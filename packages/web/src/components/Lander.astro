@@ -3,7 +3,7 @@ import CopyIcon from "../assets/lander/copy.svg"
 import CheckIcon from "../assets/lander/check.svg"
 
 const githubUrl = "https://github.com/scr1pter/Vectordev.ai"
-const releaseUrl = `${githubUrl}/releases/latest`
+const checksumUrl = "/downloads/checksums.txt"
 const command = "curl -fsSL https://vectordev.ai/install | bash"
 const downloadOptions = [
   {
@@ -68,7 +68,7 @@ const downloadOptions = [
       <p class="section-label">Download Vector</p>
       <h2 id="download-title">Choose your operating system.</h2>
       <p class="download-note">
-        Pick the build that matches your computer. These are direct release downloads, not a redirect to the GitHub page.
+        Pick the build that matches your computer. These downloads are hosted directly by Vector.
       </p>
       <div class="download-grid">
         {
@@ -83,8 +83,8 @@ const downloadOptions = [
           ))
         }
       </div>
-      <a class="release-fallback" href={releaseUrl} target="_blank" rel="noopener noreferrer">
-        View all builds and checksums
+      <a class="release-fallback" href={checksumUrl}>
+        View checksums
       </a>
     </div>
   </dialog>

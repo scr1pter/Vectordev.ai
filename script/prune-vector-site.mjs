@@ -21,6 +21,7 @@ const keep = new Set([
   "web-app-manifest-192x192.png",
   "web-app-manifest-512x512.png",
   "robots.txt",
+  "downloads",
 ])
 
 for (const entry of await readdir(dist)) {

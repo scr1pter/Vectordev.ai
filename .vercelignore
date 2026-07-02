@@ -3,7 +3,4 @@ packages/desktop/out
 packages/desktop/native
 packages/**/dist
 packages/**/out
-*.dmg
-*.exe
-*.AppImage
 *.blockmap

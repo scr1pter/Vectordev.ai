@@ -5,22 +5,22 @@
   "redirects": [
     {
       "source": "/download/mac-arm64",
-      "destination": "https://github.com/scr1pter/Vectordev.ai/releases/latest/download/vector-desktop-mac-arm64.dmg",
+      "destination": "/downloads/vector-desktop-mac-arm64.dmg",
       "permanent": false
     },
     {
       "source": "/download/mac-x64",
-      "destination": "https://github.com/scr1pter/Vectordev.ai/releases/latest/download/vector-desktop-mac-x64.dmg",
+      "destination": "/downloads/vector-desktop-mac-x64.dmg",
       "permanent": false
     },
     {
       "source": "/download/windows",
-      "destination": "https://github.com/scr1pter/Vectordev.ai/releases/latest/download/vector-desktop-win-x64.exe",
+      "destination": "/downloads/vector-desktop-win-x64.exe",
       "permanent": false
     },
     {
       "source": "/download/linux",
-      "destination": "https://github.com/scr1pter/Vectordev.ai/releases/latest/download/vector-desktop-linux-x86_64.AppImage",
+      "destination": "/downloads/vector-desktop-linux-x86_64.AppImage",
       "permanent": false
     }
   ]

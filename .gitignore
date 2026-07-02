@@ -34,3 +34,4 @@ logs/
 tsconfig.tsbuildinfo
 .vercel
 .env*
+packages/web/public/downloads/
