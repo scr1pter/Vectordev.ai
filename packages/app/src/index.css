@@ -344,10 +344,9 @@
 
   [data-vector-shell] {
     background:
-      radial-gradient(circle at 76% -10%, rgba(142, 92, 255, 0.22), transparent 32rem),
-      radial-gradient(circle at 5% 12%, rgba(155, 108, 255, 0.12), transparent 24rem),
-      linear-gradient(135deg, rgba(255, 255, 255, 0.018), transparent 36%),
-      #0b0b0d;
+      radial-gradient(circle at 0% 8%, rgba(155, 108, 255, 0.08), transparent 22rem),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.018), transparent 26%),
+      #111112;
     font-family:
       Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
   }
@@ -360,12 +359,12 @@
   }
 
   [data-component="sidebar-rail"] {
-    width: 72px;
+    width: 58px;
     border-right: 1px solid rgba(255, 255, 255, 0.09);
     background:
-      radial-gradient(circle at 50% 0%, rgba(155, 108, 255, 0.13), transparent 10rem),
-      linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent 44%),
-      rgba(12, 12, 14, 0.96);
+      radial-gradient(circle at 50% 0%, rgba(155, 108, 255, 0.14), transparent 8rem),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent 44%),
+      rgba(15, 15, 16, 0.98);
     box-shadow: inset -1px 0 0 rgba(155, 108, 255, 0.05);
   }
 
@@ -376,22 +375,13 @@
 
   [data-component="session-new-design"] {
     background:
-      radial-gradient(circle at 50% 2%, rgba(155, 108, 255, 0.28), transparent 25rem),
-      radial-gradient(circle at 86% 78%, rgba(126, 87, 255, 0.1), transparent 20rem),
-      linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent 32%),
-      #0b0b0d;
+      radial-gradient(circle at 50% 10%, rgba(155, 108, 255, 0.07), transparent 24rem),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.018), transparent 30%),
+      #111112;
   }
 
   [data-component="session-new-design"]::before {
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    content: "";
-    background-image:
-      linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
-    background-size: 44px 44px;
-    mask-image: radial-gradient(circle at 50% 36%, rgba(0, 0, 0, 0.5), transparent 62%);
+    content: none;
   }
 
   html[data-vector-theme="light"] [data-component="session-new-design"] {
@@ -404,12 +394,12 @@
   [data-component="session-new-composer"],
   [data-component="session-composer"] {
     border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 26px;
+    border-radius: 18px;
     background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.015)),
-      #232226;
+      linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.012)),
+      #2a2a2b;
     box-shadow:
-      0 22px 80px rgba(0, 0, 0, 0.42),
+      0 22px 80px rgba(0, 0, 0, 0.34),
       inset 0 1px 0 rgba(255, 255, 255, 0.06);
   }
 

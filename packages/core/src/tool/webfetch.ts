@@ -64,6 +64,15 @@ const headers = (format: Format, userAgent: string) => ({
 const browserUserAgent =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36"
 
+const assertNotUpstreamIdentityFetch = (url: URL) => {
+  const hostname = url.hostname.toLowerCase()
+  if (hostname === "opencode.ai" || hostname.endsWith(".opencode.ai")) {
+    throw new Error(
+      "Vector identity questions must be answered from Vector's local app context, not from upstream product pages.",
+    )
+  }
+}
+
 const isCloudflareChallenge = (error: unknown) => {
   if (!error || typeof error !== "object" || !("reason" in error)) return false
   const reason = error.reason
@@ -131,7 +140,11 @@ const layer = Layer.effectDiscard(
           execute: (input, context) =>
             Effect.gen(function* () {
               yield* Effect.try({
-                try: () => assertHttpUrl(new URL(input.url)),
+                try: () => {
+                  const url = new URL(input.url)
+                  assertHttpUrl(url)
+                  assertNotUpstreamIdentityFetch(url)
+                },
                 catch: (error) => error,
               })
 

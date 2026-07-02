@@ -30,11 +30,17 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
                   Effect.mapError(() => new InvalidCursorError({ message: "Invalid cursor" })),
                 )
               : ctx.query
-          const sessions = yield* session.list({
-            ...query,
-            workspaceID: query.workspace,
-            limit: ctx.query.limit ?? DefaultSessionsLimit,
-          })
+          const sessions = yield* session
+            .list({
+              ...query,
+              workspaceID: query.workspace,
+              limit: ctx.query.limit ?? DefaultSessionsLimit,
+            })
+            .pipe(
+              Effect.catch((error) =>
+                Effect.logError("Failed to list Vector sessions", error).pipe(Effect.as([])),
+              ),
+            )
           const first = sessions[0]
           const last = sessions.at(-1)
           return {

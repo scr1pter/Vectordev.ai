@@ -35,6 +35,12 @@ export const WebFetchTool = Tool.define(
           if (!params.url.startsWith("http://") && !params.url.startsWith("https://")) {
             throw new Error("URL must start with http:// or https://")
           }
+          const url = new URL(params.url)
+          if (url.hostname === "opencode.ai" || url.hostname.endsWith(".opencode.ai")) {
+            throw new Error(
+              "Vector identity questions must be answered from Vector's local app context, not from upstream product pages.",
+            )
+          }
 
           yield* ctx.ask({
             permission: "webfetch",
