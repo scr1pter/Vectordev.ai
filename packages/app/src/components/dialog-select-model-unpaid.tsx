@@ -14,6 +14,13 @@ import { decode64 } from "@/utils/base64"
 
 type ModelState = ReturnType<typeof useLocal>["model"]
 
+const costInput = (cost: unknown): number => {
+  if (Array.isArray(cost)) return Math.max(0, ...cost.map((item) => costInput(item)))
+  if (!cost || typeof cost !== "object" || !("input" in cost)) return 0
+  const value = (cost as { input?: unknown }).input
+  return typeof value === "number" && Number.isFinite(value) ? value : 0
+}
+
 export const DialogSelectModelUnpaid: Component<{ model?: ModelState }> = (props) => {
   const local = useLocal()
   const model = props.model ?? local.model
@@ -62,7 +69,7 @@ export const DialogSelectModelUnpaid: Component<{ model?: ModelState }> = (props
                 <ModelTooltip
                   model={item}
                   latest={item.latest}
-                  free={item.provider.id === "opencode" && (!item.cost || item.cost.input === 0)}
+                  free={item.provider.id === "opencode" && costInput(item.cost) === 0}
                 />
               }
             >

@@ -17,6 +17,24 @@ export const popularProviders = [
 ]
 const popularProviderSet = new Set(popularProviders)
 
+type ProviderInfo = ReturnType<typeof selectProviderCatalog>["all"] extends Map<string, infer T> ? T : never
+
+function costInput(cost: unknown): number {
+  if (Array.isArray(cost)) return Math.max(0, ...cost.map((item) => costInput(item)))
+  if (!cost || typeof cost !== "object" || !("input" in cost)) return 0
+  const value = (cost as { input?: unknown }).input
+  return typeof value === "number" && Number.isFinite(value) ? value : 0
+}
+
+function withPublicVectorModels(provider: ProviderInfo, connected: boolean) {
+  if (connected || provider.id !== "opencode") return provider
+  const freeModels = Object.fromEntries(
+    Object.entries(provider.models).filter(([, model]) => costInput(model.cost) === 0),
+  )
+  if (Object.keys(freeModels).length === 0) return
+  return { ...provider, name: "Vector", models: freeModels }
+}
+
 export function useProviders(directory?: Accessor<string | undefined>) {
   const serverSync = useServerSync()
   const params = useParams()
@@ -49,12 +67,10 @@ export function useProviders(directory?: Accessor<string | undefined>) {
       ),
     connected: () => {
       const connected = new Set(providers().connected)
-      return pipe(
-        providers().all,
-        Iterable.map(([, p]) => p),
-        Iterable.filter((p) => connected.has(p.id)),
-        (v) => Array.from(v),
-      )
+      return Array.from(providers().all.values()).flatMap((provider) => {
+        const item = withPublicVectorModels(provider, connected.has(provider.id))
+        return item ? [item] : []
+      })
     },
     paid: () => {
       const connected = new Set(providers().connected)
