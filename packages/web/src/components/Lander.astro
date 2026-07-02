@@ -1,34 +1,29 @@
 ---
-import CopyIcon from "../assets/lander/copy.svg"
-import CheckIcon from "../assets/lander/check.svg"
-
-const githubUrl = "https://github.com/scr1pter/Vectordev.ai"
 const checksumUrl = "/downloads/checksums.txt"
-const command = "curl -fsSL https://vectordev.ai/install | bash"
 const downloadOptions = [
   {
     title: "macOS Apple Silicon",
     subtitle: "M1, M2, M3, M4 and newer Macs",
     badge: ".dmg",
-    href: "/download/mac-arm64",
+    href: "/downloads/vector-desktop-mac-arm64.dmg",
   },
   {
     title: "macOS Intel",
     subtitle: "Older Intel-based Macs",
     badge: ".dmg",
-    href: "/download/mac-x64",
+    href: "/downloads/vector-desktop-mac-x64.dmg",
   },
   {
     title: "Windows",
     subtitle: "Windows 10 and Windows 11",
     badge: ".exe",
-    href: "/download/windows",
+    href: "/downloads/vector-desktop-win-x64.exe",
   },
   {
     title: "Linux",
     subtitle: "Portable AppImage build",
     badge: "AppImage",
-    href: "/download/linux",
+    href: "/downloads/vector-desktop-linux-x86_64.AppImage",
   },
 ]
 ---
@@ -38,12 +33,11 @@ const downloadOptions = [
     <div class="nav">
       <a class="brand" href="/">
         <span class="mark" aria-hidden="true">
-          <span></span>
+          <img src="/vector-logo.png" alt="" />
         </span>
         <span>vector.ai</span>
       </a>
       <div class="nav-actions">
-        <a href={githubUrl} target="_blank" rel="noopener noreferrer">GitHub</a>
         <button class="download" type="button" data-download-open>Download</button>
       </div>
     </div>
@@ -57,7 +51,7 @@ const downloadOptions = [
       </p>
       <div class="hero-actions">
         <button class="primary" type="button" data-download-open>Download Vector</button>
-        <a class="secondary" href={githubUrl} target="_blank" rel="noopener noreferrer">View source</a>
+        <button class="secondary" type="button" data-download-open>Choose your OS</button>
       </div>
     </div>
   </section>
@@ -73,7 +67,7 @@ const downloadOptions = [
       <div class="download-grid">
         {
           downloadOptions.map((option) => (
-            <a class="download-card" href={option.href} rel="noopener noreferrer">
+            <a class="download-card" href={option.href} download>
               <span>
                 <strong>{option.title}</strong>
                 <small>{option.subtitle}</small>
@@ -91,15 +85,11 @@ const downloadOptions = [
 
   <section class="install">
     <div>
-      <p class="section-label">Install path</p>
-      <h2>Desktop, terminal, and web-ready from the same engine.</h2>
+      <p class="section-label">Native app</p>
+      <h2>Download Vector for macOS, Windows, or Linux.</h2>
     </div>
-    <button class="command" data-command={command}>
-      <code>{command}</code>
-      <span class="copy" aria-hidden="true">
-        <CopyIcon />
-        <CheckIcon />
-      </span>
+    <button class="command" type="button" data-download-open>
+      <span>Choose operating system</span>
     </button>
   </section>
 
@@ -234,9 +224,9 @@ const downloadOptions = [
 
   .brand {
     gap: 0.75rem;
-    font-size: clamp(1.1rem, 2vw, 1.45rem);
+    font-size: 1.18rem;
     font-weight: 650;
-    letter-spacing: -0.02em;
+    letter-spacing: 0;
     text-decoration: none;
   }
 
@@ -250,16 +240,12 @@ const downloadOptions = [
     box-shadow: 0 0 32px rgba(143, 82, 255, 0.45);
   }
 
-  .mark span {
-    width: 1rem;
-    height: 1rem;
-    border: 0.22rem solid #09070d;
-    border-radius: 0.18rem;
-    box-shadow:
-      0 -0.42rem 0 -0.24rem #09070d,
-      0 0.42rem 0 -0.24rem #09070d,
-      -0.42rem 0 0 -0.24rem #09070d,
-      0.42rem 0 0 -0.24rem #09070d;
+  .mark img {
+    width: 100%;
+    height: 100%;
+    display: block;
+    border-radius: inherit;
+    object-fit: cover;
   }
 
   .nav-actions {
@@ -294,16 +280,16 @@ const downloadOptions = [
     margin: 0 0 1rem;
     color: var(--purple-2);
     text-transform: uppercase;
-    letter-spacing: 0.18em;
+    letter-spacing: 0;
     font-size: 0.8rem;
     font-weight: 700;
   }
 
   h1 {
     color: var(--text) !important;
-    font-size: clamp(3.7rem, 9vw, 8.5rem) !important;
-    line-height: 0.91 !important;
-    letter-spacing: -0.055em;
+    font-size: 4rem !important;
+    line-height: 0.96 !important;
+    letter-spacing: 0;
     margin: 0;
     max-width: 12ch;
     font-weight: 680 !important;
@@ -313,7 +299,7 @@ const downloadOptions = [
     max-width: 760px;
     margin: 1.6rem 0 0;
     color: var(--muted);
-    font-size: clamp(1.05rem, 2vw, 1.45rem);
+    font-size: 1.18rem;
     line-height: 1.55;
   }
 
@@ -440,9 +426,9 @@ const downloadOptions = [
   h2 {
     color: var(--text) !important;
     margin: 0;
-    font-size: clamp(1.6rem, 3.5vw, 3rem) !important;
+    font-size: 2.4rem !important;
     line-height: 1.05 !important;
-    letter-spacing: -0.04em;
+    letter-spacing: 0;
     max-width: 660px;
   }
 
@@ -458,29 +444,9 @@ const downloadOptions = [
     max-width: 100%;
   }
 
-  .command code {
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+  .command span {
     color: var(--purple-2);
     font-size: 0.95rem;
-  }
-
-  .copy svg {
-    width: 1rem;
-    height: 1rem;
-  }
-
-  .copy svg:last-child {
-    display: none;
-  }
-
-  .command.success .copy svg:first-child {
-    display: none;
-  }
-
-  .command.success .copy svg:last-child {
-    display: block;
   }
 
   .features {
@@ -565,7 +531,7 @@ const downloadOptions = [
   .prompt-title {
     color: var(--muted);
     text-transform: uppercase;
-    letter-spacing: 0.14em;
+    letter-spacing: 0;
     font-size: 0.78rem;
     margin: 0 0 1rem;
   }
@@ -601,7 +567,7 @@ const downloadOptions = [
     background: #0a0a0d;
     border: 1px solid rgba(255, 255, 255, 0.08);
     color: var(--muted);
-    font-size: clamp(1rem, 2vw, 1.4rem);
+    font-size: 1.12rem;
   }
 
   .prompt-box strong {
@@ -641,6 +607,14 @@ const downloadOptions = [
   }
 
   @media (max-width: 56rem) {
+    h1 {
+      font-size: 3rem !important;
+    }
+
+    h2 {
+      font-size: 2rem !important;
+    }
+
     .features {
       grid-template-columns: 1fr;
     }
@@ -667,6 +641,14 @@ const downloadOptions = [
   }
 
   @media (max-width: 36rem) {
+    h1 {
+      font-size: 2.35rem !important;
+    }
+
+    .lede {
+      font-size: 1rem;
+    }
+
     .nav {
       align-items: flex-start;
       flex-direction: column;
@@ -699,20 +681,9 @@ const downloadOptions = [
 </style>
 
 <script>
-  const buttons = document.querySelectorAll("button.command") as NodeListOf<HTMLButtonElement>
   const downloadModal = document.querySelector(".download-modal") as HTMLDialogElement | null
   const downloadOpenButtons = document.querySelectorAll("[data-download-open]") as NodeListOf<HTMLButtonElement>
   const downloadCloseButton = document.querySelector("[data-download-close]") as HTMLButtonElement | null
-
-  buttons.forEach((button) => {
-    button.addEventListener("click", () => {
-      navigator.clipboard.writeText(button.dataset.command!)
-      button.classList.toggle("success")
-      setTimeout(() => {
-        button.classList.toggle("success")
-      }, 1500)
-    })
-  })
 
   downloadOpenButtons.forEach((button) => {
     button.addEventListener("click", () => {

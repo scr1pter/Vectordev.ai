@@ -16,7 +16,7 @@ type SidecarMessage =
 
 export type SidecarListener = { stop: () => Promise<void> }
 
-const SIDECAR_SERVICE_NAME = "opencode server"
+const SIDECAR_SERVICE_NAME = "Vector server"
 const SIDECAR_START_STALL_TIMEOUT = 60_000
 const SIDECAR_STOP_TIMEOUT = 6_000
 
@@ -48,7 +48,12 @@ export function preferAppEnv(userDataPath: string) {
     OPENCODE_EXPERIMENTAL_ICON_DISCOVERY: "true",
     OPENCODE_EXPERIMENTAL_FILEWATCHER: "true",
     OPENCODE_CLIENT: "desktop",
-    XDG_STATE_HOME: process.env.XDG_STATE_HOME ?? userDataPath,
+    VECTOR_APP_NAMESPACE: "vector",
+    OPENCODE_CONFIG_DIR: join(userDataPath, "config", "vector"),
+    XDG_DATA_HOME: process.env.XDG_DATA_HOME ?? join(userDataPath, "xdg-data"),
+    XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME ?? join(userDataPath, "xdg-config"),
+    XDG_CACHE_HOME: process.env.XDG_CACHE_HOME ?? join(userDataPath, "xdg-cache"),
+    XDG_STATE_HOME: process.env.XDG_STATE_HOME ?? join(userDataPath, "xdg-state"),
   })
 }
 
@@ -191,7 +196,7 @@ export async function checkHealth(url: string, password?: string | null): Promis
 
   const headers = new Headers()
   if (password) {
-    const auth = Buffer.from(`opencode:${password}`).toString("base64")
+    const auth = Buffer.from(`vector:${password}`).toString("base64")
     headers.set("authorization", `Basic ${auth}`)
   }
 

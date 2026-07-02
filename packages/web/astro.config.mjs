@@ -155,13 +155,7 @@ export default defineConfig({
       ],
       lastUpdated: true,
       expressiveCode: { themes: ["github-light", "github-dark"] },
-      social: [
-        { icon: "github", label: "GitHub", href: config.github },
-        { icon: "discord", label: "Discord", href: config.discord },
-      ],
-      editLink: {
-        baseUrl: `${config.github}/edit/dev/packages/web/`,
-      },
+      social: [],
       markdown: {
         headingLinks: false,
       },

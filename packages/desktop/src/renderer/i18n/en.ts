@@ -1,6 +1,6 @@
 export const dict = {
   "desktop.menu.checkForUpdates": "Check for Updates...",
-  "desktop.menu.installCli": "Install CLI...",
+  "desktop.menu.installCli": "Install command helper...",
   "desktop.menu.reloadWebview": "Reload Webview",
   "desktop.menu.restart": "Restart",
 
@@ -20,8 +20,8 @@ export const dict = {
   "desktop.updater.installFailed.title": "Update Failed",
   "desktop.updater.installFailed.message": "Failed to install update",
 
-  "desktop.cli.installed.title": "CLI Installed",
-  "desktop.cli.installed.message": "CLI installed to {{path}}\n\nRestart your terminal to use the 'vector' command.",
+  "desktop.cli.installed.title": "Command Helper Installed",
+  "desktop.cli.installed.message": "Vector command helper installed to {{path}}\n\nRestart your terminal to use the 'vector' command.",
   "desktop.cli.failed.title": "Installation Failed",
-  "desktop.cli.failed.message": "Failed to install CLI: {{error}}",
+  "desktop.cli.failed.message": "Failed to install command helper: {{error}}",
 }

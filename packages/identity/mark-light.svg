@@ -1,5 +1,19 @@
 <svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
-<rect width="512" height="512" fill="#FDFCFC"/>
-<path d="M320 224V352H192V224H320Z" fill="#E6E5E6"/>
-<path fill-rule="evenodd" clip-rule="evenodd" d="M384 416H128V96H384V416ZM320 160H192V352H320V160Z" fill="#17181C"/>
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#d9c6ff"/>
+      <stop offset="0.52" stop-color="#a883ff"/>
+      <stop offset="1" stop-color="#7c4dff"/>
+    </linearGradient>
+    <filter id="s" x="-12%" y="-12%" width="124%" height="124%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="12" stdDeviation="13" flood-color="#2c185f" flood-opacity="0.36"/>
+      <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#ffffff" flood-opacity="0.18"/>
+    </filter>
+  </defs>
+  <rect width="512" height="512" rx="78" fill="url(#g)"/>
+  <g filter="url(#s)" stroke="#0f0d19" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="139" y="130" width="234" height="242" rx="52" stroke-width="30"/>
+    <rect x="213" y="210" width="86" height="86" rx="14" stroke-width="24"/>
+    <path d="M190 86v58M256 78v54M322 86v58M190 368v58M256 380v54M322 368v58M86 190h58M80 256h52M86 322h58M368 190h58M380 256h54M368 322h58" stroke-width="30"/>
+  </g>
 </svg>

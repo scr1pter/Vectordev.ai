@@ -40,6 +40,7 @@ import { LayoutProvider } from "@/context/layout"
 import { ModelsProvider } from "@/context/models"
 import { NotificationProvider } from "@/context/notification"
 import { PermissionProvider } from "@/context/permission"
+import { PlanModeProvider } from "@/context/plan-mode"
 import { usePlatform } from "@/context/platform"
 import { PromptProvider } from "@/context/prompt"
 import { ServerConnection, ServerProvider, serverName, useServer } from "@/context/server"
@@ -228,10 +229,12 @@ function SharedProviders(props: ParentProps) {
   return (
     <>
       <BodyDesignClass />
-      <CommandProvider>
-        <DesktopCommands />
-        <HighlightsProvider>{props.children}</HighlightsProvider>
-      </CommandProvider>
+      <PlanModeProvider>
+        <CommandProvider>
+          <DesktopCommands />
+          <HighlightsProvider>{props.children}</HighlightsProvider>
+        </CommandProvider>
+      </PlanModeProvider>
     </>
   )
 }

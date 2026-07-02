@@ -46,6 +46,7 @@ import { ModelSelectorPopover, ModelSelectorPopoverV2 } from "@/components/dialo
 import { useCommand } from "@/context/command"
 import { Persist, persisted } from "@/utils/persist"
 import { usePermission } from "@/context/permission"
+import { usePlanMode } from "@/context/plan-mode"
 import { useLanguage } from "@/context/language"
 import { usePlatform } from "@/context/platform"
 import { createSessionTabs } from "@/pages/session/helpers"
@@ -210,6 +211,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const dialog = useDialog()
   const command = useCommand()
   const permission = usePermission()
+  const planMode = usePlanMode()
   const language = useLanguage()
   const platform = usePlatform()
   const tabs = () => props.controls.session.tabs
@@ -518,6 +520,13 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   }
 
   const setMode = (mode: "normal" | "shell") => {
+    if (mode === "shell" && planMode.enabled()) {
+      showToast({
+        title: "Plan Mode is on",
+        description: "Exit Plan Mode before running shell commands.",
+      })
+      return
+    }
     setStore("mode", mode)
     setStore("popover", null)
     requestAnimationFrame(() => editorRef?.focus())
@@ -540,7 +549,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       title: language.t("command.prompt.mode.shell"),
       category: language.t("command.category.session"),
       keybind: shellModeKey,
-      disabled: store.mode === "shell",
+      disabled: store.mode === "shell" || planMode.enabled(),
       onSelect: () => setMode("shell"),
     },
     {
@@ -1319,7 +1328,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       }
     }
 
-    if (event.key === "!" && store.mode === "normal") {
+    if (event.key === "!" && store.mode === "normal" && !planMode.enabled()) {
       const cursorPosition = getCursorPosition(editorRef)
       if (cursorPosition === 0) {
         setStore("mode", "shell")
@@ -1619,6 +1628,17 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
               <div class="flex h-11 items-center px-2">
                 <div class="flex min-w-0 flex-1 items-center gap-1">
                   {fileAttachmentInput()}
+                  <Show when={planMode.enabled()}>
+                    <button
+                      type="button"
+                      class="mr-1 inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-[#9b6cff]/40 bg-[#9b6cff]/15 px-2 text-[11px] font-semibold text-[#c9b2ff]"
+                      title="Plan Mode is on. Vector will review and plan only, with file-changing actions blocked."
+                      onClick={() => planMode.setEnabled(false)}
+                    >
+                      Plan
+                      <span class="text-[9px] font-medium text-[#c9b2ff]/65">Shift Tab</span>
+                    </button>
+                  </Show>
                   <TooltipV2
                     placement="top"
                     value={

@@ -1,5 +1,6 @@
 import * as http from "node:http"
 import * as tls from "node:tls"
+import { join } from "node:path"
 
 type NodeHttpWithEnvProxy = typeof http & {
   setGlobalProxyFromEnv: () => void
@@ -59,7 +60,7 @@ async function start(command: StartCommand) {
     listener = await Server.listen({
       port: command.port,
       hostname: command.hostname,
-      username: "opencode",
+      username: "vector",
       password: command.password,
       cors: ["oc://renderer"],
     })
@@ -82,9 +83,14 @@ async function stop() {
 
 function prepareSidecarEnv(password: string, userDataPath: string) {
   Object.assign(process.env, {
-    OPENCODE_SERVER_USERNAME: "opencode",
+    OPENCODE_SERVER_USERNAME: "vector",
     OPENCODE_SERVER_PASSWORD: password,
-    XDG_STATE_HOME: process.env.XDG_STATE_HOME ?? userDataPath,
+    VECTOR_APP_NAMESPACE: "vector",
+    OPENCODE_CONFIG_DIR: join(userDataPath, "config", "vector"),
+    XDG_DATA_HOME: process.env.XDG_DATA_HOME ?? join(userDataPath, "xdg-data"),
+    XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME ?? join(userDataPath, "xdg-config"),
+    XDG_CACHE_HOME: process.env.XDG_CACHE_HOME ?? join(userDataPath, "xdg-cache"),
+    XDG_STATE_HOME: process.env.XDG_STATE_HOME ?? join(userDataPath, "xdg-state"),
   })
 }
 

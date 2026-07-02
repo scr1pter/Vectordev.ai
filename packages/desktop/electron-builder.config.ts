@@ -33,9 +33,9 @@ const channel = (() => {
 })()
 
 const APP_IDS = {
-  dev: "ai.vector.desktop.dev",
-  beta: "ai.vector.desktop.beta",
-  prod: "ai.vector.desktop",
+  dev: "ai.vector.app.dev",
+  beta: "ai.vector.app.beta",
+  prod: "ai.vector.app",
 } as const
 
 const getBase = (appId: string): Configuration => ({
@@ -45,11 +45,12 @@ const getBase = (appId: string): Configuration => ({
     buildResources: "resources",
   },
   // Linux launchers are .desktop files, so this is the desktop file name,
-  // not just the app id. For prod, app id "ai.vector.desktop" becomes
-  // "ai.vector.desktop.desktop".
+  // not just the app id. For prod, app id "ai.vector.app" becomes
+  // "ai.vector.app.desktop".
   // https://developer.gnome.org/documentation/guidelines/maintainer/integrating.html
   // https://www.electron.build/docs/linux/
   extraMetadata: {
+    name: "vector-desktop",
     desktopName: `${appId}.desktop`,
   },
   files: ["out/**/*", "resources/**/*"],

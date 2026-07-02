@@ -35,7 +35,6 @@ import { usePlatform } from "@/context/platform"
 import { DateTime } from "luxon"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { useDirectoryPicker } from "@/components/directory-picker"
-import { useSettingsCommand } from "@/components/settings-dialog"
 import { DialogSelectServer, useServerManagementController } from "@/components/dialog-select-server"
 import { DialogServerV2 } from "@/components/settings-v2/dialog-server-v2"
 import { ServerConnection, serverName, useServer } from "@/context/server"
@@ -252,7 +251,6 @@ export function NewHome() {
   const command = useCommand()
   const notification = useNotification()
   const marked = useMarked()
-  const openSettings = useSettingsCommand()
   let focusSessionSearch: (() => void) | undefined
   const [state, setState] = createStore({
     search: "",
@@ -514,8 +512,8 @@ export function NewHome() {
   }
 
   return (
-    <div class="rounded-[10px] shadow-[var(--v2-elevation-raised)] m-2 min-h-0 lg:overflow-hidden bg-v2-background-bg-base self-stretch flex-1">
-      <div class="mx-auto grid h-full w-full max-w-[1080px] grid-rows-[auto_minmax(0,1fr)_auto] gap-4 px-3 lg:grid-cols-[280px_minmax(0,720px)] lg:grid-rows-1 lg:gap-8 lg:px-6">
+    <div class="rounded-[18px] shadow-[var(--v2-elevation-raised)] m-2 min-h-0 lg:overflow-hidden bg-v2-background-bg-base self-stretch flex-1">
+      <div class="mx-auto grid h-full w-full max-w-[1120px] grid-rows-[auto_minmax(0,1fr)_auto] gap-4 px-3 lg:grid-cols-[300px_minmax(0,760px)] lg:grid-rows-1 lg:gap-10 lg:px-7">
         <HomeProjectColumn
           projects={projects()}
           selected={selection()}
@@ -535,7 +533,6 @@ export function NewHome() {
           }}
           clearNotifications={clearNotifications}
           unseenCount={unseenCount}
-          openSettings={openSettings}
           openHelp={() => platform.openLink("mailto:contact.astr0gpt@gmail.com")}
           language={language}
         />
@@ -627,7 +624,6 @@ export function NewHome() {
         </section>
         <HomeUtilityNav
           class="flex lg:hidden"
-          openSettings={openSettings}
           openHelp={() => platform.openLink("mailto:contact.astr0gpt@gmail.com")}
           language={language}
         />
@@ -647,7 +643,6 @@ function HomeProjectColumn(props: {
   closeProject: (server: ServerConnection.Any, directory: string) => void
   clearNotifications: (server: ServerConnection.Any, project: LocalProject) => void
   unseenCount: (server: ServerConnection.Any, project: LocalProject) => number
-  openSettings: () => void
   openHelp: () => void
   language: ReturnType<typeof useLanguage>
 }) {
@@ -731,7 +726,6 @@ function HomeProjectColumn(props: {
       </ScrollView>
       <HomeUtilityNav
         class="mb-8 mt-4 hidden shrink-0 lg:flex"
-        openSettings={props.openSettings}
         openHelp={props.openHelp}
         language={props.language}
       />
@@ -741,20 +735,11 @@ function HomeProjectColumn(props: {
 
 function HomeUtilityNav(props: {
   class?: string
-  openSettings: () => void
   openHelp: () => void
   language: ReturnType<typeof useLanguage>
 }) {
   return (
     <div class={`${props.class ?? ""} min-w-0 flex-col gap-1`}>
-      <button
-        type="button"
-        class={`${HOME_PROJECT_NAV_ROW} text-v2-text-text-faint [&>[data-slot=icon-svg]]:text-v2-icon-icon-muted`}
-        onClick={props.openSettings}
-      >
-        <IconV2 name="settings-gear" size="small" />
-        <span class={HOME_PROJECT_NAV_LABEL}>{props.language.t("sidebar.settings")}</span>
-      </button>
       <button
         type="button"
         class={`${HOME_PROJECT_NAV_ROW} text-v2-text-text-faint [&>[data-slot=icon-svg]]:text-v2-icon-icon-muted`}
