@@ -1,0 +1,730 @@
+---
+import CopyIcon from "../assets/lander/copy.svg"
+import CheckIcon from "../assets/lander/check.svg"
+
+const githubUrl = "https://github.com/scr1pter/Vectordev.ai"
+const releaseUrl = `${githubUrl}/releases/latest`
+const command = "curl -fsSL https://vectordev.ai/install | bash"
+const downloadOptions = [
+  {
+    title: "macOS Apple Silicon",
+    subtitle: "M1, M2, M3, M4 and newer Macs",
+    badge: ".dmg",
+    href: "/download/mac-arm64",
+  },
+  {
+    title: "macOS Intel",
+    subtitle: "Older Intel-based Macs",
+    badge: ".dmg",
+    href: "/download/mac-x64",
+  },
+  {
+    title: "Windows",
+    subtitle: "Windows 10 and Windows 11",
+    badge: ".exe",
+    href: "/download/windows",
+  },
+  {
+    title: "Linux",
+    subtitle: "Portable AppImage build",
+    badge: "AppImage",
+    href: "/download/linux",
+  },
+]
+---
+
+<div class="hero">
+  <section class="top">
+    <div class="nav">
+      <a class="brand" href="/">
+        <span class="mark" aria-hidden="true">
+          <span></span>
+        </span>
+        <span>vector.ai</span>
+      </a>
+      <div class="nav-actions">
+        <a href={githubUrl} target="_blank" rel="noopener noreferrer">GitHub</a>
+        <button class="download" type="button" data-download-open>Download</button>
+      </div>
+    </div>
+
+    <div class="hero-copy">
+      <p class="eyebrow">Free BYOK AI coding workspace</p>
+      <h1>Build with any model. Keep control of every file.</h1>
+      <p class="lede">
+        Vector is a local-first AI coding workspace for developers who want Codex-style flow,
+        Claude-grade model choice, and bring-your-own-key ownership without a locked platform bill.
+      </p>
+      <div class="hero-actions">
+        <button class="primary" type="button" data-download-open>Download Vector</button>
+        <a class="secondary" href={githubUrl} target="_blank" rel="noopener noreferrer">View source</a>
+      </div>
+    </div>
+  </section>
+
+  <dialog class="download-modal" aria-labelledby="download-title">
+    <div class="download-panel">
+      <button class="close-download" type="button" data-download-close aria-label="Close download picker">x</button>
+      <p class="section-label">Download Vector</p>
+      <h2 id="download-title">Choose your operating system.</h2>
+      <p class="download-note">
+        Pick the build that matches your computer. These are direct release downloads, not a redirect to the GitHub page.
+      </p>
+      <div class="download-grid">
+        {
+          downloadOptions.map((option) => (
+            <a class="download-card" href={option.href} rel="noopener noreferrer">
+              <span>
+                <strong>{option.title}</strong>
+                <small>{option.subtitle}</small>
+              </span>
+              <em>{option.badge}</em>
+            </a>
+          ))
+        }
+      </div>
+      <a class="release-fallback" href={releaseUrl} target="_blank" rel="noopener noreferrer">
+        View all builds and checksums
+      </a>
+    </div>
+  </dialog>
+
+  <section class="install">
+    <div>
+      <p class="section-label">Install path</p>
+      <h2>Desktop, terminal, and web-ready from the same engine.</h2>
+    </div>
+    <button class="command" data-command={command}>
+      <code>{command}</code>
+      <span class="copy" aria-hidden="true">
+        <CopyIcon />
+        <CheckIcon />
+      </span>
+    </button>
+  </section>
+
+  <section class="features" aria-label="Vector features">
+    <article>
+      <span>01</span>
+      <h3>Bring Your Own Key</h3>
+      <p>Use your own OpenAI, Anthropic, Google, Groq, local, or compatible provider keys.</p>
+    </article>
+    <article>
+      <span>02</span>
+      <h3>Agentic Coding</h3>
+      <p>Ask Vector to inspect, plan, edit, run checks, and explain what changed in your project.</p>
+    </article>
+    <article>
+      <span>03</span>
+      <h3>Real Code Ownership</h3>
+      <p>Your app remains normal files on your machine, ready for Git, review, export, and handoff.</p>
+    </article>
+    <article>
+      <span>04</span>
+      <h3>Model Freedom</h3>
+      <p>Pick the model that fits the work instead of being trapped inside one bundled AI plan.</p>
+    </article>
+    <article>
+      <span>05</span>
+      <h3>Focused Workspace</h3>
+      <p>A mature black workspace built for long coding sessions, project context, and fast iteration.</p>
+    </article>
+    <article>
+      <span>06</span>
+      <h3>Free To Start</h3>
+      <p>Vector is designed around user-controlled API spend, not forcing a subscription on day one.</p>
+    </article>
+  </section>
+
+  <section class="workspace">
+    <div class="window">
+      <div class="traffic">
+        <span></span>
+        <span></span>
+        <span></span>
+      </div>
+      <div class="workspace-grid">
+        <aside>
+          <p>Projects</p>
+          <div class="pill active">astr0gpt</div>
+          <div class="pill">stock tracker</div>
+          <div class="pill">launch page</div>
+        </aside>
+        <main>
+          <p class="prompt-title">What should Vector work on?</p>
+          <div class="prompt-box">
+            <span>Plan, edit, and verify a multi-file feature...</span>
+            <strong>BYOK</strong>
+          </div>
+          <div class="timeline">
+            <span>reading files</span>
+            <span>planning</span>
+            <span>editing</span>
+            <span>review ready</span>
+          </div>
+        </main>
+      </div>
+    </div>
+  </section>
+
+  <section class="footer">
+    <span>vector.ai</span>
+    <span>Free BYOK coding workspace</span>
+    <span>Built for ownership</span>
+  </section>
+</div>
+
+<style>
+  .hero {
+    --surface: #101015;
+    --surface-2: #17131f;
+    --surface-3: #21172f;
+    --text: #f6f2ff;
+    --muted: #a59ab8;
+    --line: rgba(177, 135, 255, 0.22);
+    --purple: #8f52ff;
+    --purple-2: #cbb4ff;
+
+    min-height: 100vh;
+    margin: 0;
+    color: var(--text);
+    background:
+      radial-gradient(circle at 12% 18%, rgba(143, 82, 255, 0.34), transparent 26rem),
+      radial-gradient(circle at 82% 8%, rgba(203, 180, 255, 0.18), transparent 24rem),
+      linear-gradient(135deg, #07070a 0%, #101015 52%, #08070b 100%);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    overflow: hidden;
+  }
+
+  .hero :is(a, button) {
+    color: inherit !important;
+  }
+
+  .hero button {
+    font: inherit;
+  }
+
+  section {
+    padding: clamp(1.25rem, 4vw, 4.5rem);
+  }
+
+  .top {
+    min-height: 72vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 6rem;
+  }
+
+  .nav,
+  .nav-actions,
+  .brand,
+  .hero-actions,
+  .install,
+  .command,
+  .footer {
+    display: flex;
+    align-items: center;
+  }
+
+  .nav {
+    justify-content: space-between;
+    gap: 1rem;
+  }
+
+  .brand {
+    gap: 0.75rem;
+    font-size: clamp(1.1rem, 2vw, 1.45rem);
+    font-weight: 650;
+    letter-spacing: -0.02em;
+    text-decoration: none;
+  }
+
+  .mark {
+    width: 2.35rem;
+    height: 2.35rem;
+    display: grid;
+    place-items: center;
+    border-radius: 0.8rem;
+    background: linear-gradient(135deg, #d9c7ff, #8d57ff);
+    box-shadow: 0 0 32px rgba(143, 82, 255, 0.45);
+  }
+
+  .mark span {
+    width: 1rem;
+    height: 1rem;
+    border: 0.22rem solid #09070d;
+    border-radius: 0.18rem;
+    box-shadow:
+      0 -0.42rem 0 -0.24rem #09070d,
+      0 0.42rem 0 -0.24rem #09070d,
+      -0.42rem 0 0 -0.24rem #09070d,
+      0.42rem 0 0 -0.24rem #09070d;
+  }
+
+  .nav-actions {
+    gap: 0.85rem;
+  }
+
+  .nav-actions :is(a, button),
+  .hero-actions :is(a, button) {
+    appearance: none;
+    cursor: pointer;
+    text-decoration: none;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 0.7rem 1rem;
+    color: var(--muted) !important;
+    background: transparent;
+  }
+
+  .nav-actions .download,
+  .hero-actions .primary {
+    color: #09070d !important;
+    background: var(--text);
+    border-color: var(--text);
+  }
+
+  .hero-copy {
+    max-width: 920px;
+  }
+
+  .eyebrow,
+  .section-label {
+    margin: 0 0 1rem;
+    color: var(--purple-2);
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    font-size: 0.8rem;
+    font-weight: 700;
+  }
+
+  h1 {
+    color: var(--text) !important;
+    font-size: clamp(3.7rem, 9vw, 8.5rem) !important;
+    line-height: 0.91 !important;
+    letter-spacing: -0.055em;
+    margin: 0;
+    max-width: 12ch;
+    font-weight: 680 !important;
+  }
+
+  .lede {
+    max-width: 760px;
+    margin: 1.6rem 0 0;
+    color: var(--muted);
+    font-size: clamp(1.05rem, 2vw, 1.45rem);
+    line-height: 1.55;
+  }
+
+  .hero-actions {
+    margin-top: 2rem;
+    gap: 0.9rem;
+    flex-wrap: wrap;
+  }
+
+  .hero-actions :is(a, button) {
+    padding: 0.9rem 1.25rem;
+    font-weight: 650;
+  }
+
+  .download-modal {
+    width: min(44rem, calc(100vw - 2rem));
+    padding: 0;
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 1.5rem;
+    background: linear-gradient(180deg, rgba(23, 19, 31, 0.98), rgba(8, 7, 11, 0.98));
+    box-shadow: 0 40px 140px rgba(0, 0, 0, 0.72);
+  }
+
+  .download-modal::backdrop {
+    background: rgba(0, 0, 0, 0.72);
+    backdrop-filter: blur(12px);
+  }
+
+  .download-panel {
+    position: relative;
+    padding: clamp(1.25rem, 4vw, 2rem);
+  }
+
+  .close-download {
+    position: absolute;
+    top: 1rem;
+    right: 1rem;
+    width: 2.3rem;
+    height: 2.3rem;
+    border: 1px solid var(--line);
+    border-radius: 50%;
+    color: var(--muted);
+    background: rgba(255, 255, 255, 0.04);
+    cursor: pointer;
+  }
+
+  .download-note {
+    max-width: 32rem;
+    color: var(--muted);
+    line-height: 1.55;
+    margin: 1rem 0 1.4rem;
+  }
+
+  .download-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.8rem;
+  }
+
+  .download-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    min-height: 7rem;
+    padding: 1rem;
+    border: 1px solid rgba(177, 135, 255, 0.24);
+    border-radius: 1rem;
+    text-decoration: none;
+    background: rgba(255, 255, 255, 0.035);
+    transition:
+      border-color 160ms ease,
+      transform 160ms ease,
+      background 160ms ease;
+  }
+
+  .download-card:hover {
+    transform: translateY(-2px);
+    border-color: var(--purple);
+    background: rgba(143, 82, 255, 0.13);
+  }
+
+  .download-card strong {
+    display: block;
+    color: var(--text);
+    font-size: 1rem;
+  }
+
+  .download-card small {
+    display: block;
+    margin-top: 0.35rem;
+    color: var(--muted);
+    line-height: 1.4;
+  }
+
+  .download-card em {
+    flex: 0 0 auto;
+    min-width: 3.3rem;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 0.35rem 0.55rem;
+    color: var(--purple-2);
+    font-style: normal;
+    text-align: center;
+    font-size: 0.75rem;
+  }
+
+  .release-fallback {
+    display: inline-flex;
+    margin-top: 1.1rem;
+    color: var(--purple-2) !important;
+    text-decoration: none;
+  }
+
+  .install {
+    justify-content: space-between;
+    gap: 2rem;
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+    background: rgba(255, 255, 255, 0.02);
+  }
+
+  h2 {
+    color: var(--text) !important;
+    margin: 0;
+    font-size: clamp(1.6rem, 3.5vw, 3rem) !important;
+    line-height: 1.05 !important;
+    letter-spacing: -0.04em;
+    max-width: 660px;
+  }
+
+  .command {
+    appearance: none;
+    border: 1px solid var(--line);
+    border-radius: 1rem;
+    background: #060609;
+    color: var(--text);
+    cursor: pointer;
+    gap: 0.9rem;
+    padding: 1rem 1.2rem;
+    max-width: 100%;
+  }
+
+  .command code {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--purple-2);
+    font-size: 0.95rem;
+  }
+
+  .copy svg {
+    width: 1rem;
+    height: 1rem;
+  }
+
+  .copy svg:last-child {
+    display: none;
+  }
+
+  .command.success .copy svg:first-child {
+    display: none;
+  }
+
+  .command.success .copy svg:last-child {
+    display: block;
+  }
+
+  .features {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1px;
+    background: var(--line);
+    padding: 1px;
+  }
+
+  .features article {
+    min-height: 14rem;
+    padding: clamp(1.2rem, 2.5vw, 2rem);
+    background: rgba(16, 16, 21, 0.96);
+  }
+
+  .features span {
+    color: var(--purple-2);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+
+  .features h3 {
+    color: var(--text) !important;
+    margin: 2.4rem 0 0.75rem;
+    font-size: 1.35rem !important;
+  }
+
+  .features p {
+    color: var(--muted);
+    margin: 0;
+    line-height: 1.55;
+  }
+
+  .workspace {
+    padding-top: clamp(3rem, 7vw, 7rem);
+    padding-bottom: clamp(3rem, 7vw, 7rem);
+  }
+
+  .window {
+    border: 1px solid var(--line);
+    border-radius: 1.4rem;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.02));
+    overflow: hidden;
+    box-shadow: 0 30px 120px rgba(0, 0, 0, 0.42);
+  }
+
+  .traffic {
+    display: flex;
+    gap: 0.55rem;
+    padding: 1rem;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .traffic span {
+    width: 0.72rem;
+    height: 0.72rem;
+    border-radius: 50%;
+    background: #ff5f56;
+  }
+
+  .traffic span:nth-child(2) {
+    background: #ffbd2e;
+  }
+
+  .traffic span:nth-child(3) {
+    background: #27c93f;
+  }
+
+  .workspace-grid {
+    display: grid;
+    grid-template-columns: minmax(14rem, 20rem) 1fr;
+    min-height: 34rem;
+  }
+
+  .workspace-grid aside {
+    border-right: 1px solid var(--line);
+    padding: 1.25rem;
+    background: rgba(0, 0, 0, 0.22);
+  }
+
+  .workspace-grid aside p,
+  .prompt-title {
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    font-size: 0.78rem;
+    margin: 0 0 1rem;
+  }
+
+  .pill {
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 0.8rem;
+    padding: 0.85rem;
+    color: var(--muted);
+    margin-top: 0.65rem;
+  }
+
+  .pill.active {
+    color: var(--text);
+    border-color: var(--purple);
+    background: rgba(143, 82, 255, 0.16);
+  }
+
+  .workspace-grid main {
+    display: grid;
+    align-content: center;
+    padding: clamp(1.5rem, 4vw, 4rem);
+  }
+
+  .prompt-box {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    min-height: 7rem;
+    border-radius: 1.35rem;
+    padding: 1.4rem;
+    background: #0a0a0d;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: var(--muted);
+    font-size: clamp(1rem, 2vw, 1.4rem);
+  }
+
+  .prompt-box strong {
+    color: var(--purple-2);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 0.45rem 0.7rem;
+  }
+
+  .timeline {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.75rem;
+    margin-top: 1rem;
+  }
+
+  .timeline span {
+    border-radius: 999px;
+    padding: 0.65rem 0.75rem;
+    background: rgba(143, 82, 255, 0.13);
+    color: var(--purple-2);
+    text-align: center;
+    font-size: 0.82rem;
+  }
+
+  .footer {
+    justify-content: space-between;
+    gap: 1rem;
+    border-top: 1px solid var(--line);
+    color: var(--muted);
+    flex-wrap: wrap;
+  }
+
+  .footer span:first-child {
+    color: var(--text);
+    font-weight: 700;
+  }
+
+  @media (max-width: 56rem) {
+    .features {
+      grid-template-columns: 1fr;
+    }
+
+    .install,
+    .workspace-grid {
+      grid-template-columns: 1fr;
+      flex-direction: column;
+      align-items: flex-start;
+    }
+
+    .workspace-grid aside {
+      border-right: 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .timeline {
+      grid-template-columns: 1fr 1fr;
+    }
+
+    .download-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  @media (max-width: 36rem) {
+    .nav {
+      align-items: flex-start;
+      flex-direction: column;
+    }
+
+    .timeline {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+
+<style is:global>
+  :root[data-has-hero] {
+    header.header {
+      display: none;
+    }
+
+    .main-frame {
+      padding-top: 0;
+
+      .main-pane > main {
+        padding: 0;
+      }
+    }
+
+    main > .content-panel .sl-markdown-content {
+      margin-top: 0;
+    }
+  }
+</style>
+
+<script>
+  const buttons = document.querySelectorAll("button.command") as NodeListOf<HTMLButtonElement>
+  const downloadModal = document.querySelector(".download-modal") as HTMLDialogElement | null
+  const downloadOpenButtons = document.querySelectorAll("[data-download-open]") as NodeListOf<HTMLButtonElement>
+  const downloadCloseButton = document.querySelector("[data-download-close]") as HTMLButtonElement | null
+
+  buttons.forEach((button) => {
+    button.addEventListener("click", () => {
+      navigator.clipboard.writeText(button.dataset.command!)
+      button.classList.toggle("success")
+      setTimeout(() => {
+        button.classList.toggle("success")
+      }, 1500)
+    })
+  })
+
+  downloadOpenButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      downloadModal?.showModal()
+    })
+  })
+
+  downloadCloseButton?.addEventListener("click", () => {
+    downloadModal?.close()
+  })
+
+  downloadModal?.addEventListener("click", (event) => {
+    if (event.target === downloadModal) downloadModal.close()
+  })
+</script>

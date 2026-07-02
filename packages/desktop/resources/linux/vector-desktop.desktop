@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Vector
+Exec=/opt/Vector/ai.vector.desktop %U
+Terminal=false
+Type=Application
+Icon=ai.vector.desktop
+StartupWMClass=ai.vector.desktop
+NoDisplay=true
+Comment=Free BYOK AI coding workspace
+Categories=Development;
