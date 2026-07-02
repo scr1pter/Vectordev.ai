@@ -108,6 +108,7 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
   const booting = new Map<string, Promise<void>>()
   const sessionLoads = new Map<string, Promise<void>>()
   const sessionMeta = new Map<string, { limit: number }>()
+  const sessionLoadToastAt = new Map<string, number>()
 
   const sdkFor = (directory: string) => {
     const key = directoryKey(directory)
@@ -309,12 +310,17 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
             })
             .catch((err) => {
               console.error("Failed to load sessions", err)
-              const project = getFilename(directory)
-              showToast({
-                variant: "error",
-                title: language.t("toast.session.listFailed.title", { project }),
-                description: formatServerError(err, language.t),
-              })
+              const now = Date.now()
+              const last = sessionLoadToastAt.get(key) ?? 0
+              if (now - last > 15_000) {
+                sessionLoadToastAt.set(key, now)
+                const project = getFilename(directory)
+                showToast({
+                  variant: "error",
+                  title: language.t("toast.session.listFailed.title", { project }),
+                  description: formatServerError(err, language.t),
+                })
+              }
             })
             .then(() => null),
       })

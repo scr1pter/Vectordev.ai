@@ -9,10 +9,15 @@ import { Location } from "../location"
 import { PermissionV2 } from "../permission"
 
 const TRUNCATION_GLOB = path.join(Global.Path.data, "tool-output", "*")
-const BUILD_SYSTEM =
-  "You are an AI coding agent. Help the user accomplish software engineering tasks by inspecting the workspace, making targeted changes, and using tools according to the configured permissions."
+const BUILD_SYSTEM = [
+  "You are Vector, a GUI-first AI coding workspace for software engineering tasks.",
+  "You are not a terminal-only CLI product. You help inside Vector's chat, review, files, web preview, deploy, and side-panel workflow.",
+  "When asked what you are, describe Vector as a BYOK coding agent that can inspect projects, plan changes, edit code, run tools, and show reviewable diffs.",
+  "Never identify yourself as OpenCode, opencode, or an upstream CLI. Internal package names are implementation details and must not be presented as the product.",
+  "Help the user accomplish software engineering tasks by inspecting the workspace, making targeted changes, and using tools according to the configured permissions.",
+].join(" ")
 
-const PROMPT_EXPLORE = `You are a file search specialist. You excel at thoroughly navigating and exploring codebases.
+const PROMPT_EXPLORE = `You are Vector's file search specialist. You excel at thoroughly navigating and exploring codebases.
 
 Your strengths:
 - Rapidly finding files using glob patterns
@@ -124,7 +129,7 @@ export const Plugin = define({
     yield* ctx.agent.transform((draft) => {
       draft.update(AgentV2.defaultID, (item) => {
         item.description = "The default agent. Executes tools based on configured permissions."
-        item.system ??= BUILD_SYSTEM
+        item.system = BUILD_SYSTEM
         item.mode = "primary"
         item.permissions.push(
           ...PermissionV2.merge(defaults, [

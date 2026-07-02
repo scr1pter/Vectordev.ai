@@ -343,29 +343,199 @@
   }
 
   [data-vector-shell] {
-    background:
-      radial-gradient(circle at 0% 8%, rgba(155, 108, 255, 0.08), transparent 22rem),
-      linear-gradient(180deg, rgba(255, 255, 255, 0.018), transparent 26%),
-      #111112;
+    --vector-accent: #9b6cff;
+    --vector-accent-soft: rgba(155, 108, 255, 0.22);
+    --vector-space-dark: #111112;
+    --vector-custom-backdrop: none;
+    isolation: isolate;
+    overflow: hidden;
+    background: #111112;
     font-family:
       Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
   }
 
+  html[data-vector-font="pixel"] [data-vector-shell] {
+    font-family:
+      "JetBrainsMono Nerd Font Mono", "SF Mono", "Cascadia Mono", "Roboto Mono", ui-monospace, monospace;
+    font-variant-ligatures: none;
+    letter-spacing: 0.01em;
+  }
+
+  html[data-vector-font="mono"] [data-vector-shell] {
+    font-family: "JetBrainsMono Nerd Font Mono", "SF Mono", "Cascadia Mono", ui-monospace, monospace;
+    font-variant-ligatures: none;
+  }
+
+  html[data-vector-element="fire"] [data-vector-shell] {
+    --vector-accent: #ff7a35;
+    --vector-accent-soft: rgba(255, 122, 53, 0.2);
+  }
+
+  html[data-vector-element="water"] [data-vector-shell] {
+    --vector-accent: #5ed7ff;
+    --vector-accent-soft: rgba(94, 215, 255, 0.18);
+  }
+
+  html[data-vector-element="earth"] [data-vector-shell] {
+    --vector-accent: #7ee787;
+    --vector-accent-soft: rgba(126, 231, 135, 0.16);
+  }
+
+  html[data-vector-element="sky"] [data-vector-shell] {
+    --vector-accent: #b8e7ff;
+    --vector-accent-soft: rgba(184, 231, 255, 0.18);
+  }
+
+  html[data-vector-element="lightning"] [data-vector-shell] {
+    --vector-accent: #ffe066;
+    --vector-accent-soft: rgba(255, 224, 102, 0.16);
+  }
+
+  html[data-vector-element="crystal"] [data-vector-shell],
+  html[data-vector-element="space"] [data-vector-shell] {
+    --vector-accent: #b595ff;
+    --vector-accent-soft: rgba(181, 149, 255, 0.2);
+  }
+
+  html[data-vector-element="shadow"] [data-vector-shell] {
+    --vector-accent: #a49bbb;
+    --vector-accent-soft: rgba(164, 155, 187, 0.14);
+  }
+
+  [data-vector-shell] > * {
+    position: relative;
+    z-index: 1;
+  }
+
+  [data-vector-shell]::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    opacity: 0.92;
+    background-image:
+      var(--vector-custom-backdrop),
+      linear-gradient(180deg, rgba(18, 12, 28, 0.16), rgba(12, 10, 16, 0.56)),
+      url("/vector-space-backdrop.png"),
+      radial-gradient(circle at 16% 12%, rgba(255, 167, 221, 0.22), transparent 22rem),
+      radial-gradient(circle at 82% 18%, rgba(122, 83, 255, 0.24), transparent 26rem),
+      linear-gradient(180deg, rgba(33, 23, 57, 0.96) 0%, rgba(32, 20, 51, 0.76) 42%, rgba(18, 17, 22, 0.98) 100%),
+      linear-gradient(90deg, rgba(174, 95, 160, 0.2), transparent 22%, rgba(170, 91, 165, 0.2) 86%);
+    background-position: center;
+    background-size:
+      cover,
+      cover,
+      cover,
+      auto,
+      auto,
+      auto,
+      auto;
+  }
+
+  [data-vector-shell]::after,
+  [data-vector-starfield]::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    opacity: 0.72;
+    background-image:
+      radial-gradient(circle, rgba(255, 255, 255, 0.88) 0 1.2px, transparent 1.35px),
+      radial-gradient(circle, rgba(255, 255, 255, 0.45) 0 1px, transparent 1.2px),
+      radial-gradient(circle, rgba(10, 8, 16, 0.95) 0 1.45px, transparent 1.55px);
+    background-position:
+      8px 18px,
+      42px 70px,
+      118px 32px;
+    background-size:
+      136px 122px,
+      174px 156px,
+      226px 194px;
+    image-rendering: pixelated;
+  }
+
+  html[data-vector-backdrop="aurora"] [data-vector-shell]::before {
+    background-image:
+      var(--vector-custom-backdrop),
+      linear-gradient(180deg, rgba(18, 12, 28, 0.14), rgba(12, 10, 16, 0.46)),
+      url("/vector-space-backdrop.png"),
+      radial-gradient(circle at 22% 14%, rgba(119, 220, 255, 0.2), transparent 25rem),
+      linear-gradient(105deg, rgba(144, 93, 255, 0.45), transparent 32%, rgba(255, 112, 184, 0.25) 72%),
+      linear-gradient(180deg, #211436 0%, #15141b 100%);
+  }
+
+  html[data-vector-backdrop="nebula"] [data-vector-shell]::before {
+    background-image:
+      var(--vector-custom-backdrop),
+      radial-gradient(circle at 22% 20%, rgba(255, 120, 209, 0.2), transparent 25rem),
+      radial-gradient(circle at 72% 8%, rgba(111, 99, 255, 0.28), transparent 24rem),
+      radial-gradient(circle at 50% 100%, rgba(180, 92, 255, 0.18), transparent 34rem),
+      linear-gradient(180deg, #160f24 0%, #0f0f12 100%);
+  }
+
+  html[data-vector-backdrop="void"] [data-vector-shell]::before {
+    opacity: 0.82;
+    background-image:
+      var(--vector-custom-backdrop),
+      radial-gradient(circle at 50% 0%, rgba(155, 108, 255, 0.16), transparent 28rem),
+      linear-gradient(180deg, #0d0d10 0%, #111112 100%);
+  }
+
+  html[data-vector-backdrop="custom"] [data-vector-shell]::before {
+    opacity: 0.96;
+    background-image:
+      linear-gradient(180deg, rgba(18, 14, 30, 0.45), rgba(11, 10, 14, 0.74)),
+      var(--vector-custom-backdrop),
+      radial-gradient(circle at 50% 0%, rgba(155, 108, 255, 0.18), transparent 28rem),
+      #111112;
+  }
+
   html[data-vector-theme="light"] [data-vector-shell] {
-    background:
-      radial-gradient(circle at 68% 0%, rgba(126, 87, 255, 0.18), transparent 34rem),
-      radial-gradient(circle at 10% 20%, rgba(155, 108, 255, 0.12), transparent 28rem),
-      #eee9ff;
+    background: #eee9ff;
+  }
+
+  html[data-vector-theme="light"] [data-vector-shell]::before {
+    opacity: 0.58;
+    background-image:
+      var(--vector-custom-backdrop),
+      radial-gradient(circle at 68% 0%, rgba(126, 87, 255, 0.22), transparent 34rem),
+      radial-gradient(circle at 10% 20%, rgba(155, 108, 255, 0.16), transparent 28rem),
+      linear-gradient(180deg, #f6f1ff 0%, #eee9ff 100%);
   }
 
   [data-component="sidebar-rail"] {
-    width: 58px;
-    border-right: 1px solid rgba(255, 255, 255, 0.09);
+    width: 62px;
+    border-right: 1px solid rgba(255, 255, 255, 0.1);
     background:
-      radial-gradient(circle at 50% 0%, rgba(155, 108, 255, 0.14), transparent 8rem),
-      linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent 44%),
+      linear-gradient(180deg, rgba(255, 122, 53, 0.22), transparent 34%),
+      repeating-linear-gradient(0deg, rgba(255, 122, 53, 0.09) 0 8px, transparent 8px 16px),
       rgba(15, 15, 16, 0.98);
-    box-shadow: inset -1px 0 0 rgba(155, 108, 255, 0.05);
+    box-shadow:
+      inset -1px 0 0 rgba(255, 122, 53, 0.1),
+      8px 0 32px rgba(0, 0, 0, 0.26);
+  }
+
+  html[data-vector-sidebar="crystal"] [data-component="sidebar-rail"] {
+    background:
+      radial-gradient(circle at 50% 0%, rgba(189, 168, 255, 0.24), transparent 9rem),
+      repeating-linear-gradient(135deg, rgba(181, 149, 255, 0.08) 0 8px, transparent 8px 18px),
+      rgba(17, 15, 22, 0.98);
+  }
+
+  html[data-vector-sidebar="graphite"] [data-component="sidebar-rail"] {
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent 46%),
+      repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.018) 0 10px, transparent 10px 20px),
+      rgba(14, 14, 16, 0.98);
+  }
+
+  html[data-vector-sidebar="aurora"] [data-component="sidebar-rail"] {
+    background:
+      radial-gradient(circle at 50% 0%, rgba(94, 215, 255, 0.16), transparent 8rem),
+      linear-gradient(180deg, rgba(155, 108, 255, 0.18), rgba(255, 112, 184, 0.08), transparent),
+      rgba(15, 15, 16, 0.98);
   }
 
   html[data-vector-theme="light"] [data-component="sidebar-rail"] {
@@ -374,21 +544,115 @@
   }
 
   [data-component="session-new-design"] {
-    background:
-      radial-gradient(circle at 50% 10%, rgba(155, 108, 255, 0.07), transparent 24rem),
-      linear-gradient(180deg, rgba(255, 255, 255, 0.018), transparent 30%),
-      #111112;
+    background: transparent;
   }
 
-  [data-component="session-new-design"]::before {
-    content: none;
+  [data-vector-starfield] {
+    background:
+      linear-gradient(180deg, rgba(28, 18, 48, 0.2), rgba(17, 17, 18, 0.72)),
+      url("/vector-space-backdrop.png") center / cover,
+      radial-gradient(circle at 18% 8%, rgba(255, 132, 200, 0.18), transparent 28rem),
+      radial-gradient(circle at 78% 12%, rgba(155, 108, 255, 0.18), transparent 30rem),
+      linear-gradient(180deg, rgba(43, 28, 70, 0.7), rgba(17, 17, 18, 0.2) 54%, rgba(17, 17, 18, 0.82));
   }
 
   html[data-vector-theme="light"] [data-component="session-new-design"] {
     background:
       radial-gradient(circle at 50% 4%, rgba(123, 70, 242, 0.18), transparent 29rem),
-      linear-gradient(180deg, rgba(255, 255, 255, 0.74), rgba(245, 241, 255, 0.35)),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(245, 241, 255, 0.38)),
       #eee9ff;
+  }
+
+  [data-vector-element-sprite] {
+    width: 42px;
+    height: 42px;
+    position: relative;
+    display: inline-grid;
+    place-items: center;
+    flex: 0 0 auto;
+    image-rendering: pixelated;
+    color: #fff;
+    border: 2px solid rgba(255, 255, 255, 0.74);
+    border-radius: 10px;
+    background:
+      linear-gradient(135deg, var(--vector-element-a), var(--vector-element-b)),
+      #151319;
+    box-shadow:
+      0 0 0 2px rgba(18, 12, 32, 0.9),
+      0 12px 30px var(--vector-element-glow);
+    transform: translateZ(0);
+  }
+
+  [data-vector-element-sprite]::before,
+  [data-vector-element-sprite]::after {
+    content: "";
+    position: absolute;
+    width: 6px;
+    height: 6px;
+    background: rgba(255, 255, 255, 0.8);
+    box-shadow:
+      16px 0 rgba(255, 255, 255, 0.34),
+      8px 16px rgba(0, 0, 0, 0.36);
+  }
+
+  [data-vector-element-sprite]::before {
+    left: 8px;
+    top: 8px;
+  }
+
+  [data-vector-element-sprite]::after {
+    right: 8px;
+    bottom: 8px;
+    opacity: 0.48;
+  }
+
+  [data-vector-element-sprite][data-size="small"] {
+    width: 25px;
+    height: 25px;
+    border-radius: 7px;
+  }
+
+  [data-vector-element-sprite][data-size="large"] {
+    width: 58px;
+    height: 58px;
+    border-radius: 14px;
+  }
+
+  [data-vector-element-sprite][data-size="small"]::before,
+  [data-vector-element-sprite][data-size="small"]::after {
+    width: 4px;
+    height: 4px;
+  }
+
+  [data-vector-element-sprite][data-size="small"]::before {
+    left: 5px;
+    top: 5px;
+  }
+
+  [data-vector-element-sprite][data-size="small"]::after {
+    right: 5px;
+    bottom: 5px;
+  }
+
+  [data-vector-element-sprite][data-size="large"]::before,
+  [data-vector-element-sprite][data-size="large"]::after {
+    width: 8px;
+    height: 8px;
+  }
+
+  [data-vector-element-core] {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    place-items: center;
+    width: 52%;
+    height: 52%;
+    border: 2px solid rgba(16, 12, 26, 0.86);
+    background: rgba(14, 10, 24, 0.55);
+    font-size: 12px;
+    font-weight: 900;
+    line-height: 1;
+    text-shadow: 1px 1px 0 rgba(0, 0, 0, 0.5);
   }
 
   [data-component="session-new-composer"],

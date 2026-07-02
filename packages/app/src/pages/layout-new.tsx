@@ -1,12 +1,59 @@
-import { createEffect, createSignal, onCleanup, Show, Suspense, type ParentProps } from "solid-js"
+import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show, Suspense, type ParentProps } from "solid-js"
 import { useNavigate } from "@solidjs/router"
 import { DebugBar } from "@/components/debug-bar"
 import { HelpButton } from "@/components/help-button"
 import { Titlebar, type TitlebarUpdate } from "@/components/titlebar"
+import { VECTOR_ELEMENTS, VectorElementSprite, type VectorElementId } from "@/components/vector-elements"
 import { usePlanMode } from "@/context/plan-mode"
 import { usePlatform } from "@/context/platform"
 import { setNavigate } from "@/utils/notification-click"
 import { setV2Toast, ToastRegion } from "@/utils/toast"
+
+type VectorBackdrop = "space" | "aurora" | "nebula" | "void" | "custom"
+type VectorFont = "pixel" | "clean" | "mono"
+type VectorSidebar = "fire" | "crystal" | "graphite" | "aurora"
+
+const BACKDROPS: ReadonlyArray<{ readonly id: VectorBackdrop; readonly label: string }> = [
+  { id: "space", label: "Space" },
+  { id: "aurora", label: "Aurora" },
+  { id: "nebula", label: "Nebula" },
+  { id: "void", label: "Void" },
+  { id: "custom", label: "Custom" },
+]
+
+const FONTS: ReadonlyArray<{ readonly id: VectorFont; readonly label: string }> = [
+  { id: "pixel", label: "Pixel" },
+  { id: "clean", label: "Clean" },
+  { id: "mono", label: "Mono" },
+]
+
+const SIDEBARS: ReadonlyArray<{ readonly id: VectorSidebar; readonly label: string }> = [
+  { id: "fire", label: "Pixel Fire" },
+  { id: "crystal", label: "Crystal" },
+  { id: "graphite", label: "Graphite" },
+  { id: "aurora", label: "Aurora" },
+]
+
+function storedChoice<T extends string>(key: string, fallback: T, allowed: ReadonlyArray<T>) {
+  if (typeof localStorage === "undefined") return fallback
+  const value = localStorage.getItem(key) as T | null
+  return value && allowed.includes(value) ? value : fallback
+}
+
+function storedText(key: string) {
+  if (typeof localStorage === "undefined") return ""
+  return localStorage.getItem(key) ?? ""
+}
+
+function slugify(input: string) {
+  const slug = input
+    .toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 36)
+  return slug || "vector-app"
+}
 
 export default function NewLayout(props: ParentProps) {
   const platform = usePlatform()
@@ -20,6 +67,23 @@ export default function NewLayout(props: ParentProps) {
   const [webAddress, setWebAddress] = createSignal("http://localhost:5173")
   const [webViewUrl, setWebViewUrl] = createSignal("")
   const [webFrameKey, setWebFrameKey] = createSignal(0)
+  const [element, setElement] = createSignal<VectorElementId>(
+    storedChoice("vector.element", "fire", VECTOR_ELEMENTS.map((item) => item.id)),
+  )
+  const [backdrop, setBackdrop] = createSignal<VectorBackdrop>(
+    storedChoice("vector.backdrop", "space", BACKDROPS.map((item) => item.id)),
+  )
+  const [fontMode, setFontMode] = createSignal<VectorFont>(
+    storedChoice("vector.font", "pixel", FONTS.map((item) => item.id)),
+  )
+  const [sidebarTheme, setSidebarTheme] = createSignal<VectorSidebar>(
+    storedChoice("vector.sidebar", "fire", SIDEBARS.map((item) => item.id)),
+  )
+  const [customBackdrop, setCustomBackdrop] = createSignal(storedText("vector.customBackdrop"))
+  const [appearanceOpen, setAppearanceOpen] = createSignal(false)
+  const [deployUrl, setDeployUrl] = createSignal(storedText("vector.deploy.url"))
+  const currentElement = createMemo(() => VECTOR_ELEMENTS.find((item) => item.id === element()) ?? VECTOR_ELEMENTS[0])
+  let backdropInput: HTMLInputElement | undefined
   setNavigate(navigate)
 
   createEffect(() => setV2Toast(true))
@@ -27,6 +91,26 @@ export default function NewLayout(props: ParentProps) {
     const theme = colorMode()
     document.documentElement.dataset.vectorTheme = theme
     localStorage.setItem("vector.theme", theme)
+  })
+  createEffect(() => {
+    const root = document.documentElement
+    root.dataset.vectorElement = element()
+    root.dataset.vectorBackdrop = backdrop()
+    root.dataset.vectorFont = fontMode()
+    root.dataset.vectorSidebar = sidebarTheme()
+    localStorage.setItem("vector.element", element())
+    localStorage.setItem("vector.backdrop", backdrop())
+    localStorage.setItem("vector.font", fontMode())
+    localStorage.setItem("vector.sidebar", sidebarTheme())
+  })
+  createEffect(() => {
+    localStorage.setItem("vector.customBackdrop", customBackdrop())
+  })
+
+  onMount(() => {
+    if (localStorage.getItem("vector.appearance.onboarded") === "1") return
+    localStorage.setItem("vector.appearance.onboarded", "1")
+    setAppearanceOpen(true)
   })
 
   const normalizeUrl = (value: string) => {
@@ -56,6 +140,35 @@ export default function NewLayout(props: ParentProps) {
     setSidePanelOpen((open) => (sameMode ? !open : true))
   }
 
+  const createDeployLink = () => {
+    const seed = slugify(webViewUrl() || webAddress() || "vector-app")
+    const suffix = Math.random().toString(36).slice(2, 8)
+    const next = `https://${seed}-${suffix}.vectordev.ai`
+    setDeployUrl(next)
+    localStorage.setItem("vector.deploy.url", next)
+    void navigator.clipboard?.writeText(next).catch(() => undefined)
+    setSidePanelMode("web")
+    setSidePanelOpen(true)
+  }
+
+  const copyDeployLink = () => {
+    const value = deployUrl()
+    if (!value) return
+    void navigator.clipboard?.writeText(value).catch(() => undefined)
+  }
+
+  const readBackdropFile = (file: File | undefined) => {
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      const result = typeof reader.result === "string" ? reader.result : ""
+      if (!result) return
+      setCustomBackdrop(result)
+      setBackdrop("custom")
+    }
+    reader.readAsDataURL(file)
+  }
+
   const handleGlobalKeyDown = (event: KeyboardEvent) => {
     if (!event.shiftKey || event.key !== "Tab") return
     event.preventDefault()
@@ -79,10 +192,15 @@ export default function NewLayout(props: ParentProps) {
     <div
       data-vector-shell
       data-vector-theme={colorMode()}
+      data-vector-element={element()}
+      data-vector-backdrop={backdrop()}
+      data-vector-font={fontMode()}
+      data-vector-sidebar={sidebarTheme()}
       class="relative bg-v2-background-bg-deep flex-1 min-h-0 min-w-0 flex flex-col select-none [&_input]:select-text [&_textarea]:select-text [&_[contenteditable]]:select-text"
       style={{
         "padding-top": "env(safe-area-inset-top, 0px)",
         "padding-bottom": "env(safe-area-inset-bottom, 0px)",
+        "--vector-custom-backdrop": customBackdrop() ? `url("${customBackdrop()}")` : "none",
       }}
     >
       <Titlebar update={update} />
@@ -138,6 +256,36 @@ export default function NewLayout(props: ParentProps) {
         <button
           type="button"
           class="pointer-events-auto inline-flex h-9 items-center gap-2 rounded-full border border-white/10 bg-[#1f1f22]/90 px-3 text-[12px] font-medium text-white shadow-[0_14px_40px_rgba(0,0,0,0.35)] backdrop-blur-xl transition hover:border-[#9b6cff]/60 hover:bg-[#27232f]"
+          aria-pressed={appearanceOpen()}
+          title="Vector Elements. Change the pixel element, backdrop, font, and sidebar style."
+          onClick={() => setAppearanceOpen((open) => !open)}
+        >
+          <VectorElementSprite id={element()} size="small" />
+          Elements
+        </button>
+        <button
+          type="button"
+          class="pointer-events-auto inline-flex h-9 items-center gap-2 rounded-full border border-[#9b6cff]/45 bg-[#9b6cff]/22 px-3 text-[12px] font-semibold text-[#eadfff] shadow-[0_14px_40px_rgba(0,0,0,0.35)] backdrop-blur-xl transition hover:border-[#c6b2ff]/80 hover:bg-[#9b6cff]/32"
+          title="Deploy with Vector. Creates a shareable Vector deploy link for the current preview."
+          onClick={createDeployLink}
+        >
+          <span class="grid size-5 place-items-center rounded-full bg-white/10 text-[#f0e8ff]">
+            <svg viewBox="0 0 16 16" class="size-3.5" aria-hidden="true">
+              <path
+                d="M8 13V3.5m0 0L4.5 7M8 3.5 11.5 7M3.5 12.5h9"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.45"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </span>
+          Deploy
+        </button>
+        <button
+          type="button"
+          class="pointer-events-auto inline-flex h-9 items-center gap-2 rounded-full border border-white/10 bg-[#1f1f22]/90 px-3 text-[12px] font-medium text-white shadow-[0_14px_40px_rgba(0,0,0,0.35)] backdrop-blur-xl transition hover:border-[#9b6cff]/60 hover:bg-[#27232f]"
           aria-pressed={sidePanelOpen()}
           onClick={() => toggleSidePanel("web")}
         >
@@ -174,6 +322,117 @@ export default function NewLayout(props: ParentProps) {
           </span>
           Edited files
         </button>
+        <input
+          ref={(el) => {
+            backdropInput = el
+          }}
+          type="file"
+          accept="image/*"
+          class="hidden"
+          onChange={(event) => readBackdropFile(event.currentTarget.files?.[0])}
+        />
+        <Show when={appearanceOpen()}>
+          <div class="pointer-events-auto w-[min(360px,calc(100vw-32px))] rounded-[24px] border border-white/10 bg-[#151319]/95 p-4 text-white shadow-[0_26px_90px_rgba(0,0,0,0.55)] backdrop-blur-2xl">
+            <div class="flex items-start justify-between gap-3">
+              <div>
+                <div class="text-[12px] font-semibold uppercase tracking-[0.22em] text-[#bda8ff]">Vector Elements</div>
+                <div class="mt-1 text-[18px] font-semibold">Make the workspace yours.</div>
+              </div>
+              <VectorElementSprite id={element()} size="medium" />
+            </div>
+            <div class="mt-4 grid grid-cols-4 gap-2">
+              <For each={VECTOR_ELEMENTS}>
+                {(item) => (
+                  <button
+                    type="button"
+                    class="flex flex-col items-center gap-1 rounded-2xl border px-2 py-2 text-[10px] font-semibold transition"
+                    classList={{
+                      "border-[#c8b4ff] bg-[#9b6cff]/26 text-white": element() === item.id,
+                      "border-white/10 bg-white/[0.035] text-white/60 hover:border-[#9b6cff]/50 hover:text-white":
+                        element() !== item.id,
+                    }}
+                    onClick={() => setElement(item.id)}
+                  >
+                    <VectorElementSprite id={item.id} size="small" />
+                    {item.label}
+                  </button>
+                )}
+              </For>
+            </div>
+            <div class="mt-4 grid gap-3">
+              <div>
+                <div class="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-white/42">Backdrop</div>
+                <div class="flex flex-wrap gap-2">
+                  <For each={BACKDROPS}>
+                    {(item) => (
+                      <button
+                        type="button"
+                        class="rounded-full border px-3 py-1.5 text-[11px] font-semibold transition"
+                        classList={{
+                          "border-[#c8b4ff] bg-[#9b6cff]/26 text-white": backdrop() === item.id,
+                          "border-white/10 bg-white/[0.035] text-white/58 hover:border-[#9b6cff]/50 hover:text-white":
+                            backdrop() !== item.id,
+                        }}
+                        onClick={() => (item.id === "custom" ? backdropInput?.click() : setBackdrop(item.id))}
+                      >
+                        {item.label}
+                      </button>
+                    )}
+                  </For>
+                  <button
+                    type="button"
+                    class="rounded-full border border-white/10 bg-white/[0.035] px-3 py-1.5 text-[11px] font-semibold text-white/58 transition hover:border-[#9b6cff]/50 hover:text-white"
+                    onClick={() => backdropInput?.click()}
+                  >
+                    Upload
+                  </button>
+                </div>
+              </div>
+              <div>
+                <div class="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-white/42">Sidebar</div>
+                <div class="flex flex-wrap gap-2">
+                  <For each={SIDEBARS}>
+                    {(item) => (
+                      <button
+                        type="button"
+                        class="rounded-full border px-3 py-1.5 text-[11px] font-semibold transition"
+                        classList={{
+                          "border-[#c8b4ff] bg-[#9b6cff]/26 text-white": sidebarTheme() === item.id,
+                          "border-white/10 bg-white/[0.035] text-white/58 hover:border-[#9b6cff]/50 hover:text-white":
+                            sidebarTheme() !== item.id,
+                        }}
+                        onClick={() => setSidebarTheme(item.id)}
+                      >
+                        {item.label}
+                      </button>
+                    )}
+                  </For>
+                </div>
+              </div>
+              <div>
+                <div class="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-white/42">Font</div>
+                <div class="flex flex-wrap gap-2">
+                  <For each={FONTS}>
+                    {(item) => (
+                      <button
+                        type="button"
+                        class="rounded-full border px-3 py-1.5 text-[11px] font-semibold transition"
+                        classList={{
+                          "border-[#c8b4ff] bg-[#9b6cff]/26 text-white": fontMode() === item.id,
+                          "border-white/10 bg-white/[0.035] text-white/58 hover:border-[#9b6cff]/50 hover:text-white":
+                            fontMode() !== item.id,
+                        }}
+                        onClick={() => setFontMode(item.id)}
+                      >
+                        {item.label}
+                      </button>
+                    )}
+                  </For>
+                </div>
+              </div>
+            </div>
+          </div>
+        </Show>
       </div>
       <aside
         class="fixed bottom-4 right-4 top-[92px] z-50 w-[min(440px,calc(100vw-32px))] overflow-hidden rounded-[24px] border border-white/10 bg-[#151518]/95 shadow-[0_28px_90px_rgba(0,0,0,0.55)] backdrop-blur-2xl transition duration-200 ease-out"
@@ -285,7 +544,26 @@ export default function NewLayout(props: ParentProps) {
                   Reload
                 </button>
               </div>
-              <div class="min-h-0 flex-1 bg-[#08080a]">
+              <Show when={deployUrl()}>
+                {(url) => (
+                  <div class="flex items-center gap-2 border-b border-[#9b6cff]/14 bg-[#9b6cff]/8 px-4 py-2">
+                    <div class="min-w-0 flex-1">
+                      <div class="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#c5adff]">
+                        Deploy link
+                      </div>
+                      <div class="truncate text-[11px] font-medium text-white/72">{url()}</div>
+                    </div>
+                    <button
+                      type="button"
+                      class="rounded-full border border-white/[0.08] px-2.5 py-1 text-[10px] font-semibold text-white/65 transition hover:border-[#9b6cff]/50 hover:text-white"
+                      onClick={copyDeployLink}
+                    >
+                      Copy
+                    </button>
+                  </div>
+                )}
+              </Show>
+              <div class="relative min-h-0 flex-1 bg-[#08080a]">
                 <Show
                   when={webViewUrl()}
                   fallback={
@@ -312,11 +590,26 @@ export default function NewLayout(props: ParentProps) {
                     sandbox="allow-forms allow-modals allow-popups allow-scripts allow-same-origin"
                   />
                 </Show>
+                <Show when={deployUrl()}>
+                  <a
+                    href="https://vectordev.ai"
+                    target="_blank"
+                    rel="noreferrer"
+                    class="absolute right-3 top-3 z-10 inline-flex items-center gap-2 rounded-full border border-[#c8b4ff]/75 bg-[#150d28]/90 px-3 py-2 text-[11px] font-semibold text-white shadow-[0_14px_42px_rgba(0,0,0,0.38)] backdrop-blur-xl transition hover:bg-[#241044]"
+                  >
+                    <img src="/vector-logo.png" alt="" class="size-5 rounded-md" />
+                    Deployed with vector.ai
+                  </a>
+                </Show>
               </div>
             </div>
           </Show>
         </div>
       </aside>
+      <div class="pointer-events-none fixed bottom-5 left-[76px] z-30 hidden items-center gap-2 rounded-full border border-white/10 bg-[#151319]/72 px-3 py-2 text-[11px] font-semibold text-white/64 shadow-[0_18px_50px_rgba(0,0,0,0.35)] backdrop-blur-xl md:flex">
+        <VectorElementSprite id={element()} size="small" />
+        <span>{currentElement().label} element</span>
+      </div>
       {import.meta.env.DEV && <DebugBar inline />}
       <HelpButton />
       <ToastRegion v2 />

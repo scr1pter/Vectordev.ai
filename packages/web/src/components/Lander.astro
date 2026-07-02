@@ -37,9 +37,6 @@ const downloadOptions = [
         </span>
         <span>vector.ai</span>
       </a>
-      <div class="nav-actions">
-        <button class="download" type="button" data-download-open>Download</button>
-      </div>
     </div>
 
     <div class="hero-copy">
@@ -84,9 +81,16 @@ const downloadOptions = [
       <p class="section-label">Native app</p>
       <h2>Download Vector for macOS, Windows, or Linux.</h2>
     </div>
-    <button class="command" type="button" data-download-open>
-      <span>Choose operating system</span>
-    </button>
+    <div class="inline-downloads">
+      {
+        downloadOptions.map((option) => (
+          <a class="mini-download" href={option.href} download>
+            <span>{option.title}</span>
+            <em>{option.badge}</em>
+          </a>
+        ))
+      }
+    </div>
   </section>
 
   <section class="features" aria-label="Vector features">
@@ -405,6 +409,47 @@ const downloadOptions = [
     background: rgba(255, 255, 255, 0.02);
   }
 
+  .inline-downloads {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(10rem, 1fr));
+    gap: 0.7rem;
+    width: min(38rem, 100%);
+  }
+
+  .mini-download {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    min-height: 3.6rem;
+    padding: 0.8rem 0.95rem;
+    border: 1px solid rgba(177, 135, 255, 0.24);
+    border-radius: 1rem;
+    text-decoration: none;
+    background: rgba(255, 255, 255, 0.035);
+    transition:
+      border-color 160ms ease,
+      background 160ms ease,
+      transform 160ms ease;
+  }
+
+  .mini-download:hover {
+    transform: translateY(-1px);
+    border-color: var(--purple);
+    background: rgba(143, 82, 255, 0.13);
+  }
+
+  .mini-download span {
+    color: var(--text);
+    font-size: 0.92rem;
+  }
+
+  .mini-download em {
+    color: var(--purple-2);
+    font-style: normal;
+    font-size: 0.76rem;
+  }
+
   h2 {
     color: var(--text) !important;
     margin: 0;
@@ -618,6 +663,10 @@ const downloadOptions = [
     }
 
     .download-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .inline-downloads {
       grid-template-columns: 1fr;
     }
   }

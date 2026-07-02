@@ -1,13 +1,11 @@
 <!--
   Built-in skill. Name and description are registered in code at
-  packages/core/src/plugin/skill.ts
-  and CUSTOMIZE_OPENCODE_SKILL_DESCRIPTION). The body below becomes the
-  skill's content.
+  packages/core/src/plugin/skill.ts. The body below becomes the skill's content.
 -->
 
-# Customizing opencode
+# Customizing Vector
 
-opencode validates its own config strictly and refuses to start when a field
+Vector validates its engine config strictly and refuses to start when a field
 is wrong. The shapes below cover the common surface area, but they are a
 **summary, not the source of truth**.
 
@@ -20,7 +18,7 @@ defaults, and descriptions — lives in the published JSON Schema:
 
 If a field is not documented in this skill, or you need to confirm an exact
 shape before writing config, **fetch that URL and read the schema directly**
-rather than guessing. opencode hard-fails on invalid config, so the cost of a
+rather than guessing. Vector hard-fails on invalid config, so the cost of a
 wrong shape is a broken startup.
 
 Independently, every `opencode.json` should declare
@@ -29,9 +27,9 @@ mistakes as they type.
 
 ## Applying changes
 
-Config is loaded once when opencode starts and is not hot-reloaded. After
+Config is loaded once when Vector starts and is not hot-reloaded. After
 saving changes to `opencode.json`, an agent file, a skill, a plugin, or any
-other config-time file, **tell the user to quit and restart opencode** for
+other config-time file, **tell the user to quit and restart Vector** for
 the changes to take effect. The running session will keep using the
 already-loaded config until then.
 
