@@ -128,6 +128,7 @@ export default function NewLayout(props: ParentProps) {
   }
 
   const taskRoute = () => /\/session\/[^/?#]+/.test(location.pathname)
+  const macDesktop = () => platform.platform === "desktop" && platform.os === "macos"
 
   const openSettings = () => {
     setLeftSidebarOpen(false)
@@ -205,7 +206,10 @@ export default function NewLayout(props: ParentProps) {
         <Suspense>{props.children}</Suspense>
       </main>
 
-      <nav class="fixed inset-y-0 left-0 z-50 flex w-14 flex-col items-center border-r border-[#2a2a2d] bg-[#181818]/96 py-3 text-white/58 shadow-[14px_0_44px_rgba(0,0,0,0.28)] backdrop-blur-2xl">
+      <nav
+        class="fixed inset-y-0 left-0 z-50 flex w-14 flex-col items-center border-r border-[#2a2a2d] bg-[#181818]/96 pb-3 text-white/58 shadow-[14px_0_44px_rgba(0,0,0,0.28)] backdrop-blur-2xl"
+        style={{ "padding-top": macDesktop() ? "46px" : "12px" }}
+      >
         <button
           type="button"
           class="grid size-9 place-items-center rounded-xl border border-[#2b2b30] bg-[#1b1b1d]/92 text-white/70 transition hover:border-[#9b6cff]/55 hover:bg-[#232127] hover:text-white"
