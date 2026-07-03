@@ -10,7 +10,6 @@ import { SettingsProvidersV2 } from "./providers"
 import { SettingsModelsV2 } from "./models"
 import "./settings-v2.css"
 import { SettingsServersV2 } from "./servers"
-import { SettingsCapabilityPanelV2, capabilityPages } from "./capability-panel"
 
 export const DialogSettings: Component<{
   sessionID?: string
@@ -36,42 +35,12 @@ export const DialogSettings: Component<{
                       <Icon name="keyboard" />
                       Keyboard shortcuts
                     </TabsV2.Trigger>
-                    <TabsV2.Trigger value="usage">
-                      <Icon name="models" />
-                      Usage and billing
-                    </TabsV2.Trigger>
                   </div>
                 </div>
 
                 <div class="flex flex-col gap-1.5">
-                  <TabsV2.SectionTitle>Integrations</TabsV2.SectionTitle>
+                  <TabsV2.SectionTitle>AI</TabsV2.SectionTitle>
                   <div class="flex flex-col gap-1.5 w-full">
-                    <TabsV2.Trigger value="appshots">
-                      <Icon name="server" />
-                      Appshots
-                    </TabsV2.Trigger>
-                    <TabsV2.Trigger value="mcp">
-                      <Icon name="providers" />
-                      MCP servers
-                    </TabsV2.Trigger>
-                    <TabsV2.Trigger value="browser">
-                      <Icon name="server" />
-                      Browser
-                    </TabsV2.Trigger>
-                    <TabsV2.Trigger value="computer">
-                      <Icon name="models" />
-                      Computer use
-                    </TabsV2.Trigger>
-                  </div>
-                </div>
-
-                <div class="flex flex-col gap-1.5">
-                  <TabsV2.SectionTitle>Coding</TabsV2.SectionTitle>
-                  <div class="flex flex-col gap-1.5 w-full">
-                    <TabsV2.Trigger value="hooks">
-                      <Icon name="providers" />
-                      Hooks
-                    </TabsV2.Trigger>
                     <TabsV2.Trigger value="providers">
                       <Icon name="providers" />
                       Connections
@@ -80,27 +49,15 @@ export const DialogSettings: Component<{
                       <Icon name="models" />
                       Models
                     </TabsV2.Trigger>
-                    <TabsV2.Trigger value="git">
-                      <Icon name="providers" />
-                      Git
-                    </TabsV2.Trigger>
-                    <TabsV2.Trigger value="servers">
-                      <Icon name="server" />
-                      Environments
-                    </TabsV2.Trigger>
-                    <TabsV2.Trigger value="worktrees">
-                      <Icon name="server" />
-                      Worktrees
-                    </TabsV2.Trigger>
                   </div>
                 </div>
 
                 <div class="flex flex-col gap-1.5">
-                  <TabsV2.SectionTitle>Archived</TabsV2.SectionTitle>
+                  <TabsV2.SectionTitle>Workspace</TabsV2.SectionTitle>
                   <div class="flex flex-col gap-1.5 w-full">
-                    <TabsV2.Trigger value="archived">
-                      <Icon name="models" />
-                      Archived chats
+                    <TabsV2.Trigger value="servers">
+                      <Icon name="server" />
+                      Environments
                     </TabsV2.Trigger>
                   </div>
                 </div>
@@ -118,24 +75,6 @@ export const DialogSettings: Component<{
         <TabsV2.Content value="shortcuts" class="settings-v2-panel">
           <SettingsKeybinds v2 />
         </TabsV2.Content>
-        <TabsV2.Content value="usage" class="settings-v2-panel">
-          <SettingsCapabilityPanelV2 {...capabilityPages.usage} />
-        </TabsV2.Content>
-        <TabsV2.Content value="appshots" class="settings-v2-panel">
-          <SettingsCapabilityPanelV2 {...capabilityPages.appshots} />
-        </TabsV2.Content>
-        <TabsV2.Content value="mcp" class="settings-v2-panel">
-          <SettingsCapabilityPanelV2 {...capabilityPages.mcp} />
-        </TabsV2.Content>
-        <TabsV2.Content value="browser" class="settings-v2-panel">
-          <SettingsCapabilityPanelV2 {...capabilityPages.browser} />
-        </TabsV2.Content>
-        <TabsV2.Content value="computer" class="settings-v2-panel">
-          <SettingsCapabilityPanelV2 {...capabilityPages.computer} />
-        </TabsV2.Content>
-        <TabsV2.Content value="hooks" class="settings-v2-panel">
-          <SettingsCapabilityPanelV2 {...capabilityPages.hooks} />
-        </TabsV2.Content>
         <TabsV2.Content value="servers" class="settings-v2-panel">
           <SettingsServersV2 />
         </TabsV2.Content>
@@ -144,15 +83,6 @@ export const DialogSettings: Component<{
         </TabsV2.Content>
         <TabsV2.Content value="models" class="settings-v2-panel">
           <SettingsModelsV2 />
-        </TabsV2.Content>
-        <TabsV2.Content value="git" class="settings-v2-panel">
-          <SettingsCapabilityPanelV2 {...capabilityPages.git} />
-        </TabsV2.Content>
-        <TabsV2.Content value="worktrees" class="settings-v2-panel">
-          <SettingsCapabilityPanelV2 {...capabilityPages.worktrees} />
-        </TabsV2.Content>
-        <TabsV2.Content value="archived" class="settings-v2-panel">
-          <SettingsCapabilityPanelV2 {...capabilityPages.archived} />
         </TabsV2.Content>
       </TabsV2>
     </Dialog>
