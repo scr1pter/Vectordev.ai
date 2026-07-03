@@ -292,6 +292,12 @@ function loadWindow(win: BrowserWindow, html: string) {
 function wireWindowRecovery(win: BrowserWindow, name: string) {
   let showing = false
   const sampler = createUnresponsiveSampler(win, name)
+  const currentURL = () => {
+    if (win.isDestroyed()) return "<destroyed>"
+    const contents = win.webContents
+    if (contents.isDestroyed()) return "<destroyed>"
+    return contents.getURL()
+  }
 
   const handle = async (button: string | undefined, wait: boolean) => {
     if (button === "Export Logs") {
@@ -350,7 +356,7 @@ function wireWindowRecovery(win: BrowserWindow, name: string) {
         errorCode,
         errorDescription,
         validatedURL,
-        currentURL: win.webContents.getURL(),
+        currentURL: currentURL(),
         isMainFrame,
       },
       "error",
@@ -372,12 +378,7 @@ function wireWindowRecovery(win: BrowserWindow, name: string) {
   })
   win.webContents.on("render-process-gone", (_event, details) => {
     sampler.stopAndFlush()
-    writeLog(
-      "window",
-      "renderer process gone",
-      { window: name, currentURL: win.webContents.getURL(), details },
-      "error",
-    )
+    writeLog("window", "renderer process gone", { window: name, currentURL: currentURL(), details }, "error")
     void show(
       "Vector window terminated unexpectedly",
       [`Window: ${name}`, `Reason: ${details.reason}`, `Code: ${details.exitCode ?? "<unknown>"}`].join("\n"),
@@ -385,12 +386,12 @@ function wireWindowRecovery(win: BrowserWindow, name: string) {
     )
   })
   win.on("unresponsive", () => {
-    writeLog("window", "renderer unresponsive", { window: name, currentURL: win.webContents.getURL() }, "error")
+    writeLog("window", "renderer unresponsive", { window: name, currentURL: currentURL() }, "error")
     sampler.start()
     void show("Vector is not responding", "You can relaunch the app, open the logs, or keep waiting.", true)
   })
   win.on("responsive", () => {
-    writeLog("window", "renderer responsive", { window: name, currentURL: win.webContents.getURL() }, "error")
+    writeLog("window", "renderer responsive", { window: name, currentURL: currentURL() }, "error")
     sampler.stopAndFlush()
   })
   win.webContents.on("console-message", (_event, level, message, line, sourceId) => {

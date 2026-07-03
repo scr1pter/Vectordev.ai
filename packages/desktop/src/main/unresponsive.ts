@@ -11,6 +11,12 @@ export function createUnresponsiveSampler(win: BrowserWindow, name: string) {
   const samples = new Map<string, number>()
 
   const active = () => sampling && !win.isDestroyed() && !win.webContents.isDestroyed()
+  const currentURL = () => {
+    if (win.isDestroyed()) return "<destroyed>"
+    const contents = win.webContents
+    if (contents.isDestroyed()) return "<destroyed>"
+    return contents.getURL()
+  }
   const clearTimers = () => {
     if (sampleTimer) clearTimeout(sampleTimer)
     if (stopTimer) clearTimeout(stopTimer)
@@ -46,7 +52,7 @@ export function createUnresponsiveSampler(win: BrowserWindow, name: string) {
     const message = [
       "renderer unresponsive samples",
       `Window: ${name}`,
-      `URL: ${win.isDestroyed() ? "<destroyed>" : win.webContents.getURL()}`,
+      `URL: ${currentURL()}`,
       ...entries.map((entry) => `<${entry[1]}> ${entry[0]}`),
       `Total Samples: ${total}`,
     ].join("\n")
