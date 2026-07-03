@@ -10,6 +10,84 @@
   font-style: normal;
 }
 
+@layer components {
+  [data-vector-shell] {
+    background: #111112 !important;
+    color: #f4f4f5;
+    font-family:
+      Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif !important;
+    letter-spacing: 0 !important;
+  }
+
+  [data-vector-shell]::before,
+  [data-vector-shell]::after,
+  [data-vector-starfield],
+  [data-vector-starfield]::after {
+    content: none !important;
+    display: none !important;
+  }
+
+  html[data-vector-font="pixel"] [data-vector-shell],
+  html[data-vector-font="mono"] [data-vector-shell] {
+    font-family:
+      Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif !important;
+    letter-spacing: 0 !important;
+  }
+
+  [data-component="session-new-design"] {
+    background: #111112 !important;
+  }
+
+  [data-component="sidebar-rail"] {
+    border-right: 1px solid rgba(255, 255, 255, 0.08) !important;
+    background: rgba(25, 25, 26, 0.98) !important;
+    box-shadow: none !important;
+  }
+
+  [data-vector-element-sprite] {
+    display: none !important;
+  }
+}
+
+@layer components {
+  [data-vector-shell] {
+    background: #111112 !important;
+    color: #f4f4f5;
+    font-family:
+      Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif !important;
+    letter-spacing: 0 !important;
+  }
+
+  [data-vector-shell]::before,
+  [data-vector-shell]::after,
+  [data-vector-starfield],
+  [data-vector-starfield]::after {
+    content: none !important;
+    display: none !important;
+  }
+
+  html[data-vector-font="pixel"] [data-vector-shell],
+  html[data-vector-font="mono"] [data-vector-shell] {
+    font-family:
+      Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif !important;
+    letter-spacing: 0 !important;
+  }
+
+  [data-component="session-new-design"] {
+    background: #111112 !important;
+  }
+
+  [data-component="sidebar-rail"] {
+    border-right: 1px solid rgba(255, 255, 255, 0.08) !important;
+    background: rgba(25, 25, 26, 0.98) !important;
+    box-shadow: none !important;
+  }
+
+  [data-vector-element-sprite] {
+    display: none !important;
+  }
+}
+
 @layer theme {
   :root,
   html {
@@ -842,5 +920,44 @@
       animation-timeline: --manage-models-scroll;
       animation-range: 0 0.1px;
     }
+  }
+}
+
+@layer components {
+  [data-vector-shell] {
+    background: #111112 !important;
+    color: #f4f4f5;
+    font-family:
+      Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif !important;
+    letter-spacing: 0 !important;
+  }
+
+  [data-vector-shell]::before,
+  [data-vector-shell]::after,
+  [data-vector-starfield],
+  [data-vector-starfield]::after {
+    content: none !important;
+    display: none !important;
+  }
+
+  html[data-vector-font="pixel"] [data-vector-shell],
+  html[data-vector-font="mono"] [data-vector-shell] {
+    font-family:
+      Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif !important;
+    letter-spacing: 0 !important;
+  }
+
+  [data-component="session-new-design"] {
+    background: #111112 !important;
+  }
+
+  [data-component="sidebar-rail"] {
+    border-right: 1px solid rgba(255, 255, 255, 0.08) !important;
+    background: rgba(25, 25, 26, 0.98) !important;
+    box-shadow: none !important;
+  }
+
+  [data-vector-element-sprite] {
+    display: none !important;
   }
 }

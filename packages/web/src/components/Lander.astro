@@ -4,25 +4,25 @@ const downloadOptions = [
     title: "macOS Apple Silicon",
     subtitle: "M1, M2, M3, M4 and newer Macs",
     badge: ".dmg",
-    href: "/downloads/vector-desktop-mac-arm64.dmg",
+    href: "/download/mac-arm64",
   },
   {
     title: "macOS Intel",
     subtitle: "Older Intel-based Macs",
     badge: ".dmg",
-    href: "/downloads/vector-desktop-mac-x64.dmg",
+    href: "/download/mac-x64",
   },
   {
     title: "Windows",
     subtitle: "Windows 10 and Windows 11",
     badge: ".exe",
-    href: "/downloads/vector-desktop-win-x64.exe",
+    href: "/download/windows",
   },
   {
     title: "Linux",
     subtitle: "Portable AppImage build",
     badge: "AppImage",
-    href: "/downloads/vector-desktop-linux-x86_64.AppImage",
+    href: "/download/linux",
   },
 ]
 ---
@@ -56,7 +56,7 @@ const downloadOptions = [
     <div class="inline-downloads">
       {
         downloadOptions.map((option) => (
-          <a class="mini-download" href={option.href} download>
+          <a class="mini-download" href={option.href}>
             <span>{option.title}</span>
             <em>{option.badge}</em>
           </a>

@@ -179,6 +179,9 @@ const main = Effect.gen(function* () {
   ensureLoopbackNoProxy()
   useEnvProxy()
   app.commandLine.appendSwitch("proxy-bypass-list", "<-loopback>")
+  // Unsigned local/demo builds should not interrupt startup with Chromium Safe Storage keychain prompts.
+  app.commandLine.appendSwitch("password-store", "basic")
+  if (process.platform === "darwin") app.commandLine.appendSwitch("use-mock-keychain")
   const features = app.commandLine.getSwitchValue("enable-features")
   app.commandLine.appendSwitch("enable-features", features ? `${jsCallStackFeature},${features}` : jsCallStackFeature)
   if (!app.isPackaged) app.commandLine.appendSwitch("remote-debugging-port", "9222")

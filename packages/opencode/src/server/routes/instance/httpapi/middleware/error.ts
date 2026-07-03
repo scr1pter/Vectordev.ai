@@ -26,8 +26,11 @@ export const errorLayer = HttpRouter.middleware<{ handles: unknown }>()((effect)
       }
 
       const ref = `err_${crypto.randomUUID().slice(0, 8)}`
+      const prettyCause = Cause.pretty(cause)
+      const detail = error instanceof Error ? { name: error.name, message: error.message, stack: error.stack } : error
+      console.error("[Vector server] unexpected request failure", { ref, error: detail, cause: prettyCause })
 
-      return Effect.logError("failed", { ref, error, cause: Cause.pretty(cause) }).pipe(
+      return Effect.logError("failed", { ref, error, cause: prettyCause }).pipe(
         Effect.as(
           HttpServerResponse.jsonUnsafe(
             new NamedError.Unknown({

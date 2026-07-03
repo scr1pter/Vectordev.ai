@@ -1,44 +1,14 @@
-import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show, Suspense, type ParentProps } from "solid-js"
-import { useNavigate } from "@solidjs/router"
+import { createEffect, createSignal, onCleanup, Show, Suspense, type ParentProps } from "solid-js"
+import { useLocation, useNavigate } from "@solidjs/router"
 import { DebugBar } from "@/components/debug-bar"
 import { HelpButton } from "@/components/help-button"
 import { Titlebar, type TitlebarUpdate } from "@/components/titlebar"
-import { VECTOR_ELEMENTS, VectorElementSprite, type VectorElementId } from "@/components/vector-elements"
+import { useCommand } from "@/context/command"
 import { usePlanMode } from "@/context/plan-mode"
 import { usePlatform } from "@/context/platform"
 import { setNavigate } from "@/utils/notification-click"
 import { setV2Toast, ToastRegion } from "@/utils/toast"
-
-type VectorBackdrop = "space" | "aurora" | "nebula" | "void" | "custom"
-type VectorFont = "pixel" | "clean" | "mono"
-type VectorSidebar = "fire" | "crystal" | "graphite" | "aurora"
-
-const BACKDROPS: ReadonlyArray<{ readonly id: VectorBackdrop; readonly label: string }> = [
-  { id: "space", label: "Space" },
-  { id: "aurora", label: "Aurora" },
-  { id: "nebula", label: "Nebula" },
-  { id: "void", label: "Void" },
-  { id: "custom", label: "Custom" },
-]
-
-const FONTS: ReadonlyArray<{ readonly id: VectorFont; readonly label: string }> = [
-  { id: "pixel", label: "Pixel" },
-  { id: "clean", label: "Clean" },
-  { id: "mono", label: "Mono" },
-]
-
-const SIDEBARS: ReadonlyArray<{ readonly id: VectorSidebar; readonly label: string }> = [
-  { id: "fire", label: "Pixel Fire" },
-  { id: "crystal", label: "Crystal" },
-  { id: "graphite", label: "Graphite" },
-  { id: "aurora", label: "Aurora" },
-]
-
-function storedChoice<T extends string>(key: string, fallback: T, allowed: ReadonlyArray<T>) {
-  if (typeof localStorage === "undefined") return fallback
-  const value = localStorage.getItem(key) as T | null
-  return value && allowed.includes(value) ? value : fallback
-}
+import { useDialog } from "@opencode-ai/ui/context/dialog"
 
 function storedText(key: string) {
   if (typeof localStorage === "undefined") return ""
@@ -58,59 +28,27 @@ function slugify(input: string) {
 export default function NewLayout(props: ParentProps) {
   const platform = usePlatform()
   const planMode = usePlanMode()
+  const command = useCommand()
+  const dialog = useDialog()
   const navigate = useNavigate()
-  const [colorMode, setColorMode] = createSignal<"dark" | "light">(
-    typeof localStorage === "undefined" || localStorage.getItem("vector.theme") !== "light" ? "dark" : "light",
-  )
+  const location = useLocation()
+  const [leftSidebarOpen, setLeftSidebarOpen] = createSignal(false)
+  const [toolsOpen, setToolsOpen] = createSignal(false)
   const [sidePanelOpen, setSidePanelOpen] = createSignal(false)
   const [sidePanelMode, setSidePanelMode] = createSignal<"web" | "files">("web")
   const [webAddress, setWebAddress] = createSignal("http://localhost:5173")
   const [webViewUrl, setWebViewUrl] = createSignal("")
   const [webFrameKey, setWebFrameKey] = createSignal(0)
-  const [element, setElement] = createSignal<VectorElementId>(
-    storedChoice("vector.element", "fire", VECTOR_ELEMENTS.map((item) => item.id)),
-  )
-  const [backdrop, setBackdrop] = createSignal<VectorBackdrop>(
-    storedChoice("vector.backdrop", "space", BACKDROPS.map((item) => item.id)),
-  )
-  const [fontMode, setFontMode] = createSignal<VectorFont>(
-    storedChoice("vector.font", "pixel", FONTS.map((item) => item.id)),
-  )
-  const [sidebarTheme, setSidebarTheme] = createSignal<VectorSidebar>(
-    storedChoice("vector.sidebar", "fire", SIDEBARS.map((item) => item.id)),
-  )
-  const [customBackdrop, setCustomBackdrop] = createSignal(storedText("vector.customBackdrop"))
-  const [appearanceOpen, setAppearanceOpen] = createSignal(false)
   const [deployUrl, setDeployUrl] = createSignal(storedText("vector.deploy.url"))
-  const currentElement = createMemo(() => VECTOR_ELEMENTS.find((item) => item.id === element()) ?? VECTOR_ELEMENTS[0])
-  let backdropInput: HTMLInputElement | undefined
   setNavigate(navigate)
 
   createEffect(() => setV2Toast(true))
   createEffect(() => {
-    const theme = colorMode()
-    document.documentElement.dataset.vectorTheme = theme
-    localStorage.setItem("vector.theme", theme)
-  })
-  createEffect(() => {
     const root = document.documentElement
-    root.dataset.vectorElement = element()
-    root.dataset.vectorBackdrop = backdrop()
-    root.dataset.vectorFont = fontMode()
-    root.dataset.vectorSidebar = sidebarTheme()
-    localStorage.setItem("vector.element", element())
-    localStorage.setItem("vector.backdrop", backdrop())
-    localStorage.setItem("vector.font", fontMode())
-    localStorage.setItem("vector.sidebar", sidebarTheme())
-  })
-  createEffect(() => {
-    localStorage.setItem("vector.customBackdrop", customBackdrop())
-  })
-
-  onMount(() => {
-    if (localStorage.getItem("vector.appearance.onboarded") === "1") return
-    localStorage.setItem("vector.appearance.onboarded", "1")
-    setAppearanceOpen(true)
+    root.dataset.vectorTheme = "dark"
+    root.dataset.vectorBackdrop = "none"
+    root.dataset.vectorFont = "system"
+    root.dataset.vectorSidebar = "classic"
   })
 
   const normalizeUrl = (value: string) => {
@@ -126,6 +64,8 @@ export default function NewLayout(props: ParentProps) {
     setWebAddress(next)
     setWebViewUrl(next)
     setWebFrameKey((key) => key + 1)
+    setSidePanelMode("web")
+    setSidePanelOpen(true)
   }
 
   const webFrameSrc = () => {
@@ -134,10 +74,9 @@ export default function NewLayout(props: ParentProps) {
     return `${url}${url.includes("?") ? "&" : "?"}vector_preview_reload=${webFrameKey()}`
   }
 
-  const toggleSidePanel = (mode: "web" | "files") => {
-    const sameMode = sidePanelMode() === mode
+  const openSidePanel = (mode: "web" | "files") => {
     setSidePanelMode(mode)
-    setSidePanelOpen((open) => (sameMode ? !open : true))
+    setSidePanelOpen(true)
   }
 
   const createDeployLink = () => {
@@ -147,8 +86,7 @@ export default function NewLayout(props: ParentProps) {
     setDeployUrl(next)
     localStorage.setItem("vector.deploy.url", next)
     void navigator.clipboard?.writeText(next).catch(() => undefined)
-    setSidePanelMode("web")
-    setSidePanelOpen(true)
+    openSidePanel("web")
   }
 
   const copyDeployLink = () => {
@@ -157,17 +95,47 @@ export default function NewLayout(props: ParentProps) {
     void navigator.clipboard?.writeText(value).catch(() => undefined)
   }
 
-  const readBackdropFile = (file: File | undefined) => {
-    if (!file) return
-    const reader = new FileReader()
-    reader.onload = () => {
-      const result = typeof reader.result === "string" ? reader.result : ""
-      if (!result) return
-      setCustomBackdrop(result)
-      setBackdrop("custom")
-    }
-    reader.readAsDataURL(file)
+  const taskRoute = () => /\/session\/[^/?#]+/.test(location.pathname)
+
+  const openSettings = () => {
+    setLeftSidebarOpen(false)
+    void import("@/components/settings-v2/dialog-settings-v2").then((x) => {
+      dialog.show(() => <x.DialogSettings />)
+    })
   }
+
+  const openNewTask = () => {
+    setLeftSidebarOpen(false)
+    navigate("/new-session")
+  }
+
+  const openProjects = () => {
+    setLeftSidebarOpen(false)
+    navigate("/")
+  }
+
+  const openModelSettings = () => {
+    setLeftSidebarOpen(false)
+    command.trigger("model.choose")
+  }
+
+  const openHelp = () => {
+    setLeftSidebarOpen(false)
+    platform.openLink("mailto:contact.astr0gpt@gmail.com")
+  }
+
+  let lastPath = ""
+  createEffect(() => {
+    const path = location.pathname
+    if (path !== lastPath) {
+      lastPath = path
+      setToolsOpen(false)
+      setSidePanelOpen(false)
+    }
+    if (taskRoute()) return
+    setToolsOpen(false)
+    setSidePanelOpen(false)
+  })
 
   const handleGlobalKeyDown = (event: KeyboardEvent) => {
     if (!event.shiftKey || event.key !== "Tab") return
@@ -191,251 +159,314 @@ export default function NewLayout(props: ParentProps) {
   return (
     <div
       data-vector-shell
-      data-vector-theme={colorMode()}
-      data-vector-element={element()}
-      data-vector-backdrop={backdrop()}
-      data-vector-font={fontMode()}
-      data-vector-sidebar={sidebarTheme()}
-      class="relative bg-v2-background-bg-deep flex-1 min-h-0 min-w-0 flex flex-col select-none [&_input]:select-text [&_textarea]:select-text [&_[contenteditable]]:select-text"
+      class="relative bg-[#111112] flex-1 min-h-0 min-w-0 flex flex-col select-none text-[#f4f4f5] [&_input]:select-text [&_textarea]:select-text [&_[contenteditable]]:select-text"
       style={{
         "padding-top": "env(safe-area-inset-top, 0px)",
         "padding-bottom": "env(safe-area-inset-bottom, 0px)",
-        "--vector-custom-backdrop": customBackdrop() ? `url("${customBackdrop()}")` : "none",
       }}
     >
       <Titlebar update={update} />
-      <main class="flex-1 min-h-0 min-w-0 overflow-x-hidden flex flex-col items-start contain-strict">
+      <main class="flex-1 min-h-0 min-w-0 overflow-x-hidden flex flex-col items-start contain-strict pl-14">
         <Suspense>{props.children}</Suspense>
       </main>
-      <div class="pointer-events-none fixed right-4 top-12 z-40 flex flex-col items-end gap-2">
+
+      <nav class="fixed inset-y-0 left-0 z-50 flex w-14 flex-col items-center border-r border-white/[0.08] bg-[#151516]/96 py-3 text-white/58 shadow-[14px_0_44px_rgba(0,0,0,0.28)] backdrop-blur-2xl">
         <button
           type="button"
-          class="pointer-events-auto inline-flex h-9 items-center gap-2 rounded-full border px-3 text-[12px] font-semibold shadow-[0_14px_40px_rgba(0,0,0,0.35)] backdrop-blur-xl transition"
-          classList={{
-            "border-[#9b6cff]/70 bg-[#9b6cff]/25 text-[#dccfff]": planMode.enabled(),
-            "border-white/10 bg-[#1f1f22]/90 text-white hover:border-[#9b6cff]/60 hover:bg-[#27232f]": !planMode.enabled(),
-          }}
-          aria-pressed={planMode.enabled()}
-          title="Plan Mode. Shift+Tab toggles planning/review behavior and blocks file-changing actions."
-          onClick={() => planMode.toggle()}
+          class="grid size-9 place-items-center rounded-xl border border-white/10 bg-[#1b1b1d]/92 text-white/70 transition hover:border-[#9b6cff]/55 hover:bg-[#232127] hover:text-white"
+          aria-label={leftSidebarOpen() ? "Close Vector navigation" : "Open Vector navigation"}
+          aria-pressed={leftSidebarOpen()}
+          title="Vector navigation"
+          onClick={() => setLeftSidebarOpen((open) => !open)}
         >
-          <span class="grid size-5 place-items-center rounded-full bg-[#9b6cff]/20 text-[#c9b2ff]">
-            <svg viewBox="0 0 16 16" class="size-3.5" aria-hidden="true">
-              <path
-                d="M4 3.75h8M4 7.75h8M4 11.75h5"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.4"
-                stroke-linecap="round"
-              />
+          <Show
+            when={leftSidebarOpen()}
+            fallback={<img src="/vector-logo.png" alt="" class="size-5 rounded-md" />}
+          >
+            <svg viewBox="0 0 16 16" class="size-4" aria-hidden="true">
+              <path d="m4 4 8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
             </svg>
-          </span>
-          Plan Mode
-          <span class="rounded-full bg-white/10 px-1.5 py-0.5 text-[10px] text-white/60">Shift Tab</span>
+          </Show>
         </button>
-        <button
-          type="button"
-          class="pointer-events-auto inline-flex h-9 items-center gap-2 rounded-full border border-white/10 bg-[#1f1f22]/90 px-3 text-[12px] font-medium text-white shadow-[0_14px_40px_rgba(0,0,0,0.35)] backdrop-blur-xl transition hover:border-[#9b6cff]/60 hover:bg-[#27232f] dark:[color-scheme:dark]"
-          aria-pressed={colorMode() === "light"}
-          title="Toggle Vector light mode."
-          onClick={() => setColorMode((mode) => (mode === "light" ? "dark" : "light"))}
-        >
-          <span class="grid size-5 place-items-center rounded-full bg-[#9b6cff]/20 text-[#b99cff]">
-            <svg viewBox="0 0 16 16" class="size-3.5" aria-hidden="true">
-              <path
-                d="M8 2.25v1.5M8 12.25v1.5M3.58 3.58l1.06 1.06m6.72 6.72 1.06 1.06M2.25 8h1.5m8.5 0h1.5M3.58 12.42l1.06-1.06m6.72-6.72 1.06-1.06"
-                stroke="currentColor"
-                stroke-width="1.35"
-                stroke-linecap="round"
-              />
-              <circle cx="8" cy="8" r="2.25" fill="currentColor" />
+        <div class="mt-5 flex flex-1 flex-col items-center gap-2">
+          <button
+            type="button"
+            class="grid size-9 place-items-center rounded-xl transition hover:bg-white/[0.06] hover:text-white"
+            aria-label="New task"
+            title="New task"
+            onClick={openNewTask}
+          >
+            <svg viewBox="0 0 16 16" class="size-4" aria-hidden="true">
+              <path d="M3 12.5h10M8 3v10M4 4.5h8" fill="none" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" />
             </svg>
-          </span>
-          {colorMode() === "light" ? "Light" : "Dark"}
-        </button>
-        <button
-          type="button"
-          class="pointer-events-auto inline-flex h-9 items-center gap-2 rounded-full border border-white/10 bg-[#1f1f22]/90 px-3 text-[12px] font-medium text-white shadow-[0_14px_40px_rgba(0,0,0,0.35)] backdrop-blur-xl transition hover:border-[#9b6cff]/60 hover:bg-[#27232f]"
-          aria-pressed={appearanceOpen()}
-          title="Vector Elements. Change the pixel element, backdrop, font, and sidebar style."
-          onClick={() => setAppearanceOpen((open) => !open)}
-        >
-          <VectorElementSprite id={element()} size="small" />
-          Elements
-        </button>
-        <button
-          type="button"
-          class="pointer-events-auto inline-flex h-9 items-center gap-2 rounded-full border border-[#9b6cff]/45 bg-[#9b6cff]/22 px-3 text-[12px] font-semibold text-[#eadfff] shadow-[0_14px_40px_rgba(0,0,0,0.35)] backdrop-blur-xl transition hover:border-[#c6b2ff]/80 hover:bg-[#9b6cff]/32"
-          title="Deploy with Vector. Creates a shareable Vector deploy link for the current preview."
-          onClick={createDeployLink}
-        >
-          <span class="grid size-5 place-items-center rounded-full bg-white/10 text-[#f0e8ff]">
-            <svg viewBox="0 0 16 16" class="size-3.5" aria-hidden="true">
-              <path
-                d="M8 13V3.5m0 0L4.5 7M8 3.5 11.5 7M3.5 12.5h9"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.45"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              />
+          </button>
+          <button
+            type="button"
+            class="grid size-9 place-items-center rounded-xl transition hover:bg-white/[0.06] hover:text-white"
+            aria-label="Projects"
+            title="Projects"
+            onClick={openProjects}
+          >
+            <svg viewBox="0 0 16 16" class="size-4" aria-hidden="true">
+              <path d="M2.75 5.5h10.5v7H2.75zM2.75 5.5l1.6-2h3.2l1.2 2" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linejoin="round" />
             </svg>
-          </span>
-          Deploy
-        </button>
-        <button
-          type="button"
-          class="pointer-events-auto inline-flex h-9 items-center gap-2 rounded-full border border-white/10 bg-[#1f1f22]/90 px-3 text-[12px] font-medium text-white shadow-[0_14px_40px_rgba(0,0,0,0.35)] backdrop-blur-xl transition hover:border-[#9b6cff]/60 hover:bg-[#27232f]"
-          aria-pressed={sidePanelOpen()}
-          onClick={() => toggleSidePanel("web")}
-        >
-          <span class="grid size-5 place-items-center rounded-full bg-[#9b6cff]/20 text-[#b99cff]">
-            <svg viewBox="0 0 16 16" class="size-3.5" aria-hidden="true">
-              <path
-                d="M2.5 5.5C3.95 3.64 5.78 2.75 8 2.75s4.05.89 5.5 2.75c.34.44.34 1.06 0 1.5C12.05 8.86 10.22 9.75 8 9.75S3.95 8.86 2.5 7a1.22 1.22 0 0 1 0-1.5Z"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.4"
-              />
-              <circle cx="8" cy="6.25" r="1.6" fill="currentColor" />
-              <path d="M3 12.75h10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+          </button>
+          <button
+            type="button"
+            class="grid size-9 place-items-center rounded-xl transition hover:bg-white/[0.06] hover:text-white"
+            aria-label="Models"
+            title="Models"
+            onClick={openModelSettings}
+          >
+            <svg viewBox="0 0 16 16" class="size-4" aria-hidden="true">
+              <path d="M3.5 5.5h9M3.5 10.5h9M6 3.5v4M10 8.5v4" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" />
             </svg>
-          </span>
-          Web view
-        </button>
-        <button
-          type="button"
-          class="pointer-events-auto inline-flex h-9 items-center gap-2 rounded-full border border-white/10 bg-[#1f1f22]/90 px-3 text-[12px] font-medium text-white shadow-[0_14px_40px_rgba(0,0,0,0.35)] backdrop-blur-xl transition hover:border-[#9b6cff]/60 hover:bg-[#27232f]"
-          aria-pressed={sidePanelOpen() && sidePanelMode() === "files"}
-          onClick={() => toggleSidePanel("files")}
-        >
-          <span class="grid size-5 place-items-center rounded-full bg-[#9b6cff]/20 text-[#b99cff]">
-            <svg viewBox="0 0 16 16" class="size-3.5" aria-hidden="true">
-              <path
-                d="M3.25 2.75h4.3l1.7 1.7v8.8h-6V2.75Zm4.25 0v2h1.75M11.75 5.25h1v8h-6v-1"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.35"
-                stroke-linejoin="round"
-              />
+          </button>
+        </div>
+        <div class="flex flex-col items-center gap-2">
+          <button
+            type="button"
+            class="grid size-9 place-items-center rounded-xl transition hover:bg-white/[0.06] hover:text-white"
+            aria-label="Settings"
+            title="Settings"
+            onClick={openSettings}
+          >
+            <svg viewBox="0 0 16 16" class="size-4" aria-hidden="true">
+              <path d="M8 5.25a2.75 2.75 0 1 1 0 5.5 2.75 2.75 0 0 1 0-5.5Zm0-3v1.5m0 8.5v1.5M3.93 3.93l1.06 1.06m6.02 6.02 1.06 1.06m1.68-4.07h-1.5m-8.5 0h-1.5m1.68 4.07 1.06-1.06m6.02-6.02 1.06-1.06" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" />
             </svg>
-          </span>
-          Edited files
-        </button>
-        <input
-          ref={(el) => {
-            backdropInput = el
-          }}
-          type="file"
-          accept="image/*"
-          class="hidden"
-          onChange={(event) => readBackdropFile(event.currentTarget.files?.[0])}
-        />
-        <Show when={appearanceOpen()}>
-          <div class="pointer-events-auto w-[min(360px,calc(100vw-32px))] rounded-[24px] border border-white/10 bg-[#151319]/95 p-4 text-white shadow-[0_26px_90px_rgba(0,0,0,0.55)] backdrop-blur-2xl">
-            <div class="flex items-start justify-between gap-3">
-              <div>
-                <div class="text-[12px] font-semibold uppercase tracking-[0.22em] text-[#bda8ff]">Vector Elements</div>
-                <div class="mt-1 text-[18px] font-semibold">Make the workspace yours.</div>
-              </div>
-              <VectorElementSprite id={element()} size="medium" />
-            </div>
-            <div class="mt-4 grid grid-cols-4 gap-2">
-              <For each={VECTOR_ELEMENTS}>
-                {(item) => (
-                  <button
-                    type="button"
-                    class="flex flex-col items-center gap-1 rounded-2xl border px-2 py-2 text-[10px] font-semibold transition"
-                    classList={{
-                      "border-[#c8b4ff] bg-[#9b6cff]/26 text-white": element() === item.id,
-                      "border-white/10 bg-white/[0.035] text-white/60 hover:border-[#9b6cff]/50 hover:text-white":
-                        element() !== item.id,
-                    }}
-                    onClick={() => setElement(item.id)}
-                  >
-                    <VectorElementSprite id={item.id} size="small" />
-                    {item.label}
-                  </button>
-                )}
-              </For>
-            </div>
-            <div class="mt-4 grid gap-3">
-              <div>
-                <div class="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-white/42">Backdrop</div>
-                <div class="flex flex-wrap gap-2">
-                  <For each={BACKDROPS}>
-                    {(item) => (
-                      <button
-                        type="button"
-                        class="rounded-full border px-3 py-1.5 text-[11px] font-semibold transition"
-                        classList={{
-                          "border-[#c8b4ff] bg-[#9b6cff]/26 text-white": backdrop() === item.id,
-                          "border-white/10 bg-white/[0.035] text-white/58 hover:border-[#9b6cff]/50 hover:text-white":
-                            backdrop() !== item.id,
-                        }}
-                        onClick={() => (item.id === "custom" ? backdropInput?.click() : setBackdrop(item.id))}
-                      >
-                        {item.label}
-                      </button>
-                    )}
-                  </For>
-                  <button
-                    type="button"
-                    class="rounded-full border border-white/10 bg-white/[0.035] px-3 py-1.5 text-[11px] font-semibold text-white/58 transition hover:border-[#9b6cff]/50 hover:text-white"
-                    onClick={() => backdropInput?.click()}
-                  >
-                    Upload
-                  </button>
-                </div>
-              </div>
-              <div>
-                <div class="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-white/42">Sidebar</div>
-                <div class="flex flex-wrap gap-2">
-                  <For each={SIDEBARS}>
-                    {(item) => (
-                      <button
-                        type="button"
-                        class="rounded-full border px-3 py-1.5 text-[11px] font-semibold transition"
-                        classList={{
-                          "border-[#c8b4ff] bg-[#9b6cff]/26 text-white": sidebarTheme() === item.id,
-                          "border-white/10 bg-white/[0.035] text-white/58 hover:border-[#9b6cff]/50 hover:text-white":
-                            sidebarTheme() !== item.id,
-                        }}
-                        onClick={() => setSidebarTheme(item.id)}
-                      >
-                        {item.label}
-                      </button>
-                    )}
-                  </For>
-                </div>
-              </div>
-              <div>
-                <div class="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-white/42">Font</div>
-                <div class="flex flex-wrap gap-2">
-                  <For each={FONTS}>
-                    {(item) => (
-                      <button
-                        type="button"
-                        class="rounded-full border px-3 py-1.5 text-[11px] font-semibold transition"
-                        classList={{
-                          "border-[#c8b4ff] bg-[#9b6cff]/26 text-white": fontMode() === item.id,
-                          "border-white/10 bg-white/[0.035] text-white/58 hover:border-[#9b6cff]/50 hover:text-white":
-                            fontMode() !== item.id,
-                        }}
-                        onClick={() => setFontMode(item.id)}
-                      >
-                        {item.label}
-                      </button>
-                    )}
-                  </For>
-                </div>
-              </div>
+          </button>
+          <button
+            type="button"
+            class="grid size-9 place-items-center rounded-xl transition hover:bg-white/[0.06] hover:text-white"
+            aria-label="Help"
+            title="Help"
+            onClick={openHelp}
+          >
+            <svg viewBox="0 0 16 16" class="size-4" aria-hidden="true">
+              <path d="M8 14a6 6 0 1 0 0-12 6 6 0 0 0 0 12Zm0-3.5v.1M6.35 6.25a1.72 1.72 0 0 1 1.72-1.5c1.02 0 1.78.63 1.78 1.55 0 1.45-1.85 1.37-1.85 2.7" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" />
+            </svg>
+          </button>
+        </div>
+      </nav>
+
+      <aside
+        class="fixed bottom-4 left-16 top-14 z-40 w-[min(310px,calc(100vw-88px))] overflow-hidden rounded-2xl border border-white/10 bg-[#18181a]/96 shadow-[0_28px_90px_rgba(0,0,0,0.5)] backdrop-blur-2xl transition duration-200"
+        classList={{
+          "pointer-events-auto translate-x-0 opacity-100": leftSidebarOpen(),
+          "pointer-events-none -translate-x-[calc(100%+24px)] opacity-0": !leftSidebarOpen(),
+        }}
+      >
+        <div class="flex h-full flex-col">
+          <div class="flex items-center gap-3 border-b border-white/[0.07] px-4 py-4">
+            <img src="/vector-logo.png" alt="" class="size-8 rounded-lg" />
+            <div>
+              <div class="text-sm font-semibold text-white">Vector</div>
+              <div class="text-xs text-white/42">Tasks, projects, settings.</div>
             </div>
           </div>
-        </Show>
-      </div>
+          <div class="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
+            <button
+              type="button"
+              class="flex w-full items-center gap-3 rounded-xl border border-[#9b6cff]/35 bg-[#9b6cff]/14 px-3 py-3 text-left text-white transition hover:border-[#b99cff]/65 hover:bg-[#9b6cff]/22"
+              onClick={openNewTask}
+            >
+              <svg viewBox="0 0 16 16" class="size-4 text-[#c5adff]" aria-hidden="true">
+                <path d="M3 12.5h10M8 3v10M4 4.5h8" fill="none" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" />
+              </svg>
+              <span>
+                <span class="block text-sm font-semibold">New task</span>
+                <span class="mt-0.5 block text-xs text-white/45">Start a fresh coding session.</span>
+              </span>
+            </button>
+
+            <button
+              type="button"
+              class="flex w-full items-center gap-3 rounded-xl border border-white/[0.08] bg-white/[0.035] px-3 py-3 text-left text-white/76 transition hover:border-[#9b6cff]/40 hover:text-white"
+              onClick={openProjects}
+            >
+              <svg viewBox="0 0 16 16" class="size-4 text-white/45" aria-hidden="true">
+                <path d="M2.75 5.5h10.5v7H2.75zM2.75 5.5l1.6-2h3.2l1.2 2" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linejoin="round" />
+              </svg>
+              <span>
+                <span class="block text-sm font-semibold">Projects</span>
+                <span class="mt-0.5 block text-xs text-white/42">Open or add a workspace.</span>
+              </span>
+            </button>
+
+            <button
+              type="button"
+              class="flex w-full items-center gap-3 rounded-xl border border-white/[0.08] bg-white/[0.035] px-3 py-3 text-left text-white/76 transition hover:border-[#9b6cff]/40 hover:text-white"
+              onClick={openModelSettings}
+            >
+              <svg viewBox="0 0 16 16" class="size-4 text-white/45" aria-hidden="true">
+                <path d="M3.5 5.5h9M3.5 10.5h9M6 3.5v4M10 8.5v4" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" />
+              </svg>
+              <span>
+                <span class="block text-sm font-semibold">Models</span>
+                <span class="mt-0.5 block text-xs text-white/42">Choose or connect providers.</span>
+              </span>
+            </button>
+          </div>
+          <div class="border-t border-white/[0.07] p-3">
+            <button
+              type="button"
+              class="mb-2 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-white/64 transition hover:bg-white/[0.055] hover:text-white"
+              onClick={openSettings}
+            >
+              <svg viewBox="0 0 16 16" class="size-4" aria-hidden="true">
+                <path d="M8 5.25a2.75 2.75 0 1 1 0 5.5 2.75 2.75 0 0 1 0-5.5Zm0-3v1.5m0 8.5v1.5M3.93 3.93l1.06 1.06m6.02 6.02 1.06 1.06m1.68-4.07h-1.5m-8.5 0h-1.5m1.68 4.07 1.06-1.06m6.02-6.02 1.06-1.06" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" />
+              </svg>
+              <span class="text-sm font-medium">Settings</span>
+            </button>
+            <button
+              type="button"
+              class="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-white/64 transition hover:bg-white/[0.055] hover:text-white"
+              onClick={openHelp}
+            >
+              <svg viewBox="0 0 16 16" class="size-4" aria-hidden="true">
+                <path d="M8 14a6 6 0 1 0 0-12 6 6 0 0 0 0 12Zm0-3.5v.1M6.35 6.25a1.72 1.72 0 0 1 1.72-1.5c1.02 0 1.78.63 1.78 1.55 0 1.45-1.85 1.37-1.85 2.7" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" />
+              </svg>
+              <span class="text-sm font-medium">Help</span>
+            </button>
+          </div>
+        </div>
+      </aside>
+
+      <Show when={taskRoute()}>
+        <button
+          type="button"
+          class="fixed right-3 top-3 z-50 grid size-9 place-items-center rounded-xl border border-white/10 bg-[#1b1b1d]/92 text-white/70 shadow-[0_18px_52px_rgba(0,0,0,0.35)] backdrop-blur-xl transition hover:border-[#9b6cff]/55 hover:bg-[#232127] hover:text-white"
+          aria-label={toolsOpen() ? "Close Vector tools" : "Open Vector tools"}
+          aria-pressed={toolsOpen()}
+          title="Vector tools"
+          onClick={() => setToolsOpen((open) => !open)}
+        >
+          <Show
+            when={toolsOpen()}
+            fallback={
+              <svg viewBox="0 0 16 16" class="size-4" aria-hidden="true">
+                <path
+                  d="M3 4.5h10M3 8h10M3 11.5h10"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                />
+              </svg>
+            }
+          >
+            <svg viewBox="0 0 16 16" class="size-4" aria-hidden="true">
+              <path d="m4 4 8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+            </svg>
+          </Show>
+        </button>
+      </Show>
+
       <aside
-        class="fixed bottom-4 right-4 top-[92px] z-50 w-[min(440px,calc(100vw-32px))] overflow-hidden rounded-[24px] border border-white/10 bg-[#151518]/95 shadow-[0_28px_90px_rgba(0,0,0,0.55)] backdrop-blur-2xl transition duration-200 ease-out"
+        class="fixed bottom-4 right-4 top-14 z-40 w-[min(330px,calc(100vw-32px))] overflow-hidden rounded-2xl border border-white/10 bg-[#18181a]/96 shadow-[0_28px_90px_rgba(0,0,0,0.5)] backdrop-blur-2xl transition duration-200"
+        classList={{
+          "pointer-events-auto translate-x-0 opacity-100": toolsOpen(),
+          "pointer-events-none translate-x-[calc(100%+24px)] opacity-0": !toolsOpen(),
+        }}
+      >
+        <div class="flex h-full flex-col">
+          <div class="flex items-center gap-3 border-b border-white/[0.07] px-4 py-4">
+            <img src="/vector-logo.png" alt="" class="size-8 rounded-lg" />
+            <div>
+              <div class="text-sm font-semibold text-white">Vector tools</div>
+              <div class="text-xs text-white/42">Plan, preview, review, deploy.</div>
+            </div>
+          </div>
+          <div class="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
+            <button
+              type="button"
+              class="flex w-full items-center justify-between rounded-xl border px-3 py-3 text-left transition"
+              classList={{
+                "border-[#9b6cff]/55 bg-[#9b6cff]/16 text-white": planMode.enabled(),
+                "border-white/[0.08] bg-white/[0.035] text-white/76 hover:border-[#9b6cff]/40 hover:text-white":
+                  !planMode.enabled(),
+              }}
+              onClick={() => planMode.toggle()}
+            >
+              <span>
+                <span class="block text-sm font-semibold">Plan Mode</span>
+                <span class="mt-0.5 block text-xs text-white/42">Shift Tab</span>
+              </span>
+              <span class="rounded-full border border-white/10 px-2 py-1 text-[10px] uppercase tracking-[0.12em] text-white/52">
+                {planMode.enabled() ? "On" : "Off"}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              class="flex w-full items-center justify-between rounded-xl border border-white/[0.08] bg-white/[0.035] px-3 py-3 text-left text-white/76 transition hover:border-[#9b6cff]/40 hover:text-white"
+              onClick={() => openSidePanel("web")}
+            >
+              <span>
+                <span class="block text-sm font-semibold">Web preview</span>
+                <span class="mt-0.5 block text-xs text-white/42">Open localhost beside Vector</span>
+              </span>
+              <svg viewBox="0 0 16 16" class="size-4 text-white/42" aria-hidden="true">
+                <path d="M6 3.5 10.5 8 6 12.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+              </svg>
+            </button>
+
+            <button
+              type="button"
+              class="flex w-full items-center justify-between rounded-xl border border-white/[0.08] bg-white/[0.035] px-3 py-3 text-left text-white/76 transition hover:border-[#9b6cff]/40 hover:text-white"
+              onClick={() => openSidePanel("files")}
+            >
+              <span>
+                <span class="block text-sm font-semibold">Changed files</span>
+                <span class="mt-0.5 block text-xs text-white/42">Inspect generated edits</span>
+              </span>
+              <svg viewBox="0 0 16 16" class="size-4 text-white/42" aria-hidden="true">
+                <path d="M6 3.5 10.5 8 6 12.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+              </svg>
+            </button>
+
+            <button
+              type="button"
+              class="flex w-full items-center justify-between rounded-xl border border-[#9b6cff]/35 bg-[#9b6cff]/12 px-3 py-3 text-left text-white transition hover:border-[#b99cff]/60 hover:bg-[#9b6cff]/18"
+              onClick={createDeployLink}
+            >
+              <span>
+                <span class="block text-sm font-semibold">Deploy link</span>
+                <span class="mt-0.5 block text-xs text-white/46">Create a shareable Vector URL</span>
+              </span>
+              <svg viewBox="0 0 16 16" class="size-4 text-[#c5adff]" aria-hidden="true">
+                <path
+                  d="M8 13V3.5m0 0L4.5 7M8 3.5 11.5 7M3.5 12.5h9"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.45"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </button>
+
+            <Show when={deployUrl()}>
+              {(url) => (
+                <div class="rounded-xl border border-[#9b6cff]/20 bg-[#9b6cff]/8 p-3">
+                  <div class="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#c5adff]">Latest deploy</div>
+                  <div class="mt-2 truncate text-xs text-white/68">{url()}</div>
+                  <button
+                    type="button"
+                    class="mt-3 rounded-lg border border-white/10 px-2.5 py-1.5 text-xs font-semibold text-white/70 transition hover:border-[#9b6cff]/45 hover:text-white"
+                    onClick={copyDeployLink}
+                  >
+                    Copy link
+                  </button>
+                </div>
+              )}
+            </Show>
+          </div>
+        </div>
+      </aside>
+
+      <aside
+        class="fixed bottom-4 top-14 z-50 w-[min(520px,calc(100vw-32px))] overflow-hidden rounded-2xl border border-white/10 bg-[#151518]/96 shadow-[0_28px_90px_rgba(0,0,0,0.55)] backdrop-blur-2xl transition duration-200 ease-out"
+        style={{ right: toolsOpen() ? "360px" : "16px" }}
         classList={{
           "pointer-events-auto translate-x-0 opacity-100": sidePanelOpen(),
           "pointer-events-none translate-x-[calc(100%+32px)] opacity-0": !sidePanelOpen(),
@@ -446,25 +477,25 @@ export default function NewLayout(props: ParentProps) {
             <div class="flex rounded-full bg-white/[0.045] p-1">
               <button
                 type="button"
-                class="rounded-full px-3 py-1.5 text-[12px] font-semibold transition"
+                class="rounded-full px-3 py-1.5 text-xs font-semibold transition"
                 classList={{
                   "bg-[#9b6cff] text-white": sidePanelMode() === "web",
                   "text-white/[0.55] hover:text-white": sidePanelMode() !== "web",
                 }}
                 onClick={() => setSidePanelMode("web")}
               >
-                Web view
+                Web preview
               </button>
               <button
                 type="button"
-                class="rounded-full px-3 py-1.5 text-[12px] font-semibold transition"
+                class="rounded-full px-3 py-1.5 text-xs font-semibold transition"
                 classList={{
                   "bg-[#9b6cff] text-white": sidePanelMode() === "files",
                   "text-white/[0.55] hover:text-white": sidePanelMode() !== "files",
                 }}
                 onClick={() => setSidePanelMode("files")}
               >
-                Edited files
+                Changed files
               </button>
             </div>
             <button
@@ -482,17 +513,16 @@ export default function NewLayout(props: ParentProps) {
             when={sidePanelMode() === "web"}
             fallback={
               <div class="flex min-h-0 flex-1 flex-col gap-3 p-4">
-                <div class="rounded-[18px] border border-white/[0.08] bg-white/[0.035] p-4">
-                  <div class="text-[13px] font-semibold text-white">Files Vector touched</div>
-                  <p class="mt-2 text-[12px] leading-5 text-white/[0.55]">
-                    Vector keeps generated edits in the review flow. Open the session Review panel to inspect exact
-                    files, split diffs, and changed lines before trusting the result.
+                <div class="rounded-2xl border border-white/[0.08] bg-white/[0.035] p-4">
+                  <div class="text-sm font-semibold text-white">Changed files</div>
+                  <p class="mt-2 text-xs leading-5 text-white/[0.55]">
+                    Review generated edits, inspect diffs, and keep the code path visible while Vector works.
                   </p>
                 </div>
-                <div class="grid gap-2 text-[12px] text-white/50">
-                  <div class="rounded-xl border border-dashed border-white/10 px-3 py-2">Review changed files.</div>
+                <div class="grid gap-2 text-xs text-white/50">
+                  <div class="rounded-xl border border-dashed border-white/10 px-3 py-2">Open Review for exact diffs.</div>
                   <div class="rounded-xl border border-dashed border-white/10 px-3 py-2">
-                    Preview running apps beside the conversation.
+                    Accepted edits remain attached to the session history.
                   </div>
                 </div>
               </div>
@@ -512,14 +542,14 @@ export default function NewLayout(props: ParentProps) {
                   <span class="size-2.5 rounded-full bg-[#28c840]" />
                 </div>
                 <input
-                  class="min-w-0 flex-1 rounded-full border border-white/[0.08] bg-white/[0.045] px-3 py-1.5 text-[11px] text-white outline-none transition placeholder:text-white/[0.32] focus:border-[#9b6cff]/60"
+                  class="min-w-0 flex-1 rounded-full border border-white/[0.08] bg-white/[0.045] px-3 py-1.5 text-xs text-white outline-none transition placeholder:text-white/[0.32] focus:border-[#9b6cff]/60"
                   value={webAddress()}
                   placeholder="http://localhost:5173"
                   onInput={(event) => setWebAddress(event.currentTarget.value)}
                 />
                 <button
                   type="submit"
-                  class="rounded-full bg-white/[0.08] px-3 py-1.5 text-[11px] font-semibold text-white transition hover:bg-[#9b6cff]/35"
+                  class="rounded-full bg-white/[0.08] px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-[#9b6cff]/35"
                 >
                   Open
                 </button>
@@ -548,10 +578,8 @@ export default function NewLayout(props: ParentProps) {
                 {(url) => (
                   <div class="flex items-center gap-2 border-b border-[#9b6cff]/14 bg-[#9b6cff]/8 px-4 py-2">
                     <div class="min-w-0 flex-1">
-                      <div class="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#c5adff]">
-                        Deploy link
-                      </div>
-                      <div class="truncate text-[11px] font-medium text-white/72">{url()}</div>
+                      <div class="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#c5adff]">Deploy link</div>
+                      <div class="truncate text-xs font-medium text-white/72">{url()}</div>
                     </div>
                     <button
                       type="button"
@@ -574,10 +602,9 @@ export default function NewLayout(props: ParentProps) {
                           alt=""
                           class="mx-auto size-14 rounded-2xl shadow-[0_18px_40px_rgba(155,108,255,0.2)]"
                         />
-                        <h2 class="mt-5 text-[18px] font-semibold text-white">Web view</h2>
-                        <p class="mt-2 max-w-[290px] text-[12px] leading-5 text-white/[0.52]">
-                          Start a dev server, then open its localhost URL here to inspect the running app beside your
-                          Vector conversation.
+                        <h2 class="mt-5 text-lg font-semibold text-white">Web preview</h2>
+                        <p class="mt-2 max-w-[290px] text-xs leading-5 text-white/[0.52]">
+                          Run a local app, then open its localhost URL here beside the session.
                         </p>
                       </div>
                     </div>
@@ -585,7 +612,7 @@ export default function NewLayout(props: ParentProps) {
                 >
                   <iframe
                     src={webFrameSrc()}
-                    title="Vector web view"
+                    title="Vector web preview"
                     class="h-full w-full border-0 bg-white"
                     sandbox="allow-forms allow-modals allow-popups allow-scripts allow-same-origin"
                   />
@@ -595,7 +622,7 @@ export default function NewLayout(props: ParentProps) {
                     href="https://vectordev.ai"
                     target="_blank"
                     rel="noreferrer"
-                    class="absolute right-3 top-3 z-10 inline-flex items-center gap-2 rounded-full border border-[#c8b4ff]/75 bg-[#150d28]/90 px-3 py-2 text-[11px] font-semibold text-white shadow-[0_14px_42px_rgba(0,0,0,0.38)] backdrop-blur-xl transition hover:bg-[#241044]"
+                    class="absolute right-3 top-3 z-10 inline-flex items-center gap-2 rounded-full border border-[#c8b4ff]/75 bg-[#150d28]/90 px-3 py-2 text-xs font-semibold text-white shadow-[0_14px_42px_rgba(0,0,0,0.38)] backdrop-blur-xl transition hover:bg-[#241044]"
                   >
                     <img src="/vector-logo.png" alt="" class="size-5 rounded-md" />
                     Deployed with vector.ai
@@ -606,10 +633,7 @@ export default function NewLayout(props: ParentProps) {
           </Show>
         </div>
       </aside>
-      <div class="pointer-events-none fixed bottom-5 left-[76px] z-30 hidden items-center gap-2 rounded-full border border-white/10 bg-[#151319]/72 px-3 py-2 text-[11px] font-semibold text-white/64 shadow-[0_18px_50px_rgba(0,0,0,0.35)] backdrop-blur-xl md:flex">
-        <VectorElementSprite id={element()} size="small" />
-        <span>{currentElement().label} element</span>
-      </div>
+
       {import.meta.env.DEV && <DebugBar inline />}
       <HelpButton />
       <ToastRegion v2 />

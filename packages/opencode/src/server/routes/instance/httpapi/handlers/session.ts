@@ -63,15 +63,24 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
 
     const list = Effect.fn("SessionHttpApi.list")(function* (ctx: { query: typeof ListQuery.Type }) {
       const directory = ctx.query.directory ? yield* InstanceState.directory : undefined
-      return yield* session.list({
-        directory: ctx.query.scope === "project" ? undefined : directory,
-        scope: ctx.query.scope,
-        path: ctx.query.path,
-        roots: ctx.query.roots,
-        start: ctx.query.start,
-        search: ctx.query.search,
-        limit: ctx.query.limit,
-      })
+      return yield* session
+        .list({
+          directory: ctx.query.scope === "project" ? undefined : directory,
+          scope: ctx.query.scope,
+          path: ctx.query.path,
+          roots: ctx.query.roots,
+          start: ctx.query.start,
+          search: ctx.query.search,
+          limit: ctx.query.limit,
+        })
+        .pipe(
+          Effect.catchCause((cause) =>
+            Effect.logError("session.list failed; returning an empty session list", {
+              cause: Cause.pretty(cause),
+              query: ctx.query,
+            }).pipe(Effect.as([])),
+          ),
+        )
     })
 
     const status = Effect.fn("SessionHttpApi.status")(function* () {

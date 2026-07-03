@@ -10,7 +10,6 @@ import { SettingsProvidersV2 } from "./providers"
 import { SettingsModelsV2 } from "./models"
 import "./settings-v2.css"
 import { SettingsServersV2 } from "./servers"
-import { SettingsElementsV2, SettingsPersonalizationV2 } from "./personalization"
 import { SettingsCapabilityPanelV2, capabilityPages } from "./capability-panel"
 
 export const DialogSettings: Component<{
@@ -32,14 +31,6 @@ export const DialogSettings: Component<{
                     <TabsV2.Trigger value="general">
                       <Icon name="sliders" />
                       Configuration
-                    </TabsV2.Trigger>
-                    <TabsV2.Trigger value="personalization">
-                      <Icon name="sliders" />
-                      Personalization
-                    </TabsV2.Trigger>
-                    <TabsV2.Trigger value="elements">
-                      <Icon name="models" />
-                      Elements
                     </TabsV2.Trigger>
                     <TabsV2.Trigger value="shortcuts">
                       <Icon name="keyboard" />
@@ -126,12 +117,6 @@ export const DialogSettings: Component<{
         </TabsV2.Content>
         <TabsV2.Content value="shortcuts" class="settings-v2-panel">
           <SettingsKeybinds v2 />
-        </TabsV2.Content>
-        <TabsV2.Content value="personalization" class="settings-v2-panel">
-          <SettingsPersonalizationV2 />
-        </TabsV2.Content>
-        <TabsV2.Content value="elements" class="settings-v2-panel">
-          <SettingsElementsV2 />
         </TabsV2.Content>
         <TabsV2.Content value="usage" class="settings-v2-panel">
           <SettingsCapabilityPanelV2 {...capabilityPages.usage} />

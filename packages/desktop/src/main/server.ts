@@ -1,5 +1,6 @@
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
+import { mkdirSync } from "node:fs"
 import { app, utilityProcess } from "electron"
 import type { Details } from "electron"
 import { getLogger } from "./logging"
@@ -43,17 +44,25 @@ export function setDefaultServerUrl(url: string | null) {
 
 export function preferAppEnv(userDataPath: string) {
   const shell = process.platform === "win32" ? null : getUserShell()
+  const configDir = join(userDataPath, "config", "vector")
+  const dataHome = join(userDataPath, "xdg-data")
+  const xdgConfigHome = join(userDataPath, "xdg-config")
+  const cacheHome = join(userDataPath, "xdg-cache")
+  const stateHome = join(userDataPath, "xdg-state")
+  for (const dir of [configDir, dataHome, xdgConfigHome, cacheHome, stateHome]) {
+    mkdirSync(dir, { recursive: true })
+  }
   Object.assign(process.env, {
     ...(shell ? loadShellEnv(shell, getLogger()) : null),
     OPENCODE_EXPERIMENTAL_ICON_DISCOVERY: "true",
     OPENCODE_EXPERIMENTAL_FILEWATCHER: "true",
     OPENCODE_CLIENT: "desktop",
     VECTOR_APP_NAMESPACE: "vector",
-    OPENCODE_CONFIG_DIR: join(userDataPath, "config", "vector"),
-    XDG_DATA_HOME: process.env.XDG_DATA_HOME ?? join(userDataPath, "xdg-data"),
-    XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME ?? join(userDataPath, "xdg-config"),
-    XDG_CACHE_HOME: process.env.XDG_CACHE_HOME ?? join(userDataPath, "xdg-cache"),
-    XDG_STATE_HOME: process.env.XDG_STATE_HOME ?? join(userDataPath, "xdg-state"),
+    OPENCODE_CONFIG_DIR: configDir,
+    XDG_DATA_HOME: process.env.XDG_DATA_HOME ?? dataHome,
+    XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME ?? xdgConfigHome,
+    XDG_CACHE_HOME: process.env.XDG_CACHE_HOME ?? cacheHome,
+    XDG_STATE_HOME: process.env.XDG_STATE_HOME ?? stateHome,
   })
 }
 

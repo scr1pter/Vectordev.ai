@@ -18,14 +18,17 @@ import { ModelTooltip } from "./model-tooltip"
 import { useLanguage } from "@/context/language"
 import { decode64 } from "@/utils/base64"
 
-const costInput = (cost: unknown): number => {
-  if (Array.isArray(cost)) return Math.max(0, ...cost.map((item) => costInput(item)))
-  if (!cost || typeof cost !== "object" || !("input" in cost)) return 0
+const costInput = (cost: unknown): number | undefined => {
+  if (Array.isArray(cost)) {
+    const values = cost.map((item) => costInput(item)).filter((value): value is number => value !== undefined)
+    return values.length > 0 ? Math.max(0, ...values) : undefined
+  }
+  if (!cost || typeof cost !== "object" || !("input" in cost)) return undefined
   const value = (cost as { input?: unknown }).input
-  return typeof value === "number" && Number.isFinite(value) ? value : 0
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined
 }
 
-const isFree = (provider: string, cost: unknown) => provider === "opencode" || costInput(cost) === 0
+const isFree = (_provider: string, cost: unknown) => costInput(cost) === 0
 
 type ModelState = ReturnType<typeof useLocal>["model"]
 type ModelItem = ReturnType<ModelState["list"]>[number]

@@ -19,10 +19,8 @@ const popularProviderSet = new Set(popularProviders)
 
 type ProviderInfo = ReturnType<typeof selectProviderCatalog>["all"] extends Map<string, infer T> ? T : never
 
-function withPublicVectorModels(provider: ProviderInfo, connected: boolean) {
-  if (connected || provider.id !== "opencode") return provider
-  if (Object.keys(provider.models).length === 0) return
-  return { ...provider, name: "Vector" }
+function connectedProvider(provider: ProviderInfo | undefined): ProviderInfo[] {
+  return provider ? [provider] : []
 }
 
 export function useProviders(directory?: Accessor<string | undefined>) {
@@ -34,9 +32,10 @@ export function useProviders(directory?: Accessor<string | undefined>) {
     const projectStore = value ? serverSync().child(value)[0] : undefined
     if (directory)
       return selectProviderCatalog({
-        explicit: true,
+        explicit: false,
         directory: value,
         catalog: projectStore && { ready: projectStore.provider_ready, providers: projectStore.provider },
+        global: serverSync().data.provider,
       })
     return selectProviderCatalog({
       explicit: false,
@@ -56,11 +55,7 @@ export function useProviders(directory?: Accessor<string | undefined>) {
         (v) => Array.from(v),
       ),
     connected: () => {
-      const connected = new Set(providers().connected)
-      return Array.from(providers().all.values()).flatMap((provider) => {
-        const item = withPublicVectorModels(provider, connected.has(provider.id))
-        return item ? [item] : []
-      })
+      return providers().connected.flatMap((id) => connectedProvider(providers().all.get(id)))
     },
     paid: () => {
       const connected = new Set(providers().connected)
