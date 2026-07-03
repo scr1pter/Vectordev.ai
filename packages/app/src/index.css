@@ -517,21 +517,24 @@
       8px 0 32px rgba(0, 0, 0, 0.26);
   }
 
-  html[data-vector-sidebar="crystal"] [data-component="sidebar-rail"] {
+  html[data-vector-sidebar="crystal"] [data-component="sidebar-rail"],
+  html[data-vector-sidebar="space"] [data-component="sidebar-rail"] {
     background:
       radial-gradient(circle at 50% 0%, rgba(189, 168, 255, 0.24), transparent 9rem),
       repeating-linear-gradient(135deg, rgba(181, 149, 255, 0.08) 0 8px, transparent 8px 18px),
       rgba(17, 15, 22, 0.98);
   }
 
-  html[data-vector-sidebar="graphite"] [data-component="sidebar-rail"] {
+  html[data-vector-sidebar="graphite"] [data-component="sidebar-rail"],
+  html[data-vector-sidebar="carbon"] [data-component="sidebar-rail"] {
     background:
       linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent 46%),
       repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.018) 0 10px, transparent 10px 20px),
       rgba(14, 14, 16, 0.98);
   }
 
-  html[data-vector-sidebar="aurora"] [data-component="sidebar-rail"] {
+  html[data-vector-sidebar="aurora"] [data-component="sidebar-rail"],
+  html[data-vector-sidebar="classic"] [data-component="sidebar-rail"] {
     background:
       radial-gradient(circle at 50% 0%, rgba(94, 215, 255, 0.16), transparent 8rem),
       linear-gradient(180deg, rgba(155, 108, 255, 0.18), rgba(255, 112, 184, 0.08), transparent),

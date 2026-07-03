@@ -25,7 +25,7 @@ const costInput = (cost: unknown): number => {
   return typeof value === "number" && Number.isFinite(value) ? value : 0
 }
 
-const isFree = (provider: string, cost: unknown) => provider === "opencode" && costInput(cost) === 0
+const isFree = (provider: string, cost: unknown) => provider === "opencode" || costInput(cost) === 0
 
 type ModelState = ReturnType<typeof useLocal>["model"]
 type ModelItem = ReturnType<ModelState["list"]>[number]

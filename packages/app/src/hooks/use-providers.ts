@@ -19,20 +19,10 @@ const popularProviderSet = new Set(popularProviders)
 
 type ProviderInfo = ReturnType<typeof selectProviderCatalog>["all"] extends Map<string, infer T> ? T : never
 
-function costInput(cost: unknown): number {
-  if (Array.isArray(cost)) return Math.max(0, ...cost.map((item) => costInput(item)))
-  if (!cost || typeof cost !== "object" || !("input" in cost)) return 0
-  const value = (cost as { input?: unknown }).input
-  return typeof value === "number" && Number.isFinite(value) ? value : 0
-}
-
 function withPublicVectorModels(provider: ProviderInfo, connected: boolean) {
   if (connected || provider.id !== "opencode") return provider
-  const freeModels = Object.fromEntries(
-    Object.entries(provider.models).filter(([, model]) => costInput(model.cost) === 0),
-  )
-  if (Object.keys(freeModels).length === 0) return
-  return { ...provider, name: "Vector", models: freeModels }
+  if (Object.keys(provider.models).length === 0) return
+  return { ...provider, name: "Vector" }
 }
 
 export function useProviders(directory?: Accessor<string | undefined>) {

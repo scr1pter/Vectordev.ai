@@ -18,6 +18,11 @@ export interface SoundSettings {
   errors: string
 }
 
+export type VectorElementPreference = "fire" | "space" | "earth" | "water" | "sky" | "lightning" | "crystal" | "shadow"
+export type VectorWallpaperPreference = "nebula" | "void" | "grid" | "aurora"
+export type VectorSidebarPreference = "fire" | "space" | "carbon" | "classic"
+export type VectorFontPreference = "system" | "pixel" | "mono"
+
 export interface Settings {
   general: {
     autoSave: boolean
@@ -40,6 +45,10 @@ export interface Settings {
     mono: string
     sans: string
     terminal: string
+    element: VectorElementPreference
+    wallpaper: VectorWallpaperPreference
+    sidebar: VectorSidebarPreference
+    fontPersonality: VectorFontPreference
   }
   keybinds: Record<string, string>
   permissions: {
@@ -124,6 +133,10 @@ const defaultSettings: Settings = {
     mono: "",
     sans: "",
     terminal: "",
+    element: "space",
+    wallpaper: "nebula",
+    sidebar: "fire",
+    fontPersonality: "system",
   },
   keybinds: {},
   permissions: {
@@ -168,6 +181,16 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
       const root = document.documentElement
       root.style.setProperty("--font-family-mono", monoFontFamily(store.appearance?.mono))
       root.style.setProperty("--font-family-sans", sansFontFamily(store.appearance?.sans))
+      root.dataset.vectorElement = store.appearance?.element ?? defaultSettings.appearance.element
+      root.dataset.vectorWallpaper = store.appearance?.wallpaper ?? defaultSettings.appearance.wallpaper
+      root.dataset.vectorBackdrop = store.appearance?.wallpaper ?? defaultSettings.appearance.wallpaper
+      root.dataset.vectorSidebar = store.appearance?.sidebar ?? defaultSettings.appearance.sidebar
+      root.dataset.vectorFontPersonality =
+        store.appearance?.fontPersonality ?? defaultSettings.appearance.fontPersonality
+      root.dataset.vectorFont = store.appearance?.fontPersonality ?? defaultSettings.appearance.fontPersonality
+      if (typeof localStorage !== "undefined") {
+        localStorage.setItem("vector.element", store.appearance?.element ?? defaultSettings.appearance.element)
+      }
     })
 
     createEffect(() => {
@@ -275,6 +298,25 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         terminalFont: withFallback(() => store.appearance?.terminal, defaultSettings.appearance.terminal),
         setTerminalFont(value: string) {
           setStore("appearance", "terminal", value.trim() ? value : "")
+        },
+        element: withFallback(() => store.appearance?.element, defaultSettings.appearance.element),
+        setElement(value: VectorElementPreference) {
+          setStore("appearance", "element", value)
+        },
+        wallpaper: withFallback(() => store.appearance?.wallpaper, defaultSettings.appearance.wallpaper),
+        setWallpaper(value: VectorWallpaperPreference) {
+          setStore("appearance", "wallpaper", value)
+        },
+        sidebar: withFallback(() => store.appearance?.sidebar, defaultSettings.appearance.sidebar),
+        setSidebar(value: VectorSidebarPreference) {
+          setStore("appearance", "sidebar", value)
+        },
+        fontPersonality: withFallback(
+          () => store.appearance?.fontPersonality,
+          defaultSettings.appearance.fontPersonality,
+        ),
+        setFontPersonality(value: VectorFontPreference) {
+          setStore("appearance", "fontPersonality", value)
         },
       },
       keybinds: {
