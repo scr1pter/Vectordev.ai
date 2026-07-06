@@ -1,560 +1,984 @@
 ---
 const downloadOptions = [
+  { title: "macOS Apple Silicon", badge: ".dmg", href: "/download/mac-arm64" },
+  { title: "macOS Intel", badge: ".dmg", href: "/download/mac-x64" },
+  { title: "Windows", badge: ".exe", href: "/download/windows" },
+  { title: "Linux", badge: "AppImage", href: "/download/linux" },
+]
+
+const runSteps = [
+  { label: "Read repository", meta: "42 files scanned" },
+  { label: "Planned implementation", meta: "4 steps, plan mode" },
+  { label: "Edited 14 files", meta: "reviewable diff ready" },
+  { label: "Started dev server", meta: "localhost:3000" },
+  { label: "Tested in browser", meta: "3 flows verified" },
+  { label: "Created checkpoint", meta: "safe to restore" },
+]
+
+const trustCards = [
+  { name: "Impact Analysis", note: "what may break before you accept", risk: "low" },
+  { name: "Secret Scanner", note: "keys never slip into commits", risk: "guard" },
+  { name: "Checkpoints", note: "one click back to any safe state", risk: "safe" },
+]
+
+const quickFeatures = [
+  { icon: "◈", name: "Project Brain", copy: "A living map of your architecture, decisions, and next steps." },
+  { icon: "⌘", name: "Plan Mode", copy: "Review the plan before a single file changes. Shift+Tab." },
+  { icon: "◧", name: "Codespace", copy: "Real editor, file tree, problems panel, and one-click AI repair." },
+  { icon: "⟁", name: "Runbook", copy: "Vector writes how to run and debug your project — automatically." },
+  { icon: "◎", name: "Learn Mode", copy: "Beginner to pro explanations for every change it makes." },
+  { icon: "▲", name: "Deploy Preview", copy: "A clean, shareable demo checklist without cloud setup." },
+]
+
+const workflowCards = [
   {
-    title: "macOS Apple Silicon",
-    subtitle: "M1, M2, M3, M4 and newer Macs",
-    badge: ".dmg",
-    href: "/download/mac-arm64",
+    label: "Agent",
+    title: "Start with the outcome.",
+    copy: "Ask Vector to build, fix, refactor, or explain. It plans against the repository before touching code.",
   },
   {
-    title: "macOS Intel",
-    subtitle: "Older Intel-based Macs",
-    badge: ".dmg",
-    href: "/download/mac-x64",
+    label: "Review",
+    title: "Inspect the engineering trail.",
+    copy: "See files read, edits made, risks found, and the exact change set before you accept anything.",
   },
   {
-    title: "Windows",
-    subtitle: "Windows 10 and Windows 11",
-    badge: ".exe",
-    href: "/download/windows",
+    label: "Codespace",
+    title: "Drop into real code.",
+    copy: "Open the editor when precision matters: files, syntax, preview, problems, debugging, and checkpoints.",
   },
   {
-    title: "Linux",
-    subtitle: "Portable AppImage build",
-    badge: "AppImage",
-    href: "/download/linux",
+    label: "Verify",
+    title: "Run it, repair it, ship it.",
+    copy: "Vector helps run checks, explain failures, create checkpoints, and prepare a demo-ready build.",
   },
+]
+
+const proofPoints = [
+  "Codex-style agent flow",
+  "Cursor-style code ownership",
+  "BYOK model control",
+  "Review-first changes",
+  "Desktop-first speed",
+  "One project, two surfaces",
 ]
 ---
 
-<div class="hero">
-  <section class="top">
-    <div class="nav">
-      <a class="brand" href="/">
-        <span class="mark" aria-hidden="true">
-          <img src="/vector-logo.png" alt="" />
-        </span>
-        <span>vector.ai</span>
-      </a>
+<div class="lander" id="vector-lander">
+  <!-- ambient layers -->
+  <div class="sky" aria-hidden="true">
+    <div class="aurora"></div>
+    <div class="stars"></div>
+    <div class="pointer-glow"></div>
+  </div>
+
+  <!-- ============ HERO ============ -->
+  <header class="nav">
+    <a class="brand" href="/">
+      <img src="/vector-logo.png" alt="" width="34" height="34" />
+      <span>Vector</span>
+    </a>
+    <nav class="nav-links">
+      <a href="/docs">Docs</a>
+      <a href="https://github.com/vectordev-ai" rel="noopener">GitHub</a>
+      <a class="nav-cta" href="#download">Download</a>
+    </nav>
+  </header>
+
+  <section class="hero">
+    <p class="eyebrow reveal">The AI software engineering workspace</p>
+    <h1 class="reveal" style="--d:.08s">
+      Ship real software<br />
+      <em>with an agent you can trust.</em>
+    </h1>
+    <p class="lede reveal" style="--d:.16s">
+      Vector plans, edits, runs, and verifies your code on your machine — with your own model keys,
+      reviewable changes, and a checkpoint for every risk it takes.
+    </p>
+    <div class="cta-row reveal" style="--d:.24s">
+      <a class="btn primary" href="#download">Download for free</a>
+      <a class="btn ghost" href="#story">See it work<span class="arrow">↓</span></a>
     </div>
 
-    <div class="hero-copy">
-      <p class="eyebrow">Free BYOK AI coding workspace</p>
-      <h1>Build with any model. Keep control of every file.</h1>
-      <p class="lede">
-        Vector is a local-first AI coding workspace for developers who want Codex-style flow,
-        Claude-grade model choice, and bring-your-own-key ownership without a locked platform bill.
+    <!-- cinematic product window -->
+    <div class="stage reveal" style="--d:.34s">
+      <div class="float-chip chip-a" aria-hidden="true">Plan Mode <b>ON</b></div>
+      <div class="float-chip chip-b" aria-hidden="true">BYOK · your keys</div>
+      <div class="float-chip chip-c" aria-hidden="true">Checkpoint saved</div>
+
+      <div class="window hero-window">
+        <div class="window-bar">
+          <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+          <span class="window-title">vector — astro-storefront</span>
+        </div>
+        <div class="window-body">
+          <div class="composer">
+            <span class="composer-text">Redesign the checkout flow and make sure nothing breaks</span>
+            <span class="composer-send" aria-hidden="true">↑</span>
+          </div>
+          <ol class="run" aria-label="Vector working through an engineering run">
+            {runSteps.map((step, i) => (
+              <li class="run-step" style={`--i:${i}`}>
+                <span class="tick" aria-hidden="true"></span>
+                <span class="run-label">{step.label}</span>
+                <span class="run-meta">{step.meta}</span>
+              </li>
+            ))}
+            <li class="run-done" style={`--i:${runSteps.length}`}>Done. 14 files changed, review ready.</li>
+          </ol>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ STORY: ASK / WATCH / TRUST ============ -->
+  <section class="story" id="story">
+    <div class="story-step reveal">
+      <span class="step-no">01</span>
+      <h2>Ask for the change you actually want.</h2>
+      <p>Plain language in, engineering out. Vector reads your repository first, so its plan fits <i>your</i> codebase — not a template.</p>
+      <div class="mini-window ask-window" aria-hidden="true">
+        <span class="typing">Fix the flaky signup test and explain what caused it</span>
+      </div>
+    </div>
+
+    <div class="story-step reveal" style="--d:.1s">
+      <span class="step-no">02</span>
+      <h2>Watch it work like an engineer.</h2>
+      <p>Not a wall of tokens — a timeline. Every read, edit, command, and browser check appears as it happens.</p>
+      <div class="mini-window" aria-hidden="true">
+        <div class="pulse-line" style="--i:0"><b>$</b> bun test auth/signup.test.ts</div>
+        <div class="pulse-line ok" style="--i:1">1 failing → race in token refresh</div>
+        <div class="pulse-line" style="--i:2"><b>edit</b> src/auth/refresh.ts <i>+9 −4</i></div>
+        <div class="pulse-line ok" style="--i:3">12 passing · 0 failing</div>
+      </div>
+    </div>
+
+    <div class="story-step reveal" style="--d:.2s">
+      <span class="step-no">03</span>
+      <h2>Trust every change before it lands.</h2>
+      <p>Diffs, risk, secrets, blast radius — surfaced before you accept. Rollback is one click, never a prayer.</p>
+      <div class="trust-cards" aria-hidden="true">
+        {trustCards.map((card) => (
+          <div class={`trust-card risk-${card.risk}`}>
+            <span class="risk-pill">{card.risk}</span>
+            <b>{card.name}</b>
+            <span>{card.note}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SHOWCASE ============ -->
+  <section class="showcase">
+    <article class="feature reveal">
+      <div class="feature-copy">
+        <p class="kicker">Project Brain</p>
+        <h2>Your project, mapped and remembered.</h2>
+        <p>Architecture, dependencies, decisions, and the files the agent has touched — connected into memory that survives every session.</p>
+      </div>
+      <div class="feature-visual brain" aria-hidden="true">
+        <svg viewBox="0 0 320 200">
+          <g class="brain-links" stroke="rgba(160,110,255,.35)" fill="none">
+            <path d="M60 60 L160 100" /><path d="M60 140 L160 100" />
+            <path d="M160 100 L260 50" /><path d="M160 100 L260 150" />
+            <path d="M260 50 L260 150" />
+          </g>
+          <g class="brain-nodes">
+            <circle cx="60" cy="60" r="10" /><circle cx="60" cy="140" r="10" />
+            <circle cx="160" cy="100" r="14" class="core" />
+            <circle cx="260" cy="50" r="10" /><circle cx="260" cy="150" r="10" />
+          </g>
+          <g class="brain-labels" fill="#b9a7d9" font-size="11">
+            <text x="34" y="42">routes</text><text x="40" y="168">api</text>
+            <text x="132" y="80">brain</text><text x="240" y="32">state</text><text x="236" y="178">tests</text>
+          </g>
+        </svg>
+      </div>
+    </article>
+
+    <article class="feature flip reveal">
+      <div class="feature-copy">
+        <p class="kicker">Checkpoints</p>
+        <h2>Every risky moment has an undo.</h2>
+        <p>Vector snapshots your work before large edits. Preview exactly what a restore will change — then travel back in one click.</p>
+      </div>
+      <div class="feature-visual checkpoints" aria-hidden="true">
+        <div class="ck-line">
+          <span class="ck" style="--i:0"><i></i><b>before refactor</b></span>
+          <span class="ck" style="--i:1"><i></i><b>tests green</b></span>
+          <span class="ck active" style="--i:2"><i></i><b>checkout v2</b><em>restore</em></span>
+        </div>
+      </div>
+    </article>
+
+    <article class="feature reveal">
+      <div class="feature-copy">
+        <p class="kicker">Review Queue</p>
+        <h2>Changes queue up. You stay in charge.</h2>
+        <p>Every edit arrives as a labeled, scannable diff with intent and risk. Accept, hold, or send it back — nothing lands silently.</p>
+      </div>
+      <div class="feature-visual diff-visual" aria-hidden="true">
+        <div class="diff-window">
+          <div class="diff-head">src/checkout/Cart.tsx <span class="risk-pill low">low risk</span></div>
+          <div class="diff-line del" style="--i:0">- const total = items.reduce((s, i) =&gt; s + i.price)</div>
+          <div class="diff-line add" style="--i:1">+ const total = items.reduce((s, i) =&gt; s + i.price, 0)</div>
+          <div class="diff-line add" style="--i:2">+ if (!items.length) return &lt;EmptyCart /&gt;</div>
+          <div class="diff-actions" style="--i:3"><span class="btn-approve">Accept</span><span class="btn-hold">Hold</span></div>
+        </div>
+      </div>
+    </article>
+
+    <article class="feature flip reveal">
+      <div class="feature-copy">
+        <p class="kicker">Terminal &amp; browser</p>
+        <h2>It runs what it writes.</h2>
+        <p>Vector starts your dev server, drives the browser, and reads the errors — so "it works" means it was actually verified.</p>
+      </div>
+      <div class="feature-visual term" aria-hidden="true">
+        <div class="term-window">
+          <div class="term-line" style="--i:0"><b>$</b> bun dev</div>
+          <div class="term-line dim" style="--i:1">vite ready in 312 ms → localhost:3000</div>
+          <div class="term-line" style="--i:2"><b>browser</b> checkout flow · 3 steps</div>
+          <div class="term-line ok" style="--i:3">✓ cart → payment → confirmation</div>
+        </div>
+      </div>
+    </article>
+
+    <article class="feature reveal">
+      <div class="feature-copy">
+        <p class="kicker">Bring your own key</p>
+        <h2>Your models. Your bill. Your ceiling.</h2>
+        <p>Anthropic, OpenAI, Google, local models — plug in any key and switch per task. Cost Guard warns you before an expensive run, not after.</p>
+      </div>
+      <div class="feature-visual byok" aria-hidden="true">
+        <div class="key-card" style="--i:0"><span class="key-dot"></span>anthropic · claude</div>
+        <div class="key-card" style="--i:1"><span class="key-dot g"></span>openai · gpt</div>
+        <div class="key-card" style="--i:2"><span class="key-dot b"></span>local · ollama</div>
+        <div class="cost-meter" style="--i:3"><span>est. run cost</span><div class="meter"><i></i></div><b>$0.14</b></div>
+      </div>
+    </article>
+  </section>
+
+  <!-- ============ POSITIONING ============ -->
+  <section class="positioning">
+    <div class="positioning-copy reveal">
+      <p class="kicker">Why Vector exists</p>
+      <h2>Agent speed, editor control, and your own AI stack.</h2>
+      <p>
+        Vector is built for people who want the power of an autonomous coding agent without giving up the code editor,
+        the model choice, or the ability to review every important change. It is not a toy builder and it is not just a chat box:
+        it is a desktop workspace where the agent and the code live together.
       </p>
     </div>
-  </section>
-
-  <section class="install">
-    <div>
-      <p class="section-label">Native app</p>
-      <h2>Download Vector for macOS, Windows, or Linux.</h2>
-    </div>
-    <div class="inline-downloads">
-      {
-        downloadOptions.map((option) => (
-          <a class="mini-download" href={option.href}>
-            <span>{option.title}</span>
-            <em>{option.badge}</em>
-          </a>
-        ))
-      }
+    <div class="proof-wall reveal" style="--d:.12s">
+      {proofPoints.map((point) => (
+        <span>{point}</span>
+      ))}
     </div>
   </section>
 
-  <section class="features" aria-label="Vector features">
-    <article>
-      <span>01</span>
-      <h3>Bring Your Own Key</h3>
-      <p>Use your own OpenAI, Anthropic, Google, Groq, local, or compatible provider keys.</p>
-    </article>
-    <article>
-      <span>02</span>
-      <h3>Agentic Coding</h3>
-      <p>Ask Vector to inspect, plan, edit, run checks, and explain what changed in your project.</p>
-    </article>
-    <article>
-      <span>03</span>
-      <h3>Real Code Ownership</h3>
-      <p>Your app remains normal files on your machine, ready for Git, review, export, and handoff.</p>
-    </article>
-    <article>
-      <span>04</span>
-      <h3>Model Freedom</h3>
-      <p>Pick the model that fits the work instead of being trapped inside one bundled AI plan.</p>
-    </article>
-    <article>
-      <span>05</span>
-      <h3>Focused Workspace</h3>
-      <p>A mature black workspace built for long coding sessions, project context, and fast iteration.</p>
-    </article>
-    <article>
-      <span>06</span>
-      <h3>Free To Start</h3>
-      <p>Vector is designed around user-controlled API spend, not forcing a subscription on day one.</p>
-    </article>
-  </section>
-
-  <section class="workspace">
-    <div class="window">
-      <div class="traffic">
-        <span></span>
-        <span></span>
-        <span></span>
-      </div>
-      <div class="workspace-grid">
-        <aside>
-          <p>Projects</p>
-          <div class="pill active">astr0gpt</div>
-          <div class="pill">stock tracker</div>
-          <div class="pill">launch page</div>
-        </aside>
-        <main>
-          <p class="prompt-title">What should Vector work on?</p>
-          <div class="prompt-box">
-            <span>Plan, edit, and verify a multi-file feature...</span>
-            <strong>BYOK</strong>
-          </div>
-          <div class="timeline">
-            <span>reading files</span>
-            <span>planning</span>
-            <span>editing</span>
-            <span>review ready</span>
-          </div>
-        </main>
-      </div>
+  <!-- ============ WORKFLOW ============ -->
+  <section class="workflow">
+    <div class="workflow-head reveal">
+      <p class="kicker center">The Vector loop</p>
+      <h2>Prompt, inspect, edit, verify.</h2>
+      <p>
+        The product story is simple: ask the agent for the change, inspect what it did, open the code when you need control,
+        then run and checkpoint the result.
+      </p>
+    </div>
+    <div class="workflow-grid">
+      {workflowCards.map((card, i) => (
+        <article class="workflow-card reveal" style={`--d:${i * 0.07}s`}>
+          <span>{card.label}</span>
+          <h3>{card.title}</h3>
+          <p>{card.copy}</p>
+        </article>
+      ))}
     </div>
   </section>
 
-  <section class="footer">
-    <span>vector.ai</span>
-    <span>Free BYOK coding workspace</span>
-    <span>Built for ownership</span>
+  <!-- ============ QUICK GRID ============ -->
+  <section class="grid-section">
+    <p class="kicker center reveal">And a workspace full of intent</p>
+    <div class="quick-grid">
+      {quickFeatures.map((f, i) => (
+        <div class="quick-card reveal" style={`--d:${i * 0.06}s`}>
+          <span class="quick-icon" aria-hidden="true">{f.icon}</span>
+          <b>{f.name}</b>
+          <p>{f.copy}</p>
+        </div>
+      ))}
+    </div>
   </section>
+
+  <!-- ============ CLOSING CTA ============ -->
+  <section class="closing" id="download">
+    <h2 class="reveal">Own your AI engineering.</h2>
+    <p class="lede center reveal" style="--d:.08s">Free to start. Local-first. Powered by the keys you already have.</p>
+    <div class="downloads reveal" style="--d:.16s">
+      {downloadOptions.map((option) => (
+        <a class="download" href={option.href}>
+          <span>{option.title}</span>
+          <em>{option.badge}</em>
+        </a>
+      ))}
+    </div>
+  </section>
+
+  <footer class="footer">
+    <div class="foot-brand"><img src="/vector-logo.png" alt="" width="22" height="22" /> Vector</div>
+    <nav>
+      <a href="/docs">Docs</a>
+      <a href="https://github.com/vectordev-ai" rel="noopener">GitHub</a>
+      <a href="#download">Downloads</a>
+    </nav>
+    <span class="foot-note">Local-first · BYOK · MIT licensed</span>
+  </footer>
 </div>
 
+<script>
+  const root = document.getElementById("vector-lander")
+  const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches
+
+  if (root) {
+    const targets = root.querySelectorAll(".reveal, .feature, .story-step")
+    if (reduced || !("IntersectionObserver" in window)) {
+      targets.forEach((el) => el.classList.add("in"))
+      root.classList.add("in")
+    } else {
+      const io = new IntersectionObserver(
+        (entries) => {
+          for (const entry of entries) {
+            if (!entry.isIntersecting) continue
+            entry.target.classList.add("in")
+            io.unobserve(entry.target)
+          }
+        },
+        { threshold: 0.18, rootMargin: "0px 0px -8% 0px" },
+      )
+      targets.forEach((el) => io.observe(el))
+      root.classList.add("in")
+
+      // pointer-reactive lighting, rAF-throttled
+      let raf = 0
+      root.addEventListener("pointermove", (event) => {
+        if (raf) return
+        raf = requestAnimationFrame(() => {
+          raf = 0
+          root.style.setProperty("--mx", `${event.clientX}px`)
+          root.style.setProperty("--my", `${event.clientY}px`)
+        })
+      })
+    }
+  }
+</script>
+
 <style>
-  .hero {
-    --surface: #101015;
-    --surface-2: #17131f;
-    --surface-3: #21172f;
-    --text: #f6f2ff;
-    --muted: #a59ab8;
-    --line: rgba(177, 135, 255, 0.22);
+  .lander {
+    --ink: #f4f0ff;
+    --muted: #a89ec0;
+    --line: rgba(178, 140, 255, 0.16);
+    --glass: rgba(255, 255, 255, 0.035);
     --purple: #8f52ff;
-    --purple-2: #cbb4ff;
+    --purple-soft: #c9b0ff;
+    --bg: #060608;
+    --ease: cubic-bezier(0.22, 0.7, 0.28, 1);
 
-    min-height: 100vh;
-    margin: 0;
-    color: var(--text);
-    background:
-      radial-gradient(circle at 12% 18%, rgba(143, 82, 255, 0.34), transparent 26rem),
-      radial-gradient(circle at 82% 8%, rgba(203, 180, 255, 0.18), transparent 24rem),
-      linear-gradient(135deg, #07070a 0%, #101015 52%, #08070b 100%);
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    overflow: hidden;
+    position: relative;
+    overflow: clip;
+    color: var(--ink);
+    background: var(--bg);
+    font-feature-settings: "ss01";
+    font-family:
+      ui-sans-serif, system-ui, -apple-system, "SF Pro Display", "Segoe UI", Inter, sans-serif;
   }
 
-  .hero :is(a, button) {
-    color: inherit !important;
+  .lander :is(h1, h2, h3) {
+    font-family: inherit !important;
   }
 
-  .hero button {
-    font: inherit;
-  }
-
-  section {
-    padding: clamp(1.25rem, 4vw, 4.5rem);
-  }
-
-  .top {
-    min-height: 72vh;
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
-    gap: 6rem;
-  }
-
-  .nav,
-  .nav-actions,
-  .brand,
-  .install,
-  .command,
-  .footer {
-    display: flex;
-    align-items: center;
-  }
-
-  .nav {
-    justify-content: space-between;
-    gap: 1rem;
-  }
-
-  .brand {
-    gap: 0.75rem;
-    font-size: 1.18rem;
-    font-weight: 650;
-    letter-spacing: 0;
-    text-decoration: none;
-  }
-
-  .mark {
-    width: 2.35rem;
-    height: 2.35rem;
-    display: grid;
-    place-items: center;
-    border-radius: 0.8rem;
-    background: linear-gradient(135deg, #d9c7ff, #8d57ff);
-    box-shadow: 0 0 32px rgba(143, 82, 255, 0.45);
-  }
-
-  .mark img {
-    width: 100%;
-    height: 100%;
-    display: block;
-    border-radius: inherit;
-    object-fit: cover;
-  }
-
-  .nav-actions {
-    gap: 0.85rem;
-  }
-
-  .nav-actions :is(a, button) {
-    appearance: none;
-    cursor: pointer;
-    text-decoration: none;
-    border: 1px solid var(--line);
-    border-radius: 999px;
-    padding: 0.7rem 1rem;
-    color: var(--muted) !important;
-    background: transparent;
-  }
-
-  .nav-actions .download {
-    color: #09070d !important;
-    background: var(--text);
-    border-color: var(--text);
-  }
-
-  .hero-copy {
-    max-width: 920px;
-  }
-
-  .eyebrow,
-  .section-label {
-    margin: 0 0 1rem;
-    color: var(--purple-2);
-    text-transform: uppercase;
-    letter-spacing: 0;
-    font-size: 0.8rem;
-    font-weight: 700;
-  }
-
-  h1 {
-    color: var(--text) !important;
-    font-size: 4rem !important;
-    line-height: 0.96 !important;
-    letter-spacing: 0;
-    margin: 0;
-    max-width: 12ch;
-    font-weight: 680 !important;
-  }
-
-  .lede {
-    max-width: 760px;
-    margin: 1.6rem 0 0;
-    color: var(--muted);
-    font-size: 1.18rem;
-    line-height: 1.55;
-  }
-
-  .install {
-    justify-content: space-between;
-    gap: 2rem;
-    border-top: 1px solid var(--line);
-    border-bottom: 1px solid var(--line);
-    background: rgba(255, 255, 255, 0.02);
-  }
-
-  .inline-downloads {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(10rem, 1fr));
-    gap: 0.7rem;
-    width: min(38rem, 100%);
-  }
-
-  .mini-download {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 1rem;
-    min-height: 3.6rem;
-    padding: 0.8rem 0.95rem;
-    border: 1px solid rgba(177, 135, 255, 0.24);
-    border-radius: 1rem;
-    text-decoration: none;
-    background: rgba(255, 255, 255, 0.035);
-    transition:
-      border-color 160ms ease,
-      background 160ms ease,
-      transform 160ms ease;
-  }
-
-  .mini-download:hover {
-    transform: translateY(-1px);
-    border-color: var(--purple);
-    background: rgba(143, 82, 255, 0.13);
-  }
-
-  .mini-download span {
-    color: var(--text);
-    font-size: 0.92rem;
-  }
-
-  .mini-download em {
-    color: var(--purple-2);
-    font-style: normal;
-    font-size: 0.76rem;
-  }
-
-  h2 {
-    color: var(--text) !important;
-    margin: 0;
-    font-size: 2.4rem !important;
-    line-height: 1.05 !important;
-    letter-spacing: 0;
-    max-width: 660px;
-  }
-
-  .command {
-    appearance: none;
-    border: 1px solid var(--line);
-    border-radius: 1rem;
-    background: #060609;
-    color: var(--text);
-    cursor: pointer;
-    gap: 0.9rem;
-    padding: 1rem 1.2rem;
-    max-width: 100%;
-  }
-
-  .command span {
-    color: var(--purple-2);
-    font-size: 0.95rem;
-  }
-
-  .features {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 1px;
-    background: var(--line);
-    padding: 1px;
-  }
-
-  .features article {
-    min-height: 14rem;
-    padding: clamp(1.2rem, 2.5vw, 2rem);
-    background: rgba(16, 16, 21, 0.96);
-  }
-
-  .features span {
-    color: var(--purple-2);
+  .lander :is(.eyebrow, .kicker, .step-no, .window-title, .run-meta) {
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   }
 
-  .features h3 {
-    color: var(--text) !important;
-    margin: 2.4rem 0 0.75rem;
-    font-size: 1.35rem !important;
+  .lander :is(a) { color: inherit; text-decoration: none; }
+
+  /* ---------- ambient sky ---------- */
+  .sky { position: absolute; inset: 0; pointer-events: none; }
+
+  .aurora {
+    position: absolute;
+    inset: -20% -10%;
+    background:
+      radial-gradient(38rem 24rem at 22% 12%, rgba(143, 82, 255, 0.26), transparent 70%),
+      radial-gradient(30rem 22rem at 80% 4%, rgba(88, 44, 176, 0.3), transparent 70%),
+      radial-gradient(44rem 30rem at 55% 90%, rgba(143, 82, 255, 0.12), transparent 70%);
+    animation: drift 26s var(--ease) infinite alternate;
+    will-change: transform;
   }
 
-  .features p {
-    color: var(--muted);
+  @keyframes drift {
+    from { transform: translate3d(-1.5%, -1%, 0) scale(1); }
+    to { transform: translate3d(1.5%, 2%, 0) scale(1.06); }
+  }
+
+  .stars {
+    position: absolute; inset: 0;
+    background-image:
+      radial-gradient(1.5px 1.5px at 12% 22%, rgba(255,255,255,.5), transparent 100%),
+      radial-gradient(1px 1px at 34% 64%, rgba(255,255,255,.35), transparent 100%),
+      radial-gradient(1.5px 1.5px at 58% 18%, rgba(220,200,255,.4), transparent 100%),
+      radial-gradient(1px 1px at 76% 48%, rgba(255,255,255,.3), transparent 100%),
+      radial-gradient(1.5px 1.5px at 88% 76%, rgba(220,200,255,.35), transparent 100%),
+      radial-gradient(1px 1px at 22% 86%, rgba(255,255,255,.3), transparent 100%);
+    animation: twinkle 7s ease-in-out infinite alternate;
+  }
+
+  @keyframes twinkle { from { opacity: 0.5; } to { opacity: 1; } }
+
+  .pointer-glow {
+    position: fixed; inset: 0;
+    background: radial-gradient(28rem 28rem at var(--mx, 50vw) var(--my, 30vh), rgba(143, 82, 255, 0.08), transparent 70%);
+    transition: opacity 300ms;
+  }
+
+  /* ---------- nav ---------- */
+  .nav {
+    position: relative; z-index: 3;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 1.4rem clamp(1.25rem, 5vw, 4rem);
+  }
+
+  .brand { display: flex; align-items: center; gap: 0.7rem; font-weight: 680; font-size: 1.15rem; }
+  .brand img { border-radius: 9px; box-shadow: 0 0 26px rgba(143, 82, 255, 0.5); }
+
+  .nav-links { display: flex; align-items: center; gap: 1.6rem; font-size: 0.95rem; color: var(--muted); }
+  .nav-links a { position: relative; transition: color 180ms var(--ease); }
+  .nav-links a:hover { color: var(--ink); }
+  .nav-links a:not(.nav-cta)::after {
+    content: ""; position: absolute; left: 0; bottom: -4px; height: 1px; width: 100%;
+    background: var(--purple-soft); transform: scaleX(0); transform-origin: left;
+    transition: transform 220ms var(--ease);
+  }
+  .nav-links a:not(.nav-cta):hover::after { transform: scaleX(1); }
+
+  .nav-cta {
+    color: #0b0712 !important;
+    background: var(--ink);
+    padding: 0.55rem 1.05rem; border-radius: 999px; font-weight: 640;
+    transition: transform 180ms var(--ease), box-shadow 180ms var(--ease);
+  }
+  .nav-cta:hover { transform: translateY(-1px); box-shadow: 0 8px 30px rgba(143, 82, 255, 0.35); }
+
+  /* ---------- hero ---------- */
+  .hero {
+    position: relative; z-index: 2;
+    display: flex; flex-direction: column; align-items: center; text-align: center;
+    padding: clamp(3rem, 8vh, 6rem) clamp(1.25rem, 5vw, 4rem) clamp(4rem, 8vw, 7rem);
+  }
+
+  .eyebrow {
+    margin: 0 0 1.2rem;
+    color: var(--purple-soft);
+    font-size: 0.82rem; font-weight: 680; letter-spacing: 0.14em; text-transform: uppercase;
+    border: 1px solid var(--line); border-radius: 999px; padding: 0.5rem 1rem;
+    background: var(--glass); backdrop-filter: blur(8px);
+  }
+
+  .hero h1 {
     margin: 0;
-    line-height: 1.55;
+    font-size: clamp(2.6rem, 7vw, 5.2rem) !important;
+    line-height: 1.02 !important;
+    font-weight: 700 !important;
+    letter-spacing: -0.02em;
+    color: var(--ink) !important;
   }
 
-  .workspace {
-    padding-top: clamp(3rem, 7vw, 7rem);
-    padding-bottom: clamp(3rem, 7vw, 7rem);
+  .hero h1 em {
+    font-style: normal;
+    background: linear-gradient(100deg, var(--purple-soft), var(--purple) 60%, #6d3bd2);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
   }
+
+  .lede {
+    max-width: 46rem; margin: 1.5rem 0 0;
+    color: var(--muted); font-size: clamp(1.02rem, 1.6vw, 1.22rem); line-height: 1.6;
+  }
+  .lede.center { margin-inline: auto; }
+
+  .cta-row { display: flex; gap: 0.9rem; margin-top: 2.2rem; flex-wrap: wrap; justify-content: center; }
+
+  .btn {
+    display: inline-flex; align-items: center; gap: 0.5rem;
+    padding: 0.85rem 1.5rem; border-radius: 999px; font-weight: 650; font-size: 1rem;
+    transition: transform 200ms var(--ease), box-shadow 200ms var(--ease), background 200ms var(--ease);
+  }
+  .btn.primary {
+    color: #0b0712 !important; background: linear-gradient(180deg, #efe6ff, #cdb2ff);
+    box-shadow: 0 10px 36px rgba(143, 82, 255, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  }
+  .btn.primary:hover { transform: translateY(-2px); box-shadow: 0 16px 48px rgba(143, 82, 255, 0.5); }
+  .btn.ghost { color: var(--ink); border: 1px solid var(--line); background: rgba(20, 17, 30, 0.82); }
+  .btn.ghost:hover { transform: translateY(-2px); background: rgba(143, 82, 255, 0.14); }
+  .btn .arrow { transition: transform 220ms var(--ease); }
+  .btn.ghost:hover .arrow { transform: translateY(3px); }
+
+  /* ---------- hero stage ---------- */
+  .stage { position: relative; margin-top: clamp(3rem, 6vw, 5rem); width: min(58rem, 100%); }
 
   .window {
     border: 1px solid var(--line);
-    border-radius: 1.4rem;
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.02));
+    border-radius: 1.1rem;
+    background: linear-gradient(180deg, rgba(24, 20, 34, 0.92), rgba(10, 9, 15, 0.96));
+    box-shadow:
+      0 40px 140px rgba(0, 0, 0, 0.6),
+      0 0 0 1px rgba(255, 255, 255, 0.03) inset,
+      0 30px 90px rgba(109, 59, 210, 0.16);
     overflow: hidden;
-    box-shadow: 0 30px 120px rgba(0, 0, 0, 0.42);
+    text-align: left;
   }
 
-  .traffic {
-    display: flex;
-    gap: 0.55rem;
-    padding: 1rem;
-    border-bottom: 1px solid var(--line);
+  .window-bar {
+    display: flex; align-items: center; gap: 0.5rem;
+    padding: 0.85rem 1rem; border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  }
+  .dot { width: 0.68rem; height: 0.68rem; border-radius: 50%; }
+  .dot.r { background: #ff5f57; } .dot.y { background: #febc2e; } .dot.g { background: #28c840; }
+  .window-title { margin-left: 0.6rem; color: var(--muted); font-size: 0.82rem; }
+
+  .window-body { padding: clamp(1.1rem, 3vw, 2rem); }
+
+  .composer {
+    display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+    border: 1px solid rgba(178, 140, 255, 0.28); border-radius: 1rem;
+    background: rgba(10, 9, 14, 0.9); padding: 1rem 1.1rem;
+    box-shadow: 0 0 0 3px rgba(143, 82, 255, 0.08);
+  }
+  .composer-text { color: var(--ink); font-size: 1rem; }
+  .composer-send {
+    display: grid; place-items: center; width: 2.1rem; height: 2.1rem; border-radius: 50%;
+    color: #fff; background: linear-gradient(135deg, #b18aff, var(--purple));
+    box-shadow: 0 6px 20px rgba(143, 82, 255, 0.5);
   }
 
-  .traffic span {
-    width: 0.72rem;
-    height: 0.72rem;
-    border-radius: 50%;
-    background: #ff5f56;
+  .run { list-style: none; margin: 1.4rem 0 0; padding: 0; display: grid; gap: 0.65rem; }
+
+  .run-step, .run-done {
+    display: flex; align-items: center; gap: 0.75rem;
+    opacity: 0; transform: translateY(8px);
+  }
+  .in .run-step, .in .run-done {
+    animation: rise 480ms var(--ease) forwards;
+    animation-delay: calc(0.55s + var(--i) * 0.5s);
   }
 
-  .traffic span:nth-child(2) {
-    background: #ffbd2e;
+  @keyframes rise { to { opacity: 1; transform: none; } }
+
+  .tick {
+    width: 1.15rem; height: 1.15rem; border-radius: 50%; flex-shrink: 0;
+    border: 1px solid rgba(178, 140, 255, 0.5); position: relative;
+  }
+  .tick::after {
+    content: "✓"; position: absolute; inset: 0; display: grid; place-items: center;
+    font-size: 0.7rem; color: #c9f7d4; opacity: 0; transform: scale(0.4);
+  }
+  .in .run-step .tick::after {
+    animation: pop 300ms var(--ease) forwards;
+    animation-delay: calc(0.85s + var(--i) * 0.5s);
+  }
+  @keyframes pop { to { opacity: 1; transform: scale(1); } }
+
+  .run-label { font-size: 0.95rem; }
+  .run-meta { margin-left: auto; color: var(--muted); font-size: 0.8rem; }
+  .run-done { color: var(--purple-soft); font-weight: 640; padding-top: 0.35rem; }
+
+  .float-chip {
+    position: absolute; z-index: 3;
+    border: 1px solid var(--line); border-radius: 999px;
+    background: rgba(16, 13, 24, 0.85); backdrop-filter: blur(10px);
+    color: var(--muted); font-size: 0.8rem; padding: 0.5rem 0.9rem;
+    box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45);
+    animation: floaty 7s ease-in-out infinite;
+  }
+  .float-chip b { color: var(--purple-soft); margin-left: 0.3rem; }
+  .chip-a { top: -1.2rem; left: max(-3rem, -4vw); animation-delay: 0s; }
+  .chip-b { top: 32%; right: max(-3.5rem, -5vw); animation-delay: 1.6s; }
+  .chip-c { bottom: -1rem; left: 12%; animation-delay: 3.1s; }
+
+  @keyframes floaty {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-9px); }
   }
 
-  .traffic span:nth-child(3) {
-    background: #27c93f;
+  /* ---------- reveal primitives ---------- */
+  .reveal {
+    opacity: 0; transform: translateY(26px);
+    transition: opacity 700ms var(--ease), transform 700ms var(--ease);
+    transition-delay: var(--d, 0s);
+  }
+  .reveal.in { opacity: 1; transform: none; }
+
+  /* ---------- story ---------- */
+  .story {
+    position: relative; z-index: 2;
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: clamp(1rem, 2.5vw, 2rem);
+    padding: clamp(3rem, 7vw, 6.5rem) clamp(1.25rem, 5vw, 4rem);
   }
 
-  .workspace-grid {
-    display: grid;
-    grid-template-columns: minmax(14rem, 20rem) 1fr;
-    min-height: 34rem;
+  .story-step {
+    border: 1px solid var(--line); border-radius: 1.2rem;
+    padding: clamp(1.3rem, 2.5vw, 2rem);
+    background: linear-gradient(180deg, rgba(22, 19, 32, 0.94), rgba(12, 10, 18, 0.96));
+    transition: transform 300ms var(--ease), border-color 300ms var(--ease), box-shadow 300ms var(--ease),
+      opacity 700ms var(--ease);
+  }
+  .story-step:hover {
+    transform: translateY(-5px);
+    border-color: rgba(178, 140, 255, 0.4);
+    box-shadow: 0 24px 70px rgba(109, 59, 210, 0.18);
   }
 
-  .workspace-grid aside {
-    border-right: 1px solid var(--line);
-    padding: 1.25rem;
-    background: rgba(0, 0, 0, 0.22);
+  .step-no { color: var(--purple-soft); font-size: 0.85rem; font-weight: 700; letter-spacing: 0.1em; }
+  .story-step h2 { margin: 0.8rem 0 0.6rem; font-size: 1.45rem !important; line-height: 1.2 !important; color: var(--ink) !important; }
+  .story-step > p { margin: 0 0 1.2rem; color: var(--muted); line-height: 1.6; font-size: 0.95rem; }
+
+  .mini-window {
+    border: 1px solid rgba(255, 255, 255, 0.07); border-radius: 0.9rem;
+    background: rgba(8, 7, 12, 0.9); padding: 1rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.82rem;
+    display: grid; gap: 0.5rem;
   }
 
-  .workspace-grid aside p,
-  .prompt-title {
-    color: var(--muted);
-    text-transform: uppercase;
-    letter-spacing: 0;
-    font-size: 0.78rem;
+  .typing {
+    display: inline-block; white-space: nowrap; overflow: hidden;
+    border-right: 2px solid var(--purple-soft);
+    width: 0; color: var(--ink);
+  }
+  .in .typing { animation: type 2.6s steps(46) 0.4s forwards, caret 0.9s step-end infinite; }
+  @keyframes type { to { width: 100%; } }
+  @keyframes caret { 50% { border-color: transparent; } }
+
+  .pulse-line { color: var(--muted); opacity: 0; transform: translateX(-8px); }
+  .pulse-line b { color: var(--purple-soft); margin-right: 0.4rem; }
+  .pulse-line i { color: var(--purple-soft); font-style: normal; }
+  .pulse-line.ok { color: #9fe3b1; }
+  .in .pulse-line { animation: slide 420ms var(--ease) forwards; animation-delay: calc(0.4s + var(--i) * 0.45s); }
+  @keyframes slide { to { opacity: 1; transform: none; } }
+
+  .trust-cards { display: grid; gap: 0.6rem; }
+  .trust-card {
+    display: grid; gap: 0.15rem;
+    border: 1px solid rgba(255, 255, 255, 0.07); border-radius: 0.9rem;
+    background: rgba(8, 7, 12, 0.85); padding: 0.85rem 1rem;
+    transition: transform 240ms var(--ease), border-color 240ms var(--ease);
+  }
+  .trust-card:hover { transform: translateX(4px); border-color: rgba(178, 140, 255, 0.4); }
+  .trust-card b { font-size: 0.92rem; }
+  .trust-card > span:last-child { color: var(--muted); font-size: 0.8rem; }
+
+  .risk-pill {
+    justify-self: start; font-size: 0.66rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em;
+    border-radius: 999px; padding: 0.2rem 0.55rem; margin-bottom: 0.3rem;
+    background: rgba(143, 82, 255, 0.16); color: var(--purple-soft);
+  }
+  .risk-low .risk-pill, .risk-pill.low { background: rgba(52, 199, 89, 0.14); color: #9fe3b1; }
+  .risk-guard .risk-pill { background: rgba(255, 176, 46, 0.14); color: #ffd48a; }
+
+  /* ---------- showcase ---------- */
+  .showcase { position: relative; z-index: 2; display: grid; gap: clamp(3rem, 6vw, 5rem); padding: 0 clamp(1.25rem, 5vw, 4rem) clamp(3rem, 6vw, 5rem); }
+
+  .feature {
+    display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+    gap: clamp(1.5rem, 4vw, 4rem); align-items: center;
+    border: 1px solid var(--line); border-radius: 1.4rem;
+    padding: clamp(1.5rem, 4vw, 3.4rem);
+    background:
+      radial-gradient(30rem 18rem at 15% 0%, rgba(143, 82, 255, 0.1), transparent 70%),
+      linear-gradient(180deg, rgba(20, 17, 30, 0.92), rgba(12, 10, 18, 0.94));
+  }
+  .feature.flip { grid-template-columns: minmax(0, 6fr) minmax(0, 5fr); }
+  .feature.flip .feature-copy { order: 2; }
+  .feature.flip .feature-visual { order: 1; }
+
+  .kicker {
+    margin: 0 0 0.8rem; color: var(--purple-soft);
+    font-size: 0.78rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.14em;
+  }
+  .kicker.center { text-align: center; }
+
+  .feature h2 { margin: 0 0 0.8rem; font-size: clamp(1.5rem, 2.6vw, 2.1rem) !important; line-height: 1.12 !important; color: var(--ink) !important; letter-spacing: -0.01em; }
+  .feature-copy > p { margin: 0; color: var(--muted); line-height: 1.65; }
+
+  .feature-visual { min-height: 13rem; display: grid; align-content: center; }
+
+  /* brain */
+  .brain svg { width: 100%; height: auto; }
+  .brain-nodes circle { fill: #1b1524; stroke: rgba(178, 140, 255, 0.6); stroke-width: 1.5; }
+  .brain-nodes .core { fill: rgba(143, 82, 255, 0.35); }
+  .in .brain-nodes circle { animation: nodePulse 3.2s ease-in-out infinite; }
+  .in .brain-nodes circle:nth-child(2) { animation-delay: 0.5s; }
+  .in .brain-nodes circle:nth-child(4) { animation-delay: 1s; }
+  .in .brain-nodes circle:nth-child(5) { animation-delay: 1.5s; }
+  @keyframes nodePulse { 50% { stroke: var(--purple-soft); filter: drop-shadow(0 0 6px rgba(178, 140, 255, 0.6)); } }
+  .brain-links path { stroke-dasharray: 130; stroke-dashoffset: 130; }
+  .in .brain-links path { animation: link 1.4s var(--ease) forwards; }
+  .in .brain-links path:nth-child(2) { animation-delay: 0.2s; }
+  .in .brain-links path:nth-child(3) { animation-delay: 0.4s; }
+  .in .brain-links path:nth-child(4) { animation-delay: 0.6s; }
+  .in .brain-links path:nth-child(5) { animation-delay: 0.8s; }
+  @keyframes link { to { stroke-dashoffset: 0; } }
+
+  /* checkpoints */
+  .ck-line { display: grid; gap: 0.8rem; position: relative; padding-left: 1.4rem; }
+  .ck-line::before { content: ""; position: absolute; left: 0.48rem; top: 0.6rem; bottom: 0.6rem; width: 2px; background: linear-gradient(180deg, rgba(178,140,255,.5), rgba(178,140,255,.08)); }
+  .ck { display: flex; align-items: center; gap: 0.7rem; opacity: 0; transform: translateX(-10px); position: relative; }
+  .in .ck { animation: slide 420ms var(--ease) forwards; animation-delay: calc(0.3s + var(--i) * 0.35s); }
+  .ck i { position: absolute; left: -1.35rem; width: 0.85rem; height: 0.85rem; border-radius: 50%; background: #171221; border: 2px solid rgba(178, 140, 255, 0.6); }
+  .ck b { font-size: 0.95rem; font-weight: 560; color: var(--muted); }
+  .ck.active b { color: var(--ink); }
+  .ck.active i { background: var(--purple); box-shadow: 0 0 14px rgba(143, 82, 255, 0.7); }
+  .ck em {
+    font-style: normal; margin-left: auto; font-size: 0.78rem; font-weight: 680;
+    color: var(--purple-soft); border: 1px solid rgba(178, 140, 255, 0.4); border-radius: 999px; padding: 0.3rem 0.8rem;
+    transition: background 200ms var(--ease), color 200ms var(--ease);
+  }
+  .ck em:hover { background: var(--purple); color: #fff; }
+
+  /* diff */
+  .diff-window { border: 1px solid rgba(255,255,255,.07); border-radius: 0.9rem; background: rgba(8,7,12,.9); overflow: hidden; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8rem; }
+  .diff-head { display: flex; justify-content: space-between; align-items: center; padding: 0.7rem 0.9rem; border-bottom: 1px solid rgba(255,255,255,.06); color: var(--muted); font-family: inherit; }
+  .diff-line { padding: 0.4rem 0.9rem; opacity: 0; transform: translateX(-8px); white-space: pre-wrap; }
+  .diff-line.del { color: #ff9d9d; background: rgba(255, 95, 87, 0.08); }
+  .diff-line.add { color: #9fe3b1; background: rgba(40, 200, 64, 0.07); }
+  .in .diff-line { animation: slide 400ms var(--ease) forwards; animation-delay: calc(0.35s + var(--i) * 0.4s); }
+  .diff-actions { display: flex; gap: 0.6rem; padding: 0.8rem 0.9rem; opacity: 0; }
+  .in .diff-actions { animation: rise 400ms var(--ease) forwards; animation-delay: calc(0.5s + var(--i) * 0.4s); }
+  .btn-approve, .btn-hold { border-radius: 999px; padding: 0.35rem 0.95rem; font-size: 0.78rem; font-weight: 650; }
+  .btn-approve { color: #0b0712; background: linear-gradient(180deg, #d9f7e0, #9fe3b1); }
+  .btn-hold { color: var(--muted); border: 1px solid rgba(255, 255, 255, 0.14); }
+
+  /* terminal */
+  .term-window { border: 1px solid rgba(255,255,255,.07); border-radius: 0.9rem; background: #07060b; padding: 1rem 1.1rem; display: grid; gap: 0.55rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.82rem; }
+  .term-line { color: var(--ink); opacity: 0; transform: translateY(6px); }
+  .term-line b { color: var(--purple-soft); margin-right: 0.45rem; }
+  .term-line.dim { color: var(--muted); }
+  .term-line.ok { color: #9fe3b1; }
+  .in .term-line { animation: rise 380ms var(--ease) forwards; animation-delay: calc(0.35s + var(--i) * 0.5s); }
+
+  /* byok */
+  .byok { display: grid; gap: 0.7rem; }
+  .key-card {
+    display: flex; align-items: center; gap: 0.7rem;
+    border: 1px solid rgba(255,255,255,.08); border-radius: 0.9rem; padding: 0.85rem 1rem;
+    background: rgba(8, 7, 12, 0.85); font-family: ui-monospace, Menlo, monospace; font-size: 0.85rem;
+    opacity: 0; transform: translateY(8px);
+    transition: border-color 220ms var(--ease), transform 220ms var(--ease);
+  }
+  .in .key-card { animation: rise 420ms var(--ease) forwards; animation-delay: calc(0.3s + var(--i) * 0.25s); }
+  .key-card:hover { border-color: rgba(178, 140, 255, 0.45); }
+  .key-dot { width: 0.6rem; height: 0.6rem; border-radius: 50%; background: var(--purple); box-shadow: 0 0 10px rgba(143, 82, 255, 0.8); }
+  .key-dot.g { background: #28c840; box-shadow: 0 0 10px rgba(40, 200, 64, 0.7); }
+  .key-dot.b { background: #4aa8ff; box-shadow: 0 0 10px rgba(74, 168, 255, 0.7); }
+
+  .cost-meter { display: flex; align-items: center; gap: 0.9rem; color: var(--muted); font-size: 0.82rem; opacity: 0; }
+  .in .cost-meter { animation: rise 420ms var(--ease) forwards; animation-delay: calc(0.3s + var(--i) * 0.25s); }
+  .cost-meter b { color: var(--ink); }
+  .meter { flex: 1; height: 0.45rem; border-radius: 999px; background: rgba(255,255,255,.07); overflow: hidden; }
+  .meter i { display: block; height: 100%; width: 0; border-radius: inherit; background: linear-gradient(90deg, var(--purple), var(--purple-soft)); }
+  .in .meter i { animation: fill 1.2s var(--ease) 1.2s forwards; }
+  @keyframes fill { to { width: 22%; } }
+
+  /* ---------- positioning ---------- */
+  .positioning {
+    position: relative; z-index: 2;
+    display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+    gap: clamp(1.5rem, 4vw, 4rem); align-items: center;
+    margin: 0 clamp(1.25rem, 5vw, 4rem) clamp(3rem, 6vw, 5rem);
+    padding: clamp(1.6rem, 4vw, 3.2rem);
+    border: 1px solid var(--line); border-radius: 1.5rem;
+    background:
+      radial-gradient(34rem 22rem at 12% 20%, rgba(143, 82, 255, 0.16), transparent 70%),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.012));
+    box-shadow: 0 28px 100px rgba(0, 0, 0, 0.34);
+    overflow: hidden;
+  }
+  .positioning::after {
+    content: ""; position: absolute; inset: auto -8rem -12rem auto; width: 24rem; height: 24rem; border-radius: 50%;
+    background: radial-gradient(circle, rgba(143, 82, 255, 0.18), transparent 68%);
+    pointer-events: none;
+  }
+  .positioning-copy h2 {
     margin: 0 0 1rem;
+    font-size: clamp(1.9rem, 4vw, 3.2rem) !important;
+    line-height: 1.04 !important;
+    letter-spacing: -0.02em;
+    color: var(--ink) !important;
+  }
+  .positioning-copy p:last-child {
+    margin: 0; color: var(--muted); line-height: 1.7; font-size: 1rem;
+  }
+  .proof-wall {
+    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem;
+  }
+  .proof-wall span {
+    display: flex; min-height: 4.4rem; align-items: center;
+    border: 1px solid rgba(178, 140, 255, 0.18); border-radius: 1rem;
+    background: rgba(8, 7, 12, 0.64);
+    padding: 0.95rem 1rem;
+    color: var(--ink); font-weight: 620; line-height: 1.25;
+    transition: transform 220ms var(--ease), border-color 220ms var(--ease), background 220ms var(--ease);
+  }
+  .proof-wall span:hover {
+    transform: translateY(-3px);
+    border-color: rgba(178, 140, 255, 0.46);
+    background: rgba(143, 82, 255, 0.11);
   }
 
-  .pill {
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 0.8rem;
-    padding: 0.85rem;
-    color: var(--muted);
-    margin-top: 0.65rem;
+  /* ---------- workflow ---------- */
+  .workflow {
+    position: relative; z-index: 2;
+    padding: 0 clamp(1.25rem, 5vw, 4rem) clamp(3.5rem, 7vw, 6rem);
+  }
+  .workflow-head {
+    width: min(48rem, 100%); margin: 0 auto 1.8rem; text-align: center;
+  }
+  .workflow-head h2 {
+    margin: 0 0 0.9rem;
+    font-size: clamp(2rem, 4.5vw, 3.5rem) !important;
+    line-height: 1.04 !important;
+    color: var(--ink) !important;
+    letter-spacing: -0.02em;
+  }
+  .workflow-head p {
+    margin: 0; color: var(--muted); line-height: 1.65; font-size: 1rem;
+  }
+  .workflow-grid {
+    display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.9rem;
+  }
+  .workflow-card {
+    position: relative; overflow: hidden;
+    border: 1px solid var(--line); border-radius: 1.15rem;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.014));
+    padding: 1.25rem;
+    min-height: 13rem;
+    transition: transform 260ms var(--ease), border-color 260ms var(--ease), box-shadow 260ms var(--ease);
+  }
+  .workflow-card::before {
+    content: ""; position: absolute; inset: 0 0 auto; height: 3px;
+    background: linear-gradient(90deg, transparent, var(--purple-soft), transparent);
+    opacity: 0.6;
+  }
+  .workflow-card:hover {
+    transform: translateY(-5px);
+    border-color: rgba(178, 140, 255, 0.42);
+    box-shadow: 0 22px 64px rgba(109, 59, 210, 0.16);
+  }
+  .workflow-card span {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 3.2rem; height: 1.7rem; border-radius: 999px;
+    background: rgba(143, 82, 255, 0.14); border: 1px solid rgba(178, 140, 255, 0.25);
+    color: var(--purple-soft); font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.72rem; font-weight: 740; text-transform: uppercase; letter-spacing: 0.08em;
+  }
+  .workflow-card h3 {
+    margin: 1rem 0 0.55rem; color: var(--ink) !important;
+    font-size: 1.05rem !important; line-height: 1.22 !important;
+  }
+  .workflow-card p { margin: 0; color: var(--muted); line-height: 1.55; font-size: 0.9rem; }
+
+  /* ---------- quick grid ---------- */
+  .grid-section { position: relative; z-index: 2; padding: 0 clamp(1.25rem, 5vw, 4rem) clamp(3.5rem, 7vw, 6rem); }
+  .quick-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; margin-top: 1.6rem; }
+  .quick-card {
+    border: 1px solid var(--line); border-radius: 1.1rem; padding: 1.4rem;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.012));
+    transition: transform 260ms var(--ease), border-color 260ms var(--ease), box-shadow 260ms var(--ease),
+      opacity 700ms var(--ease);
+  }
+  .quick-card:hover { transform: translateY(-5px); border-color: rgba(178, 140, 255, 0.42); box-shadow: 0 20px 50px rgba(109, 59, 210, 0.16); }
+  .quick-icon {
+    display: inline-grid; place-items: center; width: 2.3rem; height: 2.3rem;
+    border-radius: 0.7rem; color: var(--purple-soft); font-size: 1.05rem;
+    background: rgba(143, 82, 255, 0.14); border: 1px solid rgba(178, 140, 255, 0.25);
+    transition: transform 260ms var(--ease);
+  }
+  .quick-card:hover .quick-icon { transform: rotate(-6deg) scale(1.08); }
+  .quick-card b { display: block; margin: 0.9rem 0 0.35rem; font-size: 1rem; }
+  .quick-card p { margin: 0; color: var(--muted); font-size: 0.88rem; line-height: 1.55; }
+
+  /* ---------- closing ---------- */
+  .closing {
+    position: relative; z-index: 2; text-align: center;
+    padding: clamp(4rem, 9vw, 8rem) clamp(1.25rem, 5vw, 4rem);
+    background:
+      radial-gradient(40rem 22rem at 50% 110%, rgba(143, 82, 255, 0.22), transparent 70%);
+  }
+  .closing h2 {
+    margin: 0; font-size: clamp(2.2rem, 5.5vw, 4rem) !important; line-height: 1.04 !important;
+    font-weight: 700 !important; letter-spacing: -0.02em; color: var(--ink) !important;
   }
 
-  .pill.active {
-    color: var(--text);
-    border-color: var(--purple);
-    background: rgba(143, 82, 255, 0.16);
+  .downloads { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.8rem; margin: 2.4rem auto 0; width: min(56rem, 100%); }
+  .download {
+    display: flex; align-items: center; justify-content: space-between; gap: 0.8rem;
+    border: 1px solid var(--line); border-radius: 1rem; padding: 1rem 1.1rem;
+    background: rgba(20, 17, 30, 0.82); font-size: 0.9rem;
+    transition: transform 220ms var(--ease), border-color 220ms var(--ease), background 220ms var(--ease), box-shadow 220ms var(--ease);
   }
-
-  .workspace-grid main {
-    display: grid;
-    align-content: center;
-    padding: clamp(1.5rem, 4vw, 4rem);
+  .download:hover {
+    transform: translateY(-3px); border-color: rgba(178, 140, 255, 0.5);
+    background: rgba(143, 82, 255, 0.13); box-shadow: 0 18px 48px rgba(109, 59, 210, 0.22);
   }
+  .download em { font-style: normal; color: var(--purple-soft); font-size: 0.75rem; }
 
-  .prompt-box {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 1rem;
-    min-height: 7rem;
-    border-radius: 1.35rem;
-    padding: 1.4rem;
-    background: #0a0a0d;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    color: var(--muted);
-    font-size: 1.12rem;
-  }
-
-  .prompt-box strong {
-    color: var(--purple-2);
-    border: 1px solid var(--line);
-    border-radius: 999px;
-    padding: 0.45rem 0.7rem;
-  }
-
-  .timeline {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 0.75rem;
-    margin-top: 1rem;
-  }
-
-  .timeline span {
-    border-radius: 999px;
-    padding: 0.65rem 0.75rem;
-    background: rgba(143, 82, 255, 0.13);
-    color: var(--purple-2);
-    text-align: center;
-    font-size: 0.82rem;
-  }
-
+  /* ---------- footer ---------- */
   .footer {
-    justify-content: space-between;
-    gap: 1rem;
-    border-top: 1px solid var(--line);
-    color: var(--muted);
-    flex-wrap: wrap;
+    position: relative; z-index: 2;
+    display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap;
+    padding: 1.6rem clamp(1.25rem, 5vw, 4rem) 2.2rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    color: var(--muted); font-size: 0.88rem;
+  }
+  .foot-brand { display: flex; align-items: center; gap: 0.55rem; color: var(--ink); font-weight: 650; }
+  .foot-brand img { border-radius: 6px; }
+  .footer nav { display: flex; gap: 1.4rem; }
+  .footer nav a:hover { color: var(--ink); }
+
+  /* ---------- responsive ---------- */
+  @media (max-width: 64rem) {
+    .story { grid-template-columns: 1fr; }
+    .feature, .feature.flip { grid-template-columns: 1fr; }
+    .feature.flip .feature-copy { order: 1; }
+    .feature.flip .feature-visual { order: 2; }
+    .positioning { grid-template-columns: 1fr; }
+    .workflow-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .quick-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .downloads { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .float-chip { display: none; }
   }
 
-  .footer span:first-child {
-    color: var(--text);
-    font-weight: 700;
+  @media (max-width: 40rem) {
+    .proof-wall, .workflow-grid, .quick-grid, .downloads { grid-template-columns: 1fr; }
+    .nav-links { gap: 1rem; font-size: 0.88rem; }
+    .run-meta { display: none; }
   }
 
-  @media (max-width: 56rem) {
-    h1 {
-      font-size: 3rem !important;
+  /* ---------- reduced motion ---------- */
+  @media (prefers-reduced-motion: reduce) {
+    .aurora, .stars, .float-chip { animation: none !important; }
+    .pointer-glow { display: none; }
+    .reveal, .run-step, .run-done, .pulse-line, .diff-line, .diff-actions, .term-line, .key-card,
+    .cost-meter, .ck, .typing {
+      opacity: 1 !important; transform: none !important; animation: none !important; width: auto !important;
+      transition: none !important;
     }
-
-    h2 {
-      font-size: 2rem !important;
-    }
-
-    .features {
-      grid-template-columns: 1fr;
-    }
-
-    .install,
-    .workspace-grid {
-      grid-template-columns: 1fr;
-      flex-direction: column;
-      align-items: flex-start;
-    }
-
-    .workspace-grid aside {
-      border-right: 0;
-      border-bottom: 1px solid var(--line);
-    }
-
-    .timeline {
-      grid-template-columns: 1fr 1fr;
-    }
-
-    .inline-downloads {
-      grid-template-columns: 1fr;
-    }
-  }
-
-  @media (max-width: 36rem) {
-    h1 {
-      font-size: 2.35rem !important;
-    }
-
-    .lede {
-      font-size: 1rem;
-    }
-
-    .nav {
-      align-items: flex-start;
-      flex-direction: column;
-    }
-
-    .timeline {
-      grid-template-columns: 1fr;
-    }
+    .tick::after { opacity: 1; transform: none; animation: none !important; }
+    .meter i { width: 22%; animation: none !important; }
+    .brain-links path { stroke-dashoffset: 0; animation: none !important; }
+    .brain-nodes circle { animation: none !important; }
   }
 </style>
 

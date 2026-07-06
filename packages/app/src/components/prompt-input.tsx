@@ -386,6 +386,59 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       </div>
     )
   }
+  const [listening, setListening] = createSignal(false)
+  const appendPromptText = (text: string) => {
+    const addition = text.trim()
+    if (!addition) return
+    const current = prompt.current()
+    const currentText = current
+      .map((part) => ("content" in part ? part.content : ""))
+      .join("")
+      .trimEnd()
+    const nextText = currentText ? `${currentText} ${addition}` : addition
+    const images = current.filter((part): part is ImageAttachmentPart => part.type === "image")
+    prompt.set([{ type: "text", content: nextText, start: 0, end: nextText.length }, ...images], nextText.length)
+    requestAnimationFrame(() => {
+      editorRef?.focus()
+      if (editorRef) setCursorPosition(editorRef, nextText.length)
+    })
+  }
+  const startVoiceInput = () => {
+    if (listening()) return
+    const SpeechRecognition =
+      (globalThis as unknown as { SpeechRecognition?: new () => any }).SpeechRecognition ??
+      (globalThis as unknown as { webkitSpeechRecognition?: new () => any }).webkitSpeechRecognition
+
+    if (!SpeechRecognition) {
+      showToast({
+        title: "Microphone unavailable",
+        description: "This desktop runtime does not expose speech recognition yet.",
+      })
+      return
+    }
+
+    const recognition = new SpeechRecognition()
+    recognition.continuous = false
+    recognition.interimResults = false
+    recognition.lang = "en-US"
+    recognition.onstart = () => setListening(true)
+    recognition.onend = () => setListening(false)
+    recognition.onerror = () => {
+      setListening(false)
+      showToast({
+        title: "Could not hear audio",
+        description: "Check microphone permission, then try again.",
+      })
+    }
+    recognition.onresult = (event: any) => {
+      let transcript = ""
+      for (let i = event.resultIndex ?? 0; i < event.results.length; i++) {
+        transcript += event.results[i][0]?.transcript ?? ""
+      }
+      appendPromptText(transcript)
+    }
+    recognition.start()
+  }
 
   const contextItems = createMemo(() => {
     const items = prompt.context.items()
@@ -1543,7 +1596,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
               data-component={newSession() ? "session-new-composer" : "session-composer"}
               onSubmit={handleSubmit}
               classList={{
-                "group/prompt-input min-h-[96px] w-full rounded-[28px] bg-v2-background-bg-base shadow-[var(--v2-elevation-raised)]": true,
+                "group/prompt-input min-h-[96px] w-full rounded-[34px]": true,
                 "border-icon-info-active border-dashed": store.draggingType !== null,
                 [props.class ?? ""]: !!props.class,
               }}
@@ -1622,13 +1675,13 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                   </div>
                 </div>
               </div>
-              <div class="flex h-11 items-center px-2">
+              <div class="flex h-12 items-center px-3 pr-5">
                 <div class="flex min-w-0 flex-1 items-center gap-1">
                   {fileAttachmentInput()}
                   <Show when={planMode.enabled()}>
                     <button
                       type="button"
-                      class="mr-1 inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-[#9b6cff]/40 bg-[#9b6cff]/15 px-2 text-[11px] font-semibold text-[#c9b2ff]"
+                      class="mr-1 inline-flex h-9 shrink-0 items-center gap-2 rounded-full border border-[#9b6cff]/45 bg-[#9b6cff]/16 px-4 text-[11px] font-semibold text-[#d8c8ff] shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]"
                       title="Plan Mode is on. Vector will review and plan only, with file-changing actions blocked."
                       onClick={() => planMode.setEnabled(false)}
                     >
@@ -1636,28 +1689,6 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                       <span class="text-[9px] font-medium text-[#c9b2ff]/65">Shift Tab</span>
                     </button>
                   </Show>
-                  <TooltipV2
-                    placement="top"
-                    value={
-                      <>
-                        {language.t("prompt.action.attachFile")}
-                        <KeybindV2 keys={command.keybindParts("file.attach")} variant="neutral" />
-                      </>
-                    }
-                  >
-                    <IconButton
-                      data-action="prompt-attach"
-                      type="button"
-                      icon="plus"
-                      variant="ghost"
-                      class="size-8 rounded-full p-[7px] text-v2-icon-icon-muted"
-                      style={buttons()}
-                      onClick={pick}
-                      disabled={store.mode !== "normal"}
-                      tabIndex={store.mode === "normal" ? undefined : -1}
-                      aria-label={language.t("prompt.action.attachFile")}
-                    />
-                  </TooltipV2>
                   <Show when={showAgentControl()}>
                     <ComposerAgentControl state={agentControlState()} />
                   </Show>
@@ -1726,6 +1757,44 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                     </div>
                   </Show>
                 </div>
+                <button
+                  data-action="prompt-attach"
+                  type="button"
+                  class="mr-1 grid size-9 place-items-center rounded-full text-v2-icon-icon-muted transition hover:bg-white/[0.06] hover:text-v2-text-text-base"
+                  title={language.t("prompt.action.attachFile")}
+                  aria-label={language.t("prompt.action.attachFile")}
+                  onClick={() => fileInputRef?.click()}
+                >
+                  <svg viewBox="0 0 16 16" class="size-4" aria-hidden="true">
+                    <path
+                      d="M12.8 7.2 8.3 11.7a2.6 2.6 0 0 1-3.68-3.68l4.6-4.6a1.75 1.75 0 0 1 2.47 2.47l-4.6 4.6a.9.9 0 0 1-1.27-1.27l4.24-4.25"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    />
+                  </svg>
+                </button>
+                <button
+                  data-action="prompt-mic"
+                  type="button"
+                  class="mr-2 grid size-9 place-items-center rounded-full text-v2-icon-icon-muted transition hover:bg-white/[0.06] hover:text-v2-text-text-base"
+                  classList={{ "bg-[#9b6cff]/18 text-[#d8c8ff]": listening() }}
+                  title={listening() ? "Listening..." : "Dictate prompt"}
+                  aria-label={listening() ? "Listening" : "Dictate prompt"}
+                  onClick={startVoiceInput}
+                >
+                  <svg viewBox="0 0 16 16" class="size-4" aria-hidden="true">
+                    <path
+                      d="M8 9.6a2.1 2.1 0 0 0 2.1-2.1V4.1a2.1 2.1 0 1 0-4.2 0v3.4A2.1 2.1 0 0 0 8 9.6Zm4-2.1a4 4 0 0 1-8 0M8 11.5v2M6 13.5h4"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.35"
+                      stroke-linecap="round"
+                    />
+                  </svg>
+                </button>
                 <TooltipV2 placement="top" inactive={!working() && blank()} value={tip()}>
                   <IconButton
                     data-action="prompt-submit"
@@ -1734,7 +1803,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                     tabIndex={store.mode === "normal" ? undefined : -1}
                     icon={stopping() ? "stop" : store.mode === "shell" ? "arrow-undo-down" : "arrow-up"}
                     variant="primary"
-                    class="size-9 rounded-full p-[8px] text-v2-icon-icon-muted shadow-[var(--v2-elevation-button-contrast)] disabled:opacity-50"
+                    class="mr-1 size-9 rounded-full p-[8px] text-v2-icon-icon-muted shadow-[var(--v2-elevation-button-contrast)] disabled:opacity-50"
                     style={{
                       "background-image":
                         "linear-gradient(180deg,var(--v2-alpha-light-20) 0%,var(--v2-alpha-light-0) 100%),linear-gradient(90deg,var(--v2-background-bg-contrast) 0%,var(--v2-background-bg-contrast) 100%)",
@@ -1788,7 +1857,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
               onMouseDown={(e) => {
                 const target = e.target
                 if (!(target instanceof HTMLElement)) return
-                if (target.closest('[data-action="prompt-attach"], [data-action="prompt-submit"]')) {
+                if (target.closest('[data-action="prompt-attach"], [data-action="prompt-submit"], [data-action="prompt-mic"]')) {
                   return
                 }
                 editorRef?.focus()
@@ -1862,6 +1931,44 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                 />
 
                 <div class="flex items-center gap-1 pointer-events-auto">
+                  <button
+                    data-action="prompt-attach"
+                    type="button"
+                    class="grid size-9 place-items-center rounded-full text-text-muted transition hover:bg-white/[0.06] hover:text-text-strong"
+                    title={language.t("prompt.action.attachFile")}
+                    aria-label={language.t("prompt.action.attachFile")}
+                    onClick={() => fileInputRef?.click()}
+                  >
+                    <svg viewBox="0 0 16 16" class="size-4" aria-hidden="true">
+                      <path
+                        d="M12.8 7.2 8.3 11.7a2.6 2.6 0 0 1-3.68-3.68l4.6-4.6a1.75 1.75 0 0 1 2.47 2.47l-4.6 4.6a.9.9 0 0 1-1.27-1.27l4.24-4.25"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      />
+                    </svg>
+                  </button>
+                  <button
+                    data-action="prompt-mic"
+                    type="button"
+                    class="grid size-9 place-items-center rounded-full text-text-muted transition hover:bg-white/[0.06] hover:text-text-strong"
+                    classList={{ "bg-[#9b6cff]/18 text-[#d8c8ff]": listening() }}
+                    title={listening() ? "Listening..." : "Dictate prompt"}
+                    aria-label={listening() ? "Listening" : "Dictate prompt"}
+                    onClick={startVoiceInput}
+                  >
+                    <svg viewBox="0 0 16 16" class="size-4" aria-hidden="true">
+                      <path
+                        d="M8 9.6a2.1 2.1 0 0 0 2.1-2.1V4.1a2.1 2.1 0 1 0-4.2 0v3.4A2.1 2.1 0 0 0 8 9.6Zm4-2.1a4 4 0 0 1-8 0M8 11.5v2M6 13.5h4"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.35"
+                        stroke-linecap="round"
+                      />
+                    </svg>
+                  </button>
                   <Tooltip placement="top" inactive={!working() && blank()} value={tip()}>
                     <IconButton
                       data-action="prompt-submit"
@@ -1877,35 +1984,6 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                 </div>
               </div>
 
-              <div class="pointer-events-none absolute bottom-2 left-2">
-                <div
-                  aria-hidden={store.mode !== "normal"}
-                  class="pointer-events-auto"
-                  style={{
-                    "pointer-events": buttonsSpring() > 0.5 ? "auto" : "none",
-                  }}
-                >
-                  <TooltipKeybind
-                    placement="top"
-                    title={language.t("prompt.action.attachFile")}
-                    keybind={command.keybind("file.attach")}
-                  >
-                    <Button
-                      data-action="prompt-attach"
-                      type="button"
-                      variant="ghost"
-                      class="size-8 p-0"
-                      style={buttons()}
-                      onClick={pick}
-                      disabled={store.mode !== "normal"}
-                      tabIndex={store.mode === "normal" ? undefined : -1}
-                      aria-label={language.t("prompt.action.attachFile")}
-                    >
-                      <Icon name="plus" class="size-4.5" />
-                    </Button>
-                  </TooltipKeybind>
-                </div>
-              </div>
             </div>
           </DockShellForm>
           <Show when={store.mode === "normal" || store.mode === "shell"}>

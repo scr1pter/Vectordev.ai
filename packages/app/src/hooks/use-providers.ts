@@ -8,6 +8,7 @@ import { selectProviderCatalog } from "./provider-catalog"
 export const popularProviders = [
   "opencode",
   "opencode-go",
+  "opencode-zen",
   "anthropic",
   "github-copilot",
   "openai",
@@ -16,6 +17,7 @@ export const popularProviders = [
   "vercel",
 ]
 const popularProviderSet = new Set(popularProviders)
+const hiddenProviderSet = new Set<string>()
 
 type ProviderInfo = ReturnType<typeof selectProviderCatalog>["all"] extends Map<string, infer T> ? T : never
 
@@ -52,10 +54,13 @@ export function useProviders(directory?: Accessor<string | undefined>) {
         providers().all,
         Iterable.map(([, p]) => p),
         Iterable.filter((p) => popularProviderSet.has(p.id)),
+        Iterable.filter((p) => !hiddenProviderSet.has(p.id)),
         (v) => Array.from(v),
       ),
     connected: () => {
-      return providers().connected.flatMap((id) => connectedProvider(providers().all.get(id)))
+      return providers().connected
+        .filter((id) => !hiddenProviderSet.has(id))
+        .flatMap((id) => connectedProvider(providers().all.get(id)))
     },
     paid: () => {
       const connected = new Set(providers().connected)

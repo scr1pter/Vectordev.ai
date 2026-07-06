@@ -49,7 +49,7 @@ export const dict = {
 
   "dialog.usageExceeded.freeTier.title": "ถึงขีดจำกัดฟรีแล้ว",
   "dialog.usageExceeded.freeTier.description":
-    "สมัครสมาชิก Vector Go เพื่อการเข้าถึงโมเดลโอเพนซอร์สที่ดีที่สุดอย่างเชื่อถือได้ เริ่มต้นที่ $5/เดือน",
+    "The selected free Vector-hosted model is temporarily out of quota. Choose another free model, connect your own provider key, or try again later.",
   "dialog.usageExceeded.freeTier.actionLabel": "สมัครสมาชิก",
   "dialog.usageExceeded.accountRateLimit.title": "ถึงขีดจำกัดของ Go แล้ว",
   "dialog.usageExceeded.accountRateLimit.description":

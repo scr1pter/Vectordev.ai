@@ -28,6 +28,13 @@ const tokenTotal = (msg: AssistantMessage) => {
   return msg.tokens.input + msg.tokens.output + msg.tokens.reasoning + msg.tokens.cache.read + msg.tokens.cache.write
 }
 
+const providerDisplayName = (id: string, name?: string) => {
+  if (id === "opencode") return name ?? "OpenCode"
+  if (id === "opencode-go") return name ?? "OpenCode Go"
+  if (id === "opencode-zen") return name ?? "OpenCode Zen"
+  return name ?? id
+}
+
 const lastAssistantWithTokens = (messages: Message[]) => {
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i]
@@ -50,7 +57,7 @@ const build = (messages: Message[] = [], providers: Provider[] = []): Context | 
     message,
     provider,
     model,
-    providerLabel: provider?.name ?? message.providerID,
+    providerLabel: providerDisplayName(message.providerID, provider?.name),
     modelLabel: model?.name ?? message.modelID,
     limit,
     input: message.tokens.input,

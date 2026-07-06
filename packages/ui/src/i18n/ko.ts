@@ -48,7 +48,7 @@ export const dict = {
 
   "dialog.usageExceeded.freeTier.title": "무료 한도에 도달했습니다",
   "dialog.usageExceeded.freeTier.description":
-    "Vector Go를 구독하여 최고의 오픈 소스 모델에 안정적으로 액세스하세요. 월 $5부터 시작합니다.",
+    "The selected free Vector-hosted model is temporarily out of quota. Choose another free model, connect your own provider key, or try again later.",
   "dialog.usageExceeded.freeTier.actionLabel": "구독",
   "dialog.usageExceeded.accountRateLimit.title": "Go 한도에 도달했습니다",
   "dialog.usageExceeded.accountRateLimit.description":

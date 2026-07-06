@@ -317,7 +317,7 @@ function SessionProviders(props: ParentProps) {
 
 function SessionRouteFrame(props: ParentProps<{ padded?: boolean }>) {
   return (
-    <div class="relative size-full overflow-hidden flex flex-col" classList={{ "p-2": props.padded }}>
+    <div class="relative size-full overflow-hidden flex flex-col">
       {props.children}
     </div>
   )
@@ -327,11 +327,9 @@ function SessionPanelFrame(props: ParentProps<{ newLayout: boolean; raised?: boo
   return (
     <div
       classList={{
-        "flex-1 min-h-0 flex flex-col": true,
+        "flex-1 min-h-0 flex flex-col overflow-hidden": true,
         "bg-v2-background-bg-base": props.newLayout,
         "bg-background-stronger": !props.newLayout,
-        "rounded-[10px] overflow-hidden": props.newLayout,
-        "shadow-[var(--v2-elevation-raised)]": props.newLayout && props.raised,
       }}
     >
       {props.children}
@@ -443,7 +441,9 @@ export default function Page() {
       }),
   )
   const desktopSidePanelOpen = createMemo(() => desktopReviewOpen() || desktopFileTreeOpen())
+  const desktopCodespaceOpen = createMemo(() => desktopReviewOpen() && tabs().active() === "codespace")
   const sessionPanelWidth = createMemo(() => {
+    if (desktopCodespaceOpen()) return "0px"
     if (!desktopSidePanelOpen()) return "100%"
     if (desktopReviewOpen()) return `${layout.session.width()}px`
     return `calc(100% - ${layout.fileTree.width()}px)`
@@ -2005,7 +2005,7 @@ export default function Page() {
     </Tabs>
   )
   const mobileTabsBottom = createMemo(
-    () => !isDesktop() && settings.general.newLayoutDesigns() && settings.general.mobileTitlebarPosition() === "bottom",
+    () => !isDesktop() && !settings.general.newLayoutDesigns() && settings.general.mobileTitlebarPosition() === "bottom",
   )
 
   const sessionErrorFallback = (error: unknown, reset: () => void) => {
@@ -2016,7 +2016,7 @@ export default function Page() {
   const sessionPanelContent = () => (
     <>
       {sessionSync() ?? ""}
-      <Show when={!isDesktop() && !!params.id && settings.general.newLayoutDesigns() && !mobileTabsBottom()}>
+      <Show when={!isDesktop() && !!params.id && !settings.general.newLayoutDesigns() && !mobileTabsBottom()}>
         {mobileTabs(true)}
       </Show>
       <div class="flex-1 min-h-0 overflow-hidden">
@@ -2093,9 +2093,6 @@ export default function Page() {
       <SessionHeader />
       <div
         class="flex-1 min-h-0 flex flex-col md:flex-row"
-        classList={{
-          "gap-2 p-2": settings.general.newLayoutDesigns(),
-        }}
       >
         <Show when={!isDesktop() && !!params.id && !settings.general.newLayoutDesigns()}>{mobileTabs()}</Show>
 
@@ -2123,7 +2120,7 @@ export default function Page() {
             </SessionPanelFrame>
           )}
 
-          <Show when={desktopReviewOpen()}>
+          <Show when={desktopReviewOpen() && !desktopCodespaceOpen()}>
             <div onPointerDown={() => size.start()}>
               <ResizeHandle
                 classList={{
@@ -2131,8 +2128,8 @@ export default function Page() {
                 }}
                 direction="horizontal"
                 size={layout.session.width()}
-                min={450}
-                max={typeof window === "undefined" ? 1000 : window.innerWidth * 0.45}
+                min={280}
+                max={typeof window === "undefined" ? 1200 : Math.max(520, window.innerWidth * 0.78)}
                 onResize={(width) => {
                   size.touch()
                   layout.session.resize(width)

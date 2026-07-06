@@ -87,6 +87,14 @@ async function writeClipboard(text: string): Promise<boolean> {
   )
 }
 
+function cleanVisibleUserText(text: string): string {
+  const marker = "User request:"
+  if (!text.startsWith("PLAN MODE is ON.")) return text
+  const markerIndex = text.indexOf(marker)
+  if (markerIndex === -1) return text
+  return text.slice(markerIndex + marker.length).trim()
+}
+
 function ShellSubmessage(props: { text: string; animate?: boolean }) {
   let widthRef: HTMLSpanElement | undefined
   let valueRef: HTMLSpanElement | undefined
@@ -1136,7 +1144,7 @@ export function UserMessageDisplay(props: {
     () => props.parts?.find((p) => p.type === "text" && !(p as TextPart).synthetic) as TextPart | undefined,
   )
 
-  const text = createMemo(() => textPart()?.text || "")
+  const text = createMemo(() => cleanVisibleUserText(textPart()?.text || ""))
 
   const files = createMemo(() => (props.parts?.filter((p) => p.type === "file") as FilePart[]) ?? [])
 

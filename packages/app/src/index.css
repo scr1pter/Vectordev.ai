@@ -3,6 +3,188 @@
 @import "@opencode-ai/ui/v2/styles/tailwind.css";
 @import "tw-animate-css";
 
+@layer components {
+  [data-component="sidebar-rail"] {
+    width: 88px !important;
+    min-width: 88px !important;
+  }
+}
+
+@layer components {
+  /* Vector final polish: these rules intentionally sit last so old shell/card
+     styling cannot redraw the composer bezel or ignore live settings. */
+  html {
+    color-scheme: dark;
+    font-size: var(--vector-ui-computed-font-size, 14px);
+  }
+
+  html[data-vector-theme="light"] {
+    color-scheme: light;
+  }
+
+  body,
+  #root {
+    background: var(--vector-workspace-bg, #111112) !important;
+    font-family: var(--font-family-sans) !important;
+  }
+
+  [data-vector-shell],
+  [data-vector-shell] > main,
+  [data-component="session-new-design"] {
+    background: var(--vector-workspace-bg, #111112) !important;
+  }
+
+  [data-vector-shell] > main::before {
+    opacity: calc(0.18 * var(--vector-density-space, 1)) !important;
+  }
+
+  html[data-vector-glass="false"] [data-vector-shell] > main::before {
+    opacity: 0 !important;
+  }
+
+  [data-component="sidebar-rail"] {
+    background:
+      linear-gradient(180deg, color-mix(in oklab, var(--vector-sidebar-bg, #18181a) 92%, white 2%), var(--vector-sidebar-bg, #18181a)),
+      var(--vector-sidebar-bg, #18181a) !important;
+  }
+
+  html[data-vector-sidebar-collapsed="true"] [data-component="sidebar-rail"] {
+    width: 64px !important;
+    min-width: 64px !important;
+  }
+
+  [data-component="session-prompt-dock"],
+  [data-component="session-new-composer-region"],
+  [data-component="session-composer-region"],
+  [data-dock-surface="shell"]:has([data-component="prompt-input"]) {
+    border: 0 !important;
+    outline: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    filter: none !important;
+  }
+
+  [data-component="session-prompt-dock"] {
+    max-width: min(var(--vector-chat-width-px, 1120px), calc(100vw - 190px)) !important;
+    border-radius: 0 !important;
+    padding: 0 !important;
+  }
+
+  html[data-vector-chat-width="focused"] {
+    --vector-chat-width-px: 980px;
+  }
+
+  html[data-vector-chat-width="wide"] {
+    --vector-chat-width-px: 1180px;
+  }
+
+  html[data-vector-chat-width="full"] {
+    --vector-chat-width-px: 1600px;
+  }
+
+  [data-component="session-new-composer"],
+  [data-component="session-composer"] {
+    min-height: calc(104px * var(--vector-density-space, 1)) !important;
+    border: 1px solid color-mix(in oklab, var(--vector-accent, #9b6cff) 20%, rgba(255, 255, 255, 0.12)) !important;
+    border-radius: var(--vector-radius-panel, 26px) !important;
+    background: color-mix(in oklab, var(--vector-chat-bg, #202024) 94%, black) !important;
+    box-shadow:
+      0 18px 42px rgba(0, 0, 0, 0.28),
+      inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
+  }
+
+  [data-component="session-new-composer"]::before,
+  [data-component="session-new-composer"]::after,
+  [data-component="session-composer"]::before,
+  [data-component="session-composer"]::after,
+  [data-component="session-prompt-dock"]::before,
+  [data-component="session-prompt-dock"]::after {
+    content: none !important;
+    display: none !important;
+  }
+
+  [data-action="prompt-submit"] {
+    right: 12px !important;
+    margin-right: 10px !important;
+    border-radius: 999px !important;
+  }
+
+  [data-component="prompt-input"],
+  [data-component="session-new-design-text"],
+  [data-component="session-composer-text"] {
+    font-size: 15px !important;
+    line-height: 1.58 !important;
+  }
+
+  [data-slot="session-turn-message-container"],
+  [data-slot="session-turn-message-content"],
+  [data-slot="session-turn-assistant-content"] {
+    max-width: min(var(--vector-chat-width-px, 980px), calc(100vw - 180px)) !important;
+  }
+
+  html[data-vector-message-spacing="compact"] [data-component="session-turn"] {
+    margin-block: 0.35rem !important;
+  }
+
+  html[data-vector-message-spacing="relaxed"] [data-component="session-turn"] {
+    margin-block: 1rem !important;
+  }
+
+  html[data-vector-density="compact"] [data-component="session-new-composer"],
+  html[data-vector-density="compact"] [data-component="session-composer"] {
+    min-height: 86px !important;
+  }
+
+  html[data-vector-density="spacious"] [data-component="session-new-composer"],
+  html[data-vector-density="spacious"] [data-component="session-composer"] {
+    min-height: 122px !important;
+  }
+
+  html[data-vector-rounded-corners="false"] :is(
+    [data-component="session-new-composer"],
+    [data-component="session-composer"],
+    [data-component="settings-dialog"],
+    .settings-v2-card,
+    .settings-v2-row-modern,
+    button,
+    input,
+    textarea
+  ) {
+    border-radius: 10px !important;
+  }
+
+  html[data-vector-high-contrast="true"] {
+    --vector-workspace-bg: #050506;
+    --vector-sidebar-bg: #09090a;
+    --vector-chat-bg: #101012;
+  }
+
+  html[data-vector-larger-targets="true"] :is(button, [role="button"], input, textarea, select) {
+    min-height: 42px;
+  }
+
+  html[data-vector-focus-indicators="true"] :is(button, [role="button"], input, textarea, select):focus-visible {
+    outline: 2px solid color-mix(in oklab, var(--vector-accent, #9b6cff) 78%, white) !important;
+    outline-offset: 3px !important;
+  }
+
+  /* Scoped motion: only interactive surfaces animate, and only paint-safe
+     properties. A bare `*` duration would animate every layout change. */
+  :is(button, [role="button"], a, summary, input, select, textarea) {
+    transition-property: color, background-color, border-color, outline-color, box-shadow, opacity, transform, filter;
+    transition-duration: var(--vector-animation-duration, 180ms);
+    transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+  }
+
+  html[data-vector-reduce-animations="true"] *,
+  html[data-vector-animation-speed="off"] * {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
+
 @font-face {
   font-family: "JetBrainsMono Nerd Font Mono";
   src: url("/assets/JetBrainsMonoNerdFontMono-Regular.woff2") format("woff2");
@@ -46,6 +228,456 @@
 
   [data-vector-element-sprite] {
     display: none !important;
+  }
+}
+
+@layer components {
+  [data-vector-shell] {
+    --vector-chat-backdrop-image: url("/vector-space-backdrop.png");
+    --vector-chat-backdrop-opacity: 0.18;
+  }
+
+  [data-vector-shell] > header,
+  [data-slot="titlebar-v2"] {
+    display: none !important;
+    min-height: 0 !important;
+    height: 0 !important;
+    max-height: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+    overflow: hidden !important;
+    pointer-events: none !important;
+  }
+
+  [data-slot="titlebar-v2"] *,
+  [data-vector-shell] [data-slot="titlebar-v2"] button,
+  [data-vector-shell] [data-slot="titlebar-v2"] [role="button"] {
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
+    pointer-events: none !important;
+  }
+
+  [data-vector-shell] > main {
+    position: relative;
+    padding-top: 0 !important;
+    background: #111112;
+  }
+
+  [data-vector-shell] > main::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background-image:
+      radial-gradient(circle at 50% 20%, rgba(155, 108, 255, 0.12), transparent 34%),
+      linear-gradient(180deg, rgba(17, 17, 18, 0.74), rgba(17, 17, 18, 0.94)),
+      var(--vector-chat-backdrop-image);
+    background-position: center;
+    background-size: cover;
+    opacity: var(--vector-chat-backdrop-opacity);
+  }
+
+  html[data-vector-theme="light"] [data-vector-shell] > main {
+    background: #f4f0ff;
+  }
+
+  html[data-vector-theme="light"] [data-vector-shell] > main::before {
+    opacity: 0.24;
+    background-image:
+      radial-gradient(circle at 50% 20%, rgba(123, 70, 242, 0.1), transparent 34%),
+      linear-gradient(180deg, rgba(247, 244, 255, 0.72), rgba(247, 244, 255, 0.92)),
+      var(--vector-chat-backdrop-image);
+  }
+
+  [data-vector-shell] > main > * {
+    position: relative;
+    z-index: 1;
+  }
+
+  [data-vector-shell] [data-session-title] {
+    display: none !important;
+  }
+
+  [data-vector-shell] [data-component="session-turn"] {
+    max-width: min(980px, calc(100vw - 180px));
+    margin-inline: auto;
+  }
+
+  [data-vector-shell] [data-component="session-prompt-dock"] {
+    max-width: min(1100px, calc(100vw - 180px));
+    margin-inline: auto;
+  }
+
+  [data-component="session-new-design"] {
+    background:
+      radial-gradient(circle at 50% 24%, rgba(155, 108, 255, 0.14), transparent 36%),
+      linear-gradient(180deg, rgba(17, 17, 18, 0.76), rgba(17, 17, 18, 0.96)),
+      var(--vector-chat-backdrop-image) center / cover !important;
+  }
+
+  html[data-vector-theme="light"] [data-component="session-new-design"] {
+    background:
+      radial-gradient(circle at 50% 24%, rgba(123, 70, 242, 0.13), transparent 36%),
+      linear-gradient(180deg, rgba(247, 244, 255, 0.74), rgba(247, 244, 255, 0.94)),
+      var(--vector-chat-backdrop-image) center / cover !important;
+  }
+
+  [data-vector-shell] [data-session-title] {
+    display: block !important;
+    position: sticky !important;
+    top: 0 !important;
+    z-index: 30 !important;
+    width: 100% !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 22px 0 0 !important;
+    background: transparent !important;
+    pointer-events: none !important;
+  }
+
+  [data-vector-shell] [data-session-title] > div {
+    height: 46px !important;
+    justify-content: flex-end !important;
+  }
+
+  [data-vector-shell] [data-session-title] > div > div:first-child {
+    display: none !important;
+  }
+
+  [data-vector-shell] [data-session-title] > div > div:last-child {
+    pointer-events: auto !important;
+    gap: 8px !important;
+  }
+
+  [data-vector-shell] [data-vector-session-empty] {
+    color: #f4f4f5;
+  }
+
+  html[data-vector-theme="light"] [data-vector-shell] [data-vector-session-empty] {
+    color: #201a2e;
+  }
+}
+
+@layer components {
+  [data-vector-shell] {
+    --vector-chat-backdrop-image: url("/vector-space-backdrop.png");
+    --vector-chat-backdrop-opacity: 0.18;
+  }
+
+  [data-slot="titlebar-v2"] {
+    min-height: 0 !important;
+    height: 0 !important;
+    max-height: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+    overflow: hidden !important;
+  }
+
+  [data-vector-shell] > main {
+    position: relative;
+    background: #111112;
+  }
+
+  [data-vector-shell] > main::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background-image:
+      radial-gradient(circle at 50% 20%, rgba(155, 108, 255, 0.12), transparent 34%),
+      linear-gradient(180deg, rgba(17, 17, 18, 0.74), rgba(17, 17, 18, 0.94)),
+      var(--vector-chat-backdrop-image);
+    background-position: center;
+    background-size: cover;
+    opacity: var(--vector-chat-backdrop-opacity);
+  }
+
+  html[data-vector-theme="light"] [data-vector-shell] > main {
+    background: #f4f0ff;
+  }
+
+  html[data-vector-theme="light"] [data-vector-shell] > main::before {
+    opacity: 0.24;
+    background-image:
+      radial-gradient(circle at 50% 20%, rgba(123, 70, 242, 0.1), transparent 34%),
+      linear-gradient(180deg, rgba(247, 244, 255, 0.72), rgba(247, 244, 255, 0.92)),
+      var(--vector-chat-backdrop-image);
+  }
+
+  [data-vector-shell] > main > * {
+    position: relative;
+    z-index: 1;
+  }
+
+  [data-component="session-new-design"] {
+    background:
+      radial-gradient(circle at 50% 24%, rgba(155, 108, 255, 0.14), transparent 36%),
+      linear-gradient(180deg, rgba(17, 17, 18, 0.76), rgba(17, 17, 18, 0.96)),
+      var(--vector-chat-backdrop-image) center / cover !important;
+  }
+
+  html[data-vector-theme="light"] [data-component="session-new-design"] {
+    background:
+      radial-gradient(circle at 50% 24%, rgba(123, 70, 242, 0.13), transparent 36%),
+      linear-gradient(180deg, rgba(247, 244, 255, 0.74), rgba(247, 244, 255, 0.94)),
+      var(--vector-chat-backdrop-image) center / cover !important;
+  }
+}
+
+@layer components {
+  /* Vector app-level overrides. Keep this block at EOF so old shell styles cannot
+     recreate the extra composer backing/bezel. */
+  html {
+    color-scheme: dark;
+    font-size: var(--vector-ui-computed-font-size, 14px);
+  }
+
+  html[data-vector-theme="light"] {
+    color-scheme: light;
+  }
+
+  body,
+  #root,
+  [data-vector-shell],
+  [data-vector-shell] > main,
+  [data-component="session-new-design"] {
+    background-color: var(--vector-workspace-bg, #111112) !important;
+    font-family: var(--font-family-sans) !important;
+    letter-spacing: 0 !important;
+  }
+
+  [data-component="session-prompt-dock"],
+  [data-vector-shell] [data-component="session-prompt-dock"],
+  [data-component="session-prompt-dock"] > div,
+  [data-component="session-new-composer-region"],
+  [data-component="session-composer-region"] {
+    border: 0 !important;
+    outline: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    filter: none !important;
+  }
+
+  [data-component="session-prompt-dock"]::before,
+  [data-component="session-prompt-dock"]::after,
+  [data-component="session-prompt-dock"] > div::before,
+  [data-component="session-prompt-dock"] > div::after {
+    content: none !important;
+    display: none !important;
+  }
+
+  [data-vector-shell] [data-component="session-prompt-dock"] {
+    width: 100% !important;
+    max-width: none !important;
+    padding: 0 !important;
+  }
+
+  [data-vector-shell] [data-component="session-prompt-dock"] > div {
+    max-width: min(var(--vector-chat-width-px, 1080px), calc(100vw - 190px)) !important;
+    margin-inline: auto !important;
+  }
+
+  html[data-vector-chat-width="focused"] {
+    --vector-chat-width-px: 980px;
+  }
+
+  html[data-vector-chat-width="wide"] {
+    --vector-chat-width-px: 1180px;
+  }
+
+  html[data-vector-chat-width="full"] {
+    --vector-chat-width-px: 1600px;
+  }
+
+  [data-dock-surface="shell"][data-component="session-new-composer"],
+  [data-dock-surface="shell"][data-component="session-composer"] {
+    overflow: hidden !important;
+    border: 1px solid color-mix(in oklab, var(--vector-accent, #9b6cff) 18%, rgba(255, 255, 255, 0.12)) !important;
+    border-radius: var(--vector-radius-panel, 28px) !important;
+    background: color-mix(in oklab, var(--vector-chat-bg, #202024) 94%, black) !important;
+    box-shadow:
+      0 14px 34px rgba(0, 0, 0, 0.32),
+      inset 0 1px 0 rgba(255, 255, 255, 0.055) !important;
+  }
+
+  [data-dock-surface="shell"][data-component="session-new-composer"]:focus-within,
+  [data-dock-surface="shell"][data-component="session-composer"]:focus-within {
+    border-color: color-mix(in oklab, var(--vector-accent, #9b6cff) 38%, rgba(255, 255, 255, 0.14)) !important;
+    box-shadow:
+      0 16px 38px rgba(0, 0, 0, 0.36),
+      0 0 0 1px color-mix(in oklab, var(--vector-accent, #9b6cff) 18%, transparent),
+      inset 0 1px 0 rgba(255, 255, 255, 0.07) !important;
+  }
+
+  html[data-vector-glass="false"] [data-dock-surface="shell"][data-component="session-new-composer"],
+  html[data-vector-glass="false"] [data-dock-surface="shell"][data-component="session-composer"] {
+    background: var(--vector-chat-bg, #202024) !important;
+  }
+
+  html[data-vector-density="compact"] [data-dock-surface="shell"][data-component="session-new-composer"],
+  html[data-vector-density="compact"] [data-dock-surface="shell"][data-component="session-composer"] {
+    min-height: 82px !important;
+  }
+
+  html[data-vector-density="spacious"] [data-dock-surface="shell"][data-component="session-new-composer"],
+  html[data-vector-density="spacious"] [data-dock-surface="shell"][data-component="session-composer"] {
+    min-height: 118px !important;
+  }
+
+  html[data-vector-rounded-corners="false"] [data-dock-surface="shell"][data-component="session-new-composer"],
+  html[data-vector-rounded-corners="false"] [data-dock-surface="shell"][data-component="session-composer"] {
+    border-radius: 14px !important;
+  }
+
+  html[data-vector-theme="light"] [data-dock-surface="shell"][data-component="session-new-composer"],
+  html[data-vector-theme="light"] [data-dock-surface="shell"][data-component="session-composer"] {
+    background: color-mix(in oklab, var(--vector-chat-bg, #ffffff) 92%, white) !important;
+    border-color: color-mix(in oklab, var(--vector-accent, #7b46f2) 22%, rgba(17, 17, 18, 0.18)) !important;
+    box-shadow:
+      0 12px 28px rgba(60, 38, 110, 0.14),
+      inset 0 1px 0 rgba(255, 255, 255, 0.78) !important;
+  }
+
+  html[data-vector-theme="light"] [data-vector-shell],
+  html[data-vector-theme="light"] [data-vector-shell] > main {
+    color: #17151f;
+  }
+
+  html[data-vector-sidebar-collapsed="true"] [data-component="sidebar-rail"] {
+    width: 64px !important;
+    min-width: 64px !important;
+  }
+
+  html[data-vector-larger-targets="true"] button,
+  html[data-vector-larger-targets="true"] [role="button"],
+  html[data-vector-larger-targets="true"] [data-component="button-v2"] {
+    min-height: 42px;
+  }
+
+  html[data-vector-reduce-animations="true"] *,
+  html[data-vector-animation-speed="off"] * {
+    scroll-behavior: auto !important;
+    transition-duration: 0ms !important;
+    animation-duration: 0ms !important;
+  }
+}
+
+@layer components {
+  [data-vector-shell] [data-component="session-prompt-dock"] {
+    max-width: min(1180px, calc(100vw - 220px)) !important;
+    margin-inline: auto !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    outline: none !important;
+    padding: 0 !important;
+  }
+
+  [data-vector-shell] [data-component="session-prompt-dock"]::before,
+  [data-vector-shell] [data-component="session-prompt-dock"]::after,
+  [data-vector-shell] [data-component="session-prompt-dock"] > div::before,
+  [data-vector-shell] [data-component="session-prompt-dock"] > div::after {
+    content: none !important;
+    display: none !important;
+  }
+
+  [data-vector-shell] [data-component="session-new-composer"],
+  [data-vector-shell] [data-component="session-composer"] {
+    min-height: 104px !important;
+    border: 1px solid rgba(255, 255, 255, 0.12) !important;
+    border-radius: 34px !important;
+    background: rgba(22, 22, 24, 0.985) !important;
+    box-shadow:
+      0 18px 46px rgba(0, 0, 0, 0.32),
+      inset 0 1px 0 rgba(255, 255, 255, 0.055) !important;
+    outline: none !important;
+  }
+
+  [data-vector-shell] [data-component="session-new-composer"]::before,
+  [data-vector-shell] [data-component="session-new-composer"]::after,
+  [data-vector-shell] [data-component="session-composer"]::before,
+  [data-vector-shell] [data-component="session-composer"]::after {
+    content: none !important;
+    display: none !important;
+  }
+
+  [data-vector-shell] [data-action="prompt-submit"] {
+    margin-right: 8px !important;
+  }
+
+  html[data-vector-density="compact"] [data-vector-shell] [data-component="session-prompt-dock"] {
+    max-width: min(1040px, calc(100vw - 204px)) !important;
+  }
+}
+
+@layer components {
+  /* Final Vector shell skin. Keep this last so older inherited rules cannot leak through. */
+  [data-vector-shell] {
+    background: var(--vector-workspace-bg, #111112) !important;
+    color: #f4f4f5;
+  }
+
+  [data-vector-shell] > main {
+    background: var(--vector-workspace-bg, #111112) !important;
+    padding-top: 0 !important;
+  }
+
+  [data-component="sidebar-rail"] {
+    width: 88px !important;
+    min-width: 88px !important;
+    background:
+      linear-gradient(180deg, color-mix(in oklab, var(--vector-sidebar-bg, #18181a) 92%, black), var(--vector-sidebar-bg, #18181a)),
+      var(--vector-sidebar-bg, #18181a) !important;
+    border-right: 1px solid rgba(255, 255, 255, 0.075) !important;
+  }
+
+  [data-slot="titlebar-v2"] {
+    display: none !important;
+    min-height: 0 !important;
+    height: 0 !important;
+    max-height: 0 !important;
+    overflow: hidden !important;
+    pointer-events: none !important;
+  }
+
+  [data-vector-shell] [data-component="session-prompt-dock"] {
+    max-width: min(1120px, calc(100vw - 190px));
+    border-radius: 30px !important;
+    border-color: color-mix(in oklab, var(--vector-accent, #9b6cff) 22%, rgba(255, 255, 255, 0.13)) !important;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.012)),
+      color-mix(in oklab, var(--vector-chat-bg, #202024) 88%, black) !important;
+    box-shadow:
+      0 22px 70px rgba(0, 0, 0, 0.38),
+      inset 0 1px 0 rgba(255, 255, 255, 0.045) !important;
+  }
+
+  [data-vector-shell] :is(button, [role="button"], input, textarea):focus-visible {
+    outline: 2px solid color-mix(in oklab, var(--vector-accent, #9b6cff) 74%, white) !important;
+    outline-offset: 2px;
+  }
+
+  html[data-vector-density="compact"] [data-vector-shell] [data-component="session-prompt-dock"] {
+    max-width: min(960px, calc(100vw - 184px));
+    border-radius: 22px !important;
+  }
+
+  html[data-vector-reduce-animations="true"] *,
+  html[data-vector-reduce-animations="true"] *::before,
+  html[data-vector-reduce-animations="true"] *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
   }
 }
 
@@ -214,10 +846,10 @@
   }
 
   [data-slot="titlebar-v2"] {
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent),
-      #0d0d10;
+    min-height: 0 !important;
+    height: 0 !important;
+    border-bottom: 0 !important;
+    background: transparent !important;
   }
 
   [data-component="home-project-row"][data-selected],
@@ -225,6 +857,54 @@
     box-shadow:
       inset 0 0 0 1px rgba(155, 108, 255, 0.28),
       0 10px 30px rgba(155, 108, 255, 0.08);
+  }
+}
+
+@layer components {
+  [data-vector-shell] {
+    --vector-chat-backdrop-image: url("/vector-space-backdrop.png");
+    --vector-chat-backdrop-opacity: 0.16;
+  }
+
+  [data-vector-shell] > main {
+    position: relative;
+  }
+
+  [data-vector-shell] > main::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background-image:
+      radial-gradient(circle at 50% 20%, rgba(155, 108, 255, 0.12), transparent 34%),
+      linear-gradient(180deg, rgba(17, 17, 18, 0.72), rgba(17, 17, 18, 0.94)),
+      var(--vector-chat-backdrop-image);
+    background-position: center;
+    background-size: cover;
+    opacity: var(--vector-chat-backdrop-opacity);
+  }
+
+  html[data-vector-theme="light"] [data-vector-shell] > main::before {
+    opacity: 0.22;
+    background-image:
+      radial-gradient(circle at 50% 20%, rgba(123, 70, 242, 0.12), transparent 34%),
+      linear-gradient(180deg, rgba(247, 244, 255, 0.72), rgba(247, 244, 255, 0.92)),
+      var(--vector-chat-backdrop-image);
+  }
+
+  [data-vector-shell] > main > * {
+    position: relative;
+    z-index: 1;
+  }
+
+  [data-component="session-new-design"] {
+    background-image:
+      radial-gradient(circle at 50% 24%, rgba(155, 108, 255, 0.14), transparent 36%),
+      linear-gradient(180deg, rgba(17, 17, 18, 0.72), rgba(17, 17, 18, 0.96)),
+      var(--vector-chat-backdrop-image) !important;
+    background-position: center !important;
+    background-size: cover !important;
   }
 }
 
@@ -738,23 +1418,18 @@
 
   [data-component="session-new-composer"],
   [data-component="session-composer"] {
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 18px;
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.012)),
-      #2a2a2b;
+    border: 1px solid rgba(255, 255, 255, 0.085);
+    border-radius: 34px;
+    background: rgba(24, 24, 26, 0.96);
     box-shadow:
-      0 22px 80px rgba(0, 0, 0, 0.34),
-      inset 0 1px 0 rgba(255, 255, 255, 0.06);
+      0 12px 34px rgba(0, 0, 0, 0.34),
+      inset 0 1px 0 rgba(255, 255, 255, 0.045);
   }
 
-  html[data-vector-theme="light"] [data-component="session-new-composer"],
-  html[data-vector-theme="light"] [data-component="session-composer"] {
-    border-color: rgba(64, 45, 112, 0.14);
-    background: rgba(255, 255, 255, 0.78);
-    box-shadow:
-      0 22px 80px rgba(92, 66, 156, 0.14),
-      inset 0 1px 0 rgba(255, 255, 255, 0.92);
+  [data-component="session-composer-region"],
+  [data-component="session-new-composer-region"] {
+    background: transparent !important;
+    box-shadow: none !important;
   }
 
   [data-component="session-new-composer"] [data-component="prompt-input"],
@@ -767,11 +1442,6 @@
   [data-component="session-composer-text"] {
     font-size: 15px;
     color: rgba(255, 255, 255, 0.34);
-  }
-
-  html[data-vector-theme="light"] [data-component="session-new-design-text"],
-  html[data-vector-theme="light"] [data-component="session-composer-text"] {
-    color: rgba(31, 24, 46, 0.42);
   }
 
   [data-slot="session-turn-message-container"] {
@@ -810,24 +1480,11 @@
     letter-spacing: 0;
   }
 
-  html[data-vector-theme="light"] [data-slot="session-turn-diffs"] {
-    border-color: rgba(123, 70, 242, 0.16);
-    background: rgba(255, 255, 255, 0.58);
-    box-shadow: 0 16px 50px rgba(92, 66, 156, 0.1);
-  }
-
   #review-panel {
     border-left: 1px solid rgba(255, 255, 255, 0.08);
     background:
       linear-gradient(180deg, rgba(155, 108, 255, 0.045), transparent 24%),
       rgba(16, 16, 18, 0.96);
-  }
-
-  html[data-vector-theme="light"] #review-panel {
-    border-left-color: rgba(55, 42, 91, 0.14);
-    background:
-      linear-gradient(180deg, rgba(123, 70, 242, 0.08), transparent 24%),
-      rgba(255, 255, 255, 0.72);
   }
 
   [data-slot="titlebar-v2"] {
@@ -959,5 +1616,143 @@
 
   [data-vector-element-sprite] {
     display: none !important;
+  }
+}
+
+@layer components {
+  [data-vector-shell] {
+    --vector-chat-backdrop-image: url("/vector-space-backdrop.png");
+    --vector-chat-backdrop-opacity: 0.18;
+  }
+
+  [data-slot="titlebar-v2"] {
+    min-height: 0 !important;
+    height: 0 !important;
+    max-height: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+    overflow: hidden !important;
+  }
+
+  [data-vector-shell] > main {
+    position: relative;
+    background: #111112;
+  }
+
+  [data-vector-shell] > main::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background-image:
+      radial-gradient(circle at 50% 20%, rgba(155, 108, 255, 0.12), transparent 34%),
+      linear-gradient(180deg, rgba(17, 17, 18, 0.74), rgba(17, 17, 18, 0.94)),
+      var(--vector-chat-backdrop-image);
+    background-position: center;
+    background-size: cover;
+    opacity: var(--vector-chat-backdrop-opacity);
+  }
+
+  html[data-vector-theme="light"] [data-vector-shell] > main {
+    background: #f4f0ff;
+  }
+
+  html[data-vector-theme="light"] [data-vector-shell] > main::before {
+    opacity: 0.24;
+    background-image:
+      radial-gradient(circle at 50% 20%, rgba(123, 70, 242, 0.1), transparent 34%),
+      linear-gradient(180deg, rgba(247, 244, 255, 0.72), rgba(247, 244, 255, 0.92)),
+      var(--vector-chat-backdrop-image);
+  }
+
+  [data-vector-shell] > main > * {
+    position: relative;
+    z-index: 1;
+  }
+
+  [data-component="session-new-design"] {
+    background:
+      radial-gradient(circle at 50% 24%, rgba(155, 108, 255, 0.14), transparent 36%),
+      linear-gradient(180deg, rgba(17, 17, 18, 0.76), rgba(17, 17, 18, 0.96)),
+      var(--vector-chat-backdrop-image) center / cover !important;
+  }
+
+  html[data-vector-theme="light"] [data-component="session-new-design"] {
+    background:
+      radial-gradient(circle at 50% 24%, rgba(123, 70, 242, 0.13), transparent 36%),
+      linear-gradient(180deg, rgba(247, 244, 255, 0.74), rgba(247, 244, 255, 0.94)),
+      var(--vector-chat-backdrop-image) center / cover !important;
+  }
+}
+
+@layer components {
+  /* ------------------------------------------------------------------ */
+  /* Vector composer: single authoritative bezel. Later rules in this   */
+  /* layer win, so keep composer geometry here and nowhere else.        */
+  /* ------------------------------------------------------------------ */
+  [data-vector-shell] [data-component="session-new-composer"],
+  [data-vector-shell] [data-component="session-composer"] {
+    min-height: 96px !important;
+    border: 1px solid color-mix(in oklab, var(--vector-accent, #9b6cff) 16%, rgba(255, 255, 255, 0.1)) !important;
+    border-radius: 22px !important;
+    background: color-mix(in oklab, var(--vector-chat-bg, #202024) 92%, black) !important;
+    box-shadow:
+      0 16px 40px rgba(0, 0, 0, 0.3),
+      inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
+    transition:
+      border-color 180ms cubic-bezier(0.2, 0, 0, 1),
+      box-shadow 180ms cubic-bezier(0.2, 0, 0, 1) !important;
+  }
+
+  [data-vector-shell] [data-component="session-new-composer"]:focus-within,
+  [data-vector-shell] [data-component="session-composer"]:focus-within {
+    border-color: color-mix(in oklab, var(--vector-accent, #9b6cff) 42%, rgba(255, 255, 255, 0.12)) !important;
+    box-shadow:
+      0 16px 44px rgba(0, 0, 0, 0.34),
+      0 0 0 3px color-mix(in oklab, var(--vector-accent, #9b6cff) 14%, transparent),
+      inset 0 1px 0 rgba(255, 255, 255, 0.06) !important;
+  }
+
+  html[data-vector-density="compact"] [data-vector-shell] [data-component="session-new-composer"],
+  html[data-vector-density="compact"] [data-vector-shell] [data-component="session-composer"] {
+    min-height: 82px !important;
+  }
+
+  html[data-vector-density="spacious"] [data-vector-shell] [data-component="session-new-composer"],
+  html[data-vector-density="spacious"] [data-vector-shell] [data-component="session-composer"] {
+    min-height: 116px !important;
+  }
+
+  html[data-vector-rounded-corners="false"] [data-vector-shell] :is(
+    [data-component="session-new-composer"],
+    [data-component="session-composer"]
+  ) {
+    border-radius: 12px !important;
+  }
+
+  /* Send button: accent-filled when actionable, quiet when disabled. */
+  [data-vector-shell] [data-action="prompt-submit"]:not(:disabled) {
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0) 60%),
+      linear-gradient(135deg, color-mix(in oklab, var(--vector-accent, #9b6cff) 92%, white), var(--vector-accent, #9b6cff)) !important;
+    color: #fff !important;
+    box-shadow:
+      0 6px 18px color-mix(in oklab, var(--vector-accent, #9b6cff) 36%, transparent),
+      inset 0 1px 0 rgba(255, 255, 255, 0.22) !important;
+  }
+
+  [data-vector-shell] [data-action="prompt-submit"]:not(:disabled):hover {
+    filter: brightness(1.08);
+  }
+
+  [data-vector-shell] [data-action="prompt-submit"]:not(:disabled):active {
+    transform: translateY(0.5px) scale(0.98);
+  }
+
+  [data-vector-shell] [data-action="prompt-submit"]:disabled {
+    opacity: 0.45 !important;
   }
 }

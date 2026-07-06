@@ -13,6 +13,7 @@ import { useLanguage } from "@/context/language"
 import { decode64 } from "@/utils/base64"
 
 type ModelState = ReturnType<typeof useLocal>["model"]
+const HIDDEN_PROVIDER_IDS = new Set<string>()
 
 const costInput = (cost: unknown): number => {
   if (Array.isArray(cost)) return Math.max(0, ...cost.map((item) => costInput(item)))
@@ -28,6 +29,11 @@ export const DialogSelectModelUnpaid: Component<{ model?: ModelState }> = (props
   const directory = () => decode64(local.slug())
   const providers = useProviders(directory)
   const language = useLanguage()
+  const openCodeProviderDescription = (id: string) => {
+    if (id === "opencode") return "Free starter models provided by OpenCode and available inside Vector."
+    if (id === "opencode-go") return "OpenCode Go models are provided by OpenCode and can be used inside Vector."
+    if (id === "opencode-zen") return "OpenCode Zen models are provided by OpenCode and can be used inside Vector."
+  }
 
   const connect = (provider: string) => {
     void import("./dialog-connect-provider").then((x) => {
@@ -102,7 +108,7 @@ export const DialogSelectModelUnpaid: Component<{ model?: ModelState }> = (props
               <List
                 class="w-full px-3"
                 key={(p) => p.id}
-                items={providers.popular}
+                items={() => providers.popular().filter((provider) => !HIDDEN_PROVIDER_IDS.has(provider.id))}
                 activeIcon="plus-small"
                 sortBy={(a, b) => {
                   if (popularProviders.includes(a.id) && popularProviders.includes(b.id))
@@ -118,19 +124,11 @@ export const DialogSelectModelUnpaid: Component<{ model?: ModelState }> = (props
                   <div class="w-full flex items-center gap-x-3">
                     <ProviderIcon data-slot="list-item-extra-icon" id={i.id} />
                     <span>{i.name}</span>
-                    <Show when={i.id === "opencode"}>
-                      <div class="text-14-regular text-text-weak">{language.t("dialog.provider.opencode.tagline")}</div>
+                    <Show when={openCodeProviderDescription(i.id)}>
+                      {(text) => <div class="text-14-regular text-text-weak">{text()}</div>}
                     </Show>
-                    <Show when={i.id === "opencode"}>
+                    <Show when={i.id.startsWith("opencode")}>
                       <Tag>{language.t("dialog.provider.tag.recommended")}</Tag>
-                    </Show>
-                    <Show when={i.id === "opencode-go"}>
-                      <>
-                        <div class="text-14-regular text-text-weak">
-                          {language.t("dialog.provider.opencodeGo.tagline")}
-                        </div>
-                        <Tag>{language.t("dialog.provider.tag.recommended")}</Tag>
-                      </>
                     </Show>
                     <Show when={i.id === "anthropic"}>
                       <div class="text-14-regular text-text-weak">{language.t("dialog.provider.anthropic.note")}</div>

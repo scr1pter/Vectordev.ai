@@ -442,28 +442,31 @@ export function DialogConnectProvider(props: { provider: string; directory?: Acc
       await complete()
     }
 
-    return (
-      <div class="flex flex-col gap-6">
-        <Switch>
-          <Match when={provider().id === "opencode"}>
-            <div class="flex flex-col gap-4">
-              <div class="text-14-regular text-text-base">{language.t("provider.connect.opencodeZen.line1")}</div>
-              <div class="text-14-regular text-text-base">{language.t("provider.connect.opencodeZen.line2")}</div>
-              <div class="text-14-regular text-text-base">
-                {language.t("provider.connect.opencodeZen.visit.prefix")}
-                <Link href="https://vectordev.ai/zen" tabIndex={-1}>
-                  {language.t("provider.connect.opencodeZen.visit.link")}
-                </Link>
-                {language.t("provider.connect.opencodeZen.visit.suffix")}
+    if (provider().id === "opencode") {
+      return (
+        <div class="flex flex-col items-start gap-4">
+          <div class="flex items-start gap-3 rounded-xl border border-border-weak-base bg-surface-base px-4 py-3">
+            <ProviderIcon id="opencode" class="mt-0.5 size-6 shrink-0 icon-strong-base" />
+            <div class="flex flex-col gap-1">
+              <div class="text-14-medium text-text-strong">OpenCode free models are already available in Vector.</div>
+              <div class="text-14-regular text-text-weak">
+                No API key is required for the OpenCode starter model catalog. Add Anthropic, OpenAI, Google,
+                OpenRouter, or a custom provider when you want stronger models.
               </div>
             </div>
-          </Match>
-          <Match when={true}>
-            <div class="text-14-regular text-text-base">
-              {language.t("provider.connect.apiKey.description", { provider: provider().name })}
-            </div>
-          </Match>
-        </Switch>
+          </div>
+          <Button class="w-auto" type="button" size="large" variant="primary" onClick={complete}>
+            Done
+          </Button>
+        </div>
+      )
+    }
+
+    return (
+      <div class="flex flex-col gap-6">
+        <div class="text-14-regular text-text-base">
+          {language.t("provider.connect.apiKey.description", { provider: provider().name })}
+        </div>
         <form onSubmit={handleSubmit} class="flex flex-col items-start gap-4">
           <TextField
             autofocus

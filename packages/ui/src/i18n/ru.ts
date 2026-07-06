@@ -47,7 +47,7 @@ export const dict = {
 
   "dialog.usageExceeded.freeTier.title": "Достигнут бесплатный лимит",
   "dialog.usageExceeded.freeTier.description":
-    "Подпишитесь на Vector Go для надёжного доступа к лучшим моделям с открытым исходным кодом, от $5/месяц.",
+    "The selected free Vector-hosted model is temporarily out of quota. Choose another free model, connect your own provider key, or try again later.",
   "dialog.usageExceeded.freeTier.actionLabel": "Подписаться",
   "dialog.usageExceeded.accountRateLimit.title": "Достигнут лимит Go",
   "dialog.usageExceeded.accountRateLimit.description":

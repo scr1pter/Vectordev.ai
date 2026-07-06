@@ -5,7 +5,14 @@ import { app, BrowserWindow, Notification, clipboard, dialog, ipcMain, shell } f
 import type { IpcMainEvent, IpcMainInvokeEvent } from "electron"
 import type { DesktopMenuAction } from "@opencode-ai/app/desktop-menu"
 
-import type { FatalRendererError, ServerReadyData, TitlebarTheme } from "../preload/types"
+import type {
+  BrowserAutomationAction,
+  BrowserAutomationReport,
+  BrowserAutomationRun,
+  FatalRendererError,
+  ServerReadyData,
+  TitlebarTheme,
+} from "../preload/types"
 import { runDesktopMenuAction } from "./desktop-menu-actions"
 import { assertAttachmentBudget, createPickedFileAuthorizations } from "./attachment-picker"
 import { getStore, removeStoreFileIfEmpty } from "./store"
@@ -19,6 +26,287 @@ const pickerFilters = (ext?: string[]) => {
 }
 
 const pickedFiles = createPickedFileAuthorizations()
+
+function textBetween(source: string, regex: RegExp) {
+  const match = source.match(regex)
+  return match?.[1]?.replace(/\s+/g, " ").trim() ?? ""
+}
+
+async function inspectBrowserUrl(rawUrl: string): Promise<BrowserAutomationReport> {
+  const url = new URL(rawUrl)
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error("Browser automation can only inspect http and https URLs.")
+  }
+
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 12_000)
+  const checkedAt = new Date().toISOString()
+
+  try {
+    const response = await fetch(url, {
+      signal: controller.signal,
+      redirect: "follow",
+      headers: {
+        "user-agent": "Vector Browser Automation/1.0",
+        accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      },
+    })
+    const html = await response.text()
+    return {
+      url: rawUrl,
+      finalUrl: response.url,
+      status: response.status,
+      ok: response.ok,
+      title: textBetween(html, /<title[^>]*>([\s\S]*?)<\/title>/i),
+      description:
+        textBetween(html, /<meta[^>]+name=["']description["'][^>]+content=["']([^"']*)["'][^>]*>/i) ||
+        textBetween(html, /<meta[^>]+content=["']([^"']*)["'][^>]+name=["']description["'][^>]*>/i),
+      htmlBytes: Buffer.byteLength(html),
+      links: html.match(/<a\b/gi)?.length ?? 0,
+      scripts: html.match(/<script\b/gi)?.length ?? 0,
+      stylesheets: html.match(/<link\b[^>]*rel=["']?stylesheet/gi)?.length ?? 0,
+      checkedAt,
+    }
+  } catch (error) {
+    return {
+      url: rawUrl,
+      finalUrl: rawUrl,
+      status: 0,
+      ok: false,
+      title: "",
+      description: "",
+      htmlBytes: 0,
+      links: 0,
+      scripts: 0,
+      stylesheets: 0,
+      checkedAt,
+      error: error instanceof Error ? error.message : String(error),
+    }
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+function validateBrowserUrl(rawUrl: string) {
+  const url = new URL(rawUrl)
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error("Browser automation can only open http and https URLs.")
+  }
+  return url.toString()
+}
+
+async function runBrowserAutomation(input: {
+  url: string
+  actions?: BrowserAutomationAction[]
+  viewport?: { width: number; height: number }
+}): Promise<BrowserAutomationRun> {
+  const targetUrl = validateBrowserUrl(input.url)
+  const viewport = {
+    width: Math.max(360, Math.min(input.viewport?.width ?? 1366, 2400)),
+    height: Math.max(360, Math.min(input.viewport?.height ?? 900, 1800)),
+  }
+  const checkedAt = new Date().toISOString()
+  const consoleMessages: BrowserAutomationRun["console"] = []
+  const pageErrors: string[] = []
+  const actionResults: BrowserAutomationRun["actions"] = []
+
+  const win = new BrowserWindow({
+    show: false,
+    width: viewport.width,
+    height: viewport.height,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      javascript: true,
+      images: true,
+      webSecurity: false,
+    },
+  })
+
+  const cleanup = () => {
+    if (!win.isDestroyed()) win.destroy()
+  }
+
+  win.webContents.on("console-message", (_event, level, message) => {
+    const labels = ["log", "warn", "error", "info", "debug"]
+    consoleMessages.push({ level: labels[level] ?? String(level), message })
+  })
+  win.webContents.on("render-process-gone", (_event, details) => {
+    pageErrors.push(`Renderer stopped: ${details.reason}`)
+  })
+  win.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {
+    if (errorCode !== -3) pageErrors.push(`${validatedURL}: ${errorDescription}`)
+  })
+
+  try {
+    await win.loadURL(targetUrl)
+    await win.webContents.executeJavaScript(
+      "new Promise((resolve) => { if (document.readyState === 'complete') resolve(true); else window.addEventListener('load', () => resolve(true), { once: true }); setTimeout(() => resolve(false), 3500); })",
+      true,
+    )
+
+    for (const action of input.actions ?? []) {
+      try {
+        if (action.type === "click") {
+          const result = await win.webContents.executeJavaScript(
+            `(() => {
+              const el = document.querySelector(${JSON.stringify(action.selector)});
+              if (!el) throw new Error("No element matches selector: ${action.selector.replace(/"/g, '\\"')}");
+              el.scrollIntoView({ block: "center", inline: "center" });
+              el.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+              el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+              el.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+              el.click();
+              return true;
+            })()`,
+            true,
+          )
+          actionResults.push({ label: `Click ${action.selector}`, ok: true, result })
+        }
+        if (action.type === "type") {
+          const result = await win.webContents.executeJavaScript(
+            `(() => {
+              const el = document.querySelector(${JSON.stringify(action.selector)});
+              if (!el) throw new Error("No element matches selector: ${action.selector.replace(/"/g, '\\"')}");
+              el.scrollIntoView({ block: "center", inline: "center" });
+              el.focus();
+              const text = ${JSON.stringify(action.text)};
+              if ("value" in el) {
+                if (${action.clear ? "true" : "false"}) el.value = "";
+                el.value = String(el.value || "") + text;
+                el.dispatchEvent(new InputEvent("input", { bubbles: true, data: text }));
+                el.dispatchEvent(new Event("change", { bubbles: true }));
+              } else {
+                el.textContent = (${action.clear ? "true" : "false"} ? "" : el.textContent || "") + text;
+                el.dispatchEvent(new InputEvent("input", { bubbles: true, data: text }));
+              }
+              return true;
+            })()`,
+            true,
+          )
+          actionResults.push({ label: `Type into ${action.selector}`, ok: true, result })
+        }
+        if (action.type === "press") {
+          await win.webContents.sendInputEvent({ type: "keyDown", keyCode: action.key })
+          await win.webContents.sendInputEvent({ type: "keyUp", keyCode: action.key })
+          actionResults.push({ label: `Press ${action.key}`, ok: true })
+        }
+        if (action.type === "evaluate") {
+          const result = await win.webContents.executeJavaScript(action.script, true)
+          actionResults.push({ label: "Evaluate JavaScript", ok: true, result })
+        }
+        await new Promise((resolve) => setTimeout(resolve, 350))
+      } catch (error) {
+        actionResults.push({
+          label:
+            action.type === "evaluate"
+              ? "Evaluate JavaScript"
+              : `${action.type} ${"selector" in action ? action.selector : "key" in action ? action.key : ""}`.trim(),
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+        })
+      }
+    }
+
+    const dom = await win.webContents.executeJavaScript(
+      `(() => {
+        const selectorFor = (el) => {
+          if (el.id) return "#" + CSS.escape(el.id);
+          const test = el.getAttribute("data-testid") || el.getAttribute("data-test") || el.getAttribute("aria-label") || el.getAttribute("name");
+          if (test) return el.tagName.toLowerCase() + "[" + (el.getAttribute("data-testid") ? "data-testid" : el.getAttribute("data-test") ? "data-test" : el.getAttribute("aria-label") ? "aria-label" : "name") + "=" + JSON.stringify(test) + "]";
+          const parts = [];
+          let node = el;
+          while (node && node.nodeType === 1 && parts.length < 4) {
+            let part = node.tagName.toLowerCase();
+            const parent = node.parentElement;
+            if (parent) {
+              const siblings = Array.from(parent.children).filter((item) => item.tagName === node.tagName);
+              if (siblings.length > 1) part += ":nth-of-type(" + (siblings.indexOf(node) + 1) + ")";
+            }
+            parts.unshift(part);
+            node = parent;
+          }
+          return parts.join(" > ");
+        };
+        const pick = (el) => ({
+          tag: el.tagName.toLowerCase(),
+          text: (el.innerText || el.textContent || el.getAttribute("aria-label") || "").trim().replace(/\\s+/g, " ").slice(0, 90),
+          selector: selectorFor(el),
+          role: el.getAttribute("role") || undefined,
+          type: el.getAttribute("type") || undefined,
+        });
+        const pickInput = (el) => ({
+          tag: el.tagName.toLowerCase(),
+          selector: selectorFor(el),
+          placeholder: el.getAttribute("placeholder") || undefined,
+          type: el.getAttribute("type") || undefined,
+          name: el.getAttribute("name") || undefined,
+        });
+        return {
+          title: document.title || "",
+          description: document.querySelector('meta[name="description"]')?.getAttribute("content") || "",
+          textSample: (document.body?.innerText || "").trim().replace(/\\s+/g, " ").slice(0, 1200),
+          links: document.querySelectorAll("a").length,
+          scripts: document.querySelectorAll("script").length,
+          stylesheets: document.querySelectorAll('link[rel~="stylesheet"], style').length,
+          htmlBytes: new Blob([document.documentElement.outerHTML]).size,
+          interactives: Array.from(document.querySelectorAll('button, a, [role="button"], input[type="button"], input[type="submit"]')).slice(0, 40).map(pick),
+          inputs: Array.from(document.querySelectorAll("input, textarea, select, [contenteditable=true]")).slice(0, 40).map(pickInput),
+        };
+      })()`,
+      true,
+    )
+
+    const image = await win.webContents.capturePage()
+    return {
+      url: targetUrl,
+      finalUrl: win.webContents.getURL(),
+      status: pageErrors.length ? 0 : 200,
+      ok: pageErrors.length === 0,
+      title: dom.title,
+      description: dom.description,
+      htmlBytes: dom.htmlBytes,
+      links: dom.links,
+      scripts: dom.scripts,
+      stylesheets: dom.stylesheets,
+      checkedAt,
+      viewport,
+      screenshotDataUrl: image.toDataURL(),
+      textSample: dom.textSample,
+      console: consoleMessages.slice(-30),
+      pageErrors,
+      actions: actionResults,
+      interactives: dom.interactives,
+      inputs: dom.inputs,
+    }
+  } catch (error) {
+    return {
+      url: targetUrl,
+      finalUrl: targetUrl,
+      status: 0,
+      ok: false,
+      title: "",
+      description: "",
+      htmlBytes: 0,
+      links: 0,
+      scripts: 0,
+      stylesheets: 0,
+      checkedAt,
+      viewport,
+      screenshotDataUrl: "",
+      textSample: "",
+      console: consoleMessages.slice(-30),
+      pageErrors,
+      actions: actionResults,
+      interactives: [],
+      inputs: [],
+      error: error instanceof Error ? error.message : String(error),
+    }
+  } finally {
+    cleanup()
+  }
+}
 
 type Deps = {
   killSidecar: () => Promise<void> | void
@@ -72,6 +360,12 @@ export function registerIpcHandlers(deps: Deps) {
   ipcMain.handle("updater-check", () => deps.updater.check())
   ipcMain.handle("updater-install", () => deps.updater.install())
   ipcMain.handle("set-background-color", (_event: IpcMainInvokeEvent, color: string) => deps.setBackgroundColor(color))
+  ipcMain.handle("browser-automation-inspect", (_event: IpcMainInvokeEvent, url: string) => inspectBrowserUrl(url))
+  ipcMain.handle(
+    "browser-automation-run",
+    (_event: IpcMainInvokeEvent, input: { url: string; actions?: BrowserAutomationAction[] }) =>
+      runBrowserAutomation(input),
+  )
   ipcMain.handle("export-debug-logs", () => deps.exportDebugLogs())
   ipcMain.handle("record-fatal-renderer-error", (_event: IpcMainInvokeEvent, error: FatalRendererError) =>
     deps.recordFatalRendererError(error),

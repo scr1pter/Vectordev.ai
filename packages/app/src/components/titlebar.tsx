@@ -45,7 +45,7 @@ const tauriApi = () => (window as unknown as { __TAURI__?: TauriApi }).__TAURI__
 const currentDesktopWindow = () => tauriApi()?.window?.getCurrentWindow?.()
 const currentThemeWindow = () => tauriApi()?.webviewWindow?.getCurrentWebviewWindow?.()
 const legacyTitlebarHeight = 40
-const v2TitlebarHeight = 36
+const v2TitlebarHeight = 0
 const minTitlebarZoom = 0.25
 const windowsControlsBaseWidth = 138 // 3 native Windows caption buttons at 46px each.
 
@@ -218,7 +218,7 @@ export function Titlebar(props: { update?: TitlebarUpdate }) {
       data-slot={useV2Titlebar() ? "titlebar-v2" : undefined}
       classList={{
         "shrink-0 relative flex flex-row": true,
-        "h-9 bg-v2-background-bg-deep overflow-visible": useV2Titlebar(),
+        "h-0 bg-transparent overflow-visible": useV2Titlebar(),
         "h-10 bg-background-base overflow-hidden": !useV2Titlebar(),
         "order-last": bottom(),
       }}
@@ -410,21 +410,9 @@ export function Titlebar(props: { update?: TitlebarUpdate }) {
             })
 
             return (
-              <div
-                class="h-full flex-1 overflow-hidden flex flex-row items-center gap-2 px-3"
-                classList={{
-                  "pt-2": !bottom(),
-                  "pb-2": bottom(),
-                  "md:pl-2": mac(),
-                  "md:pl-3": !mac(),
-                }}
-              >
-                <ChannelIndicator />
-                <Show when={windows() || linux()}>
-                  <WindowsAppMenu command={command} platform={platform} variant="v2" />
-                </Show>
-                <div class="flex-1" />
-                <TitlebarV2Right state={v2RightState()} />
+              <div class="h-full flex-1 overflow-hidden" data-tauri-drag-region>
+                <div id="opencode-titlebar-center" class="hidden" />
+                <div id="opencode-titlebar-right" class="hidden" />
                 <Show when={windows() && !electronWindows()}>
                   <div data-tauri-decorum-tb class="flex flex-row" />
                 </Show>
@@ -445,31 +433,6 @@ export function Titlebar(props: { update?: TitlebarUpdate }) {
             >
               <Show when={windows() || linux()}>
                 <WindowsAppMenu command={command} platform={platform} />
-              </Show>
-              <Show when={mac()}>
-                {/*<div class="h-full shrink-0" style={{ width: `${72 / zoom()}px` }} />*/}
-                <div class="xl:hidden w-10 shrink-0 flex items-center justify-center">
-                  <IconButton
-                    icon="menu"
-                    variant="ghost"
-                    class="titlebar-icon rounded-md"
-                    onClick={layout.mobileSidebar.toggle}
-                    aria-label={language.t("sidebar.menu.toggle")}
-                    aria-expanded={layout.mobileSidebar.opened()}
-                  />
-                </div>
-              </Show>
-              <Show when={!mac()}>
-                <div class="xl:hidden w-[48px] shrink-0 flex items-center justify-center">
-                  <IconButton
-                    icon="menu"
-                    variant="ghost"
-                    class="titlebar-icon rounded-md"
-                    onClick={layout.mobileSidebar.toggle}
-                    aria-label={language.t("sidebar.menu.toggle")}
-                    aria-expanded={layout.mobileSidebar.opened()}
-                  />
-                </div>
               </Show>
               <div class="flex items-center gap-1 shrink-0">
                 <TooltipKeybind

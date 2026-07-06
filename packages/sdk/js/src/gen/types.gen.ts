@@ -3247,6 +3247,30 @@ export type FileReadResponses = {
 
 export type FileReadResponse = FileReadResponses[keyof FileReadResponses]
 
+export type FileWriteData = {
+  body: {
+    path: string
+    content: string
+  }
+  path?: never
+  query?: {
+    directory?: string
+  }
+  url: "/file/write"
+}
+
+export type FileWriteResponses = {
+  /**
+   * File written
+   */
+  200: {
+    path: string
+    bytes: number
+  }
+}
+
+export type FileWriteResponse = FileWriteResponses[keyof FileWriteResponses]
+
 export type FileStatusData = {
   body?: never
   path?: never

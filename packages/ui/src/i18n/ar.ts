@@ -48,7 +48,7 @@ export const dict = {
 
   "dialog.usageExceeded.freeTier.title": "تم الوصول إلى الحد المجاني",
   "dialog.usageExceeded.freeTier.description":
-    "اشترك في Vector Go للحصول على وصول موثوق إلى أفضل النماذج مفتوحة المصدر، ابتداءً من $5/شهر.",
+    "The selected free Vector-hosted model is temporarily out of quota. Choose another free model, connect your own provider key, or try again later.",
   "dialog.usageExceeded.freeTier.actionLabel": "اشترك",
   "dialog.usageExceeded.accountRateLimit.title": "تم الوصول إلى حد Go",
   "dialog.usageExceeded.accountRateLimit.description":

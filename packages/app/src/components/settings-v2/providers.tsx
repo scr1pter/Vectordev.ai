@@ -19,7 +19,6 @@ type ProviderItem = ReturnType<ReturnType<typeof useProviders>["connected"]>[num
 
 const PROVIDER_NOTES = [
   { match: (id: string) => id === "opencode", key: "dialog.provider.opencode.note" },
-  { match: (id: string) => id === "opencode-go", key: "dialog.provider.opencodeGo.tagline" },
   { match: (id: string) => id === "anthropic", key: "dialog.provider.anthropic.note" },
   { match: (id: string) => id.startsWith("github-copilot"), key: "dialog.provider.copilot.note" },
   { match: (id: string) => id === "openai", key: "dialog.provider.openai.note" },
@@ -29,6 +28,23 @@ const PROVIDER_NOTES = [
 ] as const
 
 const PROVIDER_ICON_SIZE = 16
+const OPENCODE_PROVIDER_IDS = new Set(["opencode", "opencode-go", "opencode-zen"])
+const HIDDEN_PROVIDER_IDS = new Set<string>()
+
+const isOpenCodeProvider = (id: string) => OPENCODE_PROVIDER_IDS.has(id)
+
+const providerDisplayName = (id: string, name: string) => {
+  if (id === "opencode") return name || "OpenCode"
+  if (id === "opencode-go") return name || "OpenCode Go"
+  if (id === "opencode-zen") return name || "OpenCode Zen"
+  return name
+}
+
+const vectorProviderDescription = (id: string) => {
+  if (id === "opencode") return "Free starter models provided by OpenCode and available inside Vector."
+  if (id === "opencode-go") return "OpenCode Go models are provided by OpenCode and can be used inside Vector."
+  if (id === "opencode-zen") return "OpenCode Zen models are provided by OpenCode and can be used inside Vector."
+}
 
 export const SettingsProvidersV2: Component = () => {
   const dialog = useDialog()
@@ -45,6 +61,7 @@ export const SettingsProvidersV2: Component = () => {
     const connectedIDs = new Set(connected().map((p) => p.id))
     const items = providers
       .popular()
+      .filter((p) => !HIDDEN_PROVIDER_IDS.has(p.id))
       .filter((p) => !connectedIDs.has(p.id))
       .slice()
     items.sort((a, b) => popularProviders.indexOf(a.id) - popularProviders.indexOf(b.id))
@@ -73,6 +90,12 @@ export const SettingsProvidersV2: Component = () => {
   const canDisconnect = (item: ProviderItem) => source(item) !== "env"
 
   const note = (id: string) => PROVIDER_NOTES.find((item) => item.match(id))?.key
+  const description = (id: string) => {
+    const vector = vectorProviderDescription(id)
+    if (vector) return vector
+    const key = note(id)
+    return key ? language.t(key) : undefined
+  }
 
   const isConfigCustom = (providerID: string) => {
     const provider = serverSync().data.config.provider?.[providerID]
@@ -156,7 +179,9 @@ export const SettingsProvidersV2: Component = () => {
                         class="settings-v2-provider-icon shrink-0"
                       />
                       <div class="settings-v2-provider-main">
-                        <span class="settings-v2-provider-name truncate">{item.name}</span>
+                        <span class="settings-v2-provider-name truncate">
+                          {providerDisplayName(item.id, item.name)}
+                        </span>
                         <Tag>{type(item)}</Tag>
                       </div>
                     </div>
@@ -168,7 +193,11 @@ export const SettingsProvidersV2: Component = () => {
                         </span>
                       }
                     >
-                      <ButtonV2 size="normal" variant="ghost-muted" onClick={() => void disconnect(item.id, item.name)}>
+                      <ButtonV2
+                        size="normal"
+                        variant="ghost-muted"
+                        onClick={() => void disconnect(item.id, providerDisplayName(item.id, item.name))}
+                      >
                         {language.t("common.disconnect")}
                       </ButtonV2>
                     </Show>
@@ -180,27 +209,27 @@ export const SettingsProvidersV2: Component = () => {
         </div>
 
         <div class="settings-v2-section">
-          <h3 class="settings-v2-section-title">{language.t("settings.providers.section.popular")}</h3>
+          <h3 class="settings-v2-section-title">Models provided by Vector:</h3>
           <SettingsListV2>
             <For each={popular()}>
               {(item) => (
                 <div class="settings-v2-provider-row">
                   <div class="settings-v2-provider-lead">
-                    <ProviderIcon
-                      id={item.id}
-                      width={PROVIDER_ICON_SIZE}
-                      height={PROVIDER_ICON_SIZE}
-                      class="settings-v2-provider-icon shrink-0"
-                    />
-                    <div class="settings-v2-provider-copy">
-                      <div class="settings-v2-provider-main">
-                        <span class="settings-v2-provider-name">{item.name}</span>
-                        <Show when={item.id === "opencode" || item.id === "opencode-go"}>
-                          <Tag>{language.t("dialog.provider.tag.recommended")}</Tag>
-                        </Show>
+                      <ProviderIcon
+                        id={item.id}
+                        width={PROVIDER_ICON_SIZE}
+                        height={PROVIDER_ICON_SIZE}
+                        class="settings-v2-provider-icon shrink-0"
+                      />
+                      <div class="settings-v2-provider-copy">
+                        <div class="settings-v2-provider-main">
+                          <span class="settings-v2-provider-name">{providerDisplayName(item.id, item.name)}</span>
+                          <Show when={isOpenCodeProvider(item.id)}>
+                            <Tag>{language.t("dialog.provider.tag.recommended")}</Tag>
+                          </Show>
                       </div>
-                      <Show when={note(item.id)}>
-                        {(key) => <p class="settings-v2-provider-description">{language.t(key())}</p>}
+                      <Show when={description(item.id)}>
+                        {(text) => <p class="settings-v2-provider-description">{text()}</p>}
                       </Show>
                     </div>
                   </div>

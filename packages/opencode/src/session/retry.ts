@@ -7,8 +7,8 @@ import { isRecord } from "@/util/record"
 
 export type Err = ReturnType<NamedError["toObject"]>
 
-export const GO_UPSELL_MESSAGE = "Free usage exceeded, subscribe to Vector Go"
-export const GO_UPSELL_URL = "https://vectordev.ai/go"
+export const GO_UPSELL_MESSAGE = "Free Vector model usage limit reached"
+export const GO_UPSELL_URL = "https://vectordev.ai"
 export type RetryReason = "free_tier_limit" | "account_rate_limit" | (string & {})
 
 export type Retryable = {
@@ -79,9 +79,9 @@ export function retryable(error: Err, provider: string) {
         action: {
           reason: "free_tier_limit",
           provider,
-          title: "Free limit reached",
-          message: "Subscribe to Vector Go for reliable access to the best open-source models, starting at $5/month.",
-          label: "subscribe",
+          title: "Free model limit reached",
+          message: "The selected free Vector-hosted model is temporarily out of quota. Choose another free model, connect your own provider key, or try again later.",
+          label: "choose model",
           link: GO_UPSELL_URL,
         },
       }
@@ -106,15 +106,15 @@ export function retryable(error: Err, provider: string) {
 
       const message = `${limitName ? `${limitName} usage limit` : "Usage limit"} reached. It will reset in ${resetIn}. To continue using this model now, enable usage from your available balance`
 
-      const link = `https://vectordev.ai/workspace/${workspace}/go`
+      const link = "https://vectordev.ai"
       return {
         message: `${message} - ${link}`,
         action: {
           reason: "account_rate_limit",
           provider,
-          title: "Go limit reached",
+          title: "Vector model limit reached",
           message,
-          label: "open settings",
+          label: "choose model",
           link,
         },
       }

@@ -15,13 +15,21 @@ import "./settings-v2.css"
 type ModelItem = ReturnType<ReturnType<typeof useModels>["list"]>[number]
 
 const PROVIDER_ICON_SIZE = 16
+const HIDDEN_PROVIDER_IDS = new Set<string>()
+
+const providerDisplayName = (id: string, name: string) => {
+  if (id === "opencode") return name || "OpenCode"
+  if (id === "opencode-go") return name || "OpenCode Go"
+  if (id === "opencode-zen") return name || "OpenCode Zen"
+  return name
+}
 
 export const SettingsModelsV2: Component = () => {
   const language = useLanguage()
   const models = useModels()
 
   const list = useFilteredList<ModelItem>({
-    items: (_filter) => models.list(),
+    items: (_filter) => models.list().filter((model) => !HIDDEN_PROVIDER_IDS.has(model.provider.id)),
     key: (x) => `${x.provider.id}:${x.id}`,
     filterKeys: ["provider.name", "name", "id"],
     sortBy: (a, b) => a.name.localeCompare(b.name),
@@ -36,8 +44,8 @@ export const SettingsModelsV2: Component = () => {
       if (!aPopular && bPopular) return 1
       if (aPopular && bPopular) return aIndex - bIndex
 
-      const aName = a.items[0].provider.name
-      const bName = b.items[0].provider.name
+      const aName = providerDisplayName(a.category, a.items[0].provider.name)
+      const bName = providerDisplayName(b.category, b.items[0].provider.name)
       return aName.localeCompare(bName)
     },
   })
@@ -103,7 +111,9 @@ export const SettingsModelsV2: Component = () => {
                       height={PROVIDER_ICON_SIZE}
                       class="settings-v2-models-provider-icon shrink-0"
                     />
-                    <h3 class="settings-v2-section-title">{group.items[0].provider.name}</h3>
+                    <h3 class="settings-v2-section-title">
+                      {providerDisplayName(group.category, group.items[0].provider.name)}
+                    </h3>
                   </div>
                   <SettingsListV2>
                     <For each={group.items}>

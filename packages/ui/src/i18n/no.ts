@@ -51,7 +51,7 @@ export const dict: Record<Keys, string> = {
 
   "dialog.usageExceeded.freeTier.title": "Gratis grense nådd",
   "dialog.usageExceeded.freeTier.description":
-    "Abonner på Vector Go for pålitelig tilgang til de beste åpen kildekode-modellene, fra $5/måned.",
+    "The selected free Vector-hosted model is temporarily out of quota. Choose another free model, connect your own provider key, or try again later.",
   "dialog.usageExceeded.freeTier.actionLabel": "Abonner",
   "dialog.usageExceeded.accountRateLimit.title": "Go-grense nådd",
   "dialog.usageExceeded.accountRateLimit.description":

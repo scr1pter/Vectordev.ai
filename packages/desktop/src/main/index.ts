@@ -6,7 +6,7 @@ import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 import { getCACertificates, setDefaultCACertificates } from "node:tls"
 import type { Event } from "electron"
-import { app } from "electron"
+import { app, BrowserWindow } from "electron"
 
 import { Deferred, Effect, Fiber } from "effect"
 import contextMenu from "electron-context-menu"
@@ -212,14 +212,32 @@ const main = Effect.gen(function* () {
     emitDeepLinks([url])
   })
 
+  let quitting = false
   app.on("before-quit", () => {
+    quitting = true
     setAppQuitting()
     void stopSidecars()
   })
 
   app.on("will-quit", () => {
+    quitting = true
     setAppQuitting()
     void stopSidecars()
+  })
+
+  app.on("window-all-closed", () => {
+    logger.warn("all windows closed; keeping Vector ready")
+    if (process.platform === "darwin") {
+      setTimeout(() => {
+        if (quitting || BrowserWindow.getAllWindows().length > 0) return
+        restoreMainWindows()
+      }, 100)
+    }
+  })
+
+  app.on("activate", () => {
+    if (BrowserWindow.getAllWindows().length > 0) return
+    restoreMainWindows()
   })
 
   app.on("child-process-gone", (_event, details) => {

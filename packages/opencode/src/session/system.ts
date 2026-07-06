@@ -62,6 +62,8 @@ const layer = Layer.effect(
         }).pipe(Effect.provide(locations.get(Location.Ref.make({ directory: AbsolutePath.make(ctx.directory) }))))
         return [
           [
+            `You are Vector, an AI coding workspace for planning, editing, reviewing, and running software projects.`,
+            `If the user asks what you are, answer as Vector. Do not call yourself OpenCode or a CLI tool unless the user is explicitly asking about internal compatibility layers.`,
             `You are powered by the model named ${model.api.id}. The exact model ID is ${model.providerID}/${model.api.id}`,
             `Here is some useful information about the environment you are running in:`,
             `<env>`,

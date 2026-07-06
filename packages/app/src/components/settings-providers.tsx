@@ -19,7 +19,6 @@ type ProviderItem = ReturnType<ReturnType<typeof useProviders>["connected"]>[num
 
 const PROVIDER_NOTES = [
   { match: (id: string) => id === "opencode", key: "dialog.provider.opencode.note" },
-  { match: (id: string) => id === "opencode-go", key: "dialog.provider.opencodeGo.tagline" },
   { match: (id: string) => id === "anthropic", key: "dialog.provider.anthropic.note" },
   { match: (id: string) => id.startsWith("github-copilot"), key: "dialog.provider.copilot.note" },
   { match: (id: string) => id === "openai", key: "dialog.provider.openai.note" },
@@ -27,6 +26,18 @@ const PROVIDER_NOTES = [
   { match: (id: string) => id === "openrouter", key: "dialog.provider.openrouter.note" },
   { match: (id: string) => id === "vercel", key: "dialog.provider.vercel.note" },
 ] as const
+
+const OPENCODE_PROVIDER_IDS = new Set(["opencode", "opencode-go", "opencode-zen"])
+const HIDDEN_PROVIDER_IDS = new Set<string>()
+
+const isOpenCodeProvider = (id: string) => OPENCODE_PROVIDER_IDS.has(id)
+
+const providerDisplayName = (id: string, name: string) => {
+  if (id === "opencode") return name || "OpenCode"
+  if (id === "opencode-go") return name || "OpenCode Go"
+  if (id === "opencode-zen") return name || "OpenCode Zen"
+  return name
+}
 
 export const SettingsProviders: Component = () => {
   return (
@@ -51,6 +62,7 @@ const SettingsProvidersContent: Component = () => {
     const connectedIDs = new Set(connected().map((p) => p.id))
     const items = providers
       .popular()
+      .filter((p) => !HIDDEN_PROVIDER_IDS.has(p.id))
       .filter((p) => !connectedIDs.has(p.id))
       .slice()
     items.sort((a, b) => popularProviders.indexOf(a.id) - popularProviders.indexOf(b.id))
@@ -79,6 +91,17 @@ const SettingsProvidersContent: Component = () => {
   const canDisconnect = (item: ProviderItem) => source(item) !== "env"
 
   const note = (id: string) => PROVIDER_NOTES.find((item) => item.match(id))?.key
+  const openCodeProviderDescription = (id: string) => {
+    if (id === "opencode") return "Free starter models provided by OpenCode and available inside Vector."
+    if (id === "opencode-go") return "OpenCode Go models are provided by OpenCode and can be used inside Vector."
+    if (id === "opencode-zen") return "OpenCode Zen models are provided by OpenCode and can be used inside Vector."
+  }
+  const description = (id: string) => {
+    const openCodeDescription = openCodeProviderDescription(id)
+    if (openCodeDescription) return openCodeDescription
+    const key = note(id)
+    return key ? language.t(key) : undefined
+  }
 
   const isConfigCustom = (providerID: string) => {
     const provider = serverSync().data.config.provider?.[providerID]
@@ -161,7 +184,9 @@ const SettingsProvidersContent: Component = () => {
                   <div class="group flex flex-wrap items-center justify-between gap-4 min-h-16 py-3 border-b border-border-weak-base last:border-none">
                     <div class="flex items-center gap-3 min-w-0">
                       <ProviderIcon id={item.id} class="size-5 shrink-0 icon-strong-base" />
-                      <span class="text-14-medium text-text-strong truncate">{item.name}</span>
+                      <span class="text-14-medium text-text-strong truncate">
+                        {providerDisplayName(item.id, item.name)}
+                      </span>
                       <Tag>{type(item)}</Tag>
                     </div>
                     <Show
@@ -172,7 +197,11 @@ const SettingsProvidersContent: Component = () => {
                         </span>
                       }
                     >
-                      <Button size="large" variant="ghost" onClick={() => void disconnect(item.id, item.name)}>
+                      <Button
+                        size="large"
+                        variant="ghost"
+                        onClick={() => void disconnect(item.id, providerDisplayName(item.id, item.name))}
+                      >
                         {language.t("common.disconnect")}
                       </Button>
                     </Show>
@@ -184,7 +213,7 @@ const SettingsProvidersContent: Component = () => {
         </div>
 
         <div class="flex flex-col gap-1">
-          <h3 class="text-14-medium text-text-strong pb-2">{language.t("settings.providers.section.popular")}</h3>
+          <h3 class="text-14-medium text-text-strong pb-2">Models provided by Vector:</h3>
           <SettingsList>
             <For each={popular()}>
               {(item) => (
@@ -192,16 +221,13 @@ const SettingsProvidersContent: Component = () => {
                   <div class="flex flex-col min-w-0">
                     <div class="flex items-center gap-x-3">
                       <ProviderIcon id={item.id} class="size-5 shrink-0 icon-strong-base" />
-                      <span class="text-14-medium text-text-strong">{item.name}</span>
-                      <Show when={item.id === "opencode"}>
-                        <Tag>{language.t("dialog.provider.tag.recommended")}</Tag>
-                      </Show>
-                      <Show when={item.id === "opencode-go"}>
+                      <span class="text-14-medium text-text-strong">{providerDisplayName(item.id, item.name)}</span>
+                      <Show when={isOpenCodeProvider(item.id)}>
                         <Tag>{language.t("dialog.provider.tag.recommended")}</Tag>
                       </Show>
                     </div>
-                    <Show when={note(item.id)}>
-                      {(key) => <span class="text-12-regular text-text-weak pl-8">{language.t(key())}</span>}
+                    <Show when={description(item.id)}>
+                      {(text) => <span class="text-12-regular text-text-weak pl-8">{text()}</span>}
                     </Show>
                   </div>
                   <Button

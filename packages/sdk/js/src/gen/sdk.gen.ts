@@ -136,6 +136,8 @@ import type {
   FileListResponses,
   FileReadData,
   FileReadResponses,
+  FileWriteData,
+  FileWriteResponses,
   FileStatusData,
   FileStatusResponses,
   AppLogData,
@@ -823,6 +825,20 @@ class File extends _HeyApiClient {
     return (options.client ?? this._client).get<FileReadResponses, unknown, ThrowOnError>({
       url: "/file/content",
       ...options,
+    })
+  }
+
+  /**
+   * Write a file
+   */
+  public write<ThrowOnError extends boolean = false>(options: Options<FileWriteData, ThrowOnError>) {
+    return (options.client ?? this._client).post<FileWriteResponses, unknown, ThrowOnError>({
+      url: "/file/write",
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options.headers,
+      },
     })
   }
 

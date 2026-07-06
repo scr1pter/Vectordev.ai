@@ -163,6 +163,33 @@
   max-width: 100%;
 }
 
+.settings-v2-file-button {
+  display: inline-flex;
+  min-height: 32px;
+  max-width: 100%;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  border: 0.5px solid var(--v2-border-border-base);
+  background: var(--v2-background-bg-button-neutral);
+  padding-inline: 12px;
+  font-size: 13px;
+  font-weight: 530;
+  line-height: 1;
+  color: var(--v2-text-text-base);
+  box-shadow: var(--v2-elevation-button-neutral);
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+
+.settings-v2-file-button:hover {
+  border-color: var(--v2-border-border-strong);
+  background: var(--v2-overlay-simple-overlay-hover);
+}
+
 [data-component="tabs-v2"][data-variant="settings"][data-orientation="vertical"] [data-slot="tabs-v2-list"] {
   background-color: var(--v2-background-bg-layer-01);
 }
@@ -660,4 +687,816 @@
   font-weight: 440;
   line-height: 1;
   color: var(--v2-state-fg-danger);
+}
+
+/* Vector skin: consistent radius scale — dialog 16, cards 14, rows 10, controls 8. */
+[data-component="dialog-v2"][data-variant="settings"].settings-v2-dialog [data-slot="dialog-container"] {
+  border: 1px solid color-mix(in oklab, var(--vector-accent, #9b6cff) 14%, rgba(255, 255, 255, 0.1));
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at 18% 0%, color-mix(in oklab, var(--vector-accent, #9b6cff) 12%, transparent), transparent 28rem),
+    linear-gradient(145deg, rgba(24, 24, 29, 0.98), rgba(14, 14, 17, 0.98));
+  box-shadow: 0 32px 110px rgba(0, 0, 0, 0.58);
+}
+
+.settings-v2[data-component="tabs-v2"][data-variant="settings"][data-orientation="vertical"] [data-slot="tabs-v2-list"] {
+  width: 236px;
+  min-width: 236px;
+  gap: 14px;
+  padding: 18px;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  background:
+    linear-gradient(180deg, color-mix(in oklab, var(--vector-sidebar-bg, #18181a) 88%, black), rgba(14, 14, 17, 0.98)),
+    var(--vector-sidebar-bg, #18181a);
+}
+
+.settings-v2[data-component="tabs-v2"][data-variant="settings"][data-orientation="vertical"]
+  [data-slot="tabs-v2-section-title"] {
+  padding: 8px 10px 3px;
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 10px;
+  font-weight: 640;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.settings-v2[data-component="tabs-v2"][data-variant="settings"][data-orientation="vertical"]
+  [data-slot="tabs-v2-trigger-wrapper"] {
+  border-radius: 10px;
+}
+
+.settings-v2[data-component="tabs-v2"][data-variant="settings"][data-orientation="vertical"]
+  [data-slot="tabs-v2-trigger"] {
+  min-height: 34px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  padding: 0 12px;
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 13px;
+  font-weight: 520;
+}
+
+.settings-v2[data-component="tabs-v2"][data-variant="settings"][data-orientation="vertical"]
+  [data-slot="tabs-v2-trigger-wrapper"]:hover:not(:disabled):not(:has([data-selected]))
+  [data-slot="tabs-v2-trigger"] {
+  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.045);
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.settings-v2[data-component="tabs-v2"][data-variant="settings"][data-orientation="vertical"]
+  [data-slot="tabs-v2-trigger-wrapper"]:has([data-selected])
+  [data-slot="tabs-v2-trigger"] {
+  border-color: color-mix(in oklab, var(--vector-accent, #9b6cff) 44%, rgba(255, 255, 255, 0.1));
+  background:
+    linear-gradient(135deg, color-mix(in oklab, var(--vector-accent, #9b6cff) 22%, transparent), rgba(255, 255, 255, 0.045));
+  color: #fff;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.035);
+}
+
+.settings-v2-tab-header {
+  padding: 34px 40px 22px;
+  background:
+    linear-gradient(to bottom, rgba(18, 18, 22, 0.98) 0%, rgba(18, 18, 22, 0.84) 74%, transparent 100%);
+}
+
+.settings-v2-tab-title {
+  font-size: 21px;
+  font-weight: 640;
+  letter-spacing: -0.01em;
+}
+
+.settings-v2-tab-body {
+  gap: 26px;
+}
+
+.settings-v2-section {
+  gap: 12px;
+}
+
+.settings-v2-section-title {
+  padding-left: 2px;
+  color: color-mix(in oklab, var(--vector-accent, #9b6cff) 55%, rgba(255, 255, 255, 0.75));
+  font-size: 11px;
+  font-weight: 640;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+[data-component="settings-v2-list"],
+.settings-v2-shortcuts [data-component="settings-v2-list"],
+.settings-v2-servers [data-component="settings-v2-list"] {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.048), rgba(255, 255, 255, 0.024)),
+    color-mix(in oklab, var(--vector-chat-bg, #202024) 82%, black);
+  padding: 10px;
+  box-shadow: none;
+}
+
+[data-component="settings-v2-row"],
+.settings-v2-provider-row,
+.settings-v2-servers-row {
+  border: 1px solid rgba(255, 255, 255, 0.055);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.035);
+  padding: 14px 16px;
+}
+
+[data-component="settings-v2-row"]:last-child,
+.settings-v2-provider-row:last-child {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.055);
+}
+
+[data-slot="settings-v2-row-title"],
+.settings-v2-provider-name,
+.settings-v2-servers-name {
+  font-size: 13px;
+  font-weight: 560;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+[data-slot="settings-v2-row-description"],
+.settings-v2-provider-description,
+.settings-v2-servers-meta {
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.settings-v2-profile-card {
+  display: grid;
+  width: min(360px, 100%);
+  grid-template-columns: 52px 1fr;
+  gap: 12px;
+  align-items: center;
+}
+
+.settings-v2-profile-avatar {
+  width: 52px;
+  height: 52px;
+  border-radius: 16px;
+  object-fit: cover;
+  box-shadow: 0 10px 30px color-mix(in oklab, var(--vector-accent, #9b6cff) 22%, transparent);
+}
+
+.settings-v2-profile-fields,
+.settings-v2-field-stack {
+  display: flex;
+  width: min(360px, 100%);
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings-v2-textarea {
+  min-height: 128px;
+  width: min(460px, 100%);
+  resize: vertical;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.22);
+  padding: 12px 14px;
+  color: rgba(255, 255, 255, 0.92);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.55;
+  outline: none;
+}
+
+.settings-v2-textarea:focus {
+  border-color: color-mix(in oklab, var(--vector-accent, #9b6cff) 62%, rgba(255, 255, 255, 0.18));
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--vector-accent, #9b6cff) 18%, transparent);
+}
+
+.settings-v2-color-grid {
+  display: grid;
+  width: min(420px, 100%);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.settings-v2-color-control {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  background: rgba(0, 0, 0, 0.18);
+  padding: 10px 12px;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.settings-v2-color-control input[type="color"] {
+  width: 32px;
+  height: 32px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  padding: 0;
+}
+
+.settings-v2-file-button,
+[data-component="dialog-v2"][data-variant="settings"] [data-component="button-v2"] {
+  border-radius: 999px;
+}
+
+html[data-vector-density="compact"] .settings-v2-tab-body {
+  gap: 18px;
+}
+
+html[data-vector-density="compact"] [data-component="settings-v2-row"],
+html[data-vector-density="compact"] .settings-v2-provider-row,
+html[data-vector-density="compact"] .settings-v2-servers-row {
+  padding: 13px 15px;
+}
+
+html[data-vector-reduce-animations="true"] *,
+html[data-vector-reduce-animations="true"] *::before,
+html[data-vector-reduce-animations="true"] *::after {
+  scroll-behavior: auto !important;
+  transition-duration: 0.01ms !important;
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+}
+
+/* Premium Vector settings surface. This intentionally avoids the inherited square settings shape. */
+.settings-v2-nav-shell {
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.settings-v2-brand-row {
+  display: grid;
+  grid-template-columns: 36px 1fr;
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.settings-v2-brand-mark {
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+  object-fit: cover;
+  box-shadow: 0 10px 26px color-mix(in oklab, var(--vector-accent, #9b6cff) 24%, transparent);
+}
+
+.settings-v2-brand-name {
+  color: rgba(255, 255, 255, 0.96);
+  font-size: 14px;
+  font-weight: 640;
+  letter-spacing: 0;
+}
+
+.settings-v2-brand-subtitle {
+  margin-top: 2px;
+  color: rgba(255, 255, 255, 0.46);
+  font-size: 11px;
+  font-weight: 520;
+}
+
+.settings-v2-nav-groups {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 18px;
+  min-height: 0;
+  overflow: auto;
+}
+
+.settings-v2-nav-items {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.settings-v2-nav-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 10px;
+  color: rgba(255, 255, 255, 0.44);
+  font-size: 11px;
+}
+
+.settings-v2-content-root {
+  position: relative;
+  min-height: 100%;
+}
+
+.settings-v2-toast {
+  position: sticky;
+  top: 18px;
+  z-index: 4;
+  width: fit-content;
+  max-width: 520px;
+  margin: 0 40px -6px auto;
+  border: 1px solid color-mix(in oklab, var(--vector-accent, #9b6cff) 34%, rgba(255, 255, 255, 0.16));
+  border-radius: 999px;
+  background: rgba(18, 18, 22, 0.92);
+  padding: 10px 14px;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 12px;
+  font-weight: 650;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.32);
+}
+
+.settings-v2-page {
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
+  gap: 26px;
+  padding: 36px 42px 46px;
+}
+
+.settings-v2-page-hero {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18px;
+  padding-bottom: 2px;
+}
+
+.settings-v2-page-kicker {
+  margin: 0 0 8px;
+  color: color-mix(in oklab, var(--vector-accent, #9b6cff) 66%, rgba(255, 255, 255, 0.7));
+  font-size: 11px;
+  font-weight: 640;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.settings-v2-page-title {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.96);
+  font-size: 21px;
+  font-weight: 640;
+  letter-spacing: -0.01em;
+}
+
+.settings-v2-page-subtitle {
+  max-width: 660px;
+  margin: 10px 0 0;
+  color: rgba(255, 255, 255, 0.54);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.settings-v2-section-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.settings-v2-card {
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  background:
+    radial-gradient(circle at 18% 0%, color-mix(in oklab, var(--vector-accent, #9b6cff) 8%, transparent), transparent 24rem),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.052), rgba(255, 255, 255, 0.024)),
+    color-mix(in oklab, var(--vector-chat-bg, #202024) 78%, black);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.settings-v2-card--wide {
+  grid-column: 1 / -1;
+}
+
+.settings-v2-card-head {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 13px;
+  align-items: center;
+  padding: 18px 18px 14px;
+}
+
+.settings-v2-card-icon {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border-radius: 9px;
+  background: color-mix(in oklab, var(--vector-accent, #9b6cff) 18%, rgba(255, 255, 255, 0.05));
+  color: color-mix(in oklab, var(--vector-accent, #9b6cff) 66%, white);
+}
+
+.settings-v2-card-copy {
+  min-width: 0;
+}
+
+.settings-v2-card-title {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.94);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+.settings-v2-card-description {
+  margin: 4px 0 0;
+  color: rgba(255, 255, 255, 0.48);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.settings-v2-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 14px 16px;
+}
+
+.settings-v2-row-modern {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+  min-height: 52px;
+  border: 1px solid rgba(255, 255, 255, 0.065);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.18);
+  padding: 12px 14px;
+}
+
+.settings-v2-row-modern--stacked {
+  grid-template-columns: 1fr;
+}
+
+.settings-v2-row-copy {
+  min-width: 0;
+}
+
+.settings-v2-row-title {
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 13px;
+  font-weight: 550;
+}
+
+.settings-v2-row-description {
+  margin-top: 3px;
+  color: rgba(255, 255, 255, 0.46);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.settings-v2-row-control {
+  display: flex;
+  justify-content: flex-end;
+  min-width: 156px;
+}
+
+.settings-v2-input,
+.settings-v2-number {
+  width: 100%;
+}
+
+.settings-v2-number {
+  max-width: 118px;
+}
+
+.settings-v2-textarea {
+  min-height: 132px;
+  width: 100%;
+  resize: vertical;
+  border: 1px solid rgba(255, 255, 255, 0.085);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.22);
+  padding: 12px 14px;
+  color: rgba(255, 255, 255, 0.92);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.55;
+  outline: none;
+}
+
+.settings-v2-textarea:focus {
+  border-color: color-mix(in oklab, var(--vector-accent, #9b6cff) 56%, rgba(255, 255, 255, 0.2));
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--vector-accent, #9b6cff) 16%, transparent);
+}
+
+.settings-v2-range-row {
+  display: grid;
+  grid-template-columns: 1fr 58px;
+  gap: 14px;
+  align-items: center;
+}
+
+.settings-v2-range {
+  accent-color: var(--vector-accent, #9b6cff);
+  width: 100%;
+}
+
+.settings-v2-range-value {
+  color: rgba(255, 255, 255, 0.65);
+  font-size: 12px;
+  font-weight: 680;
+  text-align: right;
+}
+
+.settings-v2-color-input {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.045);
+  padding: 6px 10px 6px 6px;
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.settings-v2-color-input input {
+  width: 30px;
+  height: 30px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  padding: 0;
+}
+
+.settings-v2-action-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.settings-v2-profile-preview {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 14px;
+  align-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.2);
+  padding: 14px;
+}
+
+.settings-v2-avatar {
+  display: grid;
+  width: 56px;
+  height: 56px;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 12px;
+  background:
+    linear-gradient(135deg, color-mix(in oklab, var(--vector-accent, #9b6cff) 74%, white), var(--vector-accent, #9b6cff));
+  color: #111;
+  font-size: 18px;
+  font-weight: 820;
+}
+
+.settings-v2-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.settings-v2-profile-preview strong,
+.settings-v2-profile-preview span {
+  display: block;
+}
+
+.settings-v2-profile-preview strong {
+  color: rgba(255, 255, 255, 0.94);
+  font-size: 15px;
+}
+
+.settings-v2-profile-preview span {
+  margin-top: 4px;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 12px;
+}
+
+.settings-v2-avatar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.settings-v2-pill-button {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 0 14px;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 12px;
+  font-weight: 680;
+}
+
+.settings-v2-pill-button input {
+  display: none;
+}
+
+.settings-v2-status-note {
+  border: 1px solid color-mix(in oklab, var(--vector-accent, #9b6cff) 18%, transparent);
+  border-radius: 18px;
+  background: color-mix(in oklab, var(--vector-accent, #9b6cff) 10%, rgba(255, 255, 255, 0.04));
+  padding: 14px 16px;
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 12px;
+  font-weight: 560;
+  line-height: 1.5;
+}
+
+.settings-v2-preview-shell {
+  display: grid;
+  grid-template-columns: 82px 1fr;
+  min-height: 190px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.085);
+  border-radius: 12px;
+  background: var(--vector-workspace-bg, #111112);
+}
+
+.settings-v2-preview-sidebar {
+  background: var(--vector-sidebar-bg, #18181a);
+}
+
+.settings-v2-preview-main {
+  position: relative;
+  display: grid;
+  place-items: center;
+  background:
+    linear-gradient(rgba(0, 0, 0, 0.1), rgba(0, 0, 0, 0.34)),
+    var(--vector-chat-backdrop-image, radial-gradient(circle at 50% 0%, rgba(155, 108, 255, 0.18), transparent 34rem)),
+    var(--vector-chat-bg, #202024);
+  background-size: cover;
+}
+
+.settings-v2-preview-chip {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--vector-accent, #9b6cff) 22%, rgba(255, 255, 255, 0.08));
+  padding: 7px 11px;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 11px;
+  font-weight: 720;
+}
+
+.settings-v2-preview-card {
+  display: flex;
+  width: min(420px, 78%);
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.38);
+  padding: 12px 12px 12px 18px;
+  color: rgba(255, 255, 255, 0.84);
+}
+
+.settings-v2-preview-card button {
+  border: 0;
+  border-radius: 999px;
+  background: var(--vector-accent, #9b6cff);
+  padding: 8px 13px;
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 760;
+}
+
+.settings-v2-shortcuts-embed {
+  overflow: hidden;
+  border-radius: 12px;
+}
+
+.settings-v2-about-grid {
+  display: grid;
+  grid-template-columns: 92px repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.settings-v2-about-logo {
+  grid-row: span 3;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.settings-v2-about-logo img {
+  width: 52px;
+  height: 52px;
+  border-radius: 12px;
+}
+
+.settings-v2-about-item {
+  display: flex;
+  min-height: 60px;
+  flex-direction: column;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.18);
+  padding: 12px 14px;
+}
+
+.settings-v2-about-item span {
+  color: rgba(255, 255, 255, 0.42);
+  font-size: 11px;
+  font-weight: 660;
+}
+
+.settings-v2-about-item strong {
+  margin-top: 5px;
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 13px;
+  font-weight: 680;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 1080px) {
+  .settings-v2-section-grid,
+  .settings-v2-about-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-v2-about-logo {
+    min-height: 96px;
+    grid-row: auto;
+  }
+}
+
+/* Type scale discipline: nothing in settings goes past 640 weight. */
+.settings-v2-range-value,
+.settings-v2-color-input,
+.settings-v2-color-control,
+.settings-v2-pill-button,
+.settings-v2-toast,
+.settings-v2-about-item span {
+  font-weight: 560;
+}
+
+.settings-v2-preview-chip,
+.settings-v2-preview-card button,
+.settings-v2-about-item strong,
+.settings-v2-avatar {
+  font-weight: 620;
+}
+
+.settings-v2-color-control {
+  border-radius: 10px;
+}
+
+.settings-v2-page {
+  padding: 30px 36px 40px;
+}
+
+/* Keep the dialog usable on small windows. */
+@media (max-width: 860px) {
+  .settings-v2[data-component="tabs-v2"][data-variant="settings"][data-orientation="vertical"]
+    [data-slot="tabs-v2-list"] {
+    width: 176px;
+    min-width: 176px;
+    padding: 12px;
+  }
+
+  .settings-v2-brand-row {
+    grid-template-columns: 28px 1fr;
+  }
+
+  .settings-v2-brand-mark {
+    width: 28px;
+    height: 28px;
+  }
+
+  .settings-v2-brand-subtitle {
+    display: none;
+  }
+
+  .settings-v2-page {
+    padding: 22px 20px 32px;
+  }
+
+  .settings-v2-page-title {
+    font-size: 18px;
+  }
 }

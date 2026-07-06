@@ -144,94 +144,6 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
     if (sessionID) return permission.isAutoAccepting(sessionID, sdk().directory)
     return permission.isAutoAcceptingDirectory(sdk().directory)
   }
-  const write = async (value: string) => {
-    const body = typeof document === "undefined" ? undefined : document.body
-    if (body) {
-      const textarea = document.createElement("textarea")
-      textarea.value = value
-      textarea.setAttribute("readonly", "")
-      textarea.style.position = "fixed"
-      textarea.style.opacity = "0"
-      textarea.style.pointerEvents = "none"
-      body.appendChild(textarea)
-      textarea.select()
-      const copied = document.execCommand("copy")
-      body.removeChild(textarea)
-      if (copied) return true
-    }
-
-    const clipboard = typeof navigator === "undefined" ? undefined : navigator.clipboard
-    if (!clipboard?.writeText) return false
-    return clipboard.writeText(value).then(
-      () => true,
-      () => false,
-    )
-  }
-
-  const copyShare = async (url: string, existing: boolean) => {
-    if (!(await write(url))) {
-      showToast({
-        title: language.t("toast.session.share.copyFailed.title"),
-        variant: "error",
-      })
-      return
-    }
-
-    showToast({
-      title: existing ? language.t("session.share.copy.copied") : language.t("toast.session.share.success.title"),
-      description: language.t("toast.session.share.success.description"),
-      variant: "success",
-    })
-  }
-
-  const share = async () => {
-    const sessionID = params.id
-    if (!sessionID) return
-
-    const existing = info()?.share?.url
-    if (existing) {
-      await copyShare(existing, true)
-      return
-    }
-
-    const url = await sdk()
-      .client.session.share({ sessionID })
-      .then((res) => res.data?.share?.url)
-      .catch(() => undefined)
-    if (!url) {
-      showToast({
-        title: language.t("toast.session.share.failed.title"),
-        description: language.t("toast.session.share.failed.description"),
-        variant: "error",
-      })
-      return
-    }
-
-    await copyShare(url, false)
-  }
-
-  const unshare = async () => {
-    const sessionID = params.id
-    if (!sessionID) return
-
-    await sdk()
-      .client.session.unshare({ sessionID })
-      .then(() =>
-        showToast({
-          title: language.t("toast.session.unshare.success.title"),
-          description: language.t("toast.session.unshare.success.description"),
-          variant: "success",
-        }),
-      )
-      .catch(() =>
-        showToast({
-          title: language.t("toast.session.unshare.failed.title"),
-          description: language.t("toast.session.unshare.failed.description"),
-          variant: "error",
-        }),
-      )
-  }
-
   const openFile = () => {
     void openDialog(
       () => import("@/components/dialog-select-file"),
@@ -268,6 +180,94 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
     if (terminal.all().length > 0) terminal.new()
     view().terminal.open()
   }
+
+  const openCodespace = () => {
+    const alreadyOpen = view().reviewPanel.opened() && tabs().active() === "codespace"
+    layout.fileTree.close()
+    view().reviewPanel.open("other")
+    void tabs().open("codespace")
+    tabs().setActive("codespace")
+    if (alreadyOpen) return
+    showToast({
+      title: "Vector Codespace opened",
+      description: "The synced editor is open. Pick a file in Codespace to inspect or review code.",
+    })
+  }
+
+  type VectorLocalPanelTab = "timeline" | "review" | "checkpoints" | "health"
+  const openVectorLocalPanel = (tab: VectorLocalPanelTab, scan = false) => {
+    window.dispatchEvent(
+      new CustomEvent("vector:open-code-archaeology", {
+        detail: { tab, scan },
+      }),
+    )
+  }
+
+  const vectorWorkflowCmds = () => [
+    viewCommand({
+      id: "vector.codespace.open",
+      title: "Open Vector Codespace",
+      description: "Open the synced editor with files, review, and project context.",
+      slash: "codespace",
+      onSelect: openCodespace,
+    }),
+    viewCommand({
+      id: "vector.codeArchaeology",
+      title: "Code Archaeology",
+      description: "Open the real edit timeline, changed files, and checkpoint trail.",
+      slash: "archaeology",
+      onSelect: () => openVectorLocalPanel("timeline"),
+    }),
+    viewCommand({
+      id: "vector.reviewChanges",
+      title: "Review AI Changes",
+      description: "Open the changed-file review for real pending edits.",
+      slash: "review-changes",
+      onSelect: () => openVectorLocalPanel("review"),
+    }),
+    viewCommand({
+      id: "vector.checkpoints",
+      title: "Checkpoints",
+      description: "Open restorable snapshots created from real AI edits.",
+      slash: "checkpoints",
+      onSelect: () => openVectorLocalPanel("checkpoints"),
+    }),
+    viewCommand({
+      id: "vector.projectDoctor",
+      title: "Project Doctor",
+      description: "Scan real files for health, preview readiness, context risk, and demo readiness.",
+      slash: "doctor",
+      onSelect: () => openVectorLocalPanel("health", true),
+    }),
+    viewCommand({
+      id: "vector.previewDoctor",
+      title: "Preview Doctor",
+      description: "Inspect local app entrypoints and missing preview assets.",
+      slash: "preview-doctor",
+      onSelect: () => openVectorLocalPanel("health", true),
+    }),
+    viewCommand({
+      id: "vector.costGuard",
+      title: "BYOK Cost Guard",
+      description: "Estimate local context size and model/cost risk from real project files.",
+      slash: "cost",
+      onSelect: () => openVectorLocalPanel("health", true),
+    }),
+    viewCommand({
+      id: "vector.promptGuard",
+      title: "Prompt Quality Guard",
+      description: "Show local guidance for safer prompts based on project size and pending diffs.",
+      slash: "prompt-guard",
+      onSelect: () => openVectorLocalPanel("health", true),
+    }),
+    viewCommand({
+      id: "vector.demoMode",
+      title: "Demo Mode Checklist",
+      description: "Open a local readiness checklist for a reliable demo.",
+      slash: "demo",
+      onSelect: () => openVectorLocalPanel("health", true),
+    }),
+  ]
 
   const chooseMcp = () => {
     void openDialog(
@@ -381,30 +381,6 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
     )
   }
 
-  const shareCmds = () => {
-    if (sync().data.config.share === "disabled") return []
-    return [
-      sessionCommand({
-        id: "session.share",
-        title: info()?.share?.url ? language.t("session.share.copy.copyLink") : language.t("command.session.share"),
-        description: info()?.share?.url
-          ? language.t("toast.session.share.success.description")
-          : language.t("command.session.share.description"),
-        slash: "share",
-        disabled: !params.id,
-        onSelect: share,
-      }),
-      sessionCommand({
-        id: "session.unshare",
-        title: language.t("command.session.unshare"),
-        description: language.t("command.session.unshare.description"),
-        slash: "unshare",
-        disabled: !params.id || !info()?.share?.url,
-        onSelect: unshare,
-      }),
-    ]
-  }
-
   const sessionCmds = () => [
     sessionCommand({
       id: "session.new",
@@ -476,6 +452,18 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
 
   const contextCmds = () => [
     contextCommand({
+      id: "context.window.open",
+      title: "Open Context Window",
+      description: "Open only the session context window without switching to Codespace review.",
+      slash: "context",
+      onSelect: () => {
+        view().reviewPanel.open("context-button")
+        layout.fileTree.close()
+        void tabs().open("context")
+        tabs().setActive("context")
+      },
+    }),
+    contextCommand({
       id: "context.addSelection",
       title: language.t("command.context.addSelection"),
       description: language.t("command.context.addSelection.description"),
@@ -497,13 +485,19 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
       id: "review.toggle",
       title: language.t("command.review.toggle"),
       keybind: "mod+shift+r",
-      onSelect: () => view().reviewPanel.toggle(),
+      onSelect: () => {
+        view().reviewPanel.toggle()
+        if (view().reviewPanel.opened()) tabs().setActive("review")
+      },
     }),
     viewCommand({
       id: "review.open",
       title: language.t("command.review.toggle"),
       hidden: true,
-      onSelect: () => view().reviewPanel.open(),
+      onSelect: () => {
+        view().reviewPanel.open()
+        tabs().setActive("review")
+      },
     }),
     ...(shown()
       ? [
@@ -577,9 +571,9 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
 
   command.register("session", () => [
     ...sessionCmds(),
-    ...shareCmds(),
     ...fileCmds(),
     ...contextCmds(),
+    ...vectorWorkflowCmds(),
     ...viewCmds(),
     ...terminalCmds(),
     ...messageCmds(),

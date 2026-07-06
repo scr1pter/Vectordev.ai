@@ -28,6 +28,9 @@ export const createSessionTabs = (input: TabsInput) => {
   const review = input.review ?? (() => false)
   const hasReview = input.hasReview ?? (() => false)
   const contextOpen = createMemo(() => input.tabs().active() === "context" || input.tabs().all().includes("context"))
+  const codespaceOpen = createMemo(
+    () => input.tabs().active() === "codespace" || input.tabs().all().includes("codespace"),
+  )
   const openedTabs = createMemo(
     () => {
       const seen = new Set<string>()
@@ -35,7 +38,7 @@ export const createSessionTabs = (input: TabsInput) => {
         .tabs()
         .all()
         .flatMap((tab) => {
-          if (tab === "context" || tab === "review") return []
+          if (tab === "context" || tab === "review" || tab === "codespace") return []
           const value = input.pathFromTab(tab) ? input.normalizeTab(tab) : tab
           if (seen.has(value)) return []
           seen.add(value)
@@ -48,12 +51,14 @@ export const createSessionTabs = (input: TabsInput) => {
   const activeTab = createMemo(() => {
     const active = input.tabs().active()
     if (active === "context") return active
+    if (active === "codespace") return active
     if (active === "review" && review()) return active
     if (active && input.pathFromTab(active)) return input.normalizeTab(active)
 
     const first = openedTabs()[0]
     if (first) return first
     if (contextOpen()) return "context"
+    if (codespaceOpen()) return "codespace"
     if (review() && hasReview()) return "review"
     return "empty"
   })
@@ -71,6 +76,7 @@ export const createSessionTabs = (input: TabsInput) => {
 
   return {
     contextOpen,
+    codespaceOpen,
     openedTabs,
     activeTab,
     activeFileTab,

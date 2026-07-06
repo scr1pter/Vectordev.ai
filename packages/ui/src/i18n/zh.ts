@@ -51,7 +51,8 @@ export const dict = {
   "ui.sessionTurn.error.addCredits": "添加积分",
 
   "dialog.usageExceeded.freeTier.title": "免费额度已用完",
-  "dialog.usageExceeded.freeTier.description": "订阅 Vector Go，可靠地使用最佳开源模型，每月 $5 起。",
+  "dialog.usageExceeded.freeTier.description":
+    "The selected free Vector-hosted model is temporarily out of quota. Choose another free model, connect your own provider key, or try again later.",
   "dialog.usageExceeded.freeTier.actionLabel": "订阅",
   "dialog.usageExceeded.accountRateLimit.title": "Go 额度已用完",
   "dialog.usageExceeded.accountRateLimit.description":

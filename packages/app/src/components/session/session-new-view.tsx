@@ -1,88 +1,65 @@
-import { Show, createMemo } from "solid-js"
-import { DateTime } from "luxon"
-import { useSync } from "@/context/sync"
-import { useSDK } from "@/context/sdk"
-import { useLanguage } from "@/context/language"
-import { Icon } from "@opencode-ai/ui/icon"
-import { Mark } from "@opencode-ai/ui/logo"
-import { getDirectory, getFilename } from "@opencode-ai/core/util/path"
+import { Icon as IconV2 } from "@opencode-ai/ui/v2/icon"
+import { IconButtonV2 } from "@opencode-ai/ui/v2/icon-button-v2"
+import { MenuV2 } from "@opencode-ai/ui/v2/menu-v2"
+import { TooltipV2 } from "@opencode-ai/ui/v2/tooltip-v2"
+import { useCommand } from "@/context/command"
 
-const MAIN_WORKTREE = "main"
-const CREATE_WORKTREE = "create"
-const ROOT_CLASS = "size-full flex flex-col"
+const ROOT_CLASS = "relative size-full flex flex-col"
 
 interface NewSessionViewProps {
   worktree: string
 }
 
-export function NewSessionView(props: NewSessionViewProps) {
-  const sync = useSync()
-  const sdk = useSDK()
-  const language = useLanguage()
-
-  const sandboxes = createMemo(() => sync().project?.sandboxes ?? [])
-  const options = createMemo(() => [MAIN_WORKTREE, ...sandboxes(), CREATE_WORKTREE])
-  const current = createMemo(() => {
-    const selection = props.worktree
-    if (options().includes(selection)) return selection
-    return MAIN_WORKTREE
-  })
-  const projectRoot = createMemo(() => sync().project?.worktree ?? sdk().directory)
-  const isWorktree = createMemo(() => {
-    const project = sync().project
-    if (!project) return false
-    return sdk().directory !== project.worktree
-  })
-
-  const label = (value: string) => {
-    if (value === MAIN_WORKTREE) {
-      if (isWorktree()) return language.t("session.new.worktree.main")
-      const branch = sync().data.vcs?.branch
-      if (branch) return language.t("session.new.worktree.mainWithBranch", { branch })
-      return language.t("session.new.worktree.main")
-    }
-
-    if (value === CREATE_WORKTREE) return language.t("session.new.worktree.create")
-
-    return getFilename(value)
-  }
+export function NewSessionView(_props: NewSessionViewProps) {
+  const command = useCommand()
 
   return (
     <div class={ROOT_CLASS}>
-      <div class="h-12 shrink-0" aria-hidden />
-      <div class="flex-1 px-6 pb-30 flex items-center justify-center text-center">
-        <div class="w-full max-w-200 flex flex-col items-center text-center gap-4">
-          <div class="flex flex-col items-center gap-6">
-            <Mark class="w-10" />
-            <div class="text-20-medium text-text-strong">{language.t("session.new.title")}</div>
-          </div>
-          <div class="w-full flex flex-col gap-4 items-center">
-            <div class="flex items-start justify-center gap-3 min-h-5">
-              <div class="text-12-medium text-text-weak select-text leading-5 min-w-0 max-w-160 break-words text-center">
-                {getDirectory(projectRoot())}
-                <span class="text-text-strong">{getFilename(projectRoot())}</span>
-              </div>
-            </div>
-            <div class="flex items-start justify-center gap-1.5 min-h-5">
-              <Icon name="branch" size="small" class="mt-0.5 shrink-0" />
-              <div class="text-12-medium text-text-weak select-text leading-5 min-w-0 max-w-160 break-words text-center">
-                {label(current())}
-              </div>
-            </div>
-            <Show when={sync().project}>
-              {(project) => (
-                <div class="flex items-start justify-center gap-3 min-h-5">
-                  <div class="text-12-medium text-text-weak leading-5 min-w-0 max-w-160 break-words text-center">
-                    {language.t("session.new.lastModified")}&nbsp;
-                    <span class="text-text-strong">
-                      {DateTime.fromMillis(project().time.updated ?? project().time.created)
-                        .setLocale(language.intl())
-                        .toRelative()}
-                    </span>
-                  </div>
-                </div>
-              )}
-            </Show>
+      <div class="absolute right-5 top-4 z-30 flex items-center gap-2">
+        <TooltipV2
+          placement="bottom"
+          value="Context window appears after the first message in this task."
+        >
+          <button
+            type="button"
+            disabled
+            class="grid size-9 place-items-center rounded-full text-v2-icon-icon-muted opacity-70"
+            aria-label="Context window appears after the first message"
+          >
+            <span class="block size-5 rounded-full border-2 border-current" />
+          </button>
+        </TooltipV2>
+
+        <MenuV2 gutter={6} placement="bottom-end">
+          <MenuV2.Trigger
+            as={IconButtonV2}
+            icon={<IconV2 name="outline-dots" />}
+            variant="ghost-muted"
+            size="large"
+            aria-label="More options"
+          />
+          <MenuV2.Portal>
+            <MenuV2.Content style={{ width: "154px", "min-width": "154px" }}>
+              <MenuV2.Item onSelect={() => command.trigger("settings.open")}>Settings</MenuV2.Item>
+              <MenuV2.Item onSelect={() => command.show()}>Command palette</MenuV2.Item>
+              <MenuV2.Item onSelect={() => command.trigger("file.open")}>Open file</MenuV2.Item>
+            </MenuV2.Content>
+          </MenuV2.Portal>
+        </MenuV2>
+      </div>
+
+      <div class="flex-1 px-6 pb-36 flex items-center justify-center text-center">
+        <div class="w-full max-w-200 flex flex-col items-center text-center gap-5">
+          <img
+            src="/vector-logo.png"
+            alt="Vector"
+            class="size-14 rounded-2xl object-cover shadow-[0_22px_60px_rgba(155,108,255,0.22)]"
+            draggable={false}
+          />
+          <div class="flex flex-col items-center gap-3">
+            <h1 class="text-[28px] font-medium leading-tight tracking-normal text-text-strong">
+              What can I do for you?
+            </h1>
           </div>
         </div>
       </div>

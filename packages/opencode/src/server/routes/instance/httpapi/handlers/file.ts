@@ -10,6 +10,7 @@ import ignore from "ignore"
 import path from "path"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { InstanceHttpApi } from "../api"
+import { InvalidRequestError } from "../errors"
 
 export const fileHandlers = HttpApiBuilder.group(InstanceHttpApi, "file", (handlers) =>
   Effect.gen(function* () {
@@ -113,7 +114,7 @@ export const fileHandlers = HttpApiBuilder.group(InstanceHttpApi, "file", (handl
         ),
         Effect.map(({ item, text }) =>
           Option.isSome(text)
-            ? { type: "text" as const, content: text.value.trim() }
+            ? { type: "text" as const, content: text.value }
             : {
                 type: "binary" as const,
                 content: Buffer.from(item.content).toString("base64"),
@@ -122,6 +123,22 @@ export const fileHandlers = HttpApiBuilder.group(InstanceHttpApi, "file", (handl
               },
         ),
       )
+    })
+
+    const write = Effect.fn("FileHttpApi.write")(function* (ctx: { payload: { path: string; content: string } }) {
+      const directory = (yield* InstanceState.context).directory
+      const target = path.resolve(directory, ctx.payload.path)
+      if (!FSUtil.contains(directory, target)) {
+        return yield* new InvalidRequestError({ message: "Path escapes the workspace.", field: "path" })
+      }
+      const fs = yield* FSUtil.Service
+      yield* fs.writeWithDirs(target, ctx.payload.content).pipe(
+        Effect.mapError((error) => new InvalidRequestError({ message: `${error}`, field: "path" })),
+      )
+      return {
+        path: ctx.payload.path,
+        bytes: Buffer.byteLength(ctx.payload.content, "utf8"),
+      }
     })
 
     const status = Effect.fn("FileHttpApi.status")(function* () {
@@ -134,6 +151,7 @@ export const fileHandlers = HttpApiBuilder.group(InstanceHttpApi, "file", (handl
       .handle("findSymbol", findSymbol)
       .handle("list", list)
       .handle("content", content)
+      .handle("write", write)
       .handle("status", status)
   }),
 ).pipe(Layer.provide(locationServiceMapLayer))

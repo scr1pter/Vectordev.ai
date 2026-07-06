@@ -10,6 +10,17 @@ import { useLanguage } from "@/context/language"
 import { DialogCustomProvider } from "./dialog-custom-provider"
 
 const CUSTOM_ID = "_custom"
+const OPENCODE_PROVIDER_IDS = new Set(["opencode", "opencode-go", "opencode-zen"])
+const HIDDEN_PROVIDER_IDS = new Set<string>()
+
+const isOpenCodeProvider = (id: string) => OPENCODE_PROVIDER_IDS.has(id)
+
+const providerDisplayName = (id: string, name: string) => {
+  if (id === "opencode") return name || "OpenCode"
+  if (id === "opencode-go") return name || "OpenCode Go"
+  if (id === "opencode-zen") return name || "OpenCode Zen"
+  return name
+}
 
 export const DialogSelectProvider: Component<{ directory?: Accessor<string | undefined> }> = (props) => {
   const dialog = useDialog()
@@ -20,14 +31,17 @@ export const DialogSelectProvider: Component<{ directory?: Accessor<string | und
   const otherGroup = () => language.t("dialog.provider.group.other")
   const customLabel = () => language.t("settings.providers.tag.custom")
   const note = (id: string) => {
+    if (id === "opencode") return "Free starter models provided by OpenCode and available inside Vector."
+    if (id === "opencode-go") return "OpenCode Go models are provided by OpenCode and can be used inside Vector."
+    if (id === "opencode-zen") return "OpenCode Zen models are provided by OpenCode and can be used inside Vector."
     if (id === "anthropic") return language.t("dialog.provider.anthropic.note")
     if (id === "openai") return language.t("dialog.provider.openai.note")
     if (id.startsWith("github-copilot")) return language.t("dialog.provider.copilot.note")
-    if (id === "opencode-go") return language.t("dialog.provider.opencodeGo.tagline")
   }
 
   return (
     <Dialog title={language.t("command.provider.connect")} transition>
+      <div class="px-4 pt-3 pb-1 text-12-medium text-text-base">Models provided by Vector:</div>
       <List
         class="px-3"
         search={{ placeholder: language.t("dialog.provider.search.placeholder"), autofocus: true }}
@@ -36,7 +50,9 @@ export const DialogSelectProvider: Component<{ directory?: Accessor<string | und
         key={(x) => x?.id}
         items={() => {
           language.locale()
-          return [{ id: CUSTOM_ID, name: customLabel() }, ...providers.all().values()]
+          return [{ id: CUSTOM_ID, name: customLabel() }, ...providers.all().values()].filter(
+            (provider) => provider.id === CUSTOM_ID || !HIDDEN_PROVIDER_IDS.has(provider.id),
+          )
         }}
         filterKeys={["id", "name"]}
         groupBy={(x) => (popularProviders.includes(x.id) ? popularGroup() : otherGroup())}
@@ -45,7 +61,7 @@ export const DialogSelectProvider: Component<{ directory?: Accessor<string | und
           if (b.id === CUSTOM_ID) return 1
           if (popularProviders.includes(a.id) && popularProviders.includes(b.id))
             return popularProviders.indexOf(a.id) - popularProviders.indexOf(b.id)
-          return a.name.localeCompare(b.name)
+          return providerDisplayName(a.id, a.name).localeCompare(providerDisplayName(b.id, b.name))
         }}
         sortGroupsBy={(a, b) => {
           const popular = popularGroup()
@@ -65,19 +81,18 @@ export const DialogSelectProvider: Component<{ directory?: Accessor<string | und
         {(i) => (
           <div class="px-1.25 w-full flex items-center gap-x-3">
             <ProviderIcon data-slot="list-item-extra-icon" id={i.id} />
-            <span>{i.name}</span>
-            <Show when={i.id === "opencode"}>
-              <div class="text-14-regular text-text-weak">{language.t("dialog.provider.opencode.tagline")}</div>
+            <span>{providerDisplayName(i.id, i.name)}</span>
+            <Show when={isOpenCodeProvider(i.id)}>
+              <div class="text-14-regular text-text-weak">{note(i.id)}</div>
             </Show>
             <Show when={i.id === CUSTOM_ID}>
               <Tag>{language.t("settings.providers.tag.custom")}</Tag>
             </Show>
-            <Show when={i.id === "opencode"}>
+            <Show when={isOpenCodeProvider(i.id)}>
               <Tag>{language.t("dialog.provider.tag.recommended")}</Tag>
             </Show>
-            <Show when={note(i.id)}>{(value) => <div class="text-14-regular text-text-weak">{value()}</div>}</Show>
-            <Show when={i.id === "opencode-go"}>
-              <Tag>{language.t("dialog.provider.tag.recommended")}</Tag>
+            <Show when={!isOpenCodeProvider(i.id) && note(i.id)}>
+              {(value) => <div class="text-14-regular text-text-weak">{value()}</div>}
             </Show>
           </div>
         )}

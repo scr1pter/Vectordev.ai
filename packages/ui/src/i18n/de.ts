@@ -53,7 +53,7 @@ export const dict = {
 
   "dialog.usageExceeded.freeTier.title": "Kostenloses Limit erreicht",
   "dialog.usageExceeded.freeTier.description":
-    "Abonniere Vector Go für zuverlässigen Zugriff auf die besten Open-Source-Modelle, ab $5/Monat.",
+    "The selected free Vector-hosted model is temporarily out of quota. Choose another free model, connect your own provider key, or try again later.",
   "dialog.usageExceeded.freeTier.actionLabel": "Abonnieren",
   "dialog.usageExceeded.accountRateLimit.title": "Go-Limit erreicht",
   "dialog.usageExceeded.accountRateLimit.description":

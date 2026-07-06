@@ -35,6 +35,14 @@ type ModelItem = ReturnType<ModelState["list"]>[number]
 
 const modelKey = (model: ModelItem) => `${model.provider.id}:${model.id}`
 const manageKey = "action:manage"
+const HIDDEN_PROVIDER_IDS = new Set<string>()
+
+const providerDisplayName = (id: string, name: string) => {
+  if (id === "opencode") return name || "OpenCode"
+  if (id === "opencode-go") return name || "OpenCode Go"
+  if (id === "opencode-zen") return name || "OpenCode Zen"
+  return name
+}
 
 const sortModelGroups = (a: { category: string; items: ModelItem[] }, b: { category: string; items: ModelItem[] }) => {
   const aIndex = popularProviders.indexOf(a.category)
@@ -45,7 +53,9 @@ const sortModelGroups = (a: { category: string; items: ModelItem[] }, b: { categ
   if (aPopular && !bPopular) return -1
   if (!aPopular && bPopular) return 1
   if (aPopular && bPopular) return aIndex - bIndex
-  return a.items[0].provider.name.localeCompare(b.items[0].provider.name)
+  return providerDisplayName(a.category, a.items[0].provider.name).localeCompare(
+    providerDisplayName(b.category, b.items[0].provider.name),
+  )
 }
 
 const ModelList: Component<{
@@ -61,6 +71,7 @@ const ModelList: Component<{
   const models = createMemo(() =>
     model
       .list()
+      .filter((m) => !HIDDEN_PROVIDER_IDS.has(m.provider.id))
       .filter((m) => model.visible({ modelID: m.id, providerID: m.provider.id }))
       .filter((m) => (props.provider ? m.provider.id === props.provider : true)),
   )
@@ -75,7 +86,7 @@ const ModelList: Component<{
       current={model.current()}
       filterKeys={["provider.name", "name", "id"]}
       sortBy={(a, b) => a.name.localeCompare(b.name)}
-      groupBy={(x) => x.provider.name}
+      groupBy={(x) => providerDisplayName(x.provider.id, x.provider.name)}
       sortGroupsBy={(a, b) => {
         const aProvider = a.items[0].provider.id
         const bProvider = b.items[0].provider.id
@@ -247,6 +258,7 @@ export function ModelSelectorPopoverV2(props: {
   const allModels = createMemo(() =>
     model
       .list()
+      .filter((item) => !HIDDEN_PROVIDER_IDS.has(item.provider.id))
       .filter((item) => model.visible({ modelID: item.id, providerID: item.provider.id }))
       .filter((item) => (props.provider ? item.provider.id === props.provider : true)),
   )
@@ -257,7 +269,7 @@ export function ModelSelectorPopoverV2(props: {
           (item) =>
             item.name.toLowerCase().includes(search) ||
             item.id.toLowerCase().includes(search) ||
-            item.provider.name.toLowerCase().includes(search),
+            providerDisplayName(item.provider.id, item.provider.name).toLowerCase().includes(search),
         )
       : allModels()
 
@@ -350,7 +362,7 @@ export function ModelSelectorPopoverV2(props: {
           !search ||
           item.name.toLowerCase().includes(search) ||
           item.id.toLowerCase().includes(search) ||
-          item.provider.name.toLowerCase().includes(search),
+          providerDisplayName(item.provider.id, item.provider.name).toLowerCase().includes(search),
       )
     setStore({ search: value, active: first ? modelKey(first) : manageKey })
   }
@@ -438,7 +450,9 @@ export function ModelSelectorPopoverV2(props: {
                   {(group) => (
                     <MenuV2.Group>
                       <MenuV2.GroupLabel class="gap-2 px-3">
-                        <span class="min-w-0 truncate">{group.items[0].provider.name}</span>
+                        <span class="min-w-0 truncate">
+                          {providerDisplayName(group.category, group.items[0].provider.name)}
+                        </span>
                       </MenuV2.GroupLabel>
                       <MenuV2.RadioGroup value={current()}>
                         <For each={group.items}>

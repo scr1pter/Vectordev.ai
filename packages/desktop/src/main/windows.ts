@@ -225,7 +225,13 @@ function registerWindow(win: BrowserWindow, id: string) {
   // Windows never emits before-quit on OS shutdown/logoff, but each window
   // gets session-end before it closes; flag the quit so ids stay persisted.
   win.on("session-end", () => registry.setQuitting())
-  win.on("closed", () => registry.closed(id))
+  win.on("close", () => {
+    writeLog("window", "main window closing", { id })
+  })
+  win.on("closed", () => {
+    writeLog("window", "main window closed", { id })
+    registry.closed(id)
+  })
 }
 
 function windowStateFile(id: string) {
@@ -388,7 +394,6 @@ function wireWindowRecovery(win: BrowserWindow, name: string) {
   win.on("unresponsive", () => {
     writeLog("window", "renderer unresponsive", { window: name, currentURL: currentURL() }, "error")
     sampler.start()
-    void show("Vector is not responding", "You can relaunch the app, open the logs, or keep waiting.", true)
   })
   win.on("responsive", () => {
     writeLog("window", "renderer responsive", { window: name, currentURL: currentURL() }, "error")

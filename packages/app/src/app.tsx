@@ -189,6 +189,51 @@ declare global {
     api?: {
       setTitlebar?: (theme: { mode: "light" | "dark" }) => Promise<void>
       exportDebugLogs?: () => Promise<string>
+      inspectBrowserUrl?: (url: string) => Promise<{
+        url: string
+        finalUrl: string
+        status: number
+        ok: boolean
+        title: string
+        description: string
+        htmlBytes: number
+        links: number
+        scripts: number
+        stylesheets: number
+        checkedAt: string
+        error?: string
+      }>
+      runBrowserAutomation?: (input: {
+        url: string
+        actions?: (
+          | { type: "click"; selector: string }
+          | { type: "type"; selector: string; text: string; clear?: boolean }
+          | { type: "press"; key: string }
+          | { type: "evaluate"; script: string }
+        )[]
+        viewport?: { width: number; height: number }
+      }) => Promise<{
+        url: string
+        finalUrl: string
+        status: number
+        ok: boolean
+        title: string
+        description: string
+        htmlBytes: number
+        links: number
+        scripts: number
+        stylesheets: number
+        checkedAt: string
+        error?: string
+        viewport: { width: number; height: number }
+        screenshotDataUrl: string
+        textSample: string
+        console: { level: string; message: string }[]
+        pageErrors: string[]
+        actions: { label: string; ok: boolean; error?: string; result?: unknown }[]
+        interactives: { tag: string; text: string; selector: string; role?: string; type?: string }[]
+        inputs: { tag: string; selector: string; placeholder?: string; type?: string; name?: string }[]
+      }>
     }
   }
 }

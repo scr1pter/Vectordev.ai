@@ -17,6 +17,11 @@ export const FileQuery = Schema.Struct({
   path: Schema.String,
 })
 
+export const FileWritePayload = Schema.Struct({
+  path: Schema.String,
+  content: Schema.String,
+})
+
 export const FindTextQuery = Schema.Struct({
   ...WorkspaceRoutingQueryFields,
   pattern: Schema.String,
@@ -85,6 +90,11 @@ export const LegacyContent = Schema.Struct({
   mimeType: Schema.optional(Schema.String),
 }).annotate({ identifier: "FileContent" })
 
+export const LegacyWriteResult = Schema.Struct({
+  path: Schema.String,
+  bytes: NonNegativeInt,
+}).annotate({ identifier: "FileWriteResult" })
+
 export const LegacyStatus = Schema.Struct({
   path: Schema.String,
   added: NonNegativeInt,
@@ -98,6 +108,7 @@ export const FilePaths = {
   findSymbol: "/find/symbol",
   list: "/file",
   content: "/file/content",
+  write: "/file/write",
   status: "/file/status",
 } as const
 
@@ -153,6 +164,17 @@ export const FileApi = HttpApi.make("file")
             identifier: "file.read",
             summary: "Read file",
             description: "Read the content of a specified file.",
+          }),
+        ),
+        HttpApiEndpoint.post("write", FilePaths.write, {
+          query: WorkspaceRoutingQuery,
+          payload: FileWritePayload,
+          success: described(LegacyWriteResult, "File written"),
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "file.write",
+            summary: "Write file",
+            description: "Write text content to a workspace file without requiring git.",
           }),
         ),
         HttpApiEndpoint.get("status", FilePaths.status, {

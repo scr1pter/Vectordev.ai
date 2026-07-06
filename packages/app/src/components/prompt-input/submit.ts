@@ -10,7 +10,7 @@ import { useLanguage } from "@/context/language"
 import { useLayout } from "@/context/layout"
 import { useLocal } from "@/context/local"
 import { usePermission } from "@/context/permission"
-import { PLAN_MODE_INSTRUCTION, usePlanMode } from "@/context/plan-mode"
+import { usePlanMode } from "@/context/plan-mode"
 import { type ContextItem, type ImageAttachmentPart, type Prompt, type usePrompt } from "@/context/prompt"
 import { useSDK, type DirectorySDK } from "@/context/sdk"
 import { useSync, type DirectorySync } from "@/context/sync"
@@ -52,19 +52,6 @@ type FollowupSendInput = {
 const draftText = (prompt: Prompt) => prompt.map((part) => ("content" in part ? part.content : "")).join("")
 
 const draftImages = (prompt: Prompt) => prompt.filter((part): part is ImageAttachmentPart => part.type === "image")
-
-const withPlanModePrompt = (prompt: Prompt): Prompt => {
-  const prefix = `${PLAN_MODE_INSTRUCTION}\n\nUser request:\n`
-  return [
-    {
-      type: "text",
-      content: prefix,
-      start: 0,
-      end: prefix.length,
-    },
-    ...prompt,
-  ]
-}
 
 export async function sendFollowupDraft(input: FollowupSendInput) {
   const text = draftText(input.draft.prompt)
@@ -415,7 +402,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     const draft: FollowupDraft = {
       sessionID: session.id,
       sessionDirectory,
-      prompt: isPlanMode ? withPlanModePrompt(currentPrompt) : currentPrompt,
+      prompt: currentPrompt,
       context,
       agent,
       model,

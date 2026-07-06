@@ -24,6 +24,15 @@ import "./settings-v2/settings-v2.css"
 
 type ModelItem = ReturnType<ReturnType<typeof useLocal>["model"]["list"]>[number]
 
+const HIDDEN_PROVIDER_IDS = new Set<string>()
+
+const providerDisplayName = (id: string, name: string) => {
+  if (id === "opencode") return name || "OpenCode"
+  if (id === "opencode-go") return name || "OpenCode Go"
+  if (id === "opencode-zen") return name || "OpenCode Zen"
+  return name
+}
+
 export const DialogManageModels: Component = () => {
   const local = useLocal()
   const language = useLanguage()
@@ -34,7 +43,8 @@ export const DialogManageModels: Component = () => {
     dialog.show(() => <DialogSelectProvider directory={directory} />)
   }
   const providerRank = (id: string) => popularProviders.indexOf(id)
-  const providerList = (providerID: string) => local.model.list().filter((x) => x.provider.id === providerID)
+  const visibleModels = () => local.model.list().filter((x) => !HIDDEN_PROVIDER_IDS.has(x.provider.id))
+  const providerList = (providerID: string) => visibleModels().filter((x) => x.provider.id === providerID)
   const providerVisible = (providerID: string) =>
     providerList(providerID).every((x) => local.model.visible({ modelID: x.id, providerID: x.provider.id }))
   const setProviderVisibility = (providerID: string, checked: boolean) => {
@@ -58,18 +68,19 @@ export const DialogManageModels: Component = () => {
         search={{ placeholder: language.t("dialog.model.search.placeholder"), autofocus: true }}
         emptyMessage={language.t("dialog.model.empty")}
         key={(x) => `${x?.provider?.id}:${x?.id}`}
-        items={local.model.list()}
+        items={visibleModels()}
         filterKeys={["provider.name", "name", "id"]}
         sortBy={(a, b) => a.name.localeCompare(b.name)}
         groupBy={(x) => x.provider.id}
         groupHeader={(group) => {
           const provider = group.items[0].provider
+          const label = providerDisplayName(provider.id, provider.name)
           return (
             <>
-              <span>{provider.name}</span>
+              <span>{label}</span>
               <Tooltip
                 placement="top"
-                value={language.t("dialog.model.manage.provider.toggle", { provider: provider.name })}
+                value={language.t("dialog.model.manage.provider.toggle", { provider: label })}
               >
                 <Switch
                   class="-mr-1"
@@ -77,7 +88,7 @@ export const DialogManageModels: Component = () => {
                   onChange={(checked) => setProviderVisibility(provider.id, checked)}
                   hideLabel
                 >
-                  {provider.name}
+                  {label}
                 </Switch>
               </Tooltip>
             </>
@@ -125,7 +136,8 @@ export const DialogManageModelsV2: Component = () => {
   const handleConnectProvider = () => {
     dialog.show(() => <DialogSelectProvider directory={directory} />)
   }
-  const providerList = (providerID: string) => local.model.list().filter((x) => x.provider.id === providerID)
+  const visibleModels = () => local.model.list().filter((x) => !HIDDEN_PROVIDER_IDS.has(x.provider.id))
+  const providerList = (providerID: string) => visibleModels().filter((x) => x.provider.id === providerID)
   const providerVisible = (providerID: string) =>
     providerList(providerID).every((x) => local.model.visible({ modelID: x.id, providerID: x.provider.id }))
   const setProviderVisibility = (providerID: string, checked: boolean) => {
@@ -137,7 +149,7 @@ export const DialogManageModelsV2: Component = () => {
     local.model.setVisibility({ modelID: item.id, providerID: item.provider.id }, checked)
   }
   const list = useFilteredList<ModelItem>({
-    items: () => local.model.list(),
+    items: visibleModels,
     key: (x) => `${x.provider.id}:${x.id}`,
     filterKeys: ["provider.name", "name", "id"],
     sortBy: (a, b) => a.name.localeCompare(b.name),
@@ -222,7 +234,9 @@ export const DialogManageModelsV2: Component = () => {
                       <div class="settings-v2-models-group-header justify-between">
                         <div class="flex min-w-0 items-center gap-2">
                           <ProviderIcon id={group.category} width={16} height={16} class="ml-4 shrink-0" />
-                          <h3 class="settings-v2-section-title">{group.items[0].provider.name}</h3>
+                          <h3 class="settings-v2-section-title">
+                            {providerDisplayName(group.items[0].provider.id, group.items[0].provider.name)}
+                          </h3>
                         </div>
                         <div>
                           <SwitchV2
@@ -231,7 +245,7 @@ export const DialogManageModelsV2: Component = () => {
                             onChange={(checked) => setProviderVisibility(group.category, checked)}
                             hideLabel
                           >
-                            {group.items[0].provider.name}
+                            {providerDisplayName(group.items[0].provider.id, group.items[0].provider.name)}
                           </SwitchV2>
                         </div>
                       </div>

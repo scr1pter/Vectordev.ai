@@ -533,7 +533,6 @@ export function NewHome() {
           }}
           clearNotifications={clearNotifications}
           unseenCount={unseenCount}
-          openHelp={() => platform.openLink("mailto:contact.astr0gpt@gmail.com")}
           language={language}
         />
 
@@ -587,7 +586,19 @@ export function NewHome() {
             >
               <Show
                 when={groups().length > 0}
-                fallback={<HomeSessionsEmpty onNewSession={newSessionProject() ? openNewSession : undefined} />}
+                fallback={
+                  <HomeSessionsEmpty
+                    onNewSession={newSessionProject() ? openNewSession : undefined}
+                    onOpenProject={
+                      newSessionProject()
+                        ? undefined
+                        : () => {
+                            const conn = focusedServer() ?? global.servers.list()[0]
+                            if (conn) chooseProject(conn)
+                          }
+                    }
+                  />
+                }
               >
                 <div ref={sessionHeaderOpacity.setContentRef} class="flex flex-col pt-3 pr-3 pb-16">
                   <For each={groups()}>
@@ -622,11 +633,6 @@ export function NewHome() {
             </Show>
           </ScrollView>
         </section>
-        <HomeUtilityNav
-          class="flex lg:hidden"
-          openHelp={() => platform.openLink("mailto:contact.astr0gpt@gmail.com")}
-          language={language}
-        />
       </div>
     </div>
   )
@@ -643,7 +649,6 @@ function HomeProjectColumn(props: {
   closeProject: (server: ServerConnection.Any, directory: string) => void
   clearNotifications: (server: ServerConnection.Any, project: LocalProject) => void
   unseenCount: (server: ServerConnection.Any, project: LocalProject) => number
-  openHelp: () => void
   language: ReturnType<typeof useLanguage>
 }) {
   const global = useGlobal()
@@ -724,31 +729,7 @@ function HomeProjectColumn(props: {
           </div>
         </Show>
       </ScrollView>
-      <HomeUtilityNav
-        class="mb-8 mt-4 hidden shrink-0 lg:flex"
-        openHelp={props.openHelp}
-        language={props.language}
-      />
     </aside>
-  )
-}
-
-function HomeUtilityNav(props: {
-  class?: string
-  openHelp: () => void
-  language: ReturnType<typeof useLanguage>
-}) {
-  return (
-    <div class={`${props.class ?? ""} min-w-0 flex-col gap-1`}>
-      <button
-        type="button"
-        class={`${HOME_PROJECT_NAV_ROW} text-v2-text-text-faint [&>[data-slot=icon-svg]]:text-v2-icon-icon-muted`}
-        onClick={props.openHelp}
-      >
-        <IconV2 name="help" size="small" />
-        <span class={HOME_PROJECT_NAV_LABEL}>{props.language.t("sidebar.help")}</span>
-      </button>
-    </div>
   )
 }
 
@@ -1332,20 +1313,36 @@ function HomeSessionRow(props: {
   )
 }
 
-function HomeSessionsEmpty(props: { onNewSession?: () => void }) {
+function HomeSessionsEmpty(props: { onNewSession?: () => void; onOpenProject?: () => void }) {
   const language = useLanguage()
   return (
-    <div class="flex min-h-full flex-col items-center gap-4 px-6 pt-[52px] text-center">
+    <div class="flex min-h-[320px] flex-col items-center justify-center gap-3 px-6 py-12 text-center">
+      <div class="mb-1 grid size-10 place-items-center rounded-xl bg-v2-background-bg-layer-02 text-v2-icon-icon-muted">
+        <IconV2 name="new-session" />
+      </div>
       <div class="shrink-0 text-[13px] leading-[13px] tracking-[-0.04px] text-v2-text-text-base [font-weight:530]">
         {language.t("home.sessions.empty")}
       </div>
-      <p class="mb-1 text-center text-[13px] leading-5 tracking-[-0.04px] text-v2-text-text-muted [font-weight:440]">
+      <p class="mb-1 max-w-[340px] text-center text-[13px] leading-5 tracking-[-0.04px] text-v2-text-text-muted [font-weight:440]">
         {language.t("home.sessions.empty.description")}
       </p>
       <Show when={props.onNewSession}>
         {(onNewSession) => (
           <ButtonV2 data-action="home-new-session" variant="neutral" size="normal" icon="edit" onClick={onNewSession()}>
             {language.t("command.session.new")}
+          </ButtonV2>
+        )}
+      </Show>
+      <Show when={props.onOpenProject}>
+        {(onOpenProject) => (
+          <ButtonV2
+            data-action="home-open-project"
+            variant="neutral"
+            size="normal"
+            icon="folder-add-left"
+            onClick={onOpenProject()}
+          >
+            {language.t("command.project.open")}
           </ButtonV2>
         )}
       </Show>

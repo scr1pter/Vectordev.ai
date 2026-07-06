@@ -40,6 +40,38 @@ export type FatalRendererError = {
   os?: string
 }
 
+export type BrowserAutomationReport = {
+  url: string
+  finalUrl: string
+  status: number
+  ok: boolean
+  title: string
+  description: string
+  htmlBytes: number
+  links: number
+  scripts: number
+  stylesheets: number
+  checkedAt: string
+  error?: string
+}
+
+export type BrowserAutomationAction =
+  | { type: "click"; selector: string }
+  | { type: "type"; selector: string; text: string; clear?: boolean }
+  | { type: "press"; key: string }
+  | { type: "evaluate"; script: string }
+
+export type BrowserAutomationRun = BrowserAutomationReport & {
+  viewport: { width: number; height: number }
+  screenshotDataUrl: string
+  textSample: string
+  console: { level: string; message: string }[]
+  pageErrors: string[]
+  actions: { label: string; ok: boolean; error?: string; result?: unknown }[]
+  interactives: { tag: string; text: string; selector: string; role?: string; type?: string }[]
+  inputs: { tag: string; selector: string; placeholder?: string; type?: string; name?: string }[]
+}
+
 export type ElectronAPI = {
   killSidecar: () => Promise<void>
   installCli: () => Promise<string>
@@ -98,6 +130,12 @@ export type ElectronAPI = {
   setTitlebar: (theme: TitlebarTheme) => Promise<void>
   runDesktopMenuAction: (action: DesktopMenuAction) => Promise<void>
   setBackgroundColor: (color: string) => Promise<void>
+  inspectBrowserUrl: (url: string) => Promise<BrowserAutomationReport>
+  runBrowserAutomation: (input: {
+    url: string
+    actions?: BrowserAutomationAction[]
+    viewport?: { width: number; height: number }
+  }) => Promise<BrowserAutomationRun>
   exportDebugLogs: () => Promise<string>
   recordFatalRendererError: (error: FatalRendererError) => Promise<void>
 }
