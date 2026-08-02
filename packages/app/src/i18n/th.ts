@@ -276,6 +276,7 @@ export const dict = {
   "prompt.action.attachFile": "แนบไฟล์",
   "prompt.attachment.remove": "เอาไฟล์แนบออก",
   "prompt.action.send": "ส่ง",
+  "prompt.action.queue": "เข้าคิว",
   "prompt.action.stop": "หยุด",
 
   "prompt.toast.pasteUnsupported.title": "ไฟล์แนบที่ไม่รองรับ",
@@ -533,6 +534,8 @@ export const dict = {
   "session.followupDock.summary.other": "{{count}} ข้อความในคิว",
   "session.followupDock.sendNow": "ส่งทันที",
   "session.followupDock.edit": "แก้ไข",
+  "session.followupDock.copy": "คัดลอก",
+  "session.followupDock.delete": "ลบ",
   "session.followupDock.collapse": "ย่อข้อความในคิว",
   "session.followupDock.expand": "ขยายข้อความในคิว",
   "session.revertDock.summary.one": "{{count}} ข้อความที่ถูกย้อนกลับ",

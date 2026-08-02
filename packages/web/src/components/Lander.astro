@@ -1,1003 +1,980 @@
 ---
-const downloadOptions = [
-  { title: "macOS Apple Silicon", badge: ".dmg", href: "/download/mac-arm64" },
-  { title: "macOS Intel", badge: ".dmg", href: "/download/mac-x64" },
-  { title: "Windows", badge: ".exe", href: "/download/windows" },
-  { title: "Linux", badge: "AppImage", href: "/download/linux" },
-]
+import { ArrowRight, ChevronDown, Download } from "lucide-react"
+import MarketingFooter from "./marketing/MarketingFooter.astro"
+import MarketingNav from "./marketing/MarketingNav.astro"
+import screenshotAgent from "../assets/lander/vector-agent-current.png"
+import screenshotAgents from "../assets/lander/vector-workspaces-current.png"
+import screenshotBrowser from "../assets/lander/vector-browser-current.png"
+import screenshotCloud from "../assets/lander/vector-cloud-current.png"
+import screenshotEditor from "../assets/lander/vector-editor-current.png"
 
-const runSteps = [
-  { label: "Read repository", meta: "42 files scanned" },
-  { label: "Planned implementation", meta: "4 steps, plan mode" },
-  { label: "Edited 14 files", meta: "reviewable diff ready" },
-  { label: "Started dev server", meta: "localhost:3000" },
-  { label: "Tested in browser", meta: "3 flows verified" },
-  { label: "Created checkpoint", meta: "safe to restore" },
-]
+const runtimes = ["Vector", "Claude Code", "Codex", "Cursor Agent"]
 
-const trustCards = [
-  { name: "Impact Analysis", note: "what may break before you accept", risk: "low" },
-  { name: "Secret Scanner", note: "keys never slip into commits", risk: "guard" },
-  { name: "Checkpoints", note: "one click back to any safe state", risk: "safe" },
-]
-
-const quickFeatures = [
-  { icon: "◈", name: "Project Brain", copy: "A living map of your architecture, decisions, and next steps." },
-  { icon: "⌘", name: "Plan Mode", copy: "Review the plan before a single file changes. Shift+Tab." },
-  { icon: "◧", name: "Codespace", copy: "Real editor, file tree, problems panel, and one-click AI repair." },
-  { icon: "⟁", name: "Runbook", copy: "Vector writes how to run and debug your project — automatically." },
-  { icon: "◎", name: "Learn Mode", copy: "Beginner to pro explanations for every change it makes." },
-  { icon: "▲", name: "Deploy Preview", copy: "A clean, shareable demo checklist without cloud setup." },
-]
-
-const workflowCards = [
+const chapters = [
   {
-    label: "Agent",
-    title: "Start with the outcome.",
-    copy: "Ask Vector to build, fix, refactor, or explain. It plans against the repository before touching code.",
+    eyebrow: "Parallel workspaces",
+    title: "Give every responsibility its own agent.",
+    copy: "Launch up to 16 isolated workspaces from one repository. Each agent gets its own branch, files, terminal, conversation, model, and checks, so frontend, backend, testing, and deployment can move at the same time without touching main.",
+    facts: ["Isolated git worktrees", "Live status and token activity", "Review, merge, continue, or discard"],
+    image: screenshotAgents,
+    alt: "Vector showing multiple isolated agent workspaces for the same repository",
   },
   {
-    label: "Review",
-    title: "Inspect the engineering trail.",
-    copy: "See files read, edits made, risks found, and the exact change set before you accept anything.",
+    eyebrow: "Controlled browser",
+    title: "The browser is part of the engineering loop.",
+    copy: "Vector can open the running product, navigate it, interact with forms, inspect page state, read console and network failures, capture evidence, repair the code, and test the result again. You can take over at any time.",
+    facts: ["Visible browser session", "DOM, console, and network evidence", "Approval gates for sensitive actions"],
+    image: screenshotBrowser,
+    alt: "Vector controlled browser beside an active engineering session",
   },
   {
-    label: "Codespace",
-    title: "Drop into real code.",
-    copy: "Open the editor when precision matters: files, syntax, preview, problems, debugging, and checkpoints.",
+    eyebrow: "Codespace and Canvas",
+    title: "Code yourself. Delegate beside it.",
+    copy: "Open a real project editor with search, diagnostics, terminal access, inline assistance, and a resizable editor agent. Canvas lets you arrange the editor, browser, terminal, notes, and cloud controls into one multitasking surface.",
+    facts: ["Syntax-aware code editing", "Project search and diagnostics", "Resizable tools on one canvas"],
+    image: screenshotEditor,
+    alt: "Vector Codespace with project files, editor, and the integrated editor agent",
   },
   {
-    label: "Verify",
-    title: "Run it, repair it, ship it.",
-    copy: "Vector helps run checks, explain failures, create checkpoints, and prepare a demo-ready build.",
+    eyebrow: "Vector Cloud",
+    title: "Ship without losing the context that built it.",
+    copy: "Connect hosting, source control, and data services from the project that produced the build. Publish through your own accounts, manage environment variables, inspect releases and logs, and hand the live result back to the browser for verification.",
+    facts: ["Vercel and Netlify publishing", "GitHub, GitLab, and Supabase connections", "Domains, logs, health, and environment variables"],
+    image: screenshotCloud,
+    alt: "Vector Cloud showing deployment, infrastructure, and project health",
   },
 ]
 
-const proofPoints = [
-  "Codex-style agent flow",
-  "Cursor-style code ownership",
-  "BYOK model control",
-  "Review-first changes",
-  "Desktop-first speed",
-  "One project, two surfaces",
+const systemRows = [
+  ["Context engine", "Indexes symbols, dependencies, references, and likely impact so the model receives the code that matters instead of an indiscriminate repository dump."],
+  ["Persistent memory", "Keeps repository conventions, accepted decisions, and corrections attached to the project across sessions."],
+  ["Execution controls", "Quick, normal, fast, and effort settings let the user trade latency and token depth without changing the workflow."],
+  ["Trust boundary", "Diffs, checks, secret scanning, checkpoints, risk signals, and approvals stand between agent output and main."],
+  ["Transparent economics", "Input, output, reasoning, cache, context, model, and recorded cost remain visible per session and workspace."],
+]
+
+const comparison = [
+  ["Existing local repositories", "Native", "Native", "Native", "Native", "Git import"],
+  ["Editor and terminal", "Both built in", "Terminal-first", "Agent workspace", "IDE-native", "Managed editor"],
+  ["Parallel isolated agents", "Up to 16", "Subagents", "Worktrees", "Background agents", "Not core"],
+  ["Visible browser loop", "Built in", "Via tools", "Browser + CDP", "Via tools", "Preview-centric"],
+  ["Review before merge", "Diff + checks + risk", "Git workflow", "Diff + worktrees", "Diff + merge", "History/Git"],
+  ["Provider choice", "Multi-provider BYOK", "Claude", "OpenAI", "Multiple models", "Platform managed"],
+  ["Publishing surface", "Vercel + Netlify", "Via tools", "Via skills", "Via MCP", "Native hosting"],
 ]
 ---
 
-<div class="lander" id="vector-lander">
-  <!-- ambient layers -->
-  <div class="sky" aria-hidden="true">
-    <div class="aurora"></div>
-    <div class="stars"></div>
-    <div class="pointer-glow"></div>
-  </div>
+<div class="vector-marketing">
+  <canvas class="ascii-field site-field" data-vector-field aria-hidden="true"></canvas>
+  <MarketingNav active="product" />
 
-  <!-- ============ HERO ============ -->
-  <header class="nav">
-    <a class="brand" href="/">
-      <img src="/vector-logo.png" alt="" width="34" height="34" />
-      <span>Vector</span>
-    </a>
-    <nav class="nav-links">
-      <a href="/docs">Docs</a>
-      <a href="https://github.com/vectordev-ai" rel="noopener">GitHub</a>
-      <a class="nav-cta" href="#download">Download</a>
-    </nav>
-  </header>
+  <main>
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero-shade" aria-hidden="true"></div>
 
-  <section class="hero">
-    <p class="eyebrow reveal">The AI software engineering workspace</p>
-    <h1 class="reveal" style="--d:.08s">
-      Ship real software<br />
-      <em>with an agent you can trust.</em>
-    </h1>
-    <p class="lede reveal" style="--d:.16s">
-      Vector plans, edits, runs, and verifies your code on your machine — with your own model keys,
-      reviewable changes, and a checkpoint for every risk it takes.
-    </p>
-    <div class="cta-row reveal" style="--d:.24s">
-      <a class="btn primary" href="#download">Download for free</a>
-      <a class="btn ghost" href="#story">See it work<span class="arrow">↓</span></a>
-    </div>
-
-    <!-- cinematic product window -->
-    <div class="stage reveal" style="--d:.34s">
-      <div class="float-chip chip-a" aria-hidden="true">Plan Mode <b>ON</b></div>
-      <div class="float-chip chip-b" aria-hidden="true">BYOK · your keys</div>
-      <div class="float-chip chip-c" aria-hidden="true">Checkpoint saved</div>
-
-      <div class="window hero-window">
-        <div class="window-bar">
-          <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
-          <span class="window-title">vector — astro-storefront</span>
+      <div class="hero-inner">
+        <div class="hero-copy reveal is-visible">
+          <img class="hero-logo" src="/vector-logo.png" width="56" height="56" alt="Vector" />
+          <p class="hero-name">Vector</p>
+          <h1 id="hero-title">Build, test, and ship with a team of agents.</h1>
+          <a class="hero-cta" href="/download">
+            <span>Get Vector</span>
+            <ArrowRight size={17} strokeWidth={1.8} aria-hidden="true" />
+          </a>
+          <p class="hero-note">Local repositories. Your models. Every change reviewable.</p>
         </div>
-        <div class="window-body">
-          <div class="composer">
-            <span class="composer-text">Redesign the checkout flow and make sure nothing breaks</span>
-            <span class="composer-send" aria-hidden="true">↑</span>
+
+        <figure class="hero-product reveal is-visible">
+          <div class="product-bar" aria-hidden="true">
+            <span class="traffic"><i></i><i></i><i></i></span>
+            <span class="product-title">Vector engineering workspace</span>
+            <span class="product-status"><i></i> Ready</span>
           </div>
-          <ol class="run" aria-label="Vector working through an engineering run">
-            {runSteps.map((step, i) => (
-              <li class="run-step" style={`--i:${i}`}>
-                <span class="tick" aria-hidden="true"></span>
-                <span class="run-label">{step.label}</span>
-                <span class="run-meta">{step.meta}</span>
-              </li>
-            ))}
-            <li class="run-done" style={`--i:${runSteps.length}`}>Done. 14 files changed, review ready.</li>
-          </ol>
-        </div>
+          <img
+            src={screenshotAgent.src}
+            width={screenshotAgent.width}
+            height={screenshotAgent.height}
+            alt="Vector engineering a product inside a repository"
+            loading="eager"
+          />
+        </figure>
       </div>
-    </div>
-  </section>
+    </section>
 
-  <!-- ============ STORY: ASK / WATCH / TRUST ============ -->
-  <section class="story" id="story">
-    <div class="story-step reveal">
-      <span class="step-no">01</span>
-      <h2>Ask for the change you actually want.</h2>
-      <p>Plain language in, engineering out. Vector reads your repository first, so its plan fits <i>your</i> codebase — not a template.</p>
-      <div class="mini-window ask-window" aria-hidden="true">
-        <span class="typing">Fix the flaky signup test and explain what caused it</span>
+    <section class="runtime-band" aria-labelledby="runtime-title">
+      <p id="runtime-title">One workspace for the agents and tools you already use</p>
+      <div class="runtime-list">
+        {runtimes.map((runtime) => <span>{runtime}</span>)}
       </div>
-    </div>
+    </section>
 
-    <div class="story-step reveal" style="--d:.1s">
-      <span class="step-no">02</span>
-      <h2>Watch it work like an engineer.</h2>
-      <p>Not a wall of tokens — a timeline. Every read, edit, command, and browser check appears as it happens.</p>
-      <div class="mini-window" aria-hidden="true">
-        <div class="pulse-line" style="--i:0"><b>$</b> bun test auth/signup.test.ts</div>
-        <div class="pulse-line ok" style="--i:1">1 failing → race in token refresh</div>
-        <div class="pulse-line" style="--i:2"><b>edit</b> src/auth/refresh.ts <i>+9 −4</i></div>
-        <div class="pulse-line ok" style="--i:3">12 passing · 0 failing</div>
+    <section id="workspace" class="intro chapter-width">
+      <div class="intro-copy reveal">
+        <p class="eyebrow">The complete engineering loop</p>
+        <h2>From an idea to reviewed, running software.</h2>
+        <p>
+          Vector keeps the request, repository context, agent activity, files, terminal, browser,
+          usage, review, and release in one place. Open an existing codebase or begin a new one,
+          then choose how much of the work you want to do yourself.
+        </p>
       </div>
-    </div>
+      <ol class="loop-list reveal" aria-label="Vector engineering workflow">
+        <li><span>01</span><strong>Open</strong><p>Attach the repository already on your computer.</p></li>
+        <li><span>02</span><strong>Direct</strong><p>Give one agent a task or divide the work across isolated agents.</p></li>
+        <li><span>03</span><strong>Observe</strong><p>Follow plans, edits, commands, browser actions, tokens, and cost.</p></li>
+        <li><span>04</span><strong>Verify</strong><p>Run checks, inspect the product, and review every changed line.</p></li>
+        <li><span>05</span><strong>Ship</strong><p>Merge trusted work and publish through your connected accounts.</p></li>
+      </ol>
+    </section>
 
-    <div class="story-step reveal" style="--d:.2s">
-      <span class="step-no">03</span>
-      <h2>Trust every change before it lands.</h2>
-      <p>Diffs, risk, secrets, blast radius — surfaced before you accept. Rollback is one click, never a prayer.</p>
-      <div class="trust-cards" aria-hidden="true">
-        {trustCards.map((card) => (
-          <div class={`trust-card risk-${card.risk}`}>
-            <span class="risk-pill">{card.risk}</span>
-            <b>{card.name}</b>
-            <span>{card.note}</span>
+    <div class="chapter-stack">
+      {chapters.map((chapter, index) => (
+        <section class="chapter chapter-width">
+          <div class="chapter-copy reveal">
+            <div>
+              <p class="eyebrow">{chapter.eyebrow}</p>
+              <h2>{chapter.title}</h2>
+            </div>
+            <div>
+              <p>{chapter.copy}</p>
+              <ul>
+                {chapter.facts.map((fact) => <li><span aria-hidden="true"></span>{fact}</li>)}
+              </ul>
+            </div>
           </div>
-        ))}
-      </div>
-    </div>
-  </section>
-
-  <!-- ============ SHOWCASE ============ -->
-  <section class="showcase">
-    <article class="feature reveal">
-      <div class="feature-copy">
-        <p class="kicker">Project Brain</p>
-        <h2>Your project, mapped and remembered.</h2>
-        <p>Architecture, dependencies, decisions, and the files the agent has touched — connected into memory that survives every session.</p>
-      </div>
-      <div class="feature-visual brain" aria-hidden="true">
-        <svg viewBox="0 0 320 200">
-          <g class="brain-links" stroke="rgba(160,110,255,.35)" fill="none">
-            <path d="M60 60 L160 100" /><path d="M60 140 L160 100" />
-            <path d="M160 100 L260 50" /><path d="M160 100 L260 150" />
-            <path d="M260 50 L260 150" />
-          </g>
-          <g class="brain-nodes">
-            <circle cx="60" cy="60" r="10" /><circle cx="60" cy="140" r="10" />
-            <circle cx="160" cy="100" r="14" class="core" />
-            <circle cx="260" cy="50" r="10" /><circle cx="260" cy="150" r="10" />
-          </g>
-          <g class="brain-labels" fill="#b9a7d9" font-size="11">
-            <text x="34" y="42">routes</text><text x="40" y="168">api</text>
-            <text x="132" y="80">brain</text><text x="240" y="32">state</text><text x="236" y="178">tests</text>
-          </g>
-        </svg>
-      </div>
-    </article>
-
-    <article class="feature flip reveal">
-      <div class="feature-copy">
-        <p class="kicker">Checkpoints</p>
-        <h2>Every risky moment has an undo.</h2>
-        <p>Vector snapshots your work before large edits. Preview exactly what a restore will change — then travel back in one click.</p>
-      </div>
-      <div class="feature-visual checkpoints" aria-hidden="true">
-        <div class="ck-line">
-          <span class="ck" style="--i:0"><i></i><b>before refactor</b></span>
-          <span class="ck" style="--i:1"><i></i><b>tests green</b></span>
-          <span class="ck active" style="--i:2"><i></i><b>checkout v2</b><em>restore</em></span>
-        </div>
-      </div>
-    </article>
-
-    <article class="feature reveal">
-      <div class="feature-copy">
-        <p class="kicker">Review Queue</p>
-        <h2>Changes queue up. You stay in charge.</h2>
-        <p>Every edit arrives as a labeled, scannable diff with intent and risk. Accept, hold, or send it back — nothing lands silently.</p>
-      </div>
-      <div class="feature-visual diff-visual" aria-hidden="true">
-        <div class="diff-window">
-          <div class="diff-head">src/checkout/Cart.tsx <span class="risk-pill low">low risk</span></div>
-          <div class="diff-line del" style="--i:0">- const total = items.reduce((s, i) =&gt; s + i.price)</div>
-          <div class="diff-line add" style="--i:1">+ const total = items.reduce((s, i) =&gt; s + i.price, 0)</div>
-          <div class="diff-line add" style="--i:2">+ if (!items.length) return &lt;EmptyCart /&gt;</div>
-          <div class="diff-actions" style="--i:3"><span class="btn-approve">Accept</span><span class="btn-hold">Hold</span></div>
-        </div>
-      </div>
-    </article>
-
-    <article class="feature flip reveal">
-      <div class="feature-copy">
-        <p class="kicker">Terminal &amp; browser</p>
-        <h2>It runs what it writes.</h2>
-        <p>Vector starts your dev server, drives the browser, and reads the errors — so "it works" means it was actually verified.</p>
-      </div>
-      <div class="feature-visual term" aria-hidden="true">
-        <div class="term-window">
-          <div class="term-line" style="--i:0"><b>$</b> bun dev</div>
-          <div class="term-line dim" style="--i:1">vite ready in 312 ms → localhost:3000</div>
-          <div class="term-line" style="--i:2"><b>browser</b> checkout flow · 3 steps</div>
-          <div class="term-line ok" style="--i:3">✓ cart → payment → confirmation</div>
-        </div>
-      </div>
-    </article>
-
-    <article class="feature reveal">
-      <div class="feature-copy">
-        <p class="kicker">Bring your own key</p>
-        <h2>Your models. Your bill. Your ceiling.</h2>
-        <p>Anthropic, OpenAI, Google, local models — plug in any key and switch per task. Cost Guard warns you before an expensive run, not after.</p>
-      </div>
-      <div class="feature-visual byok" aria-hidden="true">
-        <div class="key-card" style="--i:0"><span class="key-dot"></span>anthropic · claude</div>
-        <div class="key-card" style="--i:1"><span class="key-dot g"></span>openai · gpt</div>
-        <div class="key-card" style="--i:2"><span class="key-dot b"></span>local · ollama</div>
-        <div class="cost-meter" style="--i:3"><span>est. run cost</span><div class="meter"><i></i></div><b>$0.14</b></div>
-      </div>
-    </article>
-  </section>
-
-  <!-- ============ POSITIONING ============ -->
-  <section class="positioning">
-    <div class="positioning-copy reveal">
-      <p class="kicker">Why Vector exists</p>
-      <h2>Agent speed, editor control, and your own AI stack.</h2>
-      <p>
-        Vector is built for people who want the power of an autonomous coding agent without giving up the code editor,
-        the model choice, or the ability to review every important change. It is not a toy builder and it is not just a chat box:
-        it is a desktop workspace where the agent and the code live together.
-      </p>
-    </div>
-    <div class="proof-wall reveal" style="--d:.12s">
-      {proofPoints.map((point) => (
-        <span>{point}</span>
+          <figure class:list={["chapter-media", "reveal", { "media-browser": index === 1 }]}>
+            <div class="media-topline" aria-hidden="true">
+              <span>{chapter.eyebrow}</span>
+              <span>{index === 0 ? "Isolated from main" : index === 1 ? "User takeover available" : index === 2 ? "Local workspace" : "Connected release"}</span>
+            </div>
+            <img
+              src={chapter.image.src}
+              width={chapter.image.width}
+              height={chapter.image.height}
+              alt={chapter.alt}
+              loading="lazy"
+            />
+          </figure>
+        </section>
       ))}
     </div>
-  </section>
 
-  <!-- ============ WORKFLOW ============ -->
-  <section class="workflow">
-    <div class="workflow-head reveal">
-      <p class="kicker center">The Vector loop</p>
-      <h2>Prompt, inspect, edit, verify.</h2>
-      <p>
-        The product story is simple: ask the agent for the change, inspect what it did, open the code when you need control,
-        then run and checkpoint the result.
-      </p>
-    </div>
-    <div class="workflow-grid">
-      {workflowCards.map((card, i) => (
-        <article class="workflow-card reveal" style={`--d:${i * 0.07}s`}>
-          <span>{card.label}</span>
-          <h3>{card.title}</h3>
-          <p>{card.copy}</p>
-        </article>
-      ))}
-    </div>
-  </section>
-
-  <!-- ============ QUICK GRID ============ -->
-  <section class="grid-section">
-    <p class="kicker center reveal">And a workspace full of intent</p>
-    <div class="quick-grid">
-      {quickFeatures.map((f, i) => (
-        <div class="quick-card reveal" style={`--d:${i * 0.06}s`}>
-          <span class="quick-icon" aria-hidden="true">{f.icon}</span>
-          <b>{f.name}</b>
-          <p>{f.copy}</p>
+    <section class="engine-section">
+      <div class="engine-inner chapter-width">
+        <div class="engine-heading reveal">
+          <p class="eyebrow">The system underneath</p>
+          <h2>Powerful agents need an observable runtime.</h2>
+          <p>
+            Vector is designed around the parts that determine whether agentic engineering is useful:
+            relevant context, persistent knowledge, reliable execution, visible cost, and a human review boundary.
+          </p>
         </div>
-      ))}
-    </div>
-  </section>
+        <div class="engine-list">
+          {systemRows.map(([title, copy], index) => (
+            <article class="engine-row reveal">
+              <span>0{index + 1}</span>
+              <h3>{title}</h3>
+              <p>{copy}</p>
+            </article>
+          ))}
+        </div>
+      </div>
+    </section>
 
-  <!-- ============ CLOSING CTA ============ -->
-  <section class="closing" id="download">
-    <h2 class="reveal">Own your AI engineering.</h2>
-    <p class="lede center reveal" style="--d:.08s">Free to start. Local-first. Powered by the keys you already have.</p>
-    <div class="downloads reveal" style="--d:.16s">
-      {downloadOptions.map((option) => (
-        <a class="download" href={option.href}>
-          <span>{option.title}</span>
-          <em>{option.badge}</em>
+    <section class="evidence chapter-width">
+      <div class="evidence-heading reveal">
+        <p class="eyebrow">Measured, not implied</p>
+        <h2>One controlled repair task. A useful data point.</h2>
+        <p>
+          In a July 2026 scheduler-repair benchmark, Vector Balanced completed the task in 149 seconds
+          and reported roughly 67% fewer tokens than Codex CLI. Both passed all five public tests.
+          Codex passed more hidden tests, so this is evidence from one reproducible run, not a universal claim.
+        </p>
+      </div>
+      <dl class="evidence-grid reveal">
+        <div><dt>Vector Balanced</dt><dd>149s</dd><span>Completion time</span></div>
+        <div><dt>Codex CLI</dt><dd>284s</dd><span>Completion time</span></div>
+        <div><dt>Reported usage</dt><dd>67%</dd><span>Fewer tokens for Vector</span></div>
+        <div><dt>Public checks</dt><dd>5 / 5</dd><span>Passed by both</span></div>
+      </dl>
+    </section>
+
+    <section class="connections chapter-width">
+      <div class="connections-copy reveal">
+        <p class="eyebrow">Bring your stack</p>
+        <h2>Models, protocols, source control, and cloud services.</h2>
+        <p>
+          Use Vector’s provider system, connect MCP servers, call local Claude Code, Codex, and Cursor
+          runtimes when installed, then publish through GitHub, GitLab, Vercel, Netlify, and Supabase workflows.
+        </p>
+      </div>
+      <div class="connection-rail reveal" aria-label="Supported Vector connections">
+        <span>Anthropic</span><span>OpenAI</span><span>Google</span><span>MCP</span><span>GitHub</span>
+        <span>GitLab</span><span>Vercel</span><span>Netlify</span><span>Supabase</span><span>Playwright</span>
+      </div>
+    </section>
+
+    <section class="comparison-section chapter-width">
+      <div class="comparison-heading reveal">
+        <p class="eyebrow">A wider product boundary</p>
+        <h2>Fewer disconnected surfaces between request and release.</h2>
+        <p>
+          Vector combines capabilities commonly split across an agent, editor, browser, Git client,
+          and deployment dashboard. Product capabilities change quickly, so verify current vendor
+          documentation before making a purchasing decision.
+        </p>
+      </div>
+      <details class="comparison reveal">
+        <summary>
+          <span>View the detailed product comparison</span>
+          <ChevronDown size={18} strokeWidth={1.7} aria-hidden="true" />
+        </summary>
+        <div class="comparison-scroll">
+          <table>
+            <thead>
+              <tr><th>Capability</th><th>Vector</th><th>Claude Code</th><th>Codex</th><th>Cursor</th><th>App builders</th></tr>
+            </thead>
+            <tbody>
+              {comparison.map((row) => (
+                <tr>{row.map((cell, cellIndex) => cellIndex === 0 ? <th>{cell}</th> : <td>{cell}</td>)}</tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </details>
+    </section>
+
+    <section class="closing">
+      <div class="closing-copy reveal">
+        <img src="/vector-logo.png" width="56" height="56" alt="" />
+        <h2>Keep the whole build in view.</h2>
+        <p>Open the repository. Direct the agents. Inspect the evidence. Ship the result.</p>
+        <a class="closing-cta" href="/download">
+          <Download size={17} strokeWidth={1.8} aria-hidden="true" />
+          <span>Download Vector</span>
         </a>
-      ))}
-    </div>
-  </section>
+      </div>
+    </section>
+  </main>
 
-  <footer class="footer">
-    <div class="foot-brand"><img src="/vector-logo.png" alt="" width="22" height="22" /> Vector</div>
-    <nav>
-      <a href="/docs">Docs</a>
-      <a href="https://github.com/vectordev-ai" rel="noopener">GitHub</a>
-      <a href="#download">Downloads</a>
-    </nav>
-    <span class="foot-note">Local-first · BYOK · MIT licensed</span>
-  </footer>
+  <MarketingFooter />
 </div>
 
 <script>
-  const root = document.getElementById("vector-lander")
-  const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  const reducedMotion = globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false
 
-  if (root) {
-    const targets = root.querySelectorAll(".reveal, .feature, .story-step")
-    if (reduced || !("IntersectionObserver" in window)) {
-      targets.forEach((el) => el.classList.add("in"))
-      root.classList.add("in")
-    } else {
-      const io = new IntersectionObserver(
-        (entries) => {
-          for (const entry of entries) {
-            if (!entry.isIntersecting) continue
-            entry.target.classList.add("in")
-            io.unobserve(entry.target)
-          }
-        },
-        { threshold: 0.18, rootMargin: "0px 0px -8% 0px" },
-      )
-      targets.forEach((el) => io.observe(el))
-      root.classList.add("in")
+  const revealNodes = () => {
+    if (reducedMotion || !("IntersectionObserver" in globalThis)) return
+    const nodes = Array.from(document.querySelectorAll<HTMLElement>(".reveal:not(.is-visible)"))
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (!entry.isIntersecting) return
+        const node = entry.target as HTMLElement
+        node.classList.add("is-visible")
+        node.animate(
+          [{ opacity: 0, transform: "translateY(16px)" }, { opacity: 1, transform: "translateY(0)" }],
+          { duration: 460, easing: "cubic-bezier(.2,.7,.2,1)" },
+        )
+        observer.unobserve(node)
+      })
+    }, { rootMargin: "0px 0px -7%", threshold: 0.08 })
+    nodes.forEach((node) => observer.observe(node))
+  }
 
-      // pointer-reactive lighting, rAF-throttled
-      let raf = 0
-      root.addEventListener("pointermove", (event) => {
-        if (raf) return
-        raf = requestAnimationFrame(() => {
-          raf = 0
-          root.style.setProperty("--mx", `${event.clientX}px`)
-          root.style.setProperty("--my", `${event.clientY}px`)
-        })
+  const drawField = (canvas: HTMLCanvasElement) => {
+    const context = canvas.getContext("2d")
+    if (!context) return
+    const lowDensity = canvas.dataset.density === "low"
+    let width = 1
+    let height = 1
+    let dpr = 1
+    let pointerX = 0.5
+    let pointerY = 0.4
+    let pointerActive = false
+    const glyphs = "VECTOR01{}<>/\\+=:*"
+    const clusters = lowDensity
+      ? [
+          [0.14, 0.34, 0.24, 0.18, 1],
+          [0.78, 0.28, 0.3, 0.2, 1],
+          [0.86, 0.73, 0.25, 0.14, 0.75],
+        ]
+      : [
+          [0.04, 0.3, 0.14, 0.13, 0.9],
+          [0.16, 0.38, 0.23, 0.16, 1.05],
+          [0.27, 0.46, 0.16, 0.1, 0.72],
+          [0.7, 0.22, 0.24, 0.13, 0.92],
+          [0.82, 0.31, 0.27, 0.18, 1.12],
+          [0.96, 0.45, 0.18, 0.15, 0.82],
+          [0.08, 0.75, 0.22, 0.12, 0.64],
+          [0.84, 0.77, 0.3, 0.13, 0.7],
+        ]
+    const stars = Array.from({ length: lowDensity ? 28 : 52 }, (_, index) => ({
+      x: ((index * 193 + 41) % 997) / 997,
+      y: ((index * 347 + 73) % 991) / 991,
+      size: index % 11 === 0 ? 3 : index % 5 === 0 ? 2 : 1,
+      alpha: 0.28 + ((index * 29) % 57) / 100,
+    }))
+
+    const hash = (x: number, y: number, seed = 0) => {
+      const value = Math.sin(x * 12.9898 + y * 78.233 + seed * 37.719) * 43758.5453
+      return value - Math.floor(value)
+    }
+
+    const render = () => {
+      context.clearRect(0, 0, width, height)
+      const stepX = lowDensity ? 10 : 8
+      const stepY = lowDensity ? 11 : 9
+      context.font = `${lowDensity ? 8 : 7.5}px ui-monospace, SFMono-Regular, Menlo, monospace`
+      context.textAlign = "center"
+      context.textBaseline = "middle"
+
+      if (pointerActive && !reducedMotion) {
+        context.save()
+        context.filter = "blur(54px)"
+        context.fillStyle = "rgba(123, 81, 210, 0.1)"
+        context.beginPath()
+        context.arc(pointerX * width, pointerY * height, Math.min(width, height) * 0.085, 0, Math.PI * 2)
+        context.fill()
+        context.restore()
+      }
+
+      for (let y = -stepY; y < height + stepY; y += stepY) {
+        for (let x = -stepX; x < width + stepX; x += stepX) {
+          const normalizedX = x / Math.max(1, width)
+          const normalizedY = y / Math.max(1, height)
+          const warpX = normalizedX + Math.sin(normalizedY * 19) * 0.018
+          const warpY = normalizedY + Math.sin(normalizedX * 15) * 0.014
+          let field = 0
+
+          clusters.forEach(([centerX, centerY, radiusX, radiusY, strength], index) => {
+            const dx = (warpX - centerX) / radiusX
+            const dy = (warpY - centerY) / radiusY
+            const shape = Math.exp(-(dx * dx + dy * dy) * (1.18 + (index % 3) * 0.1)) * strength
+            field = Math.max(field, shape)
+          })
+
+          const texture = hash(x / stepX, y / stepY) * 0.34
+            + Math.sin(normalizedX * 46 + normalizedY * 29) * 0.08
+          if (field + texture < 0.52) continue
+
+          const safeCopyZone = Math.exp(
+            -(
+              Math.pow((normalizedX - 0.5) / 0.23, 2)
+              + Math.pow((normalizedY - 0.28) / 0.22, 2)
+            ),
+          )
+          const edge = Math.min(1, Math.max(0, (field + texture - 0.48) * 1.8))
+          const alpha = Math.max(0.1, (0.16 + edge * 0.42) * (1 - safeCopyZone * 0.66))
+          const glyphIndex = Math.floor(hash(x, y, 2) * glyphs.length)
+          const drawX = x + (pointerX - 0.5) * (2 + hash(x, y, 3) * 5)
+          const drawY = y + (pointerY - 0.5) * (2 + hash(x, y, 4) * 4)
+          context.fillStyle = `rgba(190, 166, 255, ${alpha})`
+          context.fillText(glyphs[glyphIndex], drawX, drawY)
+        }
+      }
+
+      stars.forEach((star, index) => {
+        const x = star.x * width + (pointerX - 0.5) * (index % 7)
+        const y = star.y * height + (pointerY - 0.5) * (index % 5)
+        context.fillStyle = `rgba(247, 243, 255, ${star.alpha})`
+        context.fillRect(x, y, star.size, star.size)
+        if (star.size < 3) return
+        context.fillRect(x - 5, y + 1, 13, 1)
+        context.fillRect(x + 1, y - 5, 1, 13)
       })
     }
+
+    const resize = () => {
+      const rect = canvas.getBoundingClientRect()
+      dpr = Math.min(globalThis.devicePixelRatio || 1, 2)
+      width = Math.max(1, rect.width)
+      height = Math.max(1, rect.height)
+      canvas.width = Math.round(width * dpr)
+      canvas.height = Math.round(height * dpr)
+      context.setTransform(dpr, 0, 0, dpr, 0, 0)
+      render()
+    }
+
+    const move = (event: PointerEvent) => {
+      const rect = canvas.getBoundingClientRect()
+      pointerX = (event.clientX - rect.left) / Math.max(1, rect.width)
+      pointerY = (event.clientY - rect.top) / Math.max(1, rect.height)
+      pointerActive = true
+      render()
+    }
+
+    const resizeObserver = new ResizeObserver(resize)
+    resizeObserver.observe(canvas)
+    globalThis.addEventListener("pointermove", move, { passive: true })
+    resize()
+
+    return () => {
+      resizeObserver.disconnect()
+      globalThis.removeEventListener("pointermove", move)
+    }
   }
+
+  const cleanups = Array.from(document.querySelectorAll<HTMLCanvasElement>("[data-vector-field]"))
+    .map(drawField)
+    .filter(Boolean)
+  revealNodes()
+  document.addEventListener("astro:before-swap", () => cleanups.forEach((cleanup) => cleanup?.()), { once: true })
 </script>
 
 <style>
-  .lander {
-    --ink: #f4f0ff;
-    --muted: #a89ec0;
-    --line: rgba(178, 140, 255, 0.16);
-    --glass: rgba(255, 255, 255, 0.035);
-    --purple: #8f52ff;
-    --purple-soft: #c9b0ff;
-    --bg: #060608;
-    --ease: cubic-bezier(0.22, 0.7, 0.28, 1);
-
+  .vector-marketing {
     position: relative;
+    isolation: isolate;
+    min-height: 100vh;
     overflow: clip;
-    color: var(--ink);
-    background: var(--bg);
-    font-feature-settings: "ss01";
-    font-family:
-      ui-sans-serif, system-ui, -apple-system, "SF Pro Display", "Segoe UI", Inter, sans-serif;
+    color: #f5f2f8;
+    background: #050406;
   }
 
-  .lander :is(h1, h2, h3) {
-    font-family: inherit !important;
+  .vector-marketing > main {
+    position: relative;
+    z-index: 1;
   }
 
-  .lander :is(.eyebrow, .kicker, .step-no, .window-title, .run-meta) {
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  .chapter-width {
+    width: min(1080px, calc(100% - 48px));
+    margin-inline: auto;
   }
 
-  .lander :is(a) { color: inherit; text-decoration: none; }
-
-  /* ---------- ambient sky ---------- */
-  .sky { position: absolute; inset: 0; pointer-events: none; }
-
-  .aurora {
-    position: absolute;
-    inset: -20% -10%;
-    background:
-      radial-gradient(38rem 24rem at 22% 12%, rgba(143, 82, 255, 0.26), transparent 70%),
-      radial-gradient(30rem 22rem at 80% 4%, rgba(88, 44, 176, 0.3), transparent 70%),
-      radial-gradient(44rem 30rem at 55% 90%, rgba(143, 82, 255, 0.12), transparent 70%);
-    animation: drift 26s var(--ease) infinite alternate;
-    will-change: transform;
-  }
-
-  @keyframes drift {
-    from { transform: translate3d(-1.5%, -1%, 0) scale(1); }
-    to { transform: translate3d(1.5%, 2%, 0) scale(1.06); }
-  }
-
-  .stars {
-    position: absolute; inset: 0;
-    background-image:
-      radial-gradient(1.5px 1.5px at 12% 22%, rgba(255,255,255,.5), transparent 100%),
-      radial-gradient(1px 1px at 34% 64%, rgba(255,255,255,.35), transparent 100%),
-      radial-gradient(1.5px 1.5px at 58% 18%, rgba(220,200,255,.4), transparent 100%),
-      radial-gradient(1px 1px at 76% 48%, rgba(255,255,255,.3), transparent 100%),
-      radial-gradient(1.5px 1.5px at 88% 76%, rgba(220,200,255,.35), transparent 100%),
-      radial-gradient(1px 1px at 22% 86%, rgba(255,255,255,.3), transparent 100%);
-    animation: twinkle 7s ease-in-out infinite alternate;
-  }
-
-  @keyframes twinkle { from { opacity: 0.5; } to { opacity: 1; } }
-
-  .pointer-glow {
-    position: fixed; inset: 0;
-    background: radial-gradient(28rem 28rem at var(--mx, 50vw) var(--my, 30vh), rgba(143, 82, 255, 0.08), transparent 70%);
-    transition: opacity 300ms;
-  }
-
-  /* ---------- nav ---------- */
-  .nav {
-    position: relative; z-index: 3;
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 1.4rem clamp(1.25rem, 5vw, 4rem);
-  }
-
-  .brand { display: flex; align-items: center; gap: 0.7rem; font-weight: 680; font-size: 1.15rem; }
-  .brand img { border-radius: 9px; box-shadow: 0 0 26px rgba(143, 82, 255, 0.5); }
-
-  .nav-links { display: flex; align-items: center; gap: 1.6rem; font-size: 0.95rem; color: var(--muted); }
-  .nav-links a { position: relative; transition: color 180ms var(--ease); }
-  .nav-links a:hover { color: var(--ink); }
-  .nav-links a:not(.nav-cta)::after {
-    content: ""; position: absolute; left: 0; bottom: -4px; height: 1px; width: 100%;
-    background: var(--purple-soft); transform: scaleX(0); transform-origin: left;
-    transition: transform 220ms var(--ease);
-  }
-  .nav-links a:not(.nav-cta):hover::after { transform: scaleX(1); }
-
-  .nav-cta {
-    color: #0b0712 !important;
-    background: var(--ink);
-    padding: 0.55rem 1.05rem; border-radius: 999px; font-weight: 640;
-    transition: transform 180ms var(--ease), box-shadow 180ms var(--ease);
-  }
-  .nav-cta:hover { transform: translateY(-1px); box-shadow: 0 8px 30px rgba(143, 82, 255, 0.35); }
-
-  /* ---------- hero ---------- */
   .hero {
-    position: relative; z-index: 2;
-    display: flex; flex-direction: column; align-items: center; text-align: center;
-    padding: clamp(3rem, 8vh, 6rem) clamp(1.25rem, 5vw, 4rem) clamp(4rem, 8vw, 7rem);
+    position: relative;
+    min-height: 0;
+    padding-bottom: 72px;
+    overflow: hidden;
+    isolation: isolate;
+    border-bottom: 1px solid #2a252e;
+    background: rgba(5, 4, 6, 0.08);
   }
 
-  .eyebrow {
-    margin: 0 0 1.2rem;
-    color: var(--purple-soft);
-    font-size: 0.82rem; font-weight: 680; letter-spacing: 0.14em; text-transform: uppercase;
-    border: 1px solid var(--line); border-radius: 999px; padding: 0.5rem 1rem;
-    background: var(--glass); backdrop-filter: blur(8px);
+  .ascii-field {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    opacity: 0.96;
+    transform: scale(1.01);
+    animation: vector-field-breathe 12s ease-in-out infinite alternate;
+  }
+
+  .hero-shade {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    background: rgba(5, 4, 6, 0.1);
+    box-shadow: inset 0 54px 72px rgba(5, 4, 6, 0.9);
+  }
+
+  .hero-inner {
+    position: relative;
+    z-index: 2;
+    width: min(1280px, calc(100% - 48px));
+    margin-inline: auto;
+  }
+
+  .hero-copy {
+    position: relative;
+    z-index: 2;
+    width: min(680px, 100%);
+    padding-top: 92px;
+    margin-left: 30%;
+  }
+
+  .hero-logo {
+    display: block;
+    width: 56px;
+    height: 56px;
+    border-radius: 12px;
+    box-shadow: 0 18px 54px rgba(151, 112, 255, 0.24);
+  }
+
+  .hero-name {
+    margin: 14px 0 0;
+    color: #c8b6ff;
+    font-size: 13px;
+    font-weight: 600;
   }
 
   .hero h1 {
+    margin: 18px 0 0;
+    color: #fff;
+    font-size: clamp(42px, 3.8vw, 54px);
+    font-weight: 610;
+    line-height: 1.02;
+    letter-spacing: 0;
+  }
+
+  .hero-cta,
+  .closing-cta {
+    min-height: 50px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 28px;
+    color: #120d17 !important;
+    background: #eee9f5;
+    border: 1px solid #eee9f5;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 590;
+    text-decoration: none;
+    transition: transform 180ms ease, background 180ms ease, border-color 180ms ease;
+  }
+
+  .hero-cta {
+    width: min(360px, 100%);
+    margin-top: 30px;
+    padding: 0 16px;
+  }
+
+  .hero-cta:hover,
+  .closing-cta:hover {
+    color: #120d17 !important;
+    background: #c9b9ff;
+    border-color: #c9b9ff;
+    transform: translateY(-1px);
+  }
+
+  .hero-note {
+    margin: 14px 0 0;
+    color: #918a96;
+    font-size: 13px;
+  }
+
+  .hero-product {
+    position: relative;
+    z-index: 1;
+    margin: 76px 0 0;
+    overflow: hidden;
+    border: 1px solid #403746;
+    border-radius: 8px 8px 0 0;
+    background: #121015;
+    box-shadow: 0 44px 130px rgba(0, 0, 0, 0.72), 0 0 70px rgba(132, 86, 219, 0.1);
+  }
+
+  .product-bar,
+  .media-topline {
+    min-height: 42px;
+    padding: 0 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    color: #847d89;
+    background: #17141a;
+    border-bottom: 1px solid #302b34;
+    font-size: 11px;
+  }
+
+  .traffic { display: inline-flex; gap: 6px; }
+  .traffic i { width: 8px; height: 8px; border-radius: 50%; background: #5a535e; }
+  .traffic i:first-child { background: #b46579; }
+  .traffic i:nth-child(2) { background: #b58e55; }
+  .traffic i:nth-child(3) { background: #5d9b79; }
+  .product-title { color: #b9b2be; }
+  .product-status { display: inline-flex; align-items: center; gap: 7px; }
+  .product-status i { width: 6px; height: 6px; border-radius: 50%; background: #70ca9a; box-shadow: 0 0 10px rgba(112, 202, 154, 0.45); }
+  .hero-product img { display: block; width: 100%; height: auto; }
+
+  .runtime-band {
+    width: min(980px, calc(100% - 48px));
+    min-height: 178px;
+    margin-inline: auto;
+    padding: 50px 0 44px;
+    display: grid;
+    place-items: center;
+    border-bottom: 1px solid #2a252e;
+  }
+
+  .runtime-band p {
     margin: 0;
-    font-size: clamp(2.6rem, 7vw, 5.2rem) !important;
-    line-height: 1.02 !important;
-    font-weight: 700 !important;
-    letter-spacing: -0.02em;
-    color: var(--ink) !important;
+    color: #77707d;
+    font-size: 12px;
   }
 
-  .hero h1 em {
-    font-style: normal;
-    background: linear-gradient(100deg, var(--purple-soft), var(--purple) 60%, #6d3bd2);
-    -webkit-background-clip: text; background-clip: text; color: transparent;
+  .runtime-list {
+    margin-top: 24px;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 18px 34px;
   }
 
-  .lede {
-    max-width: 46rem; margin: 1.5rem 0 0;
-    color: var(--muted); font-size: clamp(1.02rem, 1.6vw, 1.22rem); line-height: 1.6;
+  .runtime-list span {
+    color: #c4bdc8;
+    font-size: 15px;
+    font-weight: 550;
   }
-  .lede.center { margin-inline: auto; }
 
-  .cta-row { display: flex; gap: 0.9rem; margin-top: 2.2rem; flex-wrap: wrap; justify-content: center; }
-
-  .btn {
-    display: inline-flex; align-items: center; gap: 0.5rem;
-    padding: 0.85rem 1.5rem; border-radius: 999px; font-weight: 650; font-size: 1rem;
-    transition: transform 200ms var(--ease), box-shadow 200ms var(--ease), background 200ms var(--ease);
+  .intro {
+    padding: 124px 0 96px;
   }
-  .btn.primary {
-    color: #0b0712 !important; background: linear-gradient(180deg, #efe6ff, #cdb2ff);
-    box-shadow: 0 10px 36px rgba(143, 82, 255, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.6);
+
+  .intro-copy {
+    max-width: 780px;
   }
-  .btn.primary:hover { transform: translateY(-2px); box-shadow: 0 16px 48px rgba(143, 82, 255, 0.5); }
-  .btn.ghost { color: var(--ink); border: 1px solid var(--line); background: rgba(20, 17, 30, 0.82); }
-  .btn.ghost:hover { transform: translateY(-2px); background: rgba(143, 82, 255, 0.14); }
-  .btn .arrow { transition: transform 220ms var(--ease); }
-  .btn.ghost:hover .arrow { transform: translateY(3px); }
 
-  /* ---------- hero stage ---------- */
-  .stage { position: relative; margin-top: clamp(3rem, 6vw, 5rem); width: min(58rem, 100%); }
+  .eyebrow {
+    margin: 0 0 14px;
+    color: #ae91ff;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
 
-  .window {
-    border: 1px solid var(--line);
-    border-radius: 1.1rem;
-    background: linear-gradient(180deg, rgba(24, 20, 34, 0.92), rgba(10, 9, 15, 0.96));
-    box-shadow:
-      0 40px 140px rgba(0, 0, 0, 0.6),
-      0 0 0 1px rgba(255, 255, 255, 0.03) inset,
-      0 30px 90px rgba(109, 59, 210, 0.16);
+  h2 {
+    margin: 0;
+    color: #f7f4fa;
+    font-size: clamp(34px, 4.4vw, 58px);
+    font-weight: 570;
+    line-height: 1.04;
+    letter-spacing: 0;
+  }
+
+  .intro-copy > p:last-child,
+  .engine-heading > p:last-child,
+  .evidence-heading > p:last-child,
+  .connections-copy > p:last-child,
+  .comparison-heading > p:last-child {
+    max-width: 700px;
+    margin: 24px 0 0;
+    color: #96909b;
+    font-size: 17px;
+    line-height: 1.7;
+  }
+
+  .loop-list {
+    margin: 64px 0 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    border-top: 1px solid #312b35;
+    border-bottom: 1px solid #312b35;
+    list-style: none;
+  }
+
+  .loop-list li {
+    min-height: 176px;
+    padding: 22px 18px;
+    border-right: 1px solid #312b35;
+  }
+
+  .loop-list li:last-child { border-right: 0; }
+  .loop-list span { color: #756d7b; font-family: ui-monospace, monospace; font-size: 10px; }
+  .loop-list strong { display: block; margin-top: 24px; color: #ece8f0; font-size: 15px; font-weight: 560; }
+  .loop-list p { margin: 9px 0 0; color: #7f7884; font-size: 12px; line-height: 1.55; }
+
+  .chapter-stack {
+    border-top: 1px solid #2a252e;
+  }
+
+  .chapter {
+    padding: 124px 0;
+    border-bottom: 1px solid #2a252e;
+  }
+
+  .chapter-copy {
+    position: relative;
+    z-index: 1;
+    margin-bottom: 52px;
+    display: grid;
+    grid-template-columns: minmax(0, 0.88fr) minmax(320px, 0.72fr);
+    gap: 88px;
+    align-items: end;
+  }
+
+  .chapter-copy h2 {
+    max-width: 620px;
+    font-size: clamp(34px, 4vw, 52px);
+  }
+
+  .chapter-copy > div:last-child > p {
+    margin: 0;
+    color: #9b949f;
+    font-size: 15px;
+    line-height: 1.7;
+  }
+
+  .chapter-copy ul {
+    margin: 24px 0 0;
+    padding: 0;
+    display: grid;
+    gap: 9px;
+    list-style: none;
+  }
+
+  .chapter-copy li {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    color: #c6becb;
+    font-size: 13px;
+  }
+
+  .chapter-copy li span {
+    width: 5px;
+    height: 5px;
+    flex: 0 0 auto;
+    border-radius: 50%;
+    background: #a77cff;
+    box-shadow: 0 0 10px rgba(167, 124, 255, 0.5);
+  }
+
+  .chapter-media {
+    position: relative;
+    z-index: 0;
+    margin: 0;
     overflow: hidden;
-    text-align: left;
+    border: 1px solid #38313d;
+    border-radius: 7px;
+    background: #100e12;
+    box-shadow: 0 34px 100px rgba(0, 0, 0, 0.4);
   }
 
-  .window-bar {
-    display: flex; align-items: center; gap: 0.5rem;
-    padding: 0.85rem 1rem; border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  }
-  .dot { width: 0.68rem; height: 0.68rem; border-radius: 50%; }
-  .dot.r { background: #ff5f57; } .dot.y { background: #febc2e; } .dot.g { background: #28c840; }
-  .window-title { margin-left: 0.6rem; color: var(--muted); font-size: 0.82rem; }
+  .media-topline span:first-child { color: #bfa9ff; }
+  .chapter-media img { display: block; width: 100%; height: auto; }
 
-  .window-body { padding: clamp(1.1rem, 3vw, 2rem); }
-
-  .composer {
-    display: flex; align-items: center; justify-content: space-between; gap: 1rem;
-    border: 1px solid rgba(178, 140, 255, 0.28); border-radius: 1rem;
-    background: rgba(10, 9, 14, 0.9); padding: 1rem 1.1rem;
-    box-shadow: 0 0 0 3px rgba(143, 82, 255, 0.08);
-  }
-  .composer-text { color: var(--ink); font-size: 1rem; }
-  .composer-send {
-    display: grid; place-items: center; width: 2.1rem; height: 2.1rem; border-radius: 50%;
-    color: #fff; background: linear-gradient(135deg, #b18aff, var(--purple));
-    box-shadow: 0 6px 20px rgba(143, 82, 255, 0.5);
+  .engine-section {
+    padding: 124px 0;
+    background: rgba(14, 10, 16, 0.88);
+    border-bottom: 1px solid #302a34;
   }
 
-  .run { list-style: none; margin: 1.4rem 0 0; padding: 0; display: grid; gap: 0.65rem; }
-
-  .run-step, .run-done {
-    display: flex; align-items: center; gap: 0.75rem;
-    opacity: 0; transform: translateY(8px);
-  }
-  .in .run-step, .in .run-done {
-    animation: rise 480ms var(--ease) forwards;
-    animation-delay: calc(0.55s + var(--i) * 0.5s);
+  .engine-inner {
+    display: grid;
+    grid-template-columns: minmax(280px, 0.7fr) minmax(0, 1.3fr);
+    gap: 96px;
   }
 
-  @keyframes rise { to { opacity: 1; transform: none; } }
-
-  .tick {
-    width: 1.15rem; height: 1.15rem; border-radius: 50%; flex-shrink: 0;
-    border: 1px solid rgba(178, 140, 255, 0.5); position: relative;
-  }
-  .tick::after {
-    content: "✓"; position: absolute; inset: 0; display: grid; place-items: center;
-    font-size: 0.7rem; color: #c9f7d4; opacity: 0; transform: scale(0.4);
-  }
-  .in .run-step .tick::after {
-    animation: pop 300ms var(--ease) forwards;
-    animation-delay: calc(0.85s + var(--i) * 0.5s);
-  }
-  @keyframes pop { to { opacity: 1; transform: scale(1); } }
-
-  .run-label { font-size: 0.95rem; }
-  .run-meta { margin-left: auto; color: var(--muted); font-size: 0.8rem; }
-  .run-done { color: var(--purple-soft); font-weight: 640; padding-top: 0.35rem; }
-
-  .float-chip {
-    position: absolute; z-index: 3;
-    border: 1px solid var(--line); border-radius: 999px;
-    background: rgba(16, 13, 24, 0.85); backdrop-filter: blur(10px);
-    color: var(--muted); font-size: 0.8rem; padding: 0.5rem 0.9rem;
-    box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45);
-    animation: floaty 7s ease-in-out infinite;
-  }
-  .float-chip b { color: var(--purple-soft); margin-left: 0.3rem; }
-  .chip-a { top: -1.2rem; left: max(-3rem, -4vw); animation-delay: 0s; }
-  .chip-b { top: 32%; right: max(-3.5rem, -5vw); animation-delay: 1.6s; }
-  .chip-c { bottom: -1rem; left: 12%; animation-delay: 3.1s; }
-
-  @keyframes floaty {
-    0%, 100% { transform: translateY(0); }
-    50% { transform: translateY(-9px); }
+  .engine-heading {
+    position: sticky;
+    top: 96px;
+    align-self: start;
   }
 
-  /* ---------- reveal primitives ---------- */
-  .reveal {
-    opacity: 0; transform: translateY(26px);
-    transition: opacity 700ms var(--ease), transform 700ms var(--ease);
-    transition-delay: var(--d, 0s);
-  }
-  .reveal.in { opacity: 1; transform: none; }
+  .engine-heading h2 { font-size: clamp(34px, 4vw, 50px); }
 
-  /* ---------- story ---------- */
-  .story {
-    position: relative; z-index: 2;
-    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: clamp(1rem, 2.5vw, 2rem);
-    padding: clamp(3rem, 7vw, 6.5rem) clamp(1.25rem, 5vw, 4rem);
+  .engine-list { border-top: 1px solid #38313d; }
+  .engine-row {
+    padding: 26px 0;
+    display: grid;
+    grid-template-columns: 34px 150px 1fr;
+    gap: 20px;
+    border-bottom: 1px solid #38313d;
   }
 
-  .story-step {
-    border: 1px solid var(--line); border-radius: 1.2rem;
-    padding: clamp(1.3rem, 2.5vw, 2rem);
-    background: linear-gradient(180deg, rgba(22, 19, 32, 0.94), rgba(12, 10, 18, 0.96));
-    transition: transform 300ms var(--ease), border-color 300ms var(--ease), box-shadow 300ms var(--ease),
-      opacity 700ms var(--ease);
-  }
-  .story-step:hover {
-    transform: translateY(-5px);
-    border-color: rgba(178, 140, 255, 0.4);
-    box-shadow: 0 24px 70px rgba(109, 59, 210, 0.18);
+  .engine-row > span { color: #6f6674; font-family: ui-monospace, monospace; font-size: 10px; }
+  .engine-row h3 { margin: 0; color: #e7e1eb; font-size: 14px; font-weight: 570; }
+  .engine-row p { margin: 0; color: #8c8491; font-size: 13px; line-height: 1.65; }
+
+  .evidence,
+  .connections,
+  .comparison-section {
+    padding: 124px 0;
+    border-bottom: 1px solid #2a252e;
   }
 
-  .step-no { color: var(--purple-soft); font-size: 0.85rem; font-weight: 700; letter-spacing: 0.1em; }
-  .story-step h2 { margin: 0.8rem 0 0.6rem; font-size: 1.45rem !important; line-height: 1.2 !important; color: var(--ink) !important; }
-  .story-step > p { margin: 0 0 1.2rem; color: var(--muted); line-height: 1.6; font-size: 0.95rem; }
+  .evidence-heading,
+  .connections-copy,
+  .comparison-heading { max-width: 800px; }
 
-  .mini-window {
-    border: 1px solid rgba(255, 255, 255, 0.07); border-radius: 0.9rem;
-    background: rgba(8, 7, 12, 0.9); padding: 1rem;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.82rem;
-    display: grid; gap: 0.5rem;
+  .evidence-grid {
+    margin: 58px 0 0;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    border-top: 1px solid #342e38;
+    border-bottom: 1px solid #342e38;
   }
 
-  .typing {
-    display: inline-block; white-space: nowrap; overflow: hidden;
-    border-right: 2px solid var(--purple-soft);
-    width: 0; color: var(--ink);
+  .evidence-grid div {
+    min-height: 168px;
+    padding: 25px 22px;
+    border-right: 1px solid #342e38;
   }
-  .in .typing { animation: type 2.6s steps(46) 0.4s forwards, caret 0.9s step-end infinite; }
-  @keyframes type { to { width: 100%; } }
-  @keyframes caret { 50% { border-color: transparent; } }
 
-  .pulse-line { color: var(--muted); opacity: 0; transform: translateX(-8px); }
-  .pulse-line b { color: var(--purple-soft); margin-right: 0.4rem; }
-  .pulse-line i { color: var(--purple-soft); font-style: normal; }
-  .pulse-line.ok { color: #9fe3b1; }
-  .in .pulse-line { animation: slide 420ms var(--ease) forwards; animation-delay: calc(0.4s + var(--i) * 0.45s); }
-  @keyframes slide { to { opacity: 1; transform: none; } }
+  .evidence-grid div:last-child { border-right: 0; }
+  .evidence-grid dt { color: #817987; font-size: 11px; }
+  .evidence-grid dd { margin: 22px 0 4px; color: #f2edf6; font-size: 35px; font-weight: 560; }
+  .evidence-grid span { color: #746d79; font-size: 11px; }
 
-  .trust-cards { display: grid; gap: 0.6rem; }
-  .trust-card {
-    display: grid; gap: 0.15rem;
-    border: 1px solid rgba(255, 255, 255, 0.07); border-radius: 0.9rem;
-    background: rgba(8, 7, 12, 0.85); padding: 0.85rem 1rem;
-    transition: transform 240ms var(--ease), border-color 240ms var(--ease);
+  .connection-rail {
+    margin-top: 56px;
+    padding: 24px 0;
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    border-top: 1px solid #342e38;
+    border-bottom: 1px solid #342e38;
   }
-  .trust-card:hover { transform: translateX(4px); border-color: rgba(178, 140, 255, 0.4); }
-  .trust-card b { font-size: 0.92rem; }
-  .trust-card > span:last-child { color: var(--muted); font-size: 0.8rem; }
 
-  .risk-pill {
-    justify-self: start; font-size: 0.66rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em;
-    border-radius: 999px; padding: 0.2rem 0.55rem; margin-bottom: 0.3rem;
-    background: rgba(143, 82, 255, 0.16); color: var(--purple-soft);
+  .connection-rail span {
+    min-height: 54px;
+    display: grid;
+    place-items: center;
+    color: #aaa2ae;
+    border-right: 1px solid #2e2932;
+    font-size: 13px;
+    font-weight: 530;
   }
-  .risk-low .risk-pill, .risk-pill.low { background: rgba(52, 199, 89, 0.14); color: #9fe3b1; }
-  .risk-guard .risk-pill { background: rgba(255, 176, 46, 0.14); color: #ffd48a; }
 
-  /* ---------- showcase ---------- */
-  .showcase { position: relative; z-index: 2; display: grid; gap: clamp(3rem, 6vw, 5rem); padding: 0 clamp(1.25rem, 5vw, 4rem) clamp(3rem, 6vw, 5rem); }
+  .connection-rail span:nth-child(5n) { border-right: 0; }
+  .connection-rail span:nth-child(n + 6) { border-top: 1px solid #2e2932; }
 
-  .feature {
-    display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
-    gap: clamp(1.5rem, 4vw, 4rem); align-items: center;
-    border: 1px solid var(--line); border-radius: 1.4rem;
-    padding: clamp(1.5rem, 4vw, 3.4rem);
-    background:
-      radial-gradient(30rem 18rem at 15% 0%, rgba(143, 82, 255, 0.1), transparent 70%),
-      linear-gradient(180deg, rgba(20, 17, 30, 0.92), rgba(12, 10, 18, 0.94));
-  }
-  .feature.flip { grid-template-columns: minmax(0, 6fr) minmax(0, 5fr); }
-  .feature.flip .feature-copy { order: 2; }
-  .feature.flip .feature-visual { order: 1; }
-
-  .kicker {
-    margin: 0 0 0.8rem; color: var(--purple-soft);
-    font-size: 0.78rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.14em;
-  }
-  .kicker.center { text-align: center; }
-
-  .feature h2 { margin: 0 0 0.8rem; font-size: clamp(1.5rem, 2.6vw, 2.1rem) !important; line-height: 1.12 !important; color: var(--ink) !important; letter-spacing: -0.01em; }
-  .feature-copy > p { margin: 0; color: var(--muted); line-height: 1.65; }
-
-  .feature-visual { min-height: 13rem; display: grid; align-content: center; }
-
-  /* brain */
-  .brain svg { width: 100%; height: auto; }
-  .brain-nodes circle { fill: #1b1524; stroke: rgba(178, 140, 255, 0.6); stroke-width: 1.5; }
-  .brain-nodes .core { fill: rgba(143, 82, 255, 0.35); }
-  .in .brain-nodes circle { animation: nodePulse 3.2s ease-in-out infinite; }
-  .in .brain-nodes circle:nth-child(2) { animation-delay: 0.5s; }
-  .in .brain-nodes circle:nth-child(4) { animation-delay: 1s; }
-  .in .brain-nodes circle:nth-child(5) { animation-delay: 1.5s; }
-  @keyframes nodePulse { 50% { stroke: var(--purple-soft); filter: drop-shadow(0 0 6px rgba(178, 140, 255, 0.6)); } }
-  .brain-links path { stroke-dasharray: 130; stroke-dashoffset: 130; }
-  .in .brain-links path { animation: link 1.4s var(--ease) forwards; }
-  .in .brain-links path:nth-child(2) { animation-delay: 0.2s; }
-  .in .brain-links path:nth-child(3) { animation-delay: 0.4s; }
-  .in .brain-links path:nth-child(4) { animation-delay: 0.6s; }
-  .in .brain-links path:nth-child(5) { animation-delay: 0.8s; }
-  @keyframes link { to { stroke-dashoffset: 0; } }
-
-  /* checkpoints */
-  .ck-line { display: grid; gap: 0.8rem; position: relative; padding-left: 1.4rem; }
-  .ck-line::before { content: ""; position: absolute; left: 0.48rem; top: 0.6rem; bottom: 0.6rem; width: 2px; background: linear-gradient(180deg, rgba(178,140,255,.5), rgba(178,140,255,.08)); }
-  .ck { display: flex; align-items: center; gap: 0.7rem; opacity: 0; transform: translateX(-10px); position: relative; }
-  .in .ck { animation: slide 420ms var(--ease) forwards; animation-delay: calc(0.3s + var(--i) * 0.35s); }
-  .ck i { position: absolute; left: -1.35rem; width: 0.85rem; height: 0.85rem; border-radius: 50%; background: #171221; border: 2px solid rgba(178, 140, 255, 0.6); }
-  .ck b { font-size: 0.95rem; font-weight: 560; color: var(--muted); }
-  .ck.active b { color: var(--ink); }
-  .ck.active i { background: var(--purple); box-shadow: 0 0 14px rgba(143, 82, 255, 0.7); }
-  .ck em {
-    font-style: normal; margin-left: auto; font-size: 0.78rem; font-weight: 680;
-    color: var(--purple-soft); border: 1px solid rgba(178, 140, 255, 0.4); border-radius: 999px; padding: 0.3rem 0.8rem;
-    transition: background 200ms var(--ease), color 200ms var(--ease);
-  }
-  .ck em:hover { background: var(--purple); color: #fff; }
-
-  /* diff */
-  .diff-window { border: 1px solid rgba(255,255,255,.07); border-radius: 0.9rem; background: rgba(8,7,12,.9); overflow: hidden; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8rem; }
-  .diff-head { display: flex; justify-content: space-between; align-items: center; padding: 0.7rem 0.9rem; border-bottom: 1px solid rgba(255,255,255,.06); color: var(--muted); font-family: inherit; }
-  .diff-line { padding: 0.4rem 0.9rem; opacity: 0; transform: translateX(-8px); white-space: pre-wrap; }
-  .diff-line.del { color: #ff9d9d; background: rgba(255, 95, 87, 0.08); }
-  .diff-line.add { color: #9fe3b1; background: rgba(40, 200, 64, 0.07); }
-  .in .diff-line { animation: slide 400ms var(--ease) forwards; animation-delay: calc(0.35s + var(--i) * 0.4s); }
-  .diff-actions { display: flex; gap: 0.6rem; padding: 0.8rem 0.9rem; opacity: 0; }
-  .in .diff-actions { animation: rise 400ms var(--ease) forwards; animation-delay: calc(0.5s + var(--i) * 0.4s); }
-  .btn-approve, .btn-hold { border-radius: 999px; padding: 0.35rem 0.95rem; font-size: 0.78rem; font-weight: 650; }
-  .btn-approve { color: #0b0712; background: linear-gradient(180deg, #d9f7e0, #9fe3b1); }
-  .btn-hold { color: var(--muted); border: 1px solid rgba(255, 255, 255, 0.14); }
-
-  /* terminal */
-  .term-window { border: 1px solid rgba(255,255,255,.07); border-radius: 0.9rem; background: #07060b; padding: 1rem 1.1rem; display: grid; gap: 0.55rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.82rem; }
-  .term-line { color: var(--ink); opacity: 0; transform: translateY(6px); }
-  .term-line b { color: var(--purple-soft); margin-right: 0.45rem; }
-  .term-line.dim { color: var(--muted); }
-  .term-line.ok { color: #9fe3b1; }
-  .in .term-line { animation: rise 380ms var(--ease) forwards; animation-delay: calc(0.35s + var(--i) * 0.5s); }
-
-  /* byok */
-  .byok { display: grid; gap: 0.7rem; }
-  .key-card {
-    display: flex; align-items: center; gap: 0.7rem;
-    border: 1px solid rgba(255,255,255,.08); border-radius: 0.9rem; padding: 0.85rem 1rem;
-    background: rgba(8, 7, 12, 0.85); font-family: ui-monospace, Menlo, monospace; font-size: 0.85rem;
-    opacity: 0; transform: translateY(8px);
-    transition: border-color 220ms var(--ease), transform 220ms var(--ease);
-  }
-  .in .key-card { animation: rise 420ms var(--ease) forwards; animation-delay: calc(0.3s + var(--i) * 0.25s); }
-  .key-card:hover { border-color: rgba(178, 140, 255, 0.45); }
-  .key-dot { width: 0.6rem; height: 0.6rem; border-radius: 50%; background: var(--purple); box-shadow: 0 0 10px rgba(143, 82, 255, 0.8); }
-  .key-dot.g { background: #28c840; box-shadow: 0 0 10px rgba(40, 200, 64, 0.7); }
-  .key-dot.b { background: #4aa8ff; box-shadow: 0 0 10px rgba(74, 168, 255, 0.7); }
-
-  .cost-meter { display: flex; align-items: center; gap: 0.9rem; color: var(--muted); font-size: 0.82rem; opacity: 0; }
-  .in .cost-meter { animation: rise 420ms var(--ease) forwards; animation-delay: calc(0.3s + var(--i) * 0.25s); }
-  .cost-meter b { color: var(--ink); }
-  .meter { flex: 1; height: 0.45rem; border-radius: 999px; background: rgba(255,255,255,.07); overflow: hidden; }
-  .meter i { display: block; height: 100%; width: 0; border-radius: inherit; background: linear-gradient(90deg, var(--purple), var(--purple-soft)); }
-  .in .meter i { animation: fill 1.2s var(--ease) 1.2s forwards; }
-  @keyframes fill { to { width: 22%; } }
-
-  /* ---------- positioning ---------- */
-  .positioning {
-    position: relative; z-index: 2;
-    display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
-    gap: clamp(1.5rem, 4vw, 4rem); align-items: center;
-    margin: 0 clamp(1.25rem, 5vw, 4rem) clamp(3rem, 6vw, 5rem);
-    padding: clamp(1.6rem, 4vw, 3.2rem);
-    border: 1px solid var(--line); border-radius: 1.5rem;
-    background:
-      radial-gradient(34rem 22rem at 12% 20%, rgba(143, 82, 255, 0.16), transparent 70%),
-      linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.012));
-    box-shadow: 0 28px 100px rgba(0, 0, 0, 0.34);
+  .comparison {
+    margin-top: 50px;
     overflow: hidden;
-  }
-  .positioning::after {
-    content: ""; position: absolute; inset: auto -8rem -12rem auto; width: 24rem; height: 24rem; border-radius: 50%;
-    background: radial-gradient(circle, rgba(143, 82, 255, 0.18), transparent 68%);
-    pointer-events: none;
-  }
-  .positioning-copy h2 {
-    margin: 0 0 1rem;
-    font-size: clamp(1.9rem, 4vw, 3.2rem) !important;
-    line-height: 1.04 !important;
-    letter-spacing: -0.02em;
-    color: var(--ink) !important;
-  }
-  .positioning-copy p:last-child {
-    margin: 0; color: var(--muted); line-height: 1.7; font-size: 1rem;
-  }
-  .proof-wall {
-    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem;
-  }
-  .proof-wall span {
-    display: flex; min-height: 4.4rem; align-items: center;
-    border: 1px solid rgba(178, 140, 255, 0.18); border-radius: 1rem;
-    background: rgba(8, 7, 12, 0.64);
-    padding: 0.95rem 1rem;
-    color: var(--ink); font-weight: 620; line-height: 1.25;
-    transition: transform 220ms var(--ease), border-color 220ms var(--ease), background 220ms var(--ease);
-  }
-  .proof-wall span:hover {
-    transform: translateY(-3px);
-    border-color: rgba(178, 140, 255, 0.46);
-    background: rgba(143, 82, 255, 0.11);
+    border-top: 1px solid #39323d;
+    border-bottom: 1px solid #39323d;
   }
 
-  /* ---------- workflow ---------- */
-  .workflow {
-    position: relative; z-index: 2;
-    padding: 0 clamp(1.25rem, 5vw, 4rem) clamp(3.5rem, 7vw, 6rem);
+  .comparison summary {
+    min-height: 68px;
+    padding: 0 4px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    color: #d7d0db;
+    cursor: pointer;
+    font-size: 14px;
+    list-style: none;
   }
-  .workflow-head {
-    width: min(48rem, 100%); margin: 0 auto 1.8rem; text-align: center;
-  }
-  .workflow-head h2 {
-    margin: 0 0 0.9rem;
-    font-size: clamp(2rem, 4.5vw, 3.5rem) !important;
-    line-height: 1.04 !important;
-    color: var(--ink) !important;
-    letter-spacing: -0.02em;
-  }
-  .workflow-head p {
-    margin: 0; color: var(--muted); line-height: 1.65; font-size: 1rem;
-  }
-  .workflow-grid {
-    display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.9rem;
-  }
-  .workflow-card {
-    position: relative; overflow: hidden;
-    border: 1px solid var(--line); border-radius: 1.15rem;
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.014));
-    padding: 1.25rem;
-    min-height: 13rem;
-    transition: transform 260ms var(--ease), border-color 260ms var(--ease), box-shadow 260ms var(--ease);
-  }
-  .workflow-card::before {
-    content: ""; position: absolute; inset: 0 0 auto; height: 3px;
-    background: linear-gradient(90deg, transparent, var(--purple-soft), transparent);
-    opacity: 0.6;
-  }
-  .workflow-card:hover {
-    transform: translateY(-5px);
-    border-color: rgba(178, 140, 255, 0.42);
-    box-shadow: 0 22px 64px rgba(109, 59, 210, 0.16);
-  }
-  .workflow-card span {
-    display: inline-flex; align-items: center; justify-content: center;
-    min-width: 3.2rem; height: 1.7rem; border-radius: 999px;
-    background: rgba(143, 82, 255, 0.14); border: 1px solid rgba(178, 140, 255, 0.25);
-    color: var(--purple-soft); font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 0.72rem; font-weight: 740; text-transform: uppercase; letter-spacing: 0.08em;
-  }
-  .workflow-card h3 {
-    margin: 1rem 0 0.55rem; color: var(--ink) !important;
-    font-size: 1.05rem !important; line-height: 1.22 !important;
-  }
-  .workflow-card p { margin: 0; color: var(--muted); line-height: 1.55; font-size: 0.9rem; }
 
-  /* ---------- quick grid ---------- */
-  .grid-section { position: relative; z-index: 2; padding: 0 clamp(1.25rem, 5vw, 4rem) clamp(3.5rem, 7vw, 6rem); }
-  .quick-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; margin-top: 1.6rem; }
-  .quick-card {
-    border: 1px solid var(--line); border-radius: 1.1rem; padding: 1.4rem;
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.012));
-    transition: transform 260ms var(--ease), border-color 260ms var(--ease), box-shadow 260ms var(--ease),
-      opacity 700ms var(--ease);
-  }
-  .quick-card:hover { transform: translateY(-5px); border-color: rgba(178, 140, 255, 0.42); box-shadow: 0 20px 50px rgba(109, 59, 210, 0.16); }
-  .quick-icon {
-    display: inline-grid; place-items: center; width: 2.3rem; height: 2.3rem;
-    border-radius: 0.7rem; color: var(--purple-soft); font-size: 1.05rem;
-    background: rgba(143, 82, 255, 0.14); border: 1px solid rgba(178, 140, 255, 0.25);
-    transition: transform 260ms var(--ease);
-  }
-  .quick-card:hover .quick-icon { transform: rotate(-6deg) scale(1.08); }
-  .quick-card b { display: block; margin: 0.9rem 0 0.35rem; font-size: 1rem; }
-  .quick-card p { margin: 0; color: var(--muted); font-size: 0.88rem; line-height: 1.55; }
+  .comparison summary::-webkit-details-marker { display: none; }
+  .comparison summary svg { transition: transform 180ms ease; }
+  .comparison[open] summary svg { transform: rotate(180deg); }
+  .comparison-scroll { overflow-x: auto; border-top: 1px solid #39323d; }
+  .comparison table { width: 100%; min-width: 900px; border-collapse: collapse; }
+  .comparison th,
+  .comparison td { padding: 16px 14px; border-bottom: 1px solid #2c2730; color: #8d8592; font-size: 12px; text-align: left; }
+  .comparison thead th { color: #bcb4c1; font-weight: 560; }
+  .comparison tbody th { color: #d7d0db; font-weight: 520; }
+  .comparison th:nth-child(2),
+  .comparison td:nth-child(2) { color: #c8b4ff; background: #15111a; }
 
-  /* ---------- closing ---------- */
   .closing {
-    position: relative; z-index: 2; text-align: center;
-    padding: clamp(4rem, 9vw, 8rem) clamp(1.25rem, 5vw, 4rem);
-    background:
-      radial-gradient(40rem 22rem at 50% 110%, rgba(143, 82, 255, 0.22), transparent 70%);
-  }
-  .closing h2 {
-    margin: 0; font-size: clamp(2.2rem, 5.5vw, 4rem) !important; line-height: 1.04 !important;
-    font-weight: 700 !important; letter-spacing: -0.02em; color: var(--ink) !important;
-  }
-
-  .downloads { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.8rem; margin: 2.4rem auto 0; width: min(56rem, 100%); }
-  .download {
-    display: flex; align-items: center; justify-content: space-between; gap: 0.8rem;
-    border: 1px solid var(--line); border-radius: 1rem; padding: 1rem 1.1rem;
-    background: rgba(20, 17, 30, 0.82); font-size: 0.9rem;
-    transition: transform 220ms var(--ease), border-color 220ms var(--ease), background 220ms var(--ease), box-shadow 220ms var(--ease);
-  }
-  .download:hover {
-    transform: translateY(-3px); border-color: rgba(178, 140, 255, 0.5);
-    background: rgba(143, 82, 255, 0.13); box-shadow: 0 18px 48px rgba(109, 59, 210, 0.22);
-  }
-  .download em { font-style: normal; color: var(--purple-soft); font-size: 0.75rem; }
-
-  /* ---------- footer ---------- */
-  .footer {
-    position: relative; z-index: 2;
-    display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap;
-    padding: 1.6rem clamp(1.25rem, 5vw, 4rem) 2.2rem;
-    border-top: 1px solid rgba(255, 255, 255, 0.06);
-    color: var(--muted); font-size: 0.88rem;
-  }
-  .foot-brand { display: flex; align-items: center; gap: 0.55rem; color: var(--ink); font-weight: 650; }
-  .foot-brand img { border-radius: 6px; }
-  .footer nav { display: flex; gap: 1.4rem; }
-  .footer nav a:hover { color: var(--ink); }
-
-  /* ---------- responsive ---------- */
-  @media (max-width: 64rem) {
-    .story { grid-template-columns: 1fr; }
-    .feature, .feature.flip { grid-template-columns: 1fr; }
-    .feature.flip .feature-copy { order: 1; }
-    .feature.flip .feature-visual { order: 2; }
-    .positioning { grid-template-columns: 1fr; }
-    .workflow-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .quick-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .downloads { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .float-chip { display: none; }
+    position: relative;
+    min-height: 620px;
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    isolation: isolate;
+    background: rgba(5, 4, 6, 0.34);
+    border-bottom: 1px solid #2a252e;
   }
 
-  @media (max-width: 40rem) {
-    .proof-wall, .workflow-grid, .quick-grid, .downloads { grid-template-columns: 1fr; }
-    .nav-links { gap: 1rem; font-size: 0.88rem; }
-    .run-meta { display: none; }
+  .closing::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    background: rgba(5, 4, 6, 0.32);
+    box-shadow: inset 0 0 160px 56px rgba(5, 4, 6, 0.76);
   }
 
-  /* ---------- reduced motion ---------- */
+  .closing-copy {
+    position: relative;
+    z-index: 2;
+    width: min(680px, calc(100% - 40px));
+    text-align: center;
+  }
+
+  .closing-copy img { width: 56px; height: 56px; border-radius: 12px; }
+  .closing-copy h2 { margin-top: 24px; }
+  .closing-copy p { margin: 20px auto 0; color: #918996; font-size: 16px; }
+  .closing-cta { margin-top: 28px; padding: 0 18px; }
+
+  .reveal { opacity: 1; }
+
+  @keyframes vector-field-breathe {
+    from { opacity: 0.78; transform: translate3d(-5px, -3px, 0) scale(1.01); }
+    to { opacity: 1; transform: translate3d(7px, 4px, 0) scale(1.018); }
+  }
+
+  @media (max-width: 920px) {
+    .hero-copy { width: min(600px, 86%); margin-left: 14%; }
+    .loop-list { grid-template-columns: repeat(3, 1fr); }
+    .loop-list li:nth-child(3) { border-right: 0; }
+    .loop-list li:nth-child(n + 4) { border-top: 1px solid #312b35; }
+    .chapter-copy { grid-template-columns: 1fr; gap: 26px; }
+    .chapter-copy > div:last-child { max-width: 680px; }
+    .engine-inner { grid-template-columns: 1fr; gap: 58px; }
+    .engine-heading { position: static; }
+    .evidence-grid { grid-template-columns: repeat(2, 1fr); }
+    .evidence-grid div:nth-child(2) { border-right: 0; }
+    .evidence-grid div:nth-child(n + 3) { border-top: 1px solid #342e38; }
+  }
+
+  @media (max-width: 640px) {
+    .chapter-width,
+    .hero-inner,
+    .runtime-band { width: min(100% - 28px, 1080px); }
+
+    .hero { padding-bottom: 44px; }
+    .hero-copy { width: 100%; padding-top: 42px; margin-left: 0; text-align: center; }
+    .hero-logo { width: 48px; height: 48px; margin-inline: auto; border-radius: 11px; }
+    .hero-name { margin-top: 10px; }
+    .hero h1 { margin-top: 15px; font-size: clamp(38px, 11vw, 52px); }
+    .hero-cta { margin-top: 24px; }
+    .hero-note { font-size: 11px; }
+    .hero-product { margin-top: 80px; }
+    .product-bar { min-height: 34px; padding-inline: 9px; }
+    .product-title { display: none; }
+    .hero-product img { width: 100%; max-width: none; transform: none; }
+
+    .runtime-band { min-height: 164px; padding-block: 38px; text-align: center; }
+    .runtime-list { gap: 14px 22px; }
+    .runtime-list span { font-size: 13px; }
+
+    .intro,
+    .chapter,
+    .engine-section,
+    .evidence,
+    .connections,
+    .comparison-section { padding: 88px 0; }
+
+    h2,
+    .chapter-copy h2,
+    .engine-heading h2 { font-size: 36px; }
+    .intro-copy > p:last-child,
+    .engine-heading > p:last-child,
+    .evidence-heading > p:last-child,
+    .connections-copy > p:last-child,
+    .comparison-heading > p:last-child { font-size: 15px; }
+
+    .loop-list { grid-template-columns: 1fr; }
+    .loop-list li { min-height: 122px; border-right: 0; border-top: 1px solid #312b35; }
+    .loop-list li:first-child { border-top: 0; }
+    .loop-list strong { margin-top: 12px; }
+
+    .chapter-copy { margin-bottom: 34px; }
+    .chapter-media { border-radius: 6px; }
+    .media-topline span:last-child { display: none; }
+    .chapter-media img { width: 780px; max-width: none; transform: translateX(-18%); }
+    .chapter-media.media-browser img { transform: translateX(-54%); }
+
+    .engine-row { grid-template-columns: 30px 1fr; gap: 12px; }
+    .engine-row p { grid-column: 2; }
+
+    .evidence-grid { grid-template-columns: 1fr 1fr; }
+    .evidence-grid div { min-height: 142px; padding: 20px 16px; }
+    .evidence-grid dd { font-size: 28px; }
+
+    .connection-rail { grid-template-columns: repeat(2, 1fr); }
+    .connection-rail span:nth-child(5n) { border-right: 1px solid #2e2932; }
+    .connection-rail span:nth-child(2n) { border-right: 0; }
+    .connection-rail span:nth-child(n + 3) { border-top: 1px solid #2e2932; }
+    .closing { min-height: 520px; }
+  }
+
   @media (prefers-reduced-motion: reduce) {
-    .aurora, .stars, .float-chip { animation: none !important; }
-    .pointer-glow { display: none; }
-    .reveal, .run-step, .run-done, .pulse-line, .diff-line, .diff-actions, .term-line, .key-card,
-    .cost-meter, .ck, .typing {
-      opacity: 1 !important; transform: none !important; animation: none !important; width: auto !important;
-      transition: none !important;
-    }
-    .tick::after { opacity: 1; transform: none; animation: none !important; }
-    .meter i { width: 22%; animation: none !important; }
-    .brain-links path { stroke-dashoffset: 0; animation: none !important; }
-    .brain-nodes circle { animation: none !important; }
-  }
-</style>
-
-<style is:global>
-  :root[data-has-hero] {
-    header.header {
-      display: none;
-    }
-
-    .main-frame {
-      padding-top: 0;
-
-      .main-pane > main {
-        padding: 0;
-      }
-    }
-
-    main > .content-panel .sl-markdown-content {
-      margin-top: 0;
-    }
+    .reveal { opacity: 1 !important; transform: none !important; }
+    .ascii-field { animation: none; transform: none; }
   }
 </style>

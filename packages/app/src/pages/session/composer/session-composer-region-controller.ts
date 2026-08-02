@@ -11,7 +11,7 @@ export type SessionComposerFollowupDock = {
   items: { id: string; text: string }[]
   sending?: string
   onSend: (id: string) => void
-  onEdit: (id: string) => void
+  onDelete: (id: string) => void
 }
 
 export type SessionComposerRevertDock = {
@@ -119,6 +119,95 @@ export function createSessionComposerRegionController(input: {
     (promise) => promise.then(() => true),
   )
 
+  const working = () => {
+    const id = input.sessionID()
+    return id ? sync().data.session_working(id) : false
+  }
+
+  // The in-flight assistant turn is the last assistant message still missing a
+  // completion timestamp. Its server-recorded start is reload-safe; the status
+  // component falls back to a client timestamp when it is absent.
+  const startedAt = () => {
+    const id = input.sessionID()
+    if (!id) return undefined
+    const messages = sync().data.message[id] ?? []
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i]
+      if (msg.role !== "assistant") continue
+      if (msg.time.completed !== undefined) continue
+      return msg.time.created
+    }
+    return undefined
+  }
+
+  const tokens = () => {
+    const id = input.sessionID()
+    if (!id) return 0
+    const data = sync().data
+    const messages = data.message[id] ?? []
+    // Show the tokens the CURRENT task/turn is using — growing as it runs — never
+    // the session's cumulative lifetime total.
+    let inflightId: string | undefined
+    let inflightReal = 0
+    let baseContext = 0
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i]
+      if (msg.role !== "assistant") continue
+      const turn =
+        msg.tokens.input + msg.tokens.output + msg.tokens.reasoning + msg.tokens.cache.read + msg.tokens.cache.write
+      if (!inflightId && msg.time.completed === undefined) {
+        inflightId = msg.id
+        inflightReal = turn
+        continue
+      }
+      // The most recent turn that reported usage = the context carried into the
+      // running turn.
+      if (turn > 0) {
+        baseContext = turn
+        break
+      }
+    }
+    // Not streaming a turn: show the last completed turn's footprint.
+    if (!inflightId) return baseContext
+    // Provider already reported usage for the running turn: use it verbatim.
+    if (inflightReal > 0) return inflightReal
+    // Streaming: the provider only reports usage at turn completion, so estimate
+    // the output produced so far from the streamed text (~4 chars/token) and add
+    // the context carried in. This ticks up live and snaps to the real count when
+    // the turn finishes.
+    let chars = 0
+    for (const part of data.part[inflightId] ?? []) {
+      if (part.type !== "text" && part.type !== "reasoning") continue
+      chars += (data.part_text_accum_delta[part.id] ?? part.text ?? "").length
+    }
+    return baseContext + Math.round(chars / 4)
+  }
+
+  const runningTasks = () => {
+    const rootId = input.sessionID()
+    if (!rootId) return 0
+    const inSubtree = (sid: string) => {
+      let current: string | undefined = sid
+      let guard = 0
+      while (current && guard < 100) {
+        if (current === rootId) return true
+        current = sync().session.get(current)?.parentID
+        guard++
+      }
+      return false
+    }
+    return Object.entries(sync().data.session_status).filter(
+      ([sid, status]) => status.type !== "idle" && inSubtree(sid),
+    ).length
+  }
+
+  const phrase = () => {
+    const id = input.sessionID()
+    if (!id) return undefined
+    const status = sync().data.session_status[id]
+    return status?.type === "retry" ? status.message : undefined
+  }
+
   return {
     state: input.state,
     centered: input.centered,
@@ -139,6 +228,11 @@ export function createSessionComposerRegionController(input: {
     dockHeight: () => Math.max(78, store.height),
     lift: () => (input.revert()?.items.length ? 18 : 36 * value()),
     setDockBodyRef: (el: HTMLDivElement) => setStore("body", el),
+    working,
+    startedAt,
+    tokens,
+    runningTasks,
+    phrase,
   }
 }
 

@@ -1,5 +1,5 @@
 import { Binary } from "@opencode-ai/core/util/binary"
-import type { Message, Part, Session } from "@opencode-ai/sdk/v2/client"
+import type { McpLocalConfig, McpRemoteConfig, Message, Part, Session } from "@opencode-ai/sdk/v2/client"
 import { createMemo } from "solid-js"
 import { produce, reconcile, type SetStoreFunction } from "solid-js/store"
 import type { createServerSdkContext } from "./server-sdk"
@@ -144,6 +144,8 @@ export const createDirSyncContext = (
       },
     },
     mcp: {
+      add: (name: string, config: McpLocalConfig | McpRemoteConfig) => serverSync.mcp.add(directory, name, config),
+      refresh: () => serverSync.mcp.refresh(directory),
       toggle: (name: string) => serverSync.mcp.toggle(directory, name),
     },
     absolute,

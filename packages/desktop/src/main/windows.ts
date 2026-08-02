@@ -13,14 +13,12 @@ import { getStore, removeStoreFile } from "./store"
 import { PINCH_ZOOM_ENABLED_KEY, WINDOW_IDS_KEY } from "./store-keys"
 import { createUnresponsiveSampler } from "./unresponsive"
 import { createWindowRegistry } from "./window-registry"
+import { allowsRendererPermission, allowsRendererPermissionRequest } from "./renderer-permissions"
 
 const root = dirname(fileURLToPath(import.meta.url))
 const rendererRoot = join(root, "../renderer")
 const rendererProtocol = "oc"
 const rendererHost = "renderer"
-const clipboardWritePermission = "clipboard-sanitized-write"
-const notificationPermission = "notifications"
-const rendererPermissions = new Set([clipboardWritePermission, notificationPermission])
 const oc2Theme = oc2ThemeJson as DesktopTheme
 const oc2Background = {
   light: resolveThemeVariant(oc2Theme.light, false)["background-base"],
@@ -146,7 +144,10 @@ export function restoreMainWindows() {
 }
 
 export function setDockIcon() {
-  if (process.platform !== "darwin") return
+  // Packaged macOS apps already get the correctly padded icon from icon.icns.
+  // Replacing it at runtime with a full-canvas PNG makes the running Dock icon
+  // visibly larger than every neighboring app.
+  if (process.platform !== "darwin" || app.isPackaged) return
   const icon = nativeImage.createFromPath(join(iconsDir(), "dock.png"))
   if (!icon.isEmpty()) app.dock?.setIcon(icon)
 }
@@ -192,11 +193,11 @@ export function createMainWindow(id: string = randomUUID()) {
 
   allowRendererPermissions(win)
   wireWindowRecovery(win, id)
-
-  win.webContents.session.webRequest.onBeforeSendHeaders((details, callback) => {
-    const { requestHeaders } = details
-    upsertKeyValue(requestHeaders, "Access-Control-Allow-Origin", ["*"])
-    callback({ requestHeaders })
+  win.webContents.setWindowOpenHandler(() => ({ action: "deny" }))
+  win.webContents.on("will-navigate", (event, url) => {
+    if (isTrustedRendererUrl(url)) return
+    event.preventDefault()
+    writeLog("window", "blocked renderer navigation", { url }, "warn")
   })
 
   win.webContents.session.webRequest.onHeadersReceived((details, callback) => {
@@ -421,26 +422,34 @@ function allowRendererPermissions(win: BrowserWindow) {
 
   win.webContents.session.setPermissionRequestHandler((webContents, permission, callback, details) => {
     callback(
-      rendererPermissions.has(permission) &&
+      allowsRendererPermissionRequest(permission, "mediaTypes" in details ? details.mediaTypes : undefined) &&
         isTrustedRendererUrl(details.requestingUrl) &&
         webContents.id === webContentsId,
     )
   })
   win.webContents.session.setPermissionCheckHandler((webContents, permission, requestingOrigin, details) => {
-    if (!rendererPermissions.has(permission)) return false
+    if (!allowsRendererPermission(permission, details.mediaType)) return false
     if (webContents && webContents.id !== webContentsId) return false
     return isTrustedRendererUrl(details.requestingUrl) || isTrustedRendererUrl(requestingOrigin)
   })
 }
 
-function isTrustedRendererUrl(value?: string) {
+export function isTrustedRendererUrl(value?: string) {
   return isRendererUrl(value)
 }
 
 function addRendererHeaders(value: string, headers: Record<string, any>) {
-  upsertKeyValue(headers, "Access-Control-Allow-Origin", ["*"])
-  upsertKeyValue(headers, "Access-Control-Allow-Headers", ["*"])
+  if (isRendererUrl(value) || isLoopbackUrl(value)) {
+    upsertKeyValue(headers, "Access-Control-Allow-Origin", ["*"])
+    upsertKeyValue(headers, "Access-Control-Allow-Headers", ["*"])
+  }
   if (isRendererUrl(value, true)) upsertKeyValue(headers, documentPolicyHeader, [jsCallStacksDocumentPolicy])
+}
+
+function isLoopbackUrl(value?: string) {
+  if (!value || !URL.canParse(value)) return false
+  const host = new URL(value).hostname.toLowerCase()
+  return host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]"
 }
 
 function isRendererUrl(value?: string, html = false) {

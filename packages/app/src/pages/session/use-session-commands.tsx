@@ -194,13 +194,17 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
     })
   }
 
-  type VectorLocalPanelTab = "timeline" | "review" | "checkpoints" | "health"
-  const openVectorLocalPanel = (tab: VectorLocalPanelTab, scan = false) => {
-    window.dispatchEvent(
-      new CustomEvent("vector:open-code-archaeology", {
-        detail: { tab, scan },
-      }),
-    )
+  const openPreview = () => {
+    const alreadyOpen = view().reviewPanel.opened() && tabs().active() === "preview"
+    layout.fileTree.close()
+    view().reviewPanel.open("other")
+    void tabs().open("preview")
+    tabs().setActive("preview")
+    if (alreadyOpen) return
+    showToast({
+      title: "Browser opened",
+      description: "Browse any URL or start your app in Terminal and open its localhost address here.",
+    })
   }
 
   const vectorWorkflowCmds = () => [
@@ -212,60 +216,11 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
       onSelect: openCodespace,
     }),
     viewCommand({
-      id: "vector.codeArchaeology",
-      title: "Code Archaeology",
-      description: "Open the real edit timeline, changed files, and checkpoint trail.",
-      slash: "archaeology",
-      onSelect: () => openVectorLocalPanel("timeline"),
-    }),
-    viewCommand({
-      id: "vector.reviewChanges",
-      title: "Review AI Changes",
-      description: "Open the changed-file review for real pending edits.",
-      slash: "review-changes",
-      onSelect: () => openVectorLocalPanel("review"),
-    }),
-    viewCommand({
-      id: "vector.checkpoints",
-      title: "Checkpoints",
-      description: "Open restorable snapshots created from real AI edits.",
-      slash: "checkpoints",
-      onSelect: () => openVectorLocalPanel("checkpoints"),
-    }),
-    viewCommand({
-      id: "vector.projectDoctor",
-      title: "Project Doctor",
-      description: "Scan real files for health, preview readiness, context risk, and demo readiness.",
-      slash: "doctor",
-      onSelect: () => openVectorLocalPanel("health", true),
-    }),
-    viewCommand({
-      id: "vector.previewDoctor",
-      title: "Preview Doctor",
-      description: "Inspect local app entrypoints and missing preview assets.",
-      slash: "preview-doctor",
-      onSelect: () => openVectorLocalPanel("health", true),
-    }),
-    viewCommand({
-      id: "vector.costGuard",
-      title: "BYOK Cost Guard",
-      description: "Estimate local context size and model/cost risk from real project files.",
-      slash: "cost",
-      onSelect: () => openVectorLocalPanel("health", true),
-    }),
-    viewCommand({
-      id: "vector.promptGuard",
-      title: "Prompt Quality Guard",
-      description: "Show local guidance for safer prompts based on project size and pending diffs.",
-      slash: "prompt-guard",
-      onSelect: () => openVectorLocalPanel("health", true),
-    }),
-    viewCommand({
-      id: "vector.demoMode",
-      title: "Demo Mode Checklist",
-      description: "Open a local readiness checklist for a reliable demo.",
-      slash: "demo",
-      onSelect: () => openVectorLocalPanel("health", true),
+      id: "vector.preview.open",
+      title: "Toggle Browser",
+      description: "Open Vector's controlled browser beside the current task.",
+      slash: "browser",
+      onSelect: openPreview,
     }),
   ]
 
@@ -273,6 +228,13 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
     void openDialog(
       () => import("@/components/dialog-select-mcp"),
       (x) => dialog.show(() => <x.DialogSelectMcp />),
+    )
+  }
+
+  const choosePlugins = () => {
+    void openDialog(
+      () => import("@/components/dialog-select-plugins"),
+      (x) => dialog.show(() => <x.DialogSelectPlugins />),
     )
   }
 
@@ -554,6 +516,13 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
       keybind: "mod+;",
       slash: "mcp",
       onSelect: chooseMcp,
+    }),
+    mcpCommand({
+      id: "plugins.open",
+      title: "Plugins",
+      description: "Connect GitHub, Linear, Sentry and more to Vector.",
+      slash: "plugins",
+      onSelect: choosePlugins,
     }),
   ]
 

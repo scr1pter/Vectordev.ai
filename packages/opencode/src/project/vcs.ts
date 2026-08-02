@@ -273,9 +273,25 @@ export const ApplyResult = Schema.Struct({
 })
 export type ApplyResult = Schema.Schema.Type<typeof ApplyResult>
 
+export const CommitInput = Schema.Struct({
+  message: Schema.String,
+})
+export type CommitInput = Schema.Schema.Type<typeof CommitInput>
+
+export const CommitResult = Schema.Struct({
+  committed: Schema.Boolean,
+  sha: Schema.optional(Schema.String),
+}).annotate({ identifier: "VcsCommitResult" })
+export type CommitResult = Schema.Schema.Type<typeof CommitResult>
+
 export class PatchApplyError extends Schema.TaggedErrorClass<PatchApplyError>()("VcsPatchApplyError", {
   message: Schema.String,
   reason: Schema.Literals(["non-git", "not-clean"]),
+}) {}
+
+export class CommitError extends Schema.TaggedErrorClass<CommitError>()("VcsCommitError", {
+  message: Schema.String,
+  reason: Schema.Literals(["non-git", "commit-failed"]),
 }) {}
 
 export interface Interface {
@@ -286,6 +302,7 @@ export interface Interface {
   readonly diff: (mode: Mode, options?: DiffOptions) => Effect.Effect<FileDiff[]>
   readonly diffRaw: () => Effect.Effect<string>
   readonly apply: (input: ApplyInput) => Effect.Effect<ApplyResult, PatchApplyError>
+  readonly commit: (input: CommitInput) => Effect.Effect<CommitResult, CommitError>
 }
 
 interface State {
@@ -413,6 +430,55 @@ const layer: Layer.Layer<Service, never, Git.Service | EventV2Bridge.Service> = 
           })
         }
         return { applied: true }
+      }),
+      commit: Effect.fn("Vcs.commit")(function* (input: CommitInput) {
+        const ctx = yield* InstanceState.context
+        if (ctx.project.vcs !== "git") {
+          return yield* new CommitError({
+            message: "Changes can't be committed because the project is not git-based",
+            reason: "non-git",
+          })
+        }
+        const cwd = ctx.directory
+        const message = input.message.trim() || "Update"
+
+        // Never commit a clean tree — report a no-op instead of creating an empty commit.
+        const changed = yield* git.status(cwd)
+        if (changed.length === 0) return { committed: false }
+
+        // Capture a restore point BEFORE committing. A lightweight tag at the current
+        // HEAD gives a named anchor to reset back to; the commit itself is reversible
+        // with `git reset --soft HEAD~1`. Skip when there is no commit yet (empty repo).
+        const hasHead = yield* git.hasHead(cwd)
+        if (hasHead) {
+          yield* git.run(["tag", "-f", `vector/pre-commit-${Date.now()}`, "HEAD"], { cwd })
+        }
+
+        const staged = yield* git.run(["add", "-A", "--", "."], { cwd })
+        if (staged.exitCode !== 0) {
+          return yield* new CommitError({
+            message: staged.stderr.toString("utf8").trim() || "Failed to stage changes for commit",
+            reason: "commit-failed",
+          })
+        }
+
+        // Identity-safe commit: fall back to a Vector identity when git has none
+        // configured, mirroring the desktop github.ts buildCommitArgs behaviour.
+        const email = yield* git.run(["config", "user.email"], { cwd })
+        const hasEmail = email.exitCode === 0 && email.text().trim().length > 0
+        const identity = hasEmail ? [] : ["-c", "user.name=Vector", "-c", "user.email=noreply@vectordev.ai"]
+
+        const committed = yield* git.run([...identity, "commit", "-m", message, "--", "."], { cwd })
+        if (committed.exitCode !== 0) {
+          return yield* new CommitError({
+            message: committed.stderr.toString("utf8").trim() || "Failed to commit changes",
+            reason: "commit-failed",
+          })
+        }
+
+        const head = yield* git.run(["rev-parse", "HEAD"], { cwd })
+        const sha = head.exitCode === 0 ? head.text().trim() || undefined : undefined
+        return { committed: true, sha }
       }),
     })
   }),

@@ -52,6 +52,12 @@ it.instance("returns default native agents when no config", () =>
     expect(names).toContain("plan")
     expect(names).toContain("general")
     expect(names).toContain("explore")
+    expect(names).toContain("review")
+    expect(names).toContain("debug")
+    expect(names).toContain("test")
+    expect(names).toContain("security")
+    expect(names).toContain("performance")
+    expect(names).toContain("migration")
     expect(names).toContain("compaction")
     expect(names).toContain("title")
     expect(names).toContain("summary")
@@ -80,12 +86,18 @@ it.instance("plan agent denies edits except .opencode/plans/*", () =>
   }),
 )
 
-it.instance("plan agent denies the general subagent by default", () =>
+it.instance("plan agent denies mutation-capable subagents by default", () =>
   Effect.gen(function* () {
     const plan = yield* load((svc) => svc.get("plan"))
     expect(plan).toBeDefined()
     expect(Permission.evaluate("task", "general", plan!.permission).action).toBe("deny")
+    expect(Permission.evaluate("task", "debug", plan!.permission).action).toBe("deny")
+    expect(Permission.evaluate("task", "test", plan!.permission).action).toBe("deny")
+    expect(Permission.evaluate("task", "performance", plan!.permission).action).toBe("deny")
+    expect(Permission.evaluate("task", "migration", plan!.permission).action).toBe("deny")
     expect(Permission.evaluate("task", "explore", plan!.permission).action).toBe("allow")
+    expect(Permission.evaluate("task", "review", plan!.permission).action).toBe("allow")
+    expect(Permission.evaluate("task", "security", plan!.permission).action).toBe("allow")
     expect(Permission.evaluate("task", "custom", plan!.permission).action).toBe("allow")
   }),
 )
@@ -167,6 +179,32 @@ it.instance("general agent denies todo tools", () =>
     expect(general?.mode).toBe("subagent")
     expect(general?.hidden).toBeUndefined()
     expect(evalPerm(general, "todowrite")).toBe("deny")
+  }),
+)
+
+it.instance("native specialist agents have the intended permission boundaries", () =>
+  Effect.gen(function* () {
+    const review = yield* load((svc) => svc.get("review"))
+    const security = yield* load((svc) => svc.get("security"))
+    const debug = yield* load((svc) => svc.get("debug"))
+    const test = yield* load((svc) => svc.get("test"))
+
+    for (const agent of [review, security]) {
+      expect(agent?.mode).toBe("subagent")
+      expect(agent?.native).toBe(true)
+      expect(evalPerm(agent, "read")).toBe("allow")
+      expect(evalPerm(agent, "edit")).toBe("deny")
+      expect(evalPerm(agent, "write")).toBe("deny")
+    }
+
+    for (const agent of [debug, test]) {
+      expect(agent?.mode).toBe("subagent")
+      expect(agent?.native).toBe(true)
+      expect(evalPerm(agent, "read")).toBe("allow")
+      expect(evalPerm(agent, "edit")).toBe("allow")
+      expect(evalPerm(agent, "bash")).toBe("allow")
+      expect(evalPerm(agent, "todowrite")).toBe("deny")
+    }
   }),
 )
 

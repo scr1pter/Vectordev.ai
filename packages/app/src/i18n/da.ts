@@ -275,6 +275,7 @@ export const dict = {
   "prompt.action.attachFile": "Vedhæft fil",
   "prompt.attachment.remove": "Fjern vedhæftning",
   "prompt.action.send": "Send",
+  "prompt.action.queue": "Sæt i kø",
   "prompt.action.stop": "Stop",
 
   "prompt.toast.pasteUnsupported.title": "Ikke understøttet vedhæftning",
@@ -533,6 +534,8 @@ export const dict = {
   "session.followupDock.summary.other": "{{count}} beskeder i kø",
   "session.followupDock.sendNow": "Send nu",
   "session.followupDock.edit": "Rediger",
+  "session.followupDock.copy": "Kopiér",
+  "session.followupDock.delete": "Slet",
   "session.followupDock.collapse": "Skjul beskeder i kø",
   "session.followupDock.expand": "Udvid beskeder i kø",
   "session.revertDock.summary.one": "{{count}} tilbagerullet besked",

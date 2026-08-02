@@ -69,10 +69,40 @@ import { PromptDragOverlay } from "./prompt-input/drag-overlay"
 import { promptPlaceholder } from "./prompt-input/placeholder"
 import { createPromptInputTransientState } from "./prompt-input/transient-state"
 import { showToast } from "@/utils/toast"
+import { dictationAvailable, startDictation, type DictationHandle } from "@/services/dictation"
+import { DictationIndicator } from "@/components/dictation-indicator"
 import { ImagePreview } from "@opencode-ai/ui/image-preview"
 import type { ReferenceInfo } from "@opencode-ai/sdk/v2/client"
+import { modelVariantDescription, modelVariantLabel } from "@/context/model-variant"
+import { detectParallelIntent } from "@/features/delegation/delegation"
+import { listOutcomes } from "@/features/economics/economics-repository"
+import { recommendModel } from "@/features/economics/economics-recommender"
+import { categorizeTask } from "@/features/economics/task-categorizer"
 
 export type PromptInputState = ReturnType<typeof usePrompt>
+
+type ExecutionMode = "normal" | "quick" | "fast"
+
+const EXECUTION_MODES = [
+  {
+    id: "normal" as const,
+    label: "Normal",
+    description: "Standard execution speed and token use.",
+    dot: "#8a8595",
+  },
+  {
+    id: "quick" as const,
+    label: "Quick",
+    description: "Answers simple questions quickly with minimal context and fewer tokens.",
+    dot: "#70c7b1",
+  },
+  {
+    id: "fast" as const,
+    label: "Fast",
+    description: "Targets 1.5x speed with priority capacity and wider parallel execution. Uses more tokens.",
+    dot: "#9b6cff",
+  },
+]
 
 export type PromptInputHistory = {
   entries: (mode: "normal" | "shell") => PromptHistoryStoredEntry[]
@@ -86,7 +116,7 @@ export type PromptInputSubmission = {
 
 export type PromptInputControls = {
   agents: {
-    available: { name: string; hidden?: boolean; mode: string }[]
+    available: { name: string; description?: string; hidden?: boolean; mode: string }[]
     options: string[]
     current: string
     loading: boolean
@@ -162,10 +192,8 @@ export interface PromptInputProps {
   ref?: (el: HTMLDivElement) => void
   newSessionWorktree?: string
   onNewSessionWorktreeReset?: () => void
-  edit?: { id: string; prompt: Prompt; context: FollowupDraft["context"] }
-  onEditLoaded?: () => void
   shouldQueue?: () => boolean
-  onQueue?: (draft: FollowupDraft) => void
+  onQueue?: (draft: FollowupDraft) => boolean | void
   onAbort?: () => void
   onSubmit?: () => void
   toolbar?: JSX.Element
@@ -223,6 +251,17 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const mirror = { input: false }
   const inset = 56
   const space = `${inset}px`
+
+  createEffect(() => {
+    if (planMode.enabled()) return
+    if (props.controls.agents.current !== "plan") return
+
+    const next = props.controls.agents.available.find(
+      (agent) => agent.name !== "plan" && agent.mode !== "subagent" && !agent.hidden,
+    )
+    if (!next) return
+    props.controls.agents.select(next.name)
+  })
 
   const scrollCursorIntoView = () => {
     const container = scrollRef
@@ -369,6 +408,9 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     return text.trim().length === 0 && imageAttachments().length === 0 && commentCount() === 0
   })
   const stopping = createMemo(() => working() && blank())
+  // While the agent is busy and queue mode is active, a non-empty submit enqueues
+  // the message instead of interrupting the turn — surface that as "Queue".
+  const queueing = createMemo(() => working() && !blank() && !!props.shouldQueue?.())
   const tip = () => {
     if (stopping()) {
       return (
@@ -381,12 +423,17 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
 
     return (
       <div class="flex items-center gap-2">
-        <span>{language.t("prompt.action.send")}</span>
+        <span>{language.t(queueing() ? "prompt.action.queue" : "prompt.action.send")}</span>
         <Icon name="enter" size="small" class="text-icon-base" />
       </div>
     )
   }
   const [listening, setListening] = createSignal(false)
+  const [transcribing, setTranscribing] = createSignal(false)
+  const [recordingLevel, setRecordingLevel] = createSignal(0)
+  let dictation: DictationHandle | undefined
+  let dictationStarting = false
+  let voiceDisposed = false
   const appendPromptText = (text: string) => {
     const addition = text.trim()
     if (!addition) return
@@ -403,42 +450,58 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       if (editorRef) setCursorPosition(editorRef, nextText.length)
     })
   }
-  const startVoiceInput = () => {
-    if (listening()) return
-    const SpeechRecognition =
-      (globalThis as unknown as { SpeechRecognition?: new () => any }).SpeechRecognition ??
-      (globalThis as unknown as { webkitSpeechRecognition?: new () => any }).webkitSpeechRecognition
+  const micAvailable = createMemo(() => dictationAvailable())
 
-    if (!SpeechRecognition) {
-      showToast({
-        title: "Microphone unavailable",
-        description: "This desktop runtime does not expose speech recognition yet.",
-      })
+  // One engine per runtime, chosen by the shared dictation service: desktop
+  // always records natively and transcribes on-device with Whisper (Electron's
+  // SpeechRecognition engine always fails with "network"); web uses the
+  // browser's SpeechRecognition.
+  const startVoiceInput = async () => {
+    if (transcribing()) return
+    if (dictation) {
+      dictation.stop()
       return
     }
-
-    const recognition = new SpeechRecognition()
-    recognition.continuous = false
-    recognition.interimResults = false
-    recognition.lang = "en-US"
-    recognition.onstart = () => setListening(true)
-    recognition.onend = () => setListening(false)
-    recognition.onerror = () => {
-      setListening(false)
-      showToast({
-        title: "Could not hear audio",
-        description: "Check microphone permission, then try again.",
+    if (dictationStarting) return
+    dictationStarting = true
+    try {
+      const handle = await startDictation({
+        onState: (state) => {
+          if (voiceDisposed) return
+          setListening(state === "listening")
+          setTranscribing(state === "transcribing")
+          if (state !== "listening") setRecordingLevel(0)
+        },
+        onLevel: setRecordingLevel,
+        onFinal: (text) => {
+          dictation = undefined
+          setRecordingLevel(0)
+          if (!voiceDisposed) appendPromptText(text)
+        },
+        onError: (message) => {
+          dictation = undefined
+          setRecordingLevel(0)
+          if (!voiceDisposed) showToast({ title: "Dictation", description: message })
+        },
       })
-    }
-    recognition.onresult = (event: any) => {
-      let transcript = ""
-      for (let i = event.resultIndex ?? 0; i < event.results.length; i++) {
-        transcript += event.results[i][0]?.transcript ?? ""
+      if (voiceDisposed) {
+        handle?.cancel()
+        return
       }
-      appendPromptText(transcript)
+      dictation = handle
+      if (handle && globalThis.window?.api) {
+        showToast({ title: "Listening", description: "Tap the microphone again when you are finished." })
+      }
+    } finally {
+      dictationStarting = false
     }
-    recognition.start()
   }
+
+  onCleanup(() => {
+    voiceDisposed = true
+    dictation?.cancel()
+    dictation = undefined
+  })
 
   const contextItems = createMemo(() => {
     const items = prompt.context.items()
@@ -455,6 +518,69 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   })
 
   const history = props.history ?? createPersistedPromptInputHistory()
+
+  // Parallel-delegation suggestion: cheap to compute (skipped entirely in
+  // shell mode) and purely additive — it never intercepts submit, only
+  // offers to hand the current prompt to Parallel Workspaces.
+  const delegationPromptText = createMemo(() => {
+    if (store.mode === "shell") return ""
+    return prompt
+      .current()
+      .map((part) => ("content" in part ? part.content : ""))
+      .join("")
+  })
+  const delegationIntent = createMemo(() => {
+    const text = delegationPromptText()
+    if (!text) return undefined
+    return detectParallelIntent(text)
+  })
+  const [delegationDismissedFor, setDelegationDismissedFor] = createSignal("")
+  const showDelegationChip = createMemo(() => {
+    if (!props.controls.newLayoutDesigns) return false
+    if (!delegationIntent()) return false
+    return delegationDismissedFor() !== delegationPromptText()
+  })
+  const dismissDelegation = () => setDelegationDismissedFor(delegationPromptText())
+  const delegateToParallel = () => {
+    const intent = delegationIntent()
+    if (!intent) return
+    globalThis.window?.dispatchEvent(
+      new CustomEvent("vector:delegate-parallel", { detail: { missions: intent.missions } }),
+    )
+    setDelegationDismissedFor(delegationPromptText())
+  }
+
+  // Model Economics recommendation: mirrors the delegation chip. Suggests the
+  // model with the best verified track record for this task's category, learned
+  // from real parallel-workspace outcomes. Honest cold start — recommendModel
+  // returns undefined until there is enough evidence.
+  const taskCategory = createMemo(() => categorizeTask(delegationPromptText()))
+  const [economicsOutcomes] = createResource(
+    () => sdk().directory,
+    (directory) => listOutcomes(directory),
+  )
+  const modelRecommendation = createMemo(() => recommendModel(economicsOutcomes() ?? [], taskCategory()))
+  const [recommendationDismissedFor, setRecommendationDismissedFor] = createSignal("")
+  const recommendationDiffersFromCurrent = createMemo(() => {
+    const rec = modelRecommendation()
+    if (!rec) return false
+    const current = props.controls.model.selection.current()
+    return current?.provider?.id !== rec.provider || current?.id !== rec.model
+  })
+  const showRecommendationChip = createMemo(() => {
+    if (!props.controls.newLayoutDesigns) return false
+    if (!modelRecommendation()) return false
+    if (!recommendationDiffersFromCurrent()) return false
+    return recommendationDismissedFor() !== `${taskCategory()}:${modelRecommendation()?.model ?? ""}`
+  })
+  const dismissRecommendation = () =>
+    setRecommendationDismissedFor(`${taskCategory()}:${modelRecommendation()?.model ?? ""}`)
+  const useRecommendedModel = () => {
+    const rec = modelRecommendation()
+    if (!rec) return
+    props.controls.model.selection.set({ providerID: rec.provider, modelID: rec.model }, { recent: true })
+    dismissRecommendation()
+  }
 
   const suggest = createMemo(() => !hasUserPrompt())
 
@@ -724,7 +850,14 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const agentList = createMemo(() =>
     props.controls.agents.available
       .filter((agent) => !agent.hidden && agent.mode !== "primary")
-      .map((agent): AtOption => ({ type: "agent", name: agent.name, display: agent.name })),
+      .map(
+        (agent): AtOption => ({
+          type: "agent",
+          name: agent.name,
+          display: agent.name,
+          description: agent.description,
+        }),
+      ),
   )
 
   const mcpResourceList = createMemo(() =>
@@ -1234,45 +1367,6 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     history.add(prompt, mode, mode === "shell" ? [] : historyComments())
   }
 
-  createEffect(
-    on(
-      () => props.edit?.id,
-      (id) => {
-        const edit = props.edit
-        if (!id || !edit) return
-
-        for (const item of prompt.context.items()) {
-          prompt.context.remove(item.key)
-        }
-
-        for (const item of edit.context) {
-          prompt.context.add({
-            type: item.type,
-            path: item.path,
-            selection: item.selection,
-            comment: item.comment,
-            commentID: item.commentID,
-            commentOrigin: item.commentOrigin,
-            preview: item.preview,
-          })
-        }
-
-        setStore("mode", "normal")
-        setStore("popover", null)
-        setStore("historyIndex", -1)
-        setStore("savedPrompt", null)
-        prompt.set(edit.prompt, promptLength(edit.prompt))
-        requestAnimationFrame(() => {
-          editorRef.focus()
-          setCursorPosition(editorRef, promptLength(edit.prompt))
-          queueScroll()
-        })
-        props.onEditLoaded?.()
-      },
-      { defer: true },
-    ),
-  )
-
   const navigateHistory = (direction: "up" | "down") => {
     const result = navigatePromptHistory({
       direction,
@@ -1319,13 +1413,75 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   )
 
   const variants = createMemo(() => ["default", ...props.controls.model.selection.variant.list()])
+  const effortIndex = createMemo(() => {
+    const current = props.controls.model.selection.variant.current() ?? "default"
+    const index = variants().indexOf(current)
+    return index < 0 ? 0 : index
+  })
+  const effortProgress = createMemo(() => {
+    const steps = variants().length - 1
+    return steps <= 0 ? 0 : (effortIndex() / steps) * 100
+  })
+  const selectEffortIndex = (index: number) => {
+    const value = variants()[Math.max(0, Math.min(index, variants().length - 1))]
+    props.controls.model.selection.variant.set(value === "default" ? undefined : value)
+  }
+  const isMaxEffort = createMemo(() => modelVariantLabel(props.controls.model.selection.variant.current()) === "Max")
   // Check provider variants directly: `variants` also includes the UI-only default option.
   const showVariantControl = createMemo(() => props.controls.model.selection.variant.list().length > 0)
+  const [executionMode, setExecutionMode] = createSignal<ExecutionMode>("normal")
+  const [executionModeMenuOpen, setExecutionModeMenuOpen] = createSignal(false)
+  const executionModeMeta = createMemo(
+    () => EXECUTION_MODES.find((mode) => mode.id === executionMode()) ?? EXECUTION_MODES[0],
+  )
   const accepting = createMemo(() => {
     const id = props.controls.session.id
     if (!id) return permission.isAutoAcceptingDirectory(sdk().directory)
     return permission.isAutoAccepting(id, sdk().directory)
   })
+
+  // Codex/Claude-style approval MODES, mapped onto Vector's real state:
+  // plan mode + auto-accept (full access). Sits next to the effort control.
+  const setFullAccess = (on: boolean) => {
+    if (accepting() === on) return
+    const id = props.controls.session.id
+    if (id) permission.toggleAutoAccept(id, sdk().directory)
+    else permission.toggleAutoAcceptDirectory(sdk().directory)
+  }
+  const composerMode = createMemo<"manual" | "plan" | "full">(() =>
+    planMode.enabled() ? "plan" : accepting() ? "full" : "manual",
+  )
+  const setComposerMode = (mode: "manual" | "plan" | "full") => {
+    if (mode === "plan") {
+      setFullAccess(false)
+      planMode.setEnabled(true)
+    } else if (mode === "full") {
+      planMode.setEnabled(false)
+      setFullAccess(true)
+    } else {
+      planMode.setEnabled(false)
+      setFullAccess(false)
+    }
+  }
+  const COMPOSER_MODES = [
+    {
+      id: "manual" as const,
+      label: "Manual",
+      description: "Ask before editing files or running commands",
+      dot: "#8a8595",
+    },
+    { id: "plan" as const, label: "Plan", description: "Plan and explain only — no file changes", dot: "#9b6cff" },
+    {
+      id: "full" as const,
+      label: "Full access",
+      description: "Edit files, run commands, and use the browser without asking",
+      dot: "#e6a15c",
+    },
+  ]
+  const composerModeMeta = createMemo(
+    () => COMPOSER_MODES.find((mode) => mode.id === composerMode()) ?? COMPOSER_MODES[0],
+  )
+  const [composerModeMenuOpen, setComposerModeMenuOpen] = createSignal(false)
 
   const { abort, handleSubmit } =
     props.submission ??
@@ -1352,6 +1508,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       onQueue: props.onQueue,
       onAbort: props.onAbort,
       onSubmit: props.onSubmit,
+      executionMode,
     })
 
   const handleKeyDown = (event: KeyboardEvent) => {
@@ -1589,6 +1746,56 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
         newLayoutDesigns={props.controls.newLayoutDesigns}
         t={(key) => language.t(key as Parameters<typeof language.t>[0])}
       />
+      <Show when={showDelegationChip()}>
+        <div class="mx-1 mb-2 flex items-center gap-2 rounded-full border border-[#9374ec]/30 bg-[#9374ec]/10 px-3 py-1.5 text-[12px] text-[#d8cdfb] animate-in fade-in">
+          <span class="shrink-0 text-[#ad95f5]" aria-hidden="true">
+            ⑂
+          </span>
+          <span class="min-w-0 flex-1 truncate">
+            Looks like {delegationIntent()?.missions.length} independent tasks — delegate to parallel agents?
+          </span>
+          <button
+            type="button"
+            class="shrink-0 rounded-full bg-[#9374ec] px-2.5 py-1 text-[11px] font-semibold text-white transition hover:brightness-110"
+            onClick={delegateToParallel}
+          >
+            Delegate
+          </button>
+          <button
+            type="button"
+            class="shrink-0 rounded-full px-2 py-1 text-[11px] font-medium text-[#d8cdfb]/60 transition hover:text-[#d8cdfb]"
+            onClick={dismissDelegation}
+            aria-label="Dismiss delegation suggestion"
+          >
+            Dismiss
+          </button>
+        </div>
+      </Show>
+      <Show when={showRecommendationChip()}>
+        <div class="mx-1 mb-2 flex items-center gap-2 rounded-full border border-[#9374ec]/30 bg-[#9374ec]/10 px-3 py-1.5 text-[12px] text-[#d8cdfb] animate-in fade-in">
+          <span class="shrink-0 text-[#ad95f5]" aria-hidden="true">
+            ✦
+          </span>
+          <span class="min-w-0 flex-1 truncate">
+            Best for this {taskCategory()}: {modelRecommendation()?.model} — {modelRecommendation()?.evidence[0]}
+          </span>
+          <button
+            type="button"
+            class="shrink-0 rounded-full bg-[#9374ec] px-2.5 py-1 text-[11px] font-semibold text-white transition hover:brightness-110"
+            onClick={useRecommendedModel}
+          >
+            Use
+          </button>
+          <button
+            type="button"
+            class="shrink-0 rounded-full px-2 py-1 text-[11px] font-medium text-[#d8cdfb]/60 transition hover:text-[#d8cdfb]"
+            onClick={dismissRecommendation}
+            aria-label="Dismiss model recommendation"
+          >
+            Dismiss
+          </button>
+        </div>
+      </Show>
       <Switch>
         <Match when={props.controls.newLayoutDesigns}>
           <div class="flex flex-col gap-3">
@@ -1675,43 +1882,93 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                   </div>
                 </div>
               </div>
-              <div class="flex h-12 items-center px-3 pr-5">
-                <div class="flex min-w-0 flex-1 items-center gap-1">
+              <div class="flex h-12 min-w-0 items-center gap-1 px-3 pr-4">
+                <div
+                  class="flex min-w-0 items-center gap-1"
+                  classList={{
+                    "flex-1": !listening() && !transcribing(),
+                    "shrink-0": listening() || transcribing(),
+                  }}
+                >
                   {fileAttachmentInput()}
-                  <Show when={planMode.enabled()}>
-                    <button
-                      type="button"
-                      class="mr-1 inline-flex h-9 shrink-0 items-center gap-2 rounded-full border border-[#9b6cff]/45 bg-[#9b6cff]/16 px-4 text-[11px] font-semibold text-[#d8c8ff] shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]"
-                      title="Plan Mode is on. Vector will review and plan only, with file-changing actions blocked."
-                      onClick={() => planMode.setEnabled(false)}
-                    >
-                      Plan
-                      <span class="text-[9px] font-medium text-[#c9b2ff]/65">Shift Tab</span>
-                    </button>
-                  </Show>
                   <Show when={showAgentControl()}>
                     <ComposerAgentControl state={agentControlState()} />
                   </Show>
                   {props.toolbar}
                   <ComposerModelControl state={modelControlState()} />
+                  <MenuV2
+                    open={composerModeMenuOpen()}
+                    onOpenChange={setComposerModeMenuOpen}
+                    gutter={6}
+                    modal={false}
+                    placement="top-start"
+                  >
+                    <MenuV2.Trigger
+                      as={ButtonV2}
+                      data-action="prompt-mode"
+                      variant="ghost-muted"
+                      size="normal"
+                      class="max-w-[150px] justify-start"
+                    >
+                      <span class="size-1.5 shrink-0 rounded-full" style={{ background: composerModeMeta().dot }} />
+                      <span class="truncate">{composerModeMeta().label}</span>
+                      <span class="-ml-0.5 -mr-1 flex shrink-0">
+                        <Icon name="chevron-down" size="small" />
+                      </span>
+                    </MenuV2.Trigger>
+                    <MenuV2.Portal>
+                      <MenuV2.Content>
+                        <div class="w-[266px] p-1" role="group" aria-label="Mode">
+                          <div class="px-2 pb-1 pt-1 text-[11px] font-medium text-v2-text-text-faint">Mode</div>
+                          {COMPOSER_MODES.map((mode) => (
+                            <button
+                              type="button"
+                              class="flex w-full items-start gap-2.5 rounded-lg px-2 py-2 text-left transition-colors hover:bg-white/[0.06]"
+                              onClick={() => {
+                                setComposerMode(mode.id)
+                                setComposerModeMenuOpen(false)
+                              }}
+                            >
+                              <span class="mt-1 size-2 shrink-0 rounded-full" style={{ background: mode.dot }} />
+                              <span class="min-w-0 flex-1">
+                                <span class="block text-[13px] font-medium text-v2-text-text-base">{mode.label}</span>
+                                <span class="block text-[11px] leading-4 text-v2-text-text-muted">
+                                  {mode.description}
+                                </span>
+                              </span>
+                              <Show when={composerMode() === mode.id}>
+                                <Icon name="check" size="small" class="mt-0.5 shrink-0 text-v2-text-text-accent" />
+                              </Show>
+                            </button>
+                          ))}
+                        </div>
+                      </MenuV2.Content>
+                    </MenuV2.Portal>
+                  </MenuV2>
                   <Show when={!providersLoading() && store.mode !== "shell" && showVariantControl()}>
                     <div
                       data-component="prompt-variant-control"
                       class="[&_[data-action=prompt-model-variant]]:![font-weight:440]"
                       classList={{
                         "animate-in fade-in": providersShouldFadeIn(),
-                        "hidden group-hover/prompt-input:block group-focus-within/prompt-input:block":
-                          !props.controls.model.selection.variant.current() && !store.variantOpen,
                       }}
                     >
                       <TooltipV2
                         placement="top"
                         gutter={4}
                         value={
-                          <>
-                            {language.t("command.model.variant.cycle")}
-                            <KeybindV2 keys={command.keybindParts("model.variant.cycle")} variant="neutral" />
-                          </>
+                          <div class="max-w-64">
+                            <div class="font-medium">
+                              {modelVariantLabel(props.controls.model.selection.variant.current())}
+                            </div>
+                            <div class="mt-1 text-v2-text-text-muted">
+                              {modelVariantDescription(props.controls.model.selection.variant.current())}
+                            </div>
+                            <div class="mt-2 flex items-center gap-2">
+                              <span>{language.t("command.model.variant.cycle")}</span>
+                              <KeybindV2 keys={command.keybindParts("model.variant.cycle")} variant="neutral" />
+                            </div>
+                          </div>
                         }
                       >
                         <MenuV2
@@ -1726,10 +1983,13 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                             variant="ghost-muted"
                             size="normal"
                             class="max-w-[160px] justify-start capitalize"
+                            classList={{
+                              "!text-[#c9b2ff] [text-shadow:0_0_14px_rgba(155,108,255,0.7)]": isMaxEffort(),
+                            }}
                             style={control()}
                           >
                             <span class="truncate">
-                              {props.controls.model.selection.variant.current() ?? language.t("common.default")}
+                              {modelVariantLabel(props.controls.model.selection.variant.current())}
                             </span>
                             <span class="-ml-0.5 -mr-1 flex shrink-0">
                               <Icon name="chevron-down" size="small" />
@@ -1737,30 +1997,143 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                           </MenuV2.Trigger>
                           <MenuV2.Portal>
                             <MenuV2.Content>
-                              <MenuV2.RadioGroup
-                                value={props.controls.model.selection.variant.current() ?? "default"}
-                                onChange={(value) => {
-                                  props.controls.model.selection.variant.set(value === "default" ? undefined : value)
-                                  restoreFocus()
-                                }}
-                              >
-                                {variants().map((value) => (
-                                  <MenuV2.RadioItem value={value} class="capitalize">
-                                    {value === "default" ? language.t("common.default") : value}
-                                  </MenuV2.RadioItem>
-                                ))}
-                              </MenuV2.RadioGroup>
+                              <div class="w-[248px] px-3 py-2.5" role="group" aria-label="Model effort">
+                                <div class="flex items-center justify-between pb-2.5">
+                                  <span class="text-xs font-medium text-v2-text-text-base">Effort</span>
+                                  <span
+                                    class="text-xs capitalize text-v2-text-text-muted"
+                                    classList={{ "!text-[#c9b2ff]": isMaxEffort() }}
+                                  >
+                                    {modelVariantLabel(props.controls.model.selection.variant.current())}
+                                  </span>
+                                </div>
+                                <div
+                                  class="vector-effort-track"
+                                  data-max={effortProgress() >= 100 ? "true" : "false"}
+                                  style={`--vector-effort-progress: ${effortProgress()}%; --vector-effort-t: ${(effortProgress() / 100).toFixed(3)};`}
+                                >
+                                  <div class="vector-effort-thumb" aria-hidden="true" />
+                                  <input
+                                    class="vector-effort-input"
+                                    type="range"
+                                    min="0"
+                                    max={Math.max(variants().length - 1, 0)}
+                                    step="1"
+                                    value={effortIndex()}
+                                    aria-label="Model effort"
+                                    aria-valuetext={modelVariantLabel(props.controls.model.selection.variant.current())}
+                                    title={`${modelVariantLabel(props.controls.model.selection.variant.current())} — ${modelVariantDescription(props.controls.model.selection.variant.current())}`}
+                                    onInput={(event) => selectEffortIndex(Number(event.currentTarget.value))}
+                                  />
+                                </div>
+                                <div class="flex items-center justify-between pt-2 text-[10px] text-v2-text-text-faint">
+                                  <span>{modelVariantLabel(variants()[0])}</span>
+                                  <span classList={{ "!text-[#c9b2ff]": isMaxEffort() }}>
+                                    {modelVariantLabel(variants()[variants().length - 1])}
+                                  </span>
+                                </div>
+                                <div
+                                  class="mt-2 rounded-lg border border-[color:var(--vx-line)] bg-black/25 px-2.5 py-2 text-[11px] leading-4 text-v2-text-text-muted"
+                                  classList={{ "!border-[#a78bfa]/30 !text-[#d5c8f5]": isMaxEffort() }}
+                                >
+                                  {modelVariantDescription(props.controls.model.selection.variant.current())}
+                                </div>
+                              </div>
                             </MenuV2.Content>
                           </MenuV2.Portal>
                         </MenuV2>
                       </TooltipV2>
                     </div>
                   </Show>
+                  <Show when={store.mode !== "shell"}>
+                    <MenuV2
+                      open={executionModeMenuOpen()}
+                      onOpenChange={setExecutionModeMenuOpen}
+                      gutter={6}
+                      modal={false}
+                      placement="top-start"
+                    >
+                      <MenuV2.Trigger
+                        as={ButtonV2}
+                        data-action="prompt-execution-mode"
+                        variant="ghost-muted"
+                        size="normal"
+                        class="max-w-[116px] justify-start"
+                        classList={{
+                          "!text-[#c9b2ff] [text-shadow:0_0_14px_rgba(155,108,255,0.45)]": executionMode() === "fast",
+                          "!text-[#9ce0cf]": executionMode() === "quick",
+                        }}
+                      >
+                        <span class="size-1.5 shrink-0 rounded-full" style={{ background: executionModeMeta().dot }} />
+                        <span class="truncate">{executionModeMeta().label}</span>
+                        <span class="-ml-0.5 -mr-1 flex shrink-0">
+                          <Icon name="chevron-down" size="small" />
+                        </span>
+                      </MenuV2.Trigger>
+                      <MenuV2.Portal>
+                        <MenuV2.Content>
+                          <div class="w-[286px] p-1" role="group" aria-label="Execution speed">
+                            <div class="px-2 pb-1 pt-1 text-[11px] font-medium text-v2-text-text-faint">
+                              Execution speed
+                            </div>
+                            {EXECUTION_MODES.map((mode) => (
+                              <button
+                                type="button"
+                                class="flex w-full items-start gap-2.5 rounded-lg px-2 py-2 text-left transition-colors hover:bg-white/[0.06]"
+                                onClick={() => {
+                                  setExecutionMode(mode.id)
+                                  setExecutionModeMenuOpen(false)
+                                }}
+                              >
+                                <span class="mt-1 size-2 shrink-0 rounded-full" style={{ background: mode.dot }} />
+                                <span class="min-w-0 flex-1">
+                                  <span class="block text-[13px] font-medium text-v2-text-text-base">{mode.label}</span>
+                                  <span class="block text-[11px] leading-4 text-v2-text-text-muted">
+                                    {mode.description}
+                                  </span>
+                                </span>
+                                <Show when={executionMode() === mode.id}>
+                                  <Icon name="check" size="small" class="mt-0.5 shrink-0 text-v2-text-text-accent" />
+                                </Show>
+                              </button>
+                            ))}
+                          </div>
+                        </MenuV2.Content>
+                      </MenuV2.Portal>
+                    </MenuV2>
+                  </Show>
                 </div>
+                <Show when={micAvailable() && !listening() && !transcribing()}>
+                  <button
+                    data-action="prompt-mic"
+                    type="button"
+                    class="grid size-9 shrink-0 place-items-center rounded-full text-v2-icon-icon-muted transition hover:bg-white/[0.06] hover:text-v2-text-text-base"
+                    title="Dictate prompt"
+                    aria-label="Dictate prompt"
+                    onClick={() => void startVoiceInput()}
+                  >
+                    <svg viewBox="0 0 16 16" class="size-4" aria-hidden="true">
+                      <path
+                        d="M8 9.6a2.1 2.1 0 0 0 2.1-2.1V4.1a2.1 2.1 0 1 0-4.2 0v3.4A2.1 2.1 0 0 0 8 9.6Zm4-2.1a4 4 0 0 1-8 0M8 11.5v2M6 13.5h4"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.35"
+                        stroke-linecap="round"
+                      />
+                    </svg>
+                  </button>
+                </Show>
+                <Show when={listening() || transcribing()}>
+                  <DictationIndicator
+                    state={transcribing() ? "transcribing" : "listening"}
+                    level={recordingLevel()}
+                    onStop={() => dictation?.stop()}
+                  />
+                </Show>
                 <button
                   data-action="prompt-attach"
                   type="button"
-                  class="mr-1 grid size-9 place-items-center rounded-full text-v2-icon-icon-muted transition hover:bg-white/[0.06] hover:text-v2-text-text-base"
+                  class="grid size-9 shrink-0 place-items-center rounded-full text-v2-icon-icon-muted transition hover:bg-white/[0.06] hover:text-v2-text-text-base"
                   title={language.t("prompt.action.attachFile")}
                   aria-label={language.t("prompt.action.attachFile")}
                   onClick={() => fileInputRef?.click()}
@@ -1776,25 +2149,6 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                     />
                   </svg>
                 </button>
-                <button
-                  data-action="prompt-mic"
-                  type="button"
-                  class="mr-2 grid size-9 place-items-center rounded-full text-v2-icon-icon-muted transition hover:bg-white/[0.06] hover:text-v2-text-text-base"
-                  classList={{ "bg-[#9b6cff]/18 text-[#d8c8ff]": listening() }}
-                  title={listening() ? "Listening..." : "Dictate prompt"}
-                  aria-label={listening() ? "Listening" : "Dictate prompt"}
-                  onClick={startVoiceInput}
-                >
-                  <svg viewBox="0 0 16 16" class="size-4" aria-hidden="true">
-                    <path
-                      d="M8 9.6a2.1 2.1 0 0 0 2.1-2.1V4.1a2.1 2.1 0 1 0-4.2 0v3.4A2.1 2.1 0 0 0 8 9.6Zm4-2.1a4 4 0 0 1-8 0M8 11.5v2M6 13.5h4"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="1.35"
-                      stroke-linecap="round"
-                    />
-                  </svg>
-                </button>
                 <TooltipV2 placement="top" inactive={!working() && blank()} value={tip()}>
                   <IconButton
                     data-action="prompt-submit"
@@ -1803,12 +2157,16 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                     tabIndex={store.mode === "normal" ? undefined : -1}
                     icon={stopping() ? "stop" : store.mode === "shell" ? "arrow-undo-down" : "arrow-up"}
                     variant="primary"
-                    class="mr-1 size-9 rounded-full p-[8px] text-v2-icon-icon-muted shadow-[var(--v2-elevation-button-contrast)] disabled:opacity-50"
+                    class="ml-1 mr-2 size-9 shrink-0 rounded-full p-[8px] text-v2-icon-icon-muted shadow-[var(--v2-elevation-button-contrast)] disabled:opacity-50"
                     style={{
                       "background-image":
                         "linear-gradient(180deg,var(--v2-alpha-light-20) 0%,var(--v2-alpha-light-0) 100%),linear-gradient(90deg,var(--v2-background-bg-contrast) 0%,var(--v2-background-bg-contrast) 100%)",
                     }}
-                    aria-label={stopping() ? language.t("prompt.action.stop") : language.t("prompt.action.send")}
+                    aria-label={
+                      stopping()
+                        ? language.t("prompt.action.stop")
+                        : language.t(queueing() ? "prompt.action.queue" : "prompt.action.send")
+                    }
                   />
                 </TooltipV2>
               </div>
@@ -1857,7 +2215,11 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
               onMouseDown={(e) => {
                 const target = e.target
                 if (!(target instanceof HTMLElement)) return
-                if (target.closest('[data-action="prompt-attach"], [data-action="prompt-submit"], [data-action="prompt-mic"]')) {
+                if (
+                  target.closest(
+                    '[data-action="prompt-attach"], [data-action="prompt-submit"], [data-action="prompt-mic"]',
+                  )
+                ) {
                   return
                 }
                 editorRef?.focus()
@@ -1916,7 +2278,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                 }}
               />
 
-              <div class="pointer-events-none absolute bottom-2 right-2 flex items-center gap-2">
+              <div class="pointer-events-none absolute bottom-2 left-3 right-4 flex min-w-0 items-center justify-end gap-2">
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -1930,11 +2292,38 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                   }}
                 />
 
-                <div class="flex items-center gap-1 pointer-events-auto">
+                <div class="pointer-events-auto flex min-w-0 flex-1 items-center justify-end gap-1">
+                  <Show when={micAvailable() && !listening() && !transcribing()}>
+                    <button
+                      data-action="prompt-mic"
+                      type="button"
+                      class="grid size-9 shrink-0 place-items-center rounded-full text-text-muted transition hover:bg-white/[0.06] hover:text-text-strong"
+                      title="Dictate prompt"
+                      aria-label="Dictate prompt"
+                      onClick={() => void startVoiceInput()}
+                    >
+                      <svg viewBox="0 0 16 16" class="size-4" aria-hidden="true">
+                        <path
+                          d="M8 9.6a2.1 2.1 0 0 0 2.1-2.1V4.1a2.1 2.1 0 1 0-4.2 0v3.4A2.1 2.1 0 0 0 8 9.6Zm4-2.1a4 4 0 0 1-8 0M8 11.5v2M6 13.5h4"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="1.35"
+                          stroke-linecap="round"
+                        />
+                      </svg>
+                    </button>
+                  </Show>
+                  <Show when={listening() || transcribing()}>
+                    <DictationIndicator
+                      state={transcribing() ? "transcribing" : "listening"}
+                      level={recordingLevel()}
+                      onStop={() => dictation?.stop()}
+                    />
+                  </Show>
                   <button
                     data-action="prompt-attach"
                     type="button"
-                    class="grid size-9 place-items-center rounded-full text-text-muted transition hover:bg-white/[0.06] hover:text-text-strong"
+                    class="grid size-9 shrink-0 place-items-center rounded-full text-text-muted transition hover:bg-white/[0.06] hover:text-text-strong"
                     title={language.t("prompt.action.attachFile")}
                     aria-label={language.t("prompt.action.attachFile")}
                     onClick={() => fileInputRef?.click()}
@@ -1950,25 +2339,6 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                       />
                     </svg>
                   </button>
-                  <button
-                    data-action="prompt-mic"
-                    type="button"
-                    class="grid size-9 place-items-center rounded-full text-text-muted transition hover:bg-white/[0.06] hover:text-text-strong"
-                    classList={{ "bg-[#9b6cff]/18 text-[#d8c8ff]": listening() }}
-                    title={listening() ? "Listening..." : "Dictate prompt"}
-                    aria-label={listening() ? "Listening" : "Dictate prompt"}
-                    onClick={startVoiceInput}
-                  >
-                    <svg viewBox="0 0 16 16" class="size-4" aria-hidden="true">
-                      <path
-                        d="M8 9.6a2.1 2.1 0 0 0 2.1-2.1V4.1a2.1 2.1 0 1 0-4.2 0v3.4A2.1 2.1 0 0 0 8 9.6Zm4-2.1a4 4 0 0 1-8 0M8 11.5v2M6 13.5h4"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="1.35"
-                        stroke-linecap="round"
-                      />
-                    </svg>
-                  </button>
                   <Tooltip placement="top" inactive={!working() && blank()} value={tip()}>
                     <IconButton
                       data-action="prompt-submit"
@@ -1977,13 +2347,16 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                       tabIndex={store.mode === "normal" ? undefined : -1}
                       icon={stopping() ? "stop" : store.mode === "shell" ? "arrow-undo-down" : "arrow-up"}
                       variant="primary"
-                      class="size-9 rounded-full"
-                      aria-label={stopping() ? language.t("prompt.action.stop") : language.t("prompt.action.send")}
+                      class="ml-1 mr-1 size-9 shrink-0 rounded-full"
+                      aria-label={
+                        stopping()
+                          ? language.t("prompt.action.stop")
+                          : language.t(queueing() ? "prompt.action.queue" : "prompt.action.send")
+                      }
                     />
                   </Tooltip>
                 </div>
               </div>
-
             </div>
           </DockShellForm>
           <Show when={store.mode === "normal" || store.mode === "shell"}>
@@ -2071,7 +2444,8 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                                 />
                               </Show>
                               <span class="truncate">
-                                {props.controls.model.selection.current()?.name ?? language.t("dialog.model.select.title")}
+                                {props.controls.model.selection.current()?.name ??
+                                  language.t("dialog.model.select.title")}
                               </span>
                               <Icon name="chevron-down" size="small" class="shrink-0" />
                             </Button>
@@ -2085,14 +2459,14 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                             <TooltipKeybind
                               placement="top"
                               gutter={4}
-                              title={language.t("command.model.variant.cycle")}
+                              title={`${modelVariantLabel(props.controls.model.selection.variant.current())}: ${modelVariantDescription(props.controls.model.selection.variant.current())}`}
                               keybind={command.keybind("model.variant.cycle")}
                             >
                               <Select
                                 size="normal"
                                 options={variants()}
                                 current={props.controls.model.selection.variant.current() ?? "default"}
-                                label={(x) => (x === "default" ? language.t("common.default") : x)}
+                                label={modelVariantLabel}
                                 onSelect={(value) => {
                                   props.controls.model.selection.variant.set(value === "default" ? undefined : value)
                                   restoreFocus()
@@ -2106,6 +2480,23 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                             </TooltipKeybind>
                           </div>
                         </Show>
+                        <TooltipV2 placement="top" gutter={4} value={executionModeMeta().description}>
+                          <Select
+                            size="normal"
+                            options={EXECUTION_MODES.map((mode) => mode.id)}
+                            current={executionMode()}
+                            label={(value) => EXECUTION_MODES.find((mode) => mode.id === value)?.label ?? "Normal"}
+                            onSelect={(value) => {
+                              setExecutionMode(value as ExecutionMode)
+                              restoreFocus()
+                            }}
+                            class="capitalize max-w-[120px] text-text-base"
+                            valueClass="truncate text-13-regular text-text-base"
+                            triggerStyle={control()}
+                            triggerProps={{ "data-action": "prompt-execution-mode" }}
+                            variant="ghost"
+                          />
+                        </TooltipV2>
                       </Show>
                     </Show>
                   </div>

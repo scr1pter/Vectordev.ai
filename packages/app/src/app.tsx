@@ -1,4 +1,5 @@
 import "@/index.css"
+import "@/vector-premium.css"
 import * as Sentry from "@sentry/solid"
 import { I18nProvider } from "@opencode-ai/ui/context"
 import { DialogProvider } from "@opencode-ai/ui/context/dialog"
@@ -7,7 +8,7 @@ import { MarkedProvider } from "@opencode-ai/ui/context/marked"
 import { File } from "@opencode-ai/session-ui/file"
 import { Font } from "@opencode-ai/ui/font"
 import { Splash } from "@opencode-ai/ui/logo"
-import { ThemeProvider } from "@opencode-ai/ui/theme/context"
+import { ThemeProvider, useTheme } from "@opencode-ai/ui/theme/context"
 import { MetaProvider } from "@solidjs/meta"
 import { type BaseRouterProps, Navigate, Route, Router, useParams, useSearchParams } from "@solidjs/router"
 import { QueryClient, QueryClientProvider } from "@tanstack/solid-query"
@@ -24,6 +25,7 @@ import {
   type JSX,
   lazy,
   onCleanup,
+  onMount,
   type ParentProps,
   Show,
 } from "solid-js"
@@ -56,7 +58,7 @@ import { useCheckServerHealth } from "./utils/server-health"
 import { legacySessionServer, requireServerKey, sessionHref } from "./utils/session-route"
 
 import { SessionPage, TargetSessionRouteContent } from "@/pages/session"
-import { NewHome, LegacyHome } from "@/pages/home"
+import { NewHome } from "@/pages/home"
 
 const NewSession = lazy(() => import("@/pages/new-session"))
 
@@ -181,6 +183,146 @@ function UiI18nBridge(props: ParentProps) {
   return <I18nProvider value={{ locale: language.intl, t: language.t }}>{props.children}</I18nProvider>
 }
 
+type ParallelWorkspaceStatus =
+  | "queued"
+  | "planning"
+  | "editing"
+  | "running commands"
+  | "testing"
+  | "complete"
+  | "failed"
+  | "needs review"
+  | "stopped"
+  | "merged"
+  | "discarded"
+
+type ParallelWorkspaceRecord = {
+  id: string
+  name: string
+  taskPrompt: string
+  runtime: "vector" | "claude-code" | "codex" | "cursor"
+  provider: string
+  model: string
+  sourcePath: string
+  isolatedPath: string
+  isolation: "git-worktree" | "copy"
+  gitBranch?: string
+  parentSessionId?: string
+  status: ParallelWorkspaceStatus
+  progress: number
+  lastAction: string
+  createdAt: string
+  lastActivityAt: string
+  changedFilesCount: number
+  riskLevel: "low" | "medium" | "high"
+  estimatedCost: string
+  actualCost?: string
+  finalSummary: string
+  mergeState: "none" | "merged" | "discarded"
+  logs: string[]
+  terminalOutput: string[]
+  browserResults: string[]
+  changedFiles: string[]
+  diff: string
+  checkpointPath?: string
+  baselineHashes?: Record<string, string>
+  agentSessionId?: string
+  backgroundTaskId?: string
+  agent?: string
+  swarmRunId?: string
+  swarmTaskId?: string
+  swarmRole?: "coordinator" | "worker"
+  contextFiles?: string[]
+  contextIndexedFiles?: number
+  contextTokenEstimate?: number
+  contextSummary?: string
+  validationReport?: {
+    startedAt: string
+    completedAt: string
+    passed: boolean
+    hadChecks: boolean
+    checks: {
+      id: string
+      label: string
+      command: string
+      args: string[]
+      reason: string
+      status: "passed" | "failed" | "skipped"
+      exitCode?: number
+      durationMs: number
+      output: string
+    }[]
+    failureSummary: string
+  }
+  validationPassed?: boolean
+  repairAttempts?: number
+  error?: string
+}
+
+type CreateParallelWorkspaceInput = {
+  sourcePath: string
+  parentSessionId?: string
+  name?: string
+  taskPrompt: string
+  runtime?: "vector" | "claude-code" | "codex" | "cursor"
+  provider?: string
+  model?: string
+  agent?: string
+  swarmRunId?: string
+  swarmTaskId?: string
+  swarmRole?: "coordinator" | "worker"
+}
+
+type SwarmTaskRecord = {
+  id: string
+  title: string
+  prompt: string
+  role: "explore" | "implement" | "debug" | "test" | "review" | "security" | "docs"
+  dependsOn: string[]
+  fileHints: string[]
+  provider: string
+  model: string
+  status: "planned" | "blocked" | "creating" | "queued" | "running" | "merging" | "complete" | "failed" | "canceled" | "interrupted"
+  workspaceId?: string
+  startedAt?: string
+  completedAt?: string
+  lastAction: string
+  changedFilesCount: number
+  riskLevel: "low" | "medium" | "high"
+  summary: string
+  error?: string
+}
+
+type SwarmRunRecord = {
+  id: string
+  name: string
+  objective: string
+  sourcePath: string
+  parentSessionId?: string
+  strategy: "economy" | "balanced" | "quality"
+  maxAgents: number
+  maxConcurrency: number
+  modelPool: { provider: string; model: string; label?: string }[]
+  plannerProvider: string
+  plannerModel: string
+  plannerSessionId?: string
+  coordinatorWorkspaceId?: string
+  status: "planning" | "running" | "needs review" | "complete" | "failed" | "canceled" | "interrupted" | "merged" | "discarded"
+  currentStep: string
+  progress: number
+  planSummary: string
+  tasks: SwarmTaskRecord[]
+  createdAt: string
+  updatedAt: string
+  completedAt?: string
+  changedFiles: string[]
+  diff: string
+  riskLevel: "low" | "medium" | "high"
+  summary: string
+  logs: string[]
+  error?: string
+}
+
 declare global {
   interface Window {
     __OPENCODE__?: {
@@ -188,52 +330,62 @@ declare global {
     }
     api?: {
       setTitlebar?: (theme: { mode: "light" | "dark" }) => Promise<void>
+      openLink?: (url: string) => void
       exportDebugLogs?: () => Promise<string>
-      inspectBrowserUrl?: (url: string) => Promise<{
-        url: string
-        finalUrl: string
-        status: number
-        ok: boolean
-        title: string
-        description: string
-        htmlBytes: number
-        links: number
-        scripts: number
-        stylesheets: number
-        checkedAt: string
-        error?: string
-      }>
-      runBrowserAutomation?: (input: {
-        url: string
-        actions?: (
-          | { type: "click"; selector: string }
-          | { type: "type"; selector: string; text: string; clear?: boolean }
-          | { type: "press"; key: string }
-          | { type: "evaluate"; script: string }
-        )[]
-        viewport?: { width: number; height: number }
-      }) => Promise<{
-        url: string
-        finalUrl: string
-        status: number
-        ok: boolean
-        title: string
-        description: string
-        htmlBytes: number
-        links: number
-        scripts: number
-        stylesheets: number
-        checkedAt: string
-        error?: string
-        viewport: { width: number; height: number }
-        screenshotDataUrl: string
-        textSample: string
-        console: { level: string; message: string }[]
-        pageErrors: string[]
-        actions: { label: string; ok: boolean; error?: string; result?: unknown }[]
-        interactives: { tag: string; text: string; selector: string; role?: string; type?: string }[]
-        inputs: { tag: string; selector: string; placeholder?: string; type?: string; name?: string }[]
-      }>
+      getMicrophonePermission?: () => Promise<"not-determined" | "granted" | "denied" | "restricted" | "unknown">
+      requestMicrophonePermission?: () => Promise<
+        "not-determined" | "granted" | "denied" | "restricted" | "unknown"
+      >
+      runBrowserAgent?: (
+        input: import("@/features/browser-agent/types").BrowserAgentInput,
+      ) => Promise<import("@/features/browser-agent/types").BrowserAutomationRun>
+      prepareAgentTask?: (
+        root: string,
+        task: string,
+      ) => Promise<import("@/utils/task-intelligence").AgentTaskPreparation>
+      onBrowserAgentPageEvent?: (
+        cb: (event: import("@/features/browser-agent/types").BrowserAgentPageEvent) => void,
+      ) => () => void
+      onZoomFactorChanged?: (cb: (factor: number) => void) => () => void
+      parallelWorkspaces?: {
+        list: (scope?: { sourcePath?: string; parentSessionId?: string }) => Promise<ParallelWorkspaceRecord[]>
+        create: (input: CreateParallelWorkspaceInput) => Promise<ParallelWorkspaceRecord>
+        refresh: (id: string) => Promise<ParallelWorkspaceRecord>
+        run: (id: string, concurrency?: number) => Promise<ParallelWorkspaceRecord>
+        stop: (id: string) => Promise<ParallelWorkspaceRecord>
+        merge: (id: string, force?: boolean) => Promise<ParallelWorkspaceRecord>
+        mergeSelection: (
+          id: string,
+          selection: { hunkIds?: string[]; files?: string[] },
+          force?: boolean,
+        ) => Promise<ParallelWorkspaceRecord>
+        discard: (id: string) => Promise<ParallelWorkspaceRecord>
+        remove: (id: string) => Promise<ParallelWorkspaceRecord[]>
+      }
+      swarmOrchestrator?: {
+        list: (scope?: { sourcePath?: string; parentSessionId?: string }) => Promise<SwarmRunRecord[]>
+        create: (input: {
+          sourcePath: string
+          parentSessionId?: string
+          name?: string
+          objective: string
+          primaryProvider: string
+          primaryModel: string
+          modelPool?: { provider: string; model: string; label?: string }[]
+          strategy?: "economy" | "balanced" | "quality"
+          maxAgents?: number
+          maxConcurrency?: number
+        }) => Promise<SwarmRunRecord>
+        resume: (id: string) => Promise<SwarmRunRecord>
+        stop: (id: string) => Promise<SwarmRunRecord>
+        merge: (id: string, force?: boolean) => Promise<SwarmRunRecord>
+        mergeSelection: (
+          id: string,
+          selection: { hunkIds?: string[]; files?: string[] },
+          force?: boolean,
+        ) => Promise<SwarmRunRecord>
+        discard: (id: string) => Promise<SwarmRunRecord>
+      }
     }
   }
 }
@@ -359,6 +511,19 @@ function DraftProviders(props: ParentProps) {
       </PromptProvider>
     </FileProvider>
   )
+}
+
+function VectorThemeSync() {
+  const settings = useSettings()
+  const theme = useTheme()
+
+  createEffect(() => {
+    const preference = settings.appearance.theme()
+    if (theme.colorScheme() === preference) return
+    theme.setColorScheme(preference)
+  })
+
+  return null
 }
 
 export function AppBaseProviders(props: ParentProps<{ locale?: Locale }>) {
@@ -519,6 +684,19 @@ export function AppInterface(props: {
   router?: Component<BaseRouterProps>
   disableHealthCheck?: boolean
 }) {
+  // Desktop dictation transcribes on-device with Whisper; pre-warm the worker
+  // and its ~40MB model during idle time so the first dictation doesn't stall
+  // on a download. No-op on web, which uses the browser speech engine instead.
+  onMount(() => {
+    if (!globalThis.window?.api) return
+    const warm = () =>
+      void import("@/services/local-transcription")
+        .then((mod) => mod.warmupLocalTranscription())
+        .catch(() => undefined)
+    if (typeof globalThis.requestIdleCallback === "function") globalThis.requestIdleCallback(warm, { timeout: 5000 })
+    else setTimeout(warm, 2500)
+  })
+
   // The visual new layout lives in the router root so it remains mounted across
   // route changes. Draft and session routes override only their server-bound data
   // providers beneath it.
@@ -539,6 +717,7 @@ export function AppInterface(props: {
     >
       <GlobalProvider>
         <SettingsProvider>
+          <VectorThemeSync />
           <ConnectionGate disableHealthCheck={props.disableHealthCheck}>
             <Show when={useSettings().general.newLayoutDesigns().toString()} keyed>
               <Dynamic
@@ -571,7 +750,6 @@ function Routes() {
   return (
     <>
       <Route component={LegacyServerLayout}>
-        <Show when={!settings.general.newLayoutDesigns()}>{<Route path="/" component={LegacyHome} />}</Show>
         <Route path="/:dir" component={DirectoryLayout}>
           <Route path="/" component={() => <Navigate href="session" />} />
           <Route path="/session/:id?" component={SessionRoute} />
@@ -579,6 +757,15 @@ function Routes() {
       </Route>
       <Show when={settings.general.newLayoutDesigns()}>
         <Route path="/" component={NewHome} />
+        <Route path="/cloud" component={() => null} />
+        <Route path="/canvas" component={() => null} />
+        <Route path="/parallel-workspaces" component={() => null} />
+        <Route path="/parallel-workspaces/swarm/:swarmId" component={() => null} />
+        <Route path="/parallel-workspaces/:workspaceId" component={() => null} />
+        <Route
+          path="/parallel-workspaces/:workspaceId/server/:serverKey/session/:id"
+          component={TargetSessionRoute}
+        />
         <Route path="/:dir/session/:id" component={LegacyTargetSessionRoute} />
       </Show>
       <Route path="/new-session" component={DraftRoute} />

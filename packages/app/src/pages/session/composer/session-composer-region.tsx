@@ -1,10 +1,10 @@
 import { Show, type JSX } from "solid-js"
 import { useLanguage } from "@/context/language"
-import { useSettings } from "@/context/settings"
 import { SessionPermissionDock } from "@/pages/session/composer/session-permission-dock"
 import { SessionQuestionDock } from "@/pages/session/composer/session-question-dock"
 import { SessionFollowupDock } from "@/pages/session/composer/session-followup-dock"
 import { SessionRevertDock } from "@/pages/session/composer/session-revert-dock"
+import { SessionWorkingStatus } from "@/pages/session/composer/session-working-status"
 import { SessionTodoDock } from "@/pages/session/composer/session-todo-dock"
 import type { SessionComposerRegionController } from "./session-composer-region-controller"
 
@@ -14,7 +14,6 @@ export function SessionComposerRegion(props: {
 }) {
   const language = useLanguage()
   const controller = props.controller
-  const settings = useSettings()
   const rolled = () => {
     const revert = controller.revert()
     return revert?.items.length ? revert : undefined
@@ -26,16 +25,24 @@ export function SessionComposerRegion(props: {
       data-component="session-prompt-dock"
       classList={{
         "w-full shrink-0 flex flex-col justify-center items-center pointer-events-none": true,
-        "bg-transparent": settings.general.newLayoutDesigns(),
-        "bg-background-stronger": !settings.general.newLayoutDesigns(),
+        "bg-transparent": true,
       }}
     >
       <div
+        data-component="session-composer-region"
         classList={{
-          "w-full px-3 pb-3 pointer-events-auto": true,
+          "w-full pointer-events-auto": true,
           "md:max-w-200 md:mx-auto 2xl:max-w-[1000px]": controller.centered(),
         }}
       >
+        <SessionWorkingStatus
+          working={controller.working}
+          startedAt={controller.startedAt}
+          tokens={controller.tokens}
+          runningTasks={controller.runningTasks}
+          phrase={controller.phrase}
+        />
+
         <Show when={controller.state.questionRequest()} keyed>
           {(request) => (
             <div>
@@ -136,7 +143,7 @@ export function SessionComposerRegion(props: {
                   items={controller.followup()!.items}
                   sending={controller.followup()!.sending}
                   onSend={controller.followup()!.onSend}
-                  onEdit={controller.followup()!.onEdit}
+                  onDelete={controller.followup()!.onDelete}
                 />
               </Show>
               <Show

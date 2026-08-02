@@ -351,6 +351,7 @@ export const User = Schema.Struct({
   }),
   system: Schema.optional(Schema.String),
   tools: Schema.optional(Schema.Record(Schema.String, Schema.Boolean)),
+  executionMode: Schema.optional(Schema.Union([Schema.Literal("normal"), Schema.Literal("fast")])),
 }).annotate({ identifier: "UserMessage" })
 export type User = Types.DeepMutable<Schema.Schema.Type<typeof User>>
 

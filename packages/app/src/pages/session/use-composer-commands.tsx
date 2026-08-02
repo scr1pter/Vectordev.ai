@@ -26,9 +26,9 @@ export const useComposerCommands = () => {
 
   const chooseModel = async () => {
     const owner = sessionOwnership.capture()
-    const { DialogSelectModel } = await import("@/components/dialog-select-model")
+    const { DialogSelectModelV2 } = await import("@/components/dialog-select-model")
     owner.run(() => {
-      void dialog.show(() => <DialogSelectModel model={local.model} />)
+      void dialog.show(() => <DialogSelectModelV2 model={local.model} />)
     })
   }
 

@@ -276,6 +276,7 @@ export const dict = {
   "prompt.action.attachFile": "附加檔案",
   "prompt.attachment.remove": "移除附件",
   "prompt.action.send": "傳送",
+  "prompt.action.queue": "加入佇列",
   "prompt.action.stop": "停止",
 
   "prompt.toast.pasteUnsupported.title": "不支援的附件",
@@ -529,6 +530,8 @@ export const dict = {
   "session.followupDock.summary.other": "{{count}} 則佇列訊息",
   "session.followupDock.sendNow": "立即傳送",
   "session.followupDock.edit": "編輯",
+  "session.followupDock.copy": "複製",
+  "session.followupDock.delete": "刪除",
   "session.followupDock.collapse": "收合佇列訊息",
   "session.followupDock.expand": "展開佇列訊息",
   "session.revertDock.summary.one": "{{count}} 則已回復訊息",

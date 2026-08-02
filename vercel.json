@@ -4,28 +4,53 @@
   "outputDirectory": "packages/web/dist",
   "redirects": [
     {
+      "source": "/download/mac",
+      "destination": "https://42qryducihx01gl0.public.blob.vercel-storage.com/releases/vector-downloads/vector-desktop-mac-arm64.dmg",
+      "permanent": false
+    },
+    {
       "source": "/download/mac-arm64",
-      "destination": "https://github.com/scr1pter/Vectordev.ai/releases/latest/download/vector-desktop-mac-arm64.dmg",
+      "destination": "https://42qryducihx01gl0.public.blob.vercel-storage.com/releases/vector-downloads/vector-desktop-mac-arm64.dmg",
       "permanent": false
     },
     {
       "source": "/download/mac-x64",
-      "destination": "https://github.com/scr1pter/Vectordev.ai/releases/latest/download/vector-desktop-mac-x64.dmg",
+      "destination": "https://42qryducihx01gl0.public.blob.vercel-storage.com/releases/vector-downloads/vector-desktop-mac-x64.dmg",
       "permanent": false
     },
     {
       "source": "/download/windows",
-      "destination": "https://github.com/scr1pter/Vectordev.ai/releases/latest/download/vector-desktop-win-x64.exe",
+      "destination": "https://42qryducihx01gl0.public.blob.vercel-storage.com/releases/vector-downloads/vector-desktop-win-x64.exe",
+      "permanent": false
+    },
+    {
+      "source": "/download/windows-x64",
+      "destination": "https://42qryducihx01gl0.public.blob.vercel-storage.com/releases/vector-downloads/vector-desktop-win-x64.exe",
+      "permanent": false
+    },
+    {
+      "source": "/download/windows-arm64",
+      "destination": "https://42qryducihx01gl0.public.blob.vercel-storage.com/releases/vector-downloads/vector-desktop-win-arm64.exe",
       "permanent": false
     },
     {
       "source": "/download/linux",
-      "destination": "https://github.com/scr1pter/Vectordev.ai/releases/latest/download/vector-desktop-linux-x86_64.AppImage",
+      "destination": "https://42qryducihx01gl0.public.blob.vercel-storage.com/releases/vector-downloads/vector-desktop-linux-x86_64.AppImage",
+      "permanent": false
+    },
+    {
+      "source": "/download/linux-x64",
+      "destination": "https://42qryducihx01gl0.public.blob.vercel-storage.com/releases/vector-downloads/vector-desktop-linux-x86_64.AppImage",
+      "permanent": false
+    },
+    {
+      "source": "/download/linux-arm64",
+      "destination": "https://42qryducihx01gl0.public.blob.vercel-storage.com/releases/vector-downloads/vector-desktop-linux-arm64.AppImage",
       "permanent": false
     },
     {
       "source": "/download/checksums",
-      "destination": "https://github.com/scr1pter/Vectordev.ai/releases/latest/download/checksums.txt",
+      "destination": "https://42qryducihx01gl0.public.blob.vercel-storage.com/releases/vector-downloads/checksums.txt",
       "permanent": false
     }
   ]

@@ -1,7 +1,7 @@
 import { createSimpleContext } from "@opencode-ai/ui/context"
-import { createEffect, createSignal, onMount } from "solid-js"
-
-const STORAGE_KEY = "vector.plan-mode.enabled"
+import { useLocation } from "@solidjs/router"
+import { createEffect, createSignal } from "solid-js"
+import { planModeRouteScope, shouldResetPlanMode } from "./plan-mode-scope"
 
 export const PLAN_MODE_INSTRUCTION = [
   "PLAN MODE is ON.",
@@ -15,14 +15,17 @@ export const { use: usePlanMode, provider: PlanModeProvider } = createSimpleCont
   name: "PlanMode",
   gate: false,
   init: () => {
+    // Plan mode is deliberately ephemeral. Persisting it across launches made
+    // ordinary build prompts silently inherit read-only behavior from an old
+    // task, which is both surprising and difficult to diagnose.
     const [enabled, setEnabledSignal] = createSignal(false)
-
-    onMount(() => {
-      setEnabledSignal(globalThis.localStorage?.getItem(STORAGE_KEY) === "1")
-    })
+    const location = useLocation()
+    let activeScope = planModeRouteScope(location.pathname, location.search)
 
     createEffect(() => {
-      globalThis.localStorage?.setItem(STORAGE_KEY, enabled() ? "1" : "0")
+      const next = planModeRouteScope(location.pathname, location.search)
+      if (shouldResetPlanMode(activeScope, next)) setEnabledSignal(false)
+      activeScope = next
     })
 
     return {

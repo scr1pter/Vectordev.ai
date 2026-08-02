@@ -11,6 +11,7 @@ import { popularProviders, useProviders } from "@/hooks/use-providers"
 import { ModelTooltip } from "./model-tooltip"
 import { useLanguage } from "@/context/language"
 import { decode64 } from "@/utils/base64"
+import { brandProviderDescription, brandProviderName } from "@/utils/provider-brand"
 
 type ModelState = ReturnType<typeof useLocal>["model"]
 const HIDDEN_PROVIDER_IDS = new Set<string>()
@@ -29,11 +30,7 @@ export const DialogSelectModelUnpaid: Component<{ model?: ModelState }> = (props
   const directory = () => decode64(local.slug())
   const providers = useProviders(directory)
   const language = useLanguage()
-  const openCodeProviderDescription = (id: string) => {
-    if (id === "opencode") return "Free starter models provided by OpenCode and available inside Vector."
-    if (id === "opencode-go") return "OpenCode Go models are provided by OpenCode and can be used inside Vector."
-    if (id === "opencode-zen") return "OpenCode Zen models are provided by OpenCode and can be used inside Vector."
-  }
+  const openCodeProviderDescription = (id: string) => brandProviderDescription(id)
 
   const connect = (provider: string) => {
     void import("./dialog-connect-provider").then((x) => {
@@ -123,7 +120,7 @@ export const DialogSelectModelUnpaid: Component<{ model?: ModelState }> = (props
                 {(i) => (
                   <div class="w-full flex items-center gap-x-3">
                     <ProviderIcon data-slot="list-item-extra-icon" id={i.id} />
-                    <span>{i.name}</span>
+                    <span>{brandProviderName(i.id, i.name)}</span>
                     <Show when={openCodeProviderDescription(i.id)}>
                       {(text) => <div class="text-14-regular text-text-weak">{text()}</div>}
                     </Show>

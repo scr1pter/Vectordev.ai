@@ -11,6 +11,7 @@ import {
   createMemo,
   createEffect,
   createComputed,
+  createSignal,
   on,
   onMount,
   type ParentProps,
@@ -33,6 +34,8 @@ import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
 import { createAutoScroll } from "@opencode-ai/ui/hooks"
 import { previewSelectedLines } from "@opencode-ai/session-ui/pierre/selection-bridge"
 import { Button } from "@opencode-ai/ui/button"
+import { Dialog } from "@opencode-ai/ui/dialog"
+import { TextField } from "@opencode-ai/ui/text-field"
 import { showToast } from "@/utils/toast"
 import { base64Encode, checksum } from "@opencode-ai/core/util/encode"
 import { Navigate, useLocation, useNavigate, useParams, useSearchParams } from "@solidjs/router"
@@ -95,13 +98,15 @@ import { legacySessionHref, requireServerKey, sessionHref } from "@/utils/sessio
 import { useUsageExceededDialogs } from "./session/usage-exceeded-dialogs"
 import { createSessionOwnership } from "./session/session-ownership"
 import { createSessionLineage } from "./session/session-lineage"
+import { enqueueSessionFollowup, SESSION_FOLLOWUP_LIMIT } from "./session/followup-queue"
 
 type FollowupItem = FollowupDraft & { id: string }
-type FollowupEdit = Pick<FollowupItem, "id" | "prompt" | "context">
 const emptyFollowups: FollowupItem[] = []
 
 type ChangeMode = "git" | "branch" | "turn"
 type VcsMode = "git" | "branch"
+
+const MIN_REVIEW_PANEL_WIDTH = 240
 
 const sessionViewState = () => ({
   messageId: undefined as string | undefined,
@@ -317,7 +322,7 @@ function SessionProviders(props: ParentProps) {
 
 function SessionRouteFrame(props: ParentProps<{ padded?: boolean }>) {
   return (
-    <div class="relative size-full overflow-hidden flex flex-col">
+    <div data-vector-session-route class="relative size-full overflow-hidden flex flex-col">
       {props.children}
     </div>
   )
@@ -326,14 +331,61 @@ function SessionRouteFrame(props: ParentProps<{ padded?: boolean }>) {
 function SessionPanelFrame(props: ParentProps<{ newLayout: boolean; raised?: boolean }>) {
   return (
     <div
+      data-vector-session-panel
       classList={{
         "flex-1 min-h-0 flex flex-col overflow-hidden": true,
-        "bg-v2-background-bg-base": props.newLayout,
+        "bg-transparent": props.newLayout,
         "bg-background-stronger": !props.newLayout,
       }}
+      style={{ background: props.newLayout ? "var(--vector-workspace-bg, #1d1d1f)" : undefined }}
     >
       {props.children}
     </div>
+  )
+}
+
+function CommitToMainDialog(props: { defaultMessage: string; onConfirm: (message: string) => void }) {
+  const dialog = useDialog()
+  const [message, setMessage] = createSignal(props.defaultMessage)
+  const valid = () => message().trim().length > 0
+
+  const submit = () => {
+    if (!valid()) return
+    const value = message().trim()
+    dialog.close()
+    props.onConfirm(value)
+  }
+
+  return (
+    <Dialog title="Commit to main">
+      <div class="flex flex-col gap-4 min-w-96">
+        <TextField
+          label="Commit message"
+          multiline
+          value={message()}
+          onChange={setMessage}
+          autofocus
+          onKeyDown={(event: KeyboardEvent) => {
+            if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+              event.preventDefault()
+              submit()
+            }
+          }}
+        />
+        <div class="text-13-regular text-text-weak" style={{ "line-height": "var(--line-height-normal)" }}>
+          Stages every change and commits it to the current branch. This is reversible with{" "}
+          <code>git reset --soft HEAD~1</code>.
+        </div>
+        <div class="flex justify-end gap-2">
+          <Button variant="ghost" onClick={() => dialog.close()}>
+            Cancel
+          </Button>
+          <Button disabled={!valid()} onClick={submit}>
+            Commit to main
+          </Button>
+        </div>
+      </div>
+    </Dialog>
   )
 }
 
@@ -443,9 +495,12 @@ export default function Page() {
   const desktopSidePanelOpen = createMemo(() => desktopReviewOpen() || desktopFileTreeOpen())
   const desktopCodespaceOpen = createMemo(() => desktopReviewOpen() && tabs().active() === "codespace")
   const sessionPanelWidth = createMemo(() => {
+    // Codespace (the editor) takes the whole surface: collapse the session chat pane.
     if (desktopCodespaceOpen()) return "0px"
     if (!desktopSidePanelOpen()) return "100%"
-    if (desktopReviewOpen()) return `${layout.session.width()}px`
+    if (desktopReviewOpen()) {
+      return `min(${layout.session.width()}px, max(280px, calc(100% - ${MIN_REVIEW_PANEL_WIDTH}px)))`
+    }
     return `calc(100% - ${layout.fileTree.width()}px)`
   })
   const centered = createMemo(() => isDesktop() && !desktopReviewOpen())
@@ -539,12 +594,10 @@ export default function Page() {
       items: Record<string, FollowupItem[] | undefined>
       failed: Record<string, string | undefined>
       paused: Record<string, boolean | undefined>
-      edit: Record<string, FollowupEdit | undefined>
     }>({
       items: {},
       failed: {},
       paused: {},
-      edit: {},
     }),
   )
 
@@ -639,6 +692,75 @@ export default function Page() {
   const reviewReady = () => {
     if (store.changes === "git" || store.changes === "branch") return !vcsQuery.isPending
     return true
+  }
+
+  // "Commit to main": only for the git working-tree view, with actual changes.
+  const canCommit = () => reviewCount() > 0 && sync().project?.vcs === "git" && vcsMode() === "git"
+
+  const commitDefaultMessage = () => {
+    const diffs = reviewDiffs()
+    const name = diffs[0]?.file
+    if (diffs.length === 1 && name) return `Update ${name.split("/").pop() || name}`
+    return `Update ${diffs.length} files`
+  }
+
+  const commitMutation = useMutation(() => ({
+    mutationFn: async (message: string) => {
+      const res = await sdk().client.vcs.commit({ message })
+      if (res.error) throw res.error
+      return res.data
+    },
+    onSuccess: (data) => {
+      refreshVcs()
+      if (!data?.committed) {
+        showToast({
+          variant: "default",
+          title: "Nothing to commit",
+          description: "The working tree is already clean.",
+        })
+        return
+      }
+      const sha = data.sha ? data.sha.slice(0, 7) : undefined
+      showToast({
+        variant: "success",
+        title: "Committed to main",
+        description: sha
+          ? `Commit ${sha} created. Reversible with git reset --soft HEAD~1.`
+          : "Changes committed to the current branch.",
+      })
+    },
+    onError: (error) => {
+      showToast({
+        variant: "error",
+        title: "Commit failed",
+        description: formatServerError(error, language.t, "Could not commit the working tree."),
+      })
+    },
+  }))
+
+  const openCommitDialog = () => {
+    if (!canCommit() || commitMutation.isPending) return
+    dialog.show(() => (
+      <CommitToMainDialog
+        defaultMessage={commitDefaultMessage()}
+        onConfirm={(message) => commitMutation.mutate(message)}
+      />
+    ))
+  }
+
+  const commitAction = () => {
+    if (!canCommit()) return null
+    return (
+      <Button
+        class="session-review-commit-main"
+        size="small"
+        variant="ghost"
+        disabled={commitMutation.isPending}
+        onClick={openCommitDialog}
+      >
+        {commitMutation.isPending ? "Committing…" : "Commit to main"}
+      </Button>
+    )
   }
 
   const newSessionWorktree = createMemo(() => {
@@ -1044,15 +1166,18 @@ export default function Page() {
     }
 
     return (
-      <Select
-        options={changesOptions()}
-        current={store.changes}
-        label={changesLabel}
-        onSelect={(option) => option && setStore("changes", option)}
-        variant="ghost"
-        size="small"
-        valueClass="text-14-medium"
-      />
+      <div class="flex min-w-0 max-w-full flex-wrap items-center gap-1">
+        <Select
+          options={changesOptions()}
+          current={store.changes}
+          label={changesLabel}
+          onSelect={(option) => option && setStore("changes", option)}
+          variant="ghost"
+          size="small"
+          valueClass="text-14-medium"
+        />
+        {commitAction()}
+      </div>
     )
   }
 
@@ -1062,15 +1187,18 @@ export default function Page() {
     }
 
     return (
-      <SelectV2
-        appearance="inline"
-        options={changesOptions()}
-        current={store.changes}
-        label={changesLabel}
-        placement="bottom-start"
-        gutter={6}
-        onSelect={(option) => option && setStore("changes", option)}
-      />
+      <div class="flex min-w-0 max-w-full flex-wrap items-center gap-1">
+        <SelectV2
+          appearance="inline"
+          options={changesOptions()}
+          current={store.changes}
+          label={changesLabel}
+          placement="bottom-start"
+          gutter={6}
+          onSelect={(option) => option && setStore("changes", option)}
+        />
+        {commitAction()}
+      </div>
     )
   }
 
@@ -1609,12 +1737,6 @@ export default function Page() {
     return followup.items[id] ?? emptyFollowups
   })
 
-  const editingFollowup = createMemo(() => {
-    const id = params.id
-    if (!id) return
-    return followup.edit[id]
-  })
-
   const followupMutation = useMutation(() => ({
     mutationFn: async (input: { sessionID: string; id: string; manual?: boolean }) => {
       const owner = sessionOwnership.capture()
@@ -1655,7 +1777,7 @@ export default function Page() {
   const queueEnabled = createMemo(() => {
     const id = params.id
     if (!id) return false
-    return settings.general.followup() === "queue" && busy(id) && !composer.blocked() && !isChildSession()
+    return busy(id) && !composer.blocked() && !isChildSession()
   })
 
   const followupText = (item: FollowupDraft) => {
@@ -1676,12 +1798,23 @@ export default function Page() {
   }
 
   const queueFollowup = (draft: FollowupDraft) => {
-    setFollowup("items", draft.sessionID, (items) => [
-      ...(items ?? []),
-      { id: Identifier.ascending("message"), ...draft },
-    ])
+    const next = enqueueSessionFollowup(followup.items[draft.sessionID], {
+      id: Identifier.ascending("message"),
+      ...draft,
+    })
+    if (!next) {
+      showToast({
+        variant: "error",
+        title: "Message queue is full",
+        description: `Each task can hold up to ${SESSION_FOLLOWUP_LIMIT} queued messages.`,
+      })
+      return false
+    }
+
+    setFollowup("items", draft.sessionID, next)
     setFollowup("failed", draft.sessionID, undefined)
     setFollowup("paused", draft.sessionID, undefined)
+    return true
   }
 
   const followupDock = createMemo(() => queuedFollowups().map((item) => ({ id: item.id, text: followupText(item) })))
@@ -1695,27 +1828,13 @@ export default function Page() {
     return followupMutation.mutateAsync({ sessionID, id, manual: opts?.manual })
   }
 
-  const editFollowup = (id: string) => {
+  const removeFollowup = (id: string) => {
     const sessionID = params.id
     if (!sessionID) return
     if (followupBusy(sessionID)) return
 
-    const item = queuedFollowups().find((entry) => entry.id === id)
-    if (!item) return
-
     setFollowup("items", sessionID, (items) => (items ?? []).filter((entry) => entry.id !== id))
     setFollowup("failed", sessionID, (value) => (value === id ? undefined : value))
-    setFollowup("edit", sessionID, {
-      id: item.id,
-      prompt: item.prompt,
-      context: item.context,
-    })
-  }
-
-  const clearFollowupEdit = () => {
-    const id = params.id
-    if (!id) return
-    setFollowup("edit", id, undefined)
   }
 
   const halt = (sessionID: string) =>
@@ -1910,7 +2029,7 @@ export default function Page() {
               items: followupDock(),
               sending: sendingFollowup(),
               onSend: (id) => void sendFollowup(params.id!, id, { manual: true }),
-              onEdit: editFollowup,
+              onDelete: removeFollowup,
             }
           : undefined,
       revert: () =>
@@ -1954,8 +2073,6 @@ export default function Page() {
               comments.clear()
               resumeScroll()
             }}
-            edit={editingFollowup()}
-            onEditLoaded={clearFollowupEdit}
             shouldQueue={queueEnabled}
             onQueue={queueFollowup}
             onAbort={() => {
@@ -2005,7 +2122,8 @@ export default function Page() {
     </Tabs>
   )
   const mobileTabsBottom = createMemo(
-    () => !isDesktop() && !settings.general.newLayoutDesigns() && settings.general.mobileTitlebarPosition() === "bottom",
+    () =>
+      !isDesktop() && !settings.general.newLayoutDesigns() && settings.general.mobileTitlebarPosition() === "bottom",
   )
 
   const sessionErrorFallback = (error: unknown, reset: () => void) => {
@@ -2040,6 +2158,7 @@ export default function Page() {
               {(_id) => (
                 <MessageTimeline
                   actions={actions}
+                  onReviewChanges={openReviewPanel}
                   scroll={ui.scroll}
                   onResumeScroll={resumeScroll}
                   setScrollRef={setScrollRef}
@@ -2091,12 +2210,11 @@ export default function Page() {
   return (
     <SessionRouteFrame>
       <SessionHeader />
-      <div
-        class="flex-1 min-h-0 flex flex-col md:flex-row"
-      >
+      <div data-vector-session-split class="flex-1 min-h-0 flex flex-col md:flex-row">
         <Show when={!isDesktop() && !!params.id && !settings.general.newLayoutDesigns()}>{mobileTabs()}</Show>
 
         <div
+          data-vector-session-conversation
           classList={{
             "@container relative shrink-0 flex flex-col min-h-0 h-full flex-1 md:flex-none transition-[width]": true,
             "duration-[240ms] ease-[cubic-bezier(0.22,1,0.36,1)] will-change-[width] motion-reduce:transition-none":
@@ -2129,7 +2247,7 @@ export default function Page() {
                 direction="horizontal"
                 size={layout.session.width()}
                 min={280}
-                max={typeof window === "undefined" ? 1200 : Math.max(520, window.innerWidth * 0.78)}
+                max={typeof window === "undefined" ? 1200 : Math.max(520, window.innerWidth - MIN_REVIEW_PANEL_WIDTH)}
                 onResize={(width) => {
                   size.touch()
                   layout.session.resize(width)

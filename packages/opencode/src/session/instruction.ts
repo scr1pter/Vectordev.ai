@@ -66,6 +66,7 @@ const layer: Layer.Layer<
       ...(!flags.disableClaudeCodePrompt ? ["CLAUDE.md"] : []),
       "CONTEXT.md", // deprecated
     ]
+    const memoryFiles = [".vector/BRAIN.md", "BRAIN.md"]
 
     const state = yield* InstanceState.make(
       Effect.fn("Instruction.state")(() =>
@@ -117,6 +118,16 @@ const layer: Layer.Layer<
           paths.add(path.resolve(file))
           break
         }
+      }
+
+      // Vector memory is additive rather than mutually exclusive with project
+      // instructions. It must be loaded even when a global AGENTS.md or
+      // CLAUDE.md exists.
+      for (const file of memoryFiles) {
+        const matches = yield* fs
+          .findUp(file, ctx.directory, ctx.worktree)
+          .pipe(Effect.catch(() => Effect.succeed([])))
+        matches.forEach((item) => paths.add(path.resolve(item)))
       }
 
       // The first project-level match wins so we don't stack AGENTS.md/CLAUDE.md from every ancestor.

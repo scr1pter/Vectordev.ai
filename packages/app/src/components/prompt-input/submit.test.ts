@@ -2,6 +2,7 @@ import { beforeAll, beforeEach, describe, expect, mock, test } from "bun:test"
 import type { Prompt } from "@/context/prompt"
 
 let createPromptSubmit: typeof import("./submit").createPromptSubmit
+let resolveSubmissionAgent: typeof import("./submit").resolveSubmissionAgent
 
 const createdClients: string[] = []
 const createdSessions: string[] = []
@@ -19,6 +20,10 @@ const optimisticSeeded: boolean[] = []
 const storedSessions: Record<string, Array<{ id: string; title?: string }>> = {}
 const promoted: Array<{ directory: string; sessionID: string }> = []
 const sentShell: string[] = []
+const sentPrompts: Array<{
+  directory: string
+  input: { executionMode?: "normal" | "fast"; agent?: string }
+}> = []
 const syncedDirectories: string[] = []
 const promotedDrafts: Array<{ draftID: string; server: string; sessionId: string }> = []
 
@@ -26,6 +31,8 @@ let params: { id?: string } = {}
 let search: { draftId?: string } = {}
 let selected = "/repo/worktree-a"
 let variant: string | undefined
+let workspaceError: Error | undefined
+let promptResetCount = 0
 
 const promptValue: Prompt = [{ type: "text", content: "ls", start: 0, end: 2 }]
 const prompt = {
@@ -33,7 +40,9 @@ const prompt = {
   current: () => promptValue,
   cursor: () => 0,
   dirty: () => true,
-  reset: () => undefined,
+  reset: () => {
+    promptResetCount++
+  },
   set: () => undefined,
   context: {
     add: () => undefined,
@@ -49,6 +58,12 @@ const prompt = {
 const clientFor = (directory: string) => {
   createdClients.push(directory)
   return {
+    file: {
+      list: async () => {
+        if (workspaceError) throw workspaceError
+        return { data: [] }
+      },
+    },
     session: {
       create: async () => {
         createdSessions.push(directory)
@@ -64,7 +79,10 @@ const clientFor = (directory: string) => {
         return { data: undefined }
       },
       prompt: async () => ({ data: undefined }),
-      promptAsync: async () => ({ data: undefined }),
+      promptAsync: async (input: { executionMode?: "normal" | "fast"; agent?: string }) => {
+        sentPrompts.push({ directory, input })
+        return { data: undefined }
+      },
       command: async () => ({ data: undefined }),
       abort: async () => ({ data: undefined }),
     },
@@ -98,6 +116,7 @@ beforeAll(async () => {
 
   mock.module("@opencode-ai/core/util/encode", () => ({
     base64Encode: (value: string) => value,
+    checksum: (value: string) => value,
   }))
 
   mock.module("@/context/local", () => ({
@@ -108,6 +127,7 @@ beforeAll(async () => {
       },
       agent: {
         current: () => ({ name: "agent" }),
+        list: () => [{ name: "agent", mode: "primary" }],
       },
       session: {
         promote(directory: string, sessionID: string) {
@@ -123,6 +143,10 @@ beforeAll(async () => {
         enabledAutoAccept.push({ sessionID, directory })
       },
     }),
+  }))
+
+  mock.module("@/context/plan-mode", () => ({
+    usePlanMode: () => ({ enabled: () => false }),
   }))
 
   mock.module("@/context/server", () => ({
@@ -230,6 +254,7 @@ beforeAll(async () => {
 
   const mod = await import("./submit")
   createPromptSubmit = mod.createPromptSubmit
+  resolveSubmissionAgent = mod.resolveSubmissionAgent
 })
 
 beforeEach(() => {
@@ -243,9 +268,12 @@ beforeEach(() => {
   params = {}
   search = {}
   sentShell.length = 0
+  sentPrompts.length = 0
   syncedDirectories.length = 0
   selected = "/repo/worktree-a"
   variant = undefined
+  workspaceError = undefined
+  promptResetCount = 0
   for (const key of Object.keys(storedSessions)) delete storedSessions[key]
 })
 
@@ -378,6 +406,65 @@ describe("prompt submit worktree selection", () => {
     })
   })
 
+  test("sends fast execution mode to the engine", async () => {
+    params = { id: "session-1" }
+    const submit = createPromptSubmit({
+      prompt,
+      info: () => ({ id: "session-1" }),
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "normal",
+      working: () => false,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+      executionMode: () => "fast",
+      onSubmit: () => undefined,
+    })
+
+    await submit.handleSubmit({ preventDefault: () => undefined } as unknown as Event)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(sentPrompts).toEqual([
+      { directory: "/repo/main", input: expect.objectContaining({ executionMode: "fast" }) },
+    ])
+  })
+
+  test("routes explicit quick mode through the lightweight agent", async () => {
+    params = { id: "session-1" }
+    const submit = createPromptSubmit({
+      prompt,
+      info: () => ({ id: "session-1" }),
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "normal",
+      working: () => false,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+      executionMode: () => "quick",
+      onSubmit: () => undefined,
+    })
+
+    await submit.handleSubmit({ preventDefault: () => undefined } as unknown as Event)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(sentPrompts.at(-1)).toEqual({
+      directory: "/repo/main",
+      input: expect.objectContaining({ agent: "quick", executionMode: "normal" }),
+    })
+  })
+
   test("seeds new sessions before optimistic prompts are added", async () => {
     const submit = createPromptSubmit({
       prompt,
@@ -405,5 +492,91 @@ describe("prompt submit worktree selection", () => {
 
     expect(storedSessions["/repo/worktree-a"]).toEqual([{ id: "session-1", title: "New session 1" }])
     expect(optimisticSeeded).toEqual([true])
+  })
+})
+
+describe("submission agent selection", () => {
+  test("uses the plan agent only while Plan Mode is enabled", () => {
+    const available = [
+      { name: "plan", mode: "primary" },
+      { name: "build", mode: "primary" },
+    ]
+
+    expect(resolveSubmissionAgent({ planMode: true, current: "build", available })).toBe("plan")
+    expect(resolveSubmissionAgent({ planMode: false, current: "plan", available })).toBe("build")
+  })
+
+  test("preserves a non-plan agent when Plan Mode is disabled", () => {
+    expect(
+      resolveSubmissionAgent({
+        planMode: false,
+        current: "review",
+        available: [{ name: "review", mode: "primary" }],
+      }),
+    ).toBe("review")
+  })
+})
+
+describe("queued follow-up submission", () => {
+  test("keeps the draft intact when the task queue rejects it", async () => {
+    params = { id: "session-1" }
+    const queued: unknown[] = []
+    const submit = createPromptSubmit({
+      prompt,
+      info: () => ({ id: "session-1" }),
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "normal",
+      working: () => true,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+      shouldQueue: () => true,
+      onQueue: (draft) => {
+        queued.push(draft)
+        return false
+      },
+      onSubmit: () => undefined,
+    })
+
+    await submit.handleSubmit({ preventDefault: () => undefined } as unknown as Event)
+
+    expect(queued).toHaveLength(1)
+    expect(promptResetCount).toBe(0)
+    expect(sentPrompts).toHaveLength(0)
+  })
+})
+
+describe("workspace validation", () => {
+  test("does not submit into a missing project folder", async () => {
+    params = { id: "session-1" }
+    workspaceError = new Error("Project directory no longer exists")
+
+    const submit = createPromptSubmit({
+      prompt,
+      info: () => ({ id: "session-1" }),
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "normal",
+      working: () => false,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+      onSubmit: () => undefined,
+    })
+
+    await submit.handleSubmit({ preventDefault: () => undefined } as unknown as Event)
+
+    expect(optimistic).toHaveLength(0)
   })
 })

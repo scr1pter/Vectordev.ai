@@ -1,0 +1,116 @@
+---
+import { MarketingMobileNav } from "./MarketingMobileNav"
+
+interface Props {
+  active?: "product" | "docs" | "releases" | "download"
+}
+
+const { active = "product" } = Astro.props
+---
+
+<header class="site-nav">
+  <a class="site-brand" href="/" aria-label="Vector home">
+    <img src="/vector-logo.png" alt="" width="28" height="28" />
+  </a>
+
+  <nav class="desktop-links" aria-label="Primary navigation">
+    <a class:list={{ active: active === "product" }} href="/#workspace">Product</a>
+    <a class:list={{ active: active === "docs" }} href="/docs">Docs</a>
+    <a class:list={{ active: active === "releases" }} href="/releases">Releases</a>
+    <a class:list={["download-link", { active: active === "download" }]} href="/download"><span>Download</span></a>
+  </nav>
+  <div class="mobile-menu">
+    <MarketingMobileNav active={active} client:only="react" />
+  </div>
+</header>
+
+<style>
+  .site-nav {
+    width: min(1200px, calc(100% - 48px));
+    height: 58px;
+    margin: 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: relative;
+    z-index: 20;
+  }
+
+  .site-brand {
+    display: inline-flex;
+    align-items: center;
+    text-decoration: none;
+  }
+
+  .site-brand img {
+    width: 27px;
+    height: 27px;
+    border-radius: 6px;
+    box-shadow: 0 10px 30px rgba(156, 115, 255, 0.12);
+  }
+
+  .desktop-links {
+    display: flex;
+    align-items: center;
+    gap: 26px;
+  }
+
+  .desktop-links a {
+    color: var(--muted, #96929e) !important;
+    font-size: 12px;
+    font-weight: 480;
+    text-decoration: none;
+    transition: color 180ms ease, background 180ms ease, border-color 180ms ease;
+  }
+
+  .desktop-links a:hover,
+  .desktop-links a.active {
+    color: var(--ink, #f4f2f7) !important;
+  }
+
+  .mobile-menu {
+    display: none;
+  }
+
+  .download-link {
+    min-height: 34px;
+    padding: 0 15px;
+    display: inline-flex;
+    align-items: center;
+    color: #161219 !important;
+    background: #eee9f5;
+    border: 1px solid #eee9f5;
+    border-radius: 6px;
+  }
+
+  .download-link span {
+    color: #161219 !important;
+  }
+
+  .download-link:hover,
+  .download-link.active {
+    color: #161219 !important;
+    background: #c9b9ff;
+    border-color: #c9b9ff;
+  }
+
+  .download-link:hover span,
+  .download-link.active span {
+    color: #161219 !important;
+  }
+
+  @media (max-width: 640px) {
+    .site-nav {
+      width: min(100% - 28px, 1240px);
+      height: 58px;
+    }
+
+    .desktop-links {
+      display: none;
+    }
+
+    .mobile-menu {
+      display: block;
+    }
+  }
+</style>

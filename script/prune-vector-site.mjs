@@ -7,6 +7,9 @@ const dist = path.join(root, "packages", "web", "dist")
 
 const keep = new Set([
   "_astro",
+  "docs",
+  "download",
+  "releases",
   "index.html",
   "404.html",
   "favicon.ico",
@@ -15,13 +18,21 @@ const keep = new Set([
   "favicon-v3.svg",
   "favicon-96x96.png",
   "favicon-96x96-v3.png",
+  "favicon-32x32-desktop-v4.png",
+  "favicon-96x96-desktop-v4.png",
+  "favicon-desktop-v4.ico",
   "apple-touch-icon.png",
   "apple-touch-icon-v3.png",
+  "apple-touch-icon-desktop-v4.png",
   "site.webmanifest",
   "web-app-manifest-192x192.png",
   "web-app-manifest-512x512.png",
   "robots.txt",
-  "downloads",
+  "sitemap-0.xml",
+  "sitemap-index.xml",
+  "theme.json",
+  "vector-logo.png",
+  "vector-space-backdrop.png",
 ])
 
 for (const entry of await readdir(dist)) {

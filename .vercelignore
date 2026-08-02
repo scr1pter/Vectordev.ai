@@ -1,6 +1,7 @@
 packages/desktop/dist
 packages/desktop/out
 packages/desktop/native
+packages/web/public/downloads
 packages/**/dist
 packages/**/out
 *.blockmap

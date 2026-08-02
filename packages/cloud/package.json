@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@vector/cloud",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsgo --noEmit",
+    "test": "bun test src/shared.test.ts src/oauth.test.ts",
+    "dev": "bun run dev-server.ts"
+  },
+  "dependencies": {
+    "@vercel/blob": "^0.27.0"
+  },
+  "devDependencies": {
+    "@tsconfig/node22": "catalog:",
+    "@types/bun": "catalog:",
+    "@types/node": "catalog:",
+    "@typescript/native-preview": "catalog:",
+    "typescript": "catalog:"
+  }
+}

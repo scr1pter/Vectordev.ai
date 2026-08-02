@@ -46,6 +46,8 @@ import type {
   ExperimentalSessionBackgroundResponses,
   ExperimentalSessionListErrors,
   ExperimentalSessionListResponses,
+  ExperimentalSessionUsageErrors,
+  ExperimentalSessionUsageResponses,
   ExperimentalWorkspaceAdapterListErrors,
   ExperimentalWorkspaceAdapterListResponses,
   ExperimentalWorkspaceCreateErrors,
@@ -93,8 +95,22 @@ import type {
   InstanceDisposeErrors,
   InstanceDisposeResponses,
   LocationRef,
+  LspDefinitionErrors,
+  LspDefinitionResponses,
+  LspDiagnosticsErrors,
+  LspDiagnosticsResponses,
+  LspHoverErrors,
+  LspHoverResponses,
+  LspReferencesErrors,
+  LspReferencesResponses,
+  LspRenameErrors,
+  LspRenameRequest,
+  LspRenameResponses,
+  LspRequest,
   LspStatusErrors,
   LspStatusResponses,
+  LspSymbolsErrors,
+  LspSymbolsResponses,
   McpAddErrors,
   McpAddResponses,
   McpAuthAuthenticateErrors,
@@ -389,6 +405,8 @@ import type {
   V2SkillListResponses,
   VcsApplyErrors,
   VcsApplyResponses,
+  VcsCommitErrors,
+  VcsCommitResponses,
   VcsDiffErrors,
   VcsDiffRawErrors,
   VcsDiffRawResponses,
@@ -663,7 +681,7 @@ export class Capabilities extends HeyApiClient {
   /**
    * Get experimental capabilities
    *
-   * Get experimental features enabled on the OpenCode server.
+   * Get experimental features enabled on the Vector engine.
    */
   public get<ThrowOnError extends boolean = false>(
     parameters?: {
@@ -808,7 +826,7 @@ export class Session extends HeyApiClient {
   /**
    * List sessions
    *
-   * Get a list of all OpenCode sessions across projects, sorted by most recently updated. Archived sessions are excluded by default.
+   * Get a list of all Vector sessions across projects, sorted by most recently updated. Archived sessions are excluded by default.
    */
   public list<ThrowOnError extends boolean = false>(
     parameters?: {
@@ -846,6 +864,40 @@ export class Session extends HeyApiClient {
       ThrowOnError
     >({
       url: "/experimental/session",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Get local token usage
+   *
+   * Aggregate locally persisted model usage into daily token totals and activity streaks.
+   */
+  public usage<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<
+      ExperimentalSessionUsageResponses,
+      ExperimentalSessionUsageErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/session/usage",
       ...options,
       ...params,
     })
@@ -1899,11 +1951,11 @@ export class File extends HeyApiClient {
    * Write text content to a workspace file without requiring git.
    */
   public write<ThrowOnError extends boolean = false>(
-    parameters: {
+    parameters?: {
       directory?: string
       workspace?: string
-      path: string
-      content: string
+      path?: string
+      content?: string
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -2191,6 +2243,43 @@ export class Vcs extends HeyApiClient {
     })
   }
 
+  /**
+   * Commit working tree
+   *
+   * Capture a restore point, then stage all changes and commit them to the current branch.
+   */
+  public commit<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      message?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "message" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<VcsCommitResponses, VcsCommitErrors, ThrowOnError>({
+      url: "/vcs/commit",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
   private _diff?: Diff
   get diff2(): Diff {
     return (this._diff ??= new Diff({ client: this.client }))
@@ -2257,6 +2346,228 @@ export class Lsp extends HeyApiClient {
       url: "/lsp",
       ...options,
       ...params,
+    })
+  }
+
+  /**
+   * Get file diagnostics
+   *
+   * Open a file in its language server and return current compiler and linter diagnostics.
+   */
+  public diagnostics<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      file?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "file" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<LspDiagnosticsResponses, LspDiagnosticsErrors, ThrowOnError>({
+      url: "/lsp/diagnostics",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Get hover information
+   *
+   * Return language-server documentation and type information at a source position.
+   */
+  public hover<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      lspRequest?: LspRequest
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { key: "lspRequest", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<LspHoverResponses, LspHoverErrors, ThrowOnError>({
+      url: "/lsp/hover",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Find definitions
+   *
+   * Return language-server definition targets for a source position.
+   */
+  public definition<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      lspRequest?: LspRequest
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { key: "lspRequest", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<LspDefinitionResponses, LspDefinitionErrors, ThrowOnError>({
+      url: "/lsp/definition",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Find references
+   *
+   * Return language-server references for a source position.
+   */
+  public references<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      lspRequest?: LspRequest
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { key: "lspRequest", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<LspReferencesResponses, LspReferencesErrors, ThrowOnError>({
+      url: "/lsp/references",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Get document symbols
+   *
+   * Return language-server symbols for the current file outline.
+   */
+  public symbols<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      file?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "file" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<LspSymbolsResponses, LspSymbolsErrors, ThrowOnError>({
+      url: "/lsp/symbols",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Rename symbol
+   *
+   * Return language-server workspace edits for a safe symbol rename.
+   */
+  public rename<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      lspRenameRequest?: LspRenameRequest
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { key: "lspRenameRequest", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<LspRenameResponses, LspRenameErrors, ThrowOnError>({
+      url: "/lsp/rename",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
     })
   }
 }
@@ -3798,6 +4109,7 @@ export class Session2 extends HeyApiClient {
       format?: OutputFormat
       system?: string
       variant?: string
+      executionMode?: "normal" | "fast"
       parts?: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
     },
     options?: Options<never, ThrowOnError>,
@@ -3818,6 +4130,7 @@ export class Session2 extends HeyApiClient {
             { in: "body", key: "format" },
             { in: "body", key: "system" },
             { in: "body", key: "variant" },
+            { in: "body", key: "executionMode" },
             { in: "body", key: "parts" },
           ],
         },
@@ -4151,6 +4464,7 @@ export class Session2 extends HeyApiClient {
       format?: OutputFormat
       system?: string
       variant?: string
+      executionMode?: "normal" | "fast"
       parts?: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
     },
     options?: Options<never, ThrowOnError>,
@@ -4171,6 +4485,7 @@ export class Session2 extends HeyApiClient {
             { in: "body", key: "format" },
             { in: "body", key: "system" },
             { in: "body", key: "variant" },
+            { in: "body", key: "executionMode" },
             { in: "body", key: "parts" },
           ],
         },
@@ -4204,6 +4519,7 @@ export class Session2 extends HeyApiClient {
       arguments?: string
       command?: string
       variant?: string
+      executionMode?: "normal" | "fast"
       parts?: Array<{
         id?: string
         type: "file"
@@ -4229,6 +4545,7 @@ export class Session2 extends HeyApiClient {
             { in: "body", key: "arguments" },
             { in: "body", key: "command" },
             { in: "body", key: "variant" },
+            { in: "body", key: "executionMode" },
             { in: "body", key: "parts" },
           ],
         },

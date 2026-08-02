@@ -1,5 +1,28 @@
-import { For, Match, Show, Switch, createEffect, createMemo, createSignal, on, onCleanup, untrack, type JSX } from "solid-js"
+import {
+  For,
+  Match,
+  Show,
+  Switch,
+  createEffect,
+  createMemo,
+  createSignal,
+  lazy,
+  on,
+  onCleanup,
+  onMount,
+  untrack,
+  type JSX,
+} from "solid-js"
 import { createStore } from "solid-js/store"
+import { Portal } from "solid-js/web"
+import {
+  MonacoCodeEditor,
+  type InlineCompleteInput,
+  type InlineEditSelection,
+  type MonacoLanguageService,
+} from "@/components/monaco-code-editor"
+import { ModelSelectorPopoverV2 } from "@/components/dialog-select-model"
+import { setOnboardingFlag } from "@/features/onboarding/onboarding-progress"
 import { createMediaQuery } from "@solid-primitives/media"
 import {
   autocompletion,
@@ -42,8 +65,11 @@ import {
   rectangularSelection,
 } from "@codemirror/view"
 import { tags as t } from "@lezer/highlight"
+import { diffLines } from "diff"
 import { Tabs } from "@opencode-ai/ui/tabs"
+import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { IconButton } from "@opencode-ai/ui/icon-button"
+import { Icon } from "@opencode-ai/ui/icon"
 import { TooltipKeybind } from "@opencode-ai/ui/tooltip"
 import { ResizeHandle } from "@opencode-ai/ui/resize-handle"
 import { Mark } from "@opencode-ai/ui/logo"
@@ -52,7 +78,7 @@ import type { DragEvent } from "@thisbeyond/solid-dnd"
 import type { SnapshotFileDiff, VcsFileDiff } from "@opencode-ai/sdk/v2"
 import { ConstrainDragYAxis, getDraggableId } from "@/utils/solid-dnd"
 
-import FileTree, { type Kind } from "@/components/file-tree"
+import FileTree, { type FileTreeMarker, type Kind } from "@/components/file-tree"
 import { SessionContextUsage } from "@/components/session-context-usage"
 import { SessionContextTab, SortableTab, FileVisual } from "@/components/session"
 import { useCommand } from "@/context/command"
@@ -60,6 +86,7 @@ import { useFile, type SelectedLineRange } from "@/context/file"
 import { useLanguage } from "@/context/language"
 import { useLayout } from "@/context/layout"
 import { useLocal } from "@/context/local"
+import { modelVariantLabel } from "@/context/model-variant"
 import { usePrompt } from "@/context/prompt"
 import { useSDK } from "@/context/sdk"
 import { useSettings } from "@/context/settings"
@@ -75,7 +102,32 @@ import {
 } from "@/pages/session/helpers"
 import { setSessionHandoff } from "@/pages/session/handoff"
 import { useSessionLayout } from "@/pages/session/session-layout"
+import {
+  clearEngineeringEvents,
+  getEngineeringEvents,
+  logEngineeringEvent,
+  type EngineeringEventStatus,
+  type EngineeringEventType,
+  type EngineeringTimelineEvent,
+} from "@/utils/engineering-timeline"
+import { INTERNAL_SESSION_TITLE_PREFIX } from "@/utils/internal-sessions"
 import { showToast } from "@/utils/toast"
+import { resolveBrowserAddress, selectUnambiguousPreviewUrl } from "@/utils/browser-address"
+import {
+  applyExactReplacements,
+  boundInlineCompletionContext,
+  collectPatchFiles,
+  extractStructuredOutput,
+  isCodespaceEditRequest,
+  parseCodespaceProposal,
+  parseCodespaceProposalText,
+  sanitizeInlineCompletion,
+  type CodespaceProposal,
+} from "@/utils/codespace-ai"
+
+const DialogSelectFile = lazy(() =>
+  import("@/components/dialog-select-file").then((module) => ({ default: module.DialogSelectFile })),
+)
 
 type RenderDiff = (SnapshotFileDiff & { file: string }) | VcsFileDiff
 
@@ -83,24 +135,69 @@ function renderDiff(value: SnapshotFileDiff | VcsFileDiff): value is RenderDiff 
   return typeof value.file === "string"
 }
 
-type CodespaceView =
-  | "editor"
-  | "preview"
-  | "problems"
-  | "changes"
-  | "history"
-  | "debugger"
-  | "architect"
-  | "coprogrammer"
+type CodespaceView = "editor" | "problems" | "review"
 
-type CodespaceToolView = Extract<CodespaceView, "debugger" | "architect" | "coprogrammer">
-
-type CodespaceCheckpoint = {
+type CodespaceLiveWorkspace = {
   id: string
-  path: string
-  title: string
-  content: string
-  createdAt: number
+  name: string
+  taskPrompt: string
+  runtime: "vector" | "claude-code" | "codex" | "cursor"
+  sourcePath: string
+  isolatedPath: string
+  parentSessionId?: string
+  gitBranch?: string
+  status:
+    | "queued"
+    | "planning"
+    | "editing"
+    | "running commands"
+    | "testing"
+    | "complete"
+    | "failed"
+    | "needs review"
+    | "stopped"
+    | "merged"
+    | "discarded"
+  lastAction: string
+  lastActivityAt: string
+  changedFiles: string[]
+  mergeState: "none" | "merged" | "discarded"
+}
+
+const workspaceColors = [
+  "#a78bfa",
+  "#67e8f9",
+  "#f472b6",
+  "#4ade80",
+  "#fbbf24",
+  "#60a5fa",
+  "#fb7185",
+  "#2dd4bf",
+  "#c084fc",
+  "#a3e635",
+  "#f97316",
+  "#818cf8",
+  "#22d3ee",
+  "#e879f9",
+  "#34d399",
+  "#facc15",
+] as const
+
+function workspaceColor(id: string) {
+  const hash = [...id].reduce((value, character) => (value * 31 + character.charCodeAt(0)) >>> 0, 7)
+  return workspaceColors[hash % workspaceColors.length]!
+}
+
+function normalizedWorkspacePath(path: string) {
+  return path.replaceAll("\\", "/").replace(/^\.?\//, "")
+}
+
+function workspaceStatusLabel(status: CodespaceLiveWorkspace["status"]) {
+  return status.replace(/\b\w/g, (character) => character.toUpperCase())
+}
+
+function workspaceIsRunning(status: CodespaceLiveWorkspace["status"]) {
+  return ["queued", "planning", "editing", "running commands", "testing"].includes(status)
 }
 
 type CodespaceProblem = {
@@ -116,14 +213,18 @@ type CodespaceQueuedChange = {
   oldContent: string
   newContent: string
   source: string
+  explanation: string
+  confidence: number
+  risk: "low" | "medium" | "high"
   createdAt: number
 }
 
-type CodespaceArchitectMessage = {
+type CodespaceReviewHunk = {
   id: string
-  role: "user" | "assistant"
-  content: string
-  createdAt: number
+  from: number
+  to: number
+  before: string
+  after: string
 }
 
 type CodespaceAgentLog = {
@@ -131,6 +232,50 @@ type CodespaceAgentLog = {
   label: string
   detail: string
 }
+
+type CodespaceAgentMessage = {
+  id: string
+  role: "user" | "assistant"
+  content: string
+  edit?: "applied" | "staged"
+  files?: string[]
+}
+
+const CODESPACE_PROPOSAL_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["summary", "changes"],
+  properties: {
+    summary: { type: "string" },
+    changes: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["path", "mode", "explanation", "risk", "content", "replacements"],
+        properties: {
+          path: { type: "string" },
+          mode: { type: "string", enum: ["edit", "create"] },
+          explanation: { type: "string" },
+          risk: { type: "string", enum: ["low", "medium", "high"] },
+          content: { type: "string" },
+          replacements: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["oldText", "newText"],
+              properties: {
+                oldText: { type: "string" },
+                newText: { type: "string" },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+} as const
 
 type AiChangeCheckpointSnapshot = {
   path: string
@@ -143,22 +288,17 @@ type AiChangeCheckpoint = {
   title: string
   files: string[]
   createdAt: number
+  /** Auto-generated capture summary; never user-edited. */
   documentation?: string
+  /** User-chosen display name; falls back to sequential "Checkpoint N". */
+  name?: string
+  /** User-written documentation/notes for this checkpoint. */
+  note?: string
   snapshots?: AiChangeCheckpointSnapshot[]
 }
 
-type EngineeringTimelineEntry = {
-  id: string
-  createdAt: number
-  timeLabel?: string
-  kind: "edit" | "checkpoint" | "review"
-  title: string
-  detail: string
-  files: string[]
-  risk?: "Low" | "Medium" | "High"
-  additions?: number
-  deletions?: number
-}
+type TimelineFilter = "all" | "ai" | "files" | "terminal" | "browser" | "checkpoints" | "errors"
+type SkillMode = "beginner" | "intermediate" | "advanced"
 
 type VectorReportFile = {
   path: string
@@ -201,10 +341,32 @@ type VectorLocalReport = {
     suggestions: string[]
   }
   demoChecklist: string[]
+  architecture: Array<{ path: string; role: string; summary: string; lines: number }>
+  dependencies: Array<{ file: string; dependsOn: string[] }>
+  symbols: Array<{ name: string; kind: string; path: string; line: number }>
+  impact: {
+    risk: "Low" | "Medium" | "High"
+    notes: string[]
+    affectedFiles: string[]
+  }
+  ownership: Array<{ file: string; owner: string; reason: string }>
+  runbook: string[]
+  learning: {
+    appOverview: string[]
+    changeExplanation: string[]
+  }
+  mistakeJournal: Array<{ title: string; detail: string; severity: "error" | "warning" | "info" }>
+  modelFit: {
+    strength: "Cheap" | "Balanced" | "Frontier" | "Unknown"
+    verdict: string
+    detail: string
+    route: string
+  }
+  promptReplayBench: Array<{ model: string; quality: string; cost: string; recommendation: string }>
 }
 
-const CODESPACE_CHECKPOINTS_KEY = "vector.codespace.checkpoints.v1"
 const AI_CHANGE_CHECKPOINTS_KEY = "vector.ai-change-checkpoints.v1"
+const SKILL_MODE_KEY = "vector.skill-mode.v1"
 
 function textFromFileReadResponse(result: unknown) {
   const data = (result as { data?: unknown } | undefined)?.data
@@ -245,7 +407,11 @@ function looksLikeTextProjectFile(path: string) {
 
 function readPackageScripts(packageJson: string) {
   try {
-    const parsed = JSON.parse(packageJson) as { scripts?: Record<string, unknown>; dependencies?: Record<string, unknown>; devDependencies?: Record<string, unknown> }
+    const parsed = JSON.parse(packageJson) as {
+      scripts?: Record<string, unknown>
+      dependencies?: Record<string, unknown>
+      devDependencies?: Record<string, unknown>
+    }
     return {
       scripts: Object.entries(parsed.scripts ?? {})
         .filter(([, value]) => typeof value === "string")
@@ -257,7 +423,145 @@ function readPackageScripts(packageJson: string) {
   }
 }
 
-function buildVectorLocalReport(files: VectorReportFile[], diffs: readonly RenderDiff[], modelLabel: string): VectorLocalReport {
+function riskRank(value: "Low" | "Medium" | "High") {
+  return value === "High" ? 3 : value === "Medium" ? 2 : 1
+}
+
+function maxRisk(...values: Array<"Low" | "Medium" | "High">): "Low" | "Medium" | "High" {
+  return values.reduce((highest, next) => (riskRank(next) > riskRank(highest) ? next : highest), "Low")
+}
+
+function normalizeProjectImportPath(path: string) {
+  return path
+    .replaceAll("\\", "/")
+    .replace(/^\.\/+/, "")
+    .replace(/\/+/g, "/")
+}
+
+function pathDirectory(path: string) {
+  const normalized = normalizeProjectImportPath(path)
+  const parts = normalized.split("/")
+  parts.pop()
+  return parts.join("/")
+}
+
+function resolveRelativeDependency(fromPath: string, raw: string, paths: Set<string>) {
+  if (!raw.startsWith(".") && !raw.startsWith("/")) return undefined
+  const baseDir = raw.startsWith("/") ? "" : pathDirectory(fromPath)
+  const rawBase = normalizeProjectImportPath(raw.startsWith("/") ? raw.slice(1) : `${baseDir}/${raw}`)
+  const bases = [rawBase.replace(/\/$/, "")]
+  const extensions = ["", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".json", ".css", ".html", ".md", ".py"]
+  for (const base of bases) {
+    for (const ext of extensions) {
+      const candidate = `${base}${ext}`
+      if (paths.has(candidate)) return candidate
+    }
+    for (const ext of extensions.filter(Boolean)) {
+      const candidate = `${base}/index${ext}`
+      if (paths.has(candidate)) return candidate
+    }
+  }
+  return undefined
+}
+
+function extractDependencyRefs(file: VectorReportFile, paths: Set<string>) {
+  const refs = new Set<string>()
+  const patterns = [
+    /\bimport\s+(?:[^'"]+\s+from\s+)?["']([^"']+)["']/g,
+    /\bexport\s+[^'"]*\s+from\s+["']([^"']+)["']/g,
+    /\brequire\(\s*["']([^"']+)["']\s*\)/g,
+    /\bimport\(\s*["']([^"']+)["']\s*\)/g,
+    /\b(?:src|href)=["']([^"']+)["']/g,
+    /@import\s+(?:url\()?["']?([^"')]+)["']?\)?/g,
+  ]
+
+  for (const pattern of patterns) {
+    for (const match of file.content.matchAll(pattern)) {
+      const raw = match[1]?.trim()
+      if (!raw || raw.startsWith("http:") || raw.startsWith("https:") || raw.startsWith("data:") || raw.startsWith("#"))
+        continue
+      const resolved = resolveRelativeDependency(file.path, raw, paths)
+      if (resolved && resolved !== file.path) refs.add(resolved)
+    }
+  }
+  return [...refs].sort()
+}
+
+function extractCodeSymbols(file: VectorReportFile) {
+  const symbols: Array<{ name: string; kind: string; path: string; line: number }> = []
+  const patterns: Array<{ kind: string; regex: RegExp }> = [
+    { kind: "function", regex: /\b(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][\w$]*)/g },
+    { kind: "class", regex: /\bclass\s+([A-Za-z_$][\w$]*)/g },
+    { kind: "interface", regex: /\binterface\s+([A-Za-z_$][\w$]*)/g },
+    { kind: "type", regex: /\btype\s+([A-Za-z_$][\w$]*)\s*=/g },
+    { kind: "component", regex: /\b(?:const|let)\s+([A-Z][\w$]*)\s*=\s*(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>/g },
+    { kind: "function", regex: /^\s*def\s+([A-Za-z_][\w]*)\s*\(/gm },
+    { kind: "class", regex: /^\s*class\s+([A-Za-z_][\w]*)\s*[:(]/gm },
+    { kind: "heading", regex: /^#{1,6}\s+(.{1,90})$/gm },
+  ]
+  const seen = new Set<string>()
+  for (const { kind, regex } of patterns) {
+    for (const match of file.content.matchAll(regex)) {
+      const name = match[1]?.trim()
+      if (!name) continue
+      const line = file.content.slice(0, match.index ?? 0).split("\n").length
+      const key = `${kind}:${name}:${line}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      symbols.push({ name, kind, path: file.path, line })
+      if (symbols.length >= 80) return symbols
+    }
+  }
+  return symbols
+}
+
+function classifyArchitectureFile(path: string, content: string) {
+  const name = reportFileBasename(path).toLowerCase()
+  const language = reportLanguage(path)
+  if (name === "package.json")
+    return { role: "Manifest", summary: "Defines dependencies, scripts, and project runtime expectations." }
+  if (/vite\.config|next\.config|tailwind\.config|tsconfig|postcss\.config/i.test(path)) {
+    return { role: "Build configuration", summary: "Controls how the project builds, transforms, or styles code." }
+  }
+  if (/app|page|route|router|routes/i.test(path))
+    return { role: "Route or app shell", summary: "Likely controls navigation, pages, or the main app surface." }
+  if (/component|components|widget|card|button|modal/i.test(path))
+    return { role: "UI component", summary: "Reusable interface code that other screens may depend on." }
+  if (/api|server|endpoint|handler|service/i.test(path))
+    return { role: "API or service", summary: "Connects the app to data, side effects, or backend-like behavior." }
+  if (/style|theme|\.css$|\.scss$/i.test(path))
+    return { role: "Styling", summary: "Controls visual presentation, layout, and theme." }
+  if (language === "HTML")
+    return { role: "HTML entry", summary: "Previewable document entry point for browser rendering." }
+  if (language === "Python" || language === "Shell")
+    return { role: "Runtime script", summary: "Script or command-oriented file that may run outside the browser." }
+  if (language === "Markdown") return { role: "Documentation", summary: "Explains behavior, setup, or project notes." }
+  return { role: language, summary: "Project source file included in Vector's local analysis." }
+}
+
+function modelStrengthFromLabel(label: string): VectorLocalReport["modelFit"]["strength"] {
+  const value = label.toLowerCase()
+  if (!value.trim() || value.includes("no model")) return "Unknown"
+  if (/(opus|sonnet|gpt-5|gpt-4\.1|o3|gemini.*pro|deepseek.*r1|qwen.*coder.*plus)/i.test(value)) return "Frontier"
+  if (/(haiku|gpt-4o|gpt-4|gemini|llama.*70b|mistral.*large|codestral|deepseek)/i.test(value)) return "Balanced"
+  if (/(flash|mini|small|free|groq|llama.*8b|gemma|fast)/i.test(value)) return "Cheap"
+  return "Balanced"
+}
+
+function readSkillModePreference(): SkillMode {
+  try {
+    const value = localStorage.getItem(SKILL_MODE_KEY)
+    return value === "beginner" || value === "intermediate" || value === "advanced" ? value : "intermediate"
+  } catch {
+    return "intermediate"
+  }
+}
+
+function buildVectorLocalReport(
+  files: VectorReportFile[],
+  diffs: readonly RenderDiff[],
+  modelLabel: string,
+): VectorLocalReport {
   const fileByPath = new Map(files.map((file) => [file.path, file.content]))
   const languageMap = new Map<string, { files: number; lines: number }>()
   const problems: VectorReportProblem[] = []
@@ -275,7 +579,11 @@ function buildVectorLocalReport(files: VectorReportFile[], diffs: readonly Rende
     languageMap.set(language, current)
 
     for (const secret of detectSecrets(file.content)) {
-      problems.push({ severity: "warning", path: file.path, message: `${secret} pattern found. Keep real credentials in environment variables.` })
+      problems.push({
+        severity: "warning",
+        path: file.path,
+        message: `${secret} pattern found. Keep real credentials in environment variables.`,
+      })
     }
 
     if (file.path.endsWith(".json")) {
@@ -299,7 +607,7 @@ function buildVectorLocalReport(files: VectorReportFile[], diffs: readonly Rende
     deps.vue ? "Vue" : "",
     deps.svelte ? "Svelte" : "",
     deps.next ? "Next.js" : "",
-    deps.vite || packageText.includes("\"vite\"") ? "Vite" : "",
+    deps.vite || packageText.includes('"vite"') ? "Vite" : "",
     deps.tailwindcss ? "Tailwind CSS" : "",
     files.some((file) => file.path.endsWith(".py")) ? "Python" : "",
   ].filter(Boolean)
@@ -320,14 +628,15 @@ function buildVectorLocalReport(files: VectorReportFile[], diffs: readonly Rende
     : files.some((file) => file.path.endsWith(".py"))
       ? ["python main.py"]
       : entrypoints.includes("index.html")
-        ? ["Open index.html in Preview"]
+        ? ["Open index.html in Browser"]
         : []
 
   const htmlFiles = files.filter((file) => isHtmlPath(file.path))
   for (const htmlFile of htmlFiles) {
     const refs = previewAssetRefs(htmlFile.path, htmlFile.content)
     for (const ref of refs) {
-      if (!fileByPath.has(ref)) problems.push({ severity: "error", path: htmlFile.path, message: `Preview asset is missing: ${ref}` })
+      if (!fileByPath.has(ref))
+        problems.push({ severity: "error", path: htmlFile.path, message: `Preview asset is missing: ${ref}` })
     }
   }
 
@@ -347,7 +656,7 @@ function buildVectorLocalReport(files: VectorReportFile[], diffs: readonly Rende
     : {
         status: "blocked" as const,
         title: "No previewable HTML entry found",
-        details: ["Open Codespace and create or select an HTML/front-end entry file before using Preview."],
+        details: ["Open Codespace and create or select an HTML/front-end entry file before using Browser."],
       }
 
   const estimatedTokens = Math.ceil(charCount / 4)
@@ -359,19 +668,185 @@ function buildVectorLocalReport(files: VectorReportFile[], diffs: readonly Rende
         ? "This project is moderate size. File selection and clear task scope will keep BYOK cost sane."
         : "This is a small context pack. Most capable coding models should handle focused tasks cheaply.",
     `Current model: ${modelLabel || "not selected"}.`,
-    diffs.length ? `${diffs.length} pending review file${diffs.length === 1 ? "" : "s"} should be inspected before another large edit.` : "No pending review diffs detected.",
+    diffs.length
+      ? `${diffs.length} pending review file${diffs.length === 1 ? "" : "s"} should be inspected before another large edit.`
+      : "No pending review diffs detected.",
   ]
 
   const importantFiles = [
     ...entrypoints,
     ...files
-      .filter((file) => ["package.json", "vite.config.ts", "vite.config.js", "tailwind.config.js", "tsconfig.json"].includes(file.path))
+      .filter((file) =>
+        ["package.json", "vite.config.ts", "vite.config.js", "tailwind.config.js", "tsconfig.json"].includes(file.path),
+      )
       .map((file) => file.path),
     ...diffs.map((diff) => diff.file),
   ]
     .filter(Boolean)
     .filter((value, index, array) => array.indexOf(value) === index)
     .slice(0, 10)
+
+  const pathSet = new Set(files.map((file) => file.path))
+  const architecture = files
+    .map((file) => {
+      const role = classifyArchitectureFile(file.path, file.content)
+      return {
+        path: file.path,
+        role: role.role,
+        summary: role.summary,
+        lines: file.content.split("\n").length,
+      }
+    })
+    .sort((a, b) => {
+      const importantA = importantFiles.includes(a.path) ? 1 : 0
+      const importantB = importantFiles.includes(b.path) ? 1 : 0
+      return importantB - importantA || b.lines - a.lines
+    })
+    .slice(0, 60)
+
+  const dependencies = files
+    .map((file) => ({ file: file.path, dependsOn: extractDependencyRefs(file, pathSet) }))
+    .filter((item) => item.dependsOn.length > 0)
+    .slice(0, 80)
+
+  const symbols = files.flatMap(extractCodeSymbols).slice(0, 500)
+
+  const changedFiles = [...new Set(diffs.map((diff) => diff.file))]
+  const affectedFiles = new Set(changedFiles)
+  for (const item of dependencies) {
+    if (item.dependsOn.some((dependency) => changedFiles.includes(dependency))) affectedFiles.add(item.file)
+  }
+  const diffRisk = diffs.length
+    ? diffs.map(estimateDiffRisk).reduce((highest, next) => maxRisk(highest, next), "Low" as const)
+    : "Low"
+  const impactRisk = maxRisk(
+    risk,
+    diffRisk,
+    problems.some((problem) => problem.severity === "error")
+      ? "High"
+      : problems.some((problem) => problem.severity === "warning")
+        ? "Medium"
+        : "Low",
+  )
+  const impactNotes = [
+    changedFiles.length
+      ? `${changedFiles.length} pending AI-touched file${changedFiles.length === 1 ? "" : "s"} can affect ${affectedFiles.size} known file${affectedFiles.size === 1 ? "" : "s"}.`
+      : "No pending AI file edits are waiting for review.",
+    dependencies.length
+      ? "Dependency edges were inferred from imports, requires, HTML assets, and CSS imports."
+      : "No internal dependency edges were detected in the scanned files.",
+    impactRisk === "High"
+      ? "Review carefully, run the app, and create or keep a checkpoint before accepting."
+      : impactRisk === "Medium"
+        ? "A targeted review and preview run should be enough before accepting."
+        : "This appears low risk based on local file and diff analysis.",
+  ]
+
+  const ownership = [
+    ...new Set([...changedFiles, ...importantFiles, ...architecture.slice(0, 8).map((item) => item.path)]),
+  ]
+    .slice(0, 24)
+    .map((path) => ({
+      file: path,
+      owner: changedFiles.includes(path) ? "AI edited" : "Workspace",
+      reason: changedFiles.includes(path)
+        ? "The current AI task modified this file, so Vector will track it in review/checkpoints."
+        : importantFiles.includes(path)
+          ? "This file looks central to running or understanding the project."
+          : "This file is part of the detected architecture map.",
+    }))
+
+  const runbook = [
+    runCommands[0]
+      ? `Run locally with: ${runCommands[0]}`
+      : "No obvious run command was detected. Open the main entry file or add scripts to package.json.",
+    preview.status === "ready"
+      ? `Preview should start from ${htmlFiles[0]?.path ?? entrypoints[0] ?? "the detected entry file"}.`
+      : preview.title,
+    problems.some((problem) => problem.severity === "error")
+      ? "Fix blocking local problems before demoing or asking for another broad AI edit."
+      : "Use the controlled Browser or terminal checks after each meaningful AI edit.",
+    "If something breaks, inspect the review diff and restore a checkpoint only if the change moved in the wrong direction.",
+  ]
+
+  const changedSummary = diffs.map(
+    (diff) => `${diffActionLabel(diff)} ${diff.file} (+${diff.additions ?? 0}/-${diff.deletions ?? 0})`,
+  )
+  const learning = {
+    appOverview: [
+      `This project currently looks like ${frameworks.join(" + ") || "a plain web/code"} workspace with ${files.length} scanned source file${files.length === 1 ? "" : "s"}.`,
+      importantFiles.length
+        ? `Start by reading: ${importantFiles.slice(0, 5).join(", ")}.`
+        : "Vector did not find a clear entry point yet.",
+      preview.status === "ready"
+        ? "There is a previewable browser entry, so UI changes can be checked visually."
+        : "Preview needs an entry file or missing asset fixes before it is reliable.",
+    ],
+    changeExplanation: changedSummary.length
+      ? changedSummary
+      : [
+          "No pending AI change is waiting. Once Vector edits code, this section explains the change in plain language.",
+        ],
+  }
+
+  const mistakeJournal = problems.slice(0, 12).map((problem) => ({
+    title: `${problem.severity === "error" ? "Blocking issue" : problem.severity === "warning" ? "Risk noted" : "Follow-up"} in ${reportFileBasename(problem.path)}`,
+    detail: problem.message,
+    severity: problem.severity,
+  }))
+
+  const modelStrength = modelStrengthFromLabel(modelLabel)
+  const modelFit =
+    modelStrength === "Frontier"
+      ? {
+          strength: modelStrength,
+          verdict: "Good fit for large edits",
+          detail:
+            "This model tier should handle multi-file planning, refactors, and repair loops if the task scope is clear.",
+          route: "Use it for controlled-browser repair and complex architecture changes.",
+        }
+      : modelStrength === "Balanced"
+        ? {
+            strength: modelStrength,
+            verdict: "Good fit for focused edits",
+            detail:
+              "This model tier should do well on bounded tasks, but large rewrites should be split into smaller requests.",
+            route: "Use it for fixes, explanations, and small-to-medium file changes.",
+          }
+        : modelStrength === "Cheap"
+          ? {
+              strength: modelStrength,
+              verdict: "Use carefully",
+              detail: "Cheap/free/fast models can miss context or output incomplete edits on larger workspaces.",
+              route: "Route simple questions here; use a stronger model for multi-file code generation.",
+            }
+          : {
+              strength: modelStrength,
+              verdict: "Select a model before serious edits",
+              detail: "Vector cannot estimate capability until a model is selected.",
+              route: "Connect/select a model, then run a narrow task or replay benchmark.",
+            }
+
+  const promptReplayBench = [
+    {
+      model: "Cheap / free model",
+      quality: risk === "High" ? "Low for this project size" : "Useful for small questions",
+      cost: "Lowest",
+      recommendation: "Use for explanations, quick searches, and narrow one-file fixes.",
+    },
+    {
+      model: "Balanced coding model",
+      quality: risk === "High" ? "Good with selected files" : "Strong for normal edits",
+      cost: "Moderate",
+      recommendation: "Best default for day-to-day Vector work.",
+    },
+    {
+      model: "Frontier model",
+      quality: "Best for multi-file generation and repair loops",
+      cost: "Highest",
+      recommendation: "Use before demos, big refactors, and hard debugging.",
+    },
+  ]
 
   return {
     scannedAt: Date.now(),
@@ -396,8 +871,12 @@ function buildVectorLocalReport(files: VectorReportFile[], diffs: readonly Rende
       summary: `${files.length} scanned text file${files.length === 1 ? "" : "s"}, ${lineCount.toLocaleString()} lines, ${frameworks.join(" + ") || "unknown stack"}.`,
       importantFiles,
       nextSteps: [
-        preview.status === "blocked" ? "Create or select a previewable app entry." : "Open Preview and verify the main screen renders.",
-        problems.some((problem) => problem.severity === "error") ? "Fix blocking syntax/missing-asset errors first." : "Keep changes small and reviewable through Change Queue.",
+        preview.status === "blocked"
+          ? "Create or select a previewable app entry."
+          : "Open Browser and verify the main screen renders.",
+        problems.some((problem) => problem.severity === "error")
+          ? "Fix blocking syntax/missing-asset errors first."
+          : "Keep changes small and inspect them through Review Changes.",
         "Create a checkpoint before accepting broad AI edits.",
       ],
     },
@@ -407,16 +886,32 @@ function buildVectorLocalReport(files: VectorReportFile[], diffs: readonly Rende
         "Name the exact behavior you want changed.",
         "Mention the target screen/file when you know it.",
         "Paste the runtime error or screenshot details for debugging tasks.",
-        risk === "High" ? "Avoid “rewrite the whole app”; ask for one feature or one bug at a time." : "Ask for a plan first when the edit touches multiple files.",
+        risk === "High"
+          ? "Avoid “rewrite the whole app”; ask for one feature or one bug at a time."
+          : "Ask for a plan first when the edit touches multiple files.",
       ],
     },
     demoChecklist: [
       "Open the project in Vector Agent.",
       "Run one focused edit and wait for reviewable changes.",
-      "Open Code Archaeology to inspect changed files and checkpoint docs.",
-      preview.status === "ready" ? "Open Preview and show the rendered app." : "Fix preview blockers before demoing.",
+      "Open Review changes to inspect changed files before accepting them.",
+      preview.status === "ready" ? "Open Browser and show the rendered app." : "Fix preview blockers before demoing.",
       "Restore a checkpoint if the edit is not trustworthy.",
     ],
+    architecture,
+    dependencies,
+    symbols,
+    impact: {
+      risk: impactRisk,
+      notes: impactNotes,
+      affectedFiles: [...affectedFiles].slice(0, 40),
+    },
+    ownership,
+    runbook,
+    learning,
+    mistakeJournal,
+    modelFit,
+    promptReplayBench,
   }
 }
 
@@ -426,32 +921,136 @@ function splitPatchLines(value: string) {
   return normalized.split("\n")
 }
 
+const CODESPACE_CODE_PROBLEM_EXTENSIONS = new Set([
+  "css",
+  "html",
+  "js",
+  "jsx",
+  "json",
+  "mjs",
+  "cjs",
+  "py",
+  "sh",
+  "ts",
+  "tsx",
+])
+const CODESPACE_SECRET_SCAN_EXTENSIONS = new Set([
+  "cjs",
+  "css",
+  "env",
+  "html",
+  "js",
+  "jsx",
+  "json",
+  "mjs",
+  "py",
+  "sh",
+  "ts",
+  "tsx",
+  "yaml",
+  "yml",
+])
+const CODESPACE_CONSOLE_SCAN_EXTENSIONS = new Set(["cjs", "html", "js", "jsx", "mjs", "ts", "tsx"])
+const CODESPACE_BRACKET_SCAN_EXTENSIONS = new Set(["cjs", "css", "html", "js", "jsx", "json", "mjs", "ts", "tsx"])
+
+function codespaceProblemExtension(path: string) {
+  const name = path.split(/[\\/]/).pop() ?? path
+  if (/^\.env(?:\.|$)/i.test(name)) return "env"
+  const match = /\.([^.]+)$/.exec(name)
+  return match?.[1]?.toLowerCase() ?? ""
+}
+
+function stripCodespaceQuotedText(line: string) {
+  return line.replace(/(["'`])(?:\\.|(?!\1).)*\1/g, '""')
+}
+
+function stripCodespaceScanNoise(
+  line: string,
+  extension: string,
+  state: { blockComment: boolean; htmlComment: boolean },
+) {
+  let next = stripCodespaceQuotedText(line)
+
+  if (extension === "html") {
+    if (state.htmlComment) {
+      const end = next.indexOf("-->")
+      if (end === -1) return ""
+      next = next.slice(end + 3)
+      state.htmlComment = false
+    }
+    while (next.includes("<!--")) {
+      const start = next.indexOf("<!--")
+      const end = next.indexOf("-->", start + 4)
+      if (end === -1) {
+        next = next.slice(0, start)
+        state.htmlComment = true
+        break
+      }
+      next = `${next.slice(0, start)} ${next.slice(end + 3)}`
+    }
+  }
+
+  if (["css", "js", "jsx", "ts", "tsx", "mjs", "cjs"].includes(extension)) {
+    if (state.blockComment) {
+      const end = next.indexOf("*/")
+      if (end === -1) return ""
+      next = next.slice(end + 2)
+      state.blockComment = false
+    }
+    while (next.includes("/*")) {
+      const start = next.indexOf("/*")
+      const end = next.indexOf("*/", start + 2)
+      if (end === -1) {
+        next = next.slice(0, start)
+        state.blockComment = true
+        break
+      }
+      next = `${next.slice(0, start)} ${next.slice(end + 2)}`
+    }
+    next = next.replace(/\/\/.*$/, "")
+  }
+
+  if (extension === "py" || extension === "sh" || extension === "env" || extension === "yaml" || extension === "yml") {
+    next = next.replace(/#.*$/, "")
+  }
+
+  return next
+}
+
 function analyzeCodespaceProblems(path: string | undefined, text: string): CodespaceProblem[] {
   const problems: CodespaceProblem[] = []
   if (!path) return problems
+
+  const extension = codespaceProblemExtension(path)
+  const codeLike = CODESPACE_CODE_PROBLEM_EXTENSIONS.has(extension)
+  const secretLike = CODESPACE_SECRET_SCAN_EXTENSIONS.has(extension)
+  if (!codeLike && !secretLike) return problems
 
   const lines = text.split("\n")
   const stack: { char: string; line: number }[] = []
   const pairs: Record<string, string> = { "{": "}", "(": ")", "[": "]" }
   const closing = new Set(Object.values(pairs))
+  const scanState = { blockComment: false, htmlComment: false }
 
   for (const [index, line] of lines.entries()) {
     const number = index + 1
-    if (/\b(api[_-]?key|secret|token|password)\b\s*[:=]\s*["'][^"']{8,}/i.test(line)) {
+    const scanLine = stripCodespaceScanNoise(line, extension, scanState)
+
+    if (secretLike && /\b(api[_-]?key|secret|token|password)\b\s*[:=]\s*["'][^"']{8,}/i.test(line)) {
       problems.push({
         severity: "error",
         line: number,
         message: "Possible hardcoded secret. Move credentials into environment variables or Vector settings.",
       })
     }
-    if (/\bconsole\.log\s*\(/.test(line)) {
+    if (CODESPACE_CONSOLE_SCAN_EXTENSIONS.has(extension) && /\bconsole\.log\s*\(/.test(scanLine)) {
       problems.push({
         severity: "warning",
         line: number,
         message: "Debug console output detected. Remove it before shipping if it is not intentional.",
       })
     }
-    if (/\bTODO\b|\bFIXME\b/i.test(line)) {
+    if (codeLike && /\bTODO\b|\bFIXME\b/i.test(scanLine)) {
       problems.push({
         severity: "info",
         line: number,
@@ -459,7 +1058,8 @@ function analyzeCodespaceProblems(path: string | undefined, text: string): Codes
       })
     }
 
-    for (const char of line) {
+    if (!CODESPACE_BRACKET_SCAN_EXTENSIONS.has(extension)) continue
+    for (const char of scanLine) {
       if (pairs[char]) stack.push({ char, line: number })
       if (!closing.has(char)) continue
       const last = stack.at(-1)
@@ -469,7 +1069,7 @@ function analyzeCodespaceProblems(path: string | undefined, text: string): Codes
   }
 
   const lastOpen = stack.at(-1)
-  if (lastOpen && /\.(js|jsx|ts|tsx|css|html)$/i.test(path)) {
+  if (lastOpen && CODESPACE_BRACKET_SCAN_EXTENSIONS.has(extension)) {
     problems.push({
       severity: "warning",
       line: lastOpen.line,
@@ -498,22 +1098,14 @@ const SECRET_PATTERNS: { label: string; pattern: RegExp }[] = [
   { label: "Google API key", pattern: /\bAIza[0-9A-Za-z_-]{35}\b/ },
   { label: "Slack token", pattern: /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/ },
   { label: "Private key block", pattern: /-----BEGIN [A-Z ]*PRIVATE KEY-----/ },
-  { label: "Hardcoded credential", pattern: /\b(?:api[_-]?key|secret|password|auth[_-]?token)\b\s*[:=]\s*["'][^"'\s]{16,}["']/i },
+  {
+    label: "Hardcoded credential",
+    pattern: /\b(?:api[_-]?key|secret|password|auth[_-]?token)\b\s*[:=]\s*["'][^"'\s]{16,}["']/i,
+  },
 ]
 
 function detectSecrets(text: string) {
   return SECRET_PATTERNS.filter((item) => item.pattern.test(text)).map((item) => item.label)
-}
-
-function loadCodespaceCheckpoints(): CodespaceCheckpoint[] {
-  try {
-    const raw = localStorage.getItem(CODESPACE_CHECKPOINTS_KEY)
-    if (!raw) return []
-    const parsed = JSON.parse(raw)
-    return Array.isArray(parsed) ? parsed : []
-  } catch {
-    return []
-  }
 }
 
 function formatCheckpointTime(value: number) {
@@ -554,15 +1146,76 @@ function diffActionLabel(diff: RenderDiff) {
   return "Edited file"
 }
 
+function timelineTypeLabel(type: EngineeringEventType) {
+  const labels: Record<EngineeringEventType, string> = {
+    ai: "AI",
+    file: "Files",
+    terminal: "Terminal",
+    browser: "Browser",
+    checkpoint: "Checkpoint",
+    review: "Review",
+    error: "Error",
+    build: "Build",
+    decision: "Decision",
+  }
+  return labels[type]
+}
+
+function timelineIcon(type: EngineeringEventType) {
+  const icons: Record<EngineeringEventType, string> = {
+    ai: "✦",
+    file: "{}",
+    terminal: "$",
+    browser: "◉",
+    checkpoint: "✓",
+    review: "↳",
+    error: "!",
+    build: "▣",
+    decision: "◇",
+  }
+  return icons[type]
+}
+
+function timelineStatusLabel(status: EngineeringEventStatus) {
+  const labels: Record<EngineeringEventStatus, string> = {
+    pending: "Pending",
+    running: "Running",
+    success: "Success",
+    warning: "Warning",
+    failed: "Failed",
+  }
+  return labels[status]
+}
+
 function loadAiChangeCheckpoints(session: string): AiChangeCheckpoint[] {
   try {
     const parsed = JSON.parse(localStorage.getItem(AI_CHANGE_CHECKPOINTS_KEY) ?? "[]") as AiChangeCheckpoint[]
     if (!Array.isArray(parsed)) return []
-    return parsed
-      .filter((item) => item && item.session === session)
-      .sort((a, b) => b.createdAt - a.createdAt)
+    return parsed.filter((item) => item && item.session === session).sort((a, b) => b.createdAt - a.createdAt)
   } catch {
     return []
+  }
+}
+
+/**
+ * Patches a stored checkpoint's user-editable fields (name/note) in place.
+ * Old checkpoints without these fields keep working: empty or whitespace-only
+ * values delete the field so the UI falls back to the sequential default.
+ */
+function updateAiChangeCheckpoint(id: string, patch: Partial<Pick<AiChangeCheckpoint, "name" | "note">>) {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(AI_CHANGE_CHECKPOINTS_KEY) ?? "[]") as AiChangeCheckpoint[]
+    if (!Array.isArray(parsed)) return
+    const next = parsed.map((item) => {
+      if (!item || item.id !== id) return item
+      const merged: AiChangeCheckpoint = { ...item, ...patch }
+      if (!merged.name?.trim()) delete merged.name
+      if (!merged.note?.trim()) delete merged.note
+      return merged
+    })
+    localStorage.setItem(AI_CHANGE_CHECKPOINTS_KEY, JSON.stringify(next))
+  } catch {
+    // Checkpoint metadata is a local convenience; storage failures are non-fatal.
   }
 }
 
@@ -602,11 +1255,15 @@ function fileBasename(path: string | undefined) {
 function fileBadge(path: string | undefined) {
   const ext = path?.split(".").pop()?.toLowerCase()
   if (!ext) return { label: "TXT", color: "text-slate-300", ring: "border-slate-400/25 bg-slate-500/10" }
-  if (ext === "html" || ext === "htm") return { label: "HTML", color: "text-violet-300", ring: "border-violet-400/25 bg-violet-500/10" }
+  if (ext === "html" || ext === "htm")
+    return { label: "HTML", color: "text-violet-300", ring: "border-violet-400/25 bg-violet-500/10" }
   if (ext === "css") return { label: "CSS", color: "text-pink-300", ring: "border-pink-400/25 bg-pink-500/10" }
-  if (ext === "js" || ext === "jsx") return { label: ext.toUpperCase(), color: "text-yellow-300", ring: "border-yellow-400/25 bg-yellow-500/10" }
-  if (ext === "ts" || ext === "tsx") return { label: ext.toUpperCase(), color: "text-sky-300", ring: "border-sky-400/25 bg-sky-500/10" }
-  if (ext === "json") return { label: "JSON", color: "text-emerald-300", ring: "border-emerald-400/25 bg-emerald-500/10" }
+  if (ext === "js" || ext === "jsx")
+    return { label: ext.toUpperCase(), color: "text-yellow-300", ring: "border-yellow-400/25 bg-yellow-500/10" }
+  if (ext === "ts" || ext === "tsx")
+    return { label: ext.toUpperCase(), color: "text-sky-300", ring: "border-sky-400/25 bg-sky-500/10" }
+  if (ext === "json")
+    return { label: "JSON", color: "text-emerald-300", ring: "border-emerald-400/25 bg-emerald-500/10" }
   if (ext === "md") return { label: "MD", color: "text-zinc-300", ring: "border-zinc-400/25 bg-zinc-500/10" }
   return { label: ext.toUpperCase(), color: "text-slate-300", ring: "border-slate-400/25 bg-slate-500/10" }
 }
@@ -632,7 +1289,7 @@ const vectorCodeTheme = EditorView.theme(
     "&": {
       height: "100%",
       color: "#e2e0e8",
-      backgroundColor: "#141318",
+      backgroundColor: "#1d1d1f",
       fontSize: "var(--vector-editor-font-size, 13px)",
     },
     ".cm-scroller": {
@@ -650,7 +1307,7 @@ const vectorCodeTheme = EditorView.theme(
       padding: "0 12px",
     },
     ".cm-gutters": {
-      backgroundColor: "#17161c",
+      backgroundColor: "#202023",
       color: "#7c7889",
       borderRight: "1px solid rgba(255, 255, 255, 0.06)",
     },
@@ -679,7 +1336,7 @@ const vectorCodeTheme = EditorView.theme(
     },
     ".cm-tooltip": {
       border: "1px solid rgba(255, 255, 255, 0.1)",
-      backgroundColor: "#1b1a21",
+      backgroundColor: "#242428",
       color: "#e5e2ec",
       borderRadius: "10px",
       boxShadow: "0 18px 45px rgba(0,0,0,0.38)",
@@ -714,11 +1371,11 @@ const vectorCodeTheme = EditorView.theme(
       height: "12px",
     },
     ".cm-scroller::-webkit-scrollbar-track": {
-      background: "#17161c",
+      background: "#202023",
     },
     ".cm-scroller::-webkit-scrollbar-thumb": {
       background: "#3a3742",
-      border: "3px solid #17161c",
+      border: "3px solid #202023",
       borderRadius: "999px",
     },
     ".cm-scroller::-webkit-scrollbar-thumb:hover": {
@@ -774,7 +1431,7 @@ const javascriptSnippets: Completion[] = [
     detail: "const arrow function",
     boost: 86,
   }),
-  snippetCompletion("import ${name} from \"${module}\"", {
+  snippetCompletion('import ${name} from "${module}"', {
     label: "import",
     type: "snippet",
     detail: "ES module import",
@@ -824,8 +1481,18 @@ const pythonCompletions: Completion[] = [
 ].map((label) => ({ label, type: "keyword", detail: "Python keyword", boost: 58 }))
 
 const pythonSnippets: Completion[] = [
-  snippetCompletion("def ${name}(${params}):\n\t${}", { label: "def", type: "snippet", detail: "Python function", boost: 90 }),
-  snippetCompletion("class ${Name}:\n\tdef __init__(self):\n\t\t${}", { label: "class", type: "snippet", detail: "Python class", boost: 82 }),
+  snippetCompletion("def ${name}(${params}):\n\t${}", {
+    label: "def",
+    type: "snippet",
+    detail: "Python function",
+    boost: 90,
+  }),
+  snippetCompletion("class ${Name}:\n\tdef __init__(self):\n\t\t${}", {
+    label: "class",
+    type: "snippet",
+    detail: "Python class",
+    boost: 82,
+  }),
   snippetCompletion("if ${condition}:\n\t${}", { label: "if", type: "snippet", detail: "Python if block", boost: 80 }),
 ]
 
@@ -859,8 +1526,18 @@ const htmlCompletions: Completion[] = [
 
 const htmlSnippets: Completion[] = [
   snippetCompletion("<${tag}>${}</${tag}>", { label: "tag", type: "snippet", detail: "HTML element", boost: 86 }),
-  snippetCompletion("<div class=\"${className}\">\n\t${}\n</div>", { label: "div", type: "snippet", detail: "div with class", boost: 84 }),
-  snippetCompletion("<button type=\"button\">${label}</button>", { label: "button", type: "snippet", detail: "button element", boost: 76 }),
+  snippetCompletion('<div class="${className}">\n\t${}\n</div>', {
+    label: "div",
+    type: "snippet",
+    detail: "div with class",
+    boost: 84,
+  }),
+  snippetCompletion('<button type="button">${label}</button>', {
+    label: "button",
+    type: "snippet",
+    detail: "button element",
+    boost: 76,
+  }),
 ]
 
 const cssCompletions: Completion[] = [
@@ -948,7 +1625,11 @@ function inferExtensionFromContent(text: string) {
   const value = text.trim()
   if (!value) return ""
   if (looksLikeHtml(value)) return "html"
-  if (/^#!.*\b(bash|sh|zsh)\b/.test(value) || /\b(npm|pnpm|bun|python|pip|echo|export)\b/.test(value.split("\n").slice(0, 8).join("\n"))) return "sh"
+  if (
+    /^#!.*\b(bash|sh|zsh)\b/.test(value) ||
+    /\b(npm|pnpm|bun|python|pip|echo|export)\b/.test(value.split("\n").slice(0, 8).join("\n"))
+  )
+    return "sh"
   if (/^\s*[{[]/.test(value)) {
     try {
       JSON.parse(value)
@@ -1091,9 +1772,10 @@ function VectorCodeEditor(props: { path: string; value: string; onChange: (next:
                 ...completionKeymap,
               ]),
               EditorView.updateListener.of((update) => {
-                if (!update.docChanged) return
-                internalUpdate = true
-                props.onChange(update.state.doc.toString())
+                if (update.docChanged) {
+                  internalUpdate = true
+                  props.onChange(update.state.doc.toString())
+                }
               }),
             ],
           }),
@@ -1114,7 +1796,7 @@ function VectorCodeEditor(props: { path: string; value: string; onChange: (next:
 
   onCleanup(destroy)
 
-  return <div ref={mount} class="h-full w-full overflow-hidden bg-[#131217]" />
+  return <div ref={mount} class="h-full w-full overflow-hidden bg-[#1d1d1f]" />
 }
 
 function makeId(prefix: string) {
@@ -1135,10 +1817,56 @@ function previewDiffLines(before: string, after: string) {
   }))
 }
 
+function reviewHunks(before: string, after: string): CodespaceReviewHunk[] {
+  const hunks: CodespaceReviewHunk[] = []
+  let oldOffset = 0
+  let pending: CodespaceReviewHunk | undefined
+
+  const flush = () => {
+    if (!pending) return
+    pending.id = `hunk-${hunks.length + 1}-${pending.from}`
+    hunks.push(pending)
+    pending = undefined
+  }
+
+  for (const part of diffLines(before, after)) {
+    if (!part.added && !part.removed) {
+      flush()
+      oldOffset += part.value.length
+      continue
+    }
+    if (!pending) pending = { id: "", from: oldOffset, to: oldOffset, before: "", after: "" }
+    if (part.removed) {
+      pending.before += part.value
+      oldOffset += part.value.length
+      pending.to = oldOffset
+    }
+    if (part.added) pending.after += part.value
+  }
+  flush()
+  return hunks
+}
+
+function applyAcceptedHunks(original: string, hunks: CodespaceReviewHunk[], accepted: Set<string>) {
+  let cursor = 0
+  let next = ""
+  for (const hunk of hunks) {
+    next += original.slice(cursor, hunk.from)
+    next += accepted.has(hunk.id) ? hunk.after : original.slice(hunk.from, hunk.to)
+    cursor = hunk.to
+  }
+  return next + original.slice(cursor)
+}
+
 function extractModelText(value: unknown, depth = 0): string {
   if (!value || depth > 5) return ""
   if (typeof value === "string") return value.trim()
-  if (Array.isArray(value)) return value.map((item) => extractModelText(item, depth + 1)).filter(Boolean).join("\n\n").trim()
+  if (Array.isArray(value))
+    return value
+      .map((item) => extractModelText(item, depth + 1))
+      .filter(Boolean)
+      .join("\n\n")
+      .trim()
   if (typeof value !== "object") return ""
 
   const candidate = value as Record<string, unknown>
@@ -1153,6 +1881,32 @@ function extractModelText(value: unknown, depth = 0): string {
     const next = candidate[key]
     const text = extractModelText(next, depth + 1)
     if (text) return text
+  }
+
+  return ""
+}
+
+function extractModelTextRaw(value: unknown, depth = 0): string {
+  if (!value || depth > 5) return ""
+  if (typeof value === "string") return value
+  if (Array.isArray(value))
+    return value
+      .map((item) => extractModelTextRaw(item, depth + 1))
+      .filter((item) => item.trim())
+      .join("\n\n")
+  if (typeof value !== "object") return ""
+
+  const candidate = value as Record<string, unknown>
+  if (candidate.type === "text" && typeof candidate.text === "string") return candidate.text
+
+  for (const key of ["text", "content", "message", "output", "output_text", "response"]) {
+    const next = candidate[key]
+    if (typeof next === "string" && next.trim()) return next
+  }
+
+  for (const key of ["parts", "content", "messages", "data", "message", "output"]) {
+    const text = extractModelTextRaw(candidate[key], depth + 1)
+    if (text.trim()) return text
   }
 
   return ""
@@ -1223,10 +1977,6 @@ function looksLikeViteProject(packageJson: string) {
   return /"vite"\s*:/.test(packageJson) || /"@vitejs\//.test(packageJson)
 }
 
-function isBuiltPreviewPath(path: string) {
-  return path === "dist/index.html" || path === "build/index.html"
-}
-
 function previewAssetRefs(htmlPath: string, html: string) {
   const out = new Set<string>()
   html.replace(/<link\b[^>]*?href=(["'])([^"']+\.css(?:\?[^"']*)?)\1[^>]*?>/gi, (_match, _quote, href) => {
@@ -1234,127 +1984,54 @@ function previewAssetRefs(htmlPath: string, html: string) {
     if (path) out.add(path)
     return ""
   })
-  html.replace(/<script\b[^>]*?src=(["'])([^"']+\.(?:m?js|jsx|ts|tsx)(?:\?[^"']*)?)\1[^>]*?>\s*<\/script>/gi, (_match, _quote, src) => {
-    const path = previewAssetPath(htmlPath, src)
-    if (path) out.add(path)
-    return ""
-  })
+  html.replace(
+    /<script\b[^>]*?src=(["'])([^"']+\.(?:m?js|jsx|ts|tsx)(?:\?[^"']*)?)\1[^>]*?>\s*<\/script>/gi,
+    (_match, _quote, src) => {
+      const path = previewAssetPath(htmlPath, src)
+      if (path) out.add(path)
+      return ""
+    },
+  )
   return [...out]
 }
 
-function inlinePreviewAssets(htmlPath: string, html: string, readFile: (path: string) => string) {
-  return html
-    .replace(/<link\b([^>]*?)href=(["'])([^"']+\.css(?:\?[^"']*)?)\2([^>]*?)>/gi, (match, before, _quote, href, after) => {
-      const path = previewAssetPath(htmlPath, href)
-      const content = path ? readFile(path) : ""
-      if (!content.trim()) return match
-      return `<style data-vector-preview="${path}"${before.includes("media=") || after.includes("media=") ? "" : ""}>\n${content}\n</style>`
-    })
-    .replace(/<script\b([^>]*?)src=(["'])([^"']+\.(?:m?js|jsx|ts|tsx)(?:\?[^"']*)?)\2([^>]*?)>\s*<\/script>/gi, (match, before, _quote, src, after) => {
-      const path = previewAssetPath(htmlPath, src)
-      const content = path ? readFile(path) : ""
-      if (!content.trim()) return match
-      const attrs = `${before} ${after}`
-      const moduleAttr = /\btype\s*=\s*(["'])module\1/i.test(attrs) ? ` type="module"` : ""
-      return `<script${moduleAttr} data-vector-preview="${path}">\n${content.replace(/<\/script/gi, "<\\/script")}\n</script>`
-    })
-}
-
-function injectPreviewRuntime(html: string) {
-  const guard = `
-<script data-vector-preview-runtime>
-(() => {
-  const showError = (message) => {
-    let node = document.getElementById("vector-preview-error");
-    if (!node) {
-      node = document.createElement("div");
-      node.id = "vector-preview-error";
-      node.style.cssText = [
-        "position:fixed",
-        "left:16px",
-        "right:16px",
-        "bottom:16px",
-        "z-index:2147483647",
-        "padding:14px 16px",
-        "border-radius:14px",
-        "background:rgba(17,14,24,0.94)",
-        "border:1px solid rgba(168,85,247,0.35)",
-        "box-shadow:0 18px 50px rgba(0,0,0,0.35)",
-        "color:#f6f2ff",
-        "font:13px/1.45 ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif",
-        "white-space:pre-wrap",
-      ].join(";");
-      document.documentElement.appendChild(node);
-    }
-    node.textContent = "Vector Preview stopped because the app threw an error:\\n" + message;
-  };
-  window.addEventListener("error", (event) => {
-    showError(event.message || "Unknown runtime error");
-  });
-  window.addEventListener("unhandledrejection", (event) => {
-    const reason = event.reason;
-    showError(reason && reason.message ? reason.message : String(reason || "Unhandled promise rejection"));
-  });
-  document.addEventListener("click", (event) => {
-    const target = event.target && event.target.closest ? event.target.closest("a[href]") : null;
-    if (!target) return;
-    const href = target.getAttribute("href");
-    if (!href || href.startsWith("#") || /^(https?:|mailto:|tel:|data:|blob:|\\/\\/)/i.test(href)) return;
-    if (href.startsWith("/")) {
-      event.preventDefault();
-      try {
-        history.pushState({}, "", href);
-        window.dispatchEvent(new PopStateEvent("popstate"));
-      } catch {
-        location.hash = href;
-      }
-    }
-  }, true);
-})();
-</script>`
-  if (/<\/body>/i.test(html)) return html.replace(/<\/body>/i, `${guard}\n</body>`)
-  return `${html}\n${guard}`
-}
-
-function buildPreviewDocument(htmlPath: string, html: string, readFile: (path: string) => string) {
-  return injectPreviewRuntime(inlinePreviewAssets(htmlPath, html, readFile))
-}
-
-function CodespaceWorkbench(props: {
+export function CodespaceWorkbench(props: {
   modified: () => readonly string[]
   kinds: () => ReadonlyMap<string, Kind>
   empty: () => JSX.Element
   diffs: () => readonly RenderDiff[]
   focusReviewDiff: (path: string) => void
+  sessionId?: () => string | undefined
   onClose: () => void
+  embedded?: boolean
+  portalMount?: Node
 }) {
   const file = useFile()
   const sdk = useSDK()
   const local = useLocal()
+  const settings = useSettings()
+  const dialog = useDialog()
   const [selectedPath, setSelectedPath] = createSignal<string | undefined>()
   const [activeView, setActiveView] = createSignal<CodespaceView>("editor")
-  const [toolsOpen, setToolsOpen] = createSignal(false)
-  const [toolBrief, setToolBrief] = createSignal("")
   const [saving, setSaving] = createSignal(false)
   const [openFiles, setOpenFiles] = createSignal<string[]>([])
   const [drafts, setDrafts] = createStore<Record<string, string>>({})
-  const [checkpoints, setCheckpoints] = createSignal<CodespaceCheckpoint[]>(loadCodespaceCheckpoints())
+  const [inlineEditOpen, setInlineEditOpen] = createSignal(false)
+  const [inlineEditInput, setInlineEditInput] = createSignal("")
+  const [inlineEditRunning, setInlineEditRunning] = createSignal(false)
+  const [inlineEditSelection, setInlineEditSelection] = createSignal<InlineEditSelection>()
+  const [agentMessages, setAgentMessages] = createSignal<CodespaceAgentMessage[]>([])
+  const [agentInput, setAgentInput] = createSignal("")
+  const [agentRunning, setAgentRunning] = createSignal(false)
+  const [agentOpen, setAgentOpen] = createSignal(true)
+  const [agentMaximized, setAgentMaximized] = createSignal(false)
+  const [agentWidth, setAgentWidth] = createSignal(440)
   const [queuedChanges, setQueuedChanges] = createSignal<CodespaceQueuedChange[]>([])
   const [selectedQueueId, setSelectedQueueId] = createSignal<string | undefined>()
-  const [coprogrammerMode, setCoprogrammerMode] = createSignal<"build" | "repair" | "refactor" | "learn">("build")
-  const [coprogrammerRunning, setCoprogrammerRunning] = createSignal(false)
-  const [coprogrammerDraft, setCoprogrammerDraft] = createSignal("")
-  const [coprogrammerLog, setCoprogrammerLog] = createSignal<CodespaceAgentLog[]>([])
-  const [architectInput, setArchitectInput] = createSignal("")
-  const [architectRunning, setArchitectRunning] = createSignal(false)
-  const [architectMessages, setArchitectMessages] = createSignal<CodespaceArchitectMessage[]>([
-    {
-      id: "architect-welcome",
-      role: "assistant",
-      content: "I can review architecture, explain files, plan safe changes, and help you decide what to build next. Ask me about the open file or project.",
-      createdAt: Date.now(),
-    },
-  ])
+  const [hunkDecisions, setHunkDecisions] = createSignal<Record<string, "accept" | "reject">>({})
+  const [ignoredProblems, setIgnoredProblems] = createSignal<Set<string>>(new Set())
+  const [liveWorkspaces, setLiveWorkspaces] = createSignal<CodespaceLiveWorkspace[]>([])
+  const [liveWorkspaceError, setLiveWorkspaceError] = createSignal("")
 
   const state = createMemo(() => {
     const path = selectedPath()
@@ -1372,51 +2049,22 @@ function CodespaceWorkbench(props: {
     if (!path) return false
     return draft() !== contents()
   })
-  const problems = createMemo(() => analyzeCodespaceProblems(selectedPath(), draft()))
-  const selectedCheckpoints = createMemo(() => checkpoints().filter((item) => item.path === selectedPath()))
+  const problemKey = (problem: CodespaceProblem) => `${problem.line}:${problem.severity}:${problem.message}`
+  const problems = createMemo(() =>
+    analyzeCodespaceProblems(selectedPath(), draft()).filter((problem) => !ignoredProblems().has(problemKey(problem))),
+  )
   const lineCount = createMemo(() => draft().split("\n").length)
   const fileText = (path: string | undefined) => {
     if (!path) return ""
     return drafts[path] ?? file.get(path)?.content?.content ?? ""
   }
-  const previewCandidates = createMemo(() => {
-    const current = selectedPath()
-    const candidates = new Set<string>()
-    if (current) {
-      candidates.add(current)
-      const dir = pathDirname(current)
-      candidates.add(dir ? `${dir}/index.html` : "index.html")
-      candidates.add(dir ? `${dir}/index.htm` : "index.htm")
-    }
-    candidates.add("index.html")
-    candidates.add("index.htm")
-    candidates.add("dist/index.html")
-    candidates.add("build/index.html")
-    candidates.add("src/index.html")
-    candidates.add("public/index.html")
-    for (const path of openFiles()) candidates.add(path)
-    for (const path of props.modified()) candidates.add(path)
-    return [...candidates].filter((path) => isHtmlPath(path) || looksLikeHtml(fileText(path)))
-  })
-  const previewPath = createMemo(() => {
-    const candidates = previewCandidates()
-    const built = candidates.find((path) => isBuiltPreviewPath(path) && looksLikeHtml(fileText(path)))
-    if (built) return built
-    return candidates.find((path) => looksLikeHtml(fileText(path))) ?? candidates.find((path) => fileText(path).trim()) ?? candidates[0]
-  })
-  const previewDocument = createMemo(() => {
-    const path = previewPath()
-    const html = fileText(path)
-    if (!path || !html.trim()) return ""
-    return buildPreviewDocument(path, html, fileText)
-  })
   const activeBadge = createMemo(() => fileBadge(selectedPath()))
   const breakpointCount = createMemo(() => problems().filter((problem) => problem.severity === "error").length)
   const activeModelLabel = createMemo(() => {
     const model = local.model.current()
     if (!model) return "No model selected"
     const variant = local.model.variant.current()
-    return `${model.name}${variant ? ` · ${variant}` : ""}`
+    return `${model.name}${variant ? ` · ${modelVariantLabel(variant)}` : ""}`
   })
   const selectedModelPayload = createMemo(() => {
     const model = local.model.current()
@@ -1432,19 +2080,70 @@ function CodespaceWorkbench(props: {
     const id = selectedQueueId()
     return queuedChanges().find((item) => item.id === id) ?? queuedChanges()[0]
   })
+  const selectedReviewHunks = createMemo(() => {
+    const item = selectedQueue()
+    return item ? reviewHunks(item.oldContent, item.newContent) : []
+  })
   const queueCount = createMemo(() => queuedChanges().length + props.diffs().length)
+  const editorWorkspaces = createMemo(() =>
+    liveWorkspaces().filter(
+      (workspace) =>
+        workspace.mergeState === "none" &&
+        !["failed", "stopped", "merged", "discarded"].includes(workspace.status),
+    ),
+  )
+  const activeFileWorkspaces = createMemo(() => {
+    const path = selectedPath()
+    if (!path) return []
+    const normalized = normalizedWorkspacePath(path)
+    return editorWorkspaces().filter((workspace) =>
+      workspace.changedFiles.some((filePath) => normalizedWorkspacePath(filePath) === normalized),
+    )
+  })
+  const liveFileMarkers = createMemo(() => {
+    const markers = new Map<string, FileTreeMarker[]>()
+    for (const workspace of editorWorkspaces()) {
+      const marker = {
+        id: workspace.id,
+        color: workspaceColor(workspace.id),
+        label: `${workspace.name}: ${workspace.lastAction}`,
+      }
+      for (const changedFile of workspace.changedFiles) {
+        const path = normalizedWorkspacePath(changedFile)
+        const parts = path.split("/").filter(Boolean)
+        for (const [index] of parts.entries()) {
+          const target = parts.slice(0, index + 1).join("/")
+          const existing = markers.get(target) ?? []
+          if (existing.some((item) => item.id === marker.id)) continue
+          markers.set(target, [...existing, marker])
+        }
+      }
+    }
+    return markers
+  })
 
-  createEffect(() => {
-    if (activeView() !== "preview") return
-    const candidates = previewCandidates()
-    const path = previewPath()
-    const html = path ? fileText(path) : ""
-    untrack(() => {
-      void file.load("package.json").catch(() => {})
-      for (const candidate of candidates) void file.load(candidate).catch(() => {})
-      if (!path || !html.trim()) return
-      for (const asset of previewAssetRefs(path, html)) void file.load(asset).catch(() => {})
-    })
+  const refreshLiveWorkspaces = async () => {
+    const api = globalThis.window?.api?.parallelWorkspaces
+    if (!api) return
+    const parentSessionId = props.sessionId?.()
+    const scope = parentSessionId
+      ? { sourcePath: sdk().directory, parentSessionId }
+      : { sourcePath: sdk().directory }
+    await api
+      .list(scope)
+      .then((records) => {
+        setLiveWorkspaces(records)
+        setLiveWorkspaceError("")
+      })
+      .catch((error) => {
+        setLiveWorkspaceError(error instanceof Error ? error.message : "Agent activity is temporarily unavailable.")
+      })
+  }
+
+  onMount(() => {
+    void refreshLiveWorkspaces()
+    const timer = globalThis.setInterval(() => void refreshLiveWorkspaces(), 1_000)
+    onCleanup(() => globalThis.clearInterval(timer))
   })
 
   const invokeCodespaceModel = async (input: { title: string; system: string; prompt: string }) => {
@@ -1455,7 +2154,9 @@ function CodespaceWorkbench(props: {
 
     const session = await sdk().client.session.create({
       directory: sdk().directory,
-      title: input.title,
+      // Internal tool session: the shared prefix keeps it out of every
+      // user-visible session list (see utils/internal-sessions.ts).
+      title: `${INTERNAL_SESSION_TITLE_PREFIX}${input.title}`,
       agent: activeAgentName(),
       model: {
         providerID: model.providerID,
@@ -1470,22 +2171,31 @@ function CodespaceWorkbench(props: {
     })
     const sessionID = session.data?.id
     if (!sessionID) throw new Error("Vector could not create a Codespace AI session.")
-    const result = await sdk().client.session.prompt({
-      sessionID,
-      directory: sdk().directory,
-      agent: activeAgentName(),
-      model,
-      variant: activeVariant(),
-      system: input.system,
-      tools: {
-        bash: false,
-        edit: false,
-        patch: false,
-        write: false,
-      },
-      parts: [{ type: "text", text: input.prompt }],
-    })
-    const text = extractModelText(result.data)
+    const result = await sdk()
+      .client.session.prompt({
+        sessionID,
+        directory: sdk().directory,
+        agent: activeAgentName(),
+        model,
+        variant: activeVariant(),
+        system: input.system,
+        tools: {
+          shell: false,
+          edit: false,
+          patch: false,
+          write: false,
+          read: false,
+          glob: false,
+          grep: false,
+        },
+        parts: [{ type: "text", text: input.prompt }],
+      })
+      .finally(() => {
+        void sdk()
+          .client.session.delete({ sessionID })
+          .catch(() => undefined)
+      })
+    const text = extractModelTextRaw(result.data)
     if (!text) throw new Error("The selected model returned an empty response.")
     return text
   }
@@ -1497,33 +2207,25 @@ function CodespaceWorkbench(props: {
     void file.load(path)
   }
 
-  const closeFileTab = (path: string) => {
-    setOpenFiles((items) => items.filter((item) => item !== path))
+  const openQuickFileSearch = () => {
+    dialog.show(() => (
+      <DialogSelectFile
+        mode="files"
+        presentation="palette"
+        onSelectFile={(path) => {
+          openFile(path)
+        }}
+      />
+    ))
+  }
+
+  const closeFile = (path: string) => {
+    const remaining = openFiles().filter((item) => item !== path)
+    setOpenFiles(remaining)
     if (selectedPath() !== path) return
-    const next = openFiles().find((item) => item !== path)
+    const next = remaining.at(-1)
     setSelectedPath(next)
     if (next) void file.load(next)
-  }
-
-  const createNewFile = () => {
-    const path = globalThis.prompt?.("New file path", "")?.trim()
-    if (!path) return
-    setSelectedPath(path)
-    setOpenFiles((items) => (items.includes(path) ? items : [...items, path]))
-    setDrafts(path, "")
-    setActiveView("editor")
-  }
-
-  const quickOpen = async () => {
-    const query = globalThis.prompt?.("Quick open file", fileBasename(selectedPath()))?.trim()
-    if (!query) return
-    const results = await file.searchFilesAndDirectories(query)
-    const target = results.find((item) => item && !item.endsWith("/")) ?? results[0]
-    if (!target) {
-      showToast({ title: "No file found", description: `Vector could not find a file matching "${query}".` })
-      return
-    }
-    openFile(target)
   }
 
   const copyCurrentFile = async () => {
@@ -1569,45 +2271,25 @@ function CodespaceWorkbench(props: {
     if (!queuedChanges().some((item) => item.id === selectedQueueId())) setSelectedQueueId(first.id)
   })
 
-  const persistCheckpoints = (next: CodespaceCheckpoint[]) => {
-    setCheckpoints(next)
-    localStorage.setItem(CODESPACE_CHECKPOINTS_KEY, JSON.stringify(next.slice(0, 80)))
-  }
+  createEffect(
+    on(
+      () => selectedQueue()?.id,
+      () => setHunkDecisions({}),
+      { defer: true },
+    ),
+  )
 
-  const createCheckpoint = () => {
-    const path = selectedPath()
-    if (!path) {
-      showToast({ title: "Open a file first", description: "Select a file before creating a Codespace checkpoint." })
-      return
-    }
-    const next: CodespaceCheckpoint = {
-      id: crypto.randomUUID?.() ?? `${Date.now()}`,
-      path,
-      title: `${path} checkpoint`,
-      content: draft(),
-      createdAt: Date.now(),
-    }
-    persistCheckpoints([next, ...checkpoints()])
-    showToast({ title: "Checkpoint saved", description: `${path} can now be restored from Codespace history.` })
-  }
-
-  const restoreCheckpoint = (item: CodespaceCheckpoint) => {
-    setSelectedPath(item.path)
-    setDrafts(item.path, item.content)
-    setActiveView("editor")
-    showToast({ title: "Checkpoint restored", description: item.title })
-  }
-
-  const removeCheckpoint = (id: string) => {
-    persistCheckpoints(checkpoints().filter((item) => item.id !== id))
-  }
-
-  const saveDraft = async (options?: { path?: string; content?: string; base?: string; loaded?: boolean; silent?: boolean }) => {
+  const saveDraft = async (options?: {
+    path?: string
+    content?: string
+    base?: string
+    loaded?: boolean
+    silent?: boolean
+  }) => {
     const path = options?.path ?? selectedPath()
     if (!path) return
     const nextContent = options?.content ?? draft()
     const baseContent = options?.base ?? contents()
-    const isLoaded = options?.loaded ?? Boolean(state()?.loaded)
     if (nextContent === baseContent) {
       if (!options?.silent) showToast({ title: "Already saved", description: "There are no local edits to apply." })
       return
@@ -1619,12 +2301,14 @@ function CodespaceWorkbench(props: {
       if (selectedPath() === path) await file.load(path, { force: true })
       await file.tree.refresh("")
       setDrafts(path, nextContent)
-      if (!options?.silent) showToast({ title: "Saved to workspace", description: `${path} was updated from Codespace.` })
+      if (!options?.silent)
+        showToast({ title: "Saved to workspace", description: `${path} was updated from Codespace.` })
     } catch (error) {
       showToast({
         variant: "error",
         title: "Could not save edit",
-        description: error instanceof Error && error.message ? error.message : "Vector could not apply this file patch.",
+        description:
+          error instanceof Error && error.message ? error.message : "Vector could not apply this file patch.",
       })
     } finally {
       setSaving(false)
@@ -1649,119 +2333,546 @@ function CodespaceWorkbench(props: {
     if (autosaveTimer) clearTimeout(autosaveTimer)
   })
 
-  const debugProblem = (problem: CodespaceProblem) => {
-    const path = selectedPath()
-    if (!path) return
-    setToolBrief(`Debug ${path} line ${problem.line}: ${problem.message}`)
-    setActiveView("debugger")
-  }
-
-  const runCoprogrammer = async () => {
-    const path = selectedPath()
-    const task = toolBrief().trim()
-    if (!path) {
-      showToast({ title: "Open a file first", description: "Co-Programmer needs an active file to anchor the edit." })
-      return
-    }
-    if (!task) {
-      showToast({ title: "Describe the task", description: "Tell Co-Programmer what to build, fix, or refactor." })
-      return
-    }
-
-    setCoprogrammerRunning(true)
-    setCoprogrammerDraft("")
-    setCoprogrammerLog([
-      { status: "done", label: "Indexed workspace", detail: `${props.modified().length || 1} file${props.modified().length === 1 ? "" : "s"} available for context` },
-      { status: "info", label: "Selected target", detail: path },
-      { status: "info", label: "Planning task", detail: compactTask(task) },
-    ])
-
-    try {
-      const oldContent = draft()
-      setCoprogrammerLog((items) => [
-        ...items,
-        { status: "info", label: "Calling Vector engine", detail: activeModelLabel() },
-      ])
-      const modelResponse = await invokeCodespaceModel({
-        title: `Codespace Co-Programmer: ${fileBasename(path)}`,
-        system: [
-          "You are Vector Codespace Co-Programmer.",
-          "You are running through Vector's OpenCode-compatible engine.",
-          "You propose safe code edits for a separate Codespace editor.",
-          "Do not run tools, do not mutate files, and do not answer conversationally.",
-          "Return exactly one fenced code block containing the COMPLETE updated contents of the target file.",
-          "Preserve unrelated code exactly. Never replace a large file with a tiny snippet.",
-        ].join("\n"),
-        prompt: [
-          `Mode: ${coprogrammerMode()}`,
-          `Task: ${task}`,
-          `Target file: ${path}`,
-          `Language: ${fileLanguage(path)}`,
-          "",
-          "Current complete file:",
-          "```",
-          oldContent,
-          "```",
-          "",
-          "Return only the complete updated file in one fenced code block.",
-        ].join("\n"),
-      })
-      const proposedContent = extractGeneratedCodeProposal(modelResponse, oldContent)
-      if (!proposedContent) {
-        throw new Error("The model did not return a complete fenced file. No change was queued.")
-      }
-      if (oldContent.length > 800 && proposedContent.length < oldContent.length * 0.35) {
-        throw new Error("Vector blocked this proposal because it looks like an incomplete file replacement.")
-      }
-      const newContent = proposedContent.endsWith("\n") ? proposedContent : `${proposedContent}\n`
-      const item: CodespaceQueuedChange = {
-        id: makeId("queue"),
-        path,
-        name: fileBasename(path),
-        oldContent,
-        newContent,
-        source: compactTask(task),
-        createdAt: Date.now(),
-      }
-
-      createCheckpoint()
-      setQueuedChanges((items) => [item, ...items])
-      setSelectedQueueId(item.id)
-      setCoprogrammerDraft(
-        [
-          `Plan for ${fileBasename(path)}`,
-          "",
-          `- Mode: ${coprogrammerMode()}`,
-          `- Task: ${compactTask(task)}`,
-          "- Preserved existing file content.",
-          "- Staged a complete-file proposal in Change Queue.",
-          "- Review the highlighted diff before applying it.",
-        ].join("\n"),
-      )
-      setCoprogrammerLog((items) => [
-        ...items,
-        { status: "done", label: "Generated proposal", detail: "Complete file staged without overwriting the workspace." },
-        { status: "done", label: "Queued for review", detail: "Open Change Queue to accept or reject it." },
-      ])
-      setActiveView("changes")
-      showToast({ title: "Change queued", description: "Co-Programmer staged a reviewable edit in Vector Change Queue." })
-    } catch (error) {
-      const detail = error instanceof Error && error.message ? error.message : "Vector could not generate a safe Codespace proposal."
-      setCoprogrammerDraft(`Co-Programmer stopped before changing anything.\n\n${detail}`)
-      setCoprogrammerLog((items) => [...items, { status: "error", label: "Stopped safely", detail }])
-      showToast({
-        variant: "error",
-        title: "Co-Programmer stopped safely",
-        description: detail,
-      })
-    } finally {
-      setCoprogrammerRunning(false)
-    }
-  }
-
   const rejectQueuedChange = (id: string) => {
     setQueuedChanges((items) => items.filter((item) => item.id !== id))
     showToast({ title: "Change rejected", description: "The queued edit was removed without touching the file." })
+  }
+
+  // Models often wrap output in ``` fences even when told not to; strip them.
+  const stripFences = (text: string) => {
+    const normalized = text.replace(/\r\n/g, "\n")
+    const match = normalized.match(/^\s*```[^\n]*\n([\s\S]*?)\n?```\s*$/)
+    return match ? match[1] : normalized
+  }
+
+  // Cursor-style ghost-text autocomplete. Completions reuse ONE hidden session
+  // (recycled every few requests / on model change) instead of creating a fresh
+  // session per keystroke — that would add a round-trip, leak a session each time,
+  // and inflate the local usage stats. Recycling also bounds the history the model
+  // sees so suggestions stay relevant to the current cursor context.
+  let completionSessionId: string | undefined
+  let completionSessionKey = ""
+  let completionTurns = 0
+  const completionCache = new Map<string, string>()
+  const AUTOCOMPLETE_SESSION_TURNS = 6
+
+  const recycleCompletionSession = () => {
+    const stale = completionSessionId
+    completionSessionId = undefined
+    completionTurns = 0
+    if (stale)
+      void sdk()
+        .client.session.delete({ sessionID: stale })
+        .catch(() => undefined)
+  }
+  onCleanup(recycleCompletionSession)
+
+  const completionSessionFor = async (model: { providerID: string; modelID: string }) => {
+    const key = `${sdk().directory}:${model.providerID}:${model.modelID}`
+    if (completionSessionId && completionSessionKey === key && completionTurns < AUTOCOMPLETE_SESSION_TURNS) {
+      return completionSessionId
+    }
+    if (completionSessionId) recycleCompletionSession()
+    completionSessionKey = key
+    const created = await sdk()
+      .client.session.create({
+        directory: sdk().directory,
+        title: `${INTERNAL_SESSION_TITLE_PREFIX}Autocomplete`,
+        agent: activeAgentName(),
+        model: { providerID: model.providerID, id: model.modelID, variant: activeVariant() },
+        metadata: { source: "vector-codespace", engine: "opencode-compatible", hidden: true },
+      })
+      .catch(() => undefined)
+    completionSessionId = created?.data?.id
+    return completionSessionId
+  }
+
+  const aiComplete = async (input: InlineCompleteInput) => {
+    if (!settings.editor.aiAutocomplete()) return undefined
+    const model = selectedModelPayload()
+    if (!model) return undefined
+    const context = boundInlineCompletionContext({ ...input, path: selectedPath() ?? input.path })
+    const cacheKey = [
+      model.providerID,
+      model.modelID,
+      activeVariant() ?? "",
+      context.path,
+      context.language,
+      context.prefix.slice(-2_000),
+      context.suffix.slice(0, 800),
+    ].join("\u0000")
+    const cached = completionCache.get(cacheKey)
+    if (cached) return cached
+    const sessionID = await completionSessionFor(model)
+    if (!sessionID) return undefined
+    completionTurns += 1
+    const result = await sdk()
+      .client.session.prompt({
+        sessionID,
+        directory: sdk().directory,
+        agent: activeAgentName(),
+        model,
+        variant: activeVariant(),
+        system:
+          "You are Vector Tab, an inline code completion engine. Continue the code exactly at the cursor. Return only the code to insert: no explanation, no markdown, and no repeated surrounding code. Prefer the smallest useful completion, from the rest of the current line up to one short coherent block.",
+        tools: { bash: false, edit: false, patch: false, write: false, read: false, glob: false, grep: false },
+        parts: [
+          {
+            type: "text",
+            text: `File: ${context.path}\nLanguage: ${context.language}\nCursor line: ${context.cursorLine}\n\nNearby code before the cursor:\n${context.prefix}\n\nNearby code after the cursor:\n${context.suffix}\n\nReturn only the insertion.`,
+          },
+        ],
+      })
+      .catch(() => undefined)
+    const text = extractModelText(result?.data)
+    const suggestion = text ? sanitizeInlineCompletion(text, context.suffix) : undefined
+    if (!suggestion) return
+    completionCache.set(cacheKey, suggestion)
+    if (completionCache.size > 40) completionCache.delete(completionCache.keys().next().value ?? "")
+    return suggestion
+  }
+
+  // Cursor-style Cmd+K inline edit: describe a change, Vector rewrites the file.
+  // With "Bypass permissions" (autoApprove) on it applies straight into the editor;
+  // otherwise it lands in the review queue.
+  const runInlineEdit = async (instruction: string) => {
+    const path = selectedPath()
+    const trimmed = instruction.trim()
+    if (!path || !trimmed || inlineEditRunning()) return
+    if (!selectedModelPayload()) {
+      showToast({
+        variant: "error",
+        title: "Select a model",
+        description: "Choose a model in Vector before using inline edit.",
+      })
+      return
+    }
+    setInlineEditRunning(true)
+    try {
+      const current = draft()
+      const selection = inlineEditSelection()
+      if (selection?.text && current.slice(selection.startOffset, selection.endOffset) !== selection.text) {
+        throw new Error("The selected code changed while Inline Edit was open. Select it again and retry.")
+      }
+      const text = await invokeCodespaceModel(
+        selection?.text
+          ? {
+              title: "Inline selection edit",
+              system:
+                "You are Vector's inline code editor. Rewrite only the selected code to satisfy the instruction. Return only the replacement code, without markdown fences or explanation. Preserve the surrounding style, public behavior, and indentation.",
+              prompt: `Instruction: ${trimmed}\nFile: ${path}\nSelected lines: ${selection.startLine}-${selection.endLine}\n\nCode before selection:\n${current.slice(Math.max(0, selection.startOffset - 4_000), selection.startOffset)}\n\nSelected code:\n${selection.text}\n\nCode after selection:\n${current.slice(selection.endOffset, selection.endOffset + 2_000)}`,
+            }
+          : {
+              title: "Inline file edit",
+              system:
+                "You are Vector's inline code editor. Rewrite the given file so it satisfies the instruction. Return only the full updated file content, without explanation or markdown fences. Preserve unrelated code.",
+              prompt: `Instruction: ${trimmed}\n\nFile: ${path}\n\nCurrent content:\n${current}`,
+            },
+      )
+      const replacement = stripFences(text)
+      const next = selection?.text
+        ? `${current.slice(0, selection.startOffset)}${replacement}${current.slice(selection.endOffset)}`
+        : replacement
+      if (next === current) {
+        showToast({ title: "No changes", description: "Vector did not change the file." })
+        return
+      }
+      if (settings.permissions.autoApprove()) {
+        setDrafts(path, next)
+        await saveDraft({ path, content: next, silent: true })
+        showToast({ title: "Applied", description: `Vector edited ${fileBasename(path)}.` })
+      } else {
+        setQueuedChanges((items) => [
+          ...items,
+          {
+            id: makeId("inline"),
+            path,
+            name: fileBasename(path),
+            oldContent: current,
+            newContent: next,
+            source: "Inline edit",
+            explanation: trimmed,
+            confidence: 0.85,
+            risk: "medium",
+            createdAt: Date.now(),
+          },
+        ])
+        setActiveView("review")
+        showToast({
+          title: "Ready for review",
+          description: "Inspect and accept individual hunks before they touch the workspace.",
+        })
+      }
+      setInlineEditOpen(false)
+      setInlineEditInput("")
+      setInlineEditSelection(undefined)
+    } catch (error) {
+      showToast({
+        variant: "error",
+        title: "Inline edit failed",
+        description: error instanceof Error ? error.message : String(error),
+      })
+    } finally {
+      setInlineEditRunning(false)
+    }
+  }
+
+  // Embedded agent chat (the right-hand sidebar). A single hidden session is reused so
+  // the agent keeps conversation memory; it's cleaned up when the codespace unmounts.
+  let agentSessionId: string | undefined
+  let agentSessionKey = ""
+  const agentChatSession = async (model: { providerID: string; modelID: string }) => {
+    const key = [sdk().directory, model.providerID, model.modelID, activeVariant() ?? "", activeAgentName()].join(":")
+    if (agentSessionId && agentSessionKey === key) return agentSessionId
+    if (agentSessionId)
+      void sdk()
+        .client.session.delete({ sessionID: agentSessionId })
+        .catch(() => undefined)
+    agentSessionKey = key
+    const created = await sdk()
+      .client.session.create({
+        directory: sdk().directory,
+        title: `${INTERNAL_SESSION_TITLE_PREFIX}Agent chat`,
+        agent: activeAgentName(),
+        model: { providerID: model.providerID, id: model.modelID, variant: activeVariant() },
+        metadata: { source: "vector-codespace", engine: "opencode-compatible", hidden: true },
+      })
+      .catch(() => undefined)
+    agentSessionId = created?.data?.id
+    return agentSessionId
+  }
+  onCleanup(() => {
+    if (agentSessionId)
+      void sdk()
+        .client.session.delete({ sessionID: agentSessionId })
+        .catch(() => undefined)
+  })
+
+  const readWorkspaceText = (path: string) =>
+    sdk()
+      .client.file.read({ directory: sdk().directory, path })
+      .then((result) => (result.data?.type === "text" ? result.data.content : undefined))
+      .catch(() => undefined)
+
+  const refreshWorkspaceFiles = async (paths: string[]) => {
+    const files = [...new Set(paths)]
+    await file.tree.refresh("").catch(() => undefined)
+    await Promise.all(
+      files.map(async (path) => {
+        const content = await readWorkspaceText(path)
+        await file.load(path, { force: true }).catch(() => undefined)
+        if (content !== undefined) setDrafts(path, content)
+      }),
+    )
+    return files
+  }
+
+  const workspacePath = (input: string) => {
+    const root = sdk().directory.replace(/\\/g, "/").replace(/\/+$/, "")
+    const normalized = input.replace(/\\/g, "/")
+    if (normalized === root) return ""
+    if (normalized.startsWith(`${root}/`)) return normalized.slice(root.length + 1)
+    return input
+  }
+
+  const workspaceAbsolutePath = (input: string) => {
+    if (/^(?:[A-Za-z]:[\\/]|\/)/.test(input)) return input
+    return `${sdk().directory.replace(/[\\/]+$/, "")}/${input.replace(/^[\\/]+/, "")}`
+  }
+
+  const languageService: MonacoLanguageService = {
+    diagnostics: (path) =>
+      sdk()
+        .client.lsp.diagnostics({ directory: sdk().directory, file: workspacePath(path) })
+        .then((result) => result.data ?? []),
+    hover: (path, position) =>
+      sdk()
+        .client.lsp.hover({
+          directory: sdk().directory,
+          lspRequest: { file: workspacePath(path), ...position },
+        })
+        .then((result) => result.data ?? undefined),
+    definition: (path, position) =>
+      sdk()
+        .client.lsp.definition({
+          directory: sdk().directory,
+          lspRequest: { file: workspacePath(path), ...position },
+        })
+        .then((result) => result.data ?? []),
+    references: (path, position) =>
+      sdk()
+        .client.lsp.references({
+          directory: sdk().directory,
+          lspRequest: { file: workspacePath(path), ...position },
+        })
+        .then((result) => result.data ?? []),
+    symbols: (path) =>
+      sdk()
+        .client.lsp.symbols({ directory: sdk().directory, file: workspacePath(path) })
+        .then((result) => result.data ?? []),
+    rename: (path, position, newName) =>
+      sdk()
+        .client.lsp.rename({
+          directory: sdk().directory,
+          lspRenameRequest: { file: workspacePath(path), ...position, newName },
+        })
+        .then((result) => result.data?.files ?? []),
+    readFile: async (path) => {
+      const result = await sdk().client.file.read({
+        directory: sdk().directory,
+        path: workspacePath(path),
+      })
+      if (result.data?.type !== "text") throw new Error(`Vector cannot open ${workspacePath(path)} as text.`)
+      return result.data.content
+    },
+    writeFile: async (path, content) => {
+      await sdk().client.file.write({
+        directory: sdk().directory,
+        path: workspacePath(path),
+        content,
+      })
+    },
+    filesChanged: async (paths) => {
+      await refreshWorkspaceFiles(paths.map(workspacePath))
+    },
+  }
+
+  const stageCodespaceProposal = async (proposal: CodespaceProposal) => {
+    const results = await Promise.all(
+      proposal.changes.map(async (change) => {
+        const current = await readWorkspaceText(change.path)
+        if (change.mode === "create") {
+          if (current !== undefined) return { error: `${change.path} already exists, so Vector did not stage it.` }
+          return {
+            item: {
+              id: makeId("agent"),
+              path: change.path,
+              name: fileBasename(change.path),
+              oldContent: "",
+              newContent: change.content,
+              source: "Editor Agent",
+              explanation: change.explanation,
+              confidence: 82,
+              risk: change.risk,
+              createdAt: Date.now(),
+            } satisfies CodespaceQueuedChange,
+          }
+        }
+        if (current === undefined) return { error: `${change.path} could not be read, so Vector did not stage it.` }
+        const applied = applyExactReplacements(current, change.replacements)
+        if (applied.errors.length) {
+          return { error: `${change.path}: ${applied.errors.join(" ")}` }
+        }
+        if (applied.content === current) return { error: `${change.path} did not contain a material change.` }
+        return {
+          item: {
+            id: makeId("agent"),
+            path: change.path,
+            name: fileBasename(change.path),
+            oldContent: current,
+            newContent: applied.content,
+            source: "Editor Agent",
+            explanation: change.explanation,
+            confidence: 86,
+            risk: change.risk,
+            createdAt: Date.now(),
+          } satisfies CodespaceQueuedChange,
+        }
+      }),
+    )
+    const staged = results.flatMap((result) => (result.item ? [result.item] : []))
+    const errors = results.flatMap((result) => (result.error ? [result.error] : []))
+    if (staged.length) {
+      setQueuedChanges((items) => [
+        ...items.filter((item) => !staged.some((change) => change.path === item.path)),
+        ...staged,
+      ])
+      setSelectedQueueId(staged[0]?.id)
+    }
+    return { staged, errors }
+  }
+
+  const sendAgentMessage = async () => {
+    const text = agentInput().trim()
+    if (!text || agentRunning()) return
+    const model = selectedModelPayload()
+    if (!model) {
+      showToast({
+        variant: "error",
+        title: "Select a model",
+        description: "Choose a model in Vector before chatting with the agent.",
+      })
+      return
+    }
+    const path = selectedPath()
+    setAgentMessages((items) => [...items, { id: makeId("msg"), role: "user", content: text }])
+    setAgentInput("")
+    setAgentRunning(true)
+    try {
+      const sessionID = await agentChatSession(model)
+      if (!sessionID) throw new Error("Vector could not start the agent session.")
+      const prompt = path ? `The file open in my editor is ${path}.\n\n${text}` : text
+      if (!settings.permissions.autoApprove() && !isCodespaceEditRequest(text)) {
+        const result = await sdk().client.session.prompt({
+          sessionID,
+          directory: sdk().directory,
+          agent: activeAgentName(),
+          model,
+          variant: activeVariant(),
+          system:
+            "You are Vector's editor agent. Answer the user's question using the current project as context. You may inspect files with read-only tools, but do not modify files or run commands. Be concise, concrete, and cite relevant file paths when useful.",
+          tools: { bash: false, edit: false, patch: false, write: false, read: true, glob: true, grep: true },
+          parts: [{ type: "text", text: prompt }],
+        })
+        const reply = extractModelText(result.data)
+        if (!reply) throw new Error("The selected model returned an empty response.")
+        setAgentMessages((items) => [...items, { id: makeId("msg"), role: "assistant", content: reply }])
+        return
+      }
+      if (!settings.permissions.autoApprove()) {
+        const result = await sdk().client.session.prompt({
+          sessionID,
+          directory: sdk().directory,
+          agent: activeAgentName(),
+          model,
+          variant: activeVariant(),
+          system:
+            "You are Vector's editor agent. Inspect the project with read-only tools. If the user asks a question or requests an explanation, answer fully in summary and return an empty changes array. If the user requests code changes, propose the smallest complete implementation. Do not modify files or run commands. For existing files, return exact oldText snippets that occur once and their replacements. For new files, use mode=create, put the full file in content, and leave replacements empty. For edits, leave content empty. Preserve unrelated code.",
+          tools: { bash: false, edit: false, patch: false, write: false, read: true, glob: true, grep: true },
+          format: { type: "json_schema", schema: CODESPACE_PROPOSAL_SCHEMA, retryCount: 1 },
+          parts: [{ type: "text", text: prompt }],
+        })
+        const reply = extractModelText(result.data)?.trim()
+        const proposal =
+          parseCodespaceProposal(extractStructuredOutput(result.data)) ??
+          (reply ? parseCodespaceProposalText(reply) : undefined)
+        if (!proposal) {
+          if (path && isCodespaceEditRequest(text)) {
+            const current = (await readWorkspaceText(path)) ?? draft()
+            const rewritten = stripFences(
+              await invokeCodespaceModel({
+                title: "Editor agent review fallback",
+                system:
+                  "You are Vector's editor agent. Rewrite the supplied file to satisfy the request. Return only the complete updated file, with no markdown fences or explanation. Preserve unrelated code and existing style.",
+                prompt: `Request: ${text}\n\nFile: ${path}\n\nCurrent content:\n${current}`,
+              }),
+            )
+            if (!rewritten.trim() || rewritten === current) {
+              setAgentMessages((items) => [
+                ...items,
+                {
+                  id: makeId("msg"),
+                  role: "assistant",
+                  content: reply || "I inspected the file but did not find a safe material change to stage.",
+                },
+              ])
+              return
+            }
+            const item = {
+              id: makeId("agent"),
+              path,
+              name: fileBasename(path),
+              oldContent: current,
+              newContent: rewritten,
+              source: "Editor Agent",
+              explanation: text,
+              confidence: 80,
+              risk: "medium" as const,
+              createdAt: Date.now(),
+            } satisfies CodespaceQueuedChange
+            setQueuedChanges((items) => [...items.filter((change) => change.path !== path), item])
+            setSelectedQueueId(item.id)
+            setActiveView("review")
+            setAgentMessages((items) => [
+              ...items,
+              {
+                id: makeId("msg"),
+                role: "assistant",
+                content: `I prepared a reviewable update for ${path}.`,
+                edit: "staged",
+                files: [path],
+              },
+            ])
+            showToast({
+              title: "Change ready for review",
+              description: `${path} is staged without touching your workspace.`,
+            })
+            return
+          }
+          setAgentMessages((items) => [
+            ...items,
+            {
+              id: makeId("msg"),
+              role: "assistant",
+              content:
+                reply ||
+                "Open the file you want to change, then ask again. I can stage the edit for review without Bypass permissions.",
+            },
+          ])
+          return
+        }
+        const staged = await stageCodespaceProposal(proposal)
+        const details = staged.errors.length
+          ? `\n\nNot staged:\n${staged.errors.map((error) => `• ${error}`).join("\n")}`
+          : ""
+        setAgentMessages((items) => [
+          ...items,
+          {
+            id: makeId("msg"),
+            role: "assistant",
+            content: `${proposal.summary}${details}`,
+            ...(staged.staged.length ? { edit: "staged" as const, files: staged.staged.map((item) => item.path) } : {}),
+          },
+        ])
+        if (staged.staged.length) {
+          setActiveView("review")
+          showToast({
+            title: "Changes ready for review",
+            description: `${staged.staged.length} file${staged.staged.length === 1 ? "" : "s"} staged without touching your workspace.`,
+          })
+        }
+        return
+      }
+
+      const before = path ? await readWorkspaceText(path) : undefined
+      const result = await sdk().client.session.prompt({
+        sessionID,
+        directory: sdk().directory,
+        agent: activeAgentName(),
+        model,
+        variant: activeVariant(),
+        system:
+          "You are Vector's editor agent. Work directly in the current project. Inspect the repository, make complete minimal edits, run focused checks when useful, and summarize exactly what changed. Never expose secrets or rewrite unrelated files.",
+        tools: { bash: true, edit: true, patch: true, write: true, read: true, glob: true, grep: true },
+        parts: [{ type: "text", text: prompt }],
+      })
+      const reply = (extractModelText(result?.data) ?? "").trim()
+      const patched = collectPatchFiles(result.data)
+      const currentAfter = path ? await readWorkspaceText(path) : undefined
+      const touched = await refreshWorkspaceFiles(
+        patched.length ? patched : path && before !== currentAfter ? [path] : [],
+      )
+      setAgentMessages((items) => [
+        ...items,
+        {
+          id: makeId("msg"),
+          role: "assistant",
+          content: reply || "Done.",
+          ...(touched.length ? { edit: "applied" as const, files: touched } : {}),
+        },
+      ])
+    } catch (error) {
+      setAgentMessages((items) => [
+        ...items,
+        {
+          id: makeId("msg"),
+          role: "assistant",
+          content: `Error: ${error instanceof Error ? error.message : String(error)}`,
+        },
+      ])
+    } finally {
+      setAgentRunning(false)
+    }
   }
 
   const acceptQueuedChange = async (item: CodespaceQueuedChange) => {
@@ -1779,194 +2890,182 @@ function CodespaceWorkbench(props: {
       showToast({
         variant: "error",
         title: "Could not apply queued change",
-        description: error instanceof Error && error.message ? error.message : "Vector could not apply this queued edit.",
+        description:
+          error instanceof Error && error.message ? error.message : "Vector could not apply this queued edit.",
       })
     } finally {
       setSaving(false)
     }
   }
 
-  const sendArchitectMessage = async () => {
-    const text = architectInput().trim()
-    if (!text) return
-    const path = selectedPath()
-    const userMessage: CodespaceArchitectMessage = {
-      id: makeId("architect-user"),
-      role: "user",
-      content: text,
-      createdAt: Date.now(),
-    }
-    setArchitectMessages((items) => [...items, userMessage])
-    setArchitectInput("")
-    setArchitectRunning(true)
-
-    try {
-      const issueSummary = problems().length
-        ? `${problems().length} local issue${problems().length === 1 ? "" : "s"} detected, including: ${problems()[0]?.message}`
-        : "No blocking local problems are currently detected."
-      const modelResponse = await invokeCodespaceModel({
-        title: `Codespace AI Architect: ${fileBasename(path) || "Workspace"}`,
-        system: [
-          "You are Vector AI Architect inside Codespace.",
-          "You are running through Vector's OpenCode-compatible engine.",
-          "You are a chatbot for architecture, review, explanation, planning, and debugging advice.",
-          "Do not edit files. Do not produce a full replacement file unless the user explicitly asks for code.",
-          "Be concise, professional, and practical. Refer to the open file and problems when useful.",
-        ].join("\n"),
-        prompt: [
-          `User question: ${text}`,
-          "",
-          `Open file: ${path ?? "none selected"}`,
-          `Language: ${fileLanguage(path)}`,
-          `Lines: ${lineCount()}`,
-          `Draft state: ${dirty() ? "unsaved local draft" : "synced"}`,
-          `Problems: ${issueSummary}`,
-          `Queued changes: ${queuedChanges().length}`,
-          "",
-          "Open file excerpt:",
-          "```",
-          draft().slice(0, 12_000),
-          "```",
-        ].join("\n"),
-      })
-      const answer: CodespaceArchitectMessage = {
-        id: makeId("architect-assistant"),
-        role: "assistant",
-        content: modelResponse,
-        createdAt: Date.now(),
-      }
-      setArchitectMessages((items) => [...items, answer])
-    } catch (error) {
-      const detail = error instanceof Error && error.message ? error.message : "AI Architect could not reach the selected model."
-      setArchitectMessages((items) => [
-        ...items,
-        {
-          id: makeId("architect-assistant"),
-          role: "assistant",
-          content: `I could not complete that review yet.\n\n${detail}`,
-          createdAt: Date.now(),
-        },
-      ])
-    } finally {
-      setArchitectRunning(false)
-    }
+  const decideHunk = (id: string, decision: "accept" | "reject") => {
+    setHunkDecisions((current) => ({ ...current, [id]: decision }))
   }
 
-  const openCodespaceTool = (mode: CodespaceToolView) => {
-    setActiveView(mode)
-    const labels: Record<CodespaceToolView, string> = {
-      debugger: "AI Debugger",
-      architect: "AI Architect",
-      coprogrammer: "Co-Programmer",
+  const applySelectedHunks = async () => {
+    const item = selectedQueue()
+    if (!item) return
+    const accepted = new Set(
+      Object.entries(hunkDecisions())
+        .filter(([, decision]) => decision === "accept")
+        .map(([id]) => id),
+    )
+    if (!accepted.size) {
+      showToast({ title: "Choose a hunk", description: "Accept at least one hunk before applying a partial change." })
+      return
     }
-    showToast({
-      title: `${labels[mode]} opened`,
-      description: "This stays inside Codespace and will not rewrite another prompt box.",
+    const hunks = selectedReviewHunks()
+    const content = applyAcceptedHunks(item.oldContent, hunks, accepted)
+    await acceptQueuedChange({
+      ...item,
+      newContent: content,
+      explanation: `${item.explanation} Applied ${accepted.size} accepted hunk${accepted.size === 1 ? "" : "s"}; all other hunks stayed unchanged.`,
+    })
+    setHunkDecisions({})
+    logEngineeringEvent(sdk().directory, {
+      type: "review",
+      status: "success",
+      title: "Applied selected change hunks",
+      summary: `${accepted.size} of ${hunks.length} hunks accepted in ${item.path}.`,
+      files: [item.path],
+      source: "Vector Change Queue",
     })
   }
 
-  const toolTitle = (mode: CodespaceToolView) =>
-    ({
-      debugger: "AI Debugger",
-      architect: "AI Architect",
-      coprogrammer: "Co-Programmer",
-    })[mode]
+  const rejectAllQueuedChanges = () => {
+    const count = queuedChanges().length
+    setQueuedChanges([])
+    showToast({
+      title: "Queue cleared",
+      description: `${count} staged edit${count === 1 ? " was" : "s were"} rejected without touching the workspace.`,
+    })
+  }
 
-  const problemCounts = createMemo(() => ({
-    errors: problems().filter((problem) => problem.severity === "error").length,
-    warnings: problems().filter((problem) => problem.severity === "warning").length,
-    info: problems().filter((problem) => problem.severity === "info").length,
-  }))
+  const acceptAllQueuedChanges = async () => {
+    const items = queuedChanges()
+    if (!items.length) return
+    setSaving(true)
+    try {
+      for (const item of items) {
+        await sdk().client.file.write({ directory: sdk().directory, path: item.path, content: item.newContent })
+        setDrafts(item.path, item.newContent)
+      }
+      await Promise.all(items.map((item) => file.load(item.path, { force: true })))
+      await file.tree.refresh("")
+      setQueuedChanges([])
+      setActiveView("editor")
+      showToast({
+        title: "Queue applied",
+        description: `${items.length} reviewed edit${items.length === 1 ? " was" : "s were"} written to the workspace.`,
+      })
+    } catch (error) {
+      showToast({
+        variant: "error",
+        title: "Could not apply the queue",
+        description:
+          error instanceof Error && error.message ? error.message : "Vector stopped before finishing the queue.",
+      })
+    } finally {
+      setSaving(false)
+    }
+  }
 
   return (
-    <div class="h-full min-h-0 flex flex-col overflow-hidden bg-[#0d0a12] text-[#e9e4f5]">
-      <header class="h-12 shrink-0 border-b border-[#2b2438] bg-[#141318]/95">
-        <div class="h-full flex items-center gap-2 px-3">
-          <div class="flex min-w-[86px] items-center gap-2.5">
-            <button class="rounded-lg px-1.5 text-[#8c819d] transition duration-200 ease-out hover:bg-white/5 hover:text-white" aria-label="Back to Vector Agent" onClick={props.onClose}>
-              ‹
-            </button>
-            <img src="/vector-logo.png" alt="" class="size-7 rounded-lg shadow-[0_0_18px_rgba(139,92,246,0.35)]" draggable={false} />
-          </div>
-
-          <nav class="relative mx-auto flex h-10 items-center overflow-visible rounded-2xl border border-[#352845] bg-[#1d1728] p-1 shadow-[0_12px_28px_rgba(0,0,0,0.28)]">
+    <Portal mount={props.portalMount}>
+      <div
+        data-vector-codespace
+        class={`${props.embedded ? "absolute inset-0 z-0" : "fixed inset-0 z-[140]"} flex min-h-0 flex-col overflow-hidden bg-[#161616] text-[#e7e7e7]`}
+      >
+        <main class="min-h-0 flex-1 flex">
+        <aside class="w-[204px] shrink-0 border-r border-[#292929] bg-[#191919]">
+          <div class="flex h-8 items-center gap-0.5 border-b border-[#292929] px-1.5 text-[#858585]">
             <button
-              class="h-8 rounded-xl px-3 text-12-medium transition duration-200 ease-out"
-              classList={{
-                "bg-[#5d32a8] text-white shadow-[0_0_18px_rgba(139,92,246,0.35)]": activeView() === "editor",
-                "text-[#9d91af] hover:bg-white/5 hover:text-white": activeView() !== "editor",
-              }}
+              class="grid size-7 place-items-center rounded-[4px] transition-colors hover:bg-white/[0.06] hover:text-[#ddd]"
+              classList={{ "bg-white/[0.055] text-[#ddd]": activeView() === "editor" }}
+              aria-label="Explorer"
+              title="Explorer"
               onClick={() => setActiveView("editor")}
             >
-              ‹/› Editor
+              <Icon name="file-tree" size="small" />
             </button>
             <button
-              class="h-8 rounded-xl px-3 text-12-medium transition duration-200 ease-out"
-              classList={{
-                "bg-[#5d32a8] text-white": activeView() === "preview",
-                "text-[#9d91af] hover:bg-white/5 hover:text-white": activeView() !== "preview",
+              class="grid size-7 place-items-center rounded-[4px] transition-colors hover:bg-white/[0.06] hover:text-[#ddd]"
+              aria-label="Search files in Code Editor"
+              title="Search files in Code Editor"
+              onClick={openQuickFileSearch}
+            >
+              <Icon name="magnifying-glass" size="small" />
+            </button>
+            <button
+              class="relative grid size-7 place-items-center rounded-[4px] transition-colors hover:bg-white/[0.06] hover:text-[#ddd]"
+              classList={{ "bg-white/[0.055] text-[#ddd]": activeView() === "review" }}
+              aria-label="Review changes"
+              title="Review changes"
+              onClick={() => setActiveView("review")}
+            >
+              <Icon name="review" size="small" />
+              <Show when={queueCount() > 0}>
+                <span class="absolute right-0 top-0 min-w-3 rounded-full bg-[#8c6bdd] px-0.5 text-center text-[7px] leading-3 text-white">
+                  {queueCount()}
+                </span>
+              </Show>
+            </button>
+            <button
+              class="relative grid size-7 place-items-center rounded-[4px] transition-colors hover:bg-white/[0.06] hover:text-[#ddd]"
+              classList={{ "bg-white/[0.055] text-[#ddd]": activeView() === "problems" }}
+              aria-label="Problems"
+              title="Problems"
+              onClick={() => setActiveView("problems")}
+            >
+              <Icon name="warning" size="small" />
+              <Show when={problems().length > 0}>
+                <span class="absolute right-0.5 top-0.5 size-1.5 rounded-full bg-amber-400" />
+              </Show>
+            </button>
+            <button
+              class="grid size-7 place-items-center rounded-[4px] transition-colors hover:bg-white/[0.06] hover:text-[#ddd]"
+              classList={{ "bg-white/[0.055] text-[#ddd]": agentOpen() }}
+              aria-label={agentOpen() ? "Hide agent" : "Show agent"}
+              title={agentOpen() ? "Hide agent" : "Show agent"}
+              onClick={() => {
+                setAgentMaximized(false)
+                setAgentOpen((open) => !open)
               }}
-              onClick={() => setActiveView("preview")}
             >
-              ◉ Preview
+              <Icon name="layout-right" size="small" />
+            </button>
+            <div class="flex-1" />
+            <button
+              class="grid size-7 place-items-center rounded-[4px] transition-colors hover:bg-white/[0.06] hover:text-white"
+              aria-label="Export current file"
+              title="Export current file"
+              onClick={exportCurrentFile}
+            >
+              <Icon name="download" size="small" />
             </button>
             <button
-              class="h-8 rounded-xl px-3 text-12-medium text-[#9d91af] transition duration-200 ease-out hover:bg-white/5 hover:text-white"
-              onClick={() => openCodespaceTool("coprogrammer")}
+              class="grid size-7 place-items-center rounded-[4px] transition-colors hover:bg-white/[0.06] hover:text-white"
+              aria-label="Back to Vector Agent"
+              title="Back to Vector Agent"
+              onClick={props.onClose}
             >
-              ⟡ Co-Programmer
+              <Icon name="chevron-left" size="small" />
             </button>
-            <button
-              class="h-8 rounded-xl px-3 text-12-medium text-[#9d91af] transition duration-200 ease-out hover:bg-white/5 hover:text-white"
-              onClick={() => openCodespaceTool("architect")}
-            >
-              ✧ AI Architect
-            </button>
-            <button
-              class="h-8 rounded-xl px-3 text-12-medium transition duration-200 ease-out"
-              classList={{
-                "bg-[#5d32a8] text-white": ["problems", "changes", "history"].includes(activeView()),
-                "text-[#9d91af] hover:bg-white/5 hover:text-white": !["problems", "changes", "history"].includes(activeView()),
-              }}
-              onClick={() => setToolsOpen(!toolsOpen())}
-            >
-              Tools⌄
-            </button>
-            <Show when={toolsOpen()}>
-              <div class="absolute right-1 top-11 z-20 w-48 overflow-hidden rounded-2xl border border-[#3a2f4b] bg-[#141318] p-1 shadow-[0_18px_45px_rgba(0,0,0,0.42)]">
-                {[
-                  { view: "problems", label: "Problems", meta: problems().length ? String(problems().length) : "" },
-                  { view: "changes", label: "Change Queue", meta: queueCount() ? String(queueCount()) : "" },
-                  { view: "history", label: "Checkpoints", meta: selectedCheckpoints().length ? String(selectedCheckpoints().length) : "" },
-                ].map((item) => (
-                  <button
-                    class="flex h-9 w-full items-center justify-between rounded-xl px-3 text-left text-12-medium text-[#cfc6de] transition duration-200 ease-out hover:bg-white/8 hover:text-white"
-                    onClick={() => {
-                      setActiveView(item.view as CodespaceView)
-                      setToolsOpen(false)
-                    }}
-                  >
-                    <span>{item.label}</span>
-                    <Show when={item.meta}><span class="rounded-full bg-violet-500/20 px-2 py-0.5 text-[10px] text-violet-100">{item.meta}</span></Show>
-                  </button>
-                ))}
-              </div>
-            </Show>
-          </nav>
-
-          <div class="flex min-w-[222px] justify-end items-center gap-1.5 text-12-medium text-[#9d91af]">
-            <button class="rounded-xl px-2.5 py-1.5 transition duration-200 ease-out hover:bg-white/5 hover:text-white" onClick={() => openCodespaceTool("debugger")}>Debug</button>
-            <button class="rounded-xl px-2.5 py-1.5 transition duration-200 ease-out hover:bg-white/5 hover:text-white" onClick={exportCurrentFile}>Export⌄</button>
           </div>
-        </div>
-      </header>
-
-      <main class="min-h-0 flex-1 flex">
-        <aside class="w-[252px] shrink-0 border-r border-[#2b2438] bg-[#17111f]">
-          <div class="flex h-10 items-center justify-between border-b border-[#2b2438] px-3">
-            <div class="text-12-medium uppercase tracking-[0.18em] text-[#9084a4]">Files</div>
+          <div class="flex h-7 items-center justify-between px-2.5">
+            <div class="min-w-0 truncate text-[10px] font-semibold uppercase text-[#a2a2a2]">
+              {fileBasename(sdk().directory) || "Workspace"}
+            </div>
+            <button
+              class="grid size-6 place-items-center rounded text-[#737373] hover:bg-white/[0.06] hover:text-[#d8d8d8]"
+              aria-label="Refresh explorer"
+              title="Refresh explorer"
+              onClick={() => void file.tree.refresh("")}
+            >
+              <Icon name="reset" size="small" />
+            </button>
           </div>
-          <div class="h-[calc(100%-3rem)] overflow-auto px-1 py-2 group/filetree">
+          <div class="h-[calc(100%-60px)] overflow-auto px-0.5 pb-1 group/filetree">
             <Switch>
               <Match when={file.tree.state("")?.loaded && file.tree.children("").length === 0}>{props.empty()}</Match>
               <Match when={true}>
@@ -1975,6 +3074,7 @@ function CodespaceWorkbench(props: {
                   class="py-1"
                   modified={props.modified()}
                   kinds={props.kinds()}
+                  markers={liveFileMarkers()}
                   active={selectedPath()}
                   onFileClick={(node) => openFile(node.path)}
                 />
@@ -1983,15 +3083,22 @@ function CodespaceWorkbench(props: {
           </div>
         </aside>
 
-        <section class="min-w-0 flex-1 flex flex-col bg-[#202631]">
+        <section class="min-w-0 flex-1 flex flex-col bg-[#1b1b1b]">
           <Show
             when={selectedPath()}
             fallback={
-              <div class="h-full flex items-center justify-center px-8 text-center bg-[#131217]">
-                <div class="max-w-72">
-                  <img src="/vector-logo.png" alt="" class="mx-auto mb-5 size-12 rounded-xl opacity-80" draggable={false} />
-                  <div class="text-18-medium text-white">Open a file in Codespace.</div>
-                  <div class="mt-2 text-13-regular text-[#a8adba]">Choose a file from the left to edit, preview, debug, or checkpoint it.</div>
+              <div class="h-full flex items-center justify-center px-8 text-center bg-[#1b1b1b]">
+                <div class="max-w-72 text-[#8f8f8f]">
+                  <img
+                    src="/vector-logo.png"
+                    alt=""
+                    class="mx-auto mb-4 size-9 rounded-[8px] opacity-75"
+                    draggable={false}
+                  />
+                  <div class="text-14-medium text-[#d8d8d8]">Open a file to begin</div>
+                  <div class="mt-1.5 text-12-regular">
+                    Select a workspace file from Explorer or use Quick Open.
+                  </div>
                 </div>
               </div>
             }
@@ -2001,85 +3108,453 @@ function CodespaceWorkbench(props: {
                 <Match when={state()?.loaded}>
                   <Switch>
                     <Match when={activeView() === "editor"}>
-                      <div class="h-full min-h-0 flex flex-col overflow-hidden bg-[#202631]">
-                        <div class="h-[46px] shrink-0 flex items-center justify-between border-b border-[#1c2029] bg-[#111017] px-3">
-                          <div class="min-w-0 flex items-center gap-3">
-                            <span class="size-2.5 rounded-full bg-[#9b6cff]" />
-                            <span class="truncate font-mono text-[13px] text-white">{fileBasename(path())}</span>
-                            <span class={`rounded-lg border px-2 py-0.5 text-11-medium ${activeBadge().ring} ${activeBadge().color}`}>
-                              ‹/› {activeBadge().label}
-                            </span>
-                            <span class="rounded-full border border-red-400/30 bg-red-500/10 px-2 py-0.5 text-10-medium text-red-200">
-                              {breakpointCount()} bp
-                            </span>
+                      <div class="relative h-full min-h-0 flex flex-col overflow-hidden bg-[#1b1b1b]">
+                        <div class="flex h-9 shrink-0 items-stretch justify-between border-b border-[#292929] bg-[#171717]">
+                          <div class="flex min-w-0 flex-1 items-stretch overflow-x-auto no-scrollbar">
+                            <For each={openFiles()}>
+                              {(openPath) => {
+                                const active = () => selectedPath() === openPath
+                                const changed = () =>
+                                  drafts[openPath] !== undefined &&
+                                  drafts[openPath] !== (file.get(openPath)?.content?.content ?? "")
+                                return (
+                                  <button
+                                    type="button"
+                                    class="group/tab relative flex h-full min-w-[118px] max-w-[210px] items-center gap-2 border-r border-[#292929] px-3 text-left text-[11px] transition-colors"
+                                    classList={{
+                                      "bg-[#1b1b1b] text-[#e2e2e2]": active(),
+                                      "bg-[#171717] text-[#858585] hover:bg-[#1a1a1a] hover:text-[#cfcfcf]": !active(),
+                                    }}
+                                    onClick={() => openFile(openPath)}
+                                  >
+                                    <Show when={active()}>
+                                      <span class="absolute inset-x-0 top-0 h-px bg-[#9b7cf4]" />
+                                    </Show>
+                                    <span class="text-[#b4d273]">{'{}'}</span>
+                                    <span class="min-w-0 flex-1 truncate">{fileBasename(openPath)}</span>
+                                    <Show
+                                      when={changed()}
+                                      fallback={
+                                        <span
+                                          role="button"
+                                          tabindex="0"
+                                          class="grid size-4 shrink-0 place-items-center rounded opacity-0 group-hover/tab:opacity-100 hover:bg-white/10 hover:text-white"
+                                          aria-label={`Close ${fileBasename(openPath)}`}
+                                          onPointerDown={(event) => event.stopPropagation()}
+                                          onClick={(event) => {
+                                            event.stopPropagation()
+                                            closeFile(openPath)
+                                          }}
+                                        >
+                                          <Icon name="close-small" size="small" />
+                                        </span>
+                                      }
+                                    >
+                                      <span class="size-2 shrink-0 rounded-full bg-[#aaa]" title="Unsaved changes" />
+                                    </Show>
+                                  </button>
+                                )
+                              }}
+                            </For>
                           </div>
-                          <div class="flex items-center gap-2">
-                            <button class="rounded-full bg-[#191821] px-2.5 py-1 text-11-medium text-[#6f6879]" disabled>Def</button>
-                            <button class="rounded-full bg-[#191821] px-2.5 py-1 text-11-medium text-[#6f6879]" disabled>Rename</button>
-                            <button class="rounded-full border border-[#3a3048] bg-[#1b1723] px-2.5 py-1 text-11-medium text-[#d1c6df] transition duration-200 ease-out hover:bg-[#251d31]" onClick={() => openCodespaceTool("debugger")}>
-                              ✧ AI Debugger
+                          <div class="flex shrink-0 items-center gap-0.5 border-l border-[#292929] bg-[#171717] px-1.5 text-[#777]">
+                            <button
+                              class="grid size-6 place-items-center rounded hover:bg-white/[0.06] hover:text-[#ddd]"
+                              aria-label="Copy current file"
+                              title="Copy current file"
+                              onClick={copyCurrentFile}
+                            >
+                              <Icon name="copy" size="small" />
                             </button>
-                            <button class="rounded-full border border-[#7c4ee7]/50 bg-[#2a1d43] px-2.5 py-1 text-11-medium text-[#a978ff]">
-                              ⚙ Engine-managed
-                            </button>
-                            <button class="rounded-full border border-[#3a3048] bg-[#1b1723] px-2.5 py-1 text-11-medium text-[#d1c6df] transition duration-200 ease-out hover:bg-[#251d31]" onClick={copyCurrentFile}>
-                              Copy
+                            <button
+                              class="grid size-6 place-items-center rounded hover:bg-white/[0.06] hover:text-[#ddd]"
+                              aria-label={agentOpen() ? "Hide agent" : "Show agent"}
+                              title={agentOpen() ? "Hide agent" : "Show agent"}
+                              onClick={() => {
+                                setAgentMaximized(false)
+                                setAgentOpen((open) => !open)
+                              }}
+                            >
+                              <Icon name="layout-right" size="small" />
                             </button>
                           </div>
                         </div>
-                        <div class="min-h-0 flex-1 overflow-hidden bg-[#131217]">
-                          <VectorCodeEditor
-                            path={path()}
-                            value={draft()}
-                            onChange={(next) => setDrafts(path(), next)}
-                          />
+                        <div class="flex h-7 shrink-0 items-center justify-between gap-3 border-b border-[#252525] bg-[#1b1b1b] px-3 font-mono text-[10px] text-[#777]">
+                          <div class="flex min-w-0 items-center gap-1 overflow-hidden">
+                            <For each={path().split("/")}>
+                              {(part, index) => (
+                                <>
+                                  <Show when={index() > 0}>
+                                    <Icon name="chevron-right" size="small" class="shrink-0 text-[#505050]" />
+                                  </Show>
+                                  <span
+                                    class="truncate"
+                                    classList={{ "text-[#bcbcbc]": index() === path().split("/").length - 1 }}
+                                  >
+                                    {part}
+                                  </span>
+                                </>
+                              )}
+                            </For>
+                          </div>
+                          <Show when={activeFileWorkspaces().length}>
+                            <div
+                              class="flex shrink-0 items-center gap-1.5 text-[#9a95a5]"
+                              title="Agents editing isolated copies of this file"
+                            >
+                              <div class="flex -space-x-0.5">
+                                <For each={activeFileWorkspaces().slice(0, 4)}>
+                                  {(workspace) => (
+                                    <span
+                                      class="size-2 rounded-full border border-[#1b1b1b] shadow-[0_0_7px_currentColor]"
+                                      style={{
+                                        color: workspaceColor(workspace.id),
+                                        "background-color": workspaceColor(workspace.id),
+                                      }}
+                                    />
+                                  )}
+                                </For>
+                              </div>
+                              <span>
+                                {activeFileWorkspaces().length} agent
+                                {activeFileWorkspaces().length === 1 ? "" : "s"} on this file
+                              </span>
+                            </div>
+                          </Show>
                         </div>
+                        <Show when={editorWorkspaces().length || liveWorkspaceError()}>
+                          <div
+                            class="flex h-8 shrink-0 items-center gap-2 overflow-x-auto border-b border-[#292929] bg-[#181818] px-2.5 no-scrollbar"
+                            aria-label="Live agent activity"
+                          >
+                            <span class="sticky left-0 z-[1] shrink-0 bg-[#181818] pr-1 text-[9px] font-semibold uppercase tracking-[0.08em] text-[#837e8d]">
+                              Live agents
+                            </span>
+                            <Show
+                              when={!liveWorkspaceError()}
+                              fallback={<span class="truncate text-[10px] text-red-300/80">{liveWorkspaceError()}</span>}
+                            >
+                              <For each={editorWorkspaces()}>
+                                {(workspace) => {
+                                  const color = workspaceColor(workspace.id)
+                                  const latestFile = () => workspace.changedFiles.at(-1)
+                                  return (
+                                    <button
+                                      type="button"
+                                      class="flex h-5.5 max-w-[310px] shrink-0 items-center gap-1.5 rounded-[5px] border border-white/[0.07] bg-white/[0.035] px-2 text-left text-[10px] text-[#aaa5b2] transition-colors hover:border-white/[0.12] hover:bg-white/[0.06] hover:text-[#ddd]"
+                                      title={`${workspace.taskPrompt}\n${workspace.lastAction}\n${workspace.gitBranch ?? workspace.isolatedPath}`}
+                                      onClick={() => {
+                                        const filePath = latestFile()
+                                        if (filePath) openFile(normalizedWorkspacePath(filePath))
+                                      }}
+                                    >
+                                      <span
+                                        class="size-1.5 shrink-0 rounded-full shadow-[0_0_8px_currentColor]"
+                                        classList={{ "animate-pulse": workspaceIsRunning(workspace.status) }}
+                                        style={{ color, "background-color": color }}
+                                      />
+                                      <span class="max-w-[100px] truncate font-medium text-[#d5d1dc]">
+                                        {workspace.name}
+                                      </span>
+                                      <span class="text-[#55515e]">·</span>
+                                      <span class="max-w-[150px] truncate">{workspace.lastAction}</span>
+                                      <span class="shrink-0 text-[9px]" style={{ color }}>
+                                        {workspaceStatusLabel(workspace.status)}
+                                      </span>
+                                    </button>
+                                  )
+                                }}
+                              </For>
+                            </Show>
+                          </div>
+                        </Show>
+                        <div class="relative flex min-h-0 flex-1 overflow-hidden">
+                          <div
+                            class="relative min-h-0 min-w-0 flex-1 overflow-hidden bg-[#1b1b1b]"
+                            classList={{ hidden: agentMaximized() }}
+                          >
+                            <Show when={inlineEditOpen()}>
+                              <form
+                                class="absolute left-1/2 top-3 z-10 flex w-[min(720px,calc(100%-24px))] -translate-x-1/2 flex-col overflow-hidden rounded-lg border border-[rgba(178,140,255,0.3)] bg-[#242428]/97 shadow-[0_18px_48px_rgba(0,0,0,0.5)] backdrop-blur"
+                                onSubmit={(event) => {
+                                  event.preventDefault()
+                                  void runInlineEdit(inlineEditInput())
+                                }}
+                              >
+                                <div class="flex items-center gap-2 px-3 pt-2.5">
+                                  <span class="shrink-0 rounded border border-[rgba(178,140,255,0.32)] px-1.5 py-0.5 text-10-medium text-[#b7a6e6]">
+                                    ⌘K
+                                  </span>
+                                  <input
+                                    autofocus
+                                    value={inlineEditInput()}
+                                    disabled={inlineEditRunning()}
+                                    onInput={(event) => setInlineEditInput(event.currentTarget.value)}
+                                    onKeyDown={(event) => {
+                                      event.stopPropagation()
+                                      if (event.key === "Escape") {
+                                        event.preventDefault()
+                                        setInlineEditOpen(false)
+                                        setInlineEditSelection(undefined)
+                                      }
+                                    }}
+                                    placeholder={
+                                      inlineEditSelection()?.text
+                                        ? "Describe how to change the selected code…"
+                                        : "Describe how to change this file…"
+                                    }
+                                    class="min-w-0 flex-1 bg-transparent text-13-regular text-white outline-none placeholder:text-[#6f6980] disabled:opacity-60"
+                                  />
+                                  <button
+                                    type="submit"
+                                    disabled={inlineEditRunning() || !inlineEditInput().trim()}
+                                    class="shrink-0 rounded-full border border-[rgba(178,140,255,0.3)] bg-[rgba(147,116,236,0.22)] px-3 py-1 text-11-bold text-white transition-opacity hover:enabled:bg-[rgba(147,116,236,0.34)] disabled:opacity-50"
+                                  >
+                                    {inlineEditRunning() ? "Editing…" : "Edit ↵"}
+                                  </button>
+                                </div>
+                                <div class="flex items-center gap-2 px-3 pb-2 pt-2 text-10-regular text-[#8a8595]">
+                                  <Show when={inlineEditSelection()?.text}>
+                                    <span class="rounded border border-[color:var(--vx-line)] bg-white/[0.04] px-1.5 py-0.5 text-[#b9b4c3]">
+                                      Lines {inlineEditSelection()!.startLine}-{inlineEditSelection()!.endLine}
+                                    </span>
+                                  </Show>
+                                  <ModelSelectorPopoverV2
+                                    triggerProps={{
+                                      class:
+                                        "flex cursor-pointer items-center gap-1.5 rounded-full border border-[color:var(--vx-line)] bg-white/[0.04] px-2 py-0.5 text-[#cbb8f5] transition-colors hover:bg-white/[0.08]",
+                                    }}
+                                  >
+                                    <span class="size-1.5 shrink-0 rounded-full bg-[#9374ec]" />
+                                    <span class="max-w-[170px] truncate">{activeModelLabel()}</span>
+                                    <svg
+                                      viewBox="0 0 12 12"
+                                      class="size-2.5 shrink-0 opacity-70"
+                                      fill="none"
+                                      aria-hidden="true"
+                                    >
+                                      <path
+                                        d="M3 4.5 6 7.5 9 4.5"
+                                        stroke="currentColor"
+                                        stroke-width="1.2"
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                      />
+                                    </svg>
+                                  </ModelSelectorPopoverV2>
+                                  <span class="flex-1" />
+                                  <span
+                                    classList={{
+                                      "text-emerald-300/90": settings.permissions.autoApprove(),
+                                      "text-[#8a8595]": !settings.permissions.autoApprove(),
+                                    }}
+                                  >
+                                    {settings.permissions.autoApprove()
+                                      ? "Bypass on · applies instantly"
+                                      : "Staged for review"}
+                                  </span>
+                                  <span class="text-[#6f6980]">esc</span>
+                                </div>
+                              </form>
+                            </Show>
+                            <MonacoCodeEditor
+                              path={workspaceAbsolutePath(path())}
+                              value={draft()}
+                              onChange={(next) => setDrafts(path(), next)}
+                              inlineComplete={aiComplete}
+                              languageService={languageService}
+                              onInlineEdit={(selection) => {
+                                setInlineEditSelection(selection)
+                                setInlineEditOpen(true)
+                              }}
+                            />
+                          </div>
+                          <Show when={agentOpen()}>
+                            <aside
+                              class="flex shrink-0 flex-col border-l border-[#292929] bg-[#191919]"
+                              classList={{ "absolute inset-0 z-20": agentMaximized(), relative: !agentMaximized() }}
+                              style={{ width: agentMaximized() ? "100%" : `${agentWidth()}px` }}
+                            >
+                              <Show when={!agentMaximized()}>
+                                <ResizeHandle
+                                  direction="horizontal"
+                                  edge="start"
+                                  size={agentWidth()}
+                                  min={300}
+                                  max={typeof window === "undefined" ? 920 : Math.min(920, window.innerWidth * 0.72)}
+                                  onResize={setAgentWidth}
+                                />
+                              </Show>
+                              <header class="flex h-9 shrink-0 items-center justify-between gap-2 border-b border-[#292929] px-2.5">
+                                <div class="flex min-w-0 items-center gap-2 text-[11px] font-medium text-[#dedede]">
+                                  <Icon name="prompt" size="small" class="text-[#9a9a9a]" />
+                                  <span class="truncate">General chat</span>
+                                </div>
+                                <div class="flex items-center gap-0.5 text-[#777]">
+                                  <button
+                                    type="button"
+                                    class="grid size-6 place-items-center rounded transition-colors hover:bg-white/[0.06] hover:text-[#ddd]"
+                                    title="New chat"
+                                    onClick={() => setAgentMessages([])}
+                                  >
+                                    <Icon name="plus" size="small" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    class="grid size-6 place-items-center rounded transition-colors hover:bg-white/[0.06] hover:text-[#ddd]"
+                                    title={agentMaximized() ? "Restore agent" : "Maximize agent"}
+                                    onClick={() => setAgentMaximized((maximized) => !maximized)}
+                                  >
+                                    <Icon name={agentMaximized() ? "collapse" : "expand"} size="small" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    class="grid size-6 place-items-center rounded transition-colors hover:bg-white/[0.06] hover:text-[#ddd]"
+                                    title="Hide chat"
+                                    onClick={() => {
+                                      setAgentMaximized(false)
+                                      setAgentOpen(false)
+                                    }}
+                                  >
+                                    <Icon name="layout-right" size="small" />
+                                  </button>
+                                </div>
+                              </header>
+                              <div class="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-3.5 py-4">
+                                <Show when={agentMessages().length === 0}>
+                                  <div class="flex flex-1 flex-col items-center justify-center gap-2 px-5 text-center">
+                                    <img src="/vector-logo.png" alt="" class="size-8 rounded-[7px] opacity-75" draggable={false} />
+                                    <div class="text-[12px] font-medium text-[#d8d8d8]">Vector inside your editor</div>
+                                    <div class="max-w-[270px] text-[11px] leading-[1.55] text-[#777]">
+                                      Ask questions, plan a change, or edit this workspace with the model selected in Vector.
+                                    </div>
+                                  </div>
+                                </Show>
+                                <For each={agentMessages()}>
+                                  {(message) => (
+                                    <Show
+                                      when={message.role === "assistant"}
+                                      fallback={
+                                        <div class="max-w-[88%] self-end whitespace-pre-wrap break-words rounded-[8px] border border-[#303030] bg-[#202020] px-3 py-2 text-[12px] leading-relaxed text-[#e4e4e4]">
+                                          {message.content}
+                                        </div>
+                                      }
+                                    >
+                                      <div class="flex flex-col gap-2.5">
+                                        <div class="whitespace-pre-wrap break-words text-[12px] leading-[1.58] text-[#cfcfcf]">
+                                          {message.content}
+                                        </div>
+                                        <Show when={message.edit && message.files?.length}>
+                                          <div class="flex flex-col gap-1 border-l-2 border-emerald-400/30 pl-2.5">
+                                            <For each={message.files}>
+                                              {(changedFile) => (
+                                                <div class="flex items-center gap-1.5 text-[#8a8595]">
+                                                  <Icon name="check-small" size="small" class="shrink-0 text-emerald-400" />
+                                                  <span class="truncate font-mono text-[11px]">{changedFile}</span>
+                                                </div>
+                                              )}
+                                            </For>
+                                          </div>
+                                        </Show>
+                                      </div>
+                                    </Show>
+                                  )}
+                                </For>
+                                <Show when={agentRunning()}>
+                                  <div class="flex items-center gap-2 text-[11px] text-[#858585]">
+                                    <span class="size-1.5 animate-pulse rounded-full bg-[#a78bfa]" />
+                                    Working…
+                                  </div>
+                                </Show>
+                              </div>
+                              <div class="shrink-0 px-3 pb-3 pt-1">
+                                <form
+                                  class="flex flex-col gap-2 rounded-[9px] border border-[#343434] bg-[#1f1f1f] px-2.5 py-2 shadow-[0_10px_28px_rgba(0,0,0,0.18)] transition-colors focus-within:border-[#4a4a4a]"
+                                  onSubmit={(event) => {
+                                    event.preventDefault()
+                                    void sendAgentMessage()
+                                  }}
+                                >
+                                  <textarea
+                                    value={agentInput()}
+                                    disabled={agentRunning()}
+                                    onInput={(event) => setAgentInput(event.currentTarget.value)}
+                                    onKeyDown={(event) => {
+                                      event.stopPropagation()
+                                      if (event.key === "Enter" && !event.shiftKey) {
+                                        event.preventDefault()
+                                        void sendAgentMessage()
+                                      }
+                                    }}
+                                    rows={1}
+                                    placeholder="Ask Vector's editor agent to code, help you code, or fix bugs."
+                                    class="max-h-40 min-h-[24px] w-full resize-none bg-transparent text-[12px] leading-relaxed text-[#e6e6e6] outline-none placeholder:text-[#666] disabled:opacity-60"
+                                  />
+                                  <div class="flex items-center justify-between gap-2">
+                                    <div class="flex min-w-0 items-center gap-1.5">
+                                      <span class="rounded-[5px] bg-white/[0.045] px-2 py-0.5 text-[10px] text-[#aaa]">Agent</span>
+                                      <ModelSelectorPopoverV2
+                                        triggerProps={{
+                                          class:
+                                            "flex min-w-0 cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-[#878787] transition-colors hover:bg-white/[0.05] hover:text-[#ccc]",
+                                        }}
+                                      >
+                                        <span class="max-w-[150px] truncate">{activeModelLabel()}</span>
+                                        <Icon name="chevron-down" size="small" />
+                                      </ModelSelectorPopoverV2>
+                                    </div>
+                                    <button
+                                      type="submit"
+                                      disabled={agentRunning() || !agentInput().trim()}
+                                      class="grid size-6 shrink-0 place-items-center rounded-full bg-[#d7d7d7] text-[#151515] transition hover:enabled:bg-white disabled:bg-[#444] disabled:text-[#777]"
+                                      aria-label="Send"
+                                    >
+                                      <Icon name="arrow-up" size="small" />
+                                    </button>
+                                  </div>
+                                </form>
+                              </div>
+                            </aside>
+                          </Show>
+                        </div>
+                        <footer class="flex h-5.5 shrink-0 items-center justify-between border-t border-[#292929] bg-[#181818] px-2.5 font-mono text-[9px] text-[#777]">
+                          <div class="flex min-w-0 items-center gap-3">
+                            <span class="flex items-center gap-1 text-[#9a9a9a]">
+                              <Icon name="branch" size="small" />
+                              workspace
+                            </span>
+                            <span class="truncate">{path()}</span>
+                          </div>
+                          <div class="flex items-center gap-3">
+                            <span classList={{ "text-[#ad95f5]": settings.editor.aiAutocomplete() }}>
+                              Vector Tab {settings.editor.aiAutocomplete() ? "on" : "off"}
+                            </span>
+                            <span>Ln {lineCount()}, Col 1</span>
+                            <span>Spaces: 2</span>
+                            <span>UTF-8</span>
+                            <span>{activeBadge().label}</span>
+                          </div>
+                        </footer>
                       </div>
                     </Match>
 
-                    <Match when={activeView() === "preview"}>
-                      <Show
-                        when={previewDocument()}
-                        fallback={
-                          <div class="h-full flex items-center justify-center bg-[#131217] px-8 text-center">
-                            <div class="max-w-md rounded-2xl border border-[rgba(255,255,255,0.10)] bg-[#161519] p-6 shadow-[0_18px_50px_rgba(0,0,0,0.28)]">
-                              <img src="/vector-logo.png" alt="" class="mx-auto mb-4 size-10 rounded-xl opacity-80" draggable={false} />
-                              <div class="text-16-medium text-white">No web preview yet.</div>
-                              <div class="mt-2 text-13-regular leading-relaxed text-[#a8adba]">
-                                Open or create an HTML entry file and Vector will render it here with matching local CSS and JavaScript.
-                              </div>
-                            </div>
-                          </div>
-                        }
-                      >
-                        {(document) => (
-                          <iframe
-                            title="Vector Codespace Preview"
-                            sandbox="allow-scripts allow-forms allow-same-origin"
-                            srcdoc={document()}
-                            class="h-full w-full border-0 bg-white"
-                          />
-                        )}
-                      </Show>
-                    </Match>
-
                     <Match when={activeView() === "problems"}>
-                      <div class="h-full overflow-auto bg-[#131217] p-5">
+                      <div class="h-full overflow-auto bg-[#1b1b1b] p-3">
                         <For
                           each={problems()}
                           fallback={
-                            <div class="rounded-2xl border border-emerald-400/20 bg-emerald-500/8 p-4 text-13-regular text-emerald-100">
+                            <div class="rounded-[6px] border border-emerald-400/20 bg-emerald-500/[0.06] p-3 text-[12px] text-emerald-100">
                               No obvious local problems detected in this file.
                             </div>
                           }
                         >
                           {(problem) => (
-                            <div class="mb-3 rounded-2xl border border-[rgba(255,255,255,0.10)] bg-[#161519] p-4">
+                            <div class="mb-2 rounded-[6px] border border-[#2d2d2d] bg-[#191919] p-3">
                               <div class="flex items-center justify-between gap-3">
-                                <div class="text-13-medium text-text-base">Line {problem.line}</div>
+                                <div class="text-[12px] font-medium text-[#d8d8d8]">Line {problem.line}</div>
                                 <div class="flex items-center gap-2">
                                   <div
-                                    class="rounded-full px-2 py-0.5 text-11-medium uppercase"
+                                    class="rounded-[4px] px-2 py-0.5 text-[9px] font-semibold uppercase"
                                     classList={{
                                       "bg-red-500/15 text-red-200": problem.severity === "error",
                                       "bg-amber-500/15 text-amber-200": problem.severity === "warning",
@@ -2089,51 +3564,73 @@ function CodespaceWorkbench(props: {
                                     {problem.severity}
                                   </div>
                                   <button
-                                    class="rounded-full border border-violet-400/35 bg-violet-500/15 px-3 py-1 text-12-medium text-violet-100 hover:bg-violet-500/25"
-                                    onClick={() => debugProblem(problem)}
+                                    class="rounded-[4px] border border-[#323232] bg-white/[0.04] px-2.5 py-1 text-[11px] text-[#cfcfcf] hover:bg-white/[0.08]"
+                                    onClick={() => setActiveView("editor")}
                                   >
-                                    Debug
+                                    Open File
+                                  </button>
+                                  <button
+                                    class="rounded-[4px] border border-[#323232] bg-transparent px-2.5 py-1 text-[11px] text-[#858585] hover:bg-white/[0.05] hover:text-white"
+                                    onClick={() => {
+                                      const next = new Set(ignoredProblems())
+                                      next.add(problemKey(problem))
+                                      setIgnoredProblems(next)
+                                    }}
+                                  >
+                                    Ignore
                                   </button>
                                 </div>
                               </div>
-                              <div class="mt-2 text-13-regular text-text-weak">{problem.message}</div>
+                              <div class="mt-2 text-[12px] text-[#8f8f8f]">{problem.message}</div>
                             </div>
                           )}
                         </For>
                       </div>
                     </Match>
 
-                    <Match when={activeView() === "changes"}>
-                      <div class="h-full min-h-0 flex flex-col bg-[#100f14]">
-                        <header class="shrink-0 border-b border-[#2b2438] bg-[#14101c] px-6 py-5">
+                    <Match when={activeView() === "review"}>
+                      <div class="h-full min-h-0 flex flex-col bg-[#1b1b1b]">
+                        <header class="shrink-0 border-b border-[#292929] bg-[#191919] px-3 py-2.5">
                           <div class="flex items-center justify-between gap-4">
                             <div class="flex items-center gap-3">
-                              <div class="flex size-11 items-center justify-center rounded-2xl bg-[#2a1647] text-violet-300">⎇</div>
+                              <div class="flex size-7 items-center justify-center rounded-[5px] bg-[#8b5cf6]/10 text-[#bca5ff]">
+                                <Icon name="review" />
+                              </div>
                               <div>
-                                <div class="text-18-medium text-white">Vector Change Queue</div>
-                                <div class="text-12-regular text-[#8a8595]">
-                                  {queuedChanges().length} staged Codespace edit{queuedChanges().length === 1 ? "" : "s"} · {props.diffs().length} engine review change{props.diffs().length === 1 ? "" : "s"}
+                                <div class="text-[12px] font-medium text-white">Review changes</div>
+                                <div class="text-[10px] text-[#858585]">
+                                  {queuedChanges().length} proposed edit{queuedChanges().length === 1 ? "" : "s"} ·
+                                  accept only the hunks you trust
                                 </div>
                               </div>
                             </div>
                             <div class="flex items-center gap-2">
-                              <button
-                                class="rounded-xl border border-[#352845] bg-[#1d1728] px-4 py-2 text-13-medium text-[#cfc6de] hover:bg-[#251d31]"
-                                onClick={() => setActiveView("coprogrammer")}
-                              >
-                                Back to Co-Programmer
-                              </button>
+                              <Show when={queuedChanges().length > 1}>
+                                <button
+                                  class="rounded-[5px] border border-red-400/25 bg-red-500/[0.08] px-3 py-1.5 text-[11px] text-red-100 hover:bg-red-500/15"
+                                  onClick={rejectAllQueuedChanges}
+                                >
+                                  Reject all
+                                </button>
+                                <button
+                                  class="rounded-[5px] border border-emerald-400/20 bg-emerald-500/[0.08] px-3 py-1.5 text-[11px] text-emerald-100 hover:bg-emerald-500/15 disabled:opacity-50"
+                                  disabled={saving()}
+                                  onClick={() => void acceptAllQueuedChanges()}
+                                >
+                                  {saving() ? "Applying..." : "Accept all"}
+                                </button>
+                              </Show>
                               <Show when={selectedQueue()}>
                                 {(item) => (
                                   <>
                                     <button
-                                      class="rounded-xl border border-red-400/30 bg-red-500/10 px-4 py-2 text-13-medium text-red-100 hover:bg-red-500/20"
+                                      class="rounded-[5px] border border-red-400/25 bg-red-500/[0.08] px-3 py-1.5 text-[11px] text-red-100 hover:bg-red-500/15"
                                       onClick={() => rejectQueuedChange(item().id)}
                                     >
                                       Reject
                                     </button>
                                     <button
-                                      class="rounded-xl bg-[#7c3aed] px-4 py-2 text-13-medium text-white hover:bg-[#8b5cf6] disabled:opacity-50"
+                                      class="rounded-[5px] bg-[#7452c9] px-3 py-1.5 text-[11px] font-medium text-white hover:bg-[#8060d4] disabled:opacity-50"
                                       disabled={saving()}
                                       onClick={() => void acceptQueuedChange(item())}
                                     >
@@ -2146,41 +3643,59 @@ function CodespaceWorkbench(props: {
                           </div>
                         </header>
 
-                        <div class="grid min-h-0 flex-1 grid-cols-[360px_1fr]">
-                          <aside class="min-h-0 overflow-y-auto border-r border-[#2b2438] bg-[#17111f] p-4">
+                        <div class="grid min-h-0 flex-1 grid-cols-[280px_1fr]">
+                          <aside class="min-h-0 overflow-y-auto border-r border-[#292929] bg-[#191919] p-2">
                             <For
                               each={queuedChanges()}
                               fallback={
-                                <div class="rounded-2xl border border-[#352845] bg-[#0f0c15] p-4 text-13-regular text-[#8a8595]">
-                                  No Codespace edits are queued. Run Co-Programmer to stage a proposal.
+                                <div class="rounded-[5px] border border-[#2d2d2d] bg-white/[0.02] p-3 text-[11px] text-[#858585]">
+                                  No editor-agent changes are waiting for review.
                                 </div>
                               }
                             >
                               {(item) => (
                                 <button
-                                  class="mb-3 w-full rounded-2xl border p-4 text-left transition"
+                                  class="mb-1.5 w-full rounded-[5px] border p-2.5 text-left transition"
                                   classList={{
-                                    "border-[#8b5cf6] bg-[#24183a]": selectedQueueId() === item.id,
-                                    "border-[#352845] bg-[#0f0c15] hover:border-[#5a4474]": selectedQueueId() !== item.id,
+                                    "border-[#7257b6] bg-[#25202f]": selectedQueueId() === item.id,
+                                    "border-[#2d2d2d] bg-[#181818] hover:border-[#444]":
+                                      selectedQueueId() !== item.id,
                                   }}
                                   onClick={() => setSelectedQueueId(item.id)}
                                 >
                                   <div class="flex items-center justify-between gap-3">
-                                    <div class="truncate font-mono text-13-medium text-white">{item.path}</div>
-                                    <span class="rounded-full bg-violet-500/15 px-2 py-0.5 text-10-medium text-violet-200">Queued</span>
+                                    <div class="truncate font-mono text-[11px] font-medium text-white">{item.path}</div>
+                                    <span class="rounded-[4px] bg-violet-500/12 px-1.5 py-0.5 text-[9px] text-violet-200">
+                                      Review
+                                    </span>
                                   </div>
-                                  <div class="mt-2 line-clamp-2 text-12-regular text-[#8a8595]">{item.source}</div>
+                                  <div class="mt-1.5 line-clamp-2 text-[10px] text-[#858585]">{item.source}</div>
+                                  <div class="mt-3 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.12em]">
+                                    <span
+                                      class="rounded-full px-2 py-0.5"
+                                      classList={{
+                                        "bg-emerald-500/12 text-emerald-200": item.risk === "low",
+                                        "bg-amber-500/12 text-amber-200": item.risk === "medium",
+                                        "bg-red-500/12 text-red-200": item.risk === "high",
+                                      }}
+                                    >
+                                      {item.risk} risk
+                                    </span>
+                                    <span class="text-[#8a8595]">{item.confidence}% confidence</span>
+                                  </div>
                                 </button>
                               )}
                             </For>
 
                             <Show when={props.diffs().length}>
                               <div class="mt-5 border-t border-[#2b2438] pt-4">
-                                <div class="mb-3 text-11-medium uppercase tracking-[0.18em] text-[#8a8595]">Engine Review</div>
+                                <div class="mb-3 text-11-medium uppercase tracking-[0.18em] text-[#8a8595]">
+                                  Engine Review
+                                </div>
                                 <For each={props.diffs()}>
                                   {(diff) => (
                                     <button
-                                      class="mb-2 w-full rounded-2xl border border-[#352845] bg-[#0f0c15] p-3 text-left hover:border-[#5a4474]"
+                                      class="mb-1.5 w-full rounded-[5px] border border-[#2d2d2d] bg-[#181818] p-2.5 text-left hover:border-[#444]"
                                       onClick={() => props.focusReviewDiff(diff.file)}
                                     >
                                       <div class="truncate text-12-medium text-white">{diff.file}</div>
@@ -2195,7 +3710,7 @@ function CodespaceWorkbench(props: {
                             </Show>
                           </aside>
 
-                          <section class="min-h-0 overflow-auto bg-[#131217]">
+                          <section class="min-h-0 overflow-auto bg-[#1b1b1b]">
                             <Show
                               when={selectedQueue()}
                               fallback={
@@ -2209,26 +3724,88 @@ function CodespaceWorkbench(props: {
                                   <div class="mb-4 flex items-center justify-between gap-4">
                                     <div>
                                       <div class="font-mono text-18-medium text-white">{item().path}</div>
-                                      <div class="mt-1 text-12-regular text-[#a8adba]">New or changed lines are highlighted in green.</div>
+                                      <div class="mt-1 max-w-3xl text-12-regular leading-relaxed text-[#a8adba]">
+                                        {item().explanation}
+                                      </div>
                                     </div>
-                                    <div class="rounded-full bg-[#141318] px-3 py-1 text-12-medium text-[#cfc6de]">
-                                      {previewDiffLines(item().oldContent, item().newContent).filter((row) => row.added).length} changed lines
+                                    <div class="flex items-center gap-2">
+                                      <div class="rounded-md bg-[#1d1d1f] px-3 py-1 text-12-medium text-[#cfc6de]">
+                                        {selectedReviewHunks().length} hunk
+                                        {selectedReviewHunks().length === 1 ? "" : "s"}
+                                      </div>
+                                      <button
+                                        class="rounded-xl border border-emerald-400/25 bg-emerald-500/12 px-3 py-1.5 text-12-medium text-emerald-100 hover:bg-emerald-500/20 disabled:opacity-40"
+                                        disabled={!Object.values(hunkDecisions()).includes("accept") || saving()}
+                                        onClick={() => void applySelectedHunks()}
+                                      >
+                                        Apply accepted hunks
+                                      </button>
                                     </div>
                                   </div>
-                                  <div class="overflow-hidden rounded-2xl border border-[rgba(255,255,255,0.10)] bg-[#161519] font-mono text-[13px] leading-6">
-                                    <For each={previewDiffLines(item().oldContent, item().newContent)}>
-                                      {(row) => (
-                                        <div
-                                          class="grid grid-cols-[68px_1fr] border-b border-white/[0.025]"
-                                          classList={{
-                                            "bg-emerald-500/12 text-emerald-100": row.added,
-                                            "text-[#c5ccd8]": !row.added,
-                                          }}
-                                        >
-                                          <div class="select-none border-r border-white/[0.04] px-3 py-1 text-right text-[#7f8a9a]">{row.number}</div>
-                                          <pre class="overflow-x-auto px-3 py-1">{row.line || " "}</pre>
+                                  <div class="space-y-3">
+                                    <For
+                                      each={selectedReviewHunks()}
+                                      fallback={
+                                        <div class="rounded-lg border border-[color:var(--vx-line)] bg-[#202023] p-6 text-center text-13-regular text-[#a8adba]">
+                                          No textual changes found.
                                         </div>
-                                      )}
+                                      }
+                                    >
+                                      {(hunk, index) => {
+                                        const decision = () => hunkDecisions()[hunk.id]
+                                        return (
+                                          <section
+                                            class="overflow-hidden rounded-lg border bg-[#202023]"
+                                            classList={{
+                                              "border-emerald-400/35": decision() === "accept",
+                                              "border-red-400/30": decision() === "reject",
+                                              "border-[color:var(--vx-line)]": !decision(),
+                                            }}
+                                          >
+                                            <header class="flex items-center justify-between border-b border-[color:var(--vx-line)] px-4 py-2.5">
+                                              <div class="text-11-medium uppercase tracking-[0.14em] text-[#948ba0]">
+                                                Hunk {index() + 1}
+                                              </div>
+                                              <div class="flex gap-2">
+                                                <button
+                                                  class="rounded-lg border px-2.5 py-1 text-11-medium"
+                                                  classList={{
+                                                    "border-red-400/35 bg-red-500/15 text-red-100":
+                                                      decision() === "reject",
+                                                    "border-[color:var(--vx-line)] text-white/55 hover:bg-white/6":
+                                                      decision() !== "reject",
+                                                  }}
+                                                  onClick={() => decideHunk(hunk.id, "reject")}
+                                                >
+                                                  Keep original
+                                                </button>
+                                                <button
+                                                  class="rounded-lg border px-2.5 py-1 text-11-medium"
+                                                  classList={{
+                                                    "border-emerald-400/35 bg-emerald-500/15 text-emerald-100":
+                                                      decision() === "accept",
+                                                    "border-[color:var(--vx-line)] text-white/55 hover:bg-white/6":
+                                                      decision() !== "accept",
+                                                  }}
+                                                  onClick={() => decideHunk(hunk.id, "accept")}
+                                                >
+                                                  Accept hunk
+                                                </button>
+                                              </div>
+                                            </header>
+                                            <Show when={hunk.before}>
+                                              <pre class="max-h-52 overflow-auto border-b border-red-400/10 bg-red-500/[0.08] px-4 py-3 font-mono text-[12px] leading-5 text-red-100/75 whitespace-pre-wrap">
+                                                {hunk.before}
+                                              </pre>
+                                            </Show>
+                                            <Show when={hunk.after}>
+                                              <pre class="max-h-52 overflow-auto bg-emerald-500/[0.08] px-4 py-3 font-mono text-[12px] leading-5 text-emerald-100/85 whitespace-pre-wrap">
+                                                {hunk.after}
+                                              </pre>
+                                            </Show>
+                                          </section>
+                                        )
+                                      }}
                                     </For>
                                   </div>
                                 </div>
@@ -2237,344 +3814,6 @@ function CodespaceWorkbench(props: {
                           </section>
                         </div>
                       </div>
-                    </Match>
-
-                    <Match when={activeView() === "history"}>
-                      <div class="h-full overflow-auto bg-[#131217] p-5">
-                        <For
-                          each={selectedCheckpoints()}
-                          fallback={
-                            <div class="rounded-2xl border border-[rgba(255,255,255,0.10)] bg-[#161519] p-4 text-13-regular text-[#a8adba]">
-                              No checkpoints for this file yet. Create one before risky edits.
-                            </div>
-                          }
-                        >
-                          {(item) => (
-                            <div class="mb-3 rounded-2xl border border-[rgba(255,255,255,0.10)] bg-[#161519] p-4">
-                              <div class="flex items-center justify-between gap-3">
-                                <div>
-                                  <div class="text-13-medium text-white">{item.title}</div>
-                                  <div class="mt-1 text-12-regular text-[#a8adba]">{formatCheckpointTime(item.createdAt)}</div>
-                                </div>
-                                <div class="flex gap-2">
-                                  <button class="rounded-full bg-white/8 px-3 py-1.5 text-12-medium" onClick={() => restoreCheckpoint(item)}>
-                                    Restore
-                                  </button>
-                                  <button class="rounded-full bg-white/8 px-3 py-1.5 text-12-medium" onClick={() => removeCheckpoint(item.id)}>
-                                    Delete
-                                  </button>
-                                </div>
-                              </div>
-                            </div>
-                          )}
-                        </For>
-                      </div>
-                    </Match>
-
-                    <Match when={["debugger", "architect", "coprogrammer"].includes(activeView())}>
-                      <Switch>
-                        <Match when={activeView() === "coprogrammer"}>
-                          <div class="h-full min-h-0 flex bg-[#0d0914]">
-                            <aside class="w-[360px] shrink-0 overflow-y-auto border-r border-[rgba(255,255,255,0.08)] bg-[#16101f] p-5">
-                              <div class="mb-5 flex items-center gap-3">
-                                <div class="flex size-11 items-center justify-center rounded-2xl bg-[#2a1647] text-violet-300">⌘</div>
-                                <div>
-                                  <div class="text-16-medium text-white">Vector Co-Programmer</div>
-                                  <div class="text-12-regular text-[#8a8595]">Plan, generate, queue, review · {activeModelLabel()}</div>
-                                </div>
-                              </div>
-
-                              <div class="grid grid-cols-2 gap-2">
-                                {[
-                                  { id: "build", label: "Build", detail: "Create or extend features", icon: "↗" },
-                                  { id: "repair", label: "Repair", detail: "Fix broken projects", icon: "⚙" },
-                                  { id: "refactor", label: "Refactor", detail: "Improve structure", icon: "⌘" },
-                                  { id: "learn", label: "Learn", detail: "Explain while building", icon: "□" },
-                                ].map((item) => (
-                                  <button
-                                    class="rounded-2xl border p-4 text-left transition hover:border-[#8257e6] hover:bg-[#201433] hover:text-white"
-                                    classList={{
-                                      "border-[#8257e6] bg-[#201433] text-white": coprogrammerMode() === item.id,
-                                      "border-[rgba(255,255,255,0.08)] bg-[#111019] text-[#8f849f]": coprogrammerMode() !== item.id,
-                                    }}
-                                    onClick={() => setCoprogrammerMode(item.id as "build" | "repair" | "refactor" | "learn")}
-                                  >
-                                    <div class="mb-2 flex items-center gap-2">
-                                      <span class="text-violet-400">{item.icon}</span>
-                                      <span class="text-13-medium">{item.label}</span>
-                                    </div>
-                                    <div class="text-12-regular leading-relaxed">{item.detail}</div>
-                                  </button>
-                                ))}
-                              </div>
-
-                              <textarea
-                                value={toolBrief()}
-                                onInput={(event) => setToolBrief(event.currentTarget.value)}
-                                placeholder="Describe the feature, bug, refactor, or lesson for this Codespace..."
-                                class="mt-4 h-40 w-full resize-none rounded-2xl border border-[#322841] bg-[#100f14] p-4 text-14-regular leading-relaxed text-white outline-none placeholder:text-[#6e6a7b] focus:border-[#8b5cf6]"
-                              />
-
-                              <div class="mt-4 flex flex-wrap gap-2">
-                                {[
-                                  "Add a feature",
-                                  "Repair issues",
-                                  "Refactor safely",
-                                ].map((label) => (
-                                  <button
-                                    class="rounded-xl border border-[rgba(255,255,255,0.08)] bg-white/[0.03] px-3 py-2 text-12-medium text-[#a89cb9] hover:border-[#8257e6] hover:text-violet-300"
-                                    onClick={() => setToolBrief(label)}
-                                  >
-                                    {label}
-                                  </button>
-                                ))}
-                              </div>
-
-                              <button
-                                class="mt-4 flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-[#7c3aed] text-14-medium text-white hover:bg-[#8b5cf6]"
-                                disabled={coprogrammerRunning()}
-                                onClick={() => void runCoprogrammer()}
-                              >
-                                {coprogrammerRunning() ? "Running..." : "▷ Run Co-Programmer"}
-                              </button>
-
-                              <div class="mt-6 border-t border-[rgba(255,255,255,0.08)] pt-4">
-                                <div class="mb-3 text-11-medium uppercase tracking-[0.18em] text-[#8a8595]">Execution Trace</div>
-                                <For
-                                  each={
-                                    coprogrammerLog().length
-                                      ? coprogrammerLog()
-                                      : [
-                                          { status: "done", label: "Indexed workspace", detail: `${props.modified().length || 1} file${props.modified().length === 1 ? "" : "s"} available to inspect` },
-                                          { status: "info", label: "Planning task", detail: selectedPath() ? `Active file: ${fileBasename(selectedPath())}` : "Open a file to focus context" },
-                                          { status: "info", label: "Queue safety", detail: "Changes remain reviewable before acceptance" },
-                                        ]
-                                  }
-                                >
-                                  {(row) => (
-                                  <div class="mb-2 rounded-2xl border border-[rgba(255,255,255,0.08)] bg-[#100f14] p-3">
-                                    <div class="flex items-center gap-2 text-13-medium text-white">
-                                      <span
-                                        class="size-2 rounded-full"
-                                        classList={{
-                                          "bg-emerald-400": row.status === "done",
-                                          "bg-sky-400": row.status === "info",
-                                          "bg-amber-400": row.status === "warn",
-                                          "bg-red-400": row.status === "error",
-                                        }}
-                                      />
-                                      {row.label}
-                                    </div>
-                                    <div class="mt-1 pl-4 text-12-regular text-[#8a8595]">{row.detail}</div>
-                                  </div>
-                                  )}
-                                </For>
-                              </div>
-                            </aside>
-
-                            <section class="min-w-0 flex-1 overflow-y-auto bg-[#100f14]">
-                              <div class="border-b border-[rgba(255,255,255,0.08)] bg-[#141318] px-6 py-5">
-                                <div class="flex items-center justify-between gap-4">
-                                  <div class="flex items-center gap-3">
-                                    <img src="/vector-logo.png" alt="" class="size-10 rounded-xl" draggable={false} />
-                                    <div>
-                                      <div class="text-16-medium text-white">Co-Programmer Output</div>
-                                      <div class="text-12-regular text-[#8a8595]">Review the plan, then inspect generated files in Changes. Model: {activeModelLabel()}</div>
-                                    </div>
-                                  </div>
-                                  <button class="rounded-xl bg-[#7c3aed] px-4 py-2 text-13-medium text-white hover:bg-[#8b5cf6]" onClick={() => setActiveView("changes")}>
-                                    Review {queuedChanges().length || queueCount()}
-                                  </button>
-                                </div>
-                              </div>
-
-                              <div class="grid grid-cols-4 gap-4 border-b border-[rgba(255,255,255,0.08)] p-6">
-                                <div class="rounded-2xl border border-[rgba(255,255,255,0.08)] bg-[#141318] p-4">
-                                  <div class="text-11-medium uppercase tracking-[0.16em] text-[#8a8595]">Mode</div>
-                                  <div class="mt-2 text-18-medium text-white">{coprogrammerMode()}</div>
-                                </div>
-                                <div class="rounded-2xl border border-[rgba(255,255,255,0.08)] bg-[#141318] p-4">
-                                  <div class="text-11-medium uppercase tracking-[0.16em] text-[#8a8595]">Queued</div>
-                                  <div class="mt-2 text-18-medium text-white">{queuedChanges().length}</div>
-                                </div>
-                                <div class="rounded-2xl border border-[rgba(255,255,255,0.08)] bg-[#141318] p-4">
-                                  <div class="text-11-medium uppercase tracking-[0.16em] text-[#8a8595]">Problems</div>
-                                  <div class="mt-2 text-18-medium text-white">{problems().length}</div>
-                                </div>
-                                <div class="rounded-2xl border border-[rgba(255,255,255,0.08)] bg-[#141318] p-4">
-                                  <div class="text-11-medium uppercase tracking-[0.16em] text-[#8a8595]">File</div>
-                                  <div class="mt-2 truncate text-18-medium text-white">{fileBasename(path())}</div>
-                                </div>
-                              </div>
-
-                              <div class="p-6">
-                                <div class="rounded-2xl border border-[rgba(255,255,255,0.08)] bg-[#141318] p-6">
-                                  <div class="mb-4 text-18-medium text-white">{coprogrammerDraft() ? "Generated Plan" : "Plan"}</div>
-                                  <Show
-                                    when={coprogrammerDraft()}
-                                    fallback={
-                                      <ul class="space-y-3 text-14-regular leading-relaxed text-[#d6d2df]">
-                                        <li>• Inspect the active file and nearby project structure.</li>
-                                        <li>• Keep the edit scoped instead of rewriting the whole project.</li>
-                                        <li>• Create a checkpoint before risky changes.</li>
-                                        <li>• Send generated file changes to review before they touch the workspace.</li>
-                                      </ul>
-                                    }
-                                  >
-                                    {(text) => <pre class="whitespace-pre-wrap text-14-regular leading-relaxed text-[#d6d2df]">{text()}</pre>}
-                                  </Show>
-                                </div>
-                              </div>
-                            </section>
-                          </div>
-                        </Match>
-
-                        <Match when={activeView() === "architect"}>
-                          <div class="h-full min-h-0 flex flex-col bg-[#100f14]">
-                            <header class="flex items-center gap-3 border-b border-[rgba(255,255,255,0.08)] bg-[#141318] px-5 py-4">
-                              <div class="flex size-10 items-center justify-center rounded-2xl bg-[#2a1647] text-violet-300">✧</div>
-                              <div class="min-w-0 flex-1">
-                                <div class="text-16-medium text-white">AI Architect</div>
-                                <div class="text-12-regular text-[#8a8595]">Chat with the active Vector model context for planning and review · {activeModelLabel()}</div>
-                              </div>
-                              <button class="rounded-full bg-white/8 px-4 py-2 text-13-medium text-[#d6d2df] hover:bg-white/12" onClick={() => setActiveView("editor")}>
-                                Back to editor
-                              </button>
-                            </header>
-
-                            <div class="min-h-0 flex-1 overflow-y-auto p-6">
-                              <div class="mx-auto flex max-w-5xl flex-col gap-4">
-                                <div class="grid gap-3 sm:grid-cols-4">
-                                  <div class="rounded-2xl border border-[rgba(255,255,255,0.08)] bg-[#141318] p-4">
-                                    <div class="text-11-medium uppercase tracking-[0.16em] text-[#8a8595]">File</div>
-                                    <div class="mt-2 truncate text-14-medium text-white">{fileBasename(path())}</div>
-                                  </div>
-                                  <div class="rounded-2xl border border-[rgba(255,255,255,0.08)] bg-[#141318] p-4">
-                                    <div class="text-11-medium uppercase tracking-[0.16em] text-[#8a8595]">Language</div>
-                                    <div class="mt-2 text-14-medium text-white">{fileLanguage(path())}</div>
-                                  </div>
-                                  <div class="rounded-2xl border border-[rgba(255,255,255,0.08)] bg-[#141318] p-4">
-                                    <div class="text-11-medium uppercase tracking-[0.16em] text-[#8a8595]">Issues</div>
-                                    <div class="mt-2 text-14-medium text-white">{problems().length}</div>
-                                  </div>
-                                  <div class="rounded-2xl border border-[rgba(255,255,255,0.08)] bg-[#141318] p-4">
-                                    <div class="text-11-medium uppercase tracking-[0.16em] text-[#8a8595]">Queue</div>
-                                    <div class="mt-2 text-14-medium text-white">{queuedChanges().length}</div>
-                                  </div>
-                                </div>
-
-                                <div class="min-h-[420px] rounded-2xl border border-[rgba(255,255,255,0.08)] bg-[#141318] p-5">
-                                  <For each={architectMessages()}>
-                                    {(message) => (
-                                      <div
-                                        class="mb-4 flex"
-                                        classList={{
-                                          "justify-end": message.role === "user",
-                                          "justify-start": message.role === "assistant",
-                                        }}
-                                      >
-                                        <div
-                                          class="max-w-[78%] whitespace-pre-wrap rounded-2xl px-4 py-3 text-14-regular leading-relaxed"
-                                          classList={{
-                                            "bg-[#7c3aed] text-white": message.role === "user",
-                                            "border border-[rgba(255,255,255,0.08)] bg-[#100f14] text-[#d6d2df]": message.role === "assistant",
-                                          }}
-                                        >
-                                          {message.content}
-                                        </div>
-                                      </div>
-                                    )}
-                                  </For>
-                                  <Show when={architectRunning()}>
-                                    <div class="text-13-regular text-[#8a8595]">AI Architect is thinking...</div>
-                                  </Show>
-                                </div>
-                              </div>
-                            </div>
-
-                            <footer class="shrink-0 border-t border-[rgba(255,255,255,0.08)] bg-[#141318] p-4">
-                              <div class="mx-auto flex max-w-5xl gap-3">
-                                <textarea
-                                  value={architectInput()}
-                                  onInput={(event) => setArchitectInput(event.currentTarget.value)}
-                                  onKeyDown={(event) => {
-                                    if (event.key !== "Enter" || event.shiftKey) return
-                                    event.preventDefault()
-                                    void sendArchitectMessage()
-                                  }}
-                                  placeholder="Ask AI Architect to review structure, explain a file, or plan a safe edit..."
-                                  class="min-h-16 flex-1 resize-none rounded-2xl border border-[rgba(255,255,255,0.08)] bg-[#100f14] px-4 py-3 text-14-regular text-white outline-none placeholder:text-[#6e6a7b] focus:border-[#8b5cf6]"
-                                />
-                                <button
-                                  class="h-16 rounded-2xl bg-[#7c3aed] px-5 text-14-medium text-white hover:bg-[#8b5cf6] disabled:opacity-50"
-                                  disabled={architectRunning()}
-                                  onClick={() => void sendArchitectMessage()}
-                                >
-                                  Send
-                                </button>
-                              </div>
-                            </footer>
-                          </div>
-                        </Match>
-
-                        <Match when={activeView() === "debugger"}>
-                          <div class="h-full overflow-auto bg-[#131217] p-5">
-                            <div class="mx-auto max-w-4xl rounded-2xl border border-[rgba(255,255,255,0.10)] bg-[#161519] p-6 shadow-[0_18px_50px_rgba(0,0,0,0.28)]">
-                              <div class="flex items-start justify-between gap-4">
-                                <div class="flex items-center gap-4">
-                                  <img src="/vector-logo.png" alt="" class="size-10 rounded-xl" draggable={false} />
-                                    <div>
-                                      <div class="text-20-medium text-white">{toolTitle(activeView() as CodespaceToolView)}</div>
-                                      <div class="mt-1 text-13-regular text-[#a8adba]">
-                                      Focused diagnostics for the file open in Codespace. Model: {activeModelLabel()}.
-                                      </div>
-                                    </div>
-                                </div>
-                                <button class="rounded-full bg-white/8 px-4 py-2 text-13-medium text-[#d6d2df] hover:bg-white/12" onClick={() => setActiveView("editor")}>
-                                  Back to editor
-                                </button>
-                              </div>
-
-                              <div class="mt-6 rounded-2xl border border-[#343b48] bg-[#131720] p-5">
-                                <div class="text-15-medium text-white">Local diagnostic scan</div>
-                                <div class="mt-2 text-13-regular text-[#a8adba]">
-                                  Vector checked the open draft for common syntax, secret, and shipping issues.
-                                </div>
-                                <div class="mt-4 grid gap-3 sm:grid-cols-3">
-                                  <div class="rounded-2xl bg-red-500/10 p-4 text-red-100">
-                                    <div class="text-22-medium">{problemCounts().errors}</div>
-                                    <div class="text-11-medium uppercase tracking-[0.16em]">Errors</div>
-                                  </div>
-                                  <div class="rounded-2xl bg-amber-500/10 p-4 text-amber-100">
-                                    <div class="text-22-medium">{problemCounts().warnings}</div>
-                                    <div class="text-11-medium uppercase tracking-[0.16em]">Warnings</div>
-                                  </div>
-                                  <div class="rounded-2xl bg-sky-500/10 p-4 text-sky-100">
-                                    <div class="text-22-medium">{problemCounts().info}</div>
-                                    <div class="text-11-medium uppercase tracking-[0.16em]">Notes</div>
-                                  </div>
-                                </div>
-                                <button class="mt-5 rounded-full bg-violet-500 px-4 py-2 text-13-medium text-white hover:bg-violet-400" onClick={() => setActiveView("problems")}>
-                                  Open problems
-                                </button>
-                                <button
-                                  class="ml-2 mt-5 rounded-full border border-violet-400/35 bg-violet-500/10 px-4 py-2 text-13-medium text-violet-100 hover:bg-violet-500/20"
-                                  onClick={() => {
-                                    if (!toolBrief()) {
-                                      const first = problems()[0]
-                                      setToolBrief(first ? `Repair ${path()} line ${first.line}: ${first.message}` : `Review and harden ${path()}`)
-                                    }
-                                    setCoprogrammerMode("repair")
-                                    setActiveView("coprogrammer")
-                                  }}
-                                >
-                                  Repair with Co-Programmer
-                                </button>
-                              </div>
-                            </div>
-                          </div>
-                        </Match>
-                      </Switch>
                     </Match>
                   </Switch>
                 </Match>
@@ -2589,7 +3828,8 @@ function CodespaceWorkbench(props: {
           </Show>
         </section>
       </main>
-    </div>
+      </div>
+    </Portal>
   )
 }
 
@@ -2608,7 +3848,7 @@ function StableCodespaceWorkbench(props: {
   const prompt = usePrompt()
   const command = useCommand()
   const [selectedPath, setSelectedPath] = createSignal<string | undefined>()
-  const [activeView, setActiveView] = createSignal<"editor" | "preview" | "problems">("editor")
+  const [activeView, setActiveView] = createSignal<"editor" | "problems">("editor")
   const [saving, setSaving] = createSignal(false)
   const [drafts, setDrafts] = createStore<Record<string, string>>({})
 
@@ -2633,39 +3873,6 @@ function StableCodespaceWorkbench(props: {
     if (!path) return ""
     return drafts[path] ?? file.get(path)?.content?.content ?? ""
   }
-
-  const previewCandidates = createMemo(() => {
-    const current = selectedPath()
-    const candidates = new Set<string>()
-    if (current) {
-      candidates.add(current)
-      const dir = pathDirname(current)
-      candidates.add(dir ? `${dir}/index.html` : "index.html")
-      candidates.add(dir ? `${dir}/index.htm` : "index.htm")
-    }
-    candidates.add("index.html")
-    candidates.add("index.htm")
-    candidates.add("dist/index.html")
-    candidates.add("build/index.html")
-    candidates.add("src/index.html")
-    candidates.add("public/index.html")
-    for (const path of props.modified()) candidates.add(path)
-    return [...candidates].filter((path) => isHtmlPath(path) || looksLikeHtml(fileText(path)))
-  })
-
-  const previewPath = createMemo(() => {
-    const candidates = previewCandidates()
-    const built = candidates.find((path) => isBuiltPreviewPath(path) && looksLikeHtml(fileText(path)))
-    if (built) return built
-    return candidates.find((path) => looksLikeHtml(fileText(path))) ?? candidates.find((path) => fileText(path).trim()) ?? candidates[0]
-  })
-
-  const previewDocument = createMemo(() => {
-    const path = previewPath()
-    const html = fileText(path)
-    if (!path || !html.trim()) return ""
-    return buildPreviewDocument(path, html, fileText)
-  })
 
   const openFile = (path: string) => {
     setSelectedPath(path)
@@ -2763,19 +3970,6 @@ function StableCodespaceWorkbench(props: {
     if (first) openFile(first)
   })
 
-  createEffect(() => {
-    if (activeView() !== "preview") return
-    const candidates = previewCandidates()
-    const path = previewPath()
-    const html = path ? fileText(path) : ""
-    untrack(() => {
-      void file.load("package.json").catch(() => {})
-      for (const candidate of candidates) void file.load(candidate).catch(() => {})
-      if (!path || !html.trim()) return
-      for (const asset of previewAssetRefs(path, html)) void file.load(asset).catch(() => {})
-    })
-  })
-
   let autosaveTimer: ReturnType<typeof setTimeout> | undefined
   createEffect(
     on(
@@ -2795,7 +3989,7 @@ function StableCodespaceWorkbench(props: {
   })
 
   return (
-    <div class="h-full min-h-0 flex flex-col overflow-hidden bg-[#0c0911] text-[#ebe7f5]">
+    <div data-vector-codespace class="h-full min-h-0 flex flex-col overflow-hidden bg-[#0c0911] text-[#ebe7f5]">
       <header class="h-[72px] shrink-0 border-b border-[rgba(255,255,255,0.08)] bg-[#15101f]">
         <div class="flex h-full items-center gap-3 px-3">
           <button
@@ -2805,9 +3999,14 @@ function StableCodespaceWorkbench(props: {
           >
             ‹
           </button>
-          <img src="/vector-logo.png" alt="" class="size-8 rounded-xl shadow-[0_0_18px_rgba(139,92,246,0.35)]" draggable={false} />
+          <img
+            src="/vector-logo.png"
+            alt=""
+            class="size-8 rounded-xl shadow-[0_0_18px_rgba(139,92,246,0.35)]"
+            draggable={false}
+          />
 
-          <nav class="mx-auto flex items-center gap-1 rounded-2xl border border-[rgba(255,255,255,0.10)] bg-[#1b1a21] p-1">
+          <nav class="mx-auto flex items-center gap-1 rounded-2xl border border-[rgba(255,255,255,0.10)] bg-[#242428] p-1">
             <button
               class="h-7 rounded-xl px-3 text-12-medium transition duration-200"
               classList={{
@@ -2821,16 +4020,6 @@ function StableCodespaceWorkbench(props: {
             <button
               class="h-7 rounded-xl px-3 text-12-medium transition duration-200"
               classList={{
-                "bg-[#6d3bd2] text-white shadow-[0_0_18px_rgba(139,92,246,0.3)]": activeView() === "preview",
-                "text-[#a9a4b5] hover:bg-white/6 hover:text-white": activeView() !== "preview",
-              }}
-              onClick={() => setActiveView("preview")}
-            >
-              Preview
-            </button>
-            <button
-              class="h-7 rounded-xl px-3 text-12-medium transition duration-200"
-              classList={{
                 "bg-[#6d3bd2] text-white shadow-[0_0_18px_rgba(139,92,246,0.3)]": activeView() === "problems",
                 "text-[#a9a4b5] hover:bg-white/6 hover:text-white": activeView() !== "problems",
               }}
@@ -2838,7 +4027,9 @@ function StableCodespaceWorkbench(props: {
             >
               Problems
               <Show when={problems().length > 0}>
-                <span class="ml-2 rounded-full bg-orange-500 px-1.5 py-0.5 text-[10px] font-semibold text-white">{problems().length}</span>
+                <span class="ml-2 rounded-full bg-orange-500 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                  {problems().length}
+                </span>
               </Show>
             </button>
           </nav>
@@ -2850,15 +4041,21 @@ function StableCodespaceWorkbench(props: {
                 "text-violet-200": dirty(),
                 "text-[#a9a4b5]": !dirty(),
               }}
-              disabled={saving() || !selectedPath()}
+              disabled={saving() || !selectedPath() || !dirty()}
               onClick={() => void saveCurrentFile()}
             >
-              {saving() ? "Saving..." : dirty() ? "Save" : "Saved"}
+              {saving() ? "Saving..." : "Save"}
             </button>
-            <button class="rounded-xl px-3 py-1.5 text-12-medium text-[#a9a4b5] transition duration-200 hover:bg-white/6 hover:text-white" onClick={copyCurrentFile}>
+            <button
+              class="rounded-xl px-3 py-1.5 text-12-medium text-[#a9a4b5] transition duration-200 hover:bg-white/6 hover:text-white"
+              onClick={copyCurrentFile}
+            >
               Copy
             </button>
-            <button class="rounded-xl px-3 py-1.5 text-12-medium text-[#a9a4b5] transition duration-200 hover:bg-white/6 hover:text-white" onClick={exportCurrentFile}>
+            <button
+              class="rounded-xl px-3 py-1.5 text-12-medium text-[#a9a4b5] transition duration-200 hover:bg-white/6 hover:text-white"
+              onClick={exportCurrentFile}
+            >
               Export
             </button>
           </div>
@@ -2866,7 +4063,7 @@ function StableCodespaceWorkbench(props: {
       </header>
 
       <main class="min-h-0 flex-1 flex overflow-hidden">
-        <aside class="w-[260px] shrink-0 border-r border-[rgba(255,255,255,0.08)] bg-[#141318]">
+        <aside class="w-[260px] shrink-0 border-r border-[rgba(255,255,255,0.08)] bg-[#1d1d1f]">
           <div class="flex h-11 items-center justify-between border-b border-[rgba(255,255,255,0.08)] px-3">
             <div class="text-12-medium uppercase tracking-[0.18em] text-[#8a8595]">Files</div>
           </div>
@@ -2887,16 +4084,22 @@ function StableCodespaceWorkbench(props: {
           </div>
         </aside>
 
-        <section class="relative min-w-0 flex-1 flex flex-col overflow-hidden bg-[#131217]">
+        <section class="relative min-w-0 flex-1 flex flex-col overflow-hidden bg-[#1d1d1f]">
           <Show
             when={selectedPath()}
             fallback={
-              <div class="flex h-full items-center justify-center bg-[#131217] px-8 text-center">
+              <div class="flex h-full items-center justify-center bg-[#1d1d1f] px-8 text-center">
                 <div class="max-w-sm">
-                  <img src="/vector-logo.png" alt="" class="mx-auto mb-5 size-14 rounded-2xl opacity-85" draggable={false} />
+                  <img
+                    src="/vector-logo.png"
+                    alt=""
+                    class="mx-auto mb-5 size-14 rounded-2xl opacity-85"
+                    draggable={false}
+                  />
                   <div class="text-19-medium text-white">Open a file to start editing.</div>
                   <div class="mt-2 text-13-regular leading-relaxed text-[#a9a4b5]">
-                    Vector Codespace is in stable editor mode: file tree, real syntax highlighting, autocomplete, local save, and preview.
+                    Vector Codespace is in stable editor mode with a file tree, syntax highlighting, autocomplete, and
+                    local save.
                   </div>
                 </div>
               </div>
@@ -2908,56 +4111,42 @@ function StableCodespaceWorkbench(props: {
                   <Switch>
                     <Match when={activeView() === "editor"}>
                       <div class="flex h-full min-h-0 flex-col overflow-hidden">
-                        <div class="flex h-12 shrink-0 items-center justify-between border-b border-[#161519] bg-[#111018] px-4">
+                        <div class="flex h-12 shrink-0 items-center justify-between border-b border-[#202023] bg-[#111018] px-4">
                           <div class="min-w-0 flex items-center gap-3">
                             <span class="size-2.5 rounded-full bg-[#9b6cff]" />
                             <span class="truncate font-mono text-14-medium text-white">{path()}</span>
-                            <span class={`rounded-xl border px-2.5 py-1 text-11-medium ${activeBadge().ring} ${activeBadge().color}`}>
+                            <span
+                              class={`rounded-xl border px-2.5 py-1 text-11-medium ${activeBadge().ring} ${activeBadge().color}`}
+                            >
                               {activeBadge().label}
                             </span>
-                            <span class="rounded-xl border border-[rgba(255,255,255,0.10)] bg-[#1b1a21] px-2.5 py-1 text-11-medium text-[#a9a4b5]">
+                            <span class="rounded-xl border border-[rgba(255,255,255,0.10)] bg-[#242428] px-2.5 py-1 text-11-medium text-[#a9a4b5]">
                               {lineCount()} lines
                             </span>
                           </div>
                           <div class="flex items-center gap-2">
-                            <span class="text-12-regular text-[#8a8595]">{dirty() ? "Unsaved changes" : "Saved locally"}</span>
-                            <button class="rounded-xl border border-[rgba(255,255,255,0.10)] bg-[#1b1a21] px-3 py-1.5 text-12-medium text-[#e2dfe9] transition duration-200 hover:bg-[#211f28]" onClick={copyCurrentFile}>
+                            <span class="text-12-regular text-[#8a8595]">
+                              {dirty() ? "Unsaved changes" : "Saved locally"}
+                            </span>
+                            <button
+                              class="rounded-xl border border-[rgba(255,255,255,0.10)] bg-[#242428] px-3 py-1.5 text-12-medium text-[#e2dfe9] transition duration-200 hover:bg-[#211f28]"
+                              onClick={copyCurrentFile}
+                            >
                               Copy
                             </button>
                           </div>
                         </div>
-                        <div class="min-h-0 flex-1 overflow-hidden bg-[#131217]">
-                          <VectorCodeEditor path={path()} value={draft()} onChange={(next) => setDrafts(path(), next)} />
+                        <div class="m-2 min-h-0 flex-1 overflow-hidden rounded-xl border border-[color:var(--vx-line)] bg-[#1d1d1f]">
+                          <MonacoCodeEditor
+                            path={path()}
+                            value={draft()}
+                            onChange={(next) => setDrafts(path(), next)}
+                          />
                         </div>
                       </div>
                     </Match>
-                    <Match when={activeView() === "preview"}>
-                      <Show
-                        when={previewDocument()}
-                        fallback={
-                          <div class="flex h-full items-center justify-center bg-[#131217] px-8 text-center">
-                            <div class="max-w-md rounded-2xl border border-[rgba(255,255,255,0.10)] bg-[#1b1a21] p-6 shadow-[0_18px_50px_rgba(0,0,0,0.28)]">
-                              <img src="/vector-logo.png" alt="" class="mx-auto mb-4 size-10 rounded-xl opacity-80" draggable={false} />
-                              <div class="text-16-medium text-white">No previewable HTML found.</div>
-                              <div class="mt-2 text-13-regular leading-relaxed text-[#a9a4b5]">
-                                Open an HTML file, or create one in this workspace, and Vector will render it here.
-                              </div>
-                            </div>
-                          </div>
-                        }
-                      >
-                        {(document) => (
-                          <iframe
-                            title="Vector Preview"
-                            sandbox="allow-scripts allow-forms allow-same-origin"
-                            srcdoc={document()}
-                            class="h-full w-full border-0 bg-white"
-                          />
-                        )}
-                      </Show>
-                    </Match>
                     <Match when={activeView() === "problems"}>
-                      <div class="h-full overflow-auto bg-[#131217] p-5">
+                      <div class="h-full overflow-auto bg-[#1d1d1f] p-5">
                         <For
                           each={problems()}
                           fallback={
@@ -2967,7 +4156,7 @@ function StableCodespaceWorkbench(props: {
                           }
                         >
                           {(problem) => (
-                            <div class="mb-3 w-full rounded-2xl border border-[rgba(255,255,255,0.10)] bg-[#161519] p-4 text-left transition duration-200 hover:border-violet-400/35">
+                            <div class="mb-3 w-full rounded-2xl border border-[rgba(255,255,255,0.10)] bg-[#202023] p-4 text-left transition duration-200 hover:border-violet-400/35">
                               <div class="flex items-center justify-between gap-3">
                                 <div class="text-13-medium text-[#edeaf3]">Line {problem.line}</div>
                                 <div
@@ -2984,7 +4173,7 @@ function StableCodespaceWorkbench(props: {
                               <div class="mt-2 text-13-regular text-[#a9a4b5]">{problem.message}</div>
                               <div class="mt-3 flex flex-wrap items-center gap-2">
                                 <button
-                                  class="rounded-full bg-[#7c3aed] px-3 py-1.5 text-12-medium text-white transition duration-200 hover:bg-[#8b5cf6]"
+                                  class="rounded-full bg-[var(--vx-purple)] px-3 py-1.5 text-12-medium text-white transition duration-200 hover:brightness-110"
                                   onClick={() => sendProblemToAgent(problem, "fix")}
                                 >
                                   Fix with AI
@@ -3021,6 +4210,714 @@ function StableCodespaceWorkbench(props: {
         </section>
       </main>
     </div>
+  )
+}
+
+const PREVIEW_URL_STORAGE_PREFIX = "vector.preview.url.v1:"
+// Lovable-style app preview: no chrome by default — Vector finds the running
+// dev server on its own and just shows the app. Manual URL and publishing
+// live behind the slim top bar.
+// 5000 deliberately excluded: macOS AirPlay Receiver listens there by default
+// and answers HTTP, so probing it produces a false-positive "dev server found".
+const PREVIEW_PROBE_PORTS = [5173, 3000, 3001, 5174, 4321, 8080, 8000, 4000, 4173, 1420]
+
+async function probePreviewUrl(candidate: string, timeoutMs = 1200) {
+  try {
+    await fetch(candidate, { mode: "no-cors", cache: "no-store", signal: AbortSignal.timeout(timeoutMs) })
+    return true
+  } catch {
+    return false
+  }
+}
+
+type PublishPhase =
+  | { phase: "idle" }
+  | { phase: "working"; target: string }
+  | { phase: "done"; url: string; target: string }
+  | { phase: "error"; error: string }
+
+function PreviewPanel(props: { sessionKey: string; contextId: string; directory?: string; onClose: () => void }) {
+  const command = useCommand()
+  const storageKey = () => `${PREVIEW_URL_STORAGE_PREFIX}${props.sessionKey}`
+  const readSavedUrl = () => {
+    try {
+      return localStorage.getItem(storageKey()) ?? ""
+    } catch {
+      return ""
+    }
+  }
+  const [url, setUrl] = createSignal("")
+  const [draftUrl, setDraftUrl] = createSignal(readSavedUrl())
+  const [canGoBack, setCanGoBack] = createSignal(false)
+  const [canGoForward, setCanGoForward] = createSignal(false)
+  const [loading, setLoading] = createSignal(false)
+  const [publish, setPublish] = createSignal<PublishPhase>({ phase: "idle" })
+  const [copiedDeployUrl, setCopiedDeployUrl] = createSignal(false)
+  let deployLinkRef: HTMLAnchorElement | undefined
+  let viewportRef: HTMLDivElement | undefined
+  let resizeObserver: ResizeObserver | undefined
+
+  const browserApi = () => globalThis.window?.api?.runBrowserAgent
+
+  const viewportBounds = () => {
+    const rect = viewportRef?.getBoundingClientRect()
+    if (!rect) return
+    const publishReserve = publish().phase === "idle" ? 0 : 150
+    return { x: rect.x, y: rect.y, width: rect.width, height: Math.max(0, rect.height - publishReserve) }
+  }
+
+  const syncBrowserBounds = () => {
+    const bounds = viewportBounds()
+    const run = browserApi()
+    if (!bounds || !run || !url()) return
+    void run({ contextId: props.contextId, command: "setBounds", bounds }).catch(() => undefined)
+  }
+
+  const runBrowserCommand = async (
+    input: Omit<import("@/features/browser-agent/types").BrowserAgentInput, "contextId">,
+  ) => {
+    const run = browserApi()
+    if (!run) return undefined
+    const report = await run({ ...input, contextId: props.contextId })
+    if (report.finalUrl) {
+      setUrl(report.finalUrl)
+      setDraftUrl(report.finalUrl)
+    }
+    return report
+  }
+
+  const applyUrl = (next: string, allowExternal = false) => {
+    setLoading(true)
+    setUrl(next)
+    setDraftUrl(next)
+    try {
+      localStorage.setItem(storageKey(), next)
+    } catch {
+      // Local convenience only.
+    }
+    requestAnimationFrame(syncBrowserBounds)
+    void runBrowserCommand({ command: "openUrl", url: next, allowExternal })
+      .catch(() => undefined)
+      .finally(() => setLoading(false))
+  }
+
+  // Auto-detect the running app: saved URL first, then common dev-server
+  // ports. Keeps polling quietly until something is up.
+  const ownPort = globalThis.location?.port ?? ""
+  const detect = async () => {
+    if (url()) return
+    const saved = readSavedUrl()
+    // A saved URL pointing at Vector's own origin (possible in the web build)
+    // would preview the workspace inside itself — ignore it and re-detect.
+    const savedIsSelf = (() => {
+      try {
+        return Boolean(saved) && new URL(saved).origin === globalThis.location?.origin
+      } catch {
+        return false
+      }
+    })()
+    if (saved && !savedIsSelf && (await probePreviewUrl(saved))) {
+      if (!url()) applyUrl(saved)
+      return
+    }
+    const candidates = PREVIEW_PROBE_PORTS.filter((port) => String(port) !== ownPort).map(
+      (port) => `http://localhost:${port}`,
+    )
+    const results = await Promise.all(
+      candidates.map(async (candidate) => ({ candidate, ok: await probePreviewUrl(candidate) })),
+    )
+    if (url()) return
+    const hit = selectUnambiguousPreviewUrl(results)
+    if (hit) applyUrl(hit)
+  }
+
+  onMount(() => {
+    setOnboardingFlag("preview")
+    const run = browserApi()
+    if (!run) return
+    void run({ contextId: props.contextId, command: "attach" })
+      .then(() => detect())
+      .catch(() => undefined)
+    resizeObserver = new ResizeObserver(() => syncBrowserBounds())
+    if (viewportRef) resizeObserver.observe(viewportRef)
+    const removePageListener = globalThis.window?.api?.onBrowserAgentPageEvent?.((event) => {
+      if (event.contextId !== props.contextId) return
+      setCanGoBack(event.canGoBack)
+      setCanGoForward(event.canGoForward)
+      setLoading(event.loading)
+      if (event.url) {
+        setUrl(event.url)
+        setDraftUrl(event.url)
+        try {
+          localStorage.setItem(storageKey(), event.url)
+        } catch {
+          // Local convenience only.
+        }
+      }
+      requestAnimationFrame(syncBrowserBounds)
+    })
+    const removeZoomListener = globalThis.window?.api?.onZoomFactorChanged?.(() => syncBrowserBounds())
+    const detectionTimer = setInterval(() => void detect(), 2_500)
+    onCleanup(() => {
+      clearInterval(detectionTimer)
+      resizeObserver?.disconnect()
+      removePageListener?.()
+      removeZoomListener?.()
+      void run({ contextId: props.contextId, command: "detach" }).catch(() => undefined)
+    })
+  })
+
+  createEffect(() => {
+    publish().phase
+    if (!url()) return
+    requestAnimationFrame(syncBrowserBounds)
+  })
+
+  const publishApi = () =>
+    (
+      globalThis.window?.api as
+        | (Record<string, unknown> & {
+            publish?: {
+              targets: () => Promise<
+                { id: "vector-cloud" | "vercel" | "netlify"; label: string; loginHint: string; available: boolean }[]
+              >
+              run: (input: {
+                projectPath: string
+                target: "vector-cloud" | "vercel" | "netlify"
+                production?: boolean
+              }) => Promise<{
+                ok: boolean
+                url?: string
+                error?: string
+                target: string
+              }>
+            }
+          })
+        | undefined
+    )?.publish
+
+  const runPublish = async () => {
+    const api = publishApi()
+    if (!api) {
+      setPublish({ phase: "error", error: "Publishing activates once Vector connects to this workspace." })
+      return
+    }
+    if (!props.directory) {
+      setPublish({ phase: "error", error: "Open a project before publishing." })
+      return
+    }
+    const targets = await api.targets().catch(() => [])
+    const target = targets.find((item) => item.available)
+    if (!target) {
+      setPublish({
+        phase: "error",
+        error: "No deploy tool found. Install the Vercel or Netlify CLI, log in once, then publish.",
+      })
+      return
+    }
+    setPublish({ phase: "working", target: target.label })
+    const result = await api
+      .run({ projectPath: props.directory, target: target.id })
+      .catch((error) => ({
+        ok: false as const,
+        error: error instanceof Error ? error.message : String(error),
+        target: target.id,
+      }))
+    if (result.ok && result.url) setPublish({ phase: "done", url: result.url, target: target.label })
+    else setPublish({ phase: "error", error: result.error ?? "Publish failed." })
+  }
+
+  const selectDeployLinkText = () => {
+    if (!deployLinkRef) return
+    const selection = globalThis.getSelection?.()
+    if (!selection) return
+    const range = document.createRange()
+    range.selectNodeContents(deployLinkRef)
+    selection.removeAllRanges()
+    selection.addRange(range)
+  }
+
+  const copyDeployUrl = async () => {
+    const value = (publish() as { url?: string }).url ?? ""
+    if (!value) return
+    const writeText = navigator.clipboard?.writeText?.bind(navigator.clipboard)
+    if (!writeText) {
+      selectDeployLinkText()
+      return
+    }
+    try {
+      await writeText(value)
+      setCopiedDeployUrl(true)
+      setTimeout(() => setCopiedDeployUrl(false), 1500)
+    } catch {
+      selectDeployLinkText()
+    }
+  }
+
+  return (
+    <div
+      data-vector-browser-panel
+      class="flex h-full min-h-0 flex-col bg-[color-mix(in_srgb,var(--vx-stage,#242428)_88%,transparent)] text-white backdrop-blur-xl"
+    >
+      <div class="flex h-11 shrink-0 items-center gap-1.5 border-b border-[color:var(--vx-line)] bg-[color-mix(in_srgb,var(--vx-surface,#232228)_94%,transparent)] px-2">
+        <button
+          data-vector-browser-forward
+          type="button"
+          aria-label="Go back"
+          title="Go back"
+          disabled={!canGoBack()}
+          class="grid size-7 shrink-0 place-items-center rounded-[8px] text-white/55 transition hover:bg-white/[0.07] hover:text-white disabled:pointer-events-none disabled:opacity-25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(147,116,236,0.55)]"
+          onClick={() => void runBrowserCommand({ command: "goBack" }).catch(() => undefined)}
+        >
+          <svg viewBox="0 0 16 16" class="size-3.5" aria-hidden="true">
+            <path d="m9.75 3.5-4.5 4.5 4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          aria-label="Go forward"
+          title="Go forward"
+          disabled={!canGoForward()}
+          class="grid size-7 shrink-0 place-items-center rounded-[8px] text-white/55 transition hover:bg-white/[0.07] hover:text-white disabled:pointer-events-none disabled:opacity-25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(147,116,236,0.55)]"
+          onClick={() => void runBrowserCommand({ command: "goForward" }).catch(() => undefined)}
+        >
+          <svg viewBox="0 0 16 16" class="size-3.5" aria-hidden="true">
+            <path d="m6.25 3.5 4.5 4.5-4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          aria-label="Reload page"
+          title="Reload page"
+          disabled={!url()}
+          class="grid size-7 shrink-0 place-items-center rounded-[8px] text-white/55 transition hover:bg-white/[0.07] hover:text-white disabled:pointer-events-none disabled:opacity-25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(147,116,236,0.55)]"
+          onClick={() => void runBrowserCommand({ command: "reload" }).catch(() => undefined)}
+        >
+          <svg viewBox="0 0 16 16" class={`size-3.5 ${loading() ? "motion-safe:animate-spin" : ""}`} aria-hidden="true">
+            <path d="M12.5 5.25V2.8m0 0h-2.45m2.45 0-1.3 1.3A4.75 4.75 0 1 0 12.5 8" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </button>
+
+        <form
+          class="mx-1 flex h-8 min-w-0 flex-1 items-center rounded-[9px] border border-[color:var(--vx-line)] bg-black/25 px-2.5 transition focus-within:border-[rgba(147,116,236,0.5)] focus-within:bg-black/35 focus-within:ring-2 focus-within:ring-[rgba(147,116,236,0.16)]"
+          onSubmit={(event) => {
+            event.preventDefault()
+            applyUrl(resolveBrowserAddress(draftUrl()), true)
+            event.currentTarget.querySelector("input")?.blur()
+          }}
+        >
+          <span class={`mr-2 size-1.5 shrink-0 rounded-full ${url() ? "bg-emerald-400" : "motion-safe:animate-pulse bg-white/30"}`} />
+          <input
+            type="text"
+            aria-label="Browser address"
+            class="min-w-0 flex-1 bg-transparent text-[12px] text-white/80 outline-none placeholder:text-white/30"
+            value={draftUrl()}
+            placeholder="Search Google or type a URL"
+            spellcheck={false}
+            autocomplete="off"
+            onFocus={(event) => event.currentTarget.select()}
+            onInput={(event) => setDraftUrl(event.currentTarget.value)}
+            onKeyDown={(event) => {
+              if (event.key !== "Escape") return
+              setDraftUrl(url())
+              event.currentTarget.blur()
+            }}
+          />
+          <button
+            type="submit"
+            aria-label="Open URL"
+            title="Open URL"
+            class="ml-1 grid size-6 shrink-0 place-items-center rounded-[7px] text-white/35 transition hover:bg-white/[0.07] hover:text-white/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(147,116,236,0.55)]"
+          >
+            <svg viewBox="0 0 16 16" class="size-3.5" aria-hidden="true">
+              <path d="M3.5 8h9M9 4.5 12.5 8 9 11.5" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          </button>
+        </form>
+
+        <div data-vector-browser-secondary class="flex shrink-0 items-center gap-1">
+          <button
+            type="button"
+            aria-label="Toggle Vector sidebar"
+            title="Toggle Vector sidebar"
+            class="grid size-7 place-items-center rounded-[8px] text-white/50 transition hover:bg-white/[0.07] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(147,116,236,0.55)]"
+            onClick={() => command.trigger("vector.navigation.toggle")}
+          >
+            <svg viewBox="0 0 16 16" class="size-3.5" aria-hidden="true">
+              <rect x="2.25" y="2.5" width="11.5" height="11" rx="1.75" fill="none" stroke="currentColor" stroke-width="1.15" />
+              <path d="M6 2.75v10.5" fill="none" stroke="currentColor" stroke-width="1.15" />
+            </svg>
+          </button>
+          <Show when={url()}>
+            <button
+              type="button"
+              aria-label="Open in system browser"
+              title="Open in system browser"
+              class="grid size-7 place-items-center rounded-[8px] text-white/50 transition hover:bg-white/[0.07] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(147,116,236,0.55)]"
+              onClick={() => {
+                const target = url()
+                if (!target) return
+                const desktop = (globalThis.window as unknown as { api?: { openLink?: (value: string) => void } })?.api
+                  ?.openLink
+                if (desktop) {
+                  desktop(target)
+                  return
+                }
+                const opened = globalThis.window?.open(target, "_blank")
+                if (opened) {
+                  opened.opener = null
+                  return
+                }
+                showToast({ title: "Could not open browser", description: "Allow pop-ups and try again." })
+              }}
+            >
+              <svg viewBox="0 0 16 16" class="size-3.5" aria-hidden="true">
+                <path d="M6.5 3.5H3.75A1.25 1.25 0 0 0 2.5 4.75v7.5a1.25 1.25 0 0 0 1.25 1.25h7.5a1.25 1.25 0 0 0 1.25-1.25V9.5M9.5 2.75h3.75V6.5M13 3 7.75 8.25" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+            </button>
+          </Show>
+          <button
+            type="button"
+            class="h-7 rounded-full bg-[var(--vx-purple)] px-3.5 text-[12px] font-semibold text-white transition hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(147,116,236,0.55)] focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--vx-stage,#242428)] disabled:opacity-50"
+            disabled={publish().phase === "working"}
+            aria-busy={publish().phase === "working"}
+            onClick={() => void runPublish()}
+          >
+            {publish().phase === "working" ? "Publishing…" : "Publish"}
+          </button>
+        </div>
+      </div>
+
+      <div class="relative flex min-h-0 flex-1 bg-[var(--vx-stage,#242428)]">
+        <div ref={viewportRef} class="relative min-w-0 flex-1 overflow-hidden bg-[#242428]">
+          <Show when={!url()}>
+            <div class="flex h-full flex-col items-center justify-center gap-3 px-8 text-center">
+              <img
+                src="/vector-logo.png"
+                alt=""
+                class="size-11 motion-safe:animate-pulse rounded-[12px] object-cover opacity-80"
+                draggable={false}
+              />
+              <div class="text-[15px] font-semibold text-white">Waiting for your app</div>
+              <div class="max-w-sm text-[12.5px] leading-6 text-white/50">
+                Start your app and Vector will attach its controlled browser here automatically.
+              </div>
+              <Show when={!browserApi()}>
+                <div class="max-w-sm text-[12px] leading-5 text-amber-200/70">
+                  The controlled browser is available in the Vector desktop app.
+                </div>
+              </Show>
+            </div>
+          </Show>
+        </div>
+
+        <Show when={publish().phase === "done" || publish().phase === "error" || publish().phase === "working"}>
+          <div
+            class="absolute inset-x-0 bottom-0 z-20 border-t border-[color:var(--vx-line)] bg-[color-mix(in_srgb,var(--vx-surface,#232228)_92%,transparent)] p-4 shadow-[0_-24px_70px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+            aria-live="polite"
+          >
+            <Show when={publish().phase !== "working"}>
+              <button
+                type="button"
+                class="absolute right-3 top-3 grid size-6 place-items-center rounded-[7px] text-white/40 transition hover:bg-white/[0.07] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(147,116,236,0.55)]"
+                aria-label="Dismiss"
+                onClick={() => setPublish({ phase: "idle" })}
+              >
+                <svg viewBox="0 0 16 16" class="size-3.5" aria-hidden="true">
+                  <path
+                    d="m4.5 4.5 7 7M11.5 4.5l-7 7"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.35"
+                    stroke-linecap="round"
+                  />
+                </svg>
+              </button>
+            </Show>
+            <Show
+              when={publish().phase === "working"}
+              fallback={
+                <Show
+                  when={publish().phase === "done"}
+                  fallback={
+                    <>
+                      <div class="text-[13px] font-semibold text-rose-300">Couldn't publish</div>
+                      <p class="mt-1 max-w-[90%] text-[12.5px] leading-5 text-white/65">
+                        {(publish() as { error?: string }).error}
+                      </p>
+                    </>
+                  }
+                >
+                  <div class="flex items-center gap-2">
+                    <span class="inline-block size-2 rounded-full bg-emerald-400" />
+                    <span class="text-[13px] font-semibold text-white">
+                      Your app is live — share this link with anyone
+                    </span>
+                  </div>
+                  <div class="mt-2.5 flex items-center gap-2">
+                    <a
+                      ref={deployLinkRef}
+                      href={(publish() as { url?: string }).url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      class="min-w-0 flex-1 truncate rounded-[10px] border border-[var(--vx-purple)]/40 bg-[rgba(147,116,236,0.12)] px-3 py-2 font-mono text-[12.5px] text-[var(--vx-purple-bright)] transition hover:bg-[rgba(147,116,236,0.2)]"
+                    >
+                      {(publish() as { url?: string }).url}
+                    </a>
+                    <button
+                      type="button"
+                      class="h-9 shrink-0 rounded-full bg-[var(--vx-purple)] px-3.5 text-[12.5px] font-semibold text-white transition hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(147,116,236,0.55)]"
+                      onClick={() => void copyDeployUrl()}
+                    >
+                      {copiedDeployUrl() ? "Copied" : "Copy"}
+                    </button>
+                    <button
+                      type="button"
+                      class="flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-[color:var(--vx-line)] px-3 text-[12.5px] font-semibold text-white/75 transition hover:bg-white/[0.07] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(147,116,236,0.55)]"
+                      onClick={() =>
+                        globalThis.window?.open((publish() as { url?: string }).url, "_blank", "noopener,noreferrer")
+                      }
+                    >
+                      <svg viewBox="0 0 16 16" class="size-3.5" aria-hidden="true">
+                        <path
+                          d="M6.5 3.5H3.75A1.25 1.25 0 0 0 2.5 4.75v7.5a1.25 1.25 0 0 0 1.25 1.25h7.5a1.25 1.25 0 0 0 1.25-1.25V9.5M9.5 2.75h3.75V6.5M13 3 7.75 8.25"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="1.25"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                        />
+                      </svg>
+                      Open
+                    </button>
+                  </div>
+                  <p class="mt-2 text-[11px] text-white/45">
+                    Carries a small "Deployed with Vector" badge linking back to vectordev.ai.
+                  </p>
+                </Show>
+              }
+            >
+              <div class="flex items-center gap-3">
+                <span class="size-4 shrink-0 rounded-full border-2 border-[color:var(--vx-line)] border-t-[var(--vx-purple-bright)] motion-safe:animate-spin" />
+                <div>
+                  <div class="text-[13px] font-semibold text-white">
+                    Publishing to {(publish() as { target: string }).target}…
+                  </div>
+                  <div class="mt-0.5 text-[12px] text-white/50">
+                    This can take a minute or two for the first deploy.
+                  </div>
+                </div>
+              </div>
+            </Show>
+          </div>
+        </Show>
+      </div>
+    </div>
+  )
+}
+
+// Code Archaeology — the checkpoints this task has made, from the first to the
+// latest. Read-only history; restoring a checkpoint is the one mutating action,
+// and it writes real file content back via the SDK.
+function CodeArchaeologyPanel(props: {
+  open: boolean
+  onClose: () => void
+  checkpoints: AiChangeCheckpoint[]
+  restoringCheckpoint: string | undefined
+  onRestoreCheckpoint: (checkpoint: AiChangeCheckpoint) => void
+  onUpdateCheckpoint: (id: string, patch: { name?: string; note?: string }) => void
+  onOpenDiff: (path: string) => void
+}) {
+  // Oldest first — the literal ask: the task's checkpoint history from the
+  // very first one made to the latest. Sequential "Checkpoint N" names follow
+  // this order, so the numbering is stable as new checkpoints append.
+  const chronological = createMemo(() => [...props.checkpoints].sort((a, b) => a.createdAt - b.createdAt))
+
+  return (
+    <Show when={props.open}>
+      <div
+        class="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm"
+        onClick={(e) => e.target === e.currentTarget && props.onClose()}
+      >
+        <div class="flex h-[min(720px,88vh)] w-[min(760px,92vw)] flex-col overflow-hidden rounded-2xl border border-[color:var(--vx-line)] bg-[#1d1d1f] shadow-2xl">
+          <div class="flex shrink-0 items-center gap-3 border-b border-[color:var(--vx-line)] px-4 py-3">
+            <div class="flex size-8 items-center justify-center rounded-lg bg-[#9374ec]/15 text-[#c4a6ff]">
+              <svg viewBox="0 0 16 16" class="size-4" aria-hidden="true">
+                <path
+                  d="M2.75 8A5.25 5.25 0 1 1 8 13.25M2.75 8V4.5M2.75 8H6.25"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.25"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+                <path
+                  d="M8 5.25V8l2 1.25"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.25"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </div>
+            <div class="min-w-0 flex-1">
+              <div class="text-[14px] font-semibold text-white">Code Archaeology</div>
+              <div class="truncate text-[11.5px] text-white/40">
+                Every checkpoint this task has made, from the first to the latest.
+              </div>
+            </div>
+            <button
+              type="button"
+              class="grid size-7 place-items-center rounded-md text-white/40 hover:bg-white/[0.06] hover:text-white"
+              aria-label="Close"
+              onClick={() => props.onClose()}
+            >
+              <svg viewBox="0 0 16 16" class="size-3.5" aria-hidden="true">
+                <path d="m4 4 8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+              </svg>
+            </button>
+          </div>
+
+          <div class="flex-1 overflow-y-auto p-3">
+            <Show
+              when={chronological().length}
+              fallback={
+                <p class="px-2 py-10 text-center text-[13px] text-white/40">
+                  No checkpoints yet. Vector captures one automatically whenever an agent edits your files.
+                </p>
+              }
+            >
+              <div class="flex flex-col gap-2">
+                <For each={chronological()}>
+                  {(checkpoint, index) => {
+                    const [renaming, setRenaming] = createSignal(false)
+                    const [nameDraft, setNameDraft] = createSignal("")
+                    let nameInput: HTMLInputElement | undefined
+                    const displayName = () => checkpoint.name?.trim() || `Checkpoint ${index() + 1}`
+                    const startRename = () => {
+                      setNameDraft(displayName())
+                      setRenaming(true)
+                      requestAnimationFrame(() => {
+                        nameInput?.focus()
+                        nameInput?.select()
+                      })
+                    }
+                    const commitRename = () => {
+                      if (!renaming()) return
+                      setRenaming(false)
+                      const next = nameDraft().trim()
+                      if (next === displayName()) return
+                      props.onUpdateCheckpoint(checkpoint.id, { name: next })
+                    }
+                    const commitNote = (value: string) => {
+                      if (value === (checkpoint.note ?? "")) return
+                      props.onUpdateCheckpoint(checkpoint.id, { note: value })
+                    }
+
+                    return (
+                      <div class="flex flex-col gap-1.5 rounded-lg border border-[color:var(--vx-line)] bg-white/[0.02] px-3 py-2.5">
+                        <div class="flex items-center gap-2">
+                          <span class="grid size-5 shrink-0 place-items-center rounded-full bg-[#9374ec]/15 text-[10px] text-[#c4a6ff]">
+                            {index() + 1}
+                          </span>
+                          <Show
+                            when={renaming()}
+                            fallback={
+                              <button
+                                type="button"
+                                class="group/name flex min-w-0 flex-1 items-center gap-1.5 text-left"
+                                title="Rename checkpoint"
+                                onClick={startRename}
+                              >
+                                <span class="min-w-0 truncate text-[13px] font-medium text-white/85 group-hover/name:text-white">
+                                  {displayName()}
+                                </span>
+                                <svg
+                                  viewBox="0 0 16 16"
+                                  class="size-3 shrink-0 text-white/25 transition group-hover/name:text-[#c4a6ff]"
+                                  aria-hidden="true"
+                                >
+                                  <path
+                                    d="m9.9 3.3 2.8 2.8L5.6 13.2l-3.1.3.3-3.1 7.1-7.1Zm1.4-1.4 1.1-1.1 2.8 2.8-1.1 1.1-2.8-2.8Z"
+                                    fill="currentColor"
+                                  />
+                                </svg>
+                              </button>
+                            }
+                          >
+                            <input
+                              ref={nameInput}
+                              value={nameDraft()}
+                              class="h-6 min-w-0 flex-1 rounded-md border border-[#9374ec]/50 bg-black/30 px-1.5 text-[13px] font-medium text-white outline-none focus:border-[#ad95f5]"
+                              aria-label="Checkpoint name"
+                              onInput={(event) => setNameDraft(event.currentTarget.value)}
+                              onKeyDown={(event) => {
+                                event.stopPropagation()
+                                if (event.key === "Enter") {
+                                  event.preventDefault()
+                                  commitRename()
+                                }
+                                if (event.key === "Escape") {
+                                  event.preventDefault()
+                                  setRenaming(false)
+                                }
+                              }}
+                              onBlur={commitRename}
+                            />
+                          </Show>
+                          <div class="shrink-0 text-[10.5px] text-white/35">
+                            {formatCheckpointTime(checkpoint.createdAt)}
+                          </div>
+                        </div>
+                        <div class="pl-7 text-[10.5px] text-white/35">
+                          {checkpoint.files.length} {checkpoint.files.length === 1 ? "file" : "files"} captured
+                          automatically after AI edits
+                        </div>
+                        <div class="pl-7">
+                          <textarea
+                            value={checkpoint.note ?? ""}
+                            rows={2}
+                            placeholder="Write documentation for this checkpoint…"
+                            class="w-full resize-y rounded-md border border-[color:var(--vx-line)] bg-black/25 px-2 py-1.5 text-[12px] leading-5 text-white/75 outline-none transition placeholder:text-white/25 focus:border-[#9374ec]/60 focus:text-white/90"
+                            aria-label="Checkpoint documentation"
+                            onKeyDown={(event) => event.stopPropagation()}
+                            onChange={(event) => commitNote(event.currentTarget.value)}
+                          />
+                        </div>
+                        <div class="flex items-center justify-between gap-2 pl-7">
+                          <div class="flex flex-wrap gap-1">
+                            <For each={checkpoint.files}>
+                              {(path) => (
+                                <button
+                                  type="button"
+                                  class="rounded border border-[color:var(--vx-line)] bg-white/[0.03] px-1.5 py-0.5 text-[10.5px] text-white/55 hover:text-white"
+                                  onClick={() => props.onOpenDiff(path)}
+                                >
+                                  {path.split("/").at(-1)}
+                                </button>
+                              )}
+                            </For>
+                          </div>
+                          <button
+                            type="button"
+                            class="shrink-0 rounded-md border border-[color:var(--vx-line)] px-2 py-1 text-[11px] text-white/70 transition hover:bg-white/[0.06] hover:text-white disabled:opacity-40"
+                            disabled={props.restoringCheckpoint === checkpoint.id}
+                            onClick={() => props.onRestoreCheckpoint(checkpoint)}
+                          >
+                            {props.restoringCheckpoint === checkpoint.id ? "Restoring…" : "Restore"}
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  }}
+                </For>
+              </div>
+            </Show>
+          </div>
+        </div>
+      </div>
+    </Show>
   )
 }
 
@@ -3072,63 +4969,219 @@ export function SessionSidePanel(props: {
 
   const diffs = createMemo(() => props.diffs().filter(renderDiff))
   const diffFiles = createMemo(() => diffs().map((d) => d.file))
-  const aiChangeSignature = createMemo(() => diffFiles().join("\u0000"))
+  const aiChangeSignature = createMemo(() => {
+    const source = JSON.stringify(diffs())
+    if (!source || source === "[]") return ""
+    let hash = 2166136261
+    for (let index = 0; index < source.length; index++) {
+      hash = Math.imul(hash ^ source.charCodeAt(index), 16777619)
+    }
+    return (hash >>> 0).toString(36)
+  })
+  const checkpointSessionStatus = createMemo(() => {
+    const id = params.id
+    if (!id) return undefined
+    return sync().data.session_status[id]?.type
+  })
   const [archaeologyOpen, setArchaeologyOpen] = createSignal(false)
-  const [archaeologyTab, setArchaeologyTab] = createSignal<"timeline" | "review" | "checkpoints" | "health">("timeline")
   const [checkpointRefresh, setCheckpointRefresh] = createSignal(0)
+  const [timelineRefresh, setTimelineRefresh] = createSignal(0)
+  const [timelineFilter, setTimelineFilter] = createSignal<TimelineFilter>("all")
+  const [timelineSearch, setTimelineSearch] = createSignal("")
+  const [expandedTimelineEvents, setExpandedTimelineEvents] = createSignal<Record<string, boolean>>({})
   const [restoringCheckpoint, setRestoringCheckpoint] = createSignal<string | undefined>()
   const [projectReport, setProjectReport] = createSignal<VectorLocalReport | undefined>()
   const [projectReportLoading, setProjectReportLoading] = createSignal(false)
+  const [skillMode, setSkillMode] = createSignal<SkillMode>(readSkillModePreference())
+  createEffect(() => {
+    try {
+      localStorage.setItem(SKILL_MODE_KEY, skillMode())
+    } catch {
+      // Local preference only.
+    }
+  })
   const aiCheckpoints = createMemo(() => {
     checkpointRefresh()
     return loadAiChangeCheckpoints(sessionKey())
   })
-  const engineeringTimeline = createMemo<EngineeringTimelineEntry[]>(() => {
-    const checkpoints = aiCheckpoints()
-    const checkpointTimeByFile = new Map<string, number>()
-    for (const checkpoint of checkpoints) {
-      for (const path of checkpoint.files) {
-        const previous = checkpointTimeByFile.get(path) ?? 0
-        if (checkpoint.createdAt > previous) checkpointTimeByFile.set(path, checkpoint.createdAt)
-      }
-    }
-
-    const reviewEntries = diffs().map((diff) => {
+  const storedEngineeringTimeline = createMemo(() => {
+    timelineRefresh()
+    return getEngineeringEvents(sessionKey())
+  })
+  const diffTimelineEvents = createMemo<EngineeringTimelineEvent[]>(() =>
+    diffs().map((diff) => {
       const risk = estimateDiffRisk(diff)
       const additions = diff.additions ?? 0
       const deletions = diff.deletions ?? 0
+      const status: EngineeringEventStatus = risk === "High" ? "warning" : "success"
       return {
         id: `review:${diff.file}:${diff.status}:${additions}:${deletions}`,
-        createdAt: checkpointTimeByFile.get(diff.file) ?? 0,
-        timeLabel: checkpointTimeByFile.has(diff.file) ? undefined : "Pending review",
-        kind: "edit" as const,
+        timestamp: Date.now(),
+        type: "file",
+        status,
         title: `${diffActionLabel(diff)} · ${fileBasename(diff.file)}`,
-        detail: `${diff.file} has ${additions} added and ${deletions} removed line${additions + deletions === 1 ? "" : "s"}. Risk: ${risk}.`,
+        summary: `${diff.file} has ${additions} added and ${deletions} removed line${additions + deletions === 1 ? "" : "s"}.`,
+        details: [`Diff status: ${diff.status}`, `Risk level: ${risk}`, `Pending review in the changed-file panel.`],
         files: [diff.file],
-        risk,
-        additions,
-        deletions,
-      } satisfies EngineeringTimelineEntry
-    })
-
-    const checkpointEntries = checkpoints.map((checkpoint) => {
-      return {
-        id: `checkpoint:${checkpoint.id}`,
-        createdAt: checkpoint.createdAt,
-        kind: "checkpoint" as const,
-        title: checkpoint.title,
-        detail: checkpoint.documentation || createAiCheckpointDocumentation(checkpoint.files),
-        files: checkpoint.files,
-        risk: checkpoint.files.length > 4 ? "Medium" : "Low",
-      } satisfies EngineeringTimelineEntry
-    })
-
-    return [...reviewEntries, ...checkpointEntries].sort((a, b) => {
-      const aTime = a.createdAt || Number.MAX_SAFE_INTEGER
-      const bTime = b.createdAt || Number.MAX_SAFE_INTEGER
-      return bTime - aTime
+        source: "Review",
+      } satisfies EngineeringTimelineEvent
+    }),
+  )
+  const checkpointTimelineEvents = createMemo<EngineeringTimelineEvent[]>(() =>
+    aiCheckpoints().map(
+      (checkpoint) =>
+        ({
+          id: `checkpoint:${checkpoint.id}`,
+          timestamp: checkpoint.createdAt,
+          type: "checkpoint",
+          status: "success",
+          title: checkpoint.name?.trim() || checkpoint.title,
+          summary: checkpoint.documentation || createAiCheckpointDocumentation(checkpoint.files),
+          details: checkpoint.files.length
+            ? [`Captured ${checkpoint.files.length} file${checkpoint.files.length === 1 ? "" : "s"}.`]
+            : undefined,
+          files: checkpoint.files,
+          checkpointId: checkpoint.id,
+          source: "Checkpoint",
+        }) satisfies EngineeringTimelineEvent,
+    ),
+  )
+  const riskTimelineEvents = createMemo<EngineeringTimelineEvent[]>(() => {
+    const report = projectReport()
+    if (!report) return []
+    return report.problems.map((problem, index) => ({
+      id: `risk:${report.scannedAt}:${index}:${problem.path}:${problem.message}`,
+      timestamp: report.scannedAt,
+      type: problem.severity === "error" ? "error" : "review",
+      status: problem.severity === "error" ? "failed" : problem.severity === "warning" ? "warning" : "success",
+      title: `${problem.severity === "error" ? "Error" : problem.severity === "warning" ? "Warning" : "Info"} · ${fileBasename(problem.path)}`,
+      summary: problem.message,
+      files: [problem.path],
+      source: "Project Doctor",
+    }))
+  })
+  const engineeringTimeline = createMemo<EngineeringTimelineEvent[]>(() => {
+    const byId = new Map<string, EngineeringTimelineEvent>()
+    for (const event of storedEngineeringTimeline()) byId.set(event.id, event)
+    for (const event of diffTimelineEvents()) byId.set(event.id, event)
+    for (const event of checkpointTimelineEvents()) byId.set(event.id, event)
+    for (const event of riskTimelineEvents()) byId.set(event.id, event)
+    return [...byId.values()].sort((a, b) => b.timestamp - a.timestamp)
+  })
+  const filteredEngineeringTimeline = createMemo(() => {
+    const query = timelineSearch().trim().toLowerCase()
+    return engineeringTimeline().filter((event) => {
+      const filter = timelineFilter()
+      const matchesFilter =
+        filter === "all" ||
+        (filter === "ai" && (event.type === "ai" || event.type === "decision")) ||
+        (filter === "files" && (event.type === "file" || event.type === "review")) ||
+        (filter === "terminal" && (event.type === "terminal" || event.type === "build")) ||
+        (filter === "browser" && event.type === "browser") ||
+        (filter === "checkpoints" && event.type === "checkpoint") ||
+        (filter === "errors" && (event.type === "error" || event.status === "failed" || event.status === "warning"))
+      if (!matchesFilter) return false
+      if (!query) return true
+      return [
+        event.title,
+        event.summary,
+        event.source,
+        event.command,
+        event.output,
+        event.browserAction,
+        ...(event.details ?? []),
+        ...(event.files ?? []),
+      ]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(query))
     })
   })
+  const projectDecisionEvents = createMemo<EngineeringTimelineEvent[]>(() => {
+    const report = projectReport()
+    const explicit = engineeringTimeline().filter((event) => event.type === "decision")
+    if (!report) return explicit
+    return [
+      {
+        id: `decision:memory:${report.scannedAt}`,
+        timestamp: report.scannedAt,
+        type: "decision",
+        title: "Project memory summary",
+        summary: report.memory.summary,
+        status: "success",
+        details: report.memory.nextSteps,
+        files: report.memory.importantFiles,
+        source: "Project Doctor",
+      },
+      ...explicit,
+    ]
+  })
+  const taskInbox = createMemo(() =>
+    engineeringTimeline()
+      .filter(
+        (event) =>
+          event.type === "ai" ||
+          event.type === "file" ||
+          event.type === "review" ||
+          event.type === "browser" ||
+          event.type === "terminal" ||
+          event.type === "build",
+      )
+      .slice(0, 18)
+      .map((event) => ({
+        id: event.id,
+        title: event.title,
+        summary: event.summary,
+        status:
+          event.status === "pending"
+            ? "planning"
+            : event.status === "running"
+              ? "editing"
+              : event.status === "failed" || event.status === "warning"
+                ? "reviewing"
+                : "done",
+        source: event.source ?? timelineTypeLabel(event.type),
+        timestamp: event.timestamp,
+      })),
+  )
+  const copyOneClickRepairContext = async () => {
+    const report = projectReport()
+    const context = [
+      "Vector one-click repair context",
+      report?.problems.length ? "Problems:" : "Problems: none detected by local scan.",
+      ...(report?.problems
+        .slice(0, 8)
+        .map((problem) => `- [${problem.severity}] ${problem.path}: ${problem.message}`) ?? []),
+      diffs().length ? "Pending changed files:" : "Pending changed files: none.",
+      ...diffs()
+        .slice(0, 8)
+        .map((diff) => `- ${diff.file} (+${diff.additions ?? 0}/-${diff.deletions ?? 0})`),
+      report?.runCommands.length
+        ? `Run command candidates: ${report.runCommands.join(", ")}`
+        : "Run command candidates: none detected.",
+    ].join("\n")
+
+    try {
+      await navigator.clipboard.writeText(context)
+      logEngineeringEvent(sessionKey(), {
+        type: "review",
+        status: "success",
+        title: "Prepared one-click repair context",
+        summary: "Copied local errors, pending files, and run commands for a focused repair prompt.",
+        details: context.split("\n").slice(1, 10),
+        source: "Review tools",
+      })
+      showToast({
+        title: "Repair context copied",
+        description: "Paste it into Vector Agent or a focused AI repair request.",
+      })
+    } catch {
+      showToast({
+        variant: "error",
+        title: "Could not copy repair context",
+        description: "Clipboard access was not available.",
+      })
+    }
+  }
   const kinds = createMemo(() => {
     const merge = (a: "add" | "del" | "mix" | undefined, b: "add" | "del" | "mix") => {
       if (!a) return b
@@ -3157,15 +5210,17 @@ export function SessionSidePanel(props: {
 
   createEffect(
     on(
-      aiChangeSignature,
-      (signature) => {
+      () => [aiChangeSignature(), checkpointSessionStatus()] as const,
+      ([signature, sessionStatus]) => {
         if (!signature) return
-        const seenKey = `vector.ai-change-checkpoint.${sessionKey()}`
+        if (sessionStatus && sessionStatus !== "idle") return
+        const session = sessionKey()
+        const seenKey = `vector.ai-change-checkpoint.${session}`
         if (localStorage.getItem(seenKey) === signature) return
         localStorage.setItem(seenKey, signature)
 
         const createdAt = Date.now()
-        const files = signature.split("\u0000").filter(Boolean)
+        const files = [...diffFiles()]
         void (async () => {
           const snapshots = (
             await Promise.all(
@@ -3200,21 +5255,47 @@ export function SessionSidePanel(props: {
               return []
             }
           })()
-          localStorage.setItem(
-            AI_CHANGE_CHECKPOINTS_KEY,
-            JSON.stringify([
-              {
-                id: `${sessionKey()}-${createdAt}`,
-                session: sessionKey(),
-                title: `${files.length} AI-edited ${files.length === 1 ? "file" : "files"}`,
-                files,
-                createdAt,
-                documentation: createAiCheckpointDocumentation(files),
-                snapshots,
-              },
-              ...existing,
-            ].slice(0, 80)),
-          )
+          const checkpoint = {
+            id: `${session}-${createdAt}`,
+            session,
+            title: `${files.length} AI-edited ${files.length === 1 ? "file" : "files"}`,
+            files,
+            createdAt,
+            documentation: createAiCheckpointDocumentation(files),
+            snapshots,
+          } satisfies AiChangeCheckpoint
+          localStorage.setItem(AI_CHANGE_CHECKPOINTS_KEY, JSON.stringify([checkpoint, ...existing].slice(0, 80)))
+          logEngineeringEvent(session, {
+            id: `checkpoint:${checkpoint.id}`,
+            timestamp: checkpoint.createdAt,
+            type: "checkpoint",
+            status: "success",
+            title: checkpoint.title,
+            summary: checkpoint.documentation,
+            details: ["Vector captured a restorable snapshot after AI-generated edits."],
+            files: checkpoint.files,
+            checkpointId: checkpoint.id,
+            source: "AI Agent",
+          })
+          logEngineeringEvent(session, {
+            id: `file-edit:${checkpoint.id}`,
+            timestamp: checkpoint.createdAt,
+            type: "file",
+            status: flagged.length > 0 ? "warning" : "success",
+            title: `Edited ${files.length} ${files.length === 1 ? "file" : "files"}`,
+            summary:
+              flagged.length > 0
+                ? "AI changes were captured, but the secret scanner flagged possible credentials."
+                : "AI changes were captured and queued for review.",
+            details:
+              flagged.length > 0
+                ? [`Potential secrets: ${[...new Set(flagged)].slice(0, 5).join("; ")}`]
+                : ["Review these files before continuing."],
+            files,
+            checkpointId: checkpoint.id,
+            source: "AI Agent",
+          })
+          setTimelineRefresh((value) => value + 1)
           setCheckpointRefresh((value) => value + 1)
         })()
       },
@@ -3246,7 +5327,8 @@ export function SessionSidePanel(props: {
         if (node.ignored) continue
         const base = reportFileBasename(node.path)
         if (node.type === "directory") {
-          if ([".git", "node_modules", "dist", "build", ".next", "coverage", "out", "target", "vendor"].includes(base)) continue
+          if ([".git", "node_modules", "dist", "build", ".next", "coverage", "out", "target", "vendor"].includes(base))
+            continue
           await visit(node.path, depth + 1)
           continue
         }
@@ -3273,12 +5355,40 @@ export function SessionSidePanel(props: {
       const files = await collectWorkspaceReportFiles()
       const model = local.model.current()
       const variant = local.model.variant.current()
-      setProjectReport(buildVectorLocalReport(files, diffs(), `${model?.name ?? "No model selected"}${variant ? ` · ${variant}` : ""}`))
+      const report = buildVectorLocalReport(
+        files,
+        diffs(),
+        `${model?.name ?? "No model selected"}${variant ? ` · ${modelVariantLabel(variant)}` : ""}`,
+      )
+      setProjectReport(report)
+      logEngineeringEvent(sessionKey(), {
+        id: `project-doctor:${report.scannedAt}`,
+        timestamp: report.scannedAt,
+        type: "review",
+        status: report.problems.some((problem) => problem.severity === "error") ? "warning" : "success",
+        title: "Scanned project health",
+        summary: `Scanned ${files.length} workspace file${files.length === 1 ? "" : "s"} locally. Preview status: ${report.preview.status}.`,
+        details: [
+          `Files: ${report.fileCount}`,
+          `Lines: ${report.lineCount.toLocaleString()}`,
+          `Context risk: ${report.cost.risk}`,
+          `Problems: ${report.problems.length}`,
+        ],
+        files: report.memory.importantFiles,
+        source: "Project Doctor",
+      })
       showToast({
         title: "Project Doctor finished",
         description: `Scanned ${files.length} workspace file${files.length === 1 ? "" : "s"} locally.`,
       })
     } catch (error) {
+      logEngineeringEvent(sessionKey(), {
+        type: "error",
+        status: "failed",
+        title: "Project Doctor failed",
+        summary: error instanceof Error && error.message ? error.message : "Vector could not scan this workspace.",
+        source: "Project Doctor",
+      })
       showToast({
         variant: "error",
         title: "Project Doctor failed",
@@ -3289,13 +5399,15 @@ export function SessionSidePanel(props: {
     }
   }
 
-  const openCodeArchaeologyPanel = (event?: Event) => {
-    const detail = (event as CustomEvent<{ tab?: "timeline" | "review" | "checkpoints" | "health"; scan?: boolean }> | undefined)?.detail
-    setArchaeologyTab(detail?.tab ?? "timeline")
+  const openCodeArchaeologyPanel = (_event?: Event) => {
     setArchaeologyOpen(true)
     view().reviewPanel.close()
     layout.fileTree.close()
-    if (detail?.scan || detail?.tab === "health") void runProjectDoctor()
+  }
+
+  const patchAiCheckpoint = (id: string, patch: { name?: string; note?: string }) => {
+    updateAiChangeCheckpoint(id, patch)
+    setCheckpointRefresh((value) => value + 1)
   }
 
   const closeCodeArchaeologyPanel = () => {
@@ -3320,15 +5432,44 @@ export function SessionSidePanel(props: {
         await file.load(snapshot.path, { force: true })
       }
       await file.tree.refresh("")
+      logEngineeringEvent(sessionKey(), {
+        id: `checkpoint-restore:${checkpoint.id}:${Date.now()}`,
+        timestamp: Date.now(),
+        type: "checkpoint",
+        status: "success",
+        title: "Restored checkpoint",
+        summary: `Restored ${snapshots.length} file${snapshots.length === 1 ? "" : "s"} from ${formatCheckpointTime(checkpoint.createdAt)}.`,
+        details: ["Vector wrote the stored checkpoint snapshots back into the workspace."],
+        files: checkpoint.files,
+        checkpointId: checkpoint.id,
+        source: "Checkpoint",
+      })
+      setTimelineRefresh((value) => value + 1)
       showToast({
         title: "Checkpoint restored",
         description: `Restored ${snapshots.length} file${snapshots.length === 1 ? "" : "s"} from ${formatCheckpointTime(checkpoint.createdAt)}.`,
       })
     } catch (error) {
+      logEngineeringEvent(sessionKey(), {
+        type: "error",
+        status: "failed",
+        title: "Checkpoint restore failed",
+        summary:
+          error instanceof Error && error.message
+            ? error.message
+            : "Vector could not write one or more checkpoint files.",
+        files: checkpoint.files,
+        checkpointId: checkpoint.id,
+        source: "Checkpoint",
+      })
+      setTimelineRefresh((value) => value + 1)
       showToast({
         variant: "error",
         title: "Could not restore checkpoint",
-        description: error instanceof Error && error.message ? error.message : "Vector could not write one or more checkpoint files.",
+        description:
+          error instanceof Error && error.message
+            ? error.message
+            : "Vector could not write one or more checkpoint files.",
       })
     } finally {
       setRestoringCheckpoint(undefined)
@@ -3341,8 +5482,27 @@ export function SessionSidePanel(props: {
     props.focusReviewDiff(path)
   }
 
-  globalThis.window?.addEventListener("vector:open-code-archaeology", openCodeArchaeologyPanel)
-  onCleanup(() => globalThis.window?.removeEventListener("vector:open-code-archaeology", openCodeArchaeologyPanel))
+  const toggleTimelineEvent = (id: string) => {
+    setExpandedTimelineEvents((previous) => ({ ...previous, [id]: !previous[id] }))
+  }
+
+  const clearEngineeringTimelineForSession = () => {
+    clearEngineeringEvents(sessionKey())
+    setTimelineRefresh((value) => value + 1)
+  }
+
+  const refreshEngineeringTimeline = (event?: Event) => {
+    const detail = (event as CustomEvent<{ projectId?: string }> | undefined)?.detail
+    if (!detail?.projectId || detail.projectId === sessionKey()) setTimelineRefresh((value) => value + 1)
+  }
+
+  // Persisting "vector:engineering-event" is owned by the layout-level
+  // activity bridge (installActivityEventBridge); this panel only re-renders
+  // when the timeline store broadcasts an update.
+  globalThis.window?.addEventListener("vector:engineering-timeline-updated", refreshEngineeringTimeline)
+  onCleanup(() => {
+    globalThis.window?.removeEventListener("vector:engineering-timeline-updated", refreshEngineeringTimeline)
+  })
 
   const empty = (msg: string) => (
     <div class="h-full flex flex-col">
@@ -3385,6 +5545,7 @@ export function SessionSidePanel(props: {
     hasReview: props.canReview,
   })
   const contextOpen = tabState.contextOpen
+  const previewOpen = tabState.previewOpen
   const openedTabs = tabState.openedTabs
   const activeTab = tabState.activeTab
   const activeFileTab = tabState.activeFileTab
@@ -3402,6 +5563,7 @@ export function SessionSidePanel(props: {
     layout.fileTree.close()
     if (tabs().active() === "context") tabs().close("context")
     if (tabs().active() === "codespace") tabs().close("codespace")
+    if (tabs().active() === "preview") tabs().close("preview")
   }
 
   const openCodespaceTab = () => {
@@ -3411,9 +5573,20 @@ export function SessionSidePanel(props: {
     tabs().setActive("codespace")
   }
 
+  const openPreviewTab = () => {
+    view().reviewPanel.open("other")
+    layout.fileTree.close()
+    void tabs().open("preview")
+    tabs().setActive("preview")
+  }
+
   const handleTabChange = (value: string) => {
     if (value === "codespace") {
       openCodespaceTab()
+      return
+    }
+    if (value === "preview") {
+      openPreviewTab()
       return
     }
     openTab(value)
@@ -3421,6 +5594,12 @@ export function SessionSidePanel(props: {
 
   const handleKeydown = (event: KeyboardEvent) => {
     if (event.key !== "Escape" || !open()) return
+    if (
+      document.querySelector(
+        '[data-dialog-layer], [role="dialog"], [aria-modal="true"], [role="menu"], [role="listbox"]',
+      )
+    )
+      return
     event.preventDefault()
     closePanel()
   }
@@ -3475,692 +5654,397 @@ export function SessionSidePanel(props: {
 
   return (
     <>
-    <Show when={isDesktop() && !(settings.general.newLayoutDesigns() && !params.id)}>
-      <aside
-        id="review-panel"
-        aria-label={language.t("session.panel.reviewAndFiles")}
-        aria-hidden={!open()}
-        inert={!open()}
-        class="relative min-w-0 h-full flex shrink-0 overflow-hidden bg-background-base"
-        classList={{
-          "pointer-events-none": !open(),
-          "transition-[width] duration-[240ms] ease-[cubic-bezier(0.22,1,0.36,1)] will-change-[width] motion-reduce:transition-none":
-            !props.size.active() && !props.reviewSnap,
-          "rounded-[10px] shadow-[var(--v2-elevation-raised)] overflow-hidden": settings.general.newLayoutDesigns() && !codespaceOpen(),
-          "flex-1": reviewOpen(),
-        }}
-        style={{ width: panelWidth() }}
-      >
-        <Show when={open()}>
-          <div
-            class="size-full flex"
-            classList={{
-              "border-l border-border-weaker-base": !settings.general.newLayoutDesigns() && !codespaceOpen(),
-            }}
-          >
+      <Show when={isDesktop() && !(settings.general.newLayoutDesigns() && !params.id)}>
+        <aside
+          id="review-panel"
+          data-vector-review-panel
+          aria-label={language.t("session.panel.reviewAndFiles")}
+          aria-hidden={!open()}
+          inert={!open()}
+          class="relative min-w-0 h-full flex shrink-0 overflow-hidden bg-background-base"
+          classList={{
+            "pointer-events-none": !open(),
+            "transition-[width] duration-[240ms] ease-[cubic-bezier(0.22,1,0.36,1)] will-change-[width] motion-reduce:transition-none":
+              !props.size.active() && !props.reviewSnap,
+            "rounded-[10px] shadow-[var(--v2-elevation-raised)] overflow-hidden":
+              settings.general.newLayoutDesigns() && !codespaceOpen(),
+            "flex-1": reviewOpen(),
+          }}
+          style={{ width: panelWidth() }}
+        >
+          <Show when={open()}>
             <div
-              aria-hidden={!reviewOpen()}
-              inert={!reviewOpen()}
-              class="relative min-w-0 h-full flex-1 overflow-hidden bg-background-base"
+              class="size-full flex"
               classList={{
-                "pointer-events-none": !reviewOpen(),
+                "border-l border-border-weaker-base": !settings.general.newLayoutDesigns() && !codespaceOpen(),
               }}
             >
-              <div class="size-full min-w-0 h-full bg-background-base">
-                <DragDropProvider
-                  onDragStart={handleDragStart}
-                  onDragEnd={handleDragEnd}
-                  onDragOver={handleDragOver}
-                  collisionDetector={closestCenter}
-                >
-                  <DragDropSensors />
-                  <ConstrainDragYAxis />
-                  <Tabs value={activeTab()} onChange={handleTabChange}>
-                    <Show when={activeTab() !== "codespace"}>
-                      <Show
-                        when={contextActive()}
-                        fallback={
-                        <div class="sticky top-0 shrink-0 flex">
-                          <Tabs.List
-                            ref={(el: HTMLDivElement) => {
-                              const stop = createFileTabListSync({ el, contextOpen })
-                              onCleanup(stop)
-                            }}
-                          >
-                        <Show when={contextOpen()}>
-                          <Tabs.Trigger
-                            value="context"
-                            closeButton={
-                              <TooltipKeybind
-                                title={language.t("common.closeTab")}
-                                keybind={command.keybind("tab.close")}
-                                placement="bottom"
-                                gutter={10}
-                              >
-                                <IconButton
-                                  icon="close-small"
-                                  variant="ghost"
-                                  class="h-5 w-5"
-                                  onClick={() => tabs().close("context")}
-                                  aria-label={language.t("common.closeTab")}
-                                />
-                              </TooltipKeybind>
-                            }
-                            hideCloseButton
-                            onMiddleClick={() => tabs().close("context")}
-                          >
-                            <div class="flex items-center gap-2">
-                              <SessionContextUsage variant="indicator" />
-                              <div>{language.t("session.tab.context")}</div>
-                            </div>
-                          </Tabs.Trigger>
-                        </Show>
-                        <Show when={reviewTab() && props.canReview()}>
-                          <Tabs.Trigger value="review">
-                            <div class="flex items-center gap-1.5">
-                              <div>Changes</div>
-                              <Show when={props.hasReview()}>
-                                <div>{props.reviewCount()}</div>
-                              </Show>
-                            </div>
-                          </Tabs.Trigger>
-                        </Show>
-                        <SortableProvider ids={openedTabs()}>
-                          <For each={openedTabs()}>{(tab) => <SortableTab tab={tab} onTabClose={tabs().close} />}</For>
-                        </SortableProvider>
-                        <div class="bg-background-stronger h-full shrink-0 sticky right-0 z-10 flex items-center justify-center pr-3">
-                          <TooltipKeybind title="Close panel" keybind="Esc" placement="bottom" gutter={10}>
-                            <IconButton
-                              icon="close-small"
-                              variant="ghost"
-                              iconSize="large"
-                              class="!rounded-md"
-                              onClick={closePanel}
-                              aria-label="Close review panel"
-                            />
-                          </TooltipKeybind>
-                        </div>
-                          </Tabs.List>
-                        </div>
-                        }
-                      >
-                        <div class="sticky top-0 z-20 h-10 shrink-0 flex items-center justify-between border-b border-border-weaker-base bg-background-stronger px-3">
-                          <div class="flex min-w-0 items-center gap-2 text-12-medium text-text-base">
-                            <SessionContextUsage variant="indicator" />
-                            <span>Context</span>
-                          </div>
-                          <TooltipKeybind title="Close context" keybind="Esc" placement="bottom" gutter={10}>
-                            <IconButton
-                              icon="close-small"
-                              variant="ghost"
-                              iconSize="large"
-                              class="!rounded-md"
-                              onClick={() => {
-                                tabs().close("context")
-                                view().reviewPanel.close()
-                              }}
-                              aria-label="Close context"
-                            />
-                          </TooltipKeybind>
-                        </div>
-                      </Show>
-                    </Show>
-
-                    <Show when={reviewTab() && props.canReview()}>
-                      <Tabs.Content value="review" class="flex flex-col h-full overflow-hidden contain-strict">
-                        <Show when={reviewOpen() && activeTab() === "review"}>{props.reviewPanel()}</Show>
-                      </Tabs.Content>
-                    </Show>
-
-                    <Tabs.Content value="codespace" class="flex flex-col h-full overflow-hidden contain-strict">
-                      <Show when={reviewOpen() && activeTab() === "codespace"}>
-                        <StableCodespaceWorkbench
-                          modified={diffFiles}
-                          kinds={kinds}
-                          empty={() => empty(language.t("session.files.empty"))}
-                          diffs={diffs}
-                          focusReviewDiff={props.focusReviewDiff}
-                          sessionKey={sessionKey}
-                          onClose={closePanel}
-                        />
-                      </Show>
-                    </Tabs.Content>
-
-                    <Tabs.Content value="empty" class="flex flex-col h-full overflow-hidden contain-strict">
-                      <Show when={activeTab() === "empty"}>
-                        <div class="relative pt-2 flex-1 min-h-0 overflow-hidden">
-                          <div class="h-full px-6 pb-42 -mt-4 flex flex-col items-center justify-center text-center gap-6">
-                            <Mark class="w-14 opacity-10" />
-                            <div class="text-14-regular text-text-weak max-w-56">
-                              {language.t("session.files.selectToOpen")}
-                            </div>
-                          </div>
-                        </div>
-                      </Show>
-                    </Tabs.Content>
-
-                    <Show when={contextOpen()}>
-                      <Tabs.Content value="context" class="flex flex-col h-full overflow-hidden contain-strict">
-                        <Show when={activeTab() === "context"}>
-                          <div class="relative pt-2 flex-1 min-h-0 overflow-hidden">
-                            <SessionContextTab />
-                          </div>
-                        </Show>
-                      </Tabs.Content>
-                    </Show>
-
-                    <Show when={activeFileTab()} keyed>
-                      {(tab) => <FileTabContent tab={tab} />}
-                    </Show>
-                  </Tabs>
-                  <DragOverlay>
-                    <Show when={store.activeDraggable} keyed>
-                      {(tab) => {
-                        const path = file.pathFromTab(tab)
-                        return (
-                          <div data-component="tabs-drag-preview">
-                            <Show when={path}>{(p) => <FileVisual active path={p()} />}</Show>
-                          </div>
-                        )
-                      }}
-                    </Show>
-                  </DragOverlay>
-                </DragDropProvider>
-              </div>
-            </div>
-
-            <Show when={shown()}>
               <div
-                id="file-tree-panel"
-                aria-hidden={!fileOpen()}
-                inert={!fileOpen()}
-                class="relative min-w-0 h-full shrink-0 overflow-hidden"
+                aria-hidden={!reviewOpen()}
+                inert={!reviewOpen()}
+                class="relative min-w-0 h-full flex-1 overflow-hidden bg-background-base"
                 classList={{
-                  "pointer-events-none": !fileOpen(),
-                  "transition-[width] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-[width] motion-reduce:transition-none":
-                    !props.size.active(),
+                  "pointer-events-none": !reviewOpen(),
                 }}
-                style={{ width: treeWidth() }}
               >
-                <div
-                  class="h-full flex flex-col overflow-hidden group/filetree"
-                  classList={{ "border-l border-border-weaker-base": reviewOpen() }}
-                >
-                  <Tabs
-                    variant="pill"
-                    value={fileTreeTab()}
-                    onChange={setFileTreeTabValue}
-                    class="h-full"
-                    data-scope="filetree"
+                <div class="size-full min-w-0 h-full bg-background-base">
+                  <DragDropProvider
+                    onDragStart={handleDragStart}
+                    onDragEnd={handleDragEnd}
+                    onDragOver={handleDragOver}
+                    collisionDetector={closestCenter}
                   >
-                    <Tabs.List>
-                      <Tabs.Trigger value="changes" class="flex-1" classes={{ button: "w-full" }}>
-                        {props.reviewCount()}{" "}
-                        {language.t(
-                          props.reviewCount() === 1 ? "session.review.change.one" : "session.review.change.other",
-                        )}
-                      </Tabs.Trigger>
-                      <Tabs.Trigger value="all" class="flex-1" classes={{ button: "w-full" }}>
-                        {language.t("session.files.all")}
-                      </Tabs.Trigger>
-                    </Tabs.List>
-                    <Tabs.Content value="changes" class="bg-background-stronger px-3 py-0">
-                      <Switch>
-                        <Match when={props.hasReview() || !props.diffsReady()}>
-                          <Show
-                            when={props.diffsReady()}
-                            fallback={
-                              <div class="px-2 py-2 text-12-regular text-text-weak">
-                                {language.t("common.loading")}
-                                {language.t("common.loading.ellipsis")}
+                    <DragDropSensors />
+                    <ConstrainDragYAxis />
+                    <Tabs value={activeTab()} onChange={handleTabChange}>
+                      <Show when={activeTab() !== "codespace"}>
+                        <Show
+                          when={contextActive()}
+                          fallback={
+                            <div class="sticky top-0 shrink-0 flex">
+                              <Tabs.List
+                                ref={(el: HTMLDivElement) => {
+                                  const stop = createFileTabListSync({ el, contextOpen })
+                                  onCleanup(stop)
+                                }}
+                              >
+                                <Show when={contextOpen()}>
+                                  <Tabs.Trigger
+                                    value="context"
+                                    closeButton={
+                                      <TooltipKeybind
+                                        title={language.t("common.closeTab")}
+                                        keybind={command.keybind("tab.close")}
+                                        placement="bottom"
+                                        gutter={10}
+                                      >
+                                        <IconButton
+                                          icon="close-small"
+                                          variant="ghost"
+                                          class="h-5 w-5"
+                                          onClick={() => tabs().close("context")}
+                                          aria-label={language.t("common.closeTab")}
+                                        />
+                                      </TooltipKeybind>
+                                    }
+                                    hideCloseButton
+                                    onMiddleClick={() => tabs().close("context")}
+                                  >
+                                    <div class="flex items-center gap-2">
+                                      <SessionContextUsage variant="indicator" />
+                                      <div>{language.t("session.tab.context")}</div>
+                                    </div>
+                                  </Tabs.Trigger>
+                                </Show>
+                                <Show when={activeTab() !== "preview"}>
+                                  <button
+                                    type="button"
+                                    class="flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-[12.5px] text-white/60 transition hover:bg-white/[0.06] hover:text-white"
+                                    aria-label="Code Archaeology"
+                                    title="Code Archaeology — every checkpoint, from first to latest"
+                                    onClick={() => openCodeArchaeologyPanel()}
+                                  >
+                                    <svg viewBox="0 0 16 16" class="size-4" aria-hidden="true">
+                                      <path
+                                        d="M2.75 8A5.25 5.25 0 1 1 8 13.25M2.75 8V4.5M2.75 8H6.25"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="1.25"
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                      />
+                                      <path
+                                        d="M8 5.25V8l2 1.25"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="1.25"
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                      />
+                                    </svg>
+                                    <div>Archaeology</div>
+                                  </button>
+                                </Show>
+                                <Show when={previewOpen()}>
+                                  <Tabs.Trigger
+                                    value="preview"
+                                    closeButton={
+                                      <TooltipKeybind
+                                        title="Close browser"
+                                        keybind={command.keybind("tab.close")}
+                                        placement="bottom"
+                                        gutter={10}
+                                      >
+                                        <IconButton
+                                          icon="close-small"
+                                          variant="ghost"
+                                          class="h-5 w-5"
+                                          onClick={() => tabs().close("preview")}
+                                          aria-label="Close browser"
+                                        />
+                                      </TooltipKeybind>
+                                    }
+                                    hideCloseButton
+                                    onMiddleClick={() => tabs().close("preview")}
+                                  >
+                                    <div class="flex items-center gap-2">
+                                      <svg viewBox="0 0 16 16" class="size-4 text-[#c4a6ff]" aria-hidden="true">
+                                        <path
+                                          d="M2.25 4.25A1.25 1.25 0 0 1 3.5 3h9A1.25 1.25 0 0 1 13.75 4.25v6.5A1.25 1.25 0 0 1 12.5 12h-9a1.25 1.25 0 0 1-1.25-1.25v-6.5Z"
+                                          fill="none"
+                                          stroke="currentColor"
+                                          stroke-width="1.25"
+                                        />
+                                        <path
+                                          d="M2.75 5.5h10.5"
+                                          fill="none"
+                                          stroke="currentColor"
+                                          stroke-width="1.2"
+                                          stroke-linecap="round"
+                                        />
+                                      </svg>
+                                      <div>Browser</div>
+                                    </div>
+                                  </Tabs.Trigger>
+                                </Show>
+                                <Show when={activeTab() !== "preview" && reviewTab() && props.canReview()}>
+                                  <Tabs.Trigger value="review">
+                                    <div class="flex items-center gap-1.5">
+                                      <div>Changes</div>
+                                      <Show when={props.hasReview()}>
+                                        <div>{props.reviewCount()}</div>
+                                      </Show>
+                                    </div>
+                                  </Tabs.Trigger>
+                                </Show>
+                                <Show when={activeTab() !== "preview"}>
+                                  <SortableProvider ids={openedTabs()}>
+                                    <For each={openedTabs()}>
+                                      {(tab) => <SortableTab tab={tab} onTabClose={tabs().close} />}
+                                    </For>
+                                  </SortableProvider>
+                                </Show>
+                                <div class="bg-background-stronger h-full shrink-0 sticky right-0 z-10 flex items-center justify-center pr-3">
+                                  <TooltipKeybind title="Close panel" keybind="Esc" placement="bottom" gutter={10}>
+                                    <IconButton
+                                      icon="close-small"
+                                      variant="ghost"
+                                      iconSize="large"
+                                      class="!rounded-md"
+                                      onClick={closePanel}
+                                      aria-label="Close review panel"
+                                    />
+                                  </TooltipKeybind>
+                                </div>
+                              </Tabs.List>
+                            </div>
+                          }
+                        >
+                          <div class="sticky top-0 z-20 h-10 shrink-0 flex items-center justify-between border-b border-border-weaker-base bg-background-stronger px-3">
+                            <div class="flex min-w-0 items-center gap-2 text-12-medium text-text-base">
+                              <SessionContextUsage variant="indicator" />
+                              <span>Context</span>
+                            </div>
+                            <TooltipKeybind title="Close context" keybind="Esc" placement="bottom" gutter={10}>
+                              <IconButton
+                                icon="close-small"
+                                variant="ghost"
+                                iconSize="large"
+                                class="!rounded-md"
+                                onClick={() => {
+                                  tabs().close("context")
+                                  view().reviewPanel.close()
+                                }}
+                                aria-label="Close context"
+                              />
+                            </TooltipKeybind>
+                          </div>
+                        </Show>
+                      </Show>
+
+                      <Show when={reviewTab() && props.canReview()}>
+                        <Tabs.Content value="review" class="flex flex-col h-full overflow-hidden contain-strict">
+                          <Show when={reviewOpen() && activeTab() === "review"}>{props.reviewPanel()}</Show>
+                        </Tabs.Content>
+                      </Show>
+
+                      <Tabs.Content value="codespace" class="flex flex-col h-full overflow-hidden contain-strict">
+                        <Show when={reviewOpen() && activeTab() === "codespace"}>
+                          <CodespaceWorkbench
+                            modified={diffFiles}
+                            kinds={kinds}
+                            empty={() => empty(language.t("session.files.empty"))}
+                            diffs={diffs}
+                            focusReviewDiff={props.focusReviewDiff}
+                            sessionId={() => params.id}
+                            onClose={closePanel}
+                          />
+                        </Show>
+                      </Tabs.Content>
+
+                      <Tabs.Content value="preview" class="flex flex-col h-full overflow-hidden contain-strict">
+                        <Show when={reviewOpen() && activeTab() === "preview"}>
+                          <PreviewPanel
+                            sessionKey={sessionKey()}
+                            contextId={params.id ?? sessionKey()}
+                            directory={sdk().directory}
+                            onClose={() => {
+                              tabs().close("preview")
+                              view().reviewPanel.close()
+                            }}
+                          />
+                        </Show>
+                      </Tabs.Content>
+
+                      <Tabs.Content value="empty" class="flex flex-col h-full overflow-hidden contain-strict">
+                        <Show when={activeTab() === "empty"}>
+                          <div class="relative pt-2 flex-1 min-h-0 overflow-hidden">
+                            <div class="h-full px-6 pb-42 -mt-4 flex flex-col items-center justify-center text-center gap-6">
+                              <Mark class="w-14 opacity-10" />
+                              <div class="text-14-regular text-text-weak max-w-56">
+                                {language.t("session.files.selectToOpen")}
                               </div>
-                            }
-                          >
+                            </div>
+                          </div>
+                        </Show>
+                      </Tabs.Content>
+
+                      <Show when={contextOpen()}>
+                        <Tabs.Content value="context" class="flex flex-col h-full overflow-hidden contain-strict">
+                          <Show when={activeTab() === "context"}>
+                            <div class="relative pt-2 flex-1 min-h-0 overflow-hidden">
+                              <SessionContextTab />
+                            </div>
+                          </Show>
+                        </Tabs.Content>
+                      </Show>
+
+                      <Show when={activeFileTab()} keyed>
+                        {(tab) => <FileTabContent tab={tab} />}
+                      </Show>
+                    </Tabs>
+                    <DragOverlay>
+                      <Show when={store.activeDraggable} keyed>
+                        {(tab) => {
+                          const path = file.pathFromTab(tab)
+                          return (
+                            <div data-component="tabs-drag-preview">
+                              <Show when={path}>{(p) => <FileVisual active path={p()} />}</Show>
+                            </div>
+                          )
+                        }}
+                      </Show>
+                    </DragOverlay>
+                  </DragDropProvider>
+                </div>
+              </div>
+
+              <Show when={shown()}>
+                <div
+                  id="file-tree-panel"
+                  aria-hidden={!fileOpen()}
+                  inert={!fileOpen()}
+                  class="relative min-w-0 h-full shrink-0 overflow-hidden"
+                  classList={{
+                    "pointer-events-none": !fileOpen(),
+                    "transition-[width] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-[width] motion-reduce:transition-none":
+                      !props.size.active(),
+                  }}
+                  style={{ width: treeWidth() }}
+                >
+                  <div
+                    class="h-full flex flex-col overflow-hidden group/filetree"
+                    classList={{ "border-l border-border-weaker-base": reviewOpen() }}
+                  >
+                    <Tabs
+                      variant="pill"
+                      value={fileTreeTab()}
+                      onChange={setFileTreeTabValue}
+                      class="h-full"
+                      data-scope="filetree"
+                    >
+                      <Tabs.List>
+                        <Tabs.Trigger value="changes" class="flex-1" classes={{ button: "w-full" }}>
+                          {props.reviewCount()}{" "}
+                          {language.t(
+                            props.reviewCount() === 1 ? "session.review.change.one" : "session.review.change.other",
+                          )}
+                        </Tabs.Trigger>
+                        <Tabs.Trigger value="all" class="flex-1" classes={{ button: "w-full" }}>
+                          {language.t("session.files.all")}
+                        </Tabs.Trigger>
+                      </Tabs.List>
+                      <Tabs.Content value="changes" class="bg-background-stronger px-3 py-0">
+                        <Switch>
+                          <Match when={props.hasReview() || !props.diffsReady()}>
+                            <Show
+                              when={props.diffsReady()}
+                              fallback={
+                                <div class="px-2 py-2 text-12-regular text-text-weak">
+                                  {language.t("common.loading")}
+                                  {language.t("common.loading.ellipsis")}
+                                </div>
+                              }
+                            >
+                              <FileTree
+                                path=""
+                                class="pt-3"
+                                allowed={diffFiles()}
+                                kinds={kinds()}
+                                draggable={false}
+                                active={props.activeDiff}
+                                onFileClick={(node) => props.focusReviewDiff(node.path)}
+                              />
+                            </Show>
+                          </Match>
+                        </Switch>
+                      </Tabs.Content>
+                      <Tabs.Content value="all" class="bg-background-stronger px-3 py-0">
+                        <Switch>
+                          <Match when={nofiles()}>{empty(language.t("session.files.empty"))}</Match>
+                          <Match when={true}>
                             <FileTree
                               path=""
                               class="pt-3"
-                              allowed={diffFiles()}
+                              modified={diffFiles()}
                               kinds={kinds()}
-                              draggable={false}
-                              active={props.activeDiff}
-                              onFileClick={(node) => props.focusReviewDiff(node.path)}
+                              onFileClick={(node) => openTab(file.tab(node.path))}
                             />
-                          </Show>
-                        </Match>
-                      </Switch>
-                    </Tabs.Content>
-                    <Tabs.Content value="all" class="bg-background-stronger px-3 py-0">
-                      <Switch>
-                        <Match when={nofiles()}>{empty(language.t("session.files.empty"))}</Match>
-                        <Match when={true}>
-                          <FileTree
-                            path=""
-                            class="pt-3"
-                            modified={diffFiles()}
-                            kinds={kinds()}
-                            onFileClick={(node) => openTab(file.tab(node.path))}
-                          />
-                        </Match>
-                      </Switch>
-                    </Tabs.Content>
-                  </Tabs>
+                          </Match>
+                        </Switch>
+                      </Tabs.Content>
+                    </Tabs>
+                  </div>
+                  <Show when={fileOpen()}>
+                    <div onPointerDown={() => props.size.start()}>
+                      <ResizeHandle
+                        direction="horizontal"
+                        edge="start"
+                        size={layout.fileTree.width()}
+                        min={200}
+                        max={typeof window === "undefined" ? 1200 : Math.max(720, window.innerWidth * 0.72)}
+                        onResize={(width) => {
+                          props.size.touch()
+                          layout.fileTree.resize(width)
+                        }}
+                      />
+                    </div>
+                  </Show>
                 </div>
-                <Show when={fileOpen()}>
-                  <div onPointerDown={() => props.size.start()}>
-                    <ResizeHandle
-                      direction="horizontal"
-                      edge="start"
-                      size={layout.fileTree.width()}
-                      min={200}
-                      max={typeof window === "undefined" ? 1200 : Math.max(720, window.innerWidth * 0.72)}
-                      onResize={(width) => {
-                        props.size.touch()
-                        layout.fileTree.resize(width)
-                      }}
-                    />
-                  </div>
-                </Show>
-              </div>
-            </Show>
-          </div>
-        </Show>
-      </aside>
-    </Show>
-    <Show when={isDesktop() && archaeologyOpen()}>
-      <aside
-        class="fixed bottom-4 right-4 top-4 z-[70] flex w-[min(600px,calc(100vw-120px))] flex-col overflow-hidden rounded-[28px] border border-[#34283f] bg-[#121116]/98 text-white shadow-[0_28px_90px_rgba(0,0,0,0.55)] backdrop-blur-2xl"
-        aria-label="Code Archaeology"
-      >
-        <header class="flex h-20 shrink-0 items-center justify-between border-b border-[#28232f] px-5">
-          <div class="min-w-0">
-            <div class="text-17-medium">Code Archaeology</div>
-            <div class="mt-1 text-12-regular text-white/48">Review every AI edit and restore documented checkpoints.</div>
-          </div>
-          <button
-            type="button"
-            class="grid size-9 place-items-center rounded-full text-white/46 transition duration-200 hover:bg-white/[0.07] hover:text-white"
-            aria-label="Close Code Archaeology"
-            onClick={closeCodeArchaeologyPanel}
-          >
-            ×
-          </button>
-        </header>
-
-        <div class="grid grid-cols-4 gap-2 border-b border-[#28232f] p-3">
-          <button
-            type="button"
-            class="rounded-2xl px-3 py-3 text-13-medium transition duration-200"
-            classList={{
-              "bg-[#8b5cf6] text-white shadow-[0_16px_38px_rgba(139,92,246,0.22)]": archaeologyTab() === "timeline",
-              "bg-white/[0.04] text-white/58 hover:bg-white/[0.07] hover:text-white": archaeologyTab() !== "timeline",
-            }}
-            onClick={() => setArchaeologyTab("timeline")}
-          >
-            Timeline
-            <Show when={engineeringTimeline().length}>
-              <span class="ml-2 rounded-full bg-white/18 px-2 py-0.5 text-[10px]">{engineeringTimeline().length}</span>
-            </Show>
-          </button>
-          <button
-            type="button"
-            class="rounded-2xl px-3 py-3 text-13-medium transition duration-200"
-            classList={{
-              "bg-[#8b5cf6] text-white shadow-[0_16px_38px_rgba(139,92,246,0.22)]": archaeologyTab() === "review",
-              "bg-white/[0.04] text-white/58 hover:bg-white/[0.07] hover:text-white": archaeologyTab() !== "review",
-            }}
-            onClick={() => setArchaeologyTab("review")}
-          >
-            Review all changes
-            <Show when={diffs().length}>
-              <span class="ml-2 rounded-full bg-white/18 px-2 py-0.5 text-[10px]">{diffs().length}</span>
-            </Show>
-          </button>
-          <button
-            type="button"
-            class="rounded-2xl px-3 py-3 text-13-medium transition duration-200"
-            classList={{
-              "bg-[#8b5cf6] text-white shadow-[0_16px_38px_rgba(139,92,246,0.22)]": archaeologyTab() === "checkpoints",
-              "bg-white/[0.04] text-white/58 hover:bg-white/[0.07] hover:text-white": archaeologyTab() !== "checkpoints",
-            }}
-            onClick={() => setArchaeologyTab("checkpoints")}
-          >
-            Checkpoints
-            <Show when={aiCheckpoints().length}>
-              <span class="ml-2 rounded-full bg-white/18 px-2 py-0.5 text-[10px]">{aiCheckpoints().length}</span>
-            </Show>
-          </button>
-          <button
-            type="button"
-            class="rounded-2xl px-3 py-3 text-13-medium transition duration-200"
-            classList={{
-              "bg-[#8b5cf6] text-white shadow-[0_16px_38px_rgba(139,92,246,0.22)]": archaeologyTab() === "health",
-              "bg-white/[0.04] text-white/58 hover:bg-white/[0.07] hover:text-white": archaeologyTab() !== "health",
-            }}
-            onClick={() => {
-              setArchaeologyTab("health")
-              void runProjectDoctor()
-            }}
-          >
-            Project Doctor
-          </button>
-        </div>
-
-        <div class="min-h-0 flex-1 overflow-auto p-4">
-          <Switch>
-            <Match when={archaeologyTab() === "timeline"}>
-              <For
-                each={engineeringTimeline()}
-                fallback={
-                  <div class="rounded-[24px] border border-white/[0.08] bg-white/[0.035] p-5 text-13-regular leading-relaxed text-white/56">
-                    No engineering events yet. When Vector creates reviewable AI edits, the timeline will show what changed, the risk level, and the checkpoint record.
-                  </div>
-                }
-              >
-                {(entry) => (
-                  <div class="relative mb-4 pl-8">
-                    <div
-                      class="absolute left-1 top-1 grid size-5 place-items-center rounded-full border"
-                      classList={{
-                        "border-emerald-300/35 bg-emerald-400/12 text-emerald-200": entry.kind === "checkpoint",
-                        "border-violet-300/35 bg-violet-400/12 text-violet-100": entry.kind === "edit",
-                        "border-sky-300/35 bg-sky-400/12 text-sky-100": entry.kind === "review",
-                      }}
-                    >
-                      <span class="text-[10px]">{entry.kind === "checkpoint" ? "✓" : "•"}</span>
-                    </div>
-                    <div class="rounded-[24px] border border-white/[0.08] bg-white/[0.035] p-4">
-                      <div class="flex items-start justify-between gap-4">
-                        <div class="min-w-0">
-                          <div class="text-14-medium text-white">{entry.title}</div>
-                          <div class="mt-1 text-11-regular text-white/42">
-                            {entry.timeLabel || formatCheckpointTime(entry.createdAt)}
-                          </div>
-                        </div>
-                        <Show when={entry.risk}>
-                          {(risk) => (
-                            <div
-                              class="shrink-0 rounded-full border px-2.5 py-1 text-10-medium uppercase tracking-[0.12em]"
-                              classList={{
-                                "border-emerald-300/20 bg-emerald-500/10 text-emerald-200": risk() === "Low",
-                                "border-amber-300/20 bg-amber-500/10 text-amber-200": risk() === "Medium",
-                                "border-red-300/20 bg-red-500/10 text-red-200": risk() === "High",
-                              }}
-                            >
-                              {risk()} risk
-                            </div>
-                          )}
-                        </Show>
-                      </div>
-                      <div class="mt-3 text-13-regular leading-relaxed text-white/62">{entry.detail}</div>
-                      <Show when={entry.additions !== undefined || entry.deletions !== undefined}>
-                        <div class="mt-3 font-mono text-12-medium">
-                          <span class="text-emerald-300">+{entry.additions ?? 0}</span>{" "}
-                          <span class="text-red-300">-{entry.deletions ?? 0}</span>
-                        </div>
-                      </Show>
-                      <div class="mt-4 flex flex-wrap gap-2">
-                        <For each={entry.files}>
-                          {(filePath) => (
-                            <button
-                              type="button"
-                              class="rounded-full border border-white/[0.1] bg-black/18 px-3 py-1.5 font-mono text-11-medium text-white/64 transition duration-200 hover:border-[#8b5cf6]/45 hover:text-white"
-                              onClick={() => openReviewDiffFromArchaeology(filePath)}
-                            >
-                              {filePath}
-                            </button>
-                          )}
-                        </For>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </For>
-            </Match>
-
-            <Match when={archaeologyTab() === "review"}>
-              <For
-                each={diffs()}
-                fallback={
-                  <div class="rounded-[24px] border border-white/[0.08] bg-white/[0.035] p-5 text-13-regular leading-relaxed text-white/56">
-                    No AI-edited files are waiting for review yet. When the Vector agent changes files, they will appear here before you inspect them in the review panel.
-                  </div>
-                }
-              >
-                {(diff) => (
-                  <button
-                    type="button"
-                    class="mb-3 w-full rounded-[24px] border border-white/[0.08] bg-white/[0.035] p-4 text-left transition duration-200 hover:border-[#8b5cf6]/45 hover:bg-white/[0.06]"
-                    onClick={() => openReviewDiffFromArchaeology(diff.file)}
-                  >
-                    <div class="flex items-start justify-between gap-4">
-                      <div class="min-w-0">
-                        <div class="truncate font-mono text-13-medium text-white">{diff.file}</div>
-                        <div class="mt-2 text-12-regular text-white/44">Open this file in the normal review diff.</div>
-                      </div>
-                      <div class="shrink-0 text-right">
-                        <div class="rounded-full border border-white/[0.1] bg-black/24 px-2.5 py-1 text-10-medium uppercase tracking-[0.12em] text-white/56">
-                          {diff.status}
-                        </div>
-                        <div class="mt-2 font-mono text-12-medium">
-                          <span class="text-emerald-300">+{diff.additions}</span>{" "}
-                          <span class="text-red-300">-{diff.deletions}</span>
-                        </div>
-                      </div>
-                    </div>
-                  </button>
-                )}
-              </For>
-            </Match>
-
-            <Match when={archaeologyTab() === "checkpoints"}>
-              <For
-                each={aiCheckpoints()}
-                fallback={
-                  <div class="rounded-[24px] border border-white/[0.08] bg-white/[0.035] p-5 text-13-regular leading-relaxed text-white/56">
-                    No AI checkpoints yet. Vector creates a checkpoint whenever the chat agent produces file edits for this session.
-                  </div>
-                }
-              >
-                {(checkpoint, index) => (
-                  <div class="mb-4 rounded-[24px] border border-white/[0.08] bg-white/[0.035] p-5">
-                    <div class="flex items-start justify-between gap-4">
-                      <div class="min-w-0">
-                        <div class="text-14-medium text-white">{checkpoint.title}</div>
-                        <div class="mt-1 text-12-regular text-white/44">
-                          {index() === 0 ? "Latest checkpoint" : `Checkpoint ${aiCheckpoints().length - index()}`} · {formatCheckpointTime(checkpoint.createdAt)}
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        class="shrink-0 rounded-full border border-[#8b5cf6]/35 bg-[#8b5cf6]/12 px-3 py-1.5 text-12-medium text-violet-100 transition duration-200 hover:bg-[#8b5cf6]/22 disabled:cursor-not-allowed disabled:opacity-50"
-                        disabled={restoringCheckpoint() === checkpoint.id}
-                        onClick={() => void restoreAiCheckpoint(checkpoint)}
-                      >
-                        {restoringCheckpoint() === checkpoint.id ? "Restoring..." : "Restore"}
-                      </button>
-                    </div>
-                    <div class="mt-4 rounded-[18px] border border-white/[0.07] bg-black/22 p-4 text-13-regular leading-relaxed text-white/66">
-                      {checkpoint.documentation || createAiCheckpointDocumentation(checkpoint.files)}
-                    </div>
-                    <div class="mt-4 flex flex-wrap gap-2">
-                      <For each={checkpoint.files}>
-                        {(filePath) => (
-                          <button
-                            type="button"
-                            class="rounded-full border border-white/[0.1] bg-white/[0.045] px-3 py-1.5 font-mono text-11-medium text-white/64 transition duration-200 hover:border-[#8b5cf6]/45 hover:text-white"
-                            onClick={() => openReviewDiffFromArchaeology(filePath)}
-                          >
-                            {filePath}
-                          </button>
-                        )}
-                      </For>
-                    </div>
-                  </div>
-                )}
-              </For>
-            </Match>
-
-            <Match when={archaeologyTab() === "health"}>
-              <div class="space-y-4">
-                <div class="rounded-[24px] border border-white/[0.08] bg-white/[0.035] p-5">
-                  <div class="flex items-start justify-between gap-4">
-                    <div>
-                      <div class="text-15-medium text-white">Local Project Doctor</div>
-                      <div class="mt-1 text-12-regular text-white/48">
-                        Real workspace scan: preview readiness, file health, context risk, project memory, and demo checklist.
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      class="shrink-0 rounded-full bg-[#8b5cf6] px-4 py-2 text-12-medium text-white transition duration-200 hover:bg-[#9b6cff] disabled:cursor-not-allowed disabled:opacity-50"
-                      disabled={projectReportLoading()}
-                      onClick={() => void runProjectDoctor()}
-                    >
-                      {projectReportLoading() ? "Scanning..." : "Scan now"}
-                    </button>
-                  </div>
-                </div>
-
-                <Show
-                  when={projectReport()}
-                  fallback={
-                    <div class="rounded-[24px] border border-white/[0.08] bg-white/[0.035] p-5 text-13-regular leading-relaxed text-white/56">
-                      Click Scan now to inspect the actual workspace. Vector will not call the model and will not edit files.
-                    </div>
-                  }
-                >
-                  {(report) => (
-                    <>
-                      <div class="grid grid-cols-3 gap-3">
-                        <div class="rounded-[22px] border border-white/[0.08] bg-black/20 p-4">
-                          <div class="text-10-medium uppercase tracking-[0.16em] text-white/38">Files</div>
-                          <div class="mt-2 text-22-medium text-white">{report().fileCount}</div>
-                        </div>
-                        <div class="rounded-[22px] border border-white/[0.08] bg-black/20 p-4">
-                          <div class="text-10-medium uppercase tracking-[0.16em] text-white/38">Lines</div>
-                          <div class="mt-2 text-22-medium text-white">{report().lineCount.toLocaleString()}</div>
-                        </div>
-                        <div class="rounded-[22px] border border-white/[0.08] bg-black/20 p-4">
-                          <div class="text-10-medium uppercase tracking-[0.16em] text-white/38">Context</div>
-                          <div
-                            class="mt-2 text-22-medium"
-                            classList={{
-                              "text-emerald-200": report().cost.risk === "Low",
-                              "text-amber-200": report().cost.risk === "Medium",
-                              "text-red-200": report().cost.risk === "High",
-                            }}
-                          >
-                            {report().cost.risk}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div class="rounded-[24px] border border-white/[0.08] bg-white/[0.035] p-5">
-                        <div class="flex items-center justify-between gap-3">
-                          <div>
-                            <div class="text-14-medium text-white">Preview Doctor</div>
-                            <div class="mt-1 text-12-regular text-white/45">{report().preview.title}</div>
-                          </div>
-                          <div
-                            class="rounded-full border px-3 py-1 text-10-medium uppercase tracking-[0.13em]"
-                            classList={{
-                              "border-emerald-300/20 bg-emerald-500/10 text-emerald-200": report().preview.status === "ready",
-                              "border-amber-300/20 bg-amber-500/10 text-amber-200": report().preview.status === "warning",
-                              "border-red-300/20 bg-red-500/10 text-red-200": report().preview.status === "blocked",
-                            }}
-                          >
-                            {report().preview.status}
-                          </div>
-                        </div>
-                        <ul class="mt-4 space-y-2 text-13-regular text-white/62">
-                          <For each={report().preview.details}>{(item) => <li>• {item}</li>}</For>
-                        </ul>
-                      </div>
-
-                      <div class="rounded-[24px] border border-white/[0.08] bg-white/[0.035] p-5">
-                        <div class="text-14-medium text-white">Project Memory</div>
-                        <div class="mt-2 text-13-regular leading-relaxed text-white/62">{report().memory.summary}</div>
-                        <div class="mt-4 flex flex-wrap gap-2">
-                          <For each={report().frameworks}>
-                            {(item) => <span class="rounded-full border border-violet-300/15 bg-violet-400/10 px-3 py-1 text-11-medium text-violet-100">{item}</span>}
-                          </For>
-                        </div>
-                        <div class="mt-4 grid gap-4 md:grid-cols-2">
-                          <div>
-                            <div class="text-11-medium uppercase tracking-[0.16em] text-white/36">Important files</div>
-                            <div class="mt-2 space-y-1">
-                              <For each={report().memory.importantFiles}>
-                                {(item) => <div class="truncate font-mono text-11-regular text-white/58">{item}</div>}
-                              </For>
-                            </div>
-                          </div>
-                          <div>
-                            <div class="text-11-medium uppercase tracking-[0.16em] text-white/36">Next safe steps</div>
-                            <div class="mt-2 space-y-1 text-12-regular text-white/58">
-                              <For each={report().memory.nextSteps}>{(item) => <div>• {item}</div>}</For>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div class="rounded-[24px] border border-white/[0.08] bg-white/[0.035] p-5">
-                        <div class="text-14-medium text-white">BYOK Cost Guard</div>
-                        <div class="mt-2 text-13-regular text-white/62">
-                          Estimated context: {report().cost.estimatedTokens.toLocaleString()} tokens. This is a local estimate, not a billing charge.
-                        </div>
-                        <ul class="mt-4 space-y-2 text-13-regular text-white/62">
-                          <For each={report().cost.guidance}>{(item) => <li>• {item}</li>}</For>
-                        </ul>
-                      </div>
-
-                      <div class="rounded-[24px] border border-white/[0.08] bg-white/[0.035] p-5">
-                        <div class="text-14-medium text-white">Prompt Quality Guard</div>
-                        <div class="mt-2 text-13-medium text-violet-100">{report().promptGuard.verdict}</div>
-                        <ul class="mt-4 space-y-2 text-13-regular text-white/62">
-                          <For each={report().promptGuard.suggestions}>{(item) => <li>• {item}</li>}</For>
-                        </ul>
-                      </div>
-
-                      <div class="rounded-[24px] border border-white/[0.08] bg-white/[0.035] p-5">
-                        <div class="text-14-medium text-white">Problems</div>
-                        <For
-                          each={report().problems}
-                          fallback={<div class="mt-3 text-13-regular text-white/54">No local problems detected by the scan.</div>}
-                        >
-                          {(problem) => (
-                            <div class="mt-3 rounded-[18px] border border-white/[0.07] bg-black/20 p-3">
-                              <div
-                                class="text-11-medium uppercase tracking-[0.14em]"
-                                classList={{
-                                  "text-red-200": problem.severity === "error",
-                                  "text-amber-200": problem.severity === "warning",
-                                  "text-sky-200": problem.severity === "info",
-                                }}
-                              >
-                                {problem.severity}
-                              </div>
-                              <div class="mt-1 font-mono text-11-regular text-white/48">{problem.path}</div>
-                              <div class="mt-2 text-13-regular text-white/68">{problem.message}</div>
-                            </div>
-                          )}
-                        </For>
-                      </div>
-
-                      <div class="rounded-[24px] border border-white/[0.08] bg-white/[0.035] p-5">
-                        <div class="text-14-medium text-white">Demo Mode Checklist</div>
-                        <ul class="mt-4 space-y-2 text-13-regular text-white/62">
-                          <For each={report().demoChecklist}>{(item) => <li>• {item}</li>}</For>
-                        </ul>
-                      </div>
-                    </>
-                  )}
-                </Show>
-              </div>
-            </Match>
-          </Switch>
-        </div>
-      </aside>
-    </Show>
+              </Show>
+            </div>
+          </Show>
+        </aside>
+      </Show>
+      <CodeArchaeologyPanel
+        open={archaeologyOpen()}
+        onClose={closeCodeArchaeologyPanel}
+        checkpoints={aiCheckpoints()}
+        restoringCheckpoint={restoringCheckpoint()}
+        onRestoreCheckpoint={restoreAiCheckpoint}
+        onUpdateCheckpoint={patchAiCheckpoint}
+        onOpenDiff={openReviewDiffFromArchaeology}
+      />
     </>
   )
 }

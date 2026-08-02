@@ -7,10 +7,7 @@ export interface NotificationSettings {
   agent: boolean
   permissions: boolean
   errors: boolean
-  taskCompleted: boolean
   soundEffects: boolean
-  volume: number
-  successAnimations: boolean
 }
 
 export interface SoundSettings {
@@ -27,18 +24,12 @@ export type VectorWallpaperPreference = "nebula" | "void" | "grid" | "aurora"
 export type VectorSidebarPreference = "fire" | "space" | "carbon" | "classic"
 export type VectorFontPreference = "system" | "pixel" | "mono"
 
-export type VectorTonePreference = "direct" | "teacher" | "architect" | "concise"
 export type VectorDensityPreference = "comfortable" | "compact" | "spacious"
 export type VectorThemePreference = "dark" | "light" | "system"
 export type VectorLandingPreference = "home" | "last-project" | "new-chat"
 export type VectorAnimationSpeedPreference = "off" | "calm" | "normal" | "fast"
-export type VectorIndentationPreference = "spaces" | "tabs"
-export type VectorCodeStylePreference = "clean" | "documented" | "minimal"
-export type VectorComponentNamingPreference = "PascalCase" | "camelCase" | "kebab-case"
-export type VectorCursorStylePreference = "line" | "block" | "underline"
 export type VectorChatWidthPreference = "focused" | "wide" | "full"
 export type VectorMessageSpacingPreference = "compact" | "comfortable" | "relaxed"
-export type VectorExplanationStylePreference = "beginner" | "balanced" | "pro"
 
 export interface Settings {
   general: {
@@ -49,7 +40,6 @@ export interface Settings {
     confirmBeforeDeletingChats: boolean
     defaultLandingPage: VectorLandingPreference
     releaseNotes: boolean
-    followup: "queue" | "steer"
     showFileTree: boolean
     showNavigation: boolean
     showSearch: boolean
@@ -62,32 +52,6 @@ export interface Settings {
     mobileTitlebarPosition: "top" | "bottom"
     newLayoutDesigns?: boolean
   }
-  profile: {
-    displayName: string
-    email: string
-    avatar: string
-    bio: string
-  }
-  personalization: {
-    tone: VectorTonePreference
-    preferredLanguages: string
-    frontendFramework: string
-    backendFramework: string
-    preferredStack: string
-    stylingFramework: string
-    stylingSystem: string
-    packageManager: string
-    indentation: VectorIndentationPreference
-    tabWidth: number
-    codeStyle: VectorCodeStylePreference
-    componentNaming: VectorComponentNamingPreference
-    alwaysTypeScript: boolean
-    alwaysFunctionalComponents: boolean
-    alwaysExplainCode: boolean
-    alwaysGenerateComments: boolean
-    defaultProjectTemplate: string
-    customInstructions: string
-  }
   appearance: {
     theme: VectorThemePreference
     fontSize: number
@@ -98,7 +62,6 @@ export interface Settings {
     wallpaper: VectorWallpaperPreference
     sidebar: VectorSidebarPreference
     fontPersonality: VectorFontPreference
-    chatBackdrop: string
     accentColor: string
     workspaceColor: string
     sidebarColor: string
@@ -118,25 +81,11 @@ export interface Settings {
     showLineNumbers: boolean
     highlightActiveLine: boolean
     renderWhitespace: boolean
-    cursorAnimation: boolean
-    cursorStyle: VectorCursorStylePreference
-    autoCloseBrackets: boolean
-    autoCloseQuotes: boolean
-    autoIndent: boolean
-    formatOnSave: boolean
-    smoothScrolling: boolean
+    aiAutocomplete: boolean
   }
   chat: {
-    enterToSend: boolean
-    shiftEnterNewline: boolean
-    autoScroll: boolean
-    showTimestamps: boolean
-    showTokenEstimate: boolean
-    titleGeneration: boolean
-    autoRenameConversations: boolean
     chatWidth: VectorChatWidthPreference
     messageSpacing: VectorMessageSpacingPreference
-    explanationStyle: VectorExplanationStylePreference
   }
   keybinds: Record<string, string>
   permissions: {
@@ -147,7 +96,6 @@ export interface Settings {
   accessibility: {
     uiScale: number
     highContrast: boolean
-    keyboardNavigation: boolean
     focusIndicators: boolean
     largerClickTargets: boolean
   }
@@ -216,7 +164,6 @@ const defaultSettings: Settings = {
     confirmBeforeDeletingChats: true,
     defaultLandingPage: "home",
     releaseNotes: true,
-    followup: "steer",
     showFileTree: true,
     showNavigation: false,
     showSearch: false,
@@ -228,32 +175,6 @@ const defaultSettings: Settings = {
     showCustomAgents: false,
     mobileTitlebarPosition: "top",
   },
-  profile: {
-    displayName: "",
-    email: "",
-    avatar: "",
-    bio: "",
-  },
-  personalization: {
-    tone: "direct",
-    preferredLanguages: "TypeScript, JavaScript, Python",
-    frontendFramework: "React",
-    backendFramework: "Node.js",
-    preferredStack: "",
-    stylingFramework: "Tailwind CSS",
-    stylingSystem: "",
-    packageManager: "",
-    indentation: "spaces",
-    tabWidth: 2,
-    codeStyle: "clean",
-    componentNaming: "PascalCase",
-    alwaysTypeScript: true,
-    alwaysFunctionalComponents: true,
-    alwaysExplainCode: true,
-    alwaysGenerateComments: false,
-    defaultProjectTemplate: "Vite React app",
-    customInstructions: "",
-  },
   appearance: {
     theme: "dark",
     fontSize: 14,
@@ -264,10 +185,9 @@ const defaultSettings: Settings = {
     wallpaper: "nebula",
     sidebar: "fire",
     fontPersonality: "system",
-    chatBackdrop: "",
     accentColor: "#9b6cff",
-    workspaceColor: "#111112",
-    sidebarColor: "#18181a",
+    workspaceColor: "#1d1d1f",
+    sidebarColor: "#242428",
     chatColor: "#202024",
     density: "comfortable",
     sidebarCollapsed: false,
@@ -284,25 +204,11 @@ const defaultSettings: Settings = {
     showLineNumbers: true,
     highlightActiveLine: true,
     renderWhitespace: false,
-    cursorAnimation: true,
-    cursorStyle: "line",
-    autoCloseBrackets: true,
-    autoCloseQuotes: true,
-    autoIndent: true,
-    formatOnSave: false,
-    smoothScrolling: true,
+    aiAutocomplete: true,
   },
   chat: {
-    enterToSend: true,
-    shiftEnterNewline: true,
-    autoScroll: true,
-    showTimestamps: false,
-    showTokenEstimate: true,
-    titleGeneration: true,
-    autoRenameConversations: true,
     chatWidth: "focused",
     messageSpacing: "comfortable",
-    explanationStyle: "balanced",
   },
   keybinds: {},
   permissions: {
@@ -312,10 +218,7 @@ const defaultSettings: Settings = {
     agent: true,
     permissions: true,
     errors: false,
-    taskCompleted: true,
     soundEffects: true,
-    volume: 0.7,
-    successAnimations: true,
   },
   sounds: {
     agentEnabled: true,
@@ -328,7 +231,6 @@ const defaultSettings: Settings = {
   accessibility: {
     uiScale: 1,
     highContrast: false,
-    keyboardNavigation: true,
     focusIndicators: true,
     largerClickTargets: false,
   },
@@ -365,15 +267,27 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
           : themePreference
       const animationSpeed = store.appearance?.animationSpeed ?? defaultSettings.appearance.animationSpeed
       const animationDuration =
-        animationSpeed === "off" ? "0ms" : animationSpeed === "calm" ? "280ms" : animationSpeed === "fast" ? "110ms" : "180ms"
+        animationSpeed === "off"
+          ? "0ms"
+          : animationSpeed === "calm"
+            ? "280ms"
+            : animationSpeed === "fast"
+              ? "110ms"
+              : "180ms"
       const rounded = store.appearance?.roundedCorners ?? defaultSettings.appearance.roundedCorners
       const density = store.appearance?.density ?? defaultSettings.appearance.density
       const uiScale = store.accessibility?.uiScale ?? defaultSettings.accessibility.uiScale
       const appearanceFontSize = store.appearance?.fontSize ?? defaultSettings.appearance.fontSize
       root.style.setProperty("--font-family-mono", monoFontFamily(store.appearance?.mono))
       root.style.setProperty("--font-family-sans", sansFontFamily(store.appearance?.sans))
-      root.style.setProperty("--vector-editor-font-size", `${store.editor?.fontSize ?? defaultSettings.editor.fontSize}px`)
-      root.style.setProperty("--vector-editor-line-height", `${store.editor?.lineHeight ?? defaultSettings.editor.lineHeight}`)
+      root.style.setProperty(
+        "--vector-editor-font-size",
+        `${store.editor?.fontSize ?? defaultSettings.editor.fontSize}px`,
+      )
+      root.style.setProperty(
+        "--vector-editor-line-height",
+        `${store.editor?.lineHeight ?? defaultSettings.editor.lineHeight}`,
+      )
       const editorFont = store.editor?.fontFamily ?? defaultSettings.editor.fontFamily
       root.style.setProperty(
         "--vector-editor-font-family",
@@ -386,7 +300,10 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
       root.style.setProperty("--vector-radius-panel", rounded ? "26px" : "12px")
       root.style.setProperty("--vector-radius-card", rounded ? "18px" : "8px")
       root.style.setProperty("--vector-animation-duration", animationDuration)
-      root.style.setProperty("--vector-density-space", density === "compact" ? "0.78" : density === "spacious" ? "1.18" : "1")
+      root.style.setProperty(
+        "--vector-density-space",
+        density === "compact" ? "0.78" : density === "spacious" ? "1.18" : "1",
+      )
       root.dataset.vectorElement = store.appearance?.element ?? defaultSettings.appearance.element
       root.dataset.vectorWallpaper = store.appearance?.wallpaper ?? defaultSettings.appearance.wallpaper
       root.dataset.vectorBackdrop = store.appearance?.wallpaper ?? defaultSettings.appearance.wallpaper
@@ -395,8 +312,10 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         store.appearance?.fontPersonality ?? defaultSettings.appearance.fontPersonality
       root.dataset.vectorFont = store.appearance?.fontPersonality ?? defaultSettings.appearance.fontPersonality
       root.dataset.vectorDensity = density
+      root.dataset.colorScheme = resolvedTheme
       root.dataset.vectorTheme = resolvedTheme
       root.dataset.vectorThemePreference = themePreference
+      root.style.setProperty("color-scheme", resolvedTheme)
       root.dataset.vectorRoundedCorners = store.appearance?.roundedCorners ? "true" : "false"
       root.dataset.vectorGlass = store.appearance?.glassmorphism ? "true" : "false"
       root.dataset.vectorAnimationSpeed = animationSpeed
@@ -408,13 +327,10 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
       root.dataset.vectorEditorLineNumbers = store.editor?.showLineNumbers ? "true" : "false"
       root.dataset.vectorEditorActiveLine = store.editor?.highlightActiveLine ? "true" : "false"
       root.dataset.vectorEditorWhitespace = store.editor?.renderWhitespace ? "true" : "false"
-      root.dataset.vectorEditorSmoothScroll = store.editor?.smoothScrolling ? "true" : "false"
       root.dataset.vectorChatWidth = store.chat?.chatWidth ?? defaultSettings.chat.chatWidth
       root.dataset.vectorMessageSpacing = store.chat?.messageSpacing ?? defaultSettings.chat.messageSpacing
-      root.dataset.vectorChatTimestamps = store.chat?.showTimestamps ? "true" : "false"
       root.dataset.vectorSidebarCollapsed = store.appearance?.sidebarCollapsed ? "true" : "false"
-      const chatBackdrop = store.appearance?.chatBackdrop || "/vector-space-backdrop.png"
-      root.style.setProperty("--vector-chat-backdrop-image", `url(${JSON.stringify(chatBackdrop)})`)
+      root.style.setProperty("--vector-chat-backdrop-image", 'url("/vector-space-backdrop.png")')
       root.style.setProperty("--vector-accent", store.appearance?.accentColor ?? defaultSettings.appearance.accentColor)
       root.style.setProperty(
         "--vector-workspace-bg",
@@ -426,15 +342,13 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
       )
       root.style.setProperty("--vector-chat-bg", store.appearance?.chatColor ?? defaultSettings.appearance.chatColor)
       root.style.setProperty("--vector-chat-width", store.chat?.chatWidth ?? defaultSettings.chat.chatWidth)
-      root.style.setProperty("--vector-message-spacing", store.chat?.messageSpacing ?? defaultSettings.chat.messageSpacing)
+      root.style.setProperty(
+        "--vector-message-spacing",
+        store.chat?.messageSpacing ?? defaultSettings.chat.messageSpacing,
+      )
       if (typeof localStorage !== "undefined") {
         localStorage.setItem("vector.element", store.appearance?.element ?? defaultSettings.appearance.element)
       }
-    })
-
-    createEffect(() => {
-      if (store.general?.followup !== "queue") return
-      setStore("general", "followup", "steer")
     })
 
     return {
@@ -482,13 +396,6 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         releaseNotes: withFallback(() => store.general?.releaseNotes, defaultSettings.general.releaseNotes),
         setReleaseNotes(value: boolean) {
           setStore("general", "releaseNotes", value)
-        },
-        followup: withFallback(
-          () => (store.general?.followup === "queue" ? "steer" : store.general?.followup),
-          defaultSettings.general.followup,
-        ),
-        setFollowup(value: "queue" | "steer") {
-          setStore("general", "followup", value === "queue" ? "steer" : value)
         },
         showFileTree,
         setShowFileTree(value: boolean) {
@@ -553,140 +460,6 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         status: visible(showStatus),
         customAgents: visible(showCustomAgents),
       },
-      profile: {
-        displayName: withFallback(() => store.profile?.displayName, defaultSettings.profile.displayName),
-        setDisplayName(value: string) {
-          setStore("profile", "displayName", value)
-        },
-        email: withFallback(() => store.profile?.email, defaultSettings.profile.email),
-        setEmail(value: string) {
-          setStore("profile", "email", value)
-        },
-        avatar: withFallback(() => store.profile?.avatar, defaultSettings.profile.avatar),
-        setAvatar(value: string) {
-          setStore("profile", "avatar", value)
-        },
-        bio: withFallback(() => store.profile?.bio, defaultSettings.profile.bio),
-        setBio(value: string) {
-          setStore("profile", "bio", value)
-        },
-      },
-      personalization: {
-        tone: withFallback(() => store.personalization?.tone, defaultSettings.personalization.tone),
-        setTone(value: VectorTonePreference) {
-          setStore("personalization", "tone", value)
-        },
-        preferredLanguages: withFallback(
-          () => store.personalization?.preferredLanguages,
-          defaultSettings.personalization.preferredLanguages,
-        ),
-        setPreferredLanguages(value: string) {
-          setStore("personalization", "preferredLanguages", value)
-        },
-        frontendFramework: withFallback(
-          () => store.personalization?.frontendFramework,
-          defaultSettings.personalization.frontendFramework,
-        ),
-        setFrontendFramework(value: string) {
-          setStore("personalization", "frontendFramework", value)
-        },
-        backendFramework: withFallback(
-          () => store.personalization?.backendFramework,
-          defaultSettings.personalization.backendFramework,
-        ),
-        setBackendFramework(value: string) {
-          setStore("personalization", "backendFramework", value)
-        },
-        preferredStack: withFallback(
-          () => store.personalization?.preferredStack,
-          defaultSettings.personalization.preferredStack,
-        ),
-        setPreferredStack(value: string) {
-          setStore("personalization", "preferredStack", value)
-        },
-        stylingFramework: withFallback(
-          () => store.personalization?.stylingFramework,
-          defaultSettings.personalization.stylingFramework,
-        ),
-        setStylingFramework(value: string) {
-          setStore("personalization", "stylingFramework", value)
-        },
-        stylingSystem: withFallback(
-          () => store.personalization?.stylingSystem,
-          defaultSettings.personalization.stylingSystem,
-        ),
-        setStylingSystem(value: string) {
-          setStore("personalization", "stylingSystem", value)
-        },
-        packageManager: withFallback(
-          () => store.personalization?.packageManager,
-          defaultSettings.personalization.packageManager,
-        ),
-        setPackageManager(value: string) {
-          setStore("personalization", "packageManager", value)
-        },
-        indentation: withFallback(() => store.personalization?.indentation, defaultSettings.personalization.indentation),
-        setIndentation(value: VectorIndentationPreference) {
-          setStore("personalization", "indentation", value)
-        },
-        tabWidth: withFallback(() => store.personalization?.tabWidth, defaultSettings.personalization.tabWidth),
-        setTabWidth(value: number) {
-          setStore("personalization", "tabWidth", value)
-        },
-        codeStyle: withFallback(() => store.personalization?.codeStyle, defaultSettings.personalization.codeStyle),
-        setCodeStyle(value: VectorCodeStylePreference) {
-          setStore("personalization", "codeStyle", value)
-        },
-        componentNaming: withFallback(
-          () => store.personalization?.componentNaming,
-          defaultSettings.personalization.componentNaming,
-        ),
-        setComponentNaming(value: VectorComponentNamingPreference) {
-          setStore("personalization", "componentNaming", value)
-        },
-        alwaysTypeScript: withFallback(
-          () => store.personalization?.alwaysTypeScript,
-          defaultSettings.personalization.alwaysTypeScript,
-        ),
-        setAlwaysTypeScript(value: boolean) {
-          setStore("personalization", "alwaysTypeScript", value)
-        },
-        alwaysFunctionalComponents: withFallback(
-          () => store.personalization?.alwaysFunctionalComponents,
-          defaultSettings.personalization.alwaysFunctionalComponents,
-        ),
-        setAlwaysFunctionalComponents(value: boolean) {
-          setStore("personalization", "alwaysFunctionalComponents", value)
-        },
-        alwaysExplainCode: withFallback(
-          () => store.personalization?.alwaysExplainCode,
-          defaultSettings.personalization.alwaysExplainCode,
-        ),
-        setAlwaysExplainCode(value: boolean) {
-          setStore("personalization", "alwaysExplainCode", value)
-        },
-        alwaysGenerateComments: withFallback(
-          () => store.personalization?.alwaysGenerateComments,
-          defaultSettings.personalization.alwaysGenerateComments,
-        ),
-        setAlwaysGenerateComments(value: boolean) {
-          setStore("personalization", "alwaysGenerateComments", value)
-        },
-        defaultProjectTemplate: withFallback(
-          () => store.personalization?.defaultProjectTemplate,
-          defaultSettings.personalization.defaultProjectTemplate,
-        ),
-        setDefaultProjectTemplate(value: string) {
-          setStore("personalization", "defaultProjectTemplate", value)
-        },
-        customInstructions: withFallback(
-          () => store.personalization?.customInstructions,
-          defaultSettings.personalization.customInstructions,
-        ),
-        setCustomInstructions(value: string) {
-          setStore("personalization", "customInstructions", value)
-        },
-      },
       appearance: {
         theme: withFallback(() => store.appearance?.theme, defaultSettings.appearance.theme),
         setTheme(value: VectorThemePreference) {
@@ -726,10 +499,6 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         ),
         setFontPersonality(value: VectorFontPreference) {
           setStore("appearance", "fontPersonality", value)
-        },
-        chatBackdrop: withFallback(() => store.appearance?.chatBackdrop, defaultSettings.appearance.chatBackdrop),
-        setChatBackdrop(value: string) {
-          setStore("appearance", "chatBackdrop", value)
         },
         accentColor: withFallback(() => store.appearance?.accentColor, defaultSettings.appearance.accentColor),
         setAccentColor(value: string) {
@@ -810,67 +579,12 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         setRenderWhitespace(value: boolean) {
           setStore("editor", "renderWhitespace", value)
         },
-        cursorAnimation: withFallback(() => store.editor?.cursorAnimation, defaultSettings.editor.cursorAnimation),
-        setCursorAnimation(value: boolean) {
-          setStore("editor", "cursorAnimation", value)
-        },
-        cursorStyle: withFallback(() => store.editor?.cursorStyle, defaultSettings.editor.cursorStyle),
-        setCursorStyle(value: VectorCursorStylePreference) {
-          setStore("editor", "cursorStyle", value)
-        },
-        autoCloseBrackets: withFallback(() => store.editor?.autoCloseBrackets, defaultSettings.editor.autoCloseBrackets),
-        setAutoCloseBrackets(value: boolean) {
-          setStore("editor", "autoCloseBrackets", value)
-        },
-        autoCloseQuotes: withFallback(() => store.editor?.autoCloseQuotes, defaultSettings.editor.autoCloseQuotes),
-        setAutoCloseQuotes(value: boolean) {
-          setStore("editor", "autoCloseQuotes", value)
-        },
-        autoIndent: withFallback(() => store.editor?.autoIndent, defaultSettings.editor.autoIndent),
-        setAutoIndent(value: boolean) {
-          setStore("editor", "autoIndent", value)
-        },
-        formatOnSave: withFallback(() => store.editor?.formatOnSave, defaultSettings.editor.formatOnSave),
-        setFormatOnSave(value: boolean) {
-          setStore("editor", "formatOnSave", value)
-        },
-        smoothScrolling: withFallback(() => store.editor?.smoothScrolling, defaultSettings.editor.smoothScrolling),
-        setSmoothScrolling(value: boolean) {
-          setStore("editor", "smoothScrolling", value)
+        aiAutocomplete: withFallback(() => store.editor?.aiAutocomplete, defaultSettings.editor.aiAutocomplete),
+        setAiAutocomplete(value: boolean) {
+          setStore("editor", "aiAutocomplete", value)
         },
       },
       chat: {
-        enterToSend: withFallback(() => store.chat?.enterToSend, defaultSettings.chat.enterToSend),
-        setEnterToSend(value: boolean) {
-          setStore("chat", "enterToSend", value)
-        },
-        shiftEnterNewline: withFallback(() => store.chat?.shiftEnterNewline, defaultSettings.chat.shiftEnterNewline),
-        setShiftEnterNewline(value: boolean) {
-          setStore("chat", "shiftEnterNewline", value)
-        },
-        autoScroll: withFallback(() => store.chat?.autoScroll, defaultSettings.chat.autoScroll),
-        setAutoScroll(value: boolean) {
-          setStore("chat", "autoScroll", value)
-        },
-        showTimestamps: withFallback(() => store.chat?.showTimestamps, defaultSettings.chat.showTimestamps),
-        setShowTimestamps(value: boolean) {
-          setStore("chat", "showTimestamps", value)
-        },
-        showTokenEstimate: withFallback(() => store.chat?.showTokenEstimate, defaultSettings.chat.showTokenEstimate),
-        setShowTokenEstimate(value: boolean) {
-          setStore("chat", "showTokenEstimate", value)
-        },
-        titleGeneration: withFallback(() => store.chat?.titleGeneration, defaultSettings.chat.titleGeneration),
-        setTitleGeneration(value: boolean) {
-          setStore("chat", "titleGeneration", value)
-        },
-        autoRenameConversations: withFallback(
-          () => store.chat?.autoRenameConversations,
-          defaultSettings.chat.autoRenameConversations,
-        ),
-        setAutoRenameConversations(value: boolean) {
-          setStore("chat", "autoRenameConversations", value)
-        },
         chatWidth: withFallback(() => store.chat?.chatWidth, defaultSettings.chat.chatWidth),
         setChatWidth(value: VectorChatWidthPreference) {
           setStore("chat", "chatWidth", value)
@@ -878,10 +592,6 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         messageSpacing: withFallback(() => store.chat?.messageSpacing, defaultSettings.chat.messageSpacing),
         setMessageSpacing(value: VectorMessageSpacingPreference) {
           setStore("chat", "messageSpacing", value)
-        },
-        explanationStyle: withFallback(() => store.chat?.explanationStyle, defaultSettings.chat.explanationStyle),
-        setExplanationStyle(value: VectorExplanationStylePreference) {
-          setStore("chat", "explanationStyle", value)
         },
       },
       keybinds: {
@@ -920,31 +630,20 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         setErrors(value: boolean) {
           setStore("notifications", "errors", value)
         },
-        taskCompleted: withFallback(
-          () => store.notifications?.taskCompleted,
-          defaultSettings.notifications.taskCompleted,
-        ),
-        setTaskCompleted(value: boolean) {
-          setStore("notifications", "taskCompleted", value)
-        },
         soundEffects: withFallback(() => store.notifications?.soundEffects, defaultSettings.notifications.soundEffects),
         setSoundEffects(value: boolean) {
           setStore("notifications", "soundEffects", value)
         },
-        volume: withFallback(() => store.notifications?.volume, defaultSettings.notifications.volume),
-        setVolume(value: number) {
-          setStore("notifications", "volume", value)
-        },
-        successAnimations: withFallback(
-          () => store.notifications?.successAnimations,
-          defaultSettings.notifications.successAnimations,
-        ),
-        setSuccessAnimations(value: boolean) {
-          setStore("notifications", "successAnimations", value)
-        },
       },
       sounds: {
-        agentEnabled: withFallback(() => store.sounds?.agentEnabled, defaultSettings.sounds.agentEnabled),
+        // The master "Sound effects" switch (notifications.soundEffects) gates every
+        // category below — flipping it off silences agent/permission/error sounds
+        // without touching each category's own stored preference.
+        agentEnabled: createMemo(
+          () =>
+            (store.sounds?.agentEnabled ?? defaultSettings.sounds.agentEnabled) &&
+            (store.notifications?.soundEffects ?? defaultSettings.notifications.soundEffects),
+        ),
         setAgentEnabled(value: boolean) {
           setStore("sounds", "agentEnabled", value)
         },
@@ -952,9 +651,10 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         setAgent(value: string) {
           setStore("sounds", "agent", value)
         },
-        permissionsEnabled: withFallback(
-          () => store.sounds?.permissionsEnabled,
-          defaultSettings.sounds.permissionsEnabled,
+        permissionsEnabled: createMemo(
+          () =>
+            (store.sounds?.permissionsEnabled ?? defaultSettings.sounds.permissionsEnabled) &&
+            (store.notifications?.soundEffects ?? defaultSettings.notifications.soundEffects),
         ),
         setPermissionsEnabled(value: boolean) {
           setStore("sounds", "permissionsEnabled", value)
@@ -963,7 +663,11 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         setPermissions(value: string) {
           setStore("sounds", "permissions", value)
         },
-        errorsEnabled: withFallback(() => store.sounds?.errorsEnabled, defaultSettings.sounds.errorsEnabled),
+        errorsEnabled: createMemo(
+          () =>
+            (store.sounds?.errorsEnabled ?? defaultSettings.sounds.errorsEnabled) &&
+            (store.notifications?.soundEffects ?? defaultSettings.notifications.soundEffects),
+        ),
         setErrorsEnabled(value: boolean) {
           setStore("sounds", "errorsEnabled", value)
         },
@@ -980,13 +684,6 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         highContrast: withFallback(() => store.accessibility?.highContrast, defaultSettings.accessibility.highContrast),
         setHighContrast(value: boolean) {
           setStore("accessibility", "highContrast", value)
-        },
-        keyboardNavigation: withFallback(
-          () => store.accessibility?.keyboardNavigation,
-          defaultSettings.accessibility.keyboardNavigation,
-        ),
-        setKeyboardNavigation(value: boolean) {
-          setStore("accessibility", "keyboardNavigation", value)
         },
         focusIndicators: withFallback(
           () => store.accessibility?.focusIndicators,

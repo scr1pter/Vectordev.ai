@@ -5,6 +5,7 @@ import { app } from "electron"
 import { checkHealth } from "../server"
 import { type WslCommandLine, resolveWslOpencode, shellEscape, wslArgs } from "./runtime"
 import { pollWslHealth } from "./startup"
+import { VECTOR_AGENT_RUNTIME_ENV } from "../agent-runtime"
 
 export type WslSidecar = {
   listener: { stop: () => void; onExit: (cb: (code: number | null, signal: NodeJS.Signals | null) => void) => void }
@@ -30,6 +31,13 @@ export async function spawnWslSidecar(
     "export PATH",
     "export WSLENV=",
     "export OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER=true",
+    `export OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS=${VECTOR_AGENT_RUNTIME_ENV.OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS}`,
+    ...(process.env.VECTOR_MCP_AUTH_KEY
+      ? [`export VECTOR_MCP_AUTH_KEY=${shellEscape(process.env.VECTOR_MCP_AUTH_KEY)}`]
+      : []),
+    ...(process.env.VECTOR_CREDENTIAL_KEY
+      ? [`export VECTOR_CREDENTIAL_KEY=${shellEscape(process.env.VECTOR_CREDENTIAL_KEY)}`]
+      : []),
     "export OPENCODE_CLIENT=desktop",
     `export OPENCODE_SERVER_USERNAME=${shellEscape(username)}`,
     `export OPENCODE_SERVER_PASSWORD=${shellEscape(password)}`,

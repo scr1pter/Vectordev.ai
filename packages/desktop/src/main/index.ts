@@ -41,6 +41,10 @@ import { registerWslIpcHandlers } from "./wsl/ipc"
 import { spawnWslSidecar } from "./wsl/sidecar"
 import { migrate } from "./migrate"
 import { cleanupStoreFiles } from "./store-cleanup"
+import { startBrowserBridge, stopBrowserBridge } from "./browser-bridge"
+import { startCloudAgentBridge, stopCloudAgentBridge } from "./cloud-agent-bridge"
+import { setupSecureRuntimeSecrets } from "./secure-runtime"
+import { handleCloudOAuthDeepLinks } from "./cloud-connections"
 
 const APP_NAMES: Record<string, string> = {
   dev: "Vector Dev",
@@ -74,6 +78,17 @@ function emitDeepLinks(urls: string[]) {
   pendingDeepLinks.push(...urls)
   const win = getLastFocusedWindow()
   if (win) sendDeepLinks(win, urls)
+}
+
+async function routeDeepLinks(urls: string[]) {
+  if (urls.length === 0) return
+  const remaining = await handleCloudOAuthDeepLinks(urls)
+  logger.log("deep links routed", {
+    received: urls.length,
+    handled: urls.length - remaining.length,
+    forwarded: remaining.length,
+  })
+  emitDeepLinks(remaining)
 }
 
 async function killSidecar() {
@@ -129,7 +144,11 @@ const main = Effect.gen(function* () {
     process.env.XDG_STATE_HOME = join(root, "state")
     return root
   })()
-  app.setName(app.isPackaged ? APP_NAMES[CHANNEL] : "Vector Dev")
+  // Keep the product identity stable in both packaged and local development
+  // launches. macOS otherwise exposes the Electron runtime name in menus and
+  // permission surfaces, which makes a development build look like a different
+  // application.
+  app.setName(APP_NAMES[CHANNEL])
   app.setAppUserModelId(appId)
   const userDataPath = onboardingTestRoot ? join(onboardingTestRoot, "desktop") : join(app.getPath("appData"), appId)
   app.setPath("userData", userDataPath)
@@ -153,7 +172,7 @@ const main = Effect.gen(function* () {
     },
   )
   const stopSidecars = async () => {
-    await killSidecar()
+    await Promise.all([killSidecar(), stopBrowserBridge(), stopCloudAgentBridge()])
     wslServers.stopAll()
   }
   const relaunch = () => {
@@ -179,9 +198,17 @@ const main = Effect.gen(function* () {
   ensureLoopbackNoProxy()
   useEnvProxy()
   app.commandLine.appendSwitch("proxy-bypass-list", "<-loopback>")
-  // Unsigned local/demo builds should not interrupt startup with Chromium Safe Storage keychain prompts.
-  app.commandLine.appendSwitch("password-store", "basic")
-  if (process.platform === "darwin") app.commandLine.appendSwitch("use-mock-keychain")
+  // Ad-hoc desktop builds receive a new code identity on every release, which
+  // makes macOS repeatedly challenge Chromium's Safe Storage access. Keep the
+  // controlled browser on its app-local credential backend until Vector ships
+  // with a stable Developer ID signature.
+  if (process.platform === "darwin") {
+    app.commandLine.appendSwitch("password-store", "basic")
+    app.commandLine.appendSwitch("use-mock-keychain")
+    process.env.VECTOR_OS_CREDENTIAL_STORE_DISABLED = "1"
+  } else if (!app.isPackaged) {
+    app.commandLine.appendSwitch("password-store", "basic")
+  }
   const features = app.commandLine.getSwitchValue("enable-features")
   app.commandLine.appendSwitch("enable-features", features ? `${jsCallStackFeature},${features}` : jsCallStackFeature)
   if (!app.isPackaged) app.commandLine.appendSwitch("remote-debugging-port", "9222")
@@ -195,10 +222,7 @@ const main = Effect.gen(function* () {
 
   app.on("second-instance", (_event: Event, argv: string[]) => {
     const urls = argv.filter((arg: string) => arg.startsWith("vector://"))
-    if (urls.length) {
-      logger.log("deep link received via second-instance", { urls })
-      emitDeepLinks(urls)
-    }
+    if (urls.length) void routeDeepLinks(urls)
     const win = getLastFocusedWindow()
     if (win) {
       win.show()
@@ -208,8 +232,7 @@ const main = Effect.gen(function* () {
 
   app.on("open-url", (event: Event, url: string) => {
     event.preventDefault()
-    logger.log("deep link received via open-url", { url })
-    emitDeepLinks([url])
+    void routeDeepLinks([url])
   })
 
   let quitting = false
@@ -226,16 +249,14 @@ const main = Effect.gen(function* () {
   })
 
   app.on("window-all-closed", () => {
-    logger.warn("all windows closed; keeping Vector ready")
-    if (process.platform === "darwin") {
-      setTimeout(() => {
-        if (quitting || BrowserWindow.getAllWindows().length > 0) return
-        restoreMainWindows()
-      }, 100)
+    logger.warn("all windows closed; waiting for explicit activation")
+    if (process.platform !== "darwin") {
+      app.quit()
     }
   })
 
   app.on("activate", () => {
+    if (quitting) return
     if (BrowserWindow.getAllWindows().length > 0) return
     restoreMainWindows()
   })
@@ -262,6 +283,20 @@ const main = Effect.gen(function* () {
   const serverReady = Deferred.makeUnsafe<ServerReadyData, unknown>()
 
   yield* Effect.promise(() => app.whenReady())
+  yield* Effect.promise(() => setupSecureRuntimeSecrets()).pipe(
+    Effect.catch((error) =>
+      Effect.sync(() => {
+        logger.warn("secure runtime vault unavailable; MCP OAuth data will use owner-only file permissions", error)
+      }),
+    ),
+  )
+
+  const browserBridge = yield* Effect.promise(() => startBrowserBridge())
+  process.env.VECTOR_BROWSER_BRIDGE_URL = browserBridge.url
+  process.env.VECTOR_BROWSER_BRIDGE_TOKEN = browserBridge.token
+  const cloudAgentBridge = yield* Effect.promise(() => startCloudAgentBridge())
+  process.env.VECTOR_CLOUD_AGENT_BRIDGE_URL = cloudAgentBridge.url
+  process.env.VECTOR_CLOUD_AGENT_BRIDGE_TOKEN = cloudAgentBridge.token
 
   if (!TEST_ONBOARDING && process.env.VECTOR_ENABLE_LEGACY_MIGRATION === "1") migrate()
   yield* Effect.promise(() => cleanupStoreFiles(app.getPath("userData"))).pipe(

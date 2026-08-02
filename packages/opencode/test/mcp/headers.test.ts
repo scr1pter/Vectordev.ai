@@ -53,12 +53,13 @@ describe("mcp.headers", () => {
   it.instance("headers are passed to transports when oauth is enabled (default)", () =>
     Effect.gen(function* () {
       const mcp = yield* MCP.Service
+      process.env.VECTOR_TEST_MCP_TOKEN = "test-token"
       yield* mcp
         .add("test-server", {
           type: "remote",
           url: "https://example.com/mcp",
           headers: {
-            Authorization: "Bearer test-token",
+            Authorization: "Bearer {env:VECTOR_TEST_MCP_TOKEN}",
             "X-Custom-Header": "custom-value",
           },
         })
@@ -76,19 +77,21 @@ describe("mcp.headers", () => {
         // OAuth should be enabled by default, so authProvider should exist
         expect(call.options.authProvider).toBeDefined()
       }
+      delete process.env.VECTOR_TEST_MCP_TOKEN
     }),
   )
 
   it.instance("headers are passed to transports when oauth is explicitly disabled", () =>
     Effect.gen(function* () {
       const mcp = yield* MCP.Service
+      process.env.VECTOR_TEST_MCP_TOKEN = "test-token"
       yield* mcp
         .add("test-server-no-oauth", {
           type: "remote",
           url: "https://example.com/mcp",
           oauth: false,
           headers: {
-            Authorization: "Bearer test-token",
+            Authorization: "Bearer {env:VECTOR_TEST_MCP_TOKEN}",
           },
         })
         .pipe(Effect.catch(() => Effect.void))
@@ -103,6 +106,7 @@ describe("mcp.headers", () => {
         // OAuth is disabled, so no authProvider
         expect(call.options.authProvider).toBeUndefined()
       }
+      delete process.env.VECTOR_TEST_MCP_TOKEN
     }),
   )
 

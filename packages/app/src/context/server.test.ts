@@ -5,6 +5,7 @@ import {
   createServerProjects,
   migrateCanonicalLocalServerState,
   nextServerAfterRemoval,
+  pruneMissingLocalProjects,
   resolveServerList,
   ServerConnection,
 } from "./server"
@@ -113,6 +114,44 @@ describe("createServerProjects", () => {
       adopted.close("/repo")
       expect(remote.list()).toEqual([])
       dispose()
+    })
+  })
+})
+
+describe("pruneMissingLocalProjects", () => {
+  test("removes deleted folders and keeps a valid last project", async () => {
+    const result = await pruneMissingLocalProjects({
+      projects: [
+        { worktree: "/existing", expanded: true },
+        { worktree: "/deleted", expanded: false },
+      ],
+      lastProject: "/existing",
+      pathExists: async (path) => path === "/existing",
+    })
+
+    expect(result).toEqual({
+      projects: [{ worktree: "/existing", expanded: true }],
+      lastProject: "/existing",
+    })
+  })
+
+  test("repairs a missing last project and tolerates path lookup failures", async () => {
+    const result = await pruneMissingLocalProjects({
+      projects: [
+        { worktree: "/deleted", expanded: true },
+        { worktree: "/existing", expanded: false },
+        { worktree: "/unreadable", expanded: true },
+      ],
+      lastProject: "/deleted",
+      pathExists: async (path) => {
+        if (path === "/unreadable") throw new Error("permission denied")
+        return path === "/existing"
+      },
+    })
+
+    expect(result).toEqual({
+      projects: [{ worktree: "/existing", expanded: false }],
+      lastProject: "/existing",
     })
   })
 })

@@ -1,22 +1,18 @@
 import { Popover as Kobalte } from "@kobalte/core/popover"
-import { Component, ComponentProps, createMemo, For, JSX, Show, ValidComponent } from "solid-js"
+import { Component, ComponentProps, createMemo, createSignal, For, JSX, Show, ValidComponent } from "solid-js"
 import { createStore } from "solid-js/store"
 import { useLocal } from "@/context/local"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { popularProviders } from "@/hooks/use-providers"
-import { Button } from "@opencode-ai/ui/button"
-import { IconButton } from "@opencode-ai/ui/icon-button"
 import { ScrollView } from "@opencode-ai/ui/scroll-view"
-import { Tag } from "@opencode-ai/ui/tag"
-import { Dialog } from "@opencode-ai/ui/dialog"
-import { List } from "@opencode-ai/ui/list"
-import { Tooltip } from "@opencode-ai/ui/tooltip"
 import { Icon } from "@opencode-ai/ui/v2/icon"
-import { Tag as TagV2 } from "@opencode-ai/ui/v2/badge-v2"
 import { MenuV2 } from "@opencode-ai/ui/v2/menu-v2"
-import { ModelTooltip } from "./model-tooltip"
+import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
+import { TextInputV2 } from "@opencode-ai/ui/v2/text-input-v2"
+import { Dialog as DialogV2, DialogBody, DialogHeader, DialogTitle } from "@opencode-ai/ui/v2/dialog-v2"
 import { useLanguage } from "@/context/language"
 import { decode64 } from "@/utils/base64"
+import { brandProviderName } from "@/utils/provider-brand"
 
 const costInput = (cost: unknown): number | undefined => {
   if (Array.isArray(cost)) {
@@ -31,18 +27,16 @@ const costInput = (cost: unknown): number | undefined => {
 const isFree = (_provider: string, cost: unknown) => costInput(cost) === 0
 
 type ModelState = ReturnType<typeof useLocal>["model"]
+/** Minimal surface the selector popover needs — lets other screens (e.g.
+    Parallel Workspaces) host the exact same picker with their own selection. */
+export type ModelSelectorModelState = Pick<ModelState, "list" | "visible" | "current" | "set">
 type ModelItem = ReturnType<ModelState["list"]>[number]
 
 const modelKey = (model: ModelItem) => `${model.provider.id}:${model.id}`
 const manageKey = "action:manage"
 const HIDDEN_PROVIDER_IDS = new Set<string>()
 
-const providerDisplayName = (id: string, name: string) => {
-  if (id === "opencode") return name || "OpenCode"
-  if (id === "opencode-go") return name || "OpenCode Go"
-  if (id === "opencode-zen") return name || "OpenCode Zen"
-  return name
-}
+const providerDisplayName = (id: string, name: string) => brandProviderName(id, name)
 
 const sortModelGroups = (a: { category: string; items: ModelItem[] }, b: { category: string; items: ModelItem[] }) => {
   const aIndex = popularProviders.indexOf(a.category)
@@ -58,190 +52,19 @@ const sortModelGroups = (a: { category: string; items: ModelItem[] }, b: { categ
   )
 }
 
-const ModelList: Component<{
-  provider?: string
-  class?: string
-  onSelect: () => void
-  action?: JSX.Element
-  model?: ModelState
-}> = (props) => {
-  const model = props.model ?? useLocal().model
-  const language = useLanguage()
-
-  const models = createMemo(() =>
-    model
-      .list()
-      .filter((m) => !HIDDEN_PROVIDER_IDS.has(m.provider.id))
-      .filter((m) => model.visible({ modelID: m.id, providerID: m.provider.id }))
-      .filter((m) => (props.provider ? m.provider.id === props.provider : true)),
-  )
-
-  return (
-    <List
-      class={`flex-1 px-3 min-h-0 [&_[data-slot=list-scroll]]:flex-1 [&_[data-slot=list-scroll]]:min-h-0 ${props.class ?? ""}`}
-      search={{ placeholder: language.t("dialog.model.search.placeholder"), autofocus: true, action: props.action }}
-      emptyMessage={language.t("dialog.model.empty")}
-      key={(x) => `${x.provider.id}:${x.id}`}
-      items={models}
-      current={model.current()}
-      filterKeys={["provider.name", "name", "id"]}
-      sortBy={(a, b) => a.name.localeCompare(b.name)}
-      groupBy={(x) => providerDisplayName(x.provider.id, x.provider.name)}
-      sortGroupsBy={(a, b) => {
-        const aProvider = a.items[0].provider.id
-        const bProvider = b.items[0].provider.id
-        if (popularProviders.includes(aProvider) && !popularProviders.includes(bProvider)) return -1
-        if (!popularProviders.includes(aProvider) && popularProviders.includes(bProvider)) return 1
-        return popularProviders.indexOf(aProvider) - popularProviders.indexOf(bProvider)
-      }}
-      itemWrapper={(item, node) => (
-        <Tooltip
-          class="w-full"
-          placement="right-start"
-          gutter={12}
-          value={<ModelTooltip model={item} latest={item.latest} free={isFree(item.provider.id, item.cost)} />}
-        >
-          {node}
-        </Tooltip>
-      )}
-      onSelect={(x) => {
-        model.set(x ? { modelID: x.id, providerID: x.provider.id } : undefined, {
-          recent: true,
-        })
-        props.onSelect()
-      }}
-    >
-      {(i) => (
-        <div class="w-full flex items-center gap-x-2 text-13-regular">
-          <span class="truncate">{i.name}</span>
-          <Show when={isFree(i.provider.id, i.cost)}>
-            <Tag>{language.t("model.tag.free")}</Tag>
-          </Show>
-          <Show when={i.latest}>
-            <Tag>{language.t("model.tag.latest")}</Tag>
-          </Show>
-        </div>
-      )}
-    </List>
-  )
+const groupModels = (list: ModelItem[]) => {
+  const byProvider = new Map<string, ModelItem[]>()
+  for (const item of list) {
+    byProvider.set(item.provider.id, [...(byProvider.get(item.provider.id) ?? []), item])
+  }
+  return Array.from(byProvider, ([category, items]) => ({ category, items })).sort(sortModelGroups)
 }
 
 type ModelSelectorTriggerProps = Omit<ComponentProps<typeof Kobalte.Trigger>, "as" | "ref">
-type Dismiss = "escape" | "outside" | "select" | "manage" | "provider"
-
-export function ModelSelectorPopover(props: {
-  provider?: string
-  model?: ModelState
-  children?: JSX.Element
-  triggerAs?: ValidComponent
-  triggerProps?: ModelSelectorTriggerProps
-  onClose?: (cause: "escape" | "select") => void
-}) {
-  const [store, setStore] = createStore<{
-    open: boolean
-    dismiss: Dismiss | null
-  }>({
-    open: false,
-    dismiss: null,
-  })
-  const dialog = useDialog()
-  const local = useLocal()
-  const directory = () => decode64(local.slug())
-
-  const close = (dismiss: Dismiss) => {
-    setStore("dismiss", dismiss)
-    setStore("open", false)
-  }
-
-  const handleManage = () => {
-    close("manage")
-    void import("./dialog-manage-models").then((x) => {
-      dialog.show(() => <x.DialogManageModels />)
-    })
-  }
-
-  const handleConnectProvider = () => {
-    close("provider")
-    void import("./dialog-select-provider").then((x) => {
-      dialog.show(() => <x.DialogSelectProvider directory={directory} />)
-    })
-  }
-  const language = useLanguage()
-
-  return (
-    <Kobalte
-      open={store.open}
-      onOpenChange={(next) => {
-        if (next) setStore("dismiss", null)
-        setStore("open", next)
-      }}
-      modal={false}
-      placement="top-start"
-      gutter={4}
-    >
-      <Kobalte.Trigger as={props.triggerAs ?? "div"} {...props.triggerProps}>
-        {props.children}
-      </Kobalte.Trigger>
-      <Kobalte.Portal>
-        <Kobalte.Content
-          class="w-72 h-80 flex flex-col p-2 rounded-md border border-border-base bg-surface-raised-stronger-non-alpha shadow-md z-50 outline-none overflow-hidden"
-          onEscapeKeyDown={(event) => {
-            close("escape")
-            event.preventDefault()
-            event.stopPropagation()
-          }}
-          onPointerDownOutside={() => close("outside")}
-          onFocusOutside={() => close("outside")}
-          onCloseAutoFocus={(event) => {
-            const dismiss = store.dismiss
-            if (dismiss === "outside") event.preventDefault()
-            if (dismiss === "escape" || dismiss === "select") {
-              event.preventDefault()
-              props.onClose?.(dismiss)
-            }
-            setStore("dismiss", null)
-          }}
-        >
-          <Kobalte.Title class="sr-only">{language.t("dialog.model.select.title")}</Kobalte.Title>
-          <ModelList
-            provider={props.provider}
-            model={props.model}
-            onSelect={() => close("select")}
-            class="p-1"
-            action={
-              <div class="flex items-center gap-1">
-                <Tooltip placement="top" value={language.t("command.provider.connect")}>
-                  <IconButton
-                    icon="plus-small"
-                    variant="ghost"
-                    iconSize="normal"
-                    class="size-6"
-                    aria-label={language.t("command.provider.connect")}
-                    onClick={handleConnectProvider}
-                  />
-                </Tooltip>
-                <Tooltip placement="top" value={language.t("dialog.model.manage")}>
-                  <IconButton
-                    icon="sliders"
-                    variant="ghost"
-                    iconSize="normal"
-                    class="size-6"
-                    aria-label={language.t("dialog.model.manage")}
-                    onClick={handleManage}
-                  />
-                </Tooltip>
-              </div>
-            }
-          />
-        </Kobalte.Content>
-      </Kobalte.Portal>
-    </Kobalte>
-  )
-}
 
 export function ModelSelectorPopoverV2(props: {
   provider?: string
-  model?: ModelState
+  model?: ModelSelectorModelState
   children?: JSX.Element
   triggerAs?: ValidComponent
   triggerProps?: ModelSelectorTriggerProps
@@ -275,14 +98,11 @@ export function ModelSelectorPopoverV2(props: {
 
     return [...filtered].sort((a, b) => a.name.localeCompare(b.name))
   })
-  const groups = createMemo(() => {
-    const byProvider = new Map<string, ModelItem[]>()
-    for (const item of models()) {
-      byProvider.set(item.provider.id, [...(byProvider.get(item.provider.id) ?? []), item])
-    }
-    return Array.from(byProvider, ([category, items]) => ({ category, items })).sort(sortModelGroups)
-  })
-  const keys = () => [...models().map(modelKey), manageKey]
+  const groups = createMemo(() => groupModels(models()))
+  // Navigation order must match render order (grouped by provider, popular
+  // providers first) rather than the flat alphabetical `models()` list, or
+  // arrow keys visibly jump between provider groups instead of adjacent rows.
+  const keys = () => [...groups().flatMap((group) => group.items.map(modelKey)), manageKey]
   const current = () => {
     const value = model.current()
     return value ? `${value.provider.id}:${value.id}` : undefined
@@ -355,16 +175,19 @@ export function ModelSelectorPopoverV2(props: {
   }
   const setSearch = (value: string) => {
     const search = value.trim().toLowerCase()
-    const first = [...allModels()]
-      .sort((a, b) => a.name.localeCompare(b.name))
-      .find(
-        (item) =>
-          !search ||
-          item.name.toLowerCase().includes(search) ||
-          item.id.toLowerCase().includes(search) ||
-          providerDisplayName(item.provider.id, item.provider.name).toLowerCase().includes(search),
-      )
+    const filtered = allModels().filter(
+      (item) =>
+        !search ||
+        item.name.toLowerCase().includes(search) ||
+        item.id.toLowerCase().includes(search) ||
+        providerDisplayName(item.provider.id, item.provider.name).toLowerCase().includes(search),
+    )
+    const sorted = [...filtered].sort((a, b) => a.name.localeCompare(b.name))
+    // Pick the first item in render order (grouped by provider), not the
+    // alphabetically-first match, so the active row is the one visibly on top.
+    const first = groupModels(sorted)[0]?.items[0]
     setStore({ search: value, active: first ? modelKey(first) : manageKey })
+    queueMicrotask(() => activeItem()?.scrollIntoView({ block: "nearest" }))
   }
 
   return (
@@ -375,21 +198,21 @@ export function ModelSelectorPopoverV2(props: {
       <MenuV2.Portal>
         <MenuV2.Content
           ref={(el: HTMLDivElement) => (contentRef = el)}
-          class="w-[284px] overflow-hidden rounded-md border-0 bg-v2-background-bg-layer-01 !p-0 shadow-[var(--v2-elevation-floating)] focus:outline-none"
+          class="vector-model-popover w-[420px] overflow-hidden rounded-xl border border-[color:var(--vx-line)] bg-v2-background-bg-layer-01 !p-0 shadow-[var(--v2-elevation-floating)] focus:outline-none"
           onPointerDownOutside={() => (restoreTrigger = false)}
           onFocusOutside={() => (restoreTrigger = false)}
           onCloseAutoFocus={(event) => {
             if (!restoreTrigger) event.preventDefault()
           }}
         >
-          <div class="flex flex-col p-0.5">
-            <div class="flex h-7 items-center gap-2 rounded-sm pl-3 pr-2.5 text-v2-icon-icon-muted">
+          <div class="flex flex-col p-1">
+            <div class="flex h-9 items-center gap-2.5 rounded-md px-3 text-v2-icon-icon-muted">
               <Icon name="magnifying-glass" size="small" class="shrink-0" />
               <input
                 ref={(el) => (searchRef = el)}
                 value={store.search}
                 placeholder={language.t("dialog.model.search.placeholder")}
-                class="h-7 min-w-0 flex-1 border-0 bg-transparent text-[13px] font-[440] leading-5 tracking-[-0.04px] text-v2-text-text-base outline-none placeholder:text-v2-text-text-faint"
+                class="h-9 min-w-0 flex-1 border-0 bg-transparent text-sm font-normal leading-5 text-v2-text-text-base outline-none placeholder:text-v2-text-text-faint"
                 spellcheck={false}
                 autocorrect="off"
                 autocomplete="off"
@@ -436,12 +259,12 @@ export function ModelSelectorPopoverV2(props: {
             </div>
           </div>
           <div class="h-px bg-v2-border-border-muted" />
-          <ScrollView data-slot="model-selector-scroll" class="max-h-[220px] min-h-0">
-            <div class="flex flex-col p-0.5 pt-0">
+          <ScrollView data-slot="model-selector-scroll" class="max-h-[440px] min-h-0">
+            <div class="flex flex-col p-1 pt-0.5">
               <Show
                 when={models().length > 0}
                 fallback={
-                  <div class="flex h-12 items-center px-3 text-[13px] font-[440] leading-5 tracking-[-0.04px] text-v2-text-text-faint">
+                  <div class="flex h-12 items-center px-3 text-sm font-normal leading-5 text-v2-text-text-faint">
                     {language.t("dialog.model.empty")}
                   </div>
                 }
@@ -469,12 +292,9 @@ export function ModelSelectorPopoverV2(props: {
                               }}
                               onSelect={() => selectModel(item)}
                             >
-                              <span class="min-w-0 truncate">{item.name}</span>
+                              <span class="min-w-0 flex-1 truncate text-sm">{item.name}</span>
                               <Show when={isFree(item.provider.id, item.cost)}>
-                                <TagV2 class="shrink-0">{language.t("model.tag.free")}</TagV2>
-                              </Show>
-                              <Show when={item.latest}>
-                                <TagV2 class="shrink-0">{language.t("model.tag.latest")}</TagV2>
+                                <span class="shrink-0 text-xs text-v2-text-text-faint">{language.t("model.tag.free")}</span>
                               </Show>
                             </MenuV2.RadioItem>
                           )}
@@ -498,7 +318,7 @@ export function ModelSelectorPopoverV2(props: {
               onSelect={manage}
             >
               <Icon name="outline-sliders" size="small" />
-              <span class="min-w-0 flex-1 truncate leading-5">{language.t("dialog.model.manage")}</span>
+              <span class="min-w-0 flex-1 truncate text-sm leading-5">{language.t("dialog.model.manage")}</span>
             </MenuV2.Item>
           </div>
         </MenuV2.Content>
@@ -507,37 +327,167 @@ export function ModelSelectorPopoverV2(props: {
   )
 }
 
-export const DialogSelectModel: Component<{ provider?: string; model?: ModelState }> = (props) => {
-  const dialog = useDialog()
-  const language = useLanguage()
+/** Dialog-chrome counterpart to {@link ModelSelectorPopoverV2} for entry points (keybinds,
+    slash commands) that have no trigger element to anchor a popover to. Reuses the same
+    grouping/filtering helpers and v2 building blocks (DialogV2, TextInputV2, TagV2) rather
+    than introducing a new visual language. */
+export const DialogSelectModelV2: Component<{ provider?: string; model?: ModelState }> = (props) => {
   const local = useLocal()
+  const model = props.model ?? local.model
+  const language = useLanguage()
+  const dialog = useDialog()
   const directory = () => decode64(local.slug())
+  const [search, setSearch] = createSignal("")
 
-  const provider = () => {
+  const allModels = createMemo(() =>
+    model
+      .list()
+      .filter((item) => !HIDDEN_PROVIDER_IDS.has(item.provider.id))
+      .filter((item) => model.visible({ modelID: item.id, providerID: item.provider.id }))
+      .filter((item) => (props.provider ? item.provider.id === props.provider : true)),
+  )
+  const models = createMemo(() => {
+    const term = search().trim().toLowerCase()
+    const filtered = term
+      ? allModels().filter(
+          (item) =>
+            item.name.toLowerCase().includes(term) ||
+            item.id.toLowerCase().includes(term) ||
+            providerDisplayName(item.provider.id, item.provider.name).toLowerCase().includes(term),
+        )
+      : allModels()
+    return [...filtered].sort((a, b) => a.name.localeCompare(b.name))
+  })
+  const groups = createMemo(() => groupModels(models()))
+  const keys = createMemo(() => groups().flatMap((group) => group.items.map(modelKey)))
+  const current = () => {
+    const value = model.current()
+    return value ? `${value.provider.id}:${value.id}` : undefined
+  }
+
+  // Seed the keyboard-nav highlight on the current model, falling back to the first result.
+  const [active, setActive] = createSignal(current() && keys().includes(current()!) ? current()! : (keys()[0] ?? ""))
+
+  const select = (item: ModelItem) => {
+    model.set({ modelID: item.id, providerID: item.provider.id }, { recent: true })
+    dialog.close()
+  }
+  const moveActive = (delta: number) => {
+    const options = keys()
+    if (options.length === 0) return
+    const index = options.indexOf(active())
+    const start = index === -1 ? 0 : index
+    setActive(options[(start + delta + options.length) % options.length])
+  }
+  const selectActive = () => {
+    const item = models().find((item) => modelKey(item) === active())
+    if (item) select(item)
+  }
+  const connectProvider = () => {
     void import("./dialog-select-provider").then((x) => {
       dialog.show(() => <x.DialogSelectProvider directory={directory} />)
     })
   }
-
   const manage = () => {
     void import("./dialog-manage-models").then((x) => {
-      dialog.show(() => <x.DialogManageModels />)
+      dialog.show(() => <x.DialogManageModelsV2 />)
     })
   }
 
   return (
-    <Dialog
-      title={language.t("dialog.model.select.title")}
-      action={
-        <Button class="h-7 -my-1 text-14-medium" icon="plus-small" tabIndex={-1} onClick={provider}>
+    <DialogV2 size="large" class="vector-select-model-dialog">
+      <DialogHeader closeLabel={language.t("common.close")}>
+        <DialogTitle>{language.t("dialog.model.select.title")}</DialogTitle>
+        <ButtonV2 variant="neutral" icon="plus" onClick={connectProvider}>
           {language.t("command.provider.connect")}
-        </Button>
-      }
-    >
-      <ModelList provider={props.provider} model={props.model} onSelect={() => dialog.close()} />
-      <Button variant="ghost" class="ml-3 mt-5 mb-6 text-text-base self-start" onClick={manage}>
-        {language.t("dialog.model.manage")}
-      </Button>
-    </Dialog>
+        </ButtonV2>
+      </DialogHeader>
+      <DialogBody class="flex min-h-0 flex-1 flex-col">
+        <div class="px-4 pt-px pb-3">
+          <TextInputV2
+            type="search"
+            appearance="base"
+            class="!w-full self-stretch"
+            value={search()}
+            onInput={(event) => setSearch(event.currentTarget.value)}
+            onKeyDown={(event) => {
+              if (event.key === "ArrowDown") {
+                event.preventDefault()
+                moveActive(1)
+                return
+              }
+              if (event.key === "ArrowUp") {
+                event.preventDefault()
+                moveActive(-1)
+                return
+              }
+              if (event.key === "Enter" && !event.isComposing) {
+                event.preventDefault()
+                selectActive()
+              }
+            }}
+            placeholder={language.t("dialog.model.search.placeholder")}
+            spellcheck={false}
+            autocorrect="off"
+            autocomplete="off"
+            autocapitalize="off"
+            autofocus
+            showClearButton={!!search()}
+            onClearClick={() => setSearch("")}
+            aria-label={language.t("dialog.model.search.placeholder")}
+          />
+        </div>
+        <ScrollView data-slot="select-model-scroll" class="min-h-0 flex-1 px-2 pb-2">
+          <Show
+            when={models().length > 0}
+            fallback={
+              <div class="flex h-12 items-center px-3 text-sm font-normal leading-5 text-v2-text-text-faint">
+                {language.t("dialog.model.empty")}
+              </div>
+            }
+          >
+            <For each={groups()}>
+              {(group) => (
+                <div class="flex flex-col p-0.5">
+                  <div data-slot="menu-v2-group-label">
+                    {providerDisplayName(group.category, group.items[0].provider.name)}
+                  </div>
+                  <For each={group.items}>
+                    {(item) => (
+                      <button
+                        type="button"
+                        data-component="menu-v2-item"
+                        data-checked={current() === modelKey(item) ? "" : undefined}
+                        classList={{ "!bg-v2-overlay-simple-overlay-hover": active() === modelKey(item) }}
+                        onMouseEnter={() => setActive(modelKey(item))}
+                        onClick={() => select(item)}
+                      >
+                        <span data-slot="menu-v2-item-content" class="min-w-0 flex-1 truncate text-sm">
+                          {item.name}
+                        </span>
+                        <Show when={isFree(item.provider.id, item.cost)}>
+                          <span class="shrink-0 text-xs text-v2-text-text-faint">{language.t("model.tag.free")}</span>
+                        </Show>
+                        <Show when={current() === modelKey(item)}>
+                          <Icon name="check" size="small" class="shrink-0 text-v2-text-text-accent" />
+                        </Show>
+                      </button>
+                    )}
+                  </For>
+                </div>
+              )}
+            </For>
+          </Show>
+        </ScrollView>
+        <div class="flex flex-col border-t border-v2-border-border-muted p-2">
+          <button type="button" data-component="menu-v2-item" onClick={manage}>
+            <Icon name="outline-sliders" size="small" />
+            <span data-slot="menu-v2-item-content" class="min-w-0 flex-1 truncate text-sm">
+              {language.t("dialog.model.manage")}
+            </span>
+          </button>
+        </div>
+      </DialogBody>
+    </DialogV2>
   )
 }

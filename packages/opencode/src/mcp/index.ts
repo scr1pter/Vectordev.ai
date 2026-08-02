@@ -74,7 +74,7 @@ export class NotFoundError extends Schema.TaggedErrorClass<NotFoundError>()("MCP
 type MCPClient = Client
 
 function createClient(directory: string) {
-  const client = new Client({ name: "opencode", version: InstallationVersion }, CLIENT_OPTIONS)
+  const client = new Client({ name: "vector", version: InstallationVersion }, CLIENT_OPTIONS)
   client.setRequestHandler(ListRootsRequestSchema, () =>
     Promise.resolve({ roots: [{ uri: pathToFileURL(directory).href }] }),
   )
@@ -119,6 +119,32 @@ type McpEntry = NonNullable<ConfigV1.Info["mcp"]>[string]
 
 function isMcpConfigured(entry: McpEntry): entry is ConfigMCPV1.Info {
   return typeof entry === "object" && entry !== null && "type" in entry
+}
+
+function unsafeCredentialHeader(headers?: Record<string, string>) {
+  if (!headers) return
+  return Object.entries(headers).find(
+    ([name, value]) =>
+      /^(authorization|cookie|proxy-authorization|x-api-key)$/i.test(name) &&
+      !/\{env:[A-Za-z_][A-Za-z0-9_]*\}/.test(value),
+  )?.[0]
+}
+
+export function resolveMcpHeaders(
+  headers: Record<string, string> | undefined,
+  environment: Record<string, string | undefined> = process.env,
+) {
+  if (!headers) return
+  return Object.fromEntries(
+    Object.entries(headers).map(([name, value]) => [
+      name,
+      value.replace(/\{env:([A-Za-z_][A-Za-z0-9_]*)\}/g, (_, variable: string) => {
+        const resolved = environment[variable]
+        if (resolved === undefined) throw new Error(`MCP header "${name}" requires environment variable ${variable}.`)
+        return resolved
+      }),
+    ]),
+  )
 }
 
 function remoteURL(value: string) {
@@ -258,19 +284,20 @@ const layer = Layer.effect(
         )
       }
 
+      const headers = resolveMcpHeaders(mcp.headers)
       const transports: Array<{ name: string; transport: TransportWithAuth }> = [
         {
           name: "StreamableHTTP",
           transport: new StreamableHTTPClientTransport(url, {
             authProvider,
-            requestInit: mcp.headers ? { headers: mcp.headers } : undefined,
+            requestInit: headers ? { headers } : undefined,
           }),
         },
         {
           name: "SSE",
           transport: new SSEClientTransport(url, {
             authProvider,
-            requestInit: mcp.headers ? { headers: mcp.headers } : undefined,
+            requestInit: headers ? { headers } : undefined,
           }),
         },
       ]
@@ -306,7 +333,7 @@ const layer = Layer.effect(
                 return events
                   .publish(TuiEvent.ToastShow, {
                     title: "MCP Authentication Required",
-                    message: `Server "${key}" requires authentication. Run: opencode mcp auth ${key}`,
+                    message: `Server "${key}" requires authentication. Open MCP in Vector and choose Connect.`,
                     variant: "warning",
                     duration: 8000,
                   })
@@ -366,7 +393,6 @@ const layer = Layer.effect(
         if (mcp.enabled === false) {
           return DISABLED_RESULT
         }
-
         const { client: mcpClient, status } =
           mcp.type === "remote"
             ? yield* connectRemote(key, mcp as ConfigMCPV1.Info & { type: "remote" })
@@ -631,23 +657,43 @@ const layer = Layer.effect(
     })
 
     const add = Effect.fn("MCP.add")(function* (name: string, mcp: ConfigMCPV1.Info) {
+      const unsafeHeader = mcp.type === "remote" ? unsafeCredentialHeader(mcp.headers) : undefined
+      if (unsafeHeader) {
+        return {
+          status: {
+            status: "failed",
+            error: `MCP header "${unsafeHeader}" must reference an environment variable such as "Bearer {env:MCP_TOKEN}". Vector does not store raw MCP credentials in project configuration.`,
+          } satisfies Status,
+        }
+      }
       const s = yield* InstanceState.get(state)
+      yield* cfgSvc.update({ mcp: { [name]: mcp } })
       s.config[name] = mcp
       yield* createAndStore(name, mcp)
+      yield* events.publish(ToolsChanged, { server: name }).pipe(Effect.ignore)
       return { status: s.status }
     })
 
     const connect = Effect.fn("MCP.connect")(function* (name: string) {
       const mcp = yield* requireMcpConfig(name)
-      yield* createAndStore(name, { ...mcp, enabled: true })
+      const enabled = { ...mcp, enabled: true }
+      const s = yield* InstanceState.get(state)
+      yield* cfgSvc.update({ mcp: { [name]: enabled } })
+      s.config[name] = enabled
+      yield* createAndStore(name, enabled)
+      yield* events.publish(ToolsChanged, { server: name }).pipe(Effect.ignore)
     })
 
     const disconnect = Effect.fn("MCP.disconnect")(function* (name: string) {
-      yield* requireMcpConfig(name)
+      const mcp = yield* requireMcpConfig(name)
       const s = yield* InstanceState.get(state)
+      const disabled = { ...mcp, enabled: false }
+      yield* cfgSvc.update({ mcp: { [name]: disabled } })
+      s.config[name] = disabled
       yield* closeClient(s, name)
       delete s.clients[name]
       s.status[name] = { status: "disabled" }
+      yield* events.publish(ToolsChanged, { server: name }).pipe(Effect.ignore)
     })
 
     function requestTimeout(s: State, name: string, configured: McpEntry | undefined, fallback?: number) {

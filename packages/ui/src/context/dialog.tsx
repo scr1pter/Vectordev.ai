@@ -18,6 +18,10 @@ import { makeEventListener } from "@solid-primitives/event-listener"
 
 type DialogElement = () => JSX.Element
 
+// Dialogs must stay above Vector's full-screen editor, browser, canvas, and
+// workspace surfaces while remaining below toasts and tooltips.
+const DIALOG_BASE_Z_INDEX = 300
+
 type Active = {
   id: string
   node: JSX.Element
@@ -77,7 +81,7 @@ function init() {
 
   const mount = (element: DialogElement, owner: Owner, onClose: (() => void) | undefined, layer: number) => {
     const id = Math.random().toString(36).slice(2)
-    const zIndex = 50 + layer * 10
+    const zIndex = DIALOG_BASE_Z_INDEX + layer * 10
     let dispose: (() => void) | undefined
     let setClosing: ((closing: boolean) => void) | undefined
 

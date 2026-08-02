@@ -3,7 +3,7 @@ import { setTimeout as sleep } from "node:timers/promises"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { Effect, Layer } from "effect"
 import { FSUtil } from "@opencode-ai/core/fs-util"
-import { McpAuth } from "../../src/mcp/auth"
+import { McpAuth, McpAuthStorage } from "../../src/mcp/auth"
 
 function authFile() {
   let raw = ""
@@ -17,28 +17,22 @@ function authFile() {
 
       return FSUtil.Service.of({
         ...fs,
-        readJson: (file) =>
+        readFileStringSafe: (file) =>
           file.endsWith("mcp-auth.json")
-            ? Effect.try({
-                try: () => {
-                  if (!raw) throw new Error("mcp-auth.json missing")
-                  return JSON.parse(raw)
-                },
-                catch: (cause) => new FSUtil.FileSystemError({ method: "readJson", cause }),
-              })
-            : fs.readJson(file),
-        writeJson: (file, value, mode) =>
+            ? Effect.succeed(raw || undefined)
+            : fs.readFileStringSafe(file),
+        writeWithDirs: (file, value, mode) =>
           file.endsWith("mcp-auth.json")
             ? Effect.promise(async () => {
                 activeWrites++
                 sawOverlap = sawOverlap || activeWrites > 1
                 raw = ""
                 await sleep(10)
-                const next = JSON.stringify(value, null, 2)
+                const next = typeof value === "string" ? value : new TextDecoder().decode(value)
                 raw = sawOverlap ? `${next}\n}` : next
                 activeWrites--
               })
-            : fs.writeJson(file, value, mode),
+            : fs.writeWithDirs(file, value, mode),
       })
     }),
   ).pipe(Layer.provide(AppNodeBuilder.build(FSUtil.node)))
@@ -75,4 +69,19 @@ test("serializes concurrent auth file updates across service instances", async (
       expect(() => JSON.parse(file.raw())).not.toThrow()
     }),
   )
+})
+
+test("encrypts MCP OAuth credentials with Vector's vault key", () => {
+  const key = Buffer.alloc(32, 9)
+  const encoded = McpAuthStorage.encode(
+    {
+      posthog: {
+        tokens: { accessToken: "access-token" },
+        serverUrl: "https://mcp.posthog.com/mcp",
+      },
+    },
+    key,
+  )
+  expect(encoded).not.toContain("access-token")
+  expect(McpAuthStorage.decode(encoded, key).posthog?.tokens?.accessToken).toBe("access-token")
 })

@@ -26,7 +26,7 @@ import { inArray } from "drizzle-orm"
 import { lt } from "drizzle-orm"
 import { or } from "drizzle-orm"
 import type { SQL } from "drizzle-orm"
-import { PartTable, SessionTable } from "@opencode-ai/core/session/sql"
+import { MessageTable, PartTable, SessionTable } from "@opencode-ai/core/session/sql"
 import { ProjectTable } from "@opencode-ai/core/project/sql"
 import { MessageV2 } from "./message-v2"
 import type { InstanceContext } from "../project/instance-context"
@@ -257,6 +257,56 @@ export const GlobalInfo = Schema.Struct({
 }).annotate({ identifier: "GlobalSession" })
 export type GlobalInfo = Types.DeepMutable<Schema.Schema.Type<typeof GlobalInfo>>
 
+export const UsageDay = Schema.Struct({
+  date: Schema.String,
+  tokens: NonNegativeInt,
+  cost: Schema.Finite,
+  tasks: NonNegativeInt,
+}).annotate({ identifier: "SessionUsageDay" })
+export type UsageDay = Types.DeepMutable<Schema.Schema.Type<typeof UsageDay>>
+
+export const UsageModel = Schema.Struct({
+  providerID: Schema.String,
+  modelID: Schema.String,
+  tokens: NonNegativeInt,
+  responses: NonNegativeInt,
+  percentage: Schema.Finite,
+}).annotate({ identifier: "SessionUsageModel" })
+export type UsageModel = Types.DeepMutable<Schema.Schema.Type<typeof UsageModel>>
+
+export const UsageEffort = Schema.Struct({
+  id: Schema.String,
+  label: Schema.String,
+  tokens: NonNegativeInt,
+  responses: NonNegativeInt,
+  percentage: Schema.Finite,
+}).annotate({ identifier: "SessionUsageEffort" })
+export type UsageEffort = Types.DeepMutable<Schema.Schema.Type<typeof UsageEffort>>
+
+export const UsageSummary = Schema.Struct({
+  lifetimeTokens: NonNegativeInt,
+  lifetimeCost: Schema.Finite,
+  inputTokens: NonNegativeInt,
+  outputTokens: NonNegativeInt,
+  reasoningTokens: NonNegativeInt,
+  cachedTokens: NonNegativeInt,
+  peakTokens: NonNegativeInt,
+  longestTaskMs: NonNegativeInt,
+  longestTaskTokens: NonNegativeInt,
+  averageTaskMs: NonNegativeInt,
+  currentStreak: NonNegativeInt,
+  longestStreak: NonNegativeInt,
+  completedChats: NonNegativeInt,
+  conversations: NonNegativeInt,
+  activeDays: NonNegativeInt,
+  averageTokensPerChat: NonNegativeInt,
+  modelResponses: NonNegativeInt,
+  favoriteModels: Schema.Array(UsageModel),
+  effortLevels: Schema.Array(UsageEffort),
+  days: Schema.Array(UsageDay),
+}).annotate({ identifier: "SessionUsageSummary" })
+export type UsageSummary = Types.DeepMutable<Schema.Schema.Type<typeof UsageSummary>>
+
 export const CreateInput = Schema.optional(
   Schema.Struct({
     parentID: Schema.optional(SessionID),
@@ -415,6 +465,7 @@ export type NotFound = NotFoundError
 export interface Interface {
   readonly list: (input?: ListInput) => Effect.Effect<Info[]>
   readonly listGlobal: (input?: GlobalListInput) => Effect.Effect<GlobalInfo[]>
+  readonly usage: () => Effect.Effect<UsageSummary>
   readonly create: (input?: {
     parentID?: SessionID
     title?: string
@@ -593,6 +644,27 @@ const layer: Layer.Layer<
         }
       }
       return rows.map((row) => ({ ...fromRow(row), project: projects.get(row.project_id) ?? null }))
+    })
+
+    const usage = Effect.fn("Session.usage")(function* () {
+      const rows = yield* db
+        .select({ id: MessageTable.id, sessionID: MessageTable.session_id, data: MessageTable.data })
+        .from(MessageTable)
+        .orderBy(MessageTable.time_created)
+        .all()
+        .pipe(Effect.orDie)
+      const decode = Schema.decodeUnknownOption(SessionV1.Info)
+      return summarizeUsage(
+        rows.flatMap((row) =>
+          // `data` holds only the message body; `id`/`sessionID` live in columns but are
+          // required by the schema, so merge them back before decoding — otherwise every
+          // row fails to decode and usage collapses to zero. Mirrors MessageV2's `info(row)`.
+          Option.match(decode({ ...row.data, id: row.id, sessionID: row.sessionID }), {
+            onNone: () => [],
+            onSome: (message) => [message],
+          }),
+        ),
+      )
     })
 
     const children = Effect.fn("Session.children")(function* (parentID: SessionID) {
@@ -908,6 +980,7 @@ const layer: Layer.Layer<
     return Service.of({
       list,
       listGlobal,
+      usage,
       create,
       fork,
       touch,
@@ -953,6 +1026,174 @@ const cancelBackgroundJobs = Effect.fn("Session.cancelBackgroundJobs")(function*
     { concurrency: "unbounded", discard: true },
   )
 })
+
+export function summarizeUsage(messages: ReadonlyArray<typeof SessionV1.Info.Type>): UsageSummary {
+  const assistant = messages.filter((message) => message.role === "assistant")
+  const days = assistant.reduce((result, message) => {
+    const tokens = usageTokens(message)
+    const date = localDateKey(message.time.created)
+    const current = result.get(date) ?? { date, tokens: 0, cost: 0, tasks: new Set<string>() }
+    current.tasks.add(`${message.sessionID}:${message.parentID}`)
+    result.set(date, {
+      date,
+      tokens: current.tokens + tokens,
+      cost: current.cost + Math.max(0, message.cost),
+      tasks: current.tasks,
+    })
+    return result
+  }, new Map<string, { date: string; tokens: number; cost: number; tasks: Set<string> }>())
+  const activity = [...days.values()]
+    .map((day): UsageDay => ({ date: day.date, tokens: day.tokens, cost: day.cost, tasks: day.tasks.size }))
+    .sort((a, b) => a.date.localeCompare(b.date))
+  const active = new Set(activity.filter((day) => day.tasks > 0).map((day) => day.date))
+  const currentStreak = streakEndingAt(
+    active,
+    active.has(localDateKey(Date.now())) ? new Date() : previousDate(new Date()),
+  )
+  const longestStreak = activity.reduce(
+    (result, day) => {
+      if (day.tasks <= 0) return result
+      const consecutive = result.previous && localDateKey(nextDate(result.previous)) === day.date
+      const current = consecutive ? result.current + 1 : 1
+      return { current, longest: Math.max(result.longest, current), previous: dateFromKey(day.date) }
+    },
+    { current: 0, longest: 0, previous: undefined as Date | undefined },
+  ).longest
+
+  const lifetimeTokens = activity.reduce((total, day) => total + day.tokens, 0)
+  const completed = new Set(
+    assistant
+      .filter(
+        (message) => !message.summary && !message.error && (message.time.completed !== undefined || message.finish),
+      )
+      .map((message) => `${message.sessionID}:${message.parentID}`),
+  )
+  const modelGroups = assistant.reduce((result, message) => {
+    const modelID = message.modelID.endsWith("-fast") ? message.modelID.slice(0, -5) : message.modelID
+    const key = `${message.providerID}\n${modelID}`
+    const current = result.get(key) ?? { providerID: message.providerID, modelID, tokens: 0, responses: 0 }
+    result.set(key, {
+      ...current,
+      tokens: current.tokens + usageTokens(message),
+      responses: current.responses + 1,
+    })
+    return result
+  }, new Map<string, Omit<UsageModel, "percentage">>())
+  const effortGroups = assistant.reduce((result, message) => {
+    const effort = usageEffort(message.variant)
+    const current = result.get(effort.id) ?? { ...effort, tokens: 0, responses: 0 }
+    result.set(effort.id, {
+      ...current,
+      tokens: current.tokens + usageTokens(message),
+      responses: current.responses + 1,
+    })
+    return result
+  }, new Map<string, Omit<UsageEffort, "percentage">>())
+  const percentage = (tokens: number, responses: number) => {
+    const totalResponses = assistant.length
+    const share = lifetimeTokens > 0 ? tokens / lifetimeTokens : totalResponses > 0 ? responses / totalResponses : 0
+    return Math.round(share * 1_000) / 10
+  }
+  const durations = assistant
+    .filter((message) => message.time.completed !== undefined)
+    .map((message) => ({
+      ms: Math.max(0, (message.time.completed ?? message.time.created) - message.time.created),
+      tokens: usageTokens(message),
+    }))
+  const longest = durations.reduce((a, b) => (b.ms > a.ms ? b : a), { ms: 0, tokens: 0 })
+
+  return {
+    lifetimeTokens,
+    lifetimeCost: activity.reduce((total, day) => total + day.cost, 0),
+    inputTokens: assistant.reduce((total, message) => total + Math.max(0, Math.round(message.tokens.input)), 0),
+    outputTokens: assistant.reduce((total, message) => total + Math.max(0, Math.round(message.tokens.output)), 0),
+    reasoningTokens: assistant.reduce((total, message) => total + Math.max(0, Math.round(message.tokens.reasoning)), 0),
+    cachedTokens: assistant.reduce(
+      (total, message) => total + Math.max(0, Math.round(message.tokens.cache.read + message.tokens.cache.write)),
+      0,
+    ),
+    peakTokens: activity.reduce((peak, day) => Math.max(peak, day.tokens), 0),
+    longestTaskMs: longest.ms,
+    longestTaskTokens: longest.tokens,
+    averageTaskMs: durations.length
+      ? Math.round(durations.reduce((sum, item) => sum + item.ms, 0) / durations.length)
+      : 0,
+    currentStreak,
+    longestStreak,
+    completedChats: completed.size,
+    conversations: new Set(assistant.map((message) => message.sessionID)).size,
+    activeDays: active.size,
+    averageTokensPerChat: completed.size > 0 ? Math.round(lifetimeTokens / completed.size) : 0,
+    modelResponses: assistant.length,
+    favoriteModels: [...modelGroups.values()]
+      .map((model): UsageModel => ({ ...model, percentage: percentage(model.tokens, model.responses) }))
+      .sort((a, b) => b.tokens - a.tokens || b.responses - a.responses || a.modelID.localeCompare(b.modelID))
+      .slice(0, 5),
+    effortLevels: [...effortGroups.values()]
+      .map((effort): UsageEffort => ({ ...effort, percentage: percentage(effort.tokens, effort.responses) }))
+      .sort((a, b) => b.tokens - a.tokens || b.responses - a.responses || a.label.localeCompare(b.label)),
+    days: activity,
+  }
+}
+
+function usageTokens(message: typeof SessionV1.Assistant.Type) {
+  const components =
+    message.tokens.input +
+    message.tokens.output +
+    message.tokens.reasoning +
+    message.tokens.cache.read +
+    message.tokens.cache.write
+  return Math.max(0, Math.round(Math.max(message.tokens.total ?? 0, components)))
+}
+
+function usageEffort(input: string | undefined) {
+  const effort = input?.toLowerCase() ?? "default"
+  if (effort === "none" || effort === "default") return { id: "default", label: "Default" }
+  if (effort === "minimal" || effort === "low") return { id: "light", label: "Light" }
+  if (effort === "medium") return { id: "balanced", label: "Balanced" }
+  if (effort === "high") return { id: "extra", label: "Extra" }
+  if (effort === "xhigh" || effort === "max" || effort === "ultra") return { id: "max", label: "Max" }
+  return {
+    id: effort,
+    label: effort.replace(/[_-]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase()),
+  }
+}
+
+function streakEndingAt(active: Set<string>, date: Date) {
+  let streak = 0
+  let cursor = date
+  while (active.has(localDateKey(cursor))) {
+    streak += 1
+    cursor = previousDate(cursor)
+  }
+  return streak
+}
+
+function localDateKey(input: number | Date) {
+  const date = typeof input === "number" ? new Date(input) : input
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0"),
+  ].join("-")
+}
+
+function dateFromKey(input: string) {
+  const [year = 0, month = 1, day = 1] = input.split("-").map(Number)
+  return new Date(year, month - 1, day)
+}
+
+function nextDate(input: Date) {
+  const date = new Date(input)
+  date.setDate(date.getDate() + 1)
+  return date
+}
+
+function previousDate(input: Date) {
+  const date = new Date(input)
+  date.setDate(date.getDate() - 1)
+  return date
+}
 
 function listByProject(
   db: Database.Interface["db"],

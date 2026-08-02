@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, wri
 import { ZipWriter, BlobWriter, BlobReader } from "@zip.js/zip.js"
 import { dirname, join } from "node:path"
 import { homedir } from "node:os"
+import { redactText, redactValue } from "./security-redaction"
 
 const MAX_LOG_AGE_DAYS = 7
 const TAIL_LINES = 1000
@@ -21,6 +22,10 @@ export const getLogger = () => logger
 
 export function initLogging() {
   initRunDirectory()
+  log.hooks.push((message) => {
+    message.data = message.data.map((value) => redactValue(value))
+    return message
+  })
   log.transports.file.maxSize = 5 * 1024 * 1024
   log.transports.file.resolvePathFn = (_vars, message) =>
     join(
@@ -58,10 +63,15 @@ export async function exportDebugLogs() {
   try {
     write("main", "exporting debug logs", { output })
     await writeZip(output, [
-      { name: "manifest.json", data: Buffer.from(JSON.stringify(manifest(), null, 2)) },
+      { name: "manifest.json", data: Buffer.from(JSON.stringify(redactValue(manifest()), null, 2)) },
+      {
+        name: "PRIVACY.txt",
+        data: Buffer.from(
+          "Vector redacts credentials and sensitive URL parameters from text logs. Raw network captures and crash dumps are intentionally excluded because they can contain private application data.",
+        ),
+      },
       ...collect(root, "desktop"),
       ...serverLogRoots().flatMap((dir, i) => collect(dir, `server-${i + 1}`)),
-      ...collect(app.getPath("crashDumps"), "crashpad"),
     ])
     shell.showItemInFolder(output)
     return output
@@ -80,11 +90,12 @@ export function write(
 ) {
   if (!run) return
   const scoped = log.scope(safeLogName(name))
+  const safeMessage = redactText(message)
   if (extra !== undefined) {
-    scoped[level](message, extra)
+    scoped[level](safeMessage, redactValue(extra))
     return
   }
-  scoped[level](message)
+  scoped[level](safeMessage)
 }
 
 export function tail(): string {
@@ -144,6 +155,7 @@ function manifest() {
     logs: root,
     currentRun: run,
     crashDumps: app.getPath("crashDumps"),
+    crashDumpCount: collect(app.getPath("crashDumps"), "crashpad").length,
     serverLogs: serverLogRoots(),
     netLog: netLogPath,
   }
@@ -171,6 +183,7 @@ function collect(dir: string, prefix: string): Entry[] {
       if (info.mtimeMs < cutoff) continue
       if (info.size > MAX_EXPORT_FILE_SIZE) continue
       if (file.endsWith(".heapsnapshot")) continue
+      if (file.endsWith(".netlog") || file.endsWith(".dmp")) continue
       result.push({ name: join(prefix, file.slice(dir.length + 1)).replace(/\\/g, "/"), path: file })
     }
   }
@@ -181,7 +194,8 @@ function collect(dir: string, prefix: string): Entry[] {
 async function writeZip(output: string, entries: Entry[]) {
   const writer = new ZipWriter(new BlobWriter("application/zip"))
   for (const entry of entries) {
-    const data = entry.data ?? readFileSync(entry.path!)
+    const raw = entry.data ?? readFileSync(entry.path!)
+    const data = /\.(?:json|jsonl|log|md|txt)$/i.test(entry.name) ? Buffer.from(redactText(raw.toString("utf8"))) : raw
     await writer.add(entry.name, new BlobReader(new Blob([new Uint8Array(data)])))
   }
   const zip = await writer.close()

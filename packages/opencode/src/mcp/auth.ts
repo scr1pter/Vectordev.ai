@@ -1,5 +1,6 @@
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import path from "path"
+import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto"
 import { serviceUse } from "@opencode-ai/core/effect/service-use"
 import { Global } from "@opencode-ai/core/global"
 import { Effect, Layer, Context, Option, Schema } from "effect"
@@ -33,6 +34,14 @@ export type Entry = Schema.Schema.Type<typeof Entry>
 
 const decodeAuthData = Schema.decodeUnknownOption(Schema.Record(Schema.String, Entry))
 type AuthData = Record<string, Entry>
+const EncryptedAuthData = Schema.Struct({
+  version: Schema.Literal(1),
+  iv: Schema.String,
+  tag: Schema.String,
+  ciphertext: Schema.String,
+})
+const decodeEncryptedAuthData = Schema.decodeUnknownOption(EncryptedAuthData)
+const decodeJson = Schema.decodeUnknownOption(Schema.UnknownFromJsonString)
 
 const filepath = path.join(Global.Path.data, "mcp-auth.json")
 const lockKey = `mcp-auth:${filepath}`
@@ -63,10 +72,13 @@ const layer = Layer.effect(
     const flock = yield* EffectFlock.Service
 
     const read = Effect.fn("McpAuth.read")(function* () {
-      return yield* fs.readJson(filepath).pipe(
-        Effect.map((data): AuthData => Option.getOrElse(decodeAuthData(data), () => ({}) as AuthData) as AuthData),
-        Effect.catch(() => Effect.succeed({} as AuthData)),
-      )
+      const raw = yield* fs.readFileStringSafe(filepath).pipe(Effect.catch(() => Effect.succeed(undefined)))
+      if (!raw) return {} as AuthData
+      const data = decodeStored(raw)
+      if (encryptionKey() && !storedIsEncrypted(raw)) {
+        yield* fs.writeWithDirs(filepath, encodeStored(data), 0o600).pipe(Effect.orDie)
+      }
+      return data
     })
 
     const all = Effect.fn("McpAuth.all")(function* () {
@@ -77,7 +89,7 @@ const layer = Layer.effect(
       yield* Effect.gen(function* () {
         const next = update(yield* read())
         if (!next) return
-        yield* fs.writeJson(filepath, next, 0o600).pipe(Effect.orDie)
+        yield* fs.writeWithDirs(filepath, encodeStored(next), 0o600).pipe(Effect.orDie)
       }).pipe(flock.withLock(lockKey), Effect.orDie)
     })
 
@@ -157,6 +169,60 @@ const layer = Layer.effect(
     })
   }),
 )
+
+function encryptionKey() {
+  const raw = process.env.VECTOR_CREDENTIAL_KEY ?? process.env.VECTOR_MCP_AUTH_KEY
+  if (!raw) return
+  const key = Buffer.from(raw, "base64")
+  if (key.byteLength === 32) return key
+}
+
+function decodeStored(raw: string, key = encryptionKey()): AuthData {
+  const parsed = Option.getOrUndefined(decodeJson(raw))
+  if (!parsed) return {}
+  const encrypted = Option.getOrUndefined(decodeEncryptedAuthData(parsed))
+  if (!encrypted) return Option.getOrElse(decodeAuthData(parsed), () => ({}))
+  if (!key) throw new Error("MCP OAuth credentials require Vector's secure runtime vault.")
+  try {
+    const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(encrypted.iv, "base64"))
+    decipher.setAuthTag(Buffer.from(encrypted.tag, "base64"))
+    const clear = Buffer.concat([
+      decipher.update(Buffer.from(encrypted.ciphertext, "base64")),
+      decipher.final(),
+    ]).toString("utf8")
+    const data = Option.getOrUndefined(decodeJson(clear))
+    return Option.getOrElse(decodeAuthData(data), () => ({}))
+  } catch (error) {
+    throw new Error("Vector could not decrypt the MCP OAuth credential store.", { cause: error })
+  }
+}
+
+function storedIsEncrypted(raw: string) {
+  const parsed = Option.getOrUndefined(decodeJson(raw))
+  return parsed ? Option.isSome(decodeEncryptedAuthData(parsed)) : false
+}
+
+function encodeStored(data: AuthData, key = encryptionKey()) {
+  if (!key) return JSON.stringify(data, null, 2)
+  const iv = randomBytes(12)
+  const cipher = createCipheriv("aes-256-gcm", key, iv)
+  const ciphertext = Buffer.concat([cipher.update(JSON.stringify(data)), cipher.final()])
+  return JSON.stringify(
+    {
+      version: 1,
+      iv: iv.toString("base64"),
+      tag: cipher.getAuthTag().toString("base64"),
+      ciphertext: ciphertext.toString("base64"),
+    },
+    null,
+    2,
+  )
+}
+
+export const McpAuthStorage = {
+  decode: decodeStored,
+  encode: encodeStored,
+}
 
 export const node = LayerNode.make({ service: Service, layer: layer, deps: [FSUtil.node, EffectFlock.node] })
 

@@ -39,6 +39,9 @@ const BACKGROUND_UPDATED = [
   "DO NOT sleep, poll for progress, ask the task for status, or duplicate this task's work — avoid working with the same files or topics it is using.",
   "Work on non-overlapping tasks, or briefly tell the user what you sent and end your response.",
 ].join("\n")
+const MAX_ACTIVE_SUBAGENTS = 16
+const MAX_ACTIVE_SUBAGENTS_PER_SESSION = 6
+const MAX_SUBAGENT_DEPTH = 2
 
 const BaseParameterFields = {
   description: Schema.String.annotate({ description: "A short (3-5 words) description of the task" }),
@@ -100,6 +103,38 @@ export const TaskTool = Tool.define(
           new Error("Background subagents require OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS=true"),
         )
       }
+      const parent = yield* sessions.get(ctx.sessionID)
+      let cursor = parent
+      let depth = 0
+      while (cursor.parentID) {
+        depth += 1
+        const ancestor = yield* sessions
+          .get(cursor.parentID)
+          .pipe(Effect.catchCause(() => Effect.succeed(undefined)))
+        if (!ancestor) break
+        cursor = ancestor
+      }
+      if (depth >= MAX_SUBAGENT_DEPTH) {
+        return yield* Effect.fail(
+          new Error(`Subagent depth is limited to ${MAX_SUBAGENT_DEPTH} so delegated work cannot recursively fan out forever.`),
+        )
+      }
+      if (!params.task_id) {
+        const active = (yield* background.list()).filter((job) => job.type === id && job.status === "running")
+        if (active.length >= MAX_ACTIVE_SUBAGENTS) {
+          return yield* Effect.fail(
+            new Error(`Vector already has ${MAX_ACTIVE_SUBAGENTS} active subagents. Wait for or stop one before launching another.`),
+          )
+        }
+        const activeForParent = active.filter((job) => job.metadata?.parentSessionId === ctx.sessionID)
+        if (activeForParent.length >= MAX_ACTIVE_SUBAGENTS_PER_SESSION) {
+          return yield* Effect.fail(
+            new Error(
+              `This task already has ${MAX_ACTIVE_SUBAGENTS_PER_SESSION} active subagents. Reuse an existing task or wait for one to finish.`,
+            ),
+          )
+        }
+      }
 
       if (!ctx.extra?.bypassAgentCheck) {
         yield* ctx.ask({
@@ -121,7 +156,6 @@ export const TaskTool = Tool.define(
       const session = params.task_id
         ? yield* sessions.get(SessionID.make(params.task_id)).pipe(Effect.catchCause(() => Effect.succeed(undefined)))
         : undefined
-      const parent = yield* sessions.get(ctx.sessionID)
       const childPermission = deriveSubagentSessionPermission({
         parentSessionPermission: parent.permission ?? [],
         subagent: next,

@@ -81,6 +81,13 @@ IMPORTANT:
 
 const STRUCTURED_OUTPUT_SYSTEM_PROMPT = `IMPORTANT: The user has requested structured output. You MUST use the StructuredOutput tool to provide your final response. Do NOT respond with plain text - you MUST call the StructuredOutput tool with your answer formatted according to the schema.`
 
+const FAST_EXECUTION_SYSTEM_PROMPT = [
+  "FAST EXECUTION MODE is enabled for this task.",
+  "Preserve the selected model, reasoning quality, safety checks, and final validation.",
+  "Reduce wall-clock time by batching independent reads and searches, issuing independent tool calls together, and delegating non-overlapping work in parallel when safe.",
+  "Begin validation as soon as its dependencies are ready and avoid redundant narration, but never skip tests or silently lower quality.",
+].join(" ")
+
 function mcpResourceBase64Size(value: string) {
   const trimmed = value.replace(/\s/g, "")
   const padding = trimmed.endsWith("==") ? 2 : trimmed.endsWith("=") ? 1 : 0
@@ -436,6 +443,7 @@ const layer = Layer.effect(
         time: { created: Date.now() },
         agent: lastUser.agent,
         model: lastUser.model,
+        executionMode: lastUser.executionMode,
       }
       yield* sessions.updateMessage(summaryUserMsg)
       yield* sessions.updatePart({
@@ -667,6 +675,7 @@ const layer = Layer.effect(
         },
         system: input.system,
         format: input.format,
+        executionMode: input.executionMode,
       }
 
       const current = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
@@ -1138,7 +1147,13 @@ const layer = Layer.effect(
               history: msgs,
             }).pipe(Effect.ignore, Effect.forkIn(scope))
 
-          const model = yield* getModel(lastUser.model.providerID, lastUser.model.modelID, sessionID)
+          const selectedModel = yield* getModel(lastUser.model.providerID, lastUser.model.modelID, sessionID)
+          const model =
+            lastUser.executionMode === "fast" && !selectedModel.id.endsWith("-fast")
+              ? yield* provider
+                  .getModel(selectedModel.providerID, ModelV2.ID.make(`${selectedModel.id}-fast`))
+                  .pipe(Effect.catchIf(Provider.ModelNotFoundError.isInstance, () => Effect.succeed(selectedModel)))
+              : selectedModel
           const task = tasks.pop()
 
           if (task?.type === "subtask") {
@@ -1253,11 +1268,12 @@ const layer = Layer.effect(
 
             yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
 
+            const quick = agent.name === "quick"
             const [skills, env, instructions, mcpInstructions, modelMsgs] = yield* Effect.all([
-              sys.skills(agent),
-              sys.environment(model),
-              instruction.system().pipe(Effect.orDie),
-              sys.mcp(agent, session.permission),
+              quick ? Effect.succeed(undefined) : sys.skills(agent),
+              quick ? Effect.succeed([]) : sys.environment(model),
+              quick ? Effect.succeed([]) : instruction.system().pipe(Effect.orDie),
+              quick ? Effect.succeed(undefined) : sys.mcp(agent, session.permission),
               MessageV2.toModelMessagesEffect(msgs, model),
             ])
             const system = [
@@ -1265,6 +1281,7 @@ const layer = Layer.effect(
               ...instructions,
               ...(mcpInstructions ? [mcpInstructions] : []),
               ...(skills ? [skills] : []),
+              ...(lastUser.executionMode === "fast" ? [FAST_EXECUTION_SYSTEM_PROMPT] : []),
             ]
             const format = lastUser.format ?? { type: "text" as const }
             if (format.type === "json_schema") system.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
@@ -1276,12 +1293,13 @@ const layer = Layer.effect(
               parentSessionID: session.parentID,
               system,
               messages: [
-                ...modelMsgs,
+                ...(quick ? modelMsgs.filter((message) => message.role === "user").slice(-1) : modelMsgs),
                 ...(isLastStep ? [{ role: "assistant" as const, content: MAX_STEPS_PROMPT }] : []),
               ],
               tools,
               model,
               toolChoice: format.type === "json_schema" ? "required" : undefined,
+              retries: lastUser.executionMode === "fast" ? 1 : undefined,
             })
 
             if (structured !== undefined) {
@@ -1469,6 +1487,7 @@ const layer = Layer.effect(
         agent: userAgent,
         parts,
         variant: input.variant,
+        executionMode: input.executionMode,
       })
       yield* events.publish(Command.Event.Executed, {
         name: input.command,
@@ -1508,6 +1527,7 @@ export const PromptInput = Schema.Struct({
   format: Schema.optional(SessionV1.Format),
   system: Schema.optional(Schema.String),
   variant: Schema.optional(Schema.String),
+  executionMode: Schema.optional(Schema.Union([Schema.Literal("normal"), Schema.Literal("fast")])),
   parts: Schema.Array(
     Schema.Union([
       SessionV1.TextPartInput,
@@ -1540,6 +1560,7 @@ export const CommandInput = Schema.Struct({
   arguments: Schema.String,
   command: Schema.String,
   variant: Schema.optional(Schema.String),
+  executionMode: Schema.optional(Schema.Union([Schema.Literal("normal"), Schema.Literal("fast")])),
   // Inlined (no identifier annotation) to keep the original SDK output — the
   // PromptInput call site below references FilePartInput by ref via the
   // Schema export in message-v2.ts.

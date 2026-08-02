@@ -3,16 +3,17 @@ import { NEW_SESSION_CONTENT_WIDTH } from "@/pages/session/new-session-layout"
 
 export function NewSessionDesignView(props: { children: JSX.Element }) {
   return (
-    <div data-component="session-new-design" class="relative size-full overflow-hidden bg-[#111112]">
-      <div class="relative z-10 grid h-full grid-rows-[1fr_auto_1fr] px-4">
-        <div />
-        <div class="flex flex-col items-center">
-          <img src="/vector-logo.png" alt="" class="mb-8 size-12 rounded-xl shadow-[0_0_38px_rgba(155,108,255,0.18)]" />
-          <h1 class="text-center text-[30px] font-medium leading-[1.05] tracking-normal text-[#f2f2f3] sm:text-[36px]">
-            What can I do for you?
-          </h1>
-        </div>
-        <div class="flex items-end justify-center pb-[9vh]">
+    <div data-component="session-new-design" class="vector-new-task relative size-full overflow-hidden">
+      <div class="vector-new-task__body">
+        <section class="vector-new-task__welcome" aria-labelledby="vector-new-task-title">
+          <div class="vector-new-task__mark" aria-hidden="true">
+            <img src="/vector-logo.png" alt="" draggable={false} />
+          </div>
+          <div class="vector-new-task__eyebrow">Vector Agent</div>
+          <h1 id="vector-new-task-title">What should we build?</h1>
+          <p>Plan a feature, repair a bug, or ask Vector to work across the project.</p>
+        </section>
+        <div class="vector-new-task__composer">
           <div class={`${NEW_SESSION_CONTENT_WIDTH}`}>{props.children}</div>
         </div>
       </div>

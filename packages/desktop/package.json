@@ -1,7 +1,8 @@
 {
   "name": "vector-desktop",
+  "productName": "Vector",
   "private": true,
-  "version": "1.17.13",
+  "version": "1.17.26",
   "type": "module",
   "license": "MIT",
   "homepage": "https://vectordev.ai",
@@ -14,7 +15,7 @@
     "predev": "bun ./scripts/predev.ts",
     "dev": "electron-vite dev",
     "prebuild": "bun ./scripts/prebuild.ts",
-    "build": "electron-vite build",
+    "build": "electron-vite build && bun ./scripts/verify-runtime.ts",
     "preview": "electron-vite preview",
     "package": "electron-builder --config electron-builder.config.ts",
     "package:mac": "electron-builder --mac --config electron-builder.config.ts",
@@ -25,6 +26,7 @@
   "main": "./out/main/index.js",
   "dependencies": {
     "@zip.js/zip.js": "2.7.62",
+    "@lydell/node-pty": "catalog:",
     "effect": "catalog:",
     "electron-context-menu": "4.1.2",
     "electron-log": "^5",
@@ -35,7 +37,6 @@
   },
   "devDependencies": {
     "@actions/artifact": "4.0.0",
-    "@lydell/node-pty": "catalog:",
     "@opencode-ai/app": "workspace:*",
     "@opencode-ai/ui": "workspace:*",
     "@sentry/solid": "catalog:",

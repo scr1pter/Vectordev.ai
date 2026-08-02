@@ -5,7 +5,7 @@ import type { Agent } from "../../src/agent/agent"
 import { NamedError } from "@opencode-ai/core/util/error"
 import { Skill } from "../../src/skill"
 import { Permission } from "../../src/permission"
-import { SystemPrompt } from "../../src/session/system"
+import { SUBAGENT_POLICY, SystemPrompt } from "../../src/session/system"
 import { MCP } from "../../src/mcp"
 import { testEffect } from "../lib/effect"
 
@@ -83,6 +83,20 @@ const it = testEffect(
 )
 
 describe("session.system", () => {
+  it.effect("ships a model-neutral subagent delegation policy", () =>
+    Effect.sync(() => {
+      expect(SUBAGENT_POLICY).toContain("real child agents")
+      expect(SUBAGENT_POLICY).toContain("explore subagent")
+      expect(SUBAGENT_POLICY).toContain("general subagent")
+      expect(SUBAGENT_POLICY).toContain("review for read-only code review")
+      expect(SUBAGENT_POLICY).toContain("security for read-only security analysis")
+      expect(SUBAGENT_POLICY).toContain("debug for reproducing and repairing failures")
+      expect(SUBAGENT_POLICY).toContain("test for focused test design and execution")
+      expect(SUBAGENT_POLICY).toContain("background mode")
+      expect(SUBAGENT_POLICY).toContain("inherit the current provider and model")
+    }),
+  )
+
   it.effect("skills output is sorted by name and stable across calls", () =>
     Effect.gen(function* () {
       const prompt = yield* SystemPrompt.Service

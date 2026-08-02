@@ -1,4 +1,5 @@
 import type { AssistantMessage, Message, Session } from "@opencode-ai/sdk/v2/client"
+import { brandProviderName } from "@/utils/provider-brand"
 
 type Provider = {
   id: string
@@ -28,12 +29,7 @@ const tokenTotal = (msg: AssistantMessage) => {
   return msg.tokens.input + msg.tokens.output + msg.tokens.reasoning + msg.tokens.cache.read + msg.tokens.cache.write
 }
 
-const providerDisplayName = (id: string, name?: string) => {
-  if (id === "opencode") return name ?? "OpenCode"
-  if (id === "opencode-go") return name ?? "OpenCode Go"
-  if (id === "opencode-zen") return name ?? "OpenCode Zen"
-  return name ?? id
-}
+const providerDisplayName = (id: string, name?: string) => brandProviderName(id, name)
 
 const lastAssistantWithTokens = (messages: Message[]) => {
   for (let i = messages.length - 1; i >= 0; i--) {

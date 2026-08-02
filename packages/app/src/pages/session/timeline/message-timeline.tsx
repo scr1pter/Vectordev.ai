@@ -27,7 +27,6 @@ import {
   partDefaultOpen,
   type UserActions,
 } from "@opencode-ai/session-ui/message-part"
-import { DiffChanges } from "@opencode-ai/ui/diff-changes"
 import { FileIcon } from "@opencode-ai/ui/file-icon"
 import { Icon } from "@opencode-ai/ui/icon"
 import { IconButton } from "@opencode-ai/ui/icon-button"
@@ -42,7 +41,6 @@ import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
 import { SessionRetry } from "@opencode-ai/session-ui/session-retry"
 import { isScrollKeyTarget, scrollKey, scrollKeyOwner, ScrollView } from "@opencode-ai/ui/scroll-view"
 import { StickyAccordionHeader } from "@opencode-ai/ui/sticky-accordion-header"
-import { TextField } from "@opencode-ai/ui/text-field"
 import { TextReveal } from "@opencode-ai/ui/text-reveal"
 import { TextShimmer } from "@opencode-ai/ui/text-shimmer"
 import type {
@@ -58,11 +56,10 @@ import { normalize } from "@opencode-ai/session-ui/session-diff"
 import { useFileComponent } from "@opencode-ai/ui/context/file"
 import { shouldMarkBoundaryGesture, normalizeWheelDelta } from "@/pages/session/message-gesture"
 import { SessionContextUsage } from "@/components/session-context-usage"
+import { SessionCostReadout } from "@/components/session-cost-readout"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { useLanguage } from "@/context/language"
 import { useSessionKey } from "@/pages/session/session-layout"
-import { useServerSDK } from "@/context/server-sdk"
-import { usePlatform } from "@/context/platform"
 import { useSettings } from "@/context/settings"
 import { useTabs } from "@/context/tabs"
 import { legacySessionHref, requireServerKey, sessionHref } from "@/utils/session-route"
@@ -139,37 +136,85 @@ function TimelineThinkingRow(props: { reasoningHeading?: string; showReasoningSu
   )
 }
 
-function TimelineDiffSummaryRow(props: { diffs: SummaryDiff[] }) {
-  const language = useLanguage()
-  const maxFiles = 10
+function TimelineDiffSummaryRow(props: {
+  diffs: SummaryDiff[]
+  onUndo?: () => Promise<void> | void
+  onReview?: () => void
+}) {
+  const maxFiles = 3
   const [state, setState] = createStore({
     showAll: false,
     expanded: [] as string[],
   })
   const showAll = () => state.showAll
   const expanded = () => state.expanded
+  const additions = createMemo(() => props.diffs.reduce((total, diff) => total + (diff.additions ?? 0), 0))
+  const deletions = createMemo(() => props.diffs.reduce((total, diff) => total + (diff.deletions ?? 0), 0))
   const overflow = createMemo(() => Math.max(0, props.diffs.length - maxFiles))
   const visible = createMemo(() => (showAll() ? props.diffs : props.diffs.slice(0, maxFiles)))
 
   return (
-    <div
+    <section
       data-slot="session-turn-diffs"
       data-component="session-turn-diffs-group"
       data-show-all={showAll() || undefined}
+      class="relative overflow-hidden rounded-2xl border border-[#9374ec]/[0.18] bg-[#202024] shadow-[0_18px_54px_rgba(0,0,0,0.28)]"
     >
-      <div data-slot="session-turn-diffs-header">
-        <span data-slot="session-turn-diffs-label">
-          {props.diffs.length} {language.t("ui.sessionTurn.diffs.changed")}{" "}
-          {language.t(props.diffs.length === 1 ? "ui.common.file.one" : "ui.common.file.other")}
-        </span>
-        <DiffChanges changes={props.diffs} />
-        <Show when={overflow() > 0}>
-          <span data-slot="session-turn-diffs-toggle" onClick={() => setState("showAll", !showAll())}>
-            {showAll() ? language.t("ui.sessionTurn.diffs.showLess") : language.t("ui.sessionTurn.diffs.showAll")}
-          </span>
-        </Show>
-      </div>
-      <div data-component="session-turn-diffs-content">
+      <span
+        aria-hidden="true"
+        class="pointer-events-none absolute inset-y-0 left-0 z-10 w-[2px] bg-gradient-to-b from-[#9374ec]/70 via-[#9374ec]/25 to-transparent"
+      />
+      <header class="flex items-center gap-3.5 border-b border-[color:var(--vx-line)] px-4 py-3.5">
+        <div class="grid size-9 shrink-0 place-items-center rounded-xl border border-[#9374ec]/25 bg-[#9374ec]/[0.13] text-[#c4a6ff]">
+          <svg viewBox="0 0 24 24" class="size-[18px]" aria-hidden="true">
+            <path
+              d="M8 3.75h7.5l3 3v12.5A1.75 1.75 0 0 1 16.75 21h-9.5a1.75 1.75 0 0 1-1.75-1.75V5.5A1.75 1.75 0 0 1 7.25 3.75H8Zm7 0v3.5h3.5M9 12h6m-3-3v6"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+        </div>
+        <div class="min-w-0 flex-1">
+          <div class="truncate text-[13.5px] font-semibold tracking-[-0.01em] text-white/90">
+            Edited {props.diffs.length} {props.diffs.length === 1 ? "file" : "files"}
+          </div>
+          <div class="mt-1.5 flex items-center gap-1.5">
+            <span class="rounded-md border border-[#65c78e]/25 bg-[#65c78e]/10 px-1.5 py-px font-mono text-[11.5px] font-semibold text-[#7dd8a2]">
+              +{additions().toLocaleString()}
+            </span>
+            <span class="rounded-md border border-[#e6787d]/25 bg-[#e6787d]/10 px-1.5 py-px font-mono text-[11.5px] font-semibold text-[#f2989e]">
+              -{deletions().toLocaleString()}
+            </span>
+          </div>
+        </div>
+        <div class="flex shrink-0 items-center gap-2">
+          <Show when={props.onUndo}>
+            <button
+              type="button"
+              class="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[12.5px] font-medium text-white/60 transition hover:bg-white/[0.06] hover:text-white"
+              onClick={() => void props.onUndo?.()}
+            >
+              <svg viewBox="0 0 16 16" class="size-3.5" aria-hidden="true">
+                <path d="M6.25 4 2.5 7.5 6.25 11M3 7.5h6.25a4 4 0 0 1 0 8" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+              Rewind
+            </button>
+          </Show>
+          <Show when={props.onReview}>
+            <button
+              type="button"
+              class="h-8 rounded-lg border border-[#9374ec]/35 bg-[#9374ec]/[0.14] px-3.5 text-[12.5px] font-semibold text-[#d9cbff] transition hover:border-[#9374ec]/60 hover:bg-[#9374ec]/[0.22] hover:text-white"
+              onClick={() => props.onReview?.()}
+            >
+              Review
+            </button>
+          </Show>
+        </div>
+      </header>
+      <div data-component="session-turn-diffs-content" class="bg-[#1b1b1e]">
         <Accordion
           multiple
           style={{ "--sticky-accordion-offset": "44px" }}
@@ -184,7 +229,7 @@ function TimelineDiffSummaryRow(props: { diffs: SummaryDiff[] }) {
                 <Accordion.Item value={diff.file}>
                   <StickyAccordionHeader>
                     <Accordion.Trigger>
-                      <div data-slot="session-turn-diff-trigger">
+                      <div data-slot="session-turn-diff-trigger" class="min-h-12 px-4 transition-colors hover:bg-white/[0.04]">
                         <span data-slot="session-turn-diff-path">
                           <Show when={diff.file.includes("/")}>
                             <span data-slot="session-turn-diff-directory">{`\u202A${getDirectory(diff.file)}\u202C`}</span>
@@ -192,8 +237,9 @@ function TimelineDiffSummaryRow(props: { diffs: SummaryDiff[] }) {
                           <span data-slot="session-turn-diff-filename">{getFilename(diff.file)}</span>
                         </span>
                         <div data-slot="session-turn-diff-meta">
-                          <span data-slot="session-turn-diff-changes">
-                            <DiffChanges changes={diff} />
+                          <span data-slot="session-turn-diff-changes" class="flex items-center gap-1.5">
+                            <span class="font-mono text-[11.5px] font-medium text-[#7dd8a2]">+{diff.additions ?? 0}</span>
+                            <span class="font-mono text-[11.5px] font-medium text-[#f2989e]">-{diff.deletions ?? 0}</span>
                           </span>
                           <span data-slot="session-turn-diff-chevron">
                             <Icon name="chevron-down" size="small" />
@@ -212,13 +258,21 @@ function TimelineDiffSummaryRow(props: { diffs: SummaryDiff[] }) {
             }}
           </For>
         </Accordion>
-        <Show when={!showAll() && overflow() > 0}>
-          <div data-slot="session-turn-diffs-more" onClick={() => setState("showAll", true)}>
-            {language.t("ui.sessionTurn.diffs.more", { count: String(overflow()) })}
-          </div>
+        <Show when={overflow() > 0 || showAll()}>
+          <button
+            type="button"
+            data-slot="session-turn-diffs-more"
+            class="flex h-12 w-full items-center gap-2 border-t border-[color:var(--vx-line)] px-5 text-left text-sm font-medium text-white/82 transition hover:bg-white/[0.045] hover:text-white"
+            onClick={() => setState("showAll", !showAll())}
+          >
+            {showAll() ? "Show fewer files" : `Show ${overflow()} more ${overflow() === 1 ? "file" : "files"}`}
+            <svg viewBox="0 0 16 16" class="size-4 transition" classList={{ "rotate-180": showAll() }} aria-hidden="true">
+              <path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          </button>
         </Show>
       </div>
-    </div>
+    </section>
   )
 }
 
@@ -235,6 +289,7 @@ function TimelineDiffView(props: { diff: SummaryDiff }) {
 
 export function MessageTimeline(props: {
   actions?: UserActions
+  onReviewChanges?: () => void
   scroll: { overflow: boolean; bottom: boolean; jump: boolean }
   onResumeScroll: () => void
   setScrollRef: (el: HTMLDivElement | undefined) => void
@@ -257,7 +312,6 @@ export function MessageTimeline(props: {
   let touchGesture: number | undefined
 
   const navigate = useNavigate()
-  const serverSDK = useServerSDK()
   const sdk = useSDK()
   const sync = useSync()
   const settings = useSettings()
@@ -269,7 +323,6 @@ export function MessageTimeline(props: {
   const cached = timelineCache.get(ownerSessionKey)
   const initialMeasurements = cached?.measurements
   const coldBottomMount = !initialMeasurements?.length && props.shouldAnchorBottom()
-  const platform = usePlatform()
 
   const [listRoot, setListRoot] = createSignal<HTMLDivElement>()
   const sessionID = createMemo(() => params.id)
@@ -540,7 +593,6 @@ export function MessageTimeline(props: {
     draft: "",
     editing: false,
     menuOpen: false,
-    pendingRename: false,
   })
   let titleRef: HTMLInputElement | undefined
 
@@ -654,7 +706,6 @@ export function MessageTimeline(props: {
           draft: "",
           editing: false,
           menuOpen: false,
-          pendingRename: false,
         }),
       { defer: true },
     ),
@@ -718,35 +769,6 @@ export function MessageTimeline(props: {
       return
     }
     navigate(`/${params.dir}/session`)
-  }
-
-  const archiveSession = async (sessionID: string) => {
-    const session = sync().session.get(sessionID)
-    if (!session) return
-
-    const sessions = sync().data.session ?? []
-    const index = sessions.findIndex((s) => s.id === sessionID)
-    const nextSession = index === -1 ? undefined : (sessions[index + 1] ?? sessions[index - 1])
-
-    await sdk()
-      .client.session.update({ sessionID, time: { archived: Date.now() } })
-      .then(() => {
-        sync().set(
-          produce((draft) => {
-            const index = draft.session.findIndex((s) => s.id === sessionID)
-            if (index !== -1) draft.session.splice(index, 1)
-          }),
-        )
-        sync().session.evict(sessionID)
-        navigateAfterSessionRemoval(sessionID, session.parentID, nextSession?.id)
-        notifySessionTabsRemoved({ directory: sdk().directory, sessionIDs: [sessionID] })
-      })
-      .catch((err) => {
-        showToast({
-          title: language.t("common.requestFailed"),
-          description: errorMessage(err),
-        })
-      })
   }
 
   const deleteSession = async (sessionID: string) => {
@@ -868,6 +890,57 @@ export function MessageTimeline(props: {
           </div>
         </div>
       </Dialog>
+    )
+  }
+
+  function DialogRenameSession(props: { sessionID: string }) {
+    const current = sessionTitle(sync().session.get(props.sessionID)?.title) ?? language.t("command.session.new")
+    const [value, setValue] = createSignal(current)
+    let input: HTMLInputElement | undefined
+
+    onMount(() => {
+      input?.focus()
+      input?.select()
+    })
+
+    const submit = async (event?: Event) => {
+      event?.preventDefault()
+      const next = value().trim()
+      if (!next || next === current) {
+        dialog.close()
+        return
+      }
+      try {
+        await titleMutation.mutateAsync({ id: props.sessionID, title: next })
+        dialog.close()
+      } catch {
+        // The mutation reports the actionable error through the shared toast.
+      }
+    }
+
+    return (
+      <DialogV2 fit>
+        <DialogHeader>
+          <DialogTitleGroup title={language.t("common.rename")} description="Give this project session a clear name." />
+        </DialogHeader>
+        <form class="flex min-w-[360px] flex-col gap-4 px-5 pb-2" onSubmit={submit}>
+          <input
+            ref={input}
+            value={value()}
+            onInput={(event) => setValue(event.currentTarget.value)}
+            class="h-10 w-full rounded-xl border border-[color:var(--vx-line)] bg-black/30 px-3 text-sm text-white outline-none transition focus:border-[#9b6cff]/70"
+            aria-label={language.t("common.rename")}
+          />
+        </form>
+        <DialogFooter>
+          <ButtonV2 variant="ghost" onClick={() => dialog.close()}>
+            {language.t("common.cancel")}
+          </ButtonV2>
+          <ButtonV2 variant="contrast" disabled={!value().trim() || titleMutation.isPending} onClick={() => void submit()}>
+            {language.t("common.rename")}
+          </ButtonV2>
+        </DialogFooter>
+      </DialogV2>
     )
   }
 
@@ -1136,7 +1209,19 @@ export function MessageTimeline(props: {
         return (
           <TimelineRowFrame row={diffSummaryRow}>
             <div data-slot="session-turn-message-container" class="w-full px-4 md:px-5">
-              <TimelineDiffSummaryRow diffs={diffSummaryRow().diffs} />
+              <TimelineDiffSummaryRow
+                diffs={diffSummaryRow().diffs}
+                onUndo={
+                  props.actions?.revert
+                    ? () => {
+                        const id = sessionID()
+                        if (!id) return
+                        return props.actions?.revert?.({ sessionID: id, messageID: diffSummaryRow().userMessageID })
+                      }
+                    : undefined
+                }
+                onReview={props.onReviewChanges}
+              />
             </div>
           </TimelineRowFrame>
         )
@@ -1399,7 +1484,7 @@ export function MessageTimeline(props: {
                             closeTitleEditor()
                           }
                         }}
-                        onBlur={closeTitleEditor}
+                        onBlur={() => void saveTitleEditor()}
                       />
                     </Show>
                   </Show>
@@ -1414,6 +1499,7 @@ export function MessageTimeline(props: {
                       "gap-3": !settings.general.newLayoutDesigns(),
                     }}
                   >
+                    <SessionCostReadout />
                     <SessionContextUsage
                       placement="bottom"
                       buttonAppearance={settings.general.newLayoutDesigns() ? "v2" : "default"}
@@ -1440,29 +1526,12 @@ export function MessageTimeline(props: {
                               aria-expanded={title.menuOpen}
                             />
                             <DropdownMenu.Portal>
-                              <DropdownMenu.Content
-                                style={{ "min-width": "104px" }}
-                                onCloseAutoFocus={(event) => {
-                                  if (title.pendingRename) {
-                                    event.preventDefault()
-                                    setTitle("pendingRename", false)
-                                    openTitleEditor()
-                                    return
-                                  }
-                                }}
-                              >
+                              <DropdownMenu.Content style={{ "min-width": "104px" }}>
                                 <DropdownMenu.Item
-                                  onSelect={() => {
-                                    setTitle("pendingRename", true)
-                                    setTitle("menuOpen", false)
-                                  }}
+                                  onSelect={() => dialog.show(() => <DialogRenameSession sessionID={id} />)}
                                 >
                                   <DropdownMenu.ItemLabel>{language.t("common.rename")}</DropdownMenu.ItemLabel>
                                 </DropdownMenu.Item>
-                                <DropdownMenu.Item onSelect={() => void archiveSession(id)}>
-                                  <DropdownMenu.ItemLabel>{language.t("common.archive")}</DropdownMenu.ItemLabel>
-                                </DropdownMenu.Item>
-                                <DropdownMenu.Separator />
                                 <DropdownMenu.Item
                                   onSelect={() => dialog.show(() => <DialogDeleteSession sessionID={id} />)}
                                 >
@@ -1491,29 +1560,12 @@ export function MessageTimeline(props: {
                             aria-expanded={title.menuOpen}
                           />
                           <MenuV2.Portal>
-                            <MenuV2.Content
-                              style={{ width: "120px", "min-width": "120px" }}
-                              onCloseAutoFocus={(event) => {
-                                if (title.pendingRename) {
-                                  event.preventDefault()
-                                  setTitle("pendingRename", false)
-                                    openTitleEditor()
-                                    return
-                                  }
-                                }}
-                              >
+                            <MenuV2.Content style={{ width: "200px", "min-width": "200px" }}>
                               <MenuV2.Item
-                                onSelect={() => {
-                                  setTitle("pendingRename", true)
-                                  setTitle("menuOpen", false)
-                                }}
+                                onSelect={() => dialog.show(() => <DialogRenameSession sessionID={id} />)}
                               >
                                 {language.t("common.rename")}
                               </MenuV2.Item>
-                              <MenuV2.Item onSelect={() => void archiveSession(id)}>
-                                {language.t("common.archive")}
-                              </MenuV2.Item>
-                              <MenuV2.Separator />
                               <MenuV2.Item onSelect={() => dialog.show(() => <DialogDeleteSession sessionID={id} />)}>
                                 {language.t("common.delete")}...
                               </MenuV2.Item>

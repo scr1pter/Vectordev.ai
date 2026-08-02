@@ -1,5 +1,13 @@
 import { describe, expect, test } from "bun:test"
-import { cycleModelVariant, getConfiguredAgentVariant, resolveModelVariant } from "./model-variant"
+import {
+  cycleModelVariant,
+  getConfiguredAgentVariant,
+  modelVariantDescription,
+  modelVariantLabel,
+  normalizeModelVariant,
+  resolveModelVariant,
+  visibleModelVariants,
+} from "./model-variant"
 
 describe("model variant", () => {
   test("resolves configured agent variant when model matches", () => {
@@ -82,5 +90,36 @@ describe("model variant", () => {
     })
 
     expect(value).toBe("low")
+  })
+
+  test("presents xhigh as Max without changing the provider value", () => {
+    expect(modelVariantLabel("xhigh")).toBe("Max")
+    expect(modelVariantDescription("xhigh")).toContain("maximum effort")
+  })
+
+  test("hides none and collapses duplicate native effort tiers", () => {
+    expect(visibleModelVariants(["none", "minimal", "low", "medium", "high", "xhigh"])).toEqual([
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+    ])
+  })
+
+  test("prefers a provider's native max tier", () => {
+    expect(visibleModelVariants(["low", "medium", "high", "xhigh", "max"])).toEqual([
+      "low",
+      "medium",
+      "high",
+      "max",
+    ])
+    expect(normalizeModelVariant("xhigh", ["low", "medium", "high", "max"])).toBe("max")
+  })
+
+  test("treats the provider none tier as Vector default", () => {
+    expect(modelVariantLabel("none")).toBe("Default")
+    expect(
+      resolveModelVariant({ variants: ["low", "medium", "high", "xhigh"], selected: "none", configured: "high" }),
+    ).toBeUndefined()
   })
 })

@@ -17,16 +17,68 @@ import { LspEvent } from "@opencode-ai/schema/lsp-event"
 
 export const Event = LspEvent
 
-const Position = Schema.Struct({
+export const Position = Schema.Struct({
   line: NonNegativeInt,
   character: NonNegativeInt,
 })
+export type Position = typeof Position.Type
 
 export const Range = Schema.Struct({
   start: Position,
   end: Position,
 }).annotate({ identifier: "Range" })
 export type Range = typeof Range.Type
+
+export const Request = Schema.Struct({
+  file: Schema.String,
+  line: NonNegativeInt,
+  character: NonNegativeInt,
+}).annotate({ identifier: "LSPRequest" })
+export type Request = typeof Request.Type
+
+export const RenameRequest = Schema.Struct({
+  ...Request.fields,
+  newName: Schema.String,
+}).annotate({ identifier: "LSPRenameRequest" })
+export type RenameRequest = typeof RenameRequest.Type
+
+export const Location = Schema.Struct({
+  uri: Schema.String,
+  range: Range,
+}).annotate({ identifier: "LSPLocation" })
+export type Location = typeof Location.Type
+
+export const EditorDiagnostic = Schema.Struct({
+  range: Range,
+  severity: Schema.optional(NonNegativeInt),
+  code: Schema.optional(Schema.String),
+  source: Schema.optional(Schema.String),
+  message: Schema.String,
+}).annotate({ identifier: "LSPDiagnostic" })
+export type EditorDiagnostic = typeof EditorDiagnostic.Type
+
+export const Hover = Schema.Struct({
+  contents: Schema.Array(Schema.String),
+  range: Schema.optional(Range),
+}).annotate({ identifier: "LSPHover" })
+export type Hover = typeof Hover.Type
+
+export const TextEdit = Schema.Struct({
+  range: Range,
+  newText: Schema.String,
+}).annotate({ identifier: "LSPTextEdit" })
+export type TextEdit = typeof TextEdit.Type
+
+export const FileEdit = Schema.Struct({
+  uri: Schema.String,
+  edits: Schema.Array(TextEdit),
+}).annotate({ identifier: "LSPFileEdit" })
+export type FileEdit = typeof FileEdit.Type
+
+export const RenameResult = Schema.Struct({
+  files: Schema.Array(FileEdit),
+}).annotate({ identifier: "LSPRenameResult" })
+export type RenameResult = typeof RenameResult.Type
 
 export const Symbol = Schema.Struct({
   name: Schema.String,
@@ -107,7 +159,7 @@ const filterExperimentalServers = (servers: Record<string, LSPServer.Info>, flag
   }
 }
 
-type LocInput = { file: string; line: number; character: number }
+type LocInput = Request
 
 interface State {
   clients: LSPClient.Info[]
@@ -122,10 +174,11 @@ export interface Interface {
   readonly hasClients: (file: string) => Effect.Effect<boolean>
   readonly touchFile: (input: string, diagnostics?: "document" | "full") => Effect.Effect<void>
   readonly diagnostics: () => Effect.Effect<Record<string, LSPClient.Diagnostic[]>>
-  readonly hover: (input: LocInput) => Effect.Effect<any>
-  readonly definition: (input: LocInput) => Effect.Effect<any[]>
-  readonly references: (input: LocInput) => Effect.Effect<any[]>
-  readonly implementation: (input: LocInput) => Effect.Effect<any[]>
+  readonly hover: (input: LocInput) => Effect.Effect<unknown[]>
+  readonly definition: (input: LocInput) => Effect.Effect<unknown[]>
+  readonly references: (input: LocInput) => Effect.Effect<unknown[]>
+  readonly implementation: (input: LocInput) => Effect.Effect<unknown[]>
+  readonly rename?: (input: RenameRequest) => Effect.Effect<unknown[]>
   readonly documentSymbol: (uri: string) => Effect.Effect<(DocumentSymbol | Symbol)[]>
   readonly workspaceSymbol: (query: string) => Effect.Effect<Symbol[]>
   readonly prepareCallHierarchy: (input: LocInput) => Effect.Effect<any[]>
@@ -422,6 +475,19 @@ const layer = Layer.effect(
       return results.flat().filter(Boolean)
     })
 
+    const rename = Effect.fn("LSP.rename")(function* (input: RenameRequest) {
+      const results = yield* run(input.file, (client) =>
+        client.connection
+          .sendRequest("textDocument/rename", {
+            textDocument: { uri: pathToFileURL(input.file).href },
+            position: { line: input.line, character: input.character },
+            newName: input.newName,
+          })
+          .catch(() => null),
+      )
+      return results.filter(Boolean)
+    })
+
     const documentSymbol = Effect.fn("LSP.documentSymbol")(function* (uri: string) {
       const file = fileURLToPath(uri)
       const results = yield* run(file, (client) =>
@@ -487,6 +553,7 @@ const layer = Layer.effect(
       definition,
       references,
       implementation,
+      rename,
       documentSymbol,
       workspaceSymbol,
       prepareCallHierarchy,

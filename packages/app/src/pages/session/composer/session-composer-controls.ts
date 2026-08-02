@@ -33,10 +33,19 @@ export function createPromptInputController(input: {
   const agentsQuery = createQuery(() => input.queryOptions.agents(pathKey(sdk().directory)))
   const globalProvidersQuery = createQuery(() => input.queryOptions.providers(null))
   const providersQuery = createQuery(() => input.queryOptions.providers(pathKey(sdk().directory)))
+  const availableAgents = createMemo(() => {
+    const agents = new Map(sync().data.agent.map((agent) => [agent.name, agent] as const))
+    for (const agent of sync().data.agent) agents.set(agent.name, agent)
+    for (const agent of agentsQuery.data ?? []) agents.set(agent.name, agent)
+    return [...agents.values()].sort((a, b) => {
+      if (a.mode !== b.mode) return a.mode === "subagent" ? -1 : 1
+      return a.name.localeCompare(b.name)
+    })
+  })
 
   return createMemo<PromptInputControls>(() => ({
     agents: {
-      available: sync().data.agent,
+      available: availableAgents(),
       options: local.agent.list().map((agent) => agent.name),
       current: local.agent.current()?.name ?? "",
       loading: agentsQuery.isLoading,

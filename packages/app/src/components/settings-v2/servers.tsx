@@ -53,9 +53,13 @@ export const SettingsServersV2: Component = () => {
         classList={{ "settings-v2-tab-header--stacked": showSearch() }}
       >
         <div class="settings-v2-tab-header-row">
-          <h2 class="settings-v2-tab-title">{language.t("status.popover.tab.servers")}</h2>
+          <div>
+            <p class="settings-v2-page-kicker">System</p>
+            <h2 class="settings-v2-tab-title">{language.t("status.popover.tab.servers")}</h2>
+          </div>
           <AddServerMenu onAddServer={openAdd} />
         </div>
+        <p class="settings-v2-page-subtitle">Manage the Vector servers this workspace can connect to.</p>
         <Show when={showSearch()}>
           <div class="settings-v2-tab-search">
             <TextInputV2
@@ -77,6 +81,7 @@ export const SettingsServersV2: Component = () => {
                 size="small"
                 class="settings-v2-tab-search-clear"
                 icon={<IconV2 name="close" size="large" class="text-v2-icon-icon-muted" />}
+                aria-label={language.t("common.clear")}
                 onClick={() => setStore("filter", "")}
               />
             </Show>

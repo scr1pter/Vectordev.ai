@@ -156,6 +156,10 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
       })
     })
 
+    const sessionUsage = Effect.fn("ExperimentalHttpApi.sessionUsage")(function* () {
+      return yield* sessions.usage()
+    })
+
     const sessionBackground = Effect.fn("ExperimentalHttpApi.sessionBackground")(function* (ctx: {
       params: { sessionID: SessionID }
     }) {
@@ -187,6 +191,7 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
       .handle("worktreeRemove", worktreeRemove)
       .handle("worktreeReset", worktreeReset)
       .handle("session", session)
+      .handle("sessionUsage", sessionUsage)
       .handle("sessionBackground", sessionBackground)
       .handle("resource", resource)
   }),

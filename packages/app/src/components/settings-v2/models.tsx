@@ -10,6 +10,7 @@ import { useModels } from "@/context/models"
 import { popularProviders } from "@/hooks/use-providers"
 import { SettingsListV2 } from "./parts/list"
 import { SettingsRowV2 } from "./parts/row"
+import { brandProviderName } from "@/utils/provider-brand"
 import "./settings-v2.css"
 
 type ModelItem = ReturnType<ReturnType<typeof useModels>["list"]>[number]
@@ -17,12 +18,7 @@ type ModelItem = ReturnType<ReturnType<typeof useModels>["list"]>[number]
 const PROVIDER_ICON_SIZE = 16
 const HIDDEN_PROVIDER_IDS = new Set<string>()
 
-const providerDisplayName = (id: string, name: string) => {
-  if (id === "opencode") return name || "OpenCode"
-  if (id === "opencode-go") return name || "OpenCode Go"
-  if (id === "opencode-zen") return name || "OpenCode Zen"
-  return name
-}
+const providerDisplayName = (id: string, name: string) => brandProviderName(id, name)
 
 export const SettingsModelsV2: Component = () => {
   const language = useLanguage()
@@ -53,7 +49,11 @@ export const SettingsModelsV2: Component = () => {
   return (
     <>
       <div class="settings-v2-tab-header settings-v2-tab-header--stacked">
-        <h2 class="settings-v2-tab-title">{language.t("settings.models.title")}</h2>
+        <div>
+          <p class="settings-v2-page-kicker">Models &amp; keys</p>
+          <h2 class="settings-v2-tab-title">{language.t("settings.models.title")}</h2>
+          <p class="settings-v2-page-subtitle">Choose which models show up in the model picker.</p>
+        </div>
         <div class="settings-v2-tab-search">
           <TextInputV2
             type="search"
@@ -74,6 +74,7 @@ export const SettingsModelsV2: Component = () => {
               size="small"
               class="settings-v2-tab-search-clear"
               icon={<IconV2 name="close" size="large" class="text-v2-icon-icon-muted" />}
+              aria-label={language.t("common.clear")}
               onClick={() => list.clear()}
             />
           </Show>
@@ -84,9 +85,14 @@ export const SettingsModelsV2: Component = () => {
         <Show
           when={!list.grouped.loading}
           fallback={
-            <div class="settings-v2-models-status">
-              {language.t("common.loading")}
-              {language.t("common.loading.ellipsis")}
+            <div class="settings-v2-models-skeleton" role="status" aria-live="polite">
+              <span class="sr-only">
+                {language.t("common.loading")}
+                {language.t("common.loading.ellipsis")}
+              </span>
+              <div aria-hidden="true">
+                <For each={[0, 1, 2, 3]}>{() => <div class="settings-v2-models-skeleton-row" />}</For>
+              </div>
             </div>
           }
         >

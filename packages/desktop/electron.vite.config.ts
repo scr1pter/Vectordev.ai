@@ -12,8 +12,6 @@ const channel = (() => {
   return "dev"
 })()
 
-const nodePtyPkg = `@lydell/node-pty-${process.platform}-${process.arch}`
-
 const sentry =
   process.env.SENTRY_AUTH_TOKEN && process.env.SENTRY_ORG && process.env.SENTRY_PROJECT
     ? sentryVitePlugin({
@@ -40,16 +38,12 @@ export default defineConfig({
       rollupOptions: {
         input: { index: "src/main/index.ts", sidecar: "src/main/sidecar.ts" },
       },
-      externalizeDeps: { include: [nodePtyPkg] },
+      // Keep the platform-neutral loader external. It chooses the matching
+      // native PTY package when the installed app starts, so cross-arch and
+      // cross-platform installers never inherit the build machine's binary.
+      externalizeDeps: { include: ["@lydell/node-pty"] },
     },
     plugins: [
-      {
-        name: "opencode:node-pty-narrower",
-        enforce: "pre",
-        resolveId(s) {
-          if (s === "@lydell/node-pty") return nodePtyPkg
-        },
-      },
       {
         name: "opencode:virtual-server-module",
         enforce: "pre",

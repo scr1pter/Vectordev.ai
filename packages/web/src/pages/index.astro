@@ -1,0 +1,13 @@
+---
+import Lander from "../components/Lander.astro"
+import MarketingLayout from "../components/marketing/MarketingLayout.astro"
+
+export const prerender = true
+---
+
+<MarketingLayout
+  title="Vector — AI engineering inside your repository"
+  description="Run isolated coding agents inside your repository, work in a real editor and terminal, verify in a controlled browser, and review every change before it reaches main."
+>
+  <Lander />
+</MarketingLayout>

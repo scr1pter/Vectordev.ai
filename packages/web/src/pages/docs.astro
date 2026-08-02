@@ -1,0 +1,792 @@
+---
+import MarketingFooter from "../components/marketing/MarketingFooter.astro"
+import MarketingLayout from "../components/marketing/MarketingLayout.astro"
+import MarketingNav from "../components/marketing/MarketingNav.astro"
+import screenshotAgent from "../assets/lander/vector-agent-current.png"
+
+export const prerender = true
+
+const navigation = [
+  {
+    label: "Start here",
+    links: [
+      ["Install Vector", "install"],
+      ["Open a repository", "open-repository"],
+      ["Run your first task", "first-task"],
+    ],
+  },
+  {
+    label: "Build",
+    links: [
+      ["Vector Agent", "vector-agent"],
+      ["Agent workspaces", "agent-workspaces"],
+      ["Codespace", "codespace"],
+      ["Browser", "browser"],
+      ["Terminal and Canvas", "terminal-canvas"],
+    ],
+  },
+  {
+    label: "Ship and connect",
+    links: [
+      ["Vector Cloud", "vector-cloud"],
+      ["Models and BYOK", "models"],
+      ["MCP and connections", "connections"],
+      ["Review and recovery", "review"],
+    ],
+  },
+  {
+    label: "Help",
+    links: [
+      ["Troubleshooting", "troubleshooting"],
+      ["FAQ", "faq"],
+    ],
+  },
+]
+
+const faqs = [
+  {
+    question: "Does Vector upload my repository?",
+    answer:
+      "Vector is designed around local repositories. Files and commands stay on your machine unless you explicitly use a publishing, Git, or connected service workflow.",
+  },
+  {
+    question: "Where are model provider keys stored?",
+    answer:
+      "Provider credentials are stored with Vector's local application data and are not written into your repository. Keep normal operating-system account security enabled and never paste secrets into project files.",
+  },
+  {
+    question: "Can several agents work on one repository?",
+    answer:
+      "Yes. Create isolated workspaces for separate responsibilities. Each workspace works on its own copy or Git worktree, and you decide which changes are reviewed and merged.",
+  },
+  {
+    question: "Can I edit code myself?",
+    answer:
+      "Yes. Open Codespace for a file explorer, code editor, diagnostics, search, and an editor agent. Vector is meant for both direct coding and delegated work.",
+  },
+  {
+    question: "Does the browser replace Chrome or Firefox?",
+    answer:
+      "No. It is a controlled project browser for previewing, testing, and completing approved web workflows alongside the active agent session.",
+  },
+  {
+    question: "Do I need a paid Vector model plan?",
+    answer:
+      "No. Vector supports bring-your-own-key providers. Availability and billing depend on the model provider you connect.",
+  },
+]
+---
+
+<MarketingLayout
+  title="Vector Documentation"
+  description="Learn how to install Vector, run agents, work in Codespace, test with the controlled browser, review changes, and publish projects."
+>
+  <div class="docs-page">
+    <MarketingNav active="docs" />
+
+    <header class="docs-hero">
+      <p class="eyebrow">Documentation</p>
+      <h1>Build with Vector.</h1>
+      <p>
+        A practical guide to opening a repository, directing agents, working in the editor,
+        testing in the browser, and shipping the result.
+      </p>
+      <div class="quick-links" aria-label="Quick links">
+        <a href="#first-task">Run your first task <span aria-hidden="true">→</span></a>
+        <a href="#agent-workspaces">Use multiple agents <span aria-hidden="true">→</span></a>
+        <a href="#vector-cloud">Publish a project <span aria-hidden="true">→</span></a>
+      </div>
+    </header>
+
+    <div class="docs-shell">
+      <aside class="docs-nav">
+        <label for="docs-search">Search the guide</label>
+        <div class="search-field">
+          <span aria-hidden="true">⌕</span>
+          <input id="docs-search" type="search" placeholder="Search documentation" autocomplete="off" />
+        </div>
+        <nav aria-label="Documentation sections">
+          {navigation.map((group) => (
+            <section>
+              <h2>{group.label}</h2>
+              {group.links.map(([label, id]) => <a href={`#${id}`} data-doc-link>{label}</a>)}
+            </section>
+          ))}
+        </nav>
+        <p class="search-empty" hidden>No matching section.</p>
+      </aside>
+
+      <main class="docs-content">
+        <section id="install" class="doc-section">
+          <p class="section-number">01</p>
+          <h2>Install Vector</h2>
+          <p>
+            Download the installer that matches your computer, open it, and move through the operating
+            system's installation flow. Vector is available for Apple silicon and Intel Macs, Windows,
+            and Linux.
+          </p>
+          <div class="callout">
+            <strong>Start with the right build.</strong>
+            <span>The download page detects your platform and keeps every architecture available.</span>
+            <a href="/download">Open downloads →</a>
+          </div>
+        </section>
+
+        <section id="open-repository" class="doc-section">
+          <p class="section-number">02</p>
+          <h2>Open a repository</h2>
+          <p>
+            From Home, choose <strong>Open repository</strong> and select a local project folder. Vector
+            attaches conversations, browser state, usage, engineering tools, and agent workspaces to
+            that repository.
+          </p>
+          <ol class="steps">
+            <li><span>1</span><div><strong>Open repository</strong><p>Select the folder containing the project you want to build.</p></div></li>
+            <li><span>2</span><div><strong>Create a session</strong><p>Start with one clear outcome rather than a list of unrelated ideas.</p></div></li>
+            <li><span>3</span><div><strong>Choose a model</strong><p>Use the provider and model already connected in Vector.</p></div></li>
+          </ol>
+        </section>
+
+        <section id="first-task" class="doc-section">
+          <p class="section-number">03</p>
+          <h2>Run your first task</h2>
+          <p>
+            Describe the result, the constraints, and how Vector should verify the work. A strong first
+            request is specific enough to test but small enough to review.
+          </p>
+          <div class="prompt-example">
+            <span>Example</span>
+            <p>
+              Add a responsive settings page to this project. Follow the existing design system, run
+              the relevant tests, open the app in the browser, and summarize every changed file.
+            </p>
+          </div>
+          <figure class="docs-image">
+            <img
+              src={screenshotAgent.src}
+              width={screenshotAgent.width}
+              height={screenshotAgent.height}
+              alt="An active Vector agent session attached to an isolated workspace"
+              loading="lazy"
+            />
+            <figcaption>The task, tools, changes, and project remain in one workspace.</figcaption>
+          </figure>
+        </section>
+
+        <section id="vector-agent" class="doc-section">
+          <p class="section-number">04</p>
+          <h2>Vector Agent</h2>
+          <p>
+            The main session can inspect the repository, edit files, run commands, use project tools,
+            and report a reviewable result. Use Plan mode when you want analysis without edits, and
+            switch back to an editing mode when the plan is approved.
+          </p>
+          <div class="definition-grid">
+            <article><strong>Quick</strong><p>Short answers and lightweight requests with a smaller context budget.</p></article>
+            <article><strong>Normal</strong><p>The default balance of speed, context, and execution depth.</p></article>
+            <article><strong>Fast</strong><p>Prioritizes lower latency and may use more parallel model work.</p></article>
+            <article><strong>Plan</strong><p>Reviews and proposes an approach without changing project files.</p></article>
+          </div>
+        </section>
+
+        <section id="agent-workspaces" class="doc-section">
+          <p class="section-number">05</p>
+          <h2>Agent workspaces</h2>
+          <p>
+            Use another workspace when work can happen independently: one agent can handle the
+            interface while another investigates tests or infrastructure. Vector isolates each agent
+            in a Git worktree or managed project copy so unfinished work does not alter the main files.
+          </p>
+          <ol class="steps">
+            <li><span>1</span><div><strong>Create a workspace</strong><p>Name the responsibility and send its first request.</p></div></li>
+            <li><span>2</span><div><strong>Keep working</strong><p>Switch between workspaces while they stream activity independently.</p></div></li>
+            <li><span>3</span><div><strong>Review and merge</strong><p>Inspect the diff and checks before bringing selected work into main.</p></div></li>
+          </ol>
+          <p class="note">
+            Two agents should not intentionally edit the same lines at the same time. Split work by
+            responsibility to reduce conflicts and make review easier.
+          </p>
+        </section>
+
+        <section id="codespace" class="doc-section">
+          <p class="section-number">06</p>
+          <h2>Codespace</h2>
+          <p>
+            Open Codespace when you want to work directly. It includes the project tree, editor tabs,
+            syntax-aware editing, file search, diagnostics, and an editor agent connected to the
+            active Vector session.
+          </p>
+          <ul class="feature-list">
+            <li><strong>Find a file</strong><span>Use editor search to open project files without leaving Codespace.</span></li>
+            <li><strong>Edit normally</strong><span>Your changes are written to the active repository or isolated workspace.</span></li>
+            <li><strong>Ask beside the code</strong><span>Use the editor agent for focused explanations and edits.</span></li>
+          </ul>
+        </section>
+
+        <section id="browser" class="doc-section">
+          <p class="section-number">07</p>
+          <h2>Controlled browser</h2>
+          <p>
+            The Browser is attached to the current repository and session. Open a local preview or URL,
+            interact manually, or ask Vector to inspect and test the page as part of the engineering task.
+          </p>
+          <div class="do-dont">
+            <article>
+              <strong>Good uses</strong>
+              <p>Local UI testing, console inspection, screenshots, documentation research, and approved deployment workflows.</p>
+            </article>
+            <article>
+              <strong>Approval stays visible</strong>
+              <p>Take over for sign-in, secrets, payments, destructive changes, and other sensitive actions.</p>
+            </article>
+          </div>
+        </section>
+
+        <section id="terminal-canvas" class="doc-section">
+          <p class="section-number">08</p>
+          <h2>Terminal and Canvas</h2>
+          <p>
+            The Terminal runs commands inside the active repository. Canvas lets you arrange project
+            tools together so the editor, terminal, browser, cloud view, and notes can stay visible
+            while several threads of work are in motion.
+          </p>
+        </section>
+
+        <section id="vector-cloud" class="doc-section">
+          <p class="section-number">09</p>
+          <h2>Vector Cloud</h2>
+          <p>
+            Vector Cloud keeps publishing controls with the project. Connect a supported hosting
+            account, review the detected build settings, add environment values, and publish when the
+            project is ready.
+          </p>
+          <ul class="feature-list">
+            <li><strong>Deployments</strong><span>Create and inspect project deployments from Vector.</span></li>
+            <li><strong>Domains</strong><span>Open and copy the project URL from the deployment view.</span></li>
+            <li><strong>Environment</strong><span>Keep deployment configuration separate from source files.</span></li>
+            <li><strong>Data</strong><span>Attach supported database workflows to the current project.</span></li>
+          </ul>
+        </section>
+
+        <section id="models" class="doc-section">
+          <p class="section-number">10</p>
+          <h2>Models and BYOK</h2>
+          <p>
+            Connect a provider in Settings, then select a model in the session composer. Model
+            availability, context limits, pricing, and rate limits come from the provider. Vector's
+            usage view tracks the information returned by those sessions.
+          </p>
+        </section>
+
+        <section id="connections" class="doc-section">
+          <p class="section-number">11</p>
+          <h2>MCP and connections</h2>
+          <p>
+            MCP servers and project connections give an agent structured access to approved tools.
+            Add only services you trust, confirm the permissions they request, and verify the
+            connection before depending on it in a task.
+          </p>
+          <p class="note">
+            A listed integration is not automatically connected. It becomes available only after its
+            setup succeeds and Vector reports it as active.
+          </p>
+        </section>
+
+        <section id="review" class="doc-section">
+          <p class="section-number">12</p>
+          <h2>Review and recovery</h2>
+          <p>
+            Review changed files before merging or publishing. Checkpoints preserve recoverable
+            project states, while isolated workspace diffs show exactly what an agent wants to bring
+            into the main branch.
+          </p>
+        </section>
+
+        <section id="troubleshooting" class="doc-section">
+          <p class="section-number">13</p>
+          <h2>Troubleshooting</h2>
+          <div class="troubleshooting">
+            <article><strong>The agent does not respond</strong><p>Confirm a provider and model are connected, then check whether the provider reports a quota or authentication error.</p></article>
+            <article><strong>The browser cannot open the app</strong><p>Start the development server in Terminal and use the local URL printed by the project.</p></article>
+            <article><strong>A workspace cannot be created</strong><p>Open a repository first and confirm the folder is writable. Git repositories provide the cleanest isolated-workspace flow.</p></article>
+            <article><strong>A deployment fails</strong><p>Open the deployment log, verify the build command and output directory, and check required environment values.</p></article>
+          </div>
+        </section>
+
+        <section id="faq" class="doc-section">
+          <p class="section-number">14</p>
+          <h2>Frequently asked questions</h2>
+          <div class="faq-list">
+            {faqs.map((item) => (
+              <details>
+                <summary>{item.question}<span aria-hidden="true">+</span></summary>
+                <p>{item.answer}</p>
+              </details>
+            ))}
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <MarketingFooter />
+  </div>
+</MarketingLayout>
+
+<script>
+  const input = document.querySelector<HTMLInputElement>("#docs-search")
+  const links = [...document.querySelectorAll<HTMLAnchorElement>("[data-doc-link]")]
+  const empty = document.querySelector<HTMLElement>(".search-empty")
+
+  input?.addEventListener("input", () => {
+    const query = input.value.trim().toLowerCase()
+    let matches = 0
+
+    for (const link of links) {
+      const visible = !query || link.textContent?.toLowerCase().includes(query)
+      link.hidden = !visible
+      if (visible) matches += 1
+    }
+
+    if (empty) empty.hidden = matches > 0
+  })
+</script>
+
+<style>
+  .docs-page {
+    min-width: 320px;
+    overflow: hidden;
+    color: var(--ink);
+    background: var(--page);
+  }
+
+  .eyebrow,
+  .section-number {
+    margin: 0 0 16px;
+    color: var(--accent-strong);
+    font-size: 12px;
+    font-weight: 720;
+    line-height: 1.2;
+    text-transform: uppercase;
+  }
+
+  .docs-hero {
+    width: min(1120px, calc(100% - 48px));
+    margin: 0 auto;
+    padding: 92px 0 90px;
+    border-bottom: 1px solid var(--line-strong);
+  }
+
+  .docs-hero h1 {
+    margin: 0;
+    font-size: 76px;
+    font-weight: 720;
+    line-height: 1;
+    letter-spacing: 0;
+  }
+
+  .docs-hero > p:not(.eyebrow) {
+    max-width: 710px;
+    margin: 26px 0 0;
+    color: var(--muted-strong);
+    font-size: 19px;
+  }
+
+  .quick-links {
+    margin-top: 38px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .quick-links a {
+    min-height: 42px;
+    padding: 0 14px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--ink);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 620;
+    text-decoration: none;
+    transition: border-color 180ms ease, transform 180ms ease;
+  }
+
+  .quick-links a:hover {
+    border-color: var(--accent);
+    transform: translateY(-2px);
+  }
+
+  .docs-shell {
+    width: min(1120px, calc(100% - 48px));
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: 230px minmax(0, 760px);
+    justify-content: space-between;
+    gap: 84px;
+  }
+
+  .docs-nav {
+    height: fit-content;
+    padding: 46px 0;
+    position: sticky;
+    top: 0;
+  }
+
+  .docs-nav > label {
+    display: block;
+    margin-bottom: 8px;
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 650;
+    text-transform: uppercase;
+  }
+
+  .search-field {
+    height: 40px;
+    padding: 0 11px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+  }
+
+  .search-field span {
+    color: var(--muted);
+  }
+
+  .search-field input {
+    width: 100%;
+    min-width: 0;
+    padding: 0;
+    color: var(--ink);
+    background: transparent;
+    border: 0;
+    outline: 0;
+    font-size: 13px;
+  }
+
+  .search-field input::-webkit-search-cancel-button {
+    filter: invert(1);
+    opacity: 0.62;
+  }
+
+  .docs-nav nav section {
+    margin-top: 30px;
+  }
+
+  .docs-nav nav h2 {
+    margin: 0 0 8px;
+    color: var(--ink);
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .docs-nav nav a {
+    padding: 5px 0;
+    display: block;
+    color: var(--muted);
+    font-size: 13px;
+    text-decoration: none;
+    transition: color 160ms ease, transform 160ms ease;
+  }
+
+  .docs-nav nav a:hover {
+    color: var(--accent-strong);
+    transform: translateX(3px);
+  }
+
+  .search-empty {
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .docs-content {
+    min-width: 0;
+    padding-bottom: 120px;
+  }
+
+  .doc-section {
+    padding: 78px 0;
+    scroll-margin-top: 28px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .doc-section h2 {
+    margin: 0;
+    font-size: 42px;
+    font-weight: 680;
+    line-height: 1.08;
+    letter-spacing: 0;
+  }
+
+  .doc-section > p:not(.section-number, .note) {
+    max-width: 690px;
+    margin: 22px 0 0;
+    color: var(--muted-strong);
+    font-size: 17px;
+  }
+
+  .callout,
+  .prompt-example,
+  .note {
+    margin-top: 30px;
+    padding: 20px 22px;
+    background: var(--accent-soft);
+    border-left: 3px solid var(--accent);
+    border-radius: 0 6px 6px 0;
+  }
+
+  .callout {
+    display: grid;
+    gap: 5px;
+  }
+
+  .callout span,
+  .callout a,
+  .prompt-example p,
+  .note {
+    color: var(--muted-strong);
+    font-size: 14px;
+  }
+
+  .callout a {
+    margin-top: 6px;
+    width: fit-content;
+    color: var(--accent-strong);
+    font-weight: 650;
+    text-decoration: none;
+  }
+
+  .steps {
+    margin: 34px 0 0;
+    padding: 0;
+    list-style: none;
+    border-top: 1px solid var(--line);
+  }
+
+  .steps li {
+    padding: 20px 0;
+    display: grid;
+    grid-template-columns: 38px minmax(0, 1fr);
+    gap: 14px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .steps li > span {
+    width: 27px;
+    height: 27px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--accent-strong);
+    background: var(--accent-soft);
+    border-radius: 50%;
+    font-size: 11px;
+    font-weight: 700;
+  }
+
+  .steps p,
+  .definition-grid p,
+  .feature-list span,
+  .do-dont p,
+  .troubleshooting p {
+    margin: 4px 0 0;
+    color: var(--muted);
+    font-size: 14px;
+  }
+
+  .prompt-example > span {
+    color: var(--accent-strong);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+
+  .prompt-example p {
+    margin: 8px 0 0;
+    color: var(--ink);
+    font-size: 15px;
+  }
+
+  .docs-image {
+    margin: 38px 0 0;
+  }
+
+  .docs-image img {
+    width: 100%;
+    height: auto;
+    display: block;
+    background: #171719;
+    border: 1px solid #2d2d32;
+    border-radius: 8px;
+    box-shadow: 0 18px 42px rgba(21, 21, 24, 0.13);
+  }
+
+  .docs-image figcaption {
+    margin-top: 10px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .definition-grid,
+  .do-dont {
+    margin-top: 34px;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    border-top: 1px solid var(--line);
+    border-left: 1px solid var(--line);
+  }
+
+  .definition-grid article,
+  .do-dont article {
+    min-height: 132px;
+    padding: 20px;
+    background: var(--surface);
+    border-right: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+  }
+
+  .feature-list {
+    margin: 32px 0 0;
+    padding: 0;
+    list-style: none;
+    border-top: 1px solid var(--line);
+  }
+
+  .feature-list li {
+    padding: 16px 0;
+    display: grid;
+    grid-template-columns: 150px minmax(0, 1fr);
+    gap: 22px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .feature-list span {
+    margin: 0;
+  }
+
+  .note {
+    line-height: 1.55;
+  }
+
+  .troubleshooting {
+    margin-top: 32px;
+  }
+
+  .troubleshooting article {
+    padding: 20px 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .faq-list {
+    margin-top: 34px;
+    border-top: 1px solid var(--line);
+  }
+
+  details {
+    border-bottom: 1px solid var(--line);
+  }
+
+  summary {
+    padding: 21px 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+    color: var(--ink);
+    cursor: pointer;
+    font-size: 15px;
+    font-weight: 630;
+    list-style: none;
+  }
+
+  summary::-webkit-details-marker {
+    display: none;
+  }
+
+  summary span {
+    color: var(--accent-strong);
+    font-size: 20px;
+    transition: transform 180ms ease;
+  }
+
+  details[open] summary span {
+    transform: rotate(45deg);
+  }
+
+  details > p {
+    max-width: 650px;
+    margin: -4px 0 22px;
+    color: var(--muted);
+    font-size: 14px;
+  }
+
+  @media (max-width: 900px) {
+    .docs-hero h1 {
+      font-size: 62px;
+    }
+
+    .docs-shell {
+      grid-template-columns: 190px minmax(0, 1fr);
+      gap: 48px;
+    }
+  }
+
+  @media (max-width: 720px) {
+    .docs-hero,
+    .docs-shell {
+      width: min(100% - 28px, 1120px);
+    }
+
+    .docs-hero {
+      padding-top: 64px;
+      padding-bottom: 66px;
+    }
+
+    .docs-hero h1 {
+      font-size: 48px;
+    }
+
+    .docs-hero > p:not(.eyebrow) {
+      font-size: 17px;
+    }
+
+    .docs-shell {
+      display: block;
+    }
+
+    .docs-nav {
+      padding: 30px 0;
+      position: static;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .docs-nav nav {
+      display: none;
+    }
+
+    .doc-section {
+      padding: 60px 0;
+    }
+
+    .doc-section h2 {
+      font-size: 36px;
+    }
+
+    .definition-grid,
+    .do-dont {
+      grid-template-columns: 1fr;
+    }
+
+    .feature-list li {
+      grid-template-columns: 1fr;
+      gap: 2px;
+    }
+
+  }
+</style>

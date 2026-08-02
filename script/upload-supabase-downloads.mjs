@@ -23,9 +23,24 @@ const files = [
     contentType: "application/vnd.microsoft.portable-executable",
   },
   {
+    local: "vector-desktop-win-arm64.exe",
+    remote: "vector-desktop-win-arm64.exe",
+    contentType: "application/vnd.microsoft.portable-executable",
+  },
+  {
     local: "vector-desktop-linux-x86_64.AppImage",
     remote: "vector-desktop-linux-x86_64.AppImage",
     contentType: "application/octet-stream",
+  },
+  {
+    local: "vector-desktop-linux-arm64.AppImage",
+    remote: "vector-desktop-linux-arm64.AppImage",
+    contentType: "application/octet-stream",
+  },
+  {
+    local: "checksums.txt",
+    remote: "checksums.txt",
+    contentType: "text/plain; charset=utf-8",
   },
 ]
 

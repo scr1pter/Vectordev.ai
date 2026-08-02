@@ -272,9 +272,10 @@ describe("session.retry.retryable", () => {
       action: {
         reason: "free_tier_limit",
         provider: "opencode",
-        title: "Free limit reached",
-        message: "Subscribe to OpenCode Go for reliable access to the best open-source models, starting at $5/month.",
-        label: "subscribe",
+        title: "Free model limit reached",
+        message:
+          "The selected free Vector-hosted model is temporarily out of quota. Choose another free model, connect your own provider key, or try again later.",
+        label: "choose model",
         link: SessionRetry.GO_UPSELL_URL,
       },
     })
@@ -305,15 +306,15 @@ describe("session.retry.retryable", () => {
 
     expect(SessionRetry.retryable(error, "opencode-go")).toEqual({
       message:
-        "5 hour usage limit reached. It will reset in 5 hours 23 minutes. To continue using this model now, enable usage from your available balance - https://opencode.ai/workspace/wrk_01K6XGM22R6FM8JVABE9XDQXGH/go",
+        "5 hour usage limit reached. It will reset in 5 hours 23 minutes. To continue using this model now, enable usage from your available balance - https://vectordev.ai",
       action: {
         reason: "account_rate_limit",
         provider: "opencode-go",
-        title: "Go limit reached",
+        title: "Vector model limit reached",
         message:
           "5 hour usage limit reached. It will reset in 5 hours 23 minutes. To continue using this model now, enable usage from your available balance",
-        label: "open settings",
-        link: "https://opencode.ai/workspace/wrk_01K6XGM22R6FM8JVABE9XDQXGH/go",
+        label: "choose model",
+        link: "https://vectordev.ai",
       },
     })
   })

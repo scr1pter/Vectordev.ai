@@ -16,6 +16,18 @@ type TreeStoreOptions = {
   onError: (message: string) => void
 }
 
+export function fileListErrorMessage(error: unknown) {
+  if (error instanceof Error && error.message) return error.message
+  if (typeof error === "string" && error) return error
+  return "Vector could not read this folder."
+}
+
+export function isTransientFileListError(message: string) {
+  return /failed to fetch|fetch failed|networkerror|network request failed|connection (?:refused|reset)|aborterror|aborted/i.test(
+    message,
+  )
+}
+
 export function createFileTreeStore(options: TreeStoreOptions) {
   const [tree, setTree] = createStore<{
     node: Record<string, FileNode>
@@ -60,8 +72,18 @@ export function createFileTreeStore(options: TreeStoreOptions) {
 
     const directory = options.scope()
 
-    const promise = options
-      .list(dir)
+    const request = async () => {
+      try {
+        return await options.list(dir)
+      } catch (error) {
+        if (!isTransientFileListError(fileListErrorMessage(error))) throw error
+        await new Promise((resolve) => setTimeout(resolve, 250))
+        if (options.scope() !== directory) return []
+        return options.list(dir)
+      }
+    }
+
+    const promise = request()
       .then((nodes) => {
         if (options.scope() !== directory) return
         const prevChildren = tree.dir[dir]?.children ?? []
@@ -107,17 +129,18 @@ export function createFileTreeStore(options: TreeStoreOptions) {
           }),
         )
       })
-      .catch((e) => {
+      .catch((error) => {
         if (options.scope() !== directory) return
+        const message = fileListErrorMessage(error)
         setTree(
           "dir",
           dir,
           produce((draft) => {
             draft.loading = false
-            draft.error = e.message
+            draft.error = message
           }),
         )
-        options.onError(e.message)
+        options.onError(message)
       })
       .finally(() => {
         inflight.delete(dir)

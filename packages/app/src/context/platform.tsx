@@ -47,7 +47,7 @@ type PlatformBase = {
   forward(): void
 
   /** Send a system notification (optional deep link) */
-  notify(title: string, description?: string, href?: string): Promise<void>
+  notify(title: string, description?: string, href?: string, options?: { force?: boolean }): Promise<void>
 
   /** Open a native attachment picker and read selected files sequentially (desktop only) */
   openAttachmentPickerDialog?(

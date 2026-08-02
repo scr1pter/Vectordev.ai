@@ -205,6 +205,29 @@ export const Terminal = (props: TerminalProps) => {
   let drop: VoidFunction | undefined
   let reconn: ReturnType<typeof setTimeout> | undefined
   let tries = 0
+  let lastTerminalStartAt = 0
+  let lastTerminalErrorAt = 0
+
+  const dispatchTerminalActivity = (
+    status: "running" | "success" | "warning" | "failed",
+    title: string,
+    summary: string,
+    outputText?: string,
+  ) => {
+    globalThis.window?.dispatchEvent(
+      new CustomEvent("vector:engineering-event", {
+        detail: {
+          projectId: directory,
+          type: status === "failed" ? "error" : "terminal",
+          status,
+          title,
+          summary,
+          output: outputText,
+          source: "Terminal",
+        },
+      }),
+    )
+  }
 
   const cleanup = () => {
     if (!cleanups.length) return
@@ -419,6 +442,13 @@ export const Terminal = (props: TerminalProps) => {
       })
       cleanups.push(() => disposeIfDisposable(onResize))
       const onData = t.onData((data) => {
+        if (data.includes("\r")) {
+          const at = Date.now()
+          if (at - lastTerminalStartAt > 1200) {
+            lastTerminalStartAt = at
+            dispatchTerminalActivity("running", "Terminal command started", `Terminal ${local.pty.title || local.pty.titleNumber || id} received a command.`)
+          }
+        }
         if (ws?.readyState === WebSocket.OPEN) ws.send(data)
       })
       cleanups.push(() => disposeIfDisposable(onData))
@@ -552,6 +582,7 @@ export const Terminal = (props: TerminalProps) => {
           if (disposed) return
           tries = 0
           local.onConnect?.()
+          dispatchTerminalActivity("success", "Terminal connected", `Terminal ${local.pty.title || local.pty.titleNumber || id} is ready.`)
           scheduleSize(t.cols, t.rows)
         }
 
@@ -576,6 +607,13 @@ export const Terminal = (props: TerminalProps) => {
 
           const data = typeof event.data === "string" ? event.data : ""
           if (!data) return
+          if (/\b(error|failed|exception|traceback|panic|fatal)\b/i.test(data)) {
+            const at = Date.now()
+            if (at - lastTerminalErrorAt > 3000) {
+              lastTerminalErrorAt = at
+              dispatchTerminalActivity("failed", "Terminal error detected", "Vector noticed error output in the terminal stream.", data.slice(0, 1200))
+            }
+          }
           output?.push(data)
           cursor += data.length
           seek = cursor
@@ -604,7 +642,11 @@ export const Terminal = (props: TerminalProps) => {
           socket.removeEventListener("error", handleError)
           socket.removeEventListener("close", handleClose)
           if (disposed) return
-          if (event.code === 1000) return
+          if (event.code === 1000) {
+            dispatchTerminalActivity("success", "Terminal command completed", `Terminal ${local.pty.title || local.pty.titleNumber || id} closed cleanly.`)
+            return
+          }
+          dispatchTerminalActivity("failed", "Terminal connection lost", language.t("terminal.connectionLost.abnormalClose", { code: event.code }))
           retry(new Error(language.t("terminal.connectionLost.abnormalClose", { code: event.code })))
         }
 

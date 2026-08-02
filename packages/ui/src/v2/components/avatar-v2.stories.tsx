@@ -2,7 +2,7 @@
 import { Avatar } from "./avatar-v2"
 
 const docs = `### Overview
-Avatar matching OpenCode DS variants from Figma.
+Avatar variants for Vector's desktop design system.
 
 Use in user lists and headers.
 

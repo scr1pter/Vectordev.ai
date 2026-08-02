@@ -156,14 +156,22 @@ describe("tool.task", () => {
         expect(first).toBe(second)
 
         const alpha = first.indexOf("- alpha: Alpha agent")
+        const debug = first.indexOf("- debug:")
         const explore = first.indexOf("- explore:")
         const general = first.indexOf("- general:")
+        const review = first.indexOf("- review:")
+        const security = first.indexOf("- security:")
+        const test = first.indexOf("- test:")
         const zebra = first.indexOf("- zebra: Zebra agent")
 
         expect(alpha).toBeGreaterThan(-1)
-        expect(explore).toBeGreaterThan(alpha)
+        expect(debug).toBeGreaterThan(alpha)
+        expect(explore).toBeGreaterThan(debug)
         expect(general).toBeGreaterThan(explore)
-        expect(zebra).toBeGreaterThan(general)
+        expect(review).toBeGreaterThan(general)
+        expect(security).toBeGreaterThan(review)
+        expect(test).toBeGreaterThan(security)
+        expect(zebra).toBeGreaterThan(test)
       }),
     {
       config: {
@@ -252,6 +260,82 @@ describe("tool.task", () => {
       expect(result.output).toContain(`<task id="${child.id}" state="completed">`)
       expect(seen?.sessionID).toBe(child.id)
       expect(seen?.variant).toBe("xhigh")
+    }),
+  )
+
+  it.instance("inherits the parent BYOK model and variant in a child session", () =>
+    Effect.gen(function* () {
+      const { chat, assistant } = yield* seed()
+      const tool = yield* TaskTool
+      const def = yield* tool.init()
+      let seen: SessionPrompt.PromptInput | undefined
+
+      const result = yield* def.execute(
+        {
+          description: "verify implementation",
+          prompt: "inspect the implementation and report any issues",
+          subagent_type: "general",
+        },
+        {
+          sessionID: chat.id,
+          messageID: assistant.id,
+          agent: "build",
+          abort: new AbortController().signal,
+          extra: {
+            promptOps: stubOps({ onPrompt: (input) => (seen = input) }),
+          },
+          messages: [],
+          metadata: () => Effect.void,
+          ask: () => Effect.void,
+        },
+      )
+
+      expect(result.metadata.parentSessionId).toBe(chat.id)
+      expect(result.metadata.sessionId).not.toBe(chat.id)
+      expect(result.metadata.model).toEqual(ref)
+      expect(seen?.sessionID).toBe(result.metadata.sessionId)
+      expect(seen?.model).toEqual(ref)
+      expect(seen?.variant).toBe("xhigh")
+      expect(seen?.agent).toBe("general")
+    }),
+  )
+
+  it.instance("native specialists use the same child-session and BYOK inheritance path", () =>
+    Effect.gen(function* () {
+      const { chat, assistant } = yield* seed()
+      const tool = yield* TaskTool
+      const def = yield* tool.init()
+
+      for (const subagent of ["review", "debug", "test", "security", "performance", "migration"] as const) {
+        let seen: SessionPrompt.PromptInput | undefined
+        const result = yield* def.execute(
+          {
+            description: `${subagent} implementation`,
+            prompt: `Perform a focused ${subagent} pass and report the result`,
+            subagent_type: subagent,
+          },
+          {
+            sessionID: chat.id,
+            messageID: assistant.id,
+            agent: "build",
+            abort: new AbortController().signal,
+            extra: {
+              promptOps: stubOps({ onPrompt: (input) => (seen = input) }),
+            },
+            messages: [],
+            metadata: () => Effect.void,
+            ask: () => Effect.void,
+          },
+        )
+
+        expect(result.metadata.parentSessionId).toBe(chat.id)
+        expect(result.metadata.sessionId).not.toBe(chat.id)
+        expect(result.metadata.model).toEqual(ref)
+        expect(seen?.sessionID).toBe(result.metadata.sessionId)
+        expect(seen?.model).toEqual(ref)
+        expect(seen?.variant).toBe("xhigh")
+        expect(seen?.agent).toBe(subagent)
+      }
     }),
   )
 

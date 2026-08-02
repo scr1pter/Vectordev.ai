@@ -1,7 +1,12 @@
 import { describe, expect, test } from "bun:test"
 import type { SessionNotFoundError } from "@opencode-ai/sdk/v2/client"
 import type { ConfigInvalidError, ProviderModelNotFoundError } from "./server-errors"
-import { formatServerError, isSessionNotFoundError, parseReadableConfigInvalidError } from "./server-errors"
+import {
+  formatServerError,
+  formatWorkspaceFailure,
+  isSessionNotFoundError,
+  parseReadableConfigInvalidError,
+} from "./server-errors"
 
 function fill(text: string, vars?: Record<string, string | number>) {
   if (!vars) return text
@@ -98,6 +103,22 @@ describe("formatServerError", () => {
   test("falls back for unknown error objects and names", () => {
     expect(formatServerError({ name: "ServerTimeoutError", data: { seconds: 30 } }, language.t)).toBe(
       "Erro desconhecido",
+    )
+  })
+
+  test("formats structured session errors", () => {
+    expect(formatServerError({ name: "UnknownError", data: { message: "Provider request failed" } }, language.t)).toBe(
+      "Provider request failed",
+    )
+  })
+
+  test("explains stale project folders", () => {
+    expect(
+      formatWorkspaceFailure(
+        "NotFound: FileSystem.realPath (/Users/Krishna/Missing Project) at packages/opencode/src/file.ts",
+      ),
+    ).toBe(
+      "The project folder is unavailable: /Users/Krishna/Missing Project. Reopen the project from its existing folder.",
     )
   })
 

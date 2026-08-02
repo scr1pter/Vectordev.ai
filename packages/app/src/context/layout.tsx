@@ -434,17 +434,21 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
       return available[Math.floor(Math.random() * available.length)]
     }
 
-    function enrich(project: { worktree: string; expanded: boolean }) {
+    function enrich(project: LocalProject) {
       const [childStore] = serverSync().child(project.worktree, { bootstrap: false })
       const projectID = childStore.project
       const metadata = projectID
         ? serverSync().data.project.find((x) => x.id === projectID)
         : serverSync().data.project.find((x) => x.worktree === project.worktree)
 
-      // Preserve local icon override from per-workspace localStorage cache (childStore.icon).
-      // Without this, different subdirectories of the same git repo would share the same
-      // icon from the database instead of using their individual overrides.
-      const base = { ...metadata, ...project }
+      const local = childStore.projectMeta
+      const base = {
+        ...metadata,
+        ...project,
+        ...local,
+        icon: { ...metadata?.icon, ...project.icon, ...local?.icon },
+        commands: { ...metadata?.commands, ...project.commands, ...local?.commands },
+      }
       if (childStore.icon) {
         return { ...base, icon: { ...base.icon, override: childStore.icon } }
       }

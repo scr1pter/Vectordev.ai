@@ -6,7 +6,13 @@ import { createStore } from "solid-js/store"
 import { useModels } from "@/context/models"
 import { useProviders } from "@/hooks/use-providers"
 import { Persist, persisted } from "@/utils/persist"
-import { cycleModelVariant, getConfiguredAgentVariant, resolveModelVariant } from "./model-variant"
+import {
+  cycleModelVariant,
+  getConfiguredAgentVariant,
+  normalizeModelVariant,
+  resolveModelVariant,
+  visibleModelVariants,
+} from "./model-variant"
 import { useSDK } from "./sdk"
 import { useSync } from "./sync"
 import { useServerSDK } from "./server-sdk"
@@ -332,12 +338,12 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           const model = current()
           if (!model) return
           const saved = models.variant.get({ providerID: model.provider.id, modelID: model.id })
-          if (saved && this.list().includes(saved)) return saved
+          return normalizeModelVariant(saved, this.list())
         },
         list() {
           const item = current()
           if (!item?.variants) return []
-          return Object.keys(item.variants)
+          return visibleModelVariants(Object.keys(item.variants))
         },
         set(value: string | undefined) {
           startTransition(() =>

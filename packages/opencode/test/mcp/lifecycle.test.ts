@@ -319,6 +319,23 @@ it.instance(
   { config: { mcp: {} } },
 )
 
+it.instance(
+  "rejects raw remote credentials without persisting them",
+  () =>
+    MCP.Service.use((mcp: MCPNS.Interface) =>
+      Effect.gen(function* () {
+        const result = yield* mcp.add("unsafe-remote", {
+          type: "remote",
+          url: "https://mcp.example.com",
+          headers: { Authorization: "Bearer secret-token-value" },
+        })
+        expect(statusName(result.status, "unsafe-remote")).toBe("failed")
+        expect((yield* mcp.status())["unsafe-remote"]).toBeUndefined()
+      }),
+    ),
+  { config: { mcp: {} } },
+)
+
 // ========================================================================
 // Test: tools() are cached after connect
 // ========================================================================
@@ -625,6 +642,37 @@ it.instance(
       },
     },
   },
+)
+
+it.instance(
+  "add, disconnect, and reconnect persist project MCP configuration",
+  () =>
+    MCP.Service.use((mcp: MCPNS.Interface) =>
+      Effect.gen(function* () {
+        const { directory } = yield* TestInstance
+        lastCreatedClientName = "durable-server"
+
+        yield* mcp.add("durable-server", {
+          type: "local",
+          command: ["echo", "test"],
+        })
+
+        const added = yield* Effect.promise(() => Bun.file(path.join(directory, "config.json")).json())
+        expect(added.mcp["durable-server"]).toEqual({
+          type: "local",
+          command: ["echo", "test"],
+        })
+
+        yield* mcp.disconnect("durable-server")
+        const disconnected = yield* Effect.promise(() => Bun.file(path.join(directory, "config.json")).json())
+        expect(disconnected.mcp["durable-server"].enabled).toBe(false)
+
+        yield* mcp.connect("durable-server")
+        const connected = yield* Effect.promise(() => Bun.file(path.join(directory, "config.json")).json())
+        expect(connected.mcp["durable-server"].enabled).toBe(true)
+      }),
+    ),
+  { config: { mcp: {} } },
 )
 
 // ========================================================================

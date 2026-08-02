@@ -14,6 +14,8 @@ const desktopEntryFpm = `${desktopEntry}=/usr/share/applications/vector-desktop.
 const signMac = process.env.VECTOR_SIGN_MAC === "true"
 const notarizeMac = process.env.VECTOR_NOTARIZE === "true"
 const signDmg = process.env.VECTOR_SIGN_DMG === "true"
+const updateBaseUrl =
+  "https://42qryducihx01gl0.public.blob.vercel-storage.com/releases"
 
 async function signWindows(configuration: { path: string }) {
   if (process.platform !== "win32") return
@@ -60,15 +62,13 @@ const getBase = (appId: string): Configuration => ({
       to: "icons/",
       filter: ["**/*"],
     },
-    {
-      from: "native/",
-      to: "native/",
-      filter: ["index.js", "index.d.ts", "build/Release/mac_window.node", "swift-build/**"],
-    },
   ],
   mac: {
     category: "public.app-category.developer-tools",
     icon: `resources/icons/icon.icns`,
+    extendInfo: {
+      NSMicrophoneUsageDescription: "Vector uses microphone access only when you start voice dictation.",
+    },
     hardenedRuntime: true,
     identity: signMac ? undefined : "-",
     gatekeeperAssess: false,
@@ -117,36 +117,32 @@ function getConfig() {
   const appId = APP_IDS[channel]
   const base = getBase(appId)
 
-  switch (channel) {
-    case "dev": {
-      return {
-        ...base,
-        appId,
-        productName: "Vector Dev",
-        rpm: { packageName: "vector-dev" },
-      }
+  if (channel === "dev") {
+    return {
+      ...base,
+      appId,
+      productName: "Vector Dev",
+      rpm: { packageName: "vector-dev" },
     }
-    case "beta": {
-      return {
-        ...base,
-        appId,
-        productName: "Vector Beta",
-        protocols: { name: "Vector Beta", schemes: ["vector"] },
-        publish: { provider: "github", owner: "scr1pter", repo: "Vectordev.ai", channel: "beta" },
-        rpm: { packageName: "vector-beta" },
-      }
+  }
+  if (channel === "beta") {
+    return {
+      ...base,
+      appId,
+      productName: "Vector Beta",
+      protocols: { name: "Vector Beta", schemes: ["vector"] },
+      publish: { provider: "generic", url: `${updateBaseUrl}/vector-beta-updates` },
+      rpm: { packageName: "vector-beta" },
     }
-    case "prod": {
-      return {
-        ...base,
-        appId,
-        productName: "Vector",
-        protocols: { name: "Vector", schemes: ["vector"] },
-        publish: { provider: "github", owner: "scr1pter", repo: "Vectordev.ai", channel: "latest" },
-        deb: { fpm: [desktopEntryFpm] },
-        rpm: { packageName: "vector", fpm: [desktopEntryFpm] },
-      }
-    }
+  }
+  return {
+    ...base,
+    appId,
+    productName: "Vector",
+    protocols: { name: "Vector", schemes: ["vector"] },
+    publish: { provider: "generic", url: `${updateBaseUrl}/vector-updates` },
+    deb: { fpm: [desktopEntryFpm] },
+    rpm: { packageName: "vector", fpm: [desktopEntryFpm] },
   }
 }
 

@@ -8,6 +8,7 @@ import { ProviderIcon } from "@opencode-ai/ui/provider-icon"
 import { DialogConnectProvider } from "./dialog-connect-provider"
 import { useLanguage } from "@/context/language"
 import { DialogCustomProvider } from "./dialog-custom-provider"
+import { brandProviderDescription, brandProviderName } from "@/utils/provider-brand"
 
 const CUSTOM_ID = "_custom"
 const OPENCODE_PROVIDER_IDS = new Set(["opencode", "opencode-go", "opencode-zen"])
@@ -15,12 +16,7 @@ const HIDDEN_PROVIDER_IDS = new Set<string>()
 
 const isOpenCodeProvider = (id: string) => OPENCODE_PROVIDER_IDS.has(id)
 
-const providerDisplayName = (id: string, name: string) => {
-  if (id === "opencode") return name || "OpenCode"
-  if (id === "opencode-go") return name || "OpenCode Go"
-  if (id === "opencode-zen") return name || "OpenCode Zen"
-  return name
-}
+const providerDisplayName = (id: string, name: string) => brandProviderName(id, name)
 
 export const DialogSelectProvider: Component<{ directory?: Accessor<string | undefined> }> = (props) => {
   const dialog = useDialog()
@@ -31,9 +27,8 @@ export const DialogSelectProvider: Component<{ directory?: Accessor<string | und
   const otherGroup = () => language.t("dialog.provider.group.other")
   const customLabel = () => language.t("settings.providers.tag.custom")
   const note = (id: string) => {
-    if (id === "opencode") return "Free starter models provided by OpenCode and available inside Vector."
-    if (id === "opencode-go") return "OpenCode Go models are provided by OpenCode and can be used inside Vector."
-    if (id === "opencode-zen") return "OpenCode Zen models are provided by OpenCode and can be used inside Vector."
+    const branded = brandProviderDescription(id)
+    if (branded) return branded
     if (id === "anthropic") return language.t("dialog.provider.anthropic.note")
     if (id === "openai") return language.t("dialog.provider.openai.note")
     if (id.startsWith("github-copilot")) return language.t("dialog.provider.copilot.note")
@@ -41,7 +36,7 @@ export const DialogSelectProvider: Component<{ directory?: Accessor<string | und
 
   return (
     <Dialog title={language.t("command.provider.connect")} transition>
-      <div class="px-4 pt-3 pb-1 text-12-medium text-text-base">Models provided by Vector:</div>
+      <div class="px-4 pt-3 pb-1 text-12-medium text-text-base">Connect a model provider:</div>
       <List
         class="px-3"
         search={{ placeholder: language.t("dialog.provider.search.placeholder"), autofocus: true }}

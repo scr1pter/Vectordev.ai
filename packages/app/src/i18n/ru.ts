@@ -276,6 +276,7 @@ export const dict = {
   "prompt.action.attachFile": "Прикрепить файл",
   "prompt.attachment.remove": "Удалить вложение",
   "prompt.action.send": "Отправить",
+  "prompt.action.queue": "В очередь",
   "prompt.action.stop": "Остановить",
 
   "prompt.toast.pasteUnsupported.title": "Неподдерживаемое вложение",
@@ -536,6 +537,8 @@ export const dict = {
   "session.followupDock.summary.other": "{{count}} сообщений в очереди",
   "session.followupDock.sendNow": "Отправить сейчас",
   "session.followupDock.edit": "Редактировать",
+  "session.followupDock.copy": "Копировать",
+  "session.followupDock.delete": "Удалить",
   "session.followupDock.collapse": "Свернуть сообщения в очереди",
   "session.followupDock.expand": "Развернуть сообщения в очереди",
   "session.revertDock.summary.one": "{{count}} сообщение возвращено",

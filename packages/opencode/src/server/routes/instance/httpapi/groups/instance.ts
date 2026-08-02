@@ -40,6 +40,17 @@ export class ApiVcsApplyError extends Schema.ErrorClass<ApiVcsApplyError>("VcsAp
   { httpApiStatus: 400 },
 ) {}
 
+export class ApiVcsCommitError extends Schema.ErrorClass<ApiVcsCommitError>("VcsCommitError")(
+  {
+    name: Schema.Literal("VcsCommitError"),
+    data: Schema.Struct({
+      message: Schema.String,
+      reason: Schema.Literals(["non-git", "commit-failed"]),
+    }),
+  },
+  { httpApiStatus: 400 },
+) {}
+
 export const InstancePaths = {
   dispose: "/instance/dispose",
   path: "/path",
@@ -48,10 +59,17 @@ export const InstancePaths = {
   vcsDiff: "/vcs/diff",
   vcsDiffRaw: "/vcs/diff/raw",
   vcsApply: "/vcs/apply",
+  vcsCommit: "/vcs/commit",
   command: "/command",
   agent: "/agent",
   skill: "/skill",
   lsp: "/lsp",
+  lspDiagnostics: "/lsp/diagnostics",
+  lspHover: "/lsp/hover",
+  lspDefinition: "/lsp/definition",
+  lspReferences: "/lsp/references",
+  lspSymbols: "/lsp/symbols",
+  lspRename: "/lsp/rename",
   formatter: "/formatter",
 } as const
 
@@ -136,6 +154,19 @@ export const InstanceApi = HttpApi.make("instance")
             description: "Apply a raw patch to the current working tree.",
           }),
         ),
+        HttpApiEndpoint.post("vcsCommit", InstancePaths.vcsCommit, {
+          query: WorkspaceRoutingQuery,
+          payload: Vcs.CommitInput,
+          success: described(Vcs.CommitResult, "VCS commit result"),
+          error: ApiVcsCommitError,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "vcs.commit",
+            summary: "Commit working tree",
+            description:
+              "Capture a restore point, then stage all changes and commit them to the current branch.",
+          }),
+        ),
         HttpApiEndpoint.get("command", InstancePaths.command, {
           query: WorkspaceRoutingQuery,
           success: described(Schema.Array(Command.Info), "List of commands"),
@@ -174,6 +205,72 @@ export const InstanceApi = HttpApi.make("instance")
             identifier: "lsp.status",
             summary: "Get LSP status",
             description: "Get LSP server status",
+          }),
+        ),
+        HttpApiEndpoint.post("lspDiagnostics", InstancePaths.lspDiagnostics, {
+          query: WorkspaceRoutingQuery,
+          payload: Schema.Struct({ file: Schema.String }),
+          success: described(Schema.Array(LSP.EditorDiagnostic), "Language-server diagnostics"),
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "lsp.diagnostics",
+            summary: "Get file diagnostics",
+            description: "Open a file in its language server and return current compiler and linter diagnostics.",
+          }),
+        ),
+        HttpApiEndpoint.post("lspHover", InstancePaths.lspHover, {
+          query: WorkspaceRoutingQuery,
+          payload: LSP.Request,
+          success: described(Schema.NullOr(LSP.Hover), "Language-server hover information"),
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "lsp.hover",
+            summary: "Get hover information",
+            description: "Return language-server documentation and type information at a source position.",
+          }),
+        ),
+        HttpApiEndpoint.post("lspDefinition", InstancePaths.lspDefinition, {
+          query: WorkspaceRoutingQuery,
+          payload: LSP.Request,
+          success: described(Schema.Array(LSP.Location), "Definition locations"),
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "lsp.definition",
+            summary: "Find definitions",
+            description: "Return language-server definition targets for a source position.",
+          }),
+        ),
+        HttpApiEndpoint.post("lspReferences", InstancePaths.lspReferences, {
+          query: WorkspaceRoutingQuery,
+          payload: LSP.Request,
+          success: described(Schema.Array(LSP.Location), "Reference locations"),
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "lsp.references",
+            summary: "Find references",
+            description: "Return language-server references for a source position.",
+          }),
+        ),
+        HttpApiEndpoint.post("lspSymbols", InstancePaths.lspSymbols, {
+          query: WorkspaceRoutingQuery,
+          payload: Schema.Struct({ file: Schema.String }),
+          success: described(Schema.Array(Schema.Union([LSP.DocumentSymbol, LSP.Symbol])), "Document symbols"),
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "lsp.symbols",
+            summary: "Get document symbols",
+            description: "Return language-server symbols for the current file outline.",
+          }),
+        ),
+        HttpApiEndpoint.post("lspRename", InstancePaths.lspRename, {
+          query: WorkspaceRoutingQuery,
+          payload: LSP.RenameRequest,
+          success: described(LSP.RenameResult, "Workspace rename edits"),
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "lsp.rename",
+            summary: "Rename symbol",
+            description: "Return language-server workspace edits for a safe symbol rename.",
           }),
         ),
         HttpApiEndpoint.get("formatter", InstancePaths.formatter, {

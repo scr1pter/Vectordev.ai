@@ -34,6 +34,18 @@ if (import.meta.env.DEV && !(root instanceof HTMLElement)) {
   throw new Error(t("error.dev.rootNotFound"))
 }
 
+// Chromium emits this as a window error when layout settles over multiple
+// frames. It is not actionable and can otherwise drown real renderer faults.
+window.addEventListener(
+  "error",
+  (event) => {
+    if (!event.message.startsWith("ResizeObserver loop")) return
+    event.preventDefault()
+    event.stopImmediatePropagation()
+  },
+  true,
+)
+
 if (import.meta.env.VITE_SENTRY_DSN) {
   Sentry.init({
     dsn: import.meta.env.VITE_SENTRY_DSN,
@@ -243,9 +255,9 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
       window.api.relaunch()
     },
 
-    notify: async (title, description, href) => {
+    notify: async (title, description, href, options) => {
       const focused = await window.api.getWindowFocused().catch(() => document.hasFocus())
-      if (focused) return
+      if (focused && !options?.force) return
 
       const notification = new Notification(title, {
         body: description ?? "",

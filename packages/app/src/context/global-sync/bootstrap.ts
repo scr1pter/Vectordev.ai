@@ -21,7 +21,7 @@ import { formatServerError } from "@/utils/server-errors"
 import { QueryClient, queryOptions } from "@tanstack/solid-query"
 import { loadMcpQuery, loadMcpResourcesQuery } from "../server-sync"
 import { NormalizedProviderListResponse } from "@opencode-ai/session-ui/context"
-import { ScopedKey, type ServerScope } from "@/utils/server-scope"
+import { ScopedKey, ServerScope } from "@/utils/server-scope"
 
 type GlobalStore = {
   ready: boolean
@@ -91,16 +91,27 @@ export const loadGlobalConfigQuery = (scope: ServerScope, sdk: OpencodeClient) =
 export const loadProjectsQuery = (scope: ServerScope, sdk: OpencodeClient) =>
   queryOptions({
     queryKey: [scope, "project"],
-    queryFn: () =>
-      retry(() =>
-        sdk.project.list().then((x) => {
-          return (x.data ?? [])
+    queryFn: async () => {
+      const projects = await retry(() =>
+        sdk.project.list().then((x) =>
+          (x.data ?? [])
             .filter((p) => !!p?.id)
             .filter((p) => !!p.worktree && !p.worktree.includes("opencode-test"))
             .slice()
-            .sort((a, b) => cmp(a.id, b.id))
-        }),
-      ),
+            .sort((a, b) => cmp(a.id, b.id)),
+          ),
+      )
+      const desktopApi =
+        typeof window === "undefined"
+          ? undefined
+          : (window as unknown as { api?: { pathExists?: (path: string) => Promise<boolean> } }).api
+      if (scope !== ServerScope.local || !desktopApi?.pathExists) return projects
+      const pathExists = desktopApi.pathExists
+      const existing = await Promise.all(
+        projects.map(async (project) => ((await pathExists(project.worktree).catch(() => false)) ? project : undefined)),
+      )
+      return existing.filter((project): project is Project => !!project)
+    },
   })
 
 export async function bootstrapGlobal(input: {

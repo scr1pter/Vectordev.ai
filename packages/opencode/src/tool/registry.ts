@@ -51,6 +51,8 @@ import { BackgroundJob } from "@/background/job"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
+import { BrowserTool } from "./browser"
+import { VectorCloudTool } from "./vector-cloud"
 
 export function webSearchEnabled(providerID: ProviderV2.ID, flags = { exa: false, parallel: false }) {
   return providerID === ProviderV2.ID.opencode || flags.exa || flags.parallel
@@ -104,6 +106,8 @@ const layer = Layer.effect(
     const greptool = yield* GrepTool
     const patchtool = yield* ApplyPatchTool
     const skilltool = yield* SkillTool
+    const browsertool = yield* BrowserTool
+    const vectorcloudtool = yield* VectorCloudTool
     const agent = yield* Agent.Service
 
     const state = yield* InstanceState.make<State>(
@@ -211,6 +215,8 @@ const layer = Layer.effect(
           question: Tool.init(question),
           lsp: Tool.init(lsptool),
           plan: Tool.init(plan),
+          browser: Tool.init(browsertool),
+          vectorcloud: Tool.init(vectorcloudtool),
         })
 
         return {
@@ -230,6 +236,12 @@ const layer = Layer.effect(
             tool.search,
             tool.skill,
             tool.patch,
+            ...(process.env.VECTOR_BROWSER_BRIDGE_URL && process.env.VECTOR_BROWSER_BRIDGE_TOKEN
+              ? [tool.browser]
+              : []),
+            ...(process.env.VECTOR_CLOUD_AGENT_BRIDGE_URL && process.env.VECTOR_CLOUD_AGENT_BRIDGE_TOKEN
+              ? [tool.vectorcloud]
+              : []),
             ...(flags.experimentalLspTool ? [tool.lsp] : []),
             ...(flags.experimentalPlanMode && flags.client === "cli" ? [tool.plan] : []),
           ],

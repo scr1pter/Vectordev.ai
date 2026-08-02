@@ -257,6 +257,7 @@ export const dict = {
   "prompt.action.attachFile": "Joindre un fichier",
   "prompt.attachment.remove": "Supprimer la pièce jointe",
   "prompt.action.send": "Envoyer",
+  "prompt.action.queue": "Mettre en file",
   "prompt.action.stop": "Arrêter",
   "prompt.toast.pasteUnsupported.title": "Pièce jointe non prise en charge",
   "prompt.toast.pasteUnsupported.description":
@@ -488,6 +489,8 @@ export const dict = {
   "session.followupDock.summary.other": "{{count}} messages en file d'attente",
   "session.followupDock.sendNow": "Envoyer maintenant",
   "session.followupDock.edit": "Modifier",
+  "session.followupDock.copy": "Copier",
+  "session.followupDock.delete": "Supprimer",
   "session.followupDock.collapse": "Réduire les messages en file d'attente",
   "session.followupDock.expand": "Développer les messages en file d'attente",
   "session.revertDock.summary.one": "{{count}} message annulé",

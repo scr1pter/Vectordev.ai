@@ -1,0 +1,1922 @@
+import { execFile } from "node:child_process"
+import { createHash, randomUUID } from "node:crypto"
+import { createReadStream } from "node:fs"
+import { cp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises"
+import { dirname, join, relative } from "node:path"
+import { app } from "electron"
+
+import {
+  cancelBackgroundTask,
+  createBackgroundTask,
+  updateBackgroundTask,
+  type BackgroundTaskStatus,
+} from "./background-tasks"
+import {
+  classifyTaskDifficulty,
+  contextBudgetForDifficulty,
+  createContextBudgetPack,
+  formatContextBudgetForAgent,
+  type TaskDifficulty,
+} from "./context-budget"
+import { getStore } from "./store"
+import { createPullRequest } from "./github"
+import { runExternalCodingAgent, type CodingAgentRuntime } from "./external-agents"
+import {
+  formatValidationForRepair,
+  validateWorkspace,
+  type WorkspaceValidationReport,
+} from "./workspace-guardrails"
+import { parseUnifiedDiff, selectUnifiedDiff, type UnifiedDiffSelection } from "./unified-diff"
+import { scanChangedSecrets } from "./secret-scanner"
+
+// Keep persisted metadata and isolated checkout directories on distinct paths.
+// electron-store creates a file with STORE_NAME, so sharing that name with the
+// workspace directory makes either the store or the checkout root unreadable.
+const STORE_NAME = "parallel-workspaces-state"
+const STORE_KEY = "records"
+const WORKSPACE_DIRECTORY_NAME = "parallel-workspace-runs"
+
+const EXCLUDED_DIRS = new Set([
+  ".git",
+  ".hg",
+  ".svn",
+  "node_modules",
+  "dist",
+  "build",
+  ".next",
+  ".nuxt",
+  ".turbo",
+  ".cache",
+  "coverage",
+  ".vercel",
+])
+
+const TEXT_EXTENSIONS = new Set([
+  ".astro",
+  ".css",
+  ".csv",
+  ".env",
+  ".html",
+  ".js",
+  ".json",
+  ".jsx",
+  ".md",
+  ".mjs",
+  ".py",
+  ".sh",
+  ".sql",
+  ".ts",
+  ".tsx",
+  ".txt",
+  ".vue",
+  ".yaml",
+  ".yml",
+])
+
+export type ParallelWorkspaceStatus =
+  | "queued"
+  | "planning"
+  | "editing"
+  | "running commands"
+  | "testing"
+  | "complete"
+  | "failed"
+  | "needs review"
+  | "stopped"
+  | "merged"
+  | "discarded"
+
+export type ParallelWorkspaceRuntime = "vector" | CodingAgentRuntime
+
+export type ParallelWorkspaceRecord = {
+  id: string
+  name: string
+  taskPrompt: string
+  runtime: ParallelWorkspaceRuntime
+  provider: string
+  model: string
+  sourcePath: string
+  parentSessionId?: string
+  isolatedPath: string
+  isolation: "git-worktree" | "copy"
+  gitBranch?: string
+  baseCommit?: string
+  agentSessionId?: string
+  backgroundTaskId?: string
+  agent?: string
+  swarmRunId?: string
+  swarmTaskId?: string
+  swarmRole?: "coordinator" | "worker"
+  status: ParallelWorkspaceStatus
+  progress: number
+  lastAction: string
+  createdAt: string
+  lastActivityAt: string
+  changedFilesCount: number
+  riskLevel: "low" | "medium" | "high"
+  estimatedCost: string
+  actualCost?: string
+  finalSummary: string
+  mergeState: "none" | "merged" | "discarded"
+  logs: string[]
+  terminalOutput: string[]
+  browserResults: string[]
+  changedFiles: string[]
+  diff: string
+  checkpointPath?: string
+  pullRequestUrl?: string
+  baselineHashes?: Record<string, string>
+  contextFiles?: string[]
+  contextIndexedFiles?: number
+  contextTokenEstimate?: number
+  contextSummary?: string
+  taskDifficulty?: TaskDifficulty
+  retryLimit?: number
+  validationReport?: WorkspaceValidationReport
+  validationPassed?: boolean
+  repairAttempts?: number
+  error?: string
+}
+
+export type ParallelWorkspaceEngine = {
+  url: string
+  username: string | null
+  password: string | null
+}
+
+type ActiveParallelRun = {
+  controller: AbortController
+  engine: ParallelWorkspaceEngine
+  sessionId?: string
+}
+
+const activeRuns = new Map<string, ActiveParallelRun>()
+const queuedRuns = new Map<string, ActiveParallelRun>()
+let maxConcurrentRuns = 16
+
+function normalizeConcurrency(value?: number) {
+  if (!Number.isFinite(value)) return maxConcurrentRuns
+  return Math.max(1, Math.min(16, Math.floor(value!)))
+}
+
+function drainParallelRunQueue() {
+  while (activeRuns.size < maxConcurrentRuns && queuedRuns.size > 0) {
+    const next = queuedRuns.entries().next().value as [string, ActiveParallelRun] | undefined
+    if (!next) return
+    const [id, run] = next
+    queuedRuns.delete(id)
+    const record = readRecords().find((item) => item.id === id)
+    if (!record || record.mergeState !== "none") continue
+    activeRuns.set(id, run)
+    const started = updateRecord(id, (current) => ({
+      ...current,
+      status: "planning",
+      progress: 0,
+      lastAction: `Starting isolated ${runtimeLabel(current.runtime)} session`,
+      lastActivityAt: now(),
+      error: undefined,
+      logs: [`Agent slot opened at ${now()}.`, ...current.logs].slice(0, 120),
+    }))
+    syncBackgroundTask(started, `Parallel agent started with ${runtimeLabel(started.runtime)}.`)
+    void executeParallelWorkspace(id, run.engine, run.controller)
+  }
+}
+
+export type CreateParallelWorkspaceInput = {
+  sourcePath: string
+  parentSessionId?: string
+  name?: string
+  taskPrompt: string
+  runtime?: ParallelWorkspaceRuntime
+  provider?: string
+  model?: string
+  agent?: string
+  swarmRunId?: string
+  swarmTaskId?: string
+  swarmRole?: "coordinator" | "worker"
+}
+
+type CommandResult = {
+  stdout: string
+  stderr: string
+  failed: boolean
+}
+
+const now = () => new Date().toISOString()
+const workspaceRoot = () => join(app.getPath("userData"), WORKSPACE_DIRECTORY_NAME)
+const runtimeLabel = (runtime: ParallelWorkspaceRuntime) =>
+  runtime === "claude-code" ? "Claude Code" : runtime === "codex" ? "Codex" : runtime === "cursor" ? "Cursor Agent" : "Vector"
+
+function readRecords(): ParallelWorkspaceRecord[] {
+  const raw = getStore(STORE_NAME).get(STORE_KEY)
+  if (!Array.isArray(raw)) return []
+  return raw
+    .filter((item): item is ParallelWorkspaceRecord => typeof item?.id === "string")
+    .map((item) => ({
+      ...item,
+      runtime:
+        item.runtime === "claude-code" || item.runtime === "codex" || item.runtime === "cursor"
+          ? item.runtime
+          : "vector",
+    }))
+}
+
+function writeRecords(records: ParallelWorkspaceRecord[]) {
+  getStore(STORE_NAME).set(STORE_KEY, records)
+}
+
+function updateRecord(id: string, update: (record: ParallelWorkspaceRecord) => ParallelWorkspaceRecord) {
+  const records = readRecords()
+  const index = records.findIndex((record) => record.id === id)
+  if (index === -1) throw new Error("Parallel workspace was not found.")
+  records[index] = update(records[index]!)
+  writeRecords(records)
+  return records[index]!
+}
+
+function backgroundStatus(status: ParallelWorkspaceStatus): BackgroundTaskStatus {
+  if (status === "queued") return "queued"
+  if (status === "planning" || status === "editing" || status === "running commands" || status === "testing") {
+    return "running"
+  }
+  if (status === "needs review") return "needs_review"
+  if (status === "complete") return "complete"
+  if (status === "failed") return "failed"
+  if (status === "stopped") return "canceled"
+  if (status === "merged") return "merged"
+  if (status === "discarded") return "discarded"
+  return "waiting"
+}
+
+function syncBackgroundTask(record: ParallelWorkspaceRecord, log?: string) {
+  if (!record.backgroundTaskId) return
+  try {
+    updateBackgroundTask(record.backgroundTaskId, {
+      workspaceName: record.name,
+      prompt: record.taskPrompt,
+      provider: record.provider,
+      model: record.model,
+      projectPath: record.sourcePath,
+      taskId: record.parentSessionId,
+      workspaceId: record.id,
+      status: backgroundStatus(record.status),
+      progress: record.progress,
+      currentStep: record.lastAction,
+      changedFilesCount: record.changedFilesCount,
+      terminalActive: record.status === "running commands",
+      browserActive: record.status === "testing",
+      costEstimate: record.estimatedCost,
+      actualUsage: record.actualCost,
+      errorSummary: record.error,
+      mergeState: record.mergeState,
+      log,
+      action: {
+        label: record.lastAction,
+        status:
+          record.status === "failed"
+            ? "failed"
+            : record.status === "needs review"
+              ? "warning"
+              : record.status === "merged" || record.status === "complete"
+                ? "success"
+                : backgroundStatus(record.status) === "running"
+                  ? "running"
+                  : "pending",
+        detail: record.error || record.finalSummary,
+      },
+    })
+  } catch {
+    // Background tasks are an observability layer; workspace operations must not fail because
+    // task metadata was cleared or migrated.
+  }
+}
+
+function safeName(value: string) {
+  const normalized = value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+  return normalized.slice(0, 42) || "workspace"
+}
+
+function withTimeout<T>(promise: Promise<T>, message: string, milliseconds = 25_000) {
+  let timeout: NodeJS.Timeout | undefined
+  const timer = new Promise<T>((_, reject) => {
+    timeout = setTimeout(() => reject(new Error(message)), milliseconds)
+  })
+  return Promise.race([promise, timer]).finally(() => {
+    if (timeout) clearTimeout(timeout)
+  })
+}
+
+function engineHeaders(engine: ParallelWorkspaceEngine) {
+  const headers: Record<string, string> = {
+    accept: "application/json",
+    "content-type": "application/json",
+  }
+  if (engine.username && engine.password) {
+    headers.authorization = `Basic ${Buffer.from(`${engine.username}:${engine.password}`).toString("base64")}`
+  }
+  return headers
+}
+
+async function engineRequest<T>(
+  engine: ParallelWorkspaceEngine,
+  path: string,
+  init: { method?: string; body?: unknown; signal?: AbortSignal } = {},
+) {
+  const base = engine.url.endsWith("/") ? engine.url : `${engine.url}/`
+  const response = await fetch(new URL(path.replace(/^\//, ""), base), {
+    method: init.method ?? "GET",
+    headers: engineHeaders(engine),
+    body: init.body === undefined ? undefined : JSON.stringify(init.body),
+    signal: init.signal,
+  })
+  if (!response.ok) {
+    const body = await response.text().catch(() => "")
+    throw new Error(`Vector engine request failed (${response.status})${body ? `: ${body.slice(0, 500)}` : ""}`)
+  }
+  if (response.status === 204) return undefined as T
+  const text = await response.text()
+  return (text ? JSON.parse(text) : undefined) as T
+}
+
+function collectText(value: unknown, output: string[] = []) {
+  if (!value) return output
+  if (typeof value === "string") return output
+  if (Array.isArray(value)) {
+    for (const item of value) collectText(item, output)
+    return output
+  }
+  if (typeof value !== "object") return output
+  const record = value as Record<string, unknown>
+  if (record.type === "text" && typeof record.text === "string" && record.text.trim()) output.push(record.text.trim())
+  for (const item of Object.values(record)) collectText(item, output)
+  return output
+}
+
+type EngineActiveSession = Record<string, unknown>
+
+function sleep(milliseconds: number, signal: AbortSignal) {
+  if (signal.aborted) return Promise.reject(new DOMException("Parallel workspace run was canceled.", "AbortError"))
+  return new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", abort)
+      resolve()
+    }, milliseconds)
+    const abort = () => {
+      clearTimeout(timer)
+      signal.removeEventListener("abort", abort)
+      reject(new DOMException("Parallel workspace run was canceled.", "AbortError"))
+    }
+    signal.addEventListener("abort", abort, { once: true })
+  })
+}
+
+function activeSessionMap(value: unknown): Record<string, EngineActiveSession> {
+  if (!value || typeof value !== "object") return {}
+  const record = value as Record<string, unknown>
+  const candidate = record.data && typeof record.data === "object" ? record.data : record
+  return candidate as Record<string, EngineActiveSession>
+}
+
+async function refreshRunningWorkspace(id: string) {
+  const record = readRecords().find((item) => item.id === id)
+  if (!record) throw new Error("Parallel workspace was not found.")
+  const { changedFiles, diff } =
+    record.isolation === "git-worktree" ? await gitDiff(record) : await fallbackDiff(record)
+  return updateRecord(id, (current) => ({
+    ...current,
+    changedFiles,
+    diff,
+    changedFilesCount: changedFiles.length,
+    riskLevel: riskFromDiff(diff, changedFiles),
+    lastActivityAt: now(),
+  }))
+}
+
+async function waitForEngineSessionIdle(
+  id: string,
+  sessionId: string,
+  engine: ParallelWorkspaceEngine,
+  signal: AbortSignal,
+) {
+  const startedAt = Date.now()
+  const timeoutAt = startedAt + 30 * 60_000
+  let observedBusy = false
+  let idleSamples = 0
+  let lastState = "starting"
+  let lastDiffRefresh = 0
+
+  while (Date.now() < timeoutAt) {
+    if (signal.aborted) throw new DOMException("Parallel workspace run was canceled.", "AbortError")
+    // Parallel Workspaces use the v2 session engine. The legacy
+    // /session/status route only tracks v1 sessions and can report idle while
+    // the v2 agent is still editing. /api/session/active is the authoritative
+    // registry for the engine loop admitted by /api/session/:id/prompt.
+    const raw = await engineRequest<unknown>(engine, "/api/session/active", { signal })
+    const state = activeSessionMap(raw)[sessionId] ? "busy" : "idle"
+
+    if (state !== "idle") {
+      observedBusy = true
+      idleSamples = 0
+    } else {
+      idleSamples += 1
+      // Busy sessions disappear from /api/session/active when they become
+      // idle. If the session was never observed busy, give the engine a real
+      // grace window: under heavy concurrency the prompt can be durably
+      // admitted seconds before the agent loop starts, and declaring "idle"
+      // too early marks an untouched workspace complete while the agent later
+      // edits it with nobody watching.
+      if ((observedBusy && idleSamples >= 1) || (Date.now() - startedAt >= 20_000 && idleSamples >= 6)) return
+    }
+
+    if (state !== lastState) {
+      lastState = state
+      const label =
+        state === "busy"
+          ? "Agent is editing and running tools"
+          : "Waiting for the isolated agent to start"
+      const updated = updateRecord(id, (current) => ({
+        ...current,
+        status: "running commands",
+        lastAction: label,
+        lastActivityAt: now(),
+        logs: [`Engine status changed to ${state}.`, ...current.logs].slice(0, 120),
+      }))
+      syncBackgroundTask(updated, label)
+    }
+
+    if (Date.now() - lastDiffRefresh >= 2_000) {
+      lastDiffRefresh = Date.now()
+      const updated = await refreshRunningWorkspace(id)
+      syncBackgroundTask(updated)
+    }
+    await sleep(650, signal)
+  }
+
+  throw new Error("The isolated agent did not become idle within 30 minutes. Its files are preserved for review.")
+}
+
+function parallelAgentPrompt(record: ParallelWorkspaceRecord) {
+  const contextPack = record.contextFiles?.length
+    ? [
+        record.contextSummary || `Vector indexed ${record.contextIndexedFiles ?? 0} source files locally.`,
+        `Inspect these task-relevant files first (about ${(record.contextTokenEstimate ?? 0).toLocaleString()} tokens if all are read):`,
+        ...record.contextFiles.map((file) => `- ${file}`),
+        "Expand beyond this context pack only when imports, references, or validation failures prove another file is relevant.",
+      ].join("\n")
+    : "Use repository search to identify the smallest relevant context before reading large files."
+  return [
+    record.swarmRunId
+      ? `You are Vector's ${record.agent || "general"} worker inside an automatically orchestrated engineering swarm.`
+      : "You are Vector's Parallel Workspace engineering agent.",
+    `You are operating only inside this isolated workspace: ${record.isolatedPath}`,
+    `The main project at ${record.sourcePath} must remain untouched.`,
+    record.swarmTaskId ? `Swarm task ID: ${record.swarmTaskId}` : "",
+    "Inspect the repository before editing. Make the smallest complete implementation that satisfies the task.",
+    record.taskDifficulty === "complex"
+      ? "Create a visible plan, parallelize independent exploration when useful, and validate each major phase before continuing."
+      : "Keep a concise plan for the work and update it when evidence changes the approach.",
+    "Use terminal tools when useful, run the most relevant available checks, and repair failures you introduce.",
+    "Do not expose credentials or copy secrets into source files.",
+    "Finish with a concise summary of changed files, validation performed, and any remaining risk.",
+    "Read .vector/BRAIN.md when present and update it only with durable decisions or recurring failure lessons; never store secrets or routine narration.",
+    "",
+    contextPack,
+    "",
+    `Mission: ${record.name}`,
+    `Task: ${record.taskPrompt}`,
+  ].join("\n")
+}
+
+function validationLogLines(report: WorkspaceValidationReport) {
+  if (!report.checks.length) return ["No deterministic project checks were detected for this workspace."]
+  return report.checks.flatMap((check) => {
+    const command = [check.command, ...check.args].join(" ")
+    const status = check.status === "passed" ? "PASS" : check.status === "failed" ? "FAIL" : "SKIP"
+    return [`[${status}] $ ${command} (${check.durationMs}ms)`, check.output]
+  })
+}
+
+function validationSummary(report: WorkspaceValidationReport) {
+  if (!report.checks.length || !report.hadChecks) return "No runnable deterministic checks were available."
+  const passed = report.checks.filter((check) => check.status === "passed").length
+  const skipped = report.checks.filter((check) => check.status === "skipped").length
+  if (report.passed) return `${passed} deterministic check${passed === 1 ? "" : "s"} passed${skipped ? `; ${skipped} skipped` : ""}.`
+  const failed = report.checks.find((check) => check.status === "failed")
+  return `${failed?.label || "A deterministic check"} failed after the isolated edit.`
+}
+
+function runGit(args: string[], cwd: string, options: { allowFailure?: boolean; input?: string } = {}) {
+  const allowFailure = options.allowFailure ?? false
+  return withTimeout(
+    new Promise<CommandResult>((resolve, reject) => {
+      const child = execFile("git", args, { cwd, maxBuffer: 96 * 1024 * 1024 }, (error, stdout, stderr) => {
+        const result = { stdout: String(stdout), stderr: String(stderr), failed: Boolean(error) }
+        if (error && !allowFailure) return reject(error)
+        resolve(result)
+      })
+      if (options.input !== undefined) {
+        child.stdin?.write(options.input)
+        child.stdin?.end()
+      }
+    }),
+    `Git command timed out: git ${args.join(" ")}`,
+  )
+}
+
+async function gitRoot(sourcePath: string) {
+  const result = await runGit(["rev-parse", "--show-toplevel"], sourcePath, { allowFailure: true })
+  const root = result.stdout.trim()
+  return root || undefined
+}
+
+async function gitIsClean(sourcePath: string) {
+  const result = await runGit(["status", "--porcelain"], sourcePath, { allowFailure: true })
+  return !result.failed && result.stdout.trim().length === 0
+}
+
+// Only inject a throwaway identity when the repo has none, so a commit never
+// overrides the user's own git config. Mirrors github.ts buildCommitArgs; kept
+// local so parallel merges do not depend on the GitHub module's internals.
+async function buildCommitArgs(projectPath: string, message: string): Promise<string[]> {
+  const email = await runGit(["config", "user.email"], projectPath, { allowFailure: true })
+  const hasEmail = !email.failed && email.stdout.trim().length > 0
+  const identity = hasEmail ? [] : ["-c", "user.name=Vector", "-c", "user.email=noreply@vectordev.ai"]
+  return [...identity, "commit", "-m", message]
+}
+
+function extension(file: string) {
+  const dot = file.lastIndexOf(".")
+  return dot === -1 ? "" : file.slice(dot).toLowerCase()
+}
+
+function shouldSkip(name: string) {
+  return EXCLUDED_DIRS.has(name)
+}
+
+async function listProjectFiles(root: string, current = root, output: string[] = []) {
+  const entries = await readdir(current, { withFileTypes: true }).catch(() => [])
+  for (const entry of entries) {
+    if (entry.name === ".DS_Store") continue
+    if (entry.isDirectory()) {
+      if (shouldSkip(entry.name)) continue
+      await listProjectFiles(root, join(current, entry.name), output)
+      continue
+    }
+    if (!entry.isFile()) continue
+    const fullPath = join(current, entry.name)
+    const info = await stat(fullPath).catch(() => undefined)
+    if (!info || info.size > 5 * 1024 * 1024) continue
+    output.push(relative(root, fullPath))
+  }
+  return output.sort()
+}
+
+async function hashFile(path: string) {
+  const info = await stat(path)
+  if (!info.isFile()) throw new Error(`Cannot hash a non-file path: ${path}`)
+  const hash = createHash("sha256")
+  await new Promise<void>((resolve, reject) => {
+    const stream = createReadStream(path)
+    stream.on("data", (chunk) => hash.update(chunk))
+    stream.on("error", reject)
+    stream.on("end", resolve)
+  })
+  return hash.digest("hex")
+}
+
+async function hashProject(root: string) {
+  const files = await listProjectFiles(root)
+  const hashes: Record<string, string> = {}
+  for (const file of files) {
+    hashes[file] = await hashFile(join(root, file)).catch(() => "missing")
+  }
+  return hashes
+}
+
+async function copyProject(sourcePath: string, targetPath: string) {
+  await mkdir(dirname(targetPath), { recursive: true })
+  await cp(sourcePath, targetPath, {
+    recursive: true,
+    dereference: false,
+    filter: (source) => !source.split(/[\\/]/).some((part) => shouldSkip(part)),
+  })
+}
+
+function estimateCost(taskPrompt: string, hashes: Record<string, string>, contextTokens?: number) {
+  const fileCount = Object.keys(hashes).length
+  const roughTokens = Math.ceil(taskPrompt.length / 4 + (contextTokens ?? Math.min(fileCount * 120, 120_000)))
+  if (roughTokens < 6_000) return "< $0.01"
+  if (roughTokens < 30_000) return "$0.01-$0.05"
+  if (roughTokens < 120_000) return "$0.05-$0.20"
+  return "$0.20+"
+}
+
+function riskFromDiff(diff: string, changedFiles: string[]) {
+  const additions = (diff.match(/^\+/gm) ?? []).length
+  const deletions = (diff.match(/^-/gm) ?? []).length
+  if (changedFiles.length >= 12 || deletions > 400 || additions > 800) return "high"
+  if (changedFiles.length >= 4 || deletions > 80 || additions > 180) return "medium"
+  return "low"
+}
+
+async function textPreview(path: string) {
+  const text = await readFile(path, "utf8").catch(() => "")
+  return text.slice(0, 40_000)
+}
+
+function normalizeStatusLine(line: string) {
+  const file = line.slice(3).trim()
+  if (file.includes(" -> ")) return file.split(" -> ").pop()?.trim() ?? file
+  return file
+}
+
+async function fallbackDiff(record: ParallelWorkspaceRecord) {
+  const sourceFiles = await listProjectFiles(record.sourcePath)
+  const isolatedFiles = await listProjectFiles(record.isolatedPath)
+  const allFiles = Array.from(new Set([...sourceFiles, ...isolatedFiles])).sort()
+  const changedFiles: string[] = []
+  const blocks: string[] = []
+
+  for (const file of allFiles) {
+    const before = record.baselineHashes?.[file] ?? "missing"
+    const isolatedPath = join(record.isolatedPath, file)
+    const isolatedHash = await hashFile(isolatedPath).catch(() => "missing")
+    if (before === isolatedHash) continue
+    changedFiles.push(file)
+    const ext = extension(file)
+    blocks.push(`diff --vector a/${file} b/${file}`)
+    if (!TEXT_EXTENSIONS.has(ext)) {
+      blocks.push("Binary or large file changed.")
+      continue
+    }
+    const sourceText = await textPreview(join(record.sourcePath, file))
+    const isolatedText = await textPreview(isolatedPath)
+    blocks.push(`--- a/${file}`)
+    blocks.push(`+++ b/${file}`)
+    blocks.push("@@")
+    blocks.push(sourceText ? sourceText.split("\n").slice(0, 80).map((line) => `- ${line}`).join("\n") : "- <missing>")
+    blocks.push(isolatedText ? isolatedText.split("\n").slice(0, 120).map((line) => `+ ${line}`).join("\n") : "+ <deleted>")
+  }
+
+  return { changedFiles, diff: blocks.join("\n") }
+}
+
+async function gitDiff(record: ParallelWorkspaceRecord) {
+  const status = await runGit(["status", "--porcelain"], record.isolatedPath, { allowFailure: true })
+  const untrackedFiles = status.stdout
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("??"))
+    .map(normalizeStatusLine)
+    .filter(Boolean)
+  const baseCommit = record.baseCommit ?? "HEAD"
+  const trackedFiles = await runGit(["diff", "--name-only", baseCommit, "--"], record.isolatedPath, {
+    allowFailure: true,
+  })
+  const changedFiles = [
+    ...new Set([
+      ...trackedFiles.stdout.split("\n").map((line) => line.trim()).filter(Boolean),
+      ...untrackedFiles,
+    ]),
+  ]
+  const diff = await runGit(["diff", "--no-ext-diff", "--binary", baseCommit, "--"], record.isolatedPath, {
+    allowFailure: true,
+  })
+  const blocks = [diff.stdout.trim()]
+  for (const file of untrackedFiles) {
+    const fullPath = join(record.isolatedPath, file)
+    if (!TEXT_EXTENSIONS.has(extension(file))) continue
+    const text = await textPreview(fullPath)
+    if (!text) continue
+    blocks.push(`diff --git a/${file} b/${file}`)
+    blocks.push("new file mode 100644")
+    blocks.push("--- /dev/null")
+    blocks.push(`+++ b/${file}`)
+    blocks.push("@@")
+    blocks.push(text.split("\n").slice(0, 300).map((line) => `+${line}`).join("\n"))
+  }
+  return { changedFiles, diff: blocks.filter(Boolean).join("\n") }
+}
+
+// Build a unified diff of the MAIN project's working tree against HEAD, in the
+// same header format ParallelDiffReview/parseUnifiedDiff already parse. Mirrors
+// gitDiff() but runs against sourcePath with base HEAD so the review UI can show
+// "Main" and "Side-by-side" columns. Returns "" when sourcePath is not a git
+// repository (read-only; never mutates the tree).
+export async function mainWorkingTreeDiff(sourcePath: string): Promise<string> {
+  if (!(await gitRoot(sourcePath))) return ""
+  const status = await runGit(["status", "--porcelain"], sourcePath, { allowFailure: true })
+  const untrackedFiles = status.stdout
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("??"))
+    .map(normalizeStatusLine)
+    .filter(Boolean)
+  const diff = await runGit(["diff", "--no-ext-diff", "--binary", "HEAD", "--"], sourcePath, {
+    allowFailure: true,
+  })
+  const blocks = [diff.stdout.trim()]
+  for (const file of untrackedFiles) {
+    const fullPath = join(sourcePath, file)
+    if (!TEXT_EXTENSIONS.has(extension(file))) continue
+    const text = await textPreview(fullPath)
+    if (!text) continue
+    blocks.push(`diff --git a/${file} b/${file}`)
+    blocks.push("new file mode 100644")
+    blocks.push("--- /dev/null")
+    blocks.push(`+++ b/${file}`)
+    blocks.push("@@")
+    blocks.push(text.split("\n").slice(0, 300).map((line) => `+${line}`).join("\n"))
+  }
+  return blocks.filter(Boolean).join("\n")
+}
+
+export async function refreshParallelWorkspace(id: string) {
+  const record = readRecords().find((item) => item.id === id)
+  if (!record) throw new Error("Parallel workspace was not found.")
+  // Merged/discarded workspaces had their isolated checkout cleaned up; a
+  // refresh would re-diff a missing directory and wipe the recorded history.
+  if (record.mergeState !== "none") return record
+  if (!(await stat(record.isolatedPath).catch(() => undefined))) return record
+  const { changedFiles, diff } =
+    record.isolation === "git-worktree" ? await gitDiff(record) : await fallbackDiff(record)
+  const updated = updateRecord(id, (current) => ({
+    ...current,
+    changedFiles,
+    diff,
+    changedFilesCount: changedFiles.length,
+    riskLevel: riskFromDiff(diff, changedFiles),
+    lastActivityAt: now(),
+    lastAction: changedFiles.length
+      ? `${changedFiles.length} changed file${changedFiles.length === 1 ? "" : "s"} detected`
+      : "No isolated changes yet",
+    status: current.mergeState !== "none" ? current.status : changedFiles.length ? "needs review" : current.status,
+  }))
+  syncBackgroundTask(updated)
+  return updated
+}
+
+export function listParallelWorkspaces(scope?: { sourcePath?: string; parentSessionId?: string }) {
+  const records = readRecords()
+  let changed = false
+  const next = records.map((record) => {
+    const wasRunning = ["planning", "editing", "running commands", "testing"].includes(record.status)
+    if (!wasRunning || activeRuns.has(record.id) || queuedRuns.has(record.id)) return record
+    changed = true
+    const interrupted: ParallelWorkspaceRecord = {
+      ...record,
+      status: "failed",
+      progress: 0,
+      lastAction: "Interrupted by app restart",
+      lastActivityAt: now(),
+      error: "This agent stopped when Vector closed. Review the isolated files, then run the workspace again if needed.",
+      finalSummary: "The previous run was interrupted before Vector received a completion signal.",
+      logs: ["Vector detected an interrupted agent run after restart.", ...record.logs].slice(0, 120),
+    }
+    syncBackgroundTask(interrupted, "Interrupted run detected after Vector restarted.")
+    return interrupted
+  })
+  if (changed) writeRecords(next)
+  if (!scope) return next
+  return next.filter((record) => {
+    if (scope.sourcePath && record.sourcePath !== scope.sourcePath) return false
+    if ("parentSessionId" in scope && record.parentSessionId !== scope.parentSessionId) return false
+    return true
+  })
+}
+
+export function getParallelWorkspace(id: string) {
+  return readRecords().find((record) => record.id === id)
+}
+
+export async function createParallelWorkspace(input: CreateParallelWorkspaceInput) {
+  const sourceStat = await stat(input.sourcePath).catch(() => undefined)
+  if (!sourceStat?.isDirectory()) throw new Error("Choose a valid project folder before creating a parallel workspace.")
+
+  const createdAt = now()
+  const id = randomUUID()
+  const sourceRoot = (await gitRoot(input.sourcePath)) ?? input.sourcePath
+  const activeInScope = readRecords().filter(
+    (record) =>
+      record.sourcePath === sourceRoot &&
+      record.parentSessionId === input.parentSessionId &&
+      record.swarmRole !== "coordinator" &&
+      record.mergeState === "none" &&
+      !["failed", "stopped", "complete"].includes(record.status),
+  )
+  if (activeInScope.length >= 16) {
+    throw new Error("This task already has 16 active parallel agents. Merge, discard, or remove one before creating another.")
+  }
+  const root = workspaceRoot()
+  const workspaceDir = join(root, id)
+  const isolatedPath = join(workspaceDir, "workspace")
+  const baselineHashes = await hashProject(sourceRoot)
+  const taskDifficulty = classifyTaskDifficulty(input.taskPrompt)
+  const contextPack =
+    taskDifficulty === "trivial"
+      ? undefined
+      : await createContextBudgetPack(
+          sourceRoot,
+          input.taskPrompt,
+          contextBudgetForDifficulty(taskDifficulty),
+        ).catch(() => undefined)
+  const runtime = input.runtime ?? "vector"
+  const estimatedCost =
+    runtime === "vector"
+      ? estimateCost(input.taskPrompt, baselineHashes, contextPack?.estimatedTokens)
+      : "Reported by runtime when available"
+  const name = input.name?.trim() || `Agent ${activeInScope.length + 1}`
+  const runtimeName = runtimeLabel(runtime)
+  const provider = runtime === "vector" ? input.provider?.trim() || "Current Vector provider" : runtimeName
+  const model = runtime === "vector" ? input.model?.trim() || "Current selected model" : "Runtime default"
+
+  let isolation: ParallelWorkspaceRecord["isolation"] = "copy"
+  let gitBranch: string | undefined
+  let baseCommit: string | undefined
+  const logs: string[] = []
+  if (contextPack) {
+    logs.push(
+      `Context budget selected ${contextPack.selectedFileCount} of ${contextPack.indexedFileCount} indexed files (~${contextPack.estimatedTokens.toLocaleString()} tokens).`,
+    )
+  }
+
+  await mkdir(workspaceDir, { recursive: true })
+  const rootGit = await gitRoot(sourceRoot)
+  if (rootGit && (await gitIsClean(sourceRoot))) {
+    baseCommit = (await runGit(["rev-parse", "HEAD"], sourceRoot, { allowFailure: true })).stdout.trim() || undefined
+    gitBranch = `vector-parallel/${safeName(name)}-${id.slice(0, 8)}`
+    try {
+      await runGit(["worktree", "add", "-b", gitBranch, isolatedPath, "HEAD"], sourceRoot)
+      isolation = "git-worktree"
+      logs.push(`Created git worktree on ${gitBranch}.`)
+    } catch (error) {
+      logs.push(`Git worktree failed, using isolated copy: ${error instanceof Error ? error.message : String(error)}`)
+      await copyProject(sourceRoot, isolatedPath)
+    }
+  } else {
+    logs.push(
+      rootGit
+        ? "Main project has uncommitted changes, using isolated copy to preserve current state."
+        : "No git repository found, using isolated copy.",
+    )
+    await copyProject(sourceRoot, isolatedPath)
+  }
+
+  await mkdir(join(workspaceDir, "metadata"), { recursive: true })
+  await writeFile(
+    join(workspaceDir, "metadata", "task.md"),
+    [
+      `# ${name}`,
+      "",
+      `Created: ${createdAt}`,
+      `Runtime: ${runtimeName}`,
+      `Provider: ${provider}`,
+      `Model: ${model}`,
+      "",
+      "## Task",
+      input.taskPrompt.trim() || "No task prompt provided.",
+      "",
+      "This workspace is isolated. Open it in Vector to run the agent. Merge when the result is ready.",
+      "",
+    ].join("\n"),
+    "utf8",
+  )
+
+  const backgroundTask = input.swarmRole === "coordinator"
+    ? undefined
+    : createBackgroundTask({
+        kind: "parallel-workspace",
+        projectPath: sourceRoot,
+        taskId: input.parentSessionId,
+        workspaceId: id,
+        workspaceName: name,
+        name,
+        prompt: input.taskPrompt.trim(),
+        provider,
+        model,
+        status: "queued",
+        progress: 0,
+        currentStep: "Isolated workspace created",
+        changedFilesCount: 0,
+        terminalActive: false,
+        browserActive: false,
+        costEstimate: estimatedCost,
+        mergeState: "none",
+        logs: [`Created isolated workspace at ${isolatedPath}.`, ...logs],
+      })
+
+  const record: ParallelWorkspaceRecord = {
+    id,
+    name,
+    taskPrompt: input.taskPrompt.trim(),
+    runtime,
+    provider,
+    model,
+    sourcePath: sourceRoot,
+    parentSessionId: input.parentSessionId,
+    isolatedPath,
+    isolation,
+    gitBranch,
+    baseCommit,
+    backgroundTaskId: backgroundTask?.id,
+    agent: input.agent,
+    swarmRunId: input.swarmRunId,
+    swarmTaskId: input.swarmTaskId,
+    swarmRole: input.swarmRole,
+    status: "queued",
+    progress: 0,
+    lastAction: "Isolated workspace created",
+    createdAt,
+    lastActivityAt: createdAt,
+    changedFilesCount: 0,
+    riskLevel: "low",
+    estimatedCost,
+    finalSummary: "Workspace is ready. Open it to run an isolated agent session, then review the diff before merging.",
+    mergeState: "none",
+    logs,
+    terminalOutput: [],
+    browserResults: [],
+    changedFiles: [],
+    diff: "",
+    baselineHashes,
+    contextFiles: contextPack?.files.map((file) => file.path),
+    contextIndexedFiles: contextPack?.indexedFileCount,
+    contextTokenEstimate: contextPack?.estimatedTokens,
+    contextSummary: contextPack ? formatContextBudgetForAgent(contextPack).split("\n")[0] : undefined,
+    taskDifficulty,
+    retryLimit: taskDifficulty === "complex" ? 2 : taskDifficulty === "trivial" ? 0 : 1,
+    repairAttempts: 0,
+  }
+  writeRecords([record, ...readRecords()])
+  return refreshParallelWorkspace(id)
+}
+
+async function ensureParallelWorkspaceIsolation(record: ParallelWorkspaceRecord) {
+  const isolated = await stat(record.isolatedPath).catch(() => undefined)
+  if (isolated?.isDirectory()) return record
+  const source = await stat(record.sourcePath).catch(() => undefined)
+  if (!source?.isDirectory()) {
+    throw new Error("The main project folder no longer exists. Open the project again before rerunning this workspace.")
+  }
+
+  await rm(dirname(record.isolatedPath), { recursive: true, force: true }).catch(() => undefined)
+  await copyProject(record.sourcePath, record.isolatedPath)
+  const baselineHashes = await hashProject(record.sourcePath)
+  const restored = updateRecord(record.id, (current) => ({
+    ...current,
+    isolation: "copy",
+    gitBranch: undefined,
+    baseCommit: undefined,
+    baselineHashes,
+    changedFiles: [],
+    changedFilesCount: 0,
+    diff: "",
+    progress: 0,
+    error: undefined,
+    lastAction: "Rebuilt interrupted isolated workspace",
+    lastActivityAt: now(),
+    logs: [
+      "The isolated checkout was missing, so Vector rebuilt it from the current main project before starting the agent.",
+      ...current.logs,
+    ].slice(0, 120),
+  }))
+  syncBackgroundTask(restored, "Rebuilt the missing isolated workspace from the current main project.")
+  return restored
+}
+
+async function runExternalWorkspacePass(
+  id: string,
+  record: ParallelWorkspaceRecord,
+  prompt: string,
+  controller: AbortController,
+) {
+  const pendingLogs: string[] = []
+  const pendingOutput: string[] = []
+  let lastPersistedAt = 0
+  const flush = () => {
+    if (!pendingLogs.length && !pendingOutput.length) return
+    const logs = pendingLogs.splice(0)
+    const output = pendingOutput.splice(0)
+    lastPersistedAt = Date.now()
+    const updated = updateRecord(id, (current) => ({
+      ...current,
+      status: "running commands",
+      progress: 0,
+      lastAction: logs.at(-1) ?? current.lastAction,
+      lastActivityAt: now(),
+      logs: [...logs.reverse(), ...current.logs].slice(0, 120),
+      terminalOutput: [...output.reverse(), ...current.terminalOutput].slice(0, 240),
+    }))
+    syncBackgroundTask(updated, updated.lastAction)
+  }
+
+  const result = await runExternalCodingAgent({
+    runtime: record.runtime as CodingAgentRuntime,
+    cwd: record.isolatedPath,
+    prompt,
+    signal: controller.signal,
+    onEvent: (event) => {
+      if (event.stream === "activity") pendingLogs.push(event.text)
+      if (event.stream !== "activity") pendingOutput.push(event.text)
+      if (Date.now() - lastPersistedAt >= 400) flush()
+    },
+  }).finally(flush)
+  if (result.exitCode !== 0) {
+    throw new Error(
+      `${runtimeLabel(record.runtime)} exited with code ${result.exitCode}.\n${result.output.slice(-12).join("\n")}`.trim(),
+    )
+  }
+  return result
+}
+
+async function executeExternalParallelWorkspace(
+  id: string,
+  initial: ParallelWorkspaceRecord,
+  controller: AbortController,
+) {
+  let record = updateRecord(id, (current) => ({
+    ...current,
+    agentSessionId: undefined,
+    status: "editing",
+    progress: 0,
+    lastAction: `${runtimeLabel(current.runtime)} is inspecting the isolated project`,
+    lastActivityAt: now(),
+    error: undefined,
+    logs: [
+      `${runtimeLabel(current.runtime)} started in ${current.isolatedPath}.`,
+      ...current.logs,
+    ].slice(0, 120),
+  }))
+  syncBackgroundTask(record, `${runtimeLabel(record.runtime)} started in the isolated workspace.`)
+
+  const costs: number[] = []
+  const firstRun = await runExternalWorkspacePass(id, record, parallelAgentPrompt(record), controller)
+  if (firstRun.actualCost) costs.push(Number(firstRun.actualCost.replace("$", "")))
+
+  record = updateRecord(id, (current) => ({
+    ...current,
+    status: "testing",
+    progress: 0,
+    lastAction: "Running deterministic project checks",
+    lastActivityAt: now(),
+  }))
+  syncBackgroundTask(record, `${runtimeLabel(record.runtime)} completed. Running deterministic checks.`)
+
+  let refreshed = await refreshParallelWorkspace(id)
+  let validation = await validateWorkspace(refreshed.isolatedPath, refreshed.changedFiles)
+  record = updateRecord(id, (current) => ({
+    ...current,
+    validationReport: validation,
+    validationPassed: validation.passed,
+    terminalOutput: [...validationLogLines(validation), ...current.terminalOutput].slice(0, 240),
+    lastAction: validation.passed ? "Deterministic checks passed" : "Deterministic checks found a failure",
+    lastActivityAt: now(),
+    logs: [`Guardrails: ${validationSummary(validation)}`, ...current.logs].slice(0, 120),
+  }))
+  syncBackgroundTask(record, validationSummary(validation))
+
+  const retryLimit = record.retryLimit ?? (record.taskDifficulty === "complex" ? 2 : 1)
+  for (let attempt = 1; !validation.passed && attempt <= retryLimit && !controller.signal.aborted; attempt += 1) {
+    record = updateRecord(id, (current) => ({
+      ...current,
+      status: "editing",
+      riskLevel: "high",
+      repairAttempts: attempt,
+      lastAction: `${runtimeLabel(current.runtime)} is repairing a failed check (${attempt}/${retryLimit})`,
+      lastActivityAt: now(),
+      logs: [
+        `Vector returned the exact failing check to ${runtimeLabel(current.runtime)} for repair pass ${attempt} of ${retryLimit}.`,
+        ...current.logs,
+      ].slice(0, 120),
+    }))
+    syncBackgroundTask(record, record.lastAction)
+    const repair = await runExternalWorkspacePass(
+      id,
+      record,
+      [
+        parallelAgentPrompt(record),
+        formatValidationForRepair(validation),
+        `This is repair pass ${attempt} of ${retryLimit}. Diagnose the exact output, make only evidence-backed changes, and rerun the relevant check before finishing.`,
+      ].join("\n\n"),
+      controller,
+    )
+    if (repair.actualCost) costs.push(Number(repair.actualCost.replace("$", "")))
+    refreshed = await refreshParallelWorkspace(id)
+    validation = await validateWorkspace(refreshed.isolatedPath, refreshed.changedFiles)
+    record = updateRecord(id, (current) => ({
+      ...current,
+      status: "testing",
+      validationReport: validation,
+      validationPassed: validation.passed,
+      terminalOutput: [
+        `--- Guardrail repair verification ${attempt}/${retryLimit} ---`,
+        ...validationLogLines(validation),
+        ...current.terminalOutput,
+      ].slice(0, 280),
+      lastAction: validation.passed
+        ? `Repair ${attempt} verified by deterministic checks`
+        : `Repair ${attempt} did not pass validation`,
+      lastActivityAt: now(),
+      logs: [`Repair verification ${attempt}/${retryLimit}: ${validationSummary(validation)}`, ...current.logs].slice(0, 120),
+    }))
+    syncBackgroundTask(record, record.lastAction)
+  }
+
+  refreshed = await refreshParallelWorkspace(id)
+  const totalCost = costs.filter(Number.isFinite).reduce((sum, value) => sum + value, 0)
+  const finalSummary = `${firstRun.summary}\n\nGuardrails: ${validationSummary(validation)}`
+  const completed = updateRecord(id, (current) => ({
+    ...current,
+    status: current.changedFilesCount ? "needs review" : "complete",
+    progress: 100,
+    actualCost: totalCost > 0 ? `$${totalCost.toFixed(4)}` : current.actualCost,
+    riskLevel: validation.passed ? current.riskLevel : "high",
+    lastAction: current.changedFilesCount
+      ? validation.passed
+        ? "Workspace is validated and ready for review"
+        : "Workspace needs review: deterministic checks failed"
+      : `${runtimeLabel(current.runtime)} completed with no file changes`,
+    lastActivityAt: now(),
+    finalSummary,
+    error: validation.passed ? undefined : validation.failureSummary.slice(0, 12_000),
+    logs: [
+      `${runtimeLabel(current.runtime)} completed with ${current.changedFilesCount} changed file${current.changedFilesCount === 1 ? "" : "s"}. ${validationSummary(validation)}`,
+      ...current.logs,
+    ].slice(0, 120),
+  }))
+  syncBackgroundTask(completed, completed.lastAction)
+}
+
+async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEngine, controller: AbortController) {
+  try {
+    const persisted = readRecords().find((record) => record.id === id)
+    if (!persisted) throw new Error("Parallel workspace was not found.")
+    const initial = await ensureParallelWorkspaceIsolation(persisted)
+    if (initial.runtime !== "vector") {
+      await executeExternalParallelWorkspace(id, initial, controller)
+      return
+    }
+
+    const created = await engineRequest<{ data?: { id?: string } }>(engine, "/api/session", {
+      method: "POST",
+      body: {
+        location: { directory: initial.isolatedPath },
+        model:
+          initial.provider && initial.model && !initial.provider.startsWith("Current ")
+            ? { providerID: initial.provider, id: initial.model }
+            : undefined,
+        agent: initial.agent,
+      },
+      signal: controller.signal,
+    })
+    const sessionId = created?.data?.id
+    if (!sessionId) throw new Error("Vector's engine did not return a session ID for the isolated workspace.")
+    const active = activeRuns.get(id)
+    if (active) active.sessionId = sessionId
+
+    let record = updateRecord(id, (current) => ({
+      ...current,
+      agentSessionId: sessionId,
+      status: "editing",
+      progress: 0,
+      lastAction: "Agent is inspecting the isolated project",
+      lastActivityAt: now(),
+      error: undefined,
+      logs: [`Engine session ${sessionId} started in ${current.isolatedPath}.`, ...current.logs].slice(0, 120),
+    }))
+    syncBackgroundTask(record, "Vector agent session started in the isolated workspace.")
+
+    await engineRequest(engine, `/api/session/${encodeURIComponent(sessionId)}/prompt`, {
+      method: "POST",
+      body: { prompt: { text: parallelAgentPrompt(record) }, resume: true },
+      signal: controller.signal,
+    })
+    record = updateRecord(id, (current) => ({
+      ...current,
+      status: "running commands",
+      progress: 0,
+      lastAction: "Agent is editing and validating the workspace",
+      lastActivityAt: now(),
+      logs: ["Task admitted by the Vector engine. Waiting for tool execution and validation.", ...current.logs].slice(0, 120),
+    }))
+    syncBackgroundTask(record, "Task admitted; agent tool execution is active.")
+
+    await waitForEngineSessionIdle(id, sessionId, engine, controller.signal)
+
+    record = updateRecord(id, (current) => ({
+      ...current,
+      status: "testing",
+      progress: 0,
+      lastAction: "Running deterministic project checks",
+      lastActivityAt: now(),
+    }))
+    syncBackgroundTask(record, "Agent became idle. Running deterministic checks in the isolated workspace.")
+
+    let refreshed = await refreshParallelWorkspace(id)
+    let validation = await validateWorkspace(refreshed.isolatedPath, refreshed.changedFiles)
+    record = updateRecord(id, (current) => ({
+      ...current,
+      validationReport: validation,
+      validationPassed: validation.passed,
+      terminalOutput: [...validationLogLines(validation), ...current.terminalOutput].slice(0, 160),
+      lastAction: validation.passed ? "Deterministic checks passed" : "Deterministic checks found a failure",
+      lastActivityAt: now(),
+      logs: [`Guardrails: ${validationSummary(validation)}`, ...current.logs].slice(0, 120),
+    }))
+    syncBackgroundTask(record, validationSummary(validation))
+
+    const retryLimit = record.retryLimit ?? (record.taskDifficulty === "complex" ? 2 : 1)
+    for (let attempt = 1; !validation.passed && attempt <= retryLimit && !controller.signal.aborted; attempt += 1) {
+      record = updateRecord(id, (current) => ({
+        ...current,
+        status: "editing",
+        riskLevel: "high",
+        repairAttempts: attempt,
+        lastAction: `Agent is repairing deterministic validation failure (${attempt}/${retryLimit})`,
+        lastActivityAt: now(),
+        logs: [
+          `Vector returned the exact failing check to the agent for evidence-driven repair pass ${attempt} of ${retryLimit}.`,
+          ...current.logs,
+        ].slice(0, 120),
+      }))
+      syncBackgroundTask(record, `Repairing the failed deterministic check (${attempt}/${retryLimit}).`)
+      await engineRequest(engine, `/api/session/${encodeURIComponent(sessionId)}/prompt`, {
+        method: "POST",
+        body: {
+          prompt: {
+            text: [
+              formatValidationForRepair(validation),
+              `This is repair pass ${attempt} of ${retryLimit}. Diagnose from the exact output, make only evidence-backed changes, and rerun the relevant check yourself before finishing.`,
+            ].join("\n\n"),
+          },
+          resume: true,
+        },
+        signal: controller.signal,
+      })
+      await waitForEngineSessionIdle(id, sessionId, engine, controller.signal)
+
+      refreshed = await refreshParallelWorkspace(id)
+      validation = await validateWorkspace(refreshed.isolatedPath, refreshed.changedFiles)
+      record = updateRecord(id, (current) => ({
+        ...current,
+        status: "testing",
+        validationReport: validation,
+        validationPassed: validation.passed,
+        terminalOutput: [
+          `--- Guardrail repair verification ${attempt}/${retryLimit} ---`,
+          ...validationLogLines(validation),
+          ...current.terminalOutput,
+        ].slice(0, 220),
+        lastAction: validation.passed
+          ? `Repair ${attempt} verified by deterministic checks`
+          : `Repair ${attempt} did not pass validation`,
+        lastActivityAt: now(),
+        logs: [`Repair verification ${attempt}/${retryLimit}: ${validationSummary(validation)}`, ...current.logs].slice(0, 120),
+      }))
+      syncBackgroundTask(record, `Repair verification ${attempt}/${retryLimit}: ${validationSummary(validation)}`)
+    }
+
+    const context = await engineRequest<{ data?: unknown }>(
+      engine,
+      `/api/session/${encodeURIComponent(sessionId)}/context`,
+      { signal: controller.signal },
+    ).catch(() => undefined)
+    const summaries = collectText(context?.data)
+    refreshed = await refreshParallelWorkspace(id)
+    const agentSummary =
+      summaries.at(-1) ||
+      (refreshed.changedFilesCount
+        ? `The isolated agent changed ${refreshed.changedFilesCount} file${refreshed.changedFilesCount === 1 ? "" : "s"}. Review the diff before merging.`
+        : "The isolated agent completed without producing a file diff.")
+    const finalSummary = `${agentSummary}\n\nGuardrails: ${validationSummary(validation)}`
+    const completed = updateRecord(id, (current) => ({
+      ...current,
+      status: current.changedFilesCount ? "needs review" : "complete",
+      progress: 100,
+      riskLevel: validation.passed ? current.riskLevel : "high",
+      lastAction: current.changedFilesCount
+        ? validation.passed
+          ? "Workspace is validated and ready for review"
+          : "Workspace needs review: deterministic checks failed"
+        : "Agent completed with no file changes",
+      lastActivityAt: now(),
+      finalSummary,
+      error: validation.passed ? undefined : validation.failureSummary.slice(0, 12_000),
+      logs: [
+        `${current.changedFilesCount ? `Agent completed with ${current.changedFilesCount} changed file${current.changedFilesCount === 1 ? "" : "s"}.` : "Agent completed without changing files."} ${validationSummary(validation)}`,
+        ...current.logs,
+      ].slice(0, 120),
+    }))
+    syncBackgroundTask(completed, completed.lastAction)
+  } catch (error) {
+    const stopped = controller.signal.aborted
+    // A failed or timed-out run must not leave the engine session running and
+    // spending the user's API keys in the background.
+    const active = activeRuns.get(id)
+    if (active?.sessionId && !stopped) {
+      await engineRequest(engine, `/api/session/${encodeURIComponent(active.sessionId)}/interrupt`, {
+        method: "POST",
+      }).catch(() => undefined)
+    }
+    const detail = stopped
+      ? "The parallel agent was stopped by the user."
+      : error instanceof Error
+        ? error.message
+        : String(error)
+    const failed = updateRecord(id, (current) => ({
+      ...current,
+      status: stopped ? "stopped" : "failed",
+      progress: 0,
+      lastAction: stopped ? "Workspace stopped" : "Agent execution failed",
+      lastActivityAt: now(),
+      error: stopped ? undefined : detail,
+      finalSummary: detail,
+      logs: [detail, ...current.logs].slice(0, 120),
+    }))
+    syncBackgroundTask(failed, detail)
+  } finally {
+    activeRuns.delete(id)
+    drainParallelRunQueue()
+  }
+}
+
+export async function runParallelWorkspace(id: string, engine: ParallelWorkspaceEngine, concurrency?: number) {
+  const existingRun = activeRuns.get(id)
+  if (existingRun || queuedRuns.has(id)) return readRecords().find((record) => record.id === id)
+  const current = readRecords().find((record) => record.id === id)
+  if (!current) throw new Error("Parallel workspace was not found.")
+  if (current.mergeState !== "none") throw new Error("Merged or discarded workspaces cannot be run again.")
+
+  // Only an explicit concurrency choice may retune the shared pool; an
+  // undefined value must not stomp a swarm that is already draining.
+  if (concurrency !== undefined) maxConcurrentRuns = normalizeConcurrency(concurrency)
+  const controller = new AbortController()
+  queuedRuns.set(id, { controller, engine })
+  const queued = updateRecord(id, (record) => ({
+    ...record,
+    status: "queued",
+    progress: 0,
+    lastAction:
+      activeRuns.size < maxConcurrentRuns
+        ? `Starting isolated ${runtimeLabel(record.runtime)} session`
+        : "Queued for an agent slot",
+    lastActivityAt: now(),
+    error: undefined,
+    logs: [`Run requested at ${now()}.`, ...record.logs].slice(0, 120),
+  }))
+  syncBackgroundTask(queued, `Parallel agent queued for ${runtimeLabel(queued.runtime)}.`)
+  drainParallelRunQueue()
+  return readRecords().find((record) => record.id === id) ?? queued
+}
+
+export async function stopParallelWorkspace(id: string) {
+  const active = activeRuns.get(id)
+  const queued = queuedRuns.get(id)
+  queuedRuns.delete(id)
+  active?.controller.abort()
+  queued?.controller.abort()
+  if (active?.sessionId) {
+    await engineRequest(active.engine, `/api/session/${encodeURIComponent(active.sessionId)}/interrupt`, {
+      method: "POST",
+    }).catch(() => undefined)
+  }
+  const current = readRecords().find((record) => record.id === id)
+  if (!current) throw new Error("Parallel workspace was not found.")
+  // Stopping is only meaningful for work in flight; settled records
+  // (needs review, complete, failed) keep their status.
+  if (!active && !queued) return current
+  const stoppedAt = now()
+  const updated = updateRecord(id, (record) => ({
+    ...record,
+    status: "stopped",
+    lastAction: "Workspace stopped",
+    lastActivityAt: stoppedAt,
+    logs: [`Stopped at ${stoppedAt}.`, ...record.logs].slice(0, 80),
+  }))
+  if (updated.backgroundTaskId) {
+    try {
+      cancelBackgroundTask(updated.backgroundTaskId)
+    } catch {
+      syncBackgroundTask(updated, "Parallel workspace task was stopped.")
+    }
+  }
+  return updated
+}
+
+async function createCheckpoint(record: ParallelWorkspaceRecord) {
+  const checkpointDir = join(workspaceRoot(), "main-checkpoints", record.id, `before-merge-${Date.now()}`)
+  await mkdir(checkpointDir, { recursive: true })
+  const checkpointPath = join(checkpointDir, "main-state.patch")
+  if (await gitRoot(record.sourcePath)) {
+    // HEAD-relative diff captures staged AND unstaged main-project changes;
+    // the plain worktree diff used before silently missed staged work.
+    const diff = await runGit(["diff", "--binary", "HEAD", "--"], record.sourcePath, { allowFailure: true })
+    await writeFile(checkpointPath, diff.stdout || "# Main workspace had no git diff before merge.\n", "utf8")
+    await writeFile(
+      join(checkpointDir, "README.md"),
+      [
+        "# Vector merge checkpoint",
+        "",
+        "`main-state.patch` is the main project's staged+unstaged diff against HEAD taken right before this merge.",
+        "Files in `overwritten/` are copies of untracked main-project files this merge replaced.",
+        "To undo the merge's effect on a previously untracked file, copy it back from `overwritten/`.",
+        "",
+      ].join("\n"),
+      "utf8",
+    )
+  } else {
+    await writeFile(checkpointPath, JSON.stringify(record.baselineHashes ?? {}, null, 2), "utf8")
+  }
+  return checkpointPath
+}
+
+// Preserve a copy of a main-project file that a merge is about to overwrite so
+// the "checkpoint" the merge dialog promises can actually restore it.
+async function backupBeforeOverwrite(checkpointPath: string, sourcePath: string, file: string) {
+  const from = join(sourcePath, file)
+  const exists = await stat(from).catch(() => undefined)
+  if (!exists) return
+  const to = join(dirname(checkpointPath), "overwritten", file)
+  await mkdir(dirname(to), { recursive: true })
+  await cp(from, to, { recursive: true, force: true }).catch(() => undefined)
+}
+
+async function fileContentsEqual(a: string, b: string) {
+  const [hashA, hashB] = await Promise.all([hashFile(a).catch(() => "a"), hashFile(b).catch(() => "b")])
+  return hashA === hashB
+}
+
+// After a completed merge or discard nothing runs in the isolated checkout
+// again, so remove the worktree, its branch, and the per-run directory. The
+// record keeps the diff text and logs as durable history.
+async function cleanupIsolation(record: ParallelWorkspaceRecord) {
+  if (record.isolation === "git-worktree") {
+    await runGit(["worktree", "remove", "--force", record.isolatedPath], record.sourcePath, {
+      allowFailure: true,
+    }).catch(() => undefined)
+    if (record.gitBranch) {
+      await runGit(["branch", "-D", record.gitBranch], record.sourcePath, { allowFailure: true }).catch(() => undefined)
+    }
+  }
+  await rm(dirname(record.isolatedPath), { recursive: true, force: true }).catch(() => undefined)
+}
+
+async function mergeGitWorktree(record: ParallelWorkspaceRecord, force: boolean, checkpointPath: string) {
+  const patch = (await runGit(["diff", "--binary", record.baseCommit ?? "HEAD", "--"], record.isolatedPath, { allowFailure: true })).stdout
+  const untracked = (
+    await runGit(["ls-files", "--others", "--exclude-standard"], record.isolatedPath, { allowFailure: true })
+  ).stdout
+    .split("\n")
+    .map((item) => item.trim())
+    .filter(Boolean)
+
+  // An untracked file in the worktree may collide with the user's own
+  // uncommitted-untracked file in main. Overwriting silently is data loss —
+  // `git diff` checkpoints never capture untracked content.
+  const collisions: string[] = []
+  for (const file of untracked) {
+    const target = join(record.sourcePath, file)
+    const exists = await stat(target).catch(() => undefined)
+    if (exists && !(await fileContentsEqual(join(record.isolatedPath, file), target))) collisions.push(file)
+  }
+  if (collisions.length && !force) {
+    throw new Error(
+      `Merge blocked: ${collisions.slice(0, 8).join(", ")} exist${collisions.length === 1 ? "s" : ""} in your main project with different content. Review or force-merge to overwrite (a backup copy is saved to the checkpoint).`,
+    )
+  }
+
+  if (patch.trim()) {
+    const check = await runGit(["apply", "--3way", "--check", "-"], record.sourcePath, {
+      allowFailure: true,
+      input: patch,
+    })
+    if (check.failed && !force) {
+      throw new Error(`Merge conflict detected. Review before forcing merge.\n${check.stderr.trim()}`)
+    }
+    const applied = await runGit(["apply", "--3way", "-"], record.sourcePath, { allowFailure: true, input: patch })
+    if (applied.failed) throw new Error(applied.stderr || "Git could not apply the workspace diff.")
+  }
+
+  for (const file of untracked) {
+    const from = join(record.isolatedPath, file)
+    const to = join(record.sourcePath, file)
+    await backupBeforeOverwrite(checkpointPath, record.sourcePath, file)
+    await mkdir(dirname(to), { recursive: true })
+    await cp(from, to, { recursive: true, force: true })
+  }
+}
+
+async function mergeCopy(record: ParallelWorkspaceRecord, force: boolean) {
+  const refreshed = await refreshParallelWorkspace(record.id)
+  const conflicts: string[] = []
+  for (const file of refreshed.changedFiles) {
+    const sourceHash = await hashFile(join(record.sourcePath, file)).catch(() => "missing")
+    const baselineHash = record.baselineHashes?.[file] ?? "missing"
+    if (sourceHash !== baselineHash) conflicts.push(file)
+  }
+  if (conflicts.length && !force) {
+    throw new Error(
+      `Merge conflict detected in ${conflicts.slice(0, 8).join(", ")}. Main project changed since workspace creation.`,
+    )
+  }
+  for (const file of refreshed.changedFiles) {
+    const from = join(record.isolatedPath, file)
+    const to = join(record.sourcePath, file)
+    const fromStat = await stat(from).catch(() => undefined)
+    if (!fromStat) {
+      await rm(to, { force: true })
+      continue
+    }
+    await mkdir(dirname(to), { recursive: true })
+    await cp(from, to, { recursive: true, force: true })
+  }
+}
+
+async function validateBeforeIntegration(record: ParallelWorkspaceRecord, allowSecrets = false) {
+  const secrets = await scanChangedSecrets(record.sourcePath, record.isolatedPath, record.changedFiles)
+  if (secrets.length && !allowSecrets) {
+    const summary = secrets
+      .slice(0, 8)
+      .map((finding) => `${finding.file}:${finding.line} (${finding.kind})`)
+      .join(", ")
+    const updated = updateRecord(record.id, (current) => ({
+      ...current,
+      status: "needs review",
+      riskLevel: "high",
+      lastAction: "Secret scan requires review",
+      lastActivityAt: now(),
+      error: `Potential credentials detected: ${summary}`,
+      logs: [`Secret scan blocked integration: ${summary}`, ...current.logs].slice(0, 120),
+    }))
+    syncBackgroundTask(updated, "Potential credentials must be reviewed before integration.")
+    throw new Error(
+      `Secret scan blocked integration. Review ${summary}. Vector never includes secret values in this report; explicitly confirm the force action only if these are intentional test credentials.`,
+    )
+  }
+  const validationReport = await validateWorkspace(record.isolatedPath, record.changedFiles)
+  const updated = updateRecord(record.id, (current) => ({
+    ...current,
+    validationReport,
+    validationPassed: validationReport.passed,
+    terminalOutput: [...validationLogLines(validationReport), ...current.terminalOutput].slice(0, 160),
+    lastActivityAt: now(),
+    logs: [`Pre-merge checks: ${validationSummary(validationReport)}`, ...current.logs].slice(0, 120),
+  }))
+  syncBackgroundTask(updated, validationSummary(validationReport))
+  if (!validationReport.passed) {
+    throw new Error(validationReport.failureSummary || "Workspace checks failed. Fix them before integrating these changes.")
+  }
+  return updated
+}
+
+export async function mergeParallelWorkspace(
+  id: string,
+  force = false,
+  commit?: { message: string },
+) {
+  const refreshed = await refreshParallelWorkspace(id)
+  if (refreshed.mergeState === "merged") return refreshed
+  if (refreshed.mergeState === "discarded") throw new Error("Discarded workspaces cannot be merged.")
+  if (!refreshed.changedFiles.length) throw new Error("There are no changes to merge.")
+  const record = await validateBeforeIntegration(refreshed, force)
+  const checkpointPath = await createCheckpoint(record)
+  try {
+    if (record.isolation === "git-worktree") await mergeGitWorktree(record, force, checkpointPath)
+    else await mergeCopy(record, force)
+  } catch (error) {
+    const failed = updateRecord(id, (current) => ({
+      ...current,
+      status: "failed",
+      lastAction: "Merge blocked",
+      lastActivityAt: now(),
+      checkpointPath,
+      error: error instanceof Error ? error.message : String(error),
+      logs: [`Merge blocked: ${error instanceof Error ? error.message : String(error)}`, ...current.logs].slice(0, 80),
+    }))
+    syncBackgroundTask(failed, "Merge was blocked by a conflict or failed patch.")
+    return failed
+  }
+  await cleanupIsolation(record)
+
+  // Optional real commit: the merge already landed in main's working tree
+  // (checkpoint + untracked backups preserved). Committing is a separate,
+  // reversible step (git reset --soft HEAD~1), so a commit failure must never
+  // discard the successful merge — it is recorded and surfaced instead.
+  let commitNote = ""
+  let commitError = ""
+  if (commit?.message?.trim()) {
+    try {
+      if (!(await gitRoot(record.sourcePath))) {
+        commitError = "Changes were merged, but the main project is not a git repository, so nothing was committed."
+      } else if (await gitIsClean(record.sourcePath)) {
+        commitNote = "Main working tree was already clean after the merge; nothing to commit."
+      } else {
+        await runGit(["add", "-A"], record.sourcePath)
+        await runGit(await buildCommitArgs(record.sourcePath, commit.message.trim()), record.sourcePath)
+        const sha = (
+          await runGit(["rev-parse", "--short", "HEAD"], record.sourcePath, { allowFailure: true })
+        ).stdout.trim()
+        commitNote = sha ? `Committed to main: ${sha}` : "Committed to main."
+      }
+    } catch (error) {
+      commitError = `Merge succeeded, but the git commit failed: ${error instanceof Error ? error.message : String(error)}`
+    }
+  }
+
+  const merged = updateRecord(id, (current) => ({
+    ...current,
+    status: "merged",
+    progress: 100,
+    mergeState: "merged",
+    checkpointPath,
+    error: commitError || undefined,
+    lastAction: commitNote.startsWith("Committed") ? "Merged and committed to the main project" : "Merged into main project",
+    lastActivityAt: now(),
+    finalSummary: [
+      `Merged ${current.changedFiles.length} changed file${current.changedFiles.length === 1 ? "" : "s"} into the main project.`,
+      commitNote,
+      commitError,
+    ]
+      .filter(Boolean)
+      .join(" "),
+    logs: [
+      `Merged at ${now()}. Worktree cleaned up. Main checkpoint: ${checkpointPath}`,
+      ...(commitNote ? [commitNote] : []),
+      ...(commitError ? [commitError] : []),
+      ...current.logs,
+    ].slice(0, 80),
+  }))
+  syncBackgroundTask(
+    merged,
+    commitError
+      ? "Merged into the main project, but the commit failed."
+      : commitNote.startsWith("Committed")
+        ? "Parallel workspace merged and committed to the main project."
+        : "Parallel workspace merged into the main project.",
+  )
+  return merged
+}
+
+export async function openParallelWorkspacePullRequest(id: string) {
+  const refreshed = await refreshParallelWorkspace(id)
+  if (refreshed.mergeState !== "none") throw new Error("This workspace is already closed.")
+  if (refreshed.isolation !== "git-worktree" || !refreshed.gitBranch) {
+    throw new Error("Pull requests require a Git project with an isolated worktree.")
+  }
+  if (!refreshed.changedFiles.length) throw new Error("There are no workspace changes to open as a pull request.")
+  const record = await validateBeforeIntegration(refreshed)
+  const result = await createPullRequest({
+    projectPath: record.isolatedPath,
+    title: record.name,
+    body: [record.finalSummary, "", `Vector task: ${record.taskPrompt}`].filter(Boolean).join("\n"),
+  })
+  if (!result.ok || !result.url) throw new Error(result.error || "GitHub did not return a pull request URL.")
+  const updated = updateRecord(id, (current) => ({
+    ...current,
+    pullRequestUrl: result.url,
+    lastAction: "Pull request ready for review",
+    lastActivityAt: now(),
+    logs: [`Opened pull request: ${result.url}`, ...current.logs].slice(0, 120),
+  }))
+  syncBackgroundTask(updated, "Workspace pull request opened on GitHub.")
+  return updated
+}
+
+async function mergeSelectedGitChanges(
+  record: ParallelWorkspaceRecord,
+  selection: UnifiedDiffSelection,
+  force: boolean,
+  checkpointPath: string,
+) {
+  const patch = (await runGit(["diff", "--binary", record.baseCommit ?? "HEAD", "--"], record.isolatedPath, { allowFailure: true }))
+    .stdout
+  // Hunk IDs were hashed from the diff snapshot the user reviewed. If the
+  // workspace changed since, missing IDs must fail loudly instead of being
+  // silently dropped while the log claims every approved hunk merged.
+  if (selection.hunkIds?.length) {
+    const freshIds = new Set(parseUnifiedDiff(patch).flatMap((file) => file.hunks.map((hunk) => hunk.id)))
+    const missing = selection.hunkIds.filter((id) => !freshIds.has(id))
+    if (missing.length) {
+      throw new Error(
+        `${missing.length} of ${selection.hunkIds.length} approved hunk${selection.hunkIds.length === 1 ? "" : "s"} no longer match the workspace diff. Refresh the review and approve again.`,
+      )
+    }
+  }
+  const selectedPatch = selectUnifiedDiff(patch, selection)
+  const untracked = new Set(
+    (
+      await runGit(["ls-files", "--others", "--exclude-standard"], record.isolatedPath, {
+        allowFailure: true,
+      })
+    ).stdout
+      .split("\n")
+      .map((item) => item.trim())
+      .filter(Boolean),
+  )
+  const selectedUntracked = (selection.files ?? []).filter((file) => untracked.has(file))
+
+  if (!selectedPatch.trim() && !selectedUntracked.length) {
+    throw new Error("Select at least one changed hunk or file before merging.")
+  }
+
+  if (selectedPatch.trim()) {
+    const reverseCheck = await runGit(["apply", "--reverse", "--check", "-"], record.isolatedPath, {
+      allowFailure: true,
+      input: selectedPatch,
+    })
+    if (reverseCheck.failed) {
+      throw new Error(`The selected diff is stale and can no longer be separated safely.\n${reverseCheck.stderr.trim()}`)
+    }
+    const sourceCheck = await runGit(["apply", "--3way", "--check", "-"], record.sourcePath, {
+      allowFailure: true,
+      input: selectedPatch,
+    })
+    if (sourceCheck.failed && !force) {
+      throw new Error(`Selected changes conflict with the main project.\n${sourceCheck.stderr.trim()}`)
+    }
+    const applied = await runGit(["apply", "--3way", "-"], record.sourcePath, {
+      allowFailure: true,
+      input: selectedPatch,
+    })
+    if (applied.failed) throw new Error(applied.stderr || "Git could not apply the selected changes.")
+
+    const removed = await runGit(["apply", "--reverse", "-"], record.isolatedPath, {
+      allowFailure: true,
+      input: selectedPatch,
+    })
+    if (removed.failed) {
+      throw new Error(
+        "The selected changes reached main, but Vector could not remove them from the isolated review. Refresh the workspace before merging again.",
+      )
+    }
+  }
+
+  for (const file of selectedUntracked) {
+    const from = join(record.isolatedPath, file)
+    const to = join(record.sourcePath, file)
+    const exists = await stat(to).catch(() => undefined)
+    if (exists && !(await fileContentsEqual(from, to)) && !force) {
+      throw new Error(`Merge blocked: ${file} exists in your main project with different content.`)
+    }
+    await backupBeforeOverwrite(checkpointPath, record.sourcePath, file)
+    await mkdir(dirname(to), { recursive: true })
+    await cp(from, to, { recursive: true, force: true })
+    await rm(from, { force: true, recursive: true })
+  }
+}
+
+async function mergeSelectedCopyChanges(
+  record: ParallelWorkspaceRecord,
+  selection: UnifiedDiffSelection,
+  force: boolean,
+) {
+  if (selection.hunkIds?.length) {
+    throw new Error("Non-Git projects support selective review one complete file at a time.")
+  }
+  const refreshed = await refreshParallelWorkspace(record.id)
+  const changed = new Set(refreshed.changedFiles)
+  const files = Array.from(new Set(selection.files ?? [])).filter((file) => changed.has(file))
+  if (!files.length) throw new Error("Select at least one changed file before merging.")
+
+  const conflicts: string[] = []
+  for (const file of files) {
+    const sourceHash = await hashFile(join(record.sourcePath, file)).catch(() => "missing")
+    const baselineHash = record.baselineHashes?.[file] ?? "missing"
+    if (sourceHash !== baselineHash) conflicts.push(file)
+  }
+  if (conflicts.length && !force) {
+    throw new Error(
+      `Selected files conflict with newer main-project edits: ${conflicts.slice(0, 8).join(", ")}.`,
+    )
+  }
+
+  const nextBaseline = { ...(record.baselineHashes ?? {}) }
+  for (const file of files) {
+    const from = join(record.isolatedPath, file)
+    const to = join(record.sourcePath, file)
+    const fromStat = await stat(from).catch(() => undefined)
+    if (!fromStat) {
+      await rm(to, { force: true, recursive: true })
+      nextBaseline[file] = "missing"
+      continue
+    }
+    await mkdir(dirname(to), { recursive: true })
+    await cp(from, to, { recursive: true, force: true })
+    nextBaseline[file] = await hashFile(from).catch(() => "missing")
+  }
+  updateRecord(record.id, (current) => ({ ...current, baselineHashes: nextBaseline }))
+}
+
+export async function mergeParallelWorkspaceSelection(
+  id: string,
+  selection: UnifiedDiffSelection,
+  force = false,
+) {
+  const refreshed = await refreshParallelWorkspace(id)
+  if (refreshed.mergeState !== "none") throw new Error("This workspace is no longer available for review.")
+  if (!refreshed.changedFiles.length) throw new Error("There are no changes to merge.")
+  const record = await validateBeforeIntegration(refreshed, force)
+  const checkpointPath = await createCheckpoint(record)
+
+  try {
+    if (record.isolation === "git-worktree") await mergeSelectedGitChanges(record, selection, force, checkpointPath)
+    else await mergeSelectedCopyChanges(record, selection, force)
+  } catch (error) {
+    const failed = updateRecord(id, (current) => ({
+      ...current,
+      status: "needs review",
+      lastAction: "Selective merge blocked",
+      lastActivityAt: now(),
+      checkpointPath,
+      error: error instanceof Error ? error.message : String(error),
+      logs: [
+        `Selective merge blocked: ${error instanceof Error ? error.message : String(error)}`,
+        ...current.logs,
+      ].slice(0, 120),
+    }))
+    syncBackgroundTask(failed, "Selective merge was blocked; the isolated changes remain available.")
+    return failed
+  }
+
+  const remaining = await refreshParallelWorkspace(id)
+  const acceptedCount = (selection.hunkIds?.length ?? 0) + (selection.files?.length ?? 0)
+  const complete = remaining.changedFiles.length === 0
+  if (complete) await cleanupIsolation(remaining)
+  const updated = updateRecord(id, (current) => ({
+    ...current,
+    status: complete ? "merged" : "needs review",
+    progress: complete ? 100 : current.progress,
+    mergeState: complete ? "merged" : "none",
+    checkpointPath,
+    error: undefined,
+    lastAction: complete ? "All approved changes merged" : "Approved changes merged; review remains",
+    lastActivityAt: now(),
+    finalSummary: complete
+      ? "All approved changes were merged into the main project."
+      : `${current.changedFiles.length} changed file${current.changedFiles.length === 1 ? "" : "s"} remain in isolated review.`,
+    logs: [
+      `Merged ${acceptedCount} approved review item${acceptedCount === 1 ? "" : "s"} at ${now()}. Checkpoint: ${checkpointPath}`,
+      ...current.logs,
+    ].slice(0, 120),
+  }))
+  syncBackgroundTask(updated, complete ? "Workspace review fully merged." : "Approved changes merged; review remains.")
+  return updated
+}
+
+export async function discardParallelWorkspace(id: string) {
+  const record = readRecords().find((item) => item.id === id)
+  if (!record) throw new Error("Parallel workspace was not found.")
+  // Deleting a live agent's directory out from under it keeps the engine
+  // session running (and spending tokens) against a removed path — stop the
+  // run before touching the filesystem.
+  const active = activeRuns.get(id)
+  const queued = queuedRuns.get(id)
+  queuedRuns.delete(id)
+  active?.controller.abort()
+  queued?.controller.abort()
+  if (active?.sessionId) {
+    await engineRequest(active.engine, `/api/session/${encodeURIComponent(active.sessionId)}/interrupt`, {
+      method: "POST",
+    }).catch(() => undefined)
+  }
+  await cleanupIsolation(record)
+  const discarded = updateRecord(id, (current) => ({
+    ...current,
+    status: "discarded",
+    progress: 100,
+    mergeState: "discarded",
+    lastAction: "Discarded isolated workspace",
+    lastActivityAt: now(),
+    logs: [`Discarded at ${now()}.`, ...current.logs].slice(0, 80),
+  }))
+  syncBackgroundTask(discarded, "Parallel workspace discarded.")
+  return discarded
+}
+
+// Merged, discarded, failed, and stopped workspaces keep their record as
+// history, but the list fills the launch cap over time. Removal deletes the
+// record (never a live run) so the workspace list stays usable.
+export async function removeParallelWorkspaceRecord(id: string) {
+  const record = readRecords().find((item) => item.id === id)
+  if (!record) return readRecords()
+  if (activeRuns.has(id) || queuedRuns.has(id)) {
+    throw new Error("Stop this workspace before removing it from the list.")
+  }
+  if (record.mergeState === "none" && ["needs review", "complete"].includes(record.status) && record.changedFilesCount > 0) {
+    throw new Error("This workspace still has unreviewed changes. Merge or discard it first.")
+  }
+  await cleanupIsolation(record)
+  const next = readRecords().filter((item) => item.id !== id)
+  writeRecords(next)
+  if (record.backgroundTaskId) {
+    try {
+      cancelBackgroundTask(record.backgroundTaskId)
+    } catch {
+      // The mirrored task may already be settled; removal proceeds regardless.
+    }
+  }
+  return next
+}

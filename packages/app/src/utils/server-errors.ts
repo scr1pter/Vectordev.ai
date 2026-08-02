@@ -29,10 +29,28 @@ export function formatServerError(error: unknown, translate?: Translator, fallba
   const unwrapped = unwrapNamedError(error)
   if (isConfigInvalidErrorLike(unwrapped)) return parseReadableConfigInvalidError(unwrapped, translate)
   if (isProviderModelNotFoundErrorLike(unwrapped)) return parseReadableProviderModelNotFoundError(unwrapped, translate)
+  const structured = structuredMessage(unwrapped)
+  if (structured) return formatWorkspaceFailure(structured)
   if (error instanceof Error && error.message) return error.message
   if (typeof error === "string" && error) return error
   if (fallback) return fallback
   return tr(translate, "error.chain.unknown", "Unknown error")
+}
+
+function structuredMessage(error: unknown) {
+  if (typeof error !== "object" || error === null) return
+  if (!("data" in error)) return
+  const data = error.data
+  if (typeof data !== "object" || data === null || !("message" in data)) return
+  if (typeof data.message !== "string") return
+  return data.message.trim() || undefined
+}
+
+export function formatWorkspaceFailure(message: string) {
+  if (!message.includes("FileSystem.realPath")) return message
+  const path = message.match(/FileSystem\.realPath\s*\(([^)]+)\)/)?.[1]
+  if (!path) return "The project folder is unavailable. Reopen an existing project folder."
+  return `The project folder is unavailable: ${path}. Reopen the project from its existing folder.`
 }
 
 function unwrapNamedError(error: unknown): unknown {

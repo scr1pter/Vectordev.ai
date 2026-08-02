@@ -7,6 +7,7 @@ import { getLogger } from "./logging"
 import { getUserShell, loadShellEnv } from "./shell-env"
 import { getStore } from "./store"
 import { DEFAULT_SERVER_URL_KEY } from "./store-keys"
+import { VECTOR_AGENT_RUNTIME_ENV } from "./agent-runtime"
 
 export type HealthCheck = { wait: Promise<void> }
 
@@ -54,6 +55,7 @@ export function preferAppEnv(userDataPath: string) {
   }
   Object.assign(process.env, {
     ...(shell ? loadShellEnv(shell, getLogger()) : null),
+    ...VECTOR_AGENT_RUNTIME_ENV,
     OPENCODE_EXPERIMENTAL_ICON_DISCOVERY: "true",
     OPENCODE_EXPERIMENTAL_FILEWATCHER: "true",
     OPENCODE_CLIENT: "desktop",

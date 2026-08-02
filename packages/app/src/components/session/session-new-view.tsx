@@ -3,6 +3,7 @@ import { IconButtonV2 } from "@opencode-ai/ui/v2/icon-button-v2"
 import { MenuV2 } from "@opencode-ai/ui/v2/menu-v2"
 import { TooltipV2 } from "@opencode-ai/ui/v2/tooltip-v2"
 import { useCommand } from "@/context/command"
+import { createMemo } from "solid-js"
 
 const ROOT_CLASS = "relative size-full flex flex-col"
 
@@ -12,13 +13,14 @@ interface NewSessionViewProps {
 
 export function NewSessionView(_props: NewSessionViewProps) {
   const command = useCommand()
+  const fileOpenAvailable = createMemo(() => command.options.some((option) => option.id === "file.open"))
 
   return (
     <div class={ROOT_CLASS}>
       <div class="absolute right-5 top-4 z-30 flex items-center gap-2">
         <TooltipV2
           placement="bottom"
-          value="Context window appears after the first message in this task."
+          value="Context window appears after the first message in this project."
         >
           <button
             type="button"
@@ -41,26 +43,25 @@ export function NewSessionView(_props: NewSessionViewProps) {
           <MenuV2.Portal>
             <MenuV2.Content style={{ width: "154px", "min-width": "154px" }}>
               <MenuV2.Item onSelect={() => command.trigger("settings.open")}>Settings</MenuV2.Item>
-              <MenuV2.Item onSelect={() => command.show()}>Command palette</MenuV2.Item>
-              <MenuV2.Item onSelect={() => command.trigger("file.open")}>Open file</MenuV2.Item>
+              <MenuV2.Item disabled={!fileOpenAvailable()} onSelect={() => command.show()}>
+                Command palette
+              </MenuV2.Item>
+              <MenuV2.Item disabled={!fileOpenAvailable()} onSelect={() => command.trigger("file.open")}>
+                Open file
+              </MenuV2.Item>
             </MenuV2.Content>
           </MenuV2.Portal>
         </MenuV2>
       </div>
 
-      <div class="flex-1 px-6 pb-36 flex items-center justify-center text-center">
-        <div class="w-full max-w-200 flex flex-col items-center text-center gap-5">
-          <img
-            src="/vector-logo.png"
-            alt="Vector"
-            class="size-14 rounded-2xl object-cover shadow-[0_22px_60px_rgba(155,108,255,0.22)]"
-            draggable={false}
-          />
-          <div class="flex flex-col items-center gap-3">
-            <h1 class="text-[28px] font-medium leading-tight tracking-normal text-text-strong">
-              What can I do for you?
-            </h1>
+      <div class="vector-session-empty flex-1 px-6 pb-36 flex items-center justify-center text-center">
+        <div class="vector-session-empty__content">
+          <div class="vector-session-empty__mark">
+            <img src="/vector-logo.png" alt="Vector" draggable={false} />
           </div>
+          <span>Vector Agent</span>
+          <h1>What should we work on?</h1>
+          <p>Ask for a build, repair, review, or explanation. Vector will inspect the project before it acts.</p>
         </div>
       </div>
     </div>

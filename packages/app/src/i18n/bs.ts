@@ -277,6 +277,7 @@ export const dict = {
   "prompt.action.attachFile": "Priloži datoteku",
   "prompt.attachment.remove": "Ukloni prilog",
   "prompt.action.send": "Pošalji",
+  "prompt.action.queue": "U red",
   "prompt.action.stop": "Zaustavi",
 
   "prompt.toast.pasteUnsupported.title": "Nepodržan prilog",
@@ -538,6 +539,8 @@ export const dict = {
   "session.followupDock.summary.other": "{{count}} poruka na čekanju",
   "session.followupDock.sendNow": "Pošalji sada",
   "session.followupDock.edit": "Uredi",
+  "session.followupDock.copy": "Kopiraj",
+  "session.followupDock.delete": "Obriši",
   "session.followupDock.collapse": "Sažmi poruke na čekanju",
   "session.followupDock.expand": "Proširi poruke na čekanju",
   "session.revertDock.summary.one": "{{count}} vraćena poruka",

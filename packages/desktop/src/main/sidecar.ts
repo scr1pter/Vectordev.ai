@@ -2,6 +2,7 @@ import * as http from "node:http"
 import * as tls from "node:tls"
 import { join } from "node:path"
 import { mkdirSync } from "node:fs"
+import { VECTOR_AGENT_RUNTIME_ENV } from "./agent-runtime"
 
 type NodeHttpWithEnvProxy = typeof http & {
   setGlobalProxyFromEnv: () => void
@@ -92,6 +93,7 @@ function prepareSidecarEnv(password: string, userDataPath: string) {
     mkdirSync(dir, { recursive: true })
   }
   Object.assign(process.env, {
+    ...VECTOR_AGENT_RUNTIME_ENV,
     OPENCODE_SERVER_USERNAME: "vector",
     OPENCODE_SERVER_PASSWORD: password,
     VECTOR_APP_NAMESPACE: "vector",

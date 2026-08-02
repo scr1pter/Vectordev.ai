@@ -20,6 +20,7 @@ import { useSessionLayout } from "@/pages/session/session-layout"
 import { createSessionTabs } from "@/pages/session/helpers"
 import { decode64 } from "@/utils/base64"
 import { getRelativeTime } from "@/utils/time"
+import { isInternalSession } from "@/utils/internal-sessions"
 
 const DialogSelectFileV2 = lazy(() =>
   import("./dialog-select-directory-v2").then((module) => ({ default: module.DialogSelectDirectoryV2 })),
@@ -43,6 +44,7 @@ type Entry = {
 }
 
 type DialogSelectFileMode = "all" | "files"
+type DialogSelectFilePresentation = "auto" | "palette"
 
 const ENTRY_LIMIT = 5
 const COMMON_COMMAND_IDS = [
@@ -217,7 +219,7 @@ function createSessionEntries(props: {
           .list({ directory, roots: true })
           .then((x) =>
             (x.data ?? [])
-              .filter((s) => !!s?.id)
+              .filter((s) => !!s?.id && !isInternalSession(s))
               .map((s) => ({
                 id: s.id,
                 title: s.title ?? props.language.t("command.session.new"),
@@ -267,7 +269,12 @@ function createSessionEntries(props: {
   return { sessions }
 }
 
-export function DialogSelectFile(props: { mode?: DialogSelectFileMode; onOpenFile?: (path: string) => void }) {
+export function DialogSelectFile(props: {
+  mode?: DialogSelectFileMode
+  presentation?: DialogSelectFilePresentation
+  onOpenFile?: (path: string) => void
+  onSelectFile?: (path: string) => void
+}) {
   const command = useCommand()
   const language = useLanguage()
   const platform = usePlatform()
@@ -356,6 +363,10 @@ export function DialogSelectFile(props: { mode?: DialogSelectFileMode; onOpenFil
   }
 
   const open = (path: string) => {
+    if (props.onSelectFile) {
+      props.onSelectFile(file.normalize(path))
+      return
+    }
     const value = file.tab(path)
     void tabs().open(value)
     void file.load(path)
@@ -391,7 +402,12 @@ export function DialogSelectFile(props: { mode?: DialogSelectFileMode; onOpenFil
     state.cleanup?.()
   })
 
-  if (filesOnly() && platform.platform === "desktop" && settings.general.newLayoutDesigns()) {
+  if (
+    filesOnly() &&
+    props.presentation !== "palette" &&
+    platform.platform === "desktop" &&
+    settings.general.newLayoutDesigns()
+  ) {
     return (
       <DialogSelectFileV2
         server={serverSDK().server}

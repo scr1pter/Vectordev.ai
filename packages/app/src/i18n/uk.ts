@@ -283,6 +283,7 @@ export const dict = {
   "prompt.action.attachFile": "Додати файли",
   "prompt.attachment.remove": "Видалити вкладення",
   "prompt.action.send": "Надіслати",
+  "prompt.action.queue": "У чергу",
   "prompt.action.stop": "Зупинити",
 
   "prompt.toast.pasteUnsupported.title": "Непідтримуване вкладення",
@@ -574,6 +575,8 @@ export const dict = {
   "session.followupDock.summary.other": "{{count}} повідомлень у черзі",
   "session.followupDock.sendNow": "Надіслати зараз",
   "session.followupDock.edit": "Редагувати",
+  "session.followupDock.copy": "Копіювати",
+  "session.followupDock.delete": "Видалити",
   "session.followupDock.collapse": "Згорнути повідомлення в черзі",
   "session.followupDock.expand": "Розгорнути повідомлення в черзі",
   "session.revertDock.summary.one": "{{count}} скасоване повідомлення",

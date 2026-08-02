@@ -1,6 +1,7 @@
 import { getFilename } from "@opencode-ai/core/util/path"
 import { type Session } from "@opencode-ai/sdk/v2/client"
 import { pathKey } from "@/utils/path-key"
+import { isInternalSession } from "@/utils/internal-sessions"
 import type { ServerConnection } from "@/context/server"
 import type { HomeProjectSelection } from "@/context/layout"
 
@@ -24,7 +25,12 @@ function sortSessions(now: number) {
 }
 
 const isRootVisibleSession = (session: Session, directory: string) =>
-  pathKey(session.directory) === pathKey(directory) && !session.parentID && !session.time?.archived
+  pathKey(session.directory) === pathKey(directory) &&
+  !session.parentID &&
+  !session.time?.archived &&
+  // Vector's own tool sessions (canvas assistant, browser agent planner, …)
+  // are real engine sessions but must never surface in user-facing lists.
+  !isInternalSession(session)
 
 export const roots = (store: SessionStore) =>
   (store.session ?? []).filter((session) => isRootVisibleSession(session, store.path.directory))
@@ -95,7 +101,8 @@ export function homeSessionServerStatus(active: boolean, status: () => { working
 const OPENCODE_PROJECT_ID = "4b0ea68d7af9a6031a7ffda7ad66e0cb83315750"
 
 export function getProjectAvatarSource(id?: string, icon?: { color?: string; url?: string; override?: string }) {
-  if (id === OPENCODE_PROJECT_ID) return "https://vectordev.ai/favicon.svg"
+  if (id === OPENCODE_PROJECT_ID)
+    return "https://vectordev.ai/favicon-96x96-desktop-v4.png?v=desktop-20260712"
   if (icon?.override) return icon.override
   if (icon?.color) return undefined
   return icon?.url

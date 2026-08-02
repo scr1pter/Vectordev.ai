@@ -13,6 +13,7 @@ import { DialogSelectProvider } from "./dialog-select-provider"
 import { DialogCustomProvider } from "./dialog-custom-provider"
 import { SettingsList } from "./settings-list"
 import { SettingsServerPicker, SettingsServerScope } from "./settings-server-picker"
+import { brandProviderDescription, brandProviderName } from "@/utils/provider-brand"
 
 type ProviderSource = "env" | "api" | "config" | "custom"
 type ProviderItem = ReturnType<ReturnType<typeof useProviders>["connected"]>[number]
@@ -32,12 +33,7 @@ const HIDDEN_PROVIDER_IDS = new Set<string>()
 
 const isOpenCodeProvider = (id: string) => OPENCODE_PROVIDER_IDS.has(id)
 
-const providerDisplayName = (id: string, name: string) => {
-  if (id === "opencode") return name || "OpenCode"
-  if (id === "opencode-go") return name || "OpenCode Go"
-  if (id === "opencode-zen") return name || "OpenCode Zen"
-  return name
-}
+const providerDisplayName = (id: string, name: string) => brandProviderName(id, name)
 
 export const SettingsProviders: Component = () => {
   return (
@@ -91,11 +87,7 @@ const SettingsProvidersContent: Component = () => {
   const canDisconnect = (item: ProviderItem) => source(item) !== "env"
 
   const note = (id: string) => PROVIDER_NOTES.find((item) => item.match(id))?.key
-  const openCodeProviderDescription = (id: string) => {
-    if (id === "opencode") return "Free starter models provided by OpenCode and available inside Vector."
-    if (id === "opencode-go") return "OpenCode Go models are provided by OpenCode and can be used inside Vector."
-    if (id === "opencode-zen") return "OpenCode Zen models are provided by OpenCode and can be used inside Vector."
-  }
+  const openCodeProviderDescription = (id: string) => brandProviderDescription(id)
   const description = (id: string) => {
     const openCodeDescription = openCodeProviderDescription(id)
     if (openCodeDescription) return openCodeDescription

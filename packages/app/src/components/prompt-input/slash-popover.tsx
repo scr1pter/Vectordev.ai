@@ -6,7 +6,7 @@ import { KeybindV2 } from "@opencode-ai/ui/v2/keybind-v2"
 import { getDirectory, getFilename } from "@opencode-ai/core/util/path"
 
 export type AtOption =
-  | { type: "agent"; name: string; display: string }
+  | { type: "agent"; name: string; display: string; description?: string }
   | {
       type: "resource"
       name: string
@@ -45,6 +45,25 @@ type PromptPopoverProps = {
   commandKeybindParts: (id: string) => string[]
   newLayoutDesigns: boolean
   t: (key: string) => string
+}
+
+function VectorSubagentMark() {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      class="size-4 shrink-0 text-icon-info-active"
+      fill="none"
+      aria-hidden="true"
+    >
+      <path
+        d="M8 2.25 10.15 4.4 8 6.55 5.85 4.4 8 2.25ZM3.1 8l1.7-1.7L6.5 8 4.8 9.7 3.1 8Zm6.4 0 1.7-1.7L12.9 8l-1.7 1.7L9.5 8ZM8 9.45l2.15 2.15L8 13.75 5.85 11.6 8 9.45Z"
+        stroke="currentColor"
+        stroke-width="1.15"
+        stroke-linejoin="round"
+      />
+      <path d="M6.15 5.35 5.1 6.65m4.75-1.3 1.05 1.3m0 2.7-1.05 1.3m-3.7 0L5.1 9.35" stroke="currentColor" stroke-width="1" />
+    </svg>
+  )
 }
 
 export const PromptPopover: Component<PromptPopoverProps> = (props) => {
@@ -96,9 +115,9 @@ export const PromptPopover: Component<PromptPopoverProps> = (props) => {
                         onClick={() => props.onAtSelect(item)}
                         onPointerMove={() => props.setAtActive(key)}
                       >
-                        <Icon name="brain" size="small" class="text-icon-info-active shrink-0" />
+                        <VectorSubagentMark />
                         <span
-                          class="whitespace-nowrap"
+                          class="whitespace-nowrap shrink-0"
                           classList={{
                             "text-[13px] leading-[calc(var(--font-size-base)*1.8)] tracking-[-0.04px] [font-weight:440]":
                               props.newLayoutDesigns,
@@ -109,6 +128,19 @@ export const PromptPopover: Component<PromptPopoverProps> = (props) => {
                         >
                           @{item.name}
                         </span>
+                        <Show when={item.description}>
+                          {(description) => (
+                            <span
+                              class="min-w-0 truncate text-left text-[12px]"
+                              classList={{
+                                "text-v2-text-text-muted": props.newLayoutDesigns,
+                                "text-text-weak": !props.newLayoutDesigns,
+                              }}
+                            >
+                              {description()}
+                            </span>
+                          )}
+                        </Show>
                       </button>
                     )
                   }

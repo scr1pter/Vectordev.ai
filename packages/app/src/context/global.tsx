@@ -8,6 +8,7 @@ import { createServerSyncContext } from "./server-sync"
 import { getOwner } from "solid-js/web"
 import { QueryClient } from "@tanstack/solid-query"
 import type { ServerScope } from "@/utils/server-scope"
+import type { Project } from "@opencode-ai/sdk/v2"
 
 export const { use: useGlobal, provider: GlobalProvider } = createSimpleContext({
   name: "Global",
@@ -109,17 +110,21 @@ function createServerCtx(
   const sdk = createServerSdkContext(conn, scope)
   const sync = createServerSyncContext(sdk)
 
-  function enrich(project: { worktree: string; expanded: boolean }) {
+  function enrich(project: Partial<Project> & { worktree: string; expanded: boolean }) {
     const [childStore] = sync.child(project.worktree, { bootstrap: false })
     const projectID = childStore.project
     const metadata = projectID
       ? sync.data.project.find((x) => x.id === projectID)
       : sync.data.project.find((x) => x.worktree === project.worktree)
 
-    // Preserve local icon override from per-workspace localStorage cache (childStore.icon).
-    // Without this, different subdirectories of the same git repo would share the same
-    // icon from the database instead of using their individual overrides.
-    const base = { ...metadata, ...project }
+    const local = childStore.projectMeta
+    const base = {
+      ...metadata,
+      ...project,
+      ...local,
+      icon: { ...metadata?.icon, ...project.icon, ...local?.icon },
+      commands: { ...metadata?.commands, ...project.commands, ...local?.commands },
+    }
     if (childStore.icon) {
       return { ...base, icon: { ...base.icon, override: childStore.icon } }
     }

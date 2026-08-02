@@ -1,10 +1,12 @@
 import type { Session } from "@opencode-ai/sdk/v2/client"
+import type { SessionUsageSummary } from "@opencode-ai/sdk/v2"
 import {
   type ComponentProps,
   createEffect,
   createMemo,
   createResource,
   createRoot,
+  createSignal,
   For,
   Match,
   on,
@@ -15,7 +17,7 @@ import {
   Switch,
 } from "solid-js"
 import { makeEventListener } from "@solid-primitives/event-listener"
-import { createStore, produce } from "solid-js/store"
+import { createStore } from "solid-js/store"
 import { useQuery } from "@tanstack/solid-query"
 import { Button } from "@opencode-ai/ui/button"
 import { Logo } from "@opencode-ai/ui/logo"
@@ -28,10 +30,8 @@ import { IconButtonV2 } from "@opencode-ai/ui/v2/icon-button-v2"
 import { MenuV2 } from "@opencode-ai/ui/v2/menu-v2"
 import { TooltipV2 } from "@opencode-ai/ui/v2/tooltip-v2"
 import { getProjectAvatarVariant, useLayout, type HomeProjectSelection, type LocalProject } from "@/context/layout"
-import { useNavigate } from "@solidjs/router"
 import { base64Encode } from "@opencode-ai/core/util/encode"
 import { Icon } from "@opencode-ai/ui/icon"
-import { usePlatform } from "@/context/platform"
 import { DateTime } from "luxon"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { useDirectoryPicker } from "@/components/directory-picker"
@@ -45,7 +45,6 @@ import { useNotification } from "@/context/notification"
 import {
   closeHomeProject,
   displayName,
-  errorMessage,
   getProjectAvatarSource,
   homeProjectDirectories,
   projectForSession,
@@ -55,25 +54,24 @@ import {
 import { SessionTabAvatar } from "@/pages/layout/session-tab-avatar"
 import { sessionTitle } from "@/utils/session-title"
 import { pathKey } from "@/utils/path-key"
+import { showToast } from "@/utils/toast"
+import { formatServerError } from "@/utils/server-errors"
 import { useGlobal } from "@/context/global"
 import { useCommand } from "@/context/command"
-import { Binary } from "@opencode-ai/core/util/binary"
 import { ServerRowMenu } from "@/components/server/server-row-menu"
 import { ServerHealthIndicator } from "@/components/server/server-row"
 import { type ServerHealth } from "@/utils/server-health"
 import { Persist, persisted } from "@/utils/persist"
 import { useMarked } from "@opencode-ai/ui/context/marked"
 import { preloadMarkdown } from "@opencode-ai/session-ui/markdown-cache"
-import { archiveHomeSession } from "./home-session-archive"
-import { showToast } from "@/utils/toast"
+import { normalizeUsageSummary, usageStreakCalendar } from "@/utils/usage-summary"
 
 const HOME_SESSION_LIMIT = 64
 const HOME_SESSION_HEADER_STICKY_TOP = 12
 const HOME_SESSION_HEADER_TEXT_HEIGHT = 16
 const HOME_SESSION_HEADER_FADE_DISTANCE = 16
-const SHOW_HOME_SESSION_ARCHIVE = false
 const HOME_ROW_LAYOUT =
-  "flex min-w-0 w-full shrink-0 cursor-default items-center rounded-[6px] bg-transparent text-left transition-[background-color,color,box-shadow] duration-[120ms] ease-in-out focus-visible:outline-none"
+  "flex min-w-0 w-full shrink-0 cursor-default items-center rounded-[10px] bg-transparent text-left transition-[background-color,color,box-shadow] duration-[200ms] ease-[cubic-bezier(0.22,0.7,0.28,1)] focus-visible:outline-none"
 const HOME_ROW_BASE = `${HOME_ROW_LAYOUT} border-0`
 const HOME_ROW = `${HOME_ROW_BASE} [font-weight:530] text-v2-text-text-muted hover:bg-v2-overlay-simple-overlay-hover focus-visible:bg-v2-overlay-simple-overlay-hover`
 const HOME_PROJECT_NAV_LABEL = "min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap"
@@ -94,13 +92,11 @@ type HomeSessionGroup = {
 
 const HOME_SESSION_SEARCH_RESULTS_ID = "home-session-search-results"
 const HOME_SEARCH_RESULT_ROW =
-  "flex h-10 w-full shrink-0 cursor-default items-center gap-2 border-0 py-3 pl-[18px] pr-6 text-left transition-[background-color] duration-[120ms] ease-in-out hover:bg-v2-overlay-simple-overlay-hover focus-visible:bg-v2-overlay-simple-overlay-hover focus-visible:outline-none"
+  "flex h-10 w-full shrink-0 cursor-default items-center gap-2 rounded-[10px] border-0 py-3 pl-[18px] pr-6 text-left transition-[background-color] duration-[200ms] ease-[cubic-bezier(0.22,0.7,0.28,1)] hover:bg-v2-overlay-simple-overlay-hover focus-visible:bg-v2-overlay-simple-overlay-hover focus-visible:outline-none"
 const HOME_SEARCH_RESULT_TITLE =
   "min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[13px] leading-4 tracking-[-0.04px] text-v2-text-text-base [font-weight:530]"
 const HOME_SEARCH_RESULT_META =
   "min-w-0 flex-[1_1_auto] overflow-hidden text-ellipsis whitespace-nowrap text-[13px] leading-4 tracking-[-0.04px] text-v2-text-text-muted [font-weight:440]"
-
-let pendingHomeNavigation: { server: ServerConnection.Key; href: string } | undefined
 
 function buildHomeSessionRecords(input: {
   sync: Pick<ServerSync, "child">
@@ -240,10 +236,8 @@ function useHomeSessionHeaderOpacity(groups: () => HomeSessionGroup[]) {
 export function NewHome() {
   const sync = useServerSync()
   const layout = useLayout()
-  const platform = usePlatform()
   const pickDirectory = useDirectoryPicker()
   const dialog = useDialog()
-  const navigate = useNavigate()
   const server = useServer()
   const language = useLanguage()
   const global = useGlobal()
@@ -325,9 +319,18 @@ export function NewHome() {
     return allRecords().filter((record) => matchesHomeSessionSearch(record, query))
   })
   const searchOpen = createMemo(() => state.searchFocused && search().length > 0)
-  const groups = createMemo(() => groupSessions(records(), language))
-  const sessionHeaderOpacity = useHomeSessionHeaderOpacity(groups)
   const prefetched = new Set<string>()
+  const usageLoad = useQuery(() => ({
+    queryKey: ["home", "usage", selection().server] as const,
+    queryFn: async () => {
+      const ctx = focusedServerCtx()
+      if (!ctx) return normalizeUsageSummary(undefined)
+      const response = await ctx.sdk.client.experimental.session.usage()
+      if (response.data) return normalizeUsageSummary(response.data)
+      throw new Error(formatServerError(response.error, undefined, "Vector could not load local usage data."))
+    },
+    staleTime: 30_000,
+  }))
 
   createEffect(() => {
     const ctx = focusedServerCtx()
@@ -393,13 +396,6 @@ export function NewHome() {
     if (conn) setSelection({ server: ServerConnection.key(conn) })
   })
 
-  createEffect(() => {
-    const pending = pendingHomeNavigation
-    if (!pending || pending.server !== server.key) return
-    pendingHomeNavigation = undefined
-    navigate(pending.href)
-  })
-
   function focusServer(conn: ServerConnection.Any) {
     setSelection({ server: ServerConnection.key(conn) })
   }
@@ -458,41 +454,34 @@ export function NewHome() {
       .forEach((directory) => state.project.markViewed(directory))
   }
 
-  function openSession(session: Session) {
+  async function openSession(session: Session) {
     const project = projectForSession(session, projects(), projectByID())
     const conn = focusedServer()
     if (!conn) return
     const directory = project?.worktree ?? session.directory
     const ctx = global.ensureServerCtx(conn)
+
+    try {
+      await ctx.sdk.createClient({ directory, throwOnError: true }).file.list({ path: "." })
+    } catch (error) {
+      showToast({
+        title: "Repository folder unavailable",
+        description: formatServerError(
+          error,
+          undefined,
+          `Vector cannot open ${directory}. Reopen the repository folder or start a new workspace from an existing repository.`,
+        ),
+        variant: "error",
+        duration: 10000,
+      })
+      return
+    }
+
     ctx.projects.open(directory)
     ctx.projects.touch(directory)
     startTransition(() => {
       const tab = tabs.addSessionTab({ server: ServerConnection.key(conn), sessionId: session.id })
       tabs.select(tab)
-    })
-  }
-
-  async function archiveSession(session: Session) {
-    const conn = focusedServer()
-    const ctx = focusedServerCtx()
-    if (!conn || !ctx) return
-    const [, setStore] = ctx.sync.child(session.directory)
-    await archiveHomeSession({
-      server: ServerConnection.key(conn),
-      session,
-      update: (value) => ctx.sdk.client.session.update(value),
-      remove: () =>
-        setStore(
-          produce((draft) => {
-            const match = Binary.search(draft.session, session.id, (s) => s.id)
-            if (match.found) draft.session.splice(match.index, 1)
-          }),
-        ),
-      onError: (error) =>
-        showToast({
-          title: language.t("common.requestFailed"),
-          description: errorMessage(error, language.t("common.requestFailed")),
-        }),
     })
   }
 
@@ -505,22 +494,85 @@ export function NewHome() {
 
     pickDirectory({
       server: conn,
-      title: language.t("command.project.open"),
+      title: "Open repository",
       multiple: true,
       onSelect: resolve,
     })
   }
 
   return (
-    <div class="rounded-[18px] shadow-[var(--v2-elevation-raised)] m-2 min-h-0 lg:overflow-hidden bg-v2-background-bg-base self-stretch flex-1">
-      <div class="mx-auto grid h-full w-full max-w-[1120px] grid-rows-[auto_minmax(0,1fr)_auto] gap-4 px-3 lg:grid-cols-[300px_minmax(0,760px)] lg:grid-rows-1 lg:gap-10 lg:px-7">
-        <HomeProjectColumn
+    <div
+      data-vector-home
+      class="rounded-[18px] shadow-[var(--v2-elevation-raised)] m-2 min-h-0 lg:overflow-hidden bg-[var(--vx-stage)] text-white self-stretch flex-1"
+      style={{
+        /* Alias the v2 token fork onto the real --vx-* shell ramp so sticky
+           headers, fades, and layered surfaces never drift from the page
+           background (see vector-premium.css [data-vector-home]). */
+        "--v2-background-bg-base": "var(--vx-stage)",
+        "--v2-background-bg-deep": "var(--vx-canvas)",
+        "--v2-background-bg-layer-01": "var(--vx-sidebar)",
+        "--v2-background-bg-layer-02": "var(--vx-surface)",
+        "--v2-background-bg-layer-03": "var(--vx-surface-raised)",
+        "--v2-background-bg-layer-04": "var(--vx-control-hover)",
+        "--v2-text-text-base": "var(--vx-text)",
+        "--v2-text-text-muted": "var(--vx-text-subtle)",
+        "--v2-text-text-faint": "var(--vx-text-muted)",
+        "--v2-icon-icon-muted": "var(--vx-text-subtle)",
+        "--v2-border-border-base": "var(--vx-line-strong)",
+        "--v2-border-border-muted": "var(--vx-line)",
+        "--v2-overlay-simple-overlay-hover": "rgba(255,255,255,0.06)",
+      }}
+    >
+      <div class="vector-home-dashboard">
+        <header data-vector-home-overview class="vector-home-heading">
+          <div class="vector-home-heading__topline">
+            <div class="vector-home-heading__brand">
+              <img src="/vector-logo.png" alt="" draggable={false} />
+              <span>Vector engineering workspace</span>
+            </div>
+            <div class="vector-home-heading__status" aria-label="Workspace status">
+              <span classList={{ "is-offline": global.servers.health[selection().server]?.healthy === false }} />
+              {global.servers.health[selection().server]?.healthy === false ? "Runtime offline" : "Runtime ready"}
+            </div>
+          </div>
+          <div class="vector-home-heading__main">
+            <div class="vector-home-heading__copy">
+              <span>{selectedProject() ? displayName(selectedProject()!) : "Local-first agentic engineering"}</span>
+              <h1>{selectedProject() ? "Give Vector one concrete outcome." : "Choose a repository. Build from one focused brief."}</h1>
+              <p>
+                {selectedProject()
+                  ? "Vector can plan, edit, run, browse, and verify this repository. You stay in control of the changes."
+                  : "Start with working code or an empty folder. Vector keeps the first step simple, then brings in deeper tools only when the job needs them."}
+              </p>
+            </div>
+            <div class="vector-home-heading__actions">
+              <Show when={newSessionProject()}>
+                <button type="button" data-variant="primary" onClick={openNewSession}>
+                  <IconV2 name="edit" />
+                  Start building
+                </button>
+              </Show>
+              <button
+                type="button"
+                data-variant="secondary"
+                onClick={() => {
+                  const conn = focusedServer() ?? global.servers.list()[0]
+                  if (conn) chooseProject(conn)
+                }}
+              >
+                <IconV2 name="folder-add-left" />
+                Open repository
+              </button>
+            </div>
+          </div>
+        </header>
+
+        <HomeProjectDeck
           projects={projects()}
-          selected={selection()}
-          focusServer={focusServer}
+          selected={selectedProject()}
+          server={focusedServer()}
           selectProject={selectProject}
           openNewSession={openProjectNewSession}
-          chooseProject={(conn) => void chooseProject(conn)}
           editProject={editProject}
           closeProject={(conn, directory) => {
             const next = closeHomeProject(
@@ -531,15 +583,42 @@ export function NewHome() {
             )
             if (next) setSelection(next)
           }}
-          clearNotifications={clearNotifications}
-          unseenCount={unseenCount}
-          language={language}
+          chooseProject={() => {
+            const conn = focusedServer() ?? global.servers.list()[0]
+            if (conn) chooseProject(conn)
+          }}
         />
 
-        <section
-          class="min-h-0 min-w-0 flex-1 flex flex-col pt-6 lg:pt-12 relative"
-          aria-label={language.t("sidebar.project.recentSessions")}
-        >
+        <HomeUsagePulse
+          summary={usageLoad.data}
+          loading={usageLoad.isLoading}
+          failed={usageLoad.isError}
+          onOpenUsage={() => {
+            void import("@/components/settings-v2/dialog-settings-v2").then((module) => {
+              dialog.show(() => <module.DialogSettings section="usage" />)
+            })
+          }}
+        />
+
+        <section class="vector-home-recents" aria-label={language.t("sidebar.project.recentSessions")}>
+          <div class="vector-home-recents__header">
+            <div>
+              <span>Recent work</span>
+              <h2>{selectedProject() ? displayName(selectedProject()!) : "Across your repositories"}</h2>
+            </div>
+            <Show when={newSessionProject()}>
+              <ButtonV2
+                data-action="home-new-session"
+                variant="ghost-muted"
+                size="normal"
+                icon="edit"
+                class="h-8 px-3 [font-weight:530]"
+                onClick={openNewSession}
+              >
+                New session
+              </ButtonV2>
+            </Show>
+          </div>
           <HomeSessionSearch
             value={state.search}
             placeholder={searchPlaceholder()}
@@ -557,84 +636,240 @@ export function NewHome() {
             onClose={closeSearch}
             onSelect={selectSearchSession}
           />
-          <ScrollView
-            class="mt-3 -mr-3 min-h-0 flex-1 relative"
-            viewportRef={sessionHeaderOpacity.setViewport}
-            onScroll={(event) => sessionHeaderOpacity.update(event.currentTarget.scrollTop)}
-          >
-            <Show when={groups().length > 0 && newSessionProject()}>
-              <div class="pointer-events-none absolute top-3 right-3 z-20 flex">
-                <ButtonV2
-                  data-action="home-new-session"
-                  variant="ghost-muted"
-                  size="normal"
-                  icon="edit"
-                  class="pointer-events-auto h-7 px-2 [font-weight:530]"
-                  onClick={openNewSession}
-                >
-                  {language.t("command.session.new")}
-                </ButtonV2>
-              </div>
-            </Show>
+          <div class="vector-home-recents__scroll">
             <Show
               when={!sessionLoad.isLoading}
-              fallback={
-                <div class="pt-3">
-                  <HomeSessionSkeleton label={language.t("common.loading")} />
-                </div>
-              }
+              fallback={<HomeSessionSkeleton label={language.t("common.loading")} />}
             >
               <Show
-                when={groups().length > 0}
+                when={records().length > 0}
                 fallback={
                   <HomeSessionsEmpty
+                    hasKnownProjects={projectDirectories().length > 0}
                     onNewSession={newSessionProject() ? openNewSession : undefined}
-                    onOpenProject={
-                      newSessionProject()
-                        ? undefined
-                        : () => {
-                            const conn = focusedServer() ?? global.servers.list()[0]
-                            if (conn) chooseProject(conn)
-                          }
-                    }
+                    onOpenProject={newSessionProject() ? undefined : () => {
+                      const conn = focusedServer() ?? global.servers.list()[0]
+                      if (conn) chooseProject(conn)
+                    }}
                   />
                 }
               >
-                <div ref={sessionHeaderOpacity.setContentRef} class="flex flex-col pt-3 pr-3 pb-16">
-                  <For each={groups()}>
-                    {(group, index) => (
-                      <>
-                        <HomeSessionGroupHeader
-                          title={group.title}
-                          titleOpacity={sessionHeaderOpacity.titleOpacity(group.id)}
-                          ref={(el) => sessionHeaderOpacity.setHeaderRef(group.id, el)}
-                          elevated={index() === 0}
-                        />
-                        <div
-                          class={`flex min-w-0 flex-col gap-px pt-4 ${index() === groups().length - 1 ? "" : "mb-6"}`}
-                        >
-                          <For each={group.sessions}>
-                            {(record) => (
-                              <HomeSessionRow
-                                record={record}
-                                showProjectName={!selectedProject()}
-                                server={selection().server}
-                                openSession={openSession}
-                                archiveSession={archiveSession}
-                              />
-                            )}
-                          </For>
-                        </div>
-                      </>
+                <div class="vector-home-recents__grid">
+                  <For each={records()}>
+                    {(record) => (
+                      <HomeSessionRow
+                        record={record}
+                        showProjectName={!selectedProject()}
+                        server={selection().server}
+                        openSession={openSession}
+                      />
                     )}
                   </For>
                 </div>
               </Show>
             </Show>
-          </ScrollView>
+          </div>
         </section>
       </div>
+
     </div>
+  )
+}
+
+const homeUsageNumber = new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 })
+
+function homeModelLabel(modelID: string) {
+  return (
+    modelID
+      .split("/")
+      .at(-1)
+      ?.replace(/[-_]+/g, " ")
+      .replace(/\b\w/g, (letter) => letter.toUpperCase()) ?? modelID
+  )
+}
+
+function HomeUsagePulse(props: {
+  summary?: SessionUsageSummary
+  loading: boolean
+  failed: boolean
+  onOpenUsage: () => void
+}) {
+  const usage = createMemo(() => normalizeUsageSummary(props.summary))
+  const week = createMemo(() => usageStreakCalendar(usage()))
+  const favoriteModel = createMemo(() => usage().favoriteModels[0])
+
+  return (
+    <section class="vector-home-usage" aria-label="Your Vector activity">
+      <button type="button" class="vector-home-usage__summary" onClick={props.onOpenUsage}>
+        <span class="vector-home-usage__flame" aria-hidden="true">
+          <svg viewBox="0 0 20 20">
+            <path
+              d="M11.7 2.4c.5 2.7-.8 3.7-2 5.1-.8.9-1.5 1.9-1.3 3.5-1.1-.7-1.7-1.9-1.6-3.3C4.9 9.2 4 11 4.2 13c.3 3 2.7 5 5.8 5s5.7-2.2 5.8-5.5c.1-3.4-2-6.8-4.1-10.1Z"
+              fill="currentColor"
+            />
+          </svg>
+        </span>
+        <span>
+          <strong>{usage().currentStreak}</strong>
+          <small>day streak</small>
+        </span>
+        <IconV2 name="outline-chevron-down" class="-rotate-90" />
+      </button>
+
+      <div class="vector-home-usage__week" aria-label="Activity during the past seven days">
+        <For each={week()}>
+          {(day) => (
+            <span
+              classList={{ active: day.active, today: day.today }}
+              title={`${day.date}: ${day.tokens.toLocaleString()} tokens`}
+            >
+              <i />
+              <small>{day.label.slice(0, 1)}</small>
+            </span>
+          )}
+        </For>
+      </div>
+
+      <div class="vector-home-usage__metric">
+        <strong>{homeUsageNumber.format(usage().lifetimeTokens)}</strong>
+        <span>tokens used</span>
+      </div>
+      <div class="vector-home-usage__metric">
+        <strong>{homeUsageNumber.format(usage().completedChats)}</strong>
+        <span>completed chats</span>
+      </div>
+      <div class="vector-home-usage__metric vector-home-usage__metric--model">
+        <Show
+          when={favoriteModel()}
+          fallback={
+            <>
+              <strong>No model yet</strong>
+              <span>favorite model</span>
+            </>
+          }
+        >
+          {(model) => (
+            <>
+              <strong>{homeModelLabel(model().modelID)}</strong>
+              <span>{model().percentage.toFixed(0)}% of model use</span>
+            </>
+          )}
+        </Show>
+      </div>
+
+      <Show when={props.loading || props.failed}>
+        <span class="vector-home-usage__state">
+          {props.loading ? "Updating activity…" : "Activity reconnecting"}
+        </span>
+      </Show>
+    </section>
+  )
+}
+
+function HomeProjectDeck(props: {
+  projects: LocalProject[]
+  selected?: LocalProject
+  server?: ServerConnection.Any
+  selectProject: (server: ServerConnection.Any, directory: string) => void
+  openNewSession: (server: ServerConnection.Any, directory: string) => void
+  editProject: (server: ServerConnection.Any, project: LocalProject) => void
+  closeProject: (server: ServerConnection.Any, directory: string) => void
+  chooseProject: () => void
+}) {
+  return (
+    <section class="vector-home-project-deck" aria-label="Repositories">
+      <div class="vector-home-project-deck__heading">
+        <div>
+          <span>Repositories</span>
+          <strong>Pick up where you left off</strong>
+        </div>
+        <button type="button" onClick={props.chooseProject}>
+          <IconV2 name="folder-add-left" />
+          Add repository
+        </button>
+      </div>
+      <div class="vector-home-project-deck__rail">
+        <For each={props.projects}>
+          {(project) => (
+            <HomeProjectCard
+              project={project}
+              selected={props.selected?.worktree === project.worktree}
+              server={props.server}
+              selectProject={props.selectProject}
+              openNewSession={props.openNewSession}
+              editProject={props.editProject}
+              closeProject={props.closeProject}
+            />
+          )}
+        </For>
+        <button type="button" class="vector-home-project-card vector-home-project-card--add" onClick={props.chooseProject}>
+          <span>
+            <IconV2 name="folder-add-left" />
+          </span>
+          <strong>Open another repository</strong>
+          <small>Choose a local folder</small>
+        </button>
+      </div>
+    </section>
+  )
+}
+
+function HomeProjectCard(props: {
+  project: LocalProject
+  selected: boolean
+  server?: ServerConnection.Any
+  selectProject: (server: ServerConnection.Any, directory: string) => void
+  openNewSession: (server: ServerConnection.Any, directory: string) => void
+  editProject: (server: ServerConnection.Any, project: LocalProject) => void
+  closeProject: (server: ServerConnection.Any, directory: string) => void
+}) {
+  const [menuOpen, setMenuOpen] = createSignal(false)
+  const path = () => props.project.worktree.replaceAll("\\", "/").split("/").filter(Boolean).slice(-2).join("/")
+  return (
+    <article class="vector-home-project-card" data-selected={props.selected ? "true" : undefined}>
+      <button
+        type="button"
+        class="vector-home-project-card__main"
+        disabled={!props.server}
+        onClick={() => {
+          if (props.server) props.selectProject(props.server, props.project.worktree)
+        }}
+        onDblClick={() => {
+          if (props.server) props.openNewSession(props.server, props.project.worktree)
+        }}
+      >
+        <HomeProjectAvatar project={props.project} />
+        <span>
+          <strong>{displayName(props.project)}</strong>
+          <small>{path()}</small>
+        </span>
+      </button>
+      <Show when={props.server}>
+        {(server) => (
+          <MenuV2 open={menuOpen()} onOpenChange={setMenuOpen} gutter={6} modal={false} placement="bottom-end">
+            <MenuV2.Trigger
+              as={IconButtonV2}
+              variant="ghost-muted"
+              size="small"
+              icon={<IconV2 name="outline-dots" />}
+              aria-label="Repository actions"
+              class="vector-home-project-card__menu"
+            />
+            <MenuV2.Portal>
+              <MenuV2.Content>
+                <MenuV2.Item onSelect={() => props.openNewSession(server(), props.project.worktree)}>
+                  Start new session
+                </MenuV2.Item>
+                <MenuV2.Item onSelect={() => props.editProject(server(), props.project)}>Edit repository</MenuV2.Item>
+                <MenuV2.Separator />
+                <MenuV2.Item onSelect={() => props.closeProject(server(), props.project.worktree)}>Close repository</MenuV2.Item>
+              </MenuV2.Content>
+            </MenuV2.Portal>
+          </MenuV2>
+        )}
+      </Show>
+      <span class="vector-home-project-card__state">{props.selected ? "Active" : "Ready"}</span>
+    </article>
   )
 }
 
@@ -667,12 +902,12 @@ function HomeProjectColumn(props: {
   return (
     <aside
       class="mt-6 flex min-h-0 min-w-0 flex-col gap-4 overflow-hidden lg:mt-14 lg:pt-[52px]"
-      aria-label={props.language.t("home.projects")}
+      aria-label="Repositories"
     >
       <div class="flex h-7 min-w-0 shrink-0 items-center justify-between pl-1.5 pr-3">
-        <div class={HOME_SECTION_LABEL}>{props.language.t("home.projects")}</div>
+        <div class={HOME_SECTION_LABEL}>Repositories</div>
         <Show when={global.servers.list().length === 1}>
-          <TooltipV2 placement="bottom" value={props.language.t("home.project.add")}>
+          <TooltipV2 placement="bottom" value="Open repository">
             <IconButtonV2
               data-action="home-add-project"
               variant="ghost-muted"
@@ -681,7 +916,7 @@ function HomeProjectColumn(props: {
               icon={<IconV2 name="folder-add-left" />}
               disabled={global.servers.health[ServerConnection.key(global.servers.list()[0]!)]?.healthy === false}
               onClick={() => props.chooseProject(global.servers.list()[0]!)}
-              aria-label={props.language.t("home.project.add")}
+              aria-label="Open repository"
             />
           </TooltipV2>
         </Show>
@@ -750,41 +985,40 @@ function HomeServerRow(props: {
   const healthy = () => !!props.health?.healthy
   const canToggle = () => healthy() && global.ensureServerCtx(props.server).projects.list().length > 0
   return (
-    <div class="group/server relative flex h-7 min-w-0 items-center rounded-[6px]">
+    <div class="group/server relative flex h-7 min-w-0 items-center rounded-[10px]">
       <button
         type="button"
-        class={`${HOME_PROJECT_NAV_ROW} pr-16 disabled:opacity-60`}
+        data-action="home-server-collapse"
+        class="absolute left-1 top-1/2 z-10 inline-flex size-5 shrink-0 -translate-y-1/2 items-center justify-center rounded-[4px] text-v2-icon-icon-muted transition-colors duration-150 ease-in-out focus-visible:outline-none"
+        classList={{
+          "hover:bg-v2-overlay-simple-overlay-hover": canToggle(),
+          "cursor-default opacity-40": !canToggle(),
+        }}
+        aria-label={
+          props.collapsed ? props.language.t("home.server.expand") : props.language.t("home.server.collapse")
+        }
+        aria-expanded={canToggle() ? !props.collapsed : undefined}
+        disabled={!canToggle()}
+        onClick={(event) => {
+          event.stopPropagation()
+          props.toggleCollapsed()
+        }}
+        onPointerDown={(event) => event.preventDefault()}
+      >
+        <IconV2
+          name="chevron-down"
+          size="small"
+          class="transition-transform duration-150 ease-in-out"
+          style={{ transform: `rotate(${props.collapsed ? -90 : 0}deg)` }}
+        />
+      </button>
+      <button
+        type="button"
+        class={`${HOME_PROJECT_NAV_ROW} pl-7 pr-16 disabled:opacity-60`}
         data-selected={props.selected ? "" : undefined}
         disabled={!healthy()}
         onClick={() => props.focusServer(props.server)}
       >
-        <span
-          data-action="home-server-collapse"
-          class="inline-flex -ml-0.5 -mr-1.5 size-5 shrink-0 items-center justify-center rounded-[4px] text-v2-icon-icon-muted"
-          classList={{
-            "hover:bg-v2-overlay-simple-overlay-hover": canToggle(),
-            "cursor-default opacity-40": !canToggle(),
-          }}
-          aria-label={
-            props.collapsed ? props.language.t("home.server.expand") : props.language.t("home.server.collapse")
-          }
-          aria-disabled={!canToggle()}
-          aria-expanded={canToggle() ? !props.collapsed : undefined}
-          onClick={(event) => {
-            event.preventDefault()
-            event.stopPropagation()
-            if (!canToggle()) return
-            props.toggleCollapsed()
-          }}
-          onPointerDown={(event) => event.preventDefault()}
-        >
-          <IconV2
-            name="chevron-down"
-            size="small"
-            class="transition-transform duration-150 ease-in-out"
-            style={{ transform: `rotate(${props.collapsed ? -90 : 0}deg)` }}
-          />
-        </span>
         <div class="flex size-4 shrink-0 items-center justify-center -mr-0.5">
           <ServerHealthIndicator health={props.health} />
         </div>
@@ -810,13 +1044,13 @@ function HomeServerRow(props: {
           open={state.menuOpen}
           onOpenChange={(open) => setState("menuOpen", open)}
         />
-        <TooltipV2 class="flex shrink-0 items-center" placement="bottom" value={props.language.t("home.project.add")}>
+        <TooltipV2 class="flex shrink-0 items-center" placement="bottom" value="Open repository">
           <IconButtonV2
             data-action="home-add-project"
             variant="ghost-muted"
             size="small"
             icon={<IconV2 name="folder-add-left" />}
-            aria-label={props.language.t("home.project.add")}
+            aria-label="Open repository"
             disabled={props.health?.healthy === false}
             onClick={() => props.chooseProject(props.server)}
           />
@@ -879,7 +1113,7 @@ function HomeProjectRow(props: {
   const serverUnreachable = () => global.servers.health[ServerConnection.key(props.server)]?.healthy === false
   const [state, setState] = createStore({ menuOpen: false })
   return (
-    <div class="group/project relative flex h-7 min-w-0 items-center rounded-[6px]">
+    <div class="group/project relative flex h-7 min-w-0 items-center rounded-[10px]">
       <button
         type="button"
         data-component="home-project-row"
@@ -917,7 +1151,7 @@ function HomeProjectRow(props: {
                 {props.language.t("command.session.new")}
               </MenuV2.Item>
               <MenuV2.Item onSelect={() => props.editProject(props.server, props.project)}>
-                {props.language.t("dialog.project.edit.title")}
+                Edit repository
               </MenuV2.Item>
               <MenuV2.Item
                 disabled={props.unseenCount === 0}
@@ -1072,7 +1306,7 @@ function HomeSessionSearch(props: {
         <Show when={props.open}>
           <div
             data-component="home-session-search-panel"
-            class="absolute flex flex-col overflow-hidden rounded-[12px] bg-v2-background-bg-base shadow-[var(--v2-elevation-floating)]"
+            class="absolute flex flex-col overflow-hidden rounded-[12px] border border-[var(--vx-line)] bg-v2-background-bg-base shadow-[var(--v2-elevation-floating)]"
             style={{
               top: "-6px",
               left: "-6px",
@@ -1124,7 +1358,7 @@ function HomeSessionSearch(props: {
             </div>
           </div>
         </Show>
-        <label class="relative z-20 flex h-9 w-full items-center gap-2 rounded-[6px] bg-v2-background-bg-layer-02/60 py-1 pl-3 pr-2 text-v2-icon-icon-muted transition-[background-color,box-shadow] duration-[120ms] ease-in-out hover:bg-v2-background-bg-layer-02">
+        <label class="relative z-20 flex h-9 w-full items-center gap-2 rounded-[11px] border border-[var(--vx-line)] bg-[color-mix(in_srgb,var(--vx-surface)_82%,transparent)] py-1 pl-3 pr-2 text-v2-icon-icon-muted transition-[background-color,border-color,box-shadow] duration-200 ease-[cubic-bezier(0.22,0.7,0.28,1)] hover:border-[rgba(178,140,255,0.28)] hover:bg-[color-mix(in_srgb,var(--vx-surface)_94%,transparent)] focus-within:border-[rgba(147,116,236,0.55)] focus-within:shadow-[0_0_0_3px_rgba(147,116,236,0.14)]">
           <IconV2 name="magnifying-glass" />
           <input
             ref={input}
@@ -1172,7 +1406,7 @@ function HomeSessionSearch(props: {
               size="small"
               class="relative z-20 shrink-0"
               icon={<IconV2 name="close" size="large" class="text-v2-icon-icon-muted" />}
-              aria-label={props.placeholder}
+              aria-label={language.t("common.clear")}
               onClick={() => {
                 props.onClose()
                 input?.focus()
@@ -1257,15 +1491,13 @@ function HomeSessionRow(props: {
   showProjectName: boolean
   server: ServerConnection.Key
   openSession: (session: Session) => void
-  archiveSession: (session: Session) => Promise<void>
 }) {
-  const language = useLanguage()
   const title = createMemo(() => sessionTitle(props.record.session.title) || props.record.session.id)
   const showProjectName = () => props.showProjectName && props.record.projectName
 
   return (
     <div
-      class="group/session relative flex h-10 min-w-0 items-center rounded-[6px]"
+      class="group/session relative flex h-10 min-w-0 items-center rounded-[10px]"
       classList={{ group: !!showProjectName() }}
     >
       <button
@@ -1291,45 +1523,30 @@ function HomeSessionRow(props: {
           </span>
         </Show>
       </button>
-      <Show when={SHOW_HOME_SESSION_ARCHIVE}>
-        <div class="hover-reveal absolute right-1.5 top-1/2 flex -translate-y-1/2 items-center gap-1 group-hover/session:opacity-100 focus-within:opacity-100">
-          <TooltipV2 class="flex shrink-0 items-center" placement="bottom" value={language.t("common.archive")}>
-            <IconButtonV2
-              data-action="home-session-archive"
-              variant="ghost-muted"
-              size="large"
-              icon={<IconV2 name="archive" />}
-              aria-label={language.t("common.archive")}
-              onClick={(event) => {
-                event.preventDefault()
-                event.stopPropagation()
-                void props.archiveSession(props.record.session)
-              }}
-            />
-          </TooltipV2>
-        </div>
-      </Show>
     </div>
   )
 }
 
-function HomeSessionsEmpty(props: { onNewSession?: () => void; onOpenProject?: () => void }) {
+function HomeSessionsEmpty(props: { onNewSession?: () => void; onOpenProject?: () => void; hasKnownProjects?: boolean }) {
   const language = useLanguage()
+  const hasKnownProjects = () => props.hasKnownProjects !== false
   return (
     <div class="flex min-h-[320px] flex-col items-center justify-center gap-3 px-6 py-12 text-center">
-      <div class="mb-1 grid size-10 place-items-center rounded-xl bg-v2-background-bg-layer-02 text-v2-icon-icon-muted">
+      <div class="mb-1 grid size-10 place-items-center rounded-xl border border-[var(--vx-line)] bg-[rgba(255,255,255,0.035)] text-v2-icon-icon-muted">
         <IconV2 name="new-session" />
       </div>
       <div class="shrink-0 text-[13px] leading-[13px] tracking-[-0.04px] text-v2-text-text-base [font-weight:530]">
-        {language.t("home.sessions.empty")}
+        {hasKnownProjects() ? language.t("home.sessions.empty") : "Open a repository to load its workspace"}
       </div>
       <p class="mb-1 max-w-[340px] text-center text-[13px] leading-5 tracking-[-0.04px] text-v2-text-text-muted [font-weight:440]">
-        {language.t("home.sessions.empty.description")}
+        {hasKnownProjects()
+          ? language.t("home.sessions.empty.description")
+          : "Vector stores workspace history by repository path. Open a repository on this device to show saved sessions."}
       </p>
       <Show when={props.onNewSession}>
         {(onNewSession) => (
           <ButtonV2 data-action="home-new-session" variant="neutral" size="normal" icon="edit" onClick={onNewSession()}>
-            {language.t("command.session.new")}
+            Open workspace
           </ButtonV2>
         )}
       </Show>
@@ -1342,7 +1559,7 @@ function HomeSessionsEmpty(props: { onNewSession?: () => void; onOpenProject?: (
             icon="folder-add-left"
             onClick={onOpenProject()}
           >
-            {language.t("command.project.open")}
+            Open repository
           </ButtonV2>
         )}
       </Show>
@@ -1357,7 +1574,7 @@ function HomeSessionSkeleton(props: { label: string }) {
         <div class={HOME_SECTION_LABEL}>{props.label}</div>
       </div>
       <div class="flex min-w-0 flex-col gap-px" aria-hidden="true">
-        <For each={[0, 1, 2, 3]}>{() => <div class="h-10 rounded-[6px] bg-v2-background-bg-deep opacity-70" />}</For>
+        <For each={[0, 1, 2, 3]}>{() => <div class="h-10 rounded-[10px] vector-home-skeleton-row" />}</For>
       </div>
     </div>
   )
@@ -1386,135 +1603,4 @@ function groupSessions(records: HomeSessionRecord[], language: ReturnType<typeof
     { id: "yesterday" as const, title: language.t("home.sessions.group.yesterday"), sessions: yesterdaySessions },
     { id: "older" as const, title: olderTitle, sessions: olderSessions },
   ].filter((group) => group.sessions.length > 0)
-}
-
-export function LegacyHome() {
-  const sync = useServerSync()
-  const platform = usePlatform()
-  const pickDirectory = useDirectoryPicker()
-  const dialog = useDialog()
-  const navigate = useNavigate()
-  const global = useGlobal()
-  const server = useServer()
-  const language = useLanguage()
-  const homedir = createMemo(() => sync().data.path.home)
-  const serverUnreachable = createMemo(() => global.servers.health[server.key]?.healthy === false)
-  const recent = createMemo(() => {
-    return sync()
-      .data.project.slice()
-      .sort((a, b) => (b.time.updated ?? b.time.created) - (a.time.updated ?? a.time.created))
-      .slice(0, 5)
-  })
-
-  const serverDotClass = createMemo(() => {
-    const healthy = global.servers.health[server.key]?.healthy
-    if (healthy === true) return "bg-icon-success-base"
-    if (healthy === false) return "bg-icon-critical-base"
-    return "bg-border-weak-base"
-  })
-
-  function openProject(server: ServerConnection.Any, directory: string) {
-    const serverCtx = global.ensureServerCtx(server)
-    serverCtx.projects.open(directory)
-    serverCtx.projects.touch(directory)
-    navigate(`/${base64Encode(directory)}`)
-  }
-
-  function chooseProject() {
-    if (serverUnreachable()) return
-    const s = server.current
-    if (!s) return
-
-    const resolve = (result: string | string[] | null) => {
-      if (Array.isArray(result)) {
-        for (const directory of result) {
-          openProject(s, directory)
-        }
-      } else if (result) {
-        openProject(s, result)
-      }
-    }
-
-    pickDirectory({
-      server: s,
-      title: language.t("command.project.open"),
-      multiple: true,
-      onSelect: resolve,
-    })
-  }
-
-  return (
-    <div class="mx-auto mt-55 w-full md:w-auto px-4">
-      <Logo class="md:w-xl opacity-12" />
-      <Button
-        size="large"
-        variant="ghost"
-        class="mt-4 mx-auto text-14-regular text-text-weak"
-        onClick={() => dialog.show(() => <DialogSelectServer />)}
-      >
-        <div
-          classList={{
-            "size-2 rounded-full": true,
-            [serverDotClass()]: true,
-          }}
-        />
-        {server.name}
-      </Button>
-      <Switch>
-        <Match when={sync().data.project.length > 0}>
-          <div class="mt-20 w-full flex flex-col gap-4">
-            <div class="flex gap-2 items-center justify-between pl-3">
-              <div class="text-14-medium text-text-strong">{language.t("home.recentProjects")}</div>
-              <Button
-                icon="folder-add-left"
-                size="normal"
-                class="pl-2 pr-3"
-                disabled={serverUnreachable()}
-                onClick={chooseProject}
-              >
-                {language.t("command.project.open")}
-              </Button>
-            </div>
-            <ul class="flex flex-col gap-2">
-              <For each={recent()}>
-                {(project) => (
-                  <Button
-                    size="large"
-                    variant="ghost"
-                    class="text-14-mono text-left justify-between px-3"
-                    onClick={() => openProject(server.current!, project.worktree)}
-                  >
-                    {project.worktree.replace(homedir(), "~")}
-                    <div class="text-14-regular text-text-weak">
-                      {DateTime.fromMillis(project.time.updated ?? project.time.created).toRelative()}
-                    </div>
-                  </Button>
-                )}
-              </For>
-            </ul>
-          </div>
-        </Match>
-        <Match when={!sync().ready}>
-          <div class="mt-30 mx-auto flex flex-col items-center gap-3">
-            <div class="text-12-regular text-text-weak">{language.t("common.loading")}</div>
-            <Button class="px-3" disabled={serverUnreachable()} onClick={chooseProject}>
-              {language.t("command.project.open")}
-            </Button>
-          </div>
-        </Match>
-        <Match when={true}>
-          <div class="mt-30 mx-auto flex flex-col items-center gap-3">
-            <Icon name="folder-add-left" size="large" />
-            <div class="flex flex-col gap-1 items-center justify-center">
-              <div class="text-14-medium text-text-strong">{language.t("home.empty.title")}</div>
-              <div class="text-12-regular text-text-weak">{language.t("home.empty.description")}</div>
-            </div>
-            <Button class="px-3 mt-1" disabled={serverUnreachable()} onClick={chooseProject}>
-              {language.t("command.project.open")}
-            </Button>
-          </div>
-        </Match>
-      </Switch>
-    </div>
-  )
 }

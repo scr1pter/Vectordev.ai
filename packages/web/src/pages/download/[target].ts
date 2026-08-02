@@ -1,12 +1,24 @@
 import type { APIRoute } from "astro"
 
-const baseUrl = import.meta.env.PUBLIC_DOWNLOAD_BASE_URL || "https://junpwyqhgawhfrnjoeyy.supabase.co/storage/v1/object/public/vector-downloads"
-
 const files: Record<string, string> = {
-  "mac-arm64": "vector-desktop-mac-arm64.dmg",
-  "mac-x64": "vector-desktop-mac-x64.dmg",
-  windows: "vector-desktop-win-x64.exe",
-  linux: "vector-desktop-linux-x86_64.AppImage",
+  mac: "https://42qryducihx01gl0.public.blob.vercel-storage.com/releases/vector-downloads/vector-desktop-mac-arm64.dmg",
+  "mac-arm64":
+    "https://42qryducihx01gl0.public.blob.vercel-storage.com/releases/vector-downloads/vector-desktop-mac-arm64.dmg",
+  "mac-x64":
+    "https://42qryducihx01gl0.public.blob.vercel-storage.com/releases/vector-downloads/vector-desktop-mac-x64.dmg",
+  windows:
+    "https://42qryducihx01gl0.public.blob.vercel-storage.com/releases/vector-downloads/vector-desktop-win-x64.exe",
+  "windows-x64":
+    "https://42qryducihx01gl0.public.blob.vercel-storage.com/releases/vector-downloads/vector-desktop-win-x64.exe",
+  "windows-arm64":
+    "https://42qryducihx01gl0.public.blob.vercel-storage.com/releases/vector-downloads/vector-desktop-win-arm64.exe",
+  linux:
+    "https://42qryducihx01gl0.public.blob.vercel-storage.com/releases/vector-downloads/vector-desktop-linux-x86_64.AppImage",
+  "linux-x64":
+    "https://42qryducihx01gl0.public.blob.vercel-storage.com/releases/vector-downloads/vector-desktop-linux-x86_64.AppImage",
+  "linux-arm64":
+    "https://42qryducihx01gl0.public.blob.vercel-storage.com/releases/vector-downloads/vector-desktop-linux-arm64.AppImage",
+  checksums: "https://42qryducihx01gl0.public.blob.vercel-storage.com/releases/vector-downloads/checksums.txt",
 }
 
 export const GET: APIRoute = ({ params }) => {
@@ -15,5 +27,5 @@ export const GET: APIRoute = ({ params }) => {
     return new Response("Download not found", { status: 404 })
   }
 
-  return Response.redirect(`${baseUrl}/${file}`, 302)
+  return Response.redirect(file, 302)
 }

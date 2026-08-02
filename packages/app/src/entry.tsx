@@ -54,7 +54,7 @@ const setStorage = (key: string, value: string | null) => {
 const readDefaultServerUrl = () => getStorage(DEFAULT_SERVER_URL_KEY)
 const writeDefaultServerUrl = (url: string | null) => setStorage(DEFAULT_SERVER_URL_KEY, url)
 
-const notify: Platform["notify"] = async (title, description, href) => {
+const notify: Platform["notify"] = async (title, description, href, options) => {
   if (!("Notification" in window)) return
 
   const permission =
@@ -65,11 +65,11 @@ const notify: Platform["notify"] = async (title, description, href) => {
   if (permission !== "granted") return
 
   const inView = document.visibilityState === "visible" && document.hasFocus()
-  if (inView) return
+  if (inView && !options?.force) return
 
   const notification = new Notification(title, {
     body: description ?? "",
-    icon: "https://vectordev.ai/favicon-96x96-v3.png",
+    icon: "https://vectordev.ai/favicon-96x96-desktop-v4.png?v=desktop-20260712",
   })
 
   notification.onclick = () => {

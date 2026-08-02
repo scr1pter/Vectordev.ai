@@ -13,8 +13,11 @@ import { useLanguage } from "@/context/language"
 import { getProjectAvatarSource } from "@/pages/layout/helpers"
 import { ServerConnection } from "@/context/server"
 import { useGlobal } from "@/context/global"
+import { showToast } from "@/utils/toast"
 
 const AVATAR_COLOR_KEYS = ["pink", "mint", "orange", "purple", "cyan", "lime"] as const
+const MAX_ICON_UPLOAD_BYTES = 8 * 1024 * 1024
+const MAX_ICON_DIMENSION = 256
 
 export function DialogEditProject(props: { project: LocalProject; server: ServerConnection.Any }) {
   const dialog = useDialog()
@@ -39,11 +42,53 @@ export function DialogEditProject(props: { project: LocalProject; server: Server
   let iconInput: HTMLInputElement | undefined
 
   function handleFileSelect(file: File) {
-    if (!file.type.startsWith("image/")) return
+    if (!file.type.startsWith("image/")) {
+      showToast({
+        variant: "error",
+        title: language.t("common.requestFailed"),
+        description: language.t("dialog.project.edit.icon.error.type"),
+      })
+      return
+    }
+    if (file.size > MAX_ICON_UPLOAD_BYTES) {
+      showToast({
+        variant: "error",
+        title: language.t("common.requestFailed"),
+        description: language.t("dialog.project.edit.icon.error.size"),
+      })
+      return
+    }
     const reader = new FileReader()
     reader.onload = (e) => {
-      setStore("iconOverride", e.target?.result as string)
-      setStore("iconHover", false)
+      const raw = e.target?.result
+      if (typeof raw !== "string") return
+      const img = new Image()
+      img.onload = () => {
+        // Downscale on a canvas so a multi-megabyte photo doesn't get stored
+        // as a giant data URL and mirrored into the sync store on every load.
+        const scale = Math.min(1, MAX_ICON_DIMENSION / Math.max(img.naturalWidth, img.naturalHeight))
+        const width = Math.max(1, Math.round(img.naturalWidth * scale))
+        const height = Math.max(1, Math.round(img.naturalHeight * scale))
+        const canvas = document.createElement("canvas")
+        canvas.width = width
+        canvas.height = height
+        const ctx = canvas.getContext("2d")
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, width, height)
+          setStore("iconOverride", canvas.toDataURL("image/png"))
+        } else {
+          setStore("iconOverride", raw)
+        }
+        setStore("iconHover", false)
+      }
+      img.onerror = () => {
+        showToast({
+          variant: "error",
+          title: language.t("common.requestFailed"),
+          description: language.t("dialog.project.edit.icon.error.type"),
+        })
+      }
+      img.src = raw
     }
     reader.readAsDataURL(file)
   }
@@ -78,6 +123,11 @@ export function DialogEditProject(props: { project: LocalProject; server: Server
     mutationFn: async () => {
       const name = store.name.trim() === folderName() ? "" : store.name.trim()
       const start = store.startup.trim()
+      const metadata = {
+        name,
+        icon: { color: store.color || undefined, override: store.iconOverride || undefined },
+        commands: { start: start || undefined },
+      }
 
       if (props.project.id && props.project.id !== "global") {
         await serverSDK().client.project.update({
@@ -87,18 +137,23 @@ export function DialogEditProject(props: { project: LocalProject; server: Server
           icon: { color: store.color || "", override: store.iconOverride || "" },
           commands: { start },
         })
+        // Keep the local project list in sync while the server event catches up.
+        // The sidebar and home screen are derived from this per-workspace metadata.
+        serverSync().project.meta(props.project.worktree, metadata)
         serverSync().project.icon(props.project.worktree, store.iconOverride || undefined)
         dialog.close()
         return
       }
 
-      serverSync().project.meta(props.project.worktree, {
-        name,
-        icon: { color: store.color || undefined, override: store.iconOverride || undefined },
-        commands: { start: start || undefined },
-      })
+      serverSync().project.meta(props.project.worktree, metadata)
       dialog.close()
     },
+    onError: (error) =>
+      showToast({
+        variant: "error",
+        title: language.t("common.requestFailed"),
+        description: error instanceof Error ? error.message : String(error),
+      }),
   }))
 
   function handleSubmit(e: SubmitEvent) {
@@ -128,11 +183,13 @@ export function DialogEditProject(props: { project: LocalProject; server: Server
                 onMouseEnter={() => setStore("iconHover", true)}
                 onMouseLeave={() => setStore("iconHover", false)}
               >
-                <div
-                  class="relative size-16 rounded-md transition-colors cursor-pointer"
+                <button
+                  type="button"
+                  aria-label={language.t("dialog.project.edit.icon.upload")}
+                  class="relative size-16 rounded-md border border-dashed transition-colors duration-200 ease-[cubic-bezier(0.22,0.7,0.28,1)] cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[rgba(147,116,236,0.55)]"
                   classList={{
-                    "border-text-interactive-base bg-surface-info-base/20": store.dragOver,
-                    "border-border-base hover:border-border-strong": !store.dragOver,
+                    "border-[rgba(147,116,236,0.55)] bg-[rgba(147,116,236,0.1)]": store.dragOver,
+                    "border-[rgba(178,140,255,0.16)] hover:border-[rgba(178,140,255,0.35)]": !store.dragOver,
                     "overflow-hidden": !!store.iconOverride,
                   }}
                   onDrop={handleDrop}
@@ -170,7 +227,7 @@ export function DialogEditProject(props: { project: LocalProject; server: Server
                       />
                     )}
                   </Show>
-                </div>
+                </button>
                 <div
                   class="absolute inset-0 size-16 bg-surface-raised-stronger-non-alpha/90 rounded-[6px] z-10 pointer-events-none flex items-center justify-center transition-opacity"
                   classList={{
@@ -203,6 +260,15 @@ export function DialogEditProject(props: { project: LocalProject; server: Server
               <div class="flex flex-col gap-1.5 text-12-regular text-text-weak self-center">
                 <span>{language.t("dialog.project.edit.icon.hint")}</span>
                 <span>{language.t("dialog.project.edit.icon.recommended")}</span>
+                <Show when={store.iconOverride}>
+                  <button
+                    type="button"
+                    class="w-fit text-left text-12-medium text-[rgba(201,176,255,0.9)] transition-colors duration-200 ease-[cubic-bezier(0.22,0.7,0.28,1)] hover:text-text-base"
+                    onClick={clearIcon}
+                  >
+                    {language.t("dialog.project.edit.icon.remove")}
+                  </button>
+                </Show>
               </div>
             </div>
           </div>
@@ -218,10 +284,11 @@ export function DialogEditProject(props: { project: LocalProject; server: Server
                       aria-label={language.t("dialog.project.edit.color.select", { color })}
                       aria-pressed={store.color === color}
                       classList={{
-                        "flex items-center justify-center size-10 p-0.5 rounded-lg overflow-hidden transition-colors cursor-default": true,
-                        "bg-transparent border-2 border-icon-strong-base hover:bg-surface-base-hover":
+                        "flex items-center justify-center size-10 p-0.5 rounded-lg overflow-hidden transition-[box-shadow,border-color] duration-200 ease-[cubic-bezier(0.22,0.7,0.28,1)] cursor-pointer":
+                          true,
+                        "bg-transparent border border-[rgba(147,116,236,0.55)] shadow-[0_0_0_2px_rgba(147,116,236,0.5)]":
                           store.color === color,
-                        "bg-transparent border border-transparent hover:bg-surface-base-hover hover:border-border-weak-base":
+                        "bg-transparent border border-transparent hover:border-[rgba(178,140,255,0.35)]":
                           store.color !== color,
                       }}
                       onClick={() => {
@@ -249,7 +316,7 @@ export function DialogEditProject(props: { project: LocalProject; server: Server
             value={store.startup}
             onChange={(v) => setStore("startup", v)}
             spellcheck={false}
-            class="max-h-14 w-full overflow-y-auto font-mono text-xs"
+            class="min-h-[96px] max-h-[200px] w-full overflow-y-auto font-mono text-[13px]"
           />
         </div>
 

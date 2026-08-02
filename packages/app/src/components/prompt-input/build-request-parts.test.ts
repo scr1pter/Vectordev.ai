@@ -393,4 +393,24 @@ describe("buildRequestParts", () => {
       expect(filePart.url).toContain("/..")
     }
   })
+
+  test("adds hidden task intelligence without changing visible prompt text", () => {
+    const result = buildRequestParts({
+      prompt: [{ type: "text", content: "Fix the login", start: 0, end: 13 }],
+      context: [],
+      images: [],
+      text: "Fix the login",
+      syntheticText: ["<vector_task_intelligence>Inspect auth.ts first.</vector_task_intelligence>"],
+      messageID: "msg_intelligence",
+      sessionID: "ses_intelligence",
+      sessionDirectory: "/repo",
+    })
+
+    expect(result.requestParts[0]).toMatchObject({ type: "text", text: "Fix the login" })
+    expect(result.requestParts[1]).toMatchObject({
+      type: "text",
+      synthetic: true,
+      text: "<vector_task_intelligence>Inspect auth.ts first.</vector_task_intelligence>",
+    })
+  })
 })

@@ -12,6 +12,7 @@ import { DialogConnectProvider } from "../dialog-connect-provider"
 import { DialogSelectProvider } from "../dialog-select-provider"
 import { DialogCustomProvider } from "../dialog-custom-provider"
 import { SettingsListV2 } from "./parts/list"
+import { brandProviderDescription, brandProviderName } from "@/utils/provider-brand"
 import "./settings-v2.css"
 
 type ProviderSource = "env" | "api" | "config" | "custom"
@@ -33,18 +34,9 @@ const HIDDEN_PROVIDER_IDS = new Set<string>()
 
 const isOpenCodeProvider = (id: string) => OPENCODE_PROVIDER_IDS.has(id)
 
-const providerDisplayName = (id: string, name: string) => {
-  if (id === "opencode") return name || "OpenCode"
-  if (id === "opencode-go") return name || "OpenCode Go"
-  if (id === "opencode-zen") return name || "OpenCode Zen"
-  return name
-}
+const providerDisplayName = (id: string, name: string) => brandProviderName(id, name)
 
-const vectorProviderDescription = (id: string) => {
-  if (id === "opencode") return "Free starter models provided by OpenCode and available inside Vector."
-  if (id === "opencode-go") return "OpenCode Go models are provided by OpenCode and can be used inside Vector."
-  if (id === "opencode-zen") return "OpenCode Zen models are provided by OpenCode and can be used inside Vector."
-}
+const vectorProviderDescription = (id: string) => brandProviderDescription(id)
 
 export const SettingsProvidersV2: Component = () => {
   const dialog = useDialog()
@@ -155,7 +147,9 @@ export const SettingsProvidersV2: Component = () => {
   return (
     <>
       <div class="settings-v2-tab-header">
+        <p class="settings-v2-page-kicker">Models &amp; keys</p>
         <h2 class="settings-v2-tab-title">{language.t("settings.providers.title")}</h2>
+        <p class="settings-v2-page-subtitle">Connect providers and manage the credentials available to this workspace.</p>
       </div>
 
       <div class="settings-v2-tab-body settings-v2-providers">
@@ -209,7 +203,7 @@ export const SettingsProvidersV2: Component = () => {
         </div>
 
         <div class="settings-v2-section">
-          <h3 class="settings-v2-section-title">Models provided by Vector:</h3>
+          <h3 class="settings-v2-section-title">{language.t("settings.providers.section.popular")}</h3>
           <SettingsListV2>
             <For each={popular()}>
               {(item) => (

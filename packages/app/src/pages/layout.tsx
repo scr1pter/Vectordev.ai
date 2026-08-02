@@ -29,7 +29,7 @@ import { getFilename } from "@opencode-ai/core/util/path"
 import { Session } from "@opencode-ai/sdk/v2/client"
 import { usePlatform } from "@/context/platform"
 import { useSettings } from "@/context/settings"
-import { createStore, produce, reconcile } from "solid-js/store"
+import { createStore, produce } from "solid-js/store"
 import { DragDropProvider, DragDropSensors, DragOverlay, SortableProvider, closestCenter } from "@thisbeyond/solid-dnd"
 import type { DragEvent } from "@thisbeyond/solid-dnd"
 import { useProviders } from "@/hooks/use-providers"
@@ -41,7 +41,6 @@ import { pickSessionCacheEvictions } from "@/context/global-sync/session-cache"
 import { useNotification } from "@/context/notification"
 import { usePermission } from "@/context/permission"
 import { Binary } from "@opencode-ai/core/util/binary"
-import { retry } from "@opencode-ai/core/util/retry"
 import { playSoundById } from "@/utils/sound"
 import { createAim } from "@/utils/aim"
 import { setNavigate } from "@/utils/notification-click"
@@ -970,17 +969,6 @@ export default function LegacyLayout(props: ParentProps) {
         category: language.t("command.category.session"),
         keybind: "shift+alt+arrowdown",
         onSelect: () => navigateSessionByUnseen(1),
-      },
-      {
-        id: "session.archive",
-        title: language.t("command.session.archive"),
-        category: language.t("command.category.session"),
-        keybind: "mod+shift+backspace",
-        disabled: !params.dir || !params.id,
-        onSelect: () => {
-          const session = currentSessions().find((s) => s.id === params.id)
-          if (session) void archiveSession(session)
-        },
       },
       {
         id: "workspace.new",
@@ -2301,11 +2289,6 @@ export default function LegacyLayout(props: ParentProps) {
               </div>
             </Show>
 
-            <div
-              class="hidden xl:block pointer-events-none absolute top-0 right-0 z-0 border-t border-border-weaker-base"
-              style={{ left: "calc(4rem + 12px)" }}
-            />
-
             <div class="xl:hidden">
               <div
                 classList={{
@@ -2345,7 +2328,7 @@ export default function LegacyLayout(props: ParentProps) {
             >
               <main
                 classList={{
-                  "size-full overflow-x-hidden flex flex-col items-start contain-strict border-t border-border-weak-base bg-background-base xl:border-l xl:rounded-tl-[12px]": true,
+                  "size-full overflow-x-hidden flex flex-col items-start contain-strict bg-background-base xl:border-l xl:rounded-tl-[12px]": true,
                 }}
               >
                 <Show when={!autoselecting.loading} fallback={<div class="size-full" />}>

@@ -1,0 +1,23 @@
+/* Browser Agent workspace — small entrance treatment for the glass popovers
+   (settings panel, model listbox). Mirrors onboarding's vtour-card: a short
+   fade + upward slide, honoring reduced motion. */
+@keyframes vx-ba-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.vx-ba-popover {
+  animation: vx-ba-pop-in 200ms cubic-bezier(0.22, 0.7, 0.28, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vx-ba-popover {
+    animation: none;
+  }
+}

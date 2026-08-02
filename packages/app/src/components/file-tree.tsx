@@ -27,6 +27,12 @@ export function pathToFileUrl(filepath: string): string {
 
 export type Kind = "add" | "del" | "mix"
 
+export type FileTreeMarker = {
+  id: string
+  color: string
+  label: string
+}
+
 export type Filter = {
   files: Set<string>
   dirs: Set<string>
@@ -118,6 +124,7 @@ const FileTreeNode = (
       draggable: boolean
       kinds?: ReadonlyMap<string, Kind>
       marks?: Set<string>
+      markers?: ReadonlyMap<string, readonly FileTreeMarker[]>
       as?: "div" | "button"
     },
 ) => {
@@ -129,6 +136,7 @@ const FileTreeNode = (
     "draggable",
     "kinds",
     "marks",
+    "markers",
     "as",
     "children",
     "class",
@@ -174,6 +182,31 @@ const FileTreeNode = (
       >
         {local.node.name}
       </span>
+      <Show when={local.markers?.get(local.node.path)?.length}>
+        <span
+          class="flex shrink-0 items-center -space-x-0.5 pr-0.5"
+          title={local.markers
+            ?.get(local.node.path)
+            ?.map((marker) => marker.label)
+            .join(", ")}
+          aria-label={local.markers
+            ?.get(local.node.path)
+            ?.map((marker) => marker.label)
+            .join(", ")}
+        >
+          <For each={local.markers?.get(local.node.path)?.slice(0, 4)}>
+            {(marker) => (
+              <span
+                class="size-2 rounded-full border border-[#191919] shadow-[0_0_7px_currentColor]"
+                style={{ color: marker.color, "background-color": marker.color }}
+              />
+            )}
+          </For>
+          <Show when={(local.markers?.get(local.node.path)?.length ?? 0) > 4}>
+            <span class="pl-1 text-[8px] text-[#8c8795]">+{(local.markers?.get(local.node.path)?.length ?? 0) - 4}</span>
+          </Show>
+        </span>
+      </Show>
       {(() => {
         const value = kind()
         if (!value) return null
@@ -199,6 +232,7 @@ export default function FileTree(props: {
   allowed?: readonly string[]
   modified?: readonly string[]
   kinds?: ReadonlyMap<string, Kind>
+  markers?: ReadonlyMap<string, readonly FileTreeMarker[]>
   draggable?: boolean
   onFileClick?: (file: FileNode) => void
 
@@ -412,6 +446,7 @@ export default function FileTree(props: {
                       draggable={draggable()}
                       kinds={kinds()}
                       marks={marks()}
+                      markers={props.markers}
                     >
                       <div class="size-4 flex items-center justify-center text-icon-weak">
                         <Icon name={expanded() ? "chevron-down" : "chevron-right"} size="small" />
@@ -437,6 +472,7 @@ export default function FileTree(props: {
                         allowed={props.allowed}
                         modified={props.modified}
                         kinds={props.kinds}
+                        markers={props.markers}
                         active={props.active}
                         draggable={props.draggable}
                         onFileClick={props.onFileClick}
@@ -459,6 +495,7 @@ export default function FileTree(props: {
                   draggable={draggable()}
                   kinds={kinds()}
                   marks={marks()}
+                  markers={props.markers}
                   as="button"
                   type="button"
                   onClick={() => props.onFileClick?.(node)}

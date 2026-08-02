@@ -1,7 +1,7 @@
-import { describe, expect } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { Effect } from "effect"
-import { Auth } from "../../src/auth"
+import { Auth, AuthStorage } from "../../src/auth"
 import { testEffect } from "../lib/effect"
 
 const it = testEffect(LayerNode.compile(Auth.node))
@@ -72,4 +72,25 @@ describe("Auth", () => {
       expect(after["anthropic"]).toBeUndefined()
     }),
   )
+
+  test("encrypts provider credentials with Vector's vault key", () => {
+    const key = Buffer.alloc(32, 7)
+    const encoded = AuthStorage.encode(
+      {
+        "encrypted-provider": {
+          type: "api",
+          key: "provider-secret-value",
+        },
+      },
+      key,
+    )
+    expect(encoded).not.toContain("provider-secret-value")
+    expect(JSON.parse(encoded).ciphertext).toBeString()
+    expect(AuthStorage.decode(encoded, key)).toEqual({
+      "encrypted-provider": {
+        type: "api",
+        key: "provider-secret-value",
+      },
+    })
+  })
 })

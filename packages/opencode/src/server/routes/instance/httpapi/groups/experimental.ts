@@ -97,6 +97,7 @@ export const ExperimentalPaths = {
   worktree: "/experimental/worktree",
   worktreeReset: "/experimental/worktree/reset",
   session: "/experimental/session",
+  sessionUsage: "/experimental/session/usage",
   sessionBackground: "/experimental/session/:sessionID/background",
   resource: "/experimental/resource",
 } as const
@@ -112,7 +113,7 @@ export const ExperimentalApi = HttpApi.make("experimental")
           OpenApi.annotations({
             identifier: "experimental.capabilities.get",
             summary: "Get experimental capabilities",
-            description: "Get experimental features enabled on the OpenCode server.",
+            description: "Get experimental features enabled on the Vector engine.",
           }),
         ),
         HttpApiEndpoint.get("console", ExperimentalPaths.console, {
@@ -229,7 +230,17 @@ export const ExperimentalApi = HttpApi.make("experimental")
             identifier: "experimental.session.list",
             summary: "List sessions",
             description:
-              "Get a list of all OpenCode sessions across projects, sorted by most recently updated. Archived sessions are excluded by default.",
+              "Get a list of all Vector sessions across projects, sorted by most recently updated. Archived sessions are excluded by default.",
+          }),
+        ),
+        HttpApiEndpoint.get("sessionUsage", ExperimentalPaths.sessionUsage, {
+          query: WorkspaceRoutingQuery,
+          success: described(Session.UsageSummary, "Local token usage and activity streaks"),
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "experimental.session.usage",
+            summary: "Get local token usage",
+            description: "Aggregate locally persisted model usage into daily token totals and activity streaks.",
           }),
         ),
         HttpApiEndpoint.post("sessionBackground", ExperimentalPaths.sessionBackground, {

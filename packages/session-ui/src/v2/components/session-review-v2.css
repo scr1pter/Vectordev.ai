@@ -59,21 +59,38 @@
 
 [data-component="session-review-v2-sidebar-root"] [data-slot="session-review-v2-sidebar-header"] {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 6px 8px;
   padding: 12px 16px 8px 8px;
   flex-shrink: 0;
 }
 
 [data-component="session-review-v2-sidebar-root"] [data-slot="session-review-v2-sidebar-title"] {
   display: flex;
+  flex: 1 1 100%;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   min-width: 0;
   font-size: 13px;
   font-weight: 500;
   color: var(--text-strong, var(--v2-text-text-base));
+}
+
+[data-component="session-review-v2-sidebar-root"]
+  [data-slot="session-review-v2-sidebar-header"]
+  > [data-component="diff-changes"] {
+  flex: none;
+  margin-inline-start: auto;
+  padding-inline: 4px;
+}
+
+[data-component="session-review-v2-sidebar-root"] .session-review-commit-main {
+  flex: none;
+  max-width: 100%;
+  white-space: nowrap;
 }
 
 [data-component="session-review-v2-sidebar-root"]

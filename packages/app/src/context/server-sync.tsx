@@ -1,5 +1,7 @@
 import type {
   Config,
+  McpLocalConfig,
+  McpRemoteConfig,
   McpResource,
   OpencodeClient,
   Path,
@@ -493,6 +495,25 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
     project: projectApi,
     session,
     mcp: {
+      add: async (directory: string, name: string, config: McpLocalConfig | McpRemoteConfig) => {
+        const key = directoryKey(directory)
+        const sdk = sdkFor(key)
+        await sdk.mcp.add({ name, config })
+        await queryClient.refetchQueries(queryOptionsApi.mcp(key))
+        await queryClient.refetchQueries(queryOptionsApi.mcpResources(key))
+        await sdk.mcp.connect({ name }).catch(() => undefined)
+        await queryClient.refetchQueries(queryOptionsApi.mcp(key))
+        await queryClient.refetchQueries(queryOptionsApi.mcpResources(key))
+        // Return the post-connect status so callers can tell whether the server actually
+        // came up — connect() can fail (bad command, missing npx/Chrome, timeout) and we
+        // must not report success for a server that never started.
+        return children.child(key, { bootstrap: false })[0].mcp[name]
+      },
+      refresh: async (directory: string) => {
+        const key = directoryKey(directory)
+        await queryClient.refetchQueries(queryOptionsApi.mcp(key))
+        await queryClient.refetchQueries(queryOptionsApi.mcpResources(key))
+      },
       toggle: async (directory: string, name: string) => {
         const key = directoryKey(directory)
         const sdk = sdkFor(key)

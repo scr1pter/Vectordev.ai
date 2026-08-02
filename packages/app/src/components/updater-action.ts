@@ -1,5 +1,5 @@
 import { createMemo } from "solid-js"
-import type { UpdaterState } from "@/updater"
+import type { UpdaterPlatform, UpdaterState } from "@/updater"
 import { usePlatform } from "@/context/platform"
 import { useLanguage } from "@/context/language"
 import { showToast } from "@/utils/toast"
@@ -20,6 +20,19 @@ export function updaterAction(state: UpdaterState | undefined) {
     default:
       return { label: "settings.updates.action.checkNow" as const, run: "check" as const }
   }
+}
+
+export async function updateVectorToLatest(updater: UpdaterPlatform | undefined) {
+  if (!updater) return { status: "disabled" } as const
+
+  let state = updater.state()
+  if (["checking", "downloading", "installing", "disabled"].includes(state.status)) return state
+
+  if (state.status !== "ready") state = await updater.check()
+  if (state.status !== "ready") return state
+
+  await updater.install()
+  return updater.state()
 }
 
 export function useUpdaterAction() {
@@ -45,6 +58,27 @@ export function useUpdaterAction() {
       }
       if (state?.status === "error") {
         showToast({ title: language.t("common.requestFailed"), description: state.message })
+      }
+    },
+    async updateLatest() {
+      try {
+        const state = await updateVectorToLatest(platform.updater)
+        if (state.status === "up-to-date") {
+          showToast({
+            variant: "success",
+            icon: "circle-check",
+            title: language.t("settings.updates.toast.latest.title"),
+            description: language.t("settings.updates.toast.latest.description", { version: platform.version ?? "" }),
+          })
+        }
+        if (state.status === "error") {
+          showToast({ title: language.t("common.requestFailed"), description: state.message })
+        }
+      } catch (error) {
+        showToast({
+          title: language.t("common.requestFailed"),
+          description: error instanceof Error ? error.message : String(error),
+        })
       }
     },
   }

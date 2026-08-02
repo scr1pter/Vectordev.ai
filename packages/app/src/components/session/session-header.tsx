@@ -229,6 +229,10 @@ export function SessionHeader() {
   const tint = createMemo(() =>
     messageAgentColor(params.id ? sync().data.message[params.id] : undefined, sync().data.agent),
   )
+  const session = createMemo(() => (params.id ? sync().session.get(params.id) : undefined))
+  const branch = createMemo(() => sync().data.vcs?.branch || "main")
+  const changedFiles = createMemo(() => (params.id ? (sync().data.session_diff[params.id]?.length ?? 0) : 0))
+  const working = createMemo(() => (params.id ? sync().data.session_working(params.id) : false))
   const selectApp = (app: OpenApp) => {
     if (!options().some((item) => item.id === app)) return
     setPrefs("app", app)
@@ -275,6 +279,79 @@ export function SessionHeader() {
 
   return (
     <>
+      <Show when={isV2()}>
+        <header data-vector-session-header>
+          <div data-vector-session-identity>
+            <span data-vector-session-branch-icon aria-hidden="true">
+              <svg viewBox="0 0 16 16">
+                <path
+                  d="M4.1 2.3v6.1a2.7 2.7 0 0 0 2.7 2.7h2.45M4.1 2.3a1.1 1.1 0 1 0 0 2.2 1.1 1.1 0 0 0 0-2.2Zm7.8 8.8a1.1 1.1 0 1 0 0 2.2 1.1 1.1 0 0 0 0-2.2Zm0 0V5.85A2.7 2.7 0 0 0 9.2 3.15H7.45"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.15"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </span>
+            <span data-vector-session-title>{session()?.title || (params.id ? "Untitled project" : "New project")}</span>
+            <span data-vector-session-path>{name()}</span>
+          </div>
+
+          <div data-vector-session-controls>
+            <span data-vector-session-branch>{branch()}</span>
+            <span
+              data-vector-session-status
+              data-status={working() ? "working" : "ready"}
+            >
+              <span aria-hidden="true" />
+              {working() ? "Agent working" : "Ready"}
+            </span>
+            <Show when={status()}>
+              <Tooltip placement="bottom" value={language.t("status.popover.trigger")}>
+                <StatusPopover />
+              </Tooltip>
+            </Show>
+            <TooltipKeybind
+              title={language.t("command.review.toggle")}
+              keybind={command.keybind("review.toggle")}
+            >
+              <button
+                type="button"
+                data-vector-session-tool
+                data-active={view().reviewPanel.opened() ? "true" : "false"}
+                onClick={() => view().reviewPanel.toggle()}
+                aria-label={language.t("command.review.toggle")}
+                aria-expanded={view().reviewPanel.opened()}
+                aria-controls="review-panel"
+              >
+                <Icon size="small" name={view().reviewPanel.opened() ? "review-active" : "review"} />
+                <span>Changes</span>
+                <Show when={changedFiles() > 0}>
+                  <span data-vector-session-count>{changedFiles()}</span>
+                </Show>
+              </button>
+            </TooltipKeybind>
+            <TooltipKeybind
+              title={language.t("command.terminal.toggle")}
+              keybind={command.keybind("terminal.toggle")}
+            >
+              <button
+                type="button"
+                data-vector-session-tool
+                data-active={view().terminal.opened() ? "true" : "false"}
+                onClick={toggleTerminal}
+                aria-label={language.t("command.terminal.toggle")}
+                aria-expanded={view().terminal.opened()}
+                aria-controls="terminal-panel"
+              >
+                <Icon size="small" name={view().terminal.opened() ? "terminal-active" : "terminal"} />
+                <span>Terminal</span>
+              </button>
+            </TooltipKeybind>
+          </div>
+        </header>
+      </Show>
       <Show when={!isV2() && search() && centerMount()}>
         {(mount) => (
           <Portal mount={mount()}>

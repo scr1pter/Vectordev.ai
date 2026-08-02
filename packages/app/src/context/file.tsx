@@ -24,7 +24,7 @@ import {
 import { createFileViewCache } from "./file/view-cache"
 import { useServerSDK } from "./server-sdk"
 import { SessionRouteKey, SessionStateKey } from "@/utils/server-scope"
-import { createFileTreeStore } from "./file/tree-store"
+import { createFileTreeStore, isTransientFileListError } from "./file/tree-store"
 import { invalidateFromWatcher } from "./file/watcher"
 import {
   selectionFromLines,
@@ -51,6 +51,9 @@ function errorMessage(error: unknown, fallback: string) {
   if (typeof error === "string" && error) return error
   return fallback
 }
+
+const recentFileListErrors = new Map<string, number>()
+const FILE_LIST_ERROR_COOLDOWN_MS = 10_000
 
 export const { use: useFile, provider: FileProvider } = createSimpleContext({
   name: "File",
@@ -84,6 +87,11 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
           .client.file.list({ path: dir })
           .then((x) => x.data ?? []),
       onError: (message) => {
+        if (isTransientFileListError(message)) return
+        const key = `${scope()}\n${message}`
+        const now = Date.now()
+        if (now - (recentFileListErrors.get(key) ?? 0) < FILE_LIST_ERROR_COOLDOWN_MS) return
+        recentFileListErrors.set(key, now)
         showToast({
           variant: "error",
           title: language.t("toast.file.listFailed.title"),

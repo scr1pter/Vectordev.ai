@@ -1,0 +1,471 @@
+---
+import { ArrowDownToLine, ArrowUpRight, BookOpen, GitCommitHorizontal, Tag } from "lucide-react"
+import MarketingFooter from "../components/marketing/MarketingFooter.astro"
+import MarketingLayout from "../components/marketing/MarketingLayout.astro"
+import MarketingNav from "../components/marketing/MarketingNav.astro"
+import { release117, releaseSeries, type VectorRelease } from "../data/vector-releases"
+
+export const prerender = true
+
+type ReleasePost = VectorRelease & {
+  line: string
+  latest?: boolean
+}
+
+const posts: ReleasePost[] = [
+  ...[...release117].reverse().map((release, index) => ({
+    ...release,
+    line: "Vector 1.17",
+    latest: index === 0,
+  })),
+  ...[...releaseSeries]
+    .filter((release) => release.version !== "1.17")
+    .reverse()
+    .map((release) => ({
+      ...release,
+      line: "Release series",
+    })),
+]
+
+const latest = posts[0]
+const latestAnchor = `#release-${latest.version.replaceAll(".", "-")}`
+---
+
+<MarketingLayout
+  title="Vector Releases"
+  description="Follow Vector's complete release history, from the desktop foundation through the latest agent, browser, editor, cloud, and workspace improvements."
+>
+  <div class="releases-page">
+    <MarketingNav active="releases" />
+
+    <main>
+      <header class="release-hero">
+        <div class="hero-copy">
+          <p class="eyebrow"><GitCommitHorizontal size={14} strokeWidth={1.8} /> Vector releases</p>
+          <h1>Every version.<br />One evolving workspace.</h1>
+          <p>
+            Follow Vector from its desktop foundation to the current unified engineering workspace.
+            Each post records a concrete product step, with the interface that work belongs to.
+          </p>
+          <div class="hero-actions">
+            <a class="primary-action" href="/download">
+              <ArrowDownToLine size={16} strokeWidth={1.8} /> Download latest
+            </a>
+            <a class="secondary-action" href="/docs">
+              <BookOpen size={16} strokeWidth={1.8} /> Read the docs
+            </a>
+          </div>
+        </div>
+
+        <aside class="latest-note" aria-label="Latest release">
+          <span>Latest release</span>
+          <strong>Vector {latest.version}</strong>
+          <p>{latest.title}</p>
+          <a href={latestAnchor}>Read release notes <ArrowUpRight size={14} strokeWidth={1.8} /></a>
+        </aside>
+      </header>
+
+      <section class="release-feed" aria-labelledby="release-feed-title">
+        <div class="feed-heading">
+          <div>
+            <p class="eyebrow">Version history</p>
+            <h2 id="release-feed-title">Release notes</h2>
+          </div>
+          <p>{posts.length} releases documented</p>
+        </div>
+
+        <div class="timeline">
+          {posts.map((release) => (
+            <article
+              class:list={["release-post", { latest: release.latest }]}
+              id={`release-${release.version.replaceAll(".", "-")}`}
+            >
+              <div class="timeline-rail" aria-hidden="true">
+                <span></span>
+              </div>
+
+              <div class="release-card">
+                <div class="release-meta">
+                  <span class="version-tag"><Tag size={12} strokeWidth={1.8} /> v{release.version}</span>
+                  <span>{release.line}</span>
+                  {release.latest && <strong>Latest</strong>}
+                </div>
+                <h3>{release.title}</h3>
+                <p>{release.summary}</p>
+                <div class="release-links">
+                  <a href="/download">Download Vector <ArrowUpRight size={13} strokeWidth={1.8} /></a>
+                  <a href="/docs">Documentation <ArrowUpRight size={13} strokeWidth={1.8} /></a>
+                </div>
+              </div>
+            </article>
+          ))}
+        </div>
+      </section>
+    </main>
+
+    <MarketingFooter />
+  </div>
+</MarketingLayout>
+
+<style>
+  .releases-page {
+    min-height: 100vh;
+    overflow: hidden;
+    background:
+      linear-gradient(rgba(170, 140, 255, 0.045) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(170, 140, 255, 0.045) 1px, transparent 1px),
+      var(--page);
+    background-size: 56px 56px;
+  }
+
+  main {
+    width: min(1120px, calc(100% - 48px));
+    margin: 0 auto;
+  }
+
+  .release-hero {
+    min-height: 470px;
+    padding: 98px 0 82px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 290px;
+    align-items: end;
+    gap: 80px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .eyebrow {
+    margin: 0 0 20px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--accent-strong);
+    font-size: 11px;
+    font-weight: 620;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  h1,
+  h2,
+  h3,
+  p {
+    letter-spacing: 0;
+  }
+
+  h1 {
+    max-width: 760px;
+    margin: 0;
+    color: var(--ink);
+    font-size: clamp(50px, 7.4vw, 88px);
+    font-weight: 540;
+    line-height: 0.98;
+  }
+
+  .hero-copy > p:not(.eyebrow) {
+    max-width: 680px;
+    margin: 30px 0 0;
+    color: var(--muted-strong);
+    font-size: 17px;
+    line-height: 1.72;
+  }
+
+  .hero-actions {
+    margin-top: 34px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .hero-actions a {
+    min-height: 42px;
+    padding: 0 17px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    border: 1px solid var(--line-strong);
+    border-radius: 6px;
+    color: var(--ink);
+    font-size: 12px;
+    font-weight: 590;
+    text-decoration: none;
+    transition: background 180ms ease, border-color 180ms ease, color 180ms ease;
+  }
+
+  .hero-actions .primary-action {
+    color: #151119;
+    background: #eee9f5;
+    border-color: #eee9f5;
+  }
+
+  .hero-actions .primary-action:hover {
+    background: var(--accent-strong);
+    border-color: var(--accent-strong);
+  }
+
+  .hero-actions .secondary-action:hover {
+    background: var(--surface-soft);
+    border-color: var(--accent);
+  }
+
+  .latest-note {
+    padding: 24px;
+    background: rgba(17, 16, 20, 0.88);
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    box-shadow: 0 24px 70px rgba(0, 0, 0, 0.28);
+  }
+
+  .latest-note > span {
+    color: var(--success);
+    font-size: 10px;
+    font-weight: 650;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  .latest-note strong {
+    margin-top: 15px;
+    display: block;
+    color: var(--ink);
+    font-size: 19px;
+    font-weight: 580;
+  }
+
+  .latest-note p {
+    margin: 4px 0 18px;
+    color: var(--muted);
+    font-size: 13px;
+  }
+
+  .latest-note a,
+  .release-links a {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    color: var(--accent-strong);
+    font-size: 11px;
+    font-weight: 560;
+    text-decoration: none;
+  }
+
+  .latest-note a:hover,
+  .release-links a:hover {
+    color: var(--ink);
+  }
+
+  .release-feed {
+    padding: 94px 0 120px;
+  }
+
+  .feed-heading {
+    margin-bottom: 48px;
+    display: flex;
+    align-items: end;
+    justify-content: space-between;
+    gap: 24px;
+  }
+
+  .feed-heading .eyebrow {
+    margin-bottom: 10px;
+  }
+
+  .feed-heading h2 {
+    margin: 0;
+    color: var(--ink);
+    font-size: clamp(32px, 4.5vw, 52px);
+    font-weight: 540;
+    line-height: 1.05;
+  }
+
+  .feed-heading > p {
+    margin: 0 0 5px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .timeline {
+    position: relative;
+  }
+
+  .timeline::before {
+    content: "";
+    position: absolute;
+    top: 15px;
+    bottom: 15px;
+    left: 15px;
+    width: 1px;
+    background: var(--line);
+  }
+
+  .release-post {
+    position: relative;
+    padding: 0 0 26px 50px;
+  }
+
+  .timeline-rail {
+    position: absolute;
+    top: 28px;
+    left: 10px;
+    width: 11px;
+    height: 11px;
+    display: grid;
+    place-items: center;
+    background: var(--page);
+    border: 1px solid var(--line-strong);
+    border-radius: 50%;
+  }
+
+  .timeline-rail span {
+    width: 3px;
+    height: 3px;
+    background: var(--muted);
+    border-radius: 50%;
+  }
+
+  .release-post.latest .timeline-rail {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 5px rgba(170, 140, 255, 0.08);
+  }
+
+  .release-post.latest .timeline-rail span {
+    background: var(--accent-strong);
+  }
+
+  .release-card {
+    min-height: 188px;
+    padding: 28px 30px;
+    display: flex;
+    flex-direction: column;
+    background: rgba(17, 16, 20, 0.88);
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    transition: border-color 180ms ease, transform 180ms ease, background 180ms ease;
+  }
+
+  .release-card:hover {
+    transform: translateY(-2px);
+    background: rgba(24, 21, 31, 0.93);
+    border-color: var(--line-strong);
+  }
+
+  .release-post.latest .release-card {
+    border-color: rgba(170, 140, 255, 0.42);
+    box-shadow: 0 26px 80px rgba(61, 37, 103, 0.16);
+  }
+
+  .release-meta {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 9px;
+    color: var(--muted);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  .version-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    color: var(--accent-strong);
+  }
+
+  .release-meta strong {
+    padding: 3px 7px;
+    color: #b8f0d1;
+    background: rgba(51, 142, 94, 0.14);
+    border: 1px solid rgba(97, 201, 150, 0.24);
+    border-radius: 4px;
+    font-size: 9px;
+    font-weight: 650;
+  }
+
+  .release-card h3 {
+    margin: 17px 0 8px;
+    color: var(--ink);
+    font-size: 22px;
+    font-weight: 560;
+    line-height: 1.2;
+  }
+
+  .release-card > p {
+    max-width: 650px;
+    margin: 0;
+    color: var(--muted-strong);
+    font-size: 13px;
+    line-height: 1.68;
+  }
+
+  .release-links {
+    margin-top: auto;
+    padding-top: 24px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 18px;
+  }
+
+  @media (max-width: 780px) {
+    main {
+      width: min(100% - 28px, 1120px);
+    }
+
+    .release-hero {
+      min-height: auto;
+      padding: 68px 0 60px;
+      grid-template-columns: 1fr;
+      gap: 44px;
+    }
+
+    h1 {
+      font-size: clamp(43px, 14vw, 70px);
+    }
+
+    .hero-copy > p:not(.eyebrow) {
+      font-size: 15px;
+    }
+
+    .latest-note {
+      max-width: 100%;
+    }
+
+    .release-feed {
+      padding: 70px 0 90px;
+    }
+
+    .feed-heading {
+      align-items: start;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .timeline::before {
+      left: 7px;
+    }
+
+    .release-post {
+      padding: 0 0 22px 27px;
+    }
+
+    .timeline-rail {
+      left: 2px;
+    }
+
+    .release-card {
+      padding: 24px 22px;
+    }
+  }
+
+  @media (max-width: 420px) {
+    .hero-actions a {
+      width: 100%;
+      justify-content: center;
+    }
+
+    .release-links {
+      align-items: flex-start;
+      flex-direction: column;
+      gap: 10px;
+    }
+  }
+</style>

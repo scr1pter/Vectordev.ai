@@ -12,8 +12,6 @@ const {
   },
 } = Astro.locals.starlightRoute;
 const isDocs = base === "" ? true : slug === base || slug.startsWith(`${base}/`)
-const t = Astro.locals.t as (key: string) => string
-const titleSuffix = t("app.head.titleSuffix")
 const shareSlug = base === "" ? "s" : `${base}/s`
 const isShare = slug === shareSlug || slug.startsWith(`${shareSlug}/`)
 const isHome = slug === "" || slug === base
@@ -42,13 +40,20 @@ if (isDocs) {
 }
 ---
 
-{ isHome && (
-<title>{title} | {titleSuffix}</title>
-)}
-
 <Default {...Astro.props}><slot /></Default>
 
-{ !isShare && (
+{ isHome && (
+  <>
+    <meta name="application-name" content="Vector" />
+    <meta name="apple-mobile-web-app-title" content="Vector" />
+    <meta name="theme-color" content="#1d1d1f" />
+    <meta property="og:site_name" content="Vector" />
+    <meta property="og:image" content={`${config.url}/vector-logo.png`} />
+    <meta property="twitter:image" content={`${config.url}/vector-logo.png`} />
+  </>
+)}
+
+{ !isShare && !isHome && (
   <meta property="og:image" content={ogImage} />
   <meta property="twitter:image" content={ogImage} />
 )}

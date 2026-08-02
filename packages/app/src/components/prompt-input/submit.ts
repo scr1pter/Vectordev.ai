@@ -17,10 +17,17 @@ import { useSync, type DirectorySync } from "@/context/sync"
 import { Identifier } from "@/utils/id"
 import { Worktree as WorktreeState } from "@/utils/worktree"
 import { buildRequestParts } from "./build-request-parts"
+import { emitDatabaseIntent } from "@/features/cloud/db-intent"
 import { setCursorPosition } from "./editor-dom"
 import { formatServerError } from "@/utils/server-errors"
 import { ScopedKey } from "@/utils/server-scope"
 import { createPromptSubmissionState } from "./submission-state"
+import {
+  classifyTaskDifficulty,
+  routeModelForTask,
+  routeVariantForTask,
+  type TaskDifficulty,
+} from "@/utils/task-intelligence"
 
 type PendingPrompt = {
   abort: AbortController
@@ -28,6 +35,19 @@ type PendingPrompt = {
 }
 
 const pending = new Map<string, PendingPrompt>()
+
+export function resolveSubmissionAgent(input: {
+  planMode: boolean
+  current: string
+  available: Array<{ name: string; mode: string; hidden?: boolean }>
+}) {
+  if (input.planMode) return "plan"
+  if (input.current !== "plan") return input.current
+
+  return (
+    input.available.find((item) => item.name !== "plan" && item.mode !== "subagent" && !item.hidden)?.name ?? "build"
+  )
+}
 
 export type FollowupDraft = {
   sessionID: string
@@ -37,6 +57,8 @@ export type FollowupDraft = {
   agent: string
   model: { providerID: string; modelID: string }
   variant?: string
+  difficulty?: TaskDifficulty
+  executionMode?: "normal" | "fast"
 }
 
 type FollowupSendInput = {
@@ -56,6 +78,8 @@ const draftImages = (prompt: Prompt) => prompt.filter((part): part is ImageAttac
 export async function sendFollowupDraft(input: FollowupSendInput) {
   const text = draftText(input.draft.prompt)
   const images = draftImages(input.draft.prompt)
+  const difficulty = input.draft.difficulty ?? classifyTaskDifficulty(text)
+  const agent = difficulty === "trivial" && input.draft.agent !== "plan" ? "quick" : input.draft.agent
   const setBusy = () => {
     if (!input.optimisticBusy) return
     input.serverSync.session.set("session_status", input.draft.sessionID, { type: "busy" })
@@ -89,6 +113,7 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
         agent: input.draft.agent,
         model: `${input.draft.model.providerID}/${input.draft.model.modelID}`,
         variant: input.draft.variant,
+        executionMode: input.draft.executionMode,
         parts: images.map((attachment) => ({
           id: Identifier.ascending("part"),
           type: "file" as const,
@@ -105,7 +130,7 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
   }
 
   const messageID = input.messageID ?? Identifier.ascending("message")
-  const { requestParts, optimisticParts } = buildRequestParts({
+  const baseParts = buildRequestParts({
     prompt: input.draft.prompt,
     context: input.draft.context,
     images,
@@ -120,8 +145,9 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
     sessionID: input.draft.sessionID,
     role: "user",
     time: { created: Date.now() },
-    agent: input.draft.agent,
+    agent,
     model: { ...input.draft.model, variant: input.draft.variant },
+    executionMode: input.draft.executionMode,
   }
 
   const add = () =>
@@ -129,7 +155,7 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
       directory: input.draft.sessionDirectory,
       sessionID: input.draft.sessionID,
       message,
-      parts: optimisticParts,
+      parts: baseParts.optimisticParts,
     })
 
   const remove = () =>
@@ -153,13 +179,31 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
       return false
     }
 
+    const preparation =
+      difficulty === "trivial"
+        ? undefined
+        : await globalThis.window?.api?.prepareAgentTask?.(input.draft.sessionDirectory, text).catch(() => undefined)
+    const requestParts = preparation?.instruction
+      ? buildRequestParts({
+          prompt: input.draft.prompt,
+          context: input.draft.context,
+          images,
+          text,
+          sessionID: input.draft.sessionID,
+          messageID,
+          sessionDirectory: input.draft.sessionDirectory,
+          syntheticText: [preparation.instruction],
+        }).requestParts
+      : baseParts.requestParts
+
     await input.client.session.promptAsync({
       sessionID: input.draft.sessionID,
-      agent: input.draft.agent,
+      agent,
       model: input.draft.model,
       messageID,
       parts: requestParts,
       variant: input.draft.variant,
+      executionMode: input.draft.executionMode,
     })
     return true
   } catch (err) {
@@ -189,9 +233,10 @@ type PromptSubmitInput = {
   newSessionWorktree?: Accessor<string | undefined>
   onNewSessionWorktreeReset?: () => void
   shouldQueue?: Accessor<boolean>
-  onQueue?: (draft: FollowupDraft) => void
+  onQueue?: (draft: FollowupDraft) => boolean | void
   onAbort?: () => void
   onSubmit?: () => void
+  executionMode?: Accessor<"normal" | "quick" | "fast">
 }
 
 export function createPromptSubmit(input: PromptSubmitInput) {
@@ -217,6 +262,26 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     }
     if (err instanceof Error) return err.message
     return language.t("common.requestFailed")
+  }
+
+  const workspaceAvailable = async () => {
+    if (!params.id) return true
+    return sdk()
+      .client.file.list({ path: "." })
+      .then(() => true)
+      .catch((err) => {
+        showToast({
+          title: "Project folder unavailable",
+          description: formatServerError(
+            err,
+            language.t,
+            "Reopen the project from its existing folder.",
+          ),
+          variant: "error",
+          duration: 10_000,
+        })
+        return false
+      })
   }
 
   const abort = async () => {
@@ -295,6 +360,8 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     const images = input.imageAttachments().slice()
     const isPlanMode = planMode.enabled()
     const mode = isPlanMode ? "normal" : input.mode()
+    const requestedExecutionMode = input.executionMode?.() ?? "normal"
+    const executionMode = requestedExecutionMode === "fast" ? "fast" : "normal"
 
     if (text.trim().length === 0 && images.length === 0 && input.commentCount() === 0) {
       if (input.working()) void abort()
@@ -303,7 +370,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
 
     const currentModel = local.model.current()
     const currentAgent = local.agent.current()
-    const variant = local.model.variant.current()
+    const selectedVariant = local.model.variant.current()
     if (!currentModel || !currentAgent) {
       showToast({
         title: language.t("prompt.toast.modelAgentRequired.title"),
@@ -312,10 +379,19 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       return
     }
 
+    if (!(await workspaceAvailable())) return
+
     input.addToHistory(currentPrompt, mode)
     input.resetHistoryNavigation()
 
     const projectDirectory = sdk().directory
+
+    // Connected loop: if this task is really about auth / accounts / data, let
+    // the shell offer a one-click "Set up database" (Supabase) for the project.
+    // Proposal only — nothing is provisioned until the user confirms in Cloud.
+    if (mode === "normal" && !text.trim().startsWith("/")) {
+      emitDatabaseIntent(text, projectDirectory)
+    }
     const isNewSession = !params.id
     const shouldAutoAccept = !isPlanMode && isNewSession && input.autoAccept()
     const worktreeSelection = input.newSessionWorktree?.() || "main"
@@ -394,11 +470,38 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       return
     }
 
+    const difficulty =
+      mode === "normal" && !text.trim().startsWith("/") ? classifyTaskDifficulty(text) : ("standard" as const)
+    const routed = routeModelForTask({
+      difficulty,
+      current: currentModel,
+      available: typeof local.model.list === "function" ? local.model.list() : [currentModel],
+    })
+    const variant = routeVariantForTask({
+      difficulty,
+      selected: selectedVariant,
+      variants: Object.keys(routed.model.variants ?? {}),
+    })
     const model = {
-      modelID: currentModel.id,
-      providerID: currentModel.provider.id,
+      modelID: routed.model.id,
+      providerID: routed.model.provider.id,
     }
-    const agent = isPlanMode ? "plan" : currentAgent.name
+    // A session can remember the hidden `plan` agent after Plan Mode is turned
+    // off. Never carry that read-only agent into an ordinary build submission.
+    const resolvedAgent = resolveSubmissionAgent({
+      planMode: isPlanMode,
+      current: currentAgent.name,
+      available: local.agent.list(),
+    })
+    const agent =
+      !isPlanMode && (requestedExecutionMode === "quick" || difficulty === "trivial") ? "quick" : resolvedAgent
+    if (routed.routed) {
+      showToast({
+        title: "Vector routed a complex task",
+        description: `Using ${routed.model.name} for stronger planning and implementation.`,
+        duration: 5_000,
+      })
+    }
     const draft: FollowupDraft = {
       sessionID: session.id,
       sessionDirectory,
@@ -407,6 +510,8 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       agent,
       model,
       variant,
+      difficulty,
+      executionMode,
     }
 
     const clearInput = () => {
@@ -433,7 +538,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     }
 
     if (!isPlanMode && !isNewSession && mode === "normal" && input.shouldQueue?.()) {
-      input.onQueue?.(draft)
+      if (input.onQueue?.(draft) === false) return
       clearContext(submission.target())
       clearInput()
       return
@@ -474,6 +579,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
             agent,
             model: `${model.providerID}/${model.modelID}`,
             variant,
+            executionMode,
             parts: images.map((attachment) => ({
               id: Identifier.ascending("part"),
               type: "file" as const,

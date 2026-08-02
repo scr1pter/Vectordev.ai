@@ -11,8 +11,14 @@ import { ProviderTransform } from "@/provider/transform"
 
 import PROMPT_GENERATE from "./generate.txt"
 import PROMPT_COMPACTION from "./prompt/compaction.txt"
+import PROMPT_DEBUG from "./prompt/debug.txt"
 import PROMPT_EXPLORE from "./prompt/explore.txt"
+import PROMPT_MIGRATION from "./prompt/migration.txt"
+import PROMPT_PERFORMANCE from "./prompt/performance.txt"
+import PROMPT_REVIEW from "./prompt/review.txt"
+import PROMPT_SECURITY from "./prompt/security.txt"
 import PROMPT_SUMMARY from "./prompt/summary.txt"
+import PROMPT_TEST from "./prompt/test.txt"
 import PROMPT_TITLE from "./prompt/title.txt"
 import { Permission } from "@/permission"
 import { mergeDeep, pipe, sortBy, values } from "remeda"
@@ -119,6 +125,9 @@ const layer = Layer.effect(
         const defaults = Permission.fromConfig({
           "*": "allow",
           doom_loop: "ask",
+          browser_external: "ask",
+          browser_interact: "ask",
+          browser_sensitive: "ask",
           external_directory: {
             "*": "ask",
             ...Object.fromEntries(whitelistedDirs.map((dir) => [dir, "allow"])),
@@ -164,6 +173,10 @@ const layer = Layer.effect(
                 plan_exit: "allow",
                 task: {
                   general: "deny",
+                  debug: "deny",
+                  migration: "deny",
+                  performance: "deny",
+                  test: "deny",
                 },
                 external_directory: {
                   [path.join(Global.Path.data, "plans", "*")]: "allow",
@@ -178,6 +191,17 @@ const layer = Layer.effect(
             ),
             mode: "primary",
             native: true,
+          },
+          quick: {
+            name: "quick",
+            description: "A lightweight conversational lane for greetings and acknowledgements that does not load engineering tools.",
+            prompt:
+              "Respond briefly and naturally. This lane is only for conversation, greetings, acknowledgements, and other requests that require no project inspection or tool use. Identify yourself as Vector when relevant.",
+            options: {},
+            permission: Permission.merge(defaults, user, Permission.fromConfig({ "*": "deny" })),
+            mode: "primary",
+            native: true,
+            hidden: true,
           },
           general: {
             name: "general",
@@ -212,6 +236,118 @@ const layer = Layer.effect(
             ),
             description: `Fast agent specialized for exploring codebases. Use this when you need to quickly find files by patterns (eg. "src/components/**/*.tsx"), search code for keywords (eg. "API endpoints"), or answer questions about the codebase (eg. "how do API endpoints work?"). When calling this agent, specify the desired thoroughness level: "quick" for basic searches, "medium" for moderate exploration, or "very thorough" for comprehensive analysis across multiple locations and naming conventions.`,
             prompt: PROMPT_EXPLORE,
+            options: {},
+            mode: "subagent",
+            native: true,
+          },
+          review: {
+            name: "review",
+            permission: Permission.merge(
+              defaults,
+              Permission.fromConfig({
+                "*": "deny",
+                grep: "allow",
+                glob: "allow",
+                list: "allow",
+                bash: "allow",
+                webfetch: "allow",
+                websearch: "allow",
+                read: "allow",
+                external_directory: readonlyExternalDirectory,
+              }),
+              user,
+            ),
+            description:
+              "Read-only senior code reviewer. Use this to inspect a diff or implementation for correctness, regressions, missing tests, maintainability, and security issues without changing files.",
+            prompt: PROMPT_REVIEW,
+            options: {},
+            mode: "subagent",
+            native: true,
+          },
+          debug: {
+            name: "debug",
+            permission: Permission.merge(
+              defaults,
+              Permission.fromConfig({
+                todowrite: "deny",
+              }),
+              user,
+            ),
+            description:
+              "Debugging specialist that reproduces failures, isolates root causes, applies focused repairs, and verifies the fix with targeted checks.",
+            prompt: PROMPT_DEBUG,
+            options: {},
+            mode: "subagent",
+            native: true,
+          },
+          test: {
+            name: "test",
+            permission: Permission.merge(
+              defaults,
+              Permission.fromConfig({
+                todowrite: "deny",
+              }),
+              user,
+            ),
+            description:
+              "Testing specialist that designs focused coverage, writes or repairs tests, runs the relevant suite, and reports failures with actionable evidence.",
+            prompt: PROMPT_TEST,
+            options: {},
+            mode: "subagent",
+            native: true,
+          },
+          security: {
+            name: "security",
+            permission: Permission.merge(
+              defaults,
+              Permission.fromConfig({
+                "*": "deny",
+                grep: "allow",
+                glob: "allow",
+                list: "allow",
+                bash: "allow",
+                webfetch: "allow",
+                websearch: "allow",
+                read: "allow",
+                external_directory: readonlyExternalDirectory,
+              }),
+              user,
+            ),
+            description:
+              "Read-only application security reviewer for trust boundaries, authentication, authorization, secrets, injection risks, unsafe data flow, and dependency exposure.",
+            prompt: PROMPT_SECURITY,
+            options: {},
+            mode: "subagent",
+            native: true,
+          },
+          performance: {
+            name: "performance",
+            permission: Permission.merge(
+              defaults,
+              Permission.fromConfig({
+                todowrite: "deny",
+              }),
+              user,
+            ),
+            description:
+              "Performance specialist for profiling slow runtime paths, builds, bundles, queries, and rendering. Measures a baseline, applies focused optimizations, and verifies the improvement.",
+            prompt: PROMPT_PERFORMANCE,
+            options: {},
+            mode: "subagent",
+            native: true,
+          },
+          migration: {
+            name: "migration",
+            permission: Permission.merge(
+              defaults,
+              Permission.fromConfig({
+                todowrite: "deny",
+              }),
+              user,
+            ),
+            description:
+              "Migration specialist for framework, dependency, API, database schema, and configuration upgrades. Plans compatibility boundaries, makes staged changes, and validates rollback safety.",
+            prompt: PROMPT_MIGRATION,
             options: {},
             mode: "subagent",
             native: true,

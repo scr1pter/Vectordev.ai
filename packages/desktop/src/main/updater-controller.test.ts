@@ -76,14 +76,14 @@ describe("updater controller", () => {
     expect(app.calls).toEqual(["check", "download"])
   })
 
-  test("returns to ready when quitAndInstall returns without exiting", async () => {
+  test("stays installing after handing the update to the platform installer", async () => {
     const app = setup()
     await app.controller.start()
 
     await app.controller.install()
 
     expect(app.calls).toEqual(["check", "download", "stop", "install"])
-    expect(app.controller.getState()).toEqual({ status: "ready", version: "2.0.0" })
+    expect(app.controller.getState()).toEqual({ status: "installing", version: "2.0.0" })
   })
 
   test("returns to ready when installation cannot start", async () => {

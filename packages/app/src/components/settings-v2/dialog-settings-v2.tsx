@@ -2,15 +2,15 @@ import { Component, For } from "solid-js"
 import { Dialog } from "@opencode-ai/ui/v2/dialog-v2"
 import { TabsV2 } from "@opencode-ai/ui/v2/tabs-v2"
 import { Icon, type IconProps } from "@opencode-ai/ui/icon"
-import { useLanguage } from "@/context/language"
 import { usePlatform } from "@/context/platform"
 import { SettingsGeneralV2, type SettingsSection } from "./general"
 import { SettingsProvidersV2 } from "./providers"
 import { SettingsModelsV2 } from "./models"
 import { SettingsServersV2 } from "./servers"
+import { SettingsUsageV2 } from "./usage"
 import "./settings-v2.css"
 
-type SettingsTab = SettingsSection | "providers" | "models" | "servers"
+type SettingsTab = SettingsSection | "providers" | "models" | "servers" | "usage"
 
 const groups: {
   title: string
@@ -20,9 +20,8 @@ const groups: {
     title: "General",
     items: [
       { value: "general", label: "General", icon: "sliders" },
+      { value: "usage", label: "Usage & streak", icon: "status" },
       { value: "appearance", label: "Appearance", icon: "photo" },
-      { value: "profile", label: "Profile", icon: "prompt" },
-      { value: "personalization", label: "Instructions", icon: "brain" },
     ],
   },
   {
@@ -35,7 +34,6 @@ const groups: {
   {
     title: "Workspace",
     items: [
-      { value: "shortcuts", label: "Shortcuts", icon: "keyboard" },
       { value: "editor", label: "Editor", icon: "code" },
       { value: "chat", label: "Chat", icon: "bubble-5" },
     ],
@@ -46,7 +44,6 @@ const groups: {
       { value: "servers", label: "Servers", icon: "server" },
       { value: "notifications", label: "Notifications", icon: "status" },
       { value: "accessibility", label: "Accessibility", icon: "glasses" },
-      { value: "about", label: "About Vector", icon: "help" },
     ],
   },
 ]
@@ -55,10 +52,10 @@ export const DialogSettings: Component<{
   sessionID?: string
   section?: SettingsTab
 }> = (props) => {
-  const language = useLanguage()
   const platform = usePlatform()
 
   const panel = (item: SettingsTab) => {
+    if (item === "usage") return <SettingsUsageV2 />
     if (item === "providers") return <SettingsProvidersV2 />
     if (item === "models") return <SettingsModelsV2 />
     if (item === "servers") return <SettingsServersV2 />
@@ -97,8 +94,8 @@ export const DialogSettings: Component<{
               </For>
             </div>
             <div class="settings-v2-nav-footer">
-              <span>{language.t("app.name.desktop")}</span>
-              <span>Build {platform.version}</span>
+              <span>Vector</span>
+              <span>Build {platform.version || "Development"}</span>
             </div>
           </div>
         </TabsV2.List>

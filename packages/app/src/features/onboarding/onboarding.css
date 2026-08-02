@@ -1,0 +1,675 @@
+/* Onboarding — the landing page's design language inside the shell.
+   Mature black (#1d1d1f), glass instead of boxes, one gradient accent,
+   purple hues drifting as a constant ambient animation, and a subtle
+   pointer glow that brightens wherever the mouse is. */
+
+.vtour,
+.vprogress {
+  --vx-ink: #f4f0ff;
+  --vx-muted: #a89ec0;
+  --vx-line: rgba(178, 140, 255, 0.16);
+  --vx-glass: rgba(255, 255, 255, 0.035);
+  --vx-purple: #7c5ce6;
+  --vx-purple-soft: #aa91f3;
+  --vx-ease: cubic-bezier(0.22, 0.7, 0.28, 1);
+  --vx-gradient-text: linear-gradient(100deg, #6548c9 0%, #7555da 36%, #8c6de8 68%, #aa91f3 100%);
+
+  color: var(--vx-ink);
+  font-family: ui-sans-serif, system-ui, -apple-system, "SF Pro Display", "Segoe UI", Inter, sans-serif;
+}
+
+/* ---------- ambient sky: aurora + stars + pointer glow ---------- */
+
+.vx-sky {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.vx-sky-aurora {
+  position: absolute;
+  inset: -22% -12%;
+  background:
+    radial-gradient(38rem 24rem at 20% 10%, rgba(143, 82, 255, 0.22), transparent 70%),
+    radial-gradient(30rem 22rem at 82% 6%, rgba(88, 44, 176, 0.26), transparent 70%),
+    radial-gradient(34rem 26rem at 8% 78%, rgba(120, 64, 220, 0.16), transparent 70%),
+    radial-gradient(44rem 30rem at 60% 96%, rgba(143, 82, 255, 0.14), transparent 70%);
+  animation:
+    vx-sky-drift 26s var(--vx-ease) infinite alternate,
+    vx-sky-breathe 9s ease-in-out infinite alternate;
+  will-change: transform, opacity;
+}
+
+@keyframes vx-sky-drift {
+  from { transform: translate3d(-1.5%, -1%, 0) scale(1); }
+  to { transform: translate3d(1.5%, 2%, 0) scale(1.06); }
+}
+
+@keyframes vx-sky-breathe {
+  from { opacity: 0.72; }
+  to { opacity: 1; }
+}
+
+.vx-sky-stars {
+  position: absolute;
+  inset: 0;
+  background-image:
+    radial-gradient(1.5px 1.5px at 12% 22%, rgba(255, 255, 255, 0.5), transparent 100%),
+    radial-gradient(1px 1px at 34% 64%, rgba(255, 255, 255, 0.35), transparent 100%),
+    radial-gradient(1.5px 1.5px at 58% 18%, rgba(220, 200, 255, 0.4), transparent 100%),
+    radial-gradient(1px 1px at 76% 48%, rgba(255, 255, 255, 0.3), transparent 100%),
+    radial-gradient(1.5px 1.5px at 88% 76%, rgba(220, 200, 255, 0.35), transparent 100%),
+    radial-gradient(1px 1px at 22% 86%, rgba(255, 255, 255, 0.3), transparent 100%);
+  animation: vx-sky-twinkle 7s ease-in-out infinite alternate;
+}
+
+@keyframes vx-sky-twinkle {
+  from { opacity: 0.45; }
+  to { opacity: 0.9; }
+}
+
+.vx-sky-pointer {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    30rem 30rem at var(--mx, 50%) var(--my, 38%),
+    rgba(143, 82, 255, 0.12),
+    transparent 70%
+  );
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vx-sky-aurora,
+  .vx-sky-stars {
+    animation: none;
+  }
+}
+
+/* ---------- the tour: a floating glass narrator over the real app ---------- */
+
+.vtour {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  /* The real surface stays readable behind a vignette that pools dark at the
+     edges — dimmed, not hidden. */
+  background: radial-gradient(120% 130% at 50% 38%, rgba(6, 6, 8, 0.42) 0%, rgba(6, 6, 8, 0.9) 100%);
+}
+
+.vtour-skip {
+  position: absolute;
+  top: clamp(1rem, 3vh, 1.6rem);
+  right: clamp(1.1rem, 3vw, 2rem);
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--vx-line);
+  border-radius: 999px;
+  background: var(--vx-glass);
+  backdrop-filter: blur(8px);
+  color: var(--vx-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  transition: color 180ms var(--vx-ease), border-color 180ms var(--vx-ease);
+}
+
+.vtour-skip:hover {
+  color: var(--vx-ink);
+  border-color: rgba(178, 140, 255, 0.4);
+}
+
+.vtour-count {
+  position: absolute;
+  bottom: clamp(1.2rem, 4vh, 2.2rem);
+  right: clamp(1.4rem, 3.5vw, 2.6rem);
+  color: var(--vx-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.78rem;
+  letter-spacing: 0.14em;
+  opacity: 0.75;
+}
+
+.vtour-card {
+  position: absolute;
+  left: clamp(1.25rem, 5vw, 4.5rem);
+  top: 50%;
+  transform: translateY(-50%);
+  width: min(34.5rem, calc(100vw - 2.5rem));
+  max-height: calc(100dvh - 5rem);
+  overflow-y: auto;
+  padding: clamp(1.6rem, 3.4vw, 2.6rem);
+  border: 1px solid var(--vx-line);
+  border-radius: 24px;
+  background: linear-gradient(180deg, rgba(22, 18, 33, 0.78), rgba(10, 9, 15, 0.88));
+  backdrop-filter: blur(22px) saturate(1.25);
+  box-shadow:
+    0 30px 90px rgba(4, 2, 10, 0.6),
+    0 0 0 1px rgba(6, 6, 8, 0.4),
+    0 0 80px rgba(143, 82, 255, 0.1);
+  animation: vx-card-in 480ms var(--vx-ease) both;
+}
+
+@keyframes vx-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(calc(-50% + 16px)) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(-50%) scale(1);
+  }
+}
+
+.vtour-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.42rem 0.9rem;
+  border: 1px solid var(--vx-line);
+  border-radius: 999px;
+  background: var(--vx-glass);
+  color: var(--vx-purple-soft);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.vtour-eyebrow-dot {
+  width: 0.42rem;
+  height: 0.42rem;
+  border-radius: 50%;
+  background: var(--vx-purple);
+  box-shadow: 0 0 10px rgba(143, 82, 255, 0.9);
+  animation: vx-dot-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes vx-dot-pulse {
+  50% { box-shadow: 0 0 3px rgba(143, 82, 255, 0.5); }
+}
+
+.vtour-title {
+  margin: 1.15rem 0 0;
+  font-size: clamp(2rem, 4.2vw, 3.1rem);
+  font-weight: 700;
+  line-height: 1.05;
+  letter-spacing: -0.015em;
+  color: var(--vx-ink);
+}
+
+.vtour-title em,
+.vprogress-title em {
+  font-style: normal;
+  /* The Vector gradient — the one signature moment on every surface. */
+  background: var(--vx-gradient-text);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.vtour-body {
+  margin: 1.05rem 0 0;
+  max-width: 30rem;
+  color: var(--vx-muted);
+  font-size: 0.99rem;
+  line-height: 1.65;
+}
+
+.vtour-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 1.8rem;
+  padding-top: 0.85rem;
+  background: linear-gradient(180deg, transparent, rgba(10, 9, 15, 0.96) 34%);
+}
+
+.vtour-dots {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.vtour-dot {
+  width: 0.4rem;
+  height: 0.4rem;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: rgba(201, 176, 255, 0.22);
+  cursor: pointer;
+  transition:
+    width 260ms var(--vx-ease),
+    background 260ms var(--vx-ease);
+}
+
+.vtour-dot[data-past="true"] {
+  background: rgba(201, 176, 255, 0.55);
+}
+
+.vtour-dot[data-active="true"] {
+  width: 1.45rem;
+  background: var(--vx-gradient-text);
+}
+
+.vtour-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.vtour-back {
+  padding: 0.62rem 1.15rem;
+  border: 1px solid var(--vx-line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--vx-muted);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 180ms var(--vx-ease), border-color 180ms var(--vx-ease), background 180ms var(--vx-ease);
+}
+
+.vtour-back:hover {
+  color: var(--vx-ink);
+  border-color: rgba(178, 140, 255, 0.4);
+  background: var(--vx-glass);
+}
+
+.vtour-next {
+  padding: 0.62rem 1.45rem;
+  border: none;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #efe6ff, #cdb2ff);
+  color: #0b0712;
+  font-size: 0.92rem;
+  font-weight: 650;
+  cursor: pointer;
+  box-shadow:
+    0 10px 36px rgba(143, 82, 255, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  transition: transform 200ms var(--vx-ease), box-shadow 200ms var(--vx-ease);
+}
+
+.vtour-next:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    -12px 12px 40px rgba(101, 72, 201, 0.2),
+    0 14px 46px rgba(124, 92, 230, 0.34),
+    12px 12px 40px rgba(170, 145, 243, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+
+@media (max-width: 720px) {
+  .vtour-card {
+    left: 0.9rem;
+    right: 0.9rem;
+    top: auto;
+    bottom: 0.9rem;
+    transform: none;
+    width: auto;
+    max-height: calc(100dvh - 5rem);
+  }
+
+  @keyframes vx-card-in {
+    from {
+      opacity: 0;
+      transform: translateY(16px) scale(0.985);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+
+  .vtour-count {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vtour-card {
+    animation: none;
+  }
+
+  .vtour-eyebrow-dot {
+    animation: none;
+  }
+}
+
+/* ---------- progress: a quiet timeline, distinct from the tour ---------- */
+
+.vprogress {
+  position: fixed;
+  inset: 0;
+  z-index: 210;
+  display: grid;
+  place-items: center;
+  padding: clamp(1rem, 4vh, 2.5rem) 1rem;
+  background: rgba(6, 6, 8, 0.78);
+  backdrop-filter: blur(10px);
+}
+
+.vprogress-card {
+  position: relative;
+  width: min(38rem, 100%);
+  max-height: min(52rem, 100%);
+  overflow-y: auto;
+  padding: clamp(1.7rem, 4vw, 2.7rem);
+  border: 1px solid var(--vx-line);
+  border-radius: 26px;
+  background: linear-gradient(180deg, rgba(21, 17, 31, 0.92), rgba(10, 9, 15, 0.96));
+  box-shadow:
+    0 30px 90px rgba(4, 2, 10, 0.65),
+    0 0 90px rgba(143, 82, 255, 0.09);
+  animation: vx-progress-in 420ms var(--vx-ease) both;
+}
+
+@keyframes vx-progress-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.vprogress-close {
+  position: absolute;
+  top: 1.1rem;
+  right: 1.1rem;
+  display: grid;
+  place-items: center;
+  width: 2.1rem;
+  height: 2.1rem;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--vx-muted);
+  cursor: pointer;
+  transition: color 180ms var(--vx-ease), background 180ms var(--vx-ease);
+}
+
+.vprogress-close:hover {
+  color: var(--vx-ink);
+  background: var(--vx-glass);
+}
+
+.vprogress-close svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.vprogress-title {
+  margin: 1.15rem 0 0;
+  font-size: clamp(1.7rem, 3.4vw, 2.4rem);
+  font-weight: 700;
+  line-height: 1.08;
+  letter-spacing: -0.015em;
+  color: var(--vx-ink);
+}
+
+.vprogress-sub {
+  margin: 0.7rem 0 0;
+  color: var(--vx-muted);
+  font-size: 0.94rem;
+  line-height: 1.6;
+}
+
+.vprogress-timeline {
+  display: flex;
+  gap: 1.1rem;
+  margin-top: 1.9rem;
+}
+
+.vprogress-rail {
+  position: relative;
+  width: 2px;
+  margin: 0.8rem 0;
+  border-radius: 999px;
+  background: rgba(178, 140, 255, 0.14);
+  flex-shrink: 0;
+}
+
+.vprogress-rail-fill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #aa91f3, #8c6de8 46%, var(--vx-purple));
+  box-shadow: 0 0 12px rgba(143, 82, 255, 0.5);
+  transition: height 600ms var(--vx-ease);
+}
+
+.vprogress-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 1.15rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.vprogress-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.9rem;
+}
+
+.vprogress-node {
+  display: grid;
+  place-items: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  margin-top: 0.05rem;
+  border: 1px solid var(--vx-line);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.02);
+  color: #0b0712;
+  flex-shrink: 0;
+  transition: background 300ms var(--vx-ease), border-color 300ms var(--vx-ease), box-shadow 300ms var(--vx-ease);
+}
+
+.vprogress-node[data-done="true"] {
+  border-color: transparent;
+  background: linear-gradient(135deg, #b18aff, var(--vx-purple));
+  box-shadow: 0 0 16px rgba(143, 82, 255, 0.45);
+  color: #fff;
+}
+
+.vprogress-node svg {
+  width: 0.8rem;
+  height: 0.8rem;
+}
+
+.vprogress-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.vprogress-step-title {
+  font-size: 0.95rem;
+  font-weight: 620;
+  color: var(--vx-ink);
+}
+
+.vprogress-step[data-done="true"] .vprogress-step-title {
+  color: var(--vx-muted);
+}
+
+.vprogress-step-detail {
+  margin-top: 0.2rem;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--vx-muted);
+  opacity: 0.85;
+}
+
+.vprogress-go {
+  align-self: center;
+  padding: 0.42rem 0.9rem;
+  border: 1px solid var(--vx-line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--vx-purple-soft);
+  font-size: 0.82rem;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 180ms var(--vx-ease), border-color 180ms var(--vx-ease), color 180ms var(--vx-ease);
+}
+
+.vprogress-go:hover {
+  background: rgba(143, 82, 255, 0.14);
+  border-color: rgba(178, 140, 255, 0.4);
+  color: var(--vx-ink);
+}
+
+/* ---------- feature guide: the whole product, surface by surface ---------- */
+
+.vguide {
+  margin-top: 2.5rem;
+  padding-top: 2rem;
+  border-top: 1px solid var(--vx-line);
+}
+
+.vguide-kicker {
+  color: var(--vx-purple-soft);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.vguide-title {
+  margin: 0.55rem 0 0;
+  font-size: 1.4rem;
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.012em;
+  color: var(--vx-ink);
+}
+
+.vguide-lede {
+  margin: 0.55rem 0 0;
+  color: var(--vx-muted);
+  font-size: 0.92rem;
+  line-height: 1.6;
+}
+
+.vguide-section {
+  margin-top: 2.2rem;
+}
+
+.vguide-intro {
+  margin: 0.6rem 0 0;
+  color: var(--vx-muted);
+  font-size: 0.88rem;
+  line-height: 1.6;
+  opacity: 0.9;
+}
+
+.vguide-entries {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.vguide-entry {
+  padding: 1.05rem 1.15rem 1.1rem;
+  border: 1px solid var(--vx-line);
+  border-radius: 16px;
+  background: var(--vx-glass);
+  transition: border-color 200ms var(--vx-ease), background 200ms var(--vx-ease);
+}
+
+.vguide-entry:hover {
+  border-color: rgba(178, 140, 255, 0.3);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.vguide-entry-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 650;
+  letter-spacing: -0.005em;
+  color: var(--vx-ink);
+}
+
+.vguide-entry-where {
+  margin-top: 0.35rem;
+  color: var(--vx-purple-soft);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  line-height: 1.5;
+  opacity: 0.85;
+}
+
+.vguide-entry-body {
+  margin: 0.65rem 0 0;
+  color: var(--vx-muted);
+  font-size: 0.88rem;
+  line-height: 1.62;
+}
+
+.vguide-entry-tip {
+  margin: 0.8rem 0 0;
+  padding-top: 0.75rem;
+  border-top: 1px dashed rgba(178, 140, 255, 0.16);
+  color: var(--vx-muted);
+  font-size: 0.84rem;
+  line-height: 1.55;
+}
+
+.vguide-tip-label {
+  margin-right: 0.55rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  /* The Vector gradient, quietly. */
+  background: var(--vx-gradient-text);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Sticky like the tour's footer: with the guide below the timeline the card
+   scrolls a long way, and Replay the tour / Keep building should never be a
+   full page of scrolling away. */
+.vprogress-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 2rem;
+  padding-top: 0.85rem;
+  background: linear-gradient(180deg, transparent, rgba(10, 9, 15, 0.96) 34%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vprogress-card {
+    animation: none;
+  }
+
+  .vguide-entry {
+    transition: none;
+  }
+}

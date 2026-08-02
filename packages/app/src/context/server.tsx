@@ -1,5 +1,5 @@
 import { createSimpleContext } from "@opencode-ai/ui/context"
-import { type Accessor, batch, createMemo } from "solid-js"
+import { type Accessor, batch, createEffect, createMemo, createSignal } from "solid-js"
 import { createStore, type SetStoreFunction, type Store } from "solid-js/store"
 import { Persist, persisted } from "@/utils/persist"
 import { ServerScope } from "@/utils/server-scope"
@@ -109,6 +109,23 @@ export function createServerProjects<T extends ServerProjectState>(input: {
       setStore("lastProject", input.scope(), directory)
     },
   }
+}
+
+export async function pruneMissingLocalProjects(input: {
+  projects: StoredProject[]
+  lastProject?: string
+  pathExists: (path: string) => Promise<boolean>
+}) {
+  const checked = await Promise.all(
+    input.projects.map(async (project) =>
+      (await input.pathExists(project.worktree).catch(() => false)) ? project : undefined,
+    ),
+  )
+  const projects = checked.filter((project): project is StoredProject => !!project)
+  const lastProject = projects.some((project) => project.worktree === input.lastProject)
+    ? input.lastProject
+    : projects[0]?.worktree
+  return { projects, lastProject }
 }
 
 export function resolveServerList(input: {
@@ -247,6 +264,39 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
     const [state, setState] = createStore({
       active: props.defaultServer,
     })
+    const [projectRegistryReady, setProjectRegistryReady] = createSignal(false)
+    const [projectRegistryPruning, setProjectRegistryPruning] = createSignal(false)
+
+    createEffect(() => {
+      if (!ready() || projectRegistryReady() || projectRegistryPruning()) return
+      const desktopApi =
+        typeof window === "undefined"
+          ? undefined
+          : (window as unknown as { api?: { pathExists?: (path: string) => Promise<boolean> } }).api
+      if (!desktopApi?.pathExists) {
+        setProjectRegistryReady(true)
+        return
+      }
+
+      setProjectRegistryPruning(true)
+      void pruneMissingLocalProjects({
+        projects: store.projects[ServerScope.local] ?? [],
+        lastProject: store.lastProject[ServerScope.local],
+        pathExists: desktopApi.pathExists,
+      }).then((next) => {
+        batch(() => {
+          setStore("projects", ServerScope.local, next.projects)
+          setStore("lastProject", (current) => {
+            const result = { ...current }
+            if (next.lastProject) result[ServerScope.local] = next.lastProject
+            if (!next.lastProject) delete result[ServerScope.local]
+            return result
+          })
+          setProjectRegistryReady(true)
+          setProjectRegistryPruning(false)
+        })
+      })
+    })
 
     function setActive(input: ServerConnection.Key) {
       if (state.active !== input) setState("active", input)
@@ -277,7 +327,7 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
       })
     }
 
-    const isReady = createMemo(() => ready() && !!state.active)
+    const isReady = createMemo(() => ready() && projectRegistryReady() && !!state.active)
 
     const scope = (key = state.active) => ServerScope.fromServerKey(key, props.canonicalLocalServer)
     const projects = createServerProjects({ scope, store, setStore })

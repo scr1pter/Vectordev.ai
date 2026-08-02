@@ -17,6 +17,9 @@ import { ServerConnection, useServer } from "./server"
 import { type DraftTab, useTabs } from "./tabs"
 import { requireServerKey } from "@/utils/session-route"
 import type { ServerScope } from "@/utils/server-scope"
+import { formatServerError } from "@/utils/server-errors"
+import { showToast } from "@/utils/toast"
+import { createNotificationEventGate } from "./notification-event-gate"
 
 type NotificationBase = {
   directory?: string
@@ -231,6 +234,7 @@ function createServerNotificationState(input: {
   const [index, setIndex] = createStore<NotificationIndex>(buildNotificationIndex(store.list))
 
   const meta = { pruned: false, disposed: false }
+  const admitCompletionEvent = createNotificationEventGate()
 
   const updateUnseen = (scope: "session" | "project", key: string, unseen: Notification[]) => {
     setIndex(scope, "unseen", key, unseen)
@@ -346,7 +350,9 @@ function createServerNotificationState(input: {
 
       const href = `/${base64Encode(directory)}/session/${sessionID}`
       if (settings.notifications.agent()) {
-        void platform.notify(language.t("notification.session.responseReady.title"), session.title ?? sessionID, href)
+        void platform.notify(language.t("notification.session.responseReady.title"), session.title ?? sessionID, href, {
+          force: true,
+        })
       }
     })
   }
@@ -366,6 +372,11 @@ function createServerNotificationState(input: {
       }
 
       const error = "error" in event.properties ? event.properties.error : undefined
+      const description = formatServerError(
+        error,
+        language.t,
+        language.t("notification.session.error.fallbackDescription"),
+      )
       append({
         directory,
         time,
@@ -374,10 +385,15 @@ function createServerNotificationState(input: {
         session: sessionID ?? "global",
         error,
       })
-      const description =
-        session?.title ??
-        (typeof error === "string" ? error : language.t("notification.session.error.fallbackDescription"))
       const href = sessionID ? `/${base64Encode(directory)}/session/${sessionID}` : `/${base64Encode(directory)}`
+      if (viewedInCurrentSession(directory, sessionID)) {
+        showToast({
+          title: language.t("notification.session.error.title"),
+          description,
+          variant: "error",
+          duration: 10_000,
+        })
+      }
       if (settings.notifications.errors()) {
         void platform.notify(language.t("notification.session.error.title"), description, href)
       }
@@ -391,6 +407,7 @@ function createServerNotificationState(input: {
     const directory = e.name
     const time = Date.now()
     if (event.type === "session.idle") {
+      if (!admitCompletionEvent(event.id)) return
       handleSessionIdle(directory, event, time)
       return
     }

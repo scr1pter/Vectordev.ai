@@ -1,0 +1,114 @@
+<footer class="site-footer">
+  <div class="footer-inner">
+    <div class="footer-brand">
+      <img src="/vector-logo.png" alt="" width="32" height="32" />
+      <div>
+        <strong>Vector</strong>
+        <span>The complete AI engineering workspace.</span>
+      </div>
+    </div>
+
+    <div class="footer-links">
+      <nav aria-label="Product">
+        <strong>Product</strong>
+        <a href="/#workspace">Overview</a>
+        <a href="/docs">Documentation</a>
+        <a href="/download">Download</a>
+      </nav>
+      <nav aria-label="Releases">
+        <strong>Releases</strong>
+        <a href="/releases">All releases</a>
+        <a href="/download/checksums">Checksums</a>
+        <a href="/download#all-downloads">All platforms</a>
+      </nav>
+      <nav aria-label="Platforms">
+        <strong>Platforms</strong>
+        <a href="/download/mac-arm64">macOS</a>
+        <a href="/download/windows">Windows</a>
+        <a href="/download/linux">Linux</a>
+      </nav>
+    </div>
+  </div>
+  <div class="footer-base">
+    <span>© 2026 Vector</span>
+    <span>Local-first. Your repositories. Your accounts. Your models.</span>
+  </div>
+</footer>
+
+<style>
+  .site-footer {
+    padding: 58px max(24px, calc((100% - 1080px) / 2)) 28px;
+    color: #938b98;
+    background: #18151a;
+    border-top: 1px solid #342f37;
+  }
+
+  .footer-inner {
+    display: grid;
+    grid-template-columns: minmax(240px, 1fr) 1.5fr;
+    gap: 80px;
+  }
+
+  .footer-brand {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .footer-brand img {
+    width: 32px;
+    height: 32px;
+    border-radius: 7px;
+  }
+
+  .footer-brand div,
+  nav {
+    display: grid;
+    align-content: start;
+    gap: 8px;
+  }
+
+  .footer-brand strong,
+  nav strong {
+    color: #eee9f1;
+    font-size: 12px;
+    font-weight: 570;
+  }
+
+  .footer-brand span,
+  nav a,
+  .footer-base {
+    font-size: 11px;
+  }
+
+  .footer-links {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 36px;
+  }
+
+  nav a {
+    color: #8f8794 !important;
+    text-decoration: none;
+    transition: color 180ms ease;
+  }
+
+  nav a:hover { color: #d7c9ff !important; }
+
+  .footer-base {
+    margin-top: 52px;
+    padding-top: 20px;
+    display: flex;
+    justify-content: space-between;
+    gap: 24px;
+    border-top: 1px solid #302b33;
+    color: #6f6873;
+  }
+
+  @media (max-width: 700px) {
+    .site-footer { padding-inline: 14px; }
+    .footer-inner { grid-template-columns: 1fr; gap: 42px; }
+    .footer-links { gap: 22px; }
+    .footer-base { flex-direction: column; gap: 7px; }
+  }
+</style>

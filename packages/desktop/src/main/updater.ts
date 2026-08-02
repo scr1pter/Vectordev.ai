@@ -5,6 +5,7 @@ import { createUpdaterController, type UpdaterReadyRecord } from "./updater-cont
 import { getLogger } from "./logging"
 import { getStore } from "./store"
 import { setAppQuitting } from "./windows"
+import { launchMacUpdateInstaller } from "./mac-update-installer"
 
 const { autoUpdater } = pkg
 const key = "ready"
@@ -14,7 +15,7 @@ export function setupAutoUpdater(stop: () => Promise<void>) {
   autoUpdater.logger = logger
   autoUpdater.channel = "latest"
   autoUpdater.allowPrerelease = false
-  autoUpdater.allowDowngrade = true
+  autoUpdater.allowDowngrade = false
   autoUpdater.autoDownload = false
   autoUpdater.autoInstallOnAppQuit = false
   logger.log("auto updater configured", {
@@ -25,17 +26,30 @@ export function setupAutoUpdater(stop: () => Promise<void>) {
   })
 
   const store = getStore("vector.updater")
+  let downloadedFiles: string[] = []
   return createUpdaterController({
     enabled: UPDATER_ENABLED,
     currentVersion: app.getVersion(),
     backend: {
       checkForUpdates: () => autoUpdater.checkForUpdates(),
-      downloadUpdate: () => autoUpdater.downloadUpdate(),
-      quitAndInstall: () => {
-        // quitAndInstall closes all windows before emitting before-quit, so
-        // flag the quit first to keep window ids persisted for restore.
-        setAppQuitting()
+      downloadUpdate: async () => {
+        downloadedFiles = await autoUpdater.downloadUpdate()
+        return downloadedFiles
+      },
+      quitAndInstall: async () => {
         try {
+          if (process.platform === "darwin") {
+            const archive = downloadedFiles.find((file) => file.endsWith(".zip"))
+            if (!archive) throw new Error("Vector could not find the downloaded macOS update")
+            await launchMacUpdateInstaller(archive)
+            setAppQuitting()
+            app.quit()
+            return
+          }
+
+          // quitAndInstall closes all windows before emitting before-quit, so
+          // flag the quit first to keep window ids persisted for restore.
+          setAppQuitting()
           autoUpdater.quitAndInstall()
         } catch (error) {
           // The install failed and the app keeps running; clear the flag so

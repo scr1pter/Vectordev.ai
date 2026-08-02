@@ -259,6 +259,7 @@ export type UserMessage = {
   tools?: {
     [key: string]: boolean
   }
+  executionMode?: "normal" | "fast"
 }
 
 export type ProviderAuthError = {
@@ -2241,6 +2242,52 @@ export type GlobalSession = {
   project: ProjectSummary | null
 }
 
+export type SessionUsageModel = {
+  providerID: string
+  modelID: string
+  tokens: number
+  responses: number
+  percentage: number
+}
+
+export type SessionUsageEffort = {
+  id: string
+  label: string
+  tokens: number
+  responses: number
+  percentage: number
+}
+
+export type SessionUsageDay = {
+  date: string
+  tokens: number
+  cost: number
+  tasks: number
+}
+
+export type SessionUsageSummary = {
+  lifetimeTokens: number
+  lifetimeCost: number
+  inputTokens: number
+  outputTokens: number
+  reasoningTokens: number
+  cachedTokens: number
+  peakTokens: number
+  longestTaskMs: number
+  longestTaskTokens: number
+  averageTaskMs: number
+  currentStreak: number
+  longestStreak: number
+  completedChats: number
+  conversations: number
+  activeDays: number
+  averageTokensPerChat: number
+  modelResponses: number
+  favoriteModels: Array<SessionUsageModel>
+  effortLevels: Array<SessionUsageEffort>
+  days: Array<SessionUsageDay>
+}
+
 export type McpResource = {
   name: string
   uri: string
@@ -2288,6 +2335,11 @@ export type FileContent = {
   mimeType?: string
 }
 
+export type FileWriteResult = {
+  path: string
+  bytes: number
+}
+
 export type File = {
   path: string
   added: number
@@ -2331,6 +2383,19 @@ export type VcsApplyError = {
   }
 }
 
+export type VcsCommitResult = {
+  committed: boolean
+  sha?: string
+}
+
+export type VcsCommitError = {
+  name: "VcsCommitError"
+  data: {
+    message: string
+    reason: "non-git" | "commit-failed"
+  }
+}
+
 export type Command = {
   name: string
   description?: string
@@ -2369,6 +2434,59 @@ export type LspStatus = {
   name: string
   root: string
   status: "connected" | "error"
+}
+
+export type LspDiagnostic = {
+  range: Range
+  severity?: number
+  code?: string
+  source?: string
+  message: string
+}
+
+export type LspRequest = {
+  file: string
+  line: number
+  character: number
+}
+
+export type LspHover = {
+  contents: Array<string>
+  range?: Range
+}
+
+export type LspLocation = {
+  uri: string
+  range: Range
+}
+
+export type DocumentSymbol = {
+  name: string
+  detail?: string
+  kind: number
+  range: Range
+  selectionRange: Range
+}
+
+export type LspRenameRequest = {
+  file: string
+  line: number
+  character: number
+  newName: string
+}
+
+export type LspTextEdit = {
+  range: Range
+  newText: string
+}
+
+export type LspFileEdit = {
+  uri: string
+  edits: Array<LspTextEdit>
+}
+
+export type LspRenameResult = {
+  files: Array<LspFileEdit>
 }
 
 export type FormatterStatus = {
@@ -7821,6 +7939,35 @@ export type ExperimentalSessionListResponses = {
 
 export type ExperimentalSessionListResponse = ExperimentalSessionListResponses[keyof ExperimentalSessionListResponses]
 
+export type ExperimentalSessionUsageData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/experimental/session/usage"
+}
+
+export type ExperimentalSessionUsageErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type ExperimentalSessionUsageError = ExperimentalSessionUsageErrors[keyof ExperimentalSessionUsageErrors]
+
+export type ExperimentalSessionUsageResponses = {
+  /**
+   * Local token usage and activity streaks
+   */
+  200: SessionUsageSummary
+}
+
+export type ExperimentalSessionUsageResponse =
+  ExperimentalSessionUsageResponses[keyof ExperimentalSessionUsageResponses]
+
 export type ExperimentalSessionBackgroundData = {
   body?: never
   path: {
@@ -8049,7 +8196,7 @@ export type FileReadResponses = {
 export type FileReadResponse = FileReadResponses[keyof FileReadResponses]
 
 export type FileWriteData = {
-  body: {
+  body?: {
     path: string
     content: string
   }
@@ -8074,10 +8221,7 @@ export type FileWriteResponses = {
   /**
    * File written
    */
-  200: {
-    path: string
-    bytes: number
-  }
+  200: FileWriteResult
 }
 
 export type FileWriteResponse = FileWriteResponses[keyof FileWriteResponses]
@@ -8312,6 +8456,36 @@ export type VcsApplyResponses = {
 
 export type VcsApplyResponse = VcsApplyResponses[keyof VcsApplyResponses]
 
+export type VcsCommitData = {
+  body?: {
+    message: string
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/vcs/commit"
+}
+
+export type VcsCommitErrors = {
+  /**
+   * VcsCommitError | InvalidRequestError
+   */
+  400: VcsCommitError | InvalidRequestError
+}
+
+export type VcsCommitError2 = VcsCommitErrors[keyof VcsCommitErrors]
+
+export type VcsCommitResponses = {
+  /**
+   * VCS commit result
+   */
+  200: VcsCommitResult
+}
+
+export type VcsCommitResponse = VcsCommitResponses[keyof VcsCommitResponses]
+
 export type CommandListData = {
   body?: never
   path?: never
@@ -8428,6 +8602,178 @@ export type LspStatusResponses = {
 }
 
 export type LspStatusResponse = LspStatusResponses[keyof LspStatusResponses]
+
+export type LspDiagnosticsData = {
+  body?: {
+    file: string
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/lsp/diagnostics"
+}
+
+export type LspDiagnosticsErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type LspDiagnosticsError = LspDiagnosticsErrors[keyof LspDiagnosticsErrors]
+
+export type LspDiagnosticsResponses = {
+  /**
+   * Language-server diagnostics
+   */
+  200: Array<LspDiagnostic>
+}
+
+export type LspDiagnosticsResponse = LspDiagnosticsResponses[keyof LspDiagnosticsResponses]
+
+export type LspHoverData = {
+  body?: LspRequest
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/lsp/hover"
+}
+
+export type LspHoverErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type LspHoverError = LspHoverErrors[keyof LspHoverErrors]
+
+export type LspHoverResponses = {
+  /**
+   * Language-server hover information
+   */
+  200: LspHover
+}
+
+export type LspHoverResponse = LspHoverResponses[keyof LspHoverResponses]
+
+export type LspDefinitionData = {
+  body?: LspRequest
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/lsp/definition"
+}
+
+export type LspDefinitionErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type LspDefinitionError = LspDefinitionErrors[keyof LspDefinitionErrors]
+
+export type LspDefinitionResponses = {
+  /**
+   * Definition locations
+   */
+  200: Array<LspLocation>
+}
+
+export type LspDefinitionResponse = LspDefinitionResponses[keyof LspDefinitionResponses]
+
+export type LspReferencesData = {
+  body?: LspRequest
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/lsp/references"
+}
+
+export type LspReferencesErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type LspReferencesError = LspReferencesErrors[keyof LspReferencesErrors]
+
+export type LspReferencesResponses = {
+  /**
+   * Reference locations
+   */
+  200: Array<LspLocation>
+}
+
+export type LspReferencesResponse = LspReferencesResponses[keyof LspReferencesResponses]
+
+export type LspSymbolsData = {
+  body?: {
+    file: string
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/lsp/symbols"
+}
+
+export type LspSymbolsErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type LspSymbolsError = LspSymbolsErrors[keyof LspSymbolsErrors]
+
+export type LspSymbolsResponses = {
+  /**
+   * Document symbols
+   */
+  200: Array<DocumentSymbol | Symbol>
+}
+
+export type LspSymbolsResponse = LspSymbolsResponses[keyof LspSymbolsResponses]
+
+export type LspRenameData = {
+  body?: LspRenameRequest
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/lsp/rename"
+}
+
+export type LspRenameErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type LspRenameError = LspRenameErrors[keyof LspRenameErrors]
+
+export type LspRenameResponses = {
+  /**
+   * Workspace rename edits
+   */
+  200: LspRenameResult
+}
+
+export type LspRenameResponse = LspRenameResponses[keyof LspRenameResponses]
 
 export type FormatterStatusData = {
   body?: never
@@ -9835,6 +10181,7 @@ export type SessionPromptData = {
     format?: OutputFormat
     system?: string
     variant?: string
+    executionMode?: "normal" | "fast"
     parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
   }
   path: {
@@ -10182,6 +10529,7 @@ export type SessionPromptAsyncData = {
     format?: OutputFormat
     system?: string
     variant?: string
+    executionMode?: "normal" | "fast"
     parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
   }
   path: {
@@ -10224,6 +10572,7 @@ export type SessionCommandData = {
     arguments: string
     command: string
     variant?: string
+    executionMode?: "normal" | "fast"
     parts?: Array<{
       id?: string
       type: "file"
