@@ -23,6 +23,7 @@ import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/
 import { EffectFlock } from "@opencode-ai/core/util/effect-flock"
 import { containsPath, type InstanceContext } from "../project/instance-context"
 import { ConfigV1 } from "@opencode-ai/core/v1/config/config"
+import { ConfigMCPV1 } from "@opencode-ai/core/v1/config/mcp"
 import { RemoteAuthError } from "@opencode-ai/core/v1/config/error"
 import { ConfigPermissionV1 } from "@opencode-ai/core/v1/config/permission"
 import { ConfigPluginV1 } from "@opencode-ai/core/v1/config/plugin"
@@ -127,6 +128,7 @@ export interface Interface {
   readonly getConsoleState: () => Effect.Effect<ConsoleState>
   readonly update: (config: Info) => Effect.Effect<void>
   readonly updateGlobal: (config: Info) => Effect.Effect<{ info: Info; changed: boolean }>
+  readonly updateMcpLocal: (name: string, entry: ConfigMCPV1.Info | { enabled: boolean }) => Effect.Effect<void>
   readonly invalidate: () => Effect.Effect<void>
   readonly directories: () => Effect.Effect<string[]>
   readonly waitForDependencies: () => Effect.Effect<void>
@@ -135,6 +137,11 @@ export interface Interface {
 export class Service extends Context.Service<Service, Interface>()("@opencode/Config") {}
 
 export const use = serviceUse(Service)
+
+// Machine-local config layer inside .opencode directories. Runtime MCP installs (and their
+// tokens/headers) are written here instead of the committable opencode.json, so the files
+// must stay gitignored.
+const LOCAL_CONFIG_FILES = ["opencode.local.json", "opencode.local.jsonc"]
 
 function globalConfigFile() {
   const candidates = ["opencode.jsonc", "opencode.json", "config.json"].map((file) =>
@@ -299,7 +306,9 @@ const layer = Layer.effect(
         yield* fs
           .writeFileString(
             gitignore,
-            ["node_modules", "package.json", "package-lock.json", "bun.lock", ".gitignore"].join("\n"),
+            ["node_modules", "package.json", "package-lock.json", "bun.lock", ".gitignore", ...LOCAL_CONFIG_FILES].join(
+              "\n",
+            ),
           )
           .pipe(
             Effect.catchIf(
@@ -422,7 +431,8 @@ const layer = Layer.effect(
 
         for (const dir of directories) {
           if (dir.endsWith(".opencode") || dir === Flag.OPENCODE_CONFIG_DIR) {
-            for (const file of ["opencode.json", "opencode.jsonc"]) {
+            // Local files merge after the shared ones so machine-local settings win.
+            for (const file of ["opencode.json", "opencode.jsonc", ...LOCAL_CONFIG_FILES]) {
               const source = path.join(dir, file)
               yield* Effect.logDebug(`loading config from ${source}`)
               yield* merge(source, yield* loadFile(source, authEnv))
@@ -633,6 +643,43 @@ const layer = Layer.effect(
       yield* invalidateGlobal
     })
 
+    // Persists a runtime MCP mutation into the project's machine-local config layer so it
+    // survives a backend restart. A full entry replaces the server's config wholesale (a
+    // deep patch could leave e.g. a stale `command` behind a type switch to "remote");
+    // an { enabled } entry only flips the flag, layering over configs defined elsewhere.
+    const updateMcpLocal = Effect.fn("Config.updateMcpLocal")(function* (
+      name: string,
+      entry: ConfigMCPV1.Info | { enabled: boolean },
+    ) {
+      const ctx = yield* InstanceState.context
+      // Non-git projects have worktree "/", which is not a usable project root.
+      const root = ctx.worktree === "/" ? ctx.directory : ctx.worktree
+      const dir = path.join(root, ".opencode")
+      const jsonc = path.join(dir, "opencode.local.jsonc")
+      const file = (yield* fs.existsSafe(jsonc)) ? jsonc : path.join(dir, "opencode.local.json")
+      const before =
+        (yield* readConfigFile(file)) ?? JSON.stringify({ $schema: "https://opencode.ai/config.json" }, null, 2)
+      const edits = modify(
+        before,
+        "type" in entry ? ["mcp", name] : ["mcp", name, "enabled"],
+        "type" in entry ? entry : entry.enabled,
+        { formattingOptions: { insertSpaces: true, tabSize: 2 } },
+      )
+      yield* fs.writeWithDirs(file, applyEdits(before, edits)).pipe(Effect.orDie)
+      yield* ensureGitignore(dir).pipe(Effect.orDie)
+      // The generated .gitignore covers the local files, but a .gitignore that predates
+      // this layer may not; the file can hold tokens, so append the entries when missing.
+      const gitignore = path.join(dir, ".gitignore")
+      const existing = (yield* fs.readFileStringSafe(gitignore).pipe(Effect.orDie)) ?? ""
+      const present = new Set(existing.split(/\r?\n/).map((line) => line.trim()))
+      const missing = LOCAL_CONFIG_FILES.filter((item) => !present.has(item))
+      if (missing.length) {
+        yield* fs
+          .writeFileString(gitignore, [existing.replace(/\n$/, ""), ...missing].filter(Boolean).join("\n") + "\n")
+          .pipe(Effect.orDie)
+      }
+    })
+
     const updateGlobal = Effect.fn("Config.updateGlobal")(function* (config: Info) {
       const file = globalConfigFile()
       const before = (yield* readConfigFile(file)) ?? "{}"
@@ -664,6 +711,7 @@ const layer = Layer.effect(
       getConsoleState,
       update,
       updateGlobal,
+      updateMcpLocal,
       invalidate,
       directories,
       waitForDependencies,

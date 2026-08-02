@@ -630,21 +630,49 @@ const layer = Layer.effect(
       return yield* storeClient(s, name, result.mcpClient, result.defs!, result.instructions, mcp.timeout)
     })
 
+    // add/connect/disconnect mutate instance state only; mirror the intent into the
+    // project-local config layer so it survives a backend restart. Persistence failure
+    // must not undo the runtime change, so surface it instead of failing the request.
+    const persistConfig = Effect.fnUntraced(function* (name: string, entry: ConfigMCPV1.Info | { enabled: boolean }) {
+      yield* cfgSvc.updateMcpLocal(name, entry).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logError("failed to persist MCP server config", {
+            name,
+            error: String(Cause.squash(cause)),
+          }).pipe(
+            Effect.andThen(
+              events
+                .publish(TuiEvent.ToastShow, {
+                  title: "MCP config not saved",
+                  message: `Could not write "${name}" to .opencode/opencode.local.json; the change may not survive a restart.`,
+                  variant: "warning",
+                  duration: 8000,
+                })
+                .pipe(Effect.ignore),
+            ),
+          ),
+        ),
+      )
+    })
+
     const add = Effect.fn("MCP.add")(function* (name: string, mcp: ConfigMCPV1.Info) {
       const s = yield* InstanceState.get(state)
       s.config[name] = mcp
+      yield* persistConfig(name, mcp)
       yield* createAndStore(name, mcp)
       return { status: s.status }
     })
 
     const connect = Effect.fn("MCP.connect")(function* (name: string) {
       const mcp = yield* requireMcpConfig(name)
+      yield* persistConfig(name, { enabled: true })
       yield* createAndStore(name, { ...mcp, enabled: true })
     })
 
     const disconnect = Effect.fn("MCP.disconnect")(function* (name: string) {
       yield* requireMcpConfig(name)
       const s = yield* InstanceState.get(state)
+      yield* persistConfig(name, { enabled: false })
       yield* closeClient(s, name)
       delete s.clients[name]
       s.status[name] = { status: "disabled" }

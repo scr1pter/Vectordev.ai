@@ -628,6 +628,45 @@ it.instance(
 )
 
 // ========================================================================
+// Test: add()/connect()/disconnect() persist to the project-local config
+// ========================================================================
+
+it.instance("add persists the server to .opencode/opencode.local.json and toggles persist enabled", () =>
+  MCP.Service.use((mcp: MCPNS.Interface) =>
+    Effect.gen(function* () {
+      const { directory } = yield* TestInstance
+      lastCreatedClientName = "persist-server"
+      getOrCreateClientState("persist-server")
+
+      yield* mcp.add("persist-server", {
+        type: "local",
+        command: ["echo", "test"],
+        environment: { TOKEN: "secret" },
+      })
+
+      const file = path.join(directory, ".opencode", "opencode.local.json")
+      const written = JSON.parse(yield* Effect.promise(() => Bun.file(file).text()))
+      expect(written.mcp["persist-server"]).toEqual({
+        type: "local",
+        command: ["echo", "test"],
+        environment: { TOKEN: "secret" },
+      })
+
+      yield* mcp.disconnect("persist-server")
+      const afterDisconnect = JSON.parse(yield* Effect.promise(() => Bun.file(file).text()))
+      expect(afterDisconnect.mcp["persist-server"].enabled).toBe(false)
+
+      yield* mcp.connect("persist-server")
+      const afterConnect = JSON.parse(yield* Effect.promise(() => Bun.file(file).text()))
+      expect(afterConnect.mcp["persist-server"].enabled).toBe(true)
+
+      const gitignore = yield* Effect.promise(() => Bun.file(path.join(directory, ".opencode", ".gitignore")).text())
+      expect(gitignore).toContain("opencode.local.json")
+    }),
+  ),
+)
+
+// ========================================================================
 // Test: add() closes existing client before replacing
 // ========================================================================
 
