@@ -24,7 +24,6 @@ import { SDKProvider } from "@/context/sdk"
 import { useServerSync } from "@/context/server-sync"
 import { isManagedAgentWorkspacePath, useServer } from "@/context/server"
 import { sessionHref } from "@/utils/session-route"
-import { CloudConsole, type CloudSection } from "@/features/cloud/cloud-console"
 import { DB_INTENT_EVENT } from "@/features/cloud/db-intent"
 import { OnboardingProgress, OnboardingTour, TOUR_SLIDES } from "@/features/onboarding/onboarding"
 import { outcomesFromWorkspaceRecord, recordOutcome } from "@/features/economics/economics-repository"
@@ -38,6 +37,8 @@ import { ParallelDiffReview } from "@/components/parallel-diff-review"
 import { WorkspaceNavigation, type WorkspaceNavigationItem } from "@/components/workspace-navigation"
 import { CanvasWorkspace } from "@/features/canvas/canvas"
 import { useUpdaterAction } from "@/components/updater-action"
+import { VelCall } from "@/features/vel/vel-call"
+import { workProjectForTask, workTaskForDraft, workTaskForSession } from "@/features/work/work-store"
 
 const NAVIGATION_DEFAULT_WIDTH = 320
 const NAVIGATION_MINIMUM_WIDTH = 228
@@ -45,7 +46,7 @@ const NAVIGATION_MAXIMUM_WIDTH = 460
 const NAVIGATION_WIDTH_KEY = "vector.navigation-width.v1"
 const LAST_ACTIVE_PROJECT_KEY = "vector.last-active-project-path.v1"
 const AGENT_TAB_ORDER_PREFIX = "vector.agent-tab-order.v1:"
-const RESERVED_TOP_LEVEL_ROUTES = new Set(["parallel-workspaces", "cloud", "canvas"])
+const RESERVED_TOP_LEVEL_ROUTES = new Set(["code", "work", "parallel-workspaces", "cloud", "canvas"])
 type ParallelAgentRuntime = "vector" | "claude-code" | "codex" | "cursor"
 
 function readNavigationWidth() {
@@ -439,6 +440,7 @@ export default function NewLayout(props: ParentProps) {
   const [navigationVisible, setNavigationVisible] = createSignal(true)
   const [navigationWidth, setNavigationWidth] = createSignal(readNavigationWidth())
   const [navigationResizing, setNavigationResizing] = createSignal(false)
+  const [velOpen, setVelOpen] = createSignal(false)
   const [workspaceTreeOpen, setWorkspaceTreeOpen] = createSignal(true)
   const [browserAgentOpen, setBrowserAgentOpen] = createSignal(false)
   const [scheduledOpen, setScheduledOpen] = createSignal(false)
@@ -491,6 +493,11 @@ export default function NewLayout(props: ParentProps) {
         })),
       ),
   )
+  onMount(() => {
+    const openVel = () => setVelOpen(true)
+    globalThis.window?.addEventListener("vector:vel-open", openVel)
+    onCleanup(() => globalThis.window?.removeEventListener("vector:vel-open", openVel))
+  })
   createEffect(() => {
     const options = parallelModelOptions()
     if (options.length === 0) return
@@ -727,6 +734,10 @@ export default function NewLayout(props: ParentProps) {
     projectPath: routeContextProjectPath() || activeProjectPath(),
     taskId: routeContextSessionID() || currentSessionID() || undefined,
   })
+  const activeWorkTask = () => {
+    const draftID = new URLSearchParams(location.search).get("draftId") ?? undefined
+    return workTaskForSession(activeTaskScope().taskId) ?? workTaskForDraft(draftID)
+  }
   const activeWorkspaceScope = () => ({
     sourcePath: activeTaskScope().projectPath,
     parentSessionId: activeTaskScope().taskId,
@@ -916,6 +927,8 @@ export default function NewLayout(props: ParentProps) {
       }),
   )
   const mainAgentLabel = () => {
+    const workTask = activeWorkTask()
+    if (workTask) return workTask.title
     const id = mainTaskSessionID()
     if (!id) return "Main agent"
     const title = serverSync().session.get(id)?.title?.trim()
@@ -2341,7 +2354,7 @@ export default function NewLayout(props: ParentProps) {
   // controls that all toast "open a task first". A persisted last-project does
   // NOT count — you have to open something in this view.
   const navUnlocked = () =>
-    location.pathname !== "/" ||
+    !["/", "/code", "/work", "/cloud"].includes(location.pathname) ||
     toolsOpen() ||
     scheduledOpen() ||
     parallelOpen() ||
@@ -2387,7 +2400,7 @@ export default function NewLayout(props: ParentProps) {
       cta: "Open",
       onGo: () => {
         setOnboardingOpen(false)
-        navigate("/")
+        navigate("/code")
         showToast({ title: "Open a project", description: "Choose a local project, then give Vector one concrete outcome." })
       },
     },
@@ -2472,7 +2485,6 @@ export default function NewLayout(props: ParentProps) {
   // Database panel, which opens focused via cloudInitialSection.
   const [dbProposal, setDbProposal] = createSignal<({ reason: string } & TaskScope) | undefined>()
   const [dbProposalSuppressed, setDbProposalSuppressed] = createSignal<TaskScope | undefined>()
-  const [cloudInitialSection, setCloudInitialSection] = createSignal<CloudSection | undefined>()
   const scopeMatches = (candidate: TaskScope | undefined, active = activeTaskScope()) => {
     if (!candidate) return false
     if (candidate.projectPath !== active.projectPath) return false
@@ -2503,13 +2515,13 @@ export default function NewLayout(props: ParentProps) {
   const openCloudDatabaseSetup = () => {
     setDbProposal(undefined)
     setDbProposalSuppressed(activeTaskScope())
-    setCloudInitialSection("database")
     setToolsOpen(false)
     setSidePanelOpen(false)
     setBrowserAgentOpen(false)
     setScheduledOpen(false)
     setParallelOpen(false)
-    navigate(`/cloud${taskScopeSearch(activeTaskScope())}`)
+    const search = taskScopeSearch(activeTaskScope())
+    navigate(`/cloud${search}${search ? "&" : "?"}section=database`)
   }
 
   const dismissDbProposal = () => {
@@ -2539,6 +2551,8 @@ export default function NewLayout(props: ParentProps) {
     backgroundTaskRecords().filter((task) => ["queued", "running", "waiting", "needs_input"].includes(task.status)),
   )
   const projectDisplayName = () => {
+    const workProject = workProjectForTask(activeWorkTask())
+    if (workProject) return workProject.name
     const path = activeTaskScope().projectPath
     if (!path) return "No project loaded"
     return path.split(/[\\/]/).filter(Boolean).at(-1) || path
@@ -2563,7 +2577,6 @@ export default function NewLayout(props: ParentProps) {
     const path = location.pathname
     // The focused-section request is one-shot: clear it whenever we're not on
     // Cloud so a normal Cloud open always lands on Overview.
-    if (!cloudRoute()) setCloudInitialSection(undefined)
     if (path !== lastPath) {
       lastPath = path
       setToolsOpen(false)
@@ -2725,28 +2738,6 @@ export default function NewLayout(props: ParentProps) {
         </div>
       </main>
 
-      <Show when={cloudRoute()}>
-        <CloudConsole
-          projectPath={activeTaskScope().projectPath}
-          taskId={activeTaskScope().taskId}
-          onClose={closeFullscreenWorkspace}
-          onRepair={(context) => {
-            closeFullscreenWorkspace()
-            setTimeout(() => {
-              const inserted = insertScheduledPromptIntoComposer(context)
-              if (!inserted) void globalThis.navigator?.clipboard?.writeText(context).catch(() => undefined)
-              showToast({
-                title: inserted ? "Repair context loaded" : "Repair context copied",
-                description: inserted
-                  ? "Review the deployment evidence, then send it to Vector."
-                  : "Open the task composer and paste the deployment evidence.",
-              })
-            }, 180)
-          }}
-          initialSection={cloudInitialSection()}
-        />
-      </Show>
-
       <Show when={activeDbProposal() && !cloudRoute()}>
         <div class="fixed bottom-5 left-1/2 z-[120] flex max-w-[560px] -translate-x-1/2 items-center gap-3 rounded-2xl border border-[color:var(--vx-line)] bg-[color-mix(in_srgb,var(--vx-sidebar)_92%,transparent)] px-4 py-3 shadow-[0_18px_60px_rgba(0,0,0,0.5)] backdrop-blur-2xl">
           <span class="grid size-9 shrink-0 place-items-center rounded-xl" style={{ background: "var(--vx-gradient, #9374ec)" }}>
@@ -2776,6 +2767,24 @@ export default function NewLayout(props: ParentProps) {
           projectId={() => taskScopeId(activeTaskScope())}
         />
       </Show>
+
+      <VelCall
+        open={velOpen()}
+        onClose={() => setVelOpen(false)}
+        directory={resolveActiveProjectPath}
+        sessionId={() => activeTaskScope().taskId}
+        model={() => {
+          const providerID = parallelProvider()
+          const modelID = parallelModel()
+          return providerID && modelID ? { providerID, modelID } : undefined
+        }}
+        contextLabel={() => {
+          const task = activeWorkTask()
+          const project = workProjectForTask(task)
+          if (task) return `${project?.name ?? "Vector Work"} · ${task.title}`
+          return activeTaskScope().projectPath ? projectDisplayName() : "Vector product assistant"
+        }}
+      />
 
       <OnboardingTour open={tourOpen()} step={tourStep()} onStep={goToTourStep} onFinish={finishTour} onSkip={skipTour} />
       <OnboardingProgress open={onboardingOpen()} steps={onboardingSteps()} onReplayTour={replayTour} onClose={closeOnboarding} />
@@ -4371,7 +4380,7 @@ export default function NewLayout(props: ParentProps) {
           setBrowserAgentOpen(false)
           setScheduledOpen(false)
           setParallelOpen(false)
-          navigate("/")
+          navigate(activeWorkTask() ? "/work" : "/code")
         }}
         onHide={() => setNavigationVisible(false)}
         onToggleTree={() => setWorkspaceTreeOpen((open) => !open)}
@@ -4387,6 +4396,7 @@ export default function NewLayout(props: ParentProps) {
         }}
         onMoveWorkspace={moveAgentWorkspace}
         onCodeEditor={openCodespace}
+        onVel={() => setVelOpen(true)}
         onBrowser={openPreviewPanel}
         onCanvas={() => navigate(`/canvas${taskScopeSearch(activeTaskScope())}`)}
         onCloud={() => navigate(`/cloud${taskScopeSearch(activeTaskScope())}`)}

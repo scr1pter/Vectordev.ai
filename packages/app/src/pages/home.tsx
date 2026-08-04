@@ -17,6 +17,7 @@ import {
   Switch,
 } from "solid-js"
 import { makeEventListener } from "@solid-primitives/event-listener"
+import { useNavigate } from "@solidjs/router"
 import { createStore } from "solid-js/store"
 import { useQuery } from "@tanstack/solid-query"
 import { Button } from "@opencode-ai/ui/button"
@@ -235,6 +236,7 @@ function useHomeSessionHeaderOpacity(groups: () => HomeSessionGroup[]) {
 }
 
 export function NewHome() {
+  const navigate = useNavigate()
   const sync = useServerSync()
   const layout = useLayout()
   const pickDirectory = useDirectoryPicker()
@@ -528,10 +530,10 @@ export function NewHome() {
       <div class="vector-home-dashboard">
         <header data-vector-home-overview class="vector-home-heading">
           <div class="vector-home-heading__topline">
-            <div class="vector-home-heading__brand">
+            <button type="button" class="vector-home-heading__brand" onClick={() => navigate("/")} title="All Vector products">
               <img src="/vector-logo.png" alt="" draggable={false} />
-              <span>Vector engineering workspace</span>
-            </div>
+              <span>Vector Code</span>
+            </button>
             <div class="vector-home-heading__status" aria-label="Workspace status">
               <span classList={{ "is-offline": global.servers.health[selection().server]?.healthy === false }} />
               {global.servers.health[selection().server]?.healthy === false ? "Runtime offline" : "Runtime ready"}

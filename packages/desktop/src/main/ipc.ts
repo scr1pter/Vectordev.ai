@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process"
-import { stat } from "node:fs/promises"
-import { basename } from "node:path"
+import { mkdir, stat } from "node:fs/promises"
+import { basename, join } from "node:path"
 import { app, BrowserWindow, Notification, clipboard, dialog, ipcMain, shell, systemPreferences } from "electron"
 import type { IpcMainEvent, IpcMainInvokeEvent } from "electron"
 import type { DesktopMenuAction } from "@opencode-ai/app/desktop-menu"
@@ -546,6 +546,18 @@ export function registerIpcHandlers(deps: Deps) {
   handle("store-length", (_event: IpcMainInvokeEvent, name: string) => {
     const store = getStore(name)
     return Object.keys(store.store).length
+  })
+  handle("work-project-ensure-directory", async (_event: IpcMainInvokeEvent, projectId: string, name: string) => {
+    const safeID = projectId.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 80)
+    if (!safeID) throw new Error("Vector could not create this Work project.")
+    const safeName = name
+      .trim()
+      .replace(/[^a-zA-Z0-9._-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 64) || "project"
+    const directory = join(app.getPath("userData"), "work-projects", `${safeName}-${safeID.slice(0, 8)}`)
+    await mkdir(directory, { recursive: true })
+    return directory
   })
 
   handle(

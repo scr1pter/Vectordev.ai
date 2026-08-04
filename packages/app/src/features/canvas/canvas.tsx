@@ -836,7 +836,7 @@ export function CanvasWorkspace(props: {
         </Show>
         <div class="vcanvas-voice-bar">
           <Show when={!listening() && !transcribing()}>
-            <button type="button" class="vcanvas-mic" aria-label="Talk to Vector" onClick={toggleMic}>
+            <button type="button" class="vcanvas-mic" aria-label="Dictate a Canvas command" onClick={toggleMic}>
               <svg viewBox="0 0 16 16" aria-hidden="true">
                 <rect
                   x="6"
@@ -876,10 +876,21 @@ export function CanvasWorkspace(props: {
                     ? "Listening…"
                     : sttAvailable
                       ? "Tap the mic, or type a command…"
-                      : "Type a command for Vector…"
+                      : "Type a command for Vel…"
               }
             />
           </form>
+          <button
+            type="button"
+            class="vcanvas-mic"
+            aria-label="Call Vel"
+            title="Call Vel"
+            onClick={() => window.dispatchEvent(new CustomEvent("vector:vel-open"))}
+          >
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M3.6 4.1c.75 4.15 4.05 7.45 8.2 8.2l1.35-2.25-2.55-1.2-1.1 1.2a8.2 8.2 0 0 1-3.55-3.55l1.2-1.1-1.2-2.55L3.6 4.1Z" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          </button>
           <div class="vcanvas-model" data-canvas-ui>
             <button type="button" class="vcanvas-model-btn" onClick={() => setModelPickerOpen((v) => !v)}>
               <span class="vcanvas-model-dot" />

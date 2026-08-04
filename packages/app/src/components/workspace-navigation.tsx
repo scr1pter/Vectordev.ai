@@ -77,6 +77,7 @@ export function WorkspaceNavigation(props: {
   onReviewWorkspace: (id: string) => void
   onRemoveWorkspace: (id: string) => void
   onMoveWorkspace: (sourceID: string, targetID: string) => void
+  onVel: () => void
   onCodeEditor: () => void
   onBrowser: () => void
   onCanvas: () => void
@@ -337,6 +338,12 @@ export function WorkspaceNavigation(props: {
 
         <section data-vector-nav-group class="border-t border-[color:var(--vx-line)] px-2 py-3">
           <div data-vector-nav-label>Project tools</div>
+          <button type="button" data-vector-nav-item onClick={props.onVel}>
+            <svg viewBox="0 0 16 16" class="size-3.5 shrink-0" aria-hidden="true">
+              <path d="M8 9.7a2.55 2.55 0 0 0 2.55-2.55V4.4a2.55 2.55 0 0 0-5.1 0v2.75A2.55 2.55 0 0 0 8 9.7Zm-4.2-2.5a4.2 4.2 0 0 0 8.4 0M8 11.4v2.25M5.9 13.65h4.2" fill="none" stroke="currentColor" stroke-width="1.15" stroke-linecap="round" />
+            </svg>
+            <span>Vel</span>
+          </button>
           <button type="button" data-vector-nav-item onClick={props.onCodeEditor}>
             <svg viewBox="0 0 16 16" class="size-3.5 shrink-0" aria-hidden="true"><path d="M5.25 5 2.75 8l2.5 3M10.75 5l2.5 3-2.5 3M9.15 3.75l-2.3 8.5" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" /></svg>
             <span>Code editor</span>

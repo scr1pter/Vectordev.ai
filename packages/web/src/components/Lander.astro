@@ -1,5 +1,5 @@
 ---
-import { ArrowRight, Bot, ChevronDown, CloudUpload, Globe2 } from "lucide-react"
+import { ArrowRight, Bot, BriefcaseBusiness, ChevronDown, CloudUpload, Code2, Globe2, Mic2 } from "lucide-react"
 import MarketingFooter from "./marketing/MarketingFooter.astro"
 import MarketingNav from "./marketing/MarketingNav.astro"
 import screenshotAgent from "../assets/lander/vector-agent-current.png"
@@ -37,6 +37,7 @@ const ecosystem = [
   "Netlify",
   "Supabase",
   "Playwright",
+  "Vel",
 ]
 
 const features = [
@@ -143,9 +144,9 @@ const changelog = [
       </h1>
 
       <p class="headline">
-        <span>Build with a team of coding agents.</span>
-        <span class="scramble" data-scramble aria-hidden="true">Run them in isolated workspaces.</span>
-        <span class="sr-only">Run them in isolated workspaces, test in Vector's native browser, and ship through Vector Cloud.</span>
+        <span>One workspace for building, running, and shipping.</span>
+        <span class="scramble" data-scramble aria-hidden="true">Code, Work, and Cloud — connected.</span>
+        <span class="sr-only">Build software in Vector Code, run agentic projects in Vector Work, and ship through Vector Cloud.</span>
       </p>
 
       <div class="hero-loop" aria-label="Vector's build, test, and ship workflow">
@@ -169,7 +170,7 @@ const changelog = [
         <ArrowRight size={18} strokeWidth={2} aria-hidden="true" />
       </a>
 
-      <p class="hero-note">Local repositories. Your models. One continuous path from prompt to production.</p>
+      <p class="hero-note">Vector Code, Vector Work, Vector Cloud, and Vel — one local-first product system.</p>
     </section>
 
     <section class="showcase" aria-label="Vector workspace screenshot">
@@ -188,6 +189,40 @@ const changelog = [
           loading="eager"
         />
       </figure>
+    </section>
+
+    <section class="suite section-width" aria-labelledby="suite-title">
+      <div class="section-heading" data-reveal>
+        <p class="section-kicker">Choose how you work</p>
+        <h2 id="suite-title">Three focused products. One shared engineering context.</h2>
+        <p>Start from Vector's Product Hub, then move between software, project execution, and cloud operations without rebuilding context in another tool.</p>
+      </div>
+      <div class="suite-grid" data-reveal>
+        <article>
+          <span class="suite-icon"><Code2 size={19} strokeWidth={1.7} aria-hidden="true" /></span>
+          <small>Build software</small>
+          <h3>Vector Code</h3>
+          <p>Open a repository, code directly, or coordinate isolated agents with a shared editor, terminal, controlled browser and review boundary.</p>
+        </article>
+        <article>
+          <span class="suite-icon"><BriefcaseBusiness size={19} strokeWidth={1.7} aria-hidden="true" /></span>
+          <small>Run projects</small>
+          <h3>Vector Work</h3>
+          <p>Create projects with an optional repository, turn outcomes into tasks, and give every task its own agent, browser, MCP, plugins and approvals.</p>
+        </article>
+        <article>
+          <span class="suite-icon"><CloudUpload size={19} strokeWidth={1.7} aria-hidden="true" /></span>
+          <small>Ship and operate</small>
+          <h3>Vector Cloud</h3>
+          <p>Select any Code repository or Work project to manage deployments, domains, environment variables, databases and runtime health.</p>
+        </article>
+        <article>
+          <span class="suite-icon"><Mic2 size={19} strokeWidth={1.7} aria-hidden="true" /></span>
+          <small>Talk through the work</small>
+          <h3>Vel</h3>
+          <p>A task-aware voice assistant with a dedicated call surface. Vel listens, answers aloud and hands actionable requests to the active Vector agent.</p>
+        </article>
+      </div>
     </section>
 
     <section class="belt" aria-label="Agents, models, and services Vector works with">
@@ -1054,6 +1089,66 @@ const changelog = [
     line-height: 1.7;
   }
 
+  .suite {
+    margin-top: clamp(68px, 10vw, 126px);
+  }
+
+  .suite-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1px;
+    margin-top: 44px;
+    overflow: hidden;
+    border: 1px solid var(--glass-line);
+    border-radius: 24px;
+    background: var(--glass-line);
+    box-shadow: var(--glass-shadow);
+  }
+
+  .suite-grid article {
+    min-height: 226px;
+    background: color-mix(in srgb, var(--glass-fill-strong) 96%, #15131a);
+    padding: 26px;
+    backdrop-filter: blur(28px) saturate(140%);
+    -webkit-backdrop-filter: blur(28px) saturate(140%);
+  }
+
+  .suite-icon {
+    display: grid;
+    width: 38px;
+    height: 38px;
+    place-items: center;
+    border: 1px solid rgba(184, 158, 252, 0.22);
+    border-radius: 10px;
+    background: rgba(147, 116, 236, 0.11);
+    color: var(--purple-soft);
+  }
+
+  .suite-grid small {
+    display: block;
+    margin-top: 22px;
+    color: var(--purple-soft);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 9.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .suite-grid h3 {
+    margin: 6px 0 0;
+    color: white;
+    font-size: 21px;
+    font-weight: 590;
+  }
+
+  .suite-grid p {
+    max-width: 48ch;
+    margin: 11px 0 0;
+    color: var(--ink-45);
+    font-size: 12.5px;
+    line-height: 1.62;
+  }
+
   .workflow {
     margin-top: clamp(64px, 9vw, 112px);
     padding: clamp(34px, 5vw, 58px);
@@ -1538,6 +1633,7 @@ const changelog = [
   /* ---- responsive ---- */
 
   @media (max-width: 900px) {
+    .suite-grid { grid-template-columns: 1fr; }
     .workflow-list { grid-template-columns: repeat(2, 1fr); }
     .workflow-list li { border-bottom: 1px solid rgba(227, 215, 255, 0.12); }
     .workflow-list li:nth-child(2n) { border-right: 0; }
@@ -1574,6 +1670,8 @@ const changelog = [
     .marquee-track span { font-size: 13.5px; }
 
     .section-width { width: calc(100% - 24px); }
+    .suite-grid { border-radius: 20px; }
+    .suite-grid article { min-height: 200px; padding: 22px; }
     .workflow,
     .runtime,
     .evidence,

@@ -1,5 +1,6 @@
 import "@/index.css"
 import "@/vector-premium.css"
+import "@/product-suite.css"
 import * as Sentry from "@sentry/solid"
 import { I18nProvider } from "@opencode-ai/ui/context"
 import { DialogProvider } from "@opencode-ai/ui/context/dialog"
@@ -60,6 +61,9 @@ import { legacySessionServer, requireServerKey, sessionHref } from "./utils/sess
 
 import { SessionPage, TargetSessionRouteContent } from "@/pages/session"
 import { NewHome } from "@/pages/home"
+import { ProductHome } from "@/pages/product-home"
+import { WorkHome } from "@/features/work/work-home"
+import { CloudHome } from "@/features/cloud/cloud-home"
 
 const NewSession = lazy(() => import("@/pages/new-session"))
 
@@ -348,6 +352,9 @@ declare global {
         cb: (event: import("@/features/browser-agent/types").BrowserAgentPageEvent) => void,
       ) => () => void
       onZoomFactorChanged?: (cb: (factor: number) => void) => () => void
+      workProjects?: {
+        ensureDirectory: (projectId: string, name: string) => Promise<string>
+      }
       parallelWorkspaces?: {
         list: (scope?: { sourcePath?: string; parentSessionId?: string }) => Promise<ParallelWorkspaceRecord[]>
         create: (input: CreateParallelWorkspaceInput) => Promise<ParallelWorkspaceRecord>
@@ -759,8 +766,10 @@ function Routes() {
         </Route>
       </Route>
       <Show when={settings.general.newLayoutDesigns()}>
-        <Route path="/" component={NewHome} />
-        <Route path="/cloud" component={() => null} />
+        <Route path="/" component={ProductHome} />
+        <Route path="/code" component={NewHome} />
+        <Route path="/work" component={WorkHome} />
+        <Route path="/cloud" component={CloudHome} />
         <Route path="/canvas" component={() => null} />
         <Route path="/parallel-workspaces" component={() => null} />
         <Route path="/parallel-workspaces/swarm/:swarmId" component={() => null} />
