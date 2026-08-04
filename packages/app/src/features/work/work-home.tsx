@@ -172,7 +172,6 @@ export function WorkHome() {
             All Vector
           </button>
           <div class="vector-suite-header__brand"><img src="/vector-logo.png" alt="" /><span>Vector Work</span></div>
-          <button type="button" class="vector-suite-header__vel" onClick={() => window.dispatchEvent(new CustomEvent("vector:vel-open"))}>Talk to Vel</button>
         </header>
 
         <div class="vector-work-home__layout">
@@ -220,13 +219,12 @@ export function WorkHome() {
                       <p>{project().description || "Coordinate outcomes across agents, browser work and connected tools."}</p>
                     </div>
                     <div class="vector-work-tasks__actions">
-                      <button type="button" class="secondary" onClick={() => window.dispatchEvent(new CustomEvent("vector:vel-open"))}>Call Vel</button>
                       <button type="button" onClick={() => setCreatingTask(true)}>New task</button>
                     </div>
                   </div>
 
                   <div class="vector-work-capabilities" aria-label="Available in every task">
-                    <span>Agent + parallel workspaces</span><span>Controlled browser</span><span>MCP + plugins</span><span>Review + approvals</span>
+                    <span>Agent + parallel workspaces</span><span>Controlled browser</span><span>Vel voice assistant</span><span>MCP + plugins</span>
                   </div>
 
                   <div class="vector-work-task-list">

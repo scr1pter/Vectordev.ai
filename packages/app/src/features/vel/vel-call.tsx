@@ -1,7 +1,6 @@
 import { createEffect, createSignal, For, onCleanup, Show } from "solid-js"
 import { useServerSDK } from "@/context/server-sdk"
 import { startDictation, type DictationHandle, type DictationState } from "@/services/dictation"
-import { INTERNAL_SESSION_TITLE_PREFIX } from "@/utils/internal-sessions"
 
 type VelMessage = { id: string; role: "you" | "vel"; text: string }
 
@@ -46,8 +45,6 @@ export function VelCall(props: {
   const [error, setError] = createSignal("")
   const [messages, setMessages] = createSignal<VelMessage[]>([])
   let dictation: DictationHandle | undefined
-  let hiddenSessionID: string | undefined
-  let hiddenSessionDirectory = ""
   let opening = false
 
   const statusLabel = () => {
@@ -103,32 +100,19 @@ export function VelCall(props: {
     setState("thinking")
     const directory = await props.directory().catch(() => "")
     const model = props.model()
-    if (!directory || !model) {
+    const sessionID = props.sessionId()
+    if (!directory || !model || !sessionID) {
       const text = !directory
         ? "Open a Code repository or a Work task so I can act on its context."
-        : "Connect a model provider, then call me again."
+        : !sessionID
+          ? "Start this session by sending its first message, then call me again."
+          : "Connect a model provider, then call me again."
       setMessages((items) => [...items, { id: crypto.randomUUID(), role: "vel", text }])
       speak(text)
       return
     }
     try {
       const client = serverSDK().createClient({ directory, throwOnError: true })
-      let sessionID = props.sessionId()
-      if (!sessionID) {
-        if (!hiddenSessionID || hiddenSessionDirectory !== directory) {
-          const session = await client.session.create({
-            directory,
-            title: `${INTERNAL_SESSION_TITLE_PREFIX}Vel`,
-            agent: "build",
-            model: { providerID: model.providerID, id: model.modelID },
-            metadata: { source: "vector-vel", hidden: true },
-          })
-          hiddenSessionID = session.data?.id
-          hiddenSessionDirectory = directory
-        }
-        sessionID = hiddenSessionID
-      }
-      if (!sessionID) throw new Error("Vel could not open an agent session.")
       const result = await client.session.prompt({
         sessionID,
         directory,

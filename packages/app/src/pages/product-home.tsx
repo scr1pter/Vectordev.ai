@@ -75,10 +75,6 @@ export function ProductHome() {
             <img src="/vector-logo.png" alt="" draggable={false} />
             <span>Vector</span>
           </div>
-          <button type="button" class="vector-product-home__vel" onClick={() => window.dispatchEvent(new CustomEvent("vector:vel-open"))}>
-            <span aria-hidden="true" />
-            Talk to Vel
-          </button>
         </header>
 
         <section class="vector-product-home__intro">

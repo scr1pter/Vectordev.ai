@@ -71,7 +71,7 @@ export const TOUR_SLIDES: TourSlide[] = [
     eyebrow: "Meet Vel",
     titlePre: "Talk through",
     titleEm: "the work.",
-    body: "Call Vel from the Product Hub, a project, or Canvas. Vel listens, answers aloud, and hands actionable requests to the active Vector agent with the current task context.",
+    body: "Call Vel from Project tools inside an active Code session or Work task. Vel listens, answers aloud, and hands requests to that exact session without creating separate hidden work.",
   },
 ]
 

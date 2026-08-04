@@ -493,11 +493,6 @@ export default function NewLayout(props: ParentProps) {
         })),
       ),
   )
-  onMount(() => {
-    const openVel = () => setVelOpen(true)
-    globalThis.window?.addEventListener("vector:vel-open", openVel)
-    onCleanup(() => globalThis.window?.removeEventListener("vector:vel-open", openVel))
-  })
   createEffect(() => {
     const options = parallelModelOptions()
     if (options.length === 0) return
@@ -738,6 +733,7 @@ export default function NewLayout(props: ParentProps) {
     const draftID = new URLSearchParams(location.search).get("draftId") ?? undefined
     return workTaskForSession(activeTaskScope().taskId) ?? workTaskForDraft(draftID)
   }
+  const workMode = () => Boolean(activeWorkTask())
   const activeWorkspaceScope = () => ({
     sourcePath: activeTaskScope().projectPath,
     parentSessionId: activeTaskScope().taskId,
@@ -2473,6 +2469,11 @@ export default function NewLayout(props: ParentProps) {
     if (taskRoute()) setOnboardingFlag("task")
   })
 
+  createEffect(() => {
+    if (taskRoute() && activeTaskScope().taskId) return
+    setVelOpen(false)
+  })
+
   const closeOnboarding = () => {
     setOnboardingOpen(false)
     setOnboardingFlag("dismissed")
@@ -2768,23 +2769,25 @@ export default function NewLayout(props: ParentProps) {
         />
       </Show>
 
-      <VelCall
-        open={velOpen()}
-        onClose={() => setVelOpen(false)}
-        directory={resolveActiveProjectPath}
-        sessionId={() => activeTaskScope().taskId}
-        model={() => {
-          const providerID = parallelProvider()
-          const modelID = parallelModel()
-          return providerID && modelID ? { providerID, modelID } : undefined
-        }}
-        contextLabel={() => {
-          const task = activeWorkTask()
-          const project = workProjectForTask(task)
-          if (task) return `${project?.name ?? "Vector Work"} · ${task.title}`
-          return activeTaskScope().projectPath ? projectDisplayName() : "Vector product assistant"
-        }}
-      />
+      <Show when={taskRoute() && activeTaskScope().taskId}>
+        <VelCall
+          open={velOpen()}
+          onClose={() => setVelOpen(false)}
+          directory={resolveActiveProjectPath}
+          sessionId={() => activeTaskScope().taskId}
+          model={() => {
+            const providerID = parallelProvider()
+            const modelID = parallelModel()
+            return providerID && modelID ? { providerID, modelID } : undefined
+          }}
+          contextLabel={() => {
+            const task = activeWorkTask()
+            const project = workProjectForTask(task)
+            if (task) return `${project?.name ?? "Vector Work"} · ${task.title}`
+            return projectDisplayName()
+          }}
+        />
+      </Show>
 
       <OnboardingTour open={tourOpen()} step={tourStep()} onStep={goToTourStep} onFinish={finishTour} onSkip={skipTour} />
       <OnboardingProgress open={onboardingOpen()} steps={onboardingSteps()} onReplayTour={replayTour} onClose={closeOnboarding} />
@@ -4364,6 +4367,7 @@ export default function NewLayout(props: ParentProps) {
         mainActive={!sidebarActiveAgentID() && taskRoute()}
         treeOpen={workspaceTreeOpen()}
         items={workspaceNavigationItems()}
+        workMode={workMode()}
         activeTool={canvasRoute() ? "canvas" : cloudRoute() ? "cloud" : undefined}
         scheduledCount={activeScheduledCount()}
         currentVersion={platform.version}
@@ -4396,7 +4400,13 @@ export default function NewLayout(props: ParentProps) {
         }}
         onMoveWorkspace={moveAgentWorkspace}
         onCodeEditor={openCodespace}
-        onVel={() => setVelOpen(true)}
+        onVel={() => {
+          if (!taskRoute() || !activeTaskScope().taskId) {
+            showToast({ title: "Start this session first", description: "Send the first message, then Vel can join this exact session." })
+            return
+          }
+          setVelOpen(true)
+        }}
         onBrowser={openPreviewPanel}
         onCanvas={() => navigate(`/canvas${taskScopeSearch(activeTaskScope())}`)}
         onCloud={() => navigate(`/cloud${taskScopeSearch(activeTaskScope())}`)}

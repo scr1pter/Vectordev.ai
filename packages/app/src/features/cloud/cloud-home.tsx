@@ -62,7 +62,6 @@ export function CloudHome() {
                   All Vector
                 </button>
                 <div class="vector-suite-header__brand"><img src="/vector-logo.png" alt="" /><span>Vector Cloud</span></div>
-                <button type="button" class="vector-suite-header__vel" onClick={() => window.dispatchEvent(new CustomEvent("vector:vel-open"))}>Talk to Vel</button>
               </header>
 
               <section class="vector-cloud-home__intro">
