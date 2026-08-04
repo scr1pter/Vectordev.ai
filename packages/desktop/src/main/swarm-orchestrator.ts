@@ -376,6 +376,7 @@ async function executeSwarmRun(id: string, engine: ParallelWorkspaceEngine, cont
       coordinator = await createParallelWorkspace({
         sourcePath: run.sourcePath,
         parentSessionId: `swarm:${run.id}`,
+        engineParentSessionId: run.parentSessionId,
         name: `${run.name} · staging`,
         taskPrompt: `Aggregate validated work for this objective without touching main: ${run.objective}`,
         provider: run.plannerProvider,
@@ -573,6 +574,7 @@ async function executeSwarmTask(id: string, taskID: string, engine: ParallelWork
   const workspace = await createParallelWorkspace({
     sourcePath: coordinator.isolatedPath,
     parentSessionId: `swarm:${run.id}`,
+    engineParentSessionId: run.parentSessionId,
     name: `${run.name} · ${task.title}`,
     taskPrompt: [
       task.prompt,

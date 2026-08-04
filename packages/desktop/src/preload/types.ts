@@ -287,6 +287,7 @@ export type ParallelWorkspaceRecord = {
   model: string
   sourcePath: string
   parentSessionId?: string
+  engineParentSessionId?: string
   isolatedPath: string
   isolation: "git-worktree" | "copy"
   gitBranch?: string
@@ -329,6 +330,7 @@ export type ParallelWorkspaceRecord = {
 export type CreateParallelWorkspaceInput = {
   sourcePath: string
   parentSessionId?: string
+  engineParentSessionId?: string
   name?: string
   taskPrompt: string
   runtime?: "vector" | "claude-code" | "codex" | "cursor"

@@ -22,7 +22,7 @@ import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { installActivityEventBridge } from "@/services/activity-service"
 import { SDKProvider } from "@/context/sdk"
 import { useServerSync } from "@/context/server-sync"
-import { useServer } from "@/context/server"
+import { isManagedAgentWorkspacePath, useServer } from "@/context/server"
 import { sessionHref } from "@/utils/session-route"
 import { CloudConsole, type CloudSection } from "@/features/cloud/cloud-console"
 import { DB_INTENT_EVENT } from "@/features/cloud/db-intent"
@@ -532,9 +532,13 @@ export default function NewLayout(props: ParentProps) {
   const [orchestrationOpen, setOrchestrationOpen] = createSignal(false)
   const [pendingAgentOpenID, setPendingAgentOpenID] = createSignal<string>()
   const [backgroundTaskRecords, setBackgroundTaskRecords] = createSignal<BackgroundTaskRecord[]>([])
+  const persistedLastProjectPath = globalThis.localStorage?.getItem(LAST_ACTIVE_PROJECT_KEY) ?? ""
   const [lastProjectPath, setLastProjectPath] = createSignal(
-    globalThis.localStorage?.getItem(LAST_ACTIVE_PROJECT_KEY) ?? "",
+    isManagedAgentWorkspacePath(persistedLastProjectPath) ? "" : persistedLastProjectPath,
   )
+  if (isManagedAgentWorkspacePath(persistedLastProjectPath)) {
+    globalThis.localStorage?.removeItem(LAST_ACTIVE_PROJECT_KEY)
+  }
   const [agentTabOrder, setAgentTabOrder] = createSignal<string[]>([])
   let chatSearchRef: HTMLInputElement | undefined
   let scheduledTextRef: HTMLTextAreaElement | undefined
@@ -636,7 +640,17 @@ export default function NewLayout(props: ParentProps) {
   }
   const recentProjectPath = () => layout.projects.list().find((project) => project.worktree)?.worktree ?? ""
   const projectPathCandidates = () =>
-    [...new Set([routeContextProjectPath(), routeProjectPath(), routeSessionDirectory(), recentProjectPath(), lastProjectPath()].filter(Boolean))]
+    [
+      ...new Set(
+        [
+          routeContextProjectPath(),
+          routeProjectPath(),
+          routeSessionDirectory(),
+          recentProjectPath(),
+          lastProjectPath(),
+        ].filter((path): path is string => Boolean(path) && !isManagedAgentWorkspacePath(path)),
+      ),
+    ]
   const activeProjectPath = () => projectPathCandidates()[0] ?? ""
   const resolveActiveProjectPath = async () => {
     const candidates = projectPathCandidates()
@@ -662,7 +676,7 @@ export default function NewLayout(props: ParentProps) {
   }
 
   const rememberProjectPath = (path: string) => {
-    if (!path) return
+    if (!path || isManagedAgentWorkspacePath(path)) return
     if (path !== lastProjectPath()) setLastProjectPath(path)
     globalThis.localStorage?.setItem(LAST_ACTIVE_PROJECT_KEY, path)
   }
@@ -699,8 +713,8 @@ export default function NewLayout(props: ParentProps) {
   }
 
   createEffect(() => {
-    const path = routeProjectPath() || routeSessionDirectory()
-    if (!path) return
+    const path = routeContextProjectPath() || routeProjectPath() || routeSessionDirectory()
+    if (!path || isManagedAgentWorkspacePath(path)) return
     setLastProjectPath(path)
     globalThis.localStorage?.setItem(LAST_ACTIVE_PROJECT_KEY, path)
   })
@@ -918,8 +932,9 @@ export default function NewLayout(props: ParentProps) {
     record: ParallelWorkspaceRecord,
     scope: { sourcePath: string; parentSessionId?: string },
   ) => {
-    if (scope.sourcePath && pathKey(record.sourcePath) !== pathKey(scope.sourcePath)) return false
-    return record.parentSessionId === scope.parentSessionId
+    const recordScope = scopeForParallelRecord(record)
+    if (scope.sourcePath && pathKey(recordScope.projectPath) !== pathKey(scope.sourcePath)) return false
+    return recordScope.taskId === scope.parentSessionId
   }
 
   const parallelWorkspaceSessionHref = (record: ParallelWorkspaceRecord) => {
@@ -1309,6 +1324,8 @@ export default function NewLayout(props: ParentProps) {
     const current = activeWorkspaceScope()
     if (current.sourcePath !== scope.sourcePath || current.parentSessionId !== scope.parentSessionId) return
     setParallelRecords(allRecords)
+    for (const record of allRecords) server.projects.close(record.isolatedPath)
+    if (isManagedAgentWorkspacePath(lastProjectPath()) && scope.sourcePath) rememberProjectPath(scope.sourcePath)
     recordEconomicsOutcomes(allRecords)
     reconcileAgentTabOrder(allRecords)
     if (!swarmSelectedID() && !allRecords.some((record) => record.id === parallelSelectedID())) {
@@ -1392,6 +1409,12 @@ export default function NewLayout(props: ParentProps) {
     const availableSlots = availableWorkspaceSlots()
     if (!api) {
       reportDesktopOnlyParallel()
+      return
+    }
+    if (!scope.parentSessionId) {
+      setParallelError(
+        "Open a task session before launching an isolated agent. Agent workspaces belong only to that task.",
+      )
       return
     }
     if (!sourcePath) {
@@ -1492,6 +1515,10 @@ export default function NewLayout(props: ParentProps) {
       reportDesktopOnlyParallel()
       return
     }
+    if (!scope.parentSessionId) {
+      setParallelError("Open a task session before launching a swarm. Every agent run must belong to one task.")
+      return
+    }
     if (!sourcePath) {
       setParallelError("No active project path is loaded. Open a project before launching a swarm.")
       return
@@ -1580,8 +1607,7 @@ export default function NewLayout(props: ParentProps) {
         await openMainAgent()
         return
       }
-      server.projects.open(record.isolatedPath)
-      server.projects.touch(record.isolatedPath)
+      server.projects.close(record.isolatedPath)
       const resolved = await serverSync().session.lineage.resolve(record.agentSessionId!).catch(() => undefined)
       if (!resolved) {
         showToast({

@@ -263,7 +263,7 @@
     },
     "packages/desktop": {
       "name": "vector-desktop",
-      "version": "1.17.27",
+      "version": "1.17.28",
       "dependencies": {
         "@lydell/node-pty": "catalog:",
         "@zip.js/zip.js": "2.7.62",

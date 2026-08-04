@@ -3,6 +3,7 @@ import { createRoot, createSignal } from "solid-js"
 import { createStore } from "solid-js/store"
 import {
   createServerProjects,
+  isManagedAgentWorkspacePath,
   migrateCanonicalLocalServerState,
   nextServerAfterRemoval,
   pruneMissingLocalProjects,
@@ -116,6 +117,38 @@ describe("createServerProjects", () => {
       dispose()
     })
   })
+
+  test("does not promote managed agent worktrees into the project list", () => {
+    createRoot((dispose) => {
+      const [scope] = createSignal(ServerScope.local)
+      const [store, setStore] = createStore({ projects: {}, lastProject: {} })
+      const projects = createServerProjects({ scope, store, setStore })
+      const managed = "/tmp/parallel-workspace-runs/123e4567-e89b-12d3-a456-426614174000/workspace"
+
+      projects.open(managed)
+      projects.touch(managed)
+
+      expect(projects.list()).toEqual([])
+      expect(projects.last()).toBeUndefined()
+      dispose()
+    })
+  })
+})
+
+describe("isManagedAgentWorkspacePath", () => {
+  test("recognizes Vector-managed worktrees on every desktop platform", () => {
+    expect(
+      isManagedAgentWorkspacePath(
+        "/tmp/parallel-workspace-runs/123e4567-e89b-12d3-a456-426614174000/workspace",
+      ),
+    ).toBe(true)
+    expect(
+      isManagedAgentWorkspacePath(
+        "C:\\Vector\\parallel-workspace-runs\\123e4567-e89b-12d3-a456-426614174000\\workspace\\",
+      ),
+    ).toBe(true)
+    expect(isManagedAgentWorkspacePath("/projects/vector")).toBe(false)
+  })
 })
 
 describe("pruneMissingLocalProjects", () => {
@@ -152,6 +185,23 @@ describe("pruneMissingLocalProjects", () => {
     expect(result).toEqual({
       projects: [{ worktree: "/existing", expanded: false }],
       lastProject: "/existing",
+    })
+  })
+
+  test("removes managed agent worktrees even while their folders still exist", async () => {
+    const managed = "/tmp/parallel-workspace-runs/123e4567-e89b-12d3-a456-426614174000/workspace"
+    const result = await pruneMissingLocalProjects({
+      projects: [
+        { worktree: managed, expanded: true },
+        { worktree: "/repo", expanded: false },
+      ],
+      lastProject: managed,
+      pathExists: async () => true,
+    })
+
+    expect(result).toEqual({
+      projects: [{ worktree: "/repo", expanded: false }],
+      lastProject: "/repo",
     })
   })
 })

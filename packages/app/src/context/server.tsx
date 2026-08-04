@@ -31,6 +31,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
+export function isManagedAgentWorkspacePath(directory: string | undefined) {
+  if (!directory) return false
+  const normalized = directory.replaceAll("\\", "/").replace(/\/+$/, "")
+  return /(?:^|\/)parallel-workspace-runs\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/workspace$/i.test(
+    normalized,
+  )
+}
+
 export function migrateCanonicalLocalServerState(value: unknown, canonicalLocalServer?: ServerConnection.Key) {
   if (!canonicalLocalServer || canonicalLocalServer === "local") return value
   if (!isRecord(value)) return value
@@ -71,10 +79,12 @@ export function createServerProjects<T extends ServerProjectState>(input: {
   setStore: SetStoreFunction<T>
 }) {
   const setStore = input.setStore as unknown as SetStoreFunction<ServerProjectState>
-  const current = () => input.store.projects[input.scope()] ?? []
+  const current = () =>
+    (input.store.projects[input.scope()] ?? []).filter((project) => !isManagedAgentWorkspacePath(project.worktree))
   return {
     list: current,
     open(directory: string) {
+      if (isManagedAgentWorkspacePath(directory)) return
       const scope = input.scope()
       if (current().some((project) => project.worktree === directory)) return
       setStore("projects", scope, [{ worktree: directory, expanded: true }, ...current()])
@@ -103,9 +113,11 @@ export function createServerProjects<T extends ServerProjectState>(input: {
       setStore("projects", input.scope(), next)
     },
     last() {
-      return input.store.lastProject[input.scope()]
+      const directory = input.store.lastProject[input.scope()]
+      return isManagedAgentWorkspacePath(directory) ? undefined : directory
     },
     touch(directory: string) {
+      if (isManagedAgentWorkspacePath(directory)) return
       setStore("lastProject", input.scope(), directory)
     },
   }
@@ -117,7 +129,7 @@ export async function pruneMissingLocalProjects(input: {
   pathExists: (path: string) => Promise<boolean>
 }) {
   const checked = await Promise.all(
-    input.projects.map(async (project) =>
+    input.projects.filter((project) => !isManagedAgentWorkspacePath(project.worktree)).map(async (project) =>
       (await input.pathExists(project.worktree).catch(() => false)) ? project : undefined,
     ),
   )

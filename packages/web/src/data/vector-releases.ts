@@ -54,4 +54,5 @@ export const release117: VectorRelease[] = [
   { version: "1.17.25", title: "In-app updates", summary: "Introduced the visible update workflow, refreshed release artifacts, and improved the path to the latest desktop build." },
   { version: "1.17.26", title: "Updater and navigation repair", summary: "Rebuilt the macOS replacement handoff, added clearer version state, simplified the workspace navigation, and refreshed the Vector website and documentation." },
   { version: "1.17.27", title: "Living workspace", summary: "Brought Vector's interactive ASCII field into the desktop Home workspace, made the packaged window open reliably on launch, refreshed the release history, and synchronized the macOS, Windows, and Linux release line." },
+  { version: "1.17.28", title: "Task-bound agents", summary: "Kept every isolated agent and worktree attached to the task that created it, prevented managed agent folders from appearing as standalone projects, and cleaned stale workspace entries from Vector's project memory." },
 ]

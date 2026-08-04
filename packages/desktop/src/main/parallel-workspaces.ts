@@ -28,6 +28,7 @@ import {
 } from "./workspace-guardrails"
 import { parseUnifiedDiff, selectUnifiedDiff, type UnifiedDiffSelection } from "./unified-diff"
 import { scanChangedSecrets } from "./secret-scanner"
+import { parallelSessionCreateRequest } from "./parallel-session-scope"
 
 // Keep persisted metadata and isolated checkout directories on distinct paths.
 // electron-store creates a file with STORE_NAME, so sharing that name with the
@@ -97,6 +98,7 @@ export type ParallelWorkspaceRecord = {
   model: string
   sourcePath: string
   parentSessionId?: string
+  engineParentSessionId?: string
   isolatedPath: string
   isolation: "git-worktree" | "copy"
   gitBranch?: string
@@ -185,6 +187,7 @@ function drainParallelRunQueue() {
 export type CreateParallelWorkspaceInput = {
   sourcePath: string
   parentSessionId?: string
+  engineParentSessionId?: string
   name?: string
   taskPrompt: string
   runtime?: ParallelWorkspaceRuntime
@@ -793,6 +796,9 @@ export function getParallelWorkspace(id: string) {
 }
 
 export async function createParallelWorkspace(input: CreateParallelWorkspaceInput) {
+  if (!input.parentSessionId) {
+    throw new Error("Open a task session before creating an isolated agent workspace.")
+  }
   const sourceStat = await stat(input.sourcePath).catch(() => undefined)
   if (!sourceStat?.isDirectory()) throw new Error("Choose a valid project folder before creating a parallel workspace.")
 
@@ -917,6 +923,7 @@ export async function createParallelWorkspace(input: CreateParallelWorkspaceInpu
     model,
     sourcePath: sourceRoot,
     parentSessionId: input.parentSessionId,
+    engineParentSessionId: input.engineParentSessionId,
     isolatedPath,
     isolation,
     gitBranch,
@@ -1160,19 +1167,23 @@ async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEng
       return
     }
 
-    const created = await engineRequest<{ data?: { id?: string } }>(engine, "/api/session", {
+    const createRequest = parallelSessionCreateRequest({
+      workspaceId: initial.id,
+      workspaceName: initial.name,
+      isolatedPath: initial.isolatedPath,
+      sourcePath: initial.sourcePath,
+      parentSessionId: initial.parentSessionId,
+      engineParentSessionId: initial.engineParentSessionId,
+      provider: initial.provider,
+      model: initial.model,
+      agent: initial.agent,
+    })
+    const created = await engineRequest<{ id?: string }>(engine, createRequest.path, {
       method: "POST",
-      body: {
-        location: { directory: initial.isolatedPath },
-        model:
-          initial.provider && initial.model && !initial.provider.startsWith("Current ")
-            ? { providerID: initial.provider, id: initial.model }
-            : undefined,
-        agent: initial.agent,
-      },
+      body: createRequest.body,
       signal: controller.signal,
     })
-    const sessionId = created?.data?.id
+    const sessionId = created?.id
     if (!sessionId) throw new Error("Vector's engine did not return a session ID for the isolated workspace.")
     const active = activeRuns.get(id)
     if (active) active.sessionId = sessionId
