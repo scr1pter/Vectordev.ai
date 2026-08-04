@@ -223,8 +223,9 @@ const main = Effect.gen(function* () {
   app.on("second-instance", (_event: Event, argv: string[]) => {
     const urls = argv.filter((arg: string) => arg.startsWith("vector://"))
     if (urls.length) void routeDeepLinks(urls)
-    const win = getLastFocusedWindow()
+    const win = getLastFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
     if (win) {
+      if (win.isMinimized()) win.restore()
       win.show()
       win.focus()
     }
@@ -257,7 +258,13 @@ const main = Effect.gen(function* () {
 
   app.on("activate", () => {
     if (quitting) return
-    if (BrowserWindow.getAllWindows().length > 0) return
+    const win = getLastFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+    if (win) {
+      if (win.isMinimized()) win.restore()
+      win.show()
+      win.focus()
+      return
+    }
     restoreMainWindows()
   })
 

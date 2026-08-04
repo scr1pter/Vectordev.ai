@@ -53,4 +53,5 @@ export const release117: VectorRelease[] = [
   { version: "1.17.24", title: "Cross-platform repair", summary: "Fixed installer, sidebar, browser, cloud, voice, and layout issues across macOS, Windows, and Linux builds." },
   { version: "1.17.25", title: "In-app updates", summary: "Introduced the visible update workflow, refreshed release artifacts, and improved the path to the latest desktop build." },
   { version: "1.17.26", title: "Updater and navigation repair", summary: "Rebuilt the macOS replacement handoff, added clearer version state, simplified the workspace navigation, and refreshed the Vector website and documentation." },
+  { version: "1.17.27", title: "Living workspace", summary: "Brought Vector's interactive ASCII field into the desktop Home workspace, made the packaged window open reliably on launch, refreshed the release history, and synchronized the macOS, Windows, and Linux release line." },
 ]

@@ -208,12 +208,22 @@ export function createMainWindow(id: string = randomUUID()) {
 
   state.manage(win)
   registerWindow(win, id)
-  loadWindow(win, "index.html")
   wireZoom(win)
 
-  win.once("ready-to-show", () => {
+  const showWindow = () => {
+    if (win.isDestroyed()) return
+    if (win.isMinimized()) win.restore()
     win.show()
-  })
+    win.moveTop()
+    win.focus()
+  }
+  win.once("ready-to-show", showWindow)
+  win.webContents.once("did-finish-load", showWindow)
+  const showFallback = setTimeout(showWindow, 5_000)
+  showFallback.unref()
+  win.once("closed", () => clearTimeout(showFallback))
+
+  loadWindow(win, "index.html")
 
   return win
 }

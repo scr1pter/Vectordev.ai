@@ -472,17 +472,32 @@ html[data-vector-navigation-resizing] * {
   inset: 0;
   z-index: -1;
   pointer-events: none;
-  background-image:
-    linear-gradient(rgba(147, 116, 236, 0.035) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(107, 166, 221, 0.03) 1px, transparent 1px);
-  background-size: 42px 42px;
-  mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.8), transparent 72%);
-  animation: vx-home-grid-drift 28s linear infinite;
+  background:
+    radial-gradient(circle at 84% 12%, rgba(143, 82, 255, 0.09), transparent 26%),
+    radial-gradient(circle at 8% 72%, rgba(95, 49, 185, 0.06), transparent 30%);
 }
 
-@keyframes vx-home-grid-drift {
+.vector-home-ascii-field {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  opacity: 0.68;
+  mask-image: linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.92) 58%, transparent 100%);
+  animation: vx-home-field-breathe 16s ease-in-out infinite alternate;
+}
+
+@keyframes vx-home-field-breathe {
+  from {
+    opacity: 0.58;
+    transform: translate3d(-3px, -2px, 0);
+  }
+
   to {
-    background-position: 42px 42px;
+    opacity: 0.72;
+    transform: translate3d(4px, 3px, 0);
   }
 }
 
@@ -493,6 +508,8 @@ html[data-vector-navigation-resizing] * {
 }
 
 .vector-home-dashboard {
+  position: relative;
+  z-index: 1;
   display: flex !important;
   width: 100%;
   height: 100%;
@@ -502,6 +519,13 @@ html[data-vector-navigation-resizing] * {
   gap: 22px !important;
   overflow: hidden;
   padding-block: 34px 18px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vector-home-ascii-field {
+    animation: none;
+    transform: none;
+  }
 }
 
 .vector-home-heading {

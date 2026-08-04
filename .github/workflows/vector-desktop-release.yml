@@ -40,9 +40,9 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
       - uses: ./.github/actions/setup-bun
       - name: Build desktop app
-        run: OPENCODE_CHANNEL=prod bun --cwd packages/desktop build
+        run: OPENCODE_CHANNEL=prod bun run --cwd packages/desktop build
       - name: Package Apple Silicon and Intel builds
-        run: OPENCODE_CHANNEL=prod bun --cwd packages/desktop run package -- --mac dmg zip --arm64 --x64 --publish never
+        run: OPENCODE_CHANNEL=prod bun run --cwd packages/desktop package -- --mac dmg zip --arm64 --x64 --publish never
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: vector-desktop-mac
@@ -62,9 +62,9 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
       - uses: ./.github/actions/setup-bun
       - name: Build desktop app
-        run: $env:OPENCODE_CHANNEL="prod"; bun --cwd packages/desktop build
+        run: $env:OPENCODE_CHANNEL="prod"; bun run --cwd packages/desktop build
       - name: Package Windows installer
-        run: $env:OPENCODE_CHANNEL="prod"; bun --cwd packages/desktop run package -- --win nsis --x64 --arm64 --publish never
+        run: $env:OPENCODE_CHANNEL="prod"; bun run --cwd packages/desktop package -- --win nsis --x64 --arm64 --publish never
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: vector-desktop-windows
@@ -83,9 +83,9 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
       - uses: ./.github/actions/setup-bun
       - name: Build desktop app
-        run: OPENCODE_CHANNEL=prod bun --cwd packages/desktop build
+        run: OPENCODE_CHANNEL=prod bun run --cwd packages/desktop build
       - name: Package Linux AppImage
-        run: OPENCODE_CHANNEL=prod bun --cwd packages/desktop run package -- --linux AppImage --x64 --arm64 --publish never
+        run: OPENCODE_CHANNEL=prod bun run --cwd packages/desktop package -- --linux AppImage --x64 --arm64 --publish never
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: vector-desktop-linux

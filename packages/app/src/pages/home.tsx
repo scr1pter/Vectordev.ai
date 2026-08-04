@@ -65,6 +65,7 @@ import { Persist, persisted } from "@/utils/persist"
 import { useMarked } from "@opencode-ai/ui/context/marked"
 import { preloadMarkdown } from "@opencode-ai/session-ui/markdown-cache"
 import { normalizeUsageSummary, usageStreakCalendar } from "@/utils/usage-summary"
+import { VectorAsciiField } from "@/components/vector-ascii-field"
 
 const HOME_SESSION_LIMIT = 64
 const HOME_SESSION_HEADER_STICKY_TOP = 12
@@ -523,6 +524,7 @@ export function NewHome() {
         "--v2-overlay-simple-overlay-hover": "rgba(255,255,255,0.06)",
       }}
     >
+      <VectorAsciiField />
       <div class="vector-home-dashboard">
         <header data-vector-home-overview class="vector-home-heading">
           <div class="vector-home-heading__topline">

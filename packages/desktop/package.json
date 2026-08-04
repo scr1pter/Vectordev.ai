@@ -2,7 +2,7 @@
   "name": "vector-desktop",
   "productName": "Vector",
   "private": true,
-  "version": "1.17.26",
+  "version": "1.17.27",
   "type": "module",
   "license": "MIT",
   "homepage": "https://vectordev.ai",
