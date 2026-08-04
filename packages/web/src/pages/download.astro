@@ -219,7 +219,7 @@ const downloads = [
     min-width: 320px;
     overflow: hidden;
     color: var(--ink);
-    background: var(--page);
+    background: rgba(8, 6, 13, 0.42);
   }
 
   .eyebrow {
@@ -272,10 +272,12 @@ const downloads = [
     flex-direction: column;
     justify-content: space-between;
     color: #f4f4f6;
-    background: #171719;
-    border: 1px solid #2d2d32;
-    border-radius: 8px;
-    box-shadow: 0 24px 54px rgba(0, 0, 0, 0.28);
+    background: var(--glass-fill-strong);
+    border: 1px solid var(--glass-line-strong);
+    border-radius: 26px;
+    box-shadow: var(--glass-shadow);
+    backdrop-filter: blur(30px) saturate(150%);
+    -webkit-backdrop-filter: blur(30px) saturate(150%);
     animation: settle-in 700ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
   }
 
@@ -307,8 +309,10 @@ const downloads = [
     align-items: center;
     justify-content: center;
     color: #171719;
-    background: #b9a8f6;
-    border-radius: 6px;
+    background: rgba(211, 197, 255, 0.92);
+    border: 1px solid rgba(255, 255, 255, 0.62);
+    border-radius: 16px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.78), 0 12px 28px rgba(83, 55, 148, 0.2);
     font-size: 14px;
     font-weight: 700;
     text-decoration: none;
@@ -365,8 +369,10 @@ const downloads = [
     align-items: center;
     justify-content: center;
     color: var(--accent-strong);
-    background: var(--accent-soft);
-    border-radius: 6px;
+    background: rgba(170, 140, 255, 0.13);
+    border: 1px solid var(--glass-line);
+    border-radius: 13px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
     font-size: 10px;
     font-weight: 760;
     text-transform: uppercase;
@@ -392,15 +398,18 @@ const downloads = [
     justify-content: space-between;
     gap: 16px;
     color: var(--ink);
-    background: var(--surface);
-    border: 1px solid var(--line);
-    border-radius: 6px;
+    background: var(--glass-fill);
+    border: 1px solid var(--glass-line);
+    border-radius: 18px;
+    box-shadow: var(--glass-shadow-soft);
+    backdrop-filter: blur(22px) saturate(145%);
+    -webkit-backdrop-filter: blur(22px) saturate(145%);
     text-decoration: none;
     transition: border-color 180ms ease, background 180ms ease, transform 180ms ease;
   }
 
   .platform-options a:hover {
-    background: var(--surface-soft);
+    background: rgba(48, 35, 71, 0.72);
     border-color: var(--accent);
     transform: translateY(-2px);
   }
@@ -444,18 +453,22 @@ const downloads = [
     margin-top: 66px;
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    border-top: 1px solid var(--line-strong);
+    gap: 12px;
   }
 
   .install-grid article {
     min-height: 250px;
-    padding: 26px 30px 28px 0;
-    border-bottom: 1px solid var(--line);
+    padding: 26px 26px 28px;
+    background: var(--glass-fill);
+    border: 1px solid var(--glass-line);
+    border-radius: 20px;
+    box-shadow: var(--glass-shadow-soft);
+    backdrop-filter: blur(22px) saturate(140%);
+    -webkit-backdrop-filter: blur(22px) saturate(140%);
   }
 
   .install-grid article + article {
-    padding-left: 30px;
-    border-left: 1px solid var(--line);
+    padding-left: 26px;
   }
 
   .install-grid span {
@@ -476,11 +489,18 @@ const downloads = [
   }
 
   .help-band {
-    padding: 120px 0;
+    margin-block: 84px;
+    padding: 52px;
     display: flex;
     align-items: flex-end;
     justify-content: space-between;
     gap: 54px;
+    background: var(--glass-fill-strong);
+    border: 1px solid var(--glass-line);
+    border-radius: 26px;
+    box-shadow: var(--glass-shadow);
+    backdrop-filter: blur(28px) saturate(145%);
+    -webkit-backdrop-filter: blur(28px) saturate(145%);
   }
 
   .help-band h2 {
@@ -493,6 +513,14 @@ const downloads = [
     font-size: 14px;
     font-weight: 650;
     text-decoration: none;
+    min-height: 42px;
+    padding: 0 15px;
+    display: inline-flex;
+    align-items: center;
+    background: rgba(255, 255, 255, 0.055);
+    border: 1px solid var(--glass-line);
+    border-radius: 15px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
   }
 
   .help-band a span {
@@ -571,8 +599,7 @@ const downloads = [
     .install-grid article,
     .install-grid article + article {
       min-height: auto;
-      padding: 24px 0 28px;
-      border-left: 0;
+      padding: 24px;
     }
 
     .install-grid h3 {
@@ -582,7 +609,9 @@ const downloads = [
     .help-band {
       align-items: flex-start;
       flex-direction: column;
-      padding: 96px 0;
+      margin-block: 58px;
+      padding: 36px 24px;
+      border-radius: 22px;
     }
   }
 </style>

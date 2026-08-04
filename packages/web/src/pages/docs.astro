@@ -356,7 +356,7 @@ const faqs = [
     min-width: 320px;
     overflow: hidden;
     color: var(--ink);
-    background: var(--page);
+    background: rgba(8, 6, 13, 0.42);
   }
 
   .eyebrow,
@@ -371,9 +371,14 @@ const faqs = [
 
   .docs-hero {
     width: min(1120px, calc(100% - 48px));
-    margin: 0 auto;
-    padding: 92px 0 90px;
-    border-bottom: 1px solid var(--line-strong);
+    margin: 34px auto 58px;
+    padding: 64px;
+    background: var(--glass-fill-strong);
+    border: 1px solid var(--glass-line);
+    border-radius: 28px;
+    box-shadow: var(--glass-shadow);
+    backdrop-filter: blur(30px) saturate(145%);
+    -webkit-backdrop-filter: blur(30px) saturate(145%);
   }
 
   .docs-hero h1 {
@@ -405,9 +410,12 @@ const faqs = [
     align-items: center;
     gap: 8px;
     color: var(--ink);
-    background: var(--surface);
-    border: 1px solid var(--line);
-    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.055);
+    border: 1px solid var(--glass-line);
+    border-radius: 15px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
     font-size: 13px;
     font-weight: 620;
     text-decoration: none;
@@ -430,9 +438,15 @@ const faqs = [
 
   .docs-nav {
     height: fit-content;
-    padding: 46px 0;
+    padding: 22px;
     position: sticky;
-    top: 0;
+    top: 94px;
+    background: var(--glass-fill-strong);
+    border: 1px solid var(--glass-line);
+    border-radius: 22px;
+    box-shadow: var(--glass-shadow-soft);
+    backdrop-filter: blur(26px) saturate(145%);
+    -webkit-backdrop-filter: blur(26px) saturate(145%);
   }
 
   .docs-nav > label {
@@ -450,9 +464,10 @@ const faqs = [
     display: flex;
     align-items: center;
     gap: 8px;
-    background: var(--surface);
-    border: 1px solid var(--line);
-    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--glass-line);
+    border-radius: 13px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
   }
 
   .search-field span {
@@ -536,9 +551,13 @@ const faqs = [
   .note {
     margin-top: 30px;
     padding: 20px 22px;
-    background: var(--accent-soft);
+    background: var(--glass-fill);
+    border: 1px solid var(--glass-line);
     border-left: 3px solid var(--accent);
-    border-radius: 0 6px 6px 0;
+    border-radius: 16px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
   }
 
   .callout {
@@ -621,10 +640,13 @@ const faqs = [
     width: 100%;
     height: auto;
     display: block;
-    background: #171719;
-    border: 1px solid #2d2d32;
-    border-radius: 8px;
-    box-shadow: 0 18px 42px rgba(21, 21, 24, 0.13);
+    padding: 6px;
+    background: rgba(24, 18, 38, 0.68);
+    border: 1px solid var(--glass-line-strong);
+    border-radius: 24px;
+    box-shadow: var(--glass-shadow);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
   }
 
   .docs-image figcaption {
@@ -638,17 +660,19 @@ const faqs = [
     margin-top: 34px;
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    border-top: 1px solid var(--line);
-    border-left: 1px solid var(--line);
+    gap: 10px;
   }
 
   .definition-grid article,
   .do-dont article {
     min-height: 132px;
     padding: 20px;
-    background: var(--surface);
-    border-right: 1px solid var(--line);
-    border-bottom: 1px solid var(--line);
+    background: var(--glass-fill);
+    border: 1px solid var(--glass-line);
+    border-radius: 18px;
+    box-shadow: var(--glass-shadow-soft);
+    backdrop-filter: blur(20px) saturate(140%);
+    -webkit-backdrop-filter: blur(20px) saturate(140%);
   }
 
   .feature-list {
@@ -689,7 +713,13 @@ const faqs = [
   }
 
   details {
-    border-bottom: 1px solid var(--line);
+    margin-top: 10px;
+    padding: 0 18px;
+    background: var(--glass-fill);
+    border: 1px solid var(--glass-line);
+    border-radius: 16px;
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
   }
 
   summary {
@@ -744,8 +774,9 @@ const faqs = [
     }
 
     .docs-hero {
-      padding-top: 64px;
-      padding-bottom: 66px;
+      margin-top: 24px;
+      padding: 40px 24px;
+      border-radius: 22px;
     }
 
     .docs-hero h1 {
@@ -761,9 +792,9 @@ const faqs = [
     }
 
     .docs-nav {
-      padding: 30px 0;
+      padding: 18px;
       position: static;
-      border-bottom: 1px solid var(--line);
+      border: 1px solid var(--glass-line);
     }
 
     .docs-nav nav {

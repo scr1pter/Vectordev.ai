@@ -1,5 +1,5 @@
 ---
-import { MarketingMobileNav } from "./MarketingMobileNav"
+import { MarketingMobileNav } from "../MarketingMobileNav"
 
 interface Props {
   active?: "product" | "docs" | "releases" | "download"
@@ -8,64 +8,100 @@ interface Props {
 const { active = "product" } = Astro.props
 ---
 
-<header class="site-nav">
-  <a class="site-brand" href="/" aria-label="Vector home">
-    <img src="/vector-logo.png" alt="" width="28" height="28" />
-  </a>
+<header class="site-header">
+  <div class="site-nav">
+    <a class="site-brand" href="/" aria-label="Vector home">
+      <img src="/vector-logo.png" alt="" width="28" height="28" />
+    </a>
 
-  <nav class="desktop-links" aria-label="Primary navigation">
-    <a class:list={{ active: active === "product" }} href="/#workspace">Product</a>
-    <a class:list={{ active: active === "docs" }} href="/docs">Docs</a>
-    <a class:list={{ active: active === "releases" }} href="/releases">Releases</a>
-    <a class:list={["download-link", { active: active === "download" }]} href="/download"><span>Download</span></a>
-  </nav>
-  <div class="mobile-menu">
-    <MarketingMobileNav active={active} client:only="react" />
+    <nav class="desktop-links" aria-label="Primary navigation">
+      <a class:list={{ active: active === "product" }} href="/#workspace">Product</a>
+      <a class:list={{ active: active === "docs" }} href="/docs">Docs</a>
+      <a class:list={{ active: active === "releases" }} href="/releases">Releases</a>
+      <a class:list={["download-link", { active: active === "download" }]} href="/download"><span>Download</span></a>
+    </nav>
+    <div class="mobile-menu">
+      <MarketingMobileNav active={active} client:only="solid-js" />
+    </div>
   </div>
 </header>
 
 <style>
+  .site-header {
+    position: sticky;
+    top: 12px;
+    z-index: 40;
+    height: 76px;
+    pointer-events: none;
+  }
+
   .site-nav {
     width: min(1200px, calc(100% - 48px));
     height: 58px;
     margin: 0 auto;
+    padding: 7px 9px 7px 12px;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    position: relative;
-    z-index: 20;
+    background: var(--glass-fill-strong);
+    border: 1px solid var(--glass-line);
+    border-radius: 21px;
+    box-shadow: var(--glass-shadow-soft);
+    backdrop-filter: blur(28px) saturate(155%);
+    -webkit-backdrop-filter: blur(28px) saturate(155%);
+    pointer-events: auto;
   }
 
   .site-brand {
+    width: 42px;
+    height: 42px;
     display: inline-flex;
     align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.055);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 14px;
     text-decoration: none;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
   }
 
   .site-brand img {
-    width: 27px;
-    height: 27px;
-    border-radius: 6px;
-    box-shadow: 0 10px 30px rgba(156, 115, 255, 0.12);
+    width: 28px;
+    height: 28px;
+    border-radius: 7px;
   }
 
   .desktop-links {
     display: flex;
     align-items: center;
-    gap: 26px;
+    gap: 3px;
   }
 
   .desktop-links a {
-    color: var(--muted, #96929e) !important;
-    font-size: 12px;
-    font-weight: 480;
+    min-height: 38px;
+    padding: 0 14px;
+    display: inline-flex;
+    align-items: center;
+    color: rgba(255, 255, 255, 0.7) !important;
+    font-size: 14px;
+    font-weight: 400;
+    border: 1px solid transparent;
+    border-radius: 13px;
     text-decoration: none;
     transition: color 180ms ease, background 180ms ease, border-color 180ms ease;
   }
 
-  .desktop-links a:hover,
+  .desktop-links a:hover {
+    color: #fff !important;
+    background: rgba(255, 255, 255, 0.055);
+    border-color: rgba(255, 255, 255, 0.08);
+  }
+
   .desktop-links a.active {
-    color: var(--ink, #f4f2f7) !important;
+    color: #fff !important;
+    background: rgba(183, 154, 255, 0.12);
+    border-color: rgba(213, 197, 255, 0.15);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
   }
 
   .mobile-menu {
@@ -73,37 +109,44 @@ const { active = "product" } = Astro.props
   }
 
   .download-link {
-    min-height: 34px;
-    padding: 0 15px;
+    min-height: 36px;
+    padding: 0 16px;
     display: inline-flex;
     align-items: center;
-    color: #161219 !important;
-    background: #eee9f5;
-    border: 1px solid #eee9f5;
-    border-radius: 6px;
+    color: #120d17 !important;
+    background: rgba(232, 222, 255, 0.92);
+    border: 1px solid rgba(255, 255, 255, 0.58);
+    border-radius: 13px;
+    font-weight: 600 !important;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75), 0 7px 20px rgba(105, 72, 180, 0.2);
   }
 
   .download-link span {
-    color: #161219 !important;
+    color: #120d17 !important;
   }
 
   .download-link:hover,
   .download-link.active {
-    color: #161219 !important;
-    background: #c9b9ff;
-    border-color: #c9b9ff;
+    color: #120d17 !important;
+    background: #d7c9ff;
+    border-color: rgba(255, 255, 255, 0.72);
   }
 
   .download-link:hover span,
   .download-link.active span {
-    color: #161219 !important;
+    color: #120d17 !important;
   }
 
   @media (max-width: 640px) {
     .site-nav {
       width: min(100% - 28px, 1240px);
-      height: 58px;
+      height: 54px;
+      padding: 5px 7px 5px 9px;
+      border-radius: 19px;
     }
+
+    .site-header { top: 8px; height: 68px; }
+    .site-brand { width: 40px; height: 40px; border-radius: 13px; }
 
     .desktop-links {
       display: none;
@@ -111,6 +154,135 @@ const { active = "product" } = Astro.props
 
     .mobile-menu {
       display: block;
+    }
+  }
+</style>
+
+<style is:global>
+  .mobile-nav-trigger {
+    width: 40px;
+    height: 40px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: #d9d2df;
+    background: rgba(255, 255, 255, 0.055);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 13px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    cursor: pointer;
+    transition: color 180ms ease, border-color 180ms ease, background 180ms ease;
+  }
+
+  .mobile-nav-trigger:hover {
+    color: #fff;
+    border-color: rgba(255, 255, 255, 0.22);
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  .mobile-nav-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 90;
+    background: rgba(5, 3, 9, 0.58);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    animation: mobile-nav-fade 220ms ease;
+  }
+
+  .mobile-nav-panel {
+    position: fixed;
+    inset-block: 10px;
+    right: 10px;
+    z-index: 100;
+    width: min(88vw, 360px);
+    display: flex;
+    flex-direction: column;
+    padding: 20px;
+    color: #fff;
+    background: var(--glass-fill-strong);
+    border: 1px solid rgba(226, 211, 255, 0.18);
+    border-radius: 24px;
+    box-shadow: -24px 0 80px rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(30px) saturate(150%);
+    -webkit-backdrop-filter: blur(30px) saturate(150%);
+    outline: none;
+    animation: mobile-nav-slide 260ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .mobile-nav-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 16px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .mobile-nav-head strong {
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  .mobile-nav-copy {
+    margin: 16px 0 0;
+    color: #77737e;
+    font-size: 13.5px;
+    line-height: 1.6;
+  }
+
+  .mobile-nav-links {
+    margin-top: 28px;
+    display: grid;
+    gap: 8px;
+  }
+
+  .mobile-nav-links a {
+    min-height: 48px;
+    display: flex;
+    align-items: center;
+    padding: 0 14px;
+    color: #a29aa9 !important;
+    border: 1px solid transparent;
+    border-radius: 14px;
+    font-size: 14px;
+    font-weight: 530;
+    text-decoration: none;
+    transition: color 180ms ease, border-color 180ms ease, background 180ms ease;
+  }
+
+  .mobile-nav-links a:hover {
+    color: #fff !important;
+    border-color: rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.05);
+  }
+
+  .mobile-nav-links a.current {
+    color: #fff !important;
+    border-color: rgba(170, 140, 255, 0.32);
+    background: rgba(139, 92, 246, 0.14);
+  }
+
+  .mobile-nav-foot {
+    margin: auto 0 0;
+    padding-top: 18px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    color: #5f5966;
+    font-size: 12px;
+    line-height: 1.6;
+  }
+
+  @keyframes mobile-nav-fade {
+    from { opacity: 0; }
+  }
+
+  @keyframes mobile-nav-slide {
+    from { transform: translateX(100%); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .mobile-nav-overlay,
+    .mobile-nav-panel {
+      animation: none;
     }
   }
 </style>

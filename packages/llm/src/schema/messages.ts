@@ -42,6 +42,12 @@ export type MediaPart = Schema.Schema.Type<typeof MediaPart>
 
 export { ToolContent, ToolFileContent, ToolTextContent }
 
+export type ToolResultValue =
+  | { readonly type: "json"; readonly value: unknown }
+  | { readonly type: "text"; readonly value: unknown }
+  | { readonly type: "error"; readonly value: unknown }
+  | { readonly type: "content"; readonly value: ReadonlyArray<ToolContent> }
+
 const isToolResultValue = (value: unknown): value is ToolResultValue =>
   isRecord(value) &&
   (value.type === "text" || value.type === "json" || value.type === "error" || value.type === "content") &&
@@ -75,7 +81,6 @@ export const ToolResultValue = Object.assign(
     },
   },
 )
-export type ToolResultValue = Schema.Schema.Type<typeof ToolResultValue>
 
 export interface ToolOutput {
   readonly structured: unknown

@@ -656,6 +656,31 @@ const layer = Layer.effect(
       return yield* storeClient(s, name, result.mcpClient, result.defs!, result.instructions, mcp.timeout)
     })
 
+    // add/connect/disconnect mutate instance state only; mirror the intent into the
+    // project-local config layer so it survives a backend restart. Persistence failure
+    // must not undo the runtime change, so surface it instead of failing the request.
+    const persistConfig = Effect.fnUntraced(function* (name: string, entry: ConfigMCPV1.Info | { enabled: boolean }) {
+      yield* cfgSvc.updateMcpLocal(name, entry).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logError("failed to persist MCP server config", {
+            name,
+            error: String(Cause.squash(cause)),
+          }).pipe(
+            Effect.andThen(
+              events
+                .publish(TuiEvent.ToastShow, {
+                  title: "MCP config not saved",
+                  message: `Could not write "${name}" to .opencode/opencode.local.json; the change may not survive a restart.`,
+                  variant: "warning",
+                  duration: 8000,
+                })
+                .pipe(Effect.ignore),
+            ),
+          ),
+        ),
+      )
+    })
+
     const add = Effect.fn("MCP.add")(function* (name: string, mcp: ConfigMCPV1.Info) {
       const unsafeHeader = mcp.type === "remote" ? unsafeCredentialHeader(mcp.headers) : undefined
       if (unsafeHeader) {
@@ -667,8 +692,8 @@ const layer = Layer.effect(
         }
       }
       const s = yield* InstanceState.get(state)
-      yield* cfgSvc.update({ mcp: { [name]: mcp } })
       s.config[name] = mcp
+      yield* persistConfig(name, mcp)
       yield* createAndStore(name, mcp)
       yield* events.publish(ToolsChanged, { server: name }).pipe(Effect.ignore)
       return { status: s.status }
@@ -678,7 +703,7 @@ const layer = Layer.effect(
       const mcp = yield* requireMcpConfig(name)
       const enabled = { ...mcp, enabled: true }
       const s = yield* InstanceState.get(state)
-      yield* cfgSvc.update({ mcp: { [name]: enabled } })
+      yield* persistConfig(name, { enabled: true })
       s.config[name] = enabled
       yield* createAndStore(name, enabled)
       yield* events.publish(ToolsChanged, { server: name }).pipe(Effect.ignore)
@@ -688,7 +713,7 @@ const layer = Layer.effect(
       const mcp = yield* requireMcpConfig(name)
       const s = yield* InstanceState.get(state)
       const disabled = { ...mcp, enabled: false }
-      yield* cfgSvc.update({ mcp: { [name]: disabled } })
+      yield* persistConfig(name, { enabled: false })
       s.config[name] = disabled
       yield* closeClient(s, name)
       delete s.clients[name]

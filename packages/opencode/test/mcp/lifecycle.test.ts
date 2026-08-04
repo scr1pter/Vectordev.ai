@@ -644,35 +644,43 @@ it.instance(
   },
 )
 
-it.instance(
-  "add, disconnect, and reconnect persist project MCP configuration",
-  () =>
-    MCP.Service.use((mcp: MCPNS.Interface) =>
-      Effect.gen(function* () {
-        const { directory } = yield* TestInstance
-        lastCreatedClientName = "durable-server"
+// ========================================================================
+// Test: add()/connect()/disconnect() persist to the project-local config
+// ========================================================================
 
-        yield* mcp.add("durable-server", {
-          type: "local",
-          command: ["echo", "test"],
-        })
+it.instance("add persists the server to .opencode/opencode.local.json and toggles persist enabled", () =>
+  MCP.Service.use((mcp: MCPNS.Interface) =>
+    Effect.gen(function* () {
+      const { directory } = yield* TestInstance
+      lastCreatedClientName = "persist-server"
+      getOrCreateClientState("persist-server")
 
-        const added = yield* Effect.promise(() => Bun.file(path.join(directory, "config.json")).json())
-        expect(added.mcp["durable-server"]).toEqual({
-          type: "local",
-          command: ["echo", "test"],
-        })
+      yield* mcp.add("persist-server", {
+        type: "local",
+        command: ["echo", "test"],
+        environment: { TOKEN: "secret" },
+      })
 
-        yield* mcp.disconnect("durable-server")
-        const disconnected = yield* Effect.promise(() => Bun.file(path.join(directory, "config.json")).json())
-        expect(disconnected.mcp["durable-server"].enabled).toBe(false)
+      const file = path.join(directory, ".opencode", "opencode.local.json")
+      const written = JSON.parse(yield* Effect.promise(() => Bun.file(file).text()))
+      expect(written.mcp["persist-server"]).toEqual({
+        type: "local",
+        command: ["echo", "test"],
+        environment: { TOKEN: "secret" },
+      })
 
-        yield* mcp.connect("durable-server")
-        const connected = yield* Effect.promise(() => Bun.file(path.join(directory, "config.json")).json())
-        expect(connected.mcp["durable-server"].enabled).toBe(true)
-      }),
-    ),
-  { config: { mcp: {} } },
+      yield* mcp.disconnect("persist-server")
+      const afterDisconnect = JSON.parse(yield* Effect.promise(() => Bun.file(file).text()))
+      expect(afterDisconnect.mcp["persist-server"].enabled).toBe(false)
+
+      yield* mcp.connect("persist-server")
+      const afterConnect = JSON.parse(yield* Effect.promise(() => Bun.file(file).text()))
+      expect(afterConnect.mcp["persist-server"].enabled).toBe(true)
+
+      const gitignore = yield* Effect.promise(() => Bun.file(path.join(directory, ".opencode", ".gitignore")).text())
+      expect(gitignore).toContain("opencode.local.json")
+    }),
+  ),
 )
 
 // ========================================================================

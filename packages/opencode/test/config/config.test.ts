@@ -2025,3 +2025,63 @@ test("parseManagedPlist handles empty config", async () => {
   )
   expect(config.$schema).toBe("https://opencode.ai/config.json")
 })
+
+describe("machine-local config layer", () => {
+  it.instance("loads .opencode/opencode.local.json over the shared project config", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      const dir = path.join(test.directory, ".opencode")
+      yield* writeConfigEffect(dir, {
+        mcp: {
+          shared: { type: "remote", url: "https://shared.example/mcp" },
+          overridden: { type: "remote", url: "https://overridden.example/mcp" },
+        },
+      })
+      yield* writeConfigEffect(
+        dir,
+        { mcp: { overridden: { enabled: false }, added: { type: "local", command: ["added-mcp"] } } },
+        "opencode.local.json",
+      )
+
+      const mcp = (yield* Config.use.get()).mcp ?? {}
+      expect(mcp.shared).toMatchObject({ type: "remote", url: "https://shared.example/mcp" })
+      expect(mcp.overridden).toMatchObject({ url: "https://overridden.example/mcp", enabled: false })
+      expect(mcp.added).toMatchObject({ type: "local", command: ["added-mcp"] })
+    }),
+  )
+
+  it.instance("updateMcpLocal writes servers that the next config load picks up", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      yield* Config.use.updateMcpLocal("github", {
+        type: "local",
+        command: ["gh-mcp"],
+        environment: { GITHUB_TOKEN: "secret" },
+      })
+      // Re-adding with a different shape replaces the entry instead of deep-merging stale keys.
+      yield* Config.use.updateMcpLocal("github", { type: "remote", url: "https://github.example/mcp" })
+      yield* Config.use.updateMcpLocal("linear", { enabled: false })
+
+      const file = path.join(test.directory, ".opencode", "opencode.local.json")
+      const parsed = JSON.parse((yield* FSUtil.use.readFileStringSafe(file))!)
+      expect(parsed.mcp.github).toEqual({ type: "remote", url: "https://github.example/mcp" })
+      expect(parsed.mcp.linear).toEqual({ enabled: false })
+
+      expect((yield* Config.use.get()).mcp?.["github"]).toMatchObject({ url: "https://github.example/mcp" })
+    }),
+  )
+
+  it.instance("updateMcpLocal keeps the local file out of version control", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      const dir = path.join(test.directory, ".opencode")
+      yield* FSUtil.use.writeWithDirs(path.join(dir, ".gitignore"), "node_modules\n")
+      yield* Config.use.updateMcpLocal("github", { type: "remote", url: "https://github.example/mcp" })
+
+      const gitignore = yield* FSUtil.use.readFileStringSafe(path.join(dir, ".gitignore"))
+      expect(gitignore).toContain("node_modules")
+      expect(gitignore).toContain("opencode.local.json")
+      expect(gitignore).toContain("opencode.local.jsonc")
+    }),
+  )
+})

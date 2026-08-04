@@ -1,5 +1,5 @@
 ---
-import { ArrowRight, ChevronDown, Download } from "lucide-react"
+import { ArrowRight, Bot, ChevronDown, CloudUpload, Globe2 } from "lucide-react"
 import MarketingFooter from "./marketing/MarketingFooter.astro"
 import MarketingNav from "./marketing/MarketingNav.astro"
 import screenshotAgent from "../assets/lander/vector-agent-current.png"
@@ -8,49 +8,101 @@ import screenshotBrowser from "../assets/lander/vector-browser-current.png"
 import screenshotCloud from "../assets/lander/vector-cloud-current.png"
 import screenshotEditor from "../assets/lander/vector-editor-current.png"
 
-const runtimes = ["Vector", "Claude Code", "Codex", "Cursor Agent"]
+const pixelFont: Record<string, string[]> = {
+  V: ["10001", "10001", "10001", "10001", "10001", "01010", "00100"],
+  E: ["11111", "10000", "10000", "11110", "10000", "10000", "11111"],
+  C: ["01111", "10000", "10000", "10000", "10000", "10000", "01111"],
+  T: ["11111", "00100", "00100", "00100", "00100", "00100", "00100"],
+  O: ["01110", "10001", "10001", "10001", "10001", "10001", "01110"],
+  R: ["11110", "10001", "10001", "11110", "10100", "10010", "10001"],
+}
 
-const chapters = [
+const wordmarkCells = "VECTOR".split("").flatMap((letter, letterIndex) =>
+  pixelFont[letter].flatMap((row, y) =>
+    row.split("").flatMap((cell, x) => (cell === "1" ? [{ x: letterIndex * 7 + x, y }] : [])),
+  ),
+)
+
+const ecosystem = [
+  "Claude Code",
+  "Codex",
+  "Cursor Agent",
+  "Anthropic",
+  "OpenAI",
+  "Google",
+  "MCP",
+  "GitHub",
+  "GitLab",
+  "Vercel",
+  "Netlify",
+  "Supabase",
+  "Playwright",
+]
+
+const features = [
   {
-    eyebrow: "Parallel workspaces",
     title: "Give every responsibility its own agent.",
-    copy: "Launch up to 16 isolated workspaces from one repository. Each agent gets its own branch, files, terminal, conversation, model, and checks, so frontend, backend, testing, and deployment can move at the same time without touching main.",
-    facts: ["Isolated git worktrees", "Live status and token activity", "Review, merge, continue, or discard"],
+    body: "Launch up to 16 isolated workspaces from one repository. Each agent gets its own branch, files, terminal, conversation, model, and checks, so frontend, backend, testing, and deployment move at the same time without touching main.",
+    tag: "Parallel workspaces",
+    note: "Isolated from main",
     image: screenshotAgents,
     alt: "Vector showing multiple isolated agent workspaces for the same repository",
+    href: "/docs",
+    link: "Learn about workspaces",
   },
   {
-    eyebrow: "Controlled browser",
     title: "The browser is part of the engineering loop.",
-    copy: "Vector can open the running product, navigate it, interact with forms, inspect page state, read console and network failures, capture evidence, repair the code, and test the result again. You can take over at any time.",
-    facts: ["Visible browser session", "DOM, console, and network evidence", "Approval gates for sensitive actions"],
+    body: "Vector opens the running product, navigates it, reads console and network failures, captures evidence, repairs the code, and tests the result again. You can take over at any time.",
+    tag: "Controlled browser",
+    note: "User takeover available",
     image: screenshotBrowser,
     alt: "Vector controlled browser beside an active engineering session",
+    href: "/docs",
+    link: "See the browser loop",
   },
   {
-    eyebrow: "Codespace and Canvas",
     title: "Code yourself. Delegate beside it.",
-    copy: "Open a real project editor with search, diagnostics, terminal access, inline assistance, and a resizable editor agent. Canvas lets you arrange the editor, browser, terminal, notes, and cloud controls into one multitasking surface.",
-    facts: ["Syntax-aware code editing", "Project search and diagnostics", "Resizable tools on one canvas"],
+    body: "A real project editor with search, diagnostics, terminal access, and a resizable editor agent. Canvas arranges the editor, browser, terminal, notes, and cloud controls into one surface.",
+    tag: "Codespace and Canvas",
+    note: "Local workspace",
     image: screenshotEditor,
     alt: "Vector Codespace with project files, editor, and the integrated editor agent",
+    href: "/docs",
+    link: "Explore the Codespace",
   },
   {
-    eyebrow: "Vector Cloud",
     title: "Ship without losing the context that built it.",
-    copy: "Connect hosting, source control, and data services from the project that produced the build. Publish through your own accounts, manage environment variables, inspect releases and logs, and hand the live result back to the browser for verification.",
-    facts: ["Vercel and Netlify publishing", "GitHub, GitLab, and Supabase connections", "Domains, logs, health, and environment variables"],
+    body: "Publish through your own Vercel, Netlify, GitHub, GitLab, and Supabase accounts. Manage environment variables, inspect releases and logs, and hand the live result back to the browser for verification.",
+    tag: "Vector Cloud",
+    note: "Connected release",
     image: screenshotCloud,
     alt: "Vector Cloud showing deployment, infrastructure, and project health",
+    href: "/docs",
+    link: "Read about Vector Cloud",
   },
 ]
 
+const workflow = [
+  ["Open", "Attach the repository already on your computer."],
+  ["Direct", "Give one agent a task or divide work across isolated agents."],
+  ["Observe", "Follow plans, edits, commands, browser actions, tokens, and cost."],
+  ["Verify", "Run checks, inspect the product, and review every changed line."],
+  ["Ship", "Merge trusted work and publish through your connected accounts."],
+]
+
 const systemRows = [
-  ["Context engine", "Indexes symbols, dependencies, references, and likely impact so the model receives the code that matters instead of an indiscriminate repository dump."],
-  ["Persistent memory", "Keeps repository conventions, accepted decisions, and corrections attached to the project across sessions."],
-  ["Execution controls", "Quick, normal, fast, and effort settings let the user trade latency and token depth without changing the workflow."],
+  ["Context engine", "Indexes symbols, dependencies, references, and likely impact so each model receives the code that matters instead of an indiscriminate repository dump."],
+  ["Persistent project memory", "Keeps repository conventions, accepted decisions, and corrections attached to the project across sessions."],
+  ["Execution controls", "Quick, normal, and fast modes plus effort settings let you trade latency and token depth without changing the workflow."],
   ["Trust boundary", "Diffs, checks, secret scanning, checkpoints, risk signals, and approvals stand between agent output and main."],
-  ["Transparent economics", "Input, output, reasoning, cache, context, model, and recorded cost remain visible per session and workspace."],
+  ["Transparent economics", "Input, output, reasoning, cache, context, model, and recorded cost stay visible per session and workspace."],
+]
+
+const connectionGroups = [
+  ["Models", "Anthropic, OpenAI, Google, and other BYOK providers"],
+  ["Agent runtimes", "Local Claude Code, Codex, and Cursor tools when installed"],
+  ["Protocols and source", "MCP servers, GitHub, and GitLab"],
+  ["Cloud and validation", "Vercel, Netlify, Supabase, and Playwright"],
 ]
 
 const comparison = [
@@ -58,140 +110,178 @@ const comparison = [
   ["Editor and terminal", "Both built in", "Terminal-first", "Agent workspace", "IDE-native", "Managed editor"],
   ["Parallel isolated agents", "Up to 16", "Subagents", "Worktrees", "Background agents", "Not core"],
   ["Visible browser loop", "Built in", "Via tools", "Browser + CDP", "Via tools", "Preview-centric"],
-  ["Review before merge", "Diff + checks + risk", "Git workflow", "Diff + worktrees", "Diff + merge", "History/Git"],
+  ["Review before merge", "Diff + checks + risk", "Git workflow", "Diff + worktrees", "Diff + merge", "History / Git"],
   ["Provider choice", "Multi-provider BYOK", "Claude", "OpenAI", "Multiple models", "Platform managed"],
   ["Publishing surface", "Vercel + Netlify", "Via tools", "Via skills", "Via MCP", "Native hosting"],
+]
+
+const changelog = [
+  ["July 2026", "Vector desktop release and download refresh", "Signed installers for macOS, Windows, and Linux, served from the new download pipeline with automatic updates."],
+  ["July 2026", "Review tools and shell polish", "A refined review panel, window recovery fixes, and a cleaner desktop chrome across the workspace."],
+  ["July 2026", "Models and settings controls", "Restored provider management, model pickers, and execution settings throughout the rebuilt shell."],
 ]
 ---
 
 <div class="vector-marketing">
-  <canvas class="ascii-field site-field" data-vector-field aria-hidden="true"></canvas>
+  <canvas class="ascii-field" data-vector-field aria-hidden="true"></canvas>
   <MarketingNav active="product" />
 
   <main>
     <section class="hero" aria-labelledby="hero-title">
-      <div class="hero-shade" aria-hidden="true"></div>
+      <h1 class="wordmark" id="hero-title">
+        <span class="sr-only">Vector</span>
+        <svg
+          viewBox={`0 0 ${6 * 7 - 2} 7`}
+          width="252"
+          height="42"
+          fill="currentColor"
+          shape-rendering="crispEdges"
+          aria-hidden="true"
+        >
+          {wordmarkCells.map((cell) => <rect x={cell.x} y={cell.y} width="0.92" height="0.92" />)}
+        </svg>
+      </h1>
 
-      <div class="hero-inner">
-        <div class="hero-copy reveal is-visible">
-          <img class="hero-logo" src="/vector-logo.png" width="56" height="56" alt="Vector" />
-          <p class="hero-name">Vector</p>
-          <h1 id="hero-title">Build, test, and ship with a team of agents.</h1>
-          <a class="hero-cta" href="/download">
-            <span>Get Vector</span>
-            <ArrowRight size={17} strokeWidth={1.8} aria-hidden="true" />
-          </a>
-          <p class="hero-note">Local repositories. Your models. Every change reviewable.</p>
+      <p class="headline">
+        <span>Build with a team of coding agents.</span>
+        <span class="scramble" data-scramble aria-hidden="true">Run them in isolated workspaces.</span>
+        <span class="sr-only">Run them in isolated workspaces, test in Vector's native browser, and ship through Vector Cloud.</span>
+      </p>
+
+      <div class="hero-loop" aria-label="Vector's build, test, and ship workflow">
+        <div class="hero-loop-progress" aria-hidden="true"><i data-hero-progress></i></div>
+        <div class="hero-loop-stage is-active" data-hero-stage="0">
+          <span class="hero-loop-icon"><Bot size={16} strokeWidth={1.8} aria-hidden="true" /></span>
+          <span><strong>Build</strong><small>Parallel agents</small></span>
         </div>
+        <div class="hero-loop-stage" data-hero-stage="1">
+          <span class="hero-loop-icon"><Globe2 size={16} strokeWidth={1.8} aria-hidden="true" /></span>
+          <span><strong>Test</strong><small>Native browser</small></span>
+        </div>
+        <div class="hero-loop-stage" data-hero-stage="2">
+          <span class="hero-loop-icon"><CloudUpload size={16} strokeWidth={1.8} aria-hidden="true" /></span>
+          <span><strong>Ship</strong><small>Vector Cloud</small></span>
+        </div>
+      </div>
 
-        <figure class="hero-product reveal is-visible">
-          <div class="product-bar" aria-hidden="true">
-            <span class="traffic"><i></i><i></i><i></i></span>
-            <span class="product-title">Vector engineering workspace</span>
-            <span class="product-status"><i></i> Ready</span>
-          </div>
-          <img
-            src={screenshotAgent.src}
-            width={screenshotAgent.width}
-            height={screenshotAgent.height}
-            alt="Vector engineering a product inside a repository"
-            loading="eager"
-          />
-        </figure>
+      <a class="hero-cta" href="/download">
+        <span>Get Vector</span>
+        <ArrowRight size={18} strokeWidth={2} aria-hidden="true" />
+      </a>
+
+      <p class="hero-note">Local repositories. Your models. One continuous path from prompt to production.</p>
+    </section>
+
+    <section class="showcase" aria-label="Vector workspace screenshot">
+      <figure class="product-window" data-reveal>
+        <div class="product-bar" aria-hidden="true">
+          <span class="traffic"><i></i><i></i><i></i></span>
+          <span class="product-title">Vector — engineering workspace</span>
+          <span class="product-status"><i></i> Ready</span>
+        </div>
+        <img
+          data-parallax
+          src={screenshotAgent.src}
+          width={screenshotAgent.width}
+          height={screenshotAgent.height}
+          alt="Vector engineering a product inside a repository"
+          loading="eager"
+        />
+      </figure>
+    </section>
+
+    <section class="belt" aria-label="Agents, models, and services Vector works with">
+      <p>Free and BYOK — bring the agents, models, and services you already use</p>
+      <div class="marquee">
+        <div class="marquee-track" aria-hidden="true">
+          {[...ecosystem, ...ecosystem].map((name) => <span>{name}</span>)}
+        </div>
+        <ul class="marquee-static">
+          {ecosystem.map((name) => <li>{name}</li>)}
+        </ul>
       </div>
     </section>
 
-    <section class="runtime-band" aria-labelledby="runtime-title">
-      <p id="runtime-title">One workspace for the agents and tools you already use</p>
-      <div class="runtime-list">
-        {runtimes.map((runtime) => <span>{runtime}</span>)}
-      </div>
-    </section>
-
-    <section id="workspace" class="intro chapter-width">
-      <div class="intro-copy reveal">
-        <p class="eyebrow">The complete engineering loop</p>
-        <h2>From an idea to reviewed, running software.</h2>
+    <section class="workflow section-width" aria-labelledby="workflow-title">
+      <div class="section-heading" data-reveal>
+        <p class="section-kicker">The complete engineering loop</p>
+        <h2 id="workflow-title">From an idea to reviewed, running software.</h2>
         <p>
           Vector keeps the request, repository context, agent activity, files, terminal, browser,
-          usage, review, and release in one place. Open an existing codebase or begin a new one,
-          then choose how much of the work you want to do yourself.
+          usage, review, and release in one place. Work directly or delegate as much as you want.
         </p>
       </div>
-      <ol class="loop-list reveal" aria-label="Vector engineering workflow">
-        <li><span>01</span><strong>Open</strong><p>Attach the repository already on your computer.</p></li>
-        <li><span>02</span><strong>Direct</strong><p>Give one agent a task or divide the work across isolated agents.</p></li>
-        <li><span>03</span><strong>Observe</strong><p>Follow plans, edits, commands, browser actions, tokens, and cost.</p></li>
-        <li><span>04</span><strong>Verify</strong><p>Run checks, inspect the product, and review every changed line.</p></li>
-        <li><span>05</span><strong>Ship</strong><p>Merge trusted work and publish through your connected accounts.</p></li>
+      <ol class="workflow-list" data-reveal>
+        {workflow.map(([title, body], index) => (
+          <li>
+            <span>0{index + 1}</span>
+            <strong>{title}</strong>
+            <p>{body}</p>
+          </li>
+        ))}
       </ol>
     </section>
 
-    <div class="chapter-stack">
-      {chapters.map((chapter, index) => (
-        <section class="chapter chapter-width">
-          <div class="chapter-copy reveal">
-            <div>
-              <p class="eyebrow">{chapter.eyebrow}</p>
-              <h2>{chapter.title}</h2>
-            </div>
-            <div>
-              <p>{chapter.copy}</p>
-              <ul>
-                {chapter.facts.map((fact) => <li><span aria-hidden="true"></span>{fact}</li>)}
-              </ul>
-            </div>
+    <div id="workspace" class="features">
+      {features.map((feature) => (
+        <section class="feature">
+          <div class="feature-copy" data-reveal>
+            <p class="feature-tag">{feature.tag}</p>
+            <h2>{feature.title}</h2>
+            <p class="feature-body">{feature.body}</p>
           </div>
-          <figure class:list={["chapter-media", "reveal", { "media-browser": index === 1 }]}>
-            <div class="media-topline" aria-hidden="true">
-              <span>{chapter.eyebrow}</span>
-              <span>{index === 0 ? "Isolated from main" : index === 1 ? "User takeover available" : index === 2 ? "Local workspace" : "Connected release"}</span>
+          <figure class="feature-card" data-reveal>
+            <div class="card-topline" aria-hidden="true">
+              <span>{feature.tag}</span>
+              <span>{feature.note}</span>
             </div>
             <img
-              src={chapter.image.src}
-              width={chapter.image.width}
-              height={chapter.image.height}
-              alt={chapter.alt}
+              src={feature.image.src}
+              width={feature.image.width}
+              height={feature.image.height}
+              alt={feature.alt}
               loading="lazy"
             />
           </figure>
+          <a class="feature-link" href={feature.href} data-reveal>
+            <span>{feature.link}</span>
+            <ArrowRight size={15} strokeWidth={2} aria-hidden="true" />
+          </a>
         </section>
       ))}
     </div>
 
-    <section class="engine-section">
-      <div class="engine-inner chapter-width">
-        <div class="engine-heading reveal">
-          <p class="eyebrow">The system underneath</p>
-          <h2>Powerful agents need an observable runtime.</h2>
-          <p>
-            Vector is designed around the parts that determine whether agentic engineering is useful:
-            relevant context, persistent knowledge, reliable execution, visible cost, and a human review boundary.
-          </p>
-        </div>
-        <div class="engine-list">
-          {systemRows.map(([title, copy], index) => (
-            <article class="engine-row reveal">
-              <span>0{index + 1}</span>
-              <h3>{title}</h3>
-              <p>{copy}</p>
-            </article>
-          ))}
-        </div>
+    <section class="runtime section-width" aria-labelledby="runtime-title">
+      <div class="runtime-intro" data-reveal>
+        <p class="section-kicker">The system underneath</p>
+        <h2 id="runtime-title">Powerful agents need an observable runtime.</h2>
+        <p>
+          The difficult part is not generating text. It is giving agents the right context,
+          preserving project knowledge, validating their work, and keeping the human in control.
+        </p>
+      </div>
+      <div class="runtime-list">
+        {systemRows.map(([title, body], index) => (
+          <article data-reveal>
+            <span>0{index + 1}</span>
+            <h3>{title}</h3>
+            <p>{body}</p>
+          </article>
+        ))}
       </div>
     </section>
 
-    <section class="evidence chapter-width">
-      <div class="evidence-heading reveal">
-        <p class="eyebrow">Measured, not implied</p>
-        <h2>One controlled repair task. A useful data point.</h2>
+    <section class="evidence section-width" aria-labelledby="evidence-title">
+      <div class="section-heading" data-reveal>
+        <p class="section-kicker">Measured, not implied</p>
+        <h2 id="evidence-title">One controlled repair task. A useful data point.</h2>
         <p>
           In a July 2026 scheduler-repair benchmark, Vector Balanced completed the task in 149 seconds
           and reported roughly 67% fewer tokens than Codex CLI. Both passed all five public tests.
-          Codex passed more hidden tests, so this is evidence from one reproducible run, not a universal claim.
+          Codex passed more hidden tests, so this is one reproducible result, not a universal claim.
         </p>
       </div>
-      <dl class="evidence-grid reveal">
+      <dl class="evidence-grid" data-reveal>
         <div><dt>Vector Balanced</dt><dd>149s</dd><span>Completion time</span></div>
         <div><dt>Codex CLI</dt><dd>284s</dd><span>Completion time</span></div>
         <div><dt>Reported usage</dt><dd>67%</dd><span>Fewer tokens for Vector</span></div>
@@ -199,32 +289,35 @@ const comparison = [
       </dl>
     </section>
 
-    <section class="connections chapter-width">
-      <div class="connections-copy reveal">
-        <p class="eyebrow">Bring your stack</p>
-        <h2>Models, protocols, source control, and cloud services.</h2>
+    <section class="connections section-width" aria-labelledby="connections-title">
+      <div class="section-heading" data-reveal>
+        <p class="section-kicker">Bring your stack</p>
+        <h2 id="connections-title">One workspace for the tools you already trust.</h2>
         <p>
-          Use Vector’s provider system, connect MCP servers, call local Claude Code, Codex, and Cursor
-          runtimes when installed, then publish through GitHub, GitLab, Vercel, Netlify, and Supabase workflows.
+          Use Vector's provider system, connect MCP servers and source control, call supported local
+          agent runtimes when installed, then validate and publish through your own services.
         </p>
       </div>
-      <div class="connection-rail reveal" aria-label="Supported Vector connections">
-        <span>Anthropic</span><span>OpenAI</span><span>Google</span><span>MCP</span><span>GitHub</span>
-        <span>GitLab</span><span>Vercel</span><span>Netlify</span><span>Supabase</span><span>Playwright</span>
+      <div class="connection-grid">
+        {connectionGroups.map(([title, body]) => (
+          <article data-reveal>
+            <h3>{title}</h3>
+            <p>{body}</p>
+          </article>
+        ))}
       </div>
     </section>
 
-    <section class="comparison-section chapter-width">
-      <div class="comparison-heading reveal">
-        <p class="eyebrow">A wider product boundary</p>
-        <h2>Fewer disconnected surfaces between request and release.</h2>
+    <section class="comparison-section section-width" aria-labelledby="comparison-title">
+      <div class="section-heading" data-reveal>
+        <p class="section-kicker">A wider product boundary</p>
+        <h2 id="comparison-title">Fewer disconnected surfaces between request and release.</h2>
         <p>
           Vector combines capabilities commonly split across an agent, editor, browser, Git client,
-          and deployment dashboard. Product capabilities change quickly, so verify current vendor
-          documentation before making a purchasing decision.
+          and deployment dashboard. Capabilities change quickly, so verify current vendor documentation.
         </p>
       </div>
-      <details class="comparison reveal">
+      <details class="comparison" data-reveal>
         <summary>
           <span>View the detailed product comparison</span>
           <ChevronDown size={18} strokeWidth={1.7} aria-hidden="true" />
@@ -236,7 +329,7 @@ const comparison = [
             </thead>
             <tbody>
               {comparison.map((row) => (
-                <tr>{row.map((cell, cellIndex) => cellIndex === 0 ? <th>{cell}</th> : <td>{cell}</td>)}</tr>
+                <tr>{row.map((cell, index) => index === 0 ? <th>{cell}</th> : <td>{cell}</td>)}</tr>
               ))}
             </tbody>
           </table>
@@ -244,16 +337,34 @@ const comparison = [
       </details>
     </section>
 
-    <section class="closing">
-      <div class="closing-copy reveal">
-        <img src="/vector-logo.png" width="56" height="56" alt="" />
-        <h2>Keep the whole build in view.</h2>
-        <p>Open the repository. Direct the agents. Inspect the evidence. Ship the result.</p>
-        <a class="closing-cta" href="/download">
-          <Download size={17} strokeWidth={1.8} aria-hidden="true" />
-          <span>Download Vector</span>
+    <section class="changelog" aria-labelledby="changelog-title">
+      <div class="changelog-inner">
+        <h2 id="changelog-title">Changelog</h2>
+        <ol>
+          {changelog.map(([date, title, blurb]) => (
+            <li data-reveal>
+              <span class="changelog-date">{date}</span>
+              <div>
+                <strong>{title}</strong>
+                <p>{blurb}</p>
+              </div>
+            </li>
+          ))}
+        </ol>
+        <a class="changelog-link" href="/releases">
+          <span>View all releases</span>
+          <ArrowRight size={15} strokeWidth={2} aria-hidden="true" />
         </a>
       </div>
+    </section>
+
+    <section class="closing">
+      <h2>Keep the whole build in view.</h2>
+      <p>Open the repository. Direct the agents. Ship the result.</p>
+      <a class="closing-cta" href="/download">
+        <span>Download now</span>
+        <ArrowRight size={18} strokeWidth={2} aria-hidden="true" />
+      </a>
     </section>
   </main>
 
@@ -261,146 +372,215 @@ const comparison = [
 </div>
 
 <script>
-  const reducedMotion = globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false
+  const reducedMotion = () => globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false
 
-  const revealNodes = () => {
-    if (reducedMotion || !("IntersectionObserver" in globalThis)) return
-    const nodes = Array.from(document.querySelectorAll<HTMLElement>(".reveal:not(.is-visible)"))
-    const observer = new IntersectionObserver((entries) => {
-      entries.forEach((entry) => {
-        if (!entry.isIntersecting) return
-        const node = entry.target as HTMLElement
-        node.classList.add("is-visible")
-        node.animate(
-          [{ opacity: 0, transform: "translateY(16px)" }, { opacity: 1, transform: "translateY(0)" }],
-          { duration: 460, easing: "cubic-bezier(.2,.7,.2,1)" },
-        )
-        observer.unobserve(node)
-      })
-    }, { rootMargin: "0px 0px -7%", threshold: 0.08 })
+  // Signals that the animation runtime is alive. Reveal styles only hide
+  // content under html.va, so a failed script load leaves the page readable.
+  document.documentElement.classList.add("va")
+
+  const initReveals = () => {
+    const nodes = Array.from(document.querySelectorAll<HTMLElement>("[data-reveal]:not(.in)"))
+    if (reducedMotion() || !("IntersectionObserver" in globalThis)) {
+      nodes.forEach((node) => node.classList.add("in"))
+      return () => {}
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (!entry.isIntersecting) return
+          entry.target.classList.add("in")
+          observer.unobserve(entry.target)
+        })
+      },
+      { rootMargin: "0px 0px -6%", threshold: 0.08 },
+    )
     nodes.forEach((node) => observer.observe(node))
+    return () => observer.disconnect()
   }
 
-  const drawField = (canvas: HTMLCanvasElement) => {
-    const context = canvas.getContext("2d")
-    if (!context) return
-    const lowDensity = canvas.dataset.density === "low"
-    let width = 1
-    let height = 1
-    let dpr = 1
-    let pointerX = 0.5
-    let pointerY = 0.4
-    let pointerActive = false
-    const glyphs = "VECTOR01{}<>/\\+=:*"
-    const clusters = lowDensity
-      ? [
-          [0.14, 0.34, 0.24, 0.18, 1],
-          [0.78, 0.28, 0.3, 0.2, 1],
-          [0.86, 0.73, 0.25, 0.14, 0.75],
-        ]
-      : [
-          [0.04, 0.3, 0.14, 0.13, 0.9],
-          [0.16, 0.38, 0.23, 0.16, 1.05],
-          [0.27, 0.46, 0.16, 0.1, 0.72],
-          [0.7, 0.22, 0.24, 0.13, 0.92],
-          [0.82, 0.31, 0.27, 0.18, 1.12],
-          [0.96, 0.45, 0.18, 0.15, 0.82],
-          [0.08, 0.75, 0.22, 0.12, 0.64],
-          [0.84, 0.77, 0.3, 0.13, 0.7],
-        ]
-    const stars = Array.from({ length: lowDensity ? 28 : 52 }, (_, index) => ({
-      x: ((index * 193 + 41) % 997) / 997,
-      y: ((index * 347 + 73) % 991) / 991,
-      size: index % 11 === 0 ? 3 : index % 5 === 0 ? 2 : 1,
-      alpha: 0.28 + ((index * 29) % 57) / 100,
-    }))
+  const initScramble = () => {
+    const node = document.querySelector<HTMLElement>("[data-scramble]")
+    if (!node) return () => {}
+    const phrases = [
+      "Run them in isolated workspaces.",
+      "Test in Vector's native browser.",
+      "Ship through Vector Cloud.",
+    ]
+    const stages = Array.from(document.querySelectorAll<HTMLElement>("[data-hero-stage]"))
+    const progress = document.querySelector<HTMLElement>("[data-hero-progress]")
+    const selectStage = (index: number) => {
+      stages.forEach((stage, stageIndex) => stage.classList.toggle("is-active", stageIndex === index))
+      progress?.style.setProperty("--stage", String(index))
+    }
+    if (reducedMotion()) {
+      node.textContent = phrases[0]
+      selectStage(0)
+      return () => {}
+    }
+    const glyphs = "abcdefghijklmnopqrstuvwxyz<>{}/\\=+*"
+    let phrase = 0
+    let frame = 0
+    let raf = 0
+    let timer = 0
+    const step = () => {
+      const target = phrases[phrase]
+      selectStage(phrase)
+      const total = target.length + 10
+      frame++
+      const revealed = Math.max(0, Math.floor(((frame - 6) / total) * target.length))
+      const scrambled = Math.min(target.length - revealed, 9)
+      node.textContent =
+        target.slice(0, revealed) +
+        Array.from({ length: scrambled }, () => glyphs[Math.floor(Math.random() * glyphs.length)]).join("")
+      if (frame < total + 6) {
+        raf = requestAnimationFrame(step)
+        return
+      }
+      node.textContent = target
+      phrase = (phrase + 1) % phrases.length
+      frame = 0
+      timer = globalThis.setTimeout(() => {
+        if (!document.hidden) raf = requestAnimationFrame(step)
+        else timer = globalThis.setTimeout(() => raf = requestAnimationFrame(step), 4000)
+      }, 3600)
+    }
+    timer = globalThis.setTimeout(() => raf = requestAnimationFrame(step), 2400)
+    return () => {
+      globalThis.clearTimeout(timer)
+      if (raf) cancelAnimationFrame(raf)
+      node.textContent = phrases[0]
+      selectStage(0)
+    }
+  }
 
+  const initParallax = () => {
+    const node = document.querySelector<HTMLElement>("[data-parallax]")
+    if (!node || reducedMotion()) return () => {}
+    let frame = 0
+    const update = () => {
+      frame = 0
+      const shift = Math.min(globalThis.scrollY, 900) * -0.028
+      node.style.transform = `scale(1.06) translateY(${shift.toFixed(1)}px)`
+    }
+    const queue = () => {
+      if (!frame) frame = requestAnimationFrame(update)
+    }
+    globalThis.addEventListener("scroll", queue, { passive: true })
+    update()
+    return () => {
+      globalThis.removeEventListener("scroll", queue)
+      if (frame) cancelAnimationFrame(frame)
+      node.style.transform = ""
+    }
+  }
+
+  const initField = () => {
+    const canvas = document.querySelector<HTMLCanvasElement>("[data-vector-field]")
+    const context = canvas?.getContext("2d")
+    if (!canvas || !context) return () => {}
+
+    const glyphs = "VECTOR01{}<>/\\+=:*"
+    const clusters = [
+      [0.84, 0.1, 0.22, 0.16, 1.05],
+      [0.96, 0.32, 0.18, 0.2, 0.9],
+      [0.7, 0.05, 0.16, 0.1, 0.8],
+      [0.05, 0.08, 0.14, 0.12, 0.6],
+      [0.08, 0.6, 0.16, 0.18, 0.5],
+      [0.92, 0.78, 0.2, 0.16, 0.55],
+    ]
     const hash = (x: number, y: number, seed = 0) => {
       const value = Math.sin(x * 12.9898 + y * 78.233 + seed * 37.719) * 43758.5453
       return value - Math.floor(value)
     }
 
-    const render = () => {
-      context.clearRect(0, 0, width, height)
-      const stepX = lowDensity ? 10 : 8
-      const stepY = lowDensity ? 11 : 9
-      context.font = `${lowDensity ? 8 : 7.5}px ui-monospace, SFMono-Regular, Menlo, monospace`
-      context.textAlign = "center"
-      context.textBaseline = "middle"
+    let width = 1
+    let height = 1
+    let frame = 0
+    let pointerX = 0.5
+    let pointerY = 0.35
+    let cells: Array<{ x: number; y: number; glyph: string; alpha: number; drift: number }> = []
+    let stars: Array<{ x: number; y: number; size: number; alpha: number }> = []
 
-      if (pointerActive && !reducedMotion) {
-        context.save()
-        context.filter = "blur(54px)"
-        context.fillStyle = "rgba(123, 81, 210, 0.1)"
-        context.beginPath()
-        context.arc(pointerX * width, pointerY * height, Math.min(width, height) * 0.085, 0, Math.PI * 2)
-        context.fill()
-        context.restore()
-      }
-
-      for (let y = -stepY; y < height + stepY; y += stepY) {
-        for (let x = -stepX; x < width + stepX; x += stepX) {
-          const normalizedX = x / Math.max(1, width)
-          const normalizedY = y / Math.max(1, height)
-          const warpX = normalizedX + Math.sin(normalizedY * 19) * 0.018
-          const warpY = normalizedY + Math.sin(normalizedX * 15) * 0.014
+    const build = () => {
+      cells = []
+      const stepX = 9
+      const stepY = 10
+      for (let y = 0; y < height + stepY; y += stepY) {
+        for (let x = 0; x < width + stepX; x += stepX) {
+          const nx = x / Math.max(1, width)
+          const ny = y / Math.max(1, height)
+          const warpX = nx + Math.sin(ny * 19) * 0.018
+          const warpY = ny + Math.sin(nx * 15) * 0.014
           let field = 0
-
-          clusters.forEach(([centerX, centerY, radiusX, radiusY, strength], index) => {
-            const dx = (warpX - centerX) / radiusX
-            const dy = (warpY - centerY) / radiusY
-            const shape = Math.exp(-(dx * dx + dy * dy) * (1.18 + (index % 3) * 0.1)) * strength
-            field = Math.max(field, shape)
+          clusters.forEach(([cx, cy, rx, ry, strength], index) => {
+            const dx = (warpX - cx) / rx
+            const dy = (warpY - cy) / ry
+            field = Math.max(field, Math.exp(-(dx * dx + dy * dy) * (1.2 + (index % 3) * 0.1)) * strength)
           })
-
-          const texture = hash(x / stepX, y / stepY) * 0.34
-            + Math.sin(normalizedX * 46 + normalizedY * 29) * 0.08
-          if (field + texture < 0.52) continue
-
-          const safeCopyZone = Math.exp(
-            -(
-              Math.pow((normalizedX - 0.5) / 0.23, 2)
-              + Math.pow((normalizedY - 0.28) / 0.22, 2)
-            ),
-          )
-          const edge = Math.min(1, Math.max(0, (field + texture - 0.48) * 1.8))
-          const alpha = Math.max(0.1, (0.16 + edge * 0.42) * (1 - safeCopyZone * 0.66))
-          const glyphIndex = Math.floor(hash(x, y, 2) * glyphs.length)
-          const drawX = x + (pointerX - 0.5) * (2 + hash(x, y, 3) * 5)
-          const drawY = y + (pointerY - 0.5) * (2 + hash(x, y, 4) * 4)
-          context.fillStyle = `rgba(190, 166, 255, ${alpha})`
-          context.fillText(glyphs[glyphIndex], drawX, drawY)
+          const texture = hash(x / stepX, y / stepY) * 0.32 + Math.sin(nx * 46 + ny * 29) * 0.07
+          if (field + texture < 0.51) continue
+          const copyZone = Math.exp(-(Math.pow((nx - 0.42) / 0.3, 2) + Math.pow((ny - 0.3) / 0.3, 2)))
+          const edge = Math.min(1, Math.max(0, (field + texture - 0.46) * 2.1))
+          const alpha = Math.max(0.1, (0.18 + edge * 0.46) * (1 - copyZone * 0.58))
+          cells.push({
+            x,
+            y,
+            glyph: glyphs[Math.floor(hash(x, y, 2) * glyphs.length)],
+            alpha,
+            drift: 2 + hash(x, y, 3) * 5,
+          })
         }
       }
+      stars = Array.from({ length: 40 }, (_, index) => ({
+        x: (((index * 193 + 41) % 997) / 997) * width,
+        y: (((index * 347 + 73) % 991) / 991) * height,
+        size: index % 11 === 0 ? 3 : index % 5 === 0 ? 2 : 1,
+        alpha: 0.2 + ((index * 29) % 57) / 140,
+      }))
+    }
 
-      stars.forEach((star, index) => {
-        const x = star.x * width + (pointerX - 0.5) * (index % 7)
-        const y = star.y * height + (pointerY - 0.5) * (index % 5)
-        context.fillStyle = `rgba(247, 243, 255, ${star.alpha})`
-        context.fillRect(x, y, star.size, star.size)
-        if (star.size < 3) return
-        context.fillRect(x - 5, y + 1, 13, 1)
-        context.fillRect(x + 1, y - 5, 1, 13)
+    const render = () => {
+      frame = 0
+      context.clearRect(0, 0, width, height)
+      context.font = "7.5px ui-monospace, SFMono-Regular, Menlo, monospace"
+      context.textAlign = "center"
+      context.textBaseline = "middle"
+      const offsetX = (pointerX - 0.5) * 2
+      const offsetY = (pointerY - 0.5) * 2
+      cells.forEach((cell) => {
+        context.fillStyle = `rgba(164, 116, 255, ${Math.min(0.86, cell.alpha * 1.38)})`
+        context.fillText(cell.glyph, cell.x + offsetX * cell.drift, cell.y + offsetY * cell.drift)
       })
+      stars.forEach((star, index) => {
+        context.fillStyle = `rgba(220, 204, 255, ${Math.min(0.82, star.alpha * 1.12)})`
+        context.fillRect(star.x + offsetX * (index % 7), star.y + offsetY * (index % 5), star.size, star.size)
+        if (star.size < 3) return
+        context.fillRect(star.x - 5, star.y + 1, 13, 1)
+        context.fillRect(star.x + 1, star.y - 5, 1, 13)
+      })
+    }
+
+    const queue = () => {
+      if (!frame) frame = requestAnimationFrame(render)
     }
 
     const resize = () => {
       const rect = canvas.getBoundingClientRect()
-      dpr = Math.min(globalThis.devicePixelRatio || 1, 2)
+      const dpr = Math.min(globalThis.devicePixelRatio || 1, 2)
       width = Math.max(1, rect.width)
       height = Math.max(1, rect.height)
       canvas.width = Math.round(width * dpr)
       canvas.height = Math.round(height * dpr)
       context.setTransform(dpr, 0, 0, dpr, 0, 0)
+      build()
       render()
     }
 
     const move = (event: PointerEvent) => {
-      const rect = canvas.getBoundingClientRect()
-      pointerX = (event.clientX - rect.left) / Math.max(1, rect.width)
-      pointerY = (event.clientY - rect.top) / Math.max(1, rect.height)
-      pointerActive = true
-      render()
+      if (reducedMotion()) return
+      pointerX = event.clientX / Math.max(1, globalThis.innerWidth)
+      pointerY = event.clientY / Math.max(1, globalThis.innerHeight)
+      queue()
     }
 
     const resizeObserver = new ResizeObserver(resize)
@@ -411,44 +591,58 @@ const comparison = [
     return () => {
       resizeObserver.disconnect()
       globalThis.removeEventListener("pointermove", move)
+      if (frame) cancelAnimationFrame(frame)
     }
   }
 
-  const cleanups = Array.from(document.querySelectorAll<HTMLCanvasElement>("[data-vector-field]"))
-    .map(drawField)
-    .filter(Boolean)
-  revealNodes()
-  document.addEventListener("astro:before-swap", () => cleanups.forEach((cleanup) => cleanup?.()), { once: true })
+  let cleanups: Array<() => void> = []
+  const boot = () => {
+    cleanups.forEach((cleanup) => cleanup())
+    cleanups = [initReveals(), initScramble(), initParallax(), initField()]
+  }
+  const teardown = () => {
+    cleanups.forEach((cleanup) => cleanup())
+    cleanups = []
+  }
+
+  boot()
+  document.addEventListener("astro:page-load", boot)
+  document.addEventListener("astro:before-swap", teardown)
 </script>
 
 <style>
   .vector-marketing {
+    --paper: #08060d;
+    --card: var(--glass-fill);
+    --purple: #8f52ff;
+    --purple-bright: #a77cff;
+    --purple-soft: #c9b0ff;
+    --lavender: #e2d7ff;
+    --hairline: rgba(224, 211, 255, 0.16);
+    --ink-70: rgba(255, 255, 255, 0.7);
+    --ink-55: rgba(255, 255, 255, 0.55);
+    --ink-40: rgba(255, 255, 255, 0.4);
     position: relative;
     isolation: isolate;
     min-height: 100vh;
     overflow: clip;
-    color: #f5f2f8;
-    background: #050406;
+    color: #fff;
+    background:
+      linear-gradient(112deg, rgba(143, 82, 255, 0.065), transparent 27%, transparent 72%, rgba(95, 49, 185, 0.055)),
+      rgba(8, 6, 13, 0.5);
+    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  .vector-marketing,
+  .vector-marketing *,
+  .vector-marketing *::before,
+  .vector-marketing *::after {
+    box-sizing: border-box;
   }
 
   .vector-marketing > main {
     position: relative;
     z-index: 1;
-  }
-
-  .chapter-width {
-    width: min(1080px, calc(100% - 48px));
-    margin-inline: auto;
-  }
-
-  .hero {
-    position: relative;
-    min-height: 0;
-    padding-bottom: 72px;
-    overflow: hidden;
-    isolation: isolate;
-    border-bottom: 1px solid #2a252e;
-    background: rgba(5, 4, 6, 0.08);
   }
 
   .ascii-field {
@@ -458,523 +652,970 @@ const comparison = [
     width: 100%;
     height: 100%;
     pointer-events: none;
-    opacity: 0.96;
-    transform: scale(1.01);
-    animation: vector-field-breathe 12s ease-in-out infinite alternate;
+    opacity: 1;
+    animation: field-breathe 16s ease-in-out infinite alternate;
   }
 
-  .hero-shade {
+  .sr-only {
     position: absolute;
-    inset: 0;
-    z-index: 1;
-    background: rgba(5, 4, 6, 0.1);
-    box-shadow: inset 0 54px 72px rgba(5, 4, 6, 0.9);
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
   }
 
-  .hero-inner {
-    position: relative;
-    z-index: 2;
-    width: min(1280px, calc(100% - 48px));
+  /* ---- motion system ---- */
+
+  :global(html.va) [data-reveal] {
+    opacity: 0;
+    transform: translate3d(0, 18px, 0);
+    transition:
+      opacity 640ms cubic-bezier(0.16, 1, 0.3, 1),
+      transform 640ms cubic-bezier(0.16, 1, 0.3, 1);
+    transition-delay: var(--rd, 0ms);
+  }
+
+  :global(html.va) [data-reveal].in {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    :global(html.va) [data-reveal] {
+      opacity: 1;
+      transform: none;
+      transition: none;
+    }
+  }
+
+  /* ---- hero ---- */
+
+  .hero {
+    width: min(620px, calc(100% - 40px));
     margin-inline: auto;
+    padding-top: clamp(72px, 10vw, 128px);
   }
 
-  .hero-copy {
-    position: relative;
-    z-index: 2;
-    width: min(680px, 100%);
-    padding-top: 92px;
-    margin-left: 30%;
+  .wordmark {
+    margin: 0 0 34px;
+    color: var(--lavender);
+    filter: drop-shadow(0 0 24px rgba(143, 82, 255, 0.28));
   }
 
-  .hero-logo {
+  .wordmark svg {
     display: block;
-    width: 56px;
-    height: 56px;
-    border-radius: 12px;
-    box-shadow: 0 18px 54px rgba(151, 112, 255, 0.24);
+    width: min(252px, 56vw);
+    height: auto;
   }
 
-  .hero-name {
-    margin: 14px 0 0;
-    color: #c8b6ff;
-    font-size: 13px;
-    font-weight: 600;
-  }
-
-  .hero h1 {
-    margin: 18px 0 0;
+  .headline {
+    margin: 0;
+    min-height: 2.3em;
     color: #fff;
-    font-size: clamp(42px, 3.8vw, 54px);
-    font-weight: 610;
-    line-height: 1.02;
-    letter-spacing: 0;
+    font-size: clamp(28px, 4.5vw, 37px);
+    font-weight: 600;
+    line-height: 1.12;
+    letter-spacing: -0.025em;
   }
 
-  .hero-cta,
-  .closing-cta {
-    min-height: 50px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 28px;
-    color: #120d17 !important;
-    background: #eee9f5;
-    border: 1px solid #eee9f5;
-    border-radius: 6px;
-    font-size: 14px;
-    font-weight: 590;
-    text-decoration: none;
-    transition: transform 180ms ease, background 180ms ease, border-color 180ms ease;
+  .headline > span {
+    display: block;
   }
 
-  .hero-cta {
-    width: min(360px, 100%);
+  .scramble {
+    color: var(--purple-soft);
+    font-variant-ligatures: none;
+    text-shadow: 0 0 32px rgba(143, 82, 255, 0.24);
+  }
+
+  .hero-loop {
+    position: relative;
+    width: min(720px, 100%);
+    min-height: 78px;
     margin-top: 30px;
-    padding: 0 16px;
+    padding: 12px;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+    overflow: hidden;
+    background: linear-gradient(145deg, rgba(32, 23, 49, 0.78), rgba(11, 8, 17, 0.74));
+    border: 1px solid rgba(201, 176, 255, 0.2);
+    border-radius: 20px;
+    box-shadow:
+      0 22px 70px rgba(0, 0, 0, 0.34),
+      0 0 42px rgba(143, 82, 255, 0.08),
+      inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(24px) saturate(145%);
+    -webkit-backdrop-filter: blur(24px) saturate(145%);
   }
 
-  .hero-cta:hover,
-  .closing-cta:hover {
-    color: #120d17 !important;
-    background: #c9b9ff;
-    border-color: #c9b9ff;
+  .hero-loop-progress {
+    position: absolute;
+    inset: auto 12px 7px;
+    height: 2px;
+    overflow: hidden;
+    background: rgba(201, 176, 255, 0.1);
+    border-radius: 999px;
+  }
+
+  .hero-loop-progress i {
+    --stage: 0;
+    display: block;
+    width: 33.333%;
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, var(--purple), var(--purple-soft));
+    box-shadow: 0 0 16px rgba(167, 124, 255, 0.72);
+    transform: translateX(calc(var(--stage) * 100%));
+    transition: transform 460ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .hero-loop-stage {
+    min-width: 0;
+    min-height: 48px;
+    padding: 8px 10px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--ink-40);
+    border: 1px solid transparent;
+    border-radius: 13px;
+    transition:
+      color 240ms ease,
+      background 240ms ease,
+      border-color 240ms ease,
+      transform 240ms ease;
+  }
+
+  .hero-loop-stage.is-active {
+    color: #fff;
+    background: rgba(143, 82, 255, 0.12);
+    border-color: rgba(201, 176, 255, 0.2);
     transform: translateY(-1px);
   }
 
-  .hero-note {
-    margin: 14px 0 0;
-    color: #918a96;
-    font-size: 13px;
+  .hero-loop-icon {
+    width: 30px;
+    height: 30px;
+    flex: 0 0 30px;
+    display: grid;
+    place-items: center;
+    color: var(--ink-40);
+    background: rgba(255, 255, 255, 0.045);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 9px;
+    transition: color 240ms ease, background 240ms ease, box-shadow 240ms ease;
   }
 
-  .hero-product {
-    position: relative;
-    z-index: 1;
-    margin: 76px 0 0;
+  .hero-loop-stage.is-active .hero-loop-icon {
+    color: var(--lavender);
+    background: rgba(143, 82, 255, 0.18);
+    box-shadow: 0 0 22px rgba(143, 82, 255, 0.2);
+  }
+
+  .hero-loop-stage > span:last-child {
+    min-width: 0;
+    display: grid;
+    gap: 2px;
+  }
+
+  .hero-loop-stage strong {
+    color: inherit;
+    font-size: 12.5px;
+    font-weight: 650;
+  }
+
+  .hero-loop-stage small {
     overflow: hidden;
-    border: 1px solid #403746;
-    border-radius: 8px 8px 0 0;
-    background: #121015;
-    box-shadow: 0 44px 130px rgba(0, 0, 0, 0.72), 0 0 70px rgba(132, 86, 219, 0.1);
+    color: var(--ink-40);
+    font-size: 10.5px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
-  .product-bar,
-  .media-topline {
-    min-height: 42px;
+  .hero-cta {
+    width: 100%;
+    min-height: 48px;
+    margin-top: 36px;
+    padding: 0 18px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    color: #120d17 !important;
+    background: linear-gradient(180deg, rgba(245, 240, 255, 0.98), rgba(207, 184, 255, 0.94));
+    border: 1px solid rgba(255, 255, 255, 0.62);
+    border-radius: 18px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82), 0 16px 45px rgba(79, 51, 137, 0.2);
+    backdrop-filter: blur(20px) saturate(150%);
+    -webkit-backdrop-filter: blur(20px) saturate(150%);
+    font-size: 15px;
+    font-weight: 600;
+    text-decoration: none;
+    transition: background 180ms ease, transform 180ms ease, box-shadow 180ms ease;
+  }
+
+  .hero-cta:hover {
+    background: linear-gradient(180deg, #f7f2ff, #c9b0ff);
+    border-color: rgba(255, 255, 255, 0.74);
+    transform: translateY(-1px);
+    box-shadow: 0 12px 44px rgba(146, 116, 236, 0.32);
+  }
+
+  .hero-cta svg {
+    transition: transform 180ms ease;
+  }
+
+  .hero-cta:hover svg {
+    transform: translateX(3px);
+  }
+
+  .hero-note {
+    margin: 18px 0 0;
+    color: var(--ink-40);
+    font-size: 12.5px;
+    letter-spacing: 0.01em;
+  }
+
+  /* ---- showcase ---- */
+
+  .showcase {
+    width: min(1150px, calc(100% - 32px));
+    margin-inline: auto;
+    padding-top: clamp(56px, 7vw, 88px);
+  }
+
+  .product-window {
+    margin: 0;
+    overflow: hidden;
+    padding: 7px;
+    border: 1px solid rgba(235, 228, 255, 0.22);
+    border-radius: 28px;
+    background: var(--glass-fill-strong);
+    box-shadow:
+      0 40px 120px rgba(0, 0, 0, 0.66),
+      0 0 80px rgba(132, 86, 219, 0.12),
+      inset 0 1px 0 rgba(255, 255, 255, 0.13);
+    backdrop-filter: blur(28px) saturate(145%);
+    -webkit-backdrop-filter: blur(28px) saturate(145%);
+  }
+
+  .product-bar {
+    min-height: 40px;
     padding: 0 14px;
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 16px;
-    color: #847d89;
-    background: #17141a;
-    border-bottom: 1px solid #302b34;
-    font-size: 11px;
+    color: var(--ink-40);
+    background: rgba(255, 255, 255, 0.045);
+    border-bottom: 1px solid rgba(190, 166, 255, 0.1);
+    border-radius: 20px 20px 0 0;
+    font-size: 11.5px;
   }
 
   .traffic { display: inline-flex; gap: 6px; }
-  .traffic i { width: 8px; height: 8px; border-radius: 50%; background: #5a535e; }
-  .traffic i:first-child { background: #b46579; }
-  .traffic i:nth-child(2) { background: #b58e55; }
-  .traffic i:nth-child(3) { background: #5d9b79; }
-  .product-title { color: #b9b2be; }
+  .traffic i { width: 9px; height: 9px; border-radius: 50%; background: #3f3752; }
+  .traffic i:first-child { background: #f26d6d; }
+  .traffic i:nth-child(2) { background: #f2b25c; }
+  .traffic i:nth-child(3) { background: #63c98b; }
+  .product-title { color: var(--ink-55); }
   .product-status { display: inline-flex; align-items: center; gap: 7px; }
-  .product-status i { width: 6px; height: 6px; border-radius: 50%; background: #70ca9a; box-shadow: 0 0 10px rgba(112, 202, 154, 0.45); }
-  .hero-product img { display: block; width: 100%; height: auto; }
-
-  .runtime-band {
-    width: min(980px, calc(100% - 48px));
-    min-height: 178px;
-    margin-inline: auto;
-    padding: 50px 0 44px;
-    display: grid;
-    place-items: center;
-    border-bottom: 1px solid #2a252e;
+  .product-status i {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #63c98b;
+    box-shadow: 0 0 10px rgba(99, 201, 139, 0.4);
   }
 
-  .runtime-band p {
-    margin: 0;
-    color: #77707d;
-    font-size: 12px;
+  .product-window img {
+    display: block;
+    width: 100%;
+    height: auto;
+    will-change: transform;
+    transform-origin: center top;
+    border-radius: 0 0 20px 20px;
   }
 
-  .runtime-list {
-    margin-top: 24px;
+  /* ---- belt ---- */
+
+  .belt {
+    width: min(980px, calc(100% - 40px));
+    margin: clamp(52px, 7vw, 88px) auto 0;
+    padding: 30px 0;
+    overflow: hidden;
+    background: var(--glass-fill);
+    border: 1px solid var(--glass-line);
+    border-radius: 24px;
+    box-shadow: var(--glass-shadow-soft);
+    backdrop-filter: blur(24px) saturate(140%);
+    -webkit-backdrop-filter: blur(24px) saturate(140%);
+  }
+
+  .belt > p {
+    margin: 0 auto 26px;
+    width: min(680px, calc(100% - 40px));
+    color: var(--ink-40);
+    font-size: 13px;
+    text-align: center;
+    letter-spacing: 0.01em;
+  }
+
+  .marquee {
+    position: relative;
+    overflow: hidden;
+    mask-image: linear-gradient(90deg, transparent, #000 14%, #000 86%, transparent);
+    -webkit-mask-image: linear-gradient(90deg, transparent, #000 14%, #000 86%, transparent);
+  }
+
+  .marquee-track {
     display: flex;
+    align-items: center;
+    gap: 52px;
+    width: max-content;
+    padding-right: 52px;
+    animation: marquee 44s linear infinite;
+  }
+
+  .marquee:hover .marquee-track {
+    animation-play-state: paused;
+  }
+
+  .marquee-track span {
+    color: var(--ink-55);
+    font-size: 15px;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+
+  .marquee-static {
+    display: none;
+    margin: 0;
+    padding: 0;
     flex-wrap: wrap;
     justify-content: center;
-    gap: 18px 34px;
+    gap: 12px 28px;
+    list-style: none;
   }
 
-  .runtime-list span {
-    color: #c4bdc8;
-    font-size: 15px;
-    font-weight: 550;
+  .marquee-static li {
+    color: var(--ink-55);
+    font-size: 14px;
+    font-weight: 500;
   }
 
-  .intro {
-    padding: 124px 0 96px;
+  @media (prefers-reduced-motion: reduce) {
+    .marquee {
+      mask-image: none;
+      -webkit-mask-image: none;
+    }
+    .marquee-track { display: none; }
+    .marquee-static { display: flex; }
   }
 
-  .intro-copy {
-    max-width: 780px;
+  /* ---- product loop ---- */
+
+  .section-width {
+    width: min(1080px, calc(100% - 40px));
+    margin-inline: auto;
   }
 
-  .eyebrow {
-    margin: 0 0 14px;
-    color: #ae91ff;
+  .section-heading {
+    max-width: 760px;
+  }
+
+  .section-kicker {
+    margin: 0 0 13px;
+    color: var(--purple-soft);
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
-    font-size: 11px;
+    font-size: 10.5px;
     font-weight: 600;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+  }
+
+  .section-heading h2,
+  .runtime-intro h2 {
+    margin: 0;
+    color: #fff;
+    font-size: clamp(30px, 4.4vw, 50px);
+    font-weight: 590;
+    line-height: 1.06;
+    letter-spacing: -0.035em;
+  }
+
+  .section-heading > p:last-child,
+  .runtime-intro > p:last-child {
+    margin: 20px 0 0;
+    color: var(--ink-55);
+    font-size: 16px;
+    line-height: 1.7;
+  }
+
+  .workflow {
+    margin-top: clamp(64px, 9vw, 112px);
+    padding: clamp(34px, 5vw, 58px);
+    background: var(--glass-fill-strong);
+    border: 1px solid var(--glass-line);
+    border-radius: 30px;
+    box-shadow: var(--glass-shadow);
+    backdrop-filter: blur(30px) saturate(145%);
+    -webkit-backdrop-filter: blur(30px) saturate(145%);
+  }
+
+  .workflow-list {
+    margin: 48px 0 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    border-top: 1px solid rgba(227, 215, 255, 0.14);
+    border-bottom: 1px solid rgba(227, 215, 255, 0.14);
+    list-style: none;
+  }
+
+  .workflow-list li {
+    min-height: 166px;
+    padding: 22px 17px;
+    border-right: 1px solid rgba(227, 215, 255, 0.12);
+  }
+
+  .workflow-list li:last-child { border-right: 0; }
+  .workflow-list li > span {
+    color: var(--purple-soft);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 10px;
+  }
+  .workflow-list strong {
+    display: block;
+    margin-top: 24px;
+    color: #f3eef9;
+    font-size: 14px;
+    font-weight: 600;
+  }
+  .workflow-list li p {
+    margin: 9px 0 0;
+    color: var(--ink-40);
+    font-size: 12px;
+    line-height: 1.55;
+  }
+
+  /* ---- features ---- */
+
+  .features {
+    padding: clamp(24px, 4vw, 48px) 0;
+  }
+
+  .feature {
+    width: min(820px, calc(100% - 40px));
+    margin-inline: auto;
+    padding: clamp(44px, 6vw, 64px) 0;
+    display: grid;
+    gap: 22px;
+  }
+
+  .feature-tag {
+    margin: 0 0 10px;
+    color: var(--purple-soft);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px;
+    font-weight: 500;
     letter-spacing: 0.1em;
     text-transform: uppercase;
   }
 
-  h2 {
+  .feature-copy {
+    padding: 25px 26px 27px;
+    background: var(--glass-fill);
+    border: 1px solid var(--glass-line);
+    border-radius: 24px;
+    box-shadow: var(--glass-shadow-soft);
+    backdrop-filter: blur(24px) saturate(145%);
+    -webkit-backdrop-filter: blur(24px) saturate(145%);
+  }
+
+  .feature h2 {
     margin: 0;
-    color: #f7f4fa;
-    font-size: clamp(34px, 4.4vw, 58px);
-    font-weight: 570;
-    line-height: 1.04;
-    letter-spacing: 0;
+    color: #fff;
+    font-size: clamp(20px, 2.6vw, 24px);
+    font-weight: 600;
+    letter-spacing: -0.015em;
+    line-height: 1.25;
   }
 
-  .intro-copy > p:last-child,
-  .engine-heading > p:last-child,
-  .evidence-heading > p:last-child,
-  .connections-copy > p:last-child,
-  .comparison-heading > p:last-child {
-    max-width: 700px;
-    margin: 24px 0 0;
-    color: #96909b;
-    font-size: 17px;
-    line-height: 1.7;
+  .feature-body {
+    margin: 12px 0 0;
+    color: var(--ink-55);
+    font-size: 15.5px;
+    line-height: 1.65;
   }
 
-  .loop-list {
-    margin: 64px 0 0;
-    padding: 0;
-    display: grid;
-    grid-template-columns: repeat(5, 1fr);
-    border-top: 1px solid #312b35;
-    border-bottom: 1px solid #312b35;
-    list-style: none;
-  }
-
-  .loop-list li {
-    min-height: 176px;
-    padding: 22px 18px;
-    border-right: 1px solid #312b35;
-  }
-
-  .loop-list li:last-child { border-right: 0; }
-  .loop-list span { color: #756d7b; font-family: ui-monospace, monospace; font-size: 10px; }
-  .loop-list strong { display: block; margin-top: 24px; color: #ece8f0; font-size: 15px; font-weight: 560; }
-  .loop-list p { margin: 9px 0 0; color: #7f7884; font-size: 12px; line-height: 1.55; }
-
-  .chapter-stack {
-    border-top: 1px solid #2a252e;
-  }
-
-  .chapter {
-    padding: 124px 0;
-    border-bottom: 1px solid #2a252e;
-  }
-
-  .chapter-copy {
-    position: relative;
-    z-index: 1;
-    margin-bottom: 52px;
-    display: grid;
-    grid-template-columns: minmax(0, 0.88fr) minmax(320px, 0.72fr);
-    gap: 88px;
-    align-items: end;
-  }
-
-  .chapter-copy h2 {
-    max-width: 620px;
-    font-size: clamp(34px, 4vw, 52px);
-  }
-
-  .chapter-copy > div:last-child > p {
-    margin: 0;
-    color: #9b949f;
-    font-size: 15px;
-    line-height: 1.7;
-  }
-
-  .chapter-copy ul {
-    margin: 24px 0 0;
-    padding: 0;
-    display: grid;
-    gap: 9px;
-    list-style: none;
-  }
-
-  .chapter-copy li {
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    color: #c6becb;
-    font-size: 13px;
-  }
-
-  .chapter-copy li span {
-    width: 5px;
-    height: 5px;
-    flex: 0 0 auto;
-    border-radius: 50%;
-    background: #a77cff;
-    box-shadow: 0 0 10px rgba(167, 124, 255, 0.5);
-  }
-
-  .chapter-media {
-    position: relative;
-    z-index: 0;
+  .feature-card {
     margin: 0;
     overflow: hidden;
-    border: 1px solid #38313d;
-    border-radius: 7px;
-    background: #100e12;
-    box-shadow: 0 34px 100px rgba(0, 0, 0, 0.4);
+    border: 1px solid var(--hairline);
+    padding: 7px;
+    border-radius: 26px;
+    background: var(--card);
+    box-shadow: var(--glass-shadow);
+    backdrop-filter: blur(28px) saturate(145%);
+    -webkit-backdrop-filter: blur(28px) saturate(145%);
+    transition: transform 360ms cubic-bezier(0.16, 1, 0.3, 1), border-color 360ms ease;
   }
 
-  .media-topline span:first-child { color: #bfa9ff; }
-  .chapter-media img { display: block; width: 100%; height: auto; }
-
-  .engine-section {
-    padding: 124px 0;
-    background: rgba(14, 10, 16, 0.88);
-    border-bottom: 1px solid #302a34;
+  .feature-card:hover {
+    transform: translateY(-4px);
+    border-color: rgba(167, 124, 255, 0.4);
   }
 
-  .engine-inner {
-    display: grid;
-    grid-template-columns: minmax(280px, 0.7fr) minmax(0, 1.3fr);
-    gap: 96px;
-  }
-
-  .engine-heading {
-    position: sticky;
-    top: 96px;
-    align-self: start;
-  }
-
-  .engine-heading h2 { font-size: clamp(34px, 4vw, 50px); }
-
-  .engine-list { border-top: 1px solid #38313d; }
-  .engine-row {
-    padding: 26px 0;
-    display: grid;
-    grid-template-columns: 34px 150px 1fr;
-    gap: 20px;
-    border-bottom: 1px solid #38313d;
-  }
-
-  .engine-row > span { color: #6f6674; font-family: ui-monospace, monospace; font-size: 10px; }
-  .engine-row h3 { margin: 0; color: #e7e1eb; font-size: 14px; font-weight: 570; }
-  .engine-row p { margin: 0; color: #8c8491; font-size: 13px; line-height: 1.65; }
-
-  .evidence,
-  .connections,
-  .comparison-section {
-    padding: 124px 0;
-    border-bottom: 1px solid #2a252e;
-  }
-
-  .evidence-heading,
-  .connections-copy,
-  .comparison-heading { max-width: 800px; }
-
-  .evidence-grid {
-    margin: 58px 0 0;
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    border-top: 1px solid #342e38;
-    border-bottom: 1px solid #342e38;
-  }
-
-  .evidence-grid div {
-    min-height: 168px;
-    padding: 25px 22px;
-    border-right: 1px solid #342e38;
-  }
-
-  .evidence-grid div:last-child { border-right: 0; }
-  .evidence-grid dt { color: #817987; font-size: 11px; }
-  .evidence-grid dd { margin: 22px 0 4px; color: #f2edf6; font-size: 35px; font-weight: 560; }
-  .evidence-grid span { color: #746d79; font-size: 11px; }
-
-  .connection-rail {
-    margin-top: 56px;
-    padding: 24px 0;
-    display: grid;
-    grid-template-columns: repeat(5, 1fr);
-    border-top: 1px solid #342e38;
-    border-bottom: 1px solid #342e38;
-  }
-
-  .connection-rail span {
-    min-height: 54px;
-    display: grid;
-    place-items: center;
-    color: #aaa2ae;
-    border-right: 1px solid #2e2932;
-    font-size: 13px;
-    font-weight: 530;
-  }
-
-  .connection-rail span:nth-child(5n) { border-right: 0; }
-  .connection-rail span:nth-child(n + 6) { border-top: 1px solid #2e2932; }
-
-  .comparison {
-    margin-top: 50px;
-    overflow: hidden;
-    border-top: 1px solid #39323d;
-    border-bottom: 1px solid #39323d;
-  }
-
-  .comparison summary {
-    min-height: 68px;
-    padding: 0 4px;
+  .card-topline {
+    min-height: 36px;
+    padding: 0 13px;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    color: #d7d0db;
-    cursor: pointer;
+    gap: 14px;
+    color: var(--ink-40);
+    background: rgba(255, 255, 255, 0.04);
+    border-bottom: 1px solid rgba(190, 166, 255, 0.1);
+    border-radius: 18px 18px 0 0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 10.5px;
+    letter-spacing: 0.04em;
+  }
+
+  .feature-card img {
+    display: block;
+    width: 100%;
+    height: auto;
+    border-radius: 0 0 18px 18px;
+  }
+
+  .feature-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    width: fit-content;
+    min-height: 38px;
+    padding: 0 14px;
+    color: #fff !important;
+    background: rgba(255, 255, 255, 0.055);
+    border: 1px solid var(--glass-line);
+    border-radius: 999px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
     font-size: 14px;
+    font-weight: 550;
+    text-decoration: none;
+  }
+
+  .feature-link svg {
+    transition: transform 180ms ease;
+  }
+
+  .feature-link:hover svg {
+    transform: translateX(3px);
+  }
+
+  /* ---- observable runtime and proof ---- */
+
+  .runtime,
+  .evidence,
+  .connections,
+  .comparison-section {
+    margin-top: clamp(56px, 8vw, 96px);
+    padding: clamp(34px, 5vw, 58px);
+    background: var(--glass-fill-strong);
+    border: 1px solid var(--glass-line);
+    border-radius: 30px;
+    box-shadow: var(--glass-shadow);
+    backdrop-filter: blur(30px) saturate(145%);
+    -webkit-backdrop-filter: blur(30px) saturate(145%);
+  }
+
+  .runtime {
+    display: grid;
+    grid-template-columns: minmax(260px, 0.76fr) minmax(0, 1.24fr);
+    gap: clamp(40px, 7vw, 84px);
+    align-items: start;
+  }
+
+  .runtime-intro {
+    position: sticky;
+    top: 106px;
+  }
+
+  .runtime-list {
+    border-top: 1px solid rgba(227, 215, 255, 0.14);
+  }
+
+  .runtime-list article {
+    padding: 24px 0;
+    display: grid;
+    grid-template-columns: 30px minmax(120px, 0.48fr) minmax(0, 1fr);
+    gap: 18px;
+    border-bottom: 1px solid rgba(227, 215, 255, 0.14);
+  }
+
+  .runtime-list article > span {
+    color: var(--purple-soft);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 10px;
+  }
+
+  .runtime-list h3,
+  .connection-grid h3 {
+    margin: 0;
+    color: #f2edf7;
+    font-size: 13.5px;
+    font-weight: 600;
+  }
+
+  .runtime-list article p,
+  .connection-grid article p {
+    margin: 0;
+    color: var(--ink-40);
+    font-size: 12.5px;
+    line-height: 1.65;
+  }
+
+  .evidence-grid {
+    margin: 48px 0 0;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    border-top: 1px solid rgba(227, 215, 255, 0.14);
+    border-bottom: 1px solid rgba(227, 215, 255, 0.14);
+  }
+
+  .evidence-grid div {
+    min-height: 156px;
+    padding: 23px 20px;
+    border-right: 1px solid rgba(227, 215, 255, 0.12);
+  }
+
+  .evidence-grid div:last-child { border-right: 0; }
+  .evidence-grid dt { color: var(--ink-40); font-size: 11px; }
+  .evidence-grid dd {
+    margin: 21px 0 5px;
+    color: #f5f0fa;
+    font-size: clamp(29px, 4vw, 37px);
+    font-weight: 590;
+    letter-spacing: -0.03em;
+  }
+  .evidence-grid span { color: var(--ink-40); font-size: 11px; }
+
+  .connection-grid {
+    margin-top: 46px;
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    border-top: 1px solid rgba(227, 215, 255, 0.14);
+    border-left: 1px solid rgba(227, 215, 255, 0.14);
+    border-radius: 18px;
+    overflow: hidden;
+  }
+
+  .connection-grid article {
+    min-height: 126px;
+    padding: 23px;
+    background: rgba(255, 255, 255, 0.025);
+    border-right: 1px solid rgba(227, 215, 255, 0.14);
+    border-bottom: 1px solid rgba(227, 215, 255, 0.14);
+  }
+
+  .connection-grid article p { margin-top: 11px; }
+
+  .comparison {
+    margin-top: 44px;
+    overflow: hidden;
+    background: rgba(4, 3, 7, 0.25);
+    border: 1px solid rgba(227, 215, 255, 0.14);
+    border-radius: 20px;
+  }
+
+  .comparison summary {
+    min-height: 62px;
+    padding: 0 19px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    color: #e5dfee;
+    cursor: pointer;
+    font-size: 13.5px;
     list-style: none;
   }
 
   .comparison summary::-webkit-details-marker { display: none; }
   .comparison summary svg { transition: transform 180ms ease; }
   .comparison[open] summary svg { transform: rotate(180deg); }
-  .comparison-scroll { overflow-x: auto; border-top: 1px solid #39323d; }
-  .comparison table { width: 100%; min-width: 900px; border-collapse: collapse; }
+  .comparison-scroll {
+    overflow-x: auto;
+    border-top: 1px solid rgba(227, 215, 255, 0.14);
+  }
+  .comparison table { width: 100%; min-width: 880px; border-collapse: collapse; }
   .comparison th,
-  .comparison td { padding: 16px 14px; border-bottom: 1px solid #2c2730; color: #8d8592; font-size: 12px; text-align: left; }
-  .comparison thead th { color: #bcb4c1; font-weight: 560; }
-  .comparison tbody th { color: #d7d0db; font-weight: 520; }
+  .comparison td {
+    padding: 15px 13px;
+    color: var(--ink-40);
+    border-bottom: 1px solid rgba(227, 215, 255, 0.1);
+    font-size: 11.5px;
+    text-align: left;
+  }
+  .comparison thead th { color: var(--ink-55); font-weight: 600; }
+  .comparison tbody th { color: var(--ink-70); font-weight: 550; }
   .comparison th:nth-child(2),
-  .comparison td:nth-child(2) { color: #c8b4ff; background: #15111a; }
+  .comparison td:nth-child(2) {
+    color: #d4c3ff;
+    background: rgba(126, 83, 220, 0.08);
+  }
+
+  /* ---- changelog ---- */
+
+  .changelog {
+    padding: 42px 0;
+  }
+
+  .changelog-inner {
+    width: min(820px, calc(100% - 40px));
+    margin-inline: auto;
+    padding: clamp(42px, 6vw, 66px);
+    background: var(--glass-fill-strong);
+    border: 1px solid var(--glass-line);
+    border-radius: 28px;
+    box-shadow: var(--glass-shadow);
+    backdrop-filter: blur(30px) saturate(145%);
+    -webkit-backdrop-filter: blur(30px) saturate(145%);
+  }
+
+  .changelog h2 {
+    margin: 0 0 34px;
+    color: #fff;
+    font-size: 24px;
+    font-weight: 600;
+    letter-spacing: -0.015em;
+  }
+
+  .changelog ol {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .changelog li {
+    padding: 22px 0;
+    display: grid;
+    grid-template-columns: 118px 1fr;
+    gap: 18px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .changelog-date {
+    color: var(--ink-40);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+    padding-top: 3px;
+  }
+
+  .changelog strong {
+    display: block;
+    color: #fff;
+    font-size: 15px;
+    font-weight: 600;
+  }
+
+  .changelog li p {
+    margin: 7px 0 0;
+    color: var(--ink-55);
+    font-size: 14px;
+    line-height: 1.6;
+  }
+
+  .changelog-link {
+    margin-top: 26px;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 38px;
+    padding: 0 14px;
+    color: #fff !important;
+    background: rgba(255, 255, 255, 0.055);
+    border: 1px solid var(--glass-line);
+    border-radius: 999px;
+    font-size: 14px;
+    font-weight: 550;
+    text-decoration: none;
+  }
+
+  .changelog-link svg {
+    transition: transform 180ms ease;
+  }
+
+  .changelog-link:hover svg {
+    transform: translateX(3px);
+  }
+
+  /* ---- closing ---- */
 
   .closing {
-    position: relative;
-    min-height: 620px;
-    display: grid;
-    place-items: center;
-    overflow: hidden;
-    isolation: isolate;
-    background: rgba(5, 4, 6, 0.34);
-    border-bottom: 1px solid #2a252e;
-  }
-
-  .closing::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    z-index: 1;
-    background: rgba(5, 4, 6, 0.32);
-    box-shadow: inset 0 0 160px 56px rgba(5, 4, 6, 0.76);
-  }
-
-  .closing-copy {
-    position: relative;
-    z-index: 2;
     width: min(680px, calc(100% - 40px));
-    text-align: center;
+    margin: clamp(56px, 8vw, 104px) auto;
+    padding: clamp(42px, 6vw, 62px);
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    background: var(--glass-fill-strong);
+    border: 1px solid var(--glass-line);
+    border-radius: 28px;
+    box-shadow: var(--glass-shadow);
+    backdrop-filter: blur(30px) saturate(145%);
+    -webkit-backdrop-filter: blur(30px) saturate(145%);
   }
 
-  .closing-copy img { width: 56px; height: 56px; border-radius: 12px; }
-  .closing-copy h2 { margin-top: 24px; }
-  .closing-copy p { margin: 20px auto 0; color: #918996; font-size: 16px; }
-  .closing-cta { margin-top: 28px; padding: 0 18px; }
-
-  .reveal { opacity: 1; }
-
-  @keyframes vector-field-breathe {
-    from { opacity: 0.78; transform: translate3d(-5px, -3px, 0) scale(1.01); }
-    to { opacity: 1; transform: translate3d(7px, 4px, 0) scale(1.018); }
+  .closing h2 {
+    margin: 0;
+    color: #fff;
+    font-size: clamp(28px, 4vw, 36px);
+    font-weight: 600;
+    letter-spacing: -0.025em;
+    line-height: 1.12;
   }
 
-  @media (max-width: 920px) {
-    .hero-copy { width: min(600px, 86%); margin-left: 14%; }
-    .loop-list { grid-template-columns: repeat(3, 1fr); }
-    .loop-list li:nth-child(3) { border-right: 0; }
-    .loop-list li:nth-child(n + 4) { border-top: 1px solid #312b35; }
-    .chapter-copy { grid-template-columns: 1fr; gap: 26px; }
-    .chapter-copy > div:last-child { max-width: 680px; }
-    .engine-inner { grid-template-columns: 1fr; gap: 58px; }
-    .engine-heading { position: static; }
+  .closing p {
+    margin: 14px 0 0;
+    color: var(--ink-55);
+    font-size: 16px;
+  }
+
+  .closing-cta {
+    width: 100%;
+    min-height: 48px;
+    margin-top: 34px;
+    padding: 0 18px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    color: #120d17 !important;
+    background: linear-gradient(180deg, rgba(245, 240, 255, 0.98), rgba(207, 184, 255, 0.94));
+    border: 1px solid rgba(255, 255, 255, 0.62);
+    border-radius: 18px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82), 0 16px 45px rgba(79, 51, 137, 0.2);
+    font-size: 15px;
+    font-weight: 600;
+    text-decoration: none;
+    transition: background 180ms ease, transform 180ms ease, box-shadow 180ms ease;
+  }
+
+  .closing-cta:hover {
+    background: linear-gradient(180deg, #f7f2ff, #c9b0ff);
+    border-color: rgba(255, 255, 255, 0.74);
+    transform: translateY(-1px);
+    box-shadow: 0 12px 44px rgba(146, 116, 236, 0.32);
+  }
+
+  .closing-cta svg {
+    transition: transform 180ms ease;
+  }
+
+  .closing-cta:hover svg {
+    transform: translateX(3px);
+  }
+
+  /* ---- keyframes ---- */
+
+  @keyframes field-breathe {
+    from { opacity: 0.9; transform: translate3d(-4px, -2px, 0); }
+    to { opacity: 1; transform: translate3d(5px, 3px, 0); }
+  }
+
+  @keyframes marquee {
+    to { transform: translateX(-50%); }
+  }
+
+  /* ---- responsive ---- */
+
+  @media (max-width: 900px) {
+    .workflow-list { grid-template-columns: repeat(2, 1fr); }
+    .workflow-list li { border-bottom: 1px solid rgba(227, 215, 255, 0.12); }
+    .workflow-list li:nth-child(2n) { border-right: 0; }
+    .workflow-list li:last-child { border-bottom: 0; }
+
+    .runtime { grid-template-columns: 1fr; }
+    .runtime-intro { position: static; }
     .evidence-grid { grid-template-columns: repeat(2, 1fr); }
     .evidence-grid div:nth-child(2) { border-right: 0; }
-    .evidence-grid div:nth-child(n + 3) { border-top: 1px solid #342e38; }
+    .evidence-grid div:nth-child(n + 3) { border-top: 1px solid rgba(227, 215, 255, 0.12); }
   }
 
   @media (max-width: 640px) {
-    .chapter-width,
-    .hero-inner,
-    .runtime-band { width: min(100% - 28px, 1080px); }
+    .hero { padding-top: 44px; }
+    .wordmark { margin-bottom: 26px; }
+    .headline { min-height: 3.4em; font-size: clamp(26px, 7.6vw, 32px); }
+    .hero-loop { grid-template-columns: 1fr; min-height: 0; margin-top: 24px; padding: 9px 9px 13px; }
+    .hero-loop-stage { min-height: 42px; }
+    .hero-loop-stage:not(.is-active) { display: none; }
+    .hero-loop-progress { inset: auto 9px 6px; }
 
-    .hero { padding-bottom: 44px; }
-    .hero-copy { width: 100%; padding-top: 42px; margin-left: 0; text-align: center; }
-    .hero-logo { width: 48px; height: 48px; margin-inline: auto; border-radius: 11px; }
-    .hero-name { margin-top: 10px; }
-    .hero h1 { margin-top: 15px; font-size: clamp(38px, 11vw, 52px); }
-    .hero-cta { margin-top: 24px; }
-    .hero-note { font-size: 11px; }
-    .hero-product { margin-top: 80px; }
-    .product-bar { min-height: 34px; padding-inline: 9px; }
+    .showcase { width: calc(100% - 24px); padding-top: 44px; }
+    .product-window { padding: 5px; border-radius: 21px; }
+    .product-bar { min-height: 34px; padding-inline: 10px; }
     .product-title { display: none; }
-    .hero-product img { width: 100%; max-width: none; transform: none; }
+    .product-window img {
+      aspect-ratio: 16 / 10;
+      object-fit: cover;
+      object-position: top left;
+    }
 
-    .runtime-band { min-height: 164px; padding-block: 38px; text-align: center; }
-    .runtime-list { gap: 14px 22px; }
-    .runtime-list span { font-size: 13px; }
+    .belt { width: calc(100% - 24px); margin-top: 48px; padding: 26px 0; border-radius: 20px; }
+    .marquee-track { gap: 32px; padding-right: 32px; }
+    .marquee-track span { font-size: 13.5px; }
 
-    .intro,
-    .chapter,
-    .engine-section,
+    .section-width { width: calc(100% - 24px); }
+    .workflow,
+    .runtime,
     .evidence,
     .connections,
-    .comparison-section { padding: 88px 0; }
+    .comparison-section { padding: 30px 20px; border-radius: 22px; }
+    .section-heading h2,
+    .runtime-intro h2 { font-size: 32px; }
+    .section-heading > p:last-child,
+    .runtime-intro > p:last-child { font-size: 14.5px; }
+    .workflow-list { grid-template-columns: 1fr; margin-top: 34px; }
+    .workflow-list li { min-height: 118px; border-right: 0; }
+    .workflow-list strong { margin-top: 12px; }
 
-    h2,
-    .chapter-copy h2,
-    .engine-heading h2 { font-size: 36px; }
-    .intro-copy > p:last-child,
-    .engine-heading > p:last-child,
-    .evidence-heading > p:last-child,
-    .connections-copy > p:last-child,
-    .comparison-heading > p:last-child { font-size: 15px; }
-
-    .loop-list { grid-template-columns: 1fr; }
-    .loop-list li { min-height: 122px; border-right: 0; border-top: 1px solid #312b35; }
-    .loop-list li:first-child { border-top: 0; }
-    .loop-list strong { margin-top: 12px; }
-
-    .chapter-copy { margin-bottom: 34px; }
-    .chapter-media { border-radius: 6px; }
-    .media-topline span:last-child { display: none; }
-    .chapter-media img { width: 780px; max-width: none; transform: translateX(-18%); }
-    .chapter-media.media-browser img { transform: translateX(-54%); }
-
-    .engine-row { grid-template-columns: 30px 1fr; gap: 12px; }
-    .engine-row p { grid-column: 2; }
-
+    .runtime-list article { grid-template-columns: 28px 1fr; gap: 12px; }
+    .runtime-list article p { grid-column: 2; }
     .evidence-grid { grid-template-columns: 1fr 1fr; }
-    .evidence-grid div { min-height: 142px; padding: 20px 16px; }
-    .evidence-grid dd { font-size: 28px; }
+    .evidence-grid div { min-height: 132px; padding: 18px 14px; }
+    .evidence-grid dd { font-size: 27px; }
+    .connection-grid { grid-template-columns: 1fr; }
+    .connection-grid article { min-height: 108px; }
 
-    .connection-rail { grid-template-columns: repeat(2, 1fr); }
-    .connection-rail span:nth-child(5n) { border-right: 1px solid #2e2932; }
-    .connection-rail span:nth-child(2n) { border-right: 0; }
-    .connection-rail span:nth-child(n + 3) { border-top: 1px solid #2e2932; }
-    .closing { min-height: 520px; }
+    .feature { width: calc(100% - 24px); padding: 30px 0; gap: 16px; }
+    .feature-copy { padding: 22px 20px 23px; border-radius: 20px; }
+    .feature-card { padding: 5px; border-radius: 21px; }
+    .feature-card img {
+      aspect-ratio: 16 / 10;
+      object-fit: cover;
+      object-position: top left;
+    }
+    .card-topline span:last-child { display: none; }
+
+    .changelog li { grid-template-columns: 1fr; gap: 6px; padding: 18px 0; }
+    .changelog-date { padding-top: 0; }
+
+    .changelog-inner { width: calc(100% - 24px); padding: 32px 20px; border-radius: 22px; }
+    .closing { width: calc(100% - 24px); padding: 36px 22px; border-radius: 22px; }
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .reveal { opacity: 1 !important; transform: none !important; }
     .ascii-field { animation: none; transform: none; }
+    .feature-card,
+    .feature-card:hover { transform: none; }
+    .product-window img { will-change: auto; }
   }
 </style>
