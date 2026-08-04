@@ -56,6 +56,13 @@ const api: ElectronAPI = {
     check: () => ipcRenderer.invoke("updater-check"),
     install: () => ipcRenderer.invoke("updater-install"),
   },
+  license: {
+    status: () => ipcRenderer.invoke("license-status"),
+    activate: (licenseKey) => ipcRenderer.invoke("license-activate", licenseKey),
+    deactivate: () => ipcRenderer.invoke("license-deactivate"),
+    setCancellation: (cancel) => ipcRenderer.invoke("license-set-cancellation", cancel),
+    openBillingPortal: () => ipcRenderer.invoke("license-open-billing-portal"),
+  },
   consumeInitialDeepLinks: () => ipcRenderer.invoke("consume-initial-deep-links"),
   getDefaultServerUrl: () => ipcRenderer.invoke("get-default-server-url"),
   setDefaultServerUrl: (url) => ipcRenderer.invoke("set-default-server-url", url),

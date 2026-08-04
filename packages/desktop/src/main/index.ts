@@ -45,6 +45,7 @@ import { startBrowserBridge, stopBrowserBridge } from "./browser-bridge"
 import { startCloudAgentBridge, stopCloudAgentBridge } from "./cloud-agent-bridge"
 import { setupSecureRuntimeSecrets } from "./secure-runtime"
 import { handleCloudOAuthDeepLinks } from "./cloud-connections"
+import { createLicenseService } from "./license-service"
 
 const APP_NAMES: Record<string, string> = {
   dev: "Vector Dev",
@@ -323,6 +324,12 @@ const main = Effect.gen(function* () {
   registerRendererProtocol()
   setDockIcon()
   const updater = setupAutoUpdater(stopSidecars)
+  const license = createLicenseService({
+    userDataPath: app.getPath("userData"),
+    version: app.getVersion(),
+    packaged: app.isPackaged,
+    channel: CHANNEL,
+  })
   registerIpcHandlers({
     killSidecar: () => killSidecar(),
     relaunch,
@@ -344,6 +351,7 @@ const main = Effect.gen(function* () {
     checkAppExists: (appName) => checkAppExists(appName),
     resolveAppPath: async (appName) => resolveAppPath(appName),
     updater,
+    license,
     showUpdater: () => showUpdaterDialog(updater, true),
     setBackgroundColor: (color) => setBackgroundColor(color),
     exportDebugLogs: () => exportDebugLogs(),

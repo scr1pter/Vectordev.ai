@@ -62,6 +62,14 @@ const getBase = (appId: string): Configuration => ({
       to: "icons/",
       filter: ["**/*"],
     },
+    {
+      from: path.join(rootDir, "LICENSE"),
+      to: "LICENSE.txt",
+    },
+    {
+      from: path.join(rootDir, "THIRD_PARTY_NOTICES.md"),
+      to: "THIRD_PARTY_NOTICES.md",
+    },
   ],
   mac: {
     category: "public.app-category.developer-tools",

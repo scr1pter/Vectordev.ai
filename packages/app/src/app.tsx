@@ -54,6 +54,7 @@ import DirectoryLayout, { DirectoryDataProvider } from "@/pages/directory-layout
 import LegacyLayout from "@/pages/layout"
 import NewLayout from "@/pages/layout-new"
 import { ErrorPage } from "./pages/error"
+import { LicenseGate } from "./components/license-gate"
 import { useCheckServerHealth } from "./utils/server-health"
 import { legacySessionServer, requireServerKey, sessionHref } from "./utils/session-route"
 
@@ -718,26 +719,28 @@ export function AppInterface(props: {
       <GlobalProvider>
         <SettingsProvider>
           <VectorThemeSync />
-          <ConnectionGate disableHealthCheck={props.disableHealthCheck}>
-            <Show when={useSettings().general.newLayoutDesigns().toString()} keyed>
-              <Dynamic
-                component={props.router ?? Router}
-                root={(routerProps) => (
-                  <TabsProvider>
-                    <NotificationProvider>
-                      <ServerShell>
-                        <Show when={useSettings().general.newLayoutDesigns()} fallback={routerProps.children}>
-                          <NewAppLayout>{routerProps.children}</NewAppLayout>
-                        </Show>
-                      </ServerShell>
-                    </NotificationProvider>
-                  </TabsProvider>
-                )}
-              >
-                <Routes />
-              </Dynamic>
-            </Show>
-          </ConnectionGate>
+          <LicenseGate>
+            <ConnectionGate disableHealthCheck={props.disableHealthCheck}>
+              <Show when={useSettings().general.newLayoutDesigns().toString()} keyed>
+                <Dynamic
+                  component={props.router ?? Router}
+                  root={(routerProps) => (
+                    <TabsProvider>
+                      <NotificationProvider>
+                        <ServerShell>
+                          <Show when={useSettings().general.newLayoutDesigns()} fallback={routerProps.children}>
+                            <NewAppLayout>{routerProps.children}</NewAppLayout>
+                          </Show>
+                        </ServerShell>
+                      </NotificationProvider>
+                    </TabsProvider>
+                  )}
+                >
+                  <Routes />
+                </Dynamic>
+              </Show>
+            </ConnectionGate>
+          </LicenseGate>
         </SettingsProvider>
       </GlobalProvider>
     </ServerProvider>

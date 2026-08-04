@@ -5,6 +5,7 @@ import type { DesktopMenuAction } from "../desktop-menu"
 import { ServerConnection } from "./server"
 import type { WslServersPlatform } from "../wsl/types"
 import type { UpdaterPlatform } from "../updater"
+import type { VectorLicensePlatform } from "../license"
 
 type PickerPaths = string | string[] | null
 type OpenDirectoryPickerOptions = { title?: string; multiple?: boolean }
@@ -69,6 +70,9 @@ type PlatformBase = {
 
   /** Application-global desktop updater */
   updater?: UpdaterPlatform
+
+  /** Vector desktop entitlement and billing controls */
+  license?: VectorLicensePlatform
 
   /** Fetch override */
   fetch?: typeof fetch

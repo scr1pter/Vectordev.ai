@@ -7,6 +7,7 @@
     ".": "./src/index.ts",
     "./desktop-menu": "./src/desktop-menu.ts",
     "./updater": "./src/updater.ts",
+    "./license": "./src/license.ts",
     "./wsl/types": "./src/wsl/types.ts",
     "./vite": "./vite.js",
     "./index.css": "./src/index.css"
@@ -29,7 +30,7 @@
     "test:stability": "bun test ./e2e/performance/unit/visual-stability.test.ts && playwright test --config e2e/performance/timeline-stability/playwright.config.ts",
     "test:bench": "bun test ./e2e/performance/unit && playwright test --config e2e/performance/playwright.config.ts"
   },
-  "license": "MIT",
+  "license": "SEE LICENSE IN ../../LICENSE",
   "devDependencies": {
     "@happy-dom/global-registrator": "20.0.11",
     "@playwright/test": "catalog:",

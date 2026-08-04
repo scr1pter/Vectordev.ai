@@ -8,9 +8,11 @@ import { SettingsProvidersV2 } from "./providers"
 import { SettingsModelsV2 } from "./models"
 import { SettingsServersV2 } from "./servers"
 import { SettingsUsageV2 } from "./usage"
+import { SettingsBillingV2 } from "./billing"
+import { SettingsAboutV2 } from "./about"
 import "./settings-v2.css"
 
-type SettingsTab = SettingsSection | "providers" | "models" | "servers" | "usage"
+type SettingsTab = SettingsSection | "providers" | "models" | "servers" | "usage" | "billing" | "about"
 
 const groups: {
   title: string
@@ -21,6 +23,7 @@ const groups: {
     items: [
       { value: "general", label: "General", icon: "sliders" },
       { value: "usage", label: "Usage & streak", icon: "status" },
+      { value: "billing", label: "Billing & license", icon: "shield" },
       { value: "appearance", label: "Appearance", icon: "photo" },
     ],
   },
@@ -44,6 +47,7 @@ const groups: {
       { value: "servers", label: "Servers", icon: "server" },
       { value: "notifications", label: "Notifications", icon: "status" },
       { value: "accessibility", label: "Accessibility", icon: "glasses" },
+      { value: "about", label: "About & licenses", icon: "help" },
     ],
   },
 ]
@@ -56,6 +60,8 @@ export const DialogSettings: Component<{
 
   const panel = (item: SettingsTab) => {
     if (item === "usage") return <SettingsUsageV2 />
+    if (item === "billing") return <SettingsBillingV2 />
+    if (item === "about") return <SettingsAboutV2 />
     if (item === "providers") return <SettingsProvidersV2 />
     if (item === "models") return <SettingsModelsV2 />
     if (item === "servers") return <SettingsServersV2 />

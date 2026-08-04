@@ -9,6 +9,8 @@ const keep = new Set([
   "_astro",
   "docs",
   "download",
+  "legal",
+  "license",
   "releases",
   "index.html",
   "404.html",

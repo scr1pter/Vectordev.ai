@@ -1,21 +1,41 @@
-MIT License
+VECTOR SOFTWARE SOURCE LICENSE
+Version 1.0, effective August 4, 2026
 
-Copyright (c) 2025 opencode
+Copyright (c) 2026 Krishna B / VectorDev.ai. All rights reserved.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+This license applies only to code, product assets, documentation, and other
+materials originally created for Vector and owned by VectorDev.ai (the
+"Vector Materials"). It does not replace or restrict licenses that apply to
+third-party software incorporated into Vector. Those notices are listed in
+THIRD_PARTY_NOTICES.md and in the application.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+1. No public source license is granted.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+Unless VectorDev.ai gives you a separate written agreement, you may not copy,
+modify, publish, distribute, sublicense, sell, host, or create derivative works
+from the Vector Materials. Access to a private source repository does not grant
+permission to redistribute it.
+
+2. Product use is licensed separately.
+
+Purchasing Vector grants only the end-user rights described in the Vector
+Software License at https://vectordev.ai/legal/license. It does not transfer
+ownership of Vector or grant rights to its private source code.
+
+3. Third-party software remains under its original terms.
+
+Portions of Vector derive from or incorporate open-source projects, including
+OpenCode-derived portions licensed under the MIT License. You keep every right
+those licenses grant for the code they cover. Nothing in this file narrows or
+removes those rights.
+
+4. No warranty.
+
+THE VECTOR MATERIALS ARE PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT. TO THE MAXIMUM EXTENT
+PERMITTED BY LAW, VECTORDEV.AI AND ITS CONTRIBUTORS ARE NOT LIABLE FOR ANY
+CLAIM, DAMAGES, OR OTHER LIABILITY ARISING FROM THE VECTOR MATERIALS OR THEIR
+USE.
+
+For commercial source licensing questions, contact VectorDev.ai.

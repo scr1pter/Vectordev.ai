@@ -23,9 +23,16 @@
       </nav>
       <nav aria-label="Platforms">
         <strong>Platforms</strong>
-        <a href="/download/mac-arm64">macOS</a>
-        <a href="/download/windows">Windows</a>
-        <a href="/download/linux">Linux</a>
+        <a href="/download?target=mac-arm64">macOS</a>
+        <a href="/download?target=windows-x64">Windows</a>
+        <a href="/download?target=linux-x64">Linux</a>
+      </nav>
+      <nav aria-label="Legal">
+        <strong>Legal</strong>
+        <a href="/legal/license">Software license</a>
+        <a href="/legal/terms">Terms</a>
+        <a href="/legal/privacy">Privacy</a>
+        <a href="/legal/third-party">Third-party notices</a>
       </nav>
     </div>
   </div>
@@ -93,7 +100,7 @@
 
   .footer-links {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(4, 1fr);
     gap: 36px;
   }
 
@@ -118,7 +125,7 @@
   @media (max-width: 700px) {
     .site-footer { width: calc(100% - 20px); padding-inline: 18px; border-radius: 22px; }
     .footer-inner { grid-template-columns: 1fr; gap: 42px; }
-    .footer-links { gap: 22px; }
+    .footer-links { grid-template-columns: repeat(2, 1fr); gap: 28px 22px; }
     .footer-base { flex-direction: column; gap: 7px; }
   }
 </style>

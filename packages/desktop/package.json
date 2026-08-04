@@ -2,9 +2,9 @@
   "name": "vector-desktop",
   "productName": "Vector",
   "private": true,
-  "version": "1.17.28",
+  "version": "1.17.29",
   "type": "module",
-  "license": "MIT",
+  "license": "SEE LICENSE IN ../../LICENSE",
   "homepage": "https://vectordev.ai",
   "author": {
     "name": "Vector",

@@ -5,47 +5,47 @@
   "redirects": [
     {
       "source": "/download/mac",
-      "destination": "https://42qryducihx01gl0.public.blob.vercel-storage.com/releases/vector-downloads/vector-desktop-mac-arm64.dmg",
+      "destination": "/download?target=mac-arm64",
       "permanent": false
     },
     {
       "source": "/download/mac-arm64",
-      "destination": "https://42qryducihx01gl0.public.blob.vercel-storage.com/releases/vector-downloads/vector-desktop-mac-arm64.dmg",
+      "destination": "/download?target=mac-arm64",
       "permanent": false
     },
     {
       "source": "/download/mac-x64",
-      "destination": "https://42qryducihx01gl0.public.blob.vercel-storage.com/releases/vector-downloads/vector-desktop-mac-x64.dmg",
+      "destination": "/download?target=mac-x64",
       "permanent": false
     },
     {
       "source": "/download/windows",
-      "destination": "https://42qryducihx01gl0.public.blob.vercel-storage.com/releases/vector-downloads/vector-desktop-win-x64.exe",
+      "destination": "/download?target=windows-x64",
       "permanent": false
     },
     {
       "source": "/download/windows-x64",
-      "destination": "https://42qryducihx01gl0.public.blob.vercel-storage.com/releases/vector-downloads/vector-desktop-win-x64.exe",
+      "destination": "/download?target=windows-x64",
       "permanent": false
     },
     {
       "source": "/download/windows-arm64",
-      "destination": "https://42qryducihx01gl0.public.blob.vercel-storage.com/releases/vector-downloads/vector-desktop-win-arm64.exe",
+      "destination": "/download?target=windows-arm64",
       "permanent": false
     },
     {
       "source": "/download/linux",
-      "destination": "https://42qryducihx01gl0.public.blob.vercel-storage.com/releases/vector-downloads/vector-desktop-linux-x86_64.AppImage",
+      "destination": "/download?target=linux-x64",
       "permanent": false
     },
     {
       "source": "/download/linux-x64",
-      "destination": "https://42qryducihx01gl0.public.blob.vercel-storage.com/releases/vector-downloads/vector-desktop-linux-x86_64.AppImage",
+      "destination": "/download?target=linux-x64",
       "permanent": false
     },
     {
       "source": "/download/linux-arm64",
-      "destination": "https://42qryducihx01gl0.public.blob.vercel-storage.com/releases/vector-downloads/vector-desktop-linux-arm64.AppImage",
+      "destination": "/download?target=linux-arm64",
       "permanent": false
     },
     {

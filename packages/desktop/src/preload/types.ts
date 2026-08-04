@@ -1,6 +1,7 @@
 import type { DesktopMenuAction } from "@opencode-ai/app/desktop-menu"
 import type { WslServersPlatform } from "@opencode-ai/app/wsl/types"
 import type { UpdaterState } from "@opencode-ai/app/updater"
+import type { VectorLicenseStatus } from "@opencode-ai/app/license"
 import type {
   CloudRuntimeLogResult,
   PublishProgressEvent,
@@ -127,6 +128,14 @@ export type UpdaterAPI = {
   subscribe: (cb: (state: UpdaterState) => void) => Promise<() => void>
   check: () => Promise<UpdaterState>
   install: () => Promise<void>
+}
+
+export type LicenseAPI = {
+  status: () => Promise<VectorLicenseStatus>
+  activate: (licenseKey: string) => Promise<VectorLicenseStatus>
+  deactivate: () => Promise<VectorLicenseStatus>
+  setCancellation: (cancel: boolean) => Promise<VectorLicenseStatus>
+  openBillingPortal: () => Promise<string>
 }
 
 export type LinuxDisplayBackend = "wayland" | "auto"
@@ -493,6 +502,7 @@ export type ElectronAPI = {
   awaitInitialization: () => Promise<ServerReadyData>
   wslServers: WslServersAPI
   updater: UpdaterAPI
+  license: LicenseAPI
   consumeInitialDeepLinks: () => Promise<string[]>
   getDefaultServerUrl: () => Promise<string | null>
   setDefaultServerUrl: (url: string | null) => Promise<void>

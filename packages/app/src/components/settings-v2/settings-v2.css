@@ -26,6 +26,173 @@
   display: none;
 }
 
+.settings-license-content {
+  width: 100%;
+  padding: 0 40px 40px;
+  display: grid;
+  gap: 12px;
+}
+
+.settings-license-card {
+  padding: 20px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  color: var(--v2-text-text-base);
+  background: var(--v2-background-bg-layer-01);
+  border: 0.5px solid var(--v2-border-border-muted);
+  border-radius: 12px;
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.025);
+}
+
+.settings-license-card--summary {
+  display: block;
+  padding: 24px;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(155, 108, 255, 0.12), transparent 40%),
+    var(--v2-background-bg-layer-01);
+}
+
+.settings-license-status-line {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.settings-license-eyebrow {
+  color: var(--v2-text-text-muted);
+  font-size: 10px;
+  font-weight: 620;
+  text-transform: uppercase;
+}
+
+.settings-license-card h3 {
+  margin: 4px 0 0;
+  color: var(--v2-text-text-base);
+  font-size: 15px;
+  font-weight: 620;
+}
+
+.settings-license-card p {
+  max-width: 590px;
+  margin: 7px 0 0;
+  color: var(--v2-text-text-muted);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.settings-license-badge {
+  padding: 5px 9px;
+  color: #c9ffd9;
+  background: rgba(53, 179, 102, 0.11);
+  border: 1px solid rgba(76, 211, 126, 0.16);
+  border-radius: 999px;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.settings-license-badge[data-state="canceling"],
+.settings-license-badge[data-state="past_due"],
+.settings-license-badge[data-state="expired"] {
+  color: #ffd0b7;
+  background: rgba(208, 106, 65, 0.11);
+  border-color: rgba(236, 130, 86, 0.16);
+}
+
+.settings-license-facts {
+  margin-top: 22px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  background: var(--v2-border-border-muted);
+  border: 0.5px solid var(--v2-border-border-muted);
+  border-radius: 9px;
+}
+
+.settings-license-facts > div {
+  min-width: 0;
+  padding: 13px 14px;
+  display: grid;
+  gap: 5px;
+  background: rgba(9, 8, 11, 0.34);
+}
+
+.settings-license-facts span,
+.settings-notice-list span {
+  color: var(--v2-text-text-muted);
+  font-size: 10px;
+}
+
+.settings-license-facts strong,
+.settings-notice-list strong {
+  overflow: hidden;
+  color: var(--v2-text-text-base);
+  font-size: 11px;
+  font-weight: 570;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-license-card-copy {
+  min-width: 240px;
+  flex: 1;
+}
+
+.settings-license-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.settings-license-message {
+  margin: 0;
+  padding: 11px 13px;
+  color: #d9c9ff;
+  background: rgba(139, 92, 246, 0.08);
+  border: 1px solid rgba(171, 133, 255, 0.13);
+  border-radius: 9px;
+  font-size: 11px;
+}
+
+.settings-about-card {
+  justify-content: flex-start;
+}
+
+.settings-about-card img {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+}
+
+.settings-notice-list {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  background: var(--v2-border-border-muted);
+  border: 0.5px solid var(--v2-border-border-muted);
+  border-radius: 9px;
+}
+
+.settings-notice-list > div {
+  padding: 11px 13px;
+  display: grid;
+  gap: 4px;
+  background: rgba(9, 8, 11, 0.34);
+}
+
+@media (max-width: 700px) {
+  .settings-license-content { padding-inline: 24px; }
+  .settings-license-facts,
+  .settings-notice-list { grid-template-columns: 1fr; }
+  .settings-license-status-line { align-items: flex-start; flex-direction: column; }
+}
+
 .settings-v2-tab-header {
   position: sticky;
   top: 0;

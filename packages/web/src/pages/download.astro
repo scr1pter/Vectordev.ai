@@ -5,157 +5,103 @@ import MarketingNav from "../components/marketing/MarketingNav.astro"
 
 export const prerender = true
 
-const downloads = [
-  {
-    family: "macOS",
-    mark: "mac",
-    options: [
-      {
-        label: "Apple silicon",
-        detail: "M1, M2, M3, M4, and newer Apple chips",
-        href: "/download/mac-arm64",
-        platform: "mac-arm64",
-      },
-      {
-        label: "Intel",
-        detail: "Intel-based Mac computers",
-        href: "/download/mac-x64",
-        platform: "mac-x64",
-      },
-    ],
-  },
-  {
-    family: "Windows",
-    mark: "win",
-    options: [
-      {
-        label: "64-bit",
-        detail: "Most Windows 10 and Windows 11 computers",
-        href: "/download/windows",
-        platform: "windows",
-      },
-      {
-        label: "ARM64",
-        detail: "Windows computers with an ARM processor",
-        href: "/download/windows-arm64",
-        platform: "windows-arm64",
-      },
-    ],
-  },
-  {
-    family: "Linux",
-    mark: "linux",
-    options: [
-      {
-        label: "x86_64 AppImage",
-        detail: "Most Intel and AMD Linux computers",
-        href: "/download/linux",
-        platform: "linux",
-      },
-      {
-        label: "ARM64 AppImage",
-        detail: "Linux computers with an ARM processor",
-        href: "/download/linux-arm64",
-        platform: "linux-arm64",
-      },
-    ],
-  },
+const platforms = [
+  { id: "mac-arm64", family: "macOS", label: "Apple silicon", detail: "M1, M2, M3, M4, and newer" },
+  { id: "mac-x64", family: "macOS", label: "Intel", detail: "Intel-based Mac computers" },
+  { id: "windows-x64", family: "Windows", label: "64-bit", detail: "Most Windows 10 and 11 computers" },
+  { id: "windows-arm64", family: "Windows", label: "ARM64", detail: "Windows computers with ARM processors" },
+  { id: "linux-x64", family: "Linux", label: "x86_64 AppImage", detail: "Most Intel and AMD Linux computers" },
+  { id: "linux-arm64", family: "Linux", label: "ARM64 AppImage", detail: "Linux computers with ARM processors" },
 ]
 ---
 
 <MarketingLayout
-  title="Download Vector"
-  description="Download Vector for macOS, Windows, or Linux. Choose the installer that matches your computer."
+  title="Buy Vector - $99/year"
+  description="Purchase Vector for $99 per year. Includes the desktop app, updates, and one active computer."
 >
-  <div class="download-page">
+  <div class="purchase-page">
     <MarketingNav active="download" />
 
     <main>
-      <section class="download-hero">
-        <div class="hero-copy">
-          <p class="eyebrow">Vector 1.17.26</p>
-          <h1>Your engineering workspace, on your computer.</h1>
-          <p>
-            Work with local repositories, your own model providers, a real editor, a controlled browser,
-            isolated agents, and project publishing from one desktop application.
+      <section class="purchase-hero">
+        <div class="purchase-copy">
+          <p class="eyebrow">Vector 1.17.29</p>
+          <h1>Own your engineering workspace.</h1>
+          <p class="lede">
+            One annual license for the complete Vector desktop experience: agent sessions, a real editor,
+            terminal, controlled browser, isolated workspaces, review, and publishing through your accounts.
           </p>
-        </div>
 
-        <div class="recommended-card" data-recommended-card>
-          <div class="recommended-copy">
-            <span class="recommendation-label">Recommended for this computer</span>
-            <h2 data-recommended-title>Choose your Vector installer</h2>
-            <p data-recommended-detail>Select a platform below to begin the download.</p>
+          <div class="included-list">
+            <span><i aria-hidden="true"></i> macOS, Windows, and Linux</span>
+            <span><i aria-hidden="true"></i> All desktop updates during the paid year</span>
+            <span><i aria-hidden="true"></i> One active computer at a time</span>
+            <span><i aria-hidden="true"></i> Bring your own models and provider keys</span>
           </div>
-          <a class="recommended-action" data-recommended-action href="#all-downloads">View downloads</a>
         </div>
+
+        <form class="purchase-card" data-purchase-form>
+          <div class="price-row">
+            <div>
+              <span>Vector annual license</span>
+              <strong>$99</strong>
+            </div>
+            <small>per year</small>
+          </div>
+
+          <label class="email-field">
+            <span>Purchase email</span>
+            <input data-purchase-email type="email" name="email" autocomplete="email" placeholder="you@example.com" required />
+          </label>
+
+          <fieldset>
+            <legend>Choose your computer</legend>
+            <div class="platform-grid">
+              {platforms.map((platform, index) => (
+                <label class="platform-option">
+                  <input type="radio" name="platform" value={platform.id} checked={index === 0} />
+                  <span>
+                    <b>{platform.family} · {platform.label}</b>
+                    <small>{platform.detail}</small>
+                  </span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+
+          <label class="terms-row">
+            <input data-purchase-terms type="checkbox" required />
+            <span>
+              I agree to the <a href="/legal/license" target="_blank">software license</a> and
+              <a href="/legal/terms" target="_blank">subscription terms</a>. The plan renews yearly until cancelled.
+            </span>
+          </label>
+
+          <button class="purchase-button" type="submit" data-purchase-button disabled>
+            <span data-purchase-button-label>Checking availability...</span>
+            <b aria-hidden="true">→</b>
+          </button>
+          <p class="purchase-status" data-purchase-status role="status" aria-live="polite"></p>
+          <p class="secure-note">Secure checkout and billing by Stripe. A purchase receipt and license key are emailed to you.</p>
+        </form>
       </section>
 
-      <section id="all-downloads" class="downloads-section">
-        <div class="section-heading">
-          <p class="eyebrow">Desktop releases</p>
-          <h2>Download for your platform.</h2>
-        </div>
-
-        <div class="platform-list">
-          {downloads.map((platform) => (
-            <article class="platform-row">
-              <div class="platform-name">
-                <span aria-hidden="true">{platform.mark}</span>
-                <h3>{platform.family}</h3>
-              </div>
-              <div class="platform-options">
-                {platform.options.map((option) => (
-                  <a href={option.href} data-download={option.platform}>
-                    <span>
-                      <strong>{option.label}</strong>
-                      <small>{option.detail}</small>
-                    </span>
-                    <b aria-hidden="true">↓</b>
-                  </a>
-                ))}
-              </div>
-            </article>
-          ))}
-        </div>
-
-        <div class="release-meta">
-          <span>Version 1.17.26</span>
-          <span>Desktop installers</span>
-          <a href="/download/checksums">Verify checksums</a>
-        </div>
-      </section>
-
-      <section class="install-section">
-        <div class="section-heading">
-          <p class="eyebrow">Installation</p>
-          <h2>Open the installer and start building.</h2>
-        </div>
-        <div class="install-grid">
-          <article>
-            <span>01</span>
-            <h3>Install Vector</h3>
-            <p>Open the downloaded file and complete the normal installation flow for your operating system.</p>
-          </article>
-          <article>
-            <span>02</span>
-            <h3>Open a repository</h3>
-            <p>Select a local project. Vector keeps sessions, tools, and isolated work attached to it.</p>
-          </article>
-          <article>
-            <span>03</span>
-            <h3>Connect a model</h3>
-            <p>Add a supported provider in Settings, choose a model, and send the first engineering request.</p>
-          </article>
-        </div>
-      </section>
-
-      <section class="help-band">
+      <section class="license-explainer">
         <div>
-          <p class="eyebrow">Need a hand?</p>
-          <h2>Setup is covered in the documentation.</h2>
+          <p class="eyebrow">How access works</p>
+          <h2>A license that belongs to you.</h2>
         </div>
-        <a href="/docs#install">Read the installation guide <span aria-hidden="true">→</span></a>
+        <div class="steps">
+          <article><span>01</span><h3>Purchase securely</h3><p>Stripe handles payment. Vector never receives your card number.</p></article>
+          <article><span>02</span><h3>Receive your key</h3><p>Your private license key and download link arrive by email.</p></article>
+          <article><span>03</span><h3>Activate one computer</h3><p>Use Vector on one active machine, with a seven-day offline grace period.</p></article>
+          <article><span>04</span><h3>Control renewal</h3><p>Cancel in Vector Settings at any time. Access continues through the paid year.</p></article>
+        </div>
+      </section>
+
+      <section class="purchase-note">
+        <div><p class="eyebrow">Already purchased?</p><h2>Open Vector and enter the key from your email.</h2></div>
+        <a href="/docs">Read the installation guide <span aria-hidden="true">→</span></a>
       </section>
     </main>
 
@@ -164,454 +110,107 @@ const downloads = [
 </MarketingLayout>
 
 <script>
-  const ua = navigator.userAgent.toLowerCase()
-  const platform = navigator.platform.toLowerCase()
-  const isArmMac =
-    /mac/.test(platform) &&
-    ((navigator as Navigator & { userAgentData?: { architecture?: string } }).userAgentData?.architecture === "arm" ||
-      /arm|apple/.test(ua))
+  const form = document.querySelector<HTMLFormElement>("[data-purchase-form]")
+  const button = document.querySelector<HTMLButtonElement>("[data-purchase-button]")
+  const label = document.querySelector<HTMLElement>("[data-purchase-button-label]")
+  const status = document.querySelector<HTMLElement>("[data-purchase-status]")
+  let available = false
 
-  let preferred: { selector: string; title: string; detail: string } | undefined
-
-  if (/mac/.test(platform)) {
-    preferred = isArmMac
-      ? {
-          selector: "mac-arm64",
-          title: "Download Vector for Apple silicon",
-          detail: "DMG installer for M1, M2, M3, M4, and newer Apple chips.",
-        }
-      : {
-          selector: "mac-arm64",
-          title: "Download Vector for macOS",
-          detail: "Choose Apple silicon for modern Macs, or select Intel below.",
-        }
-  } else if (/win/.test(platform)) {
-    preferred = {
-      selector: "windows",
-      title: "Download Vector for Windows",
-      detail: "64-bit installer for most Windows 10 and Windows 11 computers.",
-    }
-  } else if (/linux/.test(platform)) {
-    preferred = {
-      selector: "linux",
-      title: "Download Vector for Linux",
-      detail: "x86_64 AppImage for most Intel and AMD Linux computers.",
-    }
+  const selectedFromQuery = new URLSearchParams(location.search).get("target")
+  if (selectedFromQuery) {
+    const option = form?.querySelector<HTMLInputElement>(`input[name="platform"][value="${CSS.escape(selectedFromQuery)}"]`)
+    if (option) option.checked = true
   }
 
-  if (preferred) {
-    const source = document.querySelector<HTMLAnchorElement>(`[data-download="${preferred.selector}"]`)
-    const title = document.querySelector<HTMLElement>("[data-recommended-title]")
-    const detail = document.querySelector<HTMLElement>("[data-recommended-detail]")
-    const action = document.querySelector<HTMLAnchorElement>("[data-recommended-action]")
+  fetch("/api/billing/config", { headers: { accept: "application/json" } })
+    .then(async (response) => {
+      const payload = await response.json()
+      available = Boolean(response.ok && payload.available)
+      if (!button || !label || !status) return
+      button.disabled = !available
+      label.textContent = available ? "Continue to secure checkout" : "Paid launch is being configured"
+      if (!available) status.textContent = "Purchases are not open yet. Current beta users can continue using their installed build."
+    })
+    .catch(() => {
+      if (!label || !status) return
+      label.textContent = "Checkout temporarily unavailable"
+      status.textContent = "Vector could not reach the billing service. Please try again shortly."
+    })
 
-    if (source && title && detail && action) {
-      title.textContent = preferred.title
-      detail.textContent = preferred.detail
-      action.textContent = "Download now"
-      action.href = source.href
+  form?.addEventListener("submit", async (event) => {
+    event.preventDefault()
+    if (!available || !button || !label || !status) return
+    const email = form.querySelector<HTMLInputElement>("[data-purchase-email]")?.value.trim()
+    const termsAccepted = Boolean(form.querySelector<HTMLInputElement>("[data-purchase-terms]")?.checked)
+    const target = form.querySelector<HTMLInputElement>('input[name="platform"]:checked')?.value
+    if (!email || !termsAccepted || !target) return form.reportValidity()
+
+    button.disabled = true
+    label.textContent = "Opening Stripe..."
+    status.textContent = ""
+    try {
+      sessionStorage.setItem("vector-purchase-target", target)
+      const response = await fetch("/api/billing/checkout", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email, termsAccepted }),
+      })
+      const payload = await response.json()
+      if (!response.ok || !payload.url) throw new Error(payload.error?.message || "Checkout could not start.")
+      location.assign(payload.url)
+    } catch (cause) {
+      button.disabled = false
+      label.textContent = "Continue to secure checkout"
+      status.textContent = cause instanceof Error ? cause.message : "Checkout could not start."
     }
-  }
+  })
 </script>
 
 <style>
-  .download-page {
-    min-width: 320px;
-    overflow: hidden;
-    color: var(--ink);
-    background: rgba(8, 6, 13, 0.42);
-  }
-
-  .eyebrow {
-    margin: 0 0 16px;
-    color: var(--accent-strong);
-    font-size: 12px;
-    font-weight: 720;
-    line-height: 1.2;
-    text-transform: uppercase;
-  }
-
-  .download-hero,
-  .downloads-section,
-  .install-section,
-  .help-band {
-    width: min(1120px, calc(100% - 48px));
-    margin: 0 auto;
-  }
-
-  .download-hero {
-    min-height: 670px;
-    padding: 92px 0 96px;
-    display: grid;
-    grid-template-columns: minmax(0, 1.25fr) minmax(340px, 0.75fr);
-    align-items: center;
-    gap: 84px;
-    border-bottom: 1px solid var(--line-strong);
-  }
-
-  .hero-copy h1 {
-    max-width: 700px;
-    margin: 0;
-    font-size: 72px;
-    font-weight: 720;
-    line-height: 1;
-    letter-spacing: 0;
-  }
-
-  .hero-copy > p:not(.eyebrow) {
-    max-width: 650px;
-    margin: 28px 0 0;
-    color: var(--muted-strong);
-    font-size: 18px;
-  }
-
-  .recommended-card {
-    min-height: 320px;
-    padding: 28px;
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
-    color: #f4f4f6;
-    background: var(--glass-fill-strong);
-    border: 1px solid var(--glass-line-strong);
-    border-radius: 26px;
-    box-shadow: var(--glass-shadow);
-    backdrop-filter: blur(30px) saturate(150%);
-    -webkit-backdrop-filter: blur(30px) saturate(150%);
-    animation: settle-in 700ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
-  }
-
-  .recommendation-label {
-    color: #b9a8f6;
-    font-size: 11px;
-    font-weight: 700;
-    text-transform: uppercase;
-  }
-
-  .recommended-copy h2 {
-    margin: 42px 0 0;
-    font-size: 32px;
-    font-weight: 650;
-    line-height: 1.12;
-    letter-spacing: 0;
-  }
-
-  .recommended-copy p {
-    margin: 14px 0 0;
-    color: #a7a7af;
-    font-size: 14px;
-  }
-
-  .recommended-action {
-    min-height: 48px;
-    padding: 0 18px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    color: #171719;
-    background: rgba(211, 197, 255, 0.92);
-    border: 1px solid rgba(255, 255, 255, 0.62);
-    border-radius: 16px;
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.78), 0 12px 28px rgba(83, 55, 148, 0.2);
-    font-size: 14px;
-    font-weight: 700;
-    text-decoration: none;
-    transition: background 180ms ease, transform 180ms ease;
-  }
-
-  .recommended-action:hover {
-    background: #d0c5fb;
-    transform: translateY(-2px);
-  }
-
-  .downloads-section,
-  .install-section {
-    padding: 126px 0;
-    border-bottom: 1px solid var(--line);
-  }
-
-  .section-heading {
-    max-width: 720px;
-  }
-
-  .section-heading h2,
-  .help-band h2 {
-    margin: 0;
-    font-size: 56px;
-    font-weight: 680;
-    line-height: 1.04;
-    letter-spacing: 0;
-  }
-
-  .platform-list {
-    margin-top: 68px;
-    border-top: 1px solid var(--line-strong);
-  }
-
-  .platform-row {
-    padding: 30px 0;
-    display: grid;
-    grid-template-columns: 210px minmax(0, 1fr);
-    gap: 40px;
-    border-bottom: 1px solid var(--line);
-  }
-
-  .platform-name {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-  }
-
-  .platform-name > span {
-    width: 38px;
-    height: 38px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--accent-strong);
-    background: rgba(170, 140, 255, 0.13);
-    border: 1px solid var(--glass-line);
-    border-radius: 13px;
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
-    font-size: 10px;
-    font-weight: 760;
-    text-transform: uppercase;
-  }
-
-  .platform-name h3 {
-    margin: 0;
-    font-size: 20px;
-    font-weight: 660;
-  }
-
-  .platform-options {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 10px;
-  }
-
-  .platform-options a {
-    min-height: 82px;
-    padding: 15px 16px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    color: var(--ink);
-    background: var(--glass-fill);
-    border: 1px solid var(--glass-line);
-    border-radius: 18px;
-    box-shadow: var(--glass-shadow-soft);
-    backdrop-filter: blur(22px) saturate(145%);
-    -webkit-backdrop-filter: blur(22px) saturate(145%);
-    text-decoration: none;
-    transition: border-color 180ms ease, background 180ms ease, transform 180ms ease;
-  }
-
-  .platform-options a:hover {
-    background: rgba(48, 35, 71, 0.72);
-    border-color: var(--accent);
-    transform: translateY(-2px);
-  }
-
-  .platform-options a > span {
-    min-width: 0;
-    display: grid;
-    gap: 3px;
-  }
-
-  .platform-options strong {
-    font-size: 14px;
-  }
-
-  .platform-options small {
-    color: var(--muted);
-    font-size: 11px;
-  }
-
-  .platform-options b {
-    color: var(--accent-strong);
-    font-size: 20px;
-    font-weight: 500;
-  }
-
-  .release-meta {
-    margin-top: 24px;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px 24px;
-    color: var(--muted);
-    font-size: 12px;
-  }
-
-  .release-meta a {
-    color: var(--accent-strong);
-    text-decoration: none;
-  }
-
-  .install-grid {
-    margin-top: 66px;
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 12px;
-  }
-
-  .install-grid article {
-    min-height: 250px;
-    padding: 26px 26px 28px;
-    background: var(--glass-fill);
-    border: 1px solid var(--glass-line);
-    border-radius: 20px;
-    box-shadow: var(--glass-shadow-soft);
-    backdrop-filter: blur(22px) saturate(140%);
-    -webkit-backdrop-filter: blur(22px) saturate(140%);
-  }
-
-  .install-grid article + article {
-    padding-left: 26px;
-  }
-
-  .install-grid span {
-    color: var(--accent-strong);
-    font-size: 11px;
-    font-weight: 720;
-  }
-
-  .install-grid h3 {
-    margin: 62px 0 10px;
-    font-size: 20px;
-  }
-
-  .install-grid p {
-    margin: 0;
-    color: var(--muted);
-    font-size: 14px;
-  }
-
-  .help-band {
-    margin-block: 84px;
-    padding: 52px;
-    display: flex;
-    align-items: flex-end;
-    justify-content: space-between;
-    gap: 54px;
-    background: var(--glass-fill-strong);
-    border: 1px solid var(--glass-line);
-    border-radius: 26px;
-    box-shadow: var(--glass-shadow);
-    backdrop-filter: blur(28px) saturate(145%);
-    -webkit-backdrop-filter: blur(28px) saturate(145%);
-  }
-
-  .help-band h2 {
-    max-width: 720px;
-  }
-
-  .help-band a {
-    flex: 0 0 auto;
-    color: var(--ink);
-    font-size: 14px;
-    font-weight: 650;
-    text-decoration: none;
-    min-height: 42px;
-    padding: 0 15px;
-    display: inline-flex;
-    align-items: center;
-    background: rgba(255, 255, 255, 0.055);
-    border: 1px solid var(--glass-line);
-    border-radius: 15px;
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
-  }
-
-  .help-band a span {
-    margin-left: 4px;
-    display: inline-block;
-    transition: transform 180ms ease;
-  }
-
-  .help-band a:hover span {
-    transform: translateX(4px);
-  }
-
-  @keyframes settle-in {
-    from {
-      opacity: 0;
-      transform: translateY(18px);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
-  }
-
-  @media (max-width: 900px) {
-    .download-hero {
-      grid-template-columns: 1fr;
-      gap: 48px;
-    }
-
-    .hero-copy h1 {
-      font-size: 60px;
-    }
-
-    .recommended-card {
-      min-height: 270px;
-    }
-
-    .platform-row {
-      grid-template-columns: 1fr;
-      gap: 20px;
-    }
-  }
-
-  @media (max-width: 720px) {
-    .download-hero,
-    .downloads-section,
-    .install-section,
-    .help-band {
-      width: min(100% - 28px, 1120px);
-    }
-
-    .download-hero {
-      min-height: auto;
-      padding: 62px 0 74px;
-    }
-
-    .hero-copy h1 {
-      font-size: 46px;
-    }
-
-    .downloads-section,
-    .install-section {
-      padding: 92px 0;
-    }
-
-    .section-heading h2,
-    .help-band h2 {
-      font-size: 40px;
-    }
-
-    .platform-options,
-    .install-grid {
-      grid-template-columns: 1fr;
-    }
-
-    .install-grid article,
-    .install-grid article + article {
-      min-height: auto;
-      padding: 24px;
-    }
-
-    .install-grid h3 {
-      margin-top: 34px;
-    }
-
-    .help-band {
-      align-items: flex-start;
-      flex-direction: column;
-      margin-block: 58px;
-      padding: 36px 24px;
-      border-radius: 22px;
-    }
-  }
+  .purchase-page { min-width: 320px; overflow: hidden; background: rgba(8, 6, 13, 0.58); }
+  main { width: min(1120px, calc(100% - 48px)); margin: 0 auto; }
+  .eyebrow { margin: 0 0 16px; color: var(--accent-strong); font-size: 11px; font-weight: 680; text-transform: uppercase; }
+  .purchase-hero { min-height: 760px; padding: 86px 0 100px; display: grid; grid-template-columns: minmax(0, 1fr) 450px; align-items: center; gap: 80px; }
+  .purchase-copy h1 { max-width: 650px; margin: 0; color: var(--ink); font-size: clamp(52px, 6.5vw, 82px); font-weight: 560; line-height: .98; }
+  .lede { max-width: 650px; margin: 28px 0 0; color: var(--muted-strong); font-size: 17px; line-height: 1.7; }
+  .included-list { margin-top: 34px; display: grid; gap: 13px; color: rgba(245, 242, 248, .72); font-size: 13px; }
+  .included-list span { display: flex; align-items: center; gap: 10px; }
+  .included-list i { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 4px rgba(170, 140, 255, .1); }
+  .purchase-card { padding: 28px; color: var(--ink); background: var(--glass-fill-strong); border: 1px solid var(--glass-line-strong); border-radius: 24px; box-shadow: var(--glass-shadow); backdrop-filter: blur(30px) saturate(150%); }
+  .price-row { padding-bottom: 22px; display: flex; align-items: end; justify-content: space-between; border-bottom: 1px solid var(--line); }
+  .price-row div { display: grid; gap: 6px; }
+  .price-row span, fieldset legend, .email-field > span { color: var(--muted); font-size: 11px; }
+  .price-row strong { font-size: 42px; font-weight: 570; line-height: 1; }
+  .price-row small { color: var(--muted); font-size: 12px; }
+  .email-field { margin-top: 22px; display: grid; gap: 8px; }
+  .email-field input { min-height: 44px; padding: 0 13px; color: var(--ink); background: rgba(5, 4, 7, .42); border: 1px solid var(--line-strong); border-radius: 10px; outline: none; }
+  .email-field input:focus { border-color: rgba(182, 147, 255, .6); box-shadow: 0 0 0 3px rgba(156, 109, 255, .12); }
+  fieldset { margin: 20px 0 0; padding: 0; border: 0; }
+  fieldset legend { margin-bottom: 9px; }
+  .platform-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+  .platform-option { position: relative; min-width: 0; }
+  .platform-option input { position: absolute; opacity: 0; pointer-events: none; }
+  .platform-option > span { min-height: 58px; padding: 10px 11px; display: grid; align-content: center; gap: 4px; background: rgba(255, 255, 255, .03); border: 1px solid var(--line); border-radius: 10px; cursor: pointer; }
+  .platform-option b { overflow: hidden; color: rgba(245, 242, 248, .82); font-size: 11px; font-weight: 580; text-overflow: ellipsis; white-space: nowrap; }
+  .platform-option small { overflow: hidden; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+  .platform-option input:checked + span { background: rgba(155, 108, 255, .1); border-color: rgba(188, 157, 255, .38); box-shadow: inset 0 0 0 1px rgba(172, 130, 255, .1); }
+  .terms-row { margin-top: 18px; display: grid; grid-template-columns: 16px 1fr; gap: 9px; color: var(--muted); font-size: 10px; line-height: 1.5; }
+  .terms-row input { margin: 2px 0 0; accent-color: #a47aff; }
+  .terms-row a { color: var(--accent-strong); }
+  .purchase-button { width: 100%; min-height: 46px; margin-top: 20px; padding: 0 15px; display: flex; align-items: center; justify-content: space-between; color: #130e1b; background: #d2c3f8; border: 0; border-radius: 11px; font-size: 12px; font-weight: 650; cursor: pointer; }
+  .purchase-button:disabled { cursor: default; opacity: .55; }
+  .purchase-status { min-height: 0; margin: 11px 0 0; color: #e5b4b4; font-size: 10px; line-height: 1.45; }
+  .purchase-status:empty { display: none; }
+  .secure-note { margin: 15px 0 0; color: rgba(245, 242, 248, .35); font-size: 9px; line-height: 1.5; text-align: center; }
+  .license-explainer { padding: 96px 0; display: grid; grid-template-columns: 320px 1fr; gap: 80px; border-top: 1px solid var(--line); }
+  .license-explainer h2, .purchase-note h2 { margin: 0; color: var(--ink); font-size: 36px; font-weight: 560; line-height: 1.1; }
+  .steps { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1px; overflow: hidden; background: var(--line); border: 1px solid var(--line); border-radius: 16px; }
+  .steps article { padding: 23px; background: rgba(14, 11, 19, .88); }
+  .steps span { color: var(--accent); font: 10px ui-monospace, monospace; }
+  .steps h3 { margin: 18px 0 0; font-size: 14px; font-weight: 590; }
+  .steps p { margin: 8px 0 0; color: var(--muted); font-size: 11px; line-height: 1.55; }
+  .purchase-note { margin: 0 0 70px; padding: 34px; display: flex; align-items: end; justify-content: space-between; gap: 32px; background: var(--glass-fill); border: 1px solid var(--glass-line); border-radius: 20px; }
+  .purchase-note a { color: var(--accent-strong); font-size: 12px; text-decoration: none; white-space: nowrap; }
+  @media (max-width: 900px) { .purchase-hero { grid-template-columns: 1fr; gap: 48px; } .purchase-card { width: min(520px, 100%); } .license-explainer { grid-template-columns: 1fr; gap: 36px; } }
+  @media (max-width: 600px) { main { width: min(100% - 28px, 1120px); } .purchase-hero { padding-top: 58px; } .purchase-copy h1 { font-size: 48px; } .purchase-card { padding: 20px; border-radius: 18px; } .platform-grid, .steps { grid-template-columns: 1fr; } .purchase-note { align-items: flex-start; flex-direction: column; } }
 </style>

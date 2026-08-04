@@ -1,0 +1,50 @@
+---
+import MarketingFooter from "./MarketingFooter.astro"
+import MarketingLayout from "./MarketingLayout.astro"
+import MarketingNav from "./MarketingNav.astro"
+
+interface Props {
+  title: string
+  description: string
+  eyebrow: string
+  updated?: string
+}
+
+const { title, description, eyebrow, updated = "August 4, 2026" } = Astro.props
+---
+
+<MarketingLayout title={`${title} - Vector`} description={description}>
+  <div class="legal-page">
+    <MarketingNav />
+    <main>
+      <header>
+        <p class="eyebrow">{eyebrow}</p>
+        <h1>{title}</h1>
+        <p>{description}</p>
+        <span>Effective {updated}</span>
+      </header>
+      <article><slot /></article>
+    </main>
+    <MarketingFooter />
+  </div>
+</MarketingLayout>
+
+<style is:global>
+  .legal-page { min-height: 100vh; background: rgba(8, 6, 13, .62); }
+  .legal-page main { width: min(900px, calc(100% - 44px)); margin: 0 auto; padding: 86px 0 110px; }
+  .legal-page header { padding: 20px 0 56px; border-bottom: 1px solid var(--line); }
+  .legal-page .eyebrow { margin: 0 0 17px; color: var(--accent-strong); font-size: 11px; font-weight: 670; text-transform: uppercase; }
+  .legal-page h1 { margin: 0; color: var(--ink); font-size: clamp(46px, 7vw, 72px); font-weight: 560; line-height: 1; }
+  .legal-page header > p:not(.eyebrow) { max-width: 680px; margin: 24px 0 0; color: var(--muted-strong); font-size: 15px; line-height: 1.7; }
+  .legal-page header > span { margin-top: 18px; display: block; color: var(--muted); font-size: 10px; }
+  .legal-page article { padding: 56px 0; }
+  .legal-page article section { padding: 0 0 38px; }
+  .legal-page article h2 { margin: 0 0 13px; color: var(--ink); font-size: 20px; font-weight: 590; }
+  .legal-page article h3 { margin: 24px 0 8px; color: rgba(245,242,248,.86); font-size: 14px; font-weight: 590; }
+  .legal-page article p, .legal-page article li { color: var(--muted-strong); font-size: 13px; line-height: 1.75; }
+  .legal-page article p { margin: 0 0 12px; }
+  .legal-page article ul { margin: 12px 0; padding-left: 20px; }
+  .legal-page article a { color: var(--accent-strong); }
+  .legal-page article code { padding: 2px 5px; color: #dbcfff; background: rgba(155,108,255,.09); border-radius: 5px; font-size: 11px; }
+  .legal-page article pre { overflow: auto; padding: 18px; color: rgba(245,242,248,.72); background: rgba(5,4,7,.5); border: 1px solid var(--line); border-radius: 12px; font: 10px/1.65 ui-monospace, monospace; white-space: pre-wrap; }
+</style>

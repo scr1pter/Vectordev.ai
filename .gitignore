@@ -35,5 +35,6 @@ logs/
 tsconfig.tsbuildinfo
 .vercel
 .env*
+!.env.example
 packages/web/public/downloads/
 .superdesign/tmp/
