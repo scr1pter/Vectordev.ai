@@ -16,6 +16,9 @@ on:
 permissions:
   contents: write
 
+env:
+  NODE_OPTIONS: --max-old-space-size=6144
+
 jobs:
   prepare:
     name: Validate release version
