@@ -67,6 +67,7 @@
     "@dnd-kit/solid": "0.5.0",
     "@huggingface/transformers": "4.2.0",
     "@kobalte/core": "catalog:",
+    "@lezer/highlight": "1.2.3",
     "@opencode-ai/core": "workspace:*",
     "@opencode-ai/schema": "workspace:*",
     "@opencode-ai/sdk": "workspace:*",
