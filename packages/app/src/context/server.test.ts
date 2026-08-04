@@ -11,6 +11,7 @@ import {
   ServerConnection,
 } from "./server"
 import { ServerScope } from "@/utils/server-scope"
+import { saveWorkProject } from "@/features/work/work-store"
 
 describe("resolveServerList", () => {
   test("lets startup auth_token credentials override a persisted same-url server", () => {
@@ -132,6 +133,31 @@ describe("createServerProjects", () => {
       expect(projects.last()).toBeUndefined()
       dispose()
     })
+  })
+
+  test("keeps Vector Work projects out of the Code repository list", () => {
+    localStorage.clear()
+    saveWorkProject({
+      id: "project-work",
+      name: "Launch plan",
+      description: "Coordinate launch work",
+      workspacePath: "/tmp/vector-work-launch",
+      createdAt: "2026-08-04T12:00:00.000Z",
+      updatedAt: "2026-08-04T12:00:00.000Z",
+    })
+    createRoot((dispose) => {
+      const [scope] = createSignal(ServerScope.local)
+      const [store, setStore] = createStore({ projects: {}, lastProject: {} })
+      const projects = createServerProjects({ scope, store, setStore })
+
+      projects.open("/tmp/vector-work-launch")
+      projects.touch("/tmp/vector-work-launch")
+
+      expect(projects.list()).toEqual([])
+      expect(projects.last()).toBeUndefined()
+      dispose()
+    })
+    localStorage.clear()
   })
 })
 

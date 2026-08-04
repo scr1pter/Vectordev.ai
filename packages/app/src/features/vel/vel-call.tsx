@@ -6,14 +6,51 @@ type VelMessage = { id: string; role: "you" | "vel"; text: string }
 
 type VelModel = { providerID: string; modelID: string }
 
-function extractText(value: unknown, depth = 0): string {
+const VEL_SYSTEM = [
+  "You are acting through Vel, Vector's voice agent, inside the user's active Vector session.",
+  "Treat the spoken request exactly like a typed request: inspect the project, use tools, edit files, run commands, test, or delegate when needed.",
+  "Do not merely describe work the user asked you to perform. Perform it when the available tools and permissions allow it.",
+  "In the final response, begin with a concise, spoken-friendly summary of what you completed or what you need from the user.",
+  "Never claim that an action succeeded unless it actually completed.",
+].join("\n")
+
+export function extractVelReply(value: unknown, depth = 0): string {
   if (!value || depth > 6) return ""
   if (typeof value === "string") return value.trim()
-  if (Array.isArray(value)) return value.map((item) => extractText(item, depth + 1)).filter(Boolean).join("\n")
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => extractVelReply(item, depth + 1))
+      .filter(Boolean)
+      .join("\n")
+      .trim()
+  }
   if (typeof value !== "object") return ""
   const record = value as Record<string, unknown>
-  for (const key of ["text", "content", "message", "output", "data", "parts", "part"]) {
-    const text = extractText(record[key], depth + 1)
+  if (record.type === "text" && typeof record.text === "string") return record.text.trim()
+  if (Array.isArray(record.parts)) {
+    const text = record.parts
+      .filter((part) => typeof part === "object" && part !== null && (part as Record<string, unknown>).type === "text")
+      .map((part) => extractVelReply(part, depth + 1))
+      .filter(Boolean)
+      .join("\n")
+      .trim()
+    if (text) return text
+  }
+  for (const key of ["text", "content", "message", "data", "response"]) {
+    const text = extractVelReply(record[key], depth + 1)
+    if (text) return text
+  }
+  return ""
+}
+
+export function extractLatestVelReply(value: unknown) {
+  if (!Array.isArray(value)) return extractVelReply(value)
+  for (const item of [...value].reverse()) {
+    if (!item || typeof item !== "object") continue
+    const record = item as Record<string, unknown>
+    const info = record.info
+    if (!info || typeof info !== "object" || (info as Record<string, unknown>).role !== "assistant") continue
+    const text = extractVelReply(record.parts)
     if (text) return text
   }
   return ""
@@ -33,6 +70,7 @@ export function VelCall(props: {
   directory: () => Promise<string>
   sessionId: () => string | undefined
   model: () => VelModel | undefined
+  agent: () => string
   contextLabel: () => string
   onClose: () => void
 }) {
@@ -46,46 +84,95 @@ export function VelCall(props: {
   const [messages, setMessages] = createSignal<VelMessage[]>([])
   let dictation: DictationHandle | undefined
   let opening = false
+  let wasOpen = false
+  let speechRun = 0
+  let requestRun = 0
 
   const statusLabel = () => {
-    if (error()) return "Needs attention"
-    if (muted()) return "Microphone muted"
     if (state() === "listening") return "Listening"
     if (state() === "transcribing") return "Transcribing"
     if (state() === "thinking") return "Working with Vector"
     if (state() === "speaking") return "Speaking"
+    if (error()) return "Needs attention"
+    if (muted()) return "Microphone muted"
     return "Ready"
   }
 
-  const stopAudio = () => {
+  const stopListening = () => {
     dictation?.cancel()
     dictation = undefined
+    setLevel(0)
+  }
+
+  const stopSpeech = () => {
+    speechRun += 1
+    void globalThis.window?.api?.voice?.stop().catch(() => undefined)
     globalThis.window?.speechSynthesis?.cancel()
+  }
+
+  const stopAudio = (cancelRequest = false) => {
+    stopListening()
+    stopSpeech()
+    if (cancelRequest) requestRun += 1
     setLevel(0)
     setState("idle")
   }
 
-  const speak = (text: string) => {
+  const browserSpeak = (text: string) => {
     const synth = globalThis.window?.speechSynthesis
+    if (!synth || typeof SpeechSynthesisUtterance === "undefined") return Promise.resolve(false)
+    return new Promise<boolean>((resolve) => {
+      synth.cancel()
+      const utterance = new SpeechSynthesisUtterance(text)
+      utterance.rate = 1.03
+      utterance.pitch = 1.04
+      const voices = synth.getVoices()
+      utterance.voice = voices.find((voice) => /Samantha|Ava|Serena|Google US English/i.test(voice.name)) ?? voices[0]
+      let settled = false
+      const finish = (spoken: boolean) => {
+        if (settled) return
+        settled = true
+        globalThis.clearTimeout(timeout)
+        resolve(spoken)
+      }
+      const timeout = globalThis.setTimeout(() => {
+        synth.cancel()
+        finish(false)
+      }, Math.max(4_000, text.length * 95))
+      utterance.onend = () => finish(true)
+      utterance.onerror = () => finish(false)
+      synth.speak(utterance)
+    })
+  }
+
+  const speak = async (
+    text: string,
+    options: { resumeListening?: boolean; afterState?: DictationState | "thinking" } = {},
+  ) => {
     const spoken = cleanForSpeech(text)
-    if (!synth || !spoken) {
-      setState("idle")
-      if (!muted() && props.open) setTimeout(() => void beginListening(), 350)
-      return
-    }
-    synth.cancel()
-    const utterance = new SpeechSynthesisUtterance(spoken)
-    utterance.rate = 1.03
-    utterance.pitch = 1.04
-    const voices = synth.getVoices()
-    utterance.voice = voices.find((voice) => /Samantha|Ava|Serena|Google US English/i.test(voice.name)) ?? voices[0]
-    utterance.onend = () => {
-      setState("idle")
-      if (!muted() && props.open) setTimeout(() => void beginListening(), 450)
-    }
-    utterance.onerror = utterance.onend
+    const run = ++speechRun
+    if (!spoken) return false
+    stopListening()
+    globalThis.window?.speechSynthesis?.cancel()
     setState("speaking")
-    synth.speak(utterance)
+
+    let played = false
+    const native = globalThis.window?.api?.voice
+    if (native) {
+      const result = await native.speak(spoken).catch(() => ({ status: "failed" as const }))
+      if (run !== speechRun) return false
+      played = result.status === "spoken"
+      if (!played && result.status !== "stopped") played = await browserSpeak(spoken)
+    } else {
+      played = await browserSpeak(spoken)
+    }
+
+    if (run !== speechRun) return played
+    setState(options.afterState ?? "idle")
+    if (options.resumeListening && !muted() && props.open) {
+      globalThis.setTimeout(() => void beginListening(), 420)
+    }
+    return played
   }
 
   const answer = async (transcript: string) => {
@@ -108,26 +195,47 @@ export function VelCall(props: {
           ? "Start this session by sending its first message, then call me again."
           : "Connect a model provider, then call me again."
       setMessages((items) => [...items, { id: crypto.randomUUID(), role: "vel", text }])
-      speak(text)
+      await speak(text, { resumeListening: true })
       return
     }
     try {
       const client = serverSDK().createClient({ directory, throwOnError: true })
-      const result = await client.session.prompt({
-        sessionID,
-        directory,
-        agent: "build",
-        model,
-        parts: [{ type: "text", text: request }],
-      })
-      const text = extractText(result.data) || "I finished that step. Check the active Vector session for the result."
+      const acknowledgement = "Got it. I'm handing that to the Vector agent in this session now."
+      setMessages((items) => [...items, { id: crypto.randomUUID(), role: "vel", text: acknowledgement }])
+      const run = ++requestRun
+      const acknowledgementSpeech = speak(acknowledgement, { afterState: "thinking" })
+      const requestPromise = client.session
+        .prompt({
+          sessionID,
+          directory,
+          agent: props.agent(),
+          model,
+          system: VEL_SYSTEM,
+          parts: [{ type: "text", text: request }],
+        })
+        .then(
+          (result) => ({ result }),
+          (cause: unknown) => ({ cause }),
+        )
+      await acknowledgementSpeech
+      const outcome = await requestPromise
+      if ("cause" in outcome) throw outcome.cause
+      const result = outcome.result
+      if (run !== requestRun || !props.open) return
+      let text = extractVelReply(result.data)
+      if (!text) {
+        const history = await client.session.messages({ sessionID, limit: 12 }).catch(() => undefined)
+        text = extractLatestVelReply(history?.data)
+      }
+      text ||= "I finished that step. The completed result is visible in this Vector session."
       setMessages((items) => [...items, { id: crypto.randomUUID(), role: "vel", text }])
-      speak(text)
+      await speak(text, { resumeListening: true })
     } catch (cause) {
-      const message = cause instanceof Error ? cause.message : "Vel could not reach the active agent."
-      setError(message)
+      const detail = cause instanceof Error ? cause.message : "Vel could not reach the active agent."
+      const message = "I couldn't complete that request. The active session shows what needs attention."
+      setError(detail)
       setMessages((items) => [...items, { id: crypto.randomUUID(), role: "vel", text: message }])
-      setState("idle")
+      await speak(message, { resumeListening: true })
     }
   }
 
@@ -151,13 +259,19 @@ export function VelCall(props: {
 
   createEffect(() => {
     if (!props.open) {
-      stopAudio()
+      stopAudio(true)
+      wasOpen = false
       setMinimized(false)
       setMuted(false)
       setInterim("")
       return
     }
-    queueMicrotask(() => void beginListening())
+    if (wasOpen) return
+    wasOpen = true
+    setMessages([])
+    const greeting = "Hi, I'm Vel. Tell me what you'd like me to build, change, or do in this session."
+    setMessages([{ id: crypto.randomUUID(), role: "vel", text: greeting }])
+    queueMicrotask(() => void speak(greeting, { resumeListening: true }))
   })
 
   onCleanup(stopAudio)
@@ -165,12 +279,15 @@ export function VelCall(props: {
   const toggleMute = () => {
     const next = !muted()
     setMuted(next)
-    if (next) stopAudio()
+    if (next) {
+      stopListening()
+      if (state() === "listening" || state() === "transcribing") setState("idle")
+    }
     else void beginListening()
   }
 
   const endCall = () => {
-    stopAudio()
+    stopAudio(true)
     props.onClose()
   }
 
@@ -210,13 +327,13 @@ export function VelCall(props: {
           </div>
 
           <div class="vector-vel-call__transcript">
-            <For each={messages().slice(-4)}>{(message) => <p data-role={message.role}><span>{message.role === "you" ? "You" : "Vel"}</span>{message.text}</p>}</For>
+            <For each={messages().slice(-6)}>{(message) => <p data-role={message.role}><span>{message.role === "you" ? "You" : "Vel"}</span>{message.text}</p>}</For>
           </div>
 
           <footer>
             <button type="button" classList={{ active: muted() }} onClick={toggleMute}>
               <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 12.2a3.1 3.1 0 0 0 3.1-3.1V5.5a3.1 3.1 0 0 0-6.2 0v3.6a3.1 3.1 0 0 0 3.1 3.1Zm-5-3a5 5 0 0 0 10 0M10 14.2v3M7.5 17.2h5" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" /></svg>
-              <span>{muted() ? "Unmute" : "Mute"}</span>
+              <span>{muted() ? "Unmute mic" : "Mute mic"}</span>
             </button>
             <button type="button" class="end" onClick={endCall}>
               <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4.2 12.7c3.5-2.5 8.1-2.5 11.6 0l1.3-2.1C13 7.4 7 7.4 2.9 10.6l1.3 2.1Zm1.2-.8-.4 3m9.6-3 .4 3" fill="none" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" stroke-linejoin="round" /></svg>

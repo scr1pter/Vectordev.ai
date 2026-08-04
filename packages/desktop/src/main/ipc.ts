@@ -27,6 +27,7 @@ import type { VectorLicenseService } from "./license-service"
 import { createUpdaterSubscriptions } from "./updater-subscriptions"
 import { runBrowserAgent } from "./browser-agent"
 import { prepareAgentTask } from "./context-budget"
+import { speakVoiceText, stopVoiceSynthesis } from "./voice-synthesis"
 import { cancelBackgroundTask, clearCompletedBackgroundTasks, listBackgroundTasks } from "./background-tasks"
 import {
   detectPublishTargets,
@@ -188,6 +189,7 @@ function on<T extends unknown[]>(channel: string, listener: (event: IpcMainEvent
 }
 
 export function registerIpcHandlers(deps: Deps) {
+  const voiceOwners = new Set<number>()
   const updaterSubscriptions = createUpdaterSubscriptions()
   app.once("will-quit", updaterSubscriptions.clear)
 
@@ -559,6 +561,18 @@ export function registerIpcHandlers(deps: Deps) {
     await mkdir(directory, { recursive: true })
     return directory
   })
+  handle("voice-speak", (event: IpcMainInvokeEvent, text: string) => {
+    const ownerID = event.sender.id
+    if (!voiceOwners.has(ownerID)) {
+      voiceOwners.add(ownerID)
+      event.sender.once("destroyed", () => {
+        voiceOwners.delete(ownerID)
+        stopVoiceSynthesis(ownerID)
+      })
+    }
+    return speakVoiceText(ownerID, text)
+  })
+  handle("voice-stop", (event: IpcMainInvokeEvent) => stopVoiceSynthesis(event.sender.id))
 
   handle(
     "open-directory-picker",

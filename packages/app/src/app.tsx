@@ -355,6 +355,13 @@ declare global {
       workProjects?: {
         ensureDirectory: (projectId: string, name: string) => Promise<string>
       }
+      voice?: {
+        speak: (text: string) => Promise<{
+          status: "spoken" | "unavailable" | "stopped" | "failed"
+          message?: string
+        }>
+        stop: () => Promise<void>
+      }
       parallelWorkspaces?: {
         list: (scope?: { sourcePath?: string; parentSessionId?: string }) => Promise<ParallelWorkspaceRecord[]>
         create: (input: CreateParallelWorkspaceInput) => Promise<ParallelWorkspaceRecord>

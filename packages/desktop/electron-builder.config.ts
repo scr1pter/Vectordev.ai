@@ -75,7 +75,7 @@ const getBase = (appId: string): Configuration => ({
     category: "public.app-category.developer-tools",
     icon: `resources/icons/icon.icns`,
     extendInfo: {
-      NSMicrophoneUsageDescription: "Vector uses microphone access only when you start voice dictation.",
+      NSMicrophoneUsageDescription: "Vector uses microphone access only when you start voice dictation or a conversation with Vel.",
     },
     hardenedRuntime: true,
     identity: signMac ? undefined : "-",

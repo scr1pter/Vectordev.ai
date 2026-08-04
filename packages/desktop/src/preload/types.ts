@@ -47,6 +47,7 @@ import type {
   PrepareWorkspaceResult,
 } from "../main/external-agents"
 import type { AgentTaskPreparation } from "../main/context-budget"
+import type { VoiceSpeechResult } from "../main/voice-synthesis"
 export type {
   CloudRuntimeLogResult,
   PublishProgressEvent,
@@ -520,6 +521,10 @@ export type ElectronAPI = {
   storeLength: (name: string) => Promise<number>
   workProjects: {
     ensureDirectory: (projectId: string, name: string) => Promise<string>
+  }
+  voice: {
+    speak: (text: string) => Promise<VoiceSpeechResult>
+    stop: () => Promise<void>
   }
 
   getWindowCount: () => Promise<number>

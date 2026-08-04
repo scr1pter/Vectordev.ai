@@ -33,6 +33,11 @@ export const WORK_STATE_UPDATED_EVENT = "vector:work-state-updated"
 
 const emptyState = (): WorkState => ({ version: 1, projects: [], tasks: [] })
 
+function pathKey(path: string) {
+  const normalized = path.replaceAll("\\", "/").replace(/\/+$/, "")
+  return /^[a-z]:\//i.test(normalized) ? normalized.toLowerCase() : normalized
+}
+
 export function createWorkID(prefix: "project" | "task") {
   const id = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`
   return `${prefix}-${id}`
@@ -51,6 +56,13 @@ export function readWorkState(): WorkState {
   } catch {
     return emptyState()
   }
+}
+
+export function isWorkProjectWorkspacePath(directory: string | undefined) {
+  if (!directory) return false
+  const target = pathKey(directory)
+  if (/(?:^|\/)work-projects\/[^/]+$/i.test(target)) return true
+  return readWorkState().projects.some((project) => pathKey(project.workspacePath) === target)
 }
 
 export function writeWorkState(state: WorkState) {

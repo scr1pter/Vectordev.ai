@@ -2,7 +2,6 @@ import { useNavigate } from "@solidjs/router"
 import { createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js"
 import { useDirectoryPicker } from "@/components/directory-picker"
 import { ServerConnection, useServer } from "@/context/server"
-import { useGlobal } from "@/context/global"
 import { draftHref, useTabs } from "@/context/tabs"
 import { sessionHref } from "@/utils/session-route"
 import { showToast } from "@/utils/toast"
@@ -24,7 +23,6 @@ const pathName = (path: string) => path.split(/[\\/]/).filter(Boolean).at(-1) ||
 export function WorkHome() {
   const navigate = useNavigate()
   const server = useServer()
-  const global = useGlobal()
   const tabs = useTabs()
   const pickDirectory = useDirectoryPicker()
   const [state, setState] = createSignal(readWorkState())
@@ -40,12 +38,16 @@ export function WorkHome() {
 
   const reload = () => {
     const next = readWorkState()
+    next.projects.forEach((project) => server.projects.close(project.workspacePath))
     setState(next)
     if (!next.projects.some((project) => project.id === selectedProjectId())) {
       setSelectedProjectId(next.projects[0]?.id ?? "")
     }
   }
-  onMount(() => window.addEventListener(WORK_STATE_UPDATED_EVENT, reload))
+  onMount(() => {
+    state().projects.forEach((project) => server.projects.close(project.workspacePath))
+    window.addEventListener(WORK_STATE_UPDATED_EVENT, reload)
+  })
   onCleanup(() => window.removeEventListener(WORK_STATE_UPDATED_EVENT, reload))
 
   const selectedProject = createMemo(() => state().projects.find((project) => project.id === selectedProjectId()))
@@ -101,12 +103,6 @@ export function WorkHome() {
       updatedAt: now,
     }
     saveWorkProject(project)
-    const conn = server.current
-    if (conn) {
-      const ctx = global.ensureServerCtx(conn)
-      ctx.projects.open(workspacePath)
-      ctx.projects.touch(workspacePath)
-    }
     setSelectedProjectId(id)
     setProjectName("")
     setProjectDescription("")
@@ -126,9 +122,6 @@ export function WorkHome() {
       showToast({ variant: "error", title: "Describe the task", description: "Add a task name and the outcome you want." })
       return
     }
-    const ctx = global.ensureServerCtx(conn)
-    ctx.projects.open(project.workspacePath)
-    ctx.projects.touch(project.workspacePath)
     const draftId = tabs.newDraft({ server: ServerConnection.key(conn), directory: project.workspacePath }, objective)
     const now = new Date().toISOString()
     saveWorkTask({
@@ -159,6 +152,11 @@ export function WorkHome() {
     if (!project) return
     const draftId = tabs.newDraft({ server: server.key, directory: project.workspacePath }, task.objective)
     saveWorkTask({ ...task, draftId, status: "draft", updatedAt: new Date().toISOString() })
+  }
+
+  const removeProject = (project: WorkProject) => {
+    server.projects.close(project.workspacePath)
+    removeWorkProject(project.id)
   }
 
   return (
@@ -253,7 +251,7 @@ export function WorkHome() {
 
                   <div class="vector-work-project-footer">
                     <span>{project().repositoryPath ? `Repository · ${project().repositoryPath}` : `Local workspace · ${project().workspacePath}`}</span>
-                    <button type="button" onClick={() => removeWorkProject(project().id)}>Remove project</button>
+                    <button type="button" onClick={() => removeProject(project())}>Remove project</button>
                   </div>
                 </>
               )}

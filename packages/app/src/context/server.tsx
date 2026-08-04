@@ -3,6 +3,7 @@ import { type Accessor, batch, createEffect, createMemo, createSignal } from "so
 import { createStore, type SetStoreFunction, type Store } from "solid-js/store"
 import { Persist, persisted } from "@/utils/persist"
 import { ServerScope } from "@/utils/server-scope"
+import { isWorkProjectWorkspacePath } from "@/features/work/work-store"
 
 type StoredProject = { worktree: string; expanded: boolean }
 type StoredServer = string | ServerConnection.HttpBase | ServerConnection.Http
@@ -80,11 +81,13 @@ export function createServerProjects<T extends ServerProjectState>(input: {
 }) {
   const setStore = input.setStore as unknown as SetStoreFunction<ServerProjectState>
   const current = () =>
-    (input.store.projects[input.scope()] ?? []).filter((project) => !isManagedAgentWorkspacePath(project.worktree))
+    (input.store.projects[input.scope()] ?? []).filter(
+      (project) => !isManagedAgentWorkspacePath(project.worktree) && !isWorkProjectWorkspacePath(project.worktree),
+    )
   return {
     list: current,
     open(directory: string) {
-      if (isManagedAgentWorkspacePath(directory)) return
+      if (isManagedAgentWorkspacePath(directory) || isWorkProjectWorkspacePath(directory)) return
       const scope = input.scope()
       if (current().some((project) => project.worktree === directory)) return
       setStore("projects", scope, [{ worktree: directory, expanded: true }, ...current()])
@@ -114,10 +117,10 @@ export function createServerProjects<T extends ServerProjectState>(input: {
     },
     last() {
       const directory = input.store.lastProject[input.scope()]
-      return isManagedAgentWorkspacePath(directory) ? undefined : directory
+      return isManagedAgentWorkspacePath(directory) || isWorkProjectWorkspacePath(directory) ? undefined : directory
     },
     touch(directory: string) {
-      if (isManagedAgentWorkspacePath(directory)) return
+      if (isManagedAgentWorkspacePath(directory) || isWorkProjectWorkspacePath(directory)) return
       setStore("lastProject", input.scope(), directory)
     },
   }
@@ -129,9 +132,11 @@ export async function pruneMissingLocalProjects(input: {
   pathExists: (path: string) => Promise<boolean>
 }) {
   const checked = await Promise.all(
-    input.projects.filter((project) => !isManagedAgentWorkspacePath(project.worktree)).map(async (project) =>
-      (await input.pathExists(project.worktree).catch(() => false)) ? project : undefined,
-    ),
+    input.projects
+      .filter(
+        (project) => !isManagedAgentWorkspacePath(project.worktree) && !isWorkProjectWorkspacePath(project.worktree),
+      )
+      .map(async (project) => ((await input.pathExists(project.worktree).catch(() => false)) ? project : undefined)),
   )
   const projects = checked.filter((project): project is StoredProject => !!project)
   const lastProject = projects.some((project) => project.worktree === input.lastProject)

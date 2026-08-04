@@ -38,7 +38,12 @@ import { WorkspaceNavigation, type WorkspaceNavigationItem } from "@/components/
 import { CanvasWorkspace } from "@/features/canvas/canvas"
 import { useUpdaterAction } from "@/components/updater-action"
 import { VelCall } from "@/features/vel/vel-call"
-import { workProjectForTask, workTaskForDraft, workTaskForSession } from "@/features/work/work-store"
+import {
+  isWorkProjectWorkspacePath,
+  workProjectForTask,
+  workTaskForDraft,
+  workTaskForSession,
+} from "@/features/work/work-store"
 
 const NAVIGATION_DEFAULT_WIDTH = 320
 const NAVIGATION_MINIMUM_WIDTH = 228
@@ -536,9 +541,11 @@ export default function NewLayout(props: ParentProps) {
   const [backgroundTaskRecords, setBackgroundTaskRecords] = createSignal<BackgroundTaskRecord[]>([])
   const persistedLastProjectPath = globalThis.localStorage?.getItem(LAST_ACTIVE_PROJECT_KEY) ?? ""
   const [lastProjectPath, setLastProjectPath] = createSignal(
-    isManagedAgentWorkspacePath(persistedLastProjectPath) ? "" : persistedLastProjectPath,
+    isManagedAgentWorkspacePath(persistedLastProjectPath) || isWorkProjectWorkspacePath(persistedLastProjectPath)
+      ? ""
+      : persistedLastProjectPath,
   )
-  if (isManagedAgentWorkspacePath(persistedLastProjectPath)) {
+  if (isManagedAgentWorkspacePath(persistedLastProjectPath) || isWorkProjectWorkspacePath(persistedLastProjectPath)) {
     globalThis.localStorage?.removeItem(LAST_ACTIVE_PROJECT_KEY)
   }
   const [agentTabOrder, setAgentTabOrder] = createSignal<string[]>([])
@@ -640,6 +647,12 @@ export default function NewLayout(props: ParentProps) {
     if (browserAgentRoute() || parallelWorkspacesRoute()) return routeContextSessionID()
     return decodeURIComponent(/\/session\/([^/?#]+)/.exec(location.pathname)?.[1] ?? "")
   }
+  const activeDraftID = () => new URLSearchParams(location.search).get("draftId") ?? undefined
+  const activeTaskSessionID = () => routeContextSessionID() || currentSessionID() || undefined
+  const activeWorkTask = () =>
+    workTaskForSession(activeTaskSessionID()) ?? workTaskForDraft(activeDraftID())
+  const activeWorkProject = () => workProjectForTask(activeWorkTask())
+  const workMode = () => Boolean(activeWorkTask())
   const recentProjectPath = () => layout.projects.list().find((project) => project.worktree)?.worktree ?? ""
   const projectPathCandidates = () =>
     [
@@ -650,12 +663,16 @@ export default function NewLayout(props: ParentProps) {
           routeSessionDirectory(),
           recentProjectPath(),
           lastProjectPath(),
-        ].filter((path): path is string => Boolean(path) && !isManagedAgentWorkspacePath(path)),
+        ].filter(
+          (path): path is string =>
+            Boolean(path) && !isManagedAgentWorkspacePath(path) && !isWorkProjectWorkspacePath(path),
+        ),
       ),
     ]
   const activeProjectPath = () => projectPathCandidates()[0] ?? ""
   const resolveActiveProjectPath = async () => {
-    const candidates = projectPathCandidates()
+    const workPath = activeWorkProject()?.workspacePath
+    const candidates = workPath ? [workPath] : projectPathCandidates()
     const api = globalThis.window?.api as (typeof globalThis.window.api & {
       pathExists?: (path: string) => Promise<boolean>
     }) | undefined
@@ -663,7 +680,7 @@ export default function NewLayout(props: ParentProps) {
 
     for (const candidate of candidates) {
       if (!(await api.pathExists(candidate).catch(() => false))) continue
-      if (candidate !== lastProjectPath()) {
+      if (!workPath && candidate !== lastProjectPath()) {
         setLastProjectPath(candidate)
         globalThis.localStorage?.setItem(LAST_ACTIVE_PROJECT_KEY, candidate)
       }
@@ -678,7 +695,7 @@ export default function NewLayout(props: ParentProps) {
   }
 
   const rememberProjectPath = (path: string) => {
-    if (!path || isManagedAgentWorkspacePath(path)) return
+    if (!path || isManagedAgentWorkspacePath(path) || isWorkProjectWorkspacePath(path) || workMode()) return
     if (path !== lastProjectPath()) setLastProjectPath(path)
     globalThis.localStorage?.setItem(LAST_ACTIVE_PROJECT_KEY, path)
   }
@@ -689,7 +706,9 @@ export default function NewLayout(props: ParentProps) {
       ? await serverSync().session.lineage.resolve(requestedSessionID).catch(() => undefined)
       : undefined
     const parentSessionId = lineage?.root.id ?? (requestedSessionID || undefined)
+    const workPath = activeWorkProject()?.workspacePath
     const candidates = [
+      workPath,
       routeContextProjectPath(),
       lineage?.root.directory,
       lineage?.session.directory,
@@ -703,12 +722,12 @@ export default function NewLayout(props: ParentProps) {
     }) | undefined
     if (!api?.pathExists) {
       const sourcePath = unique[0] ?? ""
-      rememberProjectPath(sourcePath)
+      if (!workPath) rememberProjectPath(sourcePath)
       return { sourcePath, parentSessionId }
     }
     for (const sourcePath of unique) {
       if (!(await api.pathExists(sourcePath).catch(() => false))) continue
-      rememberProjectPath(sourcePath)
+      if (!workPath) rememberProjectPath(sourcePath)
       return { sourcePath, parentSessionId }
     }
     return { sourcePath: "", parentSessionId }
@@ -716,7 +735,7 @@ export default function NewLayout(props: ParentProps) {
 
   createEffect(() => {
     const path = routeContextProjectPath() || routeProjectPath() || routeSessionDirectory()
-    if (!path || isManagedAgentWorkspacePath(path)) return
+    if (!path || workMode() || isManagedAgentWorkspacePath(path) || isWorkProjectWorkspacePath(path)) return
     setLastProjectPath(path)
     globalThis.localStorage?.setItem(LAST_ACTIVE_PROJECT_KEY, path)
   })
@@ -726,14 +745,9 @@ export default function NewLayout(props: ParentProps) {
   const cloudRoute = () => location.pathname === "/cloud"
   const canvasRoute = () => location.pathname === "/canvas"
   const activeTaskScope = (): TaskScope => ({
-    projectPath: routeContextProjectPath() || activeProjectPath(),
-    taskId: routeContextSessionID() || currentSessionID() || undefined,
+    projectPath: activeWorkProject()?.workspacePath || routeContextProjectPath() || activeProjectPath(),
+    taskId: activeTaskSessionID(),
   })
-  const activeWorkTask = () => {
-    const draftID = new URLSearchParams(location.search).get("draftId") ?? undefined
-    return workTaskForSession(activeTaskScope().taskId) ?? workTaskForDraft(draftID)
-  }
-  const workMode = () => Boolean(activeWorkTask())
   const activeWorkspaceScope = () => ({
     sourcePath: activeTaskScope().projectPath,
     parentSessionId: activeTaskScope().taskId,
@@ -2776,10 +2790,15 @@ export default function NewLayout(props: ParentProps) {
           directory={resolveActiveProjectPath}
           sessionId={() => activeTaskScope().taskId}
           model={() => {
+            const active = serverSync().session.get(activeTaskScope().taskId ?? "")
+            if (active?.model?.providerID && active.model.id) {
+              return { providerID: active.model.providerID, modelID: active.model.id }
+            }
             const providerID = parallelProvider()
             const modelID = parallelModel()
             return providerID && modelID ? { providerID, modelID } : undefined
           }}
+          agent={() => serverSync().session.get(activeTaskScope().taskId ?? "")?.agent || "build"}
           contextLabel={() => {
             const task = activeWorkTask()
             const project = workProjectForTask(task)

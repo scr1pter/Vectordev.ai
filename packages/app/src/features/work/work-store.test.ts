@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test } from "bun:test"
 import {
   bindWorkTaskSession,
+  isWorkProjectWorkspacePath,
   readWorkState,
   removeWorkProject,
   saveWorkProject,
@@ -41,6 +42,9 @@ describe("Vector Work persistence", () => {
     expect(state.projects).toHaveLength(1)
     expect(state.tasks).toHaveLength(1)
     expect(workProjectForTask(state.tasks[0])?.name).toBe("Launch")
+    expect(isWorkProjectWorkspacePath("/tmp/vector-launch/")).toBe(true)
+    expect(isWorkProjectWorkspacePath("/tmp/another-project")).toBe(false)
+    expect(isWorkProjectWorkspacePath("/Users/me/Library/Application Support/Vector/work-projects/launch-project-ab12")).toBe(true)
   })
 
   test("moves a task from its draft to the promoted agent session", () => {

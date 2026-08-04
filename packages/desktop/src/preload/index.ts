@@ -81,6 +81,10 @@ const api: ElectronAPI = {
   workProjects: {
     ensureDirectory: (projectId, name) => ipcRenderer.invoke("work-project-ensure-directory", projectId, name),
   },
+  voice: {
+    speak: (text) => ipcRenderer.invoke("voice-speak", text),
+    stop: () => ipcRenderer.invoke("voice-stop"),
+  },
 
   getWindowCount: () => ipcRenderer.invoke("get-window-count"),
   getWindowID: () => ipcRenderer.invoke("get-window-id"),
