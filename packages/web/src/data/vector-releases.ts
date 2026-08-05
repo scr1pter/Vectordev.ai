@@ -294,4 +294,10 @@ export const release117: VectorRelease[] = [
     summary:
       "Retired the Vector Work product split, restored the repository-first home, moved Cloud Services directly into that workflow, and repositioned Vector as one local-first, bring-your-own-key agentic workspace for builders.",
   },
+  {
+    version: "1.17.35",
+    title: "Vel, inside every session",
+    summary:
+      "Moved Vel into the chat composer, connected every spoken request directly to the selected session's real agent and reply, and made Cloud Services a repository-level destination available from Home.",
+  },
 ]

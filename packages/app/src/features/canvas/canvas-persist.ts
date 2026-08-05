@@ -59,7 +59,9 @@ function parseLayout(raw: string): CanvasWindow[] | undefined {
   if (!parsed || typeof parsed !== "object") return undefined
   const { v, windows } = parsed as { v?: unknown; windows?: unknown }
   if (v !== LAYOUT_VERSION || !Array.isArray(windows)) return undefined
-  return windows.filter(isCanvasWindow)
+  // Cloud Services moved to Home. Drop legacy Canvas windows so an old saved
+  // layout cannot bring the repository-level surface back into a task.
+  return windows.filter(isCanvasWindow).filter((window) => window.kind !== "cloud")
 }
 
 function sanitize(win: CanvasWindow): CanvasWindow {

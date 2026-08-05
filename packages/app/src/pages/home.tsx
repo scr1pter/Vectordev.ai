@@ -503,6 +503,12 @@ export function NewHome() {
     })
   }
 
+  function openSettings() {
+    void import("@/components/settings-v2/dialog-settings-v2").then((module) => {
+      dialog.show(() => <module.DialogSettings />)
+    })
+  }
+
   return (
     <div
       data-vector-home
@@ -587,16 +593,9 @@ export function NewHome() {
                 </svg>
                 Cloud services
               </button>
-              <button
-                type="button"
-                data-variant="secondary"
-                onClick={() => {
-                  const conn = focusedServer() ?? global.servers.list()[0]
-                  if (conn) chooseProject(conn)
-                }}
-              >
-                <IconV2 name="folder-add-left" />
-                Open repository
+              <button type="button" data-variant="secondary" onClick={openSettings}>
+                <IconV2 name="settings-gear" />
+                Settings
               </button>
             </div>
           </div>

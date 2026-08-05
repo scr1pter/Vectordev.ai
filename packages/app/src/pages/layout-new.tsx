@@ -50,6 +50,7 @@ import { WorkspaceNavigation, type WorkspaceNavigationItem } from "@/components/
 import { CanvasWorkspace } from "@/features/canvas/canvas"
 import { useUpdaterAction } from "@/components/updater-action"
 import { VelCall } from "@/features/vel/vel-call"
+import { VEL_OPEN_EVENT } from "@/features/vel/vel-message"
 
 const NAVIGATION_DEFAULT_WIDTH = 320
 const NAVIGATION_MINIMUM_WIDTH = 228
@@ -464,6 +465,7 @@ export default function NewLayout(props: ParentProps) {
   const [navigationWidth, setNavigationWidth] = createSignal(readNavigationWidth())
   const [navigationResizing, setNavigationResizing] = createSignal(false)
   const [velOpen, setVelOpen] = createSignal(false)
+  const [velScopeKey, setVelScopeKey] = createSignal("")
   const [workspaceTreeOpen, setWorkspaceTreeOpen] = createSignal(true)
   const [browserAgentOpen, setBrowserAgentOpen] = createSignal(false)
   const [scheduledOpen, setScheduledOpen] = createSignal(false)
@@ -2436,6 +2438,27 @@ export default function NewLayout(props: ParentProps) {
   const taskRoute = () => /\/session\/[^/?#]+/.test(location.pathname)
   const taskDraftRoute = () => location.pathname === "/new-session" && Boolean(activeDraftID())
   const taskConversationRoute = () => taskRoute() || taskDraftRoute()
+  const activeVelScopeKey = () => {
+    const sessionID = activeTaskScope().taskId
+    if (sessionID) return `session:${sessionID}`
+    const draftID = activeDraftID()
+    return draftID ? `draft:${draftID}` : ""
+  }
+  const openVelCall = () => {
+    const scope = activeVelScopeKey()
+    if (!taskConversationRoute() || !scope) {
+      showToast({
+        title: "Open a session first",
+        description: "Vel is available inside the chat for the selected Vector session.",
+      })
+      return
+    }
+    setVelScopeKey(scope)
+    setVelOpen(true)
+  }
+  const handleVelOpen = () => openVelCall()
+  globalThis.window?.addEventListener(VEL_OPEN_EVENT, handleVelOpen)
+  onCleanup(() => globalThis.window?.removeEventListener(VEL_OPEN_EVENT, handleVelOpen))
   const macDesktop = () => platform.platform === "desktop" && platform.os === "macos"
 
   // Landing-page-style ambient light: a soft purple halo trails the pointer.
@@ -2603,8 +2626,11 @@ export default function NewLayout(props: ParentProps) {
   })
 
   createEffect(() => {
-    if (taskConversationRoute() && (activeTaskScope().taskId || activeDraftID())) return
+    if (!velOpen()) return
+    const scope = activeVelScopeKey()
+    if (taskConversationRoute() && scope && scope === velScopeKey()) return
     setVelOpen(false)
+    setVelScopeKey("")
   })
 
   const closeOnboarding = () => {
@@ -2647,15 +2673,20 @@ export default function NewLayout(props: ParentProps) {
   })
 
   const openCloudDatabaseSetup = () => {
+    const scope = activeTaskScope()
     setDbProposal(undefined)
-    setDbProposalSuppressed(activeTaskScope())
+    setDbProposalSuppressed(scope)
     setToolsOpen(false)
     setSidePanelOpen(false)
     setBrowserAgentOpen(false)
     setScheduledOpen(false)
     setParallelOpen(false)
-    const search = taskScopeSearch(activeTaskScope())
-    navigate(`/cloud${search}${search ? "&" : "?"}section=database`)
+    if (scope.projectPath) layout.home.setSelection({ server: server.key, directory: scope.projectPath })
+    navigate("/")
+    showToast({
+      title: "Cloud Services is on Home",
+      description: "Open Cloud Services there to configure this repository's database.",
+    })
   }
 
   const dismissDbProposal = () => {
@@ -2906,7 +2937,7 @@ export default function NewLayout(props: ParentProps) {
             class="shrink-0 rounded-lg bg-white/10 px-3 py-1.5 text-[12px] font-medium text-white transition hover:bg-white/15"
             onClick={openCloudDatabaseSetup}
           >
-            Set up database →
+            Go to Home →
           </button>
           <button
             type="button"
@@ -2933,13 +2964,17 @@ export default function NewLayout(props: ParentProps) {
       <Show when={taskConversationRoute() && (activeTaskScope().taskId || activeDraftID())}>
         <VelCall
           open={velOpen()}
-          onClose={() => setVelOpen(false)}
+          onClose={() => {
+            setVelOpen(false)
+            setVelScopeKey("")
+          }}
           directory={resolveActiveProjectPath}
           sessionId={() => {
             const sessionID = activeTaskScope().taskId
             return sessionID && serverSync().session.get(sessionID) ? sessionID : undefined
           }}
           onSessionCreated={(created) => {
+            setVelScopeKey(`session:${created.id}`)
             serverSync().session.remember(created)
             const draftID = activeDraftID()
             if (draftID) {
@@ -5092,7 +5127,7 @@ export default function NewLayout(props: ParentProps) {
         mainActive={!sidebarActiveAgentID() && taskRoute()}
         treeOpen={workspaceTreeOpen()}
         items={workspaceNavigationItems()}
-        activeTool={canvasRoute() ? "canvas" : cloudRoute() ? "cloud" : undefined}
+        activeTool={canvasRoute() ? "canvas" : undefined}
         scheduledCount={activeScheduledCount()}
         currentVersion={platform.version}
         updaterState={platform.updater?.state()}
@@ -5124,19 +5159,8 @@ export default function NewLayout(props: ParentProps) {
         }}
         onMoveWorkspace={moveAgentWorkspace}
         onCodeEditor={openCodespace}
-        onVel={() => {
-          if (!taskConversationRoute() || (!activeTaskScope().taskId && !activeDraftID())) {
-            showToast({
-              title: "Open a session first",
-              description: "Vel is available inside an active Vector session.",
-            })
-            return
-          }
-          setVelOpen(true)
-        }}
         onBrowser={openPreviewPanel}
         onCanvas={() => navigate(`/canvas${taskScopeSearch(activeTaskScope())}`)}
-        onCloud={() => navigate(`/cloud${taskScopeSearch(activeTaskScope())}`)}
         onScheduled={openScheduledTasks}
         onMcp={() => void openMcpDialog()}
         onPlugins={() => void openPluginsDialog()}
@@ -5309,40 +5333,6 @@ export default function NewLayout(props: ParentProps) {
                 />
               </svg>
               Find in project
-            </button>
-            <button
-              type="button"
-              data-vector-nav-item
-              class="flex h-9 items-center gap-2.5 rounded-lg px-2.5 text-[13.5px] transition hover:bg-white/[0.06] hover:text-white"
-              classList={{ "bg-white/[0.08] text-white": cloudRoute() }}
-              onClick={() => {
-                setToolsOpen(false)
-                setSidePanelOpen(false)
-                setBrowserAgentOpen(false)
-                setScheduledOpen(false)
-                setParallelOpen(false)
-                navigate(`/cloud${taskScopeSearch(activeTaskScope())}`)
-              }}
-            >
-              <svg viewBox="0 0 16 16" class="size-4 shrink-0" aria-hidden="true">
-                <path
-                  d="M4.4 12.2a2.9 2.9 0 0 1-.3-5.78 3.6 3.6 0 0 1 6.96-1.2 2.7 2.7 0 0 1 .54 5.34"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                />
-                <path
-                  d="M8 8v4.3m0 0 1.6-1.6M8 12.3 6.4 10.7"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                />
-              </svg>
-              Cloud Services
             </button>
             <button
               type="button"

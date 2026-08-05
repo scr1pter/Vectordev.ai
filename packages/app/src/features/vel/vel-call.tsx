@@ -50,13 +50,14 @@ export function extractLatestVelReply(value: unknown) {
   return ""
 }
 
-function cleanForSpeech(text: string) {
+export function prepareVelSpeech(text: string) {
   return text
-    .replace(/```[\s\S]*?```/g, "I completed the requested code work.")
+    .replace(/```[a-z0-9_-]*\s*/gi, "")
+    .replace(/```/g, "")
+    .replace(/\[([^\]]+)]\([^)]+\)/g, "$1")
     .replace(/[*_#`>]/g, "")
     .replace(/\s+/g, " ")
     .trim()
-    .slice(0, 900)
 }
 
 export function VelCall(props: {
@@ -86,7 +87,7 @@ export function VelCall(props: {
   const statusLabel = () => {
     if (state() === "listening") return "Listening"
     if (state() === "transcribing") return "Transcribing"
-    if (state() === "thinking") return "Working with Vector"
+    if (state() === "thinking") return "Agent working"
     if (state() === "speaking") return "Speaking"
     if (error()) return "Needs attention"
     if (muted()) return "Microphone muted"
@@ -147,7 +148,7 @@ export function VelCall(props: {
     text: string,
     options: { resumeListening?: boolean; afterState?: DictationState | "thinking" } = {},
   ) => {
-    const spoken = cleanForSpeech(text)
+    const spoken = prepareVelSpeech(text)
     const run = ++speechRun
     if (!spoken) return false
     stopListening()
@@ -202,11 +203,8 @@ export function VelCall(props: {
         sessionID = created.id
         props.onSessionCreated?.(created, directory)
       }
-      const acknowledgement = "Got it. I'm handing that to the Vector agent in this session now."
-      setMessages((items) => [...items, { id: crypto.randomUUID(), role: "vel", text: acknowledgement }])
       const run = ++requestRun
-      const acknowledgementSpeech = speak(acknowledgement, { afterState: "thinking" })
-      const requestPromise = client.session
+      const outcome = await client.session
         .prompt({
           sessionID,
           directory,
@@ -219,8 +217,6 @@ export function VelCall(props: {
           (result) => ({ result }),
           (cause: unknown) => ({ cause }),
         )
-      await acknowledgementSpeech
-      const outcome = await requestPromise
       if ("cause" in outcome) throw outcome.cause
       const result = outcome.result
       if (run !== requestRun || !props.open) return

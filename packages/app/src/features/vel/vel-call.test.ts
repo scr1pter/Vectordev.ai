@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { extractLatestVelReply, extractVelReply } from "./vel-call"
+import { extractLatestVelReply, extractVelReply, prepareVelSpeech } from "./vel-call"
 import { isVelVoiceTurn, VEL_VOICE_SYSTEM } from "./vel-message"
 
 describe("Vel agent replies", () => {
@@ -29,5 +29,11 @@ describe("Vel agent replies", () => {
     expect(isVelVoiceTurn(VEL_VOICE_SYSTEM)).toBe(true)
     expect(isVelVoiceTurn("Answer this typed request normally.")).toBe(false)
     expect(isVelVoiceTurn(undefined)).toBe(false)
+  })
+
+  test("reads the active agent reply without replacing code work with canned narration", () => {
+    expect(prepareVelSpeech("Done.\n```ts\nconst ready = true\n```")).toBe("Done. const ready = true")
+    expect(VEL_VOICE_SYSTEM.toLowerCase()).not.toContain("handing")
+    expect(VEL_VOICE_SYSTEM.toLowerCase()).not.toContain("hand off")
   })
 })

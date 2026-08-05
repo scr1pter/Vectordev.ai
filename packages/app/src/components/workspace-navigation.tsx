@@ -60,7 +60,7 @@ export function WorkspaceNavigation(props: {
   mainActive: boolean
   treeOpen: boolean
   items: WorkspaceNavigationItem[]
-  activeTool?: "browser" | "canvas" | "cloud"
+  activeTool?: "browser" | "canvas"
   scheduledCount: number
   currentVersion?: string
   updaterState?: UpdaterState
@@ -77,11 +77,9 @@ export function WorkspaceNavigation(props: {
   onReviewWorkspace: (id: string) => void
   onRemoveWorkspace: (id: string) => void
   onMoveWorkspace: (sourceID: string, targetID: string) => void
-  onVel: () => void
   onCodeEditor: () => void
   onBrowser: () => void
   onCanvas: () => void
-  onCloud: () => void
   onScheduled: () => void
   onMcp: () => void
   onPlugins: () => void
@@ -395,18 +393,6 @@ export function WorkspaceNavigation(props: {
 
         <section data-vector-nav-group class="border-t border-[color:var(--vx-line)] px-2 py-3">
           <div data-vector-nav-label>Project tools</div>
-          <button type="button" data-vector-nav-item onClick={props.onVel}>
-            <svg viewBox="0 0 16 16" class="size-3.5 shrink-0" aria-hidden="true">
-              <path
-                d="M8 9.7a2.55 2.55 0 0 0 2.55-2.55V4.4a2.55 2.55 0 0 0-5.1 0v2.75A2.55 2.55 0 0 0 8 9.7Zm-4.2-2.5a4.2 4.2 0 0 0 8.4 0M8 11.4v2.25M5.9 13.65h4.2"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.15"
-                stroke-linecap="round"
-              />
-            </svg>
-            <span>Vel</span>
-          </button>
           <button type="button" data-vector-nav-item onClick={props.onCodeEditor}>
             <svg viewBox="0 0 16 16" class="size-3.5 shrink-0" aria-hidden="true">
               <path
@@ -473,31 +459,6 @@ export function WorkspaceNavigation(props: {
               />
             </svg>
             <span>Canvas</span>
-          </button>
-          <button
-            type="button"
-            data-vector-nav-item
-            classList={{ active: props.activeTool === "cloud" }}
-            onClick={props.onCloud}
-          >
-            <svg viewBox="0 0 16 16" class="size-3.5 shrink-0" aria-hidden="true">
-              <path
-                d="M4.4 12.2a2.9 2.9 0 0 1-.3-5.78 3.6 3.6 0 0 1 6.96-1.2 2.7 2.7 0 0 1 .54 5.34"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.15"
-                stroke-linecap="round"
-              />
-              <path
-                d="M8 8v4.3m0 0 1.6-1.6M8 12.3l-1.6-1.6"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.15"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              />
-            </svg>
-            <span>Cloud Services</span>
           </button>
         </section>
 

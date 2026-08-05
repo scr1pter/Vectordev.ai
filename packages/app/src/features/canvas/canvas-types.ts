@@ -40,7 +40,6 @@ export const CANVAS_WINDOWS: CanvasWindowSpec[] = [
   { kind: "preview", label: "Browser", detail: "Browse and test your running app beside everything else." },
   { kind: "notes", label: "Notes", detail: "A sticky note for the canvas." },
   { kind: "parallel", label: "New Agent", detail: "Launch and review an isolated agent." },
-  { kind: "cloud", label: "Cloud Services", detail: "Publish and manage deployments." },
   { kind: "codespace", label: "Code editor", detail: "Edit project files with Vector's editor agent." },
   { kind: "terminal", label: "Terminal", detail: "Use a live project shell." },
   { kind: "review", label: "Review changes", detail: "Inspect this task's diff." },

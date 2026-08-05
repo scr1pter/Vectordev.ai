@@ -9,7 +9,6 @@ import type { LocalPTY } from "@/context/terminal"
 import { showToast } from "@/utils/toast"
 import { DictationIndicator } from "@/components/dictation-indicator"
 import { INTERNAL_SESSION_TITLE_PREFIX } from "@/utils/internal-sessions"
-import { CloudConsole } from "@/features/cloud/cloud-console"
 import { CodespaceWorkbench } from "@/pages/session/session-side-panel"
 import {
   CANVAS_WINDOWS,
@@ -346,7 +345,14 @@ export function CanvasWorkspace(props: {
           w.state = { ...w.state, taskPrompt: action.task }
         })
       } else if (action.type === "deploy") {
-        openWindow("cloud")
+        const win = openWindow("vector-agent")
+        mutateWindow(win.id, (w) => {
+          w.state = {
+            ...w.state,
+            inject: "Publish this repository using its configured deployment provider.",
+            submit: true,
+          }
+        })
       } else if (action.type === "arrange") {
         arrange(action.layout)
       }
@@ -970,7 +976,7 @@ function CanvasWindowContent(props: {
   if (kind === "vector-agent") return <AgentWindow {...props} />
   if (kind === "preview" || kind === "browser-agent") return <PreviewWindow {...props} />
   if (kind === "notes") return <NotesWindow {...props} />
-  if (kind === "cloud") return <CloudWindow {...props} />
+  if (kind === "cloud") return <p class="vcanvas-surface-state">Cloud Services is available from Home.</p>
   if (kind === "codespace") return <CodespaceWindow {...props} />
   if (kind === "terminal") return <CanvasTerminalWindow {...props} />
   if (kind === "review") return <ReviewWindow {...props} />
@@ -1214,31 +1220,6 @@ function NotesWindow(props: { win: CanvasWindow; patchState: (patch: Record<stri
       }}
       placeholder="Jot something…"
     />
-  )
-}
-
-function CloudWindow(props: {
-  resolveProjectPath: () => Promise<string>
-  taskId?: () => string | undefined
-  onClose: () => void
-}) {
-  const [directory] = createResource(props.resolveProjectPath)
-  return (
-    <div class="vcanvas-embedded-host">
-      <Show
-        when={directory()}
-        keyed
-        fallback={
-          <p class="vcanvas-surface-state">
-            {directory.loading ? "Opening Cloud Services…" : "Open a repository to use Cloud Services."}
-          </p>
-        }
-      >
-        {(projectPath) => (
-          <CloudConsole projectPath={projectPath} taskId={props.taskId?.()} onClose={props.onClose} embedded />
-        )}
-      </Show>
-    </div>
   )
 }
 

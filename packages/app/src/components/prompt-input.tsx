@@ -78,6 +78,7 @@ import { detectParallelIntent } from "@/features/delegation/delegation"
 import { listOutcomes } from "@/features/economics/economics-repository"
 import { recommendModel } from "@/features/economics/economics-recommender"
 import { categorizeTask } from "@/features/economics/task-categorizer"
+import { requestVelCall } from "@/features/vel/vel-message"
 
 export type PromptInputState = ReturnType<typeof usePrompt>
 
@@ -198,6 +199,20 @@ export interface PromptInputProps {
   onSubmit?: () => void
   toolbar?: JSX.Element
 }
+
+const PromptVelButton = () => (
+  <button
+    data-action="prompt-vel"
+    type="button"
+    class="flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-[#b59af7]/20 bg-[#9b73ee]/10 px-2.5 text-[11px] font-medium text-[#cbbcff] transition hover:border-[#b59af7]/35 hover:bg-[#9b73ee]/16 hover:text-white"
+    title="Talk to Vel"
+    aria-label="Talk to Vel in this session"
+    onClick={requestVelCall}
+  >
+    <img src="/vector-logo.png" alt="" class="size-4 rounded-[5px] object-cover" draggable={false} />
+    <span>Vel</span>
+  </button>
+)
 
 const EXAMPLES = [
   "prompt.example.1",
@@ -2103,6 +2118,9 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                     </MenuV2>
                   </Show>
                 </div>
+                <Show when={store.mode === "normal"}>
+                  <PromptVelButton />
+                </Show>
                 <Show when={micAvailable() && !listening() && !transcribing()}>
                   <button
                     data-action="prompt-mic"
@@ -2293,6 +2311,9 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                 />
 
                 <div class="pointer-events-auto flex min-w-0 flex-1 items-center justify-end gap-1">
+                  <Show when={store.mode === "normal"}>
+                    <PromptVelButton />
+                  </Show>
                   <Show when={micAvailable() && !listening() && !transcribing()}>
                     <button
                       data-action="prompt-mic"
