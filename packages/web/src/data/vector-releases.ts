@@ -59,4 +59,5 @@ export const release117: VectorRelease[] = [
   { version: "1.17.30", title: "The Vector product suite", summary: "Introduced one unified Product Hub for Vector Code, Vector Work, and Vector Cloud; added project-based Work tasks with optional repositories; made Cloud globally project-selectable; and launched Vel as Vector's task-aware voice assistant." },
   { version: "1.17.31", title: "Focused Work and session-bound Vel", summary: "Limited Vector Work to agent chat, parallel workspaces, browser control, Vel, MCP, and plugins; moved Vel into active task and session tools; and ensured voice requests stay inside the exact visible session." },
   { version: "1.17.32", title: "Conversational Vel and separate Work projects", summary: "Turned Vel into a spoken active-session agent with native desktop replies and real coding handoffs, while keeping Vector Work projects separate from Vector Code repositories." },
+  { version: "1.17.33", title: "Natural voice turns with Vel", summary: "Added automatic end-of-speech detection, voice-first session creation, interruptible spoken replies, and clearly italicized Vel conversations inside the active Vector chat." },
 ]

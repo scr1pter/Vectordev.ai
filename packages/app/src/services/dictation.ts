@@ -11,17 +11,76 @@ import { getSpeechRecognitionCtor } from "@/utils/runtime-adapters"
 
 export type DictationState = "listening" | "transcribing" | "idle"
 
+export type DictationEndpointing = {
+  silenceMs?: number
+  minimumVoiceMs?: number
+  minimumSpeechMs?: number
+  maximumRecordingMs?: number
+  minimumRms?: number
+}
+
 export type DictationHandlers = {
   onInterim?: (text: string) => void
   onFinal: (text: string) => void
   onError: (message: string) => void
   onState?: (state: DictationState) => void
   onLevel?: (level: number) => void
+  onSpeechStart?: () => void
+  endpointing?: DictationEndpointing
 }
 
 export type DictationHandle = {
   stop: () => void
   cancel: () => void
+}
+
+export type VoiceTurnState = "waiting" | "speaking" | "complete"
+
+export function createVoiceTurnDetector(options: DictationEndpointing = {}) {
+  const silenceMs = Math.max(500, options.silenceMs ?? 1_200)
+  const minimumVoiceMs = Math.max(80, options.minimumVoiceMs ?? 160)
+  const minimumSpeechMs = Math.max(minimumVoiceMs, options.minimumSpeechMs ?? 320)
+  const minimumRms = Math.max(0.004, options.minimumRms ?? 0.012)
+  let noiseFloor = 0.003
+  let candidateAt: number | undefined
+  let speechStartedAt: number | undefined
+  let lastVoiceAt: number | undefined
+  let state: VoiceTurnState = "waiting"
+
+  return {
+    sample(rms: number, now: number): VoiceTurnState {
+      if (state === "complete") return state
+      const amplitude = Number.isFinite(rms) ? Math.max(0, rms) : 0
+      const threshold = Math.max(minimumRms, Math.min(0.08, noiseFloor * 3.2 + 0.003))
+      const voiced = amplitude >= threshold
+
+      if (!speechStartedAt && !voiced) noiseFloor = noiseFloor * 0.94 + amplitude * 0.06
+
+      if (voiced) {
+        candidateAt ??= now
+        lastVoiceAt = now
+        if (speechStartedAt === undefined && now - candidateAt >= minimumVoiceMs) {
+          speechStartedAt = candidateAt
+          state = "speaking"
+        }
+        return state
+      }
+
+      if (speechStartedAt === undefined) {
+        candidateAt = undefined
+        return state
+      }
+
+      if (
+        lastVoiceAt !== undefined &&
+        now - lastVoiceAt >= silenceMs &&
+        now - speechStartedAt >= minimumSpeechMs
+      ) {
+        state = "complete"
+      }
+      return state
+    },
+  }
 }
 
 export function dictationAvailable(): boolean {
@@ -89,6 +148,12 @@ async function startDesktopDictation(handlers: DictationHandlers): Promise<Dicta
   let processor: ScriptProcessorNode
   let sink: GainNode
   const chunks: Float32Array[] = []
+  const turnDetector = handlers.endpointing ? createVoiceTurnDetector(handlers.endpointing) : undefined
+  let turnState: VoiceTurnState = "waiting"
+  let recordedSamples = 0
+  let speechStartSample: number | undefined
+  let speechEndSample: number | undefined
+  let requestFinalize: (() => void) | undefined
   try {
     context = new AudioContextCtor()
     await context.resume()
@@ -99,10 +164,21 @@ async function startDesktopDictation(handlers: DictationHandlers): Promise<Dicta
     processor.onaudioprocess = (event) => {
       const chunk = event.inputBuffer.getChannelData(0).slice()
       chunks.push(chunk)
+      recordedSamples += chunk.length
       let energy = 0
       for (let index = 0; index < chunk.length; index += 8) energy += chunk[index] * chunk[index]
       const rms = Math.sqrt(energy / Math.ceil(chunk.length / 8))
       handlers.onLevel?.(Math.min(1, rms * 9))
+      const nextTurnState = turnDetector?.sample(rms, performance.now())
+      if (nextTurnState === "speaking" && turnState === "waiting") {
+        speechStartSample = Math.max(0, recordedSamples - Math.round(context.sampleRate * 0.55))
+        handlers.onSpeechStart?.()
+      }
+      if (nextTurnState === "complete" && turnState !== "complete") {
+        speechEndSample = recordedSamples
+        requestFinalize?.()
+      }
+      if (nextTurnState) turnState = nextTurnState
     }
     source.connect(processor)
     processor.connect(sink)
@@ -131,10 +207,19 @@ async function startDesktopDictation(handlers: DictationHandlers): Promise<Dicta
     if (finished) return
     finished = true
     await teardown()
+    if (turnDetector && speechStartSample === undefined) {
+      handlers.onState?.("idle")
+      handlers.onError("Didn't catch that. No speech was detected, so I'm still listening.")
+      return
+    }
     handlers.onState?.("transcribing")
     try {
       const { mergeAudioChunks, transcribeLocalAudio } = await import("@/services/local-transcription")
-      const audio = mergeAudioChunks(chunks)
+      const merged = mergeAudioChunks(chunks)
+      const audio =
+        speechStartSample === undefined
+          ? merged
+          : merged.slice(speechStartSample, Math.min(merged.length, speechEndSample ?? merged.length))
       if (audio.length < context.sampleRate / 5) {
         handlers.onState?.("idle")
         handlers.onError("Didn't catch that. Record a little longer, then tap the mic again.")
@@ -164,7 +249,8 @@ async function startDesktopDictation(handlers: DictationHandlers): Promise<Dicta
   }
 
   // Cap recordings so a forgotten mic never records forever.
-  timeout = setTimeout(() => void finalize(), MAX_RECORDING_MS)
+  requestFinalize = () => void finalize()
+  timeout = setTimeout(() => void finalize(), handlers.endpointing?.maximumRecordingMs ?? MAX_RECORDING_MS)
   handlers.onState?.("listening")
   return {
     stop: () => void finalize(),
@@ -230,6 +316,7 @@ async function startBrowserDictation(handlers: DictationHandlers): Promise<Dicta
   recognition.interimResults = true
   let finished = false
   let best = ""
+  let speechStarted = false
 
   recognition.onresult = (event) => {
     let interim = ""
@@ -240,7 +327,11 @@ async function startBrowserDictation(handlers: DictationHandlers): Promise<Dicta
       if (event.results[i]?.isFinal) final += alt
       else interim += alt
     }
-    if (final) best = final
+    if (final || interim) best = (final || interim).trim()
+    if (!speechStarted && best) {
+      speechStarted = true
+      handlers.onSpeechStart?.()
+    }
     handlers.onInterim?.((final || interim).trim())
   }
   recognition.onerror = (event) => {

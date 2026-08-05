@@ -341,6 +341,11 @@
 }
 
 @layer components {
+  [data-vel-turn="true"] [data-component="user-message"],
+  [data-vel-turn="true"] [data-component="text-part"] [data-component="markdown"] {
+    font-style: italic !important;
+  }
+
   [data-vector-shell] {
     background: #1d1d1f !important;
     color: #f4f4f5;

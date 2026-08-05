@@ -51,6 +51,7 @@ import type {
   UserMessage,
 } from "@opencode-ai/sdk/v2"
 import { showToast } from "@/utils/toast"
+import { isVelVoiceTurn } from "@/features/vel/vel-message"
 import { getDirectory, getFilename } from "@opencode-ai/core/util/path"
 import { normalize } from "@opencode-ai/session-ui/session-diff"
 import { useFileComponent } from "@opencode-ai/ui/context/file"
@@ -1057,12 +1058,17 @@ export function MessageTimeline(props: {
       const row = input.row()
       return row._tag === "AssistantPart" && row.previousAssistantPart
     }
+    const velTurn = () => {
+      const message = messageByID().get(input.row().userMessageID)
+      return message?.role === "user" && isVelVoiceTurn(message.system)
+    }
 
     return (
       <div
         id={anchor() ? props.anchor(input.row().userMessageID) : undefined}
         data-message-id={input.row().userMessageID}
         data-timeline-row={input.row()._tag}
+        data-vel-turn={velTurn() ? "true" : undefined}
         classList={{
           "min-w-0 w-full max-w-full": true,
           "md:max-w-200 2xl:max-w-[1000px]": props.centered,

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { extractLatestVelReply, extractVelReply } from "./vel-call"
+import { isVelVoiceTurn, VEL_VOICE_SYSTEM } from "./vel-message"
 
 describe("Vel agent replies", () => {
   test("speaks assistant text instead of tool output", () => {
@@ -22,5 +23,11 @@ describe("Vel agent replies", () => {
         { info: { role: "assistant" }, parts: [{ type: "text", text: "The app is built and tested." }] },
       ]),
     ).toBe("The app is built and tested.")
+  })
+
+  test("marks only voice-originated turns for timeline styling", () => {
+    expect(isVelVoiceTurn(VEL_VOICE_SYSTEM)).toBe(true)
+    expect(isVelVoiceTurn("Answer this typed request normally.")).toBe(false)
+    expect(isVelVoiceTurn(undefined)).toBe(false)
   })
 })

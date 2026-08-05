@@ -23,6 +23,7 @@ import { installActivityEventBridge } from "@/services/activity-service"
 import { SDKProvider } from "@/context/sdk"
 import { useServerSync } from "@/context/server-sync"
 import { isManagedAgentWorkspacePath, useServer } from "@/context/server"
+import { useTabs } from "@/context/tabs"
 import { sessionHref } from "@/utils/session-route"
 import { DB_INTENT_EVENT } from "@/features/cloud/db-intent"
 import { OnboardingProgress, OnboardingTour, TOUR_SLIDES } from "@/features/onboarding/onboarding"
@@ -434,6 +435,7 @@ export default function NewLayout(props: ParentProps) {
   const dialog = useDialog()
   const serverSync = useServerSync()
   const server = useServer()
+  const tabs = useTabs()
   const layout = useLayout()
   const navigate = useNavigate()
   const location = useLocation()
@@ -2323,6 +2325,8 @@ export default function NewLayout(props: ParentProps) {
   })
 
   const taskRoute = () => /\/session\/[^/?#]+/.test(location.pathname)
+  const taskDraftRoute = () => location.pathname === "/new-session" && Boolean(activeDraftID())
+  const taskConversationRoute = () => taskRoute() || taskDraftRoute()
   const macDesktop = () => platform.platform === "desktop" && platform.os === "macos"
 
   // Landing-page-style ambient light: a soft purple halo trails the pointer.
@@ -2484,7 +2488,7 @@ export default function NewLayout(props: ParentProps) {
   })
 
   createEffect(() => {
-    if (taskRoute() && activeTaskScope().taskId) return
+    if (taskConversationRoute() && (activeTaskScope().taskId || activeDraftID())) return
     setVelOpen(false)
   })
 
@@ -2783,12 +2787,29 @@ export default function NewLayout(props: ParentProps) {
         />
       </Show>
 
-      <Show when={taskRoute() && activeTaskScope().taskId}>
+      <Show when={taskConversationRoute() && (activeTaskScope().taskId || activeDraftID())}>
         <VelCall
           open={velOpen()}
           onClose={() => setVelOpen(false)}
           directory={resolveActiveProjectPath}
-          sessionId={() => activeTaskScope().taskId}
+          sessionId={() => {
+            const sessionID = activeTaskScope().taskId
+            return sessionID && serverSync().session.get(sessionID) ? sessionID : undefined
+          }}
+          onSessionCreated={(created) => {
+            serverSync().session.remember(created)
+            const draftID = activeDraftID()
+            if (draftID) {
+              try {
+                const draft = tabs.draft(draftID)
+                tabs.promoteDraft(draftID, { server: draft.server, sessionId: created.id })
+                return
+              } catch {
+                // The draft may already have been promoted by a simultaneous typed send.
+              }
+            }
+            navigate(sessionHref(server.key, created.id), { replace: true })
+          }}
           model={() => {
             const active = serverSync().session.get(activeTaskScope().taskId ?? "")
             if (active?.model?.providerID && active.model.id) {
@@ -4420,8 +4441,8 @@ export default function NewLayout(props: ParentProps) {
         onMoveWorkspace={moveAgentWorkspace}
         onCodeEditor={openCodespace}
         onVel={() => {
-          if (!taskRoute() || !activeTaskScope().taskId) {
-            showToast({ title: "Start this session first", description: "Send the first message, then Vel can join this exact session." })
+          if (!taskConversationRoute() || (!activeTaskScope().taskId && !activeDraftID())) {
+            showToast({ title: "Open a session first", description: "Vel is available inside a Code session or Work task." })
             return
           }
           setVelOpen(true)

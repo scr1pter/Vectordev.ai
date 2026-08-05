@@ -1,18 +1,12 @@
 import { createEffect, createSignal, For, onCleanup, Show } from "solid-js"
 import { useServerSDK } from "@/context/server-sdk"
 import { startDictation, type DictationHandle, type DictationState } from "@/services/dictation"
+import type { Session } from "@opencode-ai/sdk/v2"
+import { VEL_VOICE_SYSTEM } from "./vel-message"
 
 type VelMessage = { id: string; role: "you" | "vel"; text: string }
 
 type VelModel = { providerID: string; modelID: string }
-
-const VEL_SYSTEM = [
-  "You are acting through Vel, Vector's voice agent, inside the user's active Vector session.",
-  "Treat the spoken request exactly like a typed request: inspect the project, use tools, edit files, run commands, test, or delegate when needed.",
-  "Do not merely describe work the user asked you to perform. Perform it when the available tools and permissions allow it.",
-  "In the final response, begin with a concise, spoken-friendly summary of what you completed or what you need from the user.",
-  "Never claim that an action succeeded unless it actually completed.",
-].join("\n")
 
 export function extractVelReply(value: unknown, depth = 0): string {
   if (!value || depth > 6) return ""
@@ -72,6 +66,7 @@ export function VelCall(props: {
   model: () => VelModel | undefined
   agent: () => string
   contextLabel: () => string
+  onSessionCreated?: (session: Session, directory: string) => void
   onClose: () => void
 }) {
   const serverSDK = useServerSDK()
@@ -187,19 +182,23 @@ export function VelCall(props: {
     setState("thinking")
     const directory = await props.directory().catch(() => "")
     const model = props.model()
-    const sessionID = props.sessionId()
-    if (!directory || !model || !sessionID) {
+    if (!directory || !model) {
       const text = !directory
         ? "Open a Code repository or a Work task so I can act on its context."
-        : !sessionID
-          ? "Start this session by sending its first message, then call me again."
-          : "Connect a model provider, then call me again."
+        : "Connect a model provider, then call me again."
       setMessages((items) => [...items, { id: crypto.randomUUID(), role: "vel", text }])
       await speak(text, { resumeListening: true })
       return
     }
     try {
       const client = serverSDK().createClient({ directory, throwOnError: true })
+      let sessionID = props.sessionId()
+      if (!sessionID) {
+        const created = await client.session.create().then((result) => result.data ?? undefined)
+        if (!created) throw new Error("Vector could not create a session for this voice request.")
+        sessionID = created.id
+        props.onSessionCreated?.(created, directory)
+      }
       const acknowledgement = "Got it. I'm handing that to the Vector agent in this session now."
       setMessages((items) => [...items, { id: crypto.randomUUID(), role: "vel", text: acknowledgement }])
       const run = ++requestRun
@@ -210,7 +209,7 @@ export function VelCall(props: {
           directory,
           agent: props.agent(),
           model,
-          system: VEL_SYSTEM,
+          system: VEL_VOICE_SYSTEM,
           parts: [{ type: "text", text: request }],
         })
         .then(
@@ -247,11 +246,24 @@ export function VelCall(props: {
       onInterim: setInterim,
       onFinal: (text) => void answer(text),
       onError: (message) => {
+        if (/no speech|didn't catch/i.test(message) && props.open && !muted()) {
+          setError("")
+          setState("idle")
+          globalThis.setTimeout(() => void beginListening(), 320)
+          return
+        }
         setError(message)
         setState("idle")
       },
       onState: setState,
       onLevel: setLevel,
+      onSpeechStart: () => setError(""),
+      endpointing: {
+        silenceMs: 1_250,
+        minimumVoiceMs: 160,
+        minimumSpeechMs: 320,
+        maximumRecordingMs: 60_000,
+      },
     })
     dictation = started
     opening = false
@@ -274,9 +286,20 @@ export function VelCall(props: {
     queueMicrotask(() => void speak(greeting, { resumeListening: true }))
   })
 
-  onCleanup(stopAudio)
+  onCleanup(() => stopAudio(true))
+
+  const interruptSpeech = () => {
+    stopSpeech()
+    setMuted(false)
+    setState("idle")
+    globalThis.setTimeout(() => void beginListening(), 80)
+  }
 
   const toggleMute = () => {
+    if (state() === "speaking") {
+      interruptSpeech()
+      return
+    }
     const next = !muted()
     setMuted(next)
     if (next) {
@@ -333,7 +356,7 @@ export function VelCall(props: {
           <footer>
             <button type="button" classList={{ active: muted() }} onClick={toggleMute}>
               <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 12.2a3.1 3.1 0 0 0 3.1-3.1V5.5a3.1 3.1 0 0 0-6.2 0v3.6a3.1 3.1 0 0 0 3.1 3.1Zm-5-3a5 5 0 0 0 10 0M10 14.2v3M7.5 17.2h5" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" /></svg>
-              <span>{muted() ? "Unmute mic" : "Mute mic"}</span>
+              <span>{state() === "speaking" ? "Interrupt" : muted() ? "Unmute mic" : "Mute mic"}</span>
             </button>
             <button type="button" class="end" onClick={endCall}>
               <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4.2 12.7c3.5-2.5 8.1-2.5 11.6 0l1.3-2.1C13 7.4 7 7.4 2.9 10.6l1.3 2.1Zm1.2-.8-.4 3m9.6-3 .4 3" fill="none" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" stroke-linejoin="round" /></svg>
