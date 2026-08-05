@@ -530,9 +530,9 @@ export function NewHome() {
       <div class="vector-home-dashboard">
         <header data-vector-home-overview class="vector-home-heading">
           <div class="vector-home-heading__topline">
-            <button type="button" class="vector-home-heading__brand" onClick={() => navigate("/")} title="All Vector products">
+            <button type="button" class="vector-home-heading__brand" onClick={() => navigate("/")} title="Vector home">
               <img src="/vector-logo.png" alt="" draggable={false} />
-              <span>Vector Code</span>
+              <span>Vector</span>
             </button>
             <div class="vector-home-heading__status" aria-label="Workspace status">
               <span classList={{ "is-offline": global.servers.health[selection().server]?.healthy === false }} />
@@ -541,12 +541,16 @@ export function NewHome() {
           </div>
           <div class="vector-home-heading__main">
             <div class="vector-home-heading__copy">
-              <span>{selectedProject() ? displayName(selectedProject()!) : "Local-first agentic engineering"}</span>
-              <h1>{selectedProject() ? "Give Vector one concrete outcome." : "Choose a repository. Build from one focused brief."}</h1>
+              <span>{selectedProject() ? displayName(selectedProject()!) : "The agentic workspace for builders"}</span>
+              <h1>
+                {selectedProject()
+                  ? "Give Vector one concrete outcome."
+                  : "Choose a repository. Direct an army of builders."}
+              </h1>
               <p>
                 {selectedProject()
-                  ? "Vector can plan, edit, run, browse, and verify this repository. You stay in control of the changes."
-                  : "Start with working code or an empty folder. Vector keeps the first step simple, then brings in deeper tools only when the job needs them."}
+                  ? "Vector can plan, research, edit, run, browse, verify, and ship from this repository. You stay in control of every change."
+                  : "Bring your own models and tools. Work directly, direct one agent, or coordinate isolated builders from one local-first workspace."}
               </p>
             </div>
             <div class="vector-home-heading__actions">
@@ -556,6 +560,33 @@ export function NewHome() {
                   Start building
                 </button>
               </Show>
+              <button
+                type="button"
+                data-variant="secondary"
+                onClick={() => {
+                  const project = selectedProject()
+                  navigate(project ? `/cloud?project=${encodeURIComponent(project.worktree)}` : "/cloud")
+                }}
+              >
+                <svg viewBox="0 0 16 16" class="size-4" aria-hidden="true">
+                  <path
+                    d="M4.35 12.2a2.9 2.9 0 0 1-.3-5.78 3.6 3.6 0 0 1 6.96-1.2 2.7 2.7 0 0 1 .54 5.34"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.15"
+                    stroke-linecap="round"
+                  />
+                  <path
+                    d="M8 8v4.3m0 0 1.6-1.6M8 12.3l-1.6-1.6"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.15"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+                Cloud services
+              </button>
               <button
                 type="button"
                 data-variant="secondary"
@@ -641,20 +672,21 @@ export function NewHome() {
             onSelect={selectSearchSession}
           />
           <div class="vector-home-recents__scroll">
-            <Show
-              when={!sessionLoad.isLoading}
-              fallback={<HomeSessionSkeleton label={language.t("common.loading")} />}
-            >
+            <Show when={!sessionLoad.isLoading} fallback={<HomeSessionSkeleton label={language.t("common.loading")} />}>
               <Show
                 when={records().length > 0}
                 fallback={
                   <HomeSessionsEmpty
                     hasKnownProjects={projectDirectories().length > 0}
                     onNewSession={newSessionProject() ? openNewSession : undefined}
-                    onOpenProject={newSessionProject() ? undefined : () => {
-                      const conn = focusedServer() ?? global.servers.list()[0]
-                      if (conn) chooseProject(conn)
-                    }}
+                    onOpenProject={
+                      newSessionProject()
+                        ? undefined
+                        : () => {
+                            const conn = focusedServer() ?? global.servers.list()[0]
+                            if (conn) chooseProject(conn)
+                          }
+                    }
                   />
                 }
               >
@@ -675,7 +707,6 @@ export function NewHome() {
           </div>
         </section>
       </div>
-
     </div>
   )
 }
@@ -762,9 +793,7 @@ function HomeUsagePulse(props: {
       </div>
 
       <Show when={props.loading || props.failed}>
-        <span class="vector-home-usage__state">
-          {props.loading ? "Updating activity…" : "Activity reconnecting"}
-        </span>
+        <span class="vector-home-usage__state">{props.loading ? "Updating activity…" : "Activity reconnecting"}</span>
       </Show>
     </section>
   )
@@ -806,7 +835,11 @@ function HomeProjectDeck(props: {
             />
           )}
         </For>
-        <button type="button" class="vector-home-project-card vector-home-project-card--add" onClick={props.chooseProject}>
+        <button
+          type="button"
+          class="vector-home-project-card vector-home-project-card--add"
+          onClick={props.chooseProject}
+        >
           <span>
             <IconV2 name="folder-add-left" />
           </span>
@@ -866,7 +899,9 @@ function HomeProjectCard(props: {
                 </MenuV2.Item>
                 <MenuV2.Item onSelect={() => props.editProject(server(), props.project)}>Edit repository</MenuV2.Item>
                 <MenuV2.Separator />
-                <MenuV2.Item onSelect={() => props.closeProject(server(), props.project.worktree)}>Close repository</MenuV2.Item>
+                <MenuV2.Item onSelect={() => props.closeProject(server(), props.project.worktree)}>
+                  Close repository
+                </MenuV2.Item>
               </MenuV2.Content>
             </MenuV2.Portal>
           </MenuV2>
@@ -998,9 +1033,7 @@ function HomeServerRow(props: {
           "hover:bg-v2-overlay-simple-overlay-hover": canToggle(),
           "cursor-default opacity-40": !canToggle(),
         }}
-        aria-label={
-          props.collapsed ? props.language.t("home.server.expand") : props.language.t("home.server.collapse")
-        }
+        aria-label={props.collapsed ? props.language.t("home.server.expand") : props.language.t("home.server.collapse")}
         aria-expanded={canToggle() ? !props.collapsed : undefined}
         disabled={!canToggle()}
         onClick={(event) => {
@@ -1154,9 +1187,7 @@ function HomeProjectRow(props: {
               <MenuV2.Item onSelect={() => props.openNewSession(props.server, props.project.worktree)}>
                 {props.language.t("command.session.new")}
               </MenuV2.Item>
-              <MenuV2.Item onSelect={() => props.editProject(props.server, props.project)}>
-                Edit repository
-              </MenuV2.Item>
+              <MenuV2.Item onSelect={() => props.editProject(props.server, props.project)}>Edit repository</MenuV2.Item>
               <MenuV2.Item
                 disabled={props.unseenCount === 0}
                 onSelect={() => props.clearNotifications(props.server, props.project)}
@@ -1531,7 +1562,11 @@ function HomeSessionRow(props: {
   )
 }
 
-function HomeSessionsEmpty(props: { onNewSession?: () => void; onOpenProject?: () => void; hasKnownProjects?: boolean }) {
+function HomeSessionsEmpty(props: {
+  onNewSession?: () => void
+  onOpenProject?: () => void
+  hasKnownProjects?: boolean
+}) {
   const language = useLanguage()
   const hasKnownProjects = () => props.hasKnownProjects !== false
   return (

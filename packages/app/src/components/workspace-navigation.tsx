@@ -60,7 +60,6 @@ export function WorkspaceNavigation(props: {
   mainActive: boolean
   treeOpen: boolean
   items: WorkspaceNavigationItem[]
-  workMode: boolean
   activeTool?: "browser" | "canvas" | "cloud"
   scheduledCount: number
   currentVersion?: string
@@ -115,7 +114,10 @@ export function WorkspaceNavigation(props: {
         display: props.visible ? undefined : "none",
       }}
     >
-      <div data-vector-nav-top class="flex h-[54px] shrink-0 items-center gap-2 border-b border-[color:var(--vx-line)] px-3">
+      <div
+        data-vector-nav-top
+        class="flex h-[54px] shrink-0 items-center gap-2 border-b border-[color:var(--vx-line)] px-3"
+      >
         <button
           type="button"
           data-vector-nav-home
@@ -133,17 +135,23 @@ export function WorkspaceNavigation(props: {
           </svg>
           <span class="truncate">Home</span>
         </button>
-        <Show when={!props.workMode}>
-          <button
-            type="button"
-            class="grid size-8 shrink-0 place-items-center rounded-[5px] text-white/38 transition hover:bg-white/[0.055] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(147,116,236,0.55)]"
-            onClick={props.onFind}
-            title="Find in project"
-            aria-label="Find in project"
-          >
-            <svg viewBox="0 0 16 16" class="size-3.5" aria-hidden="true"><path d="M7.1 12.1a5 5 0 1 1 0-10 5 5 0 0 1 0 10Zm3.55-1.45 3 3" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" /></svg>
-          </button>
-        </Show>
+        <button
+          type="button"
+          class="grid size-8 shrink-0 place-items-center rounded-[5px] text-white/38 transition hover:bg-white/[0.055] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(147,116,236,0.55)]"
+          onClick={props.onFind}
+          title="Find in project"
+          aria-label="Find in project"
+        >
+          <svg viewBox="0 0 16 16" class="size-3.5" aria-hidden="true">
+            <path
+              d="M7.1 12.1a5 5 0 1 1 0-10 5 5 0 0 1 0 10Zm3.55-1.45 3 3"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.2"
+              stroke-linecap="round"
+            />
+          </svg>
+        </button>
         <button
           type="button"
           class="grid size-8 shrink-0 place-items-center rounded-[5px] text-white/38 transition hover:bg-white/[0.055] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(147,116,236,0.55)]"
@@ -152,8 +160,24 @@ export function WorkspaceNavigation(props: {
           onClick={props.onHide}
         >
           <svg viewBox="0 0 16 16" class="size-4" aria-hidden="true">
-            <rect x="2.25" y="2.5" width="11.5" height="11" rx="1.75" fill="none" stroke="currentColor" stroke-width="1.15" />
-            <path d="M6 2.75v10.5m3.5-7-2 2 2 2" fill="none" stroke="currentColor" stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round" />
+            <rect
+              x="2.25"
+              y="2.5"
+              width="11.5"
+              height="11"
+              rx="1.75"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.15"
+            />
+            <path
+              d="M6 2.75v10.5m3.5-7-2 2 2 2"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.15"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
           </svg>
         </button>
       </div>
@@ -173,7 +197,14 @@ export function WorkspaceNavigation(props: {
               classList={{ "-rotate-90": !props.treeOpen }}
               aria-hidden="true"
             >
-              <path d="m4.75 6.25 3.25 3 3.25-3" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" />
+              <path
+                d="m4.75 6.25 3.25 3 3.25-3"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.25"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
             </svg>
             <span class="min-w-0 flex-1 truncate">{props.projectName}</span>
             <span class="shrink-0 text-[10px] font-normal tabular-nums text-white/30">{props.items.length + 1}</span>
@@ -187,7 +218,13 @@ export function WorkspaceNavigation(props: {
                 onClick={props.onNewWorkspace}
               >
                 <svg viewBox="0 0 16 16" class="size-3.5 shrink-0" aria-hidden="true">
-                  <path d="M8 3.25v9.5M3.25 8h9.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
+                  <path
+                    d="M8 3.25v9.5M3.25 8h9.5"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.3"
+                    stroke-linecap="round"
+                  />
                 </svg>
                 <span class="truncate">New workspace</span>
               </button>
@@ -223,7 +260,9 @@ export function WorkspaceNavigation(props: {
                 }}
                 onClick={props.onOpenMain}
               >
-                <Icon><BranchIcon /></Icon>
+                <Icon>
+                  <BranchIcon />
+                </Icon>
                 <span class="min-w-0 flex-1">
                   <span class="block truncate text-[12px] font-medium">{props.mainLabel}</span>
                   <span class="mt-0.5 flex items-center gap-1.5 truncate text-[10px] text-white/34">
@@ -231,7 +270,9 @@ export function WorkspaceNavigation(props: {
                     <span class="truncate">main · Ready</span>
                   </span>
                 </span>
-                <span class="shrink-0 rounded-[4px] border border-white/[0.08] px-1.5 py-0.5 text-[9.5px] text-white/32">main</span>
+                <span class="shrink-0 rounded-[4px] border border-white/[0.08] px-1.5 py-0.5 text-[9.5px] text-white/32">
+                  main
+                </span>
               </button>
 
               <For each={props.items}>
@@ -300,7 +341,14 @@ export function WorkspaceNavigation(props: {
                             }}
                           >
                             <svg viewBox="0 0 16 16" class="size-3.5" aria-hidden="true">
-                              <path d="M3.25 3.5h9.5v9h-9.5zM5.4 6h5.2M5.4 8h5.2M5.4 10h3.1" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round" />
+                              <path
+                                d="M3.25 3.5h9.5v9h-9.5zM5.4 6h5.2M5.4 8h5.2M5.4 10h3.1"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="1.1"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                              />
                             </svg>
                           </button>
                         </Show>
@@ -317,7 +365,13 @@ export function WorkspaceNavigation(props: {
                             }}
                           >
                             <svg viewBox="0 0 16 16" class="size-3.5" aria-hidden="true">
-                              <path d="m4.5 4.5 7 7m0-7-7 7" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" />
+                              <path
+                                d="m4.5 4.5 7 7m0-7-7 7"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="1.25"
+                                stroke-linecap="round"
+                              />
                             </svg>
                           </button>
                         </Show>
@@ -343,53 +397,156 @@ export function WorkspaceNavigation(props: {
           <div data-vector-nav-label>Project tools</div>
           <button type="button" data-vector-nav-item onClick={props.onVel}>
             <svg viewBox="0 0 16 16" class="size-3.5 shrink-0" aria-hidden="true">
-              <path d="M8 9.7a2.55 2.55 0 0 0 2.55-2.55V4.4a2.55 2.55 0 0 0-5.1 0v2.75A2.55 2.55 0 0 0 8 9.7Zm-4.2-2.5a4.2 4.2 0 0 0 8.4 0M8 11.4v2.25M5.9 13.65h4.2" fill="none" stroke="currentColor" stroke-width="1.15" stroke-linecap="round" />
+              <path
+                d="M8 9.7a2.55 2.55 0 0 0 2.55-2.55V4.4a2.55 2.55 0 0 0-5.1 0v2.75A2.55 2.55 0 0 0 8 9.7Zm-4.2-2.5a4.2 4.2 0 0 0 8.4 0M8 11.4v2.25M5.9 13.65h4.2"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.15"
+                stroke-linecap="round"
+              />
             </svg>
             <span>Vel</span>
           </button>
-          <Show when={!props.workMode}>
-            <button type="button" data-vector-nav-item onClick={props.onCodeEditor}>
-              <svg viewBox="0 0 16 16" class="size-3.5 shrink-0" aria-hidden="true"><path d="M5.25 5 2.75 8l2.5 3M10.75 5l2.5 3-2.5 3M9.15 3.75l-2.3 8.5" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" /></svg>
-              <span>Code editor</span>
-            </button>
-          </Show>
-          <button type="button" data-vector-nav-item classList={{ active: props.activeTool === "browser" }} onClick={props.onBrowser}>
+          <button type="button" data-vector-nav-item onClick={props.onCodeEditor}>
             <svg viewBox="0 0 16 16" class="size-3.5 shrink-0" aria-hidden="true">
-              <rect x="2.25" y="3" width="11.5" height="10" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.15" />
-              <path d="M2.75 5.45h10.5M4.4 4.2h.01M6 4.2h.01" fill="none" stroke="currentColor" stroke-width="1.15" stroke-linecap="round" />
+              <path
+                d="M5.25 5 2.75 8l2.5 3M10.75 5l2.5 3-2.5 3M9.15 3.75l-2.3 8.5"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.25"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+            <span>Code editor</span>
+          </button>
+          <button
+            type="button"
+            data-vector-nav-item
+            classList={{ active: props.activeTool === "browser" }}
+            onClick={props.onBrowser}
+          >
+            <svg viewBox="0 0 16 16" class="size-3.5 shrink-0" aria-hidden="true">
+              <rect
+                x="2.25"
+                y="3"
+                width="11.5"
+                height="10"
+                rx="1.5"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.15"
+              />
+              <path
+                d="M2.75 5.45h10.5M4.4 4.2h.01M6 4.2h.01"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.15"
+                stroke-linecap="round"
+              />
             </svg>
             <span>Browser</span>
           </button>
-          <Show when={!props.workMode}>
-            <button type="button" data-vector-nav-item classList={{ active: props.activeTool === "canvas" }} onClick={props.onCanvas}>
-              <svg viewBox="0 0 16 16" class="size-3.5 shrink-0" aria-hidden="true"><rect x="2.4" y="3.4" width="11.2" height="9.2" rx="1.4" fill="none" stroke="currentColor" stroke-width="1.15" /><path d="M5.4 6.2h3v2.4h-3zM9.2 6.2h1.9M9.2 8.1h1.9M5.4 10h5" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" /></svg>
-              <span>Canvas</span>
-            </button>
-            <button type="button" data-vector-nav-item classList={{ active: props.activeTool === "cloud" }} onClick={props.onCloud}>
-              <svg viewBox="0 0 16 16" class="size-3.5 shrink-0" aria-hidden="true"><path d="M4.4 12.2a2.9 2.9 0 0 1-.3-5.78 3.6 3.6 0 0 1 6.96-1.2 2.7 2.7 0 0 1 .54 5.34" fill="none" stroke="currentColor" stroke-width="1.15" stroke-linecap="round" /><path d="M8 8v4.3m0 0 1.6-1.6M8 12.3l-1.6-1.6" fill="none" stroke="currentColor" stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round" /></svg>
-              <span>Vector Cloud</span>
-            </button>
-          </Show>
+          <button
+            type="button"
+            data-vector-nav-item
+            classList={{ active: props.activeTool === "canvas" }}
+            onClick={props.onCanvas}
+          >
+            <svg viewBox="0 0 16 16" class="size-3.5 shrink-0" aria-hidden="true">
+              <rect
+                x="2.4"
+                y="3.4"
+                width="11.2"
+                height="9.2"
+                rx="1.4"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.15"
+              />
+              <path
+                d="M5.4 6.2h3v2.4h-3zM9.2 6.2h1.9M9.2 8.1h1.9M5.4 10h5"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1"
+                stroke-linecap="round"
+              />
+            </svg>
+            <span>Canvas</span>
+          </button>
+          <button
+            type="button"
+            data-vector-nav-item
+            classList={{ active: props.activeTool === "cloud" }}
+            onClick={props.onCloud}
+          >
+            <svg viewBox="0 0 16 16" class="size-3.5 shrink-0" aria-hidden="true">
+              <path
+                d="M4.4 12.2a2.9 2.9 0 0 1-.3-5.78 3.6 3.6 0 0 1 6.96-1.2 2.7 2.7 0 0 1 .54 5.34"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.15"
+                stroke-linecap="round"
+              />
+              <path
+                d="M8 8v4.3m0 0 1.6-1.6M8 12.3l-1.6-1.6"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.15"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+            <span>Cloud Services</span>
+          </button>
         </section>
 
         <section data-vector-nav-group class="border-t border-[color:var(--vx-line)] px-2 py-3">
           <div data-vector-nav-label>Connections</div>
-          <Show when={!props.workMode}>
-            <button type="button" data-vector-nav-item onClick={props.onScheduled}>
-              <svg viewBox="0 0 16 16" class="size-3.5 shrink-0" aria-hidden="true"><path d="M8 2.55a5.45 5.45 0 1 0 0 10.9 5.45 5.45 0 0 0 0-10.9Zm0 2.6v3.1l2.15 1.25" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" /></svg>
-              <span class="min-w-0 flex-1">Scheduled runs</span>
-              <Show when={props.scheduledCount}><span class="rounded-full bg-[color:var(--vx-purple)]/80 px-1.5 py-0.5 text-[9.5px] font-semibold text-white">{props.scheduledCount}</span></Show>
-            </button>
-          </Show>
+          <button type="button" data-vector-nav-item onClick={props.onScheduled}>
+            <svg viewBox="0 0 16 16" class="size-3.5 shrink-0" aria-hidden="true">
+              <path
+                d="M8 2.55a5.45 5.45 0 1 0 0 10.9 5.45 5.45 0 0 0 0-10.9Zm0 2.6v3.1l2.15 1.25"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+            <span class="min-w-0 flex-1">Scheduled runs</span>
+            <Show when={props.scheduledCount}>
+              <span class="rounded-full bg-[color:var(--vx-purple)]/80 px-1.5 py-0.5 text-[9.5px] font-semibold text-white">
+                {props.scheduledCount}
+              </span>
+            </Show>
+          </button>
           <button type="button" data-vector-nav-item onClick={props.onMcp}>
-            <svg viewBox="0 0 16 16" class="size-3.5 shrink-0" aria-hidden="true"><path d="M3.25 5.25a2 2 0 1 0 0-4 2 2 0 0 0 0 4Zm9.5 0a2 2 0 1 0 0-4 2 2 0 0 0 0 4ZM8 14.75a2 2 0 1 0 0-4 2 2 0 0 0 0 4ZM4.95 4.3l1.8 6.5M11.05 4.3l-1.8 6.5M5.1 3.25h5.8" fill="none" stroke="currentColor" stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round" /></svg>
+            <svg viewBox="0 0 16 16" class="size-3.5 shrink-0" aria-hidden="true">
+              <path
+                d="M3.25 5.25a2 2 0 1 0 0-4 2 2 0 0 0 0 4Zm9.5 0a2 2 0 1 0 0-4 2 2 0 0 0 0 4ZM8 14.75a2 2 0 1 0 0-4 2 2 0 0 0 0 4ZM4.95 4.3l1.8 6.5M11.05 4.3l-1.8 6.5M5.1 3.25h5.8"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.15"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
             <span>MCP</span>
           </button>
           <button type="button" data-vector-nav-item onClick={props.onPlugins}>
-            <svg viewBox="0 0 16 16" class="size-3.5 shrink-0" aria-hidden="true"><path d="M6.1 1.6v2.7M9.9 1.6v2.7M4.6 4.3h6.8v1.7a3.4 3.4 0 0 1-6.8 0V4.3ZM8 9.4v.9c0 1.5-3.2.9-3.2 2.4 0 1.4 2.7 1.6 4.6.9" fill="none" stroke="currentColor" stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round" /></svg>
+            <svg viewBox="0 0 16 16" class="size-3.5 shrink-0" aria-hidden="true">
+              <path
+                d="M6.1 1.6v2.7M9.9 1.6v2.7M4.6 4.3h6.8v1.7a3.4 3.4 0 0 1-6.8 0V4.3ZM8 9.4v.9c0 1.5-3.2.9-3.2 2.4 0 1.4 2.7 1.6 4.6.9"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.15"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
             <span>Plugins</span>
           </button>
-          <Show when={!props.workMode}>
           <button type="button" data-vector-nav-item onClick={props.onGithub}>
             <svg viewBox="0 0 16 16" class="size-3.5 shrink-0" aria-hidden="true">
               <path
@@ -408,11 +565,13 @@ export function WorkspaceNavigation(props: {
             </svg>
             <span>Push to GitLab</span>
           </button>
-          </Show>
         </section>
       </div>
 
-      <div data-vector-nav-footer class="grid min-h-[58px] shrink-0 grid-cols-[1fr_auto] items-center gap-1 border-t border-[color:var(--vx-line)] px-3 py-2">
+      <div
+        data-vector-nav-footer
+        class="grid min-h-[58px] shrink-0 grid-cols-[1fr_auto] items-center gap-1 border-t border-[color:var(--vx-line)] px-3 py-2"
+      >
         <Show
           when={props.updaterState && props.updaterState.status !== "disabled"}
           fallback={<div class="px-2 text-[11px] text-white/28">Updates unavailable</div>}
@@ -432,14 +591,36 @@ export function WorkspaceNavigation(props: {
               classList={{ "animate-spin": props.updaterState?.status === "checking" }}
               aria-hidden="true"
             >
-              <path d="M8 2.4v7.2m0 0 2.45-2.45M8 9.6 5.55 7.15M3 12.65h10" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" />
+              <path
+                d="M8 2.4v7.2m0 0 2.45-2.45M8 9.6 5.55 7.15M3 12.65h10"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.25"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
             </svg>
             <span class="min-w-0 flex-1 truncate font-medium">Update Vector</span>
             <span class="shrink-0 text-[9.5px] text-white/30 group-hover:text-white/48">{updateDetail()}</span>
           </button>
         </Show>
-        <button type="button" class="grid size-8 place-items-center rounded-[5px] text-white/38 transition hover:bg-white/[0.05] hover:text-white" onClick={props.onSettings} title="Settings" aria-label="Settings">
-          <svg viewBox="0 0 16 16" class="size-3.5" aria-hidden="true"><path d="M8 10.35A2.35 2.35 0 1 0 8 5.65a2.35 2.35 0 0 0 0 4.7Zm4.72-1.35a4.8 4.8 0 0 0 0-2l1.2-.92-1.2-2.08-1.42.58a5.1 5.1 0 0 0-1.72-1L9.4 2H6.6l-.18 1.58a5.1 5.1 0 0 0-1.72 1L3.28 4l-1.2 2.08 1.2.92a4.8 4.8 0 0 0 0 2l-1.2.92L3.28 12l1.42-.58a5.1 5.1 0 0 0 1.72 1L6.6 14h2.8l.18-1.58a5.1 5.1 0 0 0 1.72-1l1.42.58 1.2-2.08-1.2-.92Z" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round" /></svg>
+        <button
+          type="button"
+          class="grid size-8 place-items-center rounded-[5px] text-white/38 transition hover:bg-white/[0.05] hover:text-white"
+          onClick={props.onSettings}
+          title="Settings"
+          aria-label="Settings"
+        >
+          <svg viewBox="0 0 16 16" class="size-3.5" aria-hidden="true">
+            <path
+              d="M8 10.35A2.35 2.35 0 1 0 8 5.65a2.35 2.35 0 0 0 0 4.7Zm4.72-1.35a4.8 4.8 0 0 0 0-2l1.2-.92-1.2-2.08-1.42.58a5.1 5.1 0 0 0-1.72-1L9.4 2H6.6l-.18 1.58a5.1 5.1 0 0 0-1.72 1L3.28 4l-1.2 2.08 1.2.92a4.8 4.8 0 0 0 0 2l-1.2.92L3.28 12l1.42-.58a5.1 5.1 0 0 0 1.72 1L6.6 14h2.8l.18-1.58a5.1 5.1 0 0 0 1.72-1l1.42.58 1.2-2.08-1.2-.92Z"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.1"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
         </button>
       </div>
 

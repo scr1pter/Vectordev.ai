@@ -40,38 +40,38 @@ export type TourSlide = {
 export const TOUR_SLIDES: TourSlide[] = [
   {
     route: "/",
-    eyebrow: "One Vector",
-    titlePre: "Choose",
-    titleEm: "how you work.",
-    body: "The Product Hub opens Vector Code for software, Vector Work for projects and tasks, or Vector Cloud for shipping and operating what you build.",
+    eyebrow: "Vector",
+    titlePre: "Direct",
+    titleEm: "your builders.",
+    body: "Vector is one bring-your-own-key agentic workspace. Open a repository, work directly, or give outcomes to one agent or a coordinated team.",
   },
   {
-    route: "/code",
-    eyebrow: "Vector Code",
+    route: "/",
+    eyebrow: "Repository home",
     titlePre: "Code directly.",
     titleEm: "Or delegate.",
     body: "Open a repository, edit it yourself, or give Vector one clear outcome. The agent, editor, terminal, controlled browser, review and isolated workspaces all share that repository.",
   },
   {
-    route: "/work",
-    eyebrow: "Vector Work",
-    titlePre: "Turn outcomes",
-    titleEm: "into tasks.",
-    body: "Create a project, optionally attach a repository, then open tasks with the complete Vector agent workspace. Browser, MCP, plugins, approvals and parallel agents stay attached to each task.",
+    route: "/",
+    eyebrow: "Parallel builders",
+    titlePre: "Split the work.",
+    titleEm: "Keep control.",
+    body: "Launch isolated agents for separate outcomes, watch them work in parallel, then inspect checks and diffs before merging trusted results back into main.",
   },
   {
     route: "/cloud",
-    eyebrow: "Vector Cloud",
-    titlePre: "Choose a project.",
+    eyebrow: "Cloud Services",
+    titlePre: "Choose a repository.",
     titleEm: "Ship it.",
-    body: "Cloud lives outside individual chats. Select any Code repository or Work project to manage deployments, domains, environment variables, databases and runtime health.",
+    body: "Cloud Services lives outside individual chats. Select any repository to manage deployments, domains, environment variables, databases and runtime health.",
   },
   {
     route: "/",
     eyebrow: "Meet Vel",
     titlePre: "Talk through",
     titleEm: "the work.",
-    body: "Call Vel from Project tools inside an active Code session or Work task. Vel listens, answers aloud, and hands requests to that exact session without creating separate hidden work.",
+    body: "Call Vel from Project tools inside an active session. Vel listens, answers aloud, and hands requests to that exact session without creating separate hidden work.",
   },
 ]
 
@@ -111,7 +111,9 @@ export function OnboardingTour(props: {
     <Show when={props.open}>
       <div class="vtour" aria-modal="true" role="dialog" aria-label="Getting started with Vector">
         <AmbientSky />
-        <button type="button" class="vtour-skip" onClick={props.onSkip}>Skip tour</button>
+        <button type="button" class="vtour-skip" onClick={props.onSkip}>
+          Skip tour
+        </button>
         <div class="vtour-count" aria-hidden="true">
           {String(props.step + 1).padStart(2, "0")} / {String(TOUR_SLIDES.length).padStart(2, "0")}
         </div>
@@ -143,7 +145,9 @@ export function OnboardingTour(props: {
                 </div>
                 <div class="vtour-actions">
                   <Show when={props.step > 0}>
-                    <button type="button" class="vtour-back" onClick={() => props.onStep(props.step - 1)}>Back</button>
+                    <button type="button" class="vtour-back" onClick={() => props.onStep(props.step - 1)}>
+                      Back
+                    </button>
                   </Show>
                   <button
                     type="button"
@@ -228,43 +232,44 @@ export const GUIDE_SECTIONS: GuideSection[] = [
     ],
   },
   {
-    kicker: "Vector Cloud",
-    intro: "One project-scoped console for releases, health, domains, environment, data, and build configuration. Find it in the sidebar's Workspace group.",
+    kicker: "Cloud Services",
+    intro:
+      "One repository-scoped console for releases, health, domains, environment, data, and build configuration. Open it from Vector Home or Project tools.",
     entries: [
       {
         title: "Deployments",
-        where: "Vector Cloud → Deployments.",
+        where: "Cloud Services → Deployments.",
         body: "Publish your app to the web in one click. Vector runs the whole deploy on your own Vercel or Netlify account — authorize once (for example, vercel login in the Terminal), and every deploy after that is a single click. Your code is never proxied through Vector: the build runs on your account, and finished deployments are listed with their live URLs. If no publisher is detected, the panel tells you exactly what to install and run.",
         tip: "Deploy early, even half-finished — a live URL makes every change after it feel real.",
       },
       {
         title: "Observability",
-        where: "Vector Cloud → Observability.",
+        where: "Cloud Services → Observability.",
         body: "Check every deployed URL from Vector and see real HTTP status, response time, last-check time, and the exact network failure when a release cannot be reached. Results stay attached to the current project session, so a different app never inherits the wrong health history.",
         tip: "Run Check all immediately after a production release, then inspect any degraded endpoint before sharing the link.",
       },
       {
         title: "Domains",
-        where: "Vector Cloud → Domains.",
+        where: "Cloud Services → Domains.",
         body: "Point a domain you own at the project. Add the domain and Vector shows the exact CNAME record to create at your registrar; click Verify and Vector checks your DNS live. Domains are scoped per project, so each app manages its own list.",
         tip: "DNS changes can take a few minutes to propagate — if verification doesn't pass immediately, wait a little and verify again.",
       },
       {
         title: "Environment variables",
-        where: "Vector Cloud → Environment.",
+        where: "Cloud Services → Environment.",
         body: "Manage the project's configuration as key–value pairs. Add or remove variables in the panel, then apply them and Vector writes them into the project's .env file, where your app — and the code the agent writes — can read them. It's the right home for the API keys and service URLs your app needs at runtime.",
         tip: "Keep secrets out of chat messages — put them here and just tell the agent the variable name.",
       },
       {
         title: "Database",
-        where: "Vector Cloud → Database.",
+        where: "Cloud Services → Database.",
         body: "Connect a Supabase project: paste the URL and keys from Supabase → Settings → API, and Vector writes them to your .env and adds a ready-configured client in src/lib. From then on the agent codes against a real database and auth setup instead of mocks. You may not even need to open this panel yourself — when the agent detects that your task involves accounts, logins, or stored data, a “Set up database” banner appears and offers to wire Supabase in for you.",
         tip: "Connect the database before asking for signup or login features — the agent builds against the real client on the first pass.",
       },
       {
         title: "Build & runtime",
-        where: "Vector Cloud → Build & runtime.",
-        body: "Detect the framework, package manager, install command, build command, output directory, and Node requirement from the actual project. You can correct any value and save it for that project session; Vector Cloud then uses the configured build and output directory when it publishes.",
+        where: "Cloud Services → Build & runtime.",
+        body: "Detect the framework, package manager, install command, build command, output directory, and Node requirement from the actual repository. You can correct any value and save it for that repository; Cloud Services then uses the configured build and output directory when it publishes.",
         tip: "Detect once after opening a project, then verify the output directory before the first publish.",
       },
     ],
@@ -374,16 +379,42 @@ export function OnboardingProgress(props: {
 
   return (
     <Show when={props.open}>
-      <div class="vprogress" onClick={(event) => { if (event.target === event.currentTarget) props.onClose() }}>
+      <div
+        class="vprogress"
+        onClick={(event) => {
+          if (event.target === event.currentTarget) props.onClose()
+        }}
+      >
         <AmbientSky />
         <div class="vprogress-card">
           <button type="button" class="vprogress-close" aria-label="Close getting started" onClick={props.onClose}>
-            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 4.5 7 7M11.5 4.5l-7 7" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" /></svg>
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <path
+                d="m4.5 4.5 7 7M11.5 4.5l-7 7"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.4"
+                stroke-linecap="round"
+              />
+            </svg>
           </button>
-          <div class="vtour-eyebrow"><span class="vtour-eyebrow-dot" />Getting started</div>
+          <div class="vtour-eyebrow">
+            <span class="vtour-eyebrow-dot" />
+            Getting started
+          </div>
           <h1 class="vprogress-title">
-            <Show when={!allDone()} fallback={<>Vector is <em>yours.</em></>}>
-              <em>{doneCount()} of {props.steps.length}</em> first steps
+            <Show
+              when={!allDone()}
+              fallback={
+                <>
+                  Vector is <em>yours.</em>
+                </>
+              }
+            >
+              <em>
+                {doneCount()} of {props.steps.length}
+              </em>{" "}
+              first steps
             </Show>
           </h1>
           <p class="vprogress-sub">
@@ -394,7 +425,10 @@ export function OnboardingProgress(props: {
 
           <div class="vprogress-timeline">
             <div class="vprogress-rail">
-              <div class="vprogress-rail-fill" style={{ height: `${(doneCount() / Math.max(1, props.steps.length)) * 100}%` }} />
+              <div
+                class="vprogress-rail-fill"
+                style={{ height: `${(doneCount() / Math.max(1, props.steps.length)) * 100}%` }}
+              />
             </div>
             <div class="vprogress-steps">
               <For each={props.steps}>
@@ -402,7 +436,16 @@ export function OnboardingProgress(props: {
                   <div class="vprogress-step" data-done={step.done}>
                     <span class="vprogress-node" data-done={step.done}>
                       <Show when={step.done}>
-                        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3.5 8.5 3 3 6-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg>
+                        <svg viewBox="0 0 16 16" aria-hidden="true">
+                          <path
+                            d="m3.5 8.5 3 3 6-7"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                          />
+                        </svg>
                       </Show>
                     </span>
                     <div class="vprogress-copy">
@@ -410,7 +453,9 @@ export function OnboardingProgress(props: {
                       <div class="vprogress-step-detail">{step.detail}</div>
                     </div>
                     <Show when={!step.done}>
-                      <button type="button" class="vprogress-go" onClick={step.onGo}>{step.cta} →</button>
+                      <button type="button" class="vprogress-go" onClick={step.onGo}>
+                        {step.cta} →
+                      </button>
                     </Show>
                   </div>
                 )}
@@ -455,8 +500,12 @@ export function OnboardingProgress(props: {
           </div>
 
           <div class="vprogress-footer">
-            <button type="button" class="vtour-back" onClick={props.onReplayTour}>Replay the tour</button>
-            <button type="button" class="vtour-next" onClick={props.onClose}>{allDone() ? "Done" : "Keep building"}</button>
+            <button type="button" class="vtour-back" onClick={props.onReplayTour}>
+              Replay the tour
+            </button>
+            <button type="button" class="vtour-next" onClick={props.onClose}>
+              {allDone() ? "Done" : "Keep building"}
+            </button>
           </div>
         </div>
       </div>

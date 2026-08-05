@@ -5,12 +5,7 @@ import { app, BrowserWindow, Notification, clipboard, dialog, ipcMain, shell, sy
 import type { IpcMainEvent, IpcMainInvokeEvent } from "electron"
 import type { DesktopMenuAction } from "@opencode-ai/app/desktop-menu"
 
-import type {
-  BrowserAgentInput,
-  FatalRendererError,
-  ServerReadyData,
-  TitlebarTheme,
-} from "../preload/types"
+import type { BrowserAgentInput, FatalRendererError, ServerReadyData, TitlebarTheme } from "../preload/types"
 import { runDesktopMenuAction } from "./desktop-menu-actions"
 import { assertAttachmentBudget, createPickedFileAuthorizations } from "./attachment-picker"
 import { getStore, removeStoreFileIfEmpty } from "./store"
@@ -171,10 +166,7 @@ function assertTrustedRenderer(event: IpcMainEvent | IpcMainInvokeEvent) {
   }
 }
 
-function handle<T extends unknown[], R>(
-  channel: string,
-  listener: (event: IpcMainInvokeEvent, ...args: T) => R,
-) {
+function handle<T extends unknown[], R>(channel: string, listener: (event: IpcMainInvokeEvent, ...args: T) => R) {
   ipcMain.handle(channel, (event, ...args) => {
     assertTrustedRenderer(event)
     return listener(event, ...(args as T))
@@ -197,13 +189,9 @@ export function registerIpcHandlers(deps: Deps) {
   handle("await-initialization", () => deps.awaitInitialization())
   handle("consume-initial-deep-links", () => deps.consumeInitialDeepLinks())
   handle("get-default-server-url", () => deps.getDefaultServerUrl())
-  handle("set-default-server-url", (_event: IpcMainInvokeEvent, url: string | null) =>
-    deps.setDefaultServerUrl(url),
-  )
+  handle("set-default-server-url", (_event: IpcMainInvokeEvent, url: string | null) => deps.setDefaultServerUrl(url))
   handle("get-display-backend", () => deps.getDisplayBackend())
-  handle("set-display-backend", (_event: IpcMainInvokeEvent, backend: string | null) =>
-    deps.setDisplayBackend(backend),
-  )
+  handle("set-display-backend", (_event: IpcMainInvokeEvent, backend: string | null) => deps.setDisplayBackend(backend))
   handle("parse-markdown", (_event: IpcMainInvokeEvent, markdown: string) => deps.parseMarkdown(markdown))
   handle("check-app-exists", (_event: IpcMainInvokeEvent, appName: string) => deps.checkAppExists(appName))
   handle("resolve-app-path", (_event: IpcMainInvokeEvent, appName: string) => deps.resolveAppPath(appName))
@@ -238,9 +226,7 @@ export function registerIpcHandlers(deps: Deps) {
   handle("browser-agent-command", (event: IpcMainInvokeEvent, input: BrowserAgentInput) =>
     runBrowserAgent(event, input),
   )
-  handle("agent-task-prepare", (_event: IpcMainInvokeEvent, root: string, task: string) =>
-    prepareAgentTask(root, task),
-  )
+  handle("agent-task-prepare", (_event: IpcMainInvokeEvent, root: string, task: string) => prepareAgentTask(root, task))
   handle(
     "parallel-workspaces-list",
     (_event: IpcMainInvokeEvent, scope?: { sourcePath?: string; parentSessionId?: string }) =>
@@ -249,9 +235,7 @@ export function registerIpcHandlers(deps: Deps) {
   handle("parallel-workspaces-create", (_event: IpcMainInvokeEvent, input: CreateParallelWorkspaceInput) =>
     createParallelWorkspace(input),
   )
-  handle("parallel-workspaces-refresh", (_event: IpcMainInvokeEvent, id: string) =>
-    refreshParallelWorkspace(id),
-  )
+  handle("parallel-workspaces-refresh", (_event: IpcMainInvokeEvent, id: string) => refreshParallelWorkspace(id))
   handle("parallel-workspaces-run", async (_event: IpcMainInvokeEvent, id: string, concurrency?: number) => {
     const engine = await deps.awaitInitialization()
     return runParallelWorkspace(id, engine, concurrency)
@@ -270,22 +254,13 @@ export function registerIpcHandlers(deps: Deps) {
   )
   handle(
     "parallel-workspaces-merge-selection",
-    (
-      _event: IpcMainInvokeEvent,
-      id: string,
-      selection: { hunkIds?: string[]; files?: string[] },
-      force?: boolean,
-    ) => mergeParallelWorkspaceSelection(id, selection, Boolean(force)),
+    (_event: IpcMainInvokeEvent, id: string, selection: { hunkIds?: string[]; files?: string[] }, force?: boolean) =>
+      mergeParallelWorkspaceSelection(id, selection, Boolean(force)),
   )
-  handle("parallel-workspaces-discard", (_event: IpcMainInvokeEvent, id: string) =>
-    discardParallelWorkspace(id),
-  )
-  handle("parallel-workspaces-remove", (_event: IpcMainInvokeEvent, id: string) =>
-    removeParallelWorkspaceRecord(id),
-  )
-  handle(
-    "swarm-runs-list",
-    (_event: IpcMainInvokeEvent, scope?: { sourcePath?: string; parentSessionId?: string }) => listSwarmRuns(scope),
+  handle("parallel-workspaces-discard", (_event: IpcMainInvokeEvent, id: string) => discardParallelWorkspace(id))
+  handle("parallel-workspaces-remove", (_event: IpcMainInvokeEvent, id: string) => removeParallelWorkspaceRecord(id))
+  handle("swarm-runs-list", (_event: IpcMainInvokeEvent, scope?: { sourcePath?: string; parentSessionId?: string }) =>
+    listSwarmRuns(scope),
   )
   handle("swarm-runs-create", async (_event: IpcMainInvokeEvent, input: CreateSwarmRunInput) => {
     const engine = await deps.awaitInitialization()
@@ -301,12 +276,8 @@ export function registerIpcHandlers(deps: Deps) {
   )
   handle(
     "swarm-runs-merge-selection",
-    (
-      _event: IpcMainInvokeEvent,
-      id: string,
-      selection: { hunkIds?: string[]; files?: string[] },
-      force?: boolean,
-    ) => mergeSwarmRunSelection(id, selection, Boolean(force)),
+    (_event: IpcMainInvokeEvent, id: string, selection: { hunkIds?: string[]; files?: string[] }, force?: boolean) =>
+      mergeSwarmRunSelection(id, selection, Boolean(force)),
   )
   handle("swarm-runs-discard", (_event: IpcMainInvokeEvent, id: string) => discardSwarmRun(id))
   initScheduledAgents(() => deps.awaitInitialization())
@@ -321,12 +292,8 @@ export function registerIpcHandlers(deps: Deps) {
   handle("scheduled-agents-cancel", (_event: IpcMainInvokeEvent, id: string) => cancelScheduledAgent(id))
   handle("scheduled-agents-remove", (_event: IpcMainInvokeEvent, id: string) => removeScheduledAgent(id))
   handle("publish-targets", () => detectPublishTargets())
-  handle(
-    "publish-project",
-    (
-      event: IpcMainInvokeEvent,
-      input: PublishProjectInput,
-    ) => publishProject(input, (progress) => {
+  handle("publish-project", (event: IpcMainInvokeEvent, input: PublishProjectInput) =>
+    publishProject(input, (progress) => {
       if (!event.sender.isDestroyed()) event.sender.send("cloud-publish-progress", progress)
     }),
   )
@@ -339,12 +306,8 @@ export function registerIpcHandlers(deps: Deps) {
   handle("github-auth-cancel", () => cancelDeviceLogin())
   handle("github-auth-logout", () => logoutGithub())
   handle("github-repos-list", () => listRepos())
-  handle("github-repos-create", (_event: IpcMainInvokeEvent, input: GithubCreateRepoInput) =>
-    createRepo(input),
-  )
-  handle("github-push-oauth", (_event: IpcMainInvokeEvent, input: GithubOauthPushInput) =>
-    pushWithOauth(input),
-  )
+  handle("github-repos-create", (_event: IpcMainInvokeEvent, input: GithubCreateRepoInput) => createRepo(input))
+  handle("github-push-oauth", (_event: IpcMainInvokeEvent, input: GithubOauthPushInput) => pushWithOauth(input))
   handle("gitlab-auth-status", () => getGitlabAuthStatus())
   handle("gitlab-auth-start", () => startGitlabLogin())
   handle("gitlab-auth-open-verification", () => openGitlabVerification())
@@ -352,16 +315,10 @@ export function registerIpcHandlers(deps: Deps) {
   handle("gitlab-auth-cancel", () => cancelGitlabLogin())
   handle("gitlab-auth-logout", () => logoutGitlab())
   handle("gitlab-repos-list", () => listGitlabRepos())
-  handle("gitlab-repos-create", (_event: IpcMainInvokeEvent, input: GitlabCreateRepoInput) =>
-    createGitlabRepo(input),
-  )
-  handle("gitlab-push-oauth", (_event: IpcMainInvokeEvent, input: GitlabOauthPushInput) =>
-    pushToGitlab(input),
-  )
+  handle("gitlab-repos-create", (_event: IpcMainInvokeEvent, input: GitlabCreateRepoInput) => createGitlabRepo(input))
+  handle("gitlab-push-oauth", (_event: IpcMainInvokeEvent, input: GitlabOauthPushInput) => pushToGitlab(input))
   handle("external-agents-detect", () => detectExternalAgents())
-  handle("external-agents-open-editor", (_event: IpcMainInvokeEvent, input: OpenInEditorInput) =>
-    openInEditor(input),
-  )
+  handle("external-agents-open-editor", (_event: IpcMainInvokeEvent, input: OpenInEditorInput) => openInEditor(input))
   handle("external-agents-prepare-workspace", (_event: IpcMainInvokeEvent, projectPath: string) =>
     prepareWorkspace(projectPath),
   )
@@ -375,10 +332,8 @@ export function registerIpcHandlers(deps: Deps) {
   handle("cloud-provider-resources-list", (_event: IpcMainInvokeEvent, provider: CloudProviderId) =>
     listCloudProviderResources(provider),
   )
-  handle(
-    "cloud-provider-links-list",
-    (_event: IpcMainInvokeEvent, projectPath: string, taskId?: string) =>
-      listCloudProviderProjectLinks(projectPath, taskId),
+  handle("cloud-provider-links-list", (_event: IpcMainInvokeEvent, projectPath: string, taskId?: string) =>
+    listCloudProviderProjectLinks(projectPath, taskId),
   )
   handle(
     "cloud-provider-links-set",
@@ -392,21 +347,13 @@ export function registerIpcHandlers(deps: Deps) {
   )
   handle(
     "cloud-provider-links-remove",
-    (
-      _event: IpcMainInvokeEvent,
-      projectPath: string,
-      taskId: string | undefined,
-      provider: "vercel" | "netlify",
-    ) => unlinkCloudProviderProject(projectPath, taskId, provider),
+    (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, provider: "vercel" | "netlify") =>
+      unlinkCloudProviderProject(projectPath, taskId, provider),
   )
   handle(
     "cloud-provider-env-sync",
-    (
-      _event: IpcMainInvokeEvent,
-      projectPath: string,
-      taskId: string | undefined,
-      provider: "vercel" | "netlify",
-    ) => syncCloudProviderEnvironment(projectPath, taskId, provider),
+    (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, provider: "vercel" | "netlify") =>
+      syncCloudProviderEnvironment(projectPath, taskId, provider),
   )
   handle(
     "cloud-provider-domains-add",
@@ -430,58 +377,86 @@ export function registerIpcHandlers(deps: Deps) {
   )
   handle(
     "cloud-supabase-project-connect",
-    (
-      _event: IpcMainInvokeEvent,
-      projectPath: string,
-      taskId: string | undefined,
-      projectRef: string,
-    ) => connectSupabaseProject(projectPath, taskId, projectRef),
+    (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, projectRef: string) =>
+      connectSupabaseProject(projectPath, taskId, projectRef),
   )
   handle("cloud-deployments-list", (_event: IpcMainInvokeEvent, projectPath: string, taskId?: string) =>
     listDeployments(projectPath, taskId),
   )
-  handle("cloud-deployments-remove", (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, id: string) =>
-    removeDeployment(projectPath, taskId, id),
+  handle(
+    "cloud-deployments-remove",
+    (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, id: string) =>
+      removeDeployment(projectPath, taskId, id),
   )
-  handle("cloud-deployments-check", (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, id: string) =>
-    checkDeployment(projectPath, taskId, id),
+  handle(
+    "cloud-deployments-check",
+    (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, id: string) =>
+      checkDeployment(projectPath, taskId, id),
   )
   handle("cloud-deployments-check-all", (_event: IpcMainInvokeEvent, projectPath: string, taskId?: string) =>
     checkAllDeployments(projectPath, taskId),
   )
-  handle("cloud-deployments-promote", (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, id: string) =>
-    promoteDeployment({ projectPath, taskId, id }),
+  handle(
+    "cloud-deployments-promote",
+    (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, id: string) =>
+      promoteDeployment({ projectPath, taskId, id }),
   )
-  handle("cloud-deployments-rollback", (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, id: string) =>
-    rollbackDeployment({ projectPath, taskId, id }),
+  handle(
+    "cloud-deployments-rollback",
+    (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, id: string) =>
+      rollbackDeployment({ projectPath, taskId, id }),
   )
-  handle("cloud-deployments-logs", (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, id: string) =>
-    fetchDeploymentRuntimeLogs({ projectPath, taskId, id }),
+  handle(
+    "cloud-deployments-logs",
+    (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, id: string) =>
+      fetchDeploymentRuntimeLogs({ projectPath, taskId, id }),
   )
-  handle("cloud-deployments-rerun-checks", (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, id: string) =>
-    rerunDeploymentChecks({ projectPath, taskId, id }),
+  handle(
+    "cloud-deployments-rerun-checks",
+    (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, id: string) =>
+      rerunDeploymentChecks({ projectPath, taskId, id }),
   )
-  handle("cloud-env-list", (_event: IpcMainInvokeEvent, projectPath: string, taskId?: string) => listEnv(projectPath, taskId))
-  handle("cloud-env-set", (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, key: string, value: string) =>
-    setEnv(projectPath, taskId, key, value),
+  handle("cloud-env-list", (_event: IpcMainInvokeEvent, projectPath: string, taskId?: string) =>
+    listEnv(projectPath, taskId),
   )
-  handle("cloud-env-remove", (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, key: string) =>
-    removeEnv(projectPath, taskId, key),
+  handle(
+    "cloud-env-set",
+    (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, key: string, value: string) =>
+      setEnv(projectPath, taskId, key, value),
   )
-  handle("cloud-env-apply", (_event: IpcMainInvokeEvent, projectPath: string, taskId?: string) => applyEnv(projectPath, taskId))
-  handle("cloud-domains-list", (_event: IpcMainInvokeEvent, projectPath: string, taskId?: string) => listDomains(projectPath, taskId))
+  handle(
+    "cloud-env-remove",
+    (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, key: string) =>
+      removeEnv(projectPath, taskId, key),
+  )
+  handle("cloud-env-apply", (_event: IpcMainInvokeEvent, projectPath: string, taskId?: string) =>
+    applyEnv(projectPath, taskId),
+  )
+  handle("cloud-domains-list", (_event: IpcMainInvokeEvent, projectPath: string, taskId?: string) =>
+    listDomains(projectPath, taskId),
+  )
   handle(
     "cloud-domains-add",
-    (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, input: { domain: string; slug?: string }) =>
-      addDomain(projectPath, taskId, input),
+    (
+      _event: IpcMainInvokeEvent,
+      projectPath: string,
+      taskId: string | undefined,
+      input: { domain: string; slug?: string },
+    ) => addDomain(projectPath, taskId, input),
   )
-  handle("cloud-domains-verify", (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, id: string) =>
-    verifyDomain(projectPath, taskId, id),
+  handle(
+    "cloud-domains-verify",
+    (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, id: string) =>
+      verifyDomain(projectPath, taskId, id),
   )
-  handle("cloud-domains-remove", (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, id: string) =>
-    removeDomain(projectPath, taskId, id),
+  handle(
+    "cloud-domains-remove",
+    (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, id: string) =>
+      removeDomain(projectPath, taskId, id),
   )
-  handle("cloud-db-get", (_event: IpcMainInvokeEvent, projectPath: string, taskId?: string) => getDatabase(projectPath, taskId))
+  handle("cloud-db-get", (_event: IpcMainInvokeEvent, projectPath: string, taskId?: string) =>
+    getDatabase(projectPath, taskId),
+  )
   handle(
     "cloud-db-connect",
     (
@@ -513,8 +488,10 @@ export function registerIpcHandlers(deps: Deps) {
     listBackgroundTasks(scope),
   )
   handle("background-tasks-cancel", (_event: IpcMainInvokeEvent, id: string) => cancelBackgroundTask(id))
-  handle("background-tasks-clear-completed", (_event: IpcMainInvokeEvent, scope?: { projectPath?: string; taskId?: string }) =>
-    clearCompletedBackgroundTasks(scope),
+  handle(
+    "background-tasks-clear-completed",
+    (_event: IpcMainInvokeEvent, scope?: { projectPath?: string; taskId?: string }) =>
+      clearCompletedBackgroundTasks(scope),
   )
   handle("export-debug-logs", () => deps.exportDebugLogs())
   handle("record-fatal-renderer-error", (_event: IpcMainInvokeEvent, error: FatalRendererError) =>
@@ -548,18 +525,6 @@ export function registerIpcHandlers(deps: Deps) {
   handle("store-length", (_event: IpcMainInvokeEvent, name: string) => {
     const store = getStore(name)
     return Object.keys(store.store).length
-  })
-  handle("work-project-ensure-directory", async (_event: IpcMainInvokeEvent, projectId: string, name: string) => {
-    const safeID = projectId.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 80)
-    if (!safeID) throw new Error("Vector could not create this Work project.")
-    const safeName = name
-      .trim()
-      .replace(/[^a-zA-Z0-9._-]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, 64) || "project"
-    const directory = join(app.getPath("userData"), "work-projects", `${safeName}-${safeID.slice(0, 8)}`)
-    await mkdir(directory, { recursive: true })
-    return directory
   })
   handle("voice-speak", (event: IpcMainInvokeEvent, text: string) => {
     const ownerID = event.sender.id
@@ -621,17 +586,14 @@ export function registerIpcHandlers(deps: Deps) {
     pickedFiles.release(event.sender.id, token)
   })
 
-  handle(
-    "save-file-picker",
-    async (_event: IpcMainInvokeEvent, opts?: { title?: string; defaultPath?: string }) => {
-      const result = await dialog.showSaveDialog({
-        title: opts?.title ?? "Save file",
-        defaultPath: opts?.defaultPath,
-      })
-      if (result.canceled) return null
-      return result.filePath ?? null
-    },
-  )
+  handle("save-file-picker", async (_event: IpcMainInvokeEvent, opts?: { title?: string; defaultPath?: string }) => {
+    const result = await dialog.showSaveDialog({
+      title: opts?.title ?? "Save file",
+      defaultPath: opts?.defaultPath,
+    })
+    if (result.canceled) return null
+    return result.filePath ?? null
+  })
 
   on("open-link", (_event: IpcMainEvent, url: string) => {
     const external = safeExternalUrl(url)

@@ -519,9 +519,6 @@ export type ElectronAPI = {
   storeClear: (name: string) => Promise<void>
   storeKeys: (name: string) => Promise<string[]>
   storeLength: (name: string) => Promise<number>
-  workProjects: {
-    ensureDirectory: (projectId: string, name: string) => Promise<string>
-  }
   voice: {
     speak: (text: string) => Promise<VoiceSpeechResult>
     stop: () => Promise<void>
@@ -569,41 +566,37 @@ export type ElectronAPI = {
   runBrowserAgent: (input: BrowserAgentInput) => Promise<BrowserAutomationRun>
   prepareAgentTask: (root: string, task: string) => Promise<AgentTaskPreparation>
   onBrowserAgentPageEvent: (cb: (event: BrowserAgentPageEvent) => void) => () => void
-	  parallelWorkspaces: {
-	    list: (scope?: { sourcePath?: string; parentSessionId?: string }) => Promise<ParallelWorkspaceRecord[]>
-	    create: (input: CreateParallelWorkspaceInput) => Promise<ParallelWorkspaceRecord>
-	    refresh: (id: string) => Promise<ParallelWorkspaceRecord>
-	    run: (id: string, concurrency?: number) => Promise<ParallelWorkspaceRecord>
-	    stop: (id: string) => Promise<ParallelWorkspaceRecord>
-	    merge: (id: string, force?: boolean, commit?: { message: string }) => Promise<ParallelWorkspaceRecord>
-	    mainDiff: (sourcePath: string) => Promise<string>
-	    pullRequest: (id: string) => Promise<ParallelWorkspaceRecord>
-	    mergeSelection: (
-	      id: string,
-	      selection: ParallelWorkspaceMergeSelection,
-	      force?: boolean,
-	    ) => Promise<ParallelWorkspaceRecord>
-	    discard: (id: string) => Promise<ParallelWorkspaceRecord>
-	    remove: (id: string) => Promise<ParallelWorkspaceRecord[]>
-	  }
-	  swarmOrchestrator: {
-	    list: (scope?: { sourcePath?: string; parentSessionId?: string }) => Promise<SwarmRunRecord[]>
-	    create: (input: CreateSwarmRunInput) => Promise<SwarmRunRecord>
-	    resume: (id: string) => Promise<SwarmRunRecord>
-	    stop: (id: string) => Promise<SwarmRunRecord>
-	    merge: (id: string, force?: boolean) => Promise<SwarmRunRecord>
-	    mergeSelection: (
-	      id: string,
-	      selection: ParallelWorkspaceMergeSelection,
-	      force?: boolean,
-	    ) => Promise<SwarmRunRecord>
-	    discard: (id: string) => Promise<SwarmRunRecord>
-	  }
-	  backgroundTasks: {
-	    list: (scope?: { projectPath?: string; taskId?: string }) => Promise<BackgroundTaskRecord[]>
-	    cancel: (id: string) => Promise<BackgroundTaskRecord>
-	    clearCompleted: (scope?: { projectPath?: string; taskId?: string }) => Promise<BackgroundTaskRecord[]>
-	  }
+  parallelWorkspaces: {
+    list: (scope?: { sourcePath?: string; parentSessionId?: string }) => Promise<ParallelWorkspaceRecord[]>
+    create: (input: CreateParallelWorkspaceInput) => Promise<ParallelWorkspaceRecord>
+    refresh: (id: string) => Promise<ParallelWorkspaceRecord>
+    run: (id: string, concurrency?: number) => Promise<ParallelWorkspaceRecord>
+    stop: (id: string) => Promise<ParallelWorkspaceRecord>
+    merge: (id: string, force?: boolean, commit?: { message: string }) => Promise<ParallelWorkspaceRecord>
+    mainDiff: (sourcePath: string) => Promise<string>
+    pullRequest: (id: string) => Promise<ParallelWorkspaceRecord>
+    mergeSelection: (
+      id: string,
+      selection: ParallelWorkspaceMergeSelection,
+      force?: boolean,
+    ) => Promise<ParallelWorkspaceRecord>
+    discard: (id: string) => Promise<ParallelWorkspaceRecord>
+    remove: (id: string) => Promise<ParallelWorkspaceRecord[]>
+  }
+  swarmOrchestrator: {
+    list: (scope?: { sourcePath?: string; parentSessionId?: string }) => Promise<SwarmRunRecord[]>
+    create: (input: CreateSwarmRunInput) => Promise<SwarmRunRecord>
+    resume: (id: string) => Promise<SwarmRunRecord>
+    stop: (id: string) => Promise<SwarmRunRecord>
+    merge: (id: string, force?: boolean) => Promise<SwarmRunRecord>
+    mergeSelection: (id: string, selection: ParallelWorkspaceMergeSelection, force?: boolean) => Promise<SwarmRunRecord>
+    discard: (id: string) => Promise<SwarmRunRecord>
+  }
+  backgroundTasks: {
+    list: (scope?: { projectPath?: string; taskId?: string }) => Promise<BackgroundTaskRecord[]>
+    cancel: (id: string) => Promise<BackgroundTaskRecord>
+    clearCompleted: (scope?: { projectPath?: string; taskId?: string }) => Promise<BackgroundTaskRecord[]>
+  }
   publish: {
     targets: () => Promise<PublishTarget[]>
     run: (input: PublishProjectInput) => Promise<PublishResult>
@@ -640,16 +633,8 @@ export type ElectronAPI = {
         provider: "vercel" | "netlify",
         domain: string,
       ) => Promise<CloudDomain>
-      verifyDomain: (
-        projectPath: string,
-        taskId: string | undefined,
-        id: string,
-      ) => Promise<CloudDomain>
-      removeDomain: (
-        projectPath: string,
-        taskId: string | undefined,
-        id: string,
-      ) => Promise<CloudDomain[]>
+      verifyDomain: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudDomain>
+      removeDomain: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudDomain[]>
     }
     deployments: {
       list: (projectPath: string, taskId?: string) => Promise<CloudDeployment[]>
@@ -669,7 +654,11 @@ export type ElectronAPI = {
     }
     domains: {
       list: (projectPath: string, taskId?: string) => Promise<CloudDomain[]>
-      add: (projectPath: string, taskId: string | undefined, input: { domain: string; slug?: string }) => Promise<CloudDomain>
+      add: (
+        projectPath: string,
+        taskId: string | undefined,
+        input: { domain: string; slug?: string },
+      ) => Promise<CloudDomain>
       verify: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudDomain>
       remove: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudDomain[]>
     }
@@ -747,6 +736,6 @@ export type ElectronAPI = {
     openInEditor: (input: OpenInEditorInput) => Promise<OpenInEditorResult>
     prepareWorkspace: (projectPath: string) => Promise<PrepareWorkspaceResult>
   }
-	  exportDebugLogs: () => Promise<string>
+  exportDebugLogs: () => Promise<string>
   recordFatalRendererError: (error: FatalRendererError) => Promise<void>
 }

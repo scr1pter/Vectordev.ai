@@ -3,6 +3,7 @@ import { createRoot, createSignal } from "solid-js"
 import { createStore } from "solid-js/store"
 import {
   createServerProjects,
+  isInternalProjectPath,
   isManagedAgentWorkspacePath,
   migrateCanonicalLocalServerState,
   nextServerAfterRemoval,
@@ -11,7 +12,6 @@ import {
   ServerConnection,
 } from "./server"
 import { ServerScope } from "@/utils/server-scope"
-import { saveWorkProject } from "@/features/work/work-store"
 
 describe("resolveServerList", () => {
   test("lets startup auth_token credentials override a persisted same-url server", () => {
@@ -135,38 +135,36 @@ describe("createServerProjects", () => {
     })
   })
 
-  test("keeps Vector Work projects out of the Code repository list", () => {
-    localStorage.clear()
-    saveWorkProject({
-      id: "project-work",
-      name: "Launch plan",
-      description: "Coordinate launch work",
-      workspacePath: "/tmp/vector-work-launch",
-      createdAt: "2026-08-04T12:00:00.000Z",
-      updatedAt: "2026-08-04T12:00:00.000Z",
-    })
+  test("keeps retired managed folders out of the repository list", () => {
     createRoot((dispose) => {
       const [scope] = createSignal(ServerScope.local)
       const [store, setStore] = createStore({ projects: {}, lastProject: {} })
       const projects = createServerProjects({ scope, store, setStore })
+      const retired = "/Users/me/Library/Application Support/Vector/work-projects/launch-project-ab12"
 
-      projects.open("/tmp/vector-work-launch")
-      projects.touch("/tmp/vector-work-launch")
+      projects.open(retired)
+      projects.touch(retired)
 
       expect(projects.list()).toEqual([])
       expect(projects.last()).toBeUndefined()
       dispose()
     })
-    localStorage.clear()
+  })
+})
+
+describe("isInternalProjectPath", () => {
+  test("recognizes retired managed project folders", () => {
+    expect(
+      isInternalProjectPath("/Users/me/Library/Application Support/Vector/work-projects/launch-project-ab12"),
+    ).toBe(true)
+    expect(isInternalProjectPath("/Users/me/code/launch-project")).toBe(false)
   })
 })
 
 describe("isManagedAgentWorkspacePath", () => {
   test("recognizes Vector-managed worktrees on every desktop platform", () => {
     expect(
-      isManagedAgentWorkspacePath(
-        "/tmp/parallel-workspace-runs/123e4567-e89b-12d3-a456-426614174000/workspace",
-      ),
+      isManagedAgentWorkspacePath("/tmp/parallel-workspace-runs/123e4567-e89b-12d3-a456-426614174000/workspace"),
     ).toBe(true)
     expect(
       isManagedAgentWorkspacePath(

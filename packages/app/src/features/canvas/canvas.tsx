@@ -1228,15 +1228,14 @@ function CloudWindow(props: {
       <Show
         when={directory()}
         keyed
-        fallback={<p class="vcanvas-surface-state">{directory.loading ? "Opening Vector Cloud…" : "Open a project to use Vector Cloud."}</p>}
+        fallback={
+          <p class="vcanvas-surface-state">
+            {directory.loading ? "Opening Cloud Services…" : "Open a repository to use Cloud Services."}
+          </p>
+        }
       >
         {(projectPath) => (
-          <CloudConsole
-            projectPath={projectPath}
-            taskId={props.taskId?.()}
-            onClose={props.onClose}
-            embedded
-          />
+          <CloudConsole projectPath={projectPath} taskId={props.taskId?.()} onClose={props.onClose} embedded />
         )}
       </Show>
     </div>
@@ -1255,7 +1254,11 @@ function CodespaceWindow(props: {
       <Show
         when={directory() && mount() ? { directory: directory()!, mount: mount()! } : undefined}
         keyed
-        fallback={<p class="vcanvas-surface-state">{directory.loading ? "Opening the code editor…" : "Open a project to edit its files."}</p>}
+        fallback={
+          <p class="vcanvas-surface-state">
+            {directory.loading ? "Opening the code editor…" : "Open a project to edit its files."}
+          </p>
+        }
       >
         {(ready) => (
           <SDKProvider directory={ready.directory}>
@@ -1299,11 +1302,16 @@ function CanvasTerminalRun() {
         ptyID = id
         setPty({ id, title: result.data?.title ?? "Canvas Terminal", titleNumber: 0 })
       })
-      .catch((reason) => setError(reason instanceof Error ? reason.message : "Vector could not start the project terminal."))
+      .catch((reason) =>
+        setError(reason instanceof Error ? reason.message : "Vector could not start the project terminal."),
+      )
   })
 
   onCleanup(() => {
-    if (ptyID) void sdk().client.pty.remove({ ptyID }).catch(() => undefined)
+    if (ptyID)
+      void sdk()
+        .client.pty.remove({ ptyID })
+        .catch(() => undefined)
   })
 
   return (
@@ -1320,7 +1328,11 @@ function CanvasTerminalWindow(props: { resolveProjectPath: () => Promise<string>
       <Show
         when={directory()}
         keyed
-        fallback={<p class="vcanvas-surface-state">{directory.loading ? "Connecting terminal…" : "Open a project to start a terminal."}</p>}
+        fallback={
+          <p class="vcanvas-surface-state">
+            {directory.loading ? "Connecting terminal…" : "Open a project to start a terminal."}
+          </p>
+        }
       >
         {(projectPath) => (
           <SDKProvider directory={projectPath}>
@@ -1466,7 +1478,9 @@ function ScheduledAgentsWindow(props: {
         setRunAt("")
         return refresh()
       })
-      .catch((reason) => showToast({ variant: "error", title: "Could not schedule agent", description: String(reason) }))
+      .catch((reason) =>
+        showToast({ variant: "error", title: "Could not schedule agent", description: String(reason) }),
+      )
       .finally(() => setBusy(false))
   }
 
@@ -1486,7 +1500,10 @@ function ScheduledAgentsWindow(props: {
           </button>
         </div>
       </form>
-      <Show when={api()} fallback={<p class="vcanvas-surface-state">Scheduled agents are available in the Vector desktop app.</p>}>
+      <Show
+        when={api()}
+        fallback={<p class="vcanvas-surface-state">Scheduled agents are available in the Vector desktop app.</p>}
+      >
         <div class="vcanvas-manager-list">
           <For each={records()} fallback={<p class="vcanvas-surface-state">No agents are scheduled for this task.</p>}>
             {(record) => (
@@ -1515,10 +1532,7 @@ type CanvasMcpStatus = {
   error?: string
 }
 
-function McpWindow(props: {
-  serverSDK: ReturnType<typeof useServerSDK>
-  resolveProjectPath: () => Promise<string>
-}) {
+function McpWindow(props: { serverSDK: ReturnType<typeof useServerSDK>; resolveProjectPath: () => Promise<string> }) {
   const [items, setItems] = createSignal<Array<{ name: string; value: CanvasMcpStatus }>>([])
   const [busy, setBusy] = createSignal("")
 
@@ -1539,7 +1553,9 @@ function McpWindow(props: {
   const toggle = async (item: { name: string; value: CanvasMcpStatus }) => {
     setBusy(item.name)
     const sdk = await client()
-    await (item.value.status === "disabled" ? sdk.mcp.connect({ name: item.name }) : sdk.mcp.disconnect({ name: item.name }))
+    await (
+      item.value.status === "disabled" ? sdk.mcp.connect({ name: item.name }) : sdk.mcp.disconnect({ name: item.name })
+    )
       .then(refresh)
       .catch((reason) => showToast({ variant: "error", title: "MCP connection failed", description: String(reason) }))
       .finally(() => setBusy(""))
@@ -1557,7 +1573,10 @@ function McpWindow(props: {
         </button>
       </div>
       <div class="vcanvas-manager-list">
-        <For each={items()} fallback={<p class="vcanvas-surface-state">No MCP servers are configured for this project.</p>}>
+        <For
+          each={items()}
+          fallback={<p class="vcanvas-surface-state">No MCP servers are configured for this project.</p>}
+        >
           {(item) => (
             <article>
               <div>
@@ -1662,9 +1681,12 @@ function ParallelAgentsWindow(props: {
   const act = async (id: string, action: "stop" | "merge" | "discard") => {
     if (!api()) return
     setBusy(id)
-    await api()![action](id)
+    await api()!
+      [action](id)
       .then(refresh)
-      .catch((reason) => showToast({ variant: "error", title: `Could not ${action} agent`, description: String(reason) }))
+      .catch((reason) =>
+        showToast({ variant: "error", title: `Could not ${action} agent`, description: String(reason) }),
+      )
       .finally(() => setBusy(""))
   }
 
@@ -1684,9 +1706,15 @@ function ParallelAgentsWindow(props: {
           </button>
         </div>
       </form>
-      <Show when={api()} fallback={<p class="vcanvas-surface-state">Isolated agents are available in the Vector desktop app.</p>}>
+      <Show
+        when={api()}
+        fallback={<p class="vcanvas-surface-state">Isolated agents are available in the Vector desktop app.</p>}
+      >
         <div class="vcanvas-manager-list">
-          <For each={records()} fallback={<p class="vcanvas-surface-state">No isolated agents are running for this task.</p>}>
+          <For
+            each={records()}
+            fallback={<p class="vcanvas-surface-state">No isolated agents are running for this task.</p>}
+          >
             {(record) => (
               <article>
                 <div>
@@ -1704,7 +1732,11 @@ function ParallelAgentsWindow(props: {
                     <button type="button" disabled={busy() === record.id} onClick={() => void act(record.id, "merge")}>
                       Merge
                     </button>
-                    <button type="button" disabled={busy() === record.id} onClick={() => void act(record.id, "discard")}>
+                    <button
+                      type="button"
+                      disabled={busy() === record.id}
+                      onClick={() => void act(record.id, "discard")}
+                    >
                       Discard
                     </button>
                   </Show>

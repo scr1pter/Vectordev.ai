@@ -61,8 +61,6 @@ import { legacySessionServer, requireServerKey, sessionHref } from "./utils/sess
 
 import { SessionPage, TargetSessionRouteContent } from "@/pages/session"
 import { NewHome } from "@/pages/home"
-import { ProductHome } from "@/pages/product-home"
-import { WorkHome } from "@/features/work/work-home"
 import { CloudHome } from "@/features/cloud/cloud-home"
 
 const NewSession = lazy(() => import("@/pages/new-session"))
@@ -287,7 +285,17 @@ type SwarmTaskRecord = {
   fileHints: string[]
   provider: string
   model: string
-  status: "planned" | "blocked" | "creating" | "queued" | "running" | "merging" | "complete" | "failed" | "canceled" | "interrupted"
+  status:
+    | "planned"
+    | "blocked"
+    | "creating"
+    | "queued"
+    | "running"
+    | "merging"
+    | "complete"
+    | "failed"
+    | "canceled"
+    | "interrupted"
   workspaceId?: string
   startedAt?: string
   completedAt?: string
@@ -312,7 +320,16 @@ type SwarmRunRecord = {
   plannerModel: string
   plannerSessionId?: string
   coordinatorWorkspaceId?: string
-  status: "planning" | "running" | "needs review" | "complete" | "failed" | "canceled" | "interrupted" | "merged" | "discarded"
+  status:
+    | "planning"
+    | "running"
+    | "needs review"
+    | "complete"
+    | "failed"
+    | "canceled"
+    | "interrupted"
+    | "merged"
+    | "discarded"
   currentStep: string
   progress: number
   planSummary: string
@@ -338,9 +355,7 @@ declare global {
       openLink?: (url: string) => void
       exportDebugLogs?: () => Promise<string>
       getMicrophonePermission?: () => Promise<"not-determined" | "granted" | "denied" | "restricted" | "unknown">
-      requestMicrophonePermission?: () => Promise<
-        "not-determined" | "granted" | "denied" | "restricted" | "unknown"
-      >
+      requestMicrophonePermission?: () => Promise<"not-determined" | "granted" | "denied" | "restricted" | "unknown">
       runBrowserAgent?: (
         input: import("@/features/browser-agent/types").BrowserAgentInput,
       ) => Promise<import("@/features/browser-agent/types").BrowserAutomationRun>
@@ -352,9 +367,6 @@ declare global {
         cb: (event: import("@/features/browser-agent/types").BrowserAgentPageEvent) => void,
       ) => () => void
       onZoomFactorChanged?: (cb: (factor: number) => void) => () => void
-      workProjects?: {
-        ensureDirectory: (projectId: string, name: string) => Promise<string>
-      }
       voice?: {
         speak: (text: string) => Promise<{
           status: "spoken" | "unavailable" | "stopped" | "failed"
@@ -705,9 +717,7 @@ export function AppInterface(props: {
   onMount(() => {
     if (!globalThis.window?.api) return
     const warm = () =>
-      void import("@/services/local-transcription")
-        .then((mod) => mod.warmupLocalTranscription())
-        .catch(() => undefined)
+      void import("@/services/local-transcription").then((mod) => mod.warmupLocalTranscription()).catch(() => undefined)
     if (typeof globalThis.requestIdleCallback === "function") globalThis.requestIdleCallback(warm, { timeout: 5000 })
     else setTimeout(warm, 2500)
   })
@@ -773,18 +783,15 @@ function Routes() {
         </Route>
       </Route>
       <Show when={settings.general.newLayoutDesigns()}>
-        <Route path="/" component={ProductHome} />
-        <Route path="/code" component={NewHome} />
-        <Route path="/work" component={WorkHome} />
+        <Route path="/" component={NewHome} />
+        <Route path="/code" component={() => <Navigate href="/" />} />
+        <Route path="/work" component={() => <Navigate href="/" />} />
         <Route path="/cloud" component={CloudHome} />
         <Route path="/canvas" component={() => null} />
         <Route path="/parallel-workspaces" component={() => null} />
         <Route path="/parallel-workspaces/swarm/:swarmId" component={() => null} />
         <Route path="/parallel-workspaces/:workspaceId" component={() => null} />
-        <Route
-          path="/parallel-workspaces/:workspaceId/server/:serverKey/session/:id"
-          component={TargetSessionRoute}
-        />
+        <Route path="/parallel-workspaces/:workspaceId/server/:serverKey/session/:id" component={TargetSessionRoute} />
         <Route path="/:dir/session/:id" component={LegacyTargetSessionRoute} />
       </Show>
       <Route path="/new-session" component={DraftRoute} />

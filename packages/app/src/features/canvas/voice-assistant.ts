@@ -112,7 +112,11 @@ type AssistantSessionClient = {
 function extractText(value: unknown, depth = 0): string {
   if (!value || depth > 6) return ""
   if (typeof value === "string") return value.trim()
-  if (Array.isArray(value)) return value.map((item) => extractText(item, depth + 1)).filter(Boolean).join("\n")
+  if (Array.isArray(value))
+    return value
+      .map((item) => extractText(item, depth + 1))
+      .filter(Boolean)
+      .join("\n")
   if (typeof value !== "object") return ""
   const record = value as Record<string, unknown>
   for (const key of ["text", "content", "message", "output", "data", "parts", "part"]) {
@@ -142,7 +146,8 @@ function coerceReply(text: string): CanvasAssistantReply | undefined {
         if (type === "write_note") return typeof record.text === "string"
         if (type === "delegate_parallel") return typeof record.task === "string"
         if (type === "deploy") return true
-        if (type === "arrange") return typeof record.layout === "string" && ["grid", "focus", "clear"].includes(record.layout)
+        if (type === "arrange")
+          return typeof record.layout === "string" && ["grid", "focus", "clear"].includes(record.layout)
         return false
       })
     : []
@@ -203,7 +208,8 @@ export function localIntent(transcript: string): CanvasAssistantReply {
     if (!openHits.includes("Browser")) openHits.push("Browser")
   }
   // "write a note …" / "note that …" / "jot down …" → drop text on a note.
-  const noteMatch = transcript.match(/\b(?:write|make|add|leave)?\s*(?:a\s+)?note(?:\s+that|\s+saying|:)?\s+(.+)/i) ||
+  const noteMatch =
+    transcript.match(/\b(?:write|make|add|leave)?\s*(?:a\s+)?note(?:\s+that|\s+saying|:)?\s+(.+)/i) ||
     transcript.match(/\bjot(?:\s+down)?\s+(.+)/i)
   if (noteMatch && noteMatch[1].trim().length > 1) {
     actions.push({ type: "write_note", text: noteMatch[1].trim() })
@@ -211,10 +217,13 @@ export function localIntent(transcript: string): CanvasAssistantReply {
   }
   // Delegation needs an explicit hand-off verb — not merely naming the surface,
   // which the open-window branch above already handles.
-  if (!openHits.includes("New Agent") && /\b(delegate|spin up|in parallel|in the background|isolated agent)\b/.test(lower)) {
+  if (
+    !openHits.includes("New Agent") &&
+    /\b(delegate|spin up|in parallel|in the background|isolated agent)\b/.test(lower)
+  ) {
     actions.push({ type: "delegate_parallel", task: transcript })
   }
-  if (/\b(deploy|publish|ship it)\b/.test(lower) && !openHits.includes("Vector Cloud")) {
+  if (/\b(deploy|publish|ship it)\b/.test(lower) && !openHits.includes("Cloud Services")) {
     actions.push({ type: "deploy" })
   }
   if (/\b(clear|clean up|close everything|reset)\b/.test(lower)) {

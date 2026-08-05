@@ -1,5 +1,5 @@
 ---
-import { ArrowRight, Bot, BriefcaseBusiness, ChevronDown, CloudUpload, Code2, Globe2, Mic2 } from "lucide-react"
+import { ArrowRight, Bot, ChevronDown, CloudUpload, Globe2, Mic2 } from "lucide-react"
 import MarketingFooter from "./marketing/MarketingFooter.astro"
 import MarketingNav from "./marketing/MarketingNav.astro"
 import screenshotAgent from "../assets/lander/vector-agent-current.png"
@@ -74,12 +74,12 @@ const features = [
   {
     title: "Ship without losing the context that built it.",
     body: "Publish through your own Vercel, Netlify, GitHub, GitLab, and Supabase accounts. Manage environment variables, inspect releases and logs, and hand the live result back to the browser for verification.",
-    tag: "Vector Cloud",
+    tag: "Cloud Services",
     note: "Connected release",
     image: screenshotCloud,
-    alt: "Vector Cloud showing deployment, infrastructure, and project health",
+    alt: "Vector Cloud Services showing deployment, infrastructure, and repository health",
     href: "/docs",
-    link: "Read about Vector Cloud",
+    link: "Read about Cloud Services",
   },
 ]
 
@@ -144,9 +144,9 @@ const changelog = [
       </h1>
 
       <p class="headline">
-        <span>One workspace for building, running, and shipping.</span>
-        <span class="scramble" data-scramble aria-hidden="true">Code, Work, and Cloud — connected.</span>
-        <span class="sr-only">Build software in Vector Code, run agentic projects in Vector Work, and ship through Vector Cloud.</span>
+        <span>One workspace. An army of builders.</span>
+        <span class="scramble" data-scramble aria-hidden="true">Your models. Your tools. Your control.</span>
+        <span class="sr-only">Direct parallel AI builders, operate the browser, connect your tools, review their work, and ship from one bring-your-own-key workspace.</span>
       </p>
 
       <div class="hero-loop" aria-label="Vector's build, test, and ship workflow">
@@ -161,7 +161,7 @@ const changelog = [
         </div>
         <div class="hero-loop-stage" data-hero-stage="2">
           <span class="hero-loop-icon"><CloudUpload size={16} strokeWidth={1.8} aria-hidden="true" /></span>
-          <span><strong>Ship</strong><small>Vector Cloud</small></span>
+          <span><strong>Ship</strong><small>Cloud Services</small></span>
         </div>
       </div>
 
@@ -170,14 +170,14 @@ const changelog = [
         <ArrowRight size={18} strokeWidth={2} aria-hidden="true" />
       </a>
 
-      <p class="hero-note">Vector Code, Vector Work, Vector Cloud, and Vel — one local-first product system.</p>
+      <p class="hero-note">The ultimate local-first, bring-your-own-key agentic workspace.</p>
     </section>
 
     <section class="showcase" aria-label="Vector workspace screenshot">
       <figure class="product-window" data-reveal>
         <div class="product-bar" aria-hidden="true">
           <span class="traffic"><i></i><i></i><i></i></span>
-          <span class="product-title">Vector — engineering workspace</span>
+          <span class="product-title">Vector — agentic workspace</span>
           <span class="product-status"><i></i> Ready</span>
         </div>
         <img
@@ -185,7 +185,7 @@ const changelog = [
           src={screenshotAgent.src}
           width={screenshotAgent.width}
           height={screenshotAgent.height}
-          alt="Vector engineering a product inside a repository"
+          alt="Vector coordinating builders inside a repository"
           loading="eager"
         />
       </figure>
@@ -193,28 +193,28 @@ const changelog = [
 
     <section class="suite section-width" aria-labelledby="suite-title">
       <div class="section-heading" data-reveal>
-        <p class="section-kicker">Choose how you work</p>
-        <h2 id="suite-title">Three focused products. One shared engineering context.</h2>
-        <p>Start from Vector's Product Hub, then move between software, project execution, and cloud operations without rebuilding context in another tool.</p>
+        <p class="section-kicker">One Vector</p>
+        <h2 id="suite-title">One command center for every builder.</h2>
+        <p>Vector is the command center for builders: one place to direct agents, use your own models, connect real tools, inspect the work, and ship outcomes.</p>
       </div>
       <div class="suite-grid" data-reveal>
         <article>
-          <span class="suite-icon"><Code2 size={19} strokeWidth={1.7} aria-hidden="true" /></span>
-          <small>Build software</small>
-          <h3>Vector Code</h3>
-          <p>Open a repository, code directly, or coordinate isolated agents with a shared editor, terminal, controlled browser and review boundary.</p>
+          <span class="suite-icon"><Bot size={19} strokeWidth={1.7} aria-hidden="true" /></span>
+          <small>Direct the work</small>
+          <h3>An agentic army</h3>
+          <p>Work with one agent or coordinate up to 16 isolated builders. Give each one an outcome, follow the live work, and merge only what you trust.</p>
         </article>
         <article>
-          <span class="suite-icon"><BriefcaseBusiness size={19} strokeWidth={1.7} aria-hidden="true" /></span>
-          <small>Run projects</small>
-          <h3>Vector Work</h3>
-          <p>Create projects with an optional repository, turn outcomes into tasks, and give every task its own agent, browser, MCP, plugins and approvals.</p>
+          <span class="suite-icon"><Globe2 size={19} strokeWidth={1.7} aria-hidden="true" /></span>
+          <small>Connect the world</small>
+          <h3>Browser, MCP, and plugins</h3>
+          <p>Let builders operate the visible browser and connect to the services you already use. Pause, approve, or take over whenever the work becomes sensitive.</p>
         </article>
         <article>
           <span class="suite-icon"><CloudUpload size={19} strokeWidth={1.7} aria-hidden="true" /></span>
-          <small>Ship and operate</small>
-          <h3>Vector Cloud</h3>
-          <p>Select any Code repository or Work project to manage deployments, domains, environment variables, databases and runtime health.</p>
+          <small>Build and ship</small>
+          <h3>Editor, terminal, and Cloud</h3>
+          <p>Code directly when you want to, then deploy, configure, and operate each repository through the same workspace and your own connected accounts.</p>
         </article>
         <article>
           <span class="suite-icon"><Mic2 size={19} strokeWidth={1.7} aria-hidden="true" /></span>
@@ -239,8 +239,8 @@ const changelog = [
 
     <section class="workflow section-width" aria-labelledby="workflow-title">
       <div class="section-heading" data-reveal>
-        <p class="section-kicker">The complete engineering loop</p>
-        <h2 id="workflow-title">From an idea to reviewed, running software.</h2>
+        <p class="section-kicker">One operating loop</p>
+        <h2 id="workflow-title">From a brief to verified, shipped work.</h2>
         <p>
           Vector keeps the request, repository context, agent activity, files, terminal, browser,
           usage, review, and release in one place. Work directly or delegate as much as you want.
@@ -439,7 +439,7 @@ const changelog = [
     const phrases = [
       "Run them in isolated workspaces.",
       "Test in Vector's native browser.",
-      "Ship through Vector Cloud.",
+      "Ship through Cloud Services.",
     ]
     const stages = Array.from(document.querySelectorAll<HTMLElement>("[data-hero-stage]"))
     const progress = document.querySelector<HTMLElement>("[data-hero-progress]")

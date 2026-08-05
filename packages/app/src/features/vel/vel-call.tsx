@@ -130,10 +130,13 @@ export function VelCall(props: {
         globalThis.clearTimeout(timeout)
         resolve(spoken)
       }
-      const timeout = globalThis.setTimeout(() => {
-        synth.cancel()
-        finish(false)
-      }, Math.max(4_000, text.length * 95))
+      const timeout = globalThis.setTimeout(
+        () => {
+          synth.cancel()
+          finish(false)
+        },
+        Math.max(4_000, text.length * 95),
+      )
       utterance.onend = () => finish(true)
       utterance.onerror = () => finish(false)
       synth.speak(utterance)
@@ -184,7 +187,7 @@ export function VelCall(props: {
     const model = props.model()
     if (!directory || !model) {
       const text = !directory
-        ? "Open a Code repository or a Work task so I can act on its context."
+        ? "Open a repository session so I can act on its context."
         : "Connect a model provider, then call me again."
       setMessages((items) => [...items, { id: crypto.randomUUID(), role: "vel", text }])
       await speak(text, { resumeListening: true })
@@ -239,7 +242,8 @@ export function VelCall(props: {
   }
 
   async function beginListening() {
-    if (!props.open || muted() || opening || ["listening", "transcribing", "thinking", "speaking"].includes(state())) return
+    if (!props.open || muted() || opening || ["listening", "transcribing", "thinking", "speaking"].includes(state()))
+      return
     opening = true
     setError("")
     const started = await startDictation({
@@ -305,8 +309,7 @@ export function VelCall(props: {
     if (next) {
       stopListening()
       if (state() === "listening" || state() === "transcribing") setState("idle")
-    }
-    else void beginListening()
+    } else void beginListening()
   }
 
   const endCall = () => {
@@ -319,9 +322,19 @@ export function VelCall(props: {
       <Show
         when={!minimized()}
         fallback={
-          <button type="button" class="vector-vel-mini" onClick={() => setMinimized(false)} aria-label="Return to Vel call">
-            <span classList={{ active: state() === "listening" }}><img src="/vector-logo.png" alt="" /></span>
-            <span><strong>Vel</strong><small>{statusLabel()}</small></span>
+          <button
+            type="button"
+            class="vector-vel-mini"
+            onClick={() => setMinimized(false)}
+            aria-label="Return to Vel call"
+          >
+            <span classList={{ active: state() === "listening" }}>
+              <img src="/vector-logo.png" alt="" />
+            </span>
+            <span>
+              <strong>Vel</strong>
+              <small>{statusLabel()}</small>
+            </span>
             <i />
           </button>
         }
@@ -329,13 +342,37 @@ export function VelCall(props: {
         <section class="vector-vel-call" role="dialog" aria-modal="true" aria-label="Call Vel">
           <div class="vector-vel-call__backdrop" aria-hidden="true" />
           <header>
-            <button type="button" onClick={() => setMinimized(true)} aria-label="Minimize Vel"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" /></svg></button>
-            <div><img src="/vector-logo.png" alt="" /><span>Vel</span></div>
-            <button type="button" onClick={endCall} aria-label="End call"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 4.5 7 7m0-7-7 7" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" /></svg></button>
+            <button type="button" onClick={() => setMinimized(true)} aria-label="Minimize Vel">
+              <svg viewBox="0 0 16 16" aria-hidden="true">
+                <path d="M3 8h10" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" />
+              </svg>
+            </button>
+            <div>
+              <img src="/vector-logo.png" alt="" />
+              <span>Vel</span>
+            </div>
+            <button type="button" onClick={endCall} aria-label="End call">
+              <svg viewBox="0 0 16 16" aria-hidden="true">
+                <path
+                  d="m4.5 4.5 7 7m0-7-7 7"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.25"
+                  stroke-linecap="round"
+                />
+              </svg>
+            </button>
           </header>
 
           <div class="vector-vel-call__stage">
-            <div class="vector-vel-call__mark" classList={{ listening: state() === "listening", thinking: state() === "thinking", speaking: state() === "speaking" }}>
+            <div
+              class="vector-vel-call__mark"
+              classList={{
+                listening: state() === "listening",
+                thinking: state() === "thinking",
+                speaking: state() === "speaking",
+              }}
+            >
               <img src="/vector-logo.png" alt="" />
               <span aria-hidden="true" />
               <i aria-hidden="true" />
@@ -343,23 +380,53 @@ export function VelCall(props: {
             <p>{statusLabel()}</p>
             <small>{props.contextLabel()}</small>
             <div class="vector-vel-call__wave" aria-hidden="true">
-              <For each={Array.from({ length: 26 })}>{(_, index) => <i style={{ height: `${Math.max(4, 6 + level() * (8 + (index() % 7) * 3))}px` }} />}</For>
+              <For each={Array.from({ length: 26 })}>
+                {(_, index) => <i style={{ height: `${Math.max(4, 6 + level() * (8 + (index() % 7) * 3))}px` }} />}
+              </For>
             </div>
-            <Show when={interim()}><div class="vector-vel-call__interim">{interim()}</div></Show>
-            <Show when={error()}><div class="vector-vel-call__error">{error()}</div></Show>
+            <Show when={interim()}>
+              <div class="vector-vel-call__interim">{interim()}</div>
+            </Show>
+            <Show when={error()}>
+              <div class="vector-vel-call__error">{error()}</div>
+            </Show>
           </div>
 
           <div class="vector-vel-call__transcript">
-            <For each={messages().slice(-6)}>{(message) => <p data-role={message.role}><span>{message.role === "you" ? "You" : "Vel"}</span>{message.text}</p>}</For>
+            <For each={messages().slice(-6)}>
+              {(message) => (
+                <p data-role={message.role}>
+                  <span>{message.role === "you" ? "You" : "Vel"}</span>
+                  {message.text}
+                </p>
+              )}
+            </For>
           </div>
 
           <footer>
             <button type="button" classList={{ active: muted() }} onClick={toggleMute}>
-              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 12.2a3.1 3.1 0 0 0 3.1-3.1V5.5a3.1 3.1 0 0 0-6.2 0v3.6a3.1 3.1 0 0 0 3.1 3.1Zm-5-3a5 5 0 0 0 10 0M10 14.2v3M7.5 17.2h5" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" /></svg>
+              <svg viewBox="0 0 20 20" aria-hidden="true">
+                <path
+                  d="M10 12.2a3.1 3.1 0 0 0 3.1-3.1V5.5a3.1 3.1 0 0 0-6.2 0v3.6a3.1 3.1 0 0 0 3.1 3.1Zm-5-3a5 5 0 0 0 10 0M10 14.2v3M7.5 17.2h5"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.35"
+                  stroke-linecap="round"
+                />
+              </svg>
               <span>{state() === "speaking" ? "Interrupt" : muted() ? "Unmute mic" : "Mute mic"}</span>
             </button>
             <button type="button" class="end" onClick={endCall}>
-              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4.2 12.7c3.5-2.5 8.1-2.5 11.6 0l1.3-2.1C13 7.4 7 7.4 2.9 10.6l1.3 2.1Zm1.2-.8-.4 3m9.6-3 .4 3" fill="none" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" stroke-linejoin="round" /></svg>
+              <svg viewBox="0 0 20 20" aria-hidden="true">
+                <path
+                  d="M4.2 12.7c3.5-2.5 8.1-2.5 11.6 0l1.3-2.1C13 7.4 7 7.4 2.9 10.6l1.3 2.1Zm1.2-.8-.4 3m9.6-3 .4 3"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.45"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
               <span>End</span>
             </button>
           </footer>

@@ -1,7 +1,6 @@
 import type { Session } from "@opencode-ai/sdk/v2/client"
 import { createSimpleContext } from "@opencode-ai/ui/context"
 import { createStore, produce } from "solid-js/store"
-import { bindWorkTaskSession } from "@/features/work/work-store"
 import { Persist, persisted, removePersisted, draftPersistedKeys } from "@/utils/persist"
 import { ServerConnection, useServer } from "./server"
 import { createEffect, getOwner, onCleanup, startTransition } from "solid-js"
@@ -189,7 +188,6 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
         // after its backing draft tab has been removed from the store.
         const active = location.pathname === "/new-session" && location.query.draftId === draftID
         const next = { type: "session" as const, ...session }
-        bindWorkTaskSession(draftID, session.sessionId)
         void startTransition(() => {
           setStore(
             produce((tabs) => {

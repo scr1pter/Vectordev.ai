@@ -287,17 +287,17 @@ export function CloudConsole(props: {
     const isCurrent = () => props.projectPath === projectPath && props.taskId === taskId
     const [nextDeployments, nextDomains, nextEnv, nextDatabase, nextBuild, nextWorkspaces, nextConnections, nextLinks] =
       await Promise.all([
-      api.deployments.list(projectPath, taskId).catch(() => []),
-      projectPath ? api.domains.list(projectPath, taskId).catch(() => []) : Promise.resolve([]),
-      projectPath ? api.env.list(projectPath, taskId).catch(() => []) : Promise.resolve([]),
-      projectPath ? api.database.get(projectPath, taskId).catch(() => null) : Promise.resolve(null),
-      projectPath ? api.build.get(projectPath, taskId).catch(() => null) : Promise.resolve(null),
-      projectPath && workspaceApi
-        ? workspaceApi.list({ sourcePath: projectPath, parentSessionId: taskId }).catch(() => [])
-        : Promise.resolve([]),
-      api.connections.list().catch(() => []),
-      projectPath ? api.providers.links(projectPath, taskId).catch(() => []) : Promise.resolve([]),
-    ])
+        api.deployments.list(projectPath, taskId).catch(() => []),
+        projectPath ? api.domains.list(projectPath, taskId).catch(() => []) : Promise.resolve([]),
+        projectPath ? api.env.list(projectPath, taskId).catch(() => []) : Promise.resolve([]),
+        projectPath ? api.database.get(projectPath, taskId).catch(() => null) : Promise.resolve(null),
+        projectPath ? api.build.get(projectPath, taskId).catch(() => null) : Promise.resolve(null),
+        projectPath && workspaceApi
+          ? workspaceApi.list({ sourcePath: projectPath, parentSessionId: taskId }).catch(() => [])
+          : Promise.resolve([]),
+        api.connections.list().catch(() => []),
+        projectPath ? api.providers.links(projectPath, taskId).catch(() => []) : Promise.resolve([]),
+      ])
     if (!isCurrent()) return
     setDeployments(nextDeployments)
     setDomains(nextDomains)
@@ -738,20 +738,15 @@ export function CloudConsole(props: {
   }
 
   // --- Provider connections ------------------------------------------------
-  const providerConnection = (provider: CloudProviderId) =>
-    connections().find((item) => item.provider === provider)
-  const providerLink = (provider: "vercel" | "netlify") =>
-    providerLinks().find((item) => item.provider === provider)
+  const providerConnection = (provider: CloudProviderId) => connections().find((item) => item.provider === provider)
+  const providerLink = (provider: "vercel" | "netlify") => providerLinks().find((item) => item.provider === provider)
 
   const connectProvider = async (provider: CloudProviderId) => {
     if (!api) return
     setProviderBusy(provider)
     try {
       const connection = await api.connections.connect(provider)
-      setConnections((items) => [
-        connection,
-        ...items.filter((item) => item.provider !== provider),
-      ])
+      setConnections((items) => [connection, ...items.filter((item) => item.provider !== provider)])
       const resources = await api.providers.resources(provider)
       setProviderResources((current) => ({ ...current, [provider]: resources }))
       setNotice({
@@ -864,7 +859,7 @@ export function CloudConsole(props: {
         </button>
         <img src="/vector-logo.png" alt="" class="size-9 rounded-[10px] object-cover" draggable={false} />
         <div class="min-w-0">
-          <div class="text-[13px] font-semibold text-white">Vector Cloud</div>
+          <div class="text-[13px] font-semibold text-white">Cloud Services</div>
           <div class="max-w-[440px] truncate text-[11px] text-white/45">
             {props.projectPath || "Open a project to manage its cloud"}
           </div>
@@ -929,8 +924,7 @@ export function CloudConsole(props: {
                 <For each={["vercel", "netlify", "supabase"] as CloudProviderId[]}>
                   {(provider) => {
                     const connection = () => providerConnection(provider)
-                    const linked = () =>
-                      provider === "supabase" ? undefined : providerLink(provider)
+                    const linked = () => (provider === "supabase" ? undefined : providerLink(provider))
                     const resources = () => providerResources()[provider] ?? []
                     return (
                       <section class="cloud-panel cloud-connection-card">
@@ -942,7 +936,9 @@ export function CloudConsole(props: {
                             <div class="cloud-panel-title">{providerLabel(provider)}</div>
                             <span
                               class="cloud-status"
-                              data-tone={connection()?.connected ? "success" : connection()?.configured ? undefined : "warning"}
+                              data-tone={
+                                connection()?.connected ? "success" : connection()?.configured ? undefined : "warning"
+                              }
                             >
                               {connection()?.connected
                                 ? "Connected"
@@ -956,7 +952,7 @@ export function CloudConsole(props: {
                               ? connection()?.account
                                 ? `Signed in as ${connection()?.account}`
                                 : "Account authorized"
-                              : connection()?.detail ?? "Checking provider availability…"}
+                              : (connection()?.detail ?? "Checking provider availability…")}
                           </p>
 
                           <Show when={connection()?.connected && provider !== "supabase"}>
@@ -1031,7 +1027,9 @@ export function CloudConsole(props: {
                                 disabled={!api || !connection()?.configured || providerBusy() === provider}
                                 onClick={() => void connectProvider(provider)}
                               >
-                                {providerBusy() === provider ? "Waiting for sign-in…" : `Connect ${providerLabel(provider)}`}
+                                {providerBusy() === provider
+                                  ? "Waiting for sign-in…"
+                                  : `Connect ${providerLabel(provider)}`}
                               </button>
                             }
                           >
@@ -1558,8 +1556,8 @@ export function CloudConsole(props: {
                   <div class="cloud-kicker">Bring your own domain</div>
                   <h1>Domains</h1>
                   <p>
-                    Attach a domain you own to the linked Vercel or Netlify project for{" "}
-                    <strong>{projectName()}</strong>. Vector performs the provider action and checks the result.
+                    Attach a domain you own to the linked Vercel or Netlify project for <strong>{projectName()}</strong>
+                    . Vector performs the provider action and checks the result.
                   </p>
                 </div>
               </div>
@@ -1588,44 +1586,41 @@ export function CloudConsole(props: {
                       </div>
                     }
                   >
-                  <form
-                    class="mt-3 grid gap-2 sm:grid-cols-[160px_minmax(0,1fr)_auto]"
-                    onSubmit={(event) => {
-                      event.preventDefault()
-                      void addDomain()
-                    }}
-                  >
-                    <select
-                      class="cloud-input"
-                      value={domainProvider()}
-                      onChange={(event) =>
-                        setDomainProvider(event.currentTarget.value as Exclude<CloudDomainProvider, "vector-cloud">)
-                      }
+                    <form
+                      class="mt-3 grid gap-2 sm:grid-cols-[160px_minmax(0,1fr)_auto]"
+                      onSubmit={(event) => {
+                        event.preventDefault()
+                        void addDomain()
+                      }}
                     >
-                      <For each={providerLinks()}>
-                        {(link) => <option value={link.provider}>{providerLabel(link.provider)}</option>}
-                      </For>
-                    </select>
-                    <input
-                      class="cloud-input min-w-0"
-                      value={domainDraft()}
-                      onInput={(event) => setDomainDraft(event.currentTarget.value)}
-                      placeholder="app.yourdomain.com"
-                    />
-                    <button
-                      class="cloud-button"
-                      data-variant="primary"
-                      type="submit"
-                      disabled={
-                        !api ||
-                        !props.projectPath ||
-                        !domainDraft().trim() ||
-                        !providerLink(domainProvider())
-                      }
-                    >
-                      Add domain
-                    </button>
-                  </form>
+                      <select
+                        class="cloud-input"
+                        value={domainProvider()}
+                        onChange={(event) =>
+                          setDomainProvider(event.currentTarget.value as Exclude<CloudDomainProvider, "vector-cloud">)
+                        }
+                      >
+                        <For each={providerLinks()}>
+                          {(link) => <option value={link.provider}>{providerLabel(link.provider)}</option>}
+                        </For>
+                      </select>
+                      <input
+                        class="cloud-input min-w-0"
+                        value={domainDraft()}
+                        onInput={(event) => setDomainDraft(event.currentTarget.value)}
+                        placeholder="app.yourdomain.com"
+                      />
+                      <button
+                        class="cloud-button"
+                        data-variant="primary"
+                        type="submit"
+                        disabled={
+                          !api || !props.projectPath || !domainDraft().trim() || !providerLink(domainProvider())
+                        }
+                      >
+                        Add domain
+                      </button>
+                    </form>
                   </Show>
                 </div>
                 <Show when={domains().length}>
@@ -1637,9 +1632,7 @@ export function CloudConsole(props: {
                             <div class="flex items-center gap-2">
                               <strong class="text-[13px] text-white/85">{domain.domain}</strong>
                               <span class="cloud-provider-chip">
-                                {domain.provider === "vector-cloud"
-                                  ? "Legacy DNS"
-                                  : providerLabel(domain.provider)}
+                                {domain.provider === "vector-cloud" ? "Legacy DNS" : providerLabel(domain.provider)}
                               </span>
                               <span
                                 class="cloud-status"
@@ -1658,9 +1651,7 @@ export function CloudConsole(props: {
                               CNAME {domain.domain} → {domain.cnameTarget}
                             </div>
                             <Show when={domain.providerProjectName}>
-                              <p class="cloud-muted mt-1 text-[11px]">
-                                Attached to {domain.providerProjectName}
-                              </p>
+                              <p class="cloud-muted mt-1 text-[11px]">Attached to {domain.providerProjectName}</p>
                             </Show>
                             <Show when={domain.detail}>
                               <p class="cloud-muted mt-1 text-[11px]">{domain.detail}</p>
@@ -1772,9 +1763,7 @@ export function CloudConsole(props: {
                           disabled={!api || !envVars().length || Boolean(syncingProvider())}
                           onClick={() => void syncEnvironment(link.provider)}
                         >
-                          {syncingProvider() === link.provider
-                            ? "Syncing…"
-                            : `Sync to ${providerLabel(link.provider)}`}
+                          {syncingProvider() === link.provider ? "Syncing…" : `Sync to ${providerLabel(link.provider)}`}
                         </button>
                       )}
                     </For>
@@ -1831,8 +1820,8 @@ export function CloudConsole(props: {
                   <div class="cloud-kicker">Data for your app</div>
                   <h1>Database</h1>
                   <p>
-                    Choose a project from your connected Supabase account. Vector configures the public client values
-                    in this repository without making you copy keys between dashboards.
+                    Choose a project from your connected Supabase account. Vector configures the public client values in
+                    this repository without making you copy keys between dashboards.
                   </p>
                 </div>
               </div>
@@ -1867,9 +1856,7 @@ export function CloudConsole(props: {
                               data-variant="primary"
                               type="button"
                               disabled={
-                                !api ||
-                                !providerConnection("supabase")?.configured ||
-                                providerBusy() === "supabase"
+                                !api || !providerConnection("supabase")?.configured || providerBusy() === "supabase"
                               }
                               onClick={() => void connectProvider("supabase")}
                             >
@@ -1906,11 +1893,7 @@ export function CloudConsole(props: {
                             class="cloud-button"
                             data-variant="primary"
                             type="button"
-                            disabled={
-                              !api ||
-                              !providerSelections().supabase ||
-                              providerBusy() === "supabase"
-                            }
+                            disabled={!api || !providerSelections().supabase || providerBusy() === "supabase"}
                             onClick={() => void connectSupabaseProject()}
                           >
                             {providerBusy() === "supabase" ? "Connecting…" : "Use this project"}
@@ -1958,7 +1941,7 @@ export function CloudConsole(props: {
                   <h1>Build & runtime</h1>
                   <p>
                     Detect the project framework and keep its install, build, output, and Node settings attached to this
-                    task. Vector Cloud uses these settings for its build before publishing.
+                    repository. Cloud Services uses these settings for its build before publishing.
                   </p>
                 </div>
               </div>
