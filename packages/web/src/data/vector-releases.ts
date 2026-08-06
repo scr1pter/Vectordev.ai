@@ -300,4 +300,10 @@ export const release117: VectorRelease[] = [
     summary:
       "Moved Vel into the chat composer, connected every spoken request directly to the selected session's real agent and reply, and made Cloud Services a repository-level destination available from Home.",
   },
+  {
+    version: "1.17.36",
+    title: "Guided workspace onboarding",
+    summary:
+      "Introduced an interactive spotlight tour over Vector's real controls, added a durable Getting Started guide, and made the path from repository setup to agents, tools, Cloud Services, and Settings easier to learn.",
+  },
 ]

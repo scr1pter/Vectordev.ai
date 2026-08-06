@@ -37,7 +37,9 @@ import { isInternalProjectPath, useServer } from "@/context/server"
 import { useTabs } from "@/context/tabs"
 import { sessionHref } from "@/utils/session-route"
 import { DB_INTENT_EVENT } from "@/features/cloud/db-intent"
-import { OnboardingProgress, OnboardingTour, TOUR_SLIDES } from "@/features/onboarding/onboarding"
+import { OnboardingProgress } from "@/features/onboarding/onboarding"
+import { SpotlightTour } from "@/features/onboarding/spotlight-tour"
+import { createSpotlightSteps } from "@/features/onboarding/spotlight-steps"
 import { outcomesFromWorkspaceRecord, recordOutcome } from "@/features/economics/economics-repository"
 import { categorizeTask } from "@/features/economics/task-categorizer"
 import {
@@ -2581,19 +2583,64 @@ export default function NewLayout(props: ParentProps) {
   ]
   const onboardingDoneCount = () => onboardingSteps().filter((step) => step.done).length
 
-  // The first-run tour narrates over the REAL app: each step navigates to the
-  // surface it describes, so the user is already standing where they'll work.
+  // The first-run tour walks the REAL app: each step spotlights the actual
+  // control it teaches, and prepare hooks below put the right surface on
+  // screen — Home, a draft workspace with the sidebar, Cloud, then Settings.
   const [tourOpen, setTourOpen] = createSignal(false)
   const [tourStep, setTourStep] = createSignal(0)
 
-  const goToTourStep = (step: number) => {
-    setTourStep(step)
-    const slide = TOUR_SLIDES[step]
-    if (slide) navigate(slide.route)
+  // The settings dialog opens through a lazy import; remember the in-flight
+  // open so closing (skip/finish mid-step) waits for it instead of leaving a
+  // stray dialog behind, and so Back/Next never stacks a second one.
+  const tourSettings = { pending: undefined as Promise<void> | undefined }
+  const openTourSettings = () => {
+    if (tourSettings.pending) return
+    tourSettings.pending = import("@/components/settings-v2/dialog-settings-v2").then((x) => {
+      dialog.show(() => <x.DialogSettings />)
+    })
   }
+  const closeTourSettings = () => {
+    const pending = tourSettings.pending
+    if (!pending) return
+    tourSettings.pending = undefined
+    void pending.then(() => dialog.close())
+  }
+
+  const ensureTourWorkspace = () => {
+    if (taskRoute() || taskDraftRoute()) return
+    // Reuse an existing draft instead of minting one per visit — the tour can
+    // cross this boundary many times as the user goes Back and forth.
+    const draft = tabs.store.find((tab) => tab.type === "draft")
+    if (draft && draft.type === "draft") {
+      navigate(`/new-session?draftId=${draft.draftID}`)
+      return
+    }
+    startTask()
+  }
+
+  const spotlightSteps = createSpotlightSteps({
+    goHome: () => {
+      if (location.pathname !== "/") navigate("/")
+    },
+    ensureWorkspace: ensureTourWorkspace,
+    showSidebar: () => {
+      setNavigationVisible(true)
+      setWorkspaceTreeOpen(true)
+    },
+    openScheduledPanel: () => setScheduledOpen(true),
+    closeScheduledPanel: () => setScheduledOpen(false),
+    goCloud: () => {
+      closeTourSettings()
+      if (location.pathname !== "/cloud") navigate("/cloud")
+    },
+    openSettingsDialog: openTourSettings,
+    closeSettingsDialog: closeTourSettings,
+  })
 
   const finishTour = () => {
     setTourOpen(false)
+    closeTourSettings()
+    setScheduledOpen(false)
     setOnboardingFlag("tour")
     navigate("/")
     // Hand off to the progress timeline so first steps are visible right away.
@@ -2602,6 +2649,8 @@ export default function NewLayout(props: ParentProps) {
 
   const skipTour = () => {
     setTourOpen(false)
+    closeTourSettings()
+    setScheduledOpen(false)
     setOnboardingFlag("tour")
     setOnboardingFlag("dismissed")
     navigate("/")
@@ -3002,10 +3051,11 @@ export default function NewLayout(props: ParentProps) {
         />
       </Show>
 
-      <OnboardingTour
+      <SpotlightTour
         open={tourOpen()}
+        steps={spotlightSteps}
         step={tourStep()}
-        onStep={goToTourStep}
+        onStep={setTourStep}
         onFinish={finishTour}
         onSkip={skipTour}
       />
@@ -5191,6 +5241,7 @@ export default function NewLayout(props: ParentProps) {
           command.show()
         }}
         onSettings={openSettings}
+        onGettingStarted={() => setOnboardingOpen(true)}
         onUpdate={() => void updaterAction.updateLatest()}
       />
 
@@ -5541,6 +5592,7 @@ export default function NewLayout(props: ParentProps) {
       </Show>
 
       <aside
+        data-tour="scheduled-panel"
         class="fixed bottom-4 top-4 z-50 w-[min(420px,calc(100vw-32px))] overflow-hidden rounded-2xl border border-[color:var(--vx-line)] bg-[color-mix(in_srgb,var(--vx-stage)_88%,transparent)] shadow-[0_28px_90px_rgba(0,0,0,0.55)] backdrop-blur-2xl transition duration-200 ease-out"
         style={{ left: "calc(var(--vector-navigation-effective-width) + 16px)" }}
         classList={{

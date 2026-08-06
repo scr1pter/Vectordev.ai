@@ -1,11 +1,11 @@
-import { createEffect, createMemo, For, onCleanup, onMount, Show } from "solid-js"
+import { createMemo, For, onCleanup, onMount, Show } from "solid-js"
 import "./onboarding.css"
 
 // The ambient sky both onboarding surfaces share: purple hues drifting on a
 // slow loop across the whole screen, plus a pointer glow — the patch of sky
 // under the cursor brightens slightly and follows it. Same recipe as the
 // landing page's .aurora/.pointer-glow, tuned quieter for in-app use.
-function AmbientSky() {
+export function AmbientSky() {
   let root!: HTMLDivElement
   onMount(() => {
     // No rAF throttle: two custom-property writes per move are cheap, and a
@@ -26,145 +26,9 @@ function AmbientSky() {
   )
 }
 
-// First-run onboarding proves Vector's core loop before introducing the wider
-// product. The full feature reference remains available in Getting started.
-
-export type TourSlide = {
-  route: string
-  eyebrow: string
-  titlePre: string
-  titleEm: string
-  body: string
-}
-
-export const TOUR_SLIDES: TourSlide[] = [
-  {
-    route: "/",
-    eyebrow: "Vector",
-    titlePre: "Direct",
-    titleEm: "your builders.",
-    body: "Vector is one bring-your-own-key agentic workspace. Open a repository, work directly, or give outcomes to one agent or a coordinated team.",
-  },
-  {
-    route: "/",
-    eyebrow: "Repository home",
-    titlePre: "Code directly.",
-    titleEm: "Or delegate.",
-    body: "Open a repository, edit it yourself, or give Vector one clear outcome. The agent, editor, terminal, controlled browser, review and isolated workspaces all share that repository.",
-  },
-  {
-    route: "/",
-    eyebrow: "Parallel builders",
-    titlePre: "Split the work.",
-    titleEm: "Keep control.",
-    body: "Launch isolated agents for separate outcomes, watch them work in parallel, then inspect checks and diffs before merging trusted results back into main.",
-  },
-  {
-    route: "/cloud",
-    eyebrow: "Cloud Services",
-    titlePre: "Choose a repository.",
-    titleEm: "Ship it.",
-    body: "Cloud Services lives outside individual chats. Select any repository to manage deployments, domains, environment variables, databases and runtime health.",
-  },
-  {
-    route: "/",
-    eyebrow: "Meet Vel",
-    titlePre: "Talk through",
-    titleEm: "the work.",
-    body: "Call Vel from Project tools inside an active session. Vel listens, answers aloud, and hands requests to that exact session without creating separate hidden work.",
-  },
-]
-
-export function OnboardingTour(props: {
-  open: boolean
-  step: number
-  onStep: (step: number) => void
-  onFinish: () => void
-  onSkip: () => void
-}) {
-  const slide = createMemo(() => TOUR_SLIDES[Math.min(props.step, TOUR_SLIDES.length - 1)])
-  const last = createMemo(() => props.step >= TOUR_SLIDES.length - 1)
-
-  createEffect(() => {
-    if (!props.open) return
-    const handler = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault()
-        event.stopPropagation()
-        props.onSkip()
-      }
-      if (event.key === "ArrowRight" || event.key === "Enter") {
-        event.preventDefault()
-        if (last()) props.onFinish()
-        else props.onStep(props.step + 1)
-      }
-      if (event.key === "ArrowLeft" && props.step > 0) {
-        event.preventDefault()
-        props.onStep(props.step - 1)
-      }
-    }
-    globalThis.window?.addEventListener("keydown", handler, { capture: true })
-    onCleanup(() => globalThis.window?.removeEventListener("keydown", handler, { capture: true }))
-  })
-
-  return (
-    <Show when={props.open}>
-      <div class="vtour" aria-modal="true" role="dialog" aria-label="Getting started with Vector">
-        <AmbientSky />
-        <button type="button" class="vtour-skip" onClick={props.onSkip}>
-          Skip tour
-        </button>
-        <div class="vtour-count" aria-hidden="true">
-          {String(props.step + 1).padStart(2, "0")} / {String(TOUR_SLIDES.length).padStart(2, "0")}
-        </div>
-        <Show when={slide()} keyed>
-          {(current) => (
-            <div class="vtour-card">
-              <div class="vtour-eyebrow">
-                <span class="vtour-eyebrow-dot" />
-                {current.eyebrow}
-              </div>
-              <h1 class="vtour-title">
-                {current.titlePre} <em>{current.titleEm}</em>
-              </h1>
-              <p class="vtour-body">{current.body}</p>
-              <div class="vtour-footer">
-                <div class="vtour-dots">
-                  <For each={TOUR_SLIDES}>
-                    {(_, index) => (
-                      <button
-                        type="button"
-                        class="vtour-dot"
-                        data-active={index() === props.step}
-                        data-past={index() < props.step}
-                        aria-label={`Step ${index() + 1}`}
-                        onClick={() => props.onStep(index())}
-                      />
-                    )}
-                  </For>
-                </div>
-                <div class="vtour-actions">
-                  <Show when={props.step > 0}>
-                    <button type="button" class="vtour-back" onClick={() => props.onStep(props.step - 1)}>
-                      Back
-                    </button>
-                  </Show>
-                  <button
-                    type="button"
-                    class="vtour-next"
-                    onClick={() => (last() ? props.onFinish() : props.onStep(props.step + 1))}
-                  >
-                    {last() ? "Start building" : "Next"}
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-        </Show>
-      </div>
-    </Show>
-  )
-}
+// First-run onboarding: the interactive spotlight tour (spotlight-tour.tsx +
+// spotlight-steps.ts) walks every control in place, then hands off to the
+// progress timeline below. The full feature reference stays in Getting started.
 
 export type ProgressStep = {
   id: string
@@ -234,7 +98,7 @@ export const GUIDE_SECTIONS: GuideSection[] = [
   {
     kicker: "Cloud Services",
     intro:
-      "One repository-scoped console for releases, health, domains, environment, data, and build configuration. Open it from Vector Home or Project tools.",
+      "One repository-scoped console for releases, health, domains, environment, data, and build configuration. Open it from Vector Home.",
     entries: [
       {
         title: "Deployments",
@@ -303,7 +167,7 @@ export const GUIDE_SECTIONS: GuideSection[] = [
       {
         title: "Canvas",
         where: "Project group in the sidebar.",
-        body: "A spatial surface where every Vector tool runs inside a floating window you can arrange, resize, minimize, and use together. Keep the editor, Cloud, terminal, review, browser, scheduled work, MCP connections, and coding agents open at once without leaving Canvas. Drive it by voice — hold the mic and say “open the editor” or “tidy up” — or type the same commands into the bar at the bottom; both routes do exactly the same things.",
+        body: "A spatial surface where project tools run inside floating windows you can arrange, resize, minimize, and use together. Keep the editor, terminal, review, browser, scheduled work, MCP connections, and coding agents open at once without leaving Canvas. Drive it by voice — hold the mic and say “open the editor” or “tidy up” — or type the same commands into the bar at the bottom; both routes do exactly the same things.",
         tip: "Voice needs speech recognition (desktop has it built in); the typed command bar works everywhere.",
       },
       {

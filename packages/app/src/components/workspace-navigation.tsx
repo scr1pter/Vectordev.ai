@@ -87,6 +87,7 @@ export function WorkspaceNavigation(props: {
   onGitlab: () => void
   onFind: () => void
   onSettings: () => void
+  onGettingStarted: () => void
   onUpdate: () => void
 }) {
   const updateBusy = () => ["checking", "downloading", "installing"].includes(props.updaterState?.status ?? "")
@@ -212,6 +213,7 @@ export function WorkspaceNavigation(props: {
             <div data-vector-workspace-actions class="flex items-center gap-1 px-2.5 pb-1.5">
               <button
                 type="button"
+                data-tour="nav-new-workspace"
                 class="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-[5px] px-2 text-left text-[12px] text-white/52 transition hover:bg-white/[0.05] hover:text-white"
                 onClick={props.onNewWorkspace}
               >
@@ -393,7 +395,7 @@ export function WorkspaceNavigation(props: {
 
         <section data-vector-nav-group class="border-t border-[color:var(--vx-line)] px-2 py-3">
           <div data-vector-nav-label>Project tools</div>
-          <button type="button" data-vector-nav-item onClick={props.onCodeEditor}>
+          <button type="button" data-vector-nav-item data-tour="nav-code-editor" onClick={props.onCodeEditor}>
             <svg viewBox="0 0 16 16" class="size-3.5 shrink-0" aria-hidden="true">
               <path
                 d="M5.25 5 2.75 8l2.5 3M10.75 5l2.5 3-2.5 3M9.15 3.75l-2.3 8.5"
@@ -409,6 +411,7 @@ export function WorkspaceNavigation(props: {
           <button
             type="button"
             data-vector-nav-item
+            data-tour="nav-browser"
             classList={{ active: props.activeTool === "browser" }}
             onClick={props.onBrowser}
           >
@@ -436,6 +439,7 @@ export function WorkspaceNavigation(props: {
           <button
             type="button"
             data-vector-nav-item
+            data-tour="nav-canvas"
             classList={{ active: props.activeTool === "canvas" }}
             onClick={props.onCanvas}
           >
@@ -464,7 +468,7 @@ export function WorkspaceNavigation(props: {
 
         <section data-vector-nav-group class="border-t border-[color:var(--vx-line)] px-2 py-3">
           <div data-vector-nav-label>Connections</div>
-          <button type="button" data-vector-nav-item onClick={props.onScheduled}>
+          <button type="button" data-vector-nav-item data-tour="nav-scheduled" onClick={props.onScheduled}>
             <svg viewBox="0 0 16 16" class="size-3.5 shrink-0" aria-hidden="true">
               <path
                 d="M8 2.55a5.45 5.45 0 1 0 0 10.9 5.45 5.45 0 0 0 0-10.9Zm0 2.6v3.1l2.15 1.25"
@@ -482,7 +486,7 @@ export function WorkspaceNavigation(props: {
               </span>
             </Show>
           </button>
-          <button type="button" data-vector-nav-item onClick={props.onMcp}>
+          <button type="button" data-vector-nav-item data-tour="nav-mcp" onClick={props.onMcp}>
             <svg viewBox="0 0 16 16" class="size-3.5 shrink-0" aria-hidden="true">
               <path
                 d="M3.25 5.25a2 2 0 1 0 0-4 2 2 0 0 0 0 4Zm9.5 0a2 2 0 1 0 0-4 2 2 0 0 0 0 4ZM8 14.75a2 2 0 1 0 0-4 2 2 0 0 0 0 4ZM4.95 4.3l1.8 6.5M11.05 4.3l-1.8 6.5M5.1 3.25h5.8"
@@ -495,7 +499,7 @@ export function WorkspaceNavigation(props: {
             </svg>
             <span>MCP</span>
           </button>
-          <button type="button" data-vector-nav-item onClick={props.onPlugins}>
+          <button type="button" data-vector-nav-item data-tour="nav-plugins" onClick={props.onPlugins}>
             <svg viewBox="0 0 16 16" class="size-3.5 shrink-0" aria-hidden="true">
               <path
                 d="M6.1 1.6v2.7M9.9 1.6v2.7M4.6 4.3h6.8v1.7a3.4 3.4 0 0 1-6.8 0V4.3ZM8 9.4v.9c0 1.5-3.2.9-3.2 2.4 0 1.4 2.7 1.6 4.6.9"
@@ -508,7 +512,7 @@ export function WorkspaceNavigation(props: {
             </svg>
             <span>Plugins</span>
           </button>
-          <button type="button" data-vector-nav-item onClick={props.onGithub}>
+          <button type="button" data-vector-nav-item data-tour="nav-github" onClick={props.onGithub}>
             <svg viewBox="0 0 16 16" class="size-3.5 shrink-0" aria-hidden="true">
               <path
                 d="M8 1.75a6.25 6.25 0 0 0-1.98 12.18v-1.55c-1.62.35-1.96-.68-1.96-.68-.26-.68-.66-.86-.66-.86-.54-.37.04-.36.04-.36.6.04.91.61.91.61.53.91 1.39.65 1.73.5.05-.38.21-.65.38-.8-1.29-.15-2.65-.65-2.65-2.86 0-.63.23-1.15.6-1.55-.06-.15-.26-.74.06-1.53 0 0 .49-.16 1.6.59A5.55 5.55 0 0 1 8 5.25c.5 0 .98.07 1.45.2 1.11-.75 1.6-.59 1.6-.59.32.79.12 1.38.06 1.53.37.4.6.92.6 1.55 0 2.22-1.36 2.7-2.66 2.85.21.18.4.54.4 1.09v2.05A6.25 6.25 0 0 0 8 1.75Z"
@@ -517,7 +521,7 @@ export function WorkspaceNavigation(props: {
             </svg>
             <span>Push to GitHub</span>
           </button>
-          <button type="button" data-vector-nav-item onClick={props.onGitlab}>
+          <button type="button" data-vector-nav-item data-tour="nav-gitlab" onClick={props.onGitlab}>
             <svg viewBox="0 0 16 16" class="size-3.5 shrink-0" aria-hidden="true">
               <path
                 d="m8 14.1 2.3-7.08H5.7L8 14.1Zm0 0L3.95 7.02H1.6L8 14.1Zm-6.4-7.08.72 2.22L8 14.1 1.6 7.02Zm0 0 1.17-3.61c.06-.2.35-.2.42 0l.76 3.61H1.6Zm6.4 7.08 4.05-7.08h2.35L8 14.1Zm6.4-7.08-.72 2.22L8 14.1l6.4-7.08Zm0 0-1.17-3.61c-.06-.2-.35-.2-.42 0l-.76 3.61h2.35Z"
@@ -531,7 +535,7 @@ export function WorkspaceNavigation(props: {
 
       <div
         data-vector-nav-footer
-        class="grid min-h-[58px] shrink-0 grid-cols-[1fr_auto] items-center gap-1 border-t border-[color:var(--vx-line)] px-3 py-2"
+        class="grid min-h-[58px] shrink-0 grid-cols-[1fr_auto_auto] items-center gap-1 border-t border-[color:var(--vx-line)] px-3 py-2"
       >
         <Show
           when={props.updaterState && props.updaterState.status !== "disabled"}
@@ -565,6 +569,26 @@ export function WorkspaceNavigation(props: {
             <span class="shrink-0 text-[9.5px] text-white/30 group-hover:text-white/48">{updateDetail()}</span>
           </button>
         </Show>
+        <button
+          type="button"
+          data-tour="nav-getting-started"
+          class="grid size-8 place-items-center rounded-[5px] text-white/38 transition hover:bg-white/[0.05] hover:text-white"
+          onClick={props.onGettingStarted}
+          title="Getting started"
+          aria-label="Getting started"
+        >
+          <svg viewBox="0 0 16 16" class="size-3.5" aria-hidden="true">
+            <circle cx="8" cy="8" r="6.1" fill="none" stroke="currentColor" stroke-width="1.15" />
+            <path
+              d="M6.2 6.25a1.85 1.85 0 0 1 3.6.55c0 1.15-1.8 1.35-1.8 2.4"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.15"
+              stroke-linecap="round"
+            />
+            <circle cx="8" cy="11.35" r="0.7" fill="currentColor" />
+          </svg>
+        </button>
         <button
           type="button"
           class="grid size-8 place-items-center rounded-[5px] text-white/38 transition hover:bg-white/[0.05] hover:text-white"

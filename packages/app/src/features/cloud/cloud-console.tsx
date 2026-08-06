@@ -879,6 +879,7 @@ export function CloudConsole(props: {
               <button
                 class="cloud-nav"
                 data-active={section() === item.id}
+                data-section={item.id}
                 type="button"
                 onClick={() => {
                   setSection(item.id)

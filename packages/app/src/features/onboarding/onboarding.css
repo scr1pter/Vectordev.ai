@@ -3,7 +3,7 @@
    purple hues drifting as a constant ambient animation, and a subtle
    pointer glow that brightens wherever the mouse is. */
 
-.vtour,
+.vspot,
 .vprogress {
   --vx-ink: #f4f0ff;
   --vx-muted: #a89ec0;
@@ -86,18 +86,179 @@
   }
 }
 
-/* ---------- the tour: a floating glass narrator over the real app ---------- */
+/* ---------- the spotlight tour: the app dims, one control stays lit ---------- */
 
-.vtour {
+/* Sits above the dialog stack (base z-index 300) so the tour can highlight
+   settings tabs inside an open dialog. All app interaction is blocked while it
+   runs — every state change happens through the steps' prepare hooks. */
+.vspot {
   position: fixed;
   inset: 0;
-  z-index: 200;
-  /* The real surface stays readable behind a vignette that pools dark at the
-     edges — dimmed, not hidden. */
-  background: radial-gradient(120% 130% at 50% 38%, rgba(6, 6, 8, 0.42) 0%, rgba(6, 6, 8, 0.9) 100%);
+  z-index: 340;
 }
 
-.vtour-skip {
+/* The cut-out: one rounded div whose oversized box-shadow is the dimmer, so a
+   CSS transition on its box animates the hole smoothly between targets. */
+.vspot-hole {
+  position: absolute;
+  border-radius: 12px;
+  border: 1.5px solid rgba(178, 140, 255, 0.65);
+  box-shadow:
+    0 0 0 200vmax rgba(6, 6, 8, 0.68),
+    0 0 0 4px rgba(143, 82, 255, 0.16),
+    0 0 44px rgba(143, 82, 255, 0.32);
+  pointer-events: none;
+  transition:
+    top 340ms var(--vx-ease),
+    left 340ms var(--vx-ease),
+    width 340ms var(--vx-ease),
+    height 340ms var(--vx-ease);
+}
+
+.vspot-hole::after {
+  content: "";
+  position: absolute;
+  inset: -7px;
+  border-radius: 16px;
+  border: 1px solid rgba(178, 140, 255, 0.35);
+  animation: vspot-pulse 2.6s ease-in-out infinite;
+}
+
+@keyframes vspot-pulse {
+  0%,
+  100% {
+    opacity: 0.9;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.25;
+    transform: scale(1.02);
+  }
+}
+
+.vspot-hole[data-centered="true"] {
+  border-color: transparent;
+}
+
+.vspot-hole[data-centered="true"]::after {
+  display: none;
+}
+
+.vspot-card {
+  position: absolute;
+  width: min(23.5rem, calc(100vw - 2rem));
+  padding: 1.35rem 1.45rem 1.2rem;
+  border: 1px solid var(--vx-line);
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(22, 18, 33, 0.92), rgba(10, 9, 15, 0.95));
+  backdrop-filter: blur(20px) saturate(1.25);
+  box-shadow:
+    0 24px 70px rgba(4, 2, 10, 0.6),
+    0 0 60px rgba(143, 82, 255, 0.1);
+  transition:
+    top 340ms var(--vx-ease),
+    left 340ms var(--vx-ease);
+  animation: vspot-card-in 420ms var(--vx-ease) both;
+}
+
+@keyframes vspot-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.vspot[data-centered="true"] .vspot-card {
+  width: min(30rem, calc(100vw - 2rem));
+  padding: 1.9rem 2rem 1.5rem;
+}
+
+.vspot-title {
+  margin: 0.95rem 0 0;
+  font-size: 1.22rem;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.012em;
+  color: var(--vx-ink);
+}
+
+.vspot[data-centered="true"] .vspot-title {
+  font-size: 1.7rem;
+}
+
+.vspot-title em {
+  font-style: normal;
+  background: var(--vx-gradient-text);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.vspot-body {
+  margin: 0.6rem 0 0;
+  color: var(--vx-muted);
+  font-size: 0.89rem;
+  line-height: 1.6;
+}
+
+.vspot-tip {
+  margin: 0.8rem 0 0;
+  padding-top: 0.7rem;
+  border-top: 1px dashed rgba(178, 140, 255, 0.16);
+  color: var(--vx-muted);
+  font-size: 0.82rem;
+  line-height: 1.55;
+}
+
+.vspot-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.9rem;
+  margin-top: 1.15rem;
+}
+
+.vspot-progress {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.vspot-count {
+  color: var(--vx-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  white-space: nowrap;
+  opacity: 0.85;
+}
+
+.vspot-bar {
+  position: relative;
+  height: 3px;
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(201, 176, 255, 0.16);
+}
+
+.vspot-bar-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 999px;
+  background: var(--vx-gradient-text);
+  box-shadow: 0 0 10px rgba(143, 82, 255, 0.5);
+  transition: width 340ms var(--vx-ease);
+}
+
+.vspot-skip {
   position: absolute;
   top: clamp(1rem, 3vh, 1.6rem);
   right: clamp(1.1rem, 3vw, 2rem);
@@ -114,51 +275,9 @@
   transition: color 180ms var(--vx-ease), border-color 180ms var(--vx-ease);
 }
 
-.vtour-skip:hover {
+.vspot-skip:hover {
   color: var(--vx-ink);
   border-color: rgba(178, 140, 255, 0.4);
-}
-
-.vtour-count {
-  position: absolute;
-  bottom: clamp(1.2rem, 4vh, 2.2rem);
-  right: clamp(1.4rem, 3.5vw, 2.6rem);
-  color: var(--vx-muted);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.78rem;
-  letter-spacing: 0.14em;
-  opacity: 0.75;
-}
-
-.vtour-card {
-  position: absolute;
-  left: clamp(1.25rem, 5vw, 4.5rem);
-  top: 50%;
-  transform: translateY(-50%);
-  width: min(34.5rem, calc(100vw - 2.5rem));
-  max-height: calc(100dvh - 5rem);
-  overflow-y: auto;
-  padding: clamp(1.6rem, 3.4vw, 2.6rem);
-  border: 1px solid var(--vx-line);
-  border-radius: 24px;
-  background: linear-gradient(180deg, rgba(22, 18, 33, 0.78), rgba(10, 9, 15, 0.88));
-  backdrop-filter: blur(22px) saturate(1.25);
-  box-shadow:
-    0 30px 90px rgba(4, 2, 10, 0.6),
-    0 0 0 1px rgba(6, 6, 8, 0.4),
-    0 0 80px rgba(143, 82, 255, 0.1);
-  animation: vx-card-in 480ms var(--vx-ease) both;
-}
-
-@keyframes vx-card-in {
-  from {
-    opacity: 0;
-    transform: translateY(calc(-50% + 16px)) scale(0.985);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(-50%) scale(1);
-  }
 }
 
 .vtour-eyebrow {
@@ -190,16 +309,6 @@
   50% { box-shadow: 0 0 3px rgba(143, 82, 255, 0.5); }
 }
 
-.vtour-title {
-  margin: 1.15rem 0 0;
-  font-size: clamp(2rem, 4.2vw, 3.1rem);
-  font-weight: 700;
-  line-height: 1.05;
-  letter-spacing: -0.015em;
-  color: var(--vx-ink);
-}
-
-.vtour-title em,
 .vprogress-title em {
   font-style: normal;
   /* The Vector gradient — the one signature moment on every surface. */
@@ -207,55 +316,6 @@
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-}
-
-.vtour-body {
-  margin: 1.05rem 0 0;
-  max-width: 30rem;
-  color: var(--vx-muted);
-  font-size: 0.99rem;
-  line-height: 1.65;
-}
-
-.vtour-footer {
-  position: sticky;
-  bottom: 0;
-  z-index: 2;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  margin-top: 1.8rem;
-  padding-top: 0.85rem;
-  background: linear-gradient(180deg, transparent, rgba(10, 9, 15, 0.96) 34%);
-}
-
-.vtour-dots {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-}
-
-.vtour-dot {
-  width: 0.4rem;
-  height: 0.4rem;
-  padding: 0;
-  border: none;
-  border-radius: 999px;
-  background: rgba(201, 176, 255, 0.22);
-  cursor: pointer;
-  transition:
-    width 260ms var(--vx-ease),
-    background 260ms var(--vx-ease);
-}
-
-.vtour-dot[data-past="true"] {
-  background: rgba(201, 176, 255, 0.55);
-}
-
-.vtour-dot[data-active="true"] {
-  width: 1.45rem;
-  background: var(--vx-gradient-text);
 }
 
 .vtour-actions {
@@ -307,34 +367,30 @@
 }
 
 @media (max-width: 720px) {
-  .vtour-card {
-    left: 0.9rem;
+  .vspot-card {
+    /* Small windows: dock the card to the bottom edge instead of floating
+       beside the target — the hole still marks the control being described. */
+    top: auto !important;
+    left: 0.9rem !important;
     right: 0.9rem;
-    top: auto;
     bottom: 0.9rem;
-    transform: none;
     width: auto;
-    max-height: calc(100dvh - 5rem);
-  }
-
-  @keyframes vx-card-in {
-    from {
-      opacity: 0;
-      transform: translateY(16px) scale(0.985);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0) scale(1);
-    }
-  }
-
-  .vtour-count {
-    display: none;
+    max-height: 55dvh;
+    overflow-y: auto;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .vtour-card {
+  .vspot-card {
+    animation: none;
+    transition: none;
+  }
+
+  .vspot-hole {
+    transition: none;
+  }
+
+  .vspot-hole::after {
     animation: none;
   }
 
