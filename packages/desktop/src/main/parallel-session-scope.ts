@@ -20,13 +20,14 @@ export function parallelSessionCreateRequest(input: ParallelSessionScopeInput) {
   return {
     path: `/session?${query.toString()}`,
     body: {
-      parentID,
-      title: `${input.workspaceName} · isolated agent`,
+      // Parallel workspaces are complete sessions, not child/subagent
+      // sessions. The task relationship stays in Vector metadata so each
+      // workspace retains the normal agent surface and subagent tools.
+      title: input.workspaceName,
       model:
         input.provider && input.model && !input.provider.startsWith("Current ")
           ? { providerID: input.provider, id: input.model }
           : undefined,
-      agent: input.agent,
       metadata: {
         vector: {
           kind: "parallel-agent",

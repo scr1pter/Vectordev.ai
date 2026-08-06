@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test"
 import { parallelSessionCreateRequest } from "./parallel-session-scope"
 
 describe("parallel agent session scope", () => {
-  test("creates the engine session inside the isolated folder and under its task", () => {
+  test("creates a regular engine session inside the isolated folder and associates it with its task", () => {
     const request = parallelSessionCreateRequest({
       workspaceId: "workspace-1",
       workspaceName: "Build authentication",
@@ -17,10 +17,8 @@ describe("parallel agent session scope", () => {
 
     expect(request.path).toBe("/session?directory=%2Ftmp%2FVector+runs%2Fworkspace-1")
     expect(request.body).toMatchObject({
-      parentID: "ses_parent",
-      title: "Build authentication · isolated agent",
+      title: "Build authentication",
       model: { providerID: "anthropic", id: "claude-sonnet" },
-      agent: "build",
       metadata: {
         vector: {
           kind: "parallel-agent",
@@ -30,6 +28,8 @@ describe("parallel agent session scope", () => {
         },
       },
     })
+    expect(request.body).not.toHaveProperty("parentID")
+    expect(request.body).not.toHaveProperty("agent")
     expect(request.body).not.toHaveProperty("location")
   })
 
@@ -43,6 +43,7 @@ describe("parallel agent session scope", () => {
       engineParentSessionId: "ses_main_task",
     })
 
-    expect(request.body.parentID).toBe("ses_main_task")
+    expect(request.body).not.toHaveProperty("parentID")
+    expect(request.body.metadata.vector.parentSessionId).toBe("ses_main_task")
   })
 })

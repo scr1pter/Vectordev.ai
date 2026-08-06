@@ -1,15 +1,11 @@
-import { Component, JSX, Show, createMemo, createSignal } from "solid-js"
+import { Component, JSX, Show, createSignal } from "solid-js"
 import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
 import { SelectV2 } from "@opencode-ai/ui/v2/select-v2"
 import { Switch } from "@opencode-ai/ui/v2/switch-v2"
 import { Icon, type IconProps } from "@opencode-ai/ui/icon"
-import { useLanguage } from "@/context/language"
 import {
-  type VectorAnimationSpeedPreference,
   type VectorChatWidthPreference,
-  type VectorDensityPreference,
   type VectorMessageSpacingPreference,
-  type VectorThemePreference,
   useSettings,
 } from "@/context/settings"
 import "./settings-v2.css"
@@ -20,25 +16,6 @@ type Option = {
   value: string
   label: string
 }
-
-const themeOptions: Option[] = [
-  { value: "dark", label: "Dark" },
-  { value: "light", label: "Light" },
-  { value: "system", label: "Follow system" },
-]
-
-const densityOptions: Option[] = [
-  { value: "compact", label: "Compact" },
-  { value: "comfortable", label: "Comfortable" },
-  { value: "spacious", label: "Spacious" },
-]
-
-const animationOptions: Option[] = [
-  { value: "off", label: "Off" },
-  { value: "calm", label: "Calm" },
-  { value: "normal", label: "Normal" },
-  { value: "fast", label: "Fast" },
-]
 
 const chatWidthOptions: Option[] = [
   { value: "focused", label: "Focused" },
@@ -230,18 +207,11 @@ export const SettingsGeneralV2: Component<{
   sessionID?: string
   section?: SettingsSection
 }> = (props) => {
-  const language = useLanguage()
   const settings = useSettings()
   const [status, setStatus] = createSignal("")
   let statusTimeout: ReturnType<typeof setTimeout> | undefined
 
   const section = () => props.section ?? "general"
-  const languageOptions = createMemo(() =>
-    language.locales.map((locale) => ({
-      value: locale,
-      label: language.label(locale),
-    })),
-  )
   const announce = (message: string) => {
     if (statusTimeout !== undefined) clearTimeout(statusTimeout)
     setStatus(message)
@@ -262,19 +232,10 @@ export const SettingsGeneralV2: Component<{
   const renderGeneral = () => (
     <Page
       eyebrow="General"
-      title="Language and local data"
-      description="Interface language and the data Vector stores on this device."
+      title="Local application data"
+      description="Manage the preferences and temporary data Vector stores on this device."
     >
       <div class="settings-v2-section-grid">
-        <Card icon="sliders" title="Interface" description="Applies immediately across the whole workspace.">
-          <SelectRow
-            title="Language"
-            description="Display language for menus, dialogs, and labels."
-            options={languageOptions()}
-            value={language.locale()}
-            onChange={(value) => language.setLocale(value as Parameters<typeof language.setLocale>[0])}
-          />
-        </Card>
         <Card
           icon="reset"
           title="Local data"
@@ -300,13 +261,7 @@ export const SettingsGeneralV2: Component<{
       description="Every visual choice below applies instantly and persists locally."
     >
       <div class="settings-v2-section-grid">
-        <Card icon="photo" title="Theme and color" description="Set Vector's tone without external services.">
-          <SelectRow
-            title="Theme"
-            options={themeOptions}
-            value={settings.appearance.theme()}
-            onChange={(value) => settings.appearance.setTheme(value as VectorThemePreference)}
-          />
+        <Card icon="photo" title="Workspace colors" description="Set Vector's tone without external services.">
           <ColorRow
             title="Accent color"
             description="Used for focused controls, highlights, and Vector actions."
@@ -341,7 +296,7 @@ export const SettingsGeneralV2: Component<{
             Restore default colors
           </ButtonV2>
         </Card>
-        <Card icon="sliders" title="Layout feel" description="Tune density, motion, and rounding.">
+        <Card icon="sliders" title="Layout feel" description="Tune sizing, motion, and rounding.">
           <RangeRow
             title="Interface font size"
             value={settings.appearance.fontSize()}
@@ -349,12 +304,6 @@ export const SettingsGeneralV2: Component<{
             max={20}
             format={(value) => `${value}px`}
             onInput={settings.appearance.setFontSize}
-          />
-          <SelectRow
-            title="UI density"
-            options={densityOptions}
-            value={settings.appearance.density()}
-            onChange={(value) => settings.appearance.setDensity(value as VectorDensityPreference)}
           />
           <ToggleRow
             title="Collapse sidebar by default"
@@ -365,12 +314,6 @@ export const SettingsGeneralV2: Component<{
             title="Rounded corners"
             checked={settings.appearance.roundedCorners()}
             onChange={settings.appearance.setRoundedCorners}
-          />
-          <SelectRow
-            title="Animation speed"
-            options={animationOptions}
-            value={settings.appearance.animationSpeed()}
-            onChange={(value) => settings.appearance.setAnimationSpeed(value as VectorAnimationSpeedPreference)}
           />
           <ToggleRow
             title="Reduce motion"

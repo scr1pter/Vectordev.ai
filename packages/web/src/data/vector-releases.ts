@@ -312,4 +312,10 @@ export const release117: VectorRelease[] = [
     summary:
       "Opened direct beta access to current macOS, Windows, and Linux installers, refreshed Vector's animated product story, and introduced a more distinct neon workspace editor treatment.",
   },
+  {
+    version: "1.17.38",
+    title: "Faster parallel sessions",
+    summary:
+      "Made isolated agents appear faster as complete Vector sessions with their own subagent access, simplified inactive Settings controls, and introduced a continuous purple Matrix rainfall across the landing page.",
+  },
 ]

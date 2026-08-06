@@ -819,20 +819,13 @@ export async function createParallelWorkspace(input: CreateParallelWorkspaceInpu
   const root = workspaceRoot()
   const workspaceDir = join(root, id)
   const isolatedPath = join(workspaceDir, "workspace")
-  const baselineHashes = await hashProject(sourceRoot)
   const taskDifficulty = classifyTaskDifficulty(input.taskPrompt)
-  const contextPack =
-    taskDifficulty === "trivial"
-      ? undefined
-      : await createContextBudgetPack(
-          sourceRoot,
-          input.taskPrompt,
-          contextBudgetForDifficulty(taskDifficulty),
-        ).catch(() => undefined)
   const runtime = input.runtime ?? "vector"
   const estimatedCost =
     runtime === "vector"
-      ? estimateCost(input.taskPrompt, baselineHashes, contextPack?.estimatedTokens)
+      ? taskDifficulty === "trivial"
+        ? estimateCost(input.taskPrompt, {})
+        : "Calculating from task context"
       : "Reported by runtime when available"
   const name = input.name?.trim() || `Agent ${activeInScope.length + 1}`
   const runtimeName = runtimeLabel(runtime)
@@ -843,11 +836,6 @@ export async function createParallelWorkspace(input: CreateParallelWorkspaceInpu
   let gitBranch: string | undefined
   let baseCommit: string | undefined
   const logs: string[] = []
-  if (contextPack) {
-    logs.push(
-      `Context budget selected ${contextPack.selectedFileCount} of ${contextPack.indexedFileCount} indexed files (~${contextPack.estimatedTokens.toLocaleString()} tokens).`,
-    )
-  }
 
   await mkdir(workspaceDir, { recursive: true })
   const rootGit = await gitRoot(sourceRoot)
@@ -948,17 +936,13 @@ export async function createParallelWorkspace(input: CreateParallelWorkspaceInpu
     browserResults: [],
     changedFiles: [],
     diff: "",
-    baselineHashes,
-    contextFiles: contextPack?.files.map((file) => file.path),
-    contextIndexedFiles: contextPack?.indexedFileCount,
-    contextTokenEstimate: contextPack?.estimatedTokens,
-    contextSummary: contextPack ? formatContextBudgetForAgent(contextPack).split("\n")[0] : undefined,
+    baselineHashes: undefined,
     taskDifficulty,
     retryLimit: taskDifficulty === "complex" ? 2 : taskDifficulty === "trivial" ? 0 : 1,
     repairAttempts: 0,
   }
   writeRecords([record, ...readRecords()])
-  return refreshParallelWorkspace(id)
+  return record
 }
 
 async function ensureParallelWorkspaceIsolation(record: ParallelWorkspaceRecord) {
@@ -992,6 +976,47 @@ async function ensureParallelWorkspaceIsolation(record: ParallelWorkspaceRecord)
   }))
   syncBackgroundTask(restored, "Rebuilt the missing isolated workspace from the current main project.")
   return restored
+}
+
+async function prepareParallelWorkspaceContext(record: ParallelWorkspaceRecord) {
+  const needsBaseline = record.isolation === "copy" && record.baselineHashes === undefined
+  const needsContext = record.taskDifficulty !== "trivial" && record.contextIndexedFiles === undefined
+  if (!needsBaseline && !needsContext) return record
+
+  const [baselineHashes, contextPack] = await Promise.all([
+    needsBaseline ? hashProject(record.isolatedPath) : Promise.resolve(record.baselineHashes),
+    needsContext
+      ? createContextBudgetPack(
+          record.isolatedPath,
+          record.taskPrompt,
+          contextBudgetForDifficulty(record.taskDifficulty ?? "standard"),
+        ).catch(() => undefined)
+      : Promise.resolve(undefined),
+  ])
+  const contextTokens = contextPack?.estimatedTokens ?? record.contextTokenEstimate
+  const updated = updateRecord(record.id, (current) => ({
+    ...current,
+    baselineHashes,
+    estimatedCost:
+      current.runtime === "vector"
+        ? estimateCost(current.taskPrompt, baselineHashes ?? {}, contextTokens)
+        : current.estimatedCost,
+    contextFiles: contextPack?.files.map((file) => file.path) ?? current.contextFiles,
+    contextIndexedFiles: contextPack?.indexedFileCount ?? current.contextIndexedFiles,
+    contextTokenEstimate: contextTokens,
+    contextSummary: contextPack
+      ? formatContextBudgetForAgent(contextPack).split("\n")[0]
+      : current.contextSummary,
+    logs: contextPack
+      ? [
+          `Context budget selected ${contextPack.selectedFileCount} of ${contextPack.indexedFileCount} indexed files (~${contextPack.estimatedTokens.toLocaleString()} tokens).`,
+          ...current.logs,
+        ].slice(0, 120)
+      : current.logs,
+    lastActivityAt: now(),
+  }))
+  syncBackgroundTask(updated, "Task-specific context is ready in the isolated workspace.")
+  return updated
 }
 
 async function runExternalWorkspacePass(
@@ -1163,7 +1188,8 @@ async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEng
     if (!persisted) throw new Error("Parallel workspace was not found.")
     const initial = await ensureParallelWorkspaceIsolation(persisted)
     if (initial.runtime !== "vector") {
-      await executeExternalParallelWorkspace(id, initial, controller)
+      const prepared = await prepareParallelWorkspaceContext(initial)
+      await executeExternalParallelWorkspace(id, prepared, controller)
       return
     }
 
@@ -1191,14 +1217,23 @@ async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEng
     let record = updateRecord(id, (current) => ({
       ...current,
       agentSessionId: sessionId,
-      status: "editing",
+      status: "planning",
       progress: 0,
-      lastAction: "Agent is inspecting the isolated project",
+      lastAction: "Preparing task-specific project context",
       lastActivityAt: now(),
       error: undefined,
       logs: [`Engine session ${sessionId} started in ${current.isolatedPath}.`, ...current.logs].slice(0, 120),
     }))
     syncBackgroundTask(record, "Vector agent session started in the isolated workspace.")
+
+    record = await prepareParallelWorkspaceContext(record)
+    record = updateRecord(id, (current) => ({
+      ...current,
+      status: "editing",
+      lastAction: "Agent is inspecting the isolated project",
+      lastActivityAt: now(),
+    }))
+    syncBackgroundTask(record, "Task context prepared; the Vector agent is now working.")
 
     await engineRequest(engine, `/api/session/${encodeURIComponent(sessionId)}/prompt`, {
       method: "POST",
