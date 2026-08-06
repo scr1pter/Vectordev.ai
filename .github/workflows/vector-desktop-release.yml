@@ -34,6 +34,14 @@ jobs:
             echo "Release tag $TAG must match packages/desktop version v$version"
             exit 1
           }
+      - name: Prepare draft GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --draft --title "Vector ${TAG}" --notes "Vector desktop builds for macOS, Windows, and Linux."
+          fi
 
   mac:
     name: macOS desktop apps
@@ -46,16 +54,21 @@ jobs:
         run: OPENCODE_CHANNEL=prod bun run --cwd packages/desktop build
       - name: Package Apple Silicon and Intel builds
         run: OPENCODE_CHANNEL=prod bun run --cwd packages/desktop package -- --mac dmg zip --arm64 --x64 --publish never
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: vector-desktop-mac
-          path: |
-            packages/desktop/dist/vector-desktop-mac-arm64.dmg
-            packages/desktop/dist/vector-desktop-mac-arm64.zip
-            packages/desktop/dist/vector-desktop-mac-x64.dmg
-            packages/desktop/dist/vector-desktop-mac-x64.zip
+      - name: Upload macOS assets to draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          gh release upload "$TAG" --clobber \
+            packages/desktop/dist/vector-desktop-mac-arm64.dmg \
+            packages/desktop/dist/vector-desktop-mac-arm64.dmg.blockmap \
+            packages/desktop/dist/vector-desktop-mac-arm64.zip \
+            packages/desktop/dist/vector-desktop-mac-arm64.zip.blockmap \
+            packages/desktop/dist/vector-desktop-mac-x64.dmg \
+            packages/desktop/dist/vector-desktop-mac-x64.dmg.blockmap \
+            packages/desktop/dist/vector-desktop-mac-x64.zip \
+            packages/desktop/dist/vector-desktop-mac-x64.zip.blockmap \
             packages/desktop/dist/latest-mac.yml
-            packages/desktop/dist/*.blockmap
 
   windows:
     name: Windows desktop app
@@ -68,15 +81,32 @@ jobs:
         run: $env:OPENCODE_CHANNEL="prod"; bun run --cwd packages/desktop build
       - name: Package Windows installer
         run: $env:OPENCODE_CHANNEL="prod"; bun run --cwd packages/desktop package -- --win nsis --x64 --arm64 --publish never
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: vector-desktop-windows
-          path: |
-            packages/desktop/dist/vector-desktop-win-x64.exe
-            packages/desktop/dist/vector-desktop-win-arm64.exe
-            packages/desktop/dist/vector-desktop-win.exe
-            packages/desktop/dist/latest.yml
-            packages/desktop/dist/*.blockmap
+      - name: Preserve the stable Windows updater filename
+        shell: pwsh
+        run: |
+          if (!(Test-Path packages/desktop/dist/vector-desktop-win.exe)) {
+            Copy-Item packages/desktop/dist/vector-desktop-win-x64.exe packages/desktop/dist/vector-desktop-win.exe
+          }
+          if (!(Test-Path packages/desktop/dist/vector-desktop-win.exe.blockmap)) {
+            Copy-Item packages/desktop/dist/vector-desktop-win-x64.exe.blockmap packages/desktop/dist/vector-desktop-win.exe.blockmap
+          }
+      - name: Upload Windows assets to draft release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          $assets = @(
+            "packages/desktop/dist/vector-desktop-win-x64.exe",
+            "packages/desktop/dist/vector-desktop-win-x64.exe.blockmap",
+            "packages/desktop/dist/vector-desktop-win-arm64.exe",
+            "packages/desktop/dist/vector-desktop-win-arm64.exe.blockmap",
+            "packages/desktop/dist/vector-desktop-win.exe",
+            "packages/desktop/dist/vector-desktop-win.exe.blockmap",
+            "packages/desktop/dist/latest.yml"
+          )
+          gh release upload $env:TAG $assets --clobber
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
   linux:
     name: Linux desktop app
@@ -89,15 +119,16 @@ jobs:
         run: OPENCODE_CHANNEL=prod bun run --cwd packages/desktop build
       - name: Package Linux AppImage
         run: OPENCODE_CHANNEL=prod bun run --cwd packages/desktop package -- --linux AppImage --x64 --arm64 --publish never
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: vector-desktop-linux
-          path: |
-            packages/desktop/dist/vector-desktop-linux-x86_64.AppImage
-            packages/desktop/dist/vector-desktop-linux-arm64.AppImage
-            packages/desktop/dist/latest-linux.yml
+      - name: Upload Linux assets to draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          gh release upload "$TAG" --clobber \
+            packages/desktop/dist/vector-desktop-linux-x86_64.AppImage \
+            packages/desktop/dist/vector-desktop-linux-arm64.AppImage \
+            packages/desktop/dist/latest-linux.yml \
             packages/desktop/dist/latest-linux-arm64.yml
-            packages/desktop/dist/*.blockmap
 
   release:
     name: Publish GitHub release assets
@@ -109,10 +140,13 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
       - uses: ./.github/actions/setup-bun
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          path: release-assets
-          merge-multiple: true
+      - name: Download platform assets from draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          mkdir -p release-assets
+          gh release download "$TAG" --dir release-assets --clobber
       - name: Create checksums
         run: |
           cd release-assets
@@ -124,15 +158,8 @@ jobs:
           PRERELEASE: ${{ inputs.prerelease }}
         run: |
           set -euo pipefail
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" release-assets/* --clobber
-          else
-            args=(gh release create "$TAG" release-assets/* --title "Vector ${TAG}" --notes "Vector desktop builds for macOS, Windows, and Linux.")
-            if [ "$PRERELEASE" = "true" ]; then
-              args+=(--prerelease)
-            fi
-            "${args[@]}"
-          fi
+          gh release upload "$TAG" release-assets/checksums.txt --clobber
+          gh release edit "$TAG" --draft=false --prerelease="$PRERELEASE"
       - name: Publish Vector download and update feeds
         env:
           BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
