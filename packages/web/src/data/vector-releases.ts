@@ -306,4 +306,10 @@ export const release117: VectorRelease[] = [
     summary:
       "Introduced an interactive spotlight tour over Vector's real controls, added a durable Getting Started guide, and made the path from repository setup to agents, tools, Cloud Services, and Settings easier to learn.",
   },
+  {
+    version: "1.17.37",
+    title: "Open beta downloads",
+    summary:
+      "Opened direct beta access to current macOS, Windows, and Linux installers, refreshed Vector's animated product story, and introduced a more distinct neon workspace editor treatment.",
+  },
 ]

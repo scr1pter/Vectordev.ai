@@ -128,100 +128,113 @@ const changelog = [
   <MarketingNav active="product" />
 
   <main>
-    <section class="hero" aria-labelledby="hero-title">
-      <h1 class="wordmark" id="hero-title">
-        <span class="sr-only">Vector</span>
-        <svg
-          viewBox={`0 0 ${6 * 7 - 2} 7`}
-          width="252"
-          height="42"
-          fill="currentColor"
-          shape-rendering="crispEdges"
-          aria-hidden="true"
-        >
-          {wordmarkCells.map((cell) => <rect x={cell.x} y={cell.y} width="0.92" height="0.92" />)}
-        </svg>
-      </h1>
-
-      <p class="headline">
-        <span>One workspace. An army of builders.</span>
-        <span class="scramble" data-scramble aria-hidden="true">Your models. Your tools. Your control.</span>
-        <span class="sr-only">Direct parallel AI builders, operate the browser, connect your tools, review their work, and ship from one bring-your-own-key workspace.</span>
-      </p>
-
-      <div class="hero-loop" aria-label="Vector's build, test, and ship workflow">
-        <div class="hero-loop-progress" aria-hidden="true"><i data-hero-progress></i></div>
-        <div class="hero-loop-stage is-active" data-hero-stage="0">
-          <span class="hero-loop-icon"><Bot size={16} strokeWidth={1.8} aria-hidden="true" /></span>
-          <span><strong>Build</strong><small>Parallel agents</small></span>
+    <section class="scene scene-hero" data-scene style="--scene-span: 2.3" aria-labelledby="hero-title">
+      <div class="scene-stage">
+        <div class="sky" aria-hidden="true">
+          <i class="sky-aurora"></i>
+          <i class="sky-stars"></i>
         </div>
-        <div class="hero-loop-stage" data-hero-stage="1">
-          <span class="hero-loop-icon"><Globe2 size={16} strokeWidth={1.8} aria-hidden="true" /></span>
-          <span><strong>Test</strong><small>Native browser</small></span>
+        <div class="hero">
+          <h1 class="wordmark" id="hero-title">
+            <span class="sr-only">Vector</span>
+            <svg
+              viewBox={`0 0 ${6 * 7 - 2} 7`}
+              width="252"
+              height="42"
+              fill="currentColor"
+              shape-rendering="crispEdges"
+              aria-hidden="true"
+            >
+              {wordmarkCells.map((cell) => <rect x={cell.x} y={cell.y} width="0.92" height="0.92" />)}
+            </svg>
+          </h1>
+
+          <p class="headline">
+            <span>One workspace. An army of builders.</span>
+            <span class="scramble" data-scramble aria-hidden="true">Your models. Your tools. Your control.</span>
+            <span class="sr-only">Direct parallel AI builders, operate the browser, connect your tools, review their work, and ship from one bring-your-own-key workspace.</span>
+          </p>
+
+          <div class="hero-loop" aria-label="Vector's build, test, and ship workflow">
+            <div class="hero-loop-progress" aria-hidden="true"><i data-hero-progress></i></div>
+            <div class="hero-loop-stage is-active" data-hero-stage="0">
+              <span class="hero-loop-icon"><Bot size={16} strokeWidth={1.8} aria-hidden="true" /></span>
+              <span><strong>Build</strong><small>Parallel agents</small></span>
+            </div>
+            <div class="hero-loop-stage" data-hero-stage="1">
+              <span class="hero-loop-icon"><Globe2 size={16} strokeWidth={1.8} aria-hidden="true" /></span>
+              <span><strong>Test</strong><small>Native browser</small></span>
+            </div>
+            <div class="hero-loop-stage" data-hero-stage="2">
+              <span class="hero-loop-icon"><CloudUpload size={16} strokeWidth={1.8} aria-hidden="true" /></span>
+              <span><strong>Ship</strong><small>Cloud Services</small></span>
+            </div>
+          </div>
+
+          <a class="hero-cta" href="/download">
+            <span>Get Vector</span>
+            <ArrowRight size={18} strokeWidth={2} aria-hidden="true" />
+          </a>
+
+          <p class="hero-note">The ultimate local-first, bring-your-own-key agentic workspace.</p>
         </div>
-        <div class="hero-loop-stage" data-hero-stage="2">
-          <span class="hero-loop-icon"><CloudUpload size={16} strokeWidth={1.8} aria-hidden="true" /></span>
-          <span><strong>Ship</strong><small>Cloud Services</small></span>
+
+        <div class="showcase" aria-label="Vector workspace screenshot">
+          <figure class="product-window">
+            <div class="product-bar" aria-hidden="true">
+              <span class="traffic"><i></i><i></i><i></i></span>
+              <span class="product-title">Vector — agentic workspace</span>
+              <span class="product-status"><i></i> Ready</span>
+            </div>
+            <img
+              data-parallax
+              src={screenshotAgent.src}
+              width={screenshotAgent.width}
+              height={screenshotAgent.height}
+              alt="Vector coordinating builders inside a repository"
+              loading="eager"
+            />
+          </figure>
         </div>
       </div>
-
-      <a class="hero-cta" href="/download">
-        <span>Get Vector</span>
-        <ArrowRight size={18} strokeWidth={2} aria-hidden="true" />
-      </a>
-
-      <p class="hero-note">The ultimate local-first, bring-your-own-key agentic workspace.</p>
     </section>
 
-    <section class="showcase" aria-label="Vector workspace screenshot">
-      <figure class="product-window" data-reveal>
-        <div class="product-bar" aria-hidden="true">
-          <span class="traffic"><i></i><i></i><i></i></span>
-          <span class="product-title">Vector — agentic workspace</span>
-          <span class="product-status"><i></i> Ready</span>
+    <section class="scene scene-suite" data-scene style="--scene-span: 3.1" aria-labelledby="suite-title">
+      <div class="scene-stage">
+        <div class="suite section-width">
+          <div class="section-heading chapter-head">
+            <p class="section-kicker">One Vector</p>
+            <h2 id="suite-title">One command center for every builder.</h2>
+            <p>Vector is the command center for builders: one place to direct agents, use your own models, connect real tools, inspect the work, and ship outcomes.</p>
+          </div>
+          <div class="suite-grid">
+            <article style="--i: 0">
+              <span class="suite-icon"><Bot size={19} strokeWidth={1.7} aria-hidden="true" /></span>
+              <small>Direct the work</small>
+              <h3>An agentic army</h3>
+              <p>Work with one agent or coordinate up to 16 isolated builders. Give each one an outcome, follow the live work, and merge only what you trust.</p>
+            </article>
+            <article style="--i: 1">
+              <span class="suite-icon"><Globe2 size={19} strokeWidth={1.7} aria-hidden="true" /></span>
+              <small>Connect the world</small>
+              <h3>Browser, MCP, and plugins</h3>
+              <p>Let builders operate the visible browser and connect to the services you already use. Pause, approve, or take over whenever the work becomes sensitive.</p>
+            </article>
+            <article style="--i: 2">
+              <span class="suite-icon"><CloudUpload size={19} strokeWidth={1.7} aria-hidden="true" /></span>
+              <small>Build and ship</small>
+              <h3>Editor, terminal, and Cloud</h3>
+              <p>Code directly when you want to, then deploy, configure, and operate each repository through the same workspace and your own connected accounts.</p>
+            </article>
+            <article style="--i: 3">
+              <span class="suite-icon"><Mic2 size={19} strokeWidth={1.7} aria-hidden="true" /></span>
+              <small>Talk through the work</small>
+              <h3>Vel</h3>
+              <p>A task-aware voice assistant with a dedicated call surface. Vel listens, answers aloud and hands actionable requests to the active Vector agent.</p>
+            </article>
+          </div>
+          <div class="scene-rail" aria-hidden="true"><i></i></div>
         </div>
-        <img
-          data-parallax
-          src={screenshotAgent.src}
-          width={screenshotAgent.width}
-          height={screenshotAgent.height}
-          alt="Vector coordinating builders inside a repository"
-          loading="eager"
-        />
-      </figure>
-    </section>
-
-    <section class="suite section-width" aria-labelledby="suite-title">
-      <div class="section-heading" data-reveal>
-        <p class="section-kicker">One Vector</p>
-        <h2 id="suite-title">One command center for every builder.</h2>
-        <p>Vector is the command center for builders: one place to direct agents, use your own models, connect real tools, inspect the work, and ship outcomes.</p>
-      </div>
-      <div class="suite-grid" data-reveal>
-        <article>
-          <span class="suite-icon"><Bot size={19} strokeWidth={1.7} aria-hidden="true" /></span>
-          <small>Direct the work</small>
-          <h3>An agentic army</h3>
-          <p>Work with one agent or coordinate up to 16 isolated builders. Give each one an outcome, follow the live work, and merge only what you trust.</p>
-        </article>
-        <article>
-          <span class="suite-icon"><Globe2 size={19} strokeWidth={1.7} aria-hidden="true" /></span>
-          <small>Connect the world</small>
-          <h3>Browser, MCP, and plugins</h3>
-          <p>Let builders operate the visible browser and connect to the services you already use. Pause, approve, or take over whenever the work becomes sensitive.</p>
-        </article>
-        <article>
-          <span class="suite-icon"><CloudUpload size={19} strokeWidth={1.7} aria-hidden="true" /></span>
-          <small>Build and ship</small>
-          <h3>Editor, terminal, and Cloud</h3>
-          <p>Code directly when you want to, then deploy, configure, and operate each repository through the same workspace and your own connected accounts.</p>
-        </article>
-        <article>
-          <span class="suite-icon"><Mic2 size={19} strokeWidth={1.7} aria-hidden="true" /></span>
-          <small>Talk through the work</small>
-          <h3>Vel</h3>
-          <p>A task-aware voice assistant with a dedicated call surface. Vel listens, answers aloud and hands actionable requests to the active Vector agent.</p>
-        </article>
       </div>
     </section>
 
@@ -237,24 +250,29 @@ const changelog = [
       </div>
     </section>
 
-    <section class="workflow section-width" aria-labelledby="workflow-title">
-      <div class="section-heading" data-reveal>
-        <p class="section-kicker">One operating loop</p>
-        <h2 id="workflow-title">From a brief to verified, shipped work.</h2>
-        <p>
-          Vector keeps the request, repository context, agent activity, files, terminal, browser,
-          usage, review, and release in one place. Work directly or delegate as much as you want.
-        </p>
+    <section class="scene scene-workflow" data-scene style="--scene-span: 2.8" aria-labelledby="workflow-title">
+      <div class="scene-stage">
+        <div class="workflow section-width">
+          <div class="section-heading chapter-head">
+            <p class="section-kicker">One operating loop</p>
+            <h2 id="workflow-title">From a brief to verified, shipped work.</h2>
+            <p>
+              Vector keeps the request, repository context, agent activity, files, terminal, browser,
+              usage, review, and release in one place. Work directly or delegate as much as you want.
+            </p>
+          </div>
+          <ol class="workflow-list">
+            {workflow.map(([title, body], index) => (
+              <li style={`--i: ${index}`}>
+                <span>0{index + 1}</span>
+                <strong>{title}</strong>
+                <p>{body}</p>
+              </li>
+            ))}
+          </ol>
+          <div class="workflow-rail" aria-hidden="true"><i></i></div>
+        </div>
       </div>
-      <ol class="workflow-list" data-reveal>
-        {workflow.map(([title, body], index) => (
-          <li>
-            <span>0{index + 1}</span>
-            <strong>{title}</strong>
-            <p>{body}</p>
-          </li>
-        ))}
-      </ol>
     </section>
 
     <div id="workspace" class="features">
@@ -265,7 +283,7 @@ const changelog = [
             <h2>{feature.title}</h2>
             <p class="feature-body">{feature.body}</p>
           </div>
-          <figure class="feature-card" data-reveal>
+          <figure class="feature-card reveal-zoom" data-reveal style="--rd: 90ms">
             <div class="card-topline" aria-hidden="true">
               <span>{feature.tag}</span>
               <span>{feature.note}</span>
@@ -278,7 +296,7 @@ const changelog = [
               loading="lazy"
             />
           </figure>
-          <a class="feature-link" href={feature.href} data-reveal>
+          <a class="feature-link" href={feature.href} data-reveal style="--rd: 180ms">
             <span>{feature.link}</span>
             <ArrowRight size={15} strokeWidth={2} aria-hidden="true" />
           </a>
@@ -287,7 +305,7 @@ const changelog = [
     </div>
 
     <section class="runtime section-width" aria-labelledby="runtime-title">
-      <div class="runtime-intro" data-reveal>
+      <div class="runtime-intro chapter-head" data-reveal>
         <p class="section-kicker">The system underneath</p>
         <h2 id="runtime-title">Powerful agents need an observable runtime.</h2>
         <p>
@@ -307,7 +325,7 @@ const changelog = [
     </section>
 
     <section class="evidence section-width" aria-labelledby="evidence-title">
-      <div class="section-heading" data-reveal>
+      <div class="section-heading chapter-head" data-reveal>
         <p class="section-kicker">Measured, not implied</p>
         <h2 id="evidence-title">One controlled repair task. A useful data point.</h2>
         <p>
@@ -317,15 +335,15 @@ const changelog = [
         </p>
       </div>
       <dl class="evidence-grid" data-reveal>
-        <div><dt>Vector Balanced</dt><dd>149s</dd><span>Completion time</span></div>
-        <div><dt>Codex CLI</dt><dd>284s</dd><span>Completion time</span></div>
-        <div><dt>Reported usage</dt><dd>67%</dd><span>Fewer tokens for Vector</span></div>
+        <div><dt>Vector Balanced</dt><dd data-count="149" data-suffix="s">149s</dd><span>Completion time</span></div>
+        <div><dt>Codex CLI</dt><dd data-count="284" data-suffix="s">284s</dd><span>Completion time</span></div>
+        <div><dt>Reported usage</dt><dd data-count="67" data-suffix="%">67%</dd><span>Fewer tokens for Vector</span></div>
         <div><dt>Public checks</dt><dd>5 / 5</dd><span>Passed by both</span></div>
       </dl>
     </section>
 
     <section class="connections section-width" aria-labelledby="connections-title">
-      <div class="section-heading" data-reveal>
+      <div class="section-heading chapter-head" data-reveal>
         <p class="section-kicker">Bring your stack</p>
         <h2 id="connections-title">One workspace for the tools you already trust.</h2>
         <p>
@@ -344,7 +362,7 @@ const changelog = [
     </section>
 
     <section class="comparison-section section-width" aria-labelledby="comparison-title">
-      <div class="section-heading" data-reveal>
+      <div class="section-heading chapter-head" data-reveal>
         <p class="section-kicker">A wider product boundary</p>
         <h2 id="comparison-title">Fewer disconnected surfaces between request and release.</h2>
         <p>
@@ -394,9 +412,13 @@ const changelog = [
     </section>
 
     <section class="closing">
-      <h2>Keep the whole build in view.</h2>
-      <p>Open the repository. Direct the agents. Ship the result.</p>
-      <a class="closing-cta" href="/download">
+      <div class="sky" aria-hidden="true">
+        <i class="sky-aurora"></i>
+        <i class="sky-stars"></i>
+      </div>
+      <h2 data-reveal class="reveal-blur">Keep the whole build in view.</h2>
+      <p data-reveal style="--rd: 120ms">Open the repository. Direct the agents. Ship the result.</p>
+      <a class="closing-cta" href="/download" data-reveal style="--rd: 220ms">
         <span>Download now</span>
         <ArrowRight size={18} strokeWidth={2} aria-hidden="true" />
       </a>
@@ -485,6 +507,110 @@ const changelog = [
       if (raf) cancelAnimationFrame(raf)
       node.textContent = phrases[0]
       selectStage(0)
+    }
+  }
+
+  // Apple-style pinned scenes: each [data-scene] is a tall runway with a sticky
+  // full-viewport stage. Scroll progress through the runway is written to --p
+  // (0..1) and the scene CSS choreographs its layers from that one number.
+  // Reduced motion and small screens collapse to static layouts via CSS, so the
+  // engine just parks --p at its final value there.
+  const initScenes = () => {
+    const scenes = Array.from(document.querySelectorAll<HTMLElement>("[data-scene]"))
+    if (!scenes.length) return () => {}
+    const park = () => scenes.forEach((scene) => scene.style.setProperty("--p", "1"))
+    if (reducedMotion()) {
+      park()
+      return () => {}
+    }
+    let frame = 0
+    const update = () => {
+      frame = 0
+      if (globalThis.innerWidth < 641) {
+        park()
+        return
+      }
+      const viewport = globalThis.innerHeight
+      scenes.forEach((scene) => {
+        if (scene.hasAttribute("data-static")) return
+        const rect = scene.getBoundingClientRect()
+        const span = rect.height - viewport
+        const raw = span > 0 ? -rect.top / span : 1
+        // Only touch scenes near the viewport; distant ones keep their edge value.
+        if (raw < -0.2 || raw > 1.2) return
+        scene.style.setProperty("--p", Math.min(1, Math.max(0, raw)).toFixed(4))
+      })
+    }
+    // A pinned stage must show its whole chapter at once. When the viewport is
+    // too short for a scene's content, pinning would clip it against the glass
+    // nav — so that scene falls back to a plain, fully-revealed section.
+    const audit = () => {
+      scenes.forEach((scene) => {
+        scene.removeAttribute("data-static")
+        const stage = scene.querySelector<HTMLElement>(".scene-stage")
+        if (!stage) return
+        if (stage.scrollHeight > stage.clientHeight + 1) {
+          scene.setAttribute("data-static", "")
+          scene.style.setProperty("--p", "1")
+        }
+      })
+      update()
+    }
+    const queue = () => {
+      if (!frame) frame = requestAnimationFrame(update)
+    }
+    const requeue = () => {
+      audit()
+      queue()
+    }
+    globalThis.addEventListener("scroll", queue, { passive: true })
+    globalThis.addEventListener("resize", requeue, { passive: true })
+    audit()
+    return () => {
+      globalThis.removeEventListener("scroll", queue)
+      globalThis.removeEventListener("resize", requeue)
+      if (frame) cancelAnimationFrame(frame)
+      scenes.forEach((scene) => {
+        scene.style.removeProperty("--p")
+        scene.removeAttribute("data-static")
+      })
+    }
+  }
+
+  // Benchmark numerals count up once when the stat band enters the viewport.
+  const initCounters = () => {
+    const nodes = Array.from(document.querySelectorAll<HTMLElement>("[data-count]"))
+    if (!nodes.length || reducedMotion() || !("IntersectionObserver" in globalThis)) return () => {}
+    const rafs = new Set<number>()
+    const run = (node: HTMLElement) => {
+      const target = Number(node.dataset.count)
+      const suffix = node.dataset.suffix ?? ""
+      if (!Number.isFinite(target)) return
+      const started = performance.now()
+      const duration = 1100
+      const tick = (now: number) => {
+        const t = Math.min(1, (now - started) / duration)
+        const eased = 1 - Math.pow(1 - t, 3)
+        node.textContent = `${Math.round(target * eased)}${suffix}`
+        if (t < 1) rafs.add(requestAnimationFrame(tick))
+      }
+      rafs.add(requestAnimationFrame(tick))
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (!entry.isIntersecting) return
+          observer.unobserve(entry.target)
+          run(entry.target as HTMLElement)
+        })
+      },
+      { threshold: 0.5 },
+    )
+    nodes.forEach((node) => observer.observe(node))
+    return () => {
+      observer.disconnect()
+      rafs.forEach((raf) => cancelAnimationFrame(raf))
+      nodes.forEach((node) => (node.textContent = `${node.dataset.count}${node.dataset.suffix ?? ""}`))
     }
   }
 
@@ -633,7 +759,7 @@ const changelog = [
   let cleanups: Array<() => void> = []
   const boot = () => {
     cleanups.forEach((cleanup) => cleanup())
-    cleanups = [initReveals(), initScramble(), initParallax(), initField()]
+    cleanups = [initReveals(), initScramble(), initScenes(), initCounters(), initParallax(), initField()]
   }
   const teardown = () => {
     cleanups.forEach((cleanup) => cleanup())
@@ -707,20 +833,279 @@ const changelog = [
     transform: translate3d(0, 18px, 0);
     transition:
       opacity 640ms cubic-bezier(0.16, 1, 0.3, 1),
-      transform 640ms cubic-bezier(0.16, 1, 0.3, 1);
+      transform 640ms cubic-bezier(0.16, 1, 0.3, 1),
+      filter 640ms cubic-bezier(0.16, 1, 0.3, 1);
     transition-delay: var(--rd, 0ms);
+  }
+
+  :global(html.va) [data-reveal].reveal-blur {
+    filter: blur(14px);
+  }
+
+  :global(html.va) [data-reveal].reveal-zoom {
+    transform: translate3d(0, 26px, 0) scale(0.965);
   }
 
   :global(html.va) [data-reveal].in {
     opacity: 1;
     transform: translate3d(0, 0, 0);
+    filter: none;
   }
 
   @media (prefers-reduced-motion: reduce) {
     :global(html.va) [data-reveal] {
       opacity: 1;
       transform: none;
+      filter: none;
       transition: none;
+    }
+  }
+
+  /* ---- pinned scenes ----
+     Each scene is a tall runway; its stage stays pinned a full viewport while
+     scroll progress (--p, written by initScenes) drives the choreography.
+     Everything is gated on html.va + desktop + motion-ok, so no-JS, reduced
+     motion, and small screens all read the plain stacked layout. */
+
+  .scene {
+    position: relative;
+  }
+
+  .scene-stage {
+    position: relative;
+  }
+
+  .scene-rail,
+  .workflow-rail {
+    display: none;
+  }
+
+  @media (min-width: 641px) and (prefers-reduced-motion: no-preference) {
+    :global(html.va) .scene[data-scene] {
+      height: calc(var(--scene-span, 2.4) * 100vh);
+      height: calc(var(--scene-span, 2.4) * 100svh);
+    }
+
+    :global(html.va) .scene-stage {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      height: 100svh;
+      display: flex;
+      flex-direction: column;
+      /* safe center: on short viewports overflow clips at the bottom only,
+         never under the nav. */
+      justify-content: safe center;
+      overflow: clip;
+      /* Clear the sticky glass nav so pinned chapter heads never sit under it. */
+      padding-top: 96px;
+      padding-bottom: 20px;
+    }
+
+    /* Scenes whose content can't fit a pinned viewport (short windows) become
+       plain, fully-revealed sections — initScenes marks them data-static. */
+    :global(html.va) .scene[data-static] {
+      height: auto;
+    }
+
+    :global(html.va) .scene[data-static] .scene-stage {
+      position: static;
+      display: block;
+      height: auto;
+      padding: 0;
+      overflow: visible;
+    }
+
+    :global(html.va) .scene[data-static] .hero,
+    :global(html.va) .scene[data-static] .showcase,
+    :global(html.va) .scene[data-static] .chapter-head,
+    :global(html.va) .scene[data-static] .suite-grid article,
+    :global(html.va) .scene[data-static] .workflow-list li {
+      opacity: 1;
+      transform: none;
+      filter: none;
+    }
+
+    :global(html.va) .scene[data-static] .scene-rail,
+    :global(html.va) .scene[data-static] .workflow-rail {
+      display: none;
+    }
+
+    :global(html.va) .scene[data-static].scene-suite .suite {
+      margin-top: clamp(68px, 10vw, 126px);
+    }
+
+    :global(html.va) .scene[data-static].scene-workflow .workflow {
+      margin-top: clamp(64px, 9vw, 112px);
+    }
+
+    :global(html.va) .scene[data-static].scene-hero .hero {
+      padding-top: clamp(72px, 10vw, 128px);
+    }
+
+    :global(html.va) .scene[data-static].scene-hero .showcase {
+      padding-top: clamp(56px, 7vw, 88px);
+    }
+
+    @media (max-height: 780px) {
+      :global(html.va) .scene .chapter-head h2 {
+        font-size: clamp(28px, 4.4vw, 44px);
+      }
+
+      :global(html.va) .scene-suite .suite-grid article {
+        min-height: 0;
+        padding: 18px 20px;
+      }
+
+      :global(html.va) .scene-suite .suite-grid p {
+        font-size: 12px;
+      }
+    }
+
+    /* Hero: the copy holds the stage, then hands off to the product window. */
+    :global(html.va) .scene-hero .scene-stage {
+      display: grid;
+      place-items: center;
+      padding-top: 56px;
+      --t-window: clamp(0, (var(--p, 0) - 0.2) / 0.52, 1);
+      --t-exit: clamp(0, (var(--p, 0) - 0.4) / 0.32, 1);
+    }
+
+    :global(html.va) .scene-hero .hero,
+    :global(html.va) .scene-hero .showcase {
+      grid-area: 1 / 1;
+    }
+
+    :global(html.va) .scene-hero .hero {
+      padding-top: 0;
+      opacity: calc(1 - var(--t-exit));
+      transform: translateY(calc(var(--t-exit) * -52px)) scale(calc(1 - var(--t-exit) * 0.04));
+      filter: blur(calc(var(--t-exit) * 10px));
+    }
+
+    :global(html.va) .scene-hero .showcase {
+      width: min(1150px, calc(100vw - 48px));
+      padding-top: 0;
+      opacity: min(1, calc(var(--t-window) * 2.4));
+      transform: translateY(calc((1 - var(--t-window)) * 84vh)) scale(calc(0.94 + var(--t-window) * 0.06));
+      will-change: transform;
+    }
+
+    /* Suite: the four command-center cards deal in one at a time. */
+    :global(html.va) .scene-suite .suite {
+      margin-top: 0;
+      --t-head: clamp(0, var(--p, 0) / 0.16, 1);
+    }
+
+    :global(html.va) .scene-suite .chapter-head {
+      opacity: var(--t-head);
+      transform: translateY(calc((1 - var(--t-head)) * 34px));
+      filter: blur(calc((1 - var(--t-head)) * 12px));
+    }
+
+    :global(html.va) .scene-suite .suite-grid article {
+      --t: clamp(0, (var(--p, 0) - 0.18 - var(--i, 0) * 0.16) / 0.14, 1);
+      opacity: var(--t);
+      transform: translateY(calc((1 - var(--t)) * 34px)) scale(calc(0.97 + var(--t) * 0.03));
+    }
+
+    /* Workflow: the five steps light up along the loop. */
+    :global(html.va) .scene-workflow .workflow {
+      margin-top: 0;
+      --t-head: clamp(0, var(--p, 0) / 0.16, 1);
+    }
+
+    :global(html.va) .scene-workflow .chapter-head {
+      opacity: var(--t-head);
+      transform: translateY(calc((1 - var(--t-head)) * 34px));
+      filter: blur(calc((1 - var(--t-head)) * 12px));
+    }
+
+    :global(html.va) .scene-workflow .workflow-list li {
+      --t: clamp(0, (var(--p, 0) - 0.16 - var(--i, 0) * 0.14) / 0.12, 1);
+      opacity: calc(0.2 + var(--t) * 0.8);
+      transform: translateY(calc((1 - var(--t)) * 16px));
+    }
+
+    :global(html.va) .scene-rail,
+    :global(html.va) .workflow-rail {
+      display: block;
+      height: 2px;
+      margin-top: 30px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: rgba(201, 176, 255, 0.12);
+    }
+
+    :global(html.va) .scene-rail i,
+    :global(html.va) .workflow-rail i {
+      display: block;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--purple), var(--purple-soft));
+      box-shadow: 0 0 16px rgba(167, 124, 255, 0.6);
+      transform: scaleX(var(--p, 0));
+      transform-origin: left center;
+    }
+  }
+
+  /* ---- ambient sky (shared with the app's onboarding aurora) ---- */
+
+  .sky {
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    overflow: hidden;
+    pointer-events: none;
+    --sky-ease: cubic-bezier(0.22, 0.7, 0.28, 1);
+  }
+
+  .sky-aurora {
+    position: absolute;
+    inset: -22% -12%;
+    background:
+      radial-gradient(38rem 24rem at 20% 10%, rgba(143, 82, 255, 0.2), transparent 70%),
+      radial-gradient(30rem 22rem at 82% 6%, rgba(88, 44, 176, 0.24), transparent 70%),
+      radial-gradient(34rem 26rem at 8% 78%, rgba(120, 64, 220, 0.15), transparent 70%),
+      radial-gradient(44rem 30rem at 60% 96%, rgba(143, 82, 255, 0.13), transparent 70%);
+    animation:
+      sky-drift 26s var(--sky-ease) infinite alternate,
+      sky-breathe 9s ease-in-out infinite alternate;
+    will-change: transform, opacity;
+  }
+
+  .sky-stars {
+    position: absolute;
+    inset: 0;
+    background-image:
+      radial-gradient(1.5px 1.5px at 12% 22%, rgba(255, 255, 255, 0.5), transparent 100%),
+      radial-gradient(1px 1px at 34% 64%, rgba(255, 255, 255, 0.35), transparent 100%),
+      radial-gradient(1.5px 1.5px at 58% 18%, rgba(220, 200, 255, 0.4), transparent 100%),
+      radial-gradient(1px 1px at 76% 48%, rgba(255, 255, 255, 0.3), transparent 100%),
+      radial-gradient(1.5px 1.5px at 88% 76%, rgba(220, 200, 255, 0.35), transparent 100%),
+      radial-gradient(1px 1px at 22% 86%, rgba(255, 255, 255, 0.3), transparent 100%);
+    animation: sky-twinkle 7s ease-in-out infinite alternate;
+  }
+
+  @keyframes sky-drift {
+    from { transform: translate3d(-1.5%, -1%, 0) scale(1); }
+    to { transform: translate3d(1.5%, 2%, 0) scale(1.06); }
+  }
+
+  @keyframes sky-breathe {
+    from { opacity: 0.72; }
+    to { opacity: 1; }
+  }
+
+  @keyframes sky-twinkle {
+    from { opacity: 0.45; }
+    to { opacity: 0.9; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .sky-aurora,
+    .sky-stars {
+      animation: none;
     }
   }
 
@@ -1020,7 +1405,7 @@ const changelog = [
 
   .marquee-track span {
     color: var(--ink-55);
-    font-size: 15px;
+    font-size: clamp(15px, 1.7vw, 18px);
     font-weight: 500;
     white-space: nowrap;
   }
@@ -1087,6 +1472,23 @@ const changelog = [
     color: var(--ink-55);
     font-size: 16px;
     line-height: 1.7;
+  }
+
+  /* Chapter heads carry the Apple-scale voice: bigger, tighter, brighter. */
+  .chapter-head h2 {
+    font-size: clamp(34px, 5.4vw, 62px);
+    font-weight: 620;
+    line-height: 1.02;
+    letter-spacing: -0.042em;
+    background: linear-gradient(180deg, #ffffff 62%, #cdb6ff);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .chapter-head > p:last-child {
+    max-width: 58ch;
+    font-size: 17px;
   }
 
   .suite {
@@ -1555,50 +1957,51 @@ const changelog = [
   /* ---- closing ---- */
 
   .closing {
-    width: min(680px, calc(100% - 40px));
-    margin: clamp(56px, 8vw, 104px) auto;
-    padding: clamp(42px, 6vw, 62px);
+    position: relative;
+    width: min(980px, calc(100% - 40px));
+    margin: clamp(72px, 10vw, 150px) auto clamp(88px, 12vw, 170px);
+    padding: clamp(56px, 9vw, 120px) 20px;
     display: flex;
     flex-direction: column;
-    align-items: flex-start;
-    background: var(--glass-fill-strong);
-    border: 1px solid var(--glass-line);
-    border-radius: 28px;
-    box-shadow: var(--glass-shadow);
-    backdrop-filter: blur(30px) saturate(145%);
-    -webkit-backdrop-filter: blur(30px) saturate(145%);
+    align-items: center;
+    text-align: center;
   }
 
   .closing h2 {
     margin: 0;
-    color: #fff;
-    font-size: clamp(28px, 4vw, 36px);
-    font-weight: 600;
-    letter-spacing: -0.025em;
-    line-height: 1.12;
+    font-size: clamp(38px, 6.8vw, 82px);
+    font-weight: 640;
+    letter-spacing: -0.045em;
+    line-height: 1.02;
+    background: linear-gradient(180deg, #ffffff 55%, #c9b0ff);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
   }
 
   .closing p {
-    margin: 14px 0 0;
+    margin: 22px 0 0;
     color: var(--ink-55);
-    font-size: 16px;
+    font-size: clamp(16px, 1.8vw, 19px);
   }
 
   .closing-cta {
-    width: 100%;
-    min-height: 48px;
-    margin-top: 34px;
-    padding: 0 18px;
-    display: flex;
+    min-height: 54px;
+    margin-top: 40px;
+    padding: 0 30px;
+    display: inline-flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 16px;
+    justify-content: center;
+    gap: 12px;
     color: #120d17 !important;
     background: linear-gradient(180deg, rgba(245, 240, 255, 0.98), rgba(207, 184, 255, 0.94));
     border: 1px solid rgba(255, 255, 255, 0.62);
-    border-radius: 18px;
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82), 0 16px 45px rgba(79, 51, 137, 0.2);
-    font-size: 15px;
+    border-radius: 999px;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.82),
+      0 16px 45px rgba(79, 51, 137, 0.2),
+      0 0 60px rgba(143, 82, 255, 0.22);
+    font-size: 16px;
     font-weight: 600;
     text-decoration: none;
     transition: background 180ms ease, transform 180ms ease, box-shadow 180ms ease;

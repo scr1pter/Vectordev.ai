@@ -2559,3 +2559,37 @@ html[data-vector-navigation-resizing] * {
     animation: none;
   }
 }
+
+/* ---- Codespace neon editor ----
+   The Monaco theme (vector-dark, monaco-code-editor.tsx) supplies the violet
+   palette; these rules add the glow the theme API can't express: a soft
+   text bloom, a haloed cursor, and an aurora wash over the editor surface. */
+
+.vector-neon-editor .monaco-editor .view-lines {
+  text-shadow: 0 0 12px rgba(143, 82, 255, 0.22);
+}
+
+.vector-neon-editor .monaco-editor .cursor {
+  box-shadow: 0 0 12px rgba(177, 138, 255, 0.85);
+}
+
+.vector-neon-editor .monaco-editor .current-line {
+  box-shadow: inset 0 0 26px rgba(143, 82, 255, 0.08);
+}
+
+.vector-neon-editor::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  pointer-events: none;
+  background:
+    radial-gradient(120% 90% at 85% -10%, rgba(143, 82, 255, 0.12), transparent 55%),
+    radial-gradient(90% 70% at 0% 100%, rgba(88, 44, 176, 0.1), transparent 60%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vector-neon-editor .monaco-editor .view-lines {
+    text-shadow: none;
+  }
+}
