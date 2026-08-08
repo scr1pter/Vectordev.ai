@@ -25,7 +25,7 @@ const platforms = [
     <main>
       <section class="purchase-hero">
         <div class="purchase-copy">
-          <p class="eyebrow">Vector 1.17.38</p>
+          <p class="eyebrow">Vector 1.17.39</p>
           <h1>Own your agentic workspace.</h1>
           <p class="lede">
             One annual license for the complete Vector desktop experience: agent sessions, a real editor,
@@ -78,10 +78,12 @@ const platforms = [
           </label>
 
           <button class="purchase-button" type="submit" data-purchase-button disabled>
-            <span data-purchase-button-label>Checking availability...</span>
+            <span data-purchase-button-label>Downloads unavailable</span>
             <b aria-hidden="true">→</b>
           </button>
-          <p class="purchase-status" data-purchase-status role="status" aria-live="polite"></p>
+          <p class="purchase-status" data-purchase-status role="status" aria-live="polite">
+            Public downloads are currently closed. Existing installations and release artifacts are unaffected.
+          </p>
           <p class="secure-note">Secure checkout and billing by Stripe. A purchase receipt and license key are emailed to you.</p>
         </form>
       </section>
@@ -110,19 +112,15 @@ const platforms = [
 </MarketingLayout>
 
 <script>
-  const betaDownloads: Record<string, string> = {
-    "mac-arm64": "https://42qryducihx01gl0.public.blob.vercel-storage.com/releases/vector-downloads/vector-desktop-mac-arm64.dmg",
-    "mac-x64": "https://42qryducihx01gl0.public.blob.vercel-storage.com/releases/vector-downloads/vector-desktop-mac-x64.dmg",
-    "windows-x64": "https://42qryducihx01gl0.public.blob.vercel-storage.com/releases/vector-downloads/vector-desktop-win-x64.exe",
-    "windows-arm64": "https://42qryducihx01gl0.public.blob.vercel-storage.com/releases/vector-downloads/vector-desktop-win-arm64.exe",
-    "linux-x64": "https://42qryducihx01gl0.public.blob.vercel-storage.com/releases/vector-downloads/vector-desktop-linux-x86_64.AppImage",
-    "linux-arm64": "https://42qryducihx01gl0.public.blob.vercel-storage.com/releases/vector-downloads/vector-desktop-linux-arm64.AppImage",
-  }
   const form = document.querySelector<HTMLFormElement>("[data-purchase-form]")
   const button = document.querySelector<HTMLButtonElement>("[data-purchase-button]")
   const label = document.querySelector<HTMLElement>("[data-purchase-button-label]")
   const status = document.querySelector<HTMLElement>("[data-purchase-status]")
-  if (button) button.disabled = false
+  const closePublicDownloads = () => {
+    if (button) button.disabled = true
+    if (label) label.textContent = "Downloads unavailable"
+    if (status) status.textContent = "Public downloads are currently closed. Existing installations and release artifacts are unaffected."
+  }
 
   const selectedFromQuery = new URLSearchParams(location.search).get("target")
   if (selectedFromQuery) {
@@ -130,31 +128,11 @@ const platforms = [
     if (option) option.checked = true
   }
 
-  fetch("/api/billing/config", { headers: { accept: "application/json" } })
-    .then(async (response) => {
-      const payload = await response.json()
-      const available = Boolean(response.ok && payload.available)
-      if (!button || !label || !status) return
-      button.disabled = false
-      label.textContent = available ? "Continue to secure checkout" : "Paid launch is being configured"
-      if (!available) status.textContent = "Purchases are not open yet. Current beta users can continue using their installed build."
-    })
-    .catch(() => {
-      if (!button || !label || !status) return
-      button.disabled = false
-      label.textContent = "Checkout temporarily unavailable"
-      status.textContent = "Vector could not reach the billing service. Please try again shortly."
-    })
+  closePublicDownloads()
 
-  form?.addEventListener("submit", async (event) => {
+  form?.addEventListener("submit", (event) => {
     event.preventDefault()
-    if (!button || !label || !status) return
-    const target = form.querySelector<HTMLInputElement>('input[name="platform"]:checked')?.value
-    const download = target ? betaDownloads[target] : undefined
-    if (!download) return
-
-    button.disabled = true
-    location.assign(download)
+    closePublicDownloads()
   })
 </script>
 

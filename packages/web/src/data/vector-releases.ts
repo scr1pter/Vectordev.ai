@@ -318,4 +318,10 @@ export const release117: VectorRelease[] = [
     summary:
       "Made isolated agents appear faster as complete Vector sessions with their own subagent access, simplified inactive Settings controls, and introduced a continuous purple Matrix rainfall across the landing page.",
   },
+  {
+    version: "1.17.39",
+    title: "A more focused private beta",
+    summary:
+      "Expanded Vector's engineering plugin catalog, refined the new-session workspace, and closed public installer access while preserving every cross-platform release artifact for controlled distribution.",
+  },
 ]

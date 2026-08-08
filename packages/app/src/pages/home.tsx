@@ -536,10 +536,6 @@ export function NewHome() {
       <div class="vector-home-dashboard">
         <header data-vector-home-overview class="vector-home-heading">
           <div class="vector-home-heading__topline">
-            <button type="button" class="vector-home-heading__brand" onClick={() => navigate("/")} title="Vector home">
-              <img src="/vector-logo.png" alt="" draggable={false} />
-              <span>Vector</span>
-            </button>
             <div class="vector-home-heading__status" aria-label="Workspace status">
               <span classList={{ "is-offline": global.servers.health[selection().server]?.healthy === false }} />
               {global.servers.health[selection().server]?.healthy === false ? "Runtime offline" : "Runtime ready"}
