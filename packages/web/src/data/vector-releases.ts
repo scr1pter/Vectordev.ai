@@ -336,4 +336,10 @@ export const release117: VectorRelease[] = [
     summary:
       "Rebuilt Cloud Services around explicit repository selection, moved GitHub and GitLab publishing into Cloud, added provider-backed Supabase and AWS service views, and connected Vector's main agent to real cloud preparation, inspection, environment sync, and deployment actions.",
   },
+  {
+    version: "1.17.42",
+    title: "Editor Agent workbench",
+    summary:
+      "Rebuilt the Code Editor into a focused explorer, Monaco, and resizable agent workspace; added shared model, effort, speed, Plan, and permission controls; and replaced the editor-only review queue with direct, visible workspace edits and inline Cmd+K changes.",
+  },
 ]

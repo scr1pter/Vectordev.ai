@@ -65,13 +65,13 @@ import {
   rectangularSelection,
 } from "@codemirror/view"
 import { tags as t } from "@lezer/highlight"
-import { diffLines } from "diff"
 import { Tabs } from "@opencode-ai/ui/tabs"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { IconButton } from "@opencode-ai/ui/icon-button"
 import { Icon } from "@opencode-ai/ui/icon"
 import { TooltipKeybind } from "@opencode-ai/ui/tooltip"
 import { ResizeHandle } from "@opencode-ai/ui/resize-handle"
+import { Select } from "@opencode-ai/ui/select"
 import { Mark } from "@opencode-ai/ui/logo"
 import { DragDropProvider, DragDropSensors, DragOverlay, SortableProvider, closestCenter } from "@thisbeyond/solid-dnd"
 import type { DragEvent } from "@thisbeyond/solid-dnd"
@@ -86,7 +86,9 @@ import { useFile, type SelectedLineRange } from "@/context/file"
 import { useLanguage } from "@/context/language"
 import { useLayout } from "@/context/layout"
 import { useLocal } from "@/context/local"
-import { modelVariantLabel } from "@/context/model-variant"
+import { modelVariantDescription, modelVariantLabel } from "@/context/model-variant"
+import { usePermission } from "@/context/permission"
+import { usePlanMode } from "@/context/plan-mode"
 import { usePrompt } from "@/context/prompt"
 import { useSDK } from "@/context/sdk"
 import { useSettings } from "@/context/settings"
@@ -112,6 +114,8 @@ import {
 } from "@/utils/engineering-timeline"
 import { INTERNAL_SESSION_TITLE_PREFIX } from "@/utils/internal-sessions"
 import { showToast } from "@/utils/toast"
+import { dictationAvailable, startDictation, type DictationHandle } from "@/services/dictation"
+import { DictationIndicator } from "@/components/dictation-indicator"
 import { resolveBrowserAddress, selectUnambiguousPreviewUrl } from "@/utils/browser-address"
 import {
   applyExactReplacements,
@@ -135,7 +139,21 @@ function renderDiff(value: SnapshotFileDiff | VcsFileDiff): value is RenderDiff 
   return typeof value.file === "string"
 }
 
-type CodespaceView = "editor" | "problems" | "review"
+type CodespaceView = "editor" | "problems"
+type CodespaceAgentMode = "manual" | "plan" | "full"
+type CodespaceExecutionMode = "normal" | "quick" | "fast"
+
+const codespaceAgentModes = [
+  { id: "manual" as const, label: "Ask", description: "Read and edit files without running commands" },
+  { id: "plan" as const, label: "Plan", description: "Inspect and explain without changing files" },
+  { id: "full" as const, label: "Full access", description: "Edit files and run focused commands" },
+]
+
+const codespaceExecutionModes = [
+  { id: "normal" as const, label: "Normal", description: "Standard speed and token use", color: "#8a8595" },
+  { id: "quick" as const, label: "Quick", description: "Less context for lightweight questions", color: "#70c7b1" },
+  { id: "fast" as const, label: "Fast", description: "Priority execution with higher token use", color: "#9b6cff" },
+]
 
 type CodespaceLiveWorkspace = {
   id: string
@@ -206,27 +224,6 @@ type CodespaceProblem = {
   message: string
 }
 
-type CodespaceQueuedChange = {
-  id: string
-  path: string
-  name: string
-  oldContent: string
-  newContent: string
-  source: string
-  explanation: string
-  confidence: number
-  risk: "low" | "medium" | "high"
-  createdAt: number
-}
-
-type CodespaceReviewHunk = {
-  id: string
-  from: number
-  to: number
-  before: string
-  after: string
-}
-
 type CodespaceAgentLog = {
   status: "done" | "warn" | "error" | "info"
   label: string
@@ -237,7 +234,7 @@ type CodespaceAgentMessage = {
   id: string
   role: "user" | "assistant"
   content: string
-  edit?: "applied" | "staged"
+  edit?: "applied"
   files?: string[]
 }
 
@@ -1817,47 +1814,6 @@ function previewDiffLines(before: string, after: string) {
   }))
 }
 
-function reviewHunks(before: string, after: string): CodespaceReviewHunk[] {
-  const hunks: CodespaceReviewHunk[] = []
-  let oldOffset = 0
-  let pending: CodespaceReviewHunk | undefined
-
-  const flush = () => {
-    if (!pending) return
-    pending.id = `hunk-${hunks.length + 1}-${pending.from}`
-    hunks.push(pending)
-    pending = undefined
-  }
-
-  for (const part of diffLines(before, after)) {
-    if (!part.added && !part.removed) {
-      flush()
-      oldOffset += part.value.length
-      continue
-    }
-    if (!pending) pending = { id: "", from: oldOffset, to: oldOffset, before: "", after: "" }
-    if (part.removed) {
-      pending.before += part.value
-      oldOffset += part.value.length
-      pending.to = oldOffset
-    }
-    if (part.added) pending.after += part.value
-  }
-  flush()
-  return hunks
-}
-
-function applyAcceptedHunks(original: string, hunks: CodespaceReviewHunk[], accepted: Set<string>) {
-  let cursor = 0
-  let next = ""
-  for (const hunk of hunks) {
-    next += original.slice(cursor, hunk.from)
-    next += accepted.has(hunk.id) ? hunk.after : original.slice(hunk.from, hunk.to)
-    cursor = hunk.to
-  }
-  return next + original.slice(cursor)
-}
-
 function extractModelText(value: unknown, depth = 0): string {
   if (!value || depth > 5) return ""
   if (typeof value === "string") return value.trim()
@@ -2011,6 +1967,8 @@ export function CodespaceWorkbench(props: {
   const local = useLocal()
   const settings = useSettings()
   const dialog = useDialog()
+  const permission = usePermission()
+  const planMode = usePlanMode()
   const [selectedPath, setSelectedPath] = createSignal<string | undefined>()
   const [activeView, setActiveView] = createSignal<CodespaceView>("editor")
   const [saving, setSaving] = createSignal(false)
@@ -2023,12 +1981,15 @@ export function CodespaceWorkbench(props: {
   const [agentMessages, setAgentMessages] = createSignal<CodespaceAgentMessage[]>([])
   const [agentInput, setAgentInput] = createSignal("")
   const [agentRunning, setAgentRunning] = createSignal(false)
+  const [agentStatus, setAgentStatus] = createSignal("Ready")
   const [agentOpen, setAgentOpen] = createSignal(true)
   const [agentMaximized, setAgentMaximized] = createSignal(false)
-  const [agentWidth, setAgentWidth] = createSignal(440)
-  const [queuedChanges, setQueuedChanges] = createSignal<CodespaceQueuedChange[]>([])
-  const [selectedQueueId, setSelectedQueueId] = createSignal<string | undefined>()
-  const [hunkDecisions, setHunkDecisions] = createSignal<Record<string, "accept" | "reject">>({})
+  const [agentWidth, setAgentWidth] = createSignal(520)
+  const [agentExecutionMode, setAgentExecutionMode] = createSignal<CodespaceExecutionMode>("normal")
+  const [agentContextFiles, setAgentContextFiles] = createSignal<string[]>([])
+  const [agentListening, setAgentListening] = createSignal(false)
+  const [agentTranscribing, setAgentTranscribing] = createSignal(false)
+  const [agentRecordingLevel, setAgentRecordingLevel] = createSignal(0)
   const [ignoredProblems, setIgnoredProblems] = createSignal<Set<string>>(new Set())
   const [liveWorkspaces, setLiveWorkspaces] = createSignal<CodespaceLiveWorkspace[]>([])
   const [liveWorkspaceError, setLiveWorkspaceError] = createSignal("")
@@ -2076,20 +2037,29 @@ export function CodespaceWorkbench(props: {
   })
   const activeVariant = createMemo(() => local.model.variant.current())
   const activeAgentName = createMemo(() => local.agent.current()?.name ?? "build")
-  const selectedQueue = createMemo(() => {
-    const id = selectedQueueId()
-    return queuedChanges().find((item) => item.id === id) ?? queuedChanges()[0]
+  const modelVariants = createMemo(() => ["default", ...local.model.variant.list()])
+  const editorAgentMode = createMemo<CodespaceAgentMode>(() => {
+    if (planMode.enabled()) return "plan"
+    const id = props.sessionId?.()
+    const full = id
+      ? permission.isAutoAccepting(id, sdk().directory)
+      : permission.isAutoAcceptingDirectory(sdk().directory)
+    return full ? "full" : "manual"
   })
-  const selectedReviewHunks = createMemo(() => {
-    const item = selectedQueue()
-    return item ? reviewHunks(item.oldContent, item.newContent) : []
+  const editorAgentModeMeta = createMemo(
+    () => codespaceAgentModes.find((mode) => mode.id === editorAgentMode()) ?? codespaceAgentModes[0],
+  )
+  const executionModeMeta = createMemo(
+    () => codespaceExecutionModes.find((mode) => mode.id === agentExecutionMode()) ?? codespaceExecutionModes[0],
+  )
+  const effectiveAgentName = createMemo(() => {
+    if (agentExecutionMode() !== "quick") return activeAgentName()
+    return local.agent.list().find((agent) => agent.name === "quick")?.name ?? activeAgentName()
   })
-  const queueCount = createMemo(() => queuedChanges().length + props.diffs().length)
   const editorWorkspaces = createMemo(() =>
     liveWorkspaces().filter(
       (workspace) =>
-        workspace.mergeState === "none" &&
-        !["failed", "stopped", "merged", "discarded"].includes(workspace.status),
+        workspace.mergeState === "none" && !["failed", "stopped", "merged", "discarded"].includes(workspace.status),
     ),
   )
   const activeFileWorkspaces = createMemo(() => {
@@ -2126,9 +2096,7 @@ export function CodespaceWorkbench(props: {
     const api = globalThis.window?.api?.parallelWorkspaces
     if (!api) return
     const parentSessionId = props.sessionId?.()
-    const scope = parentSessionId
-      ? { sourcePath: sdk().directory, parentSessionId }
-      : { sourcePath: sdk().directory }
+    const scope = parentSessionId ? { sourcePath: sdk().directory, parentSessionId } : { sourcePath: sdk().directory }
     await api
       .list(scope)
       .then((records) => {
@@ -2146,6 +2114,84 @@ export function CodespaceWorkbench(props: {
     onCleanup(() => globalThis.clearInterval(timer))
   })
 
+  const setEditorAgentMode = (mode: CodespaceAgentMode) => {
+    const sessionID = props.sessionId?.()
+    const directory = sdk().directory
+    const accepting = sessionID
+      ? permission.isAutoAccepting(sessionID, directory)
+      : permission.isAutoAcceptingDirectory(directory)
+
+    planMode.setEnabled(mode === "plan")
+    const shouldAccept = mode === "full"
+    if (sessionID) {
+      if (shouldAccept && !accepting) permission.enableAutoAccept(sessionID, directory)
+      if (!shouldAccept && accepting) permission.disableAutoAccept(sessionID, directory)
+    } else if (shouldAccept !== accepting) {
+      permission.toggleAutoAcceptDirectory(directory)
+    }
+    settings.permissions.setAutoApprove(shouldAccept)
+  }
+
+  const openAgentContextPicker = () => {
+    dialog.show(() => (
+      <DialogSelectFile
+        mode="files"
+        presentation="palette"
+        onSelectFile={(path) => {
+          setAgentContextFiles((items) => (items.includes(path) ? items : [...items, path]))
+        }}
+      />
+    ))
+  }
+
+  let agentDictation: DictationHandle | undefined
+  let agentDictationStarting = false
+  let agentDictationDisposed = false
+  const startAgentDictation = async () => {
+    if (agentTranscribing()) return
+    if (agentDictation) {
+      agentDictation.stop()
+      return
+    }
+    if (agentDictationStarting) return
+    agentDictationStarting = true
+    try {
+      const handle = await startDictation({
+        onState: (state) => {
+          if (agentDictationDisposed) return
+          setAgentListening(state === "listening")
+          setAgentTranscribing(state === "transcribing")
+          if (state !== "listening") setAgentRecordingLevel(0)
+        },
+        onLevel: setAgentRecordingLevel,
+        onFinal: (text) => {
+          agentDictation = undefined
+          setAgentRecordingLevel(0)
+          if (!agentDictationDisposed && text.trim()) {
+            setAgentInput((current) => `${current}${current.trim() ? " " : ""}${text.trim()}`)
+          }
+        },
+        onError: (message) => {
+          agentDictation = undefined
+          setAgentRecordingLevel(0)
+          if (!agentDictationDisposed) showToast({ title: "Dictation", description: message })
+        },
+      })
+      if (agentDictationDisposed) {
+        handle?.cancel()
+        return
+      }
+      agentDictation = handle
+    } finally {
+      agentDictationStarting = false
+    }
+  }
+  onCleanup(() => {
+    agentDictationDisposed = true
+    agentDictation?.cancel()
+    agentDictation = undefined
+  })
+
   const invokeCodespaceModel = async (input: { title: string; system: string; prompt: string }) => {
     const model = selectedModelPayload()
     if (!model) {
@@ -2157,7 +2203,7 @@ export function CodespaceWorkbench(props: {
       // Internal tool session: the shared prefix keeps it out of every
       // user-visible session list (see utils/internal-sessions.ts).
       title: `${INTERNAL_SESSION_TITLE_PREFIX}${input.title}`,
-      agent: activeAgentName(),
+      agent: effectiveAgentName(),
       model: {
         providerID: model.providerID,
         id: model.modelID,
@@ -2175,9 +2221,10 @@ export function CodespaceWorkbench(props: {
       .client.session.prompt({
         sessionID,
         directory: sdk().directory,
-        agent: activeAgentName(),
+        agent: effectiveAgentName(),
         model,
         variant: activeVariant(),
+        executionMode: agentExecutionMode() === "fast" ? "fast" : "normal",
         system: input.system,
         tools: {
           shell: false,
@@ -2262,23 +2309,6 @@ export function CodespaceWorkbench(props: {
     openFile(first)
   })
 
-  createEffect(() => {
-    const first = queuedChanges()[0]
-    if (!first) {
-      setSelectedQueueId(undefined)
-      return
-    }
-    if (!queuedChanges().some((item) => item.id === selectedQueueId())) setSelectedQueueId(first.id)
-  })
-
-  createEffect(
-    on(
-      () => selectedQueue()?.id,
-      () => setHunkDecisions({}),
-      { defer: true },
-    ),
-  )
-
   const saveDraft = async (options?: {
     path?: string
     content?: string
@@ -2333,11 +2363,6 @@ export function CodespaceWorkbench(props: {
     if (autosaveTimer) clearTimeout(autosaveTimer)
   })
 
-  const rejectQueuedChange = (id: string) => {
-    setQueuedChanges((items) => items.filter((item) => item.id !== id))
-    showToast({ title: "Change rejected", description: "The queued edit was removed without touching the file." })
-  }
-
   // Models often wrap output in ``` fences even when told not to; strip them.
   const stripFences = (text: string) => {
     const normalized = text.replace(/\r\n/g, "\n")
@@ -2368,7 +2393,7 @@ export function CodespaceWorkbench(props: {
   onCleanup(recycleCompletionSession)
 
   const completionSessionFor = async (model: { providerID: string; modelID: string }) => {
-    const key = `${sdk().directory}:${model.providerID}:${model.modelID}`
+    const key = `${sdk().directory}:${model.providerID}:${model.modelID}:${effectiveAgentName()}:${agentExecutionMode()}`
     if (completionSessionId && completionSessionKey === key && completionTurns < AUTOCOMPLETE_SESSION_TURNS) {
       return completionSessionId
     }
@@ -2378,7 +2403,7 @@ export function CodespaceWorkbench(props: {
       .client.session.create({
         directory: sdk().directory,
         title: `${INTERNAL_SESSION_TITLE_PREFIX}Autocomplete`,
-        agent: activeAgentName(),
+        agent: effectiveAgentName(),
         model: { providerID: model.providerID, id: model.modelID, variant: activeVariant() },
         metadata: { source: "vector-codespace", engine: "opencode-compatible", hidden: true },
       })
@@ -2410,9 +2435,10 @@ export function CodespaceWorkbench(props: {
       .client.session.prompt({
         sessionID,
         directory: sdk().directory,
-        agent: activeAgentName(),
+        agent: effectiveAgentName(),
         model,
         variant: activeVariant(),
+        executionMode: agentExecutionMode() === "fast" ? "fast" : "normal",
         system:
           "You are Vector Tab, an inline code completion engine. Continue the code exactly at the cursor. Return only the code to insert: no explanation, no markdown, and no repeated surrounding code. Prefer the smallest useful completion, from the rest of the current line up to one short coherent block.",
         tools: { bash: false, edit: false, patch: false, write: false, read: false, glob: false, grep: false },
@@ -2432,9 +2458,9 @@ export function CodespaceWorkbench(props: {
     return suggestion
   }
 
-  // Cursor-style Cmd+K inline edit: describe a change, Vector rewrites the file.
-  // With "Bypass permissions" (autoApprove) on it applies straight into the editor;
-  // otherwise it lands in the review queue.
+  // Cmd+K is an explicit edit action, so the returned replacement is applied to
+  // the live file immediately. The separate workspace review surface remains
+  // available for git-level review; the editor itself stays focused on coding.
   const runInlineEdit = async (instruction: string) => {
     const path = selectedPath()
     const trimmed = instruction.trim()
@@ -2477,32 +2503,9 @@ export function CodespaceWorkbench(props: {
         showToast({ title: "No changes", description: "Vector did not change the file." })
         return
       }
-      if (settings.permissions.autoApprove()) {
-        setDrafts(path, next)
-        await saveDraft({ path, content: next, silent: true })
-        showToast({ title: "Applied", description: `Vector edited ${fileBasename(path)}.` })
-      } else {
-        setQueuedChanges((items) => [
-          ...items,
-          {
-            id: makeId("inline"),
-            path,
-            name: fileBasename(path),
-            oldContent: current,
-            newContent: next,
-            source: "Inline edit",
-            explanation: trimmed,
-            confidence: 0.85,
-            risk: "medium",
-            createdAt: Date.now(),
-          },
-        ])
-        setActiveView("review")
-        showToast({
-          title: "Ready for review",
-          description: "Inspect and accept individual hunks before they touch the workspace.",
-        })
-      }
+      setDrafts(path, next)
+      await saveDraft({ path, content: next, silent: true })
+      showToast({ title: "Applied", description: `Vector edited ${fileBasename(path)}.` })
       setInlineEditOpen(false)
       setInlineEditInput("")
       setInlineEditSelection(undefined)
@@ -2522,7 +2525,15 @@ export function CodespaceWorkbench(props: {
   let agentSessionId: string | undefined
   let agentSessionKey = ""
   const agentChatSession = async (model: { providerID: string; modelID: string }) => {
-    const key = [sdk().directory, model.providerID, model.modelID, activeVariant() ?? "", activeAgentName()].join(":")
+    const key = [
+      sdk().directory,
+      model.providerID,
+      model.modelID,
+      activeVariant() ?? "",
+      effectiveAgentName(),
+      agentExecutionMode(),
+      editorAgentMode(),
+    ].join(":")
     if (agentSessionId && agentSessionKey === key) return agentSessionId
     if (agentSessionId)
       void sdk()
@@ -2533,7 +2544,7 @@ export function CodespaceWorkbench(props: {
       .client.session.create({
         directory: sdk().directory,
         title: `${INTERNAL_SESSION_TITLE_PREFIX}Agent chat`,
-        agent: activeAgentName(),
+        agent: effectiveAgentName(),
         model: { providerID: model.providerID, id: model.modelID, variant: activeVariant() },
         metadata: { source: "vector-codespace", engine: "opencode-compatible", hidden: true },
       })
@@ -2637,59 +2648,41 @@ export function CodespaceWorkbench(props: {
     },
   }
 
-  const stageCodespaceProposal = async (proposal: CodespaceProposal) => {
-    const results = await Promise.all(
+  const applyCodespaceProposal = async (proposal: CodespaceProposal) => {
+    const prepared = await Promise.all(
       proposal.changes.map(async (change) => {
         const current = await readWorkspaceText(change.path)
         if (change.mode === "create") {
-          if (current !== undefined) return { error: `${change.path} already exists, so Vector did not stage it.` }
-          return {
-            item: {
-              id: makeId("agent"),
-              path: change.path,
-              name: fileBasename(change.path),
-              oldContent: "",
-              newContent: change.content,
-              source: "Editor Agent",
-              explanation: change.explanation,
-              confidence: 82,
-              risk: change.risk,
-              createdAt: Date.now(),
-            } satisfies CodespaceQueuedChange,
-          }
+          if (current !== undefined) return { error: `${change.path} already exists.` }
+          return { path: change.path, content: change.content }
         }
-        if (current === undefined) return { error: `${change.path} could not be read, so Vector did not stage it.` }
+        if (current === undefined) return { error: `${change.path} could not be read.` }
         const applied = applyExactReplacements(current, change.replacements)
-        if (applied.errors.length) {
-          return { error: `${change.path}: ${applied.errors.join(" ")}` }
-        }
+        if (applied.errors.length) return { error: `${change.path}: ${applied.errors.join(" ")}` }
         if (applied.content === current) return { error: `${change.path} did not contain a material change.` }
-        return {
-          item: {
-            id: makeId("agent"),
-            path: change.path,
-            name: fileBasename(change.path),
-            oldContent: current,
-            newContent: applied.content,
-            source: "Editor Agent",
-            explanation: change.explanation,
-            confidence: 86,
-            risk: change.risk,
-            createdAt: Date.now(),
-          } satisfies CodespaceQueuedChange,
-        }
+        return { path: change.path, content: applied.content }
       }),
     )
-    const staged = results.flatMap((result) => (result.item ? [result.item] : []))
-    const errors = results.flatMap((result) => (result.error ? [result.error] : []))
-    if (staged.length) {
-      setQueuedChanges((items) => [
-        ...items.filter((item) => !staged.some((change) => change.path === item.path)),
-        ...staged,
-      ])
-      setSelectedQueueId(staged[0]?.id)
+    const changes = prepared.flatMap((item) => (item.path && item.content !== undefined ? [item] : []))
+    const errors = prepared.flatMap((item) => (item.error ? [item.error] : []))
+    if (!changes.length) return { applied: [] as string[], errors }
+
+    setAgentStatus(`Applying ${changes.length} file${changes.length === 1 ? "" : "s"}`)
+    for (const change of changes) {
+      await sdk().client.file.write({ directory: sdk().directory, path: change.path!, content: change.content! })
+      setDrafts(change.path!, change.content!)
     }
-    return { staged, errors }
+    const applied = await refreshWorkspaceFiles(changes.map((change) => change.path!))
+    if (applied[0]) openFile(applied[0])
+    logEngineeringEvent(sdk().directory, {
+      type: "file",
+      status: "success",
+      title: "Editor Agent applied changes",
+      summary: proposal.summary,
+      files: applied,
+      source: "Vector Editor Agent",
+    })
+    return { applied, errors }
   }
 
   const sendAgentMessage = async () => {
@@ -2705,22 +2698,38 @@ export function CodespaceWorkbench(props: {
       return
     }
     const path = selectedPath()
+    const contextFiles = agentContextFiles()
+    const mode = editorAgentMode()
     setAgentMessages((items) => [...items, { id: makeId("msg"), role: "user", content: text }])
     setAgentInput("")
+    setAgentContextFiles([])
     setAgentRunning(true)
+    setAgentStatus(mode === "plan" ? "Planning" : "Reading workspace")
     try {
       const sessionID = await agentChatSession(model)
       if (!sessionID) throw new Error("Vector could not start the agent session.")
-      const prompt = path ? `The file open in my editor is ${path}.\n\n${text}` : text
-      if (!settings.permissions.autoApprove() && !isCodespaceEditRequest(text)) {
+      if (mode === "full") permission.enableAutoAccept(sessionID, sdk().directory)
+      else permission.disableAutoAccept(sessionID, sdk().directory)
+      const editorContext = [
+        path ? `The file open in my editor is ${path}.` : "",
+        contextFiles.length ? `Read these attached workspace files first: ${contextFiles.join(", ")}.` : "",
+      ]
+        .filter(Boolean)
+        .join("\n")
+      const prompt = editorContext ? `${editorContext}\n\n${text}` : text
+
+      if (mode === "plan" || (mode === "manual" && !isCodespaceEditRequest(text))) {
         const result = await sdk().client.session.prompt({
           sessionID,
           directory: sdk().directory,
-          agent: activeAgentName(),
+          agent: effectiveAgentName(),
           model,
           variant: activeVariant(),
+          executionMode: agentExecutionMode() === "fast" ? "fast" : "normal",
           system:
-            "You are Vector's editor agent. Answer the user's question using the current project as context. You may inspect files with read-only tools, but do not modify files or run commands. Be concise, concrete, and cite relevant file paths when useful.",
+            mode === "plan"
+              ? "You are Vector's editor agent in Plan mode. Inspect the project, explain the implementation, identify files and risks, and do not modify files or run commands."
+              : "You are Vector's editor agent. Answer the user's question using the current project as context. Inspect files when useful, but do not modify files or run commands. Be concise and cite relevant file paths.",
           tools: { bash: false, edit: false, patch: false, write: false, read: true, glob: true, grep: true },
           parts: [{ type: "text", text: prompt }],
         })
@@ -2729,15 +2738,17 @@ export function CodespaceWorkbench(props: {
         setAgentMessages((items) => [...items, { id: makeId("msg"), role: "assistant", content: reply }])
         return
       }
-      if (!settings.permissions.autoApprove()) {
+      if (mode === "manual") {
+        setAgentStatus("Preparing edit")
         const result = await sdk().client.session.prompt({
           sessionID,
           directory: sdk().directory,
-          agent: activeAgentName(),
+          agent: effectiveAgentName(),
           model,
           variant: activeVariant(),
+          executionMode: agentExecutionMode() === "fast" ? "fast" : "normal",
           system:
-            "You are Vector's editor agent. Inspect the project with read-only tools. If the user asks a question or requests an explanation, answer fully in summary and return an empty changes array. If the user requests code changes, propose the smallest complete implementation. Do not modify files or run commands. For existing files, return exact oldText snippets that occur once and their replacements. For new files, use mode=create, put the full file in content, and leave replacements empty. For edits, leave content empty. Preserve unrelated code.",
+            "You are Vector's editor agent. Inspect the project with read-only tools, then return the smallest complete implementation. The user's explicit editor request authorizes the returned file edits, but not shell commands. For existing files, return exact oldText snippets that occur once and their replacements. For new files, use mode=create and return the full file in content. Preserve unrelated code.",
           tools: { bash: false, edit: false, patch: false, write: false, read: true, glob: true, grep: true },
           format: { type: "json_schema", schema: CODESPACE_PROPOSAL_SCHEMA, retryCount: 1 },
           parts: [{ type: "text", text: prompt }],
@@ -2751,7 +2762,7 @@ export function CodespaceWorkbench(props: {
             const current = (await readWorkspaceText(path)) ?? draft()
             const rewritten = stripFences(
               await invokeCodespaceModel({
-                title: "Editor agent review fallback",
+                title: "Editor agent fallback",
                 system:
                   "You are Vector's editor agent. Rewrite the supplied file to satisfy the request. Return only the complete updated file, with no markdown fences or explanation. Preserve unrelated code and existing style.",
                 prompt: `Request: ${text}\n\nFile: ${path}\n\nCurrent content:\n${current}`,
@@ -2763,40 +2774,25 @@ export function CodespaceWorkbench(props: {
                 {
                   id: makeId("msg"),
                   role: "assistant",
-                  content: reply || "I inspected the file but did not find a safe material change to stage.",
+                  content: reply || "I inspected the file but did not find a material change to apply.",
                 },
               ])
               return
             }
-            const item = {
-              id: makeId("agent"),
-              path,
-              name: fileBasename(path),
-              oldContent: current,
-              newContent: rewritten,
-              source: "Editor Agent",
-              explanation: text,
-              confidence: 80,
-              risk: "medium" as const,
-              createdAt: Date.now(),
-            } satisfies CodespaceQueuedChange
-            setQueuedChanges((items) => [...items.filter((change) => change.path !== path), item])
-            setSelectedQueueId(item.id)
-            setActiveView("review")
+            setAgentStatus("Applying file")
+            await sdk().client.file.write({ directory: sdk().directory, path, content: rewritten })
+            setDrafts(path, rewritten)
+            await refreshWorkspaceFiles([path])
             setAgentMessages((items) => [
               ...items,
               {
                 id: makeId("msg"),
                 role: "assistant",
-                content: `I prepared a reviewable update for ${path}.`,
-                edit: "staged",
+                content: reply || `Updated ${path}.`,
+                edit: "applied",
                 files: [path],
               },
             ])
-            showToast({
-              title: "Change ready for review",
-              description: `${path} is staged without touching your workspace.`,
-            })
             return
           }
           setAgentMessages((items) => [
@@ -2804,16 +2800,14 @@ export function CodespaceWorkbench(props: {
             {
               id: makeId("msg"),
               role: "assistant",
-              content:
-                reply ||
-                "Open the file you want to change, then ask again. I can stage the edit for review without Bypass permissions.",
+              content: reply || "Open the file you want to change, then ask again with the edit you want.",
             },
           ])
           return
         }
-        const staged = await stageCodespaceProposal(proposal)
-        const details = staged.errors.length
-          ? `\n\nNot staged:\n${staged.errors.map((error) => `• ${error}`).join("\n")}`
+        const applied = await applyCodespaceProposal(proposal)
+        const details = applied.errors.length
+          ? `\n\nNot applied:\n${applied.errors.map((error) => `• ${error}`).join("\n")}`
           : ""
         setAgentMessages((items) => [
           ...items,
@@ -2821,26 +2815,21 @@ export function CodespaceWorkbench(props: {
             id: makeId("msg"),
             role: "assistant",
             content: `${proposal.summary}${details}`,
-            ...(staged.staged.length ? { edit: "staged" as const, files: staged.staged.map((item) => item.path) } : {}),
+            ...(applied.applied.length ? { edit: "applied" as const, files: applied.applied } : {}),
           },
         ])
-        if (staged.staged.length) {
-          setActiveView("review")
-          showToast({
-            title: "Changes ready for review",
-            description: `${staged.staged.length} file${staged.staged.length === 1 ? "" : "s"} staged without touching your workspace.`,
-          })
-        }
         return
       }
 
+      setAgentStatus("Editing workspace")
       const before = path ? await readWorkspaceText(path) : undefined
       const result = await sdk().client.session.prompt({
         sessionID,
         directory: sdk().directory,
-        agent: activeAgentName(),
+        agent: effectiveAgentName(),
         model,
         variant: activeVariant(),
+        executionMode: agentExecutionMode() === "fast" ? "fast" : "normal",
         system:
           "You are Vector's editor agent. Work directly in the current project. Inspect the repository, make complete minimal edits, run focused checks when useful, and summarize exactly what changed. Never expose secrets or rewrite unrelated files.",
         tools: { bash: true, edit: true, patch: true, write: true, read: true, glob: true, grep: true },
@@ -2872,101 +2861,7 @@ export function CodespaceWorkbench(props: {
       ])
     } finally {
       setAgentRunning(false)
-    }
-  }
-
-  const acceptQueuedChange = async (item: CodespaceQueuedChange) => {
-    setSaving(true)
-    try {
-      await sdk().client.file.write({ directory: sdk().directory, path: item.path, content: item.newContent })
-      setDrafts(item.path, item.newContent)
-      setSelectedPath(item.path)
-      await file.load(item.path, { force: true })
-      await file.tree.refresh("")
-      setQueuedChanges((items) => items.filter((candidate) => candidate.id !== item.id))
-      setActiveView("editor")
-      showToast({ title: "Change accepted", description: `${item.name} was applied to the workspace.` })
-    } catch (error) {
-      showToast({
-        variant: "error",
-        title: "Could not apply queued change",
-        description:
-          error instanceof Error && error.message ? error.message : "Vector could not apply this queued edit.",
-      })
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const decideHunk = (id: string, decision: "accept" | "reject") => {
-    setHunkDecisions((current) => ({ ...current, [id]: decision }))
-  }
-
-  const applySelectedHunks = async () => {
-    const item = selectedQueue()
-    if (!item) return
-    const accepted = new Set(
-      Object.entries(hunkDecisions())
-        .filter(([, decision]) => decision === "accept")
-        .map(([id]) => id),
-    )
-    if (!accepted.size) {
-      showToast({ title: "Choose a hunk", description: "Accept at least one hunk before applying a partial change." })
-      return
-    }
-    const hunks = selectedReviewHunks()
-    const content = applyAcceptedHunks(item.oldContent, hunks, accepted)
-    await acceptQueuedChange({
-      ...item,
-      newContent: content,
-      explanation: `${item.explanation} Applied ${accepted.size} accepted hunk${accepted.size === 1 ? "" : "s"}; all other hunks stayed unchanged.`,
-    })
-    setHunkDecisions({})
-    logEngineeringEvent(sdk().directory, {
-      type: "review",
-      status: "success",
-      title: "Applied selected change hunks",
-      summary: `${accepted.size} of ${hunks.length} hunks accepted in ${item.path}.`,
-      files: [item.path],
-      source: "Vector Change Queue",
-    })
-  }
-
-  const rejectAllQueuedChanges = () => {
-    const count = queuedChanges().length
-    setQueuedChanges([])
-    showToast({
-      title: "Queue cleared",
-      description: `${count} staged edit${count === 1 ? " was" : "s were"} rejected without touching the workspace.`,
-    })
-  }
-
-  const acceptAllQueuedChanges = async () => {
-    const items = queuedChanges()
-    if (!items.length) return
-    setSaving(true)
-    try {
-      for (const item of items) {
-        await sdk().client.file.write({ directory: sdk().directory, path: item.path, content: item.newContent })
-        setDrafts(item.path, item.newContent)
-      }
-      await Promise.all(items.map((item) => file.load(item.path, { force: true })))
-      await file.tree.refresh("")
-      setQueuedChanges([])
-      setActiveView("editor")
-      showToast({
-        title: "Queue applied",
-        description: `${items.length} reviewed edit${items.length === 1 ? " was" : "s were"} written to the workspace.`,
-      })
-    } catch (error) {
-      showToast({
-        variant: "error",
-        title: "Could not apply the queue",
-        description:
-          error instanceof Error && error.message ? error.message : "Vector stopped before finishing the queue.",
-      })
-    } finally {
-      setSaving(false)
+      setAgentStatus("Ready")
     }
   }
 
@@ -2974,860 +2869,738 @@ export function CodespaceWorkbench(props: {
     <Portal mount={props.portalMount}>
       <div
         data-vector-codespace
-        class={`${props.embedded ? "absolute inset-0 z-0" : "fixed inset-0 z-[140]"} flex min-h-0 flex-col overflow-hidden bg-[#161616] text-[#e7e7e7]`}
+        class={`${props.embedded ? "absolute inset-0 z-0" : "fixed inset-0 z-[140]"} flex min-h-0 flex-col overflow-hidden bg-[#101010] text-[#e8e8e8]`}
       >
         <main class="min-h-0 flex-1 flex">
-        <aside class="w-[204px] shrink-0 border-r border-[#292929] bg-[#191919]">
-          <div class="flex h-8 items-center gap-0.5 border-b border-[#292929] px-1.5 text-[#858585]">
-            <button
-              class="grid size-7 place-items-center rounded-[4px] transition-colors hover:bg-white/[0.06] hover:text-[#ddd]"
-              classList={{ "bg-white/[0.055] text-[#ddd]": activeView() === "editor" }}
-              aria-label="Explorer"
-              title="Explorer"
-              onClick={() => setActiveView("editor")}
-            >
-              <Icon name="file-tree" size="small" />
-            </button>
-            <button
-              class="grid size-7 place-items-center rounded-[4px] transition-colors hover:bg-white/[0.06] hover:text-[#ddd]"
-              aria-label="Search files in Code Editor"
-              title="Search files in Code Editor"
-              onClick={openQuickFileSearch}
-            >
-              <Icon name="magnifying-glass" size="small" />
-            </button>
-            <button
-              class="relative grid size-7 place-items-center rounded-[4px] transition-colors hover:bg-white/[0.06] hover:text-[#ddd]"
-              classList={{ "bg-white/[0.055] text-[#ddd]": activeView() === "review" }}
-              aria-label="Review changes"
-              title="Review changes"
-              onClick={() => setActiveView("review")}
-            >
-              <Icon name="review" size="small" />
-              <Show when={queueCount() > 0}>
-                <span class="absolute right-0 top-0 min-w-3 rounded-full bg-[#8c6bdd] px-0.5 text-center text-[7px] leading-3 text-white">
-                  {queueCount()}
-                </span>
-              </Show>
-            </button>
-            <button
-              class="relative grid size-7 place-items-center rounded-[4px] transition-colors hover:bg-white/[0.06] hover:text-[#ddd]"
-              classList={{ "bg-white/[0.055] text-[#ddd]": activeView() === "problems" }}
-              aria-label="Problems"
-              title="Problems"
-              onClick={() => setActiveView("problems")}
-            >
-              <Icon name="warning" size="small" />
-              <Show when={problems().length > 0}>
-                <span class="absolute right-0.5 top-0.5 size-1.5 rounded-full bg-amber-400" />
-              </Show>
-            </button>
-            <button
-              class="grid size-7 place-items-center rounded-[4px] transition-colors hover:bg-white/[0.06] hover:text-[#ddd]"
-              classList={{ "bg-white/[0.055] text-[#ddd]": agentOpen() }}
-              aria-label={agentOpen() ? "Hide agent" : "Show agent"}
-              title={agentOpen() ? "Hide agent" : "Show agent"}
-              onClick={() => {
-                setAgentMaximized(false)
-                setAgentOpen((open) => !open)
-              }}
-            >
-              <Icon name="layout-right" size="small" />
-            </button>
-            <div class="flex-1" />
-            <button
-              class="grid size-7 place-items-center rounded-[4px] transition-colors hover:bg-white/[0.06] hover:text-white"
-              aria-label="Export current file"
-              title="Export current file"
-              onClick={exportCurrentFile}
-            >
-              <Icon name="download" size="small" />
-            </button>
-            <button
-              class="grid size-7 place-items-center rounded-[4px] transition-colors hover:bg-white/[0.06] hover:text-white"
-              aria-label="Back to Vector Agent"
-              title="Back to Vector Agent"
-              onClick={props.onClose}
-            >
-              <Icon name="chevron-left" size="small" />
-            </button>
-          </div>
-          <div class="flex h-7 items-center justify-between px-2.5">
-            <div class="min-w-0 truncate text-[10px] font-semibold uppercase text-[#a2a2a2]">
-              {fileBasename(sdk().directory) || "Workspace"}
+          <aside class="w-[252px] shrink-0 border-r border-[#272727] bg-[#141414]">
+            <div class="flex h-10 items-center gap-1 border-b border-[#272727] px-2 text-[#8a8a8a]">
+              <button
+                class="grid size-7 place-items-center rounded-[4px] transition-colors hover:bg-white/[0.06] hover:text-[#ddd]"
+                classList={{ "bg-white/[0.055] text-[#ddd]": activeView() === "editor" }}
+                aria-label="Explorer"
+                title="Explorer"
+                onClick={() => setActiveView("editor")}
+              >
+                <Icon name="file-tree" size="small" />
+              </button>
+              <button
+                class="grid size-7 place-items-center rounded-[4px] transition-colors hover:bg-white/[0.06] hover:text-[#ddd]"
+                aria-label="Search files in Code Editor"
+                title="Search files in Code Editor"
+                onClick={openQuickFileSearch}
+              >
+                <Icon name="magnifying-glass" size="small" />
+              </button>
+              <button
+                class="relative grid size-7 place-items-center rounded-[4px] transition-colors hover:bg-white/[0.06] hover:text-[#ddd]"
+                classList={{ "bg-white/[0.055] text-[#ddd]": activeView() === "problems" }}
+                aria-label="Problems"
+                title="Problems"
+                onClick={() => setActiveView("problems")}
+              >
+                <Icon name="warning" size="small" />
+                <Show when={problems().length > 0}>
+                  <span class="absolute right-0.5 top-0.5 size-1.5 rounded-full bg-amber-400" />
+                </Show>
+              </button>
+              <button
+                class="grid size-7 place-items-center rounded-[4px] transition-colors hover:bg-white/[0.06] hover:text-[#ddd]"
+                classList={{ "bg-white/[0.055] text-[#ddd]": agentOpen() }}
+                aria-label={agentOpen() ? "Hide agent" : "Show agent"}
+                title={agentOpen() ? "Hide agent" : "Show agent"}
+                onClick={() => {
+                  setAgentMaximized(false)
+                  setAgentOpen((open) => !open)
+                }}
+              >
+                <Icon name="layout-right" size="small" />
+              </button>
+              <div class="flex-1" />
+              <button
+                class="grid size-7 place-items-center rounded-[4px] transition-colors hover:bg-white/[0.06] hover:text-white"
+                aria-label="Export current file"
+                title="Export current file"
+                onClick={exportCurrentFile}
+              >
+                <Icon name="download" size="small" />
+              </button>
+              <button
+                class="grid size-7 place-items-center rounded-[4px] transition-colors hover:bg-white/[0.06] hover:text-white"
+                aria-label="Back to Vector Agent"
+                title="Back to Vector Agent"
+                onClick={props.onClose}
+              >
+                <Icon name="chevron-left" size="small" />
+              </button>
             </div>
-            <button
-              class="grid size-6 place-items-center rounded text-[#737373] hover:bg-white/[0.06] hover:text-[#d8d8d8]"
-              aria-label="Refresh explorer"
-              title="Refresh explorer"
-              onClick={() => void file.tree.refresh("")}
-            >
-              <Icon name="reset" size="small" />
-            </button>
-          </div>
-          <div class="h-[calc(100%-60px)] overflow-auto px-0.5 pb-1 group/filetree">
-            <Switch>
-              <Match when={file.tree.state("")?.loaded && file.tree.children("").length === 0}>{props.empty()}</Match>
-              <Match when={true}>
-                <FileTree
-                  path=""
-                  class="py-1"
-                  modified={props.modified()}
-                  kinds={props.kinds()}
-                  markers={liveFileMarkers()}
-                  active={selectedPath()}
-                  onFileClick={(node) => openFile(node.path)}
-                />
-              </Match>
-            </Switch>
-          </div>
-        </aside>
-
-        <section class="min-w-0 flex-1 flex flex-col bg-[#1b1b1b]">
-          <Show
-            when={selectedPath()}
-            fallback={
-              <div class="h-full flex items-center justify-center px-8 text-center bg-[#1b1b1b]">
-                <div class="max-w-72 text-[#8f8f8f]">
-                  <img
-                    src="/vector-logo.png"
-                    alt=""
-                    class="mx-auto mb-4 size-9 rounded-[8px] opacity-75"
-                    draggable={false}
+            <div class="flex h-8 items-center justify-between px-3">
+              <div class="min-w-0 truncate text-[10px] font-semibold uppercase tracking-[0.04em] text-[#9d9d9d]">
+                {fileBasename(sdk().directory) || "Workspace"}
+              </div>
+              <button
+                class="grid size-6 place-items-center rounded text-[#737373] hover:bg-white/[0.06] hover:text-[#d8d8d8]"
+                aria-label="Refresh explorer"
+                title="Refresh explorer"
+                onClick={() => void file.tree.refresh("")}
+              >
+                <Icon name="reset" size="small" />
+              </button>
+            </div>
+            <div class="h-[calc(100%-72px)] overflow-auto px-1 pb-2 group/filetree">
+              <Switch>
+                <Match when={file.tree.state("")?.loaded && file.tree.children("").length === 0}>{props.empty()}</Match>
+                <Match when={true}>
+                  <FileTree
+                    path=""
+                    class="py-1"
+                    modified={props.modified()}
+                    kinds={props.kinds()}
+                    markers={liveFileMarkers()}
+                    active={selectedPath()}
+                    onFileClick={(node) => openFile(node.path)}
                   />
-                  <div class="text-14-medium text-[#d8d8d8]">Open a file to begin</div>
-                  <div class="mt-1.5 text-12-regular">
-                    Select a workspace file from Explorer or use Quick Open.
+                </Match>
+              </Switch>
+            </div>
+          </aside>
+
+          <section class="min-w-0 flex-1 flex flex-col bg-[#151515]">
+            <Show
+              when={selectedPath()}
+              fallback={
+                <div class="h-full flex items-center justify-center px-8 text-center bg-[#151515]">
+                  <div class="max-w-72 text-[#8f8f8f]">
+                    <img
+                      src="/vector-logo.png"
+                      alt=""
+                      class="mx-auto mb-4 size-9 rounded-[8px] opacity-75"
+                      draggable={false}
+                    />
+                    <div class="text-14-medium text-[#d8d8d8]">Open a file to begin</div>
+                    <div class="mt-1.5 text-12-regular">Select a workspace file from Explorer or use Quick Open.</div>
                   </div>
                 </div>
-              </div>
-            }
-          >
-            {(path) => (
-              <Switch>
-                <Match when={state()?.loaded}>
-                  <Switch>
-                    <Match when={activeView() === "editor"}>
-                      <div class="relative h-full min-h-0 flex flex-col overflow-hidden bg-[#1b1b1b]">
-                        <div class="flex h-9 shrink-0 items-stretch justify-between border-b border-[#292929] bg-[#171717]">
-                          <div class="flex min-w-0 flex-1 items-stretch overflow-x-auto no-scrollbar">
-                            <For each={openFiles()}>
-                              {(openPath) => {
-                                const active = () => selectedPath() === openPath
-                                const changed = () =>
-                                  drafts[openPath] !== undefined &&
-                                  drafts[openPath] !== (file.get(openPath)?.content?.content ?? "")
-                                return (
-                                  <button
-                                    type="button"
-                                    class="group/tab relative flex h-full min-w-[118px] max-w-[210px] items-center gap-2 border-r border-[#292929] px-3 text-left text-[11px] transition-colors"
-                                    classList={{
-                                      "bg-[#1b1b1b] text-[#e2e2e2]": active(),
-                                      "bg-[#171717] text-[#858585] hover:bg-[#1a1a1a] hover:text-[#cfcfcf]": !active(),
-                                    }}
-                                    onClick={() => openFile(openPath)}
-                                  >
-                                    <Show when={active()}>
-                                      <span class="absolute inset-x-0 top-0 h-px bg-[#9b7cf4]" />
-                                    </Show>
-                                    <span class="text-[#b4d273]">{'{}'}</span>
-                                    <span class="min-w-0 flex-1 truncate">{fileBasename(openPath)}</span>
-                                    <Show
-                                      when={changed()}
-                                      fallback={
-                                        <span
-                                          role="button"
-                                          tabindex="0"
-                                          class="grid size-4 shrink-0 place-items-center rounded opacity-0 group-hover/tab:opacity-100 hover:bg-white/10 hover:text-white"
-                                          aria-label={`Close ${fileBasename(openPath)}`}
-                                          onPointerDown={(event) => event.stopPropagation()}
-                                          onClick={(event) => {
-                                            event.stopPropagation()
-                                            closeFile(openPath)
-                                          }}
-                                        >
-                                          <Icon name="close-small" size="small" />
-                                        </span>
-                                      }
-                                    >
-                                      <span class="size-2 shrink-0 rounded-full bg-[#aaa]" title="Unsaved changes" />
-                                    </Show>
-                                  </button>
-                                )
-                              }}
-                            </For>
-                          </div>
-                          <div class="flex shrink-0 items-center gap-0.5 border-l border-[#292929] bg-[#171717] px-1.5 text-[#777]">
-                            <button
-                              class="grid size-6 place-items-center rounded hover:bg-white/[0.06] hover:text-[#ddd]"
-                              aria-label="Copy current file"
-                              title="Copy current file"
-                              onClick={copyCurrentFile}
-                            >
-                              <Icon name="copy" size="small" />
-                            </button>
-                            <button
-                              class="grid size-6 place-items-center rounded hover:bg-white/[0.06] hover:text-[#ddd]"
-                              aria-label={agentOpen() ? "Hide agent" : "Show agent"}
-                              title={agentOpen() ? "Hide agent" : "Show agent"}
-                              onClick={() => {
-                                setAgentMaximized(false)
-                                setAgentOpen((open) => !open)
-                              }}
-                            >
-                              <Icon name="layout-right" size="small" />
-                            </button>
-                          </div>
-                        </div>
-                        <div class="flex h-7 shrink-0 items-center justify-between gap-3 border-b border-[#252525] bg-[#1b1b1b] px-3 font-mono text-[10px] text-[#777]">
-                          <div class="flex min-w-0 items-center gap-1 overflow-hidden">
-                            <For each={path().split("/")}>
-                              {(part, index) => (
-                                <>
-                                  <Show when={index() > 0}>
-                                    <Icon name="chevron-right" size="small" class="shrink-0 text-[#505050]" />
-                                  </Show>
-                                  <span
-                                    class="truncate"
-                                    classList={{ "text-[#bcbcbc]": index() === path().split("/").length - 1 }}
-                                  >
-                                    {part}
-                                  </span>
-                                </>
-                              )}
-                            </For>
-                          </div>
-                          <Show when={activeFileWorkspaces().length}>
-                            <div
-                              class="flex shrink-0 items-center gap-1.5 text-[#9a95a5]"
-                              title="Agents editing isolated copies of this file"
-                            >
-                              <div class="flex -space-x-0.5">
-                                <For each={activeFileWorkspaces().slice(0, 4)}>
-                                  {(workspace) => (
-                                    <span
-                                      class="size-2 rounded-full border border-[#1b1b1b] shadow-[0_0_7px_currentColor]"
-                                      style={{
-                                        color: workspaceColor(workspace.id),
-                                        "background-color": workspaceColor(workspace.id),
-                                      }}
-                                    />
-                                  )}
-                                </For>
-                              </div>
-                              <span>
-                                {activeFileWorkspaces().length} agent
-                                {activeFileWorkspaces().length === 1 ? "" : "s"} on this file
-                              </span>
-                            </div>
-                          </Show>
-                        </div>
-                        <Show when={editorWorkspaces().length || liveWorkspaceError()}>
-                          <div
-                            class="flex h-8 shrink-0 items-center gap-2 overflow-x-auto border-b border-[#292929] bg-[#181818] px-2.5 no-scrollbar"
-                            aria-label="Live agent activity"
-                          >
-                            <span class="sticky left-0 z-[1] shrink-0 bg-[#181818] pr-1 text-[9px] font-semibold uppercase tracking-[0.08em] text-[#837e8d]">
-                              Live agents
-                            </span>
-                            <Show
-                              when={!liveWorkspaceError()}
-                              fallback={<span class="truncate text-[10px] text-red-300/80">{liveWorkspaceError()}</span>}
-                            >
-                              <For each={editorWorkspaces()}>
-                                {(workspace) => {
-                                  const color = workspaceColor(workspace.id)
-                                  const latestFile = () => workspace.changedFiles.at(-1)
+              }
+            >
+              {(path) => (
+                <Switch>
+                  <Match when={state()?.loaded}>
+                    <Switch>
+                      <Match when={activeView() === "editor"}>
+                        <div class="relative h-full min-h-0 flex flex-col overflow-hidden bg-[#151515]">
+                          <div class="flex h-10 shrink-0 items-stretch justify-between border-b border-[#272727] bg-[#121212]">
+                            <div class="flex min-w-0 flex-1 items-stretch overflow-x-auto no-scrollbar">
+                              <For each={openFiles()}>
+                                {(openPath) => {
+                                  const active = () => selectedPath() === openPath
+                                  const changed = () =>
+                                    drafts[openPath] !== undefined &&
+                                    drafts[openPath] !== (file.get(openPath)?.content?.content ?? "")
                                   return (
                                     <button
                                       type="button"
-                                      class="flex h-5.5 max-w-[310px] shrink-0 items-center gap-1.5 rounded-[5px] border border-white/[0.07] bg-white/[0.035] px-2 text-left text-[10px] text-[#aaa5b2] transition-colors hover:border-white/[0.12] hover:bg-white/[0.06] hover:text-[#ddd]"
-                                      title={`${workspace.taskPrompt}\n${workspace.lastAction}\n${workspace.gitBranch ?? workspace.isolatedPath}`}
-                                      onClick={() => {
-                                        const filePath = latestFile()
-                                        if (filePath) openFile(normalizedWorkspacePath(filePath))
+                                      class="group/tab relative flex h-full min-w-[132px] max-w-[224px] items-center gap-2 border-r border-[#272727] px-3 text-left text-[12px] transition-colors"
+                                      classList={{
+                                        "bg-[#151515] text-[#e4e4e4]": active(),
+                                        "bg-[#121212] text-[#838383] hover:bg-[#181818] hover:text-[#d0d0d0]":
+                                          !active(),
                                       }}
+                                      onClick={() => openFile(openPath)}
                                     >
-                                      <span
-                                        class="size-1.5 shrink-0 rounded-full shadow-[0_0_8px_currentColor]"
-                                        classList={{ "animate-pulse": workspaceIsRunning(workspace.status) }}
-                                        style={{ color, "background-color": color }}
-                                      />
-                                      <span class="max-w-[100px] truncate font-medium text-[#d5d1dc]">
-                                        {workspace.name}
-                                      </span>
-                                      <span class="text-[#55515e]">·</span>
-                                      <span class="max-w-[150px] truncate">{workspace.lastAction}</span>
-                                      <span class="shrink-0 text-[9px]" style={{ color }}>
-                                        {workspaceStatusLabel(workspace.status)}
-                                      </span>
+                                      <Show when={active()}>
+                                        <span class="absolute inset-x-0 top-0 h-px bg-[#a98cff]" />
+                                      </Show>
+                                      <span class="text-[#b4d273]">{"{}"}</span>
+                                      <span class="min-w-0 flex-1 truncate">{fileBasename(openPath)}</span>
+                                      <Show
+                                        when={changed()}
+                                        fallback={
+                                          <span
+                                            role="button"
+                                            tabindex="0"
+                                            class="grid size-4 shrink-0 place-items-center rounded opacity-0 group-hover/tab:opacity-100 hover:bg-white/10 hover:text-white"
+                                            aria-label={`Close ${fileBasename(openPath)}`}
+                                            onPointerDown={(event) => event.stopPropagation()}
+                                            onClick={(event) => {
+                                              event.stopPropagation()
+                                              closeFile(openPath)
+                                            }}
+                                          >
+                                            <Icon name="close-small" size="small" />
+                                          </span>
+                                        }
+                                      >
+                                        <span class="size-2 shrink-0 rounded-full bg-[#aaa]" title="Unsaved changes" />
+                                      </Show>
                                     </button>
                                   )
                                 }}
                               </For>
-                            </Show>
-                          </div>
-                        </Show>
-                        <div class="relative flex min-h-0 flex-1 overflow-hidden">
-                          <div
-                            class="relative min-h-0 min-w-0 flex-1 overflow-hidden bg-[#1b1b1b]"
-                            classList={{ hidden: agentMaximized() }}
-                          >
-                            <Show when={inlineEditOpen()}>
-                              <form
-                                class="absolute left-1/2 top-3 z-10 flex w-[min(720px,calc(100%-24px))] -translate-x-1/2 flex-col overflow-hidden rounded-lg border border-[rgba(178,140,255,0.3)] bg-[#242428]/97 shadow-[0_18px_48px_rgba(0,0,0,0.5)] backdrop-blur"
-                                onSubmit={(event) => {
-                                  event.preventDefault()
-                                  void runInlineEdit(inlineEditInput())
+                            </div>
+                            <div class="flex shrink-0 items-center gap-0.5 border-l border-[#272727] bg-[#121212] px-2 text-[#777]">
+                              <button
+                                class="grid size-6 place-items-center rounded hover:bg-white/[0.06] hover:text-[#ddd]"
+                                aria-label="Copy current file"
+                                title="Copy current file"
+                                onClick={copyCurrentFile}
+                              >
+                                <Icon name="copy" size="small" />
+                              </button>
+                              <button
+                                class="grid size-6 place-items-center rounded hover:bg-white/[0.06] hover:text-[#ddd]"
+                                aria-label={agentOpen() ? "Hide agent" : "Show agent"}
+                                title={agentOpen() ? "Hide agent" : "Show agent"}
+                                onClick={() => {
+                                  setAgentMaximized(false)
+                                  setAgentOpen((open) => !open)
                                 }}
                               >
-                                <div class="flex items-center gap-2 px-3 pt-2.5">
-                                  <span class="shrink-0 rounded border border-[rgba(178,140,255,0.32)] px-1.5 py-0.5 text-10-medium text-[#b7a6e6]">
-                                    ⌘K
-                                  </span>
-                                  <input
-                                    autofocus
-                                    value={inlineEditInput()}
-                                    disabled={inlineEditRunning()}
-                                    onInput={(event) => setInlineEditInput(event.currentTarget.value)}
-                                    onKeyDown={(event) => {
-                                      event.stopPropagation()
-                                      if (event.key === "Escape") {
-                                        event.preventDefault()
-                                        setInlineEditOpen(false)
-                                        setInlineEditSelection(undefined)
-                                      }
-                                    }}
-                                    placeholder={
-                                      inlineEditSelection()?.text
-                                        ? "Describe how to change the selected code…"
-                                        : "Describe how to change this file…"
-                                    }
-                                    class="min-w-0 flex-1 bg-transparent text-13-regular text-white outline-none placeholder:text-[#6f6980] disabled:opacity-60"
-                                  />
-                                  <button
-                                    type="submit"
-                                    disabled={inlineEditRunning() || !inlineEditInput().trim()}
-                                    class="shrink-0 rounded-full border border-[rgba(178,140,255,0.3)] bg-[rgba(147,116,236,0.22)] px-3 py-1 text-11-bold text-white transition-opacity hover:enabled:bg-[rgba(147,116,236,0.34)] disabled:opacity-50"
-                                  >
-                                    {inlineEditRunning() ? "Editing…" : "Edit ↵"}
-                                  </button>
-                                </div>
-                                <div class="flex items-center gap-2 px-3 pb-2 pt-2 text-10-regular text-[#8a8595]">
-                                  <Show when={inlineEditSelection()?.text}>
-                                    <span class="rounded border border-[color:var(--vx-line)] bg-white/[0.04] px-1.5 py-0.5 text-[#b9b4c3]">
-                                      Lines {inlineEditSelection()!.startLine}-{inlineEditSelection()!.endLine}
-                                    </span>
-                                  </Show>
-                                  <ModelSelectorPopoverV2
-                                    triggerProps={{
-                                      class:
-                                        "flex cursor-pointer items-center gap-1.5 rounded-full border border-[color:var(--vx-line)] bg-white/[0.04] px-2 py-0.5 text-[#cbb8f5] transition-colors hover:bg-white/[0.08]",
-                                    }}
-                                  >
-                                    <span class="size-1.5 shrink-0 rounded-full bg-[#9374ec]" />
-                                    <span class="max-w-[170px] truncate">{activeModelLabel()}</span>
-                                    <svg
-                                      viewBox="0 0 12 12"
-                                      class="size-2.5 shrink-0 opacity-70"
-                                      fill="none"
-                                      aria-hidden="true"
-                                    >
-                                      <path
-                                        d="M3 4.5 6 7.5 9 4.5"
-                                        stroke="currentColor"
-                                        stroke-width="1.2"
-                                        stroke-linecap="round"
-                                        stroke-linejoin="round"
-                                      />
-                                    </svg>
-                                  </ModelSelectorPopoverV2>
-                                  <span class="flex-1" />
-                                  <span
-                                    classList={{
-                                      "text-emerald-300/90": settings.permissions.autoApprove(),
-                                      "text-[#8a8595]": !settings.permissions.autoApprove(),
-                                    }}
-                                  >
-                                    {settings.permissions.autoApprove()
-                                      ? "Bypass on · applies instantly"
-                                      : "Staged for review"}
-                                  </span>
-                                  <span class="text-[#6f6980]">esc</span>
-                                </div>
-                              </form>
-                            </Show>
-                            <MonacoCodeEditor
-                              path={workspaceAbsolutePath(path())}
-                              value={draft()}
-                              onChange={(next) => setDrafts(path(), next)}
-                              inlineComplete={aiComplete}
-                              languageService={languageService}
-                              onInlineEdit={(selection) => {
-                                setInlineEditSelection(selection)
-                                setInlineEditOpen(true)
-                              }}
-                            />
-                          </div>
-                          <Show when={agentOpen()}>
-                            <aside
-                              class="flex shrink-0 flex-col border-l border-[#292929] bg-[#191919]"
-                              classList={{ "absolute inset-0 z-20": agentMaximized(), relative: !agentMaximized() }}
-                              style={{ width: agentMaximized() ? "100%" : `${agentWidth()}px` }}
-                            >
-                              <Show when={!agentMaximized()}>
-                                <ResizeHandle
-                                  direction="horizontal"
-                                  edge="start"
-                                  size={agentWidth()}
-                                  min={300}
-                                  max={typeof window === "undefined" ? 920 : Math.min(920, window.innerWidth * 0.72)}
-                                  onResize={setAgentWidth}
-                                />
-                              </Show>
-                              <header class="flex h-9 shrink-0 items-center justify-between gap-2 border-b border-[#292929] px-2.5">
-                                <div class="flex min-w-0 items-center gap-2 text-[11px] font-medium text-[#dedede]">
-                                  <Icon name="prompt" size="small" class="text-[#9a9a9a]" />
-                                  <span class="truncate">General chat</span>
-                                </div>
-                                <div class="flex items-center gap-0.5 text-[#777]">
-                                  <button
-                                    type="button"
-                                    class="grid size-6 place-items-center rounded transition-colors hover:bg-white/[0.06] hover:text-[#ddd]"
-                                    title="New chat"
-                                    onClick={() => setAgentMessages([])}
-                                  >
-                                    <Icon name="plus" size="small" />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    class="grid size-6 place-items-center rounded transition-colors hover:bg-white/[0.06] hover:text-[#ddd]"
-                                    title={agentMaximized() ? "Restore agent" : "Maximize agent"}
-                                    onClick={() => setAgentMaximized((maximized) => !maximized)}
-                                  >
-                                    <Icon name={agentMaximized() ? "collapse" : "expand"} size="small" />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    class="grid size-6 place-items-center rounded transition-colors hover:bg-white/[0.06] hover:text-[#ddd]"
-                                    title="Hide chat"
-                                    onClick={() => {
-                                      setAgentMaximized(false)
-                                      setAgentOpen(false)
-                                    }}
-                                  >
-                                    <Icon name="layout-right" size="small" />
-                                  </button>
-                                </div>
-                              </header>
-                              <div class="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-3.5 py-4">
-                                <Show when={agentMessages().length === 0}>
-                                  <div class="flex flex-1 flex-col items-center justify-center gap-2 px-5 text-center">
-                                    <img src="/vector-logo.png" alt="" class="size-8 rounded-[7px] opacity-75" draggable={false} />
-                                    <div class="text-[12px] font-medium text-[#d8d8d8]">Vector inside your editor</div>
-                                    <div class="max-w-[270px] text-[11px] leading-[1.55] text-[#777]">
-                                      Ask questions, plan a change, or edit this workspace with the model selected in Vector.
-                                    </div>
-                                  </div>
-                                </Show>
-                                <For each={agentMessages()}>
-                                  {(message) => (
-                                    <Show
-                                      when={message.role === "assistant"}
-                                      fallback={
-                                        <div class="max-w-[88%] self-end whitespace-pre-wrap break-words rounded-[8px] border border-[#303030] bg-[#202020] px-3 py-2 text-[12px] leading-relaxed text-[#e4e4e4]">
-                                          {message.content}
-                                        </div>
-                                      }
-                                    >
-                                      <div class="flex flex-col gap-2.5">
-                                        <div class="whitespace-pre-wrap break-words text-[12px] leading-[1.58] text-[#cfcfcf]">
-                                          {message.content}
-                                        </div>
-                                        <Show when={message.edit && message.files?.length}>
-                                          <div class="flex flex-col gap-1 border-l-2 border-emerald-400/30 pl-2.5">
-                                            <For each={message.files}>
-                                              {(changedFile) => (
-                                                <div class="flex items-center gap-1.5 text-[#8a8595]">
-                                                  <Icon name="check-small" size="small" class="shrink-0 text-emerald-400" />
-                                                  <span class="truncate font-mono text-[11px]">{changedFile}</span>
-                                                </div>
-                                              )}
-                                            </For>
-                                          </div>
-                                        </Show>
-                                      </div>
-                                    </Show>
-                                  )}
-                                </For>
-                                <Show when={agentRunning()}>
-                                  <div class="flex items-center gap-2 text-[11px] text-[#858585]">
-                                    <span class="size-1.5 animate-pulse rounded-full bg-[#a78bfa]" />
-                                    Working…
-                                  </div>
-                                </Show>
-                              </div>
-                              <div class="shrink-0 px-3 pb-3 pt-1">
-                                <form
-                                  class="flex flex-col gap-2 rounded-[9px] border border-[#343434] bg-[#1f1f1f] px-2.5 py-2 shadow-[0_10px_28px_rgba(0,0,0,0.18)] transition-colors focus-within:border-[#4a4a4a]"
-                                  onSubmit={(event) => {
-                                    event.preventDefault()
-                                    void sendAgentMessage()
-                                  }}
-                                >
-                                  <textarea
-                                    value={agentInput()}
-                                    disabled={agentRunning()}
-                                    onInput={(event) => setAgentInput(event.currentTarget.value)}
-                                    onKeyDown={(event) => {
-                                      event.stopPropagation()
-                                      if (event.key === "Enter" && !event.shiftKey) {
-                                        event.preventDefault()
-                                        void sendAgentMessage()
-                                      }
-                                    }}
-                                    rows={1}
-                                    placeholder="Ask Vector's editor agent to code, help you code, or fix bugs."
-                                    class="max-h-40 min-h-[24px] w-full resize-none bg-transparent text-[12px] leading-relaxed text-[#e6e6e6] outline-none placeholder:text-[#666] disabled:opacity-60"
-                                  />
-                                  <div class="flex items-center justify-between gap-2">
-                                    <div class="flex min-w-0 items-center gap-1.5">
-                                      <span class="rounded-[5px] bg-white/[0.045] px-2 py-0.5 text-[10px] text-[#aaa]">Agent</span>
-                                      <ModelSelectorPopoverV2
-                                        triggerProps={{
-                                          class:
-                                            "flex min-w-0 cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-[#878787] transition-colors hover:bg-white/[0.05] hover:text-[#ccc]",
-                                        }}
-                                      >
-                                        <span class="max-w-[150px] truncate">{activeModelLabel()}</span>
-                                        <Icon name="chevron-down" size="small" />
-                                      </ModelSelectorPopoverV2>
-                                    </div>
-                                    <button
-                                      type="submit"
-                                      disabled={agentRunning() || !agentInput().trim()}
-                                      class="grid size-6 shrink-0 place-items-center rounded-full bg-[#d7d7d7] text-[#151515] transition hover:enabled:bg-white disabled:bg-[#444] disabled:text-[#777]"
-                                      aria-label="Send"
-                                    >
-                                      <Icon name="arrow-up" size="small" />
-                                    </button>
-                                  </div>
-                                </form>
-                              </div>
-                            </aside>
-                          </Show>
-                        </div>
-                        <footer class="flex h-5.5 shrink-0 items-center justify-between border-t border-[#292929] bg-[#181818] px-2.5 font-mono text-[9px] text-[#777]">
-                          <div class="flex min-w-0 items-center gap-3">
-                            <span class="flex items-center gap-1 text-[#9a9a9a]">
-                              <Icon name="branch" size="small" />
-                              workspace
-                            </span>
-                            <span class="truncate">{path()}</span>
-                          </div>
-                          <div class="flex items-center gap-3">
-                            <span classList={{ "text-[#ad95f5]": settings.editor.aiAutocomplete() }}>
-                              Vector Tab {settings.editor.aiAutocomplete() ? "on" : "off"}
-                            </span>
-                            <span>Ln {lineCount()}, Col 1</span>
-                            <span>Spaces: 2</span>
-                            <span>UTF-8</span>
-                            <span>{activeBadge().label}</span>
-                          </div>
-                        </footer>
-                      </div>
-                    </Match>
-
-                    <Match when={activeView() === "problems"}>
-                      <div class="h-full overflow-auto bg-[#1b1b1b] p-3">
-                        <For
-                          each={problems()}
-                          fallback={
-                            <div class="rounded-[6px] border border-emerald-400/20 bg-emerald-500/[0.06] p-3 text-[12px] text-emerald-100">
-                              No obvious local problems detected in this file.
+                                <Icon name="layout-right" size="small" />
+                              </button>
                             </div>
-                          }
-                        >
-                          {(problem) => (
-                            <div class="mb-2 rounded-[6px] border border-[#2d2d2d] bg-[#191919] p-3">
-                              <div class="flex items-center justify-between gap-3">
-                                <div class="text-[12px] font-medium text-[#d8d8d8]">Line {problem.line}</div>
-                                <div class="flex items-center gap-2">
-                                  <div
-                                    class="rounded-[4px] px-2 py-0.5 text-[9px] font-semibold uppercase"
-                                    classList={{
-                                      "bg-red-500/15 text-red-200": problem.severity === "error",
-                                      "bg-amber-500/15 text-amber-200": problem.severity === "warning",
-                                      "bg-sky-500/15 text-sky-200": problem.severity === "info",
-                                    }}
-                                  >
-                                    {problem.severity}
-                                  </div>
-                                  <button
-                                    class="rounded-[4px] border border-[#323232] bg-white/[0.04] px-2.5 py-1 text-[11px] text-[#cfcfcf] hover:bg-white/[0.08]"
-                                    onClick={() => setActiveView("editor")}
-                                  >
-                                    Open File
-                                  </button>
-                                  <button
-                                    class="rounded-[4px] border border-[#323232] bg-transparent px-2.5 py-1 text-[11px] text-[#858585] hover:bg-white/[0.05] hover:text-white"
-                                    onClick={() => {
-                                      const next = new Set(ignoredProblems())
-                                      next.add(problemKey(problem))
-                                      setIgnoredProblems(next)
-                                    }}
-                                  >
-                                    Ignore
-                                  </button>
-                                </div>
-                              </div>
-                              <div class="mt-2 text-[12px] text-[#8f8f8f]">{problem.message}</div>
-                            </div>
-                          )}
-                        </For>
-                      </div>
-                    </Match>
-
-                    <Match when={activeView() === "review"}>
-                      <div class="h-full min-h-0 flex flex-col bg-[#1b1b1b]">
-                        <header class="shrink-0 border-b border-[#292929] bg-[#191919] px-3 py-2.5">
-                          <div class="flex items-center justify-between gap-4">
-                            <div class="flex items-center gap-3">
-                              <div class="flex size-7 items-center justify-center rounded-[5px] bg-[#8b5cf6]/10 text-[#bca5ff]">
-                                <Icon name="review" />
-                              </div>
-                              <div>
-                                <div class="text-[12px] font-medium text-white">Review changes</div>
-                                <div class="text-[10px] text-[#858585]">
-                                  {queuedChanges().length} proposed edit{queuedChanges().length === 1 ? "" : "s"} ·
-                                  accept only the hunks you trust
-                                </div>
-                              </div>
-                            </div>
-                            <div class="flex items-center gap-2">
-                              <Show when={queuedChanges().length > 1}>
-                                <button
-                                  class="rounded-[5px] border border-red-400/25 bg-red-500/[0.08] px-3 py-1.5 text-[11px] text-red-100 hover:bg-red-500/15"
-                                  onClick={rejectAllQueuedChanges}
-                                >
-                                  Reject all
-                                </button>
-                                <button
-                                  class="rounded-[5px] border border-emerald-400/20 bg-emerald-500/[0.08] px-3 py-1.5 text-[11px] text-emerald-100 hover:bg-emerald-500/15 disabled:opacity-50"
-                                  disabled={saving()}
-                                  onClick={() => void acceptAllQueuedChanges()}
-                                >
-                                  {saving() ? "Applying..." : "Accept all"}
-                                </button>
-                              </Show>
-                              <Show when={selectedQueue()}>
-                                {(item) => (
+                          </div>
+                          <div class="flex h-7 shrink-0 items-center justify-between gap-3 border-b border-[#252525] bg-[#1b1b1b] px-3 font-mono text-[10px] text-[#777]">
+                            <div class="flex min-w-0 items-center gap-1 overflow-hidden">
+                              <For each={path().split("/")}>
+                                {(part, index) => (
                                   <>
-                                    <button
-                                      class="rounded-[5px] border border-red-400/25 bg-red-500/[0.08] px-3 py-1.5 text-[11px] text-red-100 hover:bg-red-500/15"
-                                      onClick={() => rejectQueuedChange(item().id)}
+                                    <Show when={index() > 0}>
+                                      <Icon name="chevron-right" size="small" class="shrink-0 text-[#505050]" />
+                                    </Show>
+                                    <span
+                                      class="truncate"
+                                      classList={{ "text-[#bcbcbc]": index() === path().split("/").length - 1 }}
                                     >
-                                      Reject
-                                    </button>
-                                    <button
-                                      class="rounded-[5px] bg-[#7452c9] px-3 py-1.5 text-[11px] font-medium text-white hover:bg-[#8060d4] disabled:opacity-50"
-                                      disabled={saving()}
-                                      onClick={() => void acceptQueuedChange(item())}
-                                    >
-                                      {saving() ? "Applying..." : "Accept"}
-                                    </button>
+                                      {part}
+                                    </span>
                                   </>
                                 )}
-                              </Show>
+                              </For>
                             </div>
-                          </div>
-                        </header>
-
-                        <div class="grid min-h-0 flex-1 grid-cols-[280px_1fr]">
-                          <aside class="min-h-0 overflow-y-auto border-r border-[#292929] bg-[#191919] p-2">
-                            <For
-                              each={queuedChanges()}
-                              fallback={
-                                <div class="rounded-[5px] border border-[#2d2d2d] bg-white/[0.02] p-3 text-[11px] text-[#858585]">
-                                  No editor-agent changes are waiting for review.
+                            <Show when={activeFileWorkspaces().length}>
+                              <div
+                                class="flex shrink-0 items-center gap-1.5 text-[#9a95a5]"
+                                title="Agents editing isolated copies of this file"
+                              >
+                                <div class="flex -space-x-0.5">
+                                  <For each={activeFileWorkspaces().slice(0, 4)}>
+                                    {(workspace) => (
+                                      <span
+                                        class="size-2 rounded-full border border-[#1b1b1b] shadow-[0_0_7px_currentColor]"
+                                        style={{
+                                          color: workspaceColor(workspace.id),
+                                          "background-color": workspaceColor(workspace.id),
+                                        }}
+                                      />
+                                    )}
+                                  </For>
                                 </div>
-                              }
-                            >
-                              {(item) => (
-                                <button
-                                  class="mb-1.5 w-full rounded-[5px] border p-2.5 text-left transition"
-                                  classList={{
-                                    "border-[#7257b6] bg-[#25202f]": selectedQueueId() === item.id,
-                                    "border-[#2d2d2d] bg-[#181818] hover:border-[#444]":
-                                      selectedQueueId() !== item.id,
-                                  }}
-                                  onClick={() => setSelectedQueueId(item.id)}
-                                >
-                                  <div class="flex items-center justify-between gap-3">
-                                    <div class="truncate font-mono text-[11px] font-medium text-white">{item.path}</div>
-                                    <span class="rounded-[4px] bg-violet-500/12 px-1.5 py-0.5 text-[9px] text-violet-200">
-                                      Review
-                                    </span>
-                                  </div>
-                                  <div class="mt-1.5 line-clamp-2 text-[10px] text-[#858585]">{item.source}</div>
-                                  <div class="mt-3 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.12em]">
-                                    <span
-                                      class="rounded-full px-2 py-0.5"
-                                      classList={{
-                                        "bg-emerald-500/12 text-emerald-200": item.risk === "low",
-                                        "bg-amber-500/12 text-amber-200": item.risk === "medium",
-                                        "bg-red-500/12 text-red-200": item.risk === "high",
-                                      }}
-                                    >
-                                      {item.risk} risk
-                                    </span>
-                                    <span class="text-[#8a8595]">{item.confidence}% confidence</span>
-                                  </div>
-                                </button>
-                              )}
-                            </For>
-
-                            <Show when={props.diffs().length}>
-                              <div class="mt-5 border-t border-[#2b2438] pt-4">
-                                <div class="mb-3 text-11-medium uppercase tracking-[0.18em] text-[#8a8595]">
-                                  Engine Review
-                                </div>
-                                <For each={props.diffs()}>
-                                  {(diff) => (
-                                    <button
-                                      class="mb-1.5 w-full rounded-[5px] border border-[#2d2d2d] bg-[#181818] p-2.5 text-left hover:border-[#444]"
-                                      onClick={() => props.focusReviewDiff(diff.file)}
-                                    >
-                                      <div class="truncate text-12-medium text-white">{diff.file}</div>
-                                      <div class="mt-1 text-11-medium">
-                                        <span class="text-emerald-300">+{diff.additions}</span>{" "}
-                                        <span class="text-red-300">-{diff.deletions}</span>
-                                      </div>
-                                    </button>
-                                  )}
-                                </For>
+                                <span>
+                                  {activeFileWorkspaces().length} agent
+                                  {activeFileWorkspaces().length === 1 ? "" : "s"} on this file
+                                </span>
                               </div>
                             </Show>
-                          </aside>
-
-                          <section class="min-h-0 overflow-auto bg-[#1b1b1b]">
-                            <Show
-                              when={selectedQueue()}
-                              fallback={
-                                <div class="flex h-full items-center justify-center px-6 text-center text-13-regular text-[#a8adba]">
-                                  Select a queued edit to inspect its full file preview.
-                                </div>
-                              }
+                          </div>
+                          <Show when={editorWorkspaces().length || liveWorkspaceError()}>
+                            <div
+                              class="flex h-8 shrink-0 items-center gap-2 overflow-x-auto border-b border-[#292929] bg-[#181818] px-2.5 no-scrollbar"
+                              aria-label="Live agent activity"
                             >
-                              {(item) => (
-                                <div class="p-5">
-                                  <div class="mb-4 flex items-center justify-between gap-4">
-                                    <div>
-                                      <div class="font-mono text-18-medium text-white">{item().path}</div>
-                                      <div class="mt-1 max-w-3xl text-12-regular leading-relaxed text-[#a8adba]">
-                                        {item().explanation}
-                                      </div>
-                                    </div>
-                                    <div class="flex items-center gap-2">
-                                      <div class="rounded-md bg-[#1d1d1f] px-3 py-1 text-12-medium text-[#cfc6de]">
-                                        {selectedReviewHunks().length} hunk
-                                        {selectedReviewHunks().length === 1 ? "" : "s"}
-                                      </div>
+                              <span class="sticky left-0 z-[1] shrink-0 bg-[#181818] pr-1 text-[9px] font-semibold uppercase tracking-[0.08em] text-[#837e8d]">
+                                Live agents
+                              </span>
+                              <Show
+                                when={!liveWorkspaceError()}
+                                fallback={
+                                  <span class="truncate text-[10px] text-red-300/80">{liveWorkspaceError()}</span>
+                                }
+                              >
+                                <For each={editorWorkspaces()}>
+                                  {(workspace) => {
+                                    const color = workspaceColor(workspace.id)
+                                    const latestFile = () => workspace.changedFiles.at(-1)
+                                    return (
                                       <button
-                                        class="rounded-xl border border-emerald-400/25 bg-emerald-500/12 px-3 py-1.5 text-12-medium text-emerald-100 hover:bg-emerald-500/20 disabled:opacity-40"
-                                        disabled={!Object.values(hunkDecisions()).includes("accept") || saving()}
-                                        onClick={() => void applySelectedHunks()}
+                                        type="button"
+                                        class="flex h-5.5 max-w-[310px] shrink-0 items-center gap-1.5 rounded-[5px] border border-white/[0.07] bg-white/[0.035] px-2 text-left text-[10px] text-[#aaa5b2] transition-colors hover:border-white/[0.12] hover:bg-white/[0.06] hover:text-[#ddd]"
+                                        title={`${workspace.taskPrompt}\n${workspace.lastAction}\n${workspace.gitBranch ?? workspace.isolatedPath}`}
+                                        onClick={() => {
+                                          const filePath = latestFile()
+                                          if (filePath) openFile(normalizedWorkspacePath(filePath))
+                                        }}
                                       >
-                                        Apply accepted hunks
+                                        <span
+                                          class="size-1.5 shrink-0 rounded-full shadow-[0_0_8px_currentColor]"
+                                          classList={{ "animate-pulse": workspaceIsRunning(workspace.status) }}
+                                          style={{ color, "background-color": color }}
+                                        />
+                                        <span class="max-w-[100px] truncate font-medium text-[#d5d1dc]">
+                                          {workspace.name}
+                                        </span>
+                                        <span class="text-[#55515e]">·</span>
+                                        <span class="max-w-[150px] truncate">{workspace.lastAction}</span>
+                                        <span class="shrink-0 text-[9px]" style={{ color }}>
+                                          {workspaceStatusLabel(workspace.status)}
+                                        </span>
                                       </button>
-                                    </div>
-                                  </div>
-                                  <div class="space-y-3">
-                                    <For
-                                      each={selectedReviewHunks()}
-                                      fallback={
-                                        <div class="rounded-lg border border-[color:var(--vx-line)] bg-[#202023] p-6 text-center text-13-regular text-[#a8adba]">
-                                          No textual changes found.
-                                        </div>
-                                      }
-                                    >
-                                      {(hunk, index) => {
-                                        const decision = () => hunkDecisions()[hunk.id]
-                                        return (
-                                          <section
-                                            class="overflow-hidden rounded-lg border bg-[#202023]"
-                                            classList={{
-                                              "border-emerald-400/35": decision() === "accept",
-                                              "border-red-400/30": decision() === "reject",
-                                              "border-[color:var(--vx-line)]": !decision(),
-                                            }}
-                                          >
-                                            <header class="flex items-center justify-between border-b border-[color:var(--vx-line)] px-4 py-2.5">
-                                              <div class="text-11-medium uppercase tracking-[0.14em] text-[#948ba0]">
-                                                Hunk {index() + 1}
-                                              </div>
-                                              <div class="flex gap-2">
-                                                <button
-                                                  class="rounded-lg border px-2.5 py-1 text-11-medium"
-                                                  classList={{
-                                                    "border-red-400/35 bg-red-500/15 text-red-100":
-                                                      decision() === "reject",
-                                                    "border-[color:var(--vx-line)] text-white/55 hover:bg-white/6":
-                                                      decision() !== "reject",
-                                                  }}
-                                                  onClick={() => decideHunk(hunk.id, "reject")}
-                                                >
-                                                  Keep original
-                                                </button>
-                                                <button
-                                                  class="rounded-lg border px-2.5 py-1 text-11-medium"
-                                                  classList={{
-                                                    "border-emerald-400/35 bg-emerald-500/15 text-emerald-100":
-                                                      decision() === "accept",
-                                                    "border-[color:var(--vx-line)] text-white/55 hover:bg-white/6":
-                                                      decision() !== "accept",
-                                                  }}
-                                                  onClick={() => decideHunk(hunk.id, "accept")}
-                                                >
-                                                  Accept hunk
-                                                </button>
-                                              </div>
-                                            </header>
-                                            <Show when={hunk.before}>
-                                              <pre class="max-h-52 overflow-auto border-b border-red-400/10 bg-red-500/[0.08] px-4 py-3 font-mono text-[12px] leading-5 text-red-100/75 whitespace-pre-wrap">
-                                                {hunk.before}
-                                              </pre>
-                                            </Show>
-                                            <Show when={hunk.after}>
-                                              <pre class="max-h-52 overflow-auto bg-emerald-500/[0.08] px-4 py-3 font-mono text-[12px] leading-5 text-emerald-100/85 whitespace-pre-wrap">
-                                                {hunk.after}
-                                              </pre>
-                                            </Show>
-                                          </section>
-                                        )
+                                    )
+                                  }}
+                                </For>
+                              </Show>
+                            </div>
+                          </Show>
+                          <div class="relative flex min-h-0 flex-1 overflow-hidden">
+                            <div
+                              class="relative min-h-0 min-w-0 flex-1 overflow-hidden bg-[#1b1b1b]"
+                              classList={{ hidden: agentMaximized() }}
+                            >
+                              <Show when={inlineEditOpen()}>
+                                <form
+                                  class="absolute left-1/2 top-3 z-10 flex w-[min(720px,calc(100%-24px))] -translate-x-1/2 flex-col overflow-hidden rounded-lg border border-[rgba(178,140,255,0.3)] bg-[#242428]/97 shadow-[0_18px_48px_rgba(0,0,0,0.5)] backdrop-blur"
+                                  onSubmit={(event) => {
+                                    event.preventDefault()
+                                    void runInlineEdit(inlineEditInput())
+                                  }}
+                                >
+                                  <div class="flex items-center gap-2 px-3 pt-2.5">
+                                    <span class="shrink-0 rounded border border-[rgba(178,140,255,0.32)] px-1.5 py-0.5 text-10-medium text-[#b7a6e6]">
+                                      ⌘K
+                                    </span>
+                                    <input
+                                      autofocus
+                                      value={inlineEditInput()}
+                                      disabled={inlineEditRunning()}
+                                      onInput={(event) => setInlineEditInput(event.currentTarget.value)}
+                                      onKeyDown={(event) => {
+                                        event.stopPropagation()
+                                        if (event.key === "Escape") {
+                                          event.preventDefault()
+                                          setInlineEditOpen(false)
+                                          setInlineEditSelection(undefined)
+                                        }
                                       }}
-                                    </For>
+                                      placeholder={
+                                        inlineEditSelection()?.text
+                                          ? "Describe how to change the selected code…"
+                                          : "Describe how to change this file…"
+                                      }
+                                      class="min-w-0 flex-1 bg-transparent text-13-regular text-white outline-none placeholder:text-[#6f6980] disabled:opacity-60"
+                                    />
+                                    <button
+                                      type="submit"
+                                      disabled={inlineEditRunning() || !inlineEditInput().trim()}
+                                      class="shrink-0 rounded-full border border-[rgba(178,140,255,0.3)] bg-[rgba(147,116,236,0.22)] px-3 py-1 text-11-bold text-white transition-opacity hover:enabled:bg-[rgba(147,116,236,0.34)] disabled:opacity-50"
+                                    >
+                                      {inlineEditRunning() ? "Editing…" : "Edit ↵"}
+                                    </button>
+                                  </div>
+                                  <div class="flex items-center gap-2 px-3 pb-2 pt-2 text-10-regular text-[#8a8595]">
+                                    <Show when={inlineEditSelection()?.text}>
+                                      <span class="rounded border border-[color:var(--vx-line)] bg-white/[0.04] px-1.5 py-0.5 text-[#b9b4c3]">
+                                        Lines {inlineEditSelection()!.startLine}-{inlineEditSelection()!.endLine}
+                                      </span>
+                                    </Show>
+                                    <ModelSelectorPopoverV2
+                                      triggerProps={{
+                                        class:
+                                          "flex cursor-pointer items-center gap-1.5 rounded-full border border-[color:var(--vx-line)] bg-white/[0.04] px-2 py-0.5 text-[#cbb8f5] transition-colors hover:bg-white/[0.08]",
+                                      }}
+                                    >
+                                      <span class="size-1.5 shrink-0 rounded-full bg-[#9374ec]" />
+                                      <span class="max-w-[170px] truncate">{activeModelLabel()}</span>
+                                      <svg
+                                        viewBox="0 0 12 12"
+                                        class="size-2.5 shrink-0 opacity-70"
+                                        fill="none"
+                                        aria-hidden="true"
+                                      >
+                                        <path
+                                          d="M3 4.5 6 7.5 9 4.5"
+                                          stroke="currentColor"
+                                          stroke-width="1.2"
+                                          stroke-linecap="round"
+                                          stroke-linejoin="round"
+                                        />
+                                      </svg>
+                                    </ModelSelectorPopoverV2>
+                                    <span class="flex-1" />
+                                    <span class="text-[#9a8bc1]">Explicit inline edits apply directly</span>
+                                    <span class="text-[#6f6980]">esc</span>
+                                  </div>
+                                </form>
+                              </Show>
+                              <MonacoCodeEditor
+                                path={workspaceAbsolutePath(path())}
+                                value={draft()}
+                                onChange={(next) => setDrafts(path(), next)}
+                                inlineComplete={aiComplete}
+                                languageService={languageService}
+                                onInlineEdit={(selection) => {
+                                  setInlineEditSelection(selection)
+                                  setInlineEditOpen(true)
+                                }}
+                              />
+                            </div>
+                            <Show when={agentOpen()}>
+                              <aside
+                                class="flex shrink-0 flex-col border-l border-[#272727] bg-[#121212]"
+                                classList={{ "absolute inset-0 z-20": agentMaximized(), relative: !agentMaximized() }}
+                                style={{ width: agentMaximized() ? "100%" : `${agentWidth()}px` }}
+                              >
+                                <Show when={!agentMaximized()}>
+                                  <ResizeHandle
+                                    direction="horizontal"
+                                    edge="start"
+                                    size={agentWidth()}
+                                    min={360}
+                                    max={typeof window === "undefined" ? 900 : Math.min(900, window.innerWidth * 0.72)}
+                                    onResize={setAgentWidth}
+                                  />
+                                </Show>
+
+                                <header class="flex h-10 shrink-0 items-center justify-between gap-2 border-b border-[#272727] px-3">
+                                  <div class="flex min-w-0 items-center gap-2 text-[12px] font-medium text-[#e0e0e0]">
+                                    <Icon name="prompt" size="small" class="text-[#aaa]" />
+                                    <span class="truncate">Editor Agent</span>
+                                    <span
+                                      class="size-1.5 shrink-0 rounded-full"
+                                      classList={{
+                                        "animate-pulse bg-[#a98cff]": agentRunning(),
+                                        "bg-emerald-400/70": !agentRunning(),
+                                      }}
+                                      title={agentStatus()}
+                                    />
+                                  </div>
+                                  <div class="flex items-center gap-0.5 text-[#777]">
+                                    <button
+                                      type="button"
+                                      class="grid size-7 place-items-center rounded-[5px] transition-colors hover:bg-white/[0.06] hover:text-[#ddd]"
+                                      title="New agent chat"
+                                      aria-label="New agent chat"
+                                      onClick={() => setAgentMessages([])}
+                                    >
+                                      <Icon name="plus" size="small" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      class="grid size-7 place-items-center rounded-[5px] transition-colors hover:bg-white/[0.06] hover:text-[#ddd]"
+                                      title={agentMaximized() ? "Restore agent" : "Maximize agent"}
+                                      aria-label={agentMaximized() ? "Restore agent" : "Maximize agent"}
+                                      onClick={() => setAgentMaximized((maximized) => !maximized)}
+                                    >
+                                      <Icon name={agentMaximized() ? "collapse" : "expand"} size="small" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      class="grid size-7 place-items-center rounded-[5px] transition-colors hover:bg-white/[0.06] hover:text-[#ddd]"
+                                      title="Hide agent"
+                                      aria-label="Hide agent"
+                                      onClick={() => {
+                                        setAgentMaximized(false)
+                                        setAgentOpen(false)
+                                      }}
+                                    >
+                                      <Icon name="layout-right" size="small" />
+                                    </button>
+                                  </div>
+                                </header>
+
+                                <div class="shrink-0 border-b border-[#242424] p-3">
+                                  <form
+                                    class="flex min-h-[142px] flex-col rounded-[10px] border border-[#383838] bg-[#1a1a1a] shadow-[0_10px_32px_rgba(0,0,0,0.2)] transition-colors focus-within:border-[#56505f]"
+                                    onSubmit={(event) => {
+                                      event.preventDefault()
+                                      void sendAgentMessage()
+                                    }}
+                                  >
+                                    <Show when={agentContextFiles().length}>
+                                      <div class="flex flex-wrap gap-1.5 px-3 pt-2.5">
+                                        <For each={agentContextFiles()}>
+                                          {(contextFile) => (
+                                            <span class="flex max-w-full items-center gap-1 rounded-[5px] border border-[#343434] bg-white/[0.035] px-2 py-1 font-mono text-[10px] text-[#aaa]">
+                                              <span class="truncate">{contextFile}</span>
+                                              <button
+                                                type="button"
+                                                class="grid size-3.5 shrink-0 place-items-center rounded hover:bg-white/10 hover:text-white"
+                                                aria-label={`Remove ${contextFile}`}
+                                                onClick={() =>
+                                                  setAgentContextFiles((items) =>
+                                                    items.filter((item) => item !== contextFile),
+                                                  )
+                                                }
+                                              >
+                                                <Icon name="close-small" size="small" />
+                                              </button>
+                                            </span>
+                                          )}
+                                        </For>
+                                      </div>
+                                    </Show>
+                                    <textarea
+                                      value={agentInput()}
+                                      disabled={agentRunning()}
+                                      onInput={(event) => setAgentInput(event.currentTarget.value)}
+                                      onKeyDown={(event) => {
+                                        event.stopPropagation()
+                                        if (event.key === "Enter" && !event.shiftKey) {
+                                          event.preventDefault()
+                                          void sendAgentMessage()
+                                        }
+                                      }}
+                                      rows={3}
+                                      placeholder="Ask Vector to code, explain, refactor, or fix this workspace."
+                                      class="min-h-[76px] w-full flex-1 resize-none bg-transparent px-3 py-2.5 text-[13px] leading-[1.55] text-[#e8e8e8] outline-none placeholder:text-[#666] disabled:opacity-60"
+                                    />
+                                    <div class="flex min-w-0 flex-wrap items-center justify-between gap-2 border-t border-[#242424] px-2 py-2">
+                                      <div class="flex min-w-0 flex-wrap items-center gap-1">
+                                        <Select
+                                          size="normal"
+                                          options={codespaceAgentModes.map((mode) => mode.id)}
+                                          current={editorAgentMode()}
+                                          label={(value) =>
+                                            codespaceAgentModes.find((mode) => mode.id === value)?.label ?? "Ask"
+                                          }
+                                          onSelect={(value) => setEditorAgentMode(value as CodespaceAgentMode)}
+                                          class="max-w-[112px] text-[10px] text-[#cfcfcf]"
+                                          valueClass="truncate text-[10px]"
+                                          triggerProps={{ title: editorAgentModeMeta().description }}
+                                          variant="ghost"
+                                        />
+                                        <ModelSelectorPopoverV2
+                                          triggerProps={{
+                                            class:
+                                              "flex min-w-0 max-w-[170px] cursor-pointer items-center gap-1 rounded-[5px] px-2 py-1 text-[10px] text-[#aaa] transition-colors hover:bg-white/[0.055] hover:text-[#ddd]",
+                                          }}
+                                        >
+                                          <span class="truncate">{activeModelLabel()}</span>
+                                          <Icon name="chevron-down" size="small" />
+                                        </ModelSelectorPopoverV2>
+                                        <Show when={local.model.variant.list().length > 0}>
+                                          <Select
+                                            size="normal"
+                                            options={modelVariants()}
+                                            current={activeVariant() ?? "default"}
+                                            label={(value) => modelVariantLabel(value)}
+                                            onSelect={(value) =>
+                                              local.model.variant.set(value === "default" ? undefined : value)
+                                            }
+                                            class="max-w-[96px] capitalize text-[10px] text-[#aaa]"
+                                            valueClass="truncate text-[10px]"
+                                            triggerProps={{ title: modelVariantDescription(activeVariant()) }}
+                                            variant="ghost"
+                                          />
+                                        </Show>
+                                        <Select
+                                          size="normal"
+                                          options={codespaceExecutionModes.map((mode) => mode.id)}
+                                          current={agentExecutionMode()}
+                                          label={(value) =>
+                                            codespaceExecutionModes.find((mode) => mode.id === value)?.label ?? "Normal"
+                                          }
+                                          onSelect={(value) => setAgentExecutionMode(value as CodespaceExecutionMode)}
+                                          class="max-w-[96px] text-[10px] text-[#aaa]"
+                                          valueClass="truncate text-[10px]"
+                                          triggerProps={{ title: executionModeMeta().description }}
+                                          variant="ghost"
+                                        />
+                                      </div>
+                                      <div class="flex shrink-0 items-center gap-1 text-[#868686]">
+                                        <button
+                                          type="button"
+                                          class="grid size-7 place-items-center rounded-full transition hover:bg-white/[0.06] hover:text-[#ddd]"
+                                          title="Attach workspace file"
+                                          aria-label="Attach workspace file"
+                                          onClick={openAgentContextPicker}
+                                        >
+                                          <svg viewBox="0 0 16 16" class="size-4" aria-hidden="true">
+                                            <path
+                                              d="M12.8 7.2 8.3 11.7a2.6 2.6 0 0 1-3.68-3.68l4.6-4.6a1.75 1.75 0 0 1 2.47 2.47l-4.6 4.6a.9.9 0 0 1-1.27-1.27l4.24-4.25"
+                                              fill="none"
+                                              stroke="currentColor"
+                                              stroke-width="1.2"
+                                              stroke-linecap="round"
+                                              stroke-linejoin="round"
+                                            />
+                                          </svg>
+                                        </button>
+                                        <Show when={dictationAvailable() && !agentListening() && !agentTranscribing()}>
+                                          <button
+                                            type="button"
+                                            class="grid size-7 place-items-center rounded-full transition hover:bg-white/[0.06] hover:text-[#ddd]"
+                                            title="Dictate prompt"
+                                            aria-label="Dictate prompt"
+                                            onClick={() => void startAgentDictation()}
+                                          >
+                                            <svg viewBox="0 0 16 16" class="size-4" aria-hidden="true">
+                                              <path
+                                                d="M8 9.6a2.1 2.1 0 0 0 2.1-2.1V4.1a2.1 2.1 0 1 0-4.2 0v3.4A2.1 2.1 0 0 0 8 9.6Zm4-2.1a4 4 0 0 1-8 0M8 11.5v2M6 13.5h4"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                stroke-width="1.35"
+                                                stroke-linecap="round"
+                                              />
+                                            </svg>
+                                          </button>
+                                        </Show>
+                                        <Show when={agentListening() || agentTranscribing()}>
+                                          <DictationIndicator
+                                            state={agentTranscribing() ? "transcribing" : "listening"}
+                                            level={agentRecordingLevel()}
+                                            onStop={() => agentDictation?.stop()}
+                                          />
+                                        </Show>
+                                        <button
+                                          type="submit"
+                                          disabled={agentRunning() || !agentInput().trim()}
+                                          class="grid size-7 place-items-center rounded-full bg-[#dedede] text-[#111] transition hover:enabled:bg-white disabled:bg-[#404040] disabled:text-[#777]"
+                                          aria-label="Send"
+                                        >
+                                          <Icon name="arrow-up" size="small" />
+                                        </button>
+                                      </div>
+                                    </div>
+                                  </form>
+                                </div>
+
+                                <div class="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-4 py-4">
+                                  <Show when={agentMessages().length === 0}>
+                                    <div class="pt-1 text-[11px] leading-5 text-[#696969]">
+                                      The editor agent shares this session's model and modes. Select code and press
+                                      Cmd+K for an inline edit.
+                                    </div>
+                                  </Show>
+                                  <For each={agentMessages()}>
+                                    {(message) => (
+                                      <Show
+                                        when={message.role === "assistant"}
+                                        fallback={
+                                          <div class="self-stretch whitespace-pre-wrap break-words rounded-[8px] border border-[#303030] bg-[#1c1c1c] px-3 py-2.5 text-[12px] leading-relaxed text-[#e4e4e4]">
+                                            {message.content}
+                                          </div>
+                                        }
+                                      >
+                                        <div class="flex flex-col gap-2.5">
+                                          <div class="whitespace-pre-wrap break-words text-[12px] leading-[1.62] text-[#d0d0d0]">
+                                            {message.content}
+                                          </div>
+                                          <Show when={message.edit && message.files?.length}>
+                                            <div class="flex flex-col gap-1 border-l border-emerald-400/35 pl-2.5">
+                                              <For each={message.files}>
+                                                {(changedFile) => (
+                                                  <button
+                                                    type="button"
+                                                    class="flex min-w-0 items-center gap-1.5 text-left text-[#8f8f8f] hover:text-[#cfcfcf]"
+                                                    onClick={() => openFile(changedFile)}
+                                                  >
+                                                    <Icon
+                                                      name="check-small"
+                                                      size="small"
+                                                      class="shrink-0 text-emerald-400"
+                                                    />
+                                                    <span class="truncate font-mono text-[11px]">{changedFile}</span>
+                                                  </button>
+                                                )}
+                                              </For>
+                                            </div>
+                                          </Show>
+                                        </div>
+                                      </Show>
+                                    )}
+                                  </For>
+                                  <Show when={agentRunning()}>
+                                    <div class="flex items-center gap-2 text-[11px] text-[#8c8c8c]">
+                                      <span class="size-1.5 animate-pulse rounded-full bg-[#a98cff]" />
+                                      {agentStatus()}…
+                                    </div>
+                                  </Show>
+                                </div>
+                              </aside>
+                            </Show>
+                          </div>
+                          <footer class="flex h-5.5 shrink-0 items-center justify-between border-t border-[#292929] bg-[#181818] px-2.5 font-mono text-[9px] text-[#777]">
+                            <div class="flex min-w-0 items-center gap-3">
+                              <span class="flex items-center gap-1 text-[#9a9a9a]">
+                                <Icon name="branch" size="small" />
+                                workspace
+                              </span>
+                              <span class="truncate">{path()}</span>
+                            </div>
+                            <div class="flex items-center gap-3">
+                              <span classList={{ "text-[#ad95f5]": settings.editor.aiAutocomplete() }}>
+                                Vector Tab {settings.editor.aiAutocomplete() ? "on" : "off"}
+                              </span>
+                              <span>Ln {lineCount()}, Col 1</span>
+                              <span>Spaces: 2</span>
+                              <span>UTF-8</span>
+                              <span>{activeBadge().label}</span>
+                            </div>
+                          </footer>
+                        </div>
+                      </Match>
+
+                      <Match when={activeView() === "problems"}>
+                        <div class="h-full overflow-auto bg-[#1b1b1b] p-3">
+                          <For
+                            each={problems()}
+                            fallback={
+                              <div class="rounded-[6px] border border-emerald-400/20 bg-emerald-500/[0.06] p-3 text-[12px] text-emerald-100">
+                                No obvious local problems detected in this file.
+                              </div>
+                            }
+                          >
+                            {(problem) => (
+                              <div class="mb-2 rounded-[6px] border border-[#2d2d2d] bg-[#191919] p-3">
+                                <div class="flex items-center justify-between gap-3">
+                                  <div class="text-[12px] font-medium text-[#d8d8d8]">Line {problem.line}</div>
+                                  <div class="flex items-center gap-2">
+                                    <div
+                                      class="rounded-[4px] px-2 py-0.5 text-[9px] font-semibold uppercase"
+                                      classList={{
+                                        "bg-red-500/15 text-red-200": problem.severity === "error",
+                                        "bg-amber-500/15 text-amber-200": problem.severity === "warning",
+                                        "bg-sky-500/15 text-sky-200": problem.severity === "info",
+                                      }}
+                                    >
+                                      {problem.severity}
+                                    </div>
+                                    <button
+                                      class="rounded-[4px] border border-[#323232] bg-white/[0.04] px-2.5 py-1 text-[11px] text-[#cfcfcf] hover:bg-white/[0.08]"
+                                      onClick={() => setActiveView("editor")}
+                                    >
+                                      Open File
+                                    </button>
+                                    <button
+                                      class="rounded-[4px] border border-[#323232] bg-transparent px-2.5 py-1 text-[11px] text-[#858585] hover:bg-white/[0.05] hover:text-white"
+                                      onClick={() => {
+                                        const next = new Set(ignoredProblems())
+                                        next.add(problemKey(problem))
+                                        setIgnoredProblems(next)
+                                      }}
+                                    >
+                                      Ignore
+                                    </button>
                                   </div>
                                 </div>
-                              )}
-                            </Show>
-                          </section>
+                                <div class="mt-2 text-[12px] text-[#8f8f8f]">{problem.message}</div>
+                              </div>
+                            )}
+                          </For>
                         </div>
-                      </div>
-                    </Match>
-                  </Switch>
-                </Match>
-                <Match when={state()?.loading}>
-                  <div class="px-6 py-5 text-13-regular text-[#a8adba]">Loading {path()}...</div>
-                </Match>
-                <Match when={state()?.error}>
-                  {(err) => <div class="px-6 py-5 text-13-regular text-[#a8adba]">{err()}</div>}
-                </Match>
-              </Switch>
-            )}
-          </Show>
-        </section>
-      </main>
+                      </Match>
+                    </Switch>
+                  </Match>
+                  <Match when={state()?.loading}>
+                    <div class="px-6 py-5 text-13-regular text-[#a8adba]">Loading {path()}...</div>
+                  </Match>
+                  <Match when={state()?.error}>
+                    {(err) => <div class="px-6 py-5 text-13-regular text-[#a8adba]">{err()}</div>}
+                  </Match>
+                </Switch>
+              )}
+            </Show>
+          </section>
+        </main>
       </div>
     </Portal>
   )
@@ -4416,13 +4189,11 @@ function PreviewPanel(props: { sessionKey: string; contextId: string; directory?
       return
     }
     setPublish({ phase: "working", target: target.label })
-    const result = await api
-      .run({ projectPath: props.directory, target: target.id })
-      .catch((error) => ({
-        ok: false as const,
-        error: error instanceof Error ? error.message : String(error),
-        target: target.id,
-      }))
+    const result = await api.run({ projectPath: props.directory, target: target.id }).catch((error) => ({
+      ok: false as const,
+      error: error instanceof Error ? error.message : String(error),
+      target: target.id,
+    }))
     if (result.ok && result.url) setPublish({ phase: "done", url: result.url, target: target.label })
     else setPublish({ phase: "error", error: result.error ?? "Publish failed." })
   }
@@ -4470,7 +4241,14 @@ function PreviewPanel(props: { sessionKey: string; contextId: string; directory?
           onClick={() => void runBrowserCommand({ command: "goBack" }).catch(() => undefined)}
         >
           <svg viewBox="0 0 16 16" class="size-3.5" aria-hidden="true">
-            <path d="m9.75 3.5-4.5 4.5 4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" />
+            <path
+              d="m9.75 3.5-4.5 4.5 4.5 4.5"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.35"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
           </svg>
         </button>
         <button
@@ -4482,7 +4260,14 @@ function PreviewPanel(props: { sessionKey: string; contextId: string; directory?
           onClick={() => void runBrowserCommand({ command: "goForward" }).catch(() => undefined)}
         >
           <svg viewBox="0 0 16 16" class="size-3.5" aria-hidden="true">
-            <path d="m6.25 3.5 4.5 4.5-4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" />
+            <path
+              d="m6.25 3.5 4.5 4.5-4.5 4.5"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.35"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
           </svg>
         </button>
         <button
@@ -4494,7 +4279,14 @@ function PreviewPanel(props: { sessionKey: string; contextId: string; directory?
           onClick={() => void runBrowserCommand({ command: "reload" }).catch(() => undefined)}
         >
           <svg viewBox="0 0 16 16" class={`size-3.5 ${loading() ? "motion-safe:animate-spin" : ""}`} aria-hidden="true">
-            <path d="M12.5 5.25V2.8m0 0h-2.45m2.45 0-1.3 1.3A4.75 4.75 0 1 0 12.5 8" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" />
+            <path
+              d="M12.5 5.25V2.8m0 0h-2.45m2.45 0-1.3 1.3A4.75 4.75 0 1 0 12.5 8"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.25"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
           </svg>
         </button>
 
@@ -4506,7 +4298,9 @@ function PreviewPanel(props: { sessionKey: string; contextId: string; directory?
             event.currentTarget.querySelector("input")?.blur()
           }}
         >
-          <span class={`mr-2 size-1.5 shrink-0 rounded-full ${url() ? "bg-emerald-400" : "motion-safe:animate-pulse bg-white/30"}`} />
+          <span
+            class={`mr-2 size-1.5 shrink-0 rounded-full ${url() ? "bg-emerald-400" : "motion-safe:animate-pulse bg-white/30"}`}
+          />
           <input
             type="text"
             aria-label="Browser address"
@@ -4530,7 +4324,14 @@ function PreviewPanel(props: { sessionKey: string; contextId: string; directory?
             class="ml-1 grid size-6 shrink-0 place-items-center rounded-[7px] text-white/35 transition hover:bg-white/[0.07] hover:text-white/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(147,116,236,0.55)]"
           >
             <svg viewBox="0 0 16 16" class="size-3.5" aria-hidden="true">
-              <path d="M3.5 8h9M9 4.5 12.5 8 9 11.5" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" />
+              <path
+                d="M3.5 8h9M9 4.5 12.5 8 9 11.5"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.25"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
             </svg>
           </button>
         </form>
@@ -4544,7 +4345,16 @@ function PreviewPanel(props: { sessionKey: string; contextId: string; directory?
             onClick={() => command.trigger("vector.navigation.toggle")}
           >
             <svg viewBox="0 0 16 16" class="size-3.5" aria-hidden="true">
-              <rect x="2.25" y="2.5" width="11.5" height="11" rx="1.75" fill="none" stroke="currentColor" stroke-width="1.15" />
+              <rect
+                x="2.25"
+                y="2.5"
+                width="11.5"
+                height="11"
+                rx="1.75"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.15"
+              />
               <path d="M6 2.75v10.5" fill="none" stroke="currentColor" stroke-width="1.15" />
             </svg>
           </button>
@@ -4572,7 +4382,14 @@ function PreviewPanel(props: { sessionKey: string; contextId: string; directory?
               }}
             >
               <svg viewBox="0 0 16 16" class="size-3.5" aria-hidden="true">
-                <path d="M6.5 3.5H3.75A1.25 1.25 0 0 0 2.5 4.75v7.5a1.25 1.25 0 0 0 1.25 1.25h7.5a1.25 1.25 0 0 0 1.25-1.25V9.5M9.5 2.75h3.75V6.5M13 3 7.75 8.25" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" />
+                <path
+                  d="M6.5 3.5H3.75A1.25 1.25 0 0 0 2.5 4.75v7.5a1.25 1.25 0 0 0 1.25 1.25h7.5a1.25 1.25 0 0 0 1.25-1.25V9.5M9.5 2.75h3.75V6.5M13 3 7.75 8.25"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.25"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
               </svg>
             </button>
           </Show>
