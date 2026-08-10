@@ -4,8 +4,6 @@ import { useLayout } from "@/context/layout"
 import { VectorAsciiField } from "@/components/vector-ascii-field"
 import { CloudConsole, type CloudSection } from "./cloud-console"
 
-const CLOUD_PROJECT_KEY = "vector.cloud.selected-project.v2"
-
 type CloudProject = {
   id: string
   name: string
@@ -15,15 +13,39 @@ type CloudProject = {
 
 const basename = (path: string) => path.split(/[\\/]/).filter(Boolean).at(-1) || path
 
+function parseCloudSection(value: string | null): CloudSection | undefined {
+  switch (value) {
+    case "overview":
+    case "connections":
+    case "deployments":
+    case "logs":
+    case "analytics":
+    case "observability":
+    case "domains":
+    case "environment":
+    case "database":
+    case "authentication":
+    case "storage":
+    case "functions":
+    case "realtime":
+    case "delivery":
+    case "aws":
+    case "settings":
+      return value
+    default:
+      return undefined
+  }
+}
+
 export function CloudHome() {
   const navigate = useNavigate()
   const location = useLocation()
   const layout = useLayout()
   const requestedProject = () => new URLSearchParams(location.search).get("project") ?? ""
-  const requestedSection = () => new URLSearchParams(location.search).get("section") as CloudSection | null
-  const [selectedPath, setSelectedPath] = createSignal(
-    requestedProject() || globalThis.localStorage?.getItem(CLOUD_PROJECT_KEY) || "",
-  )
+  const requestedSection = () => parseCloudSection(new URLSearchParams(location.search).get("section"))
+  // A plain Cloud Services entry always starts at the repository chooser.
+  // Explicit deep links may still select a repository with ?project=...
+  const [selectedPath, setSelectedPath] = createSignal(requestedProject())
 
   const projects = createMemo<CloudProject[]>(() => {
     const records = new Map<string, CloudProject>()
@@ -42,7 +64,6 @@ export function CloudHome() {
 
   const selectProject = (path: string) => {
     setSelectedPath(path)
-    globalThis.localStorage?.setItem(CLOUD_PROJECT_KEY, path)
   }
 
   return (
@@ -139,7 +160,6 @@ export function CloudHome() {
           projectPath={selectedProject()!.path}
           onClose={() => {
             setSelectedPath("")
-            globalThis.localStorage?.removeItem(CLOUD_PROJECT_KEY)
           }}
           onRepair={(context) => {
             void navigator.clipboard?.writeText(context)

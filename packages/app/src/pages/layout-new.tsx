@@ -27,8 +27,6 @@ import { useModels } from "@/context/models"
 import { ModelSelectorPopoverV2, type ModelSelectorModelState } from "@/components/dialog-select-model"
 import { DialogSelectMcp } from "@/components/dialog-select-mcp"
 import { DialogSelectPlugins } from "@/components/dialog-select-plugins"
-import { DialogGithubPush } from "@/components/session-github-push"
-import { DialogGitlabPush } from "@/components/session-gitlab-push"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { installActivityEventBridge } from "@/services/activity-service"
 import { SDKProvider } from "@/context/sdk"
@@ -5214,22 +5212,6 @@ export default function NewLayout(props: ParentProps) {
         onScheduled={openScheduledTasks}
         onMcp={() => void openMcpDialog()}
         onPlugins={() => void openPluginsDialog()}
-        onGithub={() => {
-          const projectPath = activeTaskScope().projectPath
-          if (!projectPath) {
-            showToast({ title: "Open a project first", description: "Choose the project you want to push to GitHub." })
-            return
-          }
-          void dialog.show(() => <DialogGithubPush projectPath={projectPath} />)
-        }}
-        onGitlab={() => {
-          const projectPath = activeTaskScope().projectPath
-          if (!projectPath) {
-            showToast({ title: "Open a project first", description: "Choose the project you want to push to GitLab." })
-            return
-          }
-          void dialog.show(() => <DialogGitlabPush projectPath={projectPath} />)
-        }}
         onFind={() => {
           if (!taskRoute() || !sessionCommandRegistered("file.open")) {
             showToast({

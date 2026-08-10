@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process"
-import { mkdir, stat } from "node:fs/promises"
-import { basename, join } from "node:path"
+import { stat } from "node:fs/promises"
+import { basename } from "node:path"
 import { app, BrowserWindow, Notification, clipboard, dialog, ipcMain, shell, systemPreferences } from "electron"
 import type { IpcMainEvent, IpcMainInvokeEvent } from "electron"
 import type { DesktopMenuAction } from "@opencode-ai/app/desktop-menu"
@@ -58,6 +58,7 @@ import {
   connectCloudProvider,
   connectSupabaseProject,
   disconnectCloudProvider,
+  getSupabaseServiceSnapshot,
   linkCloudProviderProject,
   listCloudProviderConnections,
   listCloudProviderProjectLinks,
@@ -68,6 +69,7 @@ import {
   verifyCloudProviderDomain,
   type CloudProviderId,
 } from "./cloud-connections"
+import { getCloudAwsStatus, listCloudAwsResources } from "./cloud-aws"
 import {
   detectGithub,
   publishToGithub,
@@ -379,6 +381,15 @@ export function registerIpcHandlers(deps: Deps) {
     "cloud-supabase-project-connect",
     (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, projectRef: string) =>
       connectSupabaseProject(projectPath, taskId, projectRef),
+  )
+  handle("cloud-supabase-services", (_event: IpcMainInvokeEvent, projectPath: string, taskId?: string) =>
+    getSupabaseServiceSnapshot(projectPath, taskId),
+  )
+  handle("cloud-aws-status", (_event: IpcMainInvokeEvent, input?: { profile?: string; region?: string }) =>
+    getCloudAwsStatus(input),
+  )
+  handle("cloud-aws-resources", (_event: IpcMainInvokeEvent, input?: { profile?: string; region?: string }) =>
+    listCloudAwsResources(input),
   )
   handle("cloud-deployments-list", (_event: IpcMainInvokeEvent, projectPath: string, taskId?: string) =>
     listDeployments(projectPath, taskId),

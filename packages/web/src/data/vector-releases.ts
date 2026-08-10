@@ -330,4 +330,10 @@ export const release117: VectorRelease[] = [
     summary:
       "Made JPEG and other common image attachments dependable, added local conversion for camera and design formats, and taught Vector to select a connected image-capable model before a visual task begins.",
   },
+  {
+    version: "1.17.41",
+    title: "Cloud command center",
+    summary:
+      "Rebuilt Cloud Services around explicit repository selection, moved GitHub and GitLab publishing into Cloud, added provider-backed Supabase and AWS service views, and connected Vector's main agent to real cloud preparation, inspection, environment sync, and deployment actions.",
+  },
 ]

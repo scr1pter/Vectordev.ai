@@ -1,10 +1,15 @@
 import { createEffect, createMemo, createSignal, For, onCleanup, Show } from "solid-js"
 import { usePlatform } from "@/context/platform"
+import { DialogGithubPush } from "@/components/session-github-push"
+import { DialogGitlabPush } from "@/components/session-gitlab-push"
+import { Icon } from "@opencode-ai/ui/icon"
+import { useDialog } from "@opencode-ai/ui/context/dialog"
 import {
   cloudAgentWorkspaceApi,
   cloudApi,
   publishApi,
   type CloudAgentWorkspace,
+  type CloudAwsSnapshot,
   type CloudBuildSettings,
   type CloudDeployment,
   type CloudDomain,
@@ -15,6 +20,7 @@ import {
   type CloudProviderId,
   type CloudProviderProjectLink,
   type CloudProviderResource,
+  type CloudSupabaseServices,
   type PublishProgressEvent,
   type PublishTarget,
   type PublishTargetId,
@@ -22,30 +28,72 @@ import {
 import "./cloud-console.css"
 
 export type CloudSection =
+  | "overview"
   | "connections"
   | "deployments"
+  | "logs"
+  | "analytics"
   | "observability"
   | "domains"
   | "environment"
   | "database"
+  | "authentication"
+  | "storage"
+  | "functions"
+  | "realtime"
+  | "delivery"
+  | "aws"
   | "settings"
 type Notice = { tone: "info" | "success" | "error"; text: string }
 type BuildDraft = Omit<CloudBuildSettings, "source" | "updatedAt">
 
-const SECTIONS: { id: CloudSection; label: string }[] = [
-  { id: "connections", label: "Connections" },
-  { id: "deployments", label: "Deployments" },
-  { id: "observability", label: "Observability" },
-  { id: "domains", label: "Domains" },
-  { id: "environment", label: "Environment" },
-  { id: "database", label: "Database" },
-  { id: "settings", label: "Build & runtime" },
+const SECTION_GROUPS: { label?: string; items: { id: CloudSection; label: string }[] }[] = [
+  { items: [{ id: "overview", label: "Project overview" }] },
+  {
+    label: "Deploy & observe",
+    items: [
+      { id: "deployments", label: "Deployments" },
+      { id: "logs", label: "Logs" },
+      { id: "analytics", label: "Analytics" },
+      { id: "observability", label: "Observability" },
+      { id: "domains", label: "Domains" },
+      { id: "environment", label: "Environment variables" },
+      { id: "delivery", label: "Delivery & security" },
+    ],
+  },
+  {
+    label: "Data services",
+    items: [
+      { id: "database", label: "Database" },
+      { id: "authentication", label: "Authentication" },
+      { id: "storage", label: "Storage" },
+      { id: "functions", label: "Edge functions" },
+      { id: "realtime", label: "Realtime" },
+    ],
+  },
+  {
+    label: "Connections",
+    items: [
+      { id: "connections", label: "Integrations" },
+      { id: "aws", label: "AWS" },
+      { id: "settings", label: "Project settings" },
+    ],
+  },
 ]
 
 // Stroke icons for the nav and empty states — matches the shell's SVG icon
 // language (viewBox 0 0 16 16, currentColor stroke) instead of glyph fonts.
 function sectionIcon(id: CloudSection) {
   switch (id) {
+    case "overview":
+      return (
+        <>
+          <rect x="2.5" y="2.5" width="4.25" height="4.25" rx=".5" fill="none" stroke="currentColor" />
+          <rect x="9.25" y="2.5" width="4.25" height="4.25" rx=".5" fill="none" stroke="currentColor" />
+          <rect x="2.5" y="9.25" width="4.25" height="4.25" rx=".5" fill="none" stroke="currentColor" />
+          <rect x="9.25" y="9.25" width="4.25" height="4.25" rx=".5" fill="none" stroke="currentColor" />
+        </>
+      )
     case "connections":
       return (
         <>
@@ -79,6 +127,29 @@ function sectionIcon(id: CloudSection) {
             stroke-linejoin="round"
           />
         </>
+      )
+    case "logs":
+      return (
+        <>
+          <path
+            d="M3 3h10v10H3zM5.2 6.2l1.6 1.55-1.6 1.55M8.5 9.3h2.3"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.1"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+        </>
+      )
+    case "analytics":
+      return (
+        <path
+          d="M3 12.8V9.7M6.3 12.8V6.5M9.7 12.8V8M13 12.8V3.4M2.3 13.2h11.4"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.15"
+          stroke-linecap="round"
+        />
       )
     case "domains":
       return (
@@ -134,6 +205,74 @@ function sectionIcon(id: CloudSection) {
             stroke="currentColor"
             stroke-width="1.05"
             stroke-linecap="round"
+          />
+        </>
+      )
+    case "authentication":
+      return (
+        <>
+          <rect x="3" y="6.7" width="10" height="7" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.1" />
+          <path
+            d="M5.2 6.7V5.1a2.8 2.8 0 0 1 5.6 0v1.6M8 9.2v2"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.1"
+            stroke-linecap="round"
+          />
+        </>
+      )
+    case "storage":
+      return (
+        <path
+          d="M2.5 4.2h4l1.1 1.4h5.9v7.1h-11z"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.15"
+          stroke-linejoin="round"
+        />
+      )
+    case "functions":
+      return (
+        <path
+          d="M4.6 3.2H2.9v9.6h1.7M11.4 3.2h1.7v9.6h-1.7M9.8 5.2 6.2 10.8M6.2 5.2l3.6 5.6"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.1"
+          stroke-linecap="round"
+        />
+      )
+    case "realtime":
+      return (
+        <path
+          d="M3.2 8a4.8 4.8 0 0 1 8.35-3.2M12.8 8a4.8 4.8 0 0 1-8.35 3.2M10.8 4.8h.75V4M4.45 12v-.8h.75"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.15"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        />
+      )
+    case "delivery":
+      return (
+        <>
+          <circle cx="8" cy="8" r="5.3" fill="none" stroke="currentColor" stroke-width="1.1" />
+          <path
+            d="M4.2 4.4c2.1 1.4 5.5 1.4 7.6 0M4.2 11.6c2.1-1.4 5.5-1.4 7.6 0M8 2.7c-1.9 2.9-1.9 7.7 0 10.6 1.9-2.9 1.9-7.7 0-10.6Z"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1"
+          />
+        </>
+      )
+    case "aws":
+      return (
+        <>
+          <path
+            d="M2.8 5.2 8 2.7l5.2 2.5L8 7.8 2.8 5.2Zm0 0v5.6L8 13.3l5.2-2.5V5.2M8 7.8v5.5"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.1"
+            stroke-linejoin="round"
           />
         </>
       )
@@ -199,11 +338,12 @@ export function CloudConsole(props: {
   embedded?: boolean
 }) {
   const platform = usePlatform()
+  const dialog = useDialog()
   const macDesktop = platform.platform === "desktop" && platform.os === "macos"
   const api = cloudApi()
   const publish = publishApi()
   const workspaceApi = cloudAgentWorkspaceApi()
-  const [section, setSection] = createSignal<CloudSection>(props.initialSection ?? "deployments")
+  const [section, setSection] = createSignal<CloudSection>(props.initialSection ?? "overview")
   const [notice, setNotice] = createSignal<Notice>()
 
   const [publishTargets, setPublishTargets] = createSignal<PublishTarget[]>([])
@@ -226,6 +366,14 @@ export function CloudConsole(props: {
   const [providerSelections, setProviderSelections] = createSignal<Partial<Record<CloudProviderId, string>>>({})
   const [providerBusy, setProviderBusy] = createSignal<CloudProviderId | "">("")
   const [buildSettings, setBuildSettings] = createSignal<CloudBuildSettings | null>(null)
+  const [supabaseServices, setSupabaseServices] = createSignal<CloudSupabaseServices>()
+  const [supabaseServicesBusy, setSupabaseServicesBusy] = createSignal(false)
+  const [supabaseServicesLoaded, setSupabaseServicesLoaded] = createSignal(false)
+  const [awsSnapshot, setAwsSnapshot] = createSignal<CloudAwsSnapshot>()
+  const [awsBusy, setAwsBusy] = createSignal(false)
+  const [awsLoaded, setAwsLoaded] = createSignal(false)
+  const [awsProfile, setAwsProfile] = createSignal("")
+  const [awsRegion, setAwsRegion] = createSignal("")
   const [buildDraft, setBuildDraft] = createSignal<BuildDraft>({
     framework: "",
     packageManager: "npm",
@@ -343,6 +491,8 @@ export function CloudConsole(props: {
     // Reload task-scoped data when the active task or project changes.
     props.projectPath
     props.taskId
+    setSupabaseServices(undefined)
+    setSupabaseServicesLoaded(false)
     if (api) void refreshAll()
   })
 
@@ -741,6 +891,64 @@ export function CloudConsole(props: {
   const providerConnection = (provider: CloudProviderId) => connections().find((item) => item.provider === provider)
   const providerLink = (provider: "vercel" | "netlify") => providerLinks().find((item) => item.provider === provider)
 
+  const supabaseDashboard = (pathname = "") => {
+    const ref = database()?.projectRef
+    if (!ref) return "https://supabase.com/dashboard/projects"
+    return `https://supabase.com/dashboard/project/${encodeURIComponent(ref)}${pathname}`
+  }
+
+  const deploymentDashboard = (provider: "vercel" | "netlify", pathname = "") => {
+    const link = providerLink(provider)
+    if (!link) return provider === "vercel" ? "https://vercel.com/dashboard" : "https://app.netlify.com/"
+    if (provider === "vercel" && link.accountName) {
+      return `https://vercel.com/${encodeURIComponent(link.accountName)}/${encodeURIComponent(link.projectName)}${pathname}`
+    }
+    return provider === "vercel"
+      ? "https://vercel.com/dashboard"
+      : `https://app.netlify.com/sites/${encodeURIComponent(link.projectName)}${pathname}`
+  }
+
+  const refreshSupabaseServices = async () => {
+    if (!api || !props.projectPath) return
+    setSupabaseServicesBusy(true)
+    try {
+      setSupabaseServices(await api.services.supabase(props.projectPath, props.taskId))
+    } catch (error) {
+      setSupabaseServices(undefined)
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not load Supabase services." })
+    } finally {
+      setSupabaseServicesBusy(false)
+      setSupabaseServicesLoaded(true)
+    }
+  }
+
+  const refreshAws = async () => {
+    if (!api) return
+    setAwsBusy(true)
+    try {
+      const snapshot = await api.aws.resources({
+        profile: awsProfile() || undefined,
+        region: awsRegion() || undefined,
+      })
+      setAwsSnapshot(snapshot)
+      if (!awsProfile() && snapshot.status.profile) setAwsProfile(snapshot.status.profile)
+      if (!awsRegion()) setAwsRegion(snapshot.status.region)
+    } catch (error) {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not inspect AWS." })
+    } finally {
+      setAwsBusy(false)
+      setAwsLoaded(true)
+    }
+  }
+
+  createEffect(() => {
+    const current = section()
+    if (["authentication", "storage", "functions", "realtime"].includes(current) && !supabaseServicesLoaded()) {
+      void refreshSupabaseServices()
+    }
+    if (current === "aws" && !awsLoaded()) void refreshAws()
+  })
+
   const connectProvider = async (provider: CloudProviderId) => {
     if (!api) return
     setProviderBusy(provider)
@@ -787,7 +995,8 @@ export function CloudConsole(props: {
     }
   }
 
-  const linkProviderProject = async (provider: "vercel" | "netlify") => {
+  const linkProviderProject = async (provider: CloudProviderId) => {
+    if (provider === "supabase") return
     if (!api || !props.projectPath) return
     const projectId = providerSelections()[provider]
     if (!projectId) return
@@ -803,7 +1012,8 @@ export function CloudConsole(props: {
     }
   }
 
-  const unlinkProviderProject = async (provider: "vercel" | "netlify") => {
+  const unlinkProviderProject = async (provider: CloudProviderId) => {
+    if (provider === "supabase") return
     if (!api || !props.projectPath) return
     setProviderBusy(provider)
     try {
@@ -826,6 +1036,8 @@ export function CloudConsole(props: {
       const connection = await api.database.connectProject(props.projectPath, props.taskId, projectRef)
       setDatabase(connection)
       setEnvVars(await api.env.list(props.projectPath, props.taskId))
+      setSupabaseServices(undefined)
+      setSupabaseServicesLoaded(false)
       setNotice({
         tone: "success",
         text: `${connection?.projectName ?? "Supabase"} connected. Vector configured the project locally without asking you to copy API keys.`,
@@ -874,23 +1086,32 @@ export function CloudConsole(props: {
 
       <div class="cloud-shell">
         <aside class="cloud-sidebar">
-          <For each={SECTIONS}>
-            {(item) => (
-              <button
-                class="cloud-nav"
-                data-active={section() === item.id}
-                data-section={item.id}
-                type="button"
-                onClick={() => {
-                  setSection(item.id)
-                  setNotice(undefined)
-                }}
-              >
-                <svg viewBox="0 0 16 16" class="cloud-nav-icon" aria-hidden="true">
-                  {sectionIcon(item.id)}
-                </svg>
-                <span>{item.label}</span>
-              </button>
+          <For each={SECTION_GROUPS}>
+            {(group) => (
+              <section class="cloud-nav-group">
+                <Show when={group.label}>
+                  <div class="cloud-nav-label">{group.label}</div>
+                </Show>
+                <For each={group.items}>
+                  {(item) => (
+                    <button
+                      class="cloud-nav"
+                      data-active={section() === item.id}
+                      data-section={item.id}
+                      type="button"
+                      onClick={() => {
+                        setSection(item.id)
+                        setNotice(undefined)
+                      }}
+                    >
+                      <svg viewBox="0 0 16 16" class="cloud-nav-icon" aria-hidden="true">
+                        {sectionIcon(item.id)}
+                      </svg>
+                      <span>{item.label}</span>
+                    </button>
+                  )}
+                </For>
+              </section>
             )}
           </For>
         </aside>
@@ -909,6 +1130,78 @@ export function CloudConsole(props: {
               )}
             </Show>
 
+            {/* Project overview */}
+            <Show when={section() === "overview"}>
+              <div class="cloud-heading">
+                <div>
+                  <div class="cloud-kicker">{projectName()}</div>
+                  <h1>Project overview</h1>
+                  <p>
+                    One repository-scoped view of releases, provider connections, data services, and runtime health.
+                    Vector's agent uses the same project context when it deploys or prepares cloud-backed features.
+                  </p>
+                </div>
+              </div>
+              <div class="cloud-grid">
+                <button class="cloud-metric" type="button" onClick={() => setSection("deployments")}>
+                  <span class="cloud-metric-value">{deployments().length}</span>
+                  <strong>Deployments</strong>
+                  <small>
+                    {deployments().filter((item) => item.releaseStatus === "current").length} current releases
+                  </small>
+                </button>
+                <button class="cloud-metric" type="button" onClick={() => setSection("observability")}>
+                  <span class="cloud-metric-value">
+                    {deployments().filter((item) => item.status === "ready").length}/{deployments().length || 0}
+                  </span>
+                  <strong>Healthy releases</strong>
+                  <small>Based on the latest recorded health checks</small>
+                </button>
+                <button class="cloud-metric" type="button" onClick={() => setSection("connections")}>
+                  <span class="cloud-metric-value">{connections().filter((item) => item.connected).length}</span>
+                  <strong>Cloud accounts</strong>
+                  <small>Vercel, Netlify, and Supabase connections</small>
+                </button>
+                <button class="cloud-metric" type="button" onClick={() => setSection("environment")}>
+                  <span class="cloud-metric-value">{envVars().length}</span>
+                  <strong>Environment variables</strong>
+                  <small>Stored for this repository and project scope</small>
+                </button>
+              </div>
+              <section class="cloud-service-list mt-4">
+                <button type="button" onClick={() => setSection("deployments")}>
+                  <span class="cloud-service-icon">
+                    <Icon name="cloud-upload" />
+                  </span>
+                  <span>
+                    <strong>Deploy and publish</strong>
+                    <small>Build, verify, promote, and roll back releases.</small>
+                  </span>
+                  <em>{publishTargets().filter((item) => item.available).length} targets ready</em>
+                </button>
+                <button type="button" onClick={() => setSection("database")}>
+                  <span class="cloud-service-icon">
+                    <Icon name="server" />
+                  </span>
+                  <span>
+                    <strong>Data services</strong>
+                    <small>Database, authentication, storage, functions, and realtime.</small>
+                  </span>
+                  <em>{database() ? "Supabase linked" : "Setup needed"}</em>
+                </button>
+                <button type="button" onClick={() => setSection("aws")}>
+                  <span class="cloud-service-icon">
+                    <Icon name="providers" />
+                  </span>
+                  <span>
+                    <strong>AWS</strong>
+                    <small>Inspect compute, storage, functions, containers, and model training.</small>
+                  </span>
+                  <em>{awsSnapshot()?.status.configured ? "Connected" : "Open integration"}</em>
+                </button>
+              </section>
+            </Show>
+
             {/* Connections */}
             <Show when={section() === "connections"}>
               <div class="cloud-heading">
@@ -921,6 +1214,34 @@ export function CloudConsole(props: {
                   </p>
                 </div>
               </div>
+              <section class="cloud-source-control">
+                <div>
+                  <div class="cloud-panel-title">Source control</div>
+                  <p class="cloud-muted mt-1 text-[12px]">
+                    Commit this repository and push it to a new or existing remote through your connected account.
+                  </p>
+                </div>
+                <div class="cloud-source-control-actions">
+                  <button
+                    class="cloud-repository-button"
+                    data-provider="github"
+                    type="button"
+                    onClick={() => void dialog.show(() => <DialogGithubPush projectPath={props.projectPath} />)}
+                  >
+                    <Icon name="github" />
+                    <span>Push to GitHub</span>
+                  </button>
+                  <button
+                    class="cloud-repository-button"
+                    data-provider="gitlab"
+                    type="button"
+                    onClick={() => void dialog.show(() => <DialogGitlabPush projectPath={props.projectPath} />)}
+                  >
+                    <Icon name="gitlab" />
+                    <span>Push to GitLab</span>
+                  </button>
+                </div>
+              </section>
               <div class="cloud-connection-list">
                 <For each={["vercel", "netlify", "supabase"] as CloudProviderId[]}>
                   {(provider) => {
@@ -985,7 +1306,7 @@ export function CloudConsole(props: {
                                       !providerSelections()[provider] ||
                                       providerBusy() === provider
                                     }
-                                    onClick={() => void linkProviderProject(provider as "vercel" | "netlify")}
+                                    onClick={() => void linkProviderProject(provider)}
                                   >
                                     Link project
                                   </button>
@@ -1001,7 +1322,7 @@ export function CloudConsole(props: {
                                     class="cloud-button"
                                     type="button"
                                     disabled={providerBusy() === provider}
-                                    onClick={() => void unlinkProviderProject(provider as "vercel" | "netlify")}
+                                    onClick={() => void unlinkProviderProject(provider)}
                                   >
                                     Unlink
                                   </button>
@@ -1457,6 +1778,161 @@ export function CloudConsole(props: {
                   </For>
                 </div>
               </Show>
+            </Show>
+
+            {/* Logs */}
+            <Show when={section() === "logs"}>
+              <div class="cloud-heading">
+                <div>
+                  <div class="cloud-kicker">Build and runtime output</div>
+                  <h1>Logs</h1>
+                  <p>
+                    Read the output attached to each deployment. Vector asks the linked provider for runtime logs when
+                    available and falls back to its recorded build and check evidence.
+                  </p>
+                </div>
+              </div>
+              <Show
+                when={deployments().length}
+                fallback={
+                  <div class="cloud-empty">
+                    <svg viewBox="0 0 16 16" class="cloud-empty-icon" aria-hidden="true">
+                      {sectionIcon("logs")}
+                    </svg>
+                    <strong>No deployment logs yet</strong>
+                    <p>Publish this repository once and its build and runtime evidence will appear here.</p>
+                  </div>
+                }
+              >
+                <div class="cloud-list">
+                  <For each={deployments()}>
+                    {(deployment) => (
+                      <div class="cloud-row cloud-row-block">
+                        <div class="min-w-0 flex-1">
+                          <div class="flex flex-wrap items-center gap-2">
+                            <span class="cloud-health-dot" data-status={deployment.status} />
+                            <strong class="truncate text-[13px] text-white/85">{deployment.name}</strong>
+                            <span class="cloud-status">{deployment.target}</span>
+                            <span class="cloud-status">{deployment.environment}</span>
+                          </div>
+                          <p class="cloud-muted mt-1 text-[11px]">
+                            {deployment.runtimeLogFetchedAt
+                              ? `Runtime output fetched ${formatDate(deployment.runtimeLogFetchedAt)}`
+                              : `Built ${formatDate(deployment.createdAt)}`}
+                          </p>
+                          <Show when={expandedLogId() === deployment.id}>
+                            <pre class="cloud-log mt-3">
+                              {deployment.runtimeLog ?? deployment.log ?? "No output was returned for this deployment."}
+                            </pre>
+                          </Show>
+                        </div>
+                        <div class="cloud-deployment-actions">
+                          <button
+                            class="cloud-button"
+                            type="button"
+                            disabled={!api || deploymentActionId() === deployment.id}
+                            onClick={() => void readRuntimeLogs(deployment)}
+                          >
+                            {deploymentActionId() === deployment.id ? "Loading…" : "Read logs"}
+                          </button>
+                          <button class="cloud-button" type="button" onClick={() => openDeploymentUrl(deployment)}>
+                            Open release
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </For>
+                </div>
+              </Show>
+            </Show>
+
+            {/* Analytics */}
+            <Show when={section() === "analytics"}>
+              <div class="cloud-heading">
+                <div>
+                  <div class="cloud-kicker">Release performance</div>
+                  <h1>Analytics</h1>
+                  <p>
+                    Vector summarizes the release evidence it owns locally. Traffic analytics and speed insights stay in
+                    your linked hosting account and open directly from here.
+                  </p>
+                </div>
+              </div>
+              <div class="cloud-grid">
+                <div class="cloud-metric">
+                  <span class="cloud-metric-value">{deployments().length}</span>
+                  <strong>Total releases</strong>
+                  <small>Preview and production deployments</small>
+                </div>
+                <div class="cloud-metric">
+                  <span class="cloud-metric-value">
+                    {deployments().length
+                      ? `${Math.round((deployments().filter((item) => item.status === "ready").length / deployments().length) * 100)}%`
+                      : "—"}
+                  </span>
+                  <strong>Health rate</strong>
+                  <small>Latest reachable release checks</small>
+                </div>
+                <div class="cloud-metric">
+                  <span class="cloud-metric-value">
+                    {formatDuration(
+                      deployments().filter((item) => item.durationMs !== undefined).length
+                        ? Math.round(
+                            deployments().reduce((total, item) => total + (item.durationMs ?? 0), 0) /
+                              deployments().filter((item) => item.durationMs !== undefined).length,
+                          )
+                        : undefined,
+                    )}
+                  </span>
+                  <strong>Average build</strong>
+                  <small>Across deployments with recorded duration</small>
+                </div>
+                <div class="cloud-metric">
+                  <span class="cloud-metric-value">
+                    {formatDuration(
+                      deployments().filter((item) => item.latencyMs !== undefined).length
+                        ? Math.round(
+                            deployments().reduce((total, item) => total + (item.latencyMs ?? 0), 0) /
+                              deployments().filter((item) => item.latencyMs !== undefined).length,
+                          )
+                        : undefined,
+                    )}
+                  </span>
+                  <strong>Average latency</strong>
+                  <small>From Vector's latest health probes</small>
+                </div>
+              </div>
+              <section class="cloud-service-list mt-4">
+                <button type="button" onClick={() => platform.openLink(deploymentDashboard("vercel", "/analytics"))}>
+                  <span class="cloud-service-icon">V</span>
+                  <span>
+                    <strong>Vercel Analytics</strong>
+                    <small>Open traffic analytics for the linked Vercel project.</small>
+                  </span>
+                  <em>{providerLink("vercel") ? "Open" : "Connect first"}</em>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => platform.openLink(deploymentDashboard("vercel", "/speed-insights"))}
+                >
+                  <span class="cloud-service-icon">
+                    <Icon name="status" />
+                  </span>
+                  <span>
+                    <strong>Speed Insights</strong>
+                    <small>Inspect Core Web Vitals in the provider dashboard.</small>
+                  </span>
+                  <em>{providerLink("vercel") ? "Open" : "Connect first"}</em>
+                </button>
+                <button type="button" onClick={() => platform.openLink(deploymentDashboard("netlify", "/analytics"))}>
+                  <span class="cloud-service-icon">N</span>
+                  <span>
+                    <strong>Netlify Analytics</strong>
+                    <small>Open analytics for the linked Netlify site.</small>
+                  </span>
+                  <em>{providerLink("netlify") ? "Open" : "Connect first"}</em>
+                </button>
+              </section>
             </Show>
 
             {/* Observability */}
@@ -1931,6 +2407,462 @@ export function CloudConsole(props: {
                     </div>
                   )}
                 </Show>
+              </Show>
+            </Show>
+
+            {/* Authentication */}
+            <Show when={section() === "authentication"}>
+              <div class="cloud-heading">
+                <div>
+                  <div class="cloud-kicker">Supabase identity</div>
+                  <h1>Authentication</h1>
+                  <p>
+                    Attach authentication to this repository through its linked Supabase project. Vector can prepare the
+                    client configuration and your agent can implement the application code against it.
+                  </p>
+                </div>
+              </div>
+              <Show
+                when={database()?.projectRef}
+                fallback={
+                  <div class="cloud-empty">
+                    <svg viewBox="0 0 16 16" class="cloud-empty-icon" aria-hidden="true">
+                      {sectionIcon("authentication")}
+                    </svg>
+                    <strong>Connect Supabase first</strong>
+                    <p>Choose Database in this sidebar, connect a project, then return here.</p>
+                    <button
+                      class="cloud-button mt-4"
+                      data-variant="primary"
+                      type="button"
+                      onClick={() => setSection("database")}
+                    >
+                      Open Database
+                    </button>
+                  </div>
+                }
+              >
+                <section class="cloud-service-list">
+                  <button type="button" onClick={() => platform.openLink(supabaseDashboard("/auth/users"))}>
+                    <span class="cloud-service-icon">
+                      <Icon name="shield" />
+                    </span>
+                    <span>
+                      <strong>Users</strong>
+                      <small>Manage users, identities, sessions, and invitations in Supabase.</small>
+                    </span>
+                    <em>Open</em>
+                  </button>
+                  <button type="button" onClick={() => platform.openLink(supabaseDashboard("/auth/providers"))}>
+                    <span class="cloud-service-icon">
+                      <Icon name="providers" />
+                    </span>
+                    <span>
+                      <strong>Sign-in providers</strong>
+                      <small>Configure email, OAuth, and other supported identity providers.</small>
+                    </span>
+                    <em>Open</em>
+                  </button>
+                  <button type="button" onClick={() => platform.openLink(supabaseDashboard("/auth/policies"))}>
+                    <span class="cloud-service-icon">
+                      <Icon name="review" />
+                    </span>
+                    <span>
+                      <strong>Authorization policies</strong>
+                      <small>Review row-level security and access policies before release.</small>
+                    </span>
+                    <em>Open</em>
+                  </button>
+                </section>
+              </Show>
+            </Show>
+
+            {/* Storage */}
+            <Show when={section() === "storage"}>
+              <div class="cloud-heading cloud-heading-with-action">
+                <div>
+                  <div class="cloud-kicker">Supabase objects</div>
+                  <h1>Storage</h1>
+                  <p>
+                    Inspect the buckets connected to this repository without copying service credentials into Vector.
+                  </p>
+                </div>
+                <button
+                  class="cloud-button"
+                  type="button"
+                  disabled={supabaseServicesBusy()}
+                  onClick={() => void refreshSupabaseServices()}
+                >
+                  {supabaseServicesBusy() ? "Refreshing…" : "Refresh"}
+                </button>
+              </div>
+              <Show
+                when={supabaseServices()?.connected}
+                fallback={
+                  <div class="cloud-empty">
+                    <svg viewBox="0 0 16 16" class="cloud-empty-icon" aria-hidden="true">
+                      {sectionIcon("storage")}
+                    </svg>
+                    <strong>No Supabase project linked</strong>
+                    <p>Connect one from Database to inspect its storage buckets.</p>
+                  </div>
+                }
+              >
+                <div class="cloud-list">
+                  <For
+                    each={supabaseServices()?.storage.buckets ?? []}
+                    fallback={
+                      <div class="cloud-empty">
+                        <strong>
+                          {supabaseServices()?.storage.available ? "No storage buckets" : "Storage unavailable"}
+                        </strong>
+                        <p>
+                          {supabaseServices()?.storage.detail ??
+                            "Create a bucket in Supabase when this application needs object storage."}
+                        </p>
+                      </div>
+                    }
+                  >
+                    {(bucket) => (
+                      <div class="cloud-row">
+                        <span class="cloud-service-icon">
+                          <Icon name="folder" />
+                        </span>
+                        <span class="min-w-0 flex-1">
+                          <strong class="block truncate text-[13px] text-white/85">{bucket.name}</strong>
+                          <small class="cloud-muted">
+                            {bucket.public ? "Public bucket" : "Private bucket"}
+                            {bucket.updatedAt ? ` · updated ${formatDate(bucket.updatedAt)}` : ""}
+                          </small>
+                        </span>
+                        <span class="cloud-status" data-tone={bucket.public ? "warning" : "success"}>
+                          {bucket.public ? "public" : "private"}
+                        </span>
+                      </div>
+                    )}
+                  </For>
+                </div>
+                <div class="mt-4 flex justify-end">
+                  <button
+                    class="cloud-button"
+                    data-variant="primary"
+                    type="button"
+                    onClick={() => platform.openLink(supabaseDashboard("/storage/buckets"))}
+                  >
+                    Open Storage
+                  </button>
+                </div>
+              </Show>
+            </Show>
+
+            {/* Edge Functions */}
+            <Show when={section() === "functions"}>
+              <div class="cloud-heading cloud-heading-with-action">
+                <div>
+                  <div class="cloud-kicker">Serverless logic</div>
+                  <h1>Edge functions</h1>
+                  <p>Inspect functions deployed in the Supabase project attached to this repository.</p>
+                </div>
+                <button
+                  class="cloud-button"
+                  type="button"
+                  disabled={supabaseServicesBusy()}
+                  onClick={() => void refreshSupabaseServices()}
+                >
+                  {supabaseServicesBusy() ? "Refreshing…" : "Refresh"}
+                </button>
+              </div>
+              <Show
+                when={supabaseServices()?.connected}
+                fallback={
+                  <div class="cloud-empty">
+                    <svg viewBox="0 0 16 16" class="cloud-empty-icon" aria-hidden="true">
+                      {sectionIcon("functions")}
+                    </svg>
+                    <strong>No Supabase project linked</strong>
+                    <p>Connect a database project before inspecting its Edge Functions.</p>
+                  </div>
+                }
+              >
+                <div class="cloud-list">
+                  <For
+                    each={supabaseServices()?.functions.functions ?? []}
+                    fallback={
+                      <div class="cloud-empty">
+                        <strong>
+                          {supabaseServices()?.functions.available ? "No Edge Functions" : "Functions unavailable"}
+                        </strong>
+                        <p>
+                          {supabaseServices()?.functions.detail ??
+                            "No functions have been deployed in this Supabase project."}
+                        </p>
+                      </div>
+                    }
+                  >
+                    {(fn) => (
+                      <div class="cloud-row">
+                        <span class="cloud-service-icon">
+                          <Icon name="code" />
+                        </span>
+                        <span class="min-w-0 flex-1">
+                          <strong class="block truncate text-[13px] text-white/85">{fn.name}</strong>
+                          <small class="cloud-muted">
+                            {fn.slug}
+                            {fn.version ? ` · version ${fn.version}` : ""}
+                          </small>
+                        </span>
+                        <Show when={fn.status}>
+                          <span class="cloud-status">{fn.status}</span>
+                        </Show>
+                      </div>
+                    )}
+                  </For>
+                </div>
+                <div class="mt-4 flex justify-end">
+                  <button
+                    class="cloud-button"
+                    data-variant="primary"
+                    type="button"
+                    onClick={() => platform.openLink(supabaseDashboard("/functions"))}
+                  >
+                    Open Functions
+                  </button>
+                </div>
+              </Show>
+            </Show>
+
+            {/* Realtime */}
+            <Show when={section() === "realtime"}>
+              <div class="cloud-heading">
+                <div>
+                  <div class="cloud-kicker">Live data</div>
+                  <h1>Realtime</h1>
+                  <p>Use the repository's Supabase connection for database changes, broadcast, and presence.</p>
+                </div>
+              </div>
+              <Show
+                when={database()?.projectRef}
+                fallback={
+                  <div class="cloud-empty">
+                    <svg viewBox="0 0 16 16" class="cloud-empty-icon" aria-hidden="true">
+                      {sectionIcon("realtime")}
+                    </svg>
+                    <strong>No Supabase project linked</strong>
+                    <p>Connect a project from Database to use Realtime.</p>
+                  </div>
+                }
+              >
+                <section class="cloud-service-list">
+                  <button type="button" onClick={() => platform.openLink(supabaseDashboard("/realtime/inspector"))}>
+                    <span class="cloud-service-icon">
+                      <Icon name="status" />
+                    </span>
+                    <span>
+                      <strong>Realtime inspector</strong>
+                      <small>Inspect live channels and messages for this project.</small>
+                    </span>
+                    <em>Open</em>
+                  </button>
+                  <button type="button" onClick={() => platform.openLink(supabaseDashboard("/database/replication"))}>
+                    <span class="cloud-service-icon">
+                      <Icon name="branch" />
+                    </span>
+                    <span>
+                      <strong>Database replication</strong>
+                      <small>Choose which database changes may be streamed to clients.</small>
+                    </span>
+                    <em>Open</em>
+                  </button>
+                </section>
+              </Show>
+            </Show>
+
+            {/* Delivery & security */}
+            <Show when={section() === "delivery"}>
+              <div class="cloud-heading">
+                <div>
+                  <div class="cloud-kicker">Hosting platform services</div>
+                  <h1>Delivery & security</h1>
+                  <p>
+                    Open CDN, firewall, flags, workflows, sandboxes, and image controls in the hosting account linked to
+                    this repository. Vector keeps the repository association; the provider remains the source of truth.
+                  </p>
+                </div>
+              </div>
+              <section class="cloud-service-list">
+                <For
+                  each={[
+                    {
+                      name: "CDN",
+                      detail: "Caching and global delivery for the linked deployment.",
+                      icon: "cloud-upload" as const,
+                    },
+                    {
+                      name: "Firewall",
+                      detail: "Traffic controls and security rules owned by your provider.",
+                      icon: "shield" as const,
+                    },
+                    {
+                      name: "Feature flags",
+                      detail: "Manage release flags alongside the linked project.",
+                      icon: "sliders" as const,
+                    },
+                    {
+                      name: "Workflows",
+                      detail: "Inspect durable project workflows when your provider supports them.",
+                      icon: "branch" as const,
+                    },
+                    {
+                      name: "Sandboxes",
+                      detail: "Open isolated execution resources in the provider dashboard.",
+                      icon: "terminal" as const,
+                    },
+                    {
+                      name: "Image delivery",
+                      detail: "Configure project image optimization and delivery.",
+                      icon: "photo" as const,
+                    },
+                  ]}
+                >
+                  {(service) => (
+                    <button type="button" onClick={() => platform.openLink(deploymentDashboard("vercel"))}>
+                      <span class="cloud-service-icon">
+                        <Icon name={service.icon} />
+                      </span>
+                      <span>
+                        <strong>{service.name}</strong>
+                        <small>{service.detail}</small>
+                      </span>
+                      <em>{providerLink("vercel") ? "Open Vercel" : "Connect Vercel"}</em>
+                    </button>
+                  )}
+                </For>
+              </section>
+              <Show when={providerLink("netlify")}>
+                <div class="mt-4 flex justify-end">
+                  <button
+                    class="cloud-button"
+                    type="button"
+                    onClick={() => platform.openLink(deploymentDashboard("netlify"))}
+                  >
+                    Open linked Netlify site
+                  </button>
+                </div>
+              </Show>
+            </Show>
+
+            {/* AWS */}
+            <Show when={section() === "aws"}>
+              <div class="cloud-heading cloud-heading-with-action">
+                <div>
+                  <div class="cloud-kicker">Local AWS account</div>
+                  <h1>AWS integrations</h1>
+                  <p>
+                    Vector uses your locally authenticated AWS CLI. It can inspect S3, EC2, Lambda, ECS, and SageMaker
+                    without copying credentials into the app or its logs.
+                  </p>
+                </div>
+                <button
+                  class="cloud-button"
+                  data-variant="primary"
+                  type="button"
+                  disabled={awsBusy()}
+                  onClick={() => void refreshAws()}
+                >
+                  {awsBusy() ? "Refreshing…" : "Refresh AWS"}
+                </button>
+              </div>
+              <div class="cloud-aws-controls">
+                <label>
+                  <span>Profile</span>
+                  <select
+                    class="cloud-input"
+                    value={awsProfile()}
+                    onChange={(event) => {
+                      setAwsProfile(event.currentTarget.value)
+                      setAwsLoaded(false)
+                      setAwsSnapshot(undefined)
+                    }}
+                  >
+                    <option value="">Default profile</option>
+                    <For each={awsSnapshot()?.status.profiles ?? []}>
+                      {(profile) => <option value={profile}>{profile}</option>}
+                    </For>
+                  </select>
+                </label>
+                <label>
+                  <span>Region</span>
+                  <input
+                    class="cloud-input"
+                    value={awsRegion()}
+                    onInput={(event) => setAwsRegion(event.currentTarget.value)}
+                    placeholder="us-east-1"
+                  />
+                </label>
+                <div class="cloud-aws-identity">
+                  <strong>
+                    {awsSnapshot()?.status.configured
+                      ? `Account ${awsSnapshot()?.status.accountId}`
+                      : "AWS not connected"}
+                  </strong>
+                  <small>{awsSnapshot()?.status.detail ?? "Checking the AWS CLI on this computer…"}</small>
+                </div>
+              </div>
+              <div class="cloud-list mt-4">
+                <For each={awsSnapshot()?.services ?? []}>
+                  {(service) => (
+                    <div class="cloud-row cloud-row-block">
+                      <span class="cloud-service-icon">
+                        <Icon
+                          name={
+                            service.id === "s3"
+                              ? "folder"
+                              : service.id === "lambda"
+                                ? "code"
+                                : service.id === "sagemaker"
+                                  ? "models"
+                                  : "server"
+                          }
+                        />
+                      </span>
+                      <div class="min-w-0 flex-1">
+                        <div class="flex flex-wrap items-center gap-2">
+                          <strong class="text-[13px] text-white/85">{service.label}</strong>
+                          <span class="cloud-status" data-tone={service.available ? "success" : "warning"}>
+                            {service.available ? `${service.resources.length} found` : "Unavailable"}
+                          </span>
+                        </div>
+                        <Show when={service.detail}>
+                          <p class="cloud-muted mt-1 text-[11px]">{service.detail}</p>
+                        </Show>
+                        <Show when={service.resources.length}>
+                          <div class="cloud-resource-chips mt-2">
+                            <For each={service.resources.slice(0, 8)}>
+                              {(resource) => (
+                                <span title={resource.id}>
+                                  {resource.name}
+                                  {resource.state ? ` · ${resource.state}` : ""}
+                                </span>
+                              )}
+                            </For>
+                            <Show when={service.resources.length > 8}>
+                              <span>+{service.resources.length - 8} more</span>
+                            </Show>
+                          </div>
+                        </Show>
+                      </div>
+                      <button class="cloud-button" type="button" onClick={() => platform.openLink(service.consoleUrl)}>
+                        Open AWS
+                      </button>
+                    </div>
+                  )}
+                </For>
+              </div>
+              <Show when={awsSnapshot() && !awsSnapshot()?.status.installed}>
+                <div class="cloud-notice mt-4" data-tone="info">
+                  Install AWS CLI v2, run <code>aws configure</code> or use AWS SSO, then refresh. Vector never asks for
+                  the access key itself.
+                </div>
               </Show>
             </Show>
 

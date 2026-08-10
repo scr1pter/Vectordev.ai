@@ -96,17 +96,15 @@ export type CloudDomain = {
   createdAt: string
 }
 
-export type CloudDatabaseConnection =
-  | {
-      provider: "supabase"
-      url: string
-      anonKey: string
-      projectRef?: string
-      projectName?: string
-      managedByOAuth?: boolean
-      connectedAt: string
-    }
-  | null
+export type CloudDatabaseConnection = {
+  provider: "supabase"
+  url: string
+  anonKey: string
+  projectRef?: string
+  projectName?: string
+  managedByOAuth?: boolean
+  connectedAt: string
+} | null
 
 export type CloudProviderId = "vercel" | "netlify" | "supabase"
 
@@ -151,6 +149,70 @@ export type CloudProviderSyncResult = {
   detail: string
 }
 
+export type CloudSupabaseBucket = {
+  id: string
+  name: string
+  public: boolean
+  createdAt?: string
+  updatedAt?: string
+}
+
+export type CloudSupabaseFunction = {
+  id: string
+  name: string
+  slug: string
+  status?: string
+  version?: number
+  createdAt?: string
+  updatedAt?: string
+}
+
+export type CloudSupabaseServices = {
+  connected: boolean
+  projectRef?: string
+  projectName?: string
+  region?: string
+  dashboardUrl?: string
+  detail?: string
+  storage: { available: boolean; buckets: CloudSupabaseBucket[]; detail?: string }
+  functions: { available: boolean; functions: CloudSupabaseFunction[]; detail?: string }
+}
+
+export type CloudAwsStatus = {
+  installed: boolean
+  configured: boolean
+  version?: string
+  accountId?: string
+  arn?: string
+  profile?: string
+  profiles: string[]
+  region: string
+  detail: string
+}
+
+export type CloudAwsResource = {
+  id: string
+  name: string
+  state?: string
+  detail?: string
+  createdAt?: string
+}
+
+export type CloudAwsService = {
+  id: "s3" | "ec2" | "lambda" | "sagemaker" | "ecs"
+  label: string
+  available: boolean
+  consoleUrl: string
+  resources: CloudAwsResource[]
+  detail?: string
+}
+
+export type CloudAwsSnapshot = {
+  status: CloudAwsStatus
+  services: CloudAwsService[]
+  refreshedAt: string
+}
+
 export type CloudApi = {
   connections: {
     list: () => Promise<CloudProviderConnection[]>
@@ -182,16 +244,8 @@ export type CloudApi = {
       provider: "vercel" | "netlify",
       domain: string,
     ) => Promise<CloudDomain>
-    verifyDomain: (
-      projectPath: string,
-      taskId: string | undefined,
-      id: string,
-    ) => Promise<CloudDomain>
-    removeDomain: (
-      projectPath: string,
-      taskId: string | undefined,
-      id: string,
-    ) => Promise<CloudDomain[]>
+    verifyDomain: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudDomain>
+    removeDomain: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudDomain[]>
   }
   deployments: {
     list: (projectPath: string, taskId?: string) => Promise<CloudDeployment[]>
@@ -215,7 +269,11 @@ export type CloudApi = {
   }
   domains: {
     list: (projectPath: string, taskId?: string) => Promise<CloudDomain[]>
-    add: (projectPath: string, taskId: string | undefined, input: { domain: string; slug?: string }) => Promise<CloudDomain>
+    add: (
+      projectPath: string,
+      taskId: string | undefined,
+      input: { domain: string; slug?: string },
+    ) => Promise<CloudDomain>
     verify: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudDomain>
     remove: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudDomain[]>
   }
@@ -239,6 +297,13 @@ export type CloudApi = {
       projectRef: string,
     ) => Promise<CloudDatabaseConnection>
     disconnect: (projectPath: string, taskId?: string) => Promise<void>
+  }
+  services: {
+    supabase: (projectPath: string, taskId?: string) => Promise<CloudSupabaseServices>
+  }
+  aws: {
+    status: (input?: { profile?: string; region?: string }) => Promise<CloudAwsStatus>
+    resources: (input?: { profile?: string; region?: string }) => Promise<CloudAwsSnapshot>
   }
   build: {
     get: (projectPath: string, taskId?: string) => Promise<CloudBuildSettings | null>
@@ -279,7 +344,16 @@ export type PublishResult = {
 
 export type PublishProgressEvent = {
   runId: string
-  stage: "preparing" | "installing" | "testing" | "building" | "uploading" | "checking" | "promoting" | "complete" | "failed"
+  stage:
+    | "preparing"
+    | "installing"
+    | "testing"
+    | "building"
+    | "uploading"
+    | "checking"
+    | "promoting"
+    | "complete"
+    | "failed"
   level: "info" | "success" | "warning" | "error"
   message: string
   at: string
@@ -326,8 +400,6 @@ type CloudAgentWorkspaceApi = {
 
 export function cloudAgentWorkspaceApi(): CloudAgentWorkspaceApi | undefined {
   return (
-    globalThis.window?.api as
-      | (Record<string, unknown> & { parallelWorkspaces?: CloudAgentWorkspaceApi })
-      | undefined
+    globalThis.window?.api as (Record<string, unknown> & { parallelWorkspaces?: CloudAgentWorkspaceApi }) | undefined
   )?.parallelWorkspaces
 }

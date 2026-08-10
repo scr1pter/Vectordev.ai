@@ -225,6 +225,13 @@ const api: ElectronAPI = {
         ipcRenderer.invoke("cloud-supabase-project-connect", projectPath, taskId, projectRef),
       disconnect: (projectPath, taskId) => ipcRenderer.invoke("cloud-db-disconnect", projectPath, taskId),
     },
+    services: {
+      supabase: (projectPath, taskId) => ipcRenderer.invoke("cloud-supabase-services", projectPath, taskId),
+    },
+    aws: {
+      status: (input) => ipcRenderer.invoke("cloud-aws-status", input),
+      resources: (input) => ipcRenderer.invoke("cloud-aws-resources", input),
+    },
     build: {
       get: (projectPath, taskId) => ipcRenderer.invoke("cloud-build-get", projectPath, taskId),
       detect: (projectPath, taskId) => ipcRenderer.invoke("cloud-build-detect", projectPath, taskId),

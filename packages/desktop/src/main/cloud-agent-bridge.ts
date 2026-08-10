@@ -1,13 +1,14 @@
 import { randomUUID } from "node:crypto"
 import { createServer, type Server } from "node:http"
 
+import { applyEnv, detectBuildSettings, getBuildSettings, getDatabase, listDeployments } from "./cloud-console"
 import {
-  applyEnv,
-  detectBuildSettings,
-  getBuildSettings,
-  getDatabase,
-  listDeployments,
-} from "./cloud-console"
+  getSupabaseServiceSnapshot,
+  listCloudProviderConnections,
+  listCloudProviderProjectLinks,
+  syncCloudProviderEnvironment,
+} from "./cloud-connections"
+import { getCloudAwsStatus, listCloudAwsResources } from "./cloud-aws"
 import { publishProject } from "./publish"
 
 const MAX_BODY_BYTES = 64 * 1024
@@ -17,6 +18,12 @@ type CloudCommand =
   | "detect_build"
   | "database_status"
   | "prepare_database"
+  | "prepare_auth"
+  | "cloud_connections"
+  | "supabase_services"
+  | "sync_environment"
+  | "aws_status"
+  | "aws_resources"
   | "publish"
   | "list_deployments"
 
@@ -25,6 +32,8 @@ type CloudAgentInput = {
   projectPath: string
   taskId?: string
   production?: boolean
+  target?: "vector-cloud" | "vercel" | "netlify"
+  provider?: "vercel" | "netlify"
 }
 
 let bridgeServer: Server | undefined
@@ -98,25 +107,44 @@ function parseCloudAgentInput(value: unknown): CloudAgentInput {
   const projectPath = Reflect.get(value, "projectPath")
   const taskId = Reflect.get(value, "taskId")
   const production = Reflect.get(value, "production")
+  const target = Reflect.get(value, "target")
+  const provider = Reflect.get(value, "provider")
   if (
     command !== "status" &&
     command !== "detect_build" &&
     command !== "database_status" &&
     command !== "prepare_database" &&
+    command !== "prepare_auth" &&
+    command !== "cloud_connections" &&
+    command !== "supabase_services" &&
+    command !== "sync_environment" &&
+    command !== "aws_status" &&
+    command !== "aws_resources" &&
     command !== "publish" &&
     command !== "list_deployments"
   ) {
     throw new Error("Unsupported Vector Cloud command.")
   }
-  if (typeof projectPath !== "string" || !projectPath.trim()) throw new Error("Open a project before using Vector Cloud.")
+  if (typeof projectPath !== "string" || !projectPath.trim())
+    throw new Error("Open a project before using Vector Cloud.")
   if (taskId !== undefined && typeof taskId !== "string") throw new Error("Invalid project session.")
   if (production !== undefined && typeof production !== "boolean") throw new Error("Invalid publish mode.")
-  return { command, projectPath, taskId, production }
+  if (target !== undefined && target !== "vector-cloud" && target !== "vercel" && target !== "netlify") {
+    throw new Error("Invalid publish target.")
+  }
+  if (provider !== undefined && provider !== "vercel" && provider !== "netlify") {
+    throw new Error("Invalid cloud provider.")
+  }
+  return { command, projectPath, taskId, production, target, provider }
 }
 
 async function runCloudAgentCommand(input: CloudAgentInput) {
   const database = getDatabase(input.projectPath, input.taskId)
   if (input.command === "status") {
+    const [connections, aws] = await Promise.all([
+      listCloudProviderConnections().catch(() => []),
+      getCloudAwsStatus().catch(() => undefined),
+    ])
     return {
       ok: true,
       configured: Boolean(process.env.VECTOR_CLOUD_URL && process.env.VECTOR_CLOUD_TOKEN),
@@ -125,6 +153,8 @@ async function runCloudAgentCommand(input: CloudAgentInput) {
         ? { connected: true, provider: database.provider, host: new URL(database.url).hostname }
         : { connected: false },
       deployments: deploymentSummaries(input),
+      connections,
+      aws,
     }
   }
   if (input.command === "detect_build") {
@@ -141,7 +171,7 @@ async function runCloudAgentCommand(input: CloudAgentInput) {
         : "Ask the user to connect a database in Vector Cloud > Database before implementing persistent auth or data.",
     }
   }
-  if (input.command === "prepare_database") {
+  if (input.command === "prepare_database" || input.command === "prepare_auth") {
     if (!database) {
       return {
         ok: false,
@@ -153,33 +183,55 @@ async function runCloudAgentCommand(input: CloudAgentInput) {
       ok: true,
       database: { connected: true, provider: database.provider, host: new URL(database.url).hostname },
       applied: await applyEnv(input.projectPath, input.taskId),
+      purpose: input.command === "prepare_auth" ? "authentication" : "database",
     }
   }
+  if (input.command === "cloud_connections") {
+    return {
+      ok: true,
+      connections: await listCloudProviderConnections(),
+      links: listCloudProviderProjectLinks(input.projectPath, input.taskId),
+    }
+  }
+  if (input.command === "supabase_services") {
+    return { ok: true, services: await getSupabaseServiceSnapshot(input.projectPath, input.taskId) }
+  }
+  if (input.command === "sync_environment") {
+    if (!input.provider) return { ok: false, error: "Choose vercel or netlify before syncing environment variables." }
+    return {
+      ok: true,
+      sync: await syncCloudProviderEnvironment(input.projectPath, input.taskId, input.provider),
+    }
+  }
+  if (input.command === "aws_status") return { ok: true, aws: await getCloudAwsStatus() }
+  if (input.command === "aws_resources") return { ok: true, aws: await listCloudAwsResources() }
   if (input.command === "list_deployments") {
     return { ok: true, deployments: deploymentSummaries(input) }
   }
   return publishProject({
     projectPath: input.projectPath,
     taskId: input.taskId,
-    target: "vector-cloud",
+    target: input.target ?? "vector-cloud",
     production: input.production !== false,
     runId: randomUUID(),
   })
 }
 
 function deploymentSummaries(input: CloudAgentInput) {
-  return listDeployments(input.projectPath, input.taskId).slice(0, 20).map((deployment) => ({
-    id: deployment.id,
-    name: deployment.name,
-    url: deployment.productionUrl ?? deployment.url,
-    environment: deployment.environment,
-    status: deployment.status,
-    releaseStatus: deployment.releaseStatus,
-    createdAt: deployment.createdAt,
-    checks: deployment.checks.map((check) => ({
-      label: check.label,
-      status: check.status,
-      required: check.required,
-    })),
-  }))
+  return listDeployments(input.projectPath, input.taskId)
+    .slice(0, 20)
+    .map((deployment) => ({
+      id: deployment.id,
+      name: deployment.name,
+      url: deployment.productionUrl ?? deployment.url,
+      environment: deployment.environment,
+      status: deployment.status,
+      releaseStatus: deployment.releaseStatus,
+      createdAt: deployment.createdAt,
+      checks: deployment.checks.map((check) => ({
+        label: check.label,
+        status: check.status,
+        required: check.required,
+      })),
+    }))
 }

@@ -83,8 +83,6 @@ export function WorkspaceNavigation(props: {
   onScheduled: () => void
   onMcp: () => void
   onPlugins: () => void
-  onGithub: () => void
-  onGitlab: () => void
   onFind: () => void
   onSettings: () => void
   onGettingStarted: () => void
@@ -511,24 +509,6 @@ export function WorkspaceNavigation(props: {
               />
             </svg>
             <span>Plugins</span>
-          </button>
-          <button type="button" data-vector-nav-item data-tour="nav-github" onClick={props.onGithub}>
-            <svg viewBox="0 0 16 16" class="size-3.5 shrink-0" aria-hidden="true">
-              <path
-                d="M8 1.75a6.25 6.25 0 0 0-1.98 12.18v-1.55c-1.62.35-1.96-.68-1.96-.68-.26-.68-.66-.86-.66-.86-.54-.37.04-.36.04-.36.6.04.91.61.91.61.53.91 1.39.65 1.73.5.05-.38.21-.65.38-.8-1.29-.15-2.65-.65-2.65-2.86 0-.63.23-1.15.6-1.55-.06-.15-.26-.74.06-1.53 0 0 .49-.16 1.6.59A5.55 5.55 0 0 1 8 5.25c.5 0 .98.07 1.45.2 1.11-.75 1.6-.59 1.6-.59.32.79.12 1.38.06 1.53.37.4.6.92.6 1.55 0 2.22-1.36 2.7-2.66 2.85.21.18.4.54.4 1.09v2.05A6.25 6.25 0 0 0 8 1.75Z"
-                fill="currentColor"
-              />
-            </svg>
-            <span>Push to GitHub</span>
-          </button>
-          <button type="button" data-vector-nav-item data-tour="nav-gitlab" onClick={props.onGitlab}>
-            <svg viewBox="0 0 16 16" class="size-3.5 shrink-0" aria-hidden="true">
-              <path
-                d="m8 14.1 2.3-7.08H5.7L8 14.1Zm0 0L3.95 7.02H1.6L8 14.1Zm-6.4-7.08.72 2.22L8 14.1 1.6 7.02Zm0 0 1.17-3.61c.06-.2.35-.2.42 0l.76 3.61H1.6Zm6.4 7.08 4.05-7.08h2.35L8 14.1Zm6.4-7.08-.72 2.22L8 14.1l6.4-7.08Zm0 0-1.17-3.61c-.06-.2-.35-.2-.42 0l-.76 3.61h2.35Z"
-                fill="currentColor"
-              />
-            </svg>
-            <span>Push to GitLab</span>
           </button>
         </section>
       </div>

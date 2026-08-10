@@ -566,8 +566,7 @@ export function NewHome() {
                 type="button"
                 data-variant="secondary"
                 onClick={() => {
-                  const project = selectedProject()
-                  navigate(project ? `/cloud?project=${encodeURIComponent(project.worktree)}` : "/cloud")
+                  navigate("/cloud")
                 }}
               >
                 <svg viewBox="0 0 16 16" class="size-4" aria-hidden="true">

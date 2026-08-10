@@ -22,7 +22,9 @@ import type {
   CloudProviderProjectLink,
   CloudProviderResource,
   CloudProviderSyncResult,
+  CloudSupabaseServices,
 } from "../main/cloud-connections"
+import type { CloudAwsSnapshot, CloudAwsStatus } from "../main/cloud-aws"
 import type { GithubOauthPushInput, GithubPublishInput, GithubPublishResult, GithubStatus } from "../main/github"
 import type {
   GithubAuthStatus,
@@ -73,7 +75,11 @@ export type {
   CloudProviderProjectLink,
   CloudProviderResource,
   CloudProviderSyncResult,
+  CloudSupabaseBucket,
+  CloudSupabaseFunction,
+  CloudSupabaseServices,
 } from "../main/cloud-connections"
+export type { CloudAwsResource, CloudAwsService, CloudAwsSnapshot, CloudAwsStatus } from "../main/cloud-aws"
 export type { GithubOauthPushInput, GithubPublishInput, GithubPublishResult, GithubStatus } from "../main/github"
 export type {
   GithubAuthStatus,
@@ -682,6 +688,13 @@ export type ElectronAPI = {
         projectRef: string,
       ) => Promise<CloudDatabaseConnection>
       disconnect: (projectPath: string, taskId?: string) => Promise<void>
+    }
+    services: {
+      supabase: (projectPath: string, taskId?: string) => Promise<CloudSupabaseServices>
+    }
+    aws: {
+      status: (input?: { profile?: string; region?: string }) => Promise<CloudAwsStatus>
+      resources: (input?: { profile?: string; region?: string }) => Promise<CloudAwsSnapshot>
     }
     build: {
       get: (projectPath: string, taskId?: string) => Promise<CloudBuildSettings | null>

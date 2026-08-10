@@ -218,8 +218,8 @@ export const GUIDE_SECTIONS: GuideSection[] = [
       },
       {
         title: "Push to GitHub or GitLab",
-        where: "The GitHub or GitLab button in the chat header, inside a task.",
-        body: "Commit and push your project without leaving the session. Vector commits the current files with a message you choose, then pushes to the repository's existing origin — or creates a brand-new GitHub repository (name, description, public or private) using your local GitHub CLI login. Existing remotes push with your normal git credentials or SSH; the GitHub CLI is only needed when Vector creates a new repository for you. The same works for GitLab — connect once and push to a new or existing GitLab project.",
+        where: "Cloud Services → Integrations, after choosing a repository.",
+        body: "Commit and push a selected repository from its Cloud Services workspace. Vector can use an existing origin or create a new GitHub or GitLab repository through your connected account, while keeping source-control publishing attached to the repository it belongs to.",
         tip: "Run Review changes first, then push — a commit should never contain a diff you haven't read.",
       },
       {

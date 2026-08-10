@@ -1,16 +1,10 @@
-import {
-  constants,
-  createHash,
-  generateKeyPairSync,
-  privateDecrypt,
-  randomBytes,
-  type KeyObject,
-} from "node:crypto"
+import { constants, createHash, generateKeyPairSync, privateDecrypt, randomBytes, type KeyObject } from "node:crypto"
 import { shell } from "electron"
 
 import {
   addDomain,
   connectDatabase,
+  getDatabase,
   listDomains,
   listEnv,
   normalizeCloudDomain,
@@ -74,6 +68,43 @@ export type CloudProviderSyncResult = {
   detail: string
 }
 
+export type CloudSupabaseBucket = {
+  id: string
+  name: string
+  public: boolean
+  createdAt?: string
+  updatedAt?: string
+}
+
+export type CloudSupabaseFunction = {
+  id: string
+  name: string
+  slug: string
+  status?: string
+  version?: number
+  createdAt?: string
+  updatedAt?: string
+}
+
+export type CloudSupabaseServices = {
+  connected: boolean
+  projectRef?: string
+  projectName?: string
+  region?: string
+  dashboardUrl?: string
+  detail?: string
+  storage: {
+    available: boolean
+    buckets: CloudSupabaseBucket[]
+    detail?: string
+  }
+  functions: {
+    available: boolean
+    functions: CloudSupabaseFunction[]
+    detail?: string
+  }
+}
+
 type StoredConnection = {
   provider: CloudProviderId
   accessToken: string
@@ -123,7 +154,7 @@ function base64Url(value: Buffer | string): string {
 }
 
 function isProvider(value: unknown): value is CloudProviderId {
-  return typeof value === "string" && PROVIDERS.includes(value as CloudProviderId)
+  return value === "vercel" || value === "netlify" || value === "supabase"
 }
 
 function readConnections(): StoredConnection[] {
@@ -158,13 +189,12 @@ function connectionLabel(provider: CloudProviderId): string {
 }
 
 async function brokerRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers = new Headers(init?.headers)
+  headers.set("accept", "application/json")
+  if (init?.body) headers.set("content-type", "application/json")
   const response = await fetch(`${brokerUrl()}${path}`, {
     ...init,
-    headers: {
-      accept: "application/json",
-      ...(init?.body ? { "content-type": "application/json" } : {}),
-      ...init?.headers,
-    },
+    headers,
     signal: init?.signal ?? AbortSignal.timeout(20_000),
   }).catch((error) => {
     throw new Error(
@@ -173,9 +203,7 @@ async function brokerRequest<T>(path: string, init?: RequestInit): Promise<T> {
         : "Could not reach Vector's connection service.",
     )
   })
-  const body = (await response.json().catch(() => undefined)) as
-    | (T & { ok?: boolean; error?: string })
-    | undefined
+  const body = (await response.json().catch(() => undefined)) as (T & { ok?: boolean; error?: string }) | undefined
   if (!response.ok || !body || body.ok === false) {
     throw new Error(body?.error || `Vector's connection service returned HTTP ${response.status}.`)
   }
@@ -296,32 +324,31 @@ function constantTimeEqual(left: string, right: string): boolean {
 }
 
 function stringField(value: unknown, key: string): string | undefined {
-  if (!value || typeof value !== "object") return
+  if (!value || typeof value !== "object") return undefined
   const field = Reflect.get(value, key)
   return typeof field === "string" && field ? field : undefined
 }
 
 function numberField(value: unknown, key: string): number | undefined {
-  if (!value || typeof value !== "object") return
+  if (!value || typeof value !== "object") return undefined
   const field = Reflect.get(value, key)
   return typeof field === "number" && Number.isFinite(field) ? field : undefined
 }
 
 function booleanField(value: unknown, key: string): boolean | undefined {
-  if (!value || typeof value !== "object") return
+  if (!value || typeof value !== "object") return undefined
   const field = Reflect.get(value, key)
   return typeof field === "boolean" ? field : undefined
 }
 
 async function providerJson(token: string, url: string, init?: RequestInit): Promise<unknown> {
+  const headers = new Headers(init?.headers)
+  headers.set("accept", "application/json")
+  headers.set("authorization", `Bearer ${token}`)
+  headers.set("user-agent", "Vector-Desktop/1")
   const response = await fetch(url, {
     ...init,
-    headers: {
-      accept: "application/json",
-      authorization: `Bearer ${token}`,
-      "user-agent": "Vector-Desktop/1",
-      ...init?.headers,
-    },
+    headers,
     signal: init?.signal ?? AbortSignal.timeout(20_000),
   })
   const body: unknown = await response.json().catch(() => undefined)
@@ -522,9 +549,7 @@ async function accessToken(provider: CloudProviderId): Promise<{ token: string; 
       ...record,
       accessToken: encryptCloudCredential(refreshed.accessToken),
       refreshToken: encryptCloudCredential(refreshed.refreshToken ?? refreshToken),
-      expiresAt: refreshed.expiresIn
-        ? new Date(Date.now() + refreshed.expiresIn * 1000).toISOString()
-        : undefined,
+      expiresAt: refreshed.expiresIn ? new Date(Date.now() + refreshed.expiresIn * 1000).toISOString() : undefined,
     }
     saveConnection(record)
   }
@@ -560,8 +585,7 @@ export async function listCloudProviderResources(provider: CloudProviderId): Pro
         const name = stringField(project, "name")
         if (!id || !name) return
         const targets = Reflect.get(project, "targets")
-        const production =
-          targets && typeof targets === "object" ? Reflect.get(targets, "production") : undefined
+        const production = targets && typeof targets === "object" ? Reflect.get(targets, "production") : undefined
         return {
           provider,
           id,
@@ -637,10 +661,7 @@ function readLinks(projectPath: string, taskId?: string): CloudProviderProjectLi
   })
 }
 
-export function listCloudProviderProjectLinks(
-  projectPath: string,
-  taskId?: string,
-): CloudProviderProjectLink[] {
+export function listCloudProviderProjectLinks(projectPath: string, taskId?: string): CloudProviderProjectLink[] {
   if (!projectPath.trim()) return []
   return readLinks(projectPath, taskId)
 }
@@ -706,10 +727,7 @@ async function netlifySite(
   token: string,
   siteId: string,
 ): Promise<{ accountId?: string; name?: string; customDomain?: string; aliases: string[] }> {
-  const site = await providerJson(
-    token,
-    `https://api.netlify.com/api/v1/sites/${encodeURIComponent(siteId)}`,
-  )
+  const site = await providerJson(token, `https://api.netlify.com/api/v1/sites/${encodeURIComponent(siteId)}`)
   const aliases = site && typeof site === "object" ? Reflect.get(site, "domain_aliases") : undefined
   return {
     accountId: stringField(site, "account_id"),
@@ -730,11 +748,7 @@ export async function syncCloudProviderEnvironment(
   const auth = await accessToken(provider)
 
   if (provider === "vercel") {
-    const url = providerApiUrl(
-      provider,
-      `/v10/projects/${encodeURIComponent(link.projectId)}/env`,
-      auth.record,
-    )
+    const url = providerApiUrl(provider, `/v10/projects/${encodeURIComponent(link.projectId)}/env`, auth.record)
     url.searchParams.set("upsert", "true")
     await providerJson(auth.token, url.toString(), {
       method: "POST",
@@ -745,11 +759,7 @@ export async function syncCloudProviderEnvironment(
     const site = await netlifySite(auth.token, link.projectId)
     const accountId = link.accountId ?? site.accountId
     if (!accountId) throw new Error("Netlify did not return the account that owns this site.")
-    const listUrl = providerApiUrl(
-      provider,
-      `/api/v1/accounts/${encodeURIComponent(accountId)}/env`,
-      auth.record,
-    )
+    const listUrl = providerApiUrl(provider, `/api/v1/accounts/${encodeURIComponent(accountId)}/env`, auth.record)
     listUrl.searchParams.set("site_id", link.projectId)
     const existing = await providerJson(auth.token, listUrl.toString())
     const existingKeys = new Set(
@@ -836,21 +846,13 @@ export async function addCloudProviderDomain(
   const auth = await accessToken(provider)
 
   if (provider === "vercel") {
-    const url = providerApiUrl(
-      provider,
-      `/v10/projects/${encodeURIComponent(link.projectId)}/domains`,
-      auth.record,
-    )
+    const url = providerApiUrl(provider, `/v10/projects/${encodeURIComponent(link.projectId)}/domains`, auth.record)
     const response = await providerJson(auth.token, url.toString(), {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ name: domain }),
     })
-    const configUrl = providerApiUrl(
-      provider,
-      `/v6/domains/${encodeURIComponent(domain)}/config`,
-      auth.record,
-    )
+    const configUrl = providerApiUrl(provider, `/v6/domains/${encodeURIComponent(domain)}/config`, auth.record)
     const config = await providerJson(auth.token, configUrl.toString()).catch(() => undefined)
     const verified = booleanField(response, "verified") === true
     const misconfigured = booleanField(config, "misconfigured")
@@ -871,15 +873,11 @@ export async function addCloudProviderDomain(
 
   const site = await netlifySite(auth.token, link.projectId)
   const aliases = addNetlifyDomainAlias(site.aliases, domain)
-  await providerJson(
-    auth.token,
-    `https://api.netlify.com/api/v1/sites/${encodeURIComponent(link.projectId)}`,
-    {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ domain_aliases: aliases }),
-    },
-  )
+  await providerJson(auth.token, `https://api.netlify.com/api/v1/sites/${encodeURIComponent(link.projectId)}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ domain_aliases: aliases }),
+  })
   const target = link.url
     ? new URL(link.url).hostname
     : site.name
@@ -923,11 +921,7 @@ export async function verifyCloudProviderDomain(
     )
     response = await providerJson(auth.token, verifyUrl.toString(), { method: "POST" }).catch(() => response)
   }
-  const configUrl = providerApiUrl(
-    provider,
-    `/v6/domains/${encodeURIComponent(domain.domain)}/config`,
-    auth.record,
-  )
+  const configUrl = providerApiUrl(provider, `/v6/domains/${encodeURIComponent(domain.domain)}/config`, auth.record)
   const config = await providerJson(auth.token, configUrl.toString()).catch(() => undefined)
   const verified = booleanField(response, "verified") === true
   const misconfigured = booleanField(config, "misconfigured")
@@ -966,17 +960,13 @@ export async function removeCloudProviderDomain(
     await providerJson(auth.token, url.toString(), { method: "DELETE" })
   } else {
     const site = await netlifySite(auth.token, link.projectId)
-    await providerJson(
-      auth.token,
-      `https://api.netlify.com/api/v1/sites/${encodeURIComponent(link.projectId)}`,
-      {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          domain_aliases: removeNetlifyDomainAlias(site.aliases, domain.domain),
-        }),
-      },
-    )
+    await providerJson(auth.token, `https://api.netlify.com/api/v1/sites/${encodeURIComponent(link.projectId)}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        domain_aliases: removeNetlifyDomainAlias(site.aliases, domain.domain),
+      }),
+    })
   }
   return removeDomain(projectPath, taskId, id)
 }
@@ -1011,4 +1001,87 @@ export async function connectSupabaseProject(
     projectName: project.name,
     managedByOAuth: true,
   })
+}
+
+function serviceError(result: PromiseSettledResult<unknown>): string | undefined {
+  if (result.status === "fulfilled") return
+  return result.reason instanceof Error ? result.reason.message : String(result.reason)
+}
+
+function responseArray(value: unknown): unknown[] {
+  if (Array.isArray(value)) return value
+  if (!value || typeof value !== "object") return []
+  const data = Reflect.get(value, "data")
+  return Array.isArray(data) ? data : []
+}
+
+export async function getSupabaseServiceSnapshot(projectPath: string, taskId?: string): Promise<CloudSupabaseServices> {
+  const database = getDatabase(projectPath, taskId)
+  const projectRef = database?.projectRef
+  if (!database || !projectRef) {
+    return {
+      connected: false,
+      detail: "Connect a Supabase project in Vector Cloud > Database first.",
+      storage: { available: false, buckets: [], detail: "No Supabase project is linked." },
+      functions: { available: false, functions: [], detail: "No Supabase project is linked." },
+    }
+  }
+
+  const auth = await accessToken("supabase")
+  const [bucketsResult, functionsResult, projectsResult] = await Promise.allSettled([
+    providerJson(auth.token, `https://api.supabase.com/v1/projects/${encodeURIComponent(projectRef)}/storage/buckets`),
+    providerJson(auth.token, `https://api.supabase.com/v1/projects/${encodeURIComponent(projectRef)}/functions`),
+    listCloudProviderResources("supabase"),
+  ])
+  const project =
+    projectsResult.status === "fulfilled" ? projectsResult.value.find((item) => item.id === projectRef) : undefined
+  const bucketValues = bucketsResult.status === "fulfilled" ? responseArray(bucketsResult.value) : []
+  const functionValues = functionsResult.status === "fulfilled" ? responseArray(functionsResult.value) : []
+
+  return {
+    connected: true,
+    projectRef,
+    projectName: database.projectName ?? project?.name,
+    region: project?.region,
+    dashboardUrl: `https://supabase.com/dashboard/project/${encodeURIComponent(projectRef)}`,
+    storage: {
+      available: bucketsResult.status === "fulfilled",
+      detail: serviceError(bucketsResult),
+      buckets: bucketValues
+        .map((bucket): CloudSupabaseBucket | undefined => {
+          const id = stringField(bucket, "id") ?? stringField(bucket, "name")
+          const name = stringField(bucket, "name")
+          if (!id || !name) return
+          return {
+            id,
+            name,
+            public: booleanField(bucket, "public") === true,
+            createdAt: stringField(bucket, "created_at"),
+            updatedAt: stringField(bucket, "updated_at"),
+          }
+        })
+        .filter((bucket): bucket is CloudSupabaseBucket => Boolean(bucket)),
+    },
+    functions: {
+      available: functionsResult.status === "fulfilled",
+      detail: serviceError(functionsResult),
+      functions: functionValues
+        .map((fn): CloudSupabaseFunction | undefined => {
+          const id = stringField(fn, "id") ?? stringField(fn, "slug")
+          const name = stringField(fn, "name") ?? stringField(fn, "slug")
+          const slug = stringField(fn, "slug") ?? name
+          if (!id || !name || !slug) return
+          return {
+            id,
+            name,
+            slug,
+            status: stringField(fn, "status"),
+            version: numberField(fn, "version"),
+            createdAt: stringField(fn, "created_at"),
+            updatedAt: stringField(fn, "updated_at"),
+          }
+        })
+        .filter((fn): fn is CloudSupabaseFunction => Boolean(fn)),
+    },
+  }
 }
