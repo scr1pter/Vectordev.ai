@@ -186,6 +186,7 @@ function createPersistedPromptInputHistory() {
 export interface PromptInputProps {
   class?: string
   variant?: "dock" | "new-session"
+  hideVel?: boolean
   state?: PromptInputState
   history?: PromptInputHistory
   submission?: PromptInputSubmission
@@ -2118,7 +2119,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                     </MenuV2>
                   </Show>
                 </div>
-                <Show when={store.mode === "normal"}>
+                <Show when={store.mode === "normal" && !props.hideVel}>
                   <PromptVelButton />
                 </Show>
                 <Show when={micAvailable() && !listening() && !transcribing()}>

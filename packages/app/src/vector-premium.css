@@ -1757,18 +1757,18 @@ html[data-vector-navigation-resizing] * {
 }
 
 [data-vector-codespace] .vector-editor-agent-composer > div:last-child {
-  height: auto !important;
-  min-height: 84px;
-  flex-wrap: wrap;
-  align-content: space-between;
-  row-gap: 5px;
-  padding: 7px 10px 8px !important;
+  height: 44px !important;
+  min-height: 44px;
+  flex-wrap: nowrap;
+  align-content: center;
+  row-gap: 0;
+  padding: 6px 8px !important;
 }
 
 [data-vector-codespace] .vector-editor-agent-composer > div:last-child > div:first-child {
-  order: 1;
-  flex-basis: 100%;
-  width: 100%;
+  flex: 1 1 auto;
+  flex-basis: auto;
+  width: auto;
   overflow: hidden;
 }
 
@@ -1776,31 +1776,26 @@ html[data-vector-navigation-resizing] * {
   min-width: 0;
 }
 
-[data-vector-codespace] .vector-editor-agent-composer > div:last-child > [data-action="prompt-vel"] {
-  order: 2;
-  margin-left: auto;
-}
-
 [data-vector-codespace] .vector-editor-agent-composer > div:last-child > [data-action="prompt-mic"],
 [data-vector-codespace] .vector-editor-agent-composer > div:last-child > [data-action="prompt-attach"],
 [data-vector-codespace] .vector-editor-agent-composer > div:last-child > [data-action="prompt-submit"] {
-  order: 2;
+  order: initial;
 }
 
 [data-vector-codespace] .vector-editor-agent-composer [data-action="prompt-model"] {
-  max-width: 158px !important;
+  max-width: 108px !important;
 }
 
 [data-vector-codespace] .vector-editor-agent-composer [data-action="prompt-mode"] {
-  max-width: 112px !important;
+  max-width: 74px !important;
 }
 
 [data-vector-codespace] .vector-editor-agent-composer [data-action="prompt-model-variant"] {
-  max-width: 112px !important;
+  max-width: 72px !important;
 }
 
 [data-vector-codespace] .vector-editor-agent-composer [data-action="prompt-execution-mode"] {
-  max-width: 104px !important;
+  max-width: 72px !important;
 }
 
 [data-vector-codespace] .vector-editor-agent-timeline [data-component="user-message"] {
@@ -2614,36 +2609,10 @@ html[data-vector-navigation-resizing] * {
   }
 }
 
-/* ---- Codespace neon editor ----
-   The Monaco theme (vector-dark, monaco-code-editor.tsx) supplies the violet
-   palette; these rules add the glow the theme API can't express: a soft
-   text bloom, a haloed cursor, and an aurora wash over the editor surface. */
-
-.vector-neon-editor .monaco-editor .view-lines {
-  text-shadow: 0 0 12px rgba(143, 82, 255, 0.22);
-}
-
-.vector-neon-editor .monaco-editor .cursor {
-  box-shadow: 0 0 12px rgba(177, 138, 255, 0.85);
-}
-
+/* Monaco remains neutral so syntax, selection, and agent activity carry the
+   hierarchy without tinting the file itself. */
+.vector-neon-editor .monaco-editor .view-lines,
 .vector-neon-editor .monaco-editor .current-line {
-  box-shadow: inset 0 0 26px rgba(143, 82, 255, 0.08);
-}
-
-.vector-neon-editor::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 10;
-  pointer-events: none;
-  background:
-    radial-gradient(120% 90% at 85% -10%, rgba(143, 82, 255, 0.12), transparent 55%),
-    radial-gradient(90% 70% at 0% 100%, rgba(88, 44, 176, 0.1), transparent 60%);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .vector-neon-editor .monaco-editor .view-lines {
-    text-shadow: none;
-  }
+  text-shadow: none;
+  box-shadow: none;
 }

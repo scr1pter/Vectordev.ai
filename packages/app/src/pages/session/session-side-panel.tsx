@@ -1911,7 +1911,6 @@ export function CodespaceWorkbench(props: {
   const [inlineEditRunning, setInlineEditRunning] = createSignal(false)
   const [inlineEditSelection, setInlineEditSelection] = createSignal<InlineEditSelection>()
   const [agentOpen, setAgentOpen] = createSignal(true)
-  const [agentMaximized, setAgentMaximized] = createSignal(false)
   const [agentWidth, setAgentWidth] = createSignal(520)
   const [explorerOpen, setExplorerOpen] = createSignal(true)
   const [explorerWidth, setExplorerWidth] = createSignal(260)
@@ -2146,13 +2145,6 @@ export function CodespaceWorkbench(props: {
     const next = remaining.at(-1)
     setSelectedPath(next)
     if (next) void file.load(next)
-  }
-
-  const copyCurrentFile = async () => {
-    const path = selectedPath()
-    if (!path) return
-    await navigator.clipboard.writeText(draft())
-    showToast({ title: "Copied", description: `${path} copied to clipboard.` })
   }
 
   createEffect(
@@ -2580,21 +2572,9 @@ export function CodespaceWorkbench(props: {
               classList={{ "bg-white/[0.06] text-[#d8d8d8]": agentOpen() }}
               aria-label={agentOpen() ? "Hide Vector Agent" : "Show Vector Agent"}
               title={agentOpen() ? "Hide Vector Agent" : "Show Vector Agent"}
-              onClick={() => {
-                setAgentMaximized(false)
-                setAgentOpen((open) => !open)
-              }}
+              onClick={() => setAgentOpen((open) => !open)}
             >
               <Icon name="layout-right" size="small" />
-            </button>
-            <button
-              type="button"
-              class="grid size-7 place-items-center rounded-[5px] transition-colors hover:bg-white/[0.06] hover:text-[#ddd]"
-              aria-label="Open Vector settings"
-              title="Open Vector settings"
-              onClick={() => command.trigger("settings.open")}
-            >
-              <Icon name="settings-gear" size="small" />
             </button>
           </div>
         </header>
@@ -2641,18 +2621,6 @@ export function CodespaceWorkbench(props: {
                 <Show when={problems().length > 0}>
                   <span class="absolute right-0.5 top-0.5 size-1.5 rounded-full bg-amber-400" />
                 </Show>
-              </button>
-              <button
-                class="grid size-7 place-items-center rounded-[4px] transition-colors hover:bg-white/[0.06] hover:text-[#ddd]"
-                classList={{ "bg-white/[0.055] text-[#ddd]": agentOpen() }}
-                aria-label={agentOpen() ? "Hide agent" : "Show agent"}
-                title={agentOpen() ? "Hide agent" : "Show agent"}
-                onClick={() => {
-                  setAgentMaximized(false)
-                  setAgentOpen((open) => !open)
-                }}
-              >
-                <Icon name="layout-right" size="small" />
               </button>
               <div class="flex-1" />
             </div>
@@ -2787,27 +2755,6 @@ export function CodespaceWorkbench(props: {
                                 }}
                               </For>
                             </div>
-                            <div class="flex shrink-0 items-center gap-0.5 border-l border-[#272727] bg-[#121212] px-2 text-[#777]">
-                              <button
-                                class="grid size-6 place-items-center rounded hover:bg-white/[0.06] hover:text-[#ddd]"
-                                aria-label="Copy current file"
-                                title="Copy current file"
-                                onClick={copyCurrentFile}
-                              >
-                                <Icon name="copy" size="small" />
-                              </button>
-                              <button
-                                class="grid size-6 place-items-center rounded hover:bg-white/[0.06] hover:text-[#ddd]"
-                                aria-label={agentOpen() ? "Hide agent" : "Show agent"}
-                                title={agentOpen() ? "Hide agent" : "Show agent"}
-                                onClick={() => {
-                                  setAgentMaximized(false)
-                                  setAgentOpen((open) => !open)
-                                }}
-                              >
-                                <Icon name="layout-right" size="small" />
-                              </button>
-                            </div>
                           </div>
                           <div class="flex h-7 shrink-0 items-center justify-between gap-3 border-b border-[#252525] bg-[#1b1b1b] px-3 font-mono text-[10px] text-[#777]">
                             <div class="flex min-w-0 items-center gap-1 overflow-hidden">
@@ -2901,10 +2848,7 @@ export function CodespaceWorkbench(props: {
                             </div>
                           </Show>
                           <div class="relative flex min-h-0 flex-1 overflow-hidden">
-                            <div
-                              class="relative min-h-0 min-w-0 flex-1 overflow-hidden bg-[#1b1b1b]"
-                              classList={{ hidden: agentMaximized() }}
-                            >
+                            <div class="relative min-h-0 min-w-0 flex-1 overflow-hidden bg-[#111111]">
                               <Show when={inlineEditOpen()}>
                                 <form
                                   class="absolute left-1/2 top-3 z-10 flex w-[min(720px,calc(100%-24px))] -translate-x-1/2 flex-col overflow-hidden rounded-lg border border-[rgba(178,140,255,0.3)] bg-[#242428]/97 shadow-[0_18px_48px_rgba(0,0,0,0.5)] backdrop-blur"
@@ -2994,20 +2938,17 @@ export function CodespaceWorkbench(props: {
                             </div>
                             <Show when={agentOpen()}>
                               <aside
-                                class="vector-editor-agent-pane flex shrink-0 flex-col border-l border-[#272727] bg-[#121212]"
-                                classList={{ "absolute inset-0 z-20": agentMaximized(), relative: !agentMaximized() }}
-                                style={{ width: agentMaximized() ? "100%" : `${agentWidth()}px` }}
+                                class="vector-editor-agent-pane relative flex shrink-0 flex-col border-l border-[#272727] bg-[#121212]"
+                                style={{ width: `${agentWidth()}px` }}
                               >
-                                <Show when={!agentMaximized()}>
-                                  <ResizeHandle
-                                    direction="horizontal"
-                                    edge="start"
-                                    size={agentWidth()}
-                                    min={360}
-                                    max={typeof window === "undefined" ? 900 : Math.min(900, window.innerWidth * 0.72)}
-                                    onResize={setAgentWidth}
-                                  />
-                                </Show>
+                                <ResizeHandle
+                                  direction="horizontal"
+                                  edge="start"
+                                  size={agentWidth()}
+                                  min={360}
+                                  max={typeof window === "undefined" ? 900 : Math.min(900, window.innerWidth * 0.72)}
+                                  onResize={setAgentWidth}
+                                />
 
                                 <header class="flex h-10 shrink-0 items-center justify-between gap-2 border-b border-[#272727] px-3">
                                   <div class="flex min-w-0 items-center gap-2 text-[12px] font-medium text-[#e0e0e0]">
@@ -3022,46 +2963,7 @@ export function CodespaceWorkbench(props: {
                                       title={agentStatus()}
                                     />
                                   </div>
-                                  <div class="flex items-center gap-0.5 text-[#777]">
-                                    <button
-                                      type="button"
-                                      class="grid size-7 place-items-center rounded-[5px] transition-colors hover:bg-white/[0.06] hover:text-[#ddd]"
-                                      title={agentMaximized() ? "Restore agent" : "Maximize agent"}
-                                      aria-label={agentMaximized() ? "Restore agent" : "Maximize agent"}
-                                      onClick={() => setAgentMaximized((maximized) => !maximized)}
-                                    >
-                                      <Icon name={agentMaximized() ? "collapse" : "expand"} size="small" />
-                                    </button>
-                                    <button
-                                      type="button"
-                                      class="grid size-7 place-items-center rounded-[5px] transition-colors hover:bg-white/[0.06] hover:text-[#ddd]"
-                                      title="Hide agent"
-                                      aria-label="Hide agent"
-                                      onClick={() => {
-                                        setAgentMaximized(false)
-                                        setAgentOpen(false)
-                                      }}
-                                    >
-                                      <Icon name="layout-right" size="small" />
-                                    </button>
-                                  </div>
                                 </header>
-
-                                <div class="shrink-0 border-b border-[#242424] px-3 py-3">
-                                  <Show
-                                    when={editorSessionID()}
-                                    fallback={
-                                      <div class="rounded-[10px] border border-[#303030] bg-[#191919] px-3 py-4 text-[12px] leading-5 text-[#888]">
-                                        Open Codespace from a Vector session to use the shared agent.
-                                      </div>
-                                    }
-                                  >
-                                    <PromptInput
-                                      controls={editorInputController()}
-                                      class="vector-editor-agent-composer !min-h-[140px] !rounded-[12px] !border-[#383838] !bg-[#191919] shadow-[0_10px_32px_rgba(0,0,0,0.22)]"
-                                    />
-                                  </Show>
-                                </div>
 
                                 <div
                                   ref={(element) => (agentTimelineRef = element)}
@@ -3096,6 +2998,23 @@ export function CodespaceWorkbench(props: {
                                       <span class="size-1.5 animate-pulse rounded-full bg-[#a98cff]" />
                                       {agentStatus()}…
                                     </div>
+                                  </Show>
+                                </div>
+
+                                <div class="shrink-0 border-t border-[#242424] px-3 py-2.5">
+                                  <Show
+                                    when={editorSessionID()}
+                                    fallback={
+                                      <div class="rounded-[10px] border border-[#303030] bg-[#191919] px-3 py-4 text-[12px] leading-5 text-[#888]">
+                                        Open Codespace from a Vector session to use the shared agent.
+                                      </div>
+                                    }
+                                  >
+                                    <PromptInput
+                                      controls={editorInputController()}
+                                      hideVel
+                                      class="vector-editor-agent-composer !min-h-[104px] !rounded-[10px] !border-[#343434] !bg-[#181818] shadow-[0_8px_24px_rgba(0,0,0,0.2)]"
+                                    />
                                   </Show>
                                 </div>
                               </aside>

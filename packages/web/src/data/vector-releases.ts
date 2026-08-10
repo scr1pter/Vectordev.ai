@@ -348,4 +348,10 @@ export const release117: VectorRelease[] = [
     summary:
       "Unified the Code Editor with the active Vector conversation, model, effort, speed, permissions, attachments, and voice controls; added live file following with conflict-safe drafts; and refined the full IDE shell with workspace search, a resizable explorer, code outline, Monaco editing, and a responsive agent pane.",
   },
+  {
+    version: "1.17.44",
+    title: "A quieter, focused IDE",
+    summary:
+      "Reduced the Code Editor to one Explorer control and one Agent control, moved the compact shared-agent composer beneath its conversation, removed Vel from the editor composer, and replaced the purple file canvas with a mature charcoal Monaco theme.",
+  },
 ]
