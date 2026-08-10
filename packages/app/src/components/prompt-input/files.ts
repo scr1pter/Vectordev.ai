@@ -36,10 +36,17 @@ export function pickAttachmentFiles(input: {
 
 const IMAGE_MIMES = new Set(ACCEPTED_IMAGE_TYPES)
 const IMAGE_EXTS = new Map([
+  ["avif", "image/avif"],
+  ["bmp", "image/bmp"],
   ["gif", "image/gif"],
+  ["heic", "image/heic"],
+  ["heif", "image/heif"],
   ["jpeg", "image/jpeg"],
   ["jpg", "image/jpeg"],
   ["png", "image/png"],
+  ["svg", "image/svg+xml"],
+  ["tif", "image/tiff"],
+  ["tiff", "image/tiff"],
   ["webp", "image/webp"],
 ])
 const TEXT_MIMES = new Set([
@@ -53,6 +60,35 @@ const TEXT_MIMES = new Set([
 ])
 
 const SAMPLE = 4096
+
+const startsWith = (bytes: Uint8Array, prefix: number[]) => prefix.every((value, index) => bytes[index] === value)
+
+function ascii(bytes: Uint8Array, start: number, length: number) {
+  return String.fromCharCode(...bytes.subarray(start, start + length))
+}
+
+function sniffImageMime(bytes: Uint8Array): string | undefined {
+  if (startsWith(bytes, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) return "image/png"
+  if (startsWith(bytes, [0xff, 0xd8, 0xff])) return "image/jpeg"
+  if (startsWith(bytes, [0x47, 0x49, 0x46, 0x38])) return "image/gif"
+  if (startsWith(bytes, [0x42, 0x4d])) return "image/bmp"
+  if (startsWith(bytes, [0x49, 0x49, 0x2a, 0x00]) || startsWith(bytes, [0x4d, 0x4d, 0x00, 0x2a])) return "image/tiff"
+  if (startsWith(bytes, [0x52, 0x49, 0x46, 0x46]) && ascii(bytes, 8, 4) === "WEBP") return "image/webp"
+
+  if (ascii(bytes, 4, 4) === "ftyp") {
+    const brand = ascii(bytes, 8, 4).toLowerCase()
+    if (brand === "avif" || brand === "avis") return "image/avif"
+    if (["heic", "heix", "hevc", "hevx"].includes(brand)) return "image/heic"
+    if (["heif", "mif1", "msf1"].includes(brand)) return "image/heif"
+  }
+
+  const markup = new TextDecoder()
+    .decode(bytes)
+    .replace(/^\uFEFF/, "")
+    .trimStart()
+  if (/^(?:<\?xml[^>]*>\s*)?<svg(?:\s|>)/i.test(markup)) return "image/svg+xml"
+  return undefined
+}
 
 function kind(type: string) {
   return type.split(";", 1)[0]?.trim().toLowerCase() ?? ""
@@ -82,17 +118,19 @@ function textBytes(bytes: Uint8Array) {
   return count / bytes.length <= 0.3
 }
 
-export async function attachmentMime(file: File) {
+export async function attachmentMime(file: File): Promise<string | undefined> {
   const type = kind(file.type)
+  const bytes = new Uint8Array(await file.slice(0, SAMPLE).arrayBuffer())
+  const detected = sniffImageMime(bytes)
+  if (detected) return detected
   if (IMAGE_MIMES.has(type)) return type
-  if (type === "application/pdf") return type
+  if (type === "application/pdf" || startsWith(bytes, [0x25, 0x50, 0x44, 0x46, 0x2d])) return "application/pdf"
 
   const suffix = ext(file.name)
   const fallback = IMAGE_EXTS.get(suffix) ?? (suffix === "pdf" ? "application/pdf" : undefined)
   if ((!type || type === "application/octet-stream") && fallback) return fallback
 
   if (textMime(type)) return "text/plain"
-  const bytes = new Uint8Array(await file.slice(0, SAMPLE).arrayBuffer())
-  if (!textBytes(bytes)) return
+  if (!textBytes(bytes)) return undefined
   return "text/plain"
 }

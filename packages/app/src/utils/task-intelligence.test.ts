@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test"
 
-import { classifyTaskDifficulty, routeModelForTask, routeVariantForTask } from "./task-intelligence"
+import {
+  classifyTaskDifficulty,
+  routeModelForImages,
+  routeModelForTask,
+  routeVariantForTask,
+  supportsImageInput,
+} from "./task-intelligence"
 
 type TestModel = {
   id: string
@@ -8,7 +14,11 @@ type TestModel = {
   family: string
   status: string
   provider: { id: string }
-  capabilities: { reasoning: boolean; toolcall: boolean }
+  capabilities: {
+    reasoning: boolean
+    toolcall: boolean
+    input?: { image?: boolean }
+  }
   limit: { context: number; output: number }
   variants: Record<string, unknown>
 }
@@ -46,5 +56,26 @@ describe("task intelligence", () => {
     expect(
       routeVariantForTask({ difficulty: "complex", selected: "light", variants: ["light", "balanced", "max"] }),
     ).toBe("light")
+    expect(routeVariantForTask({ difficulty: "complex", selected: "unsupported", variants: ["balanced", "max"] })).toBe(
+      "max",
+    )
+  })
+
+  test("keeps a selected model that understands images", () => {
+    const vision = model("vision", { capabilities: { reasoning: true, toolcall: true, input: { image: true } } })
+    expect(supportsImageInput(vision)).toBe(true)
+    expect(routeModelForImages({ current: vision, available: [vision] })).toEqual({ model: vision, routed: false })
+  })
+
+  test("routes image prompts to a connected vision model and reports when none exists", () => {
+    const text = model("text-only")
+    const sameProvider = model("vision", {
+      capabilities: { reasoning: true, toolcall: true, input: { image: true } },
+    })
+    expect(routeModelForImages({ current: text, available: [text, sameProvider] })).toEqual({
+      model: sameProvider,
+      routed: true,
+    })
+    expect(routeModelForImages({ current: text, available: [text] })).toEqual({ model: undefined, routed: false })
   })
 })

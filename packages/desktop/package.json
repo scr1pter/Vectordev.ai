@@ -2,7 +2,7 @@
   "name": "vector-desktop",
   "productName": "Vector",
   "private": true,
-  "version": "1.17.39",
+  "version": "1.17.40",
   "type": "module",
   "license": "SEE LICENSE IN ../../LICENSE",
   "homepage": "https://vectordev.ai",

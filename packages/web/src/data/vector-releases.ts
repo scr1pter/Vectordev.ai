@@ -324,4 +324,10 @@ export const release117: VectorRelease[] = [
     summary:
       "Expanded Vector's engineering plugin catalog, refined the new-session workspace, and closed public installer access while preserving every cross-platform release artifact for controlled distribution.",
   },
+  {
+    version: "1.17.40",
+    title: "Reliable visual context",
+    summary:
+      "Made JPEG and other common image attachments dependable, added local conversion for camera and design formats, and taught Vector to select a connected image-capable model before a visual task begins.",
+  },
 ]

@@ -22,6 +22,23 @@ describe("attachmentMime", () => {
     const file = new File([Uint8Array.of(0, 255, 1, 2)], "blob.bin", { type: "application/octet-stream" })
     expect(await attachmentMime(file)).toBeUndefined()
   })
+
+  test("recognizes JPEG images from their bytes when desktop does not provide a mime", async () => {
+    const file = new File([Uint8Array.of(0xff, 0xd8, 0xff, 0xe1, 0, 12)], "camera-photo.jpg")
+    expect(await attachmentMime(file)).toBe("image/jpeg")
+  })
+
+  test("recognizes common camera and design image signatures", async () => {
+    const avif = new File([Uint8Array.from([0, 0, 0, 24, ...Buffer.from("ftypavif")])], "photo.avif")
+    const heic = new File([Uint8Array.from([0, 0, 0, 24, ...Buffer.from("ftypheic")])], "photo.heic")
+    const tiff = new File([Uint8Array.of(0x49, 0x49, 0x2a, 0x00, 8, 0, 0, 0)], "scan.tiff")
+    const svg = new File(['<svg xmlns="http://www.w3.org/2000/svg"></svg>'], "diagram.svg")
+
+    expect(await attachmentMime(avif)).toBe("image/avif")
+    expect(await attachmentMime(heic)).toBe("image/heic")
+    expect(await attachmentMime(tiff)).toBe("image/tiff")
+    expect(await attachmentMime(svg)).toBe("image/svg+xml")
+  })
 })
 
 describe("pickAttachmentFiles", () => {

@@ -6,9 +6,10 @@ import { useLanguage } from "@/context/language"
 import { uuid } from "@/utils/uuid"
 import { getCursorPosition } from "./editor-dom"
 import { attachmentMime } from "./files"
+import { prepareImageForModel } from "./image-processing"
 import { normalizePaste, pasteMode } from "./paste"
 
-function dataUrl(file: File, mime: string) {
+function dataUrl(file: Blob, mime: string) {
   return new Promise<string>((resolve) => {
     const reader = new FileReader()
     reader.addEventListener("error", () => resolve(""))
@@ -34,6 +35,7 @@ type PromptAttachmentsCoreInput = {
   focusEditor?: () => void
   addPart?: (part: ContentPart) => boolean
   warn?: () => void
+  imageError?: (error: unknown) => void
   readClipboardImage?: () => Promise<File | null>
   getPathForFile?: (file: File) => string
 }
@@ -53,7 +55,7 @@ export function createPromptAttachmentsCore(input: PromptAttachmentsCoreInput) {
   const capture = (): AttachmentTarget | undefined => {
     const prompt = input.capture()
     const editor = input.editor()
-    if (!editor) return
+    if (!editor) return undefined
     return { prompt, cursor: prompt.cursor() ?? getCursorPosition(editor) }
   }
 
@@ -65,7 +67,13 @@ export function createPromptAttachmentsCore(input: PromptAttachmentsCoreInput) {
       return false
     }
 
-    const url = await dataUrl(file, mime)
+    const prepared = await prepareImageForModel(file, mime).catch((error) => {
+      input.imageError?.(error)
+      return undefined
+    })
+    if (!prepared) return false
+
+    const url = await dataUrl(prepared.blob, prepared.mime)
     if (!url) return false
 
     const attachment: ImageAttachmentPart = {
@@ -73,7 +81,7 @@ export function createPromptAttachmentsCore(input: PromptAttachmentsCoreInput) {
       id: uuid(),
       filename: file.name,
       sourcePath: input.getPathForFile?.(file) || undefined,
-      mime,
+      mime: prepared.mime,
       dataUrl: url,
     }
     target.prompt.set([...target.prompt.current(), attachment], target.cursor)
@@ -173,6 +181,15 @@ export function createPromptAttachments(input: PromptAttachmentsInput) {
       showToast({
         title: language.t("prompt.toast.pasteUnsupported.title"),
         description: language.t("prompt.toast.pasteUnsupported.description"),
+      })
+    },
+    imageError: (error) => {
+      showToast({
+        title: "Image couldn't be prepared",
+        description:
+          error instanceof Error ? error.message : "Try a JPEG, PNG, WebP, GIF, AVIF, HEIC, TIFF, BMP, or SVG image.",
+        variant: "error",
+        duration: 8_000,
       })
     },
   })

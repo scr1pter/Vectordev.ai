@@ -24,6 +24,7 @@ import { ScopedKey } from "@/utils/server-scope"
 import { createPromptSubmissionState } from "./submission-state"
 import {
   classifyTaskDifficulty,
+  routeModelForImages,
   routeModelForTask,
   routeVariantForTask,
   type TaskDifficulty,
@@ -272,11 +273,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       .catch((err) => {
         showToast({
           title: "Project folder unavailable",
-          description: formatServerError(
-            err,
-            language.t,
-            "Reopen the project from its existing folder.",
-          ),
+          description: formatServerError(err, language.t, "Reopen the project from its existing folder."),
           variant: "error",
           duration: 10_000,
         })
@@ -379,6 +376,52 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       return
     }
 
+    const difficulty =
+      mode === "normal" && !text.trim().startsWith("/") ? classifyTaskDifficulty(text) : ("standard" as const)
+    const availableModels = typeof local.model.list === "function" ? local.model.list() : [currentModel]
+    const taskRoute = routeModelForTask({
+      difficulty,
+      current: currentModel,
+      available: availableModels,
+    })
+    const hasImageInput = images.some((attachment) => attachment.mime.startsWith("image/"))
+    const imageRoute = hasImageInput
+      ? routeModelForImages({ current: taskRoute.model, available: availableModels })
+      : undefined
+    if (hasImageInput && !imageRoute?.model) {
+      showToast({
+        title: "Connect an image-capable model",
+        description:
+          "The connected models only accept text. Choose or connect a model with image input, then send again.",
+        variant: "error",
+        duration: 10_000,
+      })
+      return
+    }
+    const routed = {
+      model: imageRoute?.model ?? taskRoute.model,
+      task: taskRoute.routed,
+      image: imageRoute?.routed ?? false,
+    }
+    const variant = routeVariantForTask({
+      difficulty,
+      selected: selectedVariant,
+      variants: Object.keys(routed.model.variants ?? {}),
+    })
+    const model = {
+      modelID: routed.model.id,
+      providerID: routed.model.provider.id,
+    }
+    // A session can remember the hidden `plan` agent after Plan Mode is turned
+    // off. Never carry that read-only agent into an ordinary build submission.
+    const resolvedAgent = resolveSubmissionAgent({
+      planMode: isPlanMode,
+      current: currentAgent.name,
+      available: local.agent.list(),
+    })
+    const agent =
+      !isPlanMode && (requestedExecutionMode === "quick" || difficulty === "trivial") ? "quick" : resolvedAgent
+
     if (!(await workspaceAvailable())) return
 
     input.addToHistory(currentPrompt, mode)
@@ -470,32 +513,13 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       return
     }
 
-    const difficulty =
-      mode === "normal" && !text.trim().startsWith("/") ? classifyTaskDifficulty(text) : ("standard" as const)
-    const routed = routeModelForTask({
-      difficulty,
-      current: currentModel,
-      available: typeof local.model.list === "function" ? local.model.list() : [currentModel],
-    })
-    const variant = routeVariantForTask({
-      difficulty,
-      selected: selectedVariant,
-      variants: Object.keys(routed.model.variants ?? {}),
-    })
-    const model = {
-      modelID: routed.model.id,
-      providerID: routed.model.provider.id,
-    }
-    // A session can remember the hidden `plan` agent after Plan Mode is turned
-    // off. Never carry that read-only agent into an ordinary build submission.
-    const resolvedAgent = resolveSubmissionAgent({
-      planMode: isPlanMode,
-      current: currentAgent.name,
-      available: local.agent.list(),
-    })
-    const agent =
-      !isPlanMode && (requestedExecutionMode === "quick" || difficulty === "trivial") ? "quick" : resolvedAgent
-    if (routed.routed) {
+    if (routed.image) {
+      showToast({
+        title: "Vector selected an image-capable model",
+        description: `Using ${routed.model.name} to inspect the attached image.`,
+        duration: 5_000,
+      })
+    } else if (routed.task) {
       showToast({
         title: "Vector routed a complex task",
         description: `Using ${routed.model.name} for stronger planning and implementation.`,

@@ -14,13 +14,25 @@ type RoutableModel = {
   family?: string
   status?: string
   provider: { id: string }
-  capabilities?: { reasoning?: boolean; toolcall?: boolean }
+  capabilities?: {
+    reasoning?: boolean
+    toolcall?: boolean
+    input?: Partial<Record<"text" | "image" | "audio" | "video" | "pdf", boolean>>
+  }
+  modalities?: { input?: string[] }
   limit?: { context?: number; output?: number }
   variants?: Record<string, unknown>
 }
 
-const TRIVIAL_TASK = /^(?:hi|hey|hello|yo|sup|thanks|thank you|ok|okay|cool|nice|good morning|good afternoon|good evening)[!.?\s]*$/i
-const ACTION_TERMS = /\b(?:add|build|change|debug|delete|edit|fix|implement|improve|investigate|refactor|remove|rename|repair|test|update)\b/i
+export function supportsImageInput(model: RoutableModel) {
+  if (model.capabilities?.input?.image === true) return true
+  return model.modalities?.input?.includes("image") === true
+}
+
+const TRIVIAL_TASK =
+  /^(?:hi|hey|hello|yo|sup|thanks|thank you|ok|okay|cool|nice|good morning|good afternoon|good evening)[!.?\s]*$/i
+const ACTION_TERMS =
+  /\b(?:add|build|change|debug|delete|edit|fix|implement|improve|investigate|refactor|remove|rename|repair|test|update)\b/i
 const COMPLEX_TERMS = [
   /\barchitecture\b/i,
   /\bmigrat(?:e|ion)\b/i,
@@ -49,7 +61,10 @@ export function classifyTaskDifficulty(task: string): TaskDifficulty {
 function qualityScore(model: RoutableModel) {
   const label = `${model.id} ${model.name} ${model.family ?? ""}`.toLowerCase()
   const context = Math.max(1, model.limit?.context ?? 1)
-  const frontier = /(?:opus|gpt[- ]?5[.-]?[5-9]|o[3-9](?:\b|-)|gemini.*pro|sonnet.*4|kimi.*k[23]|qwen.*coder.*(?:max|plus)|codestral)/.test(label)
+  const frontier =
+    /(?:opus|gpt[- ]?5[.-]?[5-9]|o[3-9](?:\b|-)|gemini.*pro|sonnet.*4|kimi.*k[23]|qwen.*coder.*(?:max|plus)|codestral)/.test(
+      label,
+    )
   const lightweight = /(?:nano|mini|flash|haiku|lite|small|free|\b[1-9]b\b)/.test(label)
   return (
     (model.capabilities?.reasoning ? 26 : 0) +
@@ -79,12 +94,25 @@ export function routeModelForTask<T extends RoutableModel>(input: {
   return { model: strongest, routed: strongest.id !== input.current.id }
 }
 
-export function routeVariantForTask(input: {
-  difficulty: TaskDifficulty
-  selected?: string
-  variants: string[]
-}) {
-  if (input.selected && input.selected !== "default") return input.selected
+export function routeModelForImages<T extends RoutableModel>(input: {
+  current: T
+  available: T[]
+}): { model: T | undefined; routed: boolean } {
+  if (supportsImageInput(input.current)) return { model: input.current, routed: false }
+  const candidates = input.available
+    .filter((model) => supportsImageInput(model))
+    .filter((model) => model.status !== "deprecated" && model.capabilities?.toolcall !== false)
+    .toSorted((left, right) => {
+      const leftProvider = left.provider.id === input.current.provider.id ? 1 : 0
+      const rightProvider = right.provider.id === input.current.provider.id ? 1 : 0
+      return rightProvider - leftProvider || qualityScore(right) - qualityScore(left)
+    })
+  const selected = candidates[0]
+  return { model: selected, routed: !!selected }
+}
+
+export function routeVariantForTask(input: { difficulty: TaskDifficulty; selected?: string; variants: string[] }) {
+  if (input.selected && input.selected !== "default" && input.variants.includes(input.selected)) return input.selected
   const byName = (names: string[]) => names.find((name) => input.variants.includes(name))
   if (input.difficulty === "complex") return byName(["max", "ultra", "xhigh", "extra", "high"]) ?? input.selected
   if (input.difficulty === "standard") return byName(["balanced", "medium"]) ?? input.selected
