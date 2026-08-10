@@ -5,6 +5,7 @@ import {
   Switch,
   createEffect,
   createMemo,
+  createResource,
   createSignal,
   lazy,
   on,
@@ -71,14 +72,15 @@ import { IconButton } from "@opencode-ai/ui/icon-button"
 import { Icon } from "@opencode-ai/ui/icon"
 import { TooltipKeybind } from "@opencode-ai/ui/tooltip"
 import { ResizeHandle } from "@opencode-ai/ui/resize-handle"
-import { Select } from "@opencode-ai/ui/select"
 import { Mark } from "@opencode-ai/ui/logo"
 import { DragDropProvider, DragDropSensors, DragOverlay, SortableProvider, closestCenter } from "@thisbeyond/solid-dnd"
 import type { DragEvent } from "@thisbeyond/solid-dnd"
-import type { SnapshotFileDiff, VcsFileDiff } from "@opencode-ai/sdk/v2"
+import type { Message, Part, SnapshotFileDiff, VcsFileDiff } from "@opencode-ai/sdk/v2"
+import { Message as SessionMessage } from "@opencode-ai/session-ui/message-part"
 import { ConstrainDragYAxis, getDraggableId } from "@/utils/solid-dnd"
 
 import FileTree, { type FileTreeMarker, type Kind } from "@/components/file-tree"
+import { PromptInput } from "@/components/prompt-input"
 import { SessionContextUsage } from "@/components/session-context-usage"
 import { SessionContextTab, SortableTab, FileVisual } from "@/components/session"
 import { useCommand } from "@/context/command"
@@ -86,15 +88,15 @@ import { useFile, type SelectedLineRange } from "@/context/file"
 import { useLanguage } from "@/context/language"
 import { useLayout } from "@/context/layout"
 import { useLocal } from "@/context/local"
-import { modelVariantDescription, modelVariantLabel } from "@/context/model-variant"
-import { usePermission } from "@/context/permission"
-import { usePlanMode } from "@/context/plan-mode"
+import { modelVariantLabel } from "@/context/model-variant"
 import { usePrompt } from "@/context/prompt"
+import { useServerSync } from "@/context/server-sync"
 import { useSDK } from "@/context/sdk"
 import { useSettings } from "@/context/settings"
 import { useSync } from "@/context/sync"
 import { createFileTabListSync } from "@/pages/session/file-tab-scroll"
 import { FileTabContent } from "@/pages/session/file-tabs"
+import { createPromptInputController } from "@/pages/session/composer"
 import {
   createOpenSessionFileTab,
   createSessionTabs,
@@ -114,19 +116,10 @@ import {
 } from "@/utils/engineering-timeline"
 import { INTERNAL_SESSION_TITLE_PREFIX } from "@/utils/internal-sessions"
 import { showToast } from "@/utils/toast"
-import { dictationAvailable, startDictation, type DictationHandle } from "@/services/dictation"
-import { DictationIndicator } from "@/components/dictation-indicator"
 import { resolveBrowserAddress, selectUnambiguousPreviewUrl } from "@/utils/browser-address"
 import {
-  applyExactReplacements,
   boundInlineCompletionContext,
-  collectPatchFiles,
-  extractStructuredOutput,
-  isCodespaceEditRequest,
-  parseCodespaceProposal,
-  parseCodespaceProposalText,
   sanitizeInlineCompletion,
-  type CodespaceProposal,
 } from "@/utils/codespace-ai"
 
 const DialogSelectFile = lazy(() =>
@@ -140,20 +133,6 @@ function renderDiff(value: SnapshotFileDiff | VcsFileDiff): value is RenderDiff 
 }
 
 type CodespaceView = "editor" | "problems"
-type CodespaceAgentMode = "manual" | "plan" | "full"
-type CodespaceExecutionMode = "normal" | "quick" | "fast"
-
-const codespaceAgentModes = [
-  { id: "manual" as const, label: "Ask", description: "Read and edit files without running commands" },
-  { id: "plan" as const, label: "Plan", description: "Inspect and explain without changing files" },
-  { id: "full" as const, label: "Full access", description: "Edit files and run focused commands" },
-]
-
-const codespaceExecutionModes = [
-  { id: "normal" as const, label: "Normal", description: "Standard speed and token use", color: "#8a8595" },
-  { id: "quick" as const, label: "Quick", description: "Less context for lightweight questions", color: "#70c7b1" },
-  { id: "fast" as const, label: "Fast", description: "Priority execution with higher token use", color: "#9b6cff" },
-]
 
 type CodespaceLiveWorkspace = {
   id: string
@@ -223,56 +202,6 @@ type CodespaceProblem = {
   line: number
   message: string
 }
-
-type CodespaceAgentLog = {
-  status: "done" | "warn" | "error" | "info"
-  label: string
-  detail: string
-}
-
-type CodespaceAgentMessage = {
-  id: string
-  role: "user" | "assistant"
-  content: string
-  edit?: "applied"
-  files?: string[]
-}
-
-const CODESPACE_PROPOSAL_SCHEMA = {
-  type: "object",
-  additionalProperties: false,
-  required: ["summary", "changes"],
-  properties: {
-    summary: { type: "string" },
-    changes: {
-      type: "array",
-      items: {
-        type: "object",
-        additionalProperties: false,
-        required: ["path", "mode", "explanation", "risk", "content", "replacements"],
-        properties: {
-          path: { type: "string" },
-          mode: { type: "string", enum: ["edit", "create"] },
-          explanation: { type: "string" },
-          risk: { type: "string", enum: ["low", "medium", "high"] },
-          content: { type: "string" },
-          replacements: {
-            type: "array",
-            items: {
-              type: "object",
-              additionalProperties: false,
-              required: ["oldText", "newText"],
-              properties: {
-                oldText: { type: "string" },
-                newText: { type: "string" },
-              },
-            },
-          },
-        },
-      },
-    },
-  },
-} as const
 
 type AiChangeCheckpointSnapshot = {
   path: string
@@ -1964,32 +1893,28 @@ export function CodespaceWorkbench(props: {
 }) {
   const file = useFile()
   const sdk = useSDK()
+  const sync = useSync()
+  const serverSync = useServerSync()
   const local = useLocal()
   const settings = useSettings()
   const dialog = useDialog()
-  const permission = usePermission()
-  const planMode = usePlanMode()
+  const command = useCommand()
   const [selectedPath, setSelectedPath] = createSignal<string | undefined>()
   const [activeView, setActiveView] = createSignal<CodespaceView>("editor")
   const [saving, setSaving] = createSignal(false)
   const [openFiles, setOpenFiles] = createSignal<string[]>([])
   const [drafts, setDrafts] = createStore<Record<string, string>>({})
+  const [draftBases, setDraftBases] = createStore<Record<string, string>>({})
+  const [externalConflicts, setExternalConflicts] = createStore<Record<string, boolean>>({})
   const [inlineEditOpen, setInlineEditOpen] = createSignal(false)
   const [inlineEditInput, setInlineEditInput] = createSignal("")
   const [inlineEditRunning, setInlineEditRunning] = createSignal(false)
   const [inlineEditSelection, setInlineEditSelection] = createSignal<InlineEditSelection>()
-  const [agentMessages, setAgentMessages] = createSignal<CodespaceAgentMessage[]>([])
-  const [agentInput, setAgentInput] = createSignal("")
-  const [agentRunning, setAgentRunning] = createSignal(false)
-  const [agentStatus, setAgentStatus] = createSignal("Ready")
   const [agentOpen, setAgentOpen] = createSignal(true)
   const [agentMaximized, setAgentMaximized] = createSignal(false)
   const [agentWidth, setAgentWidth] = createSignal(520)
-  const [agentExecutionMode, setAgentExecutionMode] = createSignal<CodespaceExecutionMode>("normal")
-  const [agentContextFiles, setAgentContextFiles] = createSignal<string[]>([])
-  const [agentListening, setAgentListening] = createSignal(false)
-  const [agentTranscribing, setAgentTranscribing] = createSignal(false)
-  const [agentRecordingLevel, setAgentRecordingLevel] = createSignal(0)
+  const [explorerOpen, setExplorerOpen] = createSignal(true)
+  const [explorerWidth, setExplorerWidth] = createSignal(260)
   const [ignoredProblems, setIgnoredProblems] = createSignal<Set<string>>(new Set())
   const [liveWorkspaces, setLiveWorkspaces] = createSignal<CodespaceLiveWorkspace[]>([])
   const [liveWorkspaceError, setLiveWorkspaceError] = createSignal("")
@@ -2037,24 +1962,36 @@ export function CodespaceWorkbench(props: {
   })
   const activeVariant = createMemo(() => local.model.variant.current())
   const activeAgentName = createMemo(() => local.agent.current()?.name ?? "build")
-  const modelVariants = createMemo(() => ["default", ...local.model.variant.list()])
-  const editorAgentMode = createMemo<CodespaceAgentMode>(() => {
-    if (planMode.enabled()) return "plan"
-    const id = props.sessionId?.()
-    const full = id
-      ? permission.isAutoAccepting(id, sdk().directory)
-      : permission.isAutoAcceptingDirectory(sdk().directory)
-    return full ? "full" : "manual"
+  const editorSessionID = createMemo(() => props.sessionId?.())
+  const editorSessionStatus = createMemo(() => {
+    const id = editorSessionID()
+    if (!id) return "idle"
+    return sync().data.session_status[id]?.type ?? "idle"
   })
-  const editorAgentModeMeta = createMemo(
-    () => codespaceAgentModes.find((mode) => mode.id === editorAgentMode()) ?? codespaceAgentModes[0],
-  )
-  const executionModeMeta = createMemo(
-    () => codespaceExecutionModes.find((mode) => mode.id === agentExecutionMode()) ?? codespaceExecutionModes[0],
-  )
-  const effectiveAgentName = createMemo(() => {
-    if (agentExecutionMode() !== "quick") return activeAgentName()
-    return local.agent.list().find((agent) => agent.name === "quick")?.name ?? activeAgentName()
+  const agentRunning = createMemo(() => editorSessionStatus() !== "idle")
+  const agentStatus = createMemo(() => {
+    const status = editorSessionStatus()
+    if (status === "idle") return "Ready"
+    if (status === "busy") return "Working"
+    if (status === "retry") return "Retrying"
+    return "Working"
+  })
+  const editorMessages = createMemo<Message[]>(() => {
+    const id = editorSessionID()
+    if (!id) return []
+    return sync().data.message[id] ?? []
+  })
+  const editorMessageParts = (messageID: string): Part[] => sync().data.part[messageID] ?? []
+  const editorInputController = createPromptInputController({
+    sessionKey: () => `${sdk().scope}\0${sdk().directory}\0${editorSessionID() ?? "codespace"}`,
+    sessionID: editorSessionID,
+    queryOptions: serverSync().queryOptions,
+  })
+
+  createEffect(() => {
+    const id = editorSessionID()
+    if (!id) return
+    void sync().session.sync(id)
   })
   const editorWorkspaces = createMemo(() =>
     liveWorkspaces().filter(
@@ -2114,84 +2051,6 @@ export function CodespaceWorkbench(props: {
     onCleanup(() => globalThis.clearInterval(timer))
   })
 
-  const setEditorAgentMode = (mode: CodespaceAgentMode) => {
-    const sessionID = props.sessionId?.()
-    const directory = sdk().directory
-    const accepting = sessionID
-      ? permission.isAutoAccepting(sessionID, directory)
-      : permission.isAutoAcceptingDirectory(directory)
-
-    planMode.setEnabled(mode === "plan")
-    const shouldAccept = mode === "full"
-    if (sessionID) {
-      if (shouldAccept && !accepting) permission.enableAutoAccept(sessionID, directory)
-      if (!shouldAccept && accepting) permission.disableAutoAccept(sessionID, directory)
-    } else if (shouldAccept !== accepting) {
-      permission.toggleAutoAcceptDirectory(directory)
-    }
-    settings.permissions.setAutoApprove(shouldAccept)
-  }
-
-  const openAgentContextPicker = () => {
-    dialog.show(() => (
-      <DialogSelectFile
-        mode="files"
-        presentation="palette"
-        onSelectFile={(path) => {
-          setAgentContextFiles((items) => (items.includes(path) ? items : [...items, path]))
-        }}
-      />
-    ))
-  }
-
-  let agentDictation: DictationHandle | undefined
-  let agentDictationStarting = false
-  let agentDictationDisposed = false
-  const startAgentDictation = async () => {
-    if (agentTranscribing()) return
-    if (agentDictation) {
-      agentDictation.stop()
-      return
-    }
-    if (agentDictationStarting) return
-    agentDictationStarting = true
-    try {
-      const handle = await startDictation({
-        onState: (state) => {
-          if (agentDictationDisposed) return
-          setAgentListening(state === "listening")
-          setAgentTranscribing(state === "transcribing")
-          if (state !== "listening") setAgentRecordingLevel(0)
-        },
-        onLevel: setAgentRecordingLevel,
-        onFinal: (text) => {
-          agentDictation = undefined
-          setAgentRecordingLevel(0)
-          if (!agentDictationDisposed && text.trim()) {
-            setAgentInput((current) => `${current}${current.trim() ? " " : ""}${text.trim()}`)
-          }
-        },
-        onError: (message) => {
-          agentDictation = undefined
-          setAgentRecordingLevel(0)
-          if (!agentDictationDisposed) showToast({ title: "Dictation", description: message })
-        },
-      })
-      if (agentDictationDisposed) {
-        handle?.cancel()
-        return
-      }
-      agentDictation = handle
-    } finally {
-      agentDictationStarting = false
-    }
-  }
-  onCleanup(() => {
-    agentDictationDisposed = true
-    agentDictation?.cancel()
-    agentDictation = undefined
-  })
-
   const invokeCodespaceModel = async (input: { title: string; system: string; prompt: string }) => {
     const model = selectedModelPayload()
     if (!model) {
@@ -2203,7 +2062,7 @@ export function CodespaceWorkbench(props: {
       // Internal tool session: the shared prefix keeps it out of every
       // user-visible session list (see utils/internal-sessions.ts).
       title: `${INTERNAL_SESSION_TITLE_PREFIX}${input.title}`,
-      agent: effectiveAgentName(),
+      agent: activeAgentName(),
       model: {
         providerID: model.providerID,
         id: model.modelID,
@@ -2221,10 +2080,10 @@ export function CodespaceWorkbench(props: {
       .client.session.prompt({
         sessionID,
         directory: sdk().directory,
-        agent: effectiveAgentName(),
+        agent: activeAgentName(),
         model,
         variant: activeVariant(),
-        executionMode: agentExecutionMode() === "fast" ? "fast" : "normal",
+        executionMode: "normal",
         system: input.system,
         tools: {
           shell: false,
@@ -2254,6 +2113,20 @@ export function CodespaceWorkbench(props: {
     void file.load(path)
   }
 
+  const stopEditorFileFollow = sdk().event.listen((event) => {
+    if (!agentRunning()) return
+    if (event.details.type !== "file.watcher.updated") return
+    const properties =
+      typeof event.details.properties === "object" && event.details.properties
+        ? (event.details.properties as Record<string, unknown>)
+        : undefined
+    const changed = typeof properties?.file === "string" ? normalizedWorkspacePath(properties.file) : undefined
+    if (!changed || changed.startsWith(".git/")) return
+    openFile(changed)
+    void file.load(changed, { force: true })
+  })
+  onCleanup(stopEditorFileFollow)
+
   const openQuickFileSearch = () => {
     dialog.show(() => (
       <DialogSelectFile
@@ -2282,25 +2155,36 @@ export function CodespaceWorkbench(props: {
     showToast({ title: "Copied", description: `${path} copied to clipboard.` })
   }
 
-  const exportCurrentFile = () => {
-    const path = selectedPath()
-    if (!path) return
-    const blob = new Blob([draft()], { type: "text/plain;charset=utf-8" })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement("a")
-    link.href = url
-    link.download = fileBasename(path)
-    link.click()
-    URL.revokeObjectURL(url)
-  }
+  createEffect(
+    on(
+      () => [selectedPath(), contents(), Boolean(state()?.loaded)] as const,
+      ([path, nextContent, loaded]) => {
+        if (!path || !loaded) return
+        const currentDraft = drafts[path]
+        const previousBase = draftBases[path]
+        if (currentDraft === undefined || previousBase === undefined || currentDraft === previousBase) {
+          setDrafts(path, nextContent)
+          setDraftBases(path, nextContent)
+          setExternalConflicts(path, false)
+          return
+        }
+        if (nextContent === previousBase || externalConflicts[path]) return
+        setExternalConflicts(path, true)
+        showToast({
+          title: "Workspace file changed",
+          description: `${fileBasename(path)} changed outside the editor. Vector kept your unsaved draft instead of overwriting either version.`,
+        })
+      },
+    ),
+  )
 
-  createEffect(() => {
-    const path = selectedPath()
-    if (!path) return
-    if (!state()?.loaded) return
-    if (drafts[path] !== undefined) return
-    setDrafts(path, contents())
-  })
+  const updateDraft = (path: string, nextContent: string) => {
+    if (externalConflicts[path]) {
+      setDraftBases(path, file.get(path)?.content?.content ?? "")
+      setExternalConflicts(path, false)
+    }
+    setDrafts(path, nextContent)
+  }
 
   createEffect(() => {
     if (selectedPath()) return
@@ -2331,6 +2215,8 @@ export function CodespaceWorkbench(props: {
       if (selectedPath() === path) await file.load(path, { force: true })
       await file.tree.refresh("")
       setDrafts(path, nextContent)
+      setDraftBases(path, nextContent)
+      setExternalConflicts(path, false)
       if (!options?.silent)
         showToast({ title: "Saved to workspace", description: `${path} was updated from Codespace.` })
     } catch (error) {
@@ -2348,9 +2234,10 @@ export function CodespaceWorkbench(props: {
   let autosaveTimer: ReturnType<typeof setTimeout> | undefined
   createEffect(
     on(
-      () => [selectedPath(), draft(), contents(), Boolean(state()?.loaded)] as const,
-      ([path, nextContent, baseContent, loaded]) => {
-        if (!path || !loaded || nextContent === baseContent) return
+      () =>
+        [selectedPath(), draft(), contents(), Boolean(state()?.loaded), Boolean(externalConflicts[selectedPath() ?? ""])] as const,
+      ([path, nextContent, baseContent, loaded, hasExternalConflict]) => {
+        if (!path || !loaded || hasExternalConflict || nextContent === baseContent) return
         if (autosaveTimer) clearTimeout(autosaveTimer)
         autosaveTimer = setTimeout(() => {
           void saveDraft({ path, content: nextContent, base: baseContent, loaded, silent: true })
@@ -2393,7 +2280,7 @@ export function CodespaceWorkbench(props: {
   onCleanup(recycleCompletionSession)
 
   const completionSessionFor = async (model: { providerID: string; modelID: string }) => {
-    const key = `${sdk().directory}:${model.providerID}:${model.modelID}:${effectiveAgentName()}:${agentExecutionMode()}`
+    const key = `${sdk().directory}:${model.providerID}:${model.modelID}:${activeAgentName()}`
     if (completionSessionId && completionSessionKey === key && completionTurns < AUTOCOMPLETE_SESSION_TURNS) {
       return completionSessionId
     }
@@ -2403,7 +2290,7 @@ export function CodespaceWorkbench(props: {
       .client.session.create({
         directory: sdk().directory,
         title: `${INTERNAL_SESSION_TITLE_PREFIX}Autocomplete`,
-        agent: effectiveAgentName(),
+        agent: activeAgentName(),
         model: { providerID: model.providerID, id: model.modelID, variant: activeVariant() },
         metadata: { source: "vector-codespace", engine: "opencode-compatible", hidden: true },
       })
@@ -2435,10 +2322,10 @@ export function CodespaceWorkbench(props: {
       .client.session.prompt({
         sessionID,
         directory: sdk().directory,
-        agent: effectiveAgentName(),
+        agent: activeAgentName(),
         model,
         variant: activeVariant(),
-        executionMode: agentExecutionMode() === "fast" ? "fast" : "normal",
+        executionMode: "normal",
         system:
           "You are Vector Tab, an inline code completion engine. Continue the code exactly at the cursor. Return only the code to insert: no explanation, no markdown, and no repeated surrounding code. Prefer the smallest useful completion, from the rest of the current line up to one short coherent block.",
         tools: { bash: false, edit: false, patch: false, write: false, read: false, glob: false, grep: false },
@@ -2503,7 +2390,7 @@ export function CodespaceWorkbench(props: {
         showToast({ title: "No changes", description: "Vector did not change the file." })
         return
       }
-      setDrafts(path, next)
+      updateDraft(path, next)
       await saveDraft({ path, content: next, silent: true })
       showToast({ title: "Applied", description: `Vector edited ${fileBasename(path)}.` })
       setInlineEditOpen(false)
@@ -2520,45 +2407,6 @@ export function CodespaceWorkbench(props: {
     }
   }
 
-  // Embedded agent chat (the right-hand sidebar). A single hidden session is reused so
-  // the agent keeps conversation memory; it's cleaned up when the codespace unmounts.
-  let agentSessionId: string | undefined
-  let agentSessionKey = ""
-  const agentChatSession = async (model: { providerID: string; modelID: string }) => {
-    const key = [
-      sdk().directory,
-      model.providerID,
-      model.modelID,
-      activeVariant() ?? "",
-      effectiveAgentName(),
-      agentExecutionMode(),
-      editorAgentMode(),
-    ].join(":")
-    if (agentSessionId && agentSessionKey === key) return agentSessionId
-    if (agentSessionId)
-      void sdk()
-        .client.session.delete({ sessionID: agentSessionId })
-        .catch(() => undefined)
-    agentSessionKey = key
-    const created = await sdk()
-      .client.session.create({
-        directory: sdk().directory,
-        title: `${INTERNAL_SESSION_TITLE_PREFIX}Agent chat`,
-        agent: effectiveAgentName(),
-        model: { providerID: model.providerID, id: model.modelID, variant: activeVariant() },
-        metadata: { source: "vector-codespace", engine: "opencode-compatible", hidden: true },
-      })
-      .catch(() => undefined)
-    agentSessionId = created?.data?.id
-    return agentSessionId
-  }
-  onCleanup(() => {
-    if (agentSessionId)
-      void sdk()
-        .client.session.delete({ sessionID: agentSessionId })
-        .catch(() => undefined)
-  })
-
   const readWorkspaceText = (path: string) =>
     sdk()
       .client.file.read({ directory: sdk().directory, path })
@@ -2572,7 +2420,11 @@ export function CodespaceWorkbench(props: {
       files.map(async (path) => {
         const content = await readWorkspaceText(path)
         await file.load(path, { force: true }).catch(() => undefined)
-        if (content !== undefined) setDrafts(path, content)
+        if (content !== undefined) {
+          setDrafts(path, content)
+          setDraftBases(path, content)
+          setExternalConflicts(path, false)
+        }
       }),
     )
     return files
@@ -2648,222 +2500,24 @@ export function CodespaceWorkbench(props: {
     },
   }
 
-  const applyCodespaceProposal = async (proposal: CodespaceProposal) => {
-    const prepared = await Promise.all(
-      proposal.changes.map(async (change) => {
-        const current = await readWorkspaceText(change.path)
-        if (change.mode === "create") {
-          if (current !== undefined) return { error: `${change.path} already exists.` }
-          return { path: change.path, content: change.content }
-        }
-        if (current === undefined) return { error: `${change.path} could not be read.` }
-        const applied = applyExactReplacements(current, change.replacements)
-        if (applied.errors.length) return { error: `${change.path}: ${applied.errors.join(" ")}` }
-        if (applied.content === current) return { error: `${change.path} did not contain a material change.` }
-        return { path: change.path, content: applied.content }
-      }),
-    )
-    const changes = prepared.flatMap((item) => (item.path && item.content !== undefined ? [item] : []))
-    const errors = prepared.flatMap((item) => (item.error ? [item.error] : []))
-    if (!changes.length) return { applied: [] as string[], errors }
+  const [outlineSymbols] = createResource(
+    selectedPath,
+    (path) => languageService.symbols(path).catch(() => []),
+  )
 
-    setAgentStatus(`Applying ${changes.length} file${changes.length === 1 ? "" : "s"}`)
-    for (const change of changes) {
-      await sdk().client.file.write({ directory: sdk().directory, path: change.path!, content: change.content! })
-      setDrafts(change.path!, change.content!)
-    }
-    const applied = await refreshWorkspaceFiles(changes.map((change) => change.path!))
-    if (applied[0]) openFile(applied[0])
-    logEngineeringEvent(sdk().directory, {
-      type: "file",
-      status: "success",
-      title: "Editor Agent applied changes",
-      summary: proposal.summary,
-      files: applied,
-      source: "Vector Editor Agent",
+  let agentTimelineRef: HTMLDivElement | undefined
+  createEffect(() => {
+    const messages = editorMessages()
+    const last = messages.at(-1)
+    const partCount = last ? editorMessageParts(last.id).length : 0
+    editorSessionStatus()
+    partCount
+    requestAnimationFrame(() => {
+      const element = agentTimelineRef
+      if (!element) return
+      element.scrollTop = element.scrollHeight
     })
-    return { applied, errors }
-  }
-
-  const sendAgentMessage = async () => {
-    const text = agentInput().trim()
-    if (!text || agentRunning()) return
-    const model = selectedModelPayload()
-    if (!model) {
-      showToast({
-        variant: "error",
-        title: "Select a model",
-        description: "Choose a model in Vector before chatting with the agent.",
-      })
-      return
-    }
-    const path = selectedPath()
-    const contextFiles = agentContextFiles()
-    const mode = editorAgentMode()
-    setAgentMessages((items) => [...items, { id: makeId("msg"), role: "user", content: text }])
-    setAgentInput("")
-    setAgentContextFiles([])
-    setAgentRunning(true)
-    setAgentStatus(mode === "plan" ? "Planning" : "Reading workspace")
-    try {
-      const sessionID = await agentChatSession(model)
-      if (!sessionID) throw new Error("Vector could not start the agent session.")
-      if (mode === "full") permission.enableAutoAccept(sessionID, sdk().directory)
-      else permission.disableAutoAccept(sessionID, sdk().directory)
-      const editorContext = [
-        path ? `The file open in my editor is ${path}.` : "",
-        contextFiles.length ? `Read these attached workspace files first: ${contextFiles.join(", ")}.` : "",
-      ]
-        .filter(Boolean)
-        .join("\n")
-      const prompt = editorContext ? `${editorContext}\n\n${text}` : text
-
-      if (mode === "plan" || (mode === "manual" && !isCodespaceEditRequest(text))) {
-        const result = await sdk().client.session.prompt({
-          sessionID,
-          directory: sdk().directory,
-          agent: effectiveAgentName(),
-          model,
-          variant: activeVariant(),
-          executionMode: agentExecutionMode() === "fast" ? "fast" : "normal",
-          system:
-            mode === "plan"
-              ? "You are Vector's editor agent in Plan mode. Inspect the project, explain the implementation, identify files and risks, and do not modify files or run commands."
-              : "You are Vector's editor agent. Answer the user's question using the current project as context. Inspect files when useful, but do not modify files or run commands. Be concise and cite relevant file paths.",
-          tools: { bash: false, edit: false, patch: false, write: false, read: true, glob: true, grep: true },
-          parts: [{ type: "text", text: prompt }],
-        })
-        const reply = extractModelText(result.data)
-        if (!reply) throw new Error("The selected model returned an empty response.")
-        setAgentMessages((items) => [...items, { id: makeId("msg"), role: "assistant", content: reply }])
-        return
-      }
-      if (mode === "manual") {
-        setAgentStatus("Preparing edit")
-        const result = await sdk().client.session.prompt({
-          sessionID,
-          directory: sdk().directory,
-          agent: effectiveAgentName(),
-          model,
-          variant: activeVariant(),
-          executionMode: agentExecutionMode() === "fast" ? "fast" : "normal",
-          system:
-            "You are Vector's editor agent. Inspect the project with read-only tools, then return the smallest complete implementation. The user's explicit editor request authorizes the returned file edits, but not shell commands. For existing files, return exact oldText snippets that occur once and their replacements. For new files, use mode=create and return the full file in content. Preserve unrelated code.",
-          tools: { bash: false, edit: false, patch: false, write: false, read: true, glob: true, grep: true },
-          format: { type: "json_schema", schema: CODESPACE_PROPOSAL_SCHEMA, retryCount: 1 },
-          parts: [{ type: "text", text: prompt }],
-        })
-        const reply = extractModelText(result.data)?.trim()
-        const proposal =
-          parseCodespaceProposal(extractStructuredOutput(result.data)) ??
-          (reply ? parseCodespaceProposalText(reply) : undefined)
-        if (!proposal) {
-          if (path && isCodespaceEditRequest(text)) {
-            const current = (await readWorkspaceText(path)) ?? draft()
-            const rewritten = stripFences(
-              await invokeCodespaceModel({
-                title: "Editor agent fallback",
-                system:
-                  "You are Vector's editor agent. Rewrite the supplied file to satisfy the request. Return only the complete updated file, with no markdown fences or explanation. Preserve unrelated code and existing style.",
-                prompt: `Request: ${text}\n\nFile: ${path}\n\nCurrent content:\n${current}`,
-              }),
-            )
-            if (!rewritten.trim() || rewritten === current) {
-              setAgentMessages((items) => [
-                ...items,
-                {
-                  id: makeId("msg"),
-                  role: "assistant",
-                  content: reply || "I inspected the file but did not find a material change to apply.",
-                },
-              ])
-              return
-            }
-            setAgentStatus("Applying file")
-            await sdk().client.file.write({ directory: sdk().directory, path, content: rewritten })
-            setDrafts(path, rewritten)
-            await refreshWorkspaceFiles([path])
-            setAgentMessages((items) => [
-              ...items,
-              {
-                id: makeId("msg"),
-                role: "assistant",
-                content: reply || `Updated ${path}.`,
-                edit: "applied",
-                files: [path],
-              },
-            ])
-            return
-          }
-          setAgentMessages((items) => [
-            ...items,
-            {
-              id: makeId("msg"),
-              role: "assistant",
-              content: reply || "Open the file you want to change, then ask again with the edit you want.",
-            },
-          ])
-          return
-        }
-        const applied = await applyCodespaceProposal(proposal)
-        const details = applied.errors.length
-          ? `\n\nNot applied:\n${applied.errors.map((error) => `• ${error}`).join("\n")}`
-          : ""
-        setAgentMessages((items) => [
-          ...items,
-          {
-            id: makeId("msg"),
-            role: "assistant",
-            content: `${proposal.summary}${details}`,
-            ...(applied.applied.length ? { edit: "applied" as const, files: applied.applied } : {}),
-          },
-        ])
-        return
-      }
-
-      setAgentStatus("Editing workspace")
-      const before = path ? await readWorkspaceText(path) : undefined
-      const result = await sdk().client.session.prompt({
-        sessionID,
-        directory: sdk().directory,
-        agent: effectiveAgentName(),
-        model,
-        variant: activeVariant(),
-        executionMode: agentExecutionMode() === "fast" ? "fast" : "normal",
-        system:
-          "You are Vector's editor agent. Work directly in the current project. Inspect the repository, make complete minimal edits, run focused checks when useful, and summarize exactly what changed. Never expose secrets or rewrite unrelated files.",
-        tools: { bash: true, edit: true, patch: true, write: true, read: true, glob: true, grep: true },
-        parts: [{ type: "text", text: prompt }],
-      })
-      const reply = (extractModelText(result?.data) ?? "").trim()
-      const patched = collectPatchFiles(result.data)
-      const currentAfter = path ? await readWorkspaceText(path) : undefined
-      const touched = await refreshWorkspaceFiles(
-        patched.length ? patched : path && before !== currentAfter ? [path] : [],
-      )
-      setAgentMessages((items) => [
-        ...items,
-        {
-          id: makeId("msg"),
-          role: "assistant",
-          content: reply || "Done.",
-          ...(touched.length ? { edit: "applied" as const, files: touched } : {}),
-        },
-      ])
-    } catch (error) {
-      setAgentMessages((items) => [
-        ...items,
-        {
-          id: makeId("msg"),
-          role: "assistant",
-          content: `Error: ${error instanceof Error ? error.message : String(error)}`,
-        },
-      ])
-    } finally {
-      setAgentRunning(false)
-      setAgentStatus("Ready")
-    }
-  }
+  })
 
   return (
     <Portal mount={props.portalMount}>
@@ -2871,8 +2525,93 @@ export function CodespaceWorkbench(props: {
         data-vector-codespace
         class={`${props.embedded ? "absolute inset-0 z-0" : "fixed inset-0 z-[140]"} flex min-h-0 flex-col overflow-hidden bg-[#101010] text-[#e8e8e8]`}
       >
+        <header
+          data-tauri-drag-region
+          class="relative flex h-12 shrink-0 items-center border-b border-[#292929] bg-[#101010] px-2 text-[#878787]"
+        >
+          <div class="shrink-0" style={{ width: props.embedded ? "4px" : "76px" }} />
+          <div class="flex shrink-0 items-center gap-0.5 [app-region:no-drag]">
+            <button
+              type="button"
+              class="grid size-7 place-items-center rounded-[5px] transition-colors hover:bg-white/[0.06] hover:text-[#ddd]"
+              aria-label="Back to Vector Agent"
+              title="Back to Vector Agent"
+              onClick={props.onClose}
+            >
+              <Icon name="arrow-left" size="small" />
+            </button>
+            <button
+              type="button"
+              disabled
+              class="grid size-7 place-items-center rounded-[5px] text-[#3f3f3f]"
+              aria-label="Forward"
+              title="Forward"
+            >
+              <Icon name="arrow-right" size="small" />
+            </button>
+          </div>
+          <button
+            type="button"
+            class="absolute left-1/2 flex h-8 w-[min(38vw,720px)] -translate-x-1/2 items-center justify-center gap-2 rounded-[7px] border border-[#373737] bg-[#1a1a1a] px-3 text-[12px] text-[#aaa] shadow-sm transition-colors hover:border-[#484848] hover:bg-[#1e1e1e] hover:text-[#ddd] [app-region:no-drag]"
+            aria-label="Search files in this workspace"
+            title="Search files in this workspace"
+            onClick={openQuickFileSearch}
+          >
+            <Icon name="magnifying-glass" size="small" />
+            <span class="truncate">{fileBasename(sdk().directory) || "Search workspace"}</span>
+            <span class="ml-auto shrink-0 rounded border border-[#343434] px-1 py-0.5 font-mono text-[9px] text-[#666]">
+              ⌘P
+            </span>
+          </button>
+          <div class="ml-auto flex shrink-0 items-center gap-0.5 [app-region:no-drag]">
+            <button
+              type="button"
+              class="grid size-7 place-items-center rounded-[5px] transition-colors hover:bg-white/[0.06] hover:text-[#ddd]"
+              classList={{ "bg-white/[0.06] text-[#d8d8d8]": explorerOpen() }}
+              aria-label={explorerOpen() ? "Hide Explorer" : "Show Explorer"}
+              title={explorerOpen() ? "Hide Explorer" : "Show Explorer"}
+              onClick={() => setExplorerOpen((open) => !open)}
+            >
+              <Icon name="layout-left" size="small" />
+            </button>
+            <button
+              type="button"
+              class="grid size-7 place-items-center rounded-[5px] transition-colors hover:bg-white/[0.06] hover:text-[#ddd]"
+              classList={{ "bg-white/[0.06] text-[#d8d8d8]": agentOpen() }}
+              aria-label={agentOpen() ? "Hide Vector Agent" : "Show Vector Agent"}
+              title={agentOpen() ? "Hide Vector Agent" : "Show Vector Agent"}
+              onClick={() => {
+                setAgentMaximized(false)
+                setAgentOpen((open) => !open)
+              }}
+            >
+              <Icon name="layout-right" size="small" />
+            </button>
+            <button
+              type="button"
+              class="grid size-7 place-items-center rounded-[5px] transition-colors hover:bg-white/[0.06] hover:text-[#ddd]"
+              aria-label="Open Vector settings"
+              title="Open Vector settings"
+              onClick={() => command.trigger("settings.open")}
+            >
+              <Icon name="settings-gear" size="small" />
+            </button>
+          </div>
+        </header>
         <main class="min-h-0 flex-1 flex">
-          <aside class="w-[252px] shrink-0 border-r border-[#272727] bg-[#141414]">
+          <Show when={explorerOpen()}>
+          <aside
+            class="relative flex shrink-0 flex-col border-r border-[#272727] bg-[#141414]"
+            style={{ width: `${explorerWidth()}px` }}
+          >
+            <ResizeHandle
+              direction="horizontal"
+              edge="end"
+              size={explorerWidth()}
+              min={190}
+              max={480}
+              onResize={setExplorerWidth}
+            />
             <div class="flex h-10 items-center gap-1 border-b border-[#272727] px-2 text-[#8a8a8a]">
               <button
                 class="grid size-7 place-items-center rounded-[4px] transition-colors hover:bg-white/[0.06] hover:text-[#ddd]"
@@ -2916,22 +2655,6 @@ export function CodespaceWorkbench(props: {
                 <Icon name="layout-right" size="small" />
               </button>
               <div class="flex-1" />
-              <button
-                class="grid size-7 place-items-center rounded-[4px] transition-colors hover:bg-white/[0.06] hover:text-white"
-                aria-label="Export current file"
-                title="Export current file"
-                onClick={exportCurrentFile}
-              >
-                <Icon name="download" size="small" />
-              </button>
-              <button
-                class="grid size-7 place-items-center rounded-[4px] transition-colors hover:bg-white/[0.06] hover:text-white"
-                aria-label="Back to Vector Agent"
-                title="Back to Vector Agent"
-                onClick={props.onClose}
-              >
-                <Icon name="chevron-left" size="small" />
-              </button>
             </div>
             <div class="flex h-8 items-center justify-between px-3">
               <div class="min-w-0 truncate text-[10px] font-semibold uppercase tracking-[0.04em] text-[#9d9d9d]">
@@ -2946,7 +2669,7 @@ export function CodespaceWorkbench(props: {
                 <Icon name="reset" size="small" />
               </button>
             </div>
-            <div class="h-[calc(100%-72px)] overflow-auto px-1 pb-2 group/filetree">
+            <div class="min-h-0 flex-1 overflow-auto px-1 pb-2 group/filetree">
               <Switch>
                 <Match when={file.tree.state("")?.loaded && file.tree.children("").length === 0}>{props.empty()}</Match>
                 <Match when={true}>
@@ -2962,7 +2685,34 @@ export function CodespaceWorkbench(props: {
                 </Match>
               </Switch>
             </div>
+            <div class="max-h-[34%] min-h-[112px] shrink-0 border-t border-[#292929] bg-[#121212]">
+              <div class="flex h-8 items-center justify-between px-3 text-[10px] font-semibold uppercase text-[#969696]">
+                <span>Outline</span>
+                <span class="font-normal text-[#555]">{outlineSymbols()?.length ?? 0}</span>
+              </div>
+              <div class="max-h-[calc(100%-32px)] overflow-y-auto px-2 pb-2">
+                <For
+                  each={outlineSymbols() ?? []}
+                  fallback={
+                    <div class="px-2 py-2 text-[10px] leading-4 text-[#606060]">
+                      {selectedPath() ? "No symbols reported for this file." : "Open a file to see its outline."}
+                    </div>
+                  }
+                >
+                  {(symbol) => (
+                    <div
+                      class="flex h-6 min-w-0 items-center gap-1.5 rounded-[4px] px-2 text-[10px] text-[#999] hover:bg-white/[0.045] hover:text-[#d2d2d2]"
+                      title={symbol.name}
+                    >
+                      <span class="size-1.5 shrink-0 rounded-full bg-[#b394ff]/65" />
+                      <span class="truncate">{symbol.name}</span>
+                    </div>
+                  )}
+                </For>
+              </div>
+            </div>
           </aside>
+          </Show>
 
           <section class="min-w-0 flex-1 flex flex-col bg-[#151515]">
             <Show
@@ -3233,7 +2983,7 @@ export function CodespaceWorkbench(props: {
                               <MonacoCodeEditor
                                 path={workspaceAbsolutePath(path())}
                                 value={draft()}
-                                onChange={(next) => setDrafts(path(), next)}
+                                onChange={(next) => updateDraft(path(), next)}
                                 inlineComplete={aiComplete}
                                 languageService={languageService}
                                 onInlineEdit={(selection) => {
@@ -3244,7 +2994,7 @@ export function CodespaceWorkbench(props: {
                             </div>
                             <Show when={agentOpen()}>
                               <aside
-                                class="flex shrink-0 flex-col border-l border-[#272727] bg-[#121212]"
+                                class="vector-editor-agent-pane flex shrink-0 flex-col border-l border-[#272727] bg-[#121212]"
                                 classList={{ "absolute inset-0 z-20": agentMaximized(), relative: !agentMaximized() }}
                                 style={{ width: agentMaximized() ? "100%" : `${agentWidth()}px` }}
                               >
@@ -3262,7 +3012,7 @@ export function CodespaceWorkbench(props: {
                                 <header class="flex h-10 shrink-0 items-center justify-between gap-2 border-b border-[#272727] px-3">
                                   <div class="flex min-w-0 items-center gap-2 text-[12px] font-medium text-[#e0e0e0]">
                                     <Icon name="prompt" size="small" class="text-[#aaa]" />
-                                    <span class="truncate">Editor Agent</span>
+                                    <span class="truncate">Vector Agent</span>
                                     <span
                                       class="size-1.5 shrink-0 rounded-full"
                                       classList={{
@@ -3273,15 +3023,6 @@ export function CodespaceWorkbench(props: {
                                     />
                                   </div>
                                   <div class="flex items-center gap-0.5 text-[#777]">
-                                    <button
-                                      type="button"
-                                      class="grid size-7 place-items-center rounded-[5px] transition-colors hover:bg-white/[0.06] hover:text-[#ddd]"
-                                      title="New agent chat"
-                                      aria-label="New agent chat"
-                                      onClick={() => setAgentMessages([])}
-                                    >
-                                      <Icon name="plus" size="small" />
-                                    </button>
                                     <button
                                       type="button"
                                       class="grid size-7 place-items-center rounded-[5px] transition-colors hover:bg-white/[0.06] hover:text-[#ddd]"
@@ -3306,210 +3047,52 @@ export function CodespaceWorkbench(props: {
                                   </div>
                                 </header>
 
-                                <div class="shrink-0 border-b border-[#242424] p-3">
-                                  <form
-                                    class="flex min-h-[142px] flex-col rounded-[10px] border border-[#383838] bg-[#1a1a1a] shadow-[0_10px_32px_rgba(0,0,0,0.2)] transition-colors focus-within:border-[#56505f]"
-                                    onSubmit={(event) => {
-                                      event.preventDefault()
-                                      void sendAgentMessage()
-                                    }}
+                                <div class="shrink-0 border-b border-[#242424] px-3 py-3">
+                                  <Show
+                                    when={editorSessionID()}
+                                    fallback={
+                                      <div class="rounded-[10px] border border-[#303030] bg-[#191919] px-3 py-4 text-[12px] leading-5 text-[#888]">
+                                        Open Codespace from a Vector session to use the shared agent.
+                                      </div>
+                                    }
                                   >
-                                    <Show when={agentContextFiles().length}>
-                                      <div class="flex flex-wrap gap-1.5 px-3 pt-2.5">
-                                        <For each={agentContextFiles()}>
-                                          {(contextFile) => (
-                                            <span class="flex max-w-full items-center gap-1 rounded-[5px] border border-[#343434] bg-white/[0.035] px-2 py-1 font-mono text-[10px] text-[#aaa]">
-                                              <span class="truncate">{contextFile}</span>
-                                              <button
-                                                type="button"
-                                                class="grid size-3.5 shrink-0 place-items-center rounded hover:bg-white/10 hover:text-white"
-                                                aria-label={`Remove ${contextFile}`}
-                                                onClick={() =>
-                                                  setAgentContextFiles((items) =>
-                                                    items.filter((item) => item !== contextFile),
-                                                  )
-                                                }
-                                              >
-                                                <Icon name="close-small" size="small" />
-                                              </button>
-                                            </span>
-                                          )}
-                                        </For>
-                                      </div>
-                                    </Show>
-                                    <textarea
-                                      value={agentInput()}
-                                      disabled={agentRunning()}
-                                      onInput={(event) => setAgentInput(event.currentTarget.value)}
-                                      onKeyDown={(event) => {
-                                        event.stopPropagation()
-                                        if (event.key === "Enter" && !event.shiftKey) {
-                                          event.preventDefault()
-                                          void sendAgentMessage()
-                                        }
-                                      }}
-                                      rows={3}
-                                      placeholder="Ask Vector to code, explain, refactor, or fix this workspace."
-                                      class="min-h-[76px] w-full flex-1 resize-none bg-transparent px-3 py-2.5 text-[13px] leading-[1.55] text-[#e8e8e8] outline-none placeholder:text-[#666] disabled:opacity-60"
+                                    <PromptInput
+                                      controls={editorInputController()}
+                                      class="vector-editor-agent-composer !min-h-[140px] !rounded-[12px] !border-[#383838] !bg-[#191919] shadow-[0_10px_32px_rgba(0,0,0,0.22)]"
                                     />
-                                    <div class="flex min-w-0 flex-wrap items-center justify-between gap-2 border-t border-[#242424] px-2 py-2">
-                                      <div class="flex min-w-0 flex-wrap items-center gap-1">
-                                        <Select
-                                          size="normal"
-                                          options={codespaceAgentModes.map((mode) => mode.id)}
-                                          current={editorAgentMode()}
-                                          label={(value) =>
-                                            codespaceAgentModes.find((mode) => mode.id === value)?.label ?? "Ask"
-                                          }
-                                          onSelect={(value) => setEditorAgentMode(value as CodespaceAgentMode)}
-                                          class="max-w-[112px] text-[10px] text-[#cfcfcf]"
-                                          valueClass="truncate text-[10px]"
-                                          triggerProps={{ title: editorAgentModeMeta().description }}
-                                          variant="ghost"
-                                        />
-                                        <ModelSelectorPopoverV2
-                                          triggerProps={{
-                                            class:
-                                              "flex min-w-0 max-w-[170px] cursor-pointer items-center gap-1 rounded-[5px] px-2 py-1 text-[10px] text-[#aaa] transition-colors hover:bg-white/[0.055] hover:text-[#ddd]",
-                                          }}
-                                        >
-                                          <span class="truncate">{activeModelLabel()}</span>
-                                          <Icon name="chevron-down" size="small" />
-                                        </ModelSelectorPopoverV2>
-                                        <Show when={local.model.variant.list().length > 0}>
-                                          <Select
-                                            size="normal"
-                                            options={modelVariants()}
-                                            current={activeVariant() ?? "default"}
-                                            label={(value) => modelVariantLabel(value)}
-                                            onSelect={(value) =>
-                                              local.model.variant.set(value === "default" ? undefined : value)
-                                            }
-                                            class="max-w-[96px] capitalize text-[10px] text-[#aaa]"
-                                            valueClass="truncate text-[10px]"
-                                            triggerProps={{ title: modelVariantDescription(activeVariant()) }}
-                                            variant="ghost"
-                                          />
-                                        </Show>
-                                        <Select
-                                          size="normal"
-                                          options={codespaceExecutionModes.map((mode) => mode.id)}
-                                          current={agentExecutionMode()}
-                                          label={(value) =>
-                                            codespaceExecutionModes.find((mode) => mode.id === value)?.label ?? "Normal"
-                                          }
-                                          onSelect={(value) => setAgentExecutionMode(value as CodespaceExecutionMode)}
-                                          class="max-w-[96px] text-[10px] text-[#aaa]"
-                                          valueClass="truncate text-[10px]"
-                                          triggerProps={{ title: executionModeMeta().description }}
-                                          variant="ghost"
-                                        />
-                                      </div>
-                                      <div class="flex shrink-0 items-center gap-1 text-[#868686]">
-                                        <button
-                                          type="button"
-                                          class="grid size-7 place-items-center rounded-full transition hover:bg-white/[0.06] hover:text-[#ddd]"
-                                          title="Attach workspace file"
-                                          aria-label="Attach workspace file"
-                                          onClick={openAgentContextPicker}
-                                        >
-                                          <svg viewBox="0 0 16 16" class="size-4" aria-hidden="true">
-                                            <path
-                                              d="M12.8 7.2 8.3 11.7a2.6 2.6 0 0 1-3.68-3.68l4.6-4.6a1.75 1.75 0 0 1 2.47 2.47l-4.6 4.6a.9.9 0 0 1-1.27-1.27l4.24-4.25"
-                                              fill="none"
-                                              stroke="currentColor"
-                                              stroke-width="1.2"
-                                              stroke-linecap="round"
-                                              stroke-linejoin="round"
-                                            />
-                                          </svg>
-                                        </button>
-                                        <Show when={dictationAvailable() && !agentListening() && !agentTranscribing()}>
-                                          <button
-                                            type="button"
-                                            class="grid size-7 place-items-center rounded-full transition hover:bg-white/[0.06] hover:text-[#ddd]"
-                                            title="Dictate prompt"
-                                            aria-label="Dictate prompt"
-                                            onClick={() => void startAgentDictation()}
-                                          >
-                                            <svg viewBox="0 0 16 16" class="size-4" aria-hidden="true">
-                                              <path
-                                                d="M8 9.6a2.1 2.1 0 0 0 2.1-2.1V4.1a2.1 2.1 0 1 0-4.2 0v3.4A2.1 2.1 0 0 0 8 9.6Zm4-2.1a4 4 0 0 1-8 0M8 11.5v2M6 13.5h4"
-                                                fill="none"
-                                                stroke="currentColor"
-                                                stroke-width="1.35"
-                                                stroke-linecap="round"
-                                              />
-                                            </svg>
-                                          </button>
-                                        </Show>
-                                        <Show when={agentListening() || agentTranscribing()}>
-                                          <DictationIndicator
-                                            state={agentTranscribing() ? "transcribing" : "listening"}
-                                            level={agentRecordingLevel()}
-                                            onStop={() => agentDictation?.stop()}
-                                          />
-                                        </Show>
-                                        <button
-                                          type="submit"
-                                          disabled={agentRunning() || !agentInput().trim()}
-                                          class="grid size-7 place-items-center rounded-full bg-[#dedede] text-[#111] transition hover:enabled:bg-white disabled:bg-[#404040] disabled:text-[#777]"
-                                          aria-label="Send"
-                                        >
-                                          <Icon name="arrow-up" size="small" />
-                                        </button>
-                                      </div>
-                                    </div>
-                                  </form>
+                                  </Show>
                                 </div>
 
-                                <div class="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-4 py-4">
-                                  <Show when={agentMessages().length === 0}>
-                                    <div class="pt-1 text-[11px] leading-5 text-[#696969]">
-                                      The editor agent shares this session's model and modes. Select code and press
-                                      Cmd+K for an inline edit.
+                                <div
+                                  ref={(element) => (agentTimelineRef = element)}
+                                  class="vector-editor-agent-timeline flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 py-4"
+                                >
+                                  <Show when={editorMessages().length === 0}>
+                                    <div class="pt-1 text-[11px] leading-5 text-[#707070]">
+                                      This is the same Vector agent and conversation as the main workspace. Ask a question,
+                                      attach context, switch modes, or request a file edit here.
                                     </div>
                                   </Show>
-                                  <For each={agentMessages()}>
+                                  <For each={editorMessages()}>
                                     {(message) => (
-                                      <Show
-                                        when={message.role === "assistant"}
-                                        fallback={
-                                          <div class="self-stretch whitespace-pre-wrap break-words rounded-[8px] border border-[#303030] bg-[#1c1c1c] px-3 py-2.5 text-[12px] leading-relaxed text-[#e4e4e4]">
-                                            {message.content}
-                                          </div>
-                                        }
+                                      <div
+                                        class="min-w-0"
+                                        classList={{
+                                          "rounded-[9px] border border-[#303030] bg-[#1b1b1b] px-3 py-2.5":
+                                            message.role === "user",
+                                        }}
                                       >
-                                        <div class="flex flex-col gap-2.5">
-                                          <div class="whitespace-pre-wrap break-words text-[12px] leading-[1.62] text-[#d0d0d0]">
-                                            {message.content}
-                                          </div>
-                                          <Show when={message.edit && message.files?.length}>
-                                            <div class="flex flex-col gap-1 border-l border-emerald-400/35 pl-2.5">
-                                              <For each={message.files}>
-                                                {(changedFile) => (
-                                                  <button
-                                                    type="button"
-                                                    class="flex min-w-0 items-center gap-1.5 text-left text-[#8f8f8f] hover:text-[#cfcfcf]"
-                                                    onClick={() => openFile(changedFile)}
-                                                  >
-                                                    <Icon
-                                                      name="check-small"
-                                                      size="small"
-                                                      class="shrink-0 text-emerald-400"
-                                                    />
-                                                    <span class="truncate font-mono text-[11px]">{changedFile}</span>
-                                                  </button>
-                                                )}
-                                              </For>
-                                            </div>
-                                          </Show>
-                                        </div>
-                                      </Show>
+                                        <SessionMessage
+                                          message={message}
+                                          parts={editorMessageParts(message.id)}
+                                          showReasoningSummaries={settings.general.showReasoningSummaries()}
+                                          useV2Actions
+                                        />
+                                      </div>
                                     )}
                                   </For>
                                   <Show when={agentRunning()}>
-                                    <div class="flex items-center gap-2 text-[11px] text-[#8c8c8c]">
+                                    <div class="flex items-center gap-2 pb-2 text-[11px] text-[#8c8c8c]">
                                       <span class="size-1.5 animate-pulse rounded-full bg-[#a98cff]" />
                                       {agentStatus()}…
                                     </div>

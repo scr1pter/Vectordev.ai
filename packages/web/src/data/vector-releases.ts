@@ -342,4 +342,10 @@ export const release117: VectorRelease[] = [
     summary:
       "Rebuilt the Code Editor into a focused explorer, Monaco, and resizable agent workspace; added shared model, effort, speed, Plan, and permission controls; and replaced the editor-only review queue with direct, visible workspace edits and inline Cmd+K changes.",
   },
+  {
+    version: "1.17.43",
+    title: "One agent across chat and code",
+    summary:
+      "Unified the Code Editor with the active Vector conversation, model, effort, speed, permissions, attachments, and voice controls; added live file following with conflict-safe drafts; and refined the full IDE shell with workspace search, a resizable explorer, code outline, Monaco editing, and a responsive agent pane.",
+  },
 ]

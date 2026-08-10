@@ -1733,9 +1733,9 @@ html[data-vector-navigation-resizing] * {
 }
 
 [data-vector-codespace] > header {
-  height: 60px !important;
+  height: 48px !important;
   border-color: var(--vx-line) !important;
-  background: var(--vx-sidebar) !important;
+  background: #101010 !important;
 }
 
 [data-vector-codespace] > header nav {
@@ -1746,6 +1746,69 @@ html[data-vector-navigation-resizing] * {
 
 [data-vector-codespace] > header button {
   border-radius: 7px !important;
+}
+
+[data-vector-codespace] .vector-editor-agent-timeline {
+  scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
+}
+
+[data-vector-codespace] .vector-editor-agent-pane {
+  container-type: inline-size;
+}
+
+[data-vector-codespace] .vector-editor-agent-composer > div:last-child {
+  height: auto !important;
+  min-height: 84px;
+  flex-wrap: wrap;
+  align-content: space-between;
+  row-gap: 5px;
+  padding: 7px 10px 8px !important;
+}
+
+[data-vector-codespace] .vector-editor-agent-composer > div:last-child > div:first-child {
+  order: 1;
+  flex-basis: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+[data-vector-codespace] .vector-editor-agent-composer > div:last-child > div:first-child > * {
+  min-width: 0;
+}
+
+[data-vector-codespace] .vector-editor-agent-composer > div:last-child > [data-action="prompt-vel"] {
+  order: 2;
+  margin-left: auto;
+}
+
+[data-vector-codespace] .vector-editor-agent-composer > div:last-child > [data-action="prompt-mic"],
+[data-vector-codespace] .vector-editor-agent-composer > div:last-child > [data-action="prompt-attach"],
+[data-vector-codespace] .vector-editor-agent-composer > div:last-child > [data-action="prompt-submit"] {
+  order: 2;
+}
+
+[data-vector-codespace] .vector-editor-agent-composer [data-action="prompt-model"] {
+  max-width: 158px !important;
+}
+
+[data-vector-codespace] .vector-editor-agent-composer [data-action="prompt-mode"] {
+  max-width: 112px !important;
+}
+
+[data-vector-codespace] .vector-editor-agent-composer [data-action="prompt-model-variant"] {
+  max-width: 112px !important;
+}
+
+[data-vector-codespace] .vector-editor-agent-composer [data-action="prompt-execution-mode"] {
+  max-width: 104px !important;
+}
+
+[data-vector-codespace] .vector-editor-agent-timeline [data-component="user-message"] {
+  max-width: none;
+}
+
+[data-vector-codespace] .vector-editor-agent-timeline [data-slot="user-message-body"] {
+  max-width: none;
 }
 
 [data-vector-codespace] .cm-editor {
