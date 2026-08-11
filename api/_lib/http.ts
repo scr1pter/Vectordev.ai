@@ -75,11 +75,11 @@ export function handleApiError(response: ApiResponse, error: unknown) {
     json(response, error.statusCode, { error: { code: error.code, message: error.message } })
     return
   }
-  console.error("Vector billing API error", error)
+  console.error("Vector API error", error)
   json(response, 500, {
     error: {
       code: "INTERNAL_ERROR",
-      message: "Vector could not complete the billing request. Please try again.",
+      message: "Vector could not complete this request. Please try again.",
     },
   })
 }

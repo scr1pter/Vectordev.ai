@@ -2,6 +2,12 @@
   "installCommand": "bun install",
   "buildCommand": "bun --cwd packages/web build && node script/prune-vector-site.mjs",
   "outputDirectory": "packages/web/dist",
+  "crons": [
+    {
+      "path": "/api/cron/agent-reconcile",
+      "schedule": "* * * * *"
+    }
+  ],
   "redirects": [
     {
       "source": "/download/mac",

@@ -360,4 +360,10 @@ export const release117: VectorRelease[] = [
     summary:
       "Added a separate $10 monthly subscription alongside the existing $99 annual license, with plan-aware desktop billing, failed-payment email notices, a three-day monthly grace period, automatic recovery after payment, and clear reactivation choices.",
   },
+  {
+    version: "1.17.46",
+    title: "Vector platform foundation",
+    summary:
+      "Introduced unified Vector accounts and entitlements, protected subscription downloads, API Studio and Play Park, isolated Cloud Agent teams, server-managed MCP connections, verified execution evidence, and production-safe billing, quota, and security boundaries.",
+  },
 ]

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
+import { createCheckout } from "../api/_lib/billing"
 import type { ApiRequest, ApiResponse } from "../api/_lib/http"
 import activate from "../api/billing/activate"
 import checkout from "../api/billing/checkout"
@@ -11,6 +12,13 @@ const billingEnvironment = [
   "VECTOR_LICENSE_SECRET",
   "RESEND_API_KEY",
   "VECTOR_PURCHASE_EMAIL_FROM",
+  "STRIPE_PRICE_MONTHLY",
+  "STRIPE_PRICE_ANNUAL",
+  "SUPABASE_URL",
+  "SUPABASE_SERVICE_ROLE_KEY",
+  "VECTOR_PLATFORM_SECRET",
+  "VECTOR_INSTALLER_BLOB_TOKEN",
+  "VECTOR_INSTALLER_BLOB_PRIVATE",
 ] as const
 
 const original = Object.fromEntries(billingEnvironment.map((key) => [key, process.env[key]]))
@@ -84,24 +92,17 @@ describe("Vector billing API", () => {
 
   test("fails clearly rather than creating a partial checkout when billing is not configured", async () => {
     disableBilling()
-    const result = await invoke(checkout, {
-      method: "POST",
-      body: { email: "buyer@example.com", termsAccepted: true },
+    await expect(createCheckout("buyer@example.com", "annual", { userId: "user_test" })).rejects.toMatchObject({
+      statusCode: 503,
+      code: "BILLING_NOT_CONFIGURED",
     })
-
-    expect(result.status).toBe(503)
-    expect(result.body).toMatchObject({ error: { code: "BILLING_NOT_CONFIGURED" } })
   })
 
   test("rejects unknown plans without disturbing the annual default", async () => {
     disableBilling()
-    const result = await invoke(checkout, {
-      method: "POST",
-      body: { email: "buyer@example.com", termsAccepted: true, plan: "weekly" },
-    })
-
-    expect(result.status).toBe(400)
-    expect(result.body).toMatchObject({ error: { code: "PLAN_INVALID" } })
+    await expect(createCheckout("buyer@example.com", "weekly" as never, { userId: "user_test" })).rejects.toMatchObject(
+      { statusCode: 400, code: "PLAN_INVALID" },
+    )
   })
 
   test("rejects malformed activation and status requests before contacting Stripe", async () => {

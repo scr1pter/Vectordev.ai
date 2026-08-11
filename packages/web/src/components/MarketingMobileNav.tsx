@@ -1,11 +1,14 @@
 import { For, Show, createEffect, createSignal, onCleanup } from "solid-js"
 
-type ActivePage = "product" | "docs" | "releases" | "download"
+type ActivePage = "product" | "agents" | "api" | "docs" | "releases" | "download" | "account"
 
 const links: Array<{ label: string; href: string; id: ActivePage }> = [
   { label: "Product", href: "/", id: "product" },
+  { label: "Cloud Agents", href: "/cloud-agents", id: "agents" },
+  { label: "Vector Play Park", href: "/api-studio", id: "api" },
   { label: "Documentation", href: "/docs", id: "docs" },
   { label: "Releases", href: "/releases", id: "releases" },
+  { label: "Account", href: "/account", id: "account" },
   { label: "Download Vector", href: "/download", id: "download" },
 ]
 
@@ -37,7 +40,16 @@ export function MarketingMobileNav(props: { active: ActivePage }) {
         aria-expanded={open()}
         onClick={() => setOpen(true)}
       >
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+        <svg
+          width="18"
+          height="18"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.8"
+          stroke-linecap="round"
+          aria-hidden="true"
+        >
           <line x1="4" y1="7" x2="20" y2="7" />
           <line x1="4" y1="12" x2="20" y2="12" />
           <line x1="4" y1="17" x2="20" y2="17" />
@@ -55,15 +67,29 @@ export function MarketingMobileNav(props: { active: ActivePage }) {
         >
           <div class="mobile-nav-head">
             <strong>Navigate Vector</strong>
-            <button type="button" class="mobile-nav-trigger" aria-label="Close navigation" onClick={() => setOpen(false)}>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+            <button
+              type="button"
+              class="mobile-nav-trigger"
+              aria-label="Close navigation"
+              onClick={() => setOpen(false)}
+            >
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.8"
+                stroke-linecap="round"
+                aria-hidden="true"
+              >
                 <line x1="6" y1="6" x2="18" y2="18" />
                 <line x1="18" y1="6" x2="6" y2="18" />
               </svg>
             </button>
           </div>
           <p class="mobile-nav-copy">
-            Product details, practical documentation, and installers for every supported desktop platform.
+            Desktop engineering, continuous cloud agents, API development, billing, and protected installers.
           </p>
           <nav class="mobile-nav-links" aria-label="Mobile navigation">
             <For each={links}>

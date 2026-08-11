@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import type Stripe from "stripe"
 import { publicStatus } from "../api/_lib/billing"
+import { entitlementFor, type PlatformSubscription } from "../api/_lib/platform"
 
 const subscription = (input: { status: Stripe.Subscription.Status; plan: "annual" | "monthly"; periodEnd: number }) =>
   ({
@@ -53,6 +54,30 @@ describe("Vector license status", () => {
     expect(status.graceEndsAt).toBeTruthy()
   })
 
+  test("honors the recorded monthly grace period before Stripe updates its status", () => {
+    const now = Math.floor(Date.now() / 1000)
+    const active = subscription({ status: "active", plan: "monthly", periodEnd: now + 86_400 })
+    const buyer = customer({
+      vector_plan: "monthly",
+      vector_payment_failed_at: `${now - 60}`,
+      vector_payment_grace_ends_at: `${now + 86_400}`,
+    })
+    expect(publicStatus(buyer, active)).toMatchObject({ access: true, state: "grace", plan: "monthly" })
+    expect(
+      entitlementFor({
+        user_id: "user_1",
+        stripe_customer_id: "cus_1",
+        stripe_subscription_id: "sub_1",
+        plan: "monthly",
+        status: "active",
+        current_period_end: new Date((now + 86_400) * 1_000).toISOString(),
+        cancel_at_period_end: false,
+        payment_failed_at: new Date((now - 60) * 1_000).toISOString(),
+        grace_ends_at: new Date((now + 86_400) * 1_000).toISOString(),
+      } satisfies PlatformSubscription),
+    ).toMatchObject({ access: true, state: "grace", plan: "monthly" })
+  })
+
   test("expires a monthly license after payment grace ends", () => {
     const now = Math.floor(Date.now() / 1_000)
     const status = publicStatus(
@@ -65,5 +90,34 @@ describe("Vector license status", () => {
     )
 
     expect(status).toMatchObject({ access: false, state: "expired", plan: "monthly" })
+  })
+
+  test("does not grant grace to a failed initial monthly payment", () => {
+    const now = Math.floor(Date.now() / 1_000)
+    const status = publicStatus(
+      customer({
+        vector_plan: "monthly",
+        vector_payment_failed_at: `${now - 60}`,
+        vector_payment_failure_kind: "initial",
+      }),
+      subscription({ status: "past_due", plan: "monthly", periodEnd: now + 86_400 }),
+    )
+
+    expect(status).toMatchObject({ access: false, state: "past_due", plan: "monthly" })
+  })
+
+  test("does not grant the monthly grace period to an annual plan", () => {
+    const now = Math.floor(Date.now() / 1_000)
+    const status = publicStatus(
+      customer({
+        vector_plan: "annual",
+        vector_payment_failed_at: `${now - 60}`,
+        vector_payment_failure_kind: "renewal",
+        vector_payment_grace_ends_at: `${now + 3 * 86_400}`,
+      }),
+      subscription({ status: "past_due", plan: "annual", periodEnd: now - 60 }),
+    )
+
+    expect(status).toMatchObject({ access: false, state: "past_due", plan: "annual" })
   })
 })
