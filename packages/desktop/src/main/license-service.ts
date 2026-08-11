@@ -17,10 +17,15 @@ type StoredLicense = {
 
 type RemoteStatus = {
   access: boolean
-  state: "active" | "canceling" | "expired" | "past_due"
+  state: "active" | "canceling" | "grace" | "expired" | "past_due"
+  message?: string
   email: string
   expiresAt: string
+  graceEndsAt?: string
   cancelAtPeriodEnd: boolean
+  plan: "annual" | "monthly"
+  interval: "year" | "month"
+  priceUsd: number
   deviceName?: string
   devicePlatform?: string
   lastFour: string
@@ -65,7 +70,10 @@ export function createLicenseService(input: {
   apiUrl?: string
 }) {
   const file = join(input.userDataPath, "vector-license.json")
-  const api = (input.apiUrl || process.env.VECTOR_LICENSE_API_URL || "https://vectordev.ai/api/billing").replace(/\/$/, "")
+  const api = (input.apiUrl || process.env.VECTOR_LICENSE_API_URL || "https://vectordev.ai/api/billing").replace(
+    /\/$/,
+    "",
+  )
   let devicePromise: Promise<{ id: string; name: string; platform: string }> | undefined
 
   const device = () => {
@@ -144,9 +152,17 @@ export function createLicenseService(input: {
             message: "Vector paid licensing is not active yet. This build remains available as a public beta.",
           }
         }
-        return { access: false, state: "activation_required", message: "Enter the license key from your Vector purchase email." }
+        return {
+          access: false,
+          state: "activation_required",
+          message: "Enter the license key from your Vector purchase email.",
+        }
       } catch (error) {
-        return { access: false, state: "offline", message: `Vector could not verify licensing: ${normalizeError(error)}` }
+        return {
+          access: false,
+          state: "offline",
+          message: `Vector could not verify licensing: ${normalizeError(error)}`,
+        }
       }
     }
 
@@ -176,7 +192,14 @@ export function createLicenseService(input: {
       }
       const last = Date.parse(stored.lastValidatedAt)
       const expires = Date.parse(stored.status.expiresAt ?? "")
-      if (stored.status.access && Number.isFinite(last) && Date.now() - last <= OFFLINE_GRACE_MS && expires > Date.now()) {
+      const graceEnds = Date.parse(stored.status.graceEndsAt ?? "")
+      const accessEnd = stored.status.state === "grace" && Number.isFinite(graceEnds) ? graceEnds : expires
+      if (
+        stored.status.access &&
+        Number.isFinite(last) &&
+        Date.now() - last <= OFFLINE_GRACE_MS &&
+        accessEnd > Date.now()
+      ) {
         return {
           ...stored.status,
           access: true,
@@ -184,7 +207,12 @@ export function createLicenseService(input: {
           message: "Vector is offline. License access is temporarily using the seven-day offline grace period.",
         }
       }
-      return { ...stored.status, access: false, state: "offline", message: "Connect to the internet so Vector can verify this license." }
+      return {
+        ...stored.status,
+        access: false,
+        state: "offline",
+        message: "Connect to the internet so Vector can verify this license.",
+      }
     }
   }
 

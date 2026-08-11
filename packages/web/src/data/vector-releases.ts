@@ -354,4 +354,10 @@ export const release117: VectorRelease[] = [
     summary:
       "Reduced the Code Editor to one Explorer control and one Agent control, moved the compact shared-agent composer beneath its conversation, removed Vel from the editor composer, and replaced the purple file canvas with a mature charcoal Monaco theme.",
   },
+  {
+    version: "1.17.45",
+    title: "Flexible Vector billing",
+    summary:
+      "Added a separate $10 monthly subscription alongside the existing $99 annual license, with plan-aware desktop billing, failed-payment email notices, a three-day monthly grace period, automatic recovery after payment, and clear reactivation choices.",
+  },
 ]

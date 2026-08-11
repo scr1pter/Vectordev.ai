@@ -1,4 +1,4 @@
-import { type ParentProps, Show, createResource, createSignal } from "solid-js"
+import { type ParentProps, Show, createEffect, createResource, createSignal, onCleanup, onMount } from "solid-js"
 import { usePlatform } from "@/context/platform"
 import type { VectorLicenseStatus } from "@/license"
 import "./license-gate.css"
@@ -16,6 +16,22 @@ export function LicenseGate(props: ParentProps) {
   const [error, setError] = createSignal("")
   const [busy, setBusy] = createSignal(false)
   const [status, actions] = createResource(async () => (license ? license.status() : fallbackStatus))
+
+  onMount(() => {
+    const timer = window.setInterval(() => void actions.refetch(), 15 * 60 * 1_000)
+    onCleanup(() => window.clearInterval(timer))
+  })
+
+  createEffect(() => {
+    const current = status()
+    if (current?.state !== "grace" || !current.graceEndsAt) return
+    const remaining = Date.parse(current.graceEndsAt) - Date.now()
+    const timer = window.setTimeout(
+      () => void actions.refetch(),
+      Math.max(1_000, Math.min(remaining + 1_000, 2_147_000_000)),
+    )
+    onCleanup(() => window.clearTimeout(timer))
+  })
 
   const activate = async (event: SubmitEvent) => {
     event.preventDefault()
@@ -35,6 +51,10 @@ export function LicenseGate(props: ParentProps) {
 
   const openBilling = async () => {
     if (!license || busy()) return
+    if (status()?.plan === "monthly" && status()?.state === "expired") {
+      platform.openLink("https://vectordev.ai/download?reactivate=1")
+      return
+    }
     setBusy(true)
     setError("")
     try {
@@ -56,62 +76,77 @@ export function LicenseGate(props: ParentProps) {
         </div>
       }
     >
-      <Show when={status()?.access} fallback={
-        <main class="vector-license-gate">
-          <div class="vector-license-glow" aria-hidden="true" />
-          <section class="vector-license-panel" aria-labelledby="vector-license-title">
-            <img class="vector-license-mark" src="/vector-logo.png" alt="" />
-            <p class="vector-license-kicker">Vector desktop</p>
-            <h1 id="vector-license-title">
-              {status()?.state === "expired"
-                ? "Your Vector license has expired"
-                : status()?.state === "past_due"
-                  ? "Payment needs attention"
-                  : status()?.state === "offline"
-                    ? "License verification is offline"
-                    : "Activate Vector"}
-            </h1>
-            <p class="vector-license-message">
-              {status()?.message ?? "Enter the license key from your Vector purchase email."}
-            </p>
+      <Show
+        when={status()?.access}
+        fallback={
+          <main class="vector-license-gate">
+            <div class="vector-license-glow" aria-hidden="true" />
+            <section class="vector-license-panel" aria-labelledby="vector-license-title">
+              <img class="vector-license-mark" src="/vector-logo.png" alt="" />
+              <p class="vector-license-kicker">Vector desktop</p>
+              <h1 id="vector-license-title">
+                {status()?.state === "expired"
+                  ? "Your Vector license has expired"
+                  : status()?.state === "past_due"
+                    ? "Payment needs attention"
+                    : status()?.state === "offline"
+                      ? "License verification is offline"
+                      : "Activate Vector"}
+              </h1>
+              <p class="vector-license-message">
+                {status()?.message ?? "Enter the license key from your Vector purchase email."}
+              </p>
 
-            <Show when={status()?.state === "activation_required" || status()?.state === "offline"}>
-              <form class="vector-license-form" onSubmit={activate}>
-                <label for="vector-license-key">License key</label>
-                <input
-                  id="vector-license-key"
-                  type="text"
-                  value={key()}
-                  onInput={(event) => setKey(event.currentTarget.value)}
-                  placeholder="VEC1..."
-                  autocomplete="off"
-                  spellcheck={false}
-                  disabled={busy()}
-                />
-                <button class="vector-license-primary" type="submit" disabled={busy() || !key().trim()}>
-                  {busy() ? "Activating..." : "Activate this computer"}
+              <Show when={status()?.state === "activation_required" || status()?.state === "offline"}>
+                <form class="vector-license-form" onSubmit={activate}>
+                  <label for="vector-license-key">License key</label>
+                  <input
+                    id="vector-license-key"
+                    type="text"
+                    value={key()}
+                    onInput={(event) => setKey(event.currentTarget.value)}
+                    placeholder="VEC1..."
+                    autocomplete="off"
+                    spellcheck={false}
+                    disabled={busy()}
+                  />
+                  <button class="vector-license-primary" type="submit" disabled={busy() || !key().trim()}>
+                    {busy() ? "Activating..." : "Activate this computer"}
+                  </button>
+                </form>
+              </Show>
+
+              <Show when={status()?.state === "expired" || status()?.state === "past_due"}>
+                <button class="vector-license-primary" type="button" disabled={busy()} onClick={openBilling}>
+                  {busy()
+                    ? "Opening..."
+                    : status()?.plan === "monthly" && status()?.state === "expired"
+                      ? "Choose a plan"
+                      : "Fix payment"}
                 </button>
-              </form>
-            </Show>
+              </Show>
 
-            <Show when={status()?.state === "expired" || status()?.state === "past_due"}>
-              <button class="vector-license-primary" type="button" disabled={busy()} onClick={openBilling}>
-                {busy() ? "Opening..." : "Reactivate subscription"}
-              </button>
-            </Show>
+              <Show when={error()}>
+                <p class="vector-license-error" role="alert">
+                  {error()}
+                </p>
+              </Show>
 
-            <Show when={error()}>
-              <p class="vector-license-error" role="alert">{error()}</p>
-            </Show>
-
-            <div class="vector-license-actions">
-              <button type="button" onClick={() => platform.openLink("https://vectordev.ai/download")}>Buy Vector - $99/year</button>
-              <button type="button" onClick={() => void actions.refetch()}>Try again</button>
-            </div>
-            <p class="vector-license-footnote">One active computer per license. Billing is securely handled by Stripe.</p>
-          </section>
-        </main>
-      }>
+              <div class="vector-license-actions">
+                <button type="button" onClick={() => platform.openLink("https://vectordev.ai/download")}>
+                  View monthly and annual plans
+                </button>
+                <button type="button" onClick={() => void actions.refetch()}>
+                  Try again
+                </button>
+              </div>
+              <p class="vector-license-footnote">
+                One active computer per license. Billing is securely handled by Stripe.
+              </p>
+            </section>
+          </main>
+        }
+      >
         {props.children}
       </Show>
     </Show>

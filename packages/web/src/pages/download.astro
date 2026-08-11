@@ -16,8 +16,8 @@ const platforms = [
 ---
 
 <MarketingLayout
-  title="Buy Vector - $99/year"
-  description="Purchase Vector for $99 per year. Includes the desktop app, updates, and one active computer."
+  title="Buy Vector"
+  description="Choose Vector monthly for $10 or annually for $99. Includes the desktop app, updates, and one active computer."
 >
   <div class="purchase-page">
     <MarketingNav active="download" />
@@ -25,28 +25,42 @@ const platforms = [
     <main>
       <section class="purchase-hero">
         <div class="purchase-copy">
-          <p class="eyebrow">Vector 1.17.39</p>
+          <p class="eyebrow">Vector 1.17.45</p>
           <h1>Own your agentic workspace.</h1>
           <p class="lede">
-            One annual license for the complete Vector desktop experience: agent sessions, a real editor,
-            terminal, controlled browser, isolated workspaces, review, and publishing through your accounts.
+            Choose monthly or annual access to the complete Vector desktop experience: agent sessions, a real
+            editor, terminal, controlled browser, isolated workspaces, review, and publishing through your accounts.
           </p>
 
           <div class="included-list">
             <span><i aria-hidden="true"></i> macOS, Windows, and Linux</span>
-            <span><i aria-hidden="true"></i> All desktop updates during the paid year</span>
+            <span><i aria-hidden="true"></i> All desktop updates during the paid term</span>
             <span><i aria-hidden="true"></i> One active computer at a time</span>
             <span><i aria-hidden="true"></i> Bring your own models and provider keys</span>
           </div>
         </div>
 
         <form class="purchase-card" data-purchase-form>
+          <fieldset class="plan-picker">
+            <legend>Choose your plan</legend>
+            <div class="plan-options">
+              <label>
+                <input type="radio" name="plan" value="annual" checked />
+                <span><b>Annual</b><small>$99/year · Save $21</small></span>
+              </label>
+              <label>
+                <input type="radio" name="plan" value="monthly" />
+                <span><b>Monthly</b><small>$10/month</small></span>
+              </label>
+            </div>
+          </fieldset>
+
           <div class="price-row">
             <div>
-              <span>Vector annual license</span>
-              <strong>$99</strong>
+              <span data-plan-name>Vector annual license</span>
+              <strong data-plan-price>$99</strong>
             </div>
-            <small>per year</small>
+            <small data-plan-interval>per year</small>
           </div>
 
           <label class="email-field">
@@ -73,7 +87,7 @@ const platforms = [
             <input data-purchase-terms type="checkbox" />
             <span>
               I agree to the <a href="/legal/license" target="_blank">software license</a> and
-              <a href="/legal/terms" target="_blank">subscription terms</a>. The plan renews yearly until cancelled.
+              <a href="/legal/terms" target="_blank">subscription terms</a>. The selected plan renews automatically until cancelled.
             </span>
           </label>
 
@@ -97,7 +111,7 @@ const platforms = [
           <article><span>01</span><h3>Purchase securely</h3><p>Stripe handles payment. Vector never receives your card number.</p></article>
           <article><span>02</span><h3>Receive your key</h3><p>Your private license key and download link arrive by email.</p></article>
           <article><span>03</span><h3>Activate one computer</h3><p>Use Vector on one active machine, with a seven-day offline grace period.</p></article>
-          <article><span>04</span><h3>Control renewal</h3><p>Cancel in Vector Settings at any time. Access continues through the paid year.</p></article>
+          <article><span>04</span><h3>Control renewal</h3><p>Cancel in Vector Settings at any time. Access continues through the paid period.</p></article>
         </div>
       </section>
 
@@ -116,10 +130,30 @@ const platforms = [
   const button = document.querySelector<HTMLButtonElement>("[data-purchase-button]")
   const label = document.querySelector<HTMLElement>("[data-purchase-button-label]")
   const status = document.querySelector<HTMLElement>("[data-purchase-status]")
-  const closePublicDownloads = () => {
-    if (button) button.disabled = true
-    if (label) label.textContent = "Downloads unavailable"
-    if (status) status.textContent = "Public downloads are currently closed. Existing installations and release artifacts are unaffected."
+  const terms = document.querySelector<HTMLInputElement>("[data-purchase-terms]")
+  const planName = document.querySelector<HTMLElement>("[data-plan-name]")
+  const planPrice = document.querySelector<HTMLElement>("[data-plan-price]")
+  const planInterval = document.querySelector<HTMLElement>("[data-plan-interval]")
+  let billingAvailable = false
+
+  const selectedPlan = () => form?.querySelector<HTMLInputElement>('input[name="plan"]:checked')?.value === "monthly" ? "monthly" : "annual"
+  const refreshPlan = () => {
+    const monthly = selectedPlan() === "monthly"
+    if (planName) planName.textContent = monthly ? "Vector monthly license" : "Vector annual license"
+    if (planPrice) planPrice.textContent = monthly ? "$10" : "$99"
+    if (planInterval) planInterval.textContent = monthly ? "per month" : "per year"
+  }
+
+  const refreshAvailability = () => {
+    if (button) button.disabled = !billingAvailable || !terms?.checked
+    if (label) label.textContent = billingAvailable ? `Continue with ${selectedPlan()}` : "Downloads unavailable"
+    if (status) {
+      status.textContent = billingAvailable
+        ? terms?.checked
+          ? "You will review the recurring price in Stripe before paying."
+          : "Accept the license and subscription terms to continue."
+        : "Public downloads are currently closed. Existing installations and release artifacts are unaffected."
+    }
   }
 
   const selectedFromQuery = new URLSearchParams(location.search).get("target")
@@ -128,11 +162,47 @@ const platforms = [
     if (option) option.checked = true
   }
 
-  closePublicDownloads()
+  refreshPlan()
+  refreshAvailability()
+  form?.querySelectorAll<HTMLInputElement>('input[name="plan"]').forEach((option) => option.addEventListener("change", () => {
+    refreshPlan()
+    refreshAvailability()
+  }))
+  terms?.addEventListener("change", refreshAvailability)
 
-  form?.addEventListener("submit", (event) => {
+  fetch("/api/billing/config", { headers: { accept: "application/json" } })
+    .then((response) => response.ok ? response.json() : Promise.reject(new Error("Billing is unavailable.")))
+    .then((config) => {
+      billingAvailable = Boolean(config.available)
+      refreshAvailability()
+    })
+    .catch(() => refreshAvailability())
+
+  form?.addEventListener("submit", async (event) => {
     event.preventDefault()
-    closePublicDownloads()
+    if (!billingAvailable || !terms?.checked || button?.disabled) return
+    if (button) button.disabled = true
+    if (label) label.textContent = "Opening secure checkout..."
+    if (status) status.textContent = "Creating your Stripe checkout."
+    const target = form.querySelector<HTMLInputElement>('input[name="platform"]:checked')?.value
+    if (target) sessionStorage.setItem("vector-purchase-target", target)
+    try {
+      const response = await fetch("/api/billing/checkout", {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify({
+          email: document.querySelector<HTMLInputElement>("[data-purchase-email]")?.value || undefined,
+          termsAccepted: true,
+          plan: selectedPlan(),
+        }),
+      })
+      const payload = await response.json()
+      if (!response.ok || !payload.url) throw new Error(payload.error?.message || "Vector could not open checkout.")
+      location.assign(payload.url)
+    } catch (cause) {
+      if (status) status.textContent = cause instanceof Error ? cause.message : "Vector could not open checkout."
+      refreshAvailability()
+    }
   })
 </script>
 
@@ -147,6 +217,14 @@ const platforms = [
   .included-list span { display: flex; align-items: center; gap: 10px; }
   .included-list i { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 4px rgba(170, 140, 255, .1); }
   .purchase-card { padding: 28px; color: var(--ink); background: var(--glass-fill-strong); border: 1px solid var(--glass-line-strong); border-radius: 24px; box-shadow: var(--glass-shadow); backdrop-filter: blur(30px) saturate(150%); }
+  .plan-picker { margin: 0 0 20px; }
+  .plan-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+  .plan-options label { position: relative; }
+  .plan-options input { position: absolute; opacity: 0; pointer-events: none; }
+  .plan-options label > span { min-height: 58px; padding: 10px 12px; display: grid; align-content: center; gap: 4px; background: rgba(255, 255, 255, .03); border: 1px solid var(--line); border-radius: 10px; cursor: pointer; }
+  .plan-options b { color: rgba(245, 242, 248, .86); font-size: 12px; font-weight: 620; }
+  .plan-options small { color: var(--muted); font-size: 9px; }
+  .plan-options input:checked + span { background: rgba(155, 108, 255, .12); border-color: rgba(188, 157, 255, .42); box-shadow: inset 0 0 0 1px rgba(172, 130, 255, .1); }
   .price-row { padding-bottom: 22px; display: flex; align-items: end; justify-content: space-between; border-bottom: 1px solid var(--line); }
   .price-row div { display: grid; gap: 6px; }
   .price-row span, fieldset legend, .email-field > span { color: var(--muted); font-size: 11px; }

@@ -15,7 +15,11 @@ export type VectorLicenseStatus = {
   message?: string
   email?: string
   expiresAt?: string
+  graceEndsAt?: string
   cancelAtPeriodEnd?: boolean
+  plan?: "annual" | "monthly"
+  interval?: "year" | "month"
+  priceUsd?: number
   deviceName?: string
   devicePlatform?: string
   lastFour?: string

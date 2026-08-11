@@ -60,7 +60,16 @@ describe("Vector billing API", () => {
     const result = await invoke(config, { method: "GET" })
 
     expect(result.status).toBe(200)
-    expect(result.body).toMatchObject({ available: false, priceUsd: 99, interval: "year", activeDevices: 1 })
+    expect(result.body).toMatchObject({
+      available: false,
+      priceUsd: 99,
+      interval: "year",
+      activeDevices: 1,
+      plans: [
+        { id: "annual", priceUsd: 99, interval: "year", graceDays: 0 },
+        { id: "monthly", priceUsd: 10, interval: "month", graceDays: 3 },
+      ],
+    })
   })
 
   test("requires explicit agreement before opening Stripe Checkout", async () => {
@@ -82,6 +91,17 @@ describe("Vector billing API", () => {
 
     expect(result.status).toBe(503)
     expect(result.body).toMatchObject({ error: { code: "BILLING_NOT_CONFIGURED" } })
+  })
+
+  test("rejects unknown plans without disturbing the annual default", async () => {
+    disableBilling()
+    const result = await invoke(checkout, {
+      method: "POST",
+      body: { email: "buyer@example.com", termsAccepted: true, plan: "weekly" },
+    })
+
+    expect(result.status).toBe(400)
+    expect(result.body).toMatchObject({ error: { code: "PLAN_INVALID" } })
   })
 
   test("rejects malformed activation and status requests before contacting Stripe", async () => {

@@ -3,20 +3,58 @@ import { Resend } from "resend"
 import Stripe from "stripe"
 import { ApiError } from "./http.js"
 
-const PRODUCT_NAME = "Vector annual license"
-const PRICE_USD_CENTS = 9_900
+export type BillingPlan = "annual" | "monthly"
+
+type BillingPlanDefinition = {
+  id: BillingPlan
+  name: string
+  priceUsdCents: number
+  interval: "year" | "month"
+  description: string
+  renewalText: string
+  graceDays: number
+}
+
+const BILLING_PLANS: Record<BillingPlan, BillingPlanDefinition> = {
+  annual: {
+    id: "annual",
+    name: "Vector annual license",
+    priceUsdCents: 9_900,
+    interval: "year",
+    description: "Vector desktop, updates, and one active computer for one year.",
+    renewalText: "Renews yearly at $99 until cancelled.",
+    graceDays: 0,
+  },
+  monthly: {
+    id: "monthly",
+    name: "Vector monthly license",
+    priceUsdCents: 1_000,
+    interval: "month",
+    description: "Vector desktop, updates, and one active computer for one month.",
+    renewalText: "Renews monthly at $10 until cancelled.",
+    graceDays: 3,
+  },
+}
+
+const DEFAULT_PLAN: BillingPlan = "annual"
 const OFFLINE_GRACE_DAYS = 7
 const DOWNLOAD_TOKEN_SECONDS = 60 * 30
+const DAY_SECONDS = 24 * 60 * 60
 
 type StripeCustomer = Stripe.Customer
 type StripeSubscription = Stripe.Subscription
 
 export type PublicLicenseStatus = {
   access: boolean
-  state: "active" | "canceling" | "expired" | "past_due"
+  state: "active" | "canceling" | "grace" | "expired" | "past_due"
+  message?: string
   email: string
   expiresAt: string
+  graceEndsAt?: string
   cancelAtPeriodEnd: boolean
+  plan: BillingPlan
+  interval: "year" | "month"
+  priceUsd: number
   deviceName?: string
   devicePlatform?: string
   lastFour: string
@@ -38,10 +76,28 @@ export function billingConfiguration() {
     webhook,
     licenseSecret,
     email,
-    priceUsd: PRICE_USD_CENTS / 100,
-    interval: "year" as const,
+    priceUsd: BILLING_PLANS.annual.priceUsdCents / 100,
+    interval: BILLING_PLANS.annual.interval,
+    plans: Object.values(BILLING_PLANS).map((plan) => ({
+      id: plan.id,
+      priceUsd: plan.priceUsdCents / 100,
+      interval: plan.interval,
+      graceDays: plan.graceDays,
+    })),
     activeDevices: 1,
   }
+}
+
+function isBillingPlan(value: unknown): value is BillingPlan {
+  return value === "annual" || value === "monthly"
+}
+
+function requiredBillingPlan(value: unknown) {
+  if (value === undefined || value === null || value === "") return BILLING_PLANS[DEFAULT_PLAN]
+  if (!isBillingPlan(value)) {
+    throw new ApiError(400, "PLAN_INVALID", "Choose the monthly or annual Vector plan.")
+  }
+  return BILLING_PLANS[value]
 }
 
 function required(name: string) {
@@ -147,7 +203,8 @@ function customerFromActivationToken(token: string) {
   try {
     customer = fromBase64url(encodedCustomer)
   } catch {}
-  if (!customer.startsWith("cus_")) throw new ApiError(401, "ACTIVATION_INVALID", "This Vector activation is not valid.")
+  if (!customer.startsWith("cus_"))
+    throw new ApiError(401, "ACTIVATION_INVALID", "This Vector activation is not valid.")
   return customer
 }
 
@@ -193,24 +250,55 @@ function periodEnd(subscription: StripeSubscription) {
   return periods.length ? Math.min(...periods) : (subscription.ended_at ?? 0)
 }
 
-function publicStatus(customer: StripeCustomer, subscription: StripeSubscription): PublicLicenseStatus {
+function planForSubscription(subscription: StripeSubscription, customer?: StripeCustomer) {
+  const stored = subscription.metadata.vector_plan || customer?.metadata.vector_plan
+  if (isBillingPlan(stored)) return BILLING_PLANS[stored]
+  const interval = subscription.items.data[0]?.price.recurring?.interval
+  return interval === "month" ? BILLING_PLANS.monthly : BILLING_PLANS.annual
+}
+
+function metadataTimestamp(value: string | undefined) {
+  const timestamp = Number(value)
+  return Number.isFinite(timestamp) && timestamp > 0 ? timestamp : undefined
+}
+
+export function publicStatus(customer: StripeCustomer, subscription: StripeSubscription): PublicLicenseStatus {
+  const plan = planForSubscription(subscription, customer)
   const end = periodEnd(subscription)
   const now = Math.floor(Date.now() / 1000)
   const paid = subscription.status === "active" || subscription.status === "trialing"
-  const access = paid && end > now
-  const state: PublicLicenseStatus["state"] = access
-    ? subscription.cancel_at_period_end
-      ? "canceling"
-      : "active"
-    : subscription.status === "past_due" || subscription.status === "unpaid"
-      ? "past_due"
-      : "expired"
+  const failedAt = metadataTimestamp(customer.metadata.vector_payment_failed_at)
+  const graceEnd = metadataTimestamp(customer.metadata.vector_payment_grace_ends_at)
+  const paymentGrace = plan.id === "monthly" && failedAt && graceEnd ? graceEnd : undefined
+  const inPaymentGrace = Boolean(paymentGrace && paymentGrace > now)
+  const access = inPaymentGrace || (paid && end > now && !failedAt)
+  const state: PublicLicenseStatus["state"] = inPaymentGrace
+    ? "grace"
+    : failedAt && plan.id === "monthly" && paymentGrace && paymentGrace <= now
+      ? "expired"
+      : access
+        ? subscription.cancel_at_period_end
+          ? "canceling"
+          : "active"
+        : subscription.status === "past_due" || subscription.status === "unpaid"
+          ? "past_due"
+          : "expired"
+  const message = inPaymentGrace
+    ? `Your monthly renewal payment failed. Update your payment method by ${new Date(paymentGrace! * 1000).toLocaleDateString("en-US", { dateStyle: "long" })} to keep Vector active.`
+    : failedAt && plan.id === "monthly" && paymentGrace && paymentGrace <= now
+      ? "Your three-day payment grace period ended. Choose a Vector plan to reactivate this computer."
+      : undefined
   return {
     access,
     state,
+    message,
     email: customer.email ?? customer.metadata.vector_email ?? "",
     expiresAt: end ? new Date(end * 1000).toISOString() : new Date(0).toISOString(),
+    graceEndsAt: paymentGrace ? new Date(paymentGrace * 1000).toISOString() : undefined,
     cancelAtPeriodEnd: subscription.cancel_at_period_end,
+    plan: plan.id,
+    interval: plan.interval,
+    priceUsd: plan.priceUsdCents / 100,
     deviceName: customer.metadata.vector_device_name || undefined,
     devicePlatform: customer.metadata.vector_device_platform || undefined,
     lastFour: customer.metadata.vector_license_last4 || "",
@@ -229,11 +317,14 @@ async function sendPurchaseEmail(input: {
   licenseKey: string
   expiresAt: string
   checkoutSession: string
+  plan: BillingPlan
 }) {
   if (!process.env.RESEND_API_KEY || !process.env.VECTOR_PURCHASE_EMAIL_FROM) {
     throw new ApiError(503, "EMAIL_NOT_CONFIGURED", "Vector purchase email is not configured.")
   }
   const resend = new Resend(process.env.RESEND_API_KEY)
+  const plan = BILLING_PLANS[input.plan]
+  const renewal = plan.interval === "month" ? "monthly" : "yearly"
   const result = await resend.emails.send(
     {
       from: process.env.VECTOR_PURCHASE_EMAIL_FROM,
@@ -247,7 +338,7 @@ async function sendPurchaseEmail(input: {
         "",
         `Download Vector: ${publicOrigin()}/license/success?session_id=${encodeURIComponent(input.checkoutSession)}`,
         "",
-        "Your subscription renews yearly unless you cancel. One active computer is allowed at a time. Keep this key private.",
+        `Your subscription renews ${renewal} unless you cancel. One active computer is allowed at a time. Keep this key private.`,
       ].join("\n"),
       html: `
         <div style="font-family:Inter,Arial,sans-serif;max-width:620px;margin:auto;padding:32px;color:#17151b">
@@ -255,7 +346,7 @@ async function sendPurchaseEmail(input: {
           <h1 style="font-size:26px;margin:24px 0 8px">Your Vector license is ready</h1>
           <p style="color:#605a68;line-height:1.6">Thanks for purchasing Vector. Save this license key somewhere private.</p>
           <div style="margin:24px 0;padding:18px;border:1px solid #ded8e8;border-radius:12px;background:#f7f4fb;font-family:ui-monospace,monospace;font-size:16px;word-break:break-all">${input.licenseKey}</div>
-          <p style="color:#605a68">Current access ends ${new Date(input.expiresAt).toLocaleDateString("en-US", { dateStyle: "long" })}. Your subscription renews yearly unless cancelled.</p>
+          <p style="color:#605a68">Current access ends ${new Date(input.expiresAt).toLocaleDateString("en-US", { dateStyle: "long" })}. Your subscription renews ${renewal} unless cancelled.</p>
           <a href="${publicOrigin()}/license/success?session_id=${encodeURIComponent(input.checkoutSession)}" style="display:inline-block;margin-top:16px;padding:12px 18px;border-radius:10px;background:#8b5cf6;color:white;text-decoration:none;font-weight:600">Download Vector</a>
           <p style="margin-top:28px;color:#77717d;font-size:13px;line-height:1.5">One active computer is allowed at a time. Do not share or redistribute your license key.</p>
         </div>`,
@@ -265,7 +356,8 @@ async function sendPurchaseEmail(input: {
   if (result.error) throw new Error(result.error.message)
 }
 
-export async function createCheckout(email?: string) {
+export async function createCheckout(email?: string, selectedPlan?: BillingPlan) {
+  const plan = requiredBillingPlan(selectedPlan)
   const config = billingConfiguration()
   if (!config.available) throw new ApiError(503, "BILLING_NOT_CONFIGURED", "Vector purchases are not available yet.")
   const stripe = stripeClient()
@@ -279,26 +371,26 @@ export async function createCheckout(email?: string) {
         quantity: 1,
         price_data: {
           currency: "usd",
-          unit_amount: PRICE_USD_CENTS,
-          recurring: { interval: "year" },
+          unit_amount: plan.priceUsdCents,
+          recurring: { interval: plan.interval },
           product_data: {
-            name: PRODUCT_NAME,
-            description: "Vector desktop, updates, and one active computer for one year.",
-            metadata: { vector_product: "desktop" },
+            name: plan.name,
+            description: plan.description,
+            metadata: { vector_product: "desktop", vector_plan: plan.id },
           },
         },
       },
     ],
     subscription_data: {
-      description: "Vector annual desktop license",
-      metadata: { vector_product: "desktop", vector_license_version: "1" },
+      description: plan.name,
+      metadata: { vector_product: "desktop", vector_license_version: "1", vector_plan: plan.id },
     },
-    metadata: { vector_product: "desktop", vector_license_version: "1" },
+    metadata: { vector_product: "desktop", vector_license_version: "1", vector_plan: plan.id },
     success_url: `${publicOrigin()}/license/success?session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${publicOrigin()}/download?checkout=cancelled`,
     custom_text: {
       submit: {
-        message: "Renews yearly at $99 until cancelled. One active computer per license.",
+        message: `${plan.renewalText} One active computer per license.`,
       },
     },
   })
@@ -307,12 +399,16 @@ export async function createCheckout(email?: string) {
 }
 
 export async function provisionCheckout(session: Stripe.Checkout.Session, options?: { sendEmail?: boolean }) {
-  if (session.mode !== "subscription" || (session.payment_status !== "paid" && session.payment_status !== "no_payment_required")) {
+  if (
+    session.mode !== "subscription" ||
+    (session.payment_status !== "paid" && session.payment_status !== "no_payment_required")
+  ) {
     throw new ApiError(402, "PAYMENT_REQUIRED", "This Vector purchase has not been paid.")
   }
   const stripe = stripeClient()
   const customer = await customerRecord(stripe, customerID(session.customer))
   const subscription = await stripe.subscriptions.retrieve(subscriptionID(session.subscription))
+  const plan = planForSubscription(subscription)
   const licenseKey = licenseKeyFor(customer.id, session.id)
   const status = publicStatus(customer, subscription)
   const email = session.customer_details?.email ?? customer.email
@@ -322,6 +418,7 @@ export async function provisionCheckout(session: Stripe.Checkout.Session, option
     ...customer.metadata,
     vector_product: "desktop",
     vector_license_version: "1",
+    vector_plan: plan.id,
     vector_checkout_session_id: session.id,
     vector_license_hash: digest(licenseKey),
     vector_license_last4: licenseKey.slice(-4),
@@ -336,11 +433,18 @@ export async function provisionCheckout(session: Stripe.Checkout.Session, option
       vector_product: "desktop",
       vector_license_version: "1",
       vector_customer_id: customer.id,
+      vector_plan: plan.id,
     },
   })
 
   if (options?.sendEmail !== false && updated.metadata.vector_purchase_email_sent !== session.id) {
-    await sendPurchaseEmail({ email, licenseKey, expiresAt: status.expiresAt, checkoutSession: session.id })
+    await sendPurchaseEmail({
+      email,
+      licenseKey,
+      expiresAt: status.expiresAt,
+      checkoutSession: session.id,
+      plan: plan.id,
+    })
     await updateCustomer(stripe, customer.id, {
       metadata: { ...updated.metadata, vector_purchase_email_sent: session.id },
     })
@@ -382,7 +486,10 @@ async function activatedCustomer(token: string) {
   const id = customerFromActivationToken(token)
   const stripe = stripeClient()
   const customer = await customerRecord(stripe, id)
-  if (!customer.metadata.vector_activation_hash || !safeEqual(customer.metadata.vector_activation_hash, digest(token))) {
+  if (
+    !customer.metadata.vector_activation_hash ||
+    !safeEqual(customer.metadata.vector_activation_hash, digest(token))
+  ) {
     throw new ApiError(401, "ACTIVATION_INVALID", "This Vector activation is no longer valid.")
   }
   return { stripe, customer, subscription: await subscriptionForCustomer(stripe, customer) }
@@ -398,13 +505,18 @@ export async function activateLicense(input: {
   const deviceId = requiredText(input?.deviceId, "DEVICE_INVALID", "Vector could not identify this computer.", 64)
   const deviceName = requiredText(input?.deviceName, "DEVICE_INVALID", "Vector could not identify this computer.", 80)
   const platform = requiredText(input?.platform, "DEVICE_INVALID", "Vector could not identify this computer.", 40)
-  if (!/^[a-f0-9]{64}$/i.test(deviceId)) throw new ApiError(400, "DEVICE_INVALID", "Vector could not identify this computer.")
+  if (!/^[a-f0-9]{64}$/i.test(deviceId))
+    throw new ApiError(400, "DEVICE_INVALID", "Vector could not identify this computer.")
   const record = await licensedCustomer(licenseKey)
   const status = publicStatus(record.customer, record.subscription)
   if (!status.access) throw new ApiError(402, "LICENSE_EXPIRED", "This Vector subscription is not currently active.")
   const bound = record.customer.metadata.vector_device_hash
   if (bound && bound !== deviceId) {
-    throw new ApiError(409, "DEVICE_LIMIT", "This license is already active on another computer. Deactivate that computer first.")
+    throw new ApiError(
+      409,
+      "DEVICE_LIMIT",
+      "This license is already active on another computer. Deactivate that computer first.",
+    )
   }
   const token = activationToken(record.customer.id)
   const customer = await updateCustomer(record.stripe, record.customer.id, {
@@ -422,7 +534,12 @@ export async function activateLicense(input: {
 }
 
 export async function activationStatus(input: { activationToken: string; deviceId: string }) {
-  const activation = requiredText(input?.activationToken, "ACTIVATION_INVALID", "This Vector activation is not valid.", 512)
+  const activation = requiredText(
+    input?.activationToken,
+    "ACTIVATION_INVALID",
+    "This Vector activation is not valid.",
+    512,
+  )
   const deviceId = requiredText(input?.deviceId, "DEVICE_INVALID", "Vector could not identify this computer.", 64)
   const record = await activatedCustomer(activation)
   if (record.customer.metadata.vector_device_hash !== deviceId) {
@@ -435,7 +552,12 @@ export async function activationStatus(input: { activationToken: string; deviceI
 }
 
 export async function deactivateLicense(input: { activationToken: string; deviceId: string }) {
-  const activation = requiredText(input?.activationToken, "ACTIVATION_INVALID", "This Vector activation is not valid.", 512)
+  const activation = requiredText(
+    input?.activationToken,
+    "ACTIVATION_INVALID",
+    "This Vector activation is not valid.",
+    512,
+  )
   const deviceId = requiredText(input?.deviceId, "DEVICE_INVALID", "Vector could not identify this computer.", 64)
   const record = await activatedCustomer(activation)
   if (record.customer.metadata.vector_device_hash !== deviceId) {
@@ -455,9 +577,15 @@ export async function deactivateLicense(input: { activationToken: string; device
 }
 
 export async function setCancellation(input: { activationToken: string; deviceId: string; cancel: boolean }) {
-  const activation = requiredText(input?.activationToken, "ACTIVATION_INVALID", "This Vector activation is not valid.", 512)
+  const activation = requiredText(
+    input?.activationToken,
+    "ACTIVATION_INVALID",
+    "This Vector activation is not valid.",
+    512,
+  )
   const deviceId = requiredText(input?.deviceId, "DEVICE_INVALID", "Vector could not identify this computer.", 64)
-  if (typeof input?.cancel !== "boolean") throw new ApiError(400, "CANCELLATION_INVALID", "Choose whether annual renewal should be cancelled.")
+  if (typeof input?.cancel !== "boolean")
+    throw new ApiError(400, "CANCELLATION_INVALID", "Choose whether renewal should be cancelled.")
   const record = await activatedCustomer(activation)
   if (record.customer.metadata.vector_device_hash !== deviceId) {
     throw new ApiError(401, "DEVICE_MISMATCH", "This activation belongs to another computer.")
@@ -469,7 +597,12 @@ export async function setCancellation(input: { activationToken: string; deviceId
 }
 
 export async function billingPortal(input: { activationToken: string; deviceId: string }) {
-  const activation = requiredText(input?.activationToken, "ACTIVATION_INVALID", "This Vector activation is not valid.", 512)
+  const activation = requiredText(
+    input?.activationToken,
+    "ACTIVATION_INVALID",
+    "This Vector activation is not valid.",
+    512,
+  )
   const deviceId = requiredText(input?.deviceId, "DEVICE_INVALID", "Vector could not identify this computer.", 64)
   const record = await activatedCustomer(activation)
   if (record.customer.metadata.vector_device_hash !== deviceId) {
@@ -511,23 +644,119 @@ export async function consumeDownload(token: string, target: string) {
       vector_download_target: target,
     },
   })
-  const base = (process.env.VECTOR_DOWNLOAD_BASE_URL || "https://42qryducihx01gl0.public.blob.vercel-storage.com/releases/vector-downloads").replace(/\/$/, "")
+  const base = (
+    process.env.VECTOR_DOWNLOAD_BASE_URL ||
+    "https://42qryducihx01gl0.public.blob.vercel-storage.com/releases/vector-downloads"
+  ).replace(/\/$/, "")
   return `${base}/${file}`
 }
 
 export async function syncSubscription(subscription: StripeSubscription) {
   const stripe = stripeClient()
   const customer = await customerRecord(stripe, customerID(subscription.customer))
+  const plan = planForSubscription(subscription, customer)
   const status = publicStatus(customer, subscription)
   await updateCustomer(stripe, customer.id, {
     metadata: {
       ...customer.metadata,
       vector_subscription_id: subscription.id,
+      vector_plan: plan.id,
       vector_subscription_status: subscription.status,
       vector_period_end: `${Math.floor(new Date(status.expiresAt).getTime() / 1000)}`,
       vector_cancel_at_period_end: subscription.cancel_at_period_end ? "true" : "false",
     },
   })
+}
+
+function invoiceSubscriptionID(invoice: Stripe.Invoice) {
+  const legacy = (invoice as Stripe.Invoice & { subscription?: string | StripeSubscription | null }).subscription
+  const subscription = invoice.parent?.subscription_details?.subscription ?? legacy
+  return typeof subscription === "string" ? subscription : subscription?.id
+}
+
+async function sendPaymentFailureEmail(input: {
+  customer: StripeCustomer
+  invoice: Stripe.Invoice
+  plan: BillingPlanDefinition
+  graceEndsAt?: number
+}) {
+  if (!process.env.RESEND_API_KEY || !process.env.VECTOR_PURCHASE_EMAIL_FROM) {
+    throw new ApiError(503, "EMAIL_NOT_CONFIGURED", "Vector payment email is not configured.")
+  }
+  const email = input.invoice.customer_email || input.customer.email || input.customer.metadata.vector_email
+  if (!email) throw new ApiError(409, "EMAIL_MISSING", "Vector could not find the customer email for this payment.")
+  const actionUrl = input.invoice.hosted_invoice_url || `${publicOrigin()}/download?billing=past-due`
+  const graceCopy = input.graceEndsAt
+    ? `Vector remains active until ${new Date(input.graceEndsAt * 1000).toLocaleDateString("en-US", { dateStyle: "long" })}. After that three-day grace period, the license expires until payment is restored.`
+    : "Update your payment method to restore uninterrupted Vector access."
+  const resend = new Resend(process.env.RESEND_API_KEY)
+  const result = await resend.emails.send(
+    {
+      from: process.env.VECTOR_PURCHASE_EMAIL_FROM,
+      to: email,
+      subject: "Action required: your Vector payment failed",
+      text: [
+        `We could not process the latest payment for your ${input.plan.name}.`,
+        "",
+        graceCopy,
+        "",
+        `Fix payment: ${actionUrl}`,
+        "",
+        "Vector will restore normal access automatically after Stripe confirms payment.",
+      ].join("\n"),
+      html: `
+        <div style="font-family:Inter,Arial,sans-serif;max-width:620px;margin:auto;padding:32px;color:#17151b">
+          <img src="${publicOrigin()}/vector-logo.png" width="42" height="42" alt="Vector" style="border-radius:10px" />
+          <h1 style="font-size:26px;margin:24px 0 8px">Your Vector payment needs attention</h1>
+          <p style="color:#605a68;line-height:1.6">We could not process the latest payment for your ${input.plan.name}. ${graceCopy}</p>
+          <a href="${actionUrl}" style="display:inline-block;margin-top:16px;padding:12px 18px;border-radius:10px;background:#8b5cf6;color:white;text-decoration:none;font-weight:600">Update payment</a>
+          <p style="margin-top:28px;color:#77717d;font-size:13px;line-height:1.5">Vector restores normal access automatically after Stripe confirms payment.</p>
+        </div>`,
+    },
+    { idempotencyKey: `vector-payment-failed/${input.invoice.id}/${input.invoice.attempt_count}` },
+  )
+  if (result.error) throw new Error(result.error.message)
+}
+
+async function recordPaymentFailure(invoice: Stripe.Invoice, eventCreated: number) {
+  const id = invoiceSubscriptionID(invoice)
+  if (!id) return
+  const stripe = stripeClient()
+  const subscription = await stripe.subscriptions.retrieve(id)
+  const customer = await customerRecord(stripe, customerID(subscription.customer))
+  const plan = planForSubscription(subscription, customer)
+  const sameInvoice = customer.metadata.vector_payment_failed_invoice === invoice.id
+  const existingFailure = sameInvoice ? metadataTimestamp(customer.metadata.vector_payment_failed_at) : undefined
+  const failedAt = existingFailure ?? eventCreated
+  const graceEndsAt = plan.graceDays ? failedAt + plan.graceDays * DAY_SECONDS : undefined
+  await updateCustomer(stripe, customer.id, {
+    metadata: {
+      ...customer.metadata,
+      vector_plan: plan.id,
+      vector_payment_failed_at: `${failedAt}`,
+      vector_payment_failed_invoice: invoice.id,
+      vector_payment_grace_ends_at: graceEndsAt ? `${graceEndsAt}` : "",
+    },
+  })
+  await sendPaymentFailureEmail({ customer, invoice, plan, graceEndsAt })
+  await syncSubscription(subscription)
+}
+
+async function clearPaymentFailure(invoice: Stripe.Invoice) {
+  const id = invoiceSubscriptionID(invoice)
+  if (!id) return
+  const stripe = stripeClient()
+  const subscription = await stripe.subscriptions.retrieve(id)
+  const customer = await customerRecord(stripe, customerID(subscription.customer))
+  await updateCustomer(stripe, customer.id, {
+    metadata: {
+      ...customer.metadata,
+      vector_payment_failed_at: "",
+      vector_payment_failed_invoice: "",
+      vector_payment_grace_ends_at: "",
+    },
+  })
+  await syncSubscription(subscription)
 }
 
 export async function handleStripeEvent(event: Stripe.Event) {
@@ -539,9 +768,11 @@ export async function handleStripeEvent(event: Stripe.Event) {
     await syncSubscription(event.data.object)
     return
   }
-  if (event.type === "invoice.paid" || event.type === "invoice.payment_failed") {
-    const invoice = event.data.object as Stripe.Invoice & { subscription?: string | StripeSubscription | null }
-    const id = typeof invoice.subscription === "string" ? invoice.subscription : invoice.subscription?.id
-    if (id) await syncSubscription(await stripeClient().subscriptions.retrieve(id))
+  if (event.type === "invoice.payment_failed" || event.type === "invoice.payment_action_required") {
+    await recordPaymentFailure(event.data.object, event.created)
+    return
+  }
+  if (event.type === "invoice.paid" || event.type === "invoice.payment_succeeded") {
+    await clearPaymentFailure(event.data.object)
   }
 }
