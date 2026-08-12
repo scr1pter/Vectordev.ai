@@ -26,6 +26,31 @@ const customer = (metadata: Record<string, string> = {}) =>
   }) as unknown as Stripe.Customer
 
 describe("Vector license status", () => {
+  test("grants founder access without creating a fake Stripe subscription", () => {
+    expect(
+      entitlementFor(null, {
+        user_id: "founder_1",
+        label: "founder",
+        expires_at: null,
+      }),
+    ).toMatchObject({
+      access: true,
+      state: "active",
+      plan: "founder",
+      cancelAtPeriodEnd: false,
+    })
+  })
+
+  test("expires a time-limited internal access grant", () => {
+    expect(
+      entitlementFor(null, {
+        user_id: "tester_1",
+        label: "beta",
+        expires_at: new Date(Date.now() - 60_000).toISOString(),
+      }),
+    ).toMatchObject({ access: false, state: "none" })
+  })
+
   test("keeps the existing annual plan active", () => {
     const now = Math.floor(Date.now() / 1_000)
     expect(

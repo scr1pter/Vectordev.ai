@@ -1,14 +1,16 @@
 /** @jsxImportSource react */
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react"
 import type { Session } from "@supabase/supabase-js"
-import { Bot, Braces, Cloud, CreditCard, Download, KeyRound, LogIn, LogOut, ShieldCheck } from "lucide-react"
+import { Bot, Braces, Cloud, CreditCard, Home, KeyRound, LogIn, LogOut, Settings, ShieldCheck } from "lucide-react"
 import { AccountView } from "./account-view"
 import { CloudAgentsWorkspace } from "./cloud-agents-workspace"
+import { MatrixField } from "./matrix-field"
 import { PlayParkView } from "./play-park-view"
 import { apiFetch, platformAuth, platformConfig, type PlatformConfig } from "./platform-client"
+import { SettingsView } from "./settings-view"
 import "./platform.css"
 
-type Mode = "account" | "agents" | "play-park" | "downloads"
+type Mode = "account" | "agents" | "play-park" | "downloads" | "settings"
 
 type EntitlementStatus = {
   entitlement: {
@@ -21,11 +23,28 @@ type EntitlementStatus = {
 }
 
 const destinations: Array<{ id: Mode; label: string; href: string; icon: typeof Cloud }> = [
+  { id: "account", label: "Overview", href: "/account", icon: Home },
   { id: "agents", label: "Cloud Agents", href: "/cloud-agents", icon: Bot },
-  { id: "play-park", label: "Vector Play Park", href: "/api-studio", icon: Braces },
-  { id: "downloads", label: "Downloads", href: "/download", icon: Download },
-  { id: "account", label: "Account", href: "/account", icon: KeyRound },
+  { id: "play-park", label: "API Platform", href: "/api-studio", icon: Braces },
+  { id: "settings", label: "Settings", href: "/settings", icon: Settings },
 ]
+
+const modeTitles: Record<Mode, string> = {
+  account: "Vector Account",
+  agents: "Cloud Agents",
+  "play-park": "Vector API Platform",
+  downloads: "Downloads",
+  settings: "Settings",
+}
+
+function PlatformBackdrop(props: { children: ReactNode }) {
+  return (
+    <div className="platform-runtime">
+      <MatrixField />
+      {props.children}
+    </div>
+  )
+}
 
 function SignIn(props: { config?: PlatformConfig; error?: string; onSession: (session: Session) => void }) {
   const [intent, setIntent] = useState<"signin" | "signup">("signin")
@@ -94,157 +113,168 @@ function SignIn(props: { config?: PlatformConfig; error?: string; onSession: (se
 
   if (props.error || (props.config && !props.config.auth.available)) {
     return (
-      <div className="platform-gate">
-        <img src="/vector-logo.png" alt="" />
-        <span className="platform-kicker">Account service</span>
-        <h1>Vector accounts are being configured.</h1>
-        <p>
-          {props.error ||
-            "The application is installed correctly, but this deployment is missing its account environment variables."}
-        </p>
-        <a href="/">Return to Vector</a>
-      </div>
+      <PlatformBackdrop>
+        <div className="platform-gate">
+          <img src="/vector-logo.png" alt="" />
+          <span className="platform-kicker">Account service</span>
+          <h1>Vector accounts are being configured.</h1>
+          <p>
+            {props.error ||
+              "The application is installed correctly, but this deployment is missing its account environment variables."}
+          </p>
+          <a href="/">Return to Vector</a>
+        </div>
+      </PlatformBackdrop>
     )
   }
 
   return (
-    <div className="platform-auth-layout">
-      <section className="platform-auth-copy">
-        <a className="platform-brand" href="/">
-          <img src="/vector-logo.png" alt="" />
-          <span>Vector</span>
-        </a>
-        <span className="platform-kicker">One account. Every Vector surface.</span>
-        <h1>Build locally. Run continuously in the cloud.</h1>
-        <p>
-          Use the desktop workspace, isolated cloud agents, the API platform, and every supported installer through one
-          subscription.
-        </p>
-        <div className="platform-auth-proof">
-          <span>
-            <ShieldCheck size={16} /> Subscription and license stay synchronized
-          </span>
-          <span>
-            <Cloud size={16} /> Cloud runs remain isolated by workspace
-          </span>
-          <span>
-            <KeyRound size={16} /> Saved connection credentials are encrypted at rest
-          </span>
-        </div>
-      </section>
-      <form className="platform-auth-form" onSubmit={submit}>
-        <div className="platform-segmented" aria-label="Account action">
-          <button type="button" data-active={intent === "signin"} onClick={() => setIntent("signin")}>
-            Sign in
-          </button>
-          <button type="button" data-active={intent === "signup"} onClick={() => setIntent("signup")}>
-            Create account
-          </button>
-        </div>
-        <div className="platform-auth-heading">
-          <LogIn size={18} />
-          <div>
-            <strong>{intent === "signin" ? "Welcome back" : "Create your Vector account"}</strong>
+    <PlatformBackdrop>
+      <div className="platform-auth-layout">
+        <section className="platform-auth-copy">
+          <a className="platform-brand" href="/">
+            <img src="/vector-logo.png" alt="" />
+            <span>Vector</span>
+          </a>
+          <span className="platform-kicker">One account. Every Vector surface.</span>
+          <h1>Build locally. Run continuously in the cloud.</h1>
+          <p>
+            Use the desktop workspace, isolated cloud agents, the API platform, and every supported installer through
+            one subscription.
+          </p>
+          <div className="platform-auth-proof">
             <span>
-              {intent === "signin"
-                ? "Continue where you left off."
-                : "Your subscription unlocks every product surface."}
+              <ShieldCheck size={16} /> Subscription and license stay synchronized
+            </span>
+            <span>
+              <Cloud size={16} /> Cloud runs remain isolated by workspace
+            </span>
+            <span>
+              <KeyRound size={16} /> Saved connection credentials are encrypted at rest
             </span>
           </div>
-        </div>
-        <label>
-          Email
-          <input
-            type="email"
-            autoComplete="email"
-            required
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-          />
-        </label>
-        <label>
-          Password
-          <input
-            type="password"
-            autoComplete={intent === "signin" ? "current-password" : "new-password"}
-            minLength={8}
-            required
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-          />
-          {intent === "signin" && (
-            <button className="platform-reset-link" type="button" onClick={resetPassword} disabled={busy}>
-              Forgot password?
+        </section>
+        <form className="platform-auth-form" onSubmit={submit}>
+          <div className="platform-segmented" aria-label="Account action">
+            <button type="button" data-active={intent === "signin"} onClick={() => setIntent("signin")}>
+              Sign in
             </button>
+            <button type="button" data-active={intent === "signup"} onClick={() => setIntent("signup")}>
+              Create account
+            </button>
+          </div>
+          <div className="platform-auth-heading">
+            <LogIn size={18} />
+            <div>
+              <strong>{intent === "signin" ? "Welcome back" : "Create your Vector account"}</strong>
+              <span>
+                {intent === "signin"
+                  ? "Continue where you left off."
+                  : "Your subscription unlocks every product surface."}
+              </span>
+            </div>
+          </div>
+          <label>
+            Email
+            <input
+              type="email"
+              autoComplete="email"
+              required
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+            />
+          </label>
+          <label>
+            Password
+            <input
+              type="password"
+              autoComplete={intent === "signin" ? "current-password" : "new-password"}
+              minLength={8}
+              required
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+            />
+            {intent === "signin" && (
+              <button className="platform-reset-link" type="button" onClick={resetPassword} disabled={busy}>
+                Forgot password?
+              </button>
+            )}
+          </label>
+          <button className="platform-primary" type="submit" disabled={busy}>
+            {busy ? "Working..." : intent === "signin" ? "Sign in" : "Create account"}
+          </button>
+          {oauthProviders.length > 0 && (
+            <>
+              <div className="platform-divider">
+                <span>or continue with</span>
+              </div>
+              <div className="platform-oauth">
+                {oauthProviders.map((provider) => (
+                  <button key={provider} type="button" onClick={() => oauth(provider)} disabled={busy}>
+                    {provider === "github" ? "GitHub" : "Google"}
+                  </button>
+                ))}
+              </div>
+            </>
           )}
-        </label>
-        <button className="platform-primary" type="submit" disabled={busy}>
-          {busy ? "Working..." : intent === "signin" ? "Sign in" : "Create account"}
-        </button>
-        {oauthProviders.length > 0 && (
-          <>
-            <div className="platform-divider">
-              <span>or continue with</span>
-            </div>
-            <div className="platform-oauth">
-              {oauthProviders.map((provider) => (
-                <button key={provider} type="button" onClick={() => oauth(provider)} disabled={busy}>
-                  {provider === "github" ? "GitHub" : "Google"}
-                </button>
-              ))}
-            </div>
-          </>
-        )}
-        {message && <p className="platform-form-message">{message}</p>}
-        <small>
-          By continuing, you agree to Vector's license, subscription terms, privacy policy, and acceptable-use rules.
-        </small>
-      </form>
-    </div>
+          {message && <p className="platform-form-message">{message}</p>}
+          <small>
+            By continuing, you agree to Vector's license, subscription terms, privacy policy, and acceptable-use rules.
+          </small>
+        </form>
+      </div>
+    </PlatformBackdrop>
   )
 }
 
 function ProductShell(props: { mode: Mode; session: Session; children: ReactNode }) {
   const email = props.session.user.email || "Vector account"
   return (
-    <div className="platform-product">
-      <aside className="platform-product-nav">
-        <a className="platform-brand" href="/">
-          <img src="/vector-logo.png" alt="" />
-          <span>Vector</span>
-        </a>
-        <nav>
-          {destinations.map((destination) => {
-            const Icon = destination.icon
-            return (
-              <a key={destination.id} href={destination.href} data-active={props.mode === destination.id}>
-                <Icon size={16} />
-                <span>{destination.label}</span>
-              </a>
-            )
-          })}
-        </nav>
-        <div className="platform-user">
-          <span>{email.slice(0, 1).toUpperCase()}</span>
-          <div>
-            <strong>{email}</strong>
-            <small>Vector member</small>
+    <PlatformBackdrop>
+      <div className="platform-product">
+        <aside className="platform-product-nav">
+          <a className="platform-brand" href="/">
+            <img src="/vector-logo.png" alt="" />
+            <span>Vector</span>
+          </a>
+          <p className="platform-nav-label">Your platform</p>
+          <nav>
+            {destinations.map((destination) => {
+              const Icon = destination.icon
+              return (
+                <a key={destination.id} href={destination.href} data-active={props.mode === destination.id}>
+                  <Icon size={16} />
+                  <span>{destination.label}</span>
+                </a>
+              )
+            })}
+          </nav>
+          <a className="platform-nav-home" href="/">
+            <Cloud size={15} />
+            <span>Vector product site</span>
+          </a>
+          <div className="platform-user">
+            <span>{email.slice(0, 1).toUpperCase()}</span>
+            <div>
+              <strong>{email}</strong>
+              <small>Vector member</small>
+            </div>
+            <button
+              type="button"
+              title="Sign out"
+              onClick={() =>
+                platformAuth()
+                  .then((auth) => auth.auth.signOut())
+                  .then(() => location.assign("/"))
+              }
+            >
+              <LogOut size={15} />
+            </button>
           </div>
-          <button
-            type="button"
-            title="Sign out"
-            onClick={() =>
-              platformAuth()
-                .then((auth) => auth.auth.signOut())
-                .then(() => location.assign("/"))
-            }
-          >
-            <LogOut size={15} />
-          </button>
-        </div>
-      </aside>
-      <main className="platform-product-main">{props.children}</main>
-    </div>
+        </aside>
+        <main className="platform-product-main">{props.children}</main>
+      </div>
+    </PlatformBackdrop>
   )
 }
 
@@ -281,7 +311,7 @@ export function PlatformShell(props: { mode: Mode }) {
   const [config, setConfig] = useState<PlatformConfig>()
   const [account, setAccount] = useState<EntitlementStatus>()
   const [error, setError] = useState("")
-  const title = useMemo(() => destinations.find((item) => item.id === props.mode)?.label || "Vector", [props.mode])
+  const title = useMemo(() => modeTitles[props.mode], [props.mode])
 
   useEffect(() => {
     document.title = `${title} — Vector`
@@ -304,7 +334,7 @@ export function PlatformShell(props: { mode: Mode }) {
   }, [title])
 
   useEffect(() => {
-    if (!session || props.mode === "account" || props.mode === "downloads") {
+    if (!session || props.mode === "account" || props.mode === "downloads" || props.mode === "settings") {
       setAccount(undefined)
       return
     }
@@ -323,10 +353,12 @@ export function PlatformShell(props: { mode: Mode }) {
 
   if (session === undefined && !error)
     return (
-      <div className="platform-loading">
-        <img src="/vector-logo.png" alt="" />
-        <span>Opening Vector...</span>
-      </div>
+      <PlatformBackdrop>
+        <div className="platform-loading">
+          <img src="/vector-logo.png" alt="" />
+          <span>Opening Vector...</span>
+        </div>
+      </PlatformBackdrop>
     )
   if (!session) return <SignIn config={config} error={error} onSession={setSession} />
   const protectedWorkspace = props.mode === "agents" || props.mode === "play-park"
@@ -346,6 +378,7 @@ export function PlatformShell(props: { mode: Mode }) {
       {(props.mode === "account" || props.mode === "downloads") && (
         <AccountView session={session} config={config} downloadsOnly={props.mode === "downloads"} />
       )}
+      {props.mode === "settings" && <SettingsView session={session} config={config} />}
       {error && protectedWorkspace && (
         <div className="platform-gate">
           <span className="platform-kicker">Account service</span>

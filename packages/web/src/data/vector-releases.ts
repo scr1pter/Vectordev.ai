@@ -366,4 +366,10 @@ export const release117: VectorRelease[] = [
     summary:
       "Introduced unified Vector accounts and entitlements, protected subscription downloads, API Studio and Play Park, isolated Cloud Agent teams, server-managed MCP connections, verified execution evidence, and production-safe billing, quota, and security boundaries.",
   },
+  {
+    version: "1.17.47",
+    title: "One account for every Vector surface",
+    summary:
+      "Rebuilt the signed-in experience as an animated Vector command center, added complete website settings for profile, security, billing, and legal controls, unified product access behind one membership, and introduced secure internal grants for founder and beta accounts without weakening paid subscription enforcement.",
+  },
 ]

@@ -3,17 +3,22 @@ import { useEffect, useState } from "react"
 import type { Session } from "@supabase/supabase-js"
 import {
   Activity,
+  ArrowRight,
   Bot,
   Braces,
   Check,
+  Cloud,
   Copy,
   CreditCard,
   Download,
+  Gauge,
   KeyRound,
   Laptop,
   Link2,
   Plus,
+  Settings,
   Shield,
+  Sparkles,
   Trash2,
   X,
 } from "lucide-react"
@@ -24,7 +29,7 @@ type AccountStatus = {
   entitlement: {
     access: boolean
     state: string
-    plan?: "monthly" | "annual"
+    plan?: "monthly" | "annual" | "founder"
     expiresAt?: string
     graceEndsAt?: string
     cancelAtPeriodEnd: boolean
@@ -98,7 +103,7 @@ export function AccountView(props: { session: Session; config?: PlatformConfig; 
       setStatus(account)
       if (account.entitlement.access && !props.downloadsOnly) {
         const [keyPayload, usagePayload] = await Promise.all([
-          apiFetch("/api/platform/api-keys", props.session),
+          apiFetch<{ keys: ApiKey[] }>("/api/platform/api-keys", props.session),
           apiFetch("/api/platform/usage", props.session),
         ])
         setKeys(keyPayload.keys || [])
@@ -117,7 +122,10 @@ export function AccountView(props: { session: Session; config?: PlatformConfig; 
     const checkoutSession = new URLSearchParams(location.search).get("session_id")
     if (!checkoutSession) return
     setBusy("claim")
-    apiFetch(`/api/billing/claim?session_id=${encodeURIComponent(checkoutSession)}`, props.session)
+    apiFetch<{ licenseKey?: string }>(
+      `/api/billing/claim?session_id=${encodeURIComponent(checkoutSession)}`,
+      props.session,
+    )
       .then((payload) => {
         setLicenseKey(payload.licenseKey || "")
         history.replaceState({}, "", location.pathname)
@@ -135,7 +143,7 @@ export function AccountView(props: { session: Session; config?: PlatformConfig; 
     setBusy(`checkout-${plan}`)
     setMessage("")
     try {
-      const payload = await apiFetch("/api/billing/checkout", props.session, {
+      const payload = await apiFetch<{ url: string }>("/api/billing/checkout", props.session, {
         method: "POST",
         body: JSON.stringify({ plan, termsAccepted }),
       })
@@ -150,7 +158,7 @@ export function AccountView(props: { session: Session; config?: PlatformConfig; 
     setBusy(`download-${target}`)
     setMessage("")
     try {
-      const payload = await apiFetch("/api/account/download", props.session, {
+      const payload = await apiFetch<{ url: string }>("/api/account/download", props.session, {
         method: "POST",
         body: JSON.stringify({ target }),
       })
@@ -164,7 +172,7 @@ export function AccountView(props: { session: Session; config?: PlatformConfig; 
   const portal = async () => {
     setBusy("portal")
     try {
-      const payload = await apiFetch("/api/account/portal", props.session, { method: "POST" })
+      const payload = await apiFetch<{ url: string }>("/api/account/portal", props.session, { method: "POST" })
       location.assign(payload.url)
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Vector could not open billing.")
@@ -176,7 +184,7 @@ export function AccountView(props: { session: Session; config?: PlatformConfig; 
     setBusy("key")
     setNewKey("")
     try {
-      const payload = await apiFetch("/api/platform/api-keys", props.session, {
+      const payload = await apiFetch<{ secret: string }>("/api/platform/api-keys", props.session, {
         method: "POST",
         body: JSON.stringify({
           name: keyName,
@@ -249,6 +257,108 @@ export function AccountView(props: { session: Session; config?: PlatformConfig; 
         )}
       </header>
       <div className="account-content">
+        {!props.downloadsOnly && (
+          <section className="account-command-hero">
+            <div className="account-command-copy">
+              <span className="platform-kicker">
+                <Sparkles size={13} /> Vector command center
+              </span>
+              <h2>One account for every way you build.</h2>
+              <p>
+                Move from the desktop workspace to persistent cloud builders, test the same runtime through the API
+                platform, and keep access, usage, installers, and billing together.
+              </p>
+              <div className="account-command-actions">
+                <a className="platform-primary" href="/cloud-agents">
+                  Open Cloud Agents <ArrowRight size={15} />
+                </a>
+                <a className="platform-secondary" href="/api-studio">
+                  Open API Platform <ArrowRight size={15} />
+                </a>
+              </div>
+            </div>
+            <div className="account-orbit" aria-hidden="true">
+              <span>
+                <img src="/vector-logo.png" alt="" />
+              </span>
+              <i></i>
+              <i></i>
+              <i></i>
+            </div>
+          </section>
+        )}
+        {!props.downloadsOnly && (
+          <section className="account-product-grid" aria-label="Vector products">
+            <a href="/cloud-agents">
+              <span className="account-product-icon">
+                <Bot size={18} />
+              </span>
+              <small>Continuous execution</small>
+              <strong>Cloud Agents</strong>
+              <p>Launch coordinated or isolated builders that keep working in persistent cloud sandboxes.</p>
+              <span className="account-product-open">
+                Open workspace <ArrowRight size={14} />
+              </span>
+            </a>
+            <a href="/api-studio">
+              <span className="account-product-icon">
+                <Braces size={18} />
+              </span>
+              <small>Programmable runtime</small>
+              <strong>API Platform</strong>
+              <p>Design, execute, assert, save, and automate requests with logs and evidence attached.</p>
+              <span className="account-product-open">
+                Open platform <ArrowRight size={14} />
+              </span>
+            </a>
+            <a href="/download">
+              <span className="account-product-icon">
+                <Laptop size={18} />
+              </span>
+              <small>Local-first workspace</small>
+              <strong>Vector Desktop</strong>
+              <p>Build with your repositories, models, editor, terminal, browser, cloud controls, and agent teams.</p>
+              <span className="account-product-open">
+                View installers <ArrowRight size={14} />
+              </span>
+            </a>
+            <a href="/settings">
+              <span className="account-product-icon">
+                <Settings size={18} />
+              </span>
+              <small>One membership</small>
+              <strong>Account Settings</strong>
+              <p>Manage your identity, security, subscription, and access from a dedicated settings surface.</p>
+              <span className="account-product-open">
+                Open settings <ArrowRight size={14} />
+              </span>
+            </a>
+          </section>
+        )}
+        {!props.downloadsOnly && status && (
+          <section className="account-system-strip">
+            <span>
+              <Cloud size={15} />
+              <strong>{props.config?.services.cloudAgents ? "Cloud ready" : "Cloud setup"}</strong>
+              <small>Agents</small>
+            </span>
+            <span>
+              <Gauge size={15} />
+              <strong>{props.config?.services.apiPlatform ? "Runtime ready" : "Runtime setup"}</strong>
+              <small>API Platform</small>
+            </span>
+            <span>
+              <Shield size={15} />
+              <strong>{status.entitlement.access ? "Unlocked" : "Plan required"}</strong>
+              <small>Membership</small>
+            </span>
+            <span>
+              <KeyRound size={15} />
+              <strong>{(usage?.activeApiKeys || 0).toLocaleString()} active</strong>
+              <small>API keys</small>
+            </span>
+          </section>
+        )}
         {new URLSearchParams(location.search).get("recovery") === "1" && (
           <section className="account-recovery">
             <div>
@@ -297,7 +407,7 @@ export function AccountView(props: { session: Session; config?: PlatformConfig; 
           </div>
         )}
         {status && !entitled && (
-          <section className="account-purchase">
+          <section className="account-purchase" id="membership">
             <div>
               <span className="platform-kicker">Vector membership</span>
               <h2>One subscription unlocks the complete platform.</h2>
@@ -367,10 +477,18 @@ export function AccountView(props: { session: Session; config?: PlatformConfig; 
               <section className="account-overview">
                 <div className="account-overview-main">
                   <span className="platform-kicker">Current plan</span>
-                  <h2>{status.entitlement.plan === "monthly" ? "Vector monthly" : "Vector annual"}</h2>
+                  <h2>
+                    {status.entitlement.plan === "founder"
+                      ? "Founder access"
+                      : status.entitlement.plan === "monthly"
+                        ? "Vector monthly"
+                        : "Vector annual"}
+                  </h2>
                   <p>
                     {status.entitlement.message ||
-                      `Access continues through ${formatDate(status.entitlement.expiresAt)}.`}
+                      (status.entitlement.plan === "founder"
+                        ? "Founder access is active without a renewal date."
+                        : `Access continues through ${formatDate(status.entitlement.expiresAt)}.`)}
                   </p>
                 </div>
                 <dl>
@@ -380,7 +498,11 @@ export function AccountView(props: { session: Session; config?: PlatformConfig; 
                   </div>
                   <div>
                     <dt>Renews or expires</dt>
-                    <dd>{formatDate(status.entitlement.expiresAt)}</dd>
+                    <dd>
+                      {status.entitlement.plan === "founder"
+                        ? "No expiration"
+                        : formatDate(status.entitlement.expiresAt)}
+                    </dd>
                   </div>
                   {status.entitlement.graceEndsAt && (
                     <div>
@@ -393,10 +515,17 @@ export function AccountView(props: { session: Session; config?: PlatformConfig; 
                     <dd>1 active computer</dd>
                   </div>
                 </dl>
-                <button className="platform-secondary" onClick={portal} disabled={!!busy}>
-                  <CreditCard size={15} />
-                  Manage billing
-                </button>
+                {status.canManageBilling ? (
+                  <button className="platform-secondary" onClick={portal} disabled={!!busy}>
+                    <CreditCard size={15} />
+                    Manage billing
+                  </button>
+                ) : (
+                  <a className="platform-secondary" href="/settings">
+                    <Settings size={15} />
+                    Account settings
+                  </a>
+                )}
               </section>
             )}
             <section className="account-section">

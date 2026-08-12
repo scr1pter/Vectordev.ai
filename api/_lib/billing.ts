@@ -746,7 +746,7 @@ export async function billingPortal(input: { activationToken: string; deviceId: 
   return session.url
 }
 
-const downloadTargets: Record<string, string> = {
+export const downloadTargets: Record<string, string> = {
   "mac-arm64": "vector-desktop-mac-arm64.dmg",
   "mac-x64": "vector-desktop-mac-x64.dmg",
   "windows-x64": "vector-desktop-win-x64.exe",
@@ -763,7 +763,7 @@ function installerDownloadUrl(customerId: string, target: string) {
   return `${publicOrigin()}/api/billing/download?${params.toString()}`
 }
 
-function installerBlobPath(file: string) {
+export function installerBlobPath(file: string) {
   const prefix = (process.env.VECTOR_INSTALLER_BLOB_PREFIX || "releases/vector-downloads").replace(/^\/+|\/+$/g, "")
   return `${prefix}/${file}`
 }

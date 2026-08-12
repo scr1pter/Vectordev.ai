@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto"
+import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto"
 import { createClient } from "@supabase/supabase-js"
 import type Stripe from "stripe"
 import { ApiError, type ApiRequest } from "./http.js"
@@ -23,10 +23,16 @@ export type PlatformSubscription = {
   grace_ends_at: string | null
 }
 
+export type PlatformAccessGrant = {
+  user_id: string
+  label: string
+  expires_at: string | null
+}
+
 export type PlatformEntitlement = {
   access: boolean
   state: "active" | "canceling" | "grace" | "past_due" | "expired" | "none"
-  plan?: "monthly" | "annual"
+  plan?: "monthly" | "annual" | "founder"
   expiresAt?: string
   graceEndsAt?: string
   cancelAtPeriodEnd: boolean
@@ -90,9 +96,7 @@ export function platformConfiguration() {
   }
 }
 
-export async function enabledPlatformAuthProviders(
-  fetcher: typeof fetch = fetch,
-): Promise<PlatformAuthProvider[]> {
+export async function enabledPlatformAuthProviders(fetcher: typeof fetch = fetch): Promise<PlatformAuthProvider[]> {
   const config = platformConfiguration()
   if (!config.url || !config.publishableKey) return []
   try {
@@ -168,7 +172,20 @@ export async function requireUser(request: ApiRequest) {
   return user
 }
 
-export function entitlementFor(subscription?: PlatformSubscription | null): PlatformEntitlement {
+export function entitlementFor(
+  subscription?: PlatformSubscription | null,
+  grant?: PlatformAccessGrant | null,
+): PlatformEntitlement {
+  const grantActive = Boolean(grant && (!grant.expires_at || new Date(grant.expires_at).getTime() > Date.now()))
+  if (grantActive) {
+    return {
+      access: true,
+      state: "active",
+      plan: "founder",
+      expiresAt: grant?.expires_at ?? undefined,
+      cancelAtPeriodEnd: false,
+    }
+  }
   if (!subscription) return { access: false, state: "none", cancelAtPeriodEnd: false }
   const now = Date.now()
   const periodEnd = subscription.current_period_end ? new Date(subscription.current_period_end).getTime() : 0
@@ -211,14 +228,67 @@ export async function subscriptionForUser(userId: string) {
   return data
 }
 
+export async function accessGrantForUser(userId: string) {
+  const { data, error } = await platformAdmin()
+    .from("vector_access_grants")
+    .select("user_id,label,expires_at")
+    .eq("user_id", userId)
+    .maybeSingle<PlatformAccessGrant>()
+  if (error) throw new ApiError(500, "ACCESS_GRANT_LOOKUP_FAILED", "Vector could not check internal account access.")
+  return data
+}
+
+function grantDownloadSignature(payload: string) {
+  const secret = process.env.VECTOR_PLATFORM_SECRET
+  if (!secret || secret.length < 32) {
+    throw new ApiError(503, "DOWNLOAD_NOT_CONFIGURED", "Protected Vector downloads are not configured.")
+  }
+  return createHmac("sha256", secret).update(payload).digest("base64url")
+}
+
+export function accessGrantDownloadUrl(userId: string, target: string) {
+  const payload = Buffer.from(
+    JSON.stringify({ userId, target, expiresAt: Date.now() + 10 * 60 * 1000 }),
+    "utf8",
+  ).toString("base64url")
+  const token = `${payload}.${grantDownloadSignature(payload)}`
+  const origin = (process.env.VECTOR_PUBLIC_URL || "https://vectordev.ai").replace(/\/$/, "")
+  return `${origin}/api/account/grant-download?target=${encodeURIComponent(target)}&token=${encodeURIComponent(token)}`
+}
+
+export async function verifyAccessGrantDownload(token: string, target: string) {
+  const [payload, supplied] = token.split(".")
+  if (!payload || !supplied) throw new ApiError(401, "DOWNLOAD_INVALID", "That installer link is invalid.")
+  const expected = grantDownloadSignature(payload)
+  const suppliedBytes = Buffer.from(supplied)
+  const expectedBytes = Buffer.from(expected)
+  if (suppliedBytes.length !== expectedBytes.length || !timingSafeEqual(suppliedBytes, expectedBytes)) {
+    throw new ApiError(401, "DOWNLOAD_INVALID", "That installer link is invalid.")
+  }
+  let decoded: { userId?: string; target?: string; expiresAt?: number }
+  try {
+    decoded = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"))
+  } catch {
+    throw new ApiError(401, "DOWNLOAD_INVALID", "That installer link is invalid.")
+  }
+  if (!decoded.userId || decoded.target !== target || !decoded.expiresAt || decoded.expiresAt <= Date.now()) {
+    throw new ApiError(401, "DOWNLOAD_EXPIRED", "That installer link has expired. Request another from your account.")
+  }
+  const grant = await accessGrantForUser(decoded.userId)
+  if (!entitlementFor(null, grant).access) {
+    throw new ApiError(403, "DOWNLOAD_FORBIDDEN", "This internal Vector access grant is no longer active.")
+  }
+  return decoded.userId
+}
+
 export async function requireEntitlement(request: ApiRequest) {
   const user = await requireUser(request)
-  const subscription = await subscriptionForUser(user.id)
-  const entitlement = entitlementFor(subscription)
+  const [subscription, grant] = await Promise.all([subscriptionForUser(user.id), accessGrantForUser(user.id)])
+  const entitlement = entitlementFor(subscription, grant)
   if (!entitlement.access) {
     throw new ApiError(402, "SUBSCRIPTION_REQUIRED", entitlement.message || "Subscribe to Vector to continue.")
   }
-  return { user, subscription: subscription!, entitlement }
+  return { user, subscription, grant, entitlement }
 }
 
 function periodEnd(subscription: Stripe.Subscription) {
@@ -423,8 +493,8 @@ export async function requirePlatformCaller(request: ApiRequest, requiredScope?:
   if (apiPrincipal && requiredScope && !apiPrincipal.key.scopes.includes(requiredScope)) {
     throw new ApiError(403, "API_KEY_SCOPE_REQUIRED", `This API key does not include the ${requiredScope} scope.`)
   }
-  const subscription = await subscriptionForUser(user.id)
-  const entitlement = entitlementFor(subscription)
+  const [subscription, grant] = await Promise.all([subscriptionForUser(user.id), accessGrantForUser(user.id)])
+  const entitlement = entitlementFor(subscription, grant)
   if (!entitlement.access) throw new ApiError(402, "SUBSCRIPTION_REQUIRED", "An active Vector plan is required.")
   if (apiPrincipal) {
     await consumePlatformQuota({
@@ -436,7 +506,7 @@ export async function requirePlatformCaller(request: ApiRequest, requiredScope?:
       metadata: { keyId: apiPrincipal.key.id, scope: requiredScope || null },
     })
   }
-  return { user, subscription: subscription!, entitlement, apiKey: apiPrincipal?.key }
+  return { user, subscription, grant, entitlement, apiKey: apiPrincipal?.key }
 }
 
 export async function consumePlatformQuota(input: {

@@ -1,5 +1,5 @@
 ---
-import { ArrowRight, Bot, ChevronDown, CloudUpload, Globe2, Mic2 } from "lucide-react"
+import { ArrowRight, Bot, Braces, ChevronDown, Cloud, CloudUpload, Code2, Gauge, Globe2, Mic2 } from "lucide-react"
 import MarketingFooter from "./marketing/MarketingFooter.astro"
 import MarketingNav from "./marketing/MarketingNav.astro"
 import screenshotAgent from "../assets/lander/vector-agent-current.png"
@@ -106,6 +106,39 @@ const connectionGroups = [
   ["Cloud and validation", "Vercel, Netlify, Supabase, and Playwright"],
 ]
 
+const products = [
+  {
+    name: "Vector Agent Workspace",
+    eyebrow: "Desktop · available",
+    body: "The local-first command center: agents, isolated workspaces, editor, terminal, browser, MCP, review, checkpoints, and visible token economics around your real repositories.",
+    icon: Code2,
+  },
+  {
+    name: "Vector Cloud Services",
+    eyebrow: "Desktop cloud control · available",
+    body: "Deployments, databases, authentication, storage, environment variables, domains, logs, and infrastructure controls stay connected to the repository and agent that built the product.",
+    icon: Cloud,
+  },
+  {
+    name: "Vector Cloud Agents",
+    eyebrow: "Continuous execution · available",
+    body: "Persistent isolated builders continue long-running assignments in the cloud, work alone or as a coordinated team, and return activity, evidence, usage, and reviewable outcomes.",
+    icon: Bot,
+  },
+  {
+    name: "Vector API Platform",
+    eyebrow: "Programmable agent runtime · available",
+    body: "Give software access to agent orchestration, isolated execution, browser operation, MCP tools, assertions, logs, screenshots, costs, and tested evidence rather than raw generated text.",
+    icon: Braces,
+  },
+  {
+    name: "Vector Velocity",
+    eyebrow: "Coding intelligence · in development",
+    body: "A coding-specialized model direction focused on repository understanding, architecture, debugging, tool use, and verified completion, designed to work with Vector's context and tokenomics systems.",
+    icon: Gauge,
+  },
+]
+
 const comparison = [
   ["Existing local repositories", "Native", "Native", "Native", "Native", "Git import"],
   ["Editor and terminal", "Both built in", "Terminal-first", "Agent workspace", "IDE-native", "Managed editor"],
@@ -171,8 +204,8 @@ const changelog = [
             </div>
           </div>
 
-          <a class="hero-cta" href="/download">
-            <span>Get Vector</span>
+          <a class="hero-cta" href="/account">
+            <span>Open Vector</span>
             <ArrowRight size={18} strokeWidth={2} aria-hidden="true" />
           </a>
 
@@ -197,6 +230,34 @@ const changelog = [
           </figure>
         </div>
       </div>
+    </section>
+
+    <section class="product-system section-width" aria-labelledby="product-system-title">
+      <div class="section-heading chapter-head" data-reveal>
+        <p class="section-kicker">One Vector system</p>
+        <h2 id="product-system-title">Local creation, cloud execution, and programmable agents.</h2>
+        <p>
+          Vector's vision is one account and one operating model across the desktop workspace, cloud infrastructure,
+          persistent agents, and the API runtime. Start by building yourself, delegate the work, or embed the same
+          verified execution system inside another product.
+        </p>
+      </div>
+      <div class="product-system-grid">
+        {products.map((product) => {
+          const Icon = product.icon
+          return (
+            <article data-reveal>
+              <span class="product-system-icon"><Icon size={18} strokeWidth={1.7} aria-hidden="true" /></span>
+              <small>{product.eyebrow}</small>
+              <h3>{product.name}</h3>
+              <p>{product.body}</p>
+            </article>
+          )
+        })}
+      </div>
+      <a class="product-system-account" href="/account" data-reveal>
+        One account unlocks the complete available platform <ArrowRight size={15} strokeWidth={2} aria-hidden="true" />
+      </a>
     </section>
 
     <section class="scene scene-suite" data-scene style="--scene-span: 3.1" aria-labelledby="suite-title">
@@ -418,8 +479,8 @@ const changelog = [
       </div>
       <h2 data-reveal class="reveal-blur">Keep the whole build in view.</h2>
       <p data-reveal style="--rd: 120ms">Open the repository. Direct the agents. Ship the result.</p>
-      <a class="closing-cta" href="/download" data-reveal style="--rd: 220ms">
-        <span>Download now</span>
+      <a class="closing-cta" href="/account" data-reveal style="--rd: 220ms">
+        <span>Open your Vector account</span>
         <ArrowRight size={18} strokeWidth={2} aria-hidden="true" />
       </a>
     </section>
@@ -2017,6 +2078,102 @@ const changelog = [
     transform: translateX(3px);
   }
 
+  /* ---- connected product system ---- */
+
+  .product-system {
+    margin-top: clamp(72px, 10vw, 150px);
+    padding: clamp(44px, 7vw, 82px);
+    background: var(--glass-fill-strong);
+    border: 1px solid var(--glass-line);
+    border-radius: 28px;
+    box-shadow: var(--glass-shadow-soft);
+    backdrop-filter: blur(28px) saturate(145%);
+    -webkit-backdrop-filter: blur(28px) saturate(145%);
+  }
+
+  .product-system-grid {
+    margin-top: 46px;
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .product-system-grid article {
+    grid-column: span 2;
+    min-height: 250px;
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    background: rgba(7, 5, 10, 0.42);
+    border: 1px solid rgba(227, 215, 255, 0.11);
+    border-radius: 16px;
+    transition: transform 220ms ease, border-color 220ms ease, background 220ms ease;
+  }
+
+  .product-system-grid article:nth-child(4),
+  .product-system-grid article:nth-child(5) {
+    grid-column: span 3;
+  }
+
+  .product-system-grid article:hover {
+    transform: translateY(-3px);
+    border-color: rgba(197, 168, 255, 0.26);
+    background: rgba(38, 27, 57, 0.6);
+  }
+
+  .product-system-icon {
+    width: 39px;
+    height: 39px;
+    display: grid;
+    place-items: center;
+    color: var(--purple-soft);
+    background: rgba(157, 111, 255, 0.11);
+    border: 1px solid rgba(203, 178, 255, 0.15);
+    border-radius: 12px;
+  }
+
+  .product-system-grid small {
+    margin-top: 26px;
+    color: var(--purple-soft);
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .product-system-grid h3 {
+    margin: 7px 0 0;
+    color: #f6f2fb;
+    font-size: 20px;
+    font-weight: 570;
+    letter-spacing: 0;
+  }
+
+  .product-system-grid p {
+    margin: 13px 0 0;
+    color: var(--ink-55);
+    font-size: 13px;
+    line-height: 1.65;
+  }
+
+  .product-system-account {
+    width: fit-content;
+    min-height: 44px;
+    margin-top: 22px;
+    padding: 0 17px;
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    color: var(--lavender) !important;
+    background: rgba(143, 82, 255, 0.1);
+    border: 1px solid rgba(197, 168, 255, 0.2);
+    border-radius: 13px;
+    font-size: 13px;
+    text-decoration: none;
+  }
+
+  .product-system-account svg { transition: transform 180ms ease; }
+  .product-system-account:hover svg { transform: translateX(3px); }
+
   /* ---- closing ---- */
 
   .closing {
@@ -2110,6 +2267,11 @@ const changelog = [
     .evidence-grid { grid-template-columns: repeat(2, 1fr); }
     .evidence-grid div:nth-child(2) { border-right: 0; }
     .evidence-grid div:nth-child(n + 3) { border-top: 1px solid rgba(227, 215, 255, 0.12); }
+    .product-system-grid { grid-template-columns: 1fr 1fr; }
+    .product-system-grid article,
+    .product-system-grid article:nth-child(4),
+    .product-system-grid article:nth-child(5) { grid-column: auto; }
+    .product-system-grid article:last-child { grid-column: 1 / -1; }
   }
 
   @media (max-width: 640px) {
@@ -2143,6 +2305,10 @@ const changelog = [
     .evidence,
     .connections,
     .comparison-section { padding: 30px 20px; border-radius: 22px; }
+    .product-system { padding: 30px 20px; border-radius: 22px; }
+    .product-system-grid { grid-template-columns: 1fr; margin-top: 34px; }
+    .product-system-grid article,
+    .product-system-grid article:last-child { grid-column: auto; min-height: 220px; }
     .section-heading h2,
     .runtime-intro h2 { font-size: 32px; }
     .section-heading > p:last-child,

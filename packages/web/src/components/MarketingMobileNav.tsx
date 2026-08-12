@@ -4,12 +4,9 @@ type ActivePage = "product" | "agents" | "api" | "docs" | "releases" | "download
 
 const links: Array<{ label: string; href: string; id: ActivePage }> = [
   { label: "Product", href: "/", id: "product" },
-  { label: "Cloud Agents", href: "/cloud-agents", id: "agents" },
-  { label: "Vector Play Park", href: "/api-studio", id: "api" },
   { label: "Documentation", href: "/docs", id: "docs" },
   { label: "Releases", href: "/releases", id: "releases" },
-  { label: "Account", href: "/account", id: "account" },
-  { label: "Download Vector", href: "/download", id: "download" },
+  { label: "Open Vector", href: "/account", id: "account" },
 ]
 
 export function MarketingMobileNav(props: { active: ActivePage }) {
@@ -89,7 +86,7 @@ export function MarketingMobileNav(props: { active: ActivePage }) {
             </button>
           </div>
           <p class="mobile-nav-copy">
-            Desktop engineering, continuous cloud agents, API development, billing, and protected installers.
+            One account for the desktop workspace, continuous cloud agents, API development, billing, and installers.
           </p>
           <nav class="mobile-nav-links" aria-label="Mobile navigation">
             <For each={links}>

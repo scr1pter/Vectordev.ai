@@ -16,12 +16,9 @@ const { active = "product" } = Astro.props
 
     <nav class="desktop-links" aria-label="Primary navigation">
       <a class:list={{ active: active === "product" }} href="/#workspace">Product</a>
-      <a class:list={{ active: active === "agents" }} href="/cloud-agents">Cloud Agents</a>
-      <a class:list={{ active: active === "api" }} href="/api-studio">Play Park</a>
       <a class:list={{ active: active === "docs" }} href="/docs">Docs</a>
       <a class:list={{ active: active === "releases" }} href="/releases">Releases</a>
-      <a class:list={{ active: active === "account" }} href="/account">Account</a>
-      <a class:list={["download-link", { active: active === "download" }]} href="/download"><span>Download</span></a>
+      <a class:list={["download-link", { active: active === "account" || active === "download" }]} href="/account"><span>Open Vector</span></a>
     </nav>
     <div class="mobile-menu">
       <MarketingMobileNav active={active} client:only="solid-js" />
