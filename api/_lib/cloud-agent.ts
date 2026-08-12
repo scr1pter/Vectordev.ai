@@ -58,7 +58,9 @@ function cloudEngineCommand() {
 }
 
 function cloudSandboxImage() {
-  return process.env.VECTOR_CLOUD_SANDBOX_IMAGE?.trim() || undefined
+  const configured = process.env.VECTOR_CLOUD_SANDBOX_IMAGE?.trim()
+  if (!configured) return undefined
+  return configured.replace(/^https?:\/\//, "").replace(/^vcr\.vercel\.com\/[^/]+\/[^/]+\//, "")
 }
 
 export function availableCloudModels() {
@@ -103,15 +105,6 @@ function sandboxNetworkPolicy() {
         "198.18.0.0/15",
         "198.51.100.0/24",
         "203.0.113.0/24",
-        "224.0.0.0/4",
-        "240.0.0.0/4",
-        "::/128",
-        "::1/128",
-        "100::/64",
-        "2001:db8::/32",
-        "fc00::/7",
-        "fe80::/10",
-        "ff00::/8",
       ],
     },
   }
@@ -143,11 +136,25 @@ function repositoryDirectory(raw?: string | null) {
   return `/vercel/sandbox/${name.replace(/[^a-zA-Z0-9._-]/g, "-")}`
 }
 
+function record(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" ? Object.fromEntries(Object.entries(value)) : undefined
+}
+
 function sandboxMissing(error: unknown) {
-  const status =
-    (error as { status?: number; statusCode?: number })?.status ||
-    (error as { status?: number; statusCode?: number })?.statusCode
+  const value = record(error)
+  const status = value?.status || value?.statusCode
   return status === 404 || (error instanceof Error && /(?:not found|does not exist|404)/i.test(error.message))
+}
+
+function sandboxErrorMessage(error: unknown) {
+  const value = record(error)
+  const json = record(value?.json)
+  const detail = record(json?.error)
+  const message =
+    (typeof detail?.message === "string" && detail.message) ||
+    (typeof value?.message === "string" && value.message) ||
+    "The isolated workspace could not start."
+  return message.slice(0, 2_000)
 }
 
 async function readText(sandbox: Sandbox, path: string, maximum: number) {
@@ -508,7 +515,7 @@ export async function startCloudAgent(run: CloudAgentRun) {
       .update({
         status: "failed",
         current_step: "Workspace launch failed",
-        error: error instanceof Error ? error.message.slice(0, 2_000) : "The isolated workspace could not start.",
+        error: sandboxErrorMessage(error),
         completed_at: new Date().toISOString(),
       })
       .eq("id", run.id)

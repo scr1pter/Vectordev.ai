@@ -102,10 +102,10 @@ Enable Vercel AI Gateway and Vercel Sandbox, then set:
 
 ```text
 AI_GATEWAY_API_KEY
-VECTOR_CLOUD_AGENT_MODEL=vercel/anthropic/claude-sonnet-4.5
-VECTOR_CLOUD_AGENT_MODELS=vercel/anthropic/claude-sonnet-4.5
+VECTOR_CLOUD_AGENT_MODEL=vercel/poolside/laguna-s-2.1-free
+VECTOR_CLOUD_AGENT_MODELS=vercel/poolside/laguna-s-2.1-free,vercel/anthropic/claude-sonnet-4.5
 VECTOR_CLOUD_AGENT_ENGINE_COMMAND=opencode
-VECTOR_CLOUD_SANDBOX_IMAGE=vcr.vercel.com/your-team/your-project/vector-cloud-agent@sha256:<immutable-digest>
+VECTOR_CLOUD_SANDBOX_IMAGE=vector-cloud-agent@sha256:<immutable-digest>
 VECTOR_CLOUD_AGENT_MAX_MINUTES=30
 VECTOR_CLOUD_AGENT_30_DAY_LAUNCH_LIMIT=24
 VECTOR_CLOUD_AGENT_30_DAY_TURN_LIMIT=240
@@ -114,7 +114,9 @@ CRON_SECRET
 
 Every configured cloud model must use the `vercel/` AI Gateway prefix. Each run receives an isolated persistent sandbox. Repository URLs must be credential-free public HTTPS Git URLs; private-repository brokering is deliberately disabled until a scoped GitHub installation flow exists.
 
-Build `infra/vector-cloud-agent/Containerfile` and push it to Vercel Container Registry, then set `VECTOR_CLOUD_SANDBOX_IMAGE` to the immutable digest printed by `vercel vcr image inspect`. The image contains the pinned Vector agent engine, Bun, and Chromium/Playwright runtime. Cloud Agents remain unavailable until both this image and the scheduled reconciler are configured, rather than launching an incomplete workspace that must download its execution engine at run time.
+The first model is the default. Keep a zero-cost, tool-capable coding model first so a new installation works before AI Gateway credits are added. Paid models can remain available as explicit upgrades; selecting one requires sufficient AI Gateway credits or a provider key configured in Vercel.
+
+Build `infra/vector-cloud-agent/Containerfile` and push it to Vercel Container Registry, then set `VECTOR_CLOUD_SANDBOX_IMAGE` to the project-local repository name plus the immutable digest printed by `vercel vcr image inspect` (omit the `vcr.vercel.com/<team>/<project>/` prefix). The image contains the pinned Vector agent engine, Bun, and Chromium/Playwright runtime. Cloud Agents remain unavailable until both this image and the scheduled reconciler are configured, rather than launching an incomplete workspace that must download its execution engine at run time.
 
 The Vercel cron in `vercel.json` starts queued runs, refreshes active runs, and advances multi-agent teams. Confirm `/api/cron/agent-reconcile` runs every minute and receives `Authorization: Bearer $CRON_SECRET`.
 
