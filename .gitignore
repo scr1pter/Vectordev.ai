@@ -38,3 +38,5 @@ tsconfig.tsbuildinfo
 !.env.example
 packages/web/public/downloads/
 .superdesign/tmp/
+# Supabase CLI local link metadata
+supabase/.temp/
