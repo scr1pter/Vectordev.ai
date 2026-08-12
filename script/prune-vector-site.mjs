@@ -7,6 +7,9 @@ const dist = path.join(root, "packages", "web", "dist")
 
 const keep = new Set([
   "_astro",
+  "account",
+  "api-studio",
+  "cloud-agents",
   "docs",
   "download",
   "legal",
