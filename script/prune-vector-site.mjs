@@ -15,6 +15,7 @@ const keep = new Set([
   "legal",
   "license",
   "releases",
+  "settings",
   "index.html",
   "404.html",
   "favicon.ico",
