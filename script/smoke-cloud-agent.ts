@@ -67,7 +67,7 @@ try {
       name: "Production Cloud Agent smoke test",
       prompt:
         "Create a file named VECTOR_CLOUD_SMOKE.txt containing exactly VECTOR_CLOUD_OK and no other text. Then finish.",
-      model: "vercel/poolside/laguna-s-2.1-free",
+      model: "openrouter/poolside/laguna-s-2.1:free",
     }),
   })
   runId = createdRun.run?.id

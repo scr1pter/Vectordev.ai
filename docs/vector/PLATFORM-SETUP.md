@@ -1,6 +1,6 @@
 # Vector Account, Billing, API, and Cloud Agent Setup
 
-The account surfaces are intentionally fail-closed. They become available only after every required server-owned credential is configured. Never place service-role, Stripe, Resend, AI Gateway, vault, license, cron, or Blob write credentials in browser-visible variables.
+The account surfaces are intentionally fail-closed. They become available only after every required server-owned credential is configured. Never place service-role, Stripe, Resend, OpenRouter, vault, license, cron, or Blob write credentials in browser-visible variables.
 
 ## 1. Supabase
 
@@ -9,8 +9,8 @@ The account surfaces are intentionally fail-closed. They become available only a
 3. Set the production site URL to `https://vectordev.ai`.
 4. Add redirect URLs for `/account`, `/download`, `/cloud-agents`, and `/api-studio` on the production domain.
 5. Enable email/password sign-in.
-6. Optionally enable GitHub and Google in Supabase Auth. Use the callback URL Supabase provides in each provider's OAuth application.
-7. Set `VECTOR_AUTH_PROVIDERS` to only the providers actually enabled, for example `github,google`. Leave it empty to offer email/password only.
+6. Enable Google in Supabase Auth and use the callback URL Supabase provides in the Google OAuth application.
+7. Leave `VECTOR_AUTH_PROVIDERS` empty to let Vector discover enabled Supabase providers automatically. Set it only when you want an explicit allowlist such as `google` or `github,google`.
 
 Required Vercel variables:
 
@@ -18,9 +18,10 @@ Required Vercel variables:
 SUPABASE_URL
 SUPABASE_PUBLISHABLE_KEY
 SUPABASE_SERVICE_ROLE_KEY
-VECTOR_AUTH_PROVIDERS
 VECTOR_PLATFORM_SECRET
 ```
+
+Google sign-in requires a Google Cloud web OAuth client. Add Supabase's callback URL to that client's authorized redirect URIs, save its client ID and secret in Supabase Auth, and add `https://vectordev.ai/account`, `https://vectordev.ai/download`, `https://vectordev.ai/cloud-agents`, and `https://vectordev.ai/api-studio` to the Supabase redirect allowlist. Vector checks Supabase's live provider settings before showing an OAuth button, so a half-configured provider is never advertised.
 
 `VECTOR_PLATFORM_SECRET` must be a random secret of at least 32 characters. During a rotation, put the prior secret in `VECTOR_PLATFORM_SECRET_PREVIOUS`, deploy, re-save encrypted connections with the new key, and remove the old key only after the rotation is complete.
 
@@ -98,12 +99,12 @@ Play Park blocks local, private, metadata, and reserved network destinations. Sa
 
 ## 6. Vector Cloud Agents
 
-Enable Vercel AI Gateway and Vercel Sandbox, then set:
+Create an OpenRouter API key and enable Vercel Sandbox, then set:
 
 ```text
-AI_GATEWAY_API_KEY
-VECTOR_CLOUD_AGENT_MODEL=vercel/poolside/laguna-s-2.1-free
-VECTOR_CLOUD_AGENT_MODELS=vercel/poolside/laguna-s-2.1-free,vercel/anthropic/claude-sonnet-4.5
+OPENROUTER_API_KEY
+VECTOR_CLOUD_AGENT_MODEL=openrouter/openrouter/free
+VECTOR_CLOUD_AGENT_MODELS=openrouter/openrouter/free,openrouter/poolside/laguna-s-2.1:free,openrouter/cohere/north-mini-code:free,openrouter/nvidia/nemotron-3-super-120b-a12b:free,openrouter/openai/gpt-oss-20b:free
 VECTOR_CLOUD_AGENT_ENGINE_COMMAND=opencode
 VECTOR_CLOUD_SANDBOX_IMAGE=vector-cloud-agent@sha256:<immutable-digest>
 VECTOR_CLOUD_AGENT_MAX_MINUTES=30
@@ -112,9 +113,9 @@ VECTOR_CLOUD_AGENT_30_DAY_TURN_LIMIT=240
 CRON_SECRET
 ```
 
-Every configured cloud model must use the `vercel/` AI Gateway prefix. Each run receives an isolated persistent sandbox. Repository URLs must be credential-free public HTTPS Git URLs; private-repository brokering is deliberately disabled until a scoped GitHub installation flow exists.
+Every configured cloud model must use the `openrouter/` provider prefix. Each run receives an isolated persistent sandbox. Repository URLs must be credential-free public HTTPS Git URLs; private-repository brokering is deliberately disabled until a scoped GitHub installation flow exists.
 
-The first model is the default. Keep a zero-cost, tool-capable coding model first so a new installation works before AI Gateway credits are added. Paid models can remain available as explicit upgrades; selecting one requires sufficient AI Gateway credits or a provider key configured in Vercel.
+The first model is the default. `openrouter/openrouter/free` delegates selection to the current free pool and filters for capabilities required by the request, including tool calling. The remaining entries expose specific coding-oriented free choices. OpenRouter's free inventory and rate limits change over time, so verify the live catalog before changing the curated list. Paid models can remain available as explicit upgrades.
 
 Build `infra/vector-cloud-agent/Containerfile` and push it to Vercel Container Registry, then set `VECTOR_CLOUD_SANDBOX_IMAGE` to the project-local repository name plus the immutable digest printed by `vercel vcr image inspect` (omit the `vcr.vercel.com/<team>/<project>/` prefix). The image contains the pinned Vector agent engine, Bun, and Chromium/Playwright runtime. Cloud Agents remain unavailable until both this image and the scheduled reconciler are configured, rather than launching an incomplete workspace that must download its execution engine at run time.
 

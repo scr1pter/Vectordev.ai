@@ -49,7 +49,7 @@ function cloudModels() {
   const configured = (process.env.VECTOR_CLOUD_AGENT_MODELS || process.env.VECTOR_CLOUD_AGENT_MODEL || "")
     .split(",")
     .map((value) => value.trim())
-    .filter((value) => value.startsWith("vercel/"))
+    .filter((value) => value.startsWith("openrouter/"))
   return [...new Set(configured)]
 }
 
@@ -80,15 +80,15 @@ export function requiredCloudModel(requested?: string) {
 function sandboxEnvironment() {
   // The real credential is injected by the sandbox firewall and never enters
   // the customer-controlled VM. The provider SDK only needs a placeholder.
-  return { AI_GATEWAY_API_KEY: "vector-brokered" }
+  return { OPENROUTER_API_KEY: "vector-brokered" }
 }
 
 function sandboxNetworkPolicy() {
-  const key = process.env.AI_GATEWAY_API_KEY
-  if (!key) throw new ApiError(503, "CLOUD_GATEWAY_MISSING", "Vector Cloud Agents do not have AI Gateway configured.")
+  const key = process.env.OPENROUTER_API_KEY
+  if (!key) throw new ApiError(503, "CLOUD_GATEWAY_MISSING", "Vector Cloud Agents do not have OpenRouter configured.")
   return {
     allow: {
-      "ai-gateway.vercel.sh": [{ transform: [{ headers: { Authorization: `Bearer ${key}` } }] }],
+      "openrouter.ai": [{ transform: [{ headers: { Authorization: `Bearer ${key}` } }] }],
       "*": [],
     },
     subnets: {
@@ -240,14 +240,20 @@ export async function validateCloudConnections(userId: string, selected: string[
 }
 
 export function buildCloudAgentConfig(mcp: Record<string, unknown>, model: string) {
-  const gatewayModel = model.replace(/^vercel\//, "")
+  const providerModel = model.replace(/^openrouter\//, "")
   return {
     $schema: "https://opencode.ai/config.json",
-    enabled_providers: ["vercel"],
+    enabled_providers: ["openrouter"],
     provider: {
-      vercel: {
+      openrouter: {
+        options: {
+          headers: {
+            "HTTP-Referer": "https://vectordev.ai",
+            "X-OpenRouter-Title": "Vector Cloud Agents",
+          },
+        },
         models: {
-          [gatewayModel]: {},
+          [providerModel]: {},
         },
       },
     },

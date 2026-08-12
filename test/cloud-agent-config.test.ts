@@ -2,14 +2,14 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { buildCloudAgentConfig, requiredCloudModel } from "../api/_lib/cloud-agent"
 import { platformConfiguration } from "../api/_lib/platform"
 
-describe("Vector Cloud Agent gateway configuration", () => {
+describe("Vector Cloud Agent model routing", () => {
   const originalModels = process.env.VECTOR_CLOUD_AGENT_MODELS
   const originalModel = process.env.VECTOR_CLOUD_AGENT_MODEL
   const platformEnvironment = [
     "SUPABASE_URL",
     "SUPABASE_SERVICE_ROLE_KEY",
     "VECTOR_PLATFORM_SECRET",
-    "AI_GATEWAY_API_KEY",
+    "OPENROUTER_API_KEY",
     "VECTOR_CLOUD_SANDBOX_IMAGE",
     "CRON_SECRET",
   ] as const
@@ -27,34 +27,40 @@ describe("Vector Cloud Agent gateway configuration", () => {
     }
   })
 
-  test("registers the selected AI Gateway model with the agent engine", () => {
+  test("registers the selected OpenRouter model with the agent engine", () => {
     const config = buildCloudAgentConfig(
       { browser: { type: "local", command: ["playwright-mcp"] } },
-      "vercel/anthropic/claude-sonnet-4.5",
+      "openrouter/poolside/laguna-s-2.1:free",
     )
 
-    expect(config.enabled_providers).toEqual(["vercel"])
-    expect(config.provider.vercel.models).toEqual({ "anthropic/claude-sonnet-4.5": {} })
+    expect(config.enabled_providers).toEqual(["openrouter"])
+    expect(config.provider.openrouter.models).toEqual({ "poolside/laguna-s-2.1:free": {} })
+    expect(config.provider.openrouter.options.headers).toEqual({
+      "HTTP-Referer": "https://vectordev.ai",
+      "X-OpenRouter-Title": "Vector Cloud Agents",
+    })
     expect(config.mcp).toHaveProperty("browser")
     expect(config.permission.bash["git push *"]).toBe("deny")
   })
 
-  test("accepts only server-configured gateway models", () => {
+  test("accepts only server-configured OpenRouter models", () => {
     process.env.VECTOR_CLOUD_AGENT_MODELS =
-      "vercel/anthropic/claude-sonnet-4.5,vercel/openai/gpt-5.4-mini,openai/direct-model"
+      "openrouter/poolside/laguna-s-2.1:free,openrouter/cohere/north-mini-code:free,vercel/direct-model"
     delete process.env.VECTOR_CLOUD_AGENT_MODEL
 
-    expect(requiredCloudModel()).toBe("vercel/anthropic/claude-sonnet-4.5")
-    expect(requiredCloudModel("vercel/openai/gpt-5.4-mini")).toBe("vercel/openai/gpt-5.4-mini")
-    expect(() => requiredCloudModel("openai/direct-model")).toThrow("Choose an available Vector cloud model")
+    expect(requiredCloudModel()).toBe("openrouter/poolside/laguna-s-2.1:free")
+    expect(requiredCloudModel("openrouter/cohere/north-mini-code:free")).toBe(
+      "openrouter/cohere/north-mini-code:free",
+    )
+    expect(() => requiredCloudModel("vercel/direct-model")).toThrow("Choose an available Vector cloud model")
   })
 
   test("does not advertise Cloud Agents without the pinned runtime and reconciler", () => {
     process.env.SUPABASE_URL = "https://vector.supabase.co"
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role"
     process.env.VECTOR_PLATFORM_SECRET = "v".repeat(32)
-    process.env.AI_GATEWAY_API_KEY = "gateway"
-    process.env.VECTOR_CLOUD_AGENT_MODELS = "vercel/anthropic/claude-sonnet-4.5"
+    process.env.OPENROUTER_API_KEY = "gateway"
+    process.env.VECTOR_CLOUD_AGENT_MODELS = "openrouter/poolside/laguna-s-2.1:free"
     delete process.env.VECTOR_CLOUD_SANDBOX_IMAGE
     delete process.env.CRON_SECRET
 

@@ -65,7 +65,7 @@ export function platformConfiguration() {
     .split(",")
     .map((value) => value.trim())
     .filter(Boolean)
-  const gatewayModelsOnly = cloudModels.length > 0 && cloudModels.every((value) => value.startsWith("vercel/"))
+  const openRouterModelsOnly = cloudModels.length > 0 && cloudModels.every((value) => value.startsWith("openrouter/"))
   const authProviders = (process.env.VECTOR_AUTH_PROVIDERS || "")
     .split(",")
     .map((value) => value.trim().toLowerCase())
@@ -76,8 +76,8 @@ export function platformConfiguration() {
     cloudAgentsAvailable: Boolean(
       adminAvailable &&
         encryptionKey &&
-        gatewayModelsOnly &&
-        process.env.AI_GATEWAY_API_KEY &&
+        openRouterModelsOnly &&
+        process.env.OPENROUTER_API_KEY &&
         cloudRuntime &&
         cronSecret &&
         cronSecret.length >= 24,
@@ -87,6 +87,29 @@ export function platformConfiguration() {
     publishableKey,
     authProviders: [...new Set(authProviders)],
     model,
+  }
+}
+
+export async function enabledPlatformAuthProviders(
+  fetcher: typeof fetch = fetch,
+): Promise<PlatformAuthProvider[]> {
+  const config = platformConfiguration()
+  if (!config.url || !config.publishableKey) return []
+  try {
+    const response = await fetcher(`${config.url}/auth/v1/settings`, {
+      headers: { apikey: config.publishableKey },
+      signal: AbortSignal.timeout(5_000),
+    })
+    if (!response.ok) return []
+    const payload: unknown = await response.json()
+    const external = payload && typeof payload === "object" ? Reflect.get(payload, "external") : undefined
+    const enabled = (["github", "google"] as const).filter(
+      (provider) => external && typeof external === "object" && Reflect.get(external, provider) === true,
+    )
+    if (!config.authProviders.length) return enabled
+    return enabled.filter((provider) => config.authProviders.includes(provider))
+  } catch {
+    return []
   }
 }
 
