@@ -166,7 +166,7 @@ export default async function handler(request: ApiRequest, response: ApiResponse
       throw new ApiError(500, "TEAM_RUNS_FAILED", "Vector could not create the team's isolated workspaces.")
     }
 
-    const teamRuns = runs
+    const teamRuns: CloudAgentRun[] = runs
     const { error: messagesError } = await admin
       .from("vector_agent_messages")
       .insert(teamRuns.map((run) => ({ run_id: run.id, user_id: user.id, role: "user", content: run.prompt })))
