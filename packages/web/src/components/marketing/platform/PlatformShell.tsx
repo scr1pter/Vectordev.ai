@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "re
 import type { Session } from "@supabase/supabase-js"
 import { Bot, Braces, Cloud, CreditCard, Download, KeyRound, LogIn, LogOut, ShieldCheck } from "lucide-react"
 import { AccountView } from "./account-view"
-import { CloudAgentsView } from "./cloud-agents-view"
+import { CloudAgentsWorkspace } from "./cloud-agents-workspace"
 import { PlayParkView } from "./play-park-view"
 import { apiFetch, platformAuth, platformConfig, type PlatformConfig } from "./platform-client"
 import "./platform.css"
@@ -339,7 +339,9 @@ export function PlatformShell(props: { mode: Mode }) {
         </div>
       )}
       {protectedWorkspace && account && !account.entitlement.access && <SubscriptionGate status={account} />}
-      {props.mode === "agents" && account?.entitlement.access && <CloudAgentsView session={session} config={config} />}
+      {props.mode === "agents" && account?.entitlement.access && (
+        <CloudAgentsWorkspace session={session} config={config} />
+      )}
       {props.mode === "play-park" && account?.entitlement.access && <PlayParkView session={session} config={config} />}
       {(props.mode === "account" || props.mode === "downloads") && (
         <AccountView session={session} config={config} downloadsOnly={props.mode === "downloads"} />

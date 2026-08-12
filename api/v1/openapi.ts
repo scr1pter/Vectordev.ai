@@ -10,9 +10,9 @@ export default function handler(request: ApiRequest, response: ApiResponse) {
       openapi: "3.1.0",
       info: {
         title: "Vector API Platform",
-        version: "1.1.0",
+        version: "1.2.0",
         description:
-          "Execute and verify HTTP requests, launch isolated Vector Cloud Agents, and coordinate teams that automatically integrate their completed patches. Paid endpoints accept a scoped x-vector-api-key header.",
+          "Execute and verify APIs, organize autonomous work into projects and tasks, and run isolated or coordinated Vector Cloud Agents. Paid endpoints accept a scoped x-vector-api-key header.",
       },
       servers: [{ url: origin }],
       components: {
@@ -67,6 +67,11 @@ export default function handler(request: ApiRequest, response: ApiResponse) {
             type: "object",
             required: ["name", "objective", "missions"],
             properties: {
+              projectId: {
+                type: "string",
+                format: "uuid",
+                description: "Optional Cloud Agents project that owns this task.",
+              },
               name: { type: "string", maxLength: 100 },
               objective: { type: "string", maxLength: 12000 },
               mode: { type: "string", enum: ["coordinated", "isolated"], default: "coordinated" },
@@ -76,7 +81,7 @@ export default function handler(request: ApiRequest, response: ApiResponse) {
               selectedTools: { type: "array", maxItems: 24, items: { type: "string", format: "uuid" } },
               missions: {
                 type: "array",
-                minItems: 2,
+                minItems: 1,
                 maxItems: 16,
                 items: {
                   type: "object",
@@ -92,6 +97,38 @@ export default function handler(request: ApiRequest, response: ApiResponse) {
         },
       },
       paths: {
+        "/api/v1/projects": {
+          get: {
+            summary: "List Cloud Agents projects",
+            security: bearer,
+            responses: { "200": { description: "Projects owned by the current Vector account" } },
+          },
+          post: {
+            summary: "Create a Cloud Agents project",
+            security: bearer,
+            requestBody: {
+              required: true,
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    required: ["name"],
+                    properties: {
+                      name: { type: "string", maxLength: 100 },
+                      description: { type: "string", maxLength: 2000 },
+                    },
+                  },
+                },
+              },
+            },
+            responses: { "201": { description: "Project created" } },
+          },
+          patch: {
+            summary: "Update or archive a Cloud Agents project",
+            security: bearer,
+            responses: { "200": { description: "Project updated" } },
+          },
+        },
         "/api/v1/execute": {
           post: {
             summary: "Execute and inspect an HTTP request",
@@ -130,9 +167,9 @@ export default function handler(request: ApiRequest, response: ApiResponse) {
         },
         "/api/v1/team": {
           post: {
-            summary: "Launch a parallel cloud-agent team",
+            summary: "Launch a Cloud Agents task",
             description:
-              "Creates 2-16 isolated worker missions. Coordinated teams automatically launch an integration workspace after every worker finishes; isolated teams stop at parallel review.",
+              "Creates 1-16 persistent agents for one task. Coordinated tasks automatically launch a synthesis agent after every worker finishes; isolated tasks preserve separate results.",
             security: bearer,
             requestBody: {
               required: true,

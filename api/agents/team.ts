@@ -11,6 +11,7 @@ import { consumePlatformQuota, platformAdmin, platformUsageLimits, requirePlatfo
 
 type Mission = { name?: string; prompt?: string }
 type CreateTeam = {
+  projectId?: string
   name?: string
   objective?: string
   repositoryUrl?: string
@@ -60,8 +61,24 @@ async function startInBatches(runs: CloudAgentRun[], size = 4) {
 
 export default async function handler(request: ApiRequest, response: ApiResponse) {
   try {
-    if (request.method !== "POST") throw new ApiError(405, "METHOD_NOT_ALLOWED", "Use POST for this endpoint.")
     const { user } = await requirePlatformCaller(request, "agents:write")
+    const admin = platformAdmin()
+    if (request.method === "PATCH") {
+      const body = await readJson<{ id?: string; mode?: "coordinated" | "isolated" }>(request)
+      if (!body.id || !body.mode) throw new ApiError(400, "TASK_UPDATE_INVALID", "Choose a task and work mode.")
+      const { data, error } = await admin
+        .from("vector_agent_teams")
+        .update({ mode: body.mode })
+        .eq("id", body.id)
+        .eq("user_id", user.id)
+        .select("id,project_id,name,objective,mode,status,created_at,updated_at")
+        .maybeSingle()
+      if (error) throw new ApiError(500, "TASK_UPDATE_FAILED", "Vector could not update this task.")
+      if (!data) throw new ApiError(404, "TASK_NOT_FOUND", "That task does not exist.")
+      json(response, 200, { task: data })
+      return
+    }
+    if (request.method !== "POST") throw new ApiError(405, "METHOD_NOT_ALLOWED", "Use POST or PATCH for this endpoint.")
     const body = await readJson<CreateTeam>(request, 900_000)
     const missions = (body.missions || []).map(cleanMission)
     const name = body.name?.trim()
@@ -69,18 +86,27 @@ export default async function handler(request: ApiRequest, response: ApiResponse
     if (!name || name.length > 100 || !objective || objective.length > 12_000) {
       throw new ApiError(400, "TEAM_INVALID", "Give the agent team a name and shared objective.")
     }
-    if (missions.length < 2 || missions.length > 16) {
-      throw new ApiError(400, "TEAM_SIZE_INVALID", "A Vector agent team must contain between 2 and 16 missions.")
+    if (missions.length < 1 || missions.length > 16) {
+      throw new ApiError(400, "TEAM_SIZE_INVALID", "A Vector task must contain between 1 and 16 agents.")
     }
 
-    const admin = platformAdmin()
+    if (body.projectId) {
+      const { data: project } = await admin
+        .from("vector_agent_projects")
+        .select("id")
+        .eq("id", body.projectId)
+        .eq("user_id", user.id)
+        .eq("status", "active")
+        .maybeSingle()
+      if (!project) throw new ApiError(404, "PROJECT_NOT_FOUND", "Choose an active project for this task.")
+    }
     const { count } = await admin
       .from("vector_agent_runs")
       .select("id", { count: "exact", head: true })
       .eq("user_id", user.id)
       .in("status", ["queued", "starting", "running", "needs_input"])
     const limits = platformUsageLimits()
-    const integrationAgents = body.mode === "isolated" ? 0 : 1
+    const integrationAgents = body.mode === "isolated" || missions.length === 1 ? 0 : 1
     if ((count || 0) + missions.length + integrationAgents > limits.activeCloudAgents) {
       throw new ApiError(
         409,
@@ -106,6 +132,7 @@ export default async function handler(request: ApiRequest, response: ApiResponse
       .from("vector_agent_teams")
       .insert({
         user_id: user.id,
+        project_id: body.projectId || null,
         name,
         objective,
         mode: body.mode === "isolated" ? "isolated" : "coordinated",
@@ -113,7 +140,7 @@ export default async function handler(request: ApiRequest, response: ApiResponse
       })
       .select("*")
       .single()
-    if (teamError || !team) throw new ApiError(500, "TEAM_CREATE_FAILED", "Vector could not create the agent team.")
+    if (teamError || !team) throw new ApiError(500, "TEAM_CREATE_FAILED", "Vector could not create the task.")
 
     const records = missions.map((mission) => ({
       user_id: user.id,
@@ -139,7 +166,7 @@ export default async function handler(request: ApiRequest, response: ApiResponse
       throw new ApiError(500, "TEAM_RUNS_FAILED", "Vector could not create the team's isolated workspaces.")
     }
 
-    const teamRuns = runs as CloudAgentRun[]
+    const teamRuns = runs
     const { error: messagesError } = await admin
       .from("vector_agent_messages")
       .insert(teamRuns.map((run) => ({ run_id: run.id, user_id: user.id, role: "user", content: run.prompt })))
@@ -152,11 +179,7 @@ export default async function handler(request: ApiRequest, response: ApiResponse
     const launch = startInBatches(teamRuns)
       .then(async (failures) => {
         if (failures.length === teamRuns.length) {
-          await admin
-            .from("vector_agent_teams")
-            .update({ status: "review" })
-            .eq("id", team.id)
-            .eq("user_id", user.id)
+          await admin.from("vector_agent_teams").update({ status: "review" }).eq("id", team.id).eq("user_id", user.id)
         }
       })
       .catch(() => undefined)

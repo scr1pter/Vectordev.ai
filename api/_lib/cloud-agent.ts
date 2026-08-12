@@ -314,12 +314,14 @@ async function teamContext(run: CloudAgentRun) {
 
 function agentPrompt(run: CloudAgentRun, teammateContext: string, browserEnabled: boolean) {
   return [
-    "You are a Vector Cloud Agent working inside an isolated repository workspace.",
+    "You are a Vector Cloud Agent working inside an isolated, persistent cloud workspace.",
     run.role === "integrator"
-      ? "You are the team's integration agent. Teammate patches have already been applied where possible. Resolve conflicts and rejected hunks, combine the implementations into one coherent result, and validate the integrated project."
-      : "Stay focused on your assigned mission; an integration agent will combine coordinated team results after the workers finish.",
-    "Complete the requested work directly in this workspace. Inspect existing code before editing.",
-    "Run relevant checks, fix failures you introduce, and never print secrets or credentials.",
+      ? "You are the task's coordination agent. Combine teammate findings and artifacts into one coherent outcome. If the task includes code, teammate patches have been applied where possible; resolve conflicts and validate the result."
+      : "Stay focused on your assigned part of the task. In collaborate mode, a coordination agent will combine every agent's result after the group finishes.",
+    run.repository_url
+      ? "Complete the requested work in the attached repository. Inspect existing code before editing and run relevant checks."
+      : "Complete the requested work using this workspace and the connected tools. Do not pretend a code repository exists when none was attached.",
+    "Verify concrete claims where possible, record useful evidence, and never print secrets or credentials.",
     browserEnabled
       ? "A controlled browser is connected. Use it when the task needs website interaction or UI verification."
       : "No controlled browser is connected to this run. Never claim that browser testing was performed.",
@@ -640,12 +642,17 @@ export async function reconcileAgentTeam(teamId: string, userId: string) {
   const records = (runs || []) as CloudAgentRun[]
   if (records.some((item) => ["queued", "starting", "running", "needs_input"].includes(item.status))) return
   const workers = records.filter((item) => item.role !== "integrator")
-  const integrator = records.find((item) => item.role === "integrator")
-  if (integrator) {
+  const integrators = records.filter((item) => item.role === "integrator")
+  const latestIntegrator = integrators.at(-1)
+  const lastWorkerCompletion = Math.max(
+    ...workers.map((item) => new Date(item.completed_at || item.updated_at || item.created_at).getTime()),
+    0,
+  )
+  if (latestIntegrator && new Date(latestIntegrator.created_at).getTime() >= lastWorkerCompletion) {
     await admin.from("vector_agent_teams").update({ status: "review" }).eq("id", teamId).eq("user_id", userId)
     return
   }
-  if (team.mode === "isolated" || workers.some((item) => item.status !== "complete")) {
+  if (team.mode === "isolated" || workers.length < 2 || workers.some((item) => item.status !== "complete")) {
     await admin.from("vector_agent_teams").update({ status: "review" }).eq("id", teamId).eq("user_id", userId)
     return
   }
@@ -655,11 +662,13 @@ export async function reconcileAgentTeam(teamId: string, userId: string) {
     .map((item) => `- ${item.name}: ${(item.summary || "Completed without a summary.").slice(0, 1_500)}`)
     .join("\n")
   const prompt = [
-    `Integrate the completed missions for team "${team.name}".`,
-    `Shared objective: ${team.objective}`,
-    "Worker results:",
+    `Coordinate the completed agent work for task "${team.name}".`,
+    `Task outcome: ${team.objective}`,
+    "Agent results:",
     summaries,
-    "Resolve overlapping edits and rejected patches, run the appropriate project checks, and leave one reviewable integrated diff.",
+    source.repository_url
+      ? "Resolve overlapping edits and rejected patches, run the appropriate project checks, and leave one coherent result for review."
+      : "Synthesize the results, reconcile disagreements, identify anything still unverified, and produce one useful final deliverable for the user.",
   ].join("\n\n")
   const { data: created, error: createError } = await admin
     .from("vector_agent_runs")
@@ -667,14 +676,14 @@ export async function reconcileAgentTeam(teamId: string, userId: string) {
       user_id: userId,
       team_id: teamId,
       role: "integrator",
-      name: `${team.name} integration`.slice(0, 100),
+      name: `${team.name} coordinator`.slice(0, 100),
       prompt: prompt.slice(0, 50_000),
       repository_url: source.repository_url,
       repository_branch: source.repository_branch,
       provider: "vector-cloud",
       model: source.model,
       status: "queued",
-      current_step: "Waiting to integrate team changes",
+      current_step: "Preparing the coordinated result",
       selected_tools: source.selected_tools || [],
     })
     .select("*")
@@ -688,6 +697,9 @@ export async function reconcileAgentTeam(teamId: string, userId: string) {
     .from("vector_agent_messages")
     .insert({ run_id: created.id, user_id: userId, role: "user", content: created.prompt })
   await admin.from("vector_agent_teams").update({ status: "integrating" }).eq("id", teamId).eq("user_id", userId)
+  await startCloudAgent(created).catch(async () => {
+    await admin.from("vector_agent_teams").update({ status: "review" }).eq("id", teamId).eq("user_id", userId)
+  })
 }
 
 export async function stopCloudAgent(run: CloudAgentRun) {

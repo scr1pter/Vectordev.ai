@@ -37,7 +37,7 @@ export default async function handler(request: ApiRequest, response: ApiResponse
           .limit(100),
         admin
           .from("vector_agent_teams")
-          .select("id,name,objective,mode,status,created_at,updated_at")
+          .select("id,project_id,name,objective,mode,status,created_at,updated_at")
           .eq("user_id", user.id)
           .order("updated_at", { ascending: false })
           .limit(100),
@@ -102,6 +102,7 @@ export default async function handler(request: ApiRequest, response: ApiResponse
         .eq("user_id", user.id)
         .maybeSingle()
       if (!team) throw new ApiError(404, "TEAM_NOT_FOUND", "That agent team does not exist.")
+      await admin.from("vector_agent_teams").update({ status: "active" }).eq("id", teamId).eq("user_id", user.id)
     }
     const { data, error } = await admin
       .from("vector_agent_runs")

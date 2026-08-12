@@ -53,16 +53,24 @@ export async function platformAuth() {
   return client
 }
 
-export async function apiFetch(path: string, session: Session, init?: RequestInit) {
+type ApiErrorPayload = {
+  error?: { message?: string; code?: string }
+}
+
+export async function apiFetch<T extends Record<string, unknown> = Record<string, unknown>>(
+  path: string,
+  session: Session,
+  init?: RequestInit,
+): Promise<T> {
   const headers = new Headers(init?.headers)
   headers.set("accept", "application/json")
   headers.set("authorization", `Bearer ${session.access_token}`)
   if (init?.body && !headers.has("content-type")) headers.set("content-type", "application/json")
   const response = await fetch(path, { ...init, headers })
   const raw = await response.text()
-  let payload: Record<string, unknown> & { error?: { message?: string } } = {}
+  let payload: Record<string, unknown> & ApiErrorPayload = {}
   try {
-    payload = raw ? (JSON.parse(raw) as Record<string, unknown> & { error?: { message?: string } }) : {}
+    payload = raw ? (JSON.parse(raw) as Record<string, unknown> & ApiErrorPayload) : {}
   } catch {
     if (!response.ok) throw new Error(`Vector's service is unavailable (${response.status}).`)
     throw new Error("Vector's service returned an invalid response.")
@@ -76,7 +84,7 @@ export async function apiFetch(path: string, session: Session, init?: RequestIni
     error.status = response.status
     throw error
   }
-  return payload
+  return payload as T
 }
 
 export function formatDate(value?: string | null) {
