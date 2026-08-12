@@ -68,20 +68,29 @@ export default async function handler(request: ApiRequest, response: ApiResponse
           throw new ApiError(400, "MCP_URL_INVALID", "Enter a valid HTTPS MCP server URL.")
         }
         if (url.protocol !== "https:") throw new ApiError(400, "MCP_URL_INVALID", "Cloud MCP servers must use HTTPS.")
-        if (url.username || url.password || Object.keys(cleanRecord(body.headers)).length) {
+        if (url.username || url.password) {
+          throw new ApiError(400, "MCP_URL_INVALID", "Put credentials in encrypted headers, not in the server URL.")
+        }
+        config = { url: url.toString(), headers: cleanRecord(body.headers) }
+      } else {
+        const command = Array.isArray(body.command)
+          ? body.command
+              .filter((value): value is string => typeof value === "string")
+              .map((value) => value.trim())
+              .filter(Boolean)
+              .slice(0, 24)
+          : []
+        if (!command.length || command.some((value) => value.length > 500)) {
+          throw new ApiError(400, "MCP_COMMAND_INVALID", "Enter the executable and its arguments as a valid command.")
+        }
+        if (Object.keys(cleanRecord(body.environment)).length) {
           throw new ApiError(
             409,
-            "MCP_SECRET_BROKER_REQUIRED",
-            "Authenticated custom MCP servers require Vector's scoped secret broker and cannot be connected yet.",
+            "MCP_LOCAL_SECRET_UNSAFE",
+            "Cloud-local MCP secrets would be visible inside the agent workspace. Use an authenticated remote MCP instead.",
           )
         }
-        config = { url: url.toString() }
-      } else {
-        throw new ApiError(
-          409,
-          "MCP_LOCAL_UNAVAILABLE",
-          "Local MCP commands run only in Vector desktop. Cloud Agents accept vetted plugins or public HTTPS MCP servers.",
-        )
+        config = { command }
       }
       const record = {
         user_id: user.id,

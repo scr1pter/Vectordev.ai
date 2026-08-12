@@ -372,4 +372,10 @@ export const release117: VectorRelease[] = [
     summary:
       "Rebuilt the signed-in experience as an animated Vector command center, added complete website settings for profile, security, billing, and legal controls, unified product access behind one membership, and introduced secure internal grants for founder and beta accounts without weakening paid subscription enforcement.",
   },
+  {
+    version: "1.17.48",
+    title: "Cloud agents, your models, your computer",
+    summary:
+      "Restored API Studio, brought encrypted BYOK model providers and OpenCode-style MCP connections to Cloud Agents, and added an approval-gated Vector desktop companion for controlled browser and terminal work across multiple agents.",
+  },
 ]

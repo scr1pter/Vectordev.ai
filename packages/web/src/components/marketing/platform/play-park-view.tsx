@@ -125,7 +125,7 @@ type Usage = {
     activeCloudAgents: number
     cloudAgentLaunches30Days: number
     cloudAgentTurns30Days: number
-    apiExecutionsPerDay: number
+    apiExecutionsDaily: number
   }
 }
 type OpenApiDocument = {
@@ -157,6 +157,10 @@ const emptyRequest: RequestDraft = {
 }
 
 const secretHeader = /^(authorization|cookie|set-cookie|x-api-key|x-vector-api-key|proxy-authorization)$/i
+
+function formatCount(value: number | undefined, fallback = "0") {
+  return typeof value === "number" && Number.isFinite(value) ? value.toLocaleString() : fallback
+}
 
 function safeCollectionHeaders(headers: Record<string, string>) {
   return Object.fromEntries(Object.entries(headers).filter(([name]) => !secretHeader.test(name)))
@@ -726,22 +730,22 @@ export function PlayParkView(props: { session: Session; config?: PlatformConfig 
           <section className="play-overview-metrics">
             <div>
               <span>API requests</span>
-              <strong>{usage?.apiRequests.toLocaleString() || "0"}</strong>
+              <strong>{formatCount(usage?.apiRequests)}</strong>
               <small>last 30 days</small>
             </div>
             <div>
               <span>Cloud runs</span>
-              <strong>{usage?.cloudRuns.toLocaleString() || "0"}</strong>
+              <strong>{formatCount(usage?.cloudRuns)}</strong>
               <small>{usage?.activeRuns || 0} active</small>
             </div>
             <div>
               <span>Execution today</span>
-              <strong>{usage?.apiExecutionsToday.toLocaleString() || "0"}</strong>
-              <small>of {usage?.limits.apiExecutionsPerDay.toLocaleString() || "—"}</small>
+              <strong>{formatCount(usage?.apiExecutionsToday)}</strong>
+              <small>of {formatCount(usage?.limits?.apiExecutionsDaily, "—")}</small>
             </div>
             <div>
               <span>Active keys</span>
-              <strong>{usage?.activeApiKeys.toLocaleString() || "0"}</strong>
+              <strong>{formatCount(usage?.activeApiKeys)}</strong>
               <small>scoped credentials</small>
             </div>
           </section>

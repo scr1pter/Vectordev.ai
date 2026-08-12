@@ -63,15 +63,9 @@ export function platformConfiguration() {
   )
   const serviceRoleKey = trim(process.env.SUPABASE_SERVICE_ROLE_KEY)
   const encryptionKey = trim(process.env.VECTOR_PLATFORM_SECRET)
-  const model = trim(process.env.VECTOR_CLOUD_AGENT_MODEL)
   const cloudRuntime = trim(process.env.VECTOR_CLOUD_SANDBOX_IMAGE)
   const cronSecret = trim(process.env.CRON_SECRET)
   const adminAvailable = Boolean(url && serviceRoleKey)
-  const cloudModels = (process.env.VECTOR_CLOUD_AGENT_MODELS || model || "")
-    .split(",")
-    .map((value) => value.trim())
-    .filter(Boolean)
-  const openRouterModelsOnly = cloudModels.length > 0 && cloudModels.every((value) => value.startsWith("openrouter/"))
   const authProviders = (process.env.VECTOR_AUTH_PROVIDERS || "")
     .split(",")
     .map((value) => value.trim().toLowerCase())
@@ -82,8 +76,6 @@ export function platformConfiguration() {
     cloudAgentsAvailable: Boolean(
       adminAvailable &&
         encryptionKey &&
-        openRouterModelsOnly &&
-        process.env.OPENROUTER_API_KEY &&
         cloudRuntime &&
         cronSecret &&
         cronSecret.length >= 24,
@@ -92,7 +84,7 @@ export function platformConfiguration() {
     url,
     publishableKey,
     authProviders: [...new Set(authProviders)],
-    model,
+    model: trim(process.env.VECTOR_CLOUD_AGENT_MODEL),
   }
 }
 

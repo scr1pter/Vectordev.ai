@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { buildCloudAgentConfig, requiredCloudModel } from "../api/_lib/cloud-agent"
+import { createComputerToken, verifyComputerToken } from "../api/_lib/companion"
+import { cleanProviderModels, providerModelId } from "../api/_lib/provider-catalog"
 import { platformConfiguration } from "../api/_lib/platform"
 
 describe("Vector Cloud Agent model routing", () => {
@@ -53,6 +55,28 @@ describe("Vector Cloud Agent model routing", () => {
       "openrouter/cohere/north-mini-code:free",
     )
     expect(() => requiredCloudModel("vercel/direct-model")).toThrow("Choose an available Vector cloud model")
+  })
+
+  test("builds native provider configuration for BYOK models", () => {
+    const config = buildCloudAgentConfig({}, "anthropic/claude-sonnet-4-5", "anthropic")
+    expect(config.enabled_providers).toEqual(["anthropic"])
+    expect(config.provider.anthropic.models).toEqual({ "claude-sonnet-4-5": {} })
+    expect(config.provider.anthropic).not.toHaveProperty("options")
+  })
+
+  test("normalizes provider model IDs without losing nested model names", () => {
+    expect(cleanProviderModels("groq", ["groq/openai/gpt-oss-120b", "qwen/qwen3-32b"])).toEqual([
+      "openai/gpt-oss-120b",
+      "qwen/qwen3-32b",
+    ])
+    expect(providerModelId("groq", "openai/gpt-oss-120b")).toBe("groq/openai/gpt-oss-120b")
+  })
+
+  test("signs Cloud Agent computer access to one run and device", () => {
+    process.env.VECTOR_PLATFORM_SECRET = "s".repeat(32)
+    const token = createComputerToken({ userId: "user", runId: "run", deviceId: "device" })
+    expect(verifyComputerToken(token)).toMatchObject({ userId: "user", runId: "run", deviceId: "device" })
+    expect(() => verifyComputerToken(`${token}tampered`)).toThrow("invalid")
   })
 
   test("does not advertise Cloud Agents without the pinned runtime and reconciler", () => {

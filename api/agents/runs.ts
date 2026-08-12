@@ -1,7 +1,7 @@
 import { waitUntil } from "@vercel/functions"
 import {
   availableCloudModels,
-  requiredCloudModel,
+  resolveCloudProvider,
   startCloudAgent,
   validateCloudConnections,
   type CloudAgentRun,
@@ -15,6 +15,7 @@ type CreateRun = {
   repositoryUrl?: string
   repositoryBranch?: string
   model?: string
+  providerConnectionId?: string
   teamId?: string
   teamName?: string
   teamObjective?: string
@@ -67,7 +68,8 @@ export default async function handler(request: ApiRequest, response: ApiResponse
         `Vector supports up to ${limits.activeCloudAgents} active cloud agents per account.`,
       )
     }
-    const model = requiredCloudModel(body.model)
+    const provider = await resolveCloudProvider(user.id, body.providerConnectionId, body.model)
+    const model = provider.model
     const selectedTools = await validateCloudConnections(user.id, body.selectedTools || [])
     await consumePlatformQuota({
       userId: user.id,
@@ -114,7 +116,7 @@ export default async function handler(request: ApiRequest, response: ApiResponse
         prompt,
         repository_url: body.repositoryUrl?.trim() || null,
         repository_branch: body.repositoryBranch?.trim() || null,
-        provider: "vector-cloud",
+        provider: provider.source,
         model,
         status: "queued",
         current_step: "Queued",

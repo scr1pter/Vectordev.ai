@@ -1,7 +1,7 @@
 import { waitUntil } from "@vercel/functions"
 import {
   availableCloudModels,
-  requiredCloudModel,
+  resolveCloudProvider,
   startCloudAgent,
   validateCloudConnections,
   type CloudAgentRun,
@@ -17,6 +17,7 @@ type CreateTeam = {
   repositoryUrl?: string
   repositoryBranch?: string
   model?: string
+  providerConnectionId?: string
   selectedTools?: string[]
   missions?: Mission[]
   mode?: "coordinated" | "isolated"
@@ -115,7 +116,8 @@ export default async function handler(request: ApiRequest, response: ApiResponse
       )
     }
 
-    const model = requiredCloudModel(body.model)
+    const provider = await resolveCloudProvider(user.id, body.providerConnectionId, body.model)
+    const model = provider.model
     const selectedTools = await validateCloudConnections(user.id, body.selectedTools || [])
     await consumePlatformQuota({
       userId: user.id,
@@ -150,7 +152,7 @@ export default async function handler(request: ApiRequest, response: ApiResponse
       prompt: mission.prompt,
       repository_url: body.repositoryUrl?.trim() || null,
       repository_branch: body.repositoryBranch?.trim() || null,
-      provider: "vector-cloud",
+      provider: provider.source,
       model,
       status: "queued",
       current_step: "Queued with team",

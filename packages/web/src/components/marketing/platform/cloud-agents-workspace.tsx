@@ -10,6 +10,8 @@ import {
   CircleStop,
   Cloud,
   Folder,
+  KeyRound,
+  Laptop,
   Link2,
   LoaderCircle,
   MessageSquare,
@@ -50,6 +52,7 @@ type Run = {
   role?: "worker" | "integrator"
   name: string
   prompt: string
+  provider?: string | null
   model: string
   status: string
   current_step?: string | null
@@ -92,6 +95,30 @@ type ProjectsPayload = { projects: Project[] }
 type ConnectionsPayload = { connections: Connection[] }
 type CatalogPayload = { tools: Tool[] }
 type RunPayload = { run: Run; messages: Message[] }
+type ProviderCatalogItem = {
+  id: string
+  name: string
+  models: string[]
+}
+type ProviderConnection = {
+  id: string
+  provider_id: string
+  name: string
+  models: string[]
+  enabled: boolean
+  last_status: string
+}
+type ProvidersPayload = { catalog: ProviderCatalogItem[]; connections: ProviderConnection[] }
+type CompanionDevice = {
+  id: string
+  name: string
+  platform: string
+  permissions: string[]
+  status: string
+  last_seen_at?: string | null
+  created_at: string
+}
+type DevicesPayload = { devices: CompanionDevice[] }
 
 const activeStatuses = ["queued", "starting", "running", "needs_input"]
 
@@ -118,7 +145,15 @@ function toolIsReady(tool?: Tool) {
 
 function connectionIsReady(connection: Connection, catalog: Tool[]) {
   if (connection.kind !== "plugin") return true
+  if (connection.plugin_id === "computer-use") return true
   return toolIsReady(catalog.find((tool) => tool.id === connection.plugin_id))
+}
+
+function providerModels(connection?: ProviderConnection) {
+  if (!connection) return []
+  return connection.models.map((model) =>
+    model.startsWith(`${connection.provider_id}/`) ? model : `${connection.provider_id}/${model}`,
+  )
 }
 
 function AccessibleModal(props: { children: ReactNode; titleId: string; onClose: () => void; wide?: boolean }) {
@@ -170,6 +205,9 @@ export function CloudAgentsWorkspace(props: { session: Session; config?: Platfor
   const [models, setModels] = useState<string[]>([])
   const [connections, setConnections] = useState<Connection[]>([])
   const [catalog, setCatalog] = useState<Tool[]>([])
+  const [providerCatalog, setProviderCatalog] = useState<ProviderCatalogItem[]>([])
+  const [providers, setProviders] = useState<ProviderConnection[]>([])
+  const [devices, setDevices] = useState<CompanionDevice[]>([])
   const [selectedProjectId, setSelectedProjectId] = useState("")
   const [selectedTaskId, setSelectedTaskId] = useState("")
   const [selectedRunId, setSelectedRunId] = useState("")
@@ -182,6 +220,8 @@ export function CloudAgentsWorkspace(props: { session: Session; config?: Platfor
   const [taskModal, setTaskModal] = useState(false)
   const [agentModal, setAgentModal] = useState(false)
   const [toolsModal, setToolsModal] = useState(false)
+  const [providersModal, setProvidersModal] = useState(false)
+  const [devicesModal, setDevicesModal] = useState(false)
   const [busy, setBusy] = useState("")
   const [notice, setNotice] = useState<Notice>()
 
@@ -206,12 +246,17 @@ export function CloudAgentsWorkspace(props: { session: Session; config?: Platfor
 
   const loadConnections = async () => {
     try {
-      const [saved, available] = await Promise.all([
+      const [saved, available, modelProviders, pairedDevices] = await Promise.all([
         apiFetch<ConnectionsPayload>("/api/platform/connections", props.session),
         apiFetch<CatalogPayload>("/api/platform/catalog", props.session),
+        apiFetch<ProvidersPayload>("/api/platform/providers", props.session),
+        apiFetch<DevicesPayload>("/api/platform/devices", props.session),
       ])
       setConnections(saved.connections || [])
       setCatalog(available.tools || [])
+      setProviders(modelProviders.connections || [])
+      setProviderCatalog(modelProviders.catalog || [])
+      setDevices(pairedDevices.devices || [])
     } catch (cause) {
       reportError(cause, "Vector could not load integrations.")
     }
@@ -375,6 +420,12 @@ export function CloudAgentsWorkspace(props: { session: Session; config?: Platfor
           </button>
           <button className="platform-secondary" onClick={() => setToolsModal(true)}>
             <Boxes size={14} /> MCP & plugins
+          </button>
+          <button className="platform-secondary" onClick={() => setProvidersModal(true)}>
+            <KeyRound size={14} /> Model providers
+          </button>
+          <button className="platform-secondary" onClick={() => setDevicesModal(true)}>
+            <Laptop size={14} /> Computer access
           </button>
           <button className="platform-primary" onClick={() => setProjectModal(true)}>
             <Plus size={14} /> New project
@@ -676,6 +727,7 @@ export function CloudAgentsWorkspace(props: { session: Session; config?: Platfor
           session={props.session}
           project={selectedProject}
           models={models}
+          providers={providers}
           connections={connections}
           catalog={catalog}
           onClose={() => setTaskModal(false)}
@@ -700,6 +752,7 @@ export function CloudAgentsWorkspace(props: { session: Session; config?: Platfor
           session={props.session}
           task={selectedTask}
           models={models}
+          providers={providers}
           connections={connections}
           catalog={catalog}
           onClose={() => setAgentModal(false)}
@@ -718,6 +771,23 @@ export function CloudAgentsWorkspace(props: { session: Session; config?: Platfor
           connections={connections}
           catalog={catalog}
           onClose={() => setToolsModal(false)}
+          onChanged={loadConnections}
+        />
+      )}
+      {providersModal && (
+        <CloudProvidersModal
+          session={props.session}
+          catalog={providerCatalog}
+          connections={providers}
+          onClose={() => setProvidersModal(false)}
+          onChanged={loadConnections}
+        />
+      )}
+      {devicesModal && (
+        <ComputerAccessModal
+          session={props.session}
+          devices={devices}
+          onClose={() => setDevicesModal(false)}
           onChanged={loadConnections}
         />
       )}
@@ -880,6 +950,7 @@ function TaskModal(props: {
   session: Session
   project: Project
   models: string[]
+  providers: ProviderConnection[]
   connections: Connection[]
   catalog: Tool[]
   onClose: () => void
@@ -890,14 +961,24 @@ function TaskModal(props: {
   const [name, setName] = useState("")
   const [objective, setObjective] = useState("")
   const [mode, setMode] = useState<Task["mode"]>("coordinated")
-  const [model, setModel] = useState(props.models[0] || "")
+  const availableProviders = props.providers.filter((provider) => provider.enabled)
+  const [providerConnectionId, setProviderConnectionId] = useState(availableProviders[0]?.id || "")
+  const activeProvider = availableProviders.find((provider) => provider.id === providerConnectionId)
+  const availableModels = activeProvider ? providerModels(activeProvider) : props.models
+  const [model, setModel] = useState(availableModels[0] || "")
   const [agents, setAgents] = useState<AgentDraft[]>([{ key: 1, name: "", prompt: "" }])
   const [tools, setTools] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState("")
   useEffect(() => {
-    if (!props.models.includes(model)) setModel(props.models[0] || "")
-  }, [props.models])
+    const firstProvider = availableProviders[0]
+    if (firstProvider && !availableProviders.some((provider) => provider.id === providerConnectionId)) {
+      setProviderConnectionId(firstProvider.id)
+      setModel(providerModels(firstProvider)[0] || "")
+      return
+    }
+    if (!availableModels.includes(model)) setModel(availableModels[0] || "")
+  }, [props.models, props.providers, providerConnectionId, model])
   const update = (key: number, field: "name" | "prompt", value: string) =>
     setAgents((current) => current.map((agent) => (agent.key === key ? { ...agent, [field]: value } : agent)))
   const complete = agents.every((agent) => agent.name.trim() && agent.prompt.trim())
@@ -915,6 +996,7 @@ function TaskModal(props: {
           objective,
           mode,
           model,
+          providerConnectionId: providerConnectionId || undefined,
           selectedTools: tools,
           missions: agents.map(({ name: agentName, prompt }) => ({ name: agentName, prompt })),
         }),
@@ -976,15 +1058,35 @@ function TaskModal(props: {
               </select>
             </label>
             <label>
+              Model provider
+              <select
+                className="platform-select"
+                value={providerConnectionId}
+                onChange={(event) => {
+                  const id = event.target.value
+                  setProviderConnectionId(id)
+                  const provider = availableProviders.find((item) => item.id === id)
+                  setModel(providerModels(provider)[0] || props.models[0] || "")
+                }}
+                disabled={!availableProviders.length}
+              >
+                {availableProviders.length ? (
+                  availableProviders.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)
+                ) : (
+                  <option value="">Connect a provider first</option>
+                )}
+              </select>
+            </label>
+            <label>
               Model
               <select
                 className="platform-select"
                 value={model}
                 onChange={(event) => setModel(event.target.value)}
-                disabled={!props.models.length}
+                disabled={!availableModels.length}
               >
-                {props.models.length ? (
-                  props.models.map((item) => <option key={item}>{item}</option>)
+                {availableModels.length ? (
+                  availableModels.map((item) => <option key={item}>{item}</option>)
                 ) : (
                   <option value="">Cloud model needs setup</option>
                 )}
@@ -1052,7 +1154,7 @@ function TaskModal(props: {
           {error && <p className="platform-dialog-error">{error}</p>}
           <ModalActions
             busy={busy}
-            ready={!!name.trim() && !!objective.trim() && !!model && complete}
+            ready={!!name.trim() && !!objective.trim() && !!providerConnectionId && !!model && complete}
             onClose={props.onClose}
             label={`Launch ${agents.length} agent${agents.length === 1 ? "" : "s"}`}
           />
@@ -1066,6 +1168,7 @@ function NewAgentModal(props: {
   session: Session
   task: Task
   models: string[]
+  providers: ProviderConnection[]
   connections: Connection[]
   catalog: Tool[]
   onClose: () => void
@@ -1074,13 +1177,23 @@ function NewAgentModal(props: {
   const titleId = useId()
   const [name, setName] = useState("")
   const [prompt, setPrompt] = useState("")
-  const [model, setModel] = useState(props.models[0] || "")
+  const availableProviders = props.providers.filter((provider) => provider.enabled)
+  const [providerConnectionId, setProviderConnectionId] = useState(availableProviders[0]?.id || "")
+  const activeProvider = availableProviders.find((provider) => provider.id === providerConnectionId)
+  const availableModels = activeProvider ? providerModels(activeProvider) : props.models
+  const [model, setModel] = useState(availableModels[0] || "")
   const [tools, setTools] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState("")
   useEffect(() => {
-    if (!props.models.includes(model)) setModel(props.models[0] || "")
-  }, [props.models])
+    const firstProvider = availableProviders[0]
+    if (firstProvider && !availableProviders.some((provider) => provider.id === providerConnectionId)) {
+      setProviderConnectionId(firstProvider.id)
+      setModel(providerModels(firstProvider)[0] || "")
+      return
+    }
+    if (!availableModels.includes(model)) setModel(availableModels[0] || "")
+  }, [props.models, props.providers, providerConnectionId, model])
   const submit = async (event: FormEvent) => {
     event.preventDefault()
     setBusy(true)
@@ -1088,7 +1201,14 @@ function NewAgentModal(props: {
     try {
       const payload = await apiFetch<{ run: Run }>("/api/agents/runs", props.session, {
         method: "POST",
-        body: JSON.stringify({ name, prompt, model, teamId: props.task.id, selectedTools: tools }),
+        body: JSON.stringify({
+          name,
+          prompt,
+          model,
+          providerConnectionId: providerConnectionId || undefined,
+          teamId: props.task.id,
+          selectedTools: tools,
+        }),
       })
       props.onCreated(payload.run)
     } catch (cause) {
@@ -1135,15 +1255,35 @@ function NewAgentModal(props: {
             />
           </label>
           <label>
+            Model provider
+            <select
+              className="platform-select"
+              value={providerConnectionId}
+              onChange={(event) => {
+                const id = event.target.value
+                setProviderConnectionId(id)
+                const provider = availableProviders.find((item) => item.id === id)
+                setModel(providerModels(provider)[0] || props.models[0] || "")
+              }}
+              disabled={!availableProviders.length}
+            >
+              {availableProviders.length ? (
+                availableProviders.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)
+              ) : (
+                <option value="">Connect a provider first</option>
+              )}
+            </select>
+          </label>
+          <label>
             Model
             <select
               className="platform-select"
               value={model}
               onChange={(event) => setModel(event.target.value)}
-              disabled={!props.models.length}
+              disabled={!availableModels.length}
             >
-              {props.models.length ? (
-                props.models.map((item) => <option key={item}>{item}</option>)
+              {availableModels.length ? (
+                availableModels.map((item) => <option key={item}>{item}</option>)
               ) : (
                 <option value="">Cloud model needs setup</option>
               )}
@@ -1160,7 +1300,7 @@ function NewAgentModal(props: {
           {error && <p className="platform-dialog-error">{error}</p>}
           <ModalActions
             busy={busy}
-            ready={!!name.trim() && !!prompt.trim() && !!model}
+            ready={!!name.trim() && !!prompt.trim() && !!providerConnectionId && !!model}
             onClose={props.onClose}
             label="Launch agent"
           />
@@ -1197,6 +1337,250 @@ function ModalActions(props: { busy: boolean; ready: boolean; onClose: () => voi
   )
 }
 
+function ComputerAccessModal(props: {
+  session: Session
+  devices: CompanionDevice[]
+  onClose: () => void
+  onChanged: () => Promise<void>
+}) {
+  const titleId = useId()
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState("")
+
+  useEffect(() => {
+    const timer = window.setInterval(() => void props.onChanged(), 4_000)
+    return () => window.clearInterval(timer)
+  }, [])
+
+  const pair = async () => {
+    setBusy(true)
+    setError("")
+    try {
+      const payload = await apiFetch<{ url: string }>("/api/platform/devices", props.session, {
+        method: "POST",
+        body: JSON.stringify({ action: "pair" }),
+      })
+      window.location.href = payload.url
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Vector could not start computer pairing.")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const revoke = async (id: string) => {
+    setBusy(true)
+    setError("")
+    try {
+      await apiFetch("/api/platform/devices", props.session, {
+        method: "DELETE",
+        body: JSON.stringify({ id }),
+      })
+      await props.onChanged()
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Vector could not disconnect this computer.")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <AccessibleModal titleId={titleId} onClose={props.onClose}>
+      <ModalHead
+        id={titleId}
+        title="Computer access"
+        copy="Pair the Vector desktop app, then choose its Computer connection when launching an agent."
+        onClose={props.onClose}
+      />
+      <div className="platform-form-grid">
+        <div className="cloud-device-safety">
+          <Laptop size={18} />
+          <p>
+            Cloud Agents cannot act silently. The desktop app displays every requested browser or terminal action and
+            requires an explicit <strong>Allow once</strong> before it runs.
+          </p>
+        </div>
+        {props.devices.length ? (
+          props.devices.map((device) => {
+            const online = device.last_seen_at && Date.now() - new Date(device.last_seen_at).getTime() < 30_000
+            return (
+              <div className="cloud-connected-tool" key={device.id}>
+                <Laptop size={15} />
+                <span>
+                  <strong>{device.name}</strong>
+                  <small>{online ? "Online" : "Offline"} · {device.platform} · {device.permissions.join(" + ")}</small>
+                </span>
+                <button
+                  className="platform-secondary"
+                  disabled={busy}
+                  onClick={() => void revoke(device.id)}
+                >
+                  Disconnect
+                </button>
+              </div>
+            )
+          })
+        ) : (
+          <p className="cloud-tools-empty">No computers are paired with this account.</p>
+        )}
+        <button className="platform-primary" onClick={() => void pair()} disabled={busy}>
+          <Laptop size={14} /> {busy ? "Preparing..." : "Connect this computer"}
+        </button>
+        {error && <p className="platform-dialog-error">{error}</p>}
+      </div>
+    </AccessibleModal>
+  )
+}
+
+function CloudProvidersModal(props: {
+  session: Session
+  catalog: ProviderCatalogItem[]
+  connections: ProviderConnection[]
+  onClose: () => void
+  onChanged: () => Promise<void>
+}) {
+  const titleId = useId()
+  const [selectedId, setSelectedId] = useState(props.catalog[0]?.id || "")
+  const selected = props.catalog.find((provider) => provider.id === selectedId)
+  const existing = props.connections.find((provider) => provider.provider_id === selectedId)
+  const [apiKey, setApiKey] = useState("")
+  const [models, setModels] = useState((existing?.models || selected?.models || []).join("\n"))
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState("")
+
+  useEffect(() => {
+    const connection = props.connections.find((provider) => provider.provider_id === selectedId)
+    const provider = props.catalog.find((item) => item.id === selectedId)
+    setApiKey("")
+    setModels((connection?.models || provider?.models || []).join("\n"))
+  }, [selectedId, props.connections, props.catalog])
+
+  const save = async () => {
+    if (!selected) return
+    setBusy(true)
+    setError("")
+    try {
+      await apiFetch("/api/platform/providers", props.session, {
+        method: "POST",
+        body: JSON.stringify({
+          id: existing?.id,
+          providerId: selected.id,
+          name: selected.name,
+          apiKey,
+          models: models.split(/[\n,]/).map((value) => value.trim()).filter(Boolean),
+        }),
+      })
+      setApiKey("")
+      await props.onChanged()
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Vector could not save this provider.")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const remove = async (id: string) => {
+    setBusy(true)
+    setError("")
+    try {
+      await apiFetch("/api/platform/providers", props.session, { method: "DELETE", body: JSON.stringify({ id }) })
+      await props.onChanged()
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Vector could not remove this provider.")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <AccessibleModal titleId={titleId} onClose={props.onClose} wide>
+      <ModalHead
+        id={titleId}
+        title="Model providers"
+        copy="Bring the same provider keys you use in Vector desktop. Keys are encrypted and brokered into isolated runs."
+        onClose={props.onClose}
+      />
+      <div className="cloud-tools-layout">
+        <section>
+          <h3>Connected</h3>
+          {props.connections.length ? (
+            props.connections.map((connection) => (
+              <div className="cloud-connected-tool" key={connection.id}>
+                <KeyRound size={14} />
+                <span>
+                  <strong>{connection.name}</strong>
+                  <small>{connection.models.length} model{connection.models.length === 1 ? "" : "s"} · {connection.last_status}</small>
+                </span>
+                <button
+                  className="platform-icon-button"
+                  aria-label={`Remove ${connection.name}`}
+                  onClick={() => void remove(connection.id)}
+                  disabled={busy}
+                >
+                  <Trash2 size={13} />
+                </button>
+              </div>
+            ))
+          ) : (
+            <p className="cloud-tools-empty">Connect a provider to launch Cloud Agents.</p>
+          )}
+        </section>
+        <section>
+          <h3>BYOK providers</h3>
+          <div className="cloud-tool-catalog">
+            {props.catalog.map((provider) => (
+              <button
+                key={provider.id}
+                data-selected={selectedId === provider.id}
+                onClick={() => setSelectedId(provider.id)}
+              >
+                <KeyRound size={14} />
+                <span>
+                  <strong>{provider.name}</strong>
+                  <small>{props.connections.some((item) => item.provider_id === provider.id) ? "Connected" : "Use your API key"}</small>
+                </span>
+              </button>
+            ))}
+          </div>
+        </section>
+      </div>
+      {selected && (
+        <div className="cloud-tool-editor">
+          <h3>{existing ? `Reconnect ${selected.name}` : `Connect ${selected.name}`}</h3>
+          <label>
+            API key
+            <input
+              className="platform-input"
+              type="password"
+              autoComplete="off"
+              value={apiKey}
+              onChange={(event) => setApiKey(event.target.value)}
+              placeholder={existing ? "Enter a new key to replace the saved key" : "Stored encrypted"}
+            />
+          </label>
+          <label>
+            Model IDs
+            <textarea
+              className="platform-textarea"
+              value={models}
+              onChange={(event) => setModels(event.target.value)}
+              placeholder="One provider model ID per line"
+            />
+          </label>
+          <button
+            className="platform-primary"
+            onClick={() => void save()}
+            disabled={busy || apiKey.trim().length < 8 || !models.trim()}
+          >
+            {busy ? "Saving..." : existing ? "Replace connection" : "Connect provider"}
+          </button>
+        </div>
+      )}
+      {error && <p className="platform-dialog-error">{error}</p>}
+    </AccessibleModal>
+  )
+}
+
 function CloudToolsModal(props: {
   session: Session
   connections: Connection[]
@@ -1209,8 +1593,11 @@ function CloudToolsModal(props: {
   const [selected, setSelected] = useState<Tool>()
   const [values, setValues] = useState<Record<string, string>>({})
   const [custom, setCustom] = useState(false)
+  const [customKind, setCustomKind] = useState<"mcp_remote" | "mcp_local">("mcp_remote")
   const [customName, setCustomName] = useState("")
   const [customUrl, setCustomUrl] = useState("")
+  const [customHeaders, setCustomHeaders] = useState("")
+  const [customCommand, setCustomCommand] = useState("")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState("")
   const filtered = props.catalog.filter((tool) =>
@@ -1224,7 +1611,26 @@ function CloudToolsModal(props: {
         method: "POST",
         body: JSON.stringify(
           custom
-            ? { kind: "mcp_remote", name: customName, url: customUrl }
+            ? customKind === "mcp_remote"
+              ? {
+                  kind: customKind,
+                  name: customName,
+                  url: customUrl,
+                  headers: Object.fromEntries(
+                    customHeaders
+                      .split("\n")
+                      .map((line) => {
+                        const separator = line.indexOf(":")
+                        return separator > 0 ? [line.slice(0, separator).trim(), line.slice(separator + 1).trim()] : []
+                      })
+                      .filter((entry): entry is [string, string] => entry.length === 2 && Boolean(entry[0]) && Boolean(entry[1])),
+                  ),
+                }
+              : {
+                  kind: customKind,
+                  name: customName,
+                  command: customCommand.split("\n").map((value) => value.trim()).filter(Boolean),
+                }
             : { kind: "plugin", name: selected!.name, pluginId: selected!.id, values },
         ),
       })
@@ -1233,6 +1639,8 @@ function CloudToolsModal(props: {
       setCustom(false)
       setCustomName("")
       setCustomUrl("")
+      setCustomHeaders("")
+      setCustomCommand("")
       await props.onChanged()
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Vector could not save this connection.")
@@ -1290,10 +1698,21 @@ function CloudToolsModal(props: {
             className="platform-secondary"
             onClick={() => {
               setCustom(true)
+              setCustomKind("mcp_remote")
               setSelected(undefined)
             }}
           >
             <Plus size={13} /> Remote MCP server
+          </button>
+          <button
+            className="platform-secondary"
+            onClick={() => {
+              setCustom(true)
+              setCustomKind("mcp_local")
+              setSelected(undefined)
+            }}
+          >
+            <Plus size={13} /> Local MCP command
           </button>
         </section>
         <section>
@@ -1325,7 +1744,9 @@ function CloudToolsModal(props: {
       </div>
       {(selected || custom) && (
         <div className="cloud-tool-editor">
-          <h3>{custom ? "Connect remote MCP" : `Connect ${selected?.name}`}</h3>
+          <h3>
+            {custom ? (customKind === "mcp_remote" ? "Connect remote MCP" : "Connect local MCP") : `Connect ${selected?.name}`}
+          </h3>
           {custom ? (
             <>
               <label>
@@ -1336,16 +1757,40 @@ function CloudToolsModal(props: {
                   onChange={(event) => setCustomName(event.target.value)}
                 />
               </label>
-              <label>
-                Server URL
-                <input
-                  className="platform-input"
-                  type="url"
-                  value={customUrl}
-                  onChange={(event) => setCustomUrl(event.target.value)}
-                  placeholder="https://example.com/mcp"
-                />
-              </label>
+              {customKind === "mcp_remote" ? (
+                <>
+                  <label>
+                    Server URL
+                    <input
+                      className="platform-input"
+                      type="url"
+                      value={customUrl}
+                      onChange={(event) => setCustomUrl(event.target.value)}
+                      placeholder="https://example.com/mcp"
+                    />
+                  </label>
+                  <label>
+                    Encrypted request headers (optional)
+                    <textarea
+                      className="platform-textarea"
+                      value={customHeaders}
+                      onChange={(event) => setCustomHeaders(event.target.value)}
+                      placeholder={"Authorization: Bearer token\nX-Workspace: production"}
+                    />
+                  </label>
+                </>
+              ) : (
+                <label>
+                  Command and arguments
+                  <textarea
+                    className="platform-textarea"
+                    value={customCommand}
+                    onChange={(event) => setCustomCommand(event.target.value)}
+                    placeholder={"npx\n-y\n@modelcontextprotocol/server-filesystem\n/vercel/sandbox/workspace"}
+                  />
+                  <small>Enter the executable and each argument on its own line. Secret environment values require a remote MCP.</small>
+                </label>
+              )}
             </>
           ) : (
             selected?.fields?.map((field) => (
@@ -1366,7 +1811,7 @@ function CloudToolsModal(props: {
             disabled={
               busy ||
               (custom
-                ? !customName.trim() || !customUrl.trim()
+                ? !customName.trim() || (customKind === "mcp_remote" ? !customUrl.trim() : !customCommand.trim())
                 : !selected || !!selected.fields?.some((field) => !values[field.key]?.trim()))
             }
           >

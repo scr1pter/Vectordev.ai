@@ -1,6 +1,14 @@
 import { Sandbox } from "@vercel/sandbox"
 import { ApiError } from "./http.js"
+import { createComputerToken } from "./companion.js"
 import { decryptPlatformValue, platformAdmin, platformConfiguration } from "./platform.js"
+import {
+  providerAuthorization,
+  providerDefinition,
+  providerModelId,
+  type ProviderDefinition,
+  type SavedProviderSecret,
+} from "./provider-catalog.js"
 import { buildPluginMcp, cloudReadyTool, TOOL_CATALOG } from "./tool-catalog.js"
 
 export type CloudAgentRun = {
@@ -41,6 +49,23 @@ type SavedConnection = {
   encrypted_config: string
 }
 
+type SavedProviderConnection = {
+  id: string
+  provider_id: string
+  name: string
+  models: string[]
+  encrypted_config: string
+}
+
+type BrokerRule = { host: string; headers: Record<string, string> }
+
+export type CloudProviderRuntime = {
+  source: string
+  provider: ProviderDefinition
+  model: string
+  apiKey: string
+}
+
 const MAX_LOG_BYTES = 300_000
 const MAX_DIFF_BYTES = 750_000
 const MAX_AGENT_MINUTES = Math.min(120, Math.max(10, Number(process.env.VECTOR_CLOUD_AGENT_MAX_MINUTES) || 30))
@@ -71,24 +96,35 @@ export function requiredCloudModel(requested?: string) {
   const models = cloudModels()
   if (!models.length)
     throw new ApiError(503, "CLOUD_MODEL_MISSING", "Vector Cloud Agents do not have a model configured.")
-  if (!requested) return models[0]
+  if (!requested) return models[0]!
   if (!models.includes(requested))
     throw new ApiError(400, "CLOUD_MODEL_INVALID", "Choose an available Vector cloud model.")
   return requested
 }
 
-function sandboxEnvironment() {
+function sandboxEnvironment(runtime: CloudProviderRuntime) {
   // The real credential is injected by the sandbox firewall and never enters
   // the customer-controlled VM. The provider SDK only needs a placeholder.
-  return { OPENROUTER_API_KEY: "vector-brokered" }
+  return { [runtime.provider.env]: "vector-brokered" }
 }
 
-function sandboxNetworkPolicy() {
-  const key = process.env.OPENROUTER_API_KEY
-  if (!key) throw new ApiError(503, "CLOUD_GATEWAY_MISSING", "Vector Cloud Agents do not have OpenRouter configured.")
+function sandboxNetworkPolicy(runtime: CloudProviderRuntime, brokerRules: BrokerRule[] = []) {
+  const providerHeaders = {
+    [runtime.provider.header]: providerAuthorization(runtime.provider, runtime.apiKey),
+    ...(runtime.provider.id === "openrouter"
+      ? { "HTTP-Referer": "https://vectordev.ai", "X-OpenRouter-Title": "Vector Cloud Agents" }
+      : {}),
+  }
+  const transformed = new Map<string, Record<string, string>>([[runtime.provider.host, providerHeaders]])
+  for (const rule of brokerRules) {
+    transformed.set(rule.host, { ...transformed.get(rule.host), ...rule.headers })
+  }
+  const allow = Object.fromEntries(
+    [...transformed].map(([host, headers]) => [host, [{ transform: [{ headers }] }]]),
+  )
   return {
     allow: {
-      "openrouter.ai": [{ transform: [{ headers: { Authorization: `Bearer ${key}` } }] }],
+      ...allow,
       "*": [],
     },
     subnets: {
@@ -108,6 +144,46 @@ function sandboxNetworkPolicy() {
       ],
     },
   }
+}
+
+export async function resolveCloudProvider(
+  userId: string,
+  connectionId?: string | null,
+  requestedModel?: string,
+): Promise<CloudProviderRuntime> {
+  if (connectionId) {
+    const { data, error } = await platformAdmin()
+      .from("vector_model_connections")
+      .select("id,provider_id,name,models,encrypted_config")
+      .eq("id", connectionId)
+      .eq("user_id", userId)
+      .eq("enabled", true)
+      .maybeSingle<SavedProviderConnection>()
+    if (error) throw new ApiError(500, "PROVIDER_LOAD_FAILED", "Vector could not load the selected model provider.")
+    if (!data) throw new ApiError(404, "PROVIDER_NOT_FOUND", "Connect this model provider before launching agents.")
+    const provider = providerDefinition(data.provider_id)
+    const secret = decryptPlatformValue<SavedProviderSecret>(data.encrypted_config)
+    const models = [...new Set([...(data.models || []), ...(secret.models || [])])]
+    const model = providerModelId(provider.id, requestedModel || models[0] || "")
+    const bareModel = model.slice(provider.id.length + 1)
+    if (!models.includes(bareModel)) {
+      throw new ApiError(400, "CLOUD_MODEL_INVALID", "Choose a model saved with this provider connection.")
+    }
+    if (!secret.apiKey) throw new ApiError(409, "PROVIDER_KEY_MISSING", "Reconnect this provider's API key.")
+    return { source: `byok:${data.id}`, provider, model, apiKey: secret.apiKey }
+  }
+
+  const model = requiredCloudModel(requestedModel)
+  const apiKey = process.env.OPENROUTER_API_KEY?.trim()
+  if (!apiKey) {
+    throw new ApiError(409, "PROVIDER_REQUIRED", "Connect a model provider before launching a Cloud Agent.")
+  }
+  return { source: "platform:openrouter", provider: providerDefinition("openrouter"), model, apiKey }
+}
+
+async function providerForRun(run: CloudAgentRun) {
+  const connectionId = run.provider?.startsWith("byok:") ? run.provider.slice(5) : undefined
+  return resolveCloudProvider(run.user_id, connectionId, run.model)
 }
 
 function repositorySource(raw?: string | null, branch?: string | null) {
@@ -164,8 +240,9 @@ async function readText(sandbox: Sandbox, path: string, maximum: number) {
   return clipped.toString("utf8")
 }
 
-async function selectedMcpConfig(userId: string, selected: string[]) {
-  if (!selected.length) return { mcp: {}, browserEnabled: false }
+async function selectedMcpConfig(run: CloudAgentRun, selected: string[]) {
+  const userId = run.user_id
+  if (!selected.length) return { mcp: {}, browserEnabled: false, brokerRules: [] as BrokerRule[] }
   const { data, error } = await platformAdmin()
     .from("vector_tool_connections")
     .select("id,plugin_id,name,kind,encrypted_config")
@@ -175,9 +252,22 @@ async function selectedMcpConfig(userId: string, selected: string[]) {
   if (error) throw new ApiError(500, "TOOLS_LOAD_FAILED", "Vector could not prepare the selected tools.")
   const mcp: Record<string, unknown> = {}
   let browserEnabled = false
+  const brokerRules: BrokerRule[] = []
   for (const connection of (data || []) as SavedConnection[]) {
     const config = decryptPlatformValue<Record<string, unknown>>(connection.encrypted_config)
     if (connection.kind === "plugin" && connection.plugin_id) {
+      if (connection.plugin_id === "computer-use" && typeof config.deviceId === "string") {
+        const token = createComputerToken({ userId, runId: run.id, deviceId: config.deviceId })
+        const origin = (process.env.VECTOR_PUBLIC_URL || "https://vectordev.ai").replace(/\/$/, "")
+        mcp[connection.name] = {
+          type: "remote",
+          url: `${origin}/api/mcp/computer?token=${encodeURIComponent(token)}`,
+          oauth: false,
+          enabled: true,
+          timeout: 300_000,
+        }
+        continue
+      }
       const plugin = TOOL_CATALOG.find((item) => item.id === connection.plugin_id)
       if (!plugin || !cloudReadyTool(plugin)) continue
       const values =
@@ -192,18 +282,35 @@ async function selectedMcpConfig(userId: string, selected: string[]) {
       continue
     }
     if (connection.kind === "mcp_remote") {
+      const url = new URL(String(config.url))
+      const headers =
+        config.headers && typeof config.headers === "object" && !Array.isArray(config.headers)
+          ? Object.fromEntries(
+              Object.entries(config.headers as Record<string, unknown>).filter(
+                (entry): entry is [string, string] => typeof entry[1] === "string" && Boolean(entry[1]),
+              ),
+            )
+          : {}
+      if (Object.keys(headers).length) brokerRules.push({ host: url.hostname, headers })
       mcp[connection.name] = {
         type: "remote",
-        url: config.url,
+        url: url.toString(),
         oauth: false,
         enabled: true,
         timeout: 120_000,
       }
       continue
     }
-    throw new ApiError(409, "MCP_LOCAL_UNAVAILABLE", "Local MCP commands cannot run in Vector Cloud Agents.")
+    if (connection.kind === "mcp_local") {
+      const command = Array.isArray(config.command)
+        ? config.command.filter((value): value is string => typeof value === "string" && Boolean(value)).slice(0, 24)
+        : []
+      if (!command.length) throw new ApiError(409, "MCP_COMMAND_INVALID", `${connection.name} has no command.`)
+      mcp[connection.name] = { type: "local", command, enabled: true, timeout: 120_000 }
+      continue
+    }
   }
-  return { mcp, browserEnabled }
+  return { mcp, browserEnabled, brokerRules }
 }
 
 export async function validateCloudConnections(userId: string, selected: string[]) {
@@ -219,17 +326,34 @@ export async function validateCloudConnections(userId: string, selected: string[
   const found = new Set<string>()
   for (const item of (data || []) as SavedConnection[]) {
     if (item.kind === "plugin") {
+      if (item.plugin_id === "computer-use") {
+        const config = decryptPlatformValue<Record<string, unknown>>(item.encrypted_config)
+        if (typeof config.deviceId !== "string") {
+          throw new ApiError(409, "DEVICE_NOT_CONNECTED", "Reconnect this computer before using it.")
+        }
+        const { data: device } = await platformAdmin()
+          .from("vector_companion_devices")
+          .select("id")
+          .eq("id", config.deviceId)
+          .eq("user_id", userId)
+          .eq("status", "connected")
+          .maybeSingle()
+        if (!device) throw new ApiError(409, "DEVICE_NOT_CONNECTED", "That paired computer is disconnected.")
+        found.add(item.id)
+        continue
+      }
       const plugin = TOOL_CATALOG.find((entry) => entry.id === item.plugin_id)
       if (!plugin || !cloudReadyTool(plugin)) {
         throw new ApiError(409, "PLUGIN_SETUP_REQUIRED", plugin?.cloudNote || "That plugin is not cloud-ready.")
       }
     } else if (item.kind === "mcp_remote") {
       const config = decryptPlatformValue<Record<string, unknown>>(item.encrypted_config)
-      if (config.headers && Object.keys(config.headers as object).length) {
-        throw new ApiError(409, "MCP_SECRET_BROKER_REQUIRED", "Authenticated custom MCP servers are not cloud-ready.")
-      }
+      if (!config.url) throw new ApiError(409, "MCP_URL_INVALID", "Reconnect this remote MCP server.")
     } else {
-      throw new ApiError(409, "MCP_LOCAL_UNAVAILABLE", "Local MCP commands cannot run in Vector Cloud Agents.")
+      const config = decryptPlatformValue<Record<string, unknown>>(item.encrypted_config)
+      if (!Array.isArray(config.command) || !config.command.length) {
+        throw new ApiError(409, "MCP_COMMAND_INVALID", "Reconnect this local MCP command.")
+      }
     }
     found.add(item.id)
   }
@@ -239,19 +363,24 @@ export async function validateCloudConnections(userId: string, selected: string[
   return unique
 }
 
-export function buildCloudAgentConfig(mcp: Record<string, unknown>, model: string) {
-  const providerModel = model.replace(/^openrouter\//, "")
+export function buildCloudAgentConfig(mcp: Record<string, unknown>, model: string, providerId?: string) {
+  const selectedProvider = providerId || model.split("/")[0] || "openrouter"
+  const providerModel = model.replace(new RegExp(`^${selectedProvider}/`), "")
   return {
     $schema: "https://opencode.ai/config.json",
-    enabled_providers: ["openrouter"],
+    enabled_providers: [selectedProvider],
     provider: {
-      openrouter: {
-        options: {
-          headers: {
-            "HTTP-Referer": "https://vectordev.ai",
-            "X-OpenRouter-Title": "Vector Cloud Agents",
-          },
-        },
+      [selectedProvider]: {
+        ...(selectedProvider === "openrouter"
+          ? {
+              options: {
+                headers: {
+                  "HTTP-Referer": "https://vectordev.ai",
+                  "X-OpenRouter-Title": "Vector Cloud Agents",
+                },
+              },
+            }
+          : {}),
         models: {
           [providerModel]: {},
         },
@@ -438,6 +567,8 @@ export async function startCloudAgent(run: CloudAgentRun) {
   const workspace = repositoryDirectory(run.repository_url)
   let sandbox: Sandbox | undefined
   try {
+    const providerRuntime = await providerForRun(run)
+    const selectedMcp = await selectedMcpConfig(run, run.selected_tools || [])
     sandbox = await Sandbox.create({
       name: sandboxName,
       ...(source ? { source } : {}),
@@ -446,8 +577,8 @@ export async function startCloudAgent(run: CloudAgentRun) {
       timeout: 24 * 60 * 60 * 1_000,
       resources: { vcpus: 4 },
       ports: [3000, 4173, 5173, 8080],
-      env: sandboxEnvironment(),
-      networkPolicy: sandboxNetworkPolicy(),
+      env: sandboxEnvironment(providerRuntime),
+      networkPolicy: sandboxNetworkPolicy(providerRuntime, selectedMcp.brokerRules),
       tags: { product: "vector", user: run.user_id.slice(0, 16), run: run.id.slice(0, 16) },
     })
     if (!source) {
@@ -470,19 +601,22 @@ export async function startCloudAgent(run: CloudAgentRun) {
       cwd: workspace,
     })
     await seedTeamPatches(sandbox, run, workspace)
-    const { mcp, browserEnabled } = await selectedMcpConfig(run.user_id, run.selected_tools || [])
-    const prompt = agentPrompt(run, await teamContext(run), browserEnabled)
+    const prompt = agentPrompt(run, await teamContext(run), selectedMcp.browserEnabled)
     await sandbox.writeFiles([
       {
         path: `${workspace}/.vector-cloud-config.json`,
-        content: JSON.stringify(buildCloudAgentConfig(mcp, run.model), null, 2),
+        content: JSON.stringify(
+          buildCloudAgentConfig(selectedMcp.mcp, providerRuntime.model, providerRuntime.provider.id),
+          null,
+          2,
+        ),
       },
       { path: `${workspace}/.vector-cloud-prompt.txt`, content: prompt },
     ])
     const script = [
       "set +e",
       "mkdir -p .vector-cloud",
-      `MODEL=${JSON.stringify(run.model)}`,
+      `MODEL=${JSON.stringify(providerRuntime.model)}`,
       `ENGINE_COMMAND=${JSON.stringify(cloudEngineCommand())}`,
       "export OPENCODE_CONFIG_CONTENT=$(cat .vector-cloud-config.json)",
       "PROMPT=$(cat .vector-cloud-prompt.txt)",
@@ -680,7 +814,7 @@ export async function reconcileAgentTeam(teamId: string, userId: string) {
       prompt: prompt.slice(0, 50_000),
       repository_url: source.repository_url,
       repository_branch: source.repository_branch,
-      provider: "vector-cloud",
+      provider: source.provider,
       model: source.model,
       status: "queued",
       current_step: "Preparing the coordinated result",
