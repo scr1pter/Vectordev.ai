@@ -53,7 +53,12 @@ jobs:
       - name: Build desktop app
         run: OPENCODE_CHANNEL=prod bun run --cwd packages/desktop build
       - name: Package Apple Silicon and Intel builds
-        run: OPENCODE_CHANNEL=prod bun run --cwd packages/desktop package -- --mac dmg zip --arm64 --x64 --publish never
+        run: |
+          for attempt in 1 2 3; do
+            OPENCODE_CHANNEL=prod bun run --cwd packages/desktop package -- --mac dmg zip --arm64 --x64 --publish never && exit 0
+            if [ "$attempt" = "3" ]; then exit 1; fi
+            sleep $((attempt * 15))
+          done
       - name: Upload macOS assets to draft release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -80,7 +85,15 @@ jobs:
       - name: Build desktop app
         run: $env:OPENCODE_CHANNEL="prod"; bun run --cwd packages/desktop build
       - name: Package Windows installer
-        run: $env:OPENCODE_CHANNEL="prod"; bun run --cwd packages/desktop package -- --win nsis --x64 --arm64 --publish never
+        shell: pwsh
+        run: |
+          $env:OPENCODE_CHANNEL = "prod"
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            bun run --cwd packages/desktop package -- --win nsis --x64 --arm64 --publish never
+            if ($LASTEXITCODE -eq 0) { exit 0 }
+            if ($attempt -eq 3) { exit $LASTEXITCODE }
+            Start-Sleep -Seconds ($attempt * 15)
+          }
       - name: Preserve the stable Windows updater filename
         shell: pwsh
         run: |
@@ -118,7 +131,12 @@ jobs:
       - name: Build desktop app
         run: OPENCODE_CHANNEL=prod bun run --cwd packages/desktop build
       - name: Package Linux AppImage
-        run: OPENCODE_CHANNEL=prod bun run --cwd packages/desktop package -- --linux AppImage --x64 --arm64 --publish never
+        run: |
+          for attempt in 1 2 3; do
+            OPENCODE_CHANNEL=prod bun run --cwd packages/desktop package -- --linux AppImage --x64 --arm64 --publish never && exit 0
+            if [ "$attempt" = "3" ]; then exit 1; fi
+            sleep $((attempt * 15))
+          done
       - name: Upload Linux assets to draft release
         env:
           GH_TOKEN: ${{ github.token }}
