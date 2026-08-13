@@ -79,7 +79,7 @@ async function pair(url: URL) {
   if (!token) return
   const approval = await dialog.showMessageBox({
     type: "question",
-    title: "Connect Vector Cloud Agents",
+    title: "Connect Vector Builder",
     message: "Allow your Vector account to request actions on this computer?",
     detail:
       "Browser and terminal actions are never silent. Vector will show the exact action and ask you to approve it on this computer before it runs.",
@@ -114,8 +114,8 @@ async function pair(url: URL) {
   await dialog.showMessageBox({
     type: "info",
     title: "Computer connected",
-    message: "Vector Cloud Agents can now request approved actions on this computer.",
-    detail: "You can disconnect it at any time from Cloud Agents. Each browser or terminal action still asks first.",
+    message: "Vector Builder can now request approved actions on this computer.",
+    detail: "You can disconnect it at any time from Settings. Each browser or terminal action still asks first.",
   })
 }
 
@@ -154,7 +154,7 @@ async function approvalFor(command: CompanionCommand) {
       : `${operation}${url ? `\n${url}` : ""}${selector ? `\n${selector}` : ""}`
   const result = await dialog.showMessageBox({
     type: command.risk === "high" ? "warning" : "question",
-    title: "Cloud Agent requests computer access",
+    title: "Vector Builder requests computer access",
     message: command.action === "shell" ? "Allow this terminal command?" : "Allow this browser action?",
     detail: summary.slice(0, 12_000),
     buttons: ["Deny", "Allow once"],

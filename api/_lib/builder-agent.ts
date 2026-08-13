@@ -11,11 +11,10 @@ import {
 } from "./provider-catalog.js"
 import { buildPluginMcp, cloudReadyTool, TOOL_CATALOG } from "./tool-catalog.js"
 
-export type CloudAgentRun = {
+export type BuilderRun = {
   id: string
   user_id: string
-  team_id: string | null
-  role: "worker" | "integrator"
+  project_id: string
   name: string
   prompt: string
   repository_url: string | null
@@ -27,6 +26,10 @@ export type CloudAgentRun = {
   current_step: string | null
   sandbox_name: string | null
   command_id: string | null
+  preview_command_id: string | null
+  preview_url: string | null
+  preview_port: number | null
+  preview_status: "idle" | "launching" | "ready" | "failed"
   selected_tools: string[]
   summary: string | null
   logs: string | null
@@ -59,7 +62,7 @@ type SavedProviderConnection = {
 
 type BrokerRule = { host: string; headers: Record<string, string> }
 
-export type CloudProviderRuntime = {
+export type BuilderProviderRuntime = {
   source: string
   provider: ProviderDefinition
   model: string
@@ -68,51 +71,56 @@ export type CloudProviderRuntime = {
 
 const MAX_LOG_BYTES = 300_000
 const MAX_DIFF_BYTES = 750_000
-const MAX_AGENT_MINUTES = Math.min(120, Math.max(10, Number(process.env.VECTOR_CLOUD_AGENT_MAX_MINUTES) || 30))
+const MAX_AGENT_MINUTES = Math.min(
+  120,
+  Math.max(10, Number(process.env.VECTOR_BUILDER_MAX_MINUTES) || 30),
+)
 
-function cloudModels() {
-  const configured = (process.env.VECTOR_CLOUD_AGENT_MODELS || process.env.VECTOR_CLOUD_AGENT_MODEL || "")
+function builderModels() {
+  const configured = (
+    process.env.VECTOR_BUILDER_MODELS || process.env.VECTOR_BUILDER_MODEL || ""
+  )
     .split(",")
     .map((value) => value.trim())
     .filter((value) => value.startsWith("openrouter/"))
   return [...new Set(configured)]
 }
 
-function cloudEngineCommand() {
-  return process.env.VECTOR_CLOUD_AGENT_ENGINE_COMMAND?.trim() || "opencode"
+function builderEngineCommand() {
+  return process.env.VECTOR_BUILDER_ENGINE_COMMAND?.trim() || "opencode"
 }
 
-function cloudSandboxImage() {
-  const configured = process.env.VECTOR_CLOUD_SANDBOX_IMAGE?.trim()
+function builderSandboxImage() {
+  const configured = process.env.VECTOR_BUILDER_SANDBOX_IMAGE?.trim()
   if (!configured) return undefined
   return configured.replace(/^https?:\/\//, "").replace(/^vcr\.vercel\.com\/[^/]+\/[^/]+\//, "")
 }
 
-export function availableCloudModels() {
-  return cloudModels()
+export function availableBuilderModels() {
+  return builderModels()
 }
 
-export function requiredCloudModel(requested?: string) {
-  const models = cloudModels()
+export function requiredBuilderModel(requested?: string) {
+  const models = builderModels()
   if (!models.length)
-    throw new ApiError(503, "CLOUD_MODEL_MISSING", "Vector Cloud Agents do not have a model configured.")
+    throw new ApiError(503, "BUILDER_MODEL_MISSING", "Vector Builder does not have a model configured.")
   if (!requested) return models[0]!
   if (!models.includes(requested))
-    throw new ApiError(400, "CLOUD_MODEL_INVALID", "Choose an available Vector cloud model.")
+    throw new ApiError(400, "BUILDER_MODEL_INVALID", "Choose an available Vector Builder model.")
   return requested
 }
 
-function sandboxEnvironment(runtime: CloudProviderRuntime) {
+function sandboxEnvironment(runtime: BuilderProviderRuntime) {
   // The real credential is injected by the sandbox firewall and never enters
   // the customer-controlled VM. The provider SDK only needs a placeholder.
   return { [runtime.provider.env]: "vector-brokered" }
 }
 
-function sandboxNetworkPolicy(runtime: CloudProviderRuntime, brokerRules: BrokerRule[] = []) {
+function sandboxNetworkPolicy(runtime: BuilderProviderRuntime, brokerRules: BrokerRule[] = []) {
   const providerHeaders = {
     [runtime.provider.header]: providerAuthorization(runtime.provider, runtime.apiKey),
     ...(runtime.provider.id === "openrouter"
-      ? { "HTTP-Referer": "https://vectordev.ai", "X-OpenRouter-Title": "Vector Cloud Agents" }
+      ? { "HTTP-Referer": "https://vectordev.ai", "X-OpenRouter-Title": "Vector Builder" }
       : {}),
   }
   const transformed = new Map<string, Record<string, string>>([[runtime.provider.host, providerHeaders]])
@@ -146,11 +154,11 @@ function sandboxNetworkPolicy(runtime: CloudProviderRuntime, brokerRules: Broker
   }
 }
 
-export async function resolveCloudProvider(
+export async function resolveBuilderProvider(
   userId: string,
   connectionId?: string | null,
   requestedModel?: string,
-): Promise<CloudProviderRuntime> {
+): Promise<BuilderProviderRuntime> {
   if (connectionId) {
     const { data, error } = await platformAdmin()
       .from("vector_model_connections")
@@ -167,23 +175,23 @@ export async function resolveCloudProvider(
     const model = providerModelId(provider.id, requestedModel || models[0] || "")
     const bareModel = model.slice(provider.id.length + 1)
     if (!models.includes(bareModel)) {
-      throw new ApiError(400, "CLOUD_MODEL_INVALID", "Choose a model saved with this provider connection.")
+      throw new ApiError(400, "BUILDER_MODEL_INVALID", "Choose a model saved with this provider connection.")
     }
     if (!secret.apiKey) throw new ApiError(409, "PROVIDER_KEY_MISSING", "Reconnect this provider's API key.")
     return { source: `byok:${data.id}`, provider, model, apiKey: secret.apiKey }
   }
 
-  const model = requiredCloudModel(requestedModel)
+  const model = requiredBuilderModel(requestedModel)
   const apiKey = process.env.OPENROUTER_API_KEY?.trim()
   if (!apiKey) {
-    throw new ApiError(409, "PROVIDER_REQUIRED", "Connect a model provider before launching a Cloud Agent.")
+    throw new ApiError(409, "PROVIDER_REQUIRED", "Connect a model provider before launching a Builder.")
   }
   return { source: "platform:openrouter", provider: providerDefinition("openrouter"), model, apiKey }
 }
 
-async function providerForRun(run: CloudAgentRun) {
+async function providerForRun(run: BuilderRun) {
   const connectionId = run.provider?.startsWith("byok:") ? run.provider.slice(5) : undefined
-  return resolveCloudProvider(run.user_id, connectionId, run.model)
+  return resolveBuilderProvider(run.user_id, connectionId, run.model)
 }
 
 function repositorySource(raw?: string | null, branch?: string | null) {
@@ -240,7 +248,7 @@ async function readText(sandbox: Sandbox, path: string, maximum: number) {
   return clipped.toString("utf8")
 }
 
-async function selectedMcpConfig(run: CloudAgentRun, selected: string[]) {
+async function selectedMcpConfig(run: BuilderRun, selected: string[]) {
   const userId = run.user_id
   if (!selected.length) return { mcp: {}, browserEnabled: false, brokerRules: [] as BrokerRule[] }
   const { data, error } = await platformAdmin()
@@ -266,6 +274,7 @@ async function selectedMcpConfig(run: CloudAgentRun, selected: string[]) {
           enabled: true,
           timeout: 300_000,
         }
+        browserEnabled = true
         continue
       }
       const plugin = TOOL_CATALOG.find((item) => item.id === connection.plugin_id)
@@ -313,7 +322,7 @@ async function selectedMcpConfig(run: CloudAgentRun, selected: string[]) {
   return { mcp, browserEnabled, brokerRules }
 }
 
-export async function validateCloudConnections(userId: string, selected: string[]) {
+export async function validateBuilderConnections(userId: string, selected: string[]) {
   const unique = [...new Set(selected.filter((value) => typeof value === "string" && value.length <= 100))].slice(0, 24)
   if (!unique.length) return []
   const { data, error } = await platformAdmin()
@@ -363,7 +372,7 @@ export async function validateCloudConnections(userId: string, selected: string[
   return unique
 }
 
-export function buildCloudAgentConfig(mcp: Record<string, unknown>, model: string, providerId?: string) {
+export function buildBuilderConfig(mcp: Record<string, unknown>, model: string, providerId?: string) {
   const selectedProvider = providerId || model.split("/")[0] || "openrouter"
   const providerModel = model.replace(new RegExp(`^${selectedProvider}/`), "")
   return {
@@ -376,7 +385,7 @@ export function buildCloudAgentConfig(mcp: Record<string, unknown>, model: strin
               options: {
                 headers: {
                   "HTTP-Referer": "https://vectordev.ai",
-                  "X-OpenRouter-Title": "Vector Cloud Agents",
+                  "X-OpenRouter-Title": "Vector Builder",
                 },
               },
             }
@@ -403,102 +412,22 @@ export function buildCloudAgentConfig(mcp: Record<string, unknown>, model: strin
   }
 }
 
-async function teamContext(run: CloudAgentRun) {
-  if (!run.team_id) return ""
-  const admin = platformAdmin()
-  const [{ data: team }, { data: teammates }] = await Promise.all([
-    admin
-      .from("vector_agent_teams")
-      .select("name,objective")
-      .eq("id", run.team_id)
-      .eq("user_id", run.user_id)
-      .maybeSingle(),
-    admin
-      .from("vector_agent_runs")
-      .select("name,prompt,status,current_step,summary")
-      .eq("team_id", run.team_id)
-      .eq("user_id", run.user_id)
-      .neq("id", run.id)
-      .order("created_at")
-      .limit(12),
-  ])
-  const teammateRows = (teammates || []) as Array<{
-    name: string
-    prompt: string
-    status: string
-    current_step: string | null
-    summary: string | null
-  }>
-  const roster = teammateRows.length
-    ? teammateRows
-        .map((item) => `- ${item.name} [${item.status}]: ${item.summary || item.current_step || item.prompt}`)
-        .join("\n")
-    : "- No teammate runs have started yet."
-  const instruction =
-    run.role === "integrator"
-      ? "Produce one coherent integration and document any unresolved conflict for human review."
-      : "Stay within your assigned mission, account for teammate responsibilities, and report integration assumptions clearly."
-  return `\n\nAgent team: ${team?.name || "Vector team"}\nShared objective: ${team?.objective || run.prompt}\nTeam roster and current results:\n${roster}\n${instruction}`
-}
-
-function agentPrompt(run: CloudAgentRun, teammateContext: string, browserEnabled: boolean) {
+function agentPrompt(run: BuilderRun, browserEnabled: boolean) {
   return [
-    "You are a Vector Cloud Agent working inside an isolated, persistent cloud workspace.",
-    run.role === "integrator"
-      ? "You are the task's coordination agent. Combine teammate findings and artifacts into one coherent outcome. If the task includes code, teammate patches have been applied where possible; resolve conflicts and validate the result."
-      : "Stay focused on your assigned part of the task. In collaborate mode, a coordination agent will combine every agent's result after the group finishes.",
+    "You are Vector Builder, an autonomous product engineer working inside an isolated, persistent workspace.",
     run.repository_url
-      ? "Complete the requested work in the attached repository. Inspect existing code before editing and run relevant checks."
-      : "Complete the requested work using this workspace and the connected tools. Do not pretend a code repository exists when none was attached.",
+      ? "Build the requested product in the attached repository. Inspect the existing application before editing, preserve its conventions, and run relevant checks."
+      : "Create a complete, runnable web application from the user's description. Choose a sensible modern web stack, include the required package scripts, and leave the workspace ready to launch in a browser.",
+    "Translate product intent into a coherent interface and working behavior. Do not stop at a plan or a placeholder screen.",
+    "Use real project files, keep the implementation focused, and verify the app starts successfully before finishing.",
     "Verify concrete claims where possible, record useful evidence, and never print secrets or credentials.",
     browserEnabled
-      ? "A controlled browser is connected. Use it when the task needs website interaction or UI verification."
+      ? "A controlled browser or approved computer connection is available. Use it only when the task needs website interaction or UI verification and respect every approval gate."
       : "No controlled browser is connected to this run. Never claim that browser testing was performed.",
-    "Finish with a concise summary, changed files, checks run, remaining risks, and any approval you need.",
-    teammateContext,
+    "Finish with a concise product summary, changed files, checks run, and any remaining limitations.",
     "\nTask:\n",
     run.prompt,
   ].join("\n")
-}
-
-async function seedTeamPatches(sandbox: Sandbox, run: CloudAgentRun, workspace: string) {
-  if (run.role !== "integrator" || !run.team_id) return
-  const { data, error } = await platformAdmin()
-    .from("vector_agent_runs")
-    .select("id,name,diff")
-    .eq("team_id", run.team_id)
-    .eq("user_id", run.user_id)
-    .eq("role", "worker")
-    .eq("status", "complete")
-    .order("created_at")
-  if (error) throw new ApiError(500, "TEAM_PATCHES_FAILED", "Vector could not prepare the team's completed changes.")
-  const patchRows = (data || []) as Array<{ id: string; name: string; diff: string | null }>
-  const patches = patchRows.filter((item): item is { id: string; name: string; diff: string } =>
-    Boolean(typeof item.diff === "string" && item.diff.trim()),
-  )
-  if (!patches.length) return
-  await sandbox.runCommand("mkdir", ["-p", `${workspace}/.git/vector-cloud-team-patches`])
-  await sandbox.writeFiles(
-    patches.map((item, index) => ({
-      path: `${workspace}/.git/vector-cloud-team-patches/${String(index + 1).padStart(2, "0")}-${item.id}.patch`,
-      content: item.diff,
-    })),
-  )
-  await sandbox.runCommand({
-    cmd: "bash",
-    args: [
-      "-lc",
-      [
-        "set +e",
-        "for PATCH in .git/vector-cloud-team-patches/*.patch; do",
-        '  [ -s "$PATCH" ] || continue',
-        '  git apply --3way --whitespace=nowarn "$PATCH" >/dev/null 2>&1 || git apply --reject --whitespace=nowarn "$PATCH" >/dev/null 2>&1 || true',
-        "done",
-        "exit 0",
-      ].join("\n"),
-    ],
-    cwd: workspace,
-  })
 }
 
 function parseSummary(logs: string) {
@@ -513,7 +442,7 @@ function parseSummary(logs: string) {
     } catch {}
   }
   const joined = text.join("\n").trim() || logs.trim()
-  return joined.slice(-6_000) || "The cloud agent finished without a written summary."
+  return joined.slice(-6_000) || "The builder finished without a written summary."
 }
 
 function parseUsage(logs: string) {
@@ -547,9 +476,9 @@ function parseUsage(logs: string) {
   return { tokens: totals, cost: Math.round(cost * 1_000_000) / 1_000_000 }
 }
 
-export async function startCloudAgent(run: CloudAgentRun) {
-  if (!platformConfiguration().cloudAgentsAvailable) {
-    throw new ApiError(503, "CLOUD_AGENTS_NOT_CONFIGURED", "Vector Cloud Agents are not configured on this deployment.")
+export async function startBuilderRun(run: BuilderRun) {
+  if (!platformConfiguration().builderAvailable) {
+    throw new ApiError(503, "BUILDER_NOT_CONFIGURED", "Vector Builder is not configured on this deployment.")
   }
   const admin = platformAdmin()
   const { data: claimed, error: claimError } = await admin
@@ -560,7 +489,7 @@ export async function startCloudAgent(run: CloudAgentRun) {
     .eq("status", "queued")
     .select("id")
     .maybeSingle<{ id: string }>()
-  if (claimError) throw new ApiError(500, "AGENT_CLAIM_FAILED", "Vector could not claim the queued cloud agent.")
+  if (claimError) throw new ApiError(500, "AGENT_CLAIM_FAILED", "Vector could not claim the queued builder.")
   if (!claimed) return false
   const sandboxName = `vector-${run.id.replaceAll("-", "").slice(0, 24)}`
   const source = repositorySource(run.repository_url, run.repository_branch)
@@ -572,7 +501,7 @@ export async function startCloudAgent(run: CloudAgentRun) {
     sandbox = await Sandbox.create({
       name: sandboxName,
       ...(source ? { source } : {}),
-      ...(cloudSandboxImage() ? { image: cloudSandboxImage() } : {}),
+      ...(builderSandboxImage() ? { image: builderSandboxImage() } : {}),
       persistent: true,
       timeout: 24 * 60 * 60 * 1_000,
       resources: { vcpus: 4 },
@@ -591,43 +520,42 @@ export async function startCloudAgent(run: CloudAgentRun) {
         "-lc",
         [
           "mkdir -p .git/info",
-          "printf '%s\\n' '.vector-cloud/' '.vector-cloud-config.json' '.vector-cloud-prompt.txt' '.vector-cloud-follow-up.txt' >> .git/info/exclude",
-          "git config user.name 'Vector Cloud Agent'",
-          "git config user.email 'cloud-agent@vectordev.ai'",
-          "git rev-parse --verify HEAD >/dev/null 2>&1 || git commit --allow-empty -m 'Vector cloud baseline' --no-gpg-sign >/dev/null",
-          "git rev-parse HEAD > .git/vector-cloud-base",
+          "printf '%s\\n' '.vector-builder/' '.vector-builder-config.json' '.vector-builder-prompt.txt' '.vector-builder-follow-up.txt' >> .git/info/exclude",
+          "git config user.name 'Vector Builder'",
+          "git config user.email 'builder@vectordev.ai'",
+          "git rev-parse --verify HEAD >/dev/null 2>&1 || git commit --allow-empty -m 'Vector Builder baseline' --no-gpg-sign >/dev/null",
+          "git rev-parse HEAD > .git/vector-builder-base",
         ].join(" && "),
       ],
       cwd: workspace,
     })
-    await seedTeamPatches(sandbox, run, workspace)
-    const prompt = agentPrompt(run, await teamContext(run), selectedMcp.browserEnabled)
+    const prompt = agentPrompt(run, selectedMcp.browserEnabled)
     await sandbox.writeFiles([
       {
-        path: `${workspace}/.vector-cloud-config.json`,
+        path: `${workspace}/.vector-builder-config.json`,
         content: JSON.stringify(
-          buildCloudAgentConfig(selectedMcp.mcp, providerRuntime.model, providerRuntime.provider.id),
+          buildBuilderConfig(selectedMcp.mcp, providerRuntime.model, providerRuntime.provider.id),
           null,
           2,
         ),
       },
-      { path: `${workspace}/.vector-cloud-prompt.txt`, content: prompt },
+      { path: `${workspace}/.vector-builder-prompt.txt`, content: prompt },
     ])
     const script = [
       "set +e",
-      "mkdir -p .vector-cloud",
+      "mkdir -p .vector-builder",
       `MODEL=${JSON.stringify(providerRuntime.model)}`,
-      `ENGINE_COMMAND=${JSON.stringify(cloudEngineCommand())}`,
-      "export OPENCODE_CONFIG_CONTENT=$(cat .vector-cloud-config.json)",
-      "PROMPT=$(cat .vector-cloud-prompt.txt)",
-      `timeout --signal=TERM --kill-after=30s ${MAX_AGENT_MINUTES}m "$ENGINE_COMMAND" run --format json --auto --model "$MODEL" "$PROMPT" > .vector-cloud/agent.log 2>&1`,
+      `ENGINE_COMMAND=${JSON.stringify(builderEngineCommand())}`,
+      "export OPENCODE_CONFIG_CONTENT=$(cat .vector-builder-config.json)",
+      "PROMPT=$(cat .vector-builder-prompt.txt)",
+      `timeout --signal=TERM --kill-after=30s ${MAX_AGENT_MINUTES}m "$ENGINE_COMMAND" run --format json --auto --model "$MODEL" "$PROMPT" > .vector-builder/agent.log 2>&1`,
       "EXIT=$?",
-      "BASE=$(cat .git/vector-cloud-base)",
+      "BASE=$(cat .git/vector-builder-base)",
       "git add -N . >/dev/null 2>&1 || true",
-      'git diff --binary "$BASE" -- . > .vector-cloud/changes.patch 2>/dev/null || true',
-      'git diff --numstat "$BASE" -- . > .vector-cloud/changes.numstat 2>/dev/null || true',
-      "git status --short > .vector-cloud/status.txt 2>/dev/null || true",
-      "printf '%s' \"$EXIT\" > .vector-cloud/exit-code",
+      'git diff --binary "$BASE" -- . > .vector-builder/changes.patch 2>/dev/null || true',
+      'git diff --numstat "$BASE" -- . > .vector-builder/changes.numstat 2>/dev/null || true',
+      "git status --short > .vector-builder/status.txt 2>/dev/null || true",
+      "printf '%s' \"$EXIT\" > .vector-builder/exit-code",
     ].join("\n")
     const command = await sandbox.runCommand({
       cmd: "bash",
@@ -644,10 +572,14 @@ export async function startCloudAgent(run: CloudAgentRun) {
         sandbox_name: sandboxName,
         command_id: command.cmdId,
         workspace_dir: workspace,
+        preview_status: "idle",
+        preview_command_id: null,
+        preview_url: null,
+        preview_port: null,
       })
       .eq("id", run.id)
     if (error) {
-      throw new ApiError(500, "AGENT_START_FAILED", "Vector could not save the cloud agent session.")
+      throw new ApiError(500, "AGENT_START_FAILED", "Vector could not save the builder session.")
     }
     return true
   } catch (error) {
@@ -667,7 +599,7 @@ export async function startCloudAgent(run: CloudAgentRun) {
   }
 }
 
-export async function refreshCloudAgent(run: CloudAgentRun) {
+export async function refreshBuilderRun(run: BuilderRun) {
   if (run.status !== "running" && run.status !== "starting") return run
   if (!run.sandbox_name || !run.workspace_dir) return run
   let sandbox: Sandbox | undefined
@@ -693,8 +625,8 @@ export async function refreshCloudAgent(run: CloudAgentRun) {
       .eq("id", run.id)
     return { ...run, status: "failed" as const, error: "The isolated workspace is no longer available." }
   }
-  const exit = await readText(sandbox, `${run.workspace_dir}/.vector-cloud/exit-code`, 64)
-  const logs = await readText(sandbox, `${run.workspace_dir}/.vector-cloud/agent.log`, MAX_LOG_BYTES)
+  const exit = await readText(sandbox, `${run.workspace_dir}/.vector-builder/exit-code`, 64)
+  const logs = await readText(sandbox, `${run.workspace_dir}/.vector-builder/agent.log`, MAX_LOG_BYTES)
   if (!exit) {
     await platformAdmin()
       .from("vector_agent_runs")
@@ -702,8 +634,8 @@ export async function refreshCloudAgent(run: CloudAgentRun) {
       .eq("id", run.id)
     return { ...run, logs }
   }
-  const diff = await readText(sandbox, `${run.workspace_dir}/.vector-cloud/changes.patch`, MAX_DIFF_BYTES)
-  const numstat = await readText(sandbox, `${run.workspace_dir}/.vector-cloud/changes.numstat`, 100_000)
+  const diff = await readText(sandbox, `${run.workspace_dir}/.vector-builder/changes.patch`, MAX_DIFF_BYTES)
+  const numstat = await readText(sandbox, `${run.workspace_dir}/.vector-builder/changes.numstat`, 100_000)
   const files = numstat
     .split("\n")
     .filter(Boolean)
@@ -748,95 +680,141 @@ export async function refreshCloudAgent(run: CloudAgentRun) {
       content: updated.summary,
       metadata: { status: updated.status, diffStats: updated.diff_stats },
     })
-  if (run.team_id) {
-    const { count } = await platformAdmin()
-      .from("vector_agent_runs")
-      .select("id", { count: "exact", head: true })
-      .eq("team_id", run.team_id)
-      .eq("user_id", run.user_id)
-      .in("status", ["queued", "starting", "running", "needs_input"])
-    if (!count) await reconcileAgentTeam(run.team_id, run.user_id)
-  }
   await sandbox.stop().catch(() => undefined)
-  return { ...run, ...updated } as CloudAgentRun
+  return { ...run, ...updated } as BuilderRun
 }
 
-export async function reconcileAgentTeam(teamId: string, userId: string) {
+async function stopPreviewCommand(sandbox: Sandbox, run: BuilderRun) {
+  if (!run.preview_command_id) return
+  const command = await sandbox.getCommand(run.preview_command_id).catch(() => undefined)
+  await command?.kill("SIGTERM").catch(() => undefined)
+}
+
+function packageRunner(packageJson: Record<string, unknown>) {
+  const dependencies = {
+    ...(record(packageJson.dependencies) || {}),
+    ...(record(packageJson.devDependencies) || {}),
+  }
+  const scripts = record(packageJson.scripts) || {}
+  const has = (name: string) => typeof dependencies[name] === "string"
+  if (typeof scripts.dev === "string") {
+    if (has("next")) return { port: 3000, command: "npm run dev -- --hostname 0.0.0.0 --port 3000" }
+    if (has("vite") || has("astro")) return { port: 5173, command: "npm run dev -- --host 0.0.0.0 --port 5173" }
+    return { port: 3000, command: "HOST=0.0.0.0 PORT=3000 npm run dev" }
+  }
+  if (typeof scripts.start === "string") {
+    return { port: 3000, command: "HOST=0.0.0.0 PORT=3000 npm run start" }
+  }
+  if (typeof scripts.preview === "string") {
+    return { port: 4173, command: "npm run preview -- --host 0.0.0.0 --port 4173" }
+  }
+  throw new ApiError(409, "PREVIEW_SCRIPT_MISSING", "The app does not expose a dev, start, or preview script yet.")
+}
+
+async function previewRecipe(sandbox: Sandbox, workspace: string) {
+  const packageBuffer = await sandbox.readFileToBuffer({ path: `${workspace}/package.json` })
+  if (!packageBuffer) {
+    const index = await sandbox.readFileToBuffer({ path: `${workspace}/index.html` })
+    if (!index) {
+      throw new ApiError(409, "PREVIEW_APP_MISSING", "Vector Builder has not produced a launchable web app yet.")
+    }
+    return { port: 8080, install: "true", command: "python3 -m http.server 8080 --bind 0.0.0.0" }
+  }
+  let packageJson: Record<string, unknown>
+  try {
+    packageJson = JSON.parse(packageBuffer.toString("utf8")) as Record<string, unknown>
+  } catch {
+    throw new ApiError(409, "PREVIEW_PACKAGE_INVALID", "The generated package.json is not valid JSON.")
+  }
+  const runner = packageRunner(packageJson)
+  const install = [
+    "if [ ! -d node_modules ]; then",
+    "  if [ -f bun.lock ] || [ -f bun.lockb ]; then bun install;",
+    "  elif [ -f pnpm-lock.yaml ]; then corepack pnpm install;",
+    "  elif [ -f yarn.lock ]; then corepack yarn install;",
+    "  elif [ -f package-lock.json ]; then npm ci || npm install;",
+    "  else npm install; fi",
+    "fi",
+  ].join(" ")
+  return { ...runner, install }
+}
+
+export async function launchBuilderPreview(run: BuilderRun) {
+  if (!run.sandbox_name || !run.workspace_dir) {
+    throw new ApiError(409, "PREVIEW_WORKSPACE_MISSING", "Finish the first build before opening its preview.")
+  }
   const admin = platformAdmin()
-  const [{ data: team, error: teamError }, { data: runs, error: runsError }] = await Promise.all([
-    admin
-      .from("vector_agent_teams")
-      .select("id,user_id,name,objective,mode,status")
-      .eq("id", teamId)
-      .eq("user_id", userId)
-      .maybeSingle(),
-    admin.from("vector_agent_runs").select("*").eq("team_id", teamId).eq("user_id", userId).order("created_at"),
-  ])
-  if (teamError || runsError || !team) return
-  const records = (runs || []) as CloudAgentRun[]
-  if (records.some((item) => ["queued", "starting", "running", "needs_input"].includes(item.status))) return
-  const workers = records.filter((item) => item.role !== "integrator")
-  const integrators = records.filter((item) => item.role === "integrator")
-  const latestIntegrator = integrators.at(-1)
-  const lastWorkerCompletion = Math.max(
-    ...workers.map((item) => new Date(item.completed_at || item.updated_at || item.created_at).getTime()),
-    0,
-  )
-  if (latestIntegrator && new Date(latestIntegrator.created_at).getTime() >= lastWorkerCompletion) {
-    await admin.from("vector_agent_teams").update({ status: "review" }).eq("id", teamId).eq("user_id", userId)
-    return
-  }
-  if (team.mode === "isolated" || workers.length < 2 || workers.some((item) => item.status !== "complete")) {
-    await admin.from("vector_agent_teams").update({ status: "review" }).eq("id", teamId).eq("user_id", userId)
-    return
-  }
-  const source = workers[0]
-  if (!source) return
-  const summaries = workers
-    .map((item) => `- ${item.name}: ${(item.summary || "Completed without a summary.").slice(0, 1_500)}`)
-    .join("\n")
-  const prompt = [
-    `Coordinate the completed agent work for task "${team.name}".`,
-    `Task outcome: ${team.objective}`,
-    "Agent results:",
-    summaries,
-    source.repository_url
-      ? "Resolve overlapping edits and rejected patches, run the appropriate project checks, and leave one coherent result for review."
-      : "Synthesize the results, reconcile disagreements, identify anything still unverified, and produce one useful final deliverable for the user.",
-  ].join("\n\n")
-  const { data: created, error: createError } = await admin
-    .from("vector_agent_runs")
-    .insert({
-      user_id: userId,
-      team_id: teamId,
-      role: "integrator",
-      name: `${team.name} coordinator`.slice(0, 100),
-      prompt: prompt.slice(0, 50_000),
-      repository_url: source.repository_url,
-      repository_branch: source.repository_branch,
-      provider: source.provider,
-      model: source.model,
-      status: "queued",
-      current_step: "Preparing the coordinated result",
-      selected_tools: source.selected_tools || [],
-    })
-    .select("*")
-    .single<CloudAgentRun>()
-  if (createError || !created) {
-    if (createError?.code === "23505") return
-    await admin.from("vector_agent_teams").update({ status: "review" }).eq("id", teamId).eq("user_id", userId)
-    return
-  }
   await admin
-    .from("vector_agent_messages")
-    .insert({ run_id: created.id, user_id: userId, role: "user", content: created.prompt })
-  await admin.from("vector_agent_teams").update({ status: "integrating" }).eq("id", teamId).eq("user_id", userId)
-  await startCloudAgent(created).catch(async () => {
-    await admin.from("vector_agent_teams").update({ status: "review" }).eq("id", teamId).eq("user_id", userId)
-  })
+    .from("vector_agent_runs")
+    .update({ preview_status: "launching", preview_url: null })
+    .eq("id", run.id)
+    .eq("user_id", run.user_id)
+  try {
+    const sandbox = await Sandbox.get({ name: run.sandbox_name })
+    await stopPreviewCommand(sandbox, run)
+    const recipe = await previewRecipe(sandbox, run.workspace_dir)
+    const install = await sandbox.runCommand({
+      cmd: "bash",
+      args: ["-lc", recipe.install],
+      cwd: run.workspace_dir,
+      timeoutMs: 240_000,
+    })
+    if (install.exitCode !== 0) {
+      throw new ApiError(409, "PREVIEW_INSTALL_FAILED", "The generated app's dependencies could not be installed.")
+    }
+    const command = await sandbox.runCommand({
+      cmd: "bash",
+      args: ["-lc", `mkdir -p .vector-builder && ${recipe.command} > .vector-builder/preview.log 2>&1`],
+      cwd: run.workspace_dir,
+      detached: true,
+      timeoutMs: 24 * 60 * 60 * 1_000,
+    })
+    const readiness = await sandbox.runCommand({
+      cmd: "bash",
+      args: [
+        "-lc",
+        `for attempt in $(seq 1 40); do curl -fsS http://127.0.0.1:${recipe.port}/ >/dev/null && exit 0; sleep 1; done; exit 1`,
+      ],
+      cwd: run.workspace_dir,
+      timeoutMs: 45_000,
+    })
+    if (readiness.exitCode !== 0) {
+      const previewLog = await readText(sandbox, `${run.workspace_dir}/.vector-builder/preview.log`, 20_000)
+      await command.kill("SIGTERM").catch(() => undefined)
+      throw new ApiError(
+        409,
+        "PREVIEW_START_FAILED",
+        previewLog.trim().slice(-1_500) || "The generated app did not become ready in time.",
+      )
+    }
+    const previewUrl = sandbox.domain(recipe.port)
+    await admin
+      .from("vector_agent_runs")
+      .update({
+        preview_status: "ready",
+        preview_command_id: command.cmdId,
+        preview_url: previewUrl,
+        preview_port: recipe.port,
+      })
+      .eq("id", run.id)
+      .eq("user_id", run.user_id)
+    return { url: previewUrl, port: recipe.port, commandId: command.cmdId, status: "ready" as const }
+  } catch (error) {
+    await admin
+      .from("vector_agent_runs")
+      .update({
+        preview_status: "failed",
+        preview_command_id: null,
+        preview_url: null,
+        preview_port: null,
+      })
+      .eq("id", run.id)
+      .eq("user_id", run.user_id)
+    throw error
+  }
 }
 
-export async function stopCloudAgent(run: CloudAgentRun) {
+export async function stopBuilderRun(run: BuilderRun) {
   if (run.sandbox_name) {
     let sandbox: Sandbox | undefined
     try {
@@ -849,6 +827,7 @@ export async function stopCloudAgent(run: CloudAgentRun) {
         const command = await sandbox.getCommand(run.command_id).catch(() => undefined)
         await command?.kill("SIGTERM").catch(() => undefined)
       }
+      await stopPreviewCommand(sandbox, run)
       await sandbox.stop()
     }
   }
@@ -860,7 +839,7 @@ export async function stopCloudAgent(run: CloudAgentRun) {
     .in("status", ["queued", "starting", "running", "needs_input"])
 }
 
-export async function deleteCloudAgentWorkspace(run: CloudAgentRun) {
+export async function deleteBuilderWorkspace(run: BuilderRun) {
   if (!run.sandbox_name) return
   let sandbox: Sandbox | undefined
   try {
@@ -871,9 +850,9 @@ export async function deleteCloudAgentWorkspace(run: CloudAgentRun) {
   if (sandbox) await sandbox.delete()
 }
 
-export async function continueCloudAgent(run: CloudAgentRun, prompt: string) {
+export async function continueBuilderRun(run: BuilderRun, prompt: string) {
   if (run.status === "running" || run.status === "starting") {
-    throw new ApiError(409, "AGENT_BUSY", "This cloud agent is still working. Wait for it to finish before continuing.")
+    throw new ApiError(409, "AGENT_BUSY", "This builder is still working. Wait for it to finish before continuing.")
   }
   if (!run.sandbox_name || !run.workspace_dir)
     throw new ApiError(409, "AGENT_WORKSPACE_MISSING", "This run has no resumable workspace.")
@@ -885,25 +864,26 @@ export async function continueCloudAgent(run: CloudAgentRun, prompt: string) {
     .in("status", ["complete", "failed", "needs_input"])
     .select("id")
     .maybeSingle()
-  if (!claimed) throw new ApiError(409, "AGENT_BUSY", "This cloud agent is already working or was stopped.")
+  if (!claimed) throw new ApiError(409, "AGENT_BUSY", "This builder is already working or was stopped.")
   try {
     const sandbox = await Sandbox.get({ name: run.sandbox_name })
-    const promptPath = `${run.workspace_dir}/.vector-cloud-follow-up.txt`
+    await stopPreviewCommand(sandbox, run)
+    const promptPath = `${run.workspace_dir}/.vector-builder-follow-up.txt`
     await sandbox.writeFiles([{ path: promptPath, content: prompt }])
     const script = [
       "set +e",
-      "rm -f .vector-cloud/exit-code",
-      `ENGINE_COMMAND=${JSON.stringify(cloudEngineCommand())}`,
-      "export OPENCODE_CONFIG_CONTENT=$(cat .vector-cloud-config.json)",
-      "PROMPT=$(cat .vector-cloud-follow-up.txt)",
+      "rm -f .vector-builder/exit-code",
+      `ENGINE_COMMAND=${JSON.stringify(builderEngineCommand())}`,
+      "export OPENCODE_CONFIG_CONTENT=$(cat .vector-builder-config.json)",
+      "PROMPT=$(cat .vector-builder-follow-up.txt)",
       `MODEL=${JSON.stringify(run.model)}`,
-      `timeout --signal=TERM --kill-after=30s ${MAX_AGENT_MINUTES}m "$ENGINE_COMMAND" run --continue --format json --auto --model "$MODEL" "$PROMPT" >> .vector-cloud/agent.log 2>&1`,
+      `timeout --signal=TERM --kill-after=30s ${MAX_AGENT_MINUTES}m "$ENGINE_COMMAND" run --continue --format json --auto --model "$MODEL" "$PROMPT" >> .vector-builder/agent.log 2>&1`,
       "EXIT=$?",
-      "BASE=$(cat .git/vector-cloud-base)",
+      "BASE=$(cat .git/vector-builder-base)",
       "git add -N . >/dev/null 2>&1 || true",
-      'git diff --binary "$BASE" -- . > .vector-cloud/changes.patch 2>/dev/null || true',
-      'git diff --numstat "$BASE" -- . > .vector-cloud/changes.numstat 2>/dev/null || true',
-      "printf '%s' \"$EXIT\" > .vector-cloud/exit-code",
+      'git diff --binary "$BASE" -- . > .vector-builder/changes.patch 2>/dev/null || true',
+      'git diff --numstat "$BASE" -- . > .vector-builder/changes.numstat 2>/dev/null || true',
+      "printf '%s' \"$EXIT\" > .vector-builder/exit-code",
     ].join("\n")
     const command = await sandbox.runCommand({
       cmd: "bash",
@@ -920,6 +900,10 @@ export async function continueCloudAgent(run: CloudAgentRun, prompt: string) {
         command_id: command.cmdId,
         completed_at: null,
         error: null,
+        preview_status: "idle",
+        preview_command_id: null,
+        preview_url: null,
+        preview_port: null,
       })
       .eq("id", run.id)
       .eq("user_id", run.user_id)
@@ -930,7 +914,7 @@ export async function continueCloudAgent(run: CloudAgentRun, prompt: string) {
       .update({
         status: "failed",
         current_step: "Continuation failed",
-        error: error instanceof Error ? error.message.slice(0, 2_000) : "The cloud agent could not continue.",
+        error: error instanceof Error ? error.message.slice(0, 2_000) : "The builder could not continue.",
         completed_at: new Date().toISOString(),
       })
       .eq("id", run.id)

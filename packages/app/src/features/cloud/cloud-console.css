@@ -904,11 +904,11 @@
   background: #e6787d;
 }
 
-.cloud-agent-grid {
+.cloud-workspace-grid {
   display: grid;
   gap: 7px;
 }
-.cloud-agent-row {
+.cloud-workspace-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -916,18 +916,18 @@
   padding: 11px 0;
   border-top: 1px solid var(--cc-line);
 }
-.cloud-agent-row:first-child {
+.cloud-workspace-row:first-child {
   border-top: 0;
 }
-.cloud-agent-row strong {
+.cloud-workspace-row strong {
   color: rgba(255, 255, 255, 0.82);
   font-size: 12.5px;
 }
-.cloud-agent-row code {
+.cloud-workspace-row code {
   color: rgba(255, 255, 255, 0.42);
   font-size: 10.5px;
 }
-.cloud-agent-row p {
+.cloud-workspace-row p {
   margin: 3px 0 0;
   overflow: hidden;
   color: var(--cc-muted);
@@ -1066,7 +1066,7 @@
     width: 100%;
     justify-content: flex-start;
   }
-  .cloud-agent-row {
+  .cloud-workspace-row {
     align-items: flex-start;
     flex-direction: column;
   }

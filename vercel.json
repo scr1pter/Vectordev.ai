@@ -4,7 +4,7 @@
   "outputDirectory": "packages/web/dist",
   "crons": [
     {
-      "path": "/api/cron/agent-reconcile",
+      "path": "/api/cron/builder-reconcile",
       "schedule": "* * * * *"
     }
   ],

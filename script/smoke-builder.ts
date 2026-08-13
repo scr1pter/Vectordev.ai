@@ -20,20 +20,18 @@ const client = createClient(url, publishableKey, {
 })
 
 const stamp = `${Date.now()}-${crypto.randomUUID().slice(0, 8)}`
-const email = `vector-cloud-smoke-${stamp}@example.com`
+const email = `vector-builder-smoke-${stamp}@example.com`
 const password = `Vector-Smoke-${crypto.randomUUID()}`
 let userId = ""
 let accessToken = ""
+let projectId = ""
 let runId = ""
 
 async function api(path: string, init: RequestInit = {}) {
   const headers = new Headers(init.headers)
   headers.set("authorization", `Bearer ${accessToken}`)
   if (init.body) headers.set("content-type", "application/json")
-  const response = await fetch(new URL(path, origin), {
-    ...init,
-    headers,
-  })
+  const response = await fetch(new URL(path, origin), { ...init, headers })
   const payload = await response.json().catch(() => ({}))
   if (!response.ok) {
     throw new Error(`${init.method || "GET"} ${path} returned ${response.status}: ${JSON.stringify(payload)}`)
@@ -61,53 +59,49 @@ try {
   if (signedIn.error || !signedIn.data.session) throw signedIn.error || new Error("The smoke user could not sign in.")
   accessToken = signedIn.data.session.access_token
 
-  const createdRun = await api("/api/agents/runs", {
+  const project = await api("/api/builder/projects", {
+    method: "POST",
+    body: JSON.stringify({ name: "Builder smoke test" }),
+  })
+  projectId = project.project?.id
+  if (!projectId) throw new Error("Vector did not return a Builder project ID.")
+
+  const createdRun = await api("/api/builder/runs", {
     method: "POST",
     body: JSON.stringify({
-      name: "Production Cloud Agent smoke test",
-      prompt:
-        "Create a file named VECTOR_CLOUD_SMOKE.txt containing exactly VECTOR_CLOUD_OK and no other text. Then finish.",
-      model: "openrouter/poolside/laguna-s-2.1:free",
+      projectId,
+      name: "Production Builder smoke test",
+      prompt: "Create a minimal web app whose page visibly says VECTOR_BUILDER_OK, then finish.",
     }),
   })
   runId = createdRun.run?.id
-  if (!runId) throw new Error("Vector did not return a Cloud Agent run ID.")
-  console.log(`Cloud Agent run created: ${runId}`)
+  if (!runId) throw new Error("Vector did not return a Builder run ID.")
+  console.log(`Builder run created: ${runId}`)
 
   for (let attempt = 1; attempt <= 36; attempt++) {
     await Bun.sleep(10_000)
-    const state = await api(`/api/agents/run?id=${encodeURIComponent(runId)}`)
+    const state = await api(`/api/builder/run?id=${encodeURIComponent(runId)}`)
     const run = state.run || {}
     console.log(`[${attempt}] ${run.status || "unknown"} - ${run.current_step || ""}`)
     if (!["complete", "failed", "needs_input", "canceled"].includes(run.status)) continue
 
-    console.log(
-      JSON.stringify(
-        {
-          status: run.status,
-          step: run.current_step,
-          error: run.error,
-          summary: run.summary,
-          diffStats: run.diff_stats,
-          tokenUsage: run.token_usage,
-          costUsd: run.cost_usd,
-        },
-        null,
-        2,
-      ),
-    )
-    if (run.status !== "complete") throw new Error(`Cloud Agent ended with status ${run.status}.`)
-    if (!String(run.diff || "").includes("VECTOR_CLOUD_OK")) {
-      throw new Error("Cloud Agent completed without returning the expected workspace diff.")
+    if (run.status !== "complete") throw new Error(`Builder ended with status ${run.status}.`)
+    if (!String(run.diff || "").includes("VECTOR_BUILDER_OK")) {
+      throw new Error("Builder completed without returning the expected workspace diff.")
     }
-    console.log("Cloud Agent production smoke test passed.")
+    console.log("Builder production smoke test passed.")
     process.exitCode = 0
     break
   }
-  if (process.exitCode === undefined) throw new Error("Cloud Agent did not finish within six minutes.")
+  if (process.exitCode === undefined) throw new Error("Builder did not finish within six minutes.")
 } finally {
   if (runId && accessToken) {
-    await api(`/api/agents/run?id=${encodeURIComponent(runId)}`, { method: "DELETE" }).catch(() => undefined)
+    await api(`/api/builder/run?id=${encodeURIComponent(runId)}`, { method: "DELETE" }).catch(() => undefined)
+  }
+  if (projectId && accessToken) {
+    await api(`/api/builder/projects?id=${encodeURIComponent(projectId)}`, { method: "DELETE" }).catch(
+      () => undefined,
+    )
   }
   if (userId) await admin.auth.admin.deleteUser(userId).catch(() => undefined)
 }

@@ -1509,7 +1509,7 @@ export function CloudConsole(props: {
                       </div>
                       <span class="cloud-status">{agentWorkspaces().length} workspaces</span>
                     </div>
-                    <div class="cloud-agent-grid mt-3">
+                    <div class="cloud-workspace-grid mt-3">
                       <For
                         each={agentWorkspaces().filter(
                           (workspace) => workspace.isolatedPath && !["discarded", "merged"].includes(workspace.status),
@@ -1519,7 +1519,7 @@ export function CloudConsole(props: {
                           const preview = () =>
                             deployments().find((deployment) => deployment.workspaceId === workspace.id)
                           return (
-                            <div class="cloud-agent-row">
+                            <div class="cloud-workspace-row">
                               <div class="min-w-0">
                                 <div class="flex flex-wrap items-center gap-2">
                                   <strong>{workspace.name}</strong>

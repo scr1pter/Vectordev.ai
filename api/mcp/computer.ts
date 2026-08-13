@@ -138,7 +138,7 @@ export default async function handler(request: ApiRequest, response: ApiResponse
       return
     }
     const permissions = Array.isArray(device.permissions)
-      ? device.permissions.filter((permission): permission is string => typeof permission === "string")
+      ? device.permissions.filter((permission: unknown): permission is string => typeof permission === "string")
       : []
     if (name === "computer_status") {
       const lastSeen = device.last_seen_at ? new Date(device.last_seen_at).getTime() : 0
@@ -154,7 +154,7 @@ export default async function handler(request: ApiRequest, response: ApiResponse
         return
       }
       action = "browser"
-      payload = { ...args, operation, contextId: `cloud-${identity.runId}` }
+      payload = { ...args, operation, contextId: `builder-${identity.runId}` }
     } else if (name === "computer_shell") {
       if (!permissions.includes("shell") || typeof args.command !== "string" || !args.command.trim()) {
         rpc(response, body.id, toolResult("Terminal access is not enabled for this computer.", true))

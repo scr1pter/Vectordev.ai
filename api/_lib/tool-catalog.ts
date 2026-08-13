@@ -21,7 +21,7 @@ const item = (
   const desktopOnly = new Set(["computer-use", "desktop-commander", "chrome-devtools", "terraform"])
   const secretBroker = new Set(["kubernetes", "azure"])
   const runtimeRequired = new Set(["fetch", "playwright"])
-  const browserRuntimeReady = id === "playwright" && Boolean(process.env.VECTOR_CLOUD_SANDBOX_IMAGE?.trim())
+  const browserRuntimeReady = id === "playwright" && Boolean(process.env.VECTOR_BUILDER_SANDBOX_IMAGE?.trim())
   const cloudSupport: ToolCatalogItem["cloudSupport"] = desktopOnly.has(id)
     ? "desktop_only"
     : auth === "oauth"
@@ -40,7 +40,7 @@ const item = (
           ? "Requires Vector's scoped secret broker before it can run safely in cloud workspaces."
           : cloudSupport === "runtime_required"
             ? "Requires a cloud runtime dependency that Vector has not enabled yet."
-            : "Ready for isolated Vector Cloud workspaces."
+            : "Ready for isolated Vector Builder workspaces."
   return { id, name, category, description, auth, cloudSupport, cloudNote, fields }
 }
 

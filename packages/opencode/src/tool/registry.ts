@@ -239,7 +239,7 @@ const layer = Layer.effect(
             ...(process.env.VECTOR_BROWSER_BRIDGE_URL && process.env.VECTOR_BROWSER_BRIDGE_TOKEN
               ? [tool.browser]
               : []),
-            ...(process.env.VECTOR_CLOUD_AGENT_BRIDGE_URL && process.env.VECTOR_CLOUD_AGENT_BRIDGE_TOKEN
+            ...(process.env.VECTOR_CLOUD_BRIDGE_URL && process.env.VECTOR_CLOUD_BRIDGE_TOKEN
               ? [tool.vectorcloud]
               : []),
             ...(flags.experimentalLspTool ? [tool.lsp] : []),

@@ -1,16 +1,25 @@
 /** @jsxImportSource react */
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react"
 import type { Session } from "@supabase/supabase-js"
-import { Bot, Braces, Cloud, CreditCard, Home, KeyRound, LogIn, LogOut, Settings, ShieldCheck } from "lucide-react"
+import {
+  CreditCard,
+  Download,
+  KeyRound,
+  LogIn,
+  LogOut,
+  Settings,
+  ShieldCheck,
+  Sparkles,
+  WandSparkles,
+} from "lucide-react"
 import { AccountView } from "./account-view"
-import { CloudAgentsWorkspace } from "./cloud-agents-workspace"
+import { BuilderWorkspace } from "./builder-workspace"
 import { MatrixField } from "./matrix-field"
-import { PlayParkView } from "./play-park-view"
 import { apiFetch, platformAuth, platformConfig, type PlatformConfig } from "./platform-client"
 import { SettingsView } from "./settings-view"
 import "./platform.css"
 
-type Mode = "account" | "agents" | "play-park" | "downloads" | "settings"
+type Mode = "builder" | "account" | "downloads" | "settings"
 
 type EntitlementStatus = {
   entitlement: {
@@ -22,17 +31,16 @@ type EntitlementStatus = {
   billing: { available: boolean }
 }
 
-const destinations: Array<{ id: Mode; label: string; href: string; icon: typeof Cloud }> = [
-  { id: "account", label: "Overview", href: "/account", icon: Home },
-  { id: "agents", label: "Cloud Agents", href: "/cloud-agents", icon: Bot },
-  { id: "play-park", label: "API Platform", href: "/api-studio", icon: Braces },
+const destinations: Array<{ id: Mode; label: string; href: string; icon: typeof Sparkles }> = [
+  { id: "builder", label: "Builder", href: "/account", icon: WandSparkles },
+  { id: "account", label: "Billing", href: "/billing", icon: CreditCard },
+  { id: "downloads", label: "Downloads", href: "/download", icon: Download },
   { id: "settings", label: "Settings", href: "/settings", icon: Settings },
 ]
 
 const modeTitles: Record<Mode, string> = {
-  account: "Vector Account",
-  agents: "Cloud Agents",
-  "play-park": "Vector API Platform",
+  builder: "Vector Builder",
+  account: "Vector Billing",
   downloads: "Downloads",
   settings: "Settings",
 }
@@ -55,16 +63,13 @@ function SignIn(props: { config?: PlatformConfig; error?: string; onSession: (se
   const oauthProviders = props.config?.auth.providers || []
 
   const resetPassword = async () => {
-    if (!email.trim()) {
-      setMessage("Enter your email address first, then request a reset link.")
-      return
-    }
+    if (!email.trim()) return setMessage("Enter your email address first.")
     setBusy(true)
     setMessage("")
     try {
       const auth = await platformAuth()
       const { error } = await auth.auth.resetPasswordForEmail(email.trim(), {
-        redirectTo: `${location.origin}/account?recovery=1`,
+        redirectTo: location.origin + "/account?recovery=1",
       })
       if (error) throw error
       setMessage("Check your email for a secure password-reset link.")
@@ -84,10 +89,14 @@ function SignIn(props: { config?: PlatformConfig; error?: string; onSession: (se
       const result =
         intent === "signin"
           ? await auth.auth.signInWithPassword({ email, password })
-          : await auth.auth.signUp({ email, password, options: { emailRedirectTo: `${location.origin}/account` } })
+          : await auth.auth.signUp({
+              email,
+              password,
+              options: { emailRedirectTo: location.origin + "/account" },
+            })
       if (result.error) throw result.error
       if (result.data.session) props.onSession(result.data.session)
-      else setMessage("Check your email to confirm your Vector account, then return here to sign in.")
+      else setMessage("Confirm your email, then return here to sign in.")
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Vector could not sign you in.")
     } finally {
@@ -102,7 +111,7 @@ function SignIn(props: { config?: PlatformConfig; error?: string; onSession: (se
       const auth = await platformAuth()
       const { error } = await auth.auth.signInWithOAuth({
         provider,
-        options: { redirectTo: `${location.origin}${location.pathname}${location.search}` },
+        options: { redirectTo: location.origin + location.pathname + location.search },
       })
       if (error) throw error
     } catch (error) {
@@ -118,10 +127,7 @@ function SignIn(props: { config?: PlatformConfig; error?: string; onSession: (se
           <img src="/vector-logo.png" alt="" />
           <span className="platform-kicker">Account service</span>
           <h1>Vector accounts are being configured.</h1>
-          <p>
-            {props.error ||
-              "The application is installed correctly, but this deployment is missing its account environment variables."}
-          </p>
+          <p>{props.error || "This deployment is missing its account environment variables."}</p>
           <a href="/">Return to Vector</a>
         </div>
       </PlatformBackdrop>
@@ -136,21 +142,21 @@ function SignIn(props: { config?: PlatformConfig; error?: string; onSession: (se
             <img src="/vector-logo.png" alt="" />
             <span>Vector</span>
           </a>
-          <span className="platform-kicker">One account. Every Vector surface.</span>
-          <h1>Build locally. Run continuously in the cloud.</h1>
+          <span className="platform-kicker">Turn an idea into a working product</span>
+          <h1>Describe it. Build it. Open the real app.</h1>
           <p>
-            Use the desktop workspace, isolated cloud agents, the API platform, and every supported installer through
-            one subscription.
+            Vector creates a complete project in an isolated workspace, runs it, and gives you a live browser preview
+            you can keep refining with the agent.
           </p>
           <div className="platform-auth-proof">
             <span>
-              <ShieldCheck size={16} /> Subscription and license stay synchronized
+              <Sparkles size={16} /> Prompt to working application
             </span>
             <span>
-              <Cloud size={16} /> Cloud runs remain isolated by workspace
+              <ShieldCheck size={16} /> Isolated execution with visible evidence
             </span>
             <span>
-              <KeyRound size={16} /> Saved connection credentials are encrypted at rest
+              <KeyRound size={16} /> Your model and tool credentials stay encrypted
             </span>
           </div>
         </section>
@@ -167,22 +173,12 @@ function SignIn(props: { config?: PlatformConfig; error?: string; onSession: (se
             <LogIn size={18} />
             <div>
               <strong>{intent === "signin" ? "Welcome back" : "Create your Vector account"}</strong>
-              <span>
-                {intent === "signin"
-                  ? "Continue where you left off."
-                  : "Your subscription unlocks every product surface."}
-              </span>
+              <span>{intent === "signin" ? "Continue building." : "Start with one clear product idea."}</span>
             </div>
           </div>
           <label>
             Email
-            <input
-              type="email"
-              autoComplete="email"
-              required
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-            />
+            <input type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} />
           </label>
           <label>
             Password
@@ -195,7 +191,7 @@ function SignIn(props: { config?: PlatformConfig; error?: string; onSession: (se
               onChange={(event) => setPassword(event.target.value)}
             />
             {intent === "signin" && (
-              <button className="platform-reset-link" type="button" onClick={resetPassword} disabled={busy}>
+              <button className="platform-reset-link" type="button" onClick={() => void resetPassword()} disabled={busy}>
                 Forgot password?
               </button>
             )}
@@ -210,7 +206,7 @@ function SignIn(props: { config?: PlatformConfig; error?: string; onSession: (se
               </div>
               <div className="platform-oauth">
                 {oauthProviders.map((provider) => (
-                  <button key={provider} type="button" onClick={() => oauth(provider)} disabled={busy}>
+                  <button key={provider} type="button" onClick={() => void oauth(provider)} disabled={busy}>
                     {provider === "github" ? "GitHub" : "Google"}
                   </button>
                 ))}
@@ -218,9 +214,7 @@ function SignIn(props: { config?: PlatformConfig; error?: string; onSession: (se
             </>
           )}
           {message && <p className="platform-form-message">{message}</p>}
-          <small>
-            By continuing, you agree to Vector's license, subscription terms, privacy policy, and acceptable-use rules.
-          </small>
+          <small>By continuing, you agree to Vector's terms, privacy policy, and software license.</small>
         </form>
       </div>
     </PlatformBackdrop>
@@ -237,7 +231,7 @@ function ProductShell(props: { mode: Mode; session: Session; children: ReactNode
             <img src="/vector-logo.png" alt="" />
             <span>Vector</span>
           </a>
-          <p className="platform-nav-label">Your platform</p>
+          <p className="platform-nav-label">Account</p>
           <nav>
             {destinations.map((destination) => {
               const Icon = destination.icon
@@ -249,10 +243,6 @@ function ProductShell(props: { mode: Mode; session: Session; children: ReactNode
               )
             })}
           </nav>
-          <a className="platform-nav-home" href="/">
-            <Cloud size={15} />
-            <span>Vector product site</span>
-          </a>
           <div className="platform-user">
             <span>{email.slice(0, 1).toUpperCase()}</span>
             <div>
@@ -286,22 +276,16 @@ function SubscriptionGate(props: { status: EntitlementStatus }) {
         <CreditCard size={20} />
       </span>
       <span className="platform-kicker">Vector membership</span>
-      <h1>{grace ? "Your payment needs attention." : "Subscribe to open this Vector workspace."}</h1>
-      <p>
-        {props.status.entitlement.message ||
-          "Cloud Agents, Vector Play Park, API access, and protected downloads are included with one Vector subscription."}
-      </p>
+      <h1>{grace ? "Your payment needs attention." : "Subscribe to open Vector Builder."}</h1>
+      <p>{props.status.entitlement.message || "Vector Builder and protected desktop downloads share one membership."}</p>
       <div>
-        <a className="platform-primary" href="/account">
+        <a className="platform-primary" href="/billing">
           {grace ? "Fix payment" : "Choose a plan"}
         </a>
         <a className="platform-secondary" href="/">
           Return to Vector
         </a>
       </div>
-      {!props.status.billing.available && (
-        <small>Checkout is temporarily unavailable while billing is being configured.</small>
-      )}
     </section>
   )
 }
@@ -314,7 +298,7 @@ export function PlatformShell(props: { mode: Mode }) {
   const title = useMemo(() => modeTitles[props.mode], [props.mode])
 
   useEffect(() => {
-    document.title = `${title} — Vector`
+    document.title = title + " — Vector"
     let unsubscribe = () => {}
     platformConfig()
       .then(async (value) => {
@@ -334,7 +318,7 @@ export function PlatformShell(props: { mode: Mode }) {
   }, [title])
 
   useEffect(() => {
-    if (!session || props.mode === "account" || props.mode === "downloads" || props.mode === "settings") {
+    if (!session) {
       setAccount(undefined)
       return
     }
@@ -349,9 +333,9 @@ export function PlatformShell(props: { mode: Mode }) {
     return () => {
       active = false
     }
-  }, [session?.access_token, props.mode])
+  }, [session?.access_token])
 
-  if (session === undefined && !error)
+  if (session === undefined && !error) {
     return (
       <PlatformBackdrop>
         <div className="platform-loading">
@@ -360,33 +344,27 @@ export function PlatformShell(props: { mode: Mode }) {
         </div>
       </PlatformBackdrop>
     )
+  }
   if (!session) return <SignIn config={config} error={error} onSession={setSession} />
-  const protectedWorkspace = props.mode === "agents" || props.mode === "play-park"
+  if (props.mode === "builder") {
+    return (
+      <PlatformBackdrop>
+        {!account && !error && (
+          <div className="platform-loading">
+            <img src="/vector-logo.png" alt="" />
+            <span>Opening Builder...</span>
+          </div>
+        )}
+        {account && !account.entitlement.access && <SubscriptionGate status={account} />}
+        {account?.entitlement.access && <BuilderWorkspace session={session} config={config} />}
+      </PlatformBackdrop>
+    )
+  }
   return (
     <ProductShell mode={props.mode} session={session}>
-      {protectedWorkspace && !account && !error && (
-        <div className="platform-loading">
-          <img src="/vector-logo.png" alt="" />
-          <span>Verifying your Vector access...</span>
-        </div>
-      )}
-      {protectedWorkspace && account && !account.entitlement.access && <SubscriptionGate status={account} />}
-      {props.mode === "agents" && account?.entitlement.access && (
-        <CloudAgentsWorkspace session={session} config={config} />
-      )}
-      {props.mode === "play-park" && account?.entitlement.access && <PlayParkView session={session} config={config} />}
-      {(props.mode === "account" || props.mode === "downloads") && (
-        <AccountView session={session} config={config} downloadsOnly={props.mode === "downloads"} />
-      )}
+      {props.mode === "account" && <AccountView session={session} config={config} />}
+      {props.mode === "downloads" && <AccountView session={session} config={config} downloadsOnly />}
       {props.mode === "settings" && <SettingsView session={session} config={config} />}
-      {error && protectedWorkspace && (
-        <div className="platform-gate">
-          <span className="platform-kicker">Account service</span>
-          <h1>Vector could not verify this workspace.</h1>
-          <p>{error}</p>
-          <a href="/account">Open account</a>
-        </div>
-      )}
     </ProductShell>
   )
 }

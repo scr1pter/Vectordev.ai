@@ -1,8 +1,8 @@
 ---
-import { ArrowRight, Bot, Braces, ChevronDown, Cloud, CloudUpload, Code2, Gauge, Globe2, Mic2 } from "lucide-react"
+import { ArrowRight, Bot, ChevronDown, Cloud, CloudUpload, Code2, Gauge, Globe2, Laptop2, MousePointerClick, WandSparkles } from "lucide-react"
 import MarketingFooter from "./marketing/MarketingFooter.astro"
 import MarketingNav from "./marketing/MarketingNav.astro"
-import screenshotAgent from "../assets/lander/vector-agent-current.png"
+import screenshotBuilder from "../assets/lander/vector-builder-current.png"
 import screenshotAgents from "../assets/lander/vector-workspaces-current.png"
 import screenshotBrowser from "../assets/lander/vector-browser-current.png"
 import screenshotCloud from "../assets/lander/vector-cloud-current.png"
@@ -41,6 +41,16 @@ const ecosystem = [
 ]
 
 const features = [
+  {
+    title: "Describe the product. Work from a live app.",
+    body: "Start with an idea instead of a repository. Vector creates a persistent project, writes the real files in an isolated runtime, runs the application, and opens a live preview beside the conversation. Keep asking for changes until it feels right.",
+    tag: "Vector Builder",
+    note: "Prompt to working app",
+    image: screenshotBuilder,
+    alt: "Vector Builder turning a product request into a working application",
+    href: "/docs#builder",
+    link: "Build your first app",
+  },
   {
     title: "Give every responsibility its own agent.",
     body: "Launch up to 16 isolated workspaces from one repository. Each agent gets its own branch, files, terminal, conversation, model, and checks, so frontend, backend, testing, and deployment move at the same time without touching main.",
@@ -108,28 +118,28 @@ const connectionGroups = [
 
 const products = [
   {
-    name: "Vector Agent Workspace",
-    eyebrow: "Desktop · available",
-    body: "The local-first command center: agents, isolated workspaces, editor, terminal, browser, MCP, review, checkpoints, and visible token economics around your real repositories.",
-    icon: Code2,
+    name: "Vector Builder",
+    eyebrow: "Browser · available",
+    body: "Describe an app, watch Vector create and run the real project, inspect the live result, and continue refining it from one visual workspace.",
+    icon: WandSparkles,
+  },
+  {
+    name: "Vector Desktop",
+    eyebrow: "macOS, Windows, and Linux",
+    body: "Open an existing repository and work with agents, parallel workspaces, a professional editor, terminal, controlled browser, review, checkpoints, and visible token economics.",
+    icon: Laptop2,
+  },
+  {
+    name: "Connected Actions",
+    eyebrow: "Approval gated · available",
+    body: "Pair Vector Desktop when you want a Builder project to operate its controlled browser or run an exact command on your computer. Browser and terminal access are enabled separately and every action remains visible.",
+    icon: MousePointerClick,
   },
   {
     name: "Vector Cloud Services",
-    eyebrow: "Desktop cloud control · available",
-    body: "Deployments, databases, authentication, storage, environment variables, domains, logs, and infrastructure controls stay connected to the repository and agent that built the product.",
+    eyebrow: "Connected infrastructure · available",
+    body: "Deployments, databases, authentication, storage, environment variables, domains, logs, and infrastructure controls stay connected to the project that needs them.",
     icon: Cloud,
-  },
-  {
-    name: "Vector Cloud Agents",
-    eyebrow: "Continuous execution · available",
-    body: "Persistent isolated builders continue long-running assignments in the cloud, work alone or as a coordinated team, and return activity, evidence, usage, and reviewable outcomes.",
-    icon: Bot,
-  },
-  {
-    name: "Vector API Platform",
-    eyebrow: "Programmable agent runtime · available",
-    body: "Give software access to agent orchestration, isolated execution, browser operation, MCP tools, assertions, logs, screenshots, costs, and tested evidence rather than raw generated text.",
-    icon: Braces,
   },
   {
     name: "Vector Velocity",
@@ -183,24 +193,24 @@ const changelog = [
           </h1>
 
           <p class="headline">
-            <span>One workspace. An army of builders.</span>
-            <span class="scramble" data-scramble aria-hidden="true">Your models. Your tools. Your control.</span>
-            <span class="sr-only">Direct parallel AI builders, operate the browser, connect your tools, review their work, and ship from one bring-your-own-key workspace.</span>
+            <span>Turn an idea into a working app.</span>
+            <span class="scramble" data-scramble aria-hidden="true">Describe it. Watch it build. Make it yours.</span>
+            <span class="sr-only">Vector creates the project, writes the files, runs the app, and gives you a live preview you can keep refining.</span>
           </p>
 
           <div class="hero-loop" aria-label="Vector's build, test, and ship workflow">
             <div class="hero-loop-progress" aria-hidden="true"><i data-hero-progress></i></div>
             <div class="hero-loop-stage is-active" data-hero-stage="0">
               <span class="hero-loop-icon"><Bot size={16} strokeWidth={1.8} aria-hidden="true" /></span>
-              <span><strong>Build</strong><small>Parallel agents</small></span>
+              <span><strong>Describe</strong><small>Your product</small></span>
             </div>
             <div class="hero-loop-stage" data-hero-stage="1">
               <span class="hero-loop-icon"><Globe2 size={16} strokeWidth={1.8} aria-hidden="true" /></span>
-              <span><strong>Test</strong><small>Native browser</small></span>
+              <span><strong>Build</strong><small>Real project files</small></span>
             </div>
             <div class="hero-loop-stage" data-hero-stage="2">
               <span class="hero-loop-icon"><CloudUpload size={16} strokeWidth={1.8} aria-hidden="true" /></span>
-              <span><strong>Ship</strong><small>Cloud Services</small></span>
+              <span><strong>Inspect</strong><small>Live application</small></span>
             </div>
           </div>
 
@@ -209,22 +219,22 @@ const changelog = [
             <ArrowRight size={18} strokeWidth={2} aria-hidden="true" />
           </a>
 
-          <p class="hero-note">The ultimate local-first, bring-your-own-key agentic workspace.</p>
+          <p class="hero-note">A visual app builder and a professional agentic workspace, under one Vector account.</p>
         </div>
 
         <div class="showcase" aria-label="Vector workspace screenshot">
           <figure class="product-window">
             <div class="product-bar" aria-hidden="true">
               <span class="traffic"><i></i><i></i><i></i></span>
-              <span class="product-title">Vector — agentic workspace</span>
+              <span class="product-title">Vector — Builder</span>
               <span class="product-status"><i></i> Ready</span>
             </div>
             <img
               data-parallax
-              src={screenshotAgent.src}
-              width={screenshotAgent.width}
-              height={screenshotAgent.height}
-              alt="Vector coordinating builders inside a repository"
+              src={screenshotBuilder.src}
+              width={screenshotBuilder.width}
+              height={screenshotBuilder.height}
+              alt="Vector Builder creating a real product from a prompt"
               loading="eager"
             />
           </figure>
@@ -234,12 +244,11 @@ const changelog = [
 
     <section class="product-system section-width" aria-labelledby="product-system-title">
       <div class="section-heading chapter-head" data-reveal>
-        <p class="section-kicker">One Vector system</p>
-        <h2 id="product-system-title">Local creation, cloud execution, and programmable agents.</h2>
+        <p class="section-kicker">One product path</p>
+        <h2 id="product-system-title">Start visually. Go as deep as you need.</h2>
         <p>
-          Vector's vision is one account and one operating model across the desktop workspace, cloud infrastructure,
-          persistent agents, and the API runtime. Start by building yourself, delegate the work, or embed the same
-          verified execution system inside another product.
+          Begin in Vector Builder with a plain-language idea and a live app. Open Vector Desktop when you want direct
+          control over the repository, editor, terminal, browser, parallel workspaces, and release process.
         </p>
       </div>
       <div class="product-system-grid">
@@ -256,7 +265,7 @@ const changelog = [
         })}
       </div>
       <a class="product-system-account" href="/account" data-reveal>
-        One account unlocks the complete available platform <ArrowRight size={15} strokeWidth={2} aria-hidden="true" />
+        One account unlocks Builder, billing, and protected desktop downloads <ArrowRight size={15} strokeWidth={2} aria-hidden="true" />
       </a>
     </section>
 
@@ -265,33 +274,33 @@ const changelog = [
         <div class="suite section-width">
           <div class="section-heading chapter-head">
             <p class="section-kicker">One Vector</p>
-            <h2 id="suite-title">One command center for every builder.</h2>
-            <p>Vector is the command center for builders: one place to direct agents, use your own models, connect real tools, inspect the work, and ship outcomes.</p>
+            <h2 id="suite-title">A visual builder that does not become a dead end.</h2>
+            <p>Start with the ease of a no-code product builder, then keep the files, runtime, tools, and professional desktop workflow when the project grows up.</p>
           </div>
           <div class="suite-grid">
             <article style="--i: 0">
               <span class="suite-icon"><Bot size={19} strokeWidth={1.7} aria-hidden="true" /></span>
-              <small>Direct the work</small>
-              <h3>An agentic army</h3>
-              <p>Work with one agent or coordinate up to 16 isolated builders. Give each one an outcome, follow the live work, and merge only what you trust.</p>
+              <small>Prompt to product</small>
+              <h3>Build from intent</h3>
+              <p>Describe the product and its behavior. Vector creates a persistent project, makes the implementation real, runs it, and keeps the conversation beside the result.</p>
             </article>
             <article style="--i: 1">
               <span class="suite-icon"><Globe2 size={19} strokeWidth={1.7} aria-hidden="true" /></span>
-              <small>Connect the world</small>
-              <h3>Browser, MCP, and plugins</h3>
-              <p>Let builders operate the visible browser and connect to the services you already use. Pause, approve, or take over whenever the work becomes sensitive.</p>
+              <small>Operate with permission</small>
+              <h3>Browser and computer actions</h3>
+              <p>Pair Vector Desktop and explicitly allow browser or terminal control. The agent can complete approved workflows while every action remains visible and interruptible.</p>
             </article>
             <article style="--i: 2">
               <span class="suite-icon"><CloudUpload size={19} strokeWidth={1.7} aria-hidden="true" /></span>
-              <small>Build and ship</small>
-              <h3>Editor, terminal, and Cloud</h3>
-              <p>Code directly when you want to, then deploy, configure, and operate each repository through the same workspace and your own connected accounts.</p>
+              <small>Own the implementation</small>
+              <h3>A real desktop workspace</h3>
+              <p>Move beyond the visual surface whenever you choose. Edit code, run commands, coordinate isolated agents, review diffs, and test through the controlled browser.</p>
             </article>
             <article style="--i: 3">
-              <span class="suite-icon"><Mic2 size={19} strokeWidth={1.7} aria-hidden="true" /></span>
-              <small>Talk through the work</small>
-              <h3>Vel</h3>
-              <p>A task-aware voice assistant with a dedicated call surface. Vel listens, answers aloud and hands actionable requests to the active Vector agent.</p>
+              <span class="suite-icon"><CloudUpload size={19} strokeWidth={1.7} aria-hidden="true" /></span>
+              <small>Connect and ship</small>
+              <h3>MCP, providers, and Cloud</h3>
+              <p>Bring your own model provider, connect approved tools through MCP, and publish through the infrastructure accounts that already belong to you.</p>
             </article>
           </div>
           <div class="scene-rail" aria-hidden="true"><i></i></div>
@@ -520,9 +529,9 @@ const changelog = [
     const node = document.querySelector<HTMLElement>("[data-scramble]")
     if (!node) return () => {}
     const phrases = [
-      "Run them in isolated workspaces.",
-      "Test in Vector's native browser.",
-      "Ship through Cloud Services.",
+      "Describe the product in plain language.",
+      "Watch Vector build the real project.",
+      "Inspect and refine the live app.",
     ]
     const stages = Array.from(document.querySelectorAll<HTMLElement>("[data-hero-stage]"))
     const progress = document.querySelector<HTMLElement>("[data-hero-progress]")

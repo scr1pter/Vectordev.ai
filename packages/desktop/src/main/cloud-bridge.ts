@@ -27,7 +27,7 @@ type CloudCommand =
   | "publish"
   | "list_deployments"
 
-type CloudAgentInput = {
+type CloudCommandInput = {
   command: CloudCommand
   projectPath: string
   taskId?: string
@@ -40,7 +40,7 @@ let bridgeServer: Server | undefined
 let bridgeUrl = ""
 let bridgeToken = ""
 
-export async function startCloudAgentBridge() {
+export async function startCloudBridge() {
   if (bridgeServer) return { url: bridgeUrl, token: bridgeToken }
 
   bridgeToken = randomUUID()
@@ -72,8 +72,8 @@ export async function startCloudAgentBridge() {
     }
 
     const result = await Promise.resolve()
-      .then(() => parseCloudAgentInput(JSON.parse(Buffer.concat(chunks).toString("utf8"))))
-      .then(runCloudAgentCommand)
+      .then(() => parseCloudCommandInput(JSON.parse(Buffer.concat(chunks).toString("utf8"))))
+      .then(runCloudCommand)
       .catch((error) => ({
         ok: false,
         error: error instanceof Error ? error.message : String(error),
@@ -87,12 +87,12 @@ export async function startCloudAgentBridge() {
     bridgeServer!.listen(0, "127.0.0.1", () => resolve())
   })
   const address = bridgeServer.address()
-  if (!address || typeof address === "string") throw new Error("Vector Cloud agent bridge failed to bind")
+  if (!address || typeof address === "string") throw new Error("Vector Cloud bridge failed to bind")
   bridgeUrl = `http://127.0.0.1:${address.port}`
   return { url: bridgeUrl, token: bridgeToken }
 }
 
-export async function stopCloudAgentBridge() {
+export async function stopCloudBridge() {
   const current = bridgeServer
   bridgeServer = undefined
   bridgeUrl = ""
@@ -101,7 +101,7 @@ export async function stopCloudAgentBridge() {
   await new Promise<void>((resolve) => current.close(() => resolve()))
 }
 
-function parseCloudAgentInput(value: unknown): CloudAgentInput {
+function parseCloudCommandInput(value: unknown): CloudCommandInput {
   if (!value || typeof value !== "object") throw new Error("Cloud command must be an object.")
   const command = Reflect.get(value, "command")
   const projectPath = Reflect.get(value, "projectPath")
@@ -138,7 +138,7 @@ function parseCloudAgentInput(value: unknown): CloudAgentInput {
   return { command, projectPath, taskId, production, target, provider }
 }
 
-async function runCloudAgentCommand(input: CloudAgentInput) {
+async function runCloudCommand(input: CloudCommandInput) {
   const database = getDatabase(input.projectPath, input.taskId)
   if (input.command === "status") {
     const [connections, aws] = await Promise.all([
@@ -217,7 +217,7 @@ async function runCloudAgentCommand(input: CloudAgentInput) {
   })
 }
 
-function deploymentSummaries(input: CloudAgentInput) {
+function deploymentSummaries(input: CloudCommandInput) {
   return listDeployments(input.projectPath, input.taskId)
     .slice(0, 20)
     .map((deployment) => ({

@@ -42,7 +42,7 @@ import { spawnWslSidecar } from "./wsl/sidecar"
 import { migrate } from "./migrate"
 import { cleanupStoreFiles } from "./store-cleanup"
 import { startBrowserBridge, stopBrowserBridge } from "./browser-bridge"
-import { startCloudAgentBridge, stopCloudAgentBridge } from "./cloud-agent-bridge"
+import { startCloudBridge, stopCloudBridge } from "./cloud-bridge"
 import { setupSecureRuntimeSecrets } from "./secure-runtime"
 import { handleCloudOAuthDeepLinks } from "./cloud-connections"
 import { handleCompanionDeepLinks, startCompanionClient, stopCompanionClient } from "./companion-client"
@@ -176,7 +176,7 @@ const main = Effect.gen(function* () {
   )
   const stopSidecars = async () => {
     stopCompanionClient()
-    await Promise.all([killSidecar(), stopBrowserBridge(), stopCloudAgentBridge()])
+    await Promise.all([killSidecar(), stopBrowserBridge(), stopCloudBridge()])
     wslServers.stopAll()
   }
   const relaunch = () => {
@@ -306,9 +306,9 @@ const main = Effect.gen(function* () {
   const browserBridge = yield* Effect.promise(() => startBrowserBridge())
   process.env.VECTOR_BROWSER_BRIDGE_URL = browserBridge.url
   process.env.VECTOR_BROWSER_BRIDGE_TOKEN = browserBridge.token
-  const cloudAgentBridge = yield* Effect.promise(() => startCloudAgentBridge())
-  process.env.VECTOR_CLOUD_AGENT_BRIDGE_URL = cloudAgentBridge.url
-  process.env.VECTOR_CLOUD_AGENT_BRIDGE_TOKEN = cloudAgentBridge.token
+  const cloudBridge = yield* Effect.promise(() => startCloudBridge())
+  process.env.VECTOR_CLOUD_BRIDGE_URL = cloudBridge.url
+  process.env.VECTOR_CLOUD_BRIDGE_TOKEN = cloudBridge.token
 
   if (!TEST_ONBOARDING && process.env.VECTOR_ENABLE_LEGACY_MIGRATION === "1") migrate()
   yield* Effect.promise(() => cleanupStoreFiles(app.getPath("userData"))).pipe(

@@ -1,20 +1,15 @@
-import { reconcileAgentTeam, refreshCloudAgent, startCloudAgent, type CloudAgentRun } from "../_lib/cloud-agent.js"
+import { refreshBuilderRun, startBuilderRun, type BuilderRun } from "../_lib/builder-agent.js"
 import { ApiError, handleApiError, json, type ApiRequest, type ApiResponse } from "../_lib/http.js"
 import { platformAdmin } from "../_lib/platform.js"
 
 export const maxDuration = 300
 
-type AgentTeamRow = {
-  id: string
-  user_id: string
-}
-
 function requireCron(request: ApiRequest) {
   const secret = process.env.CRON_SECRET?.trim()
   if (!secret || secret.length < 24) {
-    throw new ApiError(503, "CRON_NOT_CONFIGURED", "Vector's Cloud Agent reconciler is not configured.")
+    throw new ApiError(503, "CRON_NOT_CONFIGURED", "Vector Builder's scheduler is not configured.")
   }
-  if (request.headers.authorization !== `Bearer ${secret}`) {
+  if (request.headers.authorization !== "Bearer " + secret) {
     throw new ApiError(401, "CRON_UNAUTHORIZED", "This endpoint is reserved for Vector's scheduler.")
   }
 }
@@ -40,23 +35,25 @@ export default async function handler(request: ApiRequest, response: ApiResponse
     const { data: queuedData, error: queuedError } = await admin
       .from("vector_agent_runs")
       .select("*")
+      .not("project_id", "is", null)
       .eq("status", "queued")
       .order("created_at")
       .limit(16)
-    if (queuedError) throw new ApiError(500, "AGENT_QUEUE_FAILED", "Vector could not load queued cloud agents.")
-    const queued = (queuedData || []) as CloudAgentRun[]
+    if (queuedError) throw new ApiError(500, "BUILD_QUEUE_FAILED", "Vector could not load queued builds.")
+    const queued = (queuedData || []) as BuilderRun[]
     const queueResult = await inBatches(queued, 4, async (run) => {
-      await startCloudAgent(run)
+      await startBuilderRun(run)
     })
 
     const { data, error } = await admin
       .from("vector_agent_runs")
       .select("*")
+      .not("project_id", "is", null)
       .in("status", ["starting", "running"])
       .order("updated_at")
       .limit(100)
-    if (error) throw new ApiError(500, "AGENT_RECONCILE_FAILED", "Vector could not load active cloud agents.")
-    const runs = (data || []) as CloudAgentRun[]
+    if (error) throw new ApiError(500, "BUILD_RECONCILE_FAILED", "Vector could not load active builds.")
+    const runs = (data || []) as BuilderRun[]
     const runResult = await inBatches(runs, 5, async (run) => {
       const started = run.started_at ? new Date(run.started_at).getTime() : new Date(run.updated_at).getTime()
       if (run.status === "starting" && !run.sandbox_name && Date.now() - started > 10 * 60_000) {
@@ -65,7 +62,7 @@ export default async function handler(request: ApiRequest, response: ApiResponse
           .update({
             status: "failed",
             current_step: "Launch interrupted",
-            error: "The Cloud Agent launch was interrupted before its workspace became available.",
+            error: "The Builder launch was interrupted before its workspace became available.",
             completed_at: new Date().toISOString(),
           })
           .eq("id", run.id)
@@ -73,28 +70,16 @@ export default async function handler(request: ApiRequest, response: ApiResponse
           .eq("status", "starting")
         return
       }
-      await refreshCloudAgent(run)
+      await refreshBuilderRun(run)
     })
 
-    const { data: teams, error: teamsError } = await admin
-      .from("vector_agent_teams")
-      .select("id,user_id")
-      .in("status", ["active", "integrating"])
-      .limit(100)
-    if (teamsError) throw new ApiError(500, "TEAM_RECONCILE_FAILED", "Vector could not load active agent teams.")
-    const teamRows = (teams || []) as AgentTeamRow[]
-    const teamResult = await inBatches(teamRows, 10, async (team) => {
-      await reconcileAgentTeam(team.id, team.user_id)
-    })
     json(response, 200, {
-      queuedRuns: queued.length,
-      runsStarted: queueResult.completed,
+      queuedBuilds: queued.length,
+      buildsStarted: queueResult.completed,
       launchErrors: queueResult.failed,
-      activeRuns: runs.length,
-      runsReconciled: runResult.completed,
-      runErrors: runResult.failed,
-      teamsReconciled: teamResult.completed,
-      teamErrors: teamResult.failed,
+      activeBuilds: runs.length,
+      buildsReconciled: runResult.completed,
+      buildErrors: runResult.failed,
       reconciledAt: new Date().toISOString(),
     })
   } catch (error) {

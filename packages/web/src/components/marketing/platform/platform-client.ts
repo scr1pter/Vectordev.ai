@@ -7,13 +7,12 @@ export type PlatformConfig = {
     publishableKey?: string
     providers: Array<"github" | "google">
   }
-  services: { apiPlatform: boolean; cloudAgents: boolean; billing: boolean }
-  cloudModel: string | null
+  services: { builder: boolean; billing: boolean }
+  builderModel: string | null
   limits: {
-    activeCloudAgents: number
-    cloudAgentLaunches30Days: number
-    cloudAgentTurns30Days: number
-    apiExecutionsDaily: number
+    activeBuilderRuns: number
+    builderLaunches30Days: number
+    builderTurns30Days: number
   }
   plans: Array<{ id: "monthly" | "annual"; priceUsd: number; interval: string; graceDays: number }>
 }

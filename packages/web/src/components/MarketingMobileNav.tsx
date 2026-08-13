@@ -1,6 +1,6 @@
 import { For, Show, createEffect, createSignal, onCleanup } from "solid-js"
 
-type ActivePage = "product" | "agents" | "api" | "docs" | "releases" | "download" | "account"
+type ActivePage = "product" | "docs" | "releases" | "download" | "account"
 
 const links: Array<{ label: string; href: string; id: ActivePage }> = [
   { label: "Product", href: "/", id: "product" },
@@ -86,7 +86,7 @@ export function MarketingMobileNav(props: { active: ActivePage }) {
             </button>
           </div>
           <p class="mobile-nav-copy">
-            One account for the desktop workspace, continuous cloud agents, API development, billing, and installers.
+            Build working apps in the browser, then take the same account into Vector's desktop workspace.
           </p>
           <nav class="mobile-nav-links" aria-label="Mobile navigation">
             <For each={links}>
@@ -102,7 +102,7 @@ export function MarketingMobileNav(props: { active: ActivePage }) {
             </For>
           </nav>
           <p class="mobile-nav-foot">
-            Vector is a local-first AI engineering workspace for building, testing, reviewing, and shipping software.
+            Vector turns a product brief into a working app with real files, an isolated runtime, and a live preview.
           </p>
         </div>
       </Show>

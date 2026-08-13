@@ -8,7 +8,7 @@ import {
 } from "../_lib/platform.js"
 
 type DeviceBody = {
-  action?: "pair" | "claim" | "revoke"
+  action?: "pair" | "claim" | "permissions" | "revoke"
   token?: string
   id?: string
   name?: string
@@ -112,6 +112,24 @@ export default async function handler(request: ApiRequest, response: ApiResponse
         .single()
       if (error || !data) throw new ApiError(500, "PAIRING_CREATE_FAILED", "Vector could not create a pairing link.")
       json(response, 200, { url: `vector://companion/pair?token=${encodeURIComponent(`${data.id}.${secret}`)}`, expiresAt: data.expires_at })
+      return
+    }
+    if (request.method === "POST" && body.action === "permissions") {
+      if (!body.id) throw new ApiError(400, "DEVICE_REQUIRED", "Choose a computer to update.")
+      const permissions = [
+        ...new Set((body.permissions || []).filter((item) => item === "browser" || item === "shell")),
+      ]
+      const { data, error } = await admin
+        .from("vector_companion_devices")
+        .update({ permissions })
+        .eq("id", body.id)
+        .eq("user_id", user.id)
+        .eq("status", "connected")
+        .select(publicFields)
+        .maybeSingle()
+      if (error) throw new ApiError(500, "DEVICE_UPDATE_FAILED", "Vector could not update this computer.")
+      if (!data) throw new ApiError(404, "DEVICE_NOT_FOUND", "That paired computer does not exist.")
+      json(response, 200, { device: data })
       return
     }
     if (request.method === "DELETE" || (request.method === "POST" && body.action === "revoke")) {

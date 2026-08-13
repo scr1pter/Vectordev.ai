@@ -362,9 +362,9 @@ export const release117: VectorRelease[] = [
   },
   {
     version: "1.17.46",
-    title: "Vector platform foundation",
+    title: "Unified account foundation",
     summary:
-      "Introduced unified Vector accounts and entitlements, protected subscription downloads, API Studio and Play Park, isolated Cloud Agent teams, server-managed MCP connections, verified execution evidence, and production-safe billing, quota, and security boundaries.",
+      "Introduced unified Vector accounts and entitlements, protected subscription downloads, server-managed provider and MCP connections, and production-safe billing, quota, and security boundaries.",
   },
   {
     version: "1.17.47",
@@ -374,8 +374,14 @@ export const release117: VectorRelease[] = [
   },
   {
     version: "1.17.48",
-    title: "Cloud agents, your models, your computer",
+    title: "Your models, tools, and computer",
     summary:
-      "Restored API Studio, brought encrypted BYOK model providers and OpenCode-style MCP connections to Cloud Agents, and added an approval-gated Vector desktop companion for controlled browser and terminal work across multiple agents.",
+      "Added encrypted BYOK model providers, managed MCP connections, and an approval-gated Vector desktop companion with independent browser and terminal permissions.",
+  },
+  {
+    version: "1.17.49",
+    title: "Vector Builder",
+    summary:
+      "Introduced Vector Builder as the focused web product: persistent projects, isolated execution, real file changes, continuing conversations, live previews, BYOK models, MCP tools, and explicitly permissioned computer actions.",
   },
 ]

@@ -49,10 +49,19 @@ function boundedEnvironmentInteger(name: string, fallback: number, minimum: numb
 
 export function platformUsageLimits() {
   return {
-    activeCloudAgents: 16,
-    cloudAgentLaunches30Days: boundedEnvironmentInteger("VECTOR_CLOUD_AGENT_30_DAY_LAUNCH_LIMIT", 24, 1, 1_000),
-    cloudAgentTurns30Days: boundedEnvironmentInteger("VECTOR_CLOUD_AGENT_30_DAY_TURN_LIMIT", 240, 1, 10_000),
-    apiExecutionsDaily: boundedEnvironmentInteger("VECTOR_API_DAILY_EXECUTION_LIMIT", 500, 1, 100_000),
+    activeBuilderRuns: 8,
+    builderLaunches30Days: boundedEnvironmentInteger(
+      "VECTOR_BUILDER_30_DAY_LAUNCH_LIMIT",
+      24,
+      1,
+      1_000,
+    ),
+    builderTurns30Days: boundedEnvironmentInteger(
+      "VECTOR_BUILDER_30_DAY_TURN_LIMIT",
+      240,
+      1,
+      10_000,
+    ),
   }
 }
 
@@ -63,7 +72,7 @@ export function platformConfiguration() {
   )
   const serviceRoleKey = trim(process.env.SUPABASE_SERVICE_ROLE_KEY)
   const encryptionKey = trim(process.env.VECTOR_PLATFORM_SECRET)
-  const cloudRuntime = trim(process.env.VECTOR_CLOUD_SANDBOX_IMAGE)
+  const builderRuntime = trim(process.env.VECTOR_BUILDER_SANDBOX_IMAGE)
   const cronSecret = trim(process.env.CRON_SECRET)
   const adminAvailable = Boolean(url && serviceRoleKey)
   const authProviders = (process.env.VECTOR_AUTH_PROVIDERS || "")
@@ -73,18 +82,17 @@ export function platformConfiguration() {
   return {
     authAvailable: Boolean(url && publishableKey),
     adminAvailable,
-    cloudAgentsAvailable: Boolean(
+    builderAvailable: Boolean(
       adminAvailable &&
         encryptionKey &&
-        cloudRuntime &&
+        builderRuntime &&
         cronSecret &&
         cronSecret.length >= 24,
     ),
-    apiPlatformAvailable: Boolean(adminAvailable && encryptionKey),
     url,
     publishableKey,
     authProviders: [...new Set(authProviders)],
-    model: trim(process.env.VECTOR_CLOUD_AGENT_MODEL),
+    model: trim(process.env.VECTOR_BUILDER_MODEL),
   }
 }
 
@@ -443,62 +451,13 @@ export function hashSecret(value: string) {
   return createHash("sha256").update(value).digest("hex")
 }
 
-export async function userFromApiKey(request: ApiRequest) {
-  const raw = request.headers["x-vector-api-key"]
-  const key = Array.isArray(raw) ? raw[0] : raw
-  if (!key?.startsWith("vec_live_")) return undefined
-  const admin = platformAdmin()
-  const { data, error } = await admin
-    .from("vector_api_keys")
-    .select("id,user_id,revoked_at,scopes,daily_unit_limit,expires_at")
-    .eq("secret_hash", hashSecret(key))
-    .maybeSingle<{
-      id: string
-      user_id: string
-      revoked_at: string | null
-      scopes: string[]
-      daily_unit_limit: number
-      expires_at: string | null
-    }>()
-  if (error || !data || data.revoked_at || (data.expires_at && new Date(data.expires_at).getTime() <= Date.now())) {
-    throw new ApiError(401, "API_KEY_INVALID", "That Vector API key is invalid or expired.")
-  }
-  await admin.from("vector_api_keys").update({ last_used_at: new Date().toISOString() }).eq("id", data.id)
-  const config = requiredAdminConfig()
-  const userResponse = await fetch(`${config.url}/auth/v1/admin/users/${encodeURIComponent(data.user_id)}`, {
-    headers: {
-      apikey: config.serviceRoleKey,
-      authorization: `Bearer ${config.serviceRoleKey}`,
-    },
-    signal: AbortSignal.timeout(10_000),
-  }).catch(() => undefined)
-  if (!userResponse?.ok) throw new ApiError(401, "API_KEY_INVALID", "That Vector API key is invalid.")
-  const user = (await userResponse.json().catch(() => undefined)) as PlatformUser | undefined
-  if (!user?.id) throw new ApiError(401, "API_KEY_INVALID", "That Vector API key is invalid.")
-  return { user, key: data }
-}
-
-export async function requirePlatformCaller(request: ApiRequest, requiredScope?: string) {
-  const apiPrincipal = await userFromApiKey(request)
-  const user = apiPrincipal?.user || (await optionalUser(request))
-  if (!user) throw new ApiError(401, "AUTH_REQUIRED", "Use a Vector API key or sign in to continue.")
-  if (apiPrincipal && requiredScope && !apiPrincipal.key.scopes.includes(requiredScope)) {
-    throw new ApiError(403, "API_KEY_SCOPE_REQUIRED", `This API key does not include the ${requiredScope} scope.`)
-  }
+export async function requirePlatformCaller(request: ApiRequest) {
+  const user = await optionalUser(request)
+  if (!user) throw new ApiError(401, "AUTH_REQUIRED", "Sign in to your Vector account to continue.")
   const [subscription, grant] = await Promise.all([subscriptionForUser(user.id), accessGrantForUser(user.id)])
   const entitlement = entitlementFor(subscription, grant)
   if (!entitlement.access) throw new ApiError(402, "SUBSCRIPTION_REQUIRED", "An active Vector plan is required.")
-  if (apiPrincipal) {
-    await consumePlatformQuota({
-      userId: user.id,
-      kind: `api_key_${apiPrincipal.key.id}`,
-      limit: apiPrincipal.key.daily_unit_limit,
-      windowSeconds: 86_400,
-      message: "This Vector API key reached its daily request limit.",
-      metadata: { keyId: apiPrincipal.key.id, scope: requiredScope || null },
-    })
-  }
-  return { user, subscription, grant, entitlement, apiKey: apiPrincipal?.key }
+  return { user, subscription, grant, entitlement }
 }
 
 export async function consumePlatformQuota(input: {

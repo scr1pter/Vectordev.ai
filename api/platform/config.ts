@@ -15,11 +15,10 @@ export default async function handler(request: ApiRequest, response: ApiResponse
         providers: authProviders,
       },
       services: {
-        apiPlatform: platform.apiPlatformAvailable,
-        cloudAgents: platform.cloudAgentsAvailable,
+        builder: platform.builderAvailable,
         billing: billingConfiguration().available,
       },
-      cloudModel: platform.model || null,
+      builderModel: platform.model || null,
       limits: platformUsageLimits(),
       plans: billingConfiguration().plans,
     })

@@ -60,9 +60,9 @@ type Metadata = {
 }
 
 function bridgeRequest(input: Record<string, unknown>, signal: AbortSignal) {
-  const url = process.env.VECTOR_CLOUD_AGENT_BRIDGE_URL
-  const token = process.env.VECTOR_CLOUD_AGENT_BRIDGE_TOKEN
-  if (!url || !token) throw new Error("Vector Cloud agent tools are available in the Vector desktop app only.")
+  const url = process.env.VECTOR_CLOUD_BRIDGE_URL
+  const token = process.env.VECTOR_CLOUD_BRIDGE_TOKEN
+  if (!url || !token) throw new Error("Vector Cloud tools are available in the Vector desktop app only.")
   return fetch(`${url}/command`, {
     method: "POST",
     headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
