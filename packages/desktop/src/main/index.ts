@@ -45,7 +45,6 @@ import { startBrowserBridge, stopBrowserBridge } from "./browser-bridge"
 import { startCloudBridge, stopCloudBridge } from "./cloud-bridge"
 import { setupSecureRuntimeSecrets } from "./secure-runtime"
 import { handleCloudOAuthDeepLinks } from "./cloud-connections"
-import { handleCompanionDeepLinks, startCompanionClient, stopCompanionClient } from "./companion-client"
 import { createLicenseService } from "./license-service"
 
 const APP_NAMES: Record<string, string> = {
@@ -84,8 +83,7 @@ function emitDeepLinks(urls: string[]) {
 
 async function routeDeepLinks(urls: string[]) {
   if (urls.length === 0) return
-  const afterCompanion = await handleCompanionDeepLinks(urls)
-  const remaining = await handleCloudOAuthDeepLinks(afterCompanion)
+  const remaining = await handleCloudOAuthDeepLinks(urls)
   logger.log("deep links routed", {
     received: urls.length,
     handled: urls.length - remaining.length,
@@ -175,7 +173,6 @@ const main = Effect.gen(function* () {
     },
   )
   const stopSidecars = async () => {
-    stopCompanionClient()
     await Promise.all([killSidecar(), stopBrowserBridge(), stopCloudBridge()])
     wslServers.stopAll()
   }
@@ -301,8 +298,6 @@ const main = Effect.gen(function* () {
       }),
     ),
   )
-  void startCompanionClient()
-
   const browserBridge = yield* Effect.promise(() => startBrowserBridge())
   process.env.VECTOR_BROWSER_BRIDGE_URL = browserBridge.url
   process.env.VECTOR_BROWSER_BRIDGE_TOKEN = browserBridge.token

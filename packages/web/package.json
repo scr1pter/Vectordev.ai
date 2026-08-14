@@ -19,7 +19,6 @@
     "@astrojs/starlight": "0.34.3",
     "@fontsource/ibm-plex-mono": "5.2.5",
     "@fontsource-variable/geist": "5.2.6",
-    "@supabase/supabase-js": "2.112.2",
     "@shikijs/transformers": "3.20.0",
     "@solid-primitives/resize-observer": "2.1.5",
     "@tailwindcss/vite": "catalog:",

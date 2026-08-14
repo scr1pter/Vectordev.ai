@@ -1,8 +1,8 @@
 ---
-import { ArrowRight, Bot, ChevronDown, Cloud, CloudUpload, Code2, Gauge, Globe2, Laptop2, MousePointerClick, WandSparkles } from "lucide-react"
+import { ArrowRight, Bot, ChevronDown, Cloud, CloudUpload, Code2, Globe2, Laptop2 } from "lucide-react"
 import MarketingFooter from "./marketing/MarketingFooter.astro"
 import MarketingNav from "./marketing/MarketingNav.astro"
-import screenshotBuilder from "../assets/lander/vector-builder-current.png"
+import screenshotAgent from "../assets/lander/vector-agent-current.png"
 import screenshotAgents from "../assets/lander/vector-workspaces-current.png"
 import screenshotBrowser from "../assets/lander/vector-browser-current.png"
 import screenshotCloud from "../assets/lander/vector-cloud-current.png"
@@ -42,14 +42,14 @@ const ecosystem = [
 
 const features = [
   {
-    title: "Describe the product. Work from a live app.",
-    body: "Start with an idea instead of a repository. Vector creates a persistent project, writes the real files in an isolated runtime, runs the application, and opens a live preview beside the conversation. Keep asking for changes until it feels right.",
-    tag: "Vector Builder",
-    note: "Prompt to working app",
-    image: screenshotBuilder,
-    alt: "Vector Builder turning a product request into a working application",
-    href: "/docs#builder",
-    link: "Build your first app",
+    title: "Ask for an outcome. Keep the engineering in view.",
+    body: "Vector reads the active repository, plans the work, edits real files, runs commands, and reports a reviewable result in one session. Context, tool activity, token use, checkpoints, and changed files stay attached to that repository.",
+    tag: "Vector Agent",
+    note: "Repository-native",
+    image: screenshotAgent,
+    alt: "Vector Agent working inside a local software repository",
+    href: "/docs#vector-agent",
+    link: "Run your first session",
   },
   {
     title: "Give every responsibility its own agent.",
@@ -118,34 +118,34 @@ const connectionGroups = [
 
 const products = [
   {
-    name: "Vector Builder",
-    eyebrow: "Browser · available",
-    body: "Describe an app, watch Vector create and run the real project, inspect the live result, and continue refining it from one visual workspace.",
-    icon: WandSparkles,
+    name: "Vector Agent",
+    eyebrow: "Plan, edit, run, verify",
+    body: "Give Vector a repository-level outcome and follow the plan, file edits, commands, checks, browser evidence, and final summary from one session.",
+    icon: Bot,
   },
   {
-    name: "Vector Desktop",
-    eyebrow: "macOS, Windows, and Linux",
-    body: "Open an existing repository and work with agents, parallel workspaces, a professional editor, terminal, controlled browser, review, checkpoints, and visible token economics.",
+    name: "Parallel workspaces",
+    eyebrow: "Up to 16 isolated agents",
+    body: "Split independent responsibilities across Git worktrees, keep unfinished changes away from main, then inspect checks and merge only the work you trust.",
     icon: Laptop2,
   },
   {
-    name: "Connected Actions",
-    eyebrow: "Approval gated · available",
-    body: "Pair Vector Desktop when you want a Builder project to operate its controlled browser or run an exact command on your computer. Browser and terminal access are enabled separately and every action remains visible.",
-    icon: MousePointerClick,
+    name: "Controlled browser",
+    eyebrow: "Observe, interact, retest",
+    body: "Let the active agent inspect a running app, navigate, capture errors and screenshots, repair the code, and verify the result without losing session context.",
+    icon: Globe2,
+  },
+  {
+    name: "Codespace and Canvas",
+    eyebrow: "Code directly or delegate",
+    body: "Use the editor, project search, diagnostics, terminal, notes, browser, and editor agent together when you want hands-on control beside autonomous work.",
+    icon: Code2,
   },
   {
     name: "Vector Cloud Services",
     eyebrow: "Connected infrastructure · available",
     body: "Deployments, databases, authentication, storage, environment variables, domains, logs, and infrastructure controls stay connected to the project that needs them.",
     icon: Cloud,
-  },
-  {
-    name: "Vector Velocity",
-    eyebrow: "Coding intelligence · in development",
-    body: "A coding-specialized model direction focused on repository understanding, architecture, debugging, tool use, and verified completion, designed to work with Vector's context and tokenomics systems.",
-    icon: Gauge,
   },
 ]
 
@@ -193,48 +193,48 @@ const changelog = [
           </h1>
 
           <p class="headline">
-            <span>Turn an idea into a working app.</span>
-            <span class="scramble" data-scramble aria-hidden="true">Describe it. Watch it build. Make it yours.</span>
-            <span class="sr-only">Vector creates the project, writes the files, runs the app, and gives you a live preview you can keep refining.</span>
+            <span>Build software with agents you can inspect.</span>
+            <span class="scramble" data-scramble aria-hidden="true">Open the repo. Direct the work. Ship with evidence.</span>
+            <span class="sr-only">Vector brings agents, code, terminal, browser testing, review, and cloud delivery into one local-first workspace.</span>
           </p>
 
           <div class="hero-loop" aria-label="Vector's build, test, and ship workflow">
             <div class="hero-loop-progress" aria-hidden="true"><i data-hero-progress></i></div>
             <div class="hero-loop-stage is-active" data-hero-stage="0">
               <span class="hero-loop-icon"><Bot size={16} strokeWidth={1.8} aria-hidden="true" /></span>
-              <span><strong>Describe</strong><small>Your product</small></span>
+              <span><strong>Direct</strong><small>The outcome</small></span>
             </div>
             <div class="hero-loop-stage" data-hero-stage="1">
               <span class="hero-loop-icon"><Globe2 size={16} strokeWidth={1.8} aria-hidden="true" /></span>
-              <span><strong>Build</strong><small>Real project files</small></span>
+              <span><strong>Execute</strong><small>Files and commands</small></span>
             </div>
             <div class="hero-loop-stage" data-hero-stage="2">
               <span class="hero-loop-icon"><CloudUpload size={16} strokeWidth={1.8} aria-hidden="true" /></span>
-              <span><strong>Inspect</strong><small>Live application</small></span>
+              <span><strong>Verify</strong><small>Review and browser</small></span>
             </div>
           </div>
 
-          <a class="hero-cta" href="/account">
-            <span>Open Vector</span>
+          <a class="hero-cta" href="/download">
+            <span>Get Vector</span>
             <ArrowRight size={18} strokeWidth={2} aria-hidden="true" />
           </a>
 
-          <p class="hero-note">A visual app builder and a professional agentic workspace, under one Vector account.</p>
+          <p class="hero-note">Local-first. Bring your own models. Available for macOS, Windows, and Linux.</p>
         </div>
 
         <div class="showcase" aria-label="Vector workspace screenshot">
           <figure class="product-window">
             <div class="product-bar" aria-hidden="true">
               <span class="traffic"><i></i><i></i><i></i></span>
-              <span class="product-title">Vector — Builder</span>
+              <span class="product-title">Vector — Agent workspace</span>
               <span class="product-status"><i></i> Ready</span>
             </div>
             <img
               data-parallax
-              src={screenshotBuilder.src}
-              width={screenshotBuilder.width}
-              height={screenshotBuilder.height}
-              alt="Vector Builder creating a real product from a prompt"
+              src={screenshotAgent.src}
+              width={screenshotAgent.width}
+              height={screenshotAgent.height}
+              alt="Vector Agent working with a local repository"
               loading="eager"
             />
           </figure>
@@ -244,11 +244,11 @@ const changelog = [
 
     <section class="product-system section-width" aria-labelledby="product-system-title">
       <div class="section-heading chapter-head" data-reveal>
-        <p class="section-kicker">One product path</p>
-        <h2 id="product-system-title">Start visually. Go as deep as you need.</h2>
+        <p class="section-kicker">One engineering workspace</p>
+        <h2 id="product-system-title">Delegate broadly. Inspect precisely.</h2>
         <p>
-          Begin in Vector Builder with a plain-language idea and a live app. Open Vector Desktop when you want direct
-          control over the repository, editor, terminal, browser, parallel workspaces, and release process.
+          Vector keeps autonomous work and hands-on engineering in the same local workspace: agent sessions,
+          isolated worktrees, editor, terminal, controlled browser, review, and cloud delivery.
         </p>
       </div>
       <div class="product-system-grid">
@@ -264,8 +264,8 @@ const changelog = [
           )
         })}
       </div>
-      <a class="product-system-account" href="/account" data-reveal>
-        One account unlocks Builder, billing, and protected desktop downloads <ArrowRight size={15} strokeWidth={2} aria-hidden="true" />
+      <a class="product-system-account" href="/download" data-reveal>
+        Choose monthly or annual access and download Vector for your platform <ArrowRight size={15} strokeWidth={2} aria-hidden="true" />
       </a>
     </section>
 
@@ -274,27 +274,27 @@ const changelog = [
         <div class="suite section-width">
           <div class="section-heading chapter-head">
             <p class="section-kicker">One Vector</p>
-            <h2 id="suite-title">A visual builder that does not become a dead end.</h2>
-            <p>Start with the ease of a no-code product builder, then keep the files, runtime, tools, and professional desktop workflow when the project grows up.</p>
+            <h2 id="suite-title">One place to direct, build, test, and ship.</h2>
+            <p>Use one focused agent or coordinate independent workspaces while the repository, tools, evidence, and release destination remain connected.</p>
           </div>
           <div class="suite-grid">
             <article style="--i: 0">
               <span class="suite-icon"><Bot size={19} strokeWidth={1.7} aria-hidden="true" /></span>
-              <small>Prompt to product</small>
-              <h3>Build from intent</h3>
-              <p>Describe the product and its behavior. Vector creates a persistent project, makes the implementation real, runs it, and keeps the conversation beside the result.</p>
+              <small>Repository intelligence</small>
+              <h3>Work from context</h3>
+              <p>Vector selects relevant files and symbols, remembers project decisions, and keeps each session grounded in the repository it belongs to.</p>
             </article>
             <article style="--i: 1">
               <span class="suite-icon"><Globe2 size={19} strokeWidth={1.7} aria-hidden="true" /></span>
-              <small>Operate with permission</small>
-              <h3>Browser and computer actions</h3>
-              <p>Pair Vector Desktop and explicitly allow browser or terminal control. The agent can complete approved workflows while every action remains visible and interruptible.</p>
+              <small>Execution you can observe</small>
+              <h3>Terminal and browser actions</h3>
+              <p>The agent can run commands, inspect the app in a controlled browser, collect failures, and retest while activity remains visible and interruptible.</p>
             </article>
             <article style="--i: 2">
               <span class="suite-icon"><CloudUpload size={19} strokeWidth={1.7} aria-hidden="true" /></span>
-              <small>Own the implementation</small>
-              <h3>A real desktop workspace</h3>
-              <p>Move beyond the visual surface whenever you choose. Edit code, run commands, coordinate isolated agents, review diffs, and test through the controlled browser.</p>
+              <small>Human control</small>
+              <h3>Review before main</h3>
+              <p>Inspect diffs, checks, risk signals, and checkpoints before isolated agent work reaches the primary repository files.</p>
             </article>
             <article style="--i: 3">
               <span class="suite-icon"><CloudUpload size={19} strokeWidth={1.7} aria-hidden="true" /></span>
@@ -488,8 +488,8 @@ const changelog = [
       </div>
       <h2 data-reveal class="reveal-blur">Keep the whole build in view.</h2>
       <p data-reveal style="--rd: 120ms">Open the repository. Direct the agents. Ship the result.</p>
-      <a class="closing-cta" href="/account" data-reveal style="--rd: 220ms">
-        <span>Open your Vector account</span>
+      <a class="closing-cta" href="/download" data-reveal style="--rd: 220ms">
+        <span>Get Vector</span>
         <ArrowRight size={18} strokeWidth={2} aria-hidden="true" />
       </a>
     </section>
@@ -529,9 +529,9 @@ const changelog = [
     const node = document.querySelector<HTMLElement>("[data-scramble]")
     if (!node) return () => {}
     const phrases = [
-      "Describe the product in plain language.",
-      "Watch Vector build the real project.",
-      "Inspect and refine the live app.",
+      "Direct the agent with a clear outcome.",
+      "Watch files, commands, and checks run.",
+      "Review the evidence and ship confidently.",
     ]
     const stages = Array.from(document.querySelectorAll<HTMLElement>("[data-hero-stage]"))
     const progress = document.querySelector<HTMLElement>("[data-hero-progress]")

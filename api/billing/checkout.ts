@@ -1,6 +1,5 @@
 import { createCheckout, type BillingPlan } from "../_lib/billing.js"
 import { handleApiError, json, readJson, requireMethod, type ApiRequest, type ApiResponse } from "../_lib/http.js"
-import { requireUser } from "../_lib/platform.js"
 
 export default async function handler(request: ApiRequest, response: ApiResponse) {
   try {
@@ -12,8 +11,7 @@ export default async function handler(request: ApiRequest, response: ApiResponse
       })
       return
     }
-    const user = await requireUser(request)
-    const url = await createCheckout(user.email || body.email, body.plan, { userId: user.id })
+    const url = await createCheckout(body.email, body.plan)
     json(response, 200, { url })
   } catch (error) {
     handleApiError(response, error)

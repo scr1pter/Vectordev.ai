@@ -7,14 +7,11 @@ const dist = path.join(root, "packages", "web", "dist")
 
 const keep = new Set([
   "_astro",
-  "account",
-  "billing",
   "docs",
   "download",
   "legal",
   "license",
   "releases",
-  "settings",
   "index.html",
   "404.html",
   "favicon.ico",

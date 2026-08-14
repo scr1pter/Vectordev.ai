@@ -21,7 +21,6 @@ export default async function handler(request: ApiRequest, response: ApiResponse
     if (blob.statusCode !== 304) {
       await completeDownload({
         customerId: installer.customerId,
-        userId: installer.userId,
         target,
         alreadyDownloaded: installer.alreadyDownloaded,
       })

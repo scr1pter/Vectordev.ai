@@ -380,8 +380,8 @@ export const release117: VectorRelease[] = [
   },
   {
     version: "1.17.49",
-    title: "Vector Builder",
+    title: "Desktop-first Vector",
     summary:
-      "Introduced Vector Builder as the focused web product: persistent projects, isolated execution, real file changes, continuing conversations, live previews, BYOK models, MCP tools, and explicitly permissioned computer actions.",
+      "Retired the experimental website account, Builder, Cloud Agent, and API Studio surfaces; restored Vector's public site to product, documentation, purchase, releases, and legal pages; preserved Stripe licensing; and removed the unused desktop companion while keeping Vector Cloud Services inside the IDE.",
   },
 ]

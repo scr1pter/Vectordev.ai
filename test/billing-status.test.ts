@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type Stripe from "stripe"
 import { publicStatus } from "../api/_lib/billing"
-import { entitlementFor, type PlatformSubscription } from "../api/_lib/platform"
 
 const subscription = (input: { status: Stripe.Subscription.Status; plan: "annual" | "monthly"; periodEnd: number }) =>
   ({
@@ -26,31 +25,6 @@ const customer = (metadata: Record<string, string> = {}) =>
   }) as unknown as Stripe.Customer
 
 describe("Vector license status", () => {
-  test("grants founder access without creating a fake Stripe subscription", () => {
-    expect(
-      entitlementFor(null, {
-        user_id: "founder_1",
-        label: "founder",
-        expires_at: null,
-      }),
-    ).toMatchObject({
-      access: true,
-      state: "active",
-      plan: "founder",
-      cancelAtPeriodEnd: false,
-    })
-  })
-
-  test("expires a time-limited internal access grant", () => {
-    expect(
-      entitlementFor(null, {
-        user_id: "tester_1",
-        label: "beta",
-        expires_at: new Date(Date.now() - 60_000).toISOString(),
-      }),
-    ).toMatchObject({ access: false, state: "none" })
-  })
-
   test("keeps the existing annual plan active", () => {
     const now = Math.floor(Date.now() / 1_000)
     expect(
@@ -88,19 +62,6 @@ describe("Vector license status", () => {
       vector_payment_grace_ends_at: `${now + 86_400}`,
     })
     expect(publicStatus(buyer, active)).toMatchObject({ access: true, state: "grace", plan: "monthly" })
-    expect(
-      entitlementFor({
-        user_id: "user_1",
-        stripe_customer_id: "cus_1",
-        stripe_subscription_id: "sub_1",
-        plan: "monthly",
-        status: "active",
-        current_period_end: new Date((now + 86_400) * 1_000).toISOString(),
-        cancel_at_period_end: false,
-        payment_failed_at: new Date((now - 60) * 1_000).toISOString(),
-        grace_ends_at: new Date((now + 86_400) * 1_000).toISOString(),
-      } satisfies PlatformSubscription),
-    ).toMatchObject({ access: true, state: "grace", plan: "monthly" })
   })
 
   test("expires a monthly license after payment grace ends", () => {

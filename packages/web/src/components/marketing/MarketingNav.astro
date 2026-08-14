@@ -2,7 +2,7 @@
 import { MarketingMobileNav } from "../MarketingMobileNav"
 
 interface Props {
-  active?: "product" | "docs" | "releases" | "download" | "account"
+  active?: "product" | "docs" | "releases" | "download"
 }
 
 const { active = "product" } = Astro.props
@@ -18,7 +18,7 @@ const { active = "product" } = Astro.props
       <a class:list={{ active: active === "product" }} href="/#workspace">Product</a>
       <a class:list={{ active: active === "docs" }} href="/docs">Docs</a>
       <a class:list={{ active: active === "releases" }} href="/releases">Releases</a>
-      <a class:list={["download-link", { active: active === "account" || active === "download" }]} href="/account"><span>Open Vector</span></a>
+      <a class:list={["download-link", { active: active === "download" }]} href="/download"><span>Get Vector</span></a>
     </nav>
     <div class="mobile-menu">
       <MarketingMobileNav active={active} client:only="solid-js" />

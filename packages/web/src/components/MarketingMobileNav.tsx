@@ -1,12 +1,12 @@
 import { For, Show, createEffect, createSignal, onCleanup } from "solid-js"
 
-type ActivePage = "product" | "docs" | "releases" | "download" | "account"
+type ActivePage = "product" | "docs" | "releases" | "download"
 
 const links: Array<{ label: string; href: string; id: ActivePage }> = [
   { label: "Product", href: "/", id: "product" },
   { label: "Documentation", href: "/docs", id: "docs" },
   { label: "Releases", href: "/releases", id: "releases" },
-  { label: "Open Vector", href: "/account", id: "account" },
+  { label: "Get Vector", href: "/download", id: "download" },
 ]
 
 export function MarketingMobileNav(props: { active: ActivePage }) {
@@ -86,7 +86,7 @@ export function MarketingMobileNav(props: { active: ActivePage }) {
             </button>
           </div>
           <p class="mobile-nav-copy">
-            Build working apps in the browser, then take the same account into Vector's desktop workspace.
+            Open a repository, direct agents, inspect their work, and ship from one desktop workspace.
           </p>
           <nav class="mobile-nav-links" aria-label="Mobile navigation">
             <For each={links}>
@@ -101,9 +101,7 @@ export function MarketingMobileNav(props: { active: ActivePage }) {
               )}
             </For>
           </nav>
-          <p class="mobile-nav-foot">
-            Vector turns a product brief into a working app with real files, an isolated runtime, and a live preview.
-          </p>
+          <p class="mobile-nav-foot">Vector is available for macOS, Windows, and Linux.</p>
         </div>
       </Show>
     </>

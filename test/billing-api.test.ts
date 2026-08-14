@@ -14,9 +14,6 @@ const billingEnvironment = [
   "VECTOR_PURCHASE_EMAIL_FROM",
   "STRIPE_PRICE_MONTHLY",
   "STRIPE_PRICE_ANNUAL",
-  "SUPABASE_URL",
-  "SUPABASE_SERVICE_ROLE_KEY",
-  "VECTOR_PLATFORM_SECRET",
   "VECTOR_INSTALLER_BLOB_TOKEN",
   "VECTOR_INSTALLER_BLOB_PRIVATE",
 ] as const
@@ -92,7 +89,7 @@ describe("Vector billing API", () => {
 
   test("fails clearly rather than creating a partial checkout when billing is not configured", async () => {
     disableBilling()
-    await expect(createCheckout("buyer@example.com", "annual", { userId: "user_test" })).rejects.toMatchObject({
+    await expect(createCheckout("buyer@example.com", "annual")).rejects.toMatchObject({
       statusCode: 503,
       code: "BILLING_NOT_CONFIGURED",
     })
@@ -100,9 +97,10 @@ describe("Vector billing API", () => {
 
   test("rejects unknown plans without disturbing the annual default", async () => {
     disableBilling()
-    await expect(createCheckout("buyer@example.com", "weekly" as never, { userId: "user_test" })).rejects.toMatchObject(
-      { statusCode: 400, code: "PLAN_INVALID" },
-    )
+    await expect(createCheckout("buyer@example.com", "weekly" as never)).rejects.toMatchObject({
+      statusCode: 400,
+      code: "PLAN_INVALID",
+    })
   })
 
   test("rejects malformed activation and status requests before contacting Stripe", async () => {

@@ -1,13 +1,17 @@
 ---
 import MarketingLayout from "../components/marketing/MarketingLayout.astro"
-import { PlatformShell } from "../components/marketing/platform/PlatformShell"
+import MarketingFooter from "../components/marketing/MarketingFooter.astro"
+import MarketingNav from "../components/marketing/MarketingNav.astro"
+import { PurchasePage } from "../components/marketing/purchase/PurchasePage"
 
 export const prerender = true
 ---
 
 <MarketingLayout
   title="Download Vector"
-  description="Sign in, choose a Vector plan, and download the protected desktop installer for macOS, Windows, or Linux."
+  description="Purchase Vector and download the protected desktop installer for macOS, Windows, or Linux."
 >
-  <PlatformShell mode="downloads" client:only="react" />
+  <MarketingNav active="download" />
+  <PurchasePage client:only="react" />
+  <MarketingFooter />
 </MarketingLayout>

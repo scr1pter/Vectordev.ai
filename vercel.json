@@ -2,13 +2,42 @@
   "installCommand": "bun install",
   "buildCommand": "bun --cwd packages/web build && node script/prune-vector-site.mjs",
   "outputDirectory": "packages/web/dist",
-  "crons": [
-    {
-      "path": "/api/cron/builder-reconcile",
-      "schedule": "* * * * *"
-    }
-  ],
   "redirects": [
+    {
+      "source": "/account",
+      "destination": "/download",
+      "permanent": true
+    },
+    {
+      "source": "/billing",
+      "destination": "/download",
+      "permanent": true
+    },
+    {
+      "source": "/settings",
+      "destination": "/download",
+      "permanent": true
+    },
+    {
+      "source": "/builder",
+      "destination": "/",
+      "permanent": true
+    },
+    {
+      "source": "/play-park",
+      "destination": "/",
+      "permanent": true
+    },
+    {
+      "source": "/cloud-agents",
+      "destination": "/",
+      "permanent": true
+    },
+    {
+      "source": "/api-studio",
+      "destination": "/",
+      "permanent": true
+    },
     {
       "source": "/download/mac",
       "destination": "/download?target=mac-arm64",

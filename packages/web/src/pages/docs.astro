@@ -10,7 +10,6 @@ const navigation = [
   {
     label: "Start here",
     links: [
-      ["Build an app in the browser", "builder"],
       ["Install Vector", "install"],
       ["Open a repository", "open-repository"],
       ["Run your first task", "first-task"],
@@ -76,16 +75,16 @@ const faqs = [
       "No. Vector supports bring-your-own-key providers. Availability and billing depend on the model provider you connect.",
   },
   {
-    question: "How do I access all Vector services?",
+    question: "How do I buy and activate Vector?",
     answer:
-      "Sign in to your Vector account with Google or email, then start a $10 monthly or $99 annual subscription. The same membership unlocks Vector Builder, protected desktop installers, connected providers and MCP tools, updates, and account billing controls. Manage payment details and renewal from Billing on the website or open the same portal from Vector Desktop.",
+      "Choose the $10 monthly or $99 annual plan on the download page and complete Stripe Checkout. Vector emails the license key and shows it on the purchase-complete page. Enter that key when the desktop app asks for activation; no website account is required.",
   },
 ]
 ---
 
 <MarketingLayout
   title="Vector Documentation"
-  description="Learn how to build an app in Vector Builder, install Vector Desktop, run agents, test with the controlled browser, review changes, and publish projects."
+  description="Learn how to install Vector, open a repository, run agents, test with the controlled browser, review changes, and publish projects."
 >
   <div class="docs-page">
     <MarketingNav active="docs" />
@@ -94,11 +93,11 @@ const faqs = [
       <p class="eyebrow">Documentation</p>
       <h1>Build with Vector.</h1>
       <p>
-        Start from a plain-language product idea in the browser, or open a repository in Vector Desktop for direct
-        control over agents, code, commands, browser testing, and release.
+        Open a local repository, direct one or many agents, work beside them in the editor, verify the result in the
+        terminal and browser, then review and publish without leaving the workspace.
       </p>
       <div class="quick-links" aria-label="Quick links">
-        <a href="#builder">Build your first app <span aria-hidden="true">→</span></a>
+        <a href="#first-task">Run your first session <span aria-hidden="true">→</span></a>
         <a href="#agent-workspaces">Use multiple agents <span aria-hidden="true">→</span></a>
         <a href="#cloud-services">Publish a repository <span aria-hidden="true">→</span></a>
       </div>
@@ -123,28 +122,8 @@ const faqs = [
       </aside>
 
       <main class="docs-content">
-        <section id="builder" class="doc-section">
-          <p class="section-number">01</p>
-          <h2>Build an app in the browser</h2>
-          <p>
-            Open Vector Builder after signing in and describe the product you want. Vector creates a persistent project,
-            starts an isolated runtime, writes the real application files, runs the project, and opens the result in a live
-            preview beside the conversation.
-          </p>
-          <ol class="steps">
-            <li><span>1</span><div><strong>Describe the outcome</strong><p>Explain who the app is for, its core workflow, and the result a user should reach.</p></div></li>
-            <li><span>2</span><div><strong>Choose intelligence and tools</strong><p>Select a connected model and any MCP or paired-computer tools the build genuinely needs.</p></div></li>
-            <li><span>3</span><div><strong>Inspect and continue</strong><p>Use the live app, review the activity and changed files, then ask Vector for precise revisions.</p></div></li>
-          </ol>
-          <div class="callout">
-            <strong>Computer control is always explicit.</strong>
-            <span>Pair Vector Desktop in Settings, then enable browser and terminal access separately. The agent cannot use either permission when its toggle is off.</span>
-            <a href="/account">Open Vector Builder →</a>
-          </div>
-        </section>
-
         <section id="install" class="doc-section">
-          <p class="section-number">02</p>
+          <p class="section-number">01</p>
           <h2>Install Vector</h2>
           <p>
             Download the installer that matches your computer, open it, and move through the operating
