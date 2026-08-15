@@ -69,14 +69,13 @@ export function publicOrigin() {
 }
 
 export function billingConfiguration() {
+  const installerToken = process.env.VECTOR_INSTALLER_BLOB_TOKEN?.trim() ?? ""
   const stripe = Boolean(process.env.STRIPE_SECRET_KEY)
   const webhook = Boolean(process.env.STRIPE_WEBHOOK_SECRET)
   const licenseSecret = (process.env.VECTOR_LICENSE_SECRET ?? "").length >= 32
   const email = Boolean(process.env.RESEND_API_KEY && process.env.VECTOR_PURCHASE_EMAIL_FROM)
   const prices = Object.values(BILLING_PLANS).every((plan) => Boolean(process.env[plan.priceEnvironment]?.trim()))
-  const downloads = Boolean(
-    process.env.VECTOR_INSTALLER_BLOB_TOKEN && process.env.VECTOR_INSTALLER_BLOB_PRIVATE === "true",
-  )
+  const downloads = installerToken.startsWith("vercel_blob_rw_") && process.env.VECTOR_INSTALLER_BLOB_PRIVATE === "true"
   return {
     available: stripe && webhook && licenseSecret && email && prices && downloads,
     stripe,

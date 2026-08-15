@@ -30,7 +30,9 @@ Configure the webhook endpoint at `https://vectordev.ai/api/billing/webhook` for
 
 ## Installer storage
 
-Release automation uploads installers to private Vercel Blob paths. The billing API creates a short-lived download token only after a paid checkout. The first completed installer download is recorded in Stripe customer metadata.
+Vector's automatic updater uses a public release feed so installed apps can retrieve updates. Initial purchase downloads use a separate private Vercel Blob store. `VECTOR_INSTALLER_BLOB_TOKEN` must be that private store's real `vercel_blob_rw_...` token; placeholders are rejected. Copy each platform installer into `VECTOR_INSTALLER_BLOB_PREFIX` in the private store before enabling checkout.
+
+The billing API creates a short-lived download token only after a paid checkout. The first completed installer download is recorded in Stripe customer metadata, while the desktop license still controls whether the installed application can be used.
 
 ## Release check
 

@@ -77,6 +77,23 @@ describe("Vector billing API", () => {
     })
   })
 
+  test("does not accept a placeholder as private installer storage", async () => {
+    process.env.STRIPE_SECRET_KEY = "sk_test_vector"
+    process.env.STRIPE_WEBHOOK_SECRET = "whsec_vector"
+    process.env.STRIPE_PRICE_MONTHLY = "price_monthly"
+    process.env.STRIPE_PRICE_ANNUAL = "price_annual"
+    process.env.VECTOR_LICENSE_SECRET = "v".repeat(32)
+    process.env.RESEND_API_KEY = "re_vector"
+    process.env.VECTOR_PURCHASE_EMAIL_FROM = "Vector <licenses@example.com>"
+    process.env.VECTOR_INSTALLER_BLOB_PRIVATE = "true"
+    process.env.VECTOR_INSTALLER_BLOB_TOKEN = "placeholder"
+
+    const result = await invoke(config, { method: "GET" })
+
+    expect(result.status).toBe(200)
+    expect(result.body).toMatchObject({ available: false, downloads: false })
+  })
+
   test("requires explicit agreement before opening Stripe Checkout", async () => {
     disableBilling()
     const result = await invoke(checkout, { method: "POST", body: { email: "buyer@example.com" } })
