@@ -1,5 +1,6 @@
 import { AppIcon } from "@opencode-ai/ui/app-icon"
 import { Button } from "@opencode-ai/ui/button"
+import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { DropdownMenu } from "@opencode-ai/ui/dropdown-menu"
 import { Icon } from "@opencode-ai/ui/icon"
 import { IconButton } from "@opencode-ai/ui/icon-button"
@@ -24,7 +25,9 @@ import { useSessionLayout } from "@/pages/session/session-layout"
 import { messageAgentColor } from "@/utils/agent"
 import { decode64 } from "@/utils/base64"
 import { Persist, persisted } from "@/utils/persist"
+import { hasActiveVerification } from "@/utils/session-activity"
 import { StatusPopover } from "../status-popover"
+import { DialogGithubReview } from "../dialog-github-review"
 
 const OPEN_APPS = [
   "vscode",
@@ -136,6 +139,7 @@ export function SessionHeader() {
   const platform = usePlatform()
   const language = useLanguage()
   const settings = useSettings()
+  const dialog = useDialog()
   const sync = useSync()
   const terminal = useTerminal()
   const { params, view } = useSessionLayout()
@@ -233,6 +237,17 @@ export function SessionHeader() {
   const branch = createMemo(() => sync().data.vcs?.branch || "main")
   const changedFiles = createMemo(() => (params.id ? (sync().data.session_diff[params.id]?.length ?? 0) : 0))
   const working = createMemo(() => (params.id ? sync().data.session_working(params.id) : false))
+  const testing = createMemo(() => {
+    if (!params.id) return false
+    return hasActiveVerification(
+      (sync().data.message[params.id] ?? []).flatMap((message) => sync().data.part[message.id] ?? []),
+    )
+  })
+  const activity = createMemo(() => {
+    if (testing()) return { status: "testing", label: "Testing" }
+    if (working()) return { status: "working", label: "Agent working" }
+    return { status: "ready", label: "Ready" }
+  })
   const selectApp = (app: OpenApp) => {
     if (!options().some((item) => item.id === app)) return
     setPrefs("app", app)
@@ -302,15 +317,30 @@ export function SessionHeader() {
             <span data-vector-session-branch>{branch()}</span>
             <span
               data-vector-session-status
-              data-status={working() ? "working" : "ready"}
+              data-status={activity().status}
             >
               <span aria-hidden="true" />
-              {working() ? "Agent working" : "Ready"}
+              {activity().label}
             </span>
             <Show when={status()}>
               <Tooltip placement="bottom" value={language.t("status.popover.trigger")}>
                 <StatusPopover />
               </Tooltip>
+            </Show>
+            <Show when={params.id} keyed>
+              {(sessionID) => (
+                <Tooltip placement="bottom" value="Review a GitHub pull request in this session">
+                  <button
+                    type="button"
+                    data-vector-session-tool
+                    onClick={() => dialog.show(() => <DialogGithubReview sessionID={sessionID} />)}
+                    aria-label="Review GitHub pull request"
+                  >
+                    <Icon size="small" name="github" />
+                    <span>Review PR</span>
+                  </button>
+                </Tooltip>
+              )}
             </Show>
             <TooltipKeybind
               title={language.t("command.review.toggle")}

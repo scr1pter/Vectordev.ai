@@ -46,6 +46,7 @@ import { useCommand } from "@/context/command"
 import { Persist, persisted } from "@/utils/persist"
 import { usePermission } from "@/context/permission"
 import { usePlanMode } from "@/context/plan-mode"
+import { useSettings } from "@/context/settings"
 import { useLanguage } from "@/context/language"
 import { usePlatform } from "@/context/platform"
 import { createSessionTabs } from "@/pages/session/helpers"
@@ -255,6 +256,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const command = useCommand()
   const permission = usePermission()
   const planMode = usePlanMode()
+  const settings = useSettings()
   const language = useLanguage()
   const platform = usePlatform()
   const tabs = () => props.controls.session.tabs
@@ -1525,6 +1527,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       onAbort: props.onAbort,
       onSubmit: props.onSubmit,
       executionMode,
+      llmJudge: settings.general.llmJudge,
     })
 
   const handleKeyDown = (event: KeyboardEvent) => {

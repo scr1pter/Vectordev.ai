@@ -17,3 +17,5 @@ Usage notes:
 5. The agent's outputs should generally be trusted
 6. Clearly tell the agent whether you expect it to write code or just to do research (search, file reads, web fetches, etc.), since it is not aware of the user's intent. Tell it how to verify its work if possible (e.g., relevant test commands).
 7. If the agent description mentions that it should be used proactively, then you should try your best to use it without the user having to ask for it first. Use your judgement.
+8. For coordinated implementation, assign non-overlapping owned_paths and explicit success_criteria. Use depends_on with returned task IDs when one subagent's work must finish before another begins. Vector rejects overlapping active ownership instead of letting agents silently overwrite one another.
+9. Treat completion as evidence-based: inspect each result, run the integration checks in the parent session, and use the judge agent when an independent rubric-based verdict is required.

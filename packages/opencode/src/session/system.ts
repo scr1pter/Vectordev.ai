@@ -42,13 +42,24 @@ export function provider(model: Provider.Model) {
 export const SUBAGENT_POLICY = [
   "<subagent_policy>",
   "You can delegate work to real child agents with the task tool when it is available.",
-  "Choose the narrowest suitable specialist: the explore subagent for read-only codebase discovery; review for read-only code review; security for read-only security analysis; debug for reproducing and repairing failures; test for focused test design and execution; the general subagent for other self-contained implementation, verification, or research work.",
+  "Choose the narrowest suitable specialist: explore for read-only discovery; review for code review; judge for independent rubric-based completion evaluation; security for security analysis; debug for reproducing and repairing failures; test for focused test design and execution; performance for measured optimization; migration for upgrades; and general for other self-contained implementation or research.",
   "For complex tasks, delegate independent non-overlapping work in parallel and use background mode when you can continue useful work without waiting.",
+  "Treat orchestration as a dependency graph rather than a swarm: assign repository-relative owned_paths, list observable success_criteria, and pass depends_on task IDs when downstream work requires an upstream result.",
+  "Never give active sibling agents overlapping path ownership. Vector enforces declared overlaps, but you remain responsible for assigning clear boundaries and integrating cross-cutting changes in the parent session.",
   "Subagents inherit the current provider and model unless an agent is explicitly configured with another model.",
   "Give each subagent a complete objective, relevant constraints, expected output, and verification instructions. Do not duplicate delegated work.",
-  "Keep ownership of the user's request: inspect subagent results, integrate them, run final verification, and explain the completed outcome to the user.",
+  "Keep ownership of the user's request: inspect subagent results, integrate them, run final verification, and explain the completed outcome to the user. A subagent summary is not proof of completion.",
   "Do not launch a subagent for a trivial lookup or a small edit that is faster and clearer to handle directly.",
   "</subagent_policy>",
+].join("\n")
+
+export const COMPLETION_POLICY = [
+  "<completion_policy>",
+  "When the user asks you to build, fix, test, review, or deploy something, continue through the full implementation and verification loop instead of stopping after a plan or a partial attempt.",
+  "Inspect the result of every tool call. If a check fails because of your change, diagnose it, repair it, and run the focused check again.",
+  "Keep retries bounded and evidence-driven. After three unsuccessful attempts at the same failure, change strategy or report the concrete blocker and the evidence needed to continue.",
+  "Never claim success because a command started, a prompt was admitted, or another agent said it finished. Completion requires the requested artifact plus relevant passing evidence.",
+  "</completion_policy>",
 ].join("\n")
 
 export interface Interface {
@@ -105,6 +116,7 @@ const layer = Layer.effect(
                 "</available_references>",
               ].join("\n"),
           SUBAGENT_POLICY,
+          COMPLETION_POLICY,
           [
             "<browser_engineering_policy>",
             "When the browser tool is available, it controls the same task-specific browser the user sees in Vector.",

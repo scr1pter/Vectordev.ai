@@ -5,7 +5,7 @@ import type { Agent } from "../../src/agent/agent"
 import { NamedError } from "@opencode-ai/core/util/error"
 import { Skill } from "../../src/skill"
 import { Permission } from "../../src/permission"
-import { SUBAGENT_POLICY, SystemPrompt } from "../../src/session/system"
+import { COMPLETION_POLICY, SUBAGENT_POLICY, SystemPrompt } from "../../src/session/system"
 import { MCP } from "../../src/mcp"
 import { testEffect } from "../lib/effect"
 
@@ -86,14 +86,25 @@ describe("session.system", () => {
   it.effect("ships a model-neutral subagent delegation policy", () =>
     Effect.sync(() => {
       expect(SUBAGENT_POLICY).toContain("real child agents")
-      expect(SUBAGENT_POLICY).toContain("explore subagent")
-      expect(SUBAGENT_POLICY).toContain("general subagent")
-      expect(SUBAGENT_POLICY).toContain("review for read-only code review")
-      expect(SUBAGENT_POLICY).toContain("security for read-only security analysis")
+      expect(SUBAGENT_POLICY).toContain("explore for read-only discovery")
+      expect(SUBAGENT_POLICY).toContain("general for other self-contained implementation")
+      expect(SUBAGENT_POLICY).toContain("review for code review")
+      expect(SUBAGENT_POLICY).toContain("judge for independent rubric-based completion evaluation")
+      expect(SUBAGENT_POLICY).toContain("security for security analysis")
       expect(SUBAGENT_POLICY).toContain("debug for reproducing and repairing failures")
       expect(SUBAGENT_POLICY).toContain("test for focused test design and execution")
       expect(SUBAGENT_POLICY).toContain("background mode")
+      expect(SUBAGENT_POLICY).toContain("owned_paths")
+      expect(SUBAGENT_POLICY).toContain("depends_on")
       expect(SUBAGENT_POLICY).toContain("inherit the current provider and model")
+    }),
+  )
+
+  it.effect("ships a bounded evidence-based completion loop", () =>
+    Effect.sync(() => {
+      expect(COMPLETION_POLICY).toContain("full implementation and verification loop")
+      expect(COMPLETION_POLICY).toContain("three unsuccessful attempts")
+      expect(COMPLETION_POLICY).toContain("Completion requires")
     }),
   )
 

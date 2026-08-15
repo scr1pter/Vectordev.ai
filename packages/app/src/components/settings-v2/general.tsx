@@ -250,6 +250,18 @@ export const SettingsGeneralV2: Component<{
             </ButtonV2>
           </div>
         </Card>
+        <Card
+          icon="circle-check"
+          title="Verified completion"
+          description="Control whether Vector independently tests and scores engineering work before calling it complete."
+        >
+          <ToggleRow
+            title="LLM-as-a-judge"
+            description="After implementation, a separate judge agent checks the request, diff, tests, runtime evidence, and regression risk. Failed verdicts trigger a bounded repair-and-retest loop. This uses additional model calls and tokens."
+            checked={settings.general.llmJudge()}
+            onChange={settings.general.setLlmJudge}
+          />
+        </Card>
       </div>
     </Page>
   )

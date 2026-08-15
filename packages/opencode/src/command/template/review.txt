@@ -6,6 +6,8 @@ Input: $ARGUMENTS
 
 ---
 
+If the input begins with `--publish`, remove that flag before resolving the pull request and remember that the user explicitly approved publishing one final review summary to GitHub. The flag does not authorize approving, merging, closing, or requesting changes on the pull request.
+
 ## Determining What to Review
 
 Based on the input provided, determine which type of review to perform:
@@ -24,6 +26,7 @@ Based on the input provided, determine which type of review to perform:
 4. **PR URL or number** (contains "github.com" or "pull" or looks like a PR number): Review the pull request
    - Run: `gh pr view $ARGUMENTS` to get PR context
    - Run: `gh pr diff $ARGUMENTS` to get the diff
+   - Run the repository's focused validation checks when they are discoverable and safe
 
 Use best judgement when processing input.
 
@@ -99,3 +102,13 @@ If you're uncertain about something and can't verify it with these tools, say "I
 4. Your tone should be matter-of-fact and not accusatory or overly positive. It should read as a helpful AI assistant suggestion without sounding too much like a human reviewer.
 5. Write so the reader can quickly understand the issue without reading too closely.
 6. AVOID flattery, do not give any comments that are not helpful to the reader. Avoid phrasing like "Great job ...", "Thanks for ...".
+
+## Optional GitHub publication
+
+When and only when the input included `--publish` and the target is a GitHub pull request:
+
+1. Finish the complete local review first.
+2. Publish one concise Markdown summary with `gh pr review <PR> --comment --body-file <file>`.
+3. Include the verdict, blocking findings ordered by severity, checks run, and any verification limitation.
+4. Never approve, merge, close, or request changes. Never publish partial analysis or secrets.
+5. If publication fails, keep the local review and report the exact GitHub/CLI error instead of claiming it was posted.

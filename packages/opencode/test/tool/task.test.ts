@@ -3,7 +3,7 @@ import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { Database } from "@opencode-ai/core/database/database"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
-import { Deferred, Effect, Exit, Fiber, Layer } from "effect"
+import { Cause, Deferred, Effect, Exit, Fiber, Layer } from "effect"
 import { Agent } from "../../src/agent/agent"
 import { BackgroundJob } from "@/background/job"
 import { EventV2Bridge } from "@/event-v2-bridge"
@@ -300,13 +300,328 @@ describe("tool.task", () => {
     }),
   )
 
+  it.instance("passes ownership and success criteria into the child assignment", () =>
+    Effect.gen(function* () {
+      const { chat, assistant } = yield* seed()
+      const tool = yield* TaskTool
+      const def = yield* tool.init()
+      let seen: SessionPrompt.PromptInput | undefined
+
+      const result = yield* def.execute(
+        {
+          description: "build auth flow",
+          prompt: "Implement the requested authentication flow.",
+          subagent_type: "general",
+          owned_paths: ["./src/auth/", "src/auth"],
+          success_criteria: ["Auth tests pass", "No secrets are logged"],
+        },
+        {
+          sessionID: chat.id,
+          messageID: assistant.id,
+          agent: "build",
+          abort: new AbortController().signal,
+          extra: { promptOps: stubOps({ onPrompt: (input) => (seen = input) }) },
+          messages: [],
+          metadata: () => Effect.void,
+          ask: () => Effect.void,
+        },
+      )
+
+      expect(result.metadata.ownedPaths).toEqual(["src/auth"])
+      expect(result.metadata.successCriteria).toEqual(["Auth tests pass", "No secrets are logged"])
+      const assignment = seen?.parts.find((part) => part.type === "text")
+      expect(assignment?.type === "text" ? assignment.text : "").toContain("You own only these repository paths")
+      expect(assignment?.type === "text" ? assignment.text : "").toContain("Auth tests pass")
+    }),
+  )
+
+  background.instance("waits for declared dependencies before starting a subagent", () =>
+    Effect.gen(function* () {
+      const jobs = yield* BackgroundJob.Service
+      const { chat, assistant } = yield* seed()
+      const tool = yield* TaskTool
+      const def = yield* tool.init()
+      const dependency = "task-foundation"
+
+      yield* jobs.start({
+        id: dependency,
+        type: "task",
+        title: "Build foundation",
+        metadata: { parentSessionId: chat.id },
+        run: Effect.succeed("foundation ready"),
+      })
+
+      const result = yield* def.execute(
+        {
+          description: "integrate feature",
+          prompt: "Integrate the feature after its foundation is ready.",
+          subagent_type: "general",
+          depends_on: [dependency],
+        },
+        {
+          sessionID: chat.id,
+          messageID: assistant.id,
+          agent: "build",
+          abort: new AbortController().signal,
+          extra: { promptOps: stubOps() },
+          messages: [],
+          metadata: () => Effect.void,
+          ask: () => Effect.void,
+        },
+      )
+
+      expect(result.metadata.dependsOn).toEqual([dependency])
+      expect(result.output).toContain('state="completed"')
+    }),
+  )
+
+  background.instance("registers a dependent background task before its dependency finishes", () =>
+    Effect.gen(function* () {
+      const jobs = yield* BackgroundJob.Service
+      const { chat, assistant } = yield* seed()
+      const tool = yield* TaskTool
+      const def = yield* tool.init()
+      const dependencyDone = yield* Deferred.make<void>()
+      let prompted = false
+
+      yield* jobs.start({
+        id: "task-foundation-running",
+        type: "task",
+        title: "Build foundation",
+        metadata: { parentSessionId: chat.id },
+        run: Deferred.await(dependencyDone).pipe(Effect.as("foundation ready")),
+      })
+
+      const result = yield* def.execute(
+        {
+          description: "integrate feature",
+          prompt: "Integrate the feature after its foundation is ready.",
+          subagent_type: "general",
+          depends_on: ["task-foundation-running"],
+          background: true,
+        },
+        {
+          sessionID: chat.id,
+          messageID: assistant.id,
+          agent: "build",
+          abort: new AbortController().signal,
+          extra: {
+            promptOps: stubOps({
+              onPrompt: () => {
+                prompted = true
+              },
+            }),
+          },
+          messages: [],
+          metadata: () => Effect.void,
+          ask: () => Effect.void,
+        },
+      )
+
+      expect(result.metadata.background).toBe(true)
+      expect((yield* jobs.get(result.metadata.sessionId))?.status).toBe("running")
+      expect(prompted).toBe(false)
+
+      yield* Deferred.succeed(dependencyDone, undefined)
+      expect((yield* jobs.wait({ id: result.metadata.sessionId })).info?.status).toBe("completed")
+      expect(prompted).toBe(true)
+    }),
+  )
+
+  background.instance("allows sequential ownership when the active owner is a declared dependency", () =>
+    Effect.gen(function* () {
+      const { chat, assistant } = yield* seed()
+      const tool = yield* TaskTool
+      const def = yield* tool.init()
+      const dependencyDone = yield* Deferred.make<void>()
+
+      const upstream = yield* def.execute(
+        {
+          description: "edit auth module",
+          prompt: "Refactor the authentication module.",
+          subagent_type: "general",
+          owned_paths: ["src/auth"],
+          background: true,
+        },
+        {
+          sessionID: chat.id,
+          messageID: assistant.id,
+          agent: "build",
+          abort: new AbortController().signal,
+          extra: {
+            promptOps: {
+              ...stubOps(),
+              prompt: (input: SessionPrompt.PromptInput) =>
+                Deferred.await(dependencyDone).pipe(Effect.as(reply(input, "auth ready"))),
+            },
+          },
+          messages: [],
+          metadata: () => Effect.void,
+          ask: () => Effect.void,
+        },
+      )
+
+      const downstream = yield* def.execute(
+        {
+          description: "finish login view",
+          prompt: "Finish the login view after the auth module is ready.",
+          subagent_type: "general",
+          depends_on: [upstream.metadata.sessionId],
+          owned_paths: ["src/auth/login.tsx"],
+          background: true,
+        },
+        {
+          sessionID: chat.id,
+          messageID: assistant.id,
+          agent: "build",
+          abort: new AbortController().signal,
+          extra: { promptOps: stubOps() },
+          messages: [],
+          metadata: () => Effect.void,
+          ask: () => Effect.void,
+        },
+      )
+
+      expect(downstream.metadata.dependsOn).toEqual([upstream.metadata.sessionId])
+      expect(downstream.output).toContain('state="running"')
+      yield* Deferred.succeed(dependencyDone, undefined)
+    }),
+  )
+
+  background.instance("rejects dependencies from another parent session", () =>
+    Effect.gen(function* () {
+      const jobs = yield* BackgroundJob.Service
+      const first = yield* seed("First")
+      const second = yield* seed("Second")
+      const tool = yield* TaskTool
+      const def = yield* tool.init()
+
+      yield* jobs.start({
+        id: "task-other-parent",
+        type: "task",
+        title: "Other work",
+        metadata: { parentSessionId: first.chat.id },
+        run: Effect.succeed("done"),
+      })
+
+      const exit = yield* Effect.exit(
+        def.execute(
+          {
+            description: "reuse foreign task",
+            prompt: "Depend on work from another task.",
+            subagent_type: "general",
+            depends_on: ["task-other-parent"],
+          },
+          {
+            sessionID: second.chat.id,
+            messageID: second.assistant.id,
+            agent: "build",
+            abort: new AbortController().signal,
+            extra: { promptOps: stubOps() },
+            messages: [],
+            metadata: () => Effect.void,
+            ask: () => Effect.void,
+          },
+        ),
+      )
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      if (Exit.isFailure(exit)) expect(Cause.pretty(exit.cause)).toContain("does not belong")
+    }),
+  )
+
+  background.instance("rejects owned paths outside the repository", () =>
+    Effect.gen(function* () {
+      const { chat, assistant } = yield* seed()
+      const tool = yield* TaskTool
+      const def = yield* tool.init()
+      const exit = yield* Effect.exit(
+        def.execute(
+          {
+            description: "edit outside repo",
+            prompt: "Edit a file outside the repository.",
+            subagent_type: "general",
+            owned_paths: ["../secrets"],
+            background: true,
+          },
+          {
+            sessionID: chat.id,
+            messageID: assistant.id,
+            agent: "build",
+            abort: new AbortController().signal,
+            extra: { promptOps: stubOps() },
+            messages: [],
+            metadata: () => Effect.void,
+            ask: () => Effect.void,
+          },
+        ),
+      )
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      if (Exit.isFailure(exit)) expect(Cause.pretty(exit.cause)).toContain("cannot leave the repository")
+    }),
+  )
+
+  background.instance("rejects overlapping ownership across active sibling subagents", () =>
+    Effect.gen(function* () {
+      const { chat, assistant } = yield* seed()
+      const tool = yield* TaskTool
+      const def = yield* tool.init()
+
+      yield* def.execute(
+        {
+          description: "edit auth module",
+          prompt: "Refactor the authentication module.",
+          subagent_type: "general",
+          owned_paths: ["src/auth"],
+          background: true,
+        },
+        {
+          sessionID: chat.id,
+          messageID: assistant.id,
+          agent: "build",
+          abort: new AbortController().signal,
+          extra: { promptOps: { ...stubOps(), prompt: () => Effect.never } },
+          messages: [],
+          metadata: () => Effect.void,
+          ask: () => Effect.void,
+        },
+      )
+
+      const exit = yield* Effect.exit(
+        def.execute(
+          {
+            description: "edit login view",
+            prompt: "Update the login view.",
+            subagent_type: "general",
+            owned_paths: ["src/auth/login.tsx"],
+            background: true,
+          },
+          {
+            sessionID: chat.id,
+            messageID: assistant.id,
+            agent: "build",
+            abort: new AbortController().signal,
+            extra: { promptOps: stubOps() },
+            messages: [],
+            metadata: () => Effect.void,
+            ask: () => Effect.void,
+          },
+        ),
+      )
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      if (Exit.isFailure(exit)) expect(Cause.pretty(exit.cause)).toContain("ownership overlaps")
+    }),
+  )
+
   it.instance("native specialists use the same child-session and BYOK inheritance path", () =>
     Effect.gen(function* () {
       const { chat, assistant } = yield* seed()
       const tool = yield* TaskTool
       const def = yield* tool.init()
 
-      for (const subagent of ["review", "debug", "test", "security", "performance", "migration"] as const) {
+      for (const subagent of ["review", "judge", "debug", "test", "security", "performance", "migration"] as const) {
         let seen: SessionPrompt.PromptInput | undefined
         const result = yield* def.execute(
           {

@@ -384,4 +384,10 @@ export const release117: VectorRelease[] = [
     summary:
       "Retired the experimental website account, Builder, Cloud Agent, and API Studio surfaces; restored Vector's public site to product, documentation, purchase, releases, and legal pages; preserved Stripe licensing; and removed the unused desktop companion while keeping Vector Cloud Services inside the IDE.",
   },
+  {
+    version: "1.17.50",
+    title: "Orchestrated and verified completion",
+    summary:
+      "Added dependency-aware subagent orchestration with file ownership boundaries, optional LLM-as-a-judge verification and repair loops, durable scheduled-agent completion tracking, in-session GitHub pull-request review, visible testing state, and a substantially expanded MCP plugin catalog.",
+  },
 ]

@@ -2397,6 +2397,16 @@ html[data-vector-navigation-resizing] * {
   animation: vx-session-working 1.5s ease-in-out infinite;
 }
 
+[data-vector-session-status][data-status="testing"] {
+  color: var(--vx-amber);
+}
+
+[data-vector-session-status][data-status="testing"] > span {
+  background: var(--vx-amber);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--vx-amber) 48%, transparent);
+  animation: vx-session-working 1.15s ease-in-out infinite;
+}
+
 @keyframes vx-session-working {
   50% {
     opacity: 0.38;
@@ -2604,7 +2614,8 @@ html[data-vector-navigation-resizing] * {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  [data-vector-session-status][data-status="working"] > span {
+  [data-vector-session-status][data-status="working"] > span,
+  [data-vector-session-status][data-status="testing"] > span {
     animation: none;
   }
 }

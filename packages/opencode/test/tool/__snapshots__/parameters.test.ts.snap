@@ -309,9 +309,23 @@ exports[`tool parameters JSON Schema (wire shape) task 1`] = `
       "description": "The command that triggered this task",
       "type": "string",
     },
+    "depends_on": {
+      "description": "Task IDs that must complete successfully before this subagent starts. Use this to express dependencies between delegated work without polling",
+      "items": {
+        "type": "string",
+      },
+      "type": "array",
+    },
     "description": {
       "description": "A short (3-5 words) description of the task",
       "type": "string",
+    },
+    "owned_paths": {
+      "description": "Repository-relative files or directory prefixes this subagent owns. Vector rejects overlapping ownership among active sibling subagents",
+      "items": {
+        "type": "string",
+      },
+      "type": "array",
     },
     "prompt": {
       "description": "The task for the agent to perform",
@@ -320,6 +334,13 @@ exports[`tool parameters JSON Schema (wire shape) task 1`] = `
     "subagent_type": {
       "description": "The type of specialized agent to use for this task",
       "type": "string",
+    },
+    "success_criteria": {
+      "description": "Observable conditions the subagent must verify before reporting completion",
+      "items": {
+        "type": "string",
+      },
+      "type": "array",
     },
     "task_id": {
       "description": "This should only be set if you mean to resume a previous task (you can pass a prior task_id and the task will continue the same subagent session as before instead of creating a fresh one)",

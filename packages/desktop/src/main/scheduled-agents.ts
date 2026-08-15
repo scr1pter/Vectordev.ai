@@ -6,10 +6,9 @@ const STORE_NAME = "scheduled-agents"
 const STORE_KEY = "records"
 // The scheduler wakes up on this cadence to launch any records that are due.
 const TICK_INTERVAL_MS = 20_000
-// Launching is only two quick HTTP calls against the local engine. A record
-// that has been "running" for longer than this belongs to a previous app run
-// that quit before the launch completed.
-const STALE_RUNNING_MS = 10 * 60_000
+const COMPLETION_POLL_MS = 1_500
+const COMPLETION_TIMEOUT_MS = 6 * 60 * 60_000
+const STARTUP_GRACE_MS = 3_000
 
 export type ScheduledAgentStatus = "scheduled" | "running" | "completed" | "failed" | "canceled"
 
@@ -47,6 +46,7 @@ const now = () => new Date().toISOString()
 let engineProvider: (() => Promise<ScheduledAgentEngine>) | undefined
 let tickTimer: NodeJS.Timeout | undefined
 let tickInProgress = false
+const activeRuns = new Set<string>()
 
 function readRecords(): ScheduledAgentRecord[] {
   const raw = getStore(STORE_NAME).get(STORE_KEY)
@@ -98,53 +98,129 @@ async function engineRequest<T>(
   return (text ? JSON.parse(text) : undefined) as T
 }
 
-// "Running" only spans the launch calls, so a record still "running" after the
-// stale window was interrupted by an app shutdown. A fresh "running" record is
-// left alone: it may belong to a launch happening right now.
 function reconcileInterruptedRecords(records: ScheduledAgentRecord[]) {
   let changed = false
   const next = records.map((record) => {
-    if (record.status !== "running") return record
-    const startedAtMs = record.startedAt ? Date.parse(record.startedAt) : Number.NaN
-    if (Number.isFinite(startedAtMs) && Date.now() - startedAtMs < STALE_RUNNING_MS) return record
+    if (record.status !== "running" || activeRuns.has(record.id)) return record
     changed = true
     return {
       ...record,
       status: "failed" as const,
-      error: "Interrupted by app restart before launch completed.",
+      completedAt: now(),
+      error: "Interrupted by app restart before the agent completed.",
     }
   })
   if (changed) writeRecords(next)
   return next
 }
 
+type EngineMessageResponse = {
+  data?: Array<{
+    info?: {
+      role?: string
+      finish?: string
+      error?: { message?: string; data?: { message?: string } } | string
+    }
+  }>
+}
+
+const delay = (milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds))
+
+function activeSessionMap(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object") return {}
+  const record = value as Record<string, unknown>
+  const candidate = record.data && typeof record.data === "object" ? record.data : record
+  return candidate as Record<string, unknown>
+}
+
+function assistantFailure(response: EngineMessageResponse) {
+  const messages = response.data ?? []
+  const assistant = messages.filter((item) => item.info?.role === "assistant").at(-1)?.info
+  if (!assistant) return { settled: false as const }
+  if (!assistant.error) return { settled: true as const }
+  if (typeof assistant.error === "string") return { settled: true as const, error: assistant.error }
+  return {
+    settled: true as const,
+    error: assistant.error.data?.message ?? assistant.error.message ?? "The scheduled agent failed.",
+  }
+}
+
+async function abortEngineSession(engine: ScheduledAgentEngine, sessionId: string) {
+  await engineRequest(engine, `/api/session/${encodeURIComponent(sessionId)}/abort`, { method: "POST" }).catch(() => {})
+}
+
+async function waitForSessionCompletion(engine: ScheduledAgentEngine, recordId: string, sessionId: string) {
+  const startedAt = Date.now()
+  let observedActive = false
+  while (Date.now() - startedAt < COMPLETION_TIMEOUT_MS) {
+    const record = readRecords().find((item) => item.id === recordId)
+    if (!record || record.status === "canceled") {
+      await abortEngineSession(engine, sessionId)
+      return "canceled" as const
+    }
+
+    // Scheduled agents run on the V2 session engine. Active sessions are
+    // present in this registry and disappear only after the execution loop
+    // settles, which avoids marking a merely admitted prompt as complete.
+    const sessions = activeSessionMap(await engineRequest<unknown>(engine, "/api/session/active"))
+    const active = Boolean(sessions[sessionId])
+    if (active) observedActive = true
+    if (!active && (observedActive || Date.now() - startedAt >= STARTUP_GRACE_MS)) {
+      const messages = await engineRequest<EngineMessageResponse>(
+        engine,
+        `/api/session/${encodeURIComponent(sessionId)}/message?limit=20`,
+      )
+      const outcome = assistantFailure(messages)
+      if (!outcome.settled) {
+        await delay(COMPLETION_POLL_MS)
+        continue
+      }
+      if (outcome.error) throw new Error(outcome.error)
+      return "completed" as const
+    }
+    await delay(COMPLETION_POLL_MS)
+  }
+  await abortEngineSession(engine, sessionId)
+  throw new Error("Scheduled agent exceeded the six-hour completion limit and was stopped.")
+}
+
 async function launchScheduledAgent(id: string, awaitEngine: () => Promise<ScheduledAgentEngine>) {
-  updateRecord(id, (current) => ({ ...current, status: "running", startedAt: now(), error: undefined }))
-  const record = readRecords().find((item) => item.id === id)
-  if (!record) throw new Error("Scheduled agent was not found.")
+  activeRuns.add(id)
+  try {
+    updateRecord(id, (current) => ({ ...current, status: "running", startedAt: now(), error: undefined }))
+    const record = readRecords().find((item) => item.id === id)
+    if (!record) throw new Error("Scheduled agent was not found.")
 
-  const engine = await awaitEngine()
-  const created = await engineRequest<{ data?: { id?: string } }>(engine, "/api/session", {
-    method: "POST",
-    body: { location: { directory: record.directory } },
-  })
-  const sessionId = created?.data?.id
-  if (!sessionId) throw new Error("Vector's engine did not return a session ID for the scheduled agent.")
+    const engine = await awaitEngine()
+    const created = await engineRequest<{ data?: { id?: string } }>(engine, "/api/session", {
+      method: "POST",
+      body: { location: { directory: record.directory } },
+    })
+    const sessionId = created?.data?.id
+    if (!sessionId) throw new Error("Vector's engine did not return a session ID for the scheduled agent.")
+    const current = updateRecord(id, (item) => ({ ...item, sessionId }))
+    if (current.status === "canceled") {
+      await abortEngineSession(engine, sessionId)
+      return
+    }
 
-  await engineRequest(engine, `/api/session/${encodeURIComponent(sessionId)}/prompt`, {
-    method: "POST",
-    body: { prompt: { text: record.prompt }, resume: true },
-  })
+    await engineRequest(engine, `/api/session/${encodeURIComponent(sessionId)}/prompt`, {
+      method: "POST",
+      body: { prompt: { text: record.prompt }, resume: true },
+    })
 
-  // Fire-and-forget: the prompt was admitted, so the session keeps working on
-  // the engine. "Completed" means the scheduled launch itself completed.
-  updateRecord(id, (current) => ({
-    ...current,
-    status: "completed",
-    completedAt: now(),
-    sessionId,
-    error: undefined,
-  }))
+    const outcome = await waitForSessionCompletion(engine, id, sessionId)
+    if (outcome === "canceled") return
+    updateRecord(id, (item) => ({
+      ...item,
+      status: "completed",
+      completedAt: now(),
+      sessionId,
+      error: undefined,
+    }))
+  } finally {
+    activeRuns.delete(id)
+  }
 }
 
 async function runDueScheduledAgents() {
@@ -160,16 +236,18 @@ async function runDueScheduledAgents() {
       return !Number.isFinite(runAtMs) || runAtMs <= nowMs
     })
     for (const record of due) {
-      try {
-        await launchScheduledAgent(record.id, engineProvider)
-      } catch (error) {
+      void launchScheduledAgent(record.id, engineProvider).catch((error) => {
         const message = error instanceof Error ? error.message : String(error)
         try {
-          updateRecord(record.id, (current) => ({ ...current, status: "failed", error: message }))
+          updateRecord(record.id, (current) =>
+            current.status === "canceled"
+              ? current
+              : { ...current, status: "failed", completedAt: now(), error: message },
+          )
         } catch {
-          // The record was removed mid-launch; there is nothing left to mark.
+          // The record was removed mid-run; there is nothing left to mark.
         }
-      }
+      })
     }
   } finally {
     tickInProgress = false
@@ -216,13 +294,15 @@ export function createScheduledAgent(input: CreateScheduledAgentInput): Schedule
   return record
 }
 
-export function cancelScheduledAgent(id: string): ScheduledAgentRecord | undefined {
+export async function cancelScheduledAgent(id: string): Promise<ScheduledAgentRecord | undefined> {
   const record = readRecords().find((item) => item.id === id)
   if (!record) return undefined
-  // Canceling is only meaningful before launch; running, settled, and already
-  // canceled records are returned unchanged.
-  if (record.status !== "scheduled") return record
-  return updateRecord(id, (current) => ({ ...current, status: "canceled" }))
+  if (record.status !== "scheduled" && record.status !== "running") return record
+  const canceled = updateRecord(id, (current) => ({ ...current, status: "canceled", completedAt: now() }))
+  if (!record.sessionId || !engineProvider) return canceled
+  const engine = await engineProvider().catch(() => undefined)
+  if (engine) await abortEngineSession(engine, record.sessionId)
+  return canceled
 }
 
 export function removeScheduledAgent(id: string): ScheduledAgentRecord[] {

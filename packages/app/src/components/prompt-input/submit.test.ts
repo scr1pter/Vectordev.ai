@@ -3,6 +3,7 @@ import type { Prompt } from "@/context/prompt"
 
 let createPromptSubmit: typeof import("./submit").createPromptSubmit
 let resolveSubmissionAgent: typeof import("./submit").resolveSubmissionAgent
+let shouldUseCompletionJudge: typeof import("./submit").shouldUseCompletionJudge
 
 const createdClients: string[] = []
 const createdSessions: string[] = []
@@ -255,6 +256,7 @@ beforeAll(async () => {
   const mod = await import("./submit")
   createPromptSubmit = mod.createPromptSubmit
   resolveSubmissionAgent = mod.resolveSubmissionAgent
+  shouldUseCompletionJudge = mod.shouldUseCompletionJudge
 })
 
 beforeEach(() => {
@@ -514,6 +516,12 @@ describe("submission agent selection", () => {
         available: [{ name: "review", mode: "primary" }],
       }),
     ).toBe("review")
+  })
+
+  test("does not enable the completion judge in Plan Mode or trivial conversation", () => {
+    expect(shouldUseCompletionJudge({ enabled: true, agent: "plan", difficulty: "complex" })).toBe(false)
+    expect(shouldUseCompletionJudge({ enabled: true, agent: "build", difficulty: "trivial" })).toBe(false)
+    expect(shouldUseCompletionJudge({ enabled: true, agent: "build", difficulty: "complex" })).toBe(true)
   })
 })
 

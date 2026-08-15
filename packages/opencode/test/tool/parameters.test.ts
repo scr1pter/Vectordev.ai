@@ -243,6 +243,19 @@ describe("tool parameters", () => {
       const parsed = parse(Task, { description: "d", prompt: "p", subagent_type: "general", background: true })
       expect(parsed.background).toBe(true)
     })
+    test("accepts orchestration metadata", () => {
+      const parsed = parse(Task, {
+        description: "d",
+        prompt: "p",
+        subagent_type: "general",
+        depends_on: ["ses_dependency"],
+        owned_paths: ["src/auth"],
+        success_criteria: ["Authentication tests pass"],
+      })
+      expect(parsed.depends_on).toEqual(["ses_dependency"])
+      expect(parsed.owned_paths).toEqual(["src/auth"])
+      expect(parsed.success_criteria).toEqual(["Authentication tests pass"])
+    })
     test("rejects missing prompt", () => {
       expect(accepts(Task, { description: "d", subagent_type: "general" })).toBe(false)
     })

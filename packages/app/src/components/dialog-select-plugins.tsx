@@ -29,13 +29,18 @@ export const DialogSelectPlugins: Component = () => {
   const [fields, setFields] = createStore<Record<string, string>>({})
 
   // Identity is a plain server-name match: a plugin is "installed" when an
-  // MCP server with its id exists. A user-created server with the same name
-  // is treated as the same integration on purpose.
-  const mcpEntry = (plugin: PluginDef) => sync().data.mcp?.[plugin.id]
+  // MCP server with its name exists. A user-created server with the same name
+  // is treated as the same integration on purpose. Cards that share a `server`
+  // back onto one MCP entry, so connecting one connects all of them.
+  const serverName = (plugin: PluginDef) => plugin.server ?? plugin.id
+  const mcpEntry = (plugin: PluginDef) => sync().data.mcp?.[serverName(plugin)]
   const installedCount = createMemo(
-    () => PLUGIN_CATALOG.filter((plugin) => !plugin.soon && sync().data.mcp?.[plugin.id]).length,
+    () =>
+      new Set(
+        PLUGIN_CATALOG.filter((plugin) => !plugin.soon && sync().data.mcp?.[serverName(plugin)]).map(serverName),
+      ).size,
   )
-  const availableCount = PLUGIN_CATALOG.filter((plugin) => !plugin.soon).length
+  const availableCount = new Set(PLUGIN_CATALOG.filter((plugin) => !plugin.soon).map(serverName)).size
 
   const startConnect = (plugin: PluginDef) => {
     if (plugin.auth.kind === "token") {
@@ -49,7 +54,7 @@ export const DialogSelectPlugins: Component = () => {
   const install = async (plugin: PluginDef, values: Record<string, string>) => {
     if (!plugin.build || add.isPending) return
     try {
-      await add.mutateAsync({ name: plugin.id, config: plugin.build(values) })
+      await add.mutateAsync({ name: serverName(plugin), config: plugin.build(values) })
       await sync().mcp.refresh()
       // Only clear the form belonging to this plugin — an install started
       // from another card must not wipe a half-typed token elsewhere.
@@ -80,7 +85,7 @@ export const DialogSelectPlugins: Component = () => {
   return (
     <Dialog
       title="Plugins"
-      description={`${installedCount()} installed · ${availableCount} available. One-click integrations that make Vector a better IDE.`}
+      description={`${installedCount()} connected · ${availableCount} available. One-click integrations that make Vector a better IDE.`}
       class="vector-mcp-dialog vector-plugins-dialog"
     >
       <div class="max-h-[72vh] overflow-y-auto px-3 pb-3 flex flex-col gap-5">
@@ -94,7 +99,7 @@ export const DialogSelectPlugins: Component = () => {
                     const entry = () => mcpEntry(plugin)
                     const status = () => entry()?.status
                     const meta = () => (status() ? statusMeta[status() as string] : undefined)
-                    const busy = () => toggle.isPending && toggle.variables === plugin.id
+                    const busy = () => toggle.isPending && toggle.variables === serverName(plugin)
                     const statusError = () => {
                       const s = entry()
                       if (s?.status === "failed" || s?.status === "needs_client_registration") return s.error
@@ -165,7 +170,7 @@ export const DialogSelectPlugins: Component = () => {
                                       checked={status() === "connected"}
                                       disabled={busy()}
                                       onChange={() => {
-                                        if (!toggle.isPending) toggle.mutate(plugin.id)
+                                        if (!toggle.isPending) toggle.mutate(serverName(plugin))
                                       }}
                                     >
                                       {plugin.name} connection
@@ -177,7 +182,7 @@ export const DialogSelectPlugins: Component = () => {
                                     class={pillButtonClass}
                                     disabled={busy()}
                                     onClick={() => {
-                                      if (!toggle.isPending) toggle.mutate(plugin.id)
+                                      if (!toggle.isPending) toggle.mutate(serverName(plugin))
                                     }}
                                   >
                                     Authorize
@@ -249,7 +254,7 @@ export const DialogSelectPlugins: Component = () => {
                                 )}
                               </Show>
                               <button type="submit" class={pillButtonClass} disabled={!formReady(plugin) || add.isPending}>
-                                {add.isPending && add.variables?.name === plugin.id ? "Connecting…" : "Install"}
+                                {add.isPending && add.variables?.name === serverName(plugin) ? "Connecting…" : "Install"}
                               </button>
                             </div>
                           </form>

@@ -14,6 +14,7 @@ import { Effect, Exit, Schema, Scope } from "effect"
 import { EffectBridge } from "@/effect/bridge"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Database } from "@opencode-ai/core/database/database"
+import path from "path"
 
 export interface TaskPromptOps {
   cancel(sessionID: SessionID): Effect.Effect<void>
@@ -43,10 +44,54 @@ const MAX_ACTIVE_SUBAGENTS = 16
 const MAX_ACTIVE_SUBAGENTS_PER_SESSION = 6
 const MAX_SUBAGENT_DEPTH = 2
 
+function normalizedPath(value: string) {
+  const input = value.trim().replaceAll("\\", "/")
+  if (!input) return ""
+  if (path.posix.isAbsolute(input) || path.win32.isAbsolute(value) || /^[a-z]:/i.test(input)) {
+    throw new Error(`Subagent owned path must be repository-relative: ${value}`)
+  }
+  const normalized = path.posix.normalize(input.replace(/^\.\//, ""))
+  if (normalized === ".." || normalized.startsWith("../")) {
+    throw new Error(`Subagent owned path cannot leave the repository: ${value}`)
+  }
+  return normalized.replace(/\/$/, "")
+}
+
+function pathsOverlap(a: string, b: string) {
+  if (a === "." || b === ".") return true
+  if (a === b) return true
+  return a.startsWith(`${b}/`) || b.startsWith(`${a}/`)
+}
+
+function dependencyIDs(job: BackgroundJob.Info) {
+  if (!Array.isArray(job.metadata?.dependsOn)) return []
+  return job.metadata.dependsOn.filter((item): item is string => typeof item === "string")
+}
+
+function dependencyReaches(jobs: BackgroundJob.Info[], start: string, target: string, seen = new Set<string>()): boolean {
+  if (start === target) return true
+  if (seen.has(start)) return false
+  seen.add(start)
+  const job = jobs.find((item) => item.id === start)
+  if (!job) return false
+  return dependencyIDs(job).some((dependency) => dependencyReaches(jobs, dependency, target, seen))
+}
+
 const BaseParameterFields = {
   description: Schema.String.annotate({ description: "A short (3-5 words) description of the task" }),
   prompt: Schema.String.annotate({ description: "The task for the agent to perform" }),
   subagent_type: Schema.String.annotate({ description: "The type of specialized agent to use for this task" }),
+  depends_on: Schema.optional(Schema.Array(Schema.String)).annotate({
+    description:
+      "Task IDs that must complete successfully before this subagent starts. Use this to express dependencies between delegated work without polling",
+  }),
+  owned_paths: Schema.optional(Schema.Array(Schema.String)).annotate({
+    description:
+      "Repository-relative files or directory prefixes this subagent owns. Vector rejects overlapping ownership among active sibling subagents",
+  }),
+  success_criteria: Schema.optional(Schema.Array(Schema.String)).annotate({
+    description: "Observable conditions the subagent must verify before reporting completion",
+  }),
   task_id: Schema.optional(Schema.String).annotate({
     description:
       "This should only be set if you mean to resume a previous task (you can pass a prior task_id and the task will continue the same subagent session as before instead of creating a fresh one)",
@@ -63,6 +108,30 @@ export const Parameters = Schema.Struct({
       "Run the agent in the background. You will be notified when it completes. DO NOT sleep, poll, or proactively check on its progress",
   }),
 })
+
+function assignmentPrompt(params: Schema.Schema.Type<typeof Parameters>, ownedPaths: string[]) {
+  const successCriteria = params.success_criteria?.map((item) => item.trim()).filter(Boolean) ?? []
+  if (ownedPaths.length === 0 && successCriteria.length === 0) return params.prompt
+  return [
+    "<orchestration_assignment>",
+    ...(ownedPaths.length === 0
+      ? []
+      : [
+          "You own only these repository paths for this assignment:",
+          ...ownedPaths.map((item) => `- ${item}`),
+          "Do not edit outside these paths. Report any required cross-boundary change to the parent agent instead.",
+        ]),
+    ...(successCriteria.length === 0
+      ? []
+      : [
+          "Do not report completion until every success criterion below has been checked:",
+          ...successCriteria.map((item) => `- ${item}`),
+        ]),
+    "</orchestration_assignment>",
+    "",
+    params.prompt,
+  ].join("\n")
+}
 
 function renderOutput(input: {
   sessionID: SessionID
@@ -104,6 +173,70 @@ export const TaskTool = Tool.define(
         )
       }
       const parent = yield* sessions.get(ctx.sessionID)
+      const dependencies = [...new Set(params.depends_on?.map((item) => item.trim()).filter(Boolean) ?? [])]
+      const jobs = yield* background.list()
+      for (const dependency of dependencies) {
+        if (dependency === params.task_id) {
+          return yield* Effect.fail(new Error(`Task ${dependency} cannot depend on itself.`))
+        }
+        const job = jobs.find((item) => item.id === dependency)
+        if (!job) {
+          return yield* Effect.fail(new Error(`Dependency ${dependency} was not found in this project runtime.`))
+        }
+        if (job.type !== id || job.metadata?.parentSessionId !== ctx.sessionID) {
+          return yield* Effect.fail(new Error(`Dependency ${dependency} does not belong to this task's subagent group.`))
+        }
+        if (job.status === "error") {
+          return yield* Effect.fail(
+            new Error(`Dependency ${dependency} failed${job.error ? `: ${job.error}` : "."}`),
+          )
+        }
+        if (job.status === "cancelled") {
+          return yield* Effect.fail(new Error(`Dependency ${dependency} was cancelled.`))
+        }
+        if (params.task_id && dependencyReaches(jobs, dependency, params.task_id)) {
+          return yield* Effect.fail(new Error(`Dependency ${dependency} would create a task cycle.`))
+        }
+      }
+
+      const ownedPaths = yield* Effect.try({
+        try: () => [...new Set(params.owned_paths?.map(normalizedPath).filter(Boolean) ?? [])],
+        catch: (error) => (error instanceof Error ? error : new Error(String(error))),
+      })
+      if (ownedPaths.length > 0) {
+        const conflicts = jobs
+          .filter(
+            (job) =>
+              job.type === id &&
+              job.status === "running" &&
+              job.id !== params.task_id &&
+              !dependencies.includes(job.id) &&
+              job.metadata?.parentSessionId === ctx.sessionID,
+          )
+          .flatMap((job) => {
+            const existing = Array.isArray(job.metadata?.ownedPaths)
+              ? job.metadata.ownedPaths.filter((item): item is string => typeof item === "string")
+              : []
+            return ownedPaths.flatMap((owned) =>
+              existing
+                .map(normalizedPath)
+                .filter((item) => item && pathsOverlap(owned, item))
+                .map((item) => `${job.title ?? job.id}: ${owned} overlaps ${item}`),
+            )
+          })
+        if (conflicts.length > 0) {
+          return yield* Effect.fail(
+            new Error(
+              [
+                "Subagent ownership overlaps active sibling work.",
+                ...conflicts.map((item) => `- ${item}`),
+                "Wait for that task, add it to depends_on, or assign non-overlapping paths.",
+              ].join("\n"),
+            ),
+          )
+        }
+      }
+
       let cursor = parent
       let depth = 0
       while (cursor.parentID) {
@@ -205,7 +338,12 @@ export const TaskTool = Tool.define(
       const metadata = {
         parentSessionId: ctx.sessionID,
         sessionId: nextSession.id,
+        projectId: parent.projectID,
+        directory: parent.directory,
         model,
+        ...(dependencies.length > 0 ? { dependsOn: dependencies } : {}),
+        ...(ownedPaths.length > 0 ? { ownedPaths } : {}),
+        ...(params.success_criteria?.length ? { successCriteria: params.success_criteria } : {}),
         ...(runInBackground ? { background: true } : {}),
       }
 
@@ -218,7 +356,21 @@ export const TaskTool = Tool.define(
       if (!ops) return yield* Effect.fail(new Error("TaskTool requires promptOps in ctx.extra"))
 
       const runTask = Effect.fn("TaskTool.runTask")(function* () {
-        const parts = yield* ops.resolvePromptParts(params.prompt)
+        for (const dependency of dependencies) {
+          const waited = yield* background.wait({ id: dependency })
+          if (!waited.info) {
+            return yield* Effect.fail(new Error(`Dependency ${dependency} disappeared before this task could start.`))
+          }
+          if (waited.info.status === "error") {
+            return yield* Effect.fail(
+              new Error(`Dependency ${dependency} failed${waited.info.error ? `: ${waited.info.error}` : "."}`),
+            )
+          }
+          if (waited.info.status === "cancelled") {
+            return yield* Effect.fail(new Error(`Dependency ${dependency} was cancelled.`))
+          }
+        }
+        const parts = yield* ops.resolvePromptParts(assignmentPrompt(params, ownedPaths))
         const result = yield* ops.prompt({
           messageID: MessageID.ascending(),
           sessionID: nextSession.id,

@@ -37,6 +37,16 @@ type PendingPrompt = {
 
 const pending = new Map<string, PendingPrompt>()
 
+export const VERIFIED_COMPLETION_POLICY = [
+  "<vector_verified_completion>",
+  "LLM-as-a-judge is enabled for this request. Treat completion as a verified state, not a confident summary.",
+  "Before editing, identify observable success criteria. For complex work, coordinate specialized subagents with non-overlapping owned_paths and explicit dependencies.",
+  "After implementation, run the relevant tests, typechecks, builds, and browser checks. Then delegate an independent final evaluation to the judge subagent with the original request, success criteria, changed files, and verification evidence.",
+  "The judge must return PASS, FAIL, or INCONCLUSIVE. On FAIL, repair the blocking findings and re-run verification and judgment. Stop after three judge rounds and report the remaining blocker rather than looping forever.",
+  "Do not say the task is complete unless the final judge verdict is PASS. If required credentials, approvals, external services, or unavailable environments prevent verification, report INCONCLUSIVE and name the missing evidence.",
+  "</vector_verified_completion>",
+].join("\n")
+
 export function resolveSubmissionAgent(input: {
   planMode: boolean
   current: string
@@ -50,6 +60,14 @@ export function resolveSubmissionAgent(input: {
   )
 }
 
+export function shouldUseCompletionJudge(input: {
+  enabled: boolean
+  agent: string
+  difficulty: TaskDifficulty
+}) {
+  return input.enabled && input.agent !== "plan" && input.difficulty !== "trivial"
+}
+
 export type FollowupDraft = {
   sessionID: string
   sessionDirectory: string
@@ -60,6 +78,7 @@ export type FollowupDraft = {
   variant?: string
   difficulty?: TaskDifficulty
   executionMode?: "normal" | "fast"
+  llmJudge?: boolean
 }
 
 type FollowupSendInput = {
@@ -81,6 +100,11 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
   const images = draftImages(input.draft.prompt)
   const difficulty = input.draft.difficulty ?? classifyTaskDifficulty(text)
   const agent = difficulty === "trivial" && input.draft.agent !== "plan" ? "quick" : input.draft.agent
+  const llmJudge = shouldUseCompletionJudge({
+    enabled: input.draft.llmJudge === true,
+    agent,
+    difficulty,
+  })
   const setBusy = () => {
     if (!input.optimisticBusy) return
     input.serverSync.session.set("session_status", input.draft.sessionID, { type: "busy" })
@@ -184,7 +208,11 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
       difficulty === "trivial"
         ? undefined
         : await globalThis.window?.api?.prepareAgentTask?.(input.draft.sessionDirectory, text).catch(() => undefined)
-    const requestParts = preparation?.instruction
+    const syntheticText = [
+      ...(preparation?.instruction ? [preparation.instruction] : []),
+      ...(llmJudge ? [VERIFIED_COMPLETION_POLICY] : []),
+    ]
+    const requestParts = syntheticText.length
       ? buildRequestParts({
           prompt: input.draft.prompt,
           context: input.draft.context,
@@ -193,7 +221,7 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
           sessionID: input.draft.sessionID,
           messageID,
           sessionDirectory: input.draft.sessionDirectory,
-          syntheticText: [preparation.instruction],
+          syntheticText,
         }).requestParts
       : baseParts.requestParts
 
@@ -238,6 +266,7 @@ type PromptSubmitInput = {
   onAbort?: () => void
   onSubmit?: () => void
   executionMode?: Accessor<"normal" | "quick" | "fast">
+  llmJudge?: Accessor<boolean>
 }
 
 export function createPromptSubmit(input: PromptSubmitInput) {
@@ -536,6 +565,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       variant,
       difficulty,
       executionMode,
+      llmJudge: input.llmJudge?.() ?? false,
     }
 
     const clearInput = () => {

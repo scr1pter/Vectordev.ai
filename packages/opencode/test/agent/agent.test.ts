@@ -53,6 +53,7 @@ it.instance("returns default native agents when no config", () =>
     expect(names).toContain("general")
     expect(names).toContain("explore")
     expect(names).toContain("review")
+    expect(names).toContain("judge")
     expect(names).toContain("debug")
     expect(names).toContain("test")
     expect(names).toContain("security")
@@ -185,17 +186,23 @@ it.instance("general agent denies todo tools", () =>
 it.instance("native specialist agents have the intended permission boundaries", () =>
   Effect.gen(function* () {
     const review = yield* load((svc) => svc.get("review"))
+    const judge = yield* load((svc) => svc.get("judge"))
     const security = yield* load((svc) => svc.get("security"))
     const debug = yield* load((svc) => svc.get("debug"))
     const test = yield* load((svc) => svc.get("test"))
 
-    for (const agent of [review, security]) {
+    for (const agent of [review, judge, security]) {
       expect(agent?.mode).toBe("subagent")
       expect(agent?.native).toBe(true)
       expect(evalPerm(agent, "read")).toBe("allow")
       expect(evalPerm(agent, "edit")).toBe("deny")
       expect(evalPerm(agent, "write")).toBe("deny")
+      expect(Permission.evaluate("bash", "rm -rf dist", agent!.permission).action).toBe("deny")
     }
+
+    expect(Permission.evaluate("bash", "gh pr view 42", review!.permission).action).toBe("allow")
+    expect(Permission.evaluate("bash", "gh pr diff 42", review!.permission).action).toBe("allow")
+    expect(Permission.evaluate("bash", "gh pr review 42 --comment", review!.permission).action).toBe("ask")
 
     for (const agent of [debug, test]) {
       expect(agent?.mode).toBe("subagent")
@@ -206,6 +213,26 @@ it.instance("native specialist agents have the intended permission boundaries", 
       expect(evalPerm(agent, "todowrite")).toBe("deny")
     }
   }),
+)
+
+it.instance(
+  "user permissions cannot make read-only specialists mutate files",
+  () =>
+    Effect.gen(function* () {
+      for (const name of ["review", "judge", "security"] as const) {
+        const agent = yield* load((svc) => svc.get(name))
+        expect(Permission.evaluate("edit", "src/app.ts", agent!.permission).action).toBe("deny")
+        expect(Permission.evaluate("bash", "rm -rf src", agent!.permission).action).toBe("deny")
+      }
+    }),
+  {
+    config: {
+      permission: {
+        edit: "allow",
+        bash: "allow",
+      },
+    },
+  },
 )
 
 it.instance("compaction agent denies all permissions", () =>

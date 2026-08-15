@@ -13,6 +13,7 @@ import PROMPT_GENERATE from "./generate.txt"
 import PROMPT_COMPACTION from "./prompt/compaction.txt"
 import PROMPT_DEBUG from "./prompt/debug.txt"
 import PROMPT_EXPLORE from "./prompt/explore.txt"
+import PROMPT_JUDGE from "./prompt/judge.txt"
 import PROMPT_MIGRATION from "./prompt/migration.txt"
 import PROMPT_PERFORMANCE from "./prompt/performance.txt"
 import PROMPT_REVIEW from "./prompt/review.txt"
@@ -145,6 +146,29 @@ const layer = Layer.effect(
         })
 
         const user = Permission.fromConfig(cfg.permission ?? {})
+        const readonlyVerificationBash = {
+          "*": "deny",
+          "git diff*": "allow",
+          "git status*": "allow",
+          "git show*": "allow",
+          "git log*": "allow",
+          "gh pr view*": "allow",
+          "gh pr diff*": "allow",
+          "gh pr review*": "ask",
+          "bun test*": "allow",
+          "bun typecheck*": "allow",
+          "bun run test*": "allow",
+          "bun run build*": "allow",
+          "npm test*": "allow",
+          "npm run test*": "allow",
+          "npm run build*": "allow",
+          "pnpm test*": "allow",
+          "pnpm run test*": "allow",
+          "pnpm run build*": "allow",
+          "pytest*": "allow",
+          "cargo test*": "allow",
+          "go test*": "allow",
+        } as const
 
         const agents: Record<string, Info> = {
           build: {
@@ -174,6 +198,7 @@ const layer = Layer.effect(
                 task: {
                   general: "deny",
                   debug: "deny",
+                  judge: "deny",
                   migration: "deny",
                   performance: "deny",
                   test: "deny",
@@ -244,22 +269,45 @@ const layer = Layer.effect(
             name: "review",
             permission: Permission.merge(
               defaults,
+              user,
               Permission.fromConfig({
                 "*": "deny",
                 grep: "allow",
                 glob: "allow",
                 list: "allow",
-                bash: "allow",
+                bash: readonlyVerificationBash,
                 webfetch: "allow",
                 websearch: "allow",
                 read: "allow",
                 external_directory: readonlyExternalDirectory,
               }),
-              user,
             ),
             description:
               "Read-only senior code reviewer. Use this to inspect a diff or implementation for correctness, regressions, missing tests, maintainability, and security issues without changing files.",
             prompt: PROMPT_REVIEW,
+            options: {},
+            mode: "subagent",
+            native: true,
+          },
+          judge: {
+            name: "judge",
+            permission: Permission.merge(
+              defaults,
+              user,
+              Permission.fromConfig({
+                "*": "deny",
+                grep: "allow",
+                glob: "allow",
+                list: "allow",
+                bash: readonlyVerificationBash,
+                browser: "allow",
+                read: "allow",
+                external_directory: readonlyExternalDirectory,
+              }),
+            ),
+            description:
+              "Independent completion judge. Scores requirement coverage, correctness, regression safety, evidence, and security, then returns PASS, FAIL, or INCONCLUSIVE without editing files.",
+            prompt: PROMPT_JUDGE,
             options: {},
             mode: "subagent",
             native: true,
@@ -300,18 +348,18 @@ const layer = Layer.effect(
             name: "security",
             permission: Permission.merge(
               defaults,
+              user,
               Permission.fromConfig({
                 "*": "deny",
                 grep: "allow",
                 glob: "allow",
                 list: "allow",
-                bash: "allow",
+                bash: readonlyVerificationBash,
                 webfetch: "allow",
                 websearch: "allow",
                 read: "allow",
                 external_directory: readonlyExternalDirectory,
               }),
-              user,
             ),
             description:
               "Read-only application security reviewer for trust boundaries, authentication, authorization, secrets, injection risks, unsafe data flow, and dependency exposure.",

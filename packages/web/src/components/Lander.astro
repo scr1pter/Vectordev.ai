@@ -1,5 +1,5 @@
 ---
-import { ArrowRight, Bot, ChevronDown, Cloud, CloudUpload, Code2, Globe2, Laptop2 } from "lucide-react"
+import { ArrowRight, BadgeCheck, Bot, ChevronDown, Cloud, CloudUpload, Code2, Globe2, Laptop2 } from "lucide-react"
 import MarketingFooter from "./marketing/MarketingFooter.astro"
 import MarketingNav from "./marketing/MarketingNav.astro"
 import screenshotAgent from "../assets/lander/vector-agent-current.png"
@@ -43,7 +43,7 @@ const ecosystem = [
 const features = [
   {
     title: "Ask for an outcome. Keep the engineering in view.",
-    body: "Vector reads the active repository, plans the work, edits real files, runs commands, and reports a reviewable result in one session. Context, tool activity, token use, checkpoints, and changed files stay attached to that repository.",
+    body: "Vector reads the active repository, plans the work, edits real files, runs commands, and reports a reviewable result in one session. It can coordinate specialist subagents, review a GitHub pull request, and keep context, tool activity, token use, checkpoints, and changed files attached to that repository.",
     tag: "Vector Agent",
     note: "Repository-native",
     image: screenshotAgent,
@@ -95,9 +95,9 @@ const features = [
 
 const workflow = [
   ["Open", "Attach the repository already on your computer."],
-  ["Direct", "Give one agent a task or divide work across isolated agents."],
+  ["Direct", "Give one agent a task or coordinate specialist subagents through explicit dependencies."],
   ["Observe", "Follow plans, edits, commands, browser actions, tokens, and cost."],
-  ["Verify", "Run checks, inspect the product, and review every changed line."],
+  ["Verify", "Run checks, inspect the product, review the diff, and optionally require an independent judge verdict."],
   ["Ship", "Merge trusted work and publish through your connected accounts."],
 ]
 
@@ -106,6 +106,7 @@ const systemRows = [
   ["Persistent project memory", "Keeps repository conventions, accepted decisions, and corrections attached to the project across sessions."],
   ["Execution controls", "Quick, normal, and fast modes plus effort settings let you trade latency and token depth without changing the workflow."],
   ["Trust boundary", "Diffs, checks, secret scanning, checkpoints, risk signals, and approvals stand between agent output and main."],
+  ["Verified completion", "An optional LLM judge scores requirement coverage, correctness, regressions, evidence, and safety. Failed verdicts return to repair and retesting before Vector reports completion."],
   ["Transparent economics", "Input, output, reasoning, cache, context, model, and recorded cost stay visible per session and workspace."],
 ]
 
@@ -146,6 +147,12 @@ const products = [
     eyebrow: "Connected infrastructure · available",
     body: "Deployments, databases, authentication, storage, environment variables, domains, logs, and infrastructure controls stay connected to the project that needs them.",
     icon: Cloud,
+  },
+  {
+    name: "Verified completion",
+    eyebrow: "Test, judge, repair, repeat",
+    body: "Turn on LLM-as-a-judge when correctness matters more than the extra model call. Vector evaluates the original request against explicit evidence and keeps working after a failed verdict instead of stopping at a confident summary.",
+    icon: BadgeCheck,
   },
 ]
 
@@ -248,7 +255,7 @@ const changelog = [
         <h2 id="product-system-title">Delegate broadly. Inspect precisely.</h2>
         <p>
           Vector keeps autonomous work and hands-on engineering in the same local workspace: agent sessions,
-          isolated worktrees, editor, terminal, controlled browser, review, and cloud delivery.
+          orchestrated subagents, isolated worktrees, editor, terminal, controlled browser, review, and cloud delivery.
         </p>
       </div>
       <div class="product-system-grid">
@@ -291,10 +298,10 @@ const changelog = [
               <p>The agent can run commands, inspect the app in a controlled browser, collect failures, and retest while activity remains visible and interruptible.</p>
             </article>
             <article style="--i: 2">
-              <span class="suite-icon"><CloudUpload size={19} strokeWidth={1.7} aria-hidden="true" /></span>
+              <span class="suite-icon"><BadgeCheck size={19} strokeWidth={1.7} aria-hidden="true" /></span>
               <small>Human control</small>
               <h3>Review before main</h3>
-              <p>Inspect diffs, checks, risk signals, and checkpoints before isolated agent work reaches the primary repository files.</p>
+              <p>Inspect diffs, focused checks, GitHub pull-request findings, risk signals, checkpoints, and an optional independent judge verdict before work reaches the primary repository files.</p>
             </article>
             <article style="--i: 3">
               <span class="suite-icon"><CloudUpload size={19} strokeWidth={1.7} aria-hidden="true" /></span>
@@ -328,7 +335,8 @@ const changelog = [
             <h2 id="workflow-title">From a brief to verified, shipped work.</h2>
             <p>
               Vector keeps the request, repository context, agent activity, files, terminal, browser,
-              usage, review, and release in one place. Work directly or delegate as much as you want.
+              usage, review, and release in one place. Enable verified completion when you want a rubric-based
+              judge to require evidence before the task can be called done; it uses an additional model call and tokens.
             </p>
           </div>
           <ol class="workflow-list">
@@ -2119,11 +2127,6 @@ const changelog = [
     transition: transform 220ms ease, border-color 220ms ease, background 220ms ease;
   }
 
-  .product-system-grid article:nth-child(4),
-  .product-system-grid article:nth-child(5) {
-    grid-column: span 3;
-  }
-
   .product-system-grid article:hover {
     transform: translateY(-3px);
     border-color: rgba(197, 168, 255, 0.26);
@@ -2280,7 +2283,6 @@ const changelog = [
     .product-system-grid article,
     .product-system-grid article:nth-child(4),
     .product-system-grid article:nth-child(5) { grid-column: auto; }
-    .product-system-grid article:last-child { grid-column: 1 / -1; }
   }
 
   @media (max-width: 640px) {
