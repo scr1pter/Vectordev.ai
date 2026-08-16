@@ -653,6 +653,44 @@ function withTeammateMessages(record: ParallelWorkspaceRecord, basePrompt: strin
   return [formatDelivery(pending, record.name), basePrompt].join("\n\n")
 }
 
+// Members of a shared workspace all write to one outbox, so each entry carries
+// the sending session. Draining is destructive: an entry is routed exactly once
+// and the file is truncated, otherwise every later turn would replay the whole
+// history to the team.
+async function drainTeamOutbox(record: ParallelWorkspaceRecord) {
+  const team = teamForWorkspace(record.id)
+  if (!team) return
+  const outbox = join(record.isolatedPath, ".vector", "team-outbox.jsonl")
+  const raw = await readFile(outbox, "utf8").catch(() => "")
+  if (!raw.trim()) return
+  await writeFile(outbox, "", "utf8").catch(() => undefined)
+
+  const siblings = readRecords().filter((item) => team.memberIds.includes(item.id))
+  for (const line of raw.split("\n")) {
+    if (!line.trim()) continue
+    const entry = ((): { to?: string; message?: string; sessionID?: string } | undefined => {
+      try {
+        return JSON.parse(line)
+      } catch {
+        return undefined
+      }
+    })()
+    if (!entry?.message) continue
+    // Attribute by session so a shared outbox routes to the right sender.
+    const sender = siblings.find((item) => item.agentSessionId === entry.sessionID) ?? record
+    const recipient = entry.to
+      ? siblings.find((item) => item.name.toLowerCase() === entry.to!.trim().toLowerCase())
+      : undefined
+    postTeamMessage({
+      teamId: team.id,
+      fromWorkspaceId: sender.id,
+      fromName: sender.name,
+      toWorkspaceId: recipient?.id,
+      text: entry.message,
+    })
+  }
+}
+
 // Broadcasts what this agent just did so teammates sharing the workspace can
 // adapt instead of rediscovering it from the diff.
 function broadcastHandoff(record: ParallelWorkspaceRecord, summary: string) {
@@ -881,6 +919,17 @@ export async function createParallelWorkspace(input: CreateParallelWorkspaceInpu
     baseCommit =
       (await runGit(["rev-parse", "HEAD"], input.sharedPath, { allowFailure: true })).stdout.trim() || undefined
     logs.push(`Joined the shared workspace at ${input.sharedPath}.`)
+  }
+
+  // The engine-side tool checks for this marker before offering to message a
+  // teammate, so an agent working alone is never told a message was queued.
+  if (input.teamId) {
+    await mkdir(join(isolatedPath, ".vector"), { recursive: true }).catch(() => undefined)
+    await writeFile(
+      join(isolatedPath, ".vector", "team.json"),
+      JSON.stringify({ teamId: input.teamId, workspaceId: id, name }, null, 2),
+      "utf8",
+    ).catch(() => undefined)
   }
 
   await mkdir(workspaceDir, { recursive: true })
@@ -1406,6 +1455,7 @@ async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEng
       ].slice(0, 120),
     }))
     syncBackgroundTask(completed, completed.lastAction)
+    await drainTeamOutbox(completed)
     broadcastHandoff(completed, agentSummary)
   } catch (error) {
     const stopped = controller.signal.aborted

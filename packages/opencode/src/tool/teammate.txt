@@ -1,0 +1,19 @@
+Send a message to another agent working with you in this shared workspace.
+
+Use this when you genuinely need a teammate to know something or to answer you:
+
+- You changed something they depend on (a shared type, an interface, a route).
+- You are about to edit a file they are also working in, and want to avoid a collision.
+- You need a decision or an answer only they can give.
+- You finished a piece they are blocked on.
+
+Do not use it to narrate routine progress. Vector already broadcasts a summary of
+your work when your turn completes, so a message that only says what you did is
+noise for everyone else.
+
+Address one teammate by name when the message is for them specifically. Leave the
+recipient out to reach everyone on the team.
+
+Messages are delivered at the start of the recipient's next turn, not instantly,
+so do not wait on a reply within this turn. Say what you need, then continue with
+work you can do without the answer.
