@@ -31,6 +31,7 @@ import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { installActivityEventBridge } from "@/services/activity-service"
 import { SDKProvider } from "@/context/sdk"
 import { useServerSync } from "@/context/server-sync"
+import { useServerSDK } from "@/context/server-sdk"
 import { isInternalProjectPath, useServer } from "@/context/server"
 import { useTabs } from "@/context/tabs"
 import { sessionHref } from "@/utils/session-route"
@@ -40,6 +41,7 @@ import { SpotlightTour } from "@/features/onboarding/spotlight-tour"
 import { createSpotlightSteps } from "@/features/onboarding/spotlight-steps"
 import { outcomesFromWorkspaceRecord, recordOutcome } from "@/features/economics/economics-repository"
 import { categorizeTask } from "@/features/economics/task-categorizer"
+import { measureUsage } from "@/features/economics/token-usage"
 import {
   ONBOARDING_UPDATED_EVENT,
   readOnboardingFlags,
@@ -451,6 +453,7 @@ export default function NewLayout(props: ParentProps) {
   const command = useCommand()
   const dialog = useDialog()
   const serverSync = useServerSync()
+  const serverSDK = useServerSDK()
   const server = useServer()
   const tabs = useTabs()
   const layout = useLayout()
@@ -1364,11 +1367,33 @@ export default function NewLayout(props: ParentProps) {
     "merged",
     "discarded",
   ]
+  // Callers re-run over the full workspace list every poll, so remember which
+  // records were already measured. Without this the engine would refetch every
+  // finished agent's whole message history every 1.5 seconds.
+  const measuredEconomicsIds = new Set<string>()
+
+  // Real spend comes from the provider's own reported usage on the agent
+  // session's assistant messages. A workspace with no reachable session simply
+  // records no usage rather than a fabricated zero.
+  const measureWorkspaceUsage = async (record: ParallelWorkspaceRecord) => {
+    if (!record.agentSessionId) return undefined
+    const history = await serverSDK()
+      .createClient({ directory: record.isolatedPath })
+      .session.messages({ sessionID: record.agentSessionId })
+      .catch(() => undefined)
+    if (!Array.isArray(history?.data)) return undefined
+    return measureUsage(history.data.map((entry) => entry.info))
+  }
+
   const recordEconomicsOutcomes = (records: ParallelWorkspaceRecord[]) => {
     for (const record of records) {
       if (!record.validationReport && record.validationPassed === undefined) continue
       if (!TERMINAL_WORKSPACE_STATUSES.includes(record.status)) continue
-      void recordOutcome(outcomesFromWorkspaceRecord(record, categorizeTask(record.taskPrompt)))
+      if (measuredEconomicsIds.has(record.id)) continue
+      measuredEconomicsIds.add(record.id)
+      void measureWorkspaceUsage(record).then((measured) =>
+        recordOutcome(outcomesFromWorkspaceRecord(record, categorizeTask(record.taskPrompt), measured)),
+      )
     }
   }
 

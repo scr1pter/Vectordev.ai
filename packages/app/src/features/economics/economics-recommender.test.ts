@@ -104,3 +104,44 @@ describe("recommendModel", () => {
     expect(recommendModel(outcomes, "frontend", 2)?.model).toBe("claude-sonnet-5")
   })
 })
+
+describe("recommendModel cost ranking", () => {
+  const usage = { input: 1_000, output: 200, reasoning: 0, cacheRead: 0, cacheWrite: 0 }
+  const runs = (provider: string, model: string, costUsd: number) =>
+    [0, 1, 2].map(() => outcome({ provider, model, costUsd, usage, latencyMs: 1_000 }))
+
+  test("prefers the cheaper model when correctness and latency tie", () => {
+    const result = recommendModel([...runs("openai", "gpt-4o", 0.05), ...runs("openai", "gpt-4o-mini", 0.002)], "frontend", 3)
+    expect(result?.model).toBe("gpt-4o-mini")
+    expect(result?.medianCostUsd).toBeCloseTo(0.002, 10)
+    expect(result?.medianTokens).toBe(1_200)
+  })
+
+  test("correctness still outranks cost — an expensive model that passes checks beats a cheap one that fails", () => {
+    const cheapFailing = [0, 1, 2].map(() =>
+      outcome({ provider: "openai", model: "cheap", costUsd: 0.001, usage, hadChecks: true, checksPassed: false }),
+    )
+    const pricyPassing = [0, 1, 2].map(() =>
+      outcome({ provider: "anthropic", model: "pricy", costUsd: 0.5, usage, hadChecks: true, checksPassed: true }),
+    )
+    expect(recommendModel([...cheapFailing, ...pricyPassing], "frontend", 3)?.model).toBe("pricy")
+  })
+
+  test("a model with unmeasured spend never sorts ahead of one that reported cost", () => {
+    const unmeasured = [0, 1, 2].map(() => outcome({ provider: "x", model: "unmeasured", latencyMs: 1_000 }))
+    const measured = [0, 1, 2].map(() => outcome({ provider: "y", model: "measured", costUsd: 9.99, usage, latencyMs: 1_000 }))
+    expect(recommendModel([...unmeasured, ...measured], "frontend", 3)?.model).toBe("measured")
+  })
+
+  test("omits cost fields entirely when no run reported usage", () => {
+    const result = recommendModel([0, 1, 2].map(() => outcome({ provider: "x", model: "m" })), "frontend", 3)
+    expect(result?.medianCostUsd).toBeUndefined()
+    expect(result?.medianTokens).toBeUndefined()
+    expect(result?.evidence.some((line) => line.includes("tokens at $"))).toBe(false)
+  })
+
+  test("surfaces measured spend as evidence", () => {
+    const result = recommendModel(runs("openai", "gpt-4o", 0.0125), "frontend", 3)
+    expect(result?.evidence.some((line) => line.includes("median 1,200 tokens at $0.0125 per run"))).toBe(true)
+  })
+})

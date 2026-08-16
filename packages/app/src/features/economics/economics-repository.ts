@@ -6,6 +6,7 @@
 // other's history.
 import { checksum } from "@opencode-ai/core/util/encode"
 import type { ModelOutcome, TaskCategory } from "./economics-types"
+import type { MeasuredUsage } from "./token-usage"
 
 const STORAGE_NAME = "vector.model-economics.v1.dat"
 const MAX_OUTCOMES_PER_PROJECT = 500
@@ -90,7 +91,11 @@ export type WorkspaceRecordForEconomics = {
   validationReport?: { hadChecks: boolean; passed: boolean }
 }
 
-export function outcomesFromWorkspaceRecord(record: WorkspaceRecordForEconomics, category: TaskCategory): ModelOutcome {
+export function outcomesFromWorkspaceRecord(
+  record: WorkspaceRecordForEconomics,
+  category: TaskCategory,
+  measured?: MeasuredUsage,
+): ModelOutcome {
   const createdAtMs = Date.parse(record.createdAt)
   const lastActivityMs = Date.parse(record.lastActivityAt)
   const latencyMs =
@@ -107,5 +112,7 @@ export function outcomesFromWorkspaceRecord(record: WorkspaceRecordForEconomics,
     hadChecks: record.validationReport?.hadChecks ?? false,
     latencyMs,
     changedFiles: record.changedFilesCount,
+    usage: measured?.usage,
+    costUsd: measured?.costUsd,
   }
 }

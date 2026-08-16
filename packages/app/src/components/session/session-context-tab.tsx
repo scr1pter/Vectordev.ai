@@ -8,7 +8,7 @@ import { useSessionLayout } from "@/pages/session/session-layout"
 import { useSync } from "@/context/sync"
 import { same } from "@/utils/same"
 import { listOutcomes } from "@/features/economics/economics-repository"
-import { estimatePromptCost } from "@/features/economics/model-pricing"
+import { estimateCostForTokens } from "@/features/economics/model-pricing"
 import { categorizeTask } from "@/features/economics/task-categorizer"
 import type { ModelOutcome } from "@/features/economics/economics-types"
 import { getSessionContext, getSessionTokenTotal } from "./session-context-metrics"
@@ -25,7 +25,7 @@ function medianOf(values: number[]): number {
 
 // Ranks recorded outcomes for one task category exactly like the recommender:
 // tournament win rate first, then check-pass rate, then median latency.
-function rankModelsForCategory(outcomes: ModelOutcome[], category: ModelOutcome["category"], promptChars: number) {
+function rankModelsForCategory(outcomes: ModelOutcome[], category: ModelOutcome["category"], promptTokens: number) {
   const matching = outcomes.filter((outcome) => outcome.category === category)
   const groups = new Map<string, ModelOutcome[]>()
   for (const outcome of matching) {
@@ -49,7 +49,7 @@ function rankModelsForCategory(outcomes: ModelOutcome[], category: ModelOutcome[
         winRate,
         checkPassRate,
         medianLatencyMs: medianOf(list.map((outcome) => outcome.latencyMs)),
-        cost: estimatePromptCost(list[0].model, promptChars),
+        cost: estimateCostForTokens(list[0].model, promptTokens),
       }
     })
     .sort((a, b) => {
@@ -107,8 +107,7 @@ export function SessionContextTab() {
     (directory) => listOutcomes(directory),
   )
   const taskCategory = createMemo(() => categorizeTask(info()?.title ?? ""))
-  const promptChars = createMemo(() => (getSessionTokenTotal(tokens()) ?? 0) * 4)
-  const modelEconomics = createMemo(() => rankModelsForCategory(economicsOutcomes() ?? [], taskCategory(), promptChars()))
+  const modelEconomics = createMemo(() => rankModelsForCategory(economicsOutcomes() ?? [], taskCategory(), totalTokens()))
   const formatPercent = (value: number | undefined) =>
     value === undefined ? "-" : `${Math.round(value * 100)}%`
   const formatLatency = (ms: number) => (ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms)}ms`)

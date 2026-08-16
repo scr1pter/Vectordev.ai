@@ -1,4 +1,4 @@
-import type { ModelOutcome, ModelRecommendation, TaskCategory } from "./economics-types"
+import { totalTokens, type ModelOutcome, type ModelRecommendation, type TaskCategory } from "./economics-types"
 
 type Group = {
   provider: string
@@ -32,6 +32,21 @@ function checkPassRateOf(outcomes: ModelOutcome[]): number | undefined {
   return checked.filter((o) => o.checksPassed === true).length / checked.length
 }
 
+// undefined when no run in the group reported spend. A model that never
+// reported cost must not sort ahead of one that did just because its absent
+// cost reads as cheaper.
+function medianCostOf(outcomes: ModelOutcome[]): number | undefined {
+  const costs = outcomes.map((o) => o.costUsd).filter((cost): cost is number => typeof cost === "number")
+  if (costs.length === 0) return undefined
+  return median(costs)
+}
+
+function medianTokensOf(outcomes: ModelOutcome[]): number | undefined {
+  const counts = outcomes.map((o) => o.usage).filter((usage) => usage !== undefined).map(totalTokens)
+  if (counts.length === 0) return undefined
+  return median(counts)
+}
+
 function evidenceFor(provider: string, model: string, category: TaskCategory, outcomes: ModelOutcome[]): string[] {
   const evidence: string[] = []
 
@@ -45,6 +60,12 @@ function evidenceFor(provider: string, model: string, category: TaskCategory, ou
   if (checked.length > 0) {
     const passed = checked.filter((o) => o.checksPassed === true).length
     evidence.push(`checks passed ${passed}/${checked.length} runs`)
+  }
+
+  const cost = medianCostOf(outcomes)
+  const tokens = medianTokensOf(outcomes)
+  if (cost !== undefined && tokens !== undefined) {
+    evidence.push(`median ${Math.round(tokens).toLocaleString()} tokens at $${cost.toFixed(4)} per run`)
   }
 
   evidence.push(`${outcomes.length} recorded ${category} run${outcomes.length === 1 ? "" : "s"} for ${provider}/${model}`)
@@ -79,12 +100,21 @@ export function recommendModel(
       winRate: winRateOf(group.outcomes),
       checkPassRate: checkPassRateOf(group.outcomes),
       medianLatencyMs: median(group.outcomes.map((o) => o.latencyMs)),
+      medianCostUsd: medianCostOf(group.outcomes),
+      medianTokens: medianTokensOf(group.outcomes),
     }))
     .sort((a, b) => {
       const winDiff = (b.winRate ?? -1) - (a.winRate ?? -1)
       if (winDiff !== 0) return winDiff
       const passDiff = (b.checkPassRate ?? -1) - (a.checkPassRate ?? -1)
       if (passDiff !== 0) return passDiff
+      // Cheaper wins once correctness ties. Unknown spend sorts last rather
+      // than first, so an unmeasured model never masquerades as free. Both
+      // unknown compares equal and falls through to latency — subtracting the
+      // two sentinels would yield NaN and corrupt the sort.
+      const aCost = a.medianCostUsd ?? Infinity
+      const bCost = b.medianCostUsd ?? Infinity
+      if (aCost !== bCost) return aCost - bCost
       return a.medianLatencyMs - b.medianLatencyMs
     })
 
@@ -96,6 +126,8 @@ export function recommendModel(
     winRate: best.winRate,
     checkPassRate: best.checkPassRate,
     medianLatencyMs: best.medianLatencyMs,
+    medianCostUsd: best.medianCostUsd,
+    medianTokens: best.medianTokens,
     evidence: evidenceFor(best.group.provider, best.group.model, category, best.group.outcomes),
   }
 }

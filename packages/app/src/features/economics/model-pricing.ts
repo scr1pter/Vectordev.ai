@@ -70,6 +70,22 @@ export function findModelPricing(model: string): ModelPricing | undefined {
   return PRICING_TABLE.find((entry) => normalized.includes(entry.match))?.pricing
 }
 
+// Cost of a run from its MEASURED token counts, for the case where a provider
+// reported usage but no cost. Prefer the provider's own reported cost whenever
+// it exists — this is a fallback, and it returns undefined for unpriced models
+// rather than inventing a number. Cache reads are billed at the input rate
+// here, which slightly over-states spend on providers that discount them.
+export function costFromUsage(
+  model: string,
+  usage: { input: number; output: number; reasoning: number; cacheRead: number },
+): number | undefined {
+  const pricing = findModelPricing(model)
+  if (!pricing) return undefined
+  const inputTokens = Math.max(0, usage.input) + Math.max(0, usage.cacheRead)
+  const outputTokens = Math.max(0, usage.output) + Math.max(0, usage.reasoning)
+  return (inputTokens / 1_000_000) * pricing.inputPer1M + (outputTokens / 1_000_000) * pricing.outputPer1M
+}
+
 // Rough token estimate: ~4 characters per token, the same ballpark heuristic
 // providers themselves publish for sizing prompts without a real tokenizer.
 const CHARS_PER_TOKEN = 4
@@ -87,6 +103,33 @@ export type PromptCostEstimate = {
   estimatedInputCost: number
   estimatedOutputCost: number
   estimatedTotalCost: number
+}
+
+// Prospective estimate from a token count the caller already knows. Prefer
+// this over estimatePromptCost whenever real token counts are available —
+// going through characters only to divide them back out loses precision and
+// invites the caller to fabricate a character count it never measured.
+export function estimateCostForTokens(
+  model: string,
+  inputTokens: number,
+  assumedOutputTokens = DEFAULT_ASSUMED_OUTPUT_TOKENS,
+): PromptCostEstimate | undefined {
+  const pricing = findModelPricing(model)
+  if (!pricing) return undefined
+
+  const estimatedInputTokens = Math.max(0, Math.round(inputTokens))
+  const estimatedInputCost = (estimatedInputTokens / 1_000_000) * pricing.inputPer1M
+  const estimatedOutputCost = (Math.max(0, assumedOutputTokens) / 1_000_000) * pricing.outputPer1M
+
+  return {
+    model,
+    pricing,
+    estimatedInputTokens,
+    assumedOutputTokens,
+    estimatedInputCost,
+    estimatedOutputCost,
+    estimatedTotalCost: estimatedInputCost + estimatedOutputCost,
+  }
 }
 
 export function estimatePromptCost(
