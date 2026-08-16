@@ -803,6 +803,7 @@ export type ElectronAPI = {
     list: (scope?: { directory?: string; parentSessionId?: string }) => Promise<ScheduledAgentRecord[]>
     create: (input: CreateScheduledAgentInput) => Promise<ScheduledAgentRecord>
     cancel: (id: string) => Promise<ScheduledAgentRecord | undefined>
+  setPaused: (id: string, paused: boolean) => Promise<ScheduledAgentRecord | undefined>
     remove: (id: string) => Promise<ScheduledAgentRecord[]>
   }
   externalAgents: {

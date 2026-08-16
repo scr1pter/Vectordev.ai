@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto"
 
 import { getStore } from "./store"
+import { nextRun, type Recurrence } from "@opencode-ai/app/schedule"
 
 const STORE_NAME = "scheduled-agents"
 const STORE_KEY = "records"
@@ -14,7 +15,12 @@ export type ScheduledAgentStatus = "scheduled" | "running" | "completed" | "fail
 
 export type ScheduledAgentRecord = {
   id: string
+  title?: string
   prompt: string
+  // Absent means a one-shot run, which is what every record created before
+  // recurrence existed is.
+  recurrence?: Recurrence
+  paused?: boolean
   directory: string
   parentSessionId?: string
   runAt: string
@@ -35,6 +41,8 @@ export type ScheduledAgentEngine = {
 }
 
 export type CreateScheduledAgentInput = {
+  title?: string
+  recurrence?: Recurrence
   prompt: string
   directory: string
   parentSessionId?: string
@@ -211,13 +219,27 @@ async function launchScheduledAgent(id: string, awaitEngine: () => Promise<Sched
 
     const outcome = await waitForSessionCompletion(engine, id, sessionId)
     if (outcome === "canceled") return
-    updateRecord(id, (item) => ({
-      ...item,
-      status: "completed",
-      completedAt: now(),
-      sessionId,
-      error: undefined,
-    }))
+    updateRecord(id, (item) => {
+      const completedAt = now()
+      // A recurring task returns to "scheduled" at its next moment rather than
+      // finishing, which is what makes it repeat. nextRun is always strictly in
+      // the future, so it cannot immediately re-fire.
+      const upcoming =
+        item.recurrence && item.recurrence.kind !== "once" && !item.paused
+          ? nextRun(item.recurrence, new Date())
+          : undefined
+      if (!upcoming) {
+        return { ...item, status: "completed", completedAt, sessionId, error: undefined }
+      }
+      return {
+        ...item,
+        status: "scheduled",
+        completedAt,
+        runAt: upcoming.toISOString(),
+        sessionId,
+        error: undefined,
+      }
+    })
   } finally {
     activeRuns.delete(id)
   }
@@ -233,6 +255,7 @@ async function runDueScheduledAgents() {
       const runAtMs = Date.parse(record.runAt)
       // A record with an unreadable time can never become due later; fire it
       // now instead of leaving it stuck as "scheduled" forever.
+      if (record.paused) return false
       return !Number.isFinite(runAtMs) || runAtMs <= nowMs
     })
     for (const record of due) {
@@ -271,6 +294,20 @@ export function listScheduledAgents(scope?: { directory?: string; parentSessionI
   })
 }
 
+export function setScheduledAgentPaused(id: string, paused: boolean) {
+  return updateRecord(id, (record) => ({
+    ...record,
+    paused,
+    // Resuming a recurring task moves it to its next real moment; without this
+    // it would still hold a runAt in the past and fire immediately.
+    runAt:
+      !paused && record.recurrence && record.recurrence.kind !== "once"
+        ? (nextRun(record.recurrence, new Date())?.toISOString() ?? record.runAt)
+        : record.runAt,
+    status: paused && record.status === "scheduled" ? "canceled" : paused ? record.status : "scheduled",
+  }))
+}
+
 export function createScheduledAgent(input: CreateScheduledAgentInput): ScheduledAgentRecord {
   const prompt = input.prompt?.trim()
   if (!prompt) throw new Error("Write a prompt for the scheduled agent to run.")
@@ -283,8 +320,11 @@ export function createScheduledAgent(input: CreateScheduledAgentInput): Schedule
   // tick instead of being rejected.
   const record: ScheduledAgentRecord = {
     id: randomUUID(),
+    title: input.title?.trim() || prompt.split("\n")[0]?.slice(0, 80),
     prompt,
     directory,
+    recurrence: input.recurrence,
+    paused: false,
     parentSessionId: input.parentSessionId?.trim() || undefined,
     runAt: new Date(Math.max(parsed, Date.now())).toISOString(),
     status: "scheduled",

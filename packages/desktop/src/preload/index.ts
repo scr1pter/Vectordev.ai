@@ -300,6 +300,7 @@ const api: ElectronAPI = {
     list: (scope) => ipcRenderer.invoke("scheduled-agents-list", scope),
     create: (input) => ipcRenderer.invoke("scheduled-agents-create", input),
     cancel: (id) => ipcRenderer.invoke("scheduled-agents-cancel", id),
+    setPaused: (id, paused) => ipcRenderer.invoke("scheduled-agents-set-paused", id, paused),
     remove: (id) => ipcRenderer.invoke("scheduled-agents-remove", id),
   },
   externalAgents: {

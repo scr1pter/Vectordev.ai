@@ -2380,6 +2380,8 @@ export default function NewLayout(props: ParentProps) {
   // engine session at the scheduled time. The web build keeps prompt reminders.
   type ScheduledAgentRecordUI = {
     id: string
+    title?: string
+    paused?: boolean
     prompt: string
     directory: string
     runAt: string
@@ -2404,6 +2406,7 @@ export default function NewLayout(props: ParentProps) {
                 runAt: string
               }) => Promise<ScheduledAgentRecordUI>
               cancel: (id: string) => Promise<ScheduledAgentRecordUI | undefined>
+              setPaused?: (id: string, paused: boolean) => Promise<ScheduledAgentRecordUI | undefined>
               remove: (id: string) => Promise<ScheduledAgentRecordUI[]>
             }
           })
@@ -2462,13 +2465,13 @@ export default function NewLayout(props: ParentProps) {
   const scheduledTasksForPanel = createMemo<ScheduledTask[]>(() =>
     scheduledAgentRecords().map((record) => ({
       id: record.id,
-      title: record.prompt.split("\n")[0]?.slice(0, 80) || "Scheduled run",
+      title: record.title || record.prompt.split("\n")[0]?.slice(0, 80) || "Scheduled run",
       prompt: record.prompt,
       directory: record.directory,
       recurrence: { kind: "once", at: record.runAt },
       // Nothing persists a paused flag yet, so a run that already finished is
       // shown as inactive rather than pretending it is still pending.
-      paused: record.status !== "scheduled",
+      paused: record.paused ?? record.status !== "scheduled",
       createdAt: record.createdAt,
       lastRunAt: record.completedAt ?? record.startedAt,
       lastStatus:
@@ -5524,10 +5527,11 @@ export default function NewLayout(props: ParentProps) {
           insertScheduledPromptIntoComposer(`${suggestion.prompt} (${suggestion.schedule})`)
         }}
         onTogglePause={(id, paused) => {
-          // Only cancelling is durable today; resuming a finished one-shot is
-          // not something the scheduler can currently express.
-          if (!paused) return
-          void scheduledAgentsApi()?.cancel(id).then(() => refreshScheduledAgents())
+          const api = scheduledAgentsApi()
+          // Older builds expose only cancel, so fall back rather than making
+          // pause silently do nothing.
+          const action = api?.setPaused ? api.setPaused(id, paused) : paused ? api?.cancel(id) : undefined
+          void Promise.resolve(action).then(() => refreshScheduledAgents())
         }}
         onDelete={(id) => void scheduledAgentsApi()?.remove(id).then((records) => setScheduledAgentRecords(records))}
       />

@@ -155,6 +155,7 @@ import {
   listScheduledAgents,
   removeScheduledAgent,
   type CreateScheduledAgentInput,
+  setScheduledAgentPaused,
 } from "./scheduled-agents"
 
 const pickerFilters = (ext?: string[]) => {
@@ -357,6 +358,9 @@ export function registerIpcHandlers(deps: Deps) {
     createScheduledAgent(input),
   )
   handle("scheduled-agents-cancel", (_event: IpcMainInvokeEvent, id: string) => cancelScheduledAgent(id))
+  handle("scheduled-agents-set-paused", (_event, id: string, paused: boolean) =>
+    setScheduledAgentPaused(id, Boolean(paused)),
+  )
   handle("scheduled-agents-remove", (_event: IpcMainInvokeEvent, id: string) => removeScheduledAgent(id))
   handle("publish-targets", () => detectPublishTargets())
   handle("publish-project", (event: IpcMainInvokeEvent, input: PublishProjectInput) =>
