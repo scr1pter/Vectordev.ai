@@ -17,6 +17,12 @@ import {
 import { createStore } from "solid-js/store"
 import { Portal } from "solid-js/web"
 import {
+  agentColor,
+  changedLineRanges,
+  mergeAttribution,
+  type AgentAttribution,
+} from "@/components/editor-attribution"
+import {
   MonacoCodeEditor,
   type InlineCompleteInput,
   type InlineEditSelection,
@@ -2126,6 +2132,37 @@ export function CodespaceWorkbench(props: {
   })
   onCleanup(stopEditorFileFollow)
 
+  // Attribution for live agent edits. file.edited carries the agent but no line
+  // ranges, so the ranges come from comparing the buffer before and after the
+  // reload the event triggers.
+  const [attributions, setAttributions] = createSignal<AgentAttribution[]>([])
+  const stopEditAttribution = sdk().event.listen((event) => {
+    if (event.details.type !== "file.edited") return
+    const properties =
+      typeof event.details.properties === "object" && event.details.properties
+        ? (event.details.properties as Record<string, unknown>)
+        : undefined
+    const changed = typeof properties?.file === "string" ? normalizedWorkspacePath(properties.file) : undefined
+    const sessionID = typeof properties?.sessionID === "string" ? properties.sessionID : undefined
+    if (!changed || !sessionID || changed !== selectedPath()) return
+
+    const before = drafts[changed] ?? state()?.content?.content ?? ""
+    const agentName = typeof properties?.agent === "string" ? properties.agent : "Agent"
+    void file.load(changed, { force: true }).then(() => {
+      const after = state()?.content?.content ?? ""
+      const ranges = changedLineRanges(before, after)
+      if (!ranges.length) return
+      setAttributions((current) =>
+        mergeAttribution(
+          current,
+          { agentId: sessionID, agentName, color: agentColor(sessionID), ranges, at: Date.now() },
+          Date.now(),
+        ),
+      )
+    })
+  })
+  onCleanup(stopEditAttribution)
+
   const openQuickFileSearch = () => {
     dialog.show(() => (
       <DialogSelectFile
@@ -2927,6 +2964,7 @@ export function CodespaceWorkbench(props: {
                               <MonacoCodeEditor
                                 path={workspaceAbsolutePath(path())}
                                 value={draft()}
+                                attributions={attributions()}
                                 onChange={(next) => updateDraft(path(), next)}
                                 inlineComplete={aiComplete}
                                 languageService={languageService}
