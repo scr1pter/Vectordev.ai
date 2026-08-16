@@ -367,11 +367,11 @@ export function createSpotlightSteps(host: SpotlightTourHost): SpotlightStep[] {
       placement: "right",
     }),
     workspace({
-      id: "sidebar-settings",
+      id: "sidebar-report-bug",
       section: "Sidebar",
-      title: "The Settings gear.",
-      body: "Same Settings as on Home, always within reach. We'll open it in a moment — one more stop first.",
-      target: '[data-vector-navigation] [aria-label="Settings"]',
+      title: "Hit a bug? Say so here.",
+      body: "Send a report straight to the Vector team without leaving your workspace — your app version and platform ride along automatically. Settings lives on Home, so the workspace stays focused on the work.",
+      target: "[data-vector-navigation] [data-vector-report-bug]",
       placement: "right",
     }),
 

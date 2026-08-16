@@ -510,6 +510,7 @@ export type ElectronAPI = {
   wslServers: WslServersAPI
   updater: UpdaterAPI
   license: LicenseAPI
+  reportBug: (input: { message: string; email?: string }) => Promise<{ delivered: boolean; error?: string }>
   consumeInitialDeepLinks: () => Promise<string[]>
   getDefaultServerUrl: () => Promise<string | null>
   setDefaultServerUrl: (url: string | null) => Promise<void>

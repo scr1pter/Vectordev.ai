@@ -32,6 +32,7 @@ import { installActivityEventBridge } from "@/services/activity-service"
 import { SDKProvider } from "@/context/sdk"
 import { useServerSync } from "@/context/server-sync"
 import { useServerSDK } from "@/context/server-sdk"
+import { DialogReportBug } from "@/components/dialog-report-bug"
 import { isInternalProjectPath, useServer } from "@/context/server"
 import { useTabs } from "@/context/tabs"
 import { sessionHref } from "@/utils/session-route"
@@ -454,6 +455,7 @@ export default function NewLayout(props: ParentProps) {
   const dialog = useDialog()
   const serverSync = useServerSync()
   const serverSDK = useServerSDK()
+  const [reportBugOpen, setReportBugOpen] = createSignal(false)
   const server = useServer()
   const tabs = useTabs()
   const layout = useLayout()
@@ -5247,10 +5249,12 @@ export default function NewLayout(props: ParentProps) {
           }
           command.show()
         }}
-        onSettings={openSettings}
+        onReportBug={() => setReportBugOpen(true)}
         onGettingStarted={() => setOnboardingOpen(true)}
         onUpdate={() => void updaterAction.updateLatest()}
       />
+
+      <DialogReportBug open={reportBugOpen()} onClose={() => setReportBugOpen(false)} />
 
       <nav
         data-vector-navigation-legacy

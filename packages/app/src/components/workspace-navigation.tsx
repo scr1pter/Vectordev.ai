@@ -84,7 +84,7 @@ export function WorkspaceNavigation(props: {
   onMcp: () => void
   onPlugins: () => void
   onFind: () => void
-  onSettings: () => void
+  onReportBug: () => void
   onGettingStarted: () => void
   onUpdate: () => void
 }) {
@@ -571,19 +571,20 @@ export function WorkspaceNavigation(props: {
         </button>
         <button
           type="button"
+          data-vector-report-bug
           class="grid size-8 place-items-center rounded-[5px] text-white/38 transition hover:bg-white/[0.05] hover:text-white"
-          onClick={props.onSettings}
-          title="Settings"
-          aria-label="Settings"
+          onClick={props.onReportBug}
+          title="Report a bug"
+          aria-label="Report a bug"
         >
           <svg viewBox="0 0 16 16" class="size-3.5" aria-hidden="true">
+            <ellipse cx="8" cy="9.1" rx="3.15" ry="3.9" fill="none" stroke="currentColor" stroke-width="1.15" />
             <path
-              d="M8 10.35A2.35 2.35 0 1 0 8 5.65a2.35 2.35 0 0 0 0 4.7Zm4.72-1.35a4.8 4.8 0 0 0 0-2l1.2-.92-1.2-2.08-1.42.58a5.1 5.1 0 0 0-1.72-1L9.4 2H6.6l-.18 1.58a5.1 5.1 0 0 0-1.72 1L3.28 4l-1.2 2.08 1.2.92a4.8 4.8 0 0 0 0 2l-1.2.92L3.28 12l1.42-.58a5.1 5.1 0 0 0 1.72 1L6.6 14h2.8l.18-1.58a5.1 5.1 0 0 0 1.72-1l1.42.58 1.2-2.08-1.2-.92Z"
+              d="M5.85 5.85a2.15 2.15 0 0 1 4.3 0M6.5 4.3 5.6 3.1m3.9 1.2.9-1.2M4.85 7.3 2.6 6.5m10.8 0-2.25.8M4.5 9.9H2.3m11.4 0h-2.2M4.85 12.5l-2 1.05m11.1-1.05-2-1.05M8 6.2v6.6"
               fill="none"
               stroke="currentColor"
-              stroke-width="1.1"
+              stroke-width="1.15"
               stroke-linecap="round"
-              stroke-linejoin="round"
             />
           </svg>
         </button>

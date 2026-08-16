@@ -63,6 +63,7 @@ const api: ElectronAPI = {
     setCancellation: (cancel) => ipcRenderer.invoke("license-set-cancellation", cancel),
     openBillingPortal: () => ipcRenderer.invoke("license-open-billing-portal"),
   },
+  reportBug: (input) => ipcRenderer.invoke("report-bug", input),
   consumeInitialDeepLinks: () => ipcRenderer.invoke("consume-initial-deep-links"),
   getDefaultServerUrl: () => ipcRenderer.invoke("get-default-server-url"),
   setDefaultServerUrl: (url) => ipcRenderer.invoke("set-default-server-url", url),
