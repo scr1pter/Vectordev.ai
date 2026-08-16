@@ -34,6 +34,7 @@ import { useServerSync } from "@/context/server-sync"
 import { useServerSDK } from "@/context/server-sdk"
 import { DialogReportBug } from "@/components/dialog-report-bug"
 import { HelpPanel } from "@/features/help/help-panel"
+import { AgentDashboard } from "@/features/agents/agent-dashboard"
 import { isInternalProjectPath, useServer } from "@/context/server"
 import { useTabs } from "@/context/tabs"
 import { sessionHref } from "@/utils/session-route"
@@ -458,6 +459,7 @@ export default function NewLayout(props: ParentProps) {
   const serverSDK = useServerSDK()
   const [reportBugOpen, setReportBugOpen] = createSignal(false)
   const [helpPanelOpen, setHelpPanelOpen] = createSignal(false)
+  const [agentDashboardOpen, setAgentDashboardOpen] = createSignal(false)
   const server = useServer()
   const tabs = useTabs()
   const layout = useLayout()
@@ -5236,6 +5238,7 @@ export default function NewLayout(props: ParentProps) {
         }}
         onMoveWorkspace={moveAgentWorkspace}
         onCodeEditor={openCodespace}
+        onAgentDashboard={() => setAgentDashboardOpen(true)}
         onBrowser={openPreviewPanel}
         onCanvas={() => navigate(`/canvas${taskScopeSearch(activeTaskScope())}`)}
         onScheduled={openScheduledTasks}
@@ -5259,6 +5262,16 @@ export default function NewLayout(props: ParentProps) {
       <DialogReportBug open={reportBugOpen()} onClose={() => setReportBugOpen(false)} />
 
       <HelpPanel open={helpPanelOpen()} onClose={() => setHelpPanelOpen(false)} />
+
+      <AgentDashboard
+        open={agentDashboardOpen()}
+        agents={parallelRecords()}
+        onClose={() => setAgentDashboardOpen(false)}
+        onOpenAgent={(id) => {
+          setAgentDashboardOpen(false)
+          openAgentByID(id)
+        }}
+      />
 
       <nav
         data-vector-navigation-legacy
