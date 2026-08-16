@@ -390,4 +390,10 @@ export const release117: VectorRelease[] = [
     summary:
       "Added dependency-aware subagent orchestration with file ownership boundaries, optional LLM-as-a-judge verification and repair loops, durable scheduled-agent completion tracking, in-session GitHub pull-request review, visible testing state, and a substantially expanded MCP plugin catalog.",
   },
+  {
+    version: "1.17.51",
+    title: "Real spend, real answers",
+    summary:
+      "The model economics engine now records the provider's own reported tokens and cost for every run instead of estimating from character counts, and ranks models on measured spend once correctness ties. Added the Vector Help AI Assistant, a docs-and-chat side panel answering strictly from Vector's own documentation so it cannot invent controls that do not exist. Replaced the workspace settings gear with a one-click bug reporter that sends your app version and platform along with the report.",
+  },
 ]
