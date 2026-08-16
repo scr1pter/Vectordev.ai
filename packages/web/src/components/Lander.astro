@@ -1,5 +1,5 @@
 ---
-import { ArrowRight, BadgeCheck, Bot, ChevronDown, Cloud, CloudUpload, Code2, Globe2, Laptop2 } from "lucide-react"
+import { ArrowRight, BadgeCheck, Bot, Brain, ChevronDown, Cloud, CloudUpload, Code2, GitPullRequest, Globe2, Laptop2, Users } from "lucide-react"
 import MarketingFooter from "./marketing/MarketingFooter.astro"
 import MarketingNav from "./marketing/MarketingNav.astro"
 import screenshotAgent from "../assets/lander/vector-agent-current.png"
@@ -177,6 +177,24 @@ const products = [
     icon: Bot,
   },
   {
+    name: "Agents that work together",
+    eyebrow: "Shared or isolated",
+    body: "Put agents in one workspace and they see each other's edits as they happen and message each other while working, or keep each on its own branch. When two hold the same file, Vector names the file and both agents before you merge.",
+    icon: Users,
+  },
+  {
+    name: "AI code review",
+    eyebrow: "Before it reaches your team",
+    body: "Read, review, and merge pull requests without leaving Vector. Vector reviews the diff itself and returns findings by severity with file and line, which you read before anything is posted.",
+    icon: GitPullRequest,
+  },
+  {
+    name: "Local memory",
+    eyebrow: "Never leaves your machine",
+    body: "Vector carries what it learns about how you work across every project and repository. A plain file in your own config directory, visible in Settings, erasable in one click.",
+    icon: Brain,
+  },
+  {
     name: "Parallel workspaces",
     eyebrow: "Up to 16 isolated agents",
     body: "Split independent responsibilities across Git worktrees, keep unfinished changes away from main, then inspect checks and merge only the work you trust.",
@@ -255,9 +273,9 @@ const changelog = [
           </h1>
 
           <p class="headline">
-            <span>Build software with agents you can inspect.</span>
-            <span class="scramble" data-scramble aria-hidden="true">Open the repo. Direct the work. Ship with evidence.</span>
-            <span class="sr-only">Vector brings agents, code, terminal, browser testing, review, and cloud delivery into one local-first workspace.</span>
+            <span class="headline-lead">Build software with</span>{" "}
+            <span class="headline-rotate" data-scramble aria-hidden="true">agents that work together.</span>
+            <span class="sr-only">Vector brings agents, code review, terminal, browser testing, memory, and cloud delivery into one local-first workspace.</span>
           </p>
 
           <div class="hero-loop" aria-label="Vector's build, test, and ship workflow">
@@ -591,10 +609,14 @@ const changelog = [
   const initScramble = () => {
     const node = document.querySelector<HTMLElement>("[data-scramble]")
     if (!node) return () => {}
+    // Each phrase completes the same opening clause, so the headline always
+    // reads as one sentence rather than a label with a caption.
     const phrases = [
-      "Direct the agent with a clear outcome.",
-      "Watch files, commands, and checks run.",
-      "Review the evidence and ship confidently.",
+      "agents that work together.",
+      "AI review on every pull request.",
+      "memory that never leaves your machine.",
+      "one dashboard over every agent.",
+      "Claude Code, Codex, or Cursor inside.",
     ]
     const stages = Array.from(document.querySelectorAll<HTMLElement>("[data-hero-stage]"))
     const progress = document.querySelector<HTMLElement>("[data-hero-progress]")
@@ -607,47 +629,47 @@ const changelog = [
       selectStage(0)
       return () => {}
     }
-    const glyphs = "abcdefghijklmnopqrstuvwxyz<>{}/\\=+*"
-    let phrase = 0
-    let frame = 0
-    let raf = 0
-    let timer = 0
-    const step = () => {
-      const target = phrases[phrase]
-      selectStage(phrase)
-      const total = target.length + 10
-      frame++
-      const revealed = Math.max(0, Math.floor(((frame - 6) / total) * target.length))
-      const scrambled = Math.min(target.length - revealed, 9)
-      node.textContent =
-        target.slice(0, revealed) +
-        Array.from({ length: scrambled }, () => glyphs[Math.floor(Math.random() * glyphs.length)]).join("")
-      if (frame < total + 6) {
-        raf = requestAnimationFrame(step)
-        return
-      }
-      node.textContent = target
-      phrase = (phrase + 1) % phrases.length
-      frame = 0
-      timer = globalThis.setTimeout(() => {
-        if (!document.hidden) raf = requestAnimationFrame(step)
-        else timer = globalThis.setTimeout(() => raf = requestAnimationFrame(step), 4000)
-      }, 3600)
+
+    // Reserve the width of the longest phrase so swapping one for another never
+    // reflows the hero beneath it.
+    const measure = document.createElement("span")
+    measure.setAttribute("aria-hidden", "true")
+    measure.style.cssText = "position:absolute;visibility:hidden;white-space:nowrap;pointer-events:none"
+    node.after(measure)
+    const widest = phrases.reduce((longest, phrase) => (phrase.length > longest.length ? phrase : longest), "")
+    measure.textContent = widest
+    measure.style.font = getComputedStyle(node).font
+    node.style.minWidth = `${Math.ceil(measure.getBoundingClientRect().width)}px`
+    node.style.display = "inline-block"
+    measure.remove()
+
+    let index = 0
+    let holdTimer = 0
+    let swapTimer = 0
+    const HOLD_MS = 2600
+    const FADE_MS = 320
+
+    const cycle = () => {
+      node.dataset.out = "true"
+      swapTimer = window.setTimeout(() => {
+        index = (index + 1) % phrases.length
+        node.textContent = phrases[index]
+        selectStage(index % Math.max(stages.length, 1))
+        node.dataset.out = "false"
+        holdTimer = window.setTimeout(cycle, HOLD_MS)
+      }, FADE_MS)
     }
-    timer = globalThis.setTimeout(() => raf = requestAnimationFrame(step), 2400)
+
+    node.textContent = phrases[0]
+    selectStage(0)
+    holdTimer = window.setTimeout(cycle, HOLD_MS)
+
     return () => {
-      globalThis.clearTimeout(timer)
-      if (raf) cancelAnimationFrame(raf)
-      node.textContent = phrases[0]
-      selectStage(0)
+      window.clearTimeout(holdTimer)
+      window.clearTimeout(swapTimer)
     }
   }
 
-  // Apple-style pinned scenes: each [data-scene] is a tall runway with a sticky
-  // full-viewport stage. Scroll progress through the runway is written to --p
-  // (0..1) and the scene CSS choreographs its layers from that one number.
-  // Reduced motion and small screens collapse to static layouts via CSS, so the
-  // engine just parks --p at its final value there.
   const initScenes = () => {
     const scenes = Array.from(document.querySelectorAll<HTMLElement>("[data-scene]"))
     if (!scenes.length) return () => {}
@@ -1336,13 +1358,21 @@ const changelog = [
   }
 
   .headline > span {
-    display: block;
+    display: inline;
   }
 
-  .scramble {
+  .headline-rotate {
     color: var(--purple-soft);
-    font-variant-ligatures: none;
     text-shadow: 0 0 32px rgba(143, 82, 255, 0.24);
+    /* Fade only. Sliding or scaling the phrase reflows the line beneath it on
+       every swap, which reads as the page twitching rather than the words
+       changing. */
+    opacity: 1;
+    transition: opacity 320ms ease;
+  }
+
+  .headline-rotate[data-out="true"] {
+    opacity: 0;
   }
 
   .hero-loop {
