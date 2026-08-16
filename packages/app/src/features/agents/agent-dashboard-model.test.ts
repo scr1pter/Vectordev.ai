@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import {
   elapsedLabel,
+  isDirected,
+  orderConversation,
   findClashes,
   groupAgents,
   isFinished,
@@ -105,7 +107,7 @@ describe("summarize", () => {
   })
 
   test("is all zeroes for no agents", () => {
-    expect(summarize([])).toEqual({ total: 0, running: 0, attention: 0, finished: 0, changedFiles: 0, clashes: 0 })
+    expect(summarize([])).toEqual({ total: 0, running: 0, attention: 0, finished: 0, changedFiles: 0, clashes: 0, teams: 0 })
   })
 })
 
@@ -156,5 +158,41 @@ describe("elapsedLabel", () => {
 
   test("is empty for an unparseable timestamp", () => {
     expect(elapsedLabel(agent({ createdAt: "not a date" }), now)).toBe("")
+  })
+})
+
+describe("team conversation", () => {
+  const message = (id: string, createdAt: string, toWorkspaceId?: string) => ({
+    id,
+    fromWorkspaceId: "a",
+    fromName: "Alpha",
+    toWorkspaceId,
+    text: "t",
+    createdAt,
+  })
+
+  test("orders a transcript oldest first", () => {
+    const ordered = orderConversation([
+      message("second", "2026-08-15T20:05:00.000Z"),
+      message("first", "2026-08-15T20:00:00.000Z"),
+    ])
+    expect(ordered.map((m) => m.id)).toEqual(["first", "second"])
+  })
+
+  test("does not mutate the input", () => {
+    const input = [message("b", "2026-08-15T20:05:00.000Z"), message("a", "2026-08-15T20:00:00.000Z")]
+    orderConversation(input)
+    expect(input.map((m) => m.id)).toEqual(["b", "a"])
+  })
+
+  test("distinguishes a directed reply from a broadcast handoff", () => {
+    expect(isDirected(message("x", "2026-08-15T20:00:00.000Z", "b"))).toBe(true)
+    expect(isDirected(message("y", "2026-08-15T20:00:00.000Z"))).toBe(false)
+  })
+})
+
+describe("summarize teams", () => {
+  test("counts distinct teams and ignores agents without one", () => {
+    expect(summarize([agent({ teamId: "t1" }), agent({ teamId: "t1" }), agent({ teamId: "t2" }), agent()]).teams).toBe(2)
   })
 })

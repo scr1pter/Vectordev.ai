@@ -1,6 +1,8 @@
 import { createMemo, createSignal, For, onCleanup, Show } from "solid-js"
 import {
   elapsedLabel,
+  isDirected,
+  orderConversation,
   findClashes,
   groupAgents,
   isRunning,
@@ -8,6 +10,7 @@ import {
   sortForDisplay,
   summarize,
   type DashboardAgentInput,
+  type TeamConversation,
 } from "./agent-dashboard-model"
 
 const statusTone = (status: DashboardAgentInput["status"]) => {
@@ -79,9 +82,40 @@ function AgentRow(props: { agent: DashboardAgentInput; now: number; onOpen?: (id
   )
 }
 
+
+function Conversation(props: { conversation: TeamConversation }) {
+  return (
+    <div class="mb-4 rounded-[6px] border border-[color:var(--vx-line)] bg-[color:var(--vx-surface)]">
+      <div class="flex items-center gap-2 border-b border-[color:var(--vx-line)] px-3 py-2">
+        <span class="text-[12.5px] font-medium text-white">{props.conversation.teamName}</span>
+        <span class="text-[11px] text-white/40">
+          {props.conversation.messages.length} message{props.conversation.messages.length === 1 ? "" : "s"}
+        </span>
+      </div>
+      <div class="max-h-[260px] overflow-y-auto px-3 py-2">
+        <For each={orderConversation(props.conversation.messages)}>
+          {(message) => (
+            <div class="mb-2 last:mb-0">
+              <div class="flex items-baseline gap-2">
+                <span class="text-[11.5px] font-medium text-[color:var(--vx-purple-bright)]">{message.fromName}</span>
+                <Show when={isDirected(message)}>
+                  <span class="text-[10px] text-white/35">replied</span>
+                </Show>
+                <span class="text-[10px] text-white/30">{new Date(message.createdAt).toLocaleTimeString()}</span>
+              </div>
+              <p class="mt-0.5 whitespace-pre-wrap text-[12px] leading-relaxed text-white/70">{message.text}</p>
+            </div>
+          )}
+        </For>
+      </div>
+    </div>
+  )
+}
+
 export function AgentDashboard(props: {
   open: boolean
   agents: DashboardAgentInput[]
+  conversations?: TeamConversation[]
   onClose: () => void
   onOpenAgent?: (id: string) => void
 }) {
@@ -130,6 +164,7 @@ export function AgentDashboard(props: {
             <Stat label="Need you" value={summary().attention} tone="text-amber-300" />
             <Stat label="Finished" value={summary().finished} tone="text-emerald-300" />
             <Stat label="Files touched" value={summary().changedFiles} />
+            <Stat label="Teams" value={summary().teams} />
             <Stat label="Clashes" value={summary().clashes} tone={summary().clashes ? "text-rose-300" : "text-white"} />
           </div>
 
@@ -150,6 +185,14 @@ export function AgentDashboard(props: {
               </div>
             </div>
           </Show>
+
+          <For each={props.conversations ?? []}>
+            {(conversation) => (
+              <Show when={conversation.messages.length}>
+                <Conversation conversation={conversation} />
+              </Show>
+            )}
+          </For>
 
           <Show
             when={props.agents.length}

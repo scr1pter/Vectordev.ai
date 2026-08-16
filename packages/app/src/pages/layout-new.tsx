@@ -35,6 +35,7 @@ import { useServerSDK } from "@/context/server-sdk"
 import { DialogReportBug } from "@/components/dialog-report-bug"
 import { HelpPanel } from "@/features/help/help-panel"
 import { AgentDashboard } from "@/features/agents/agent-dashboard"
+import type { TeamConversation } from "@/features/agents/agent-dashboard-model"
 import { ExternalRuntimeSetupPanel } from "@/features/agents/external-runtime-setup"
 import { isExternalRuntime, type ExternalRuntime } from "@/features/agents/external-runtimes"
 import { PullRequests } from "@/features/pull-requests/pull-requests"
@@ -464,6 +465,28 @@ export default function NewLayout(props: ParentProps) {
   const [reportBugOpen, setReportBugOpen] = createSignal(false)
   const [helpPanelOpen, setHelpPanelOpen] = createSignal(false)
   const [agentDashboardOpen, setAgentDashboardOpen] = createSignal(false)
+  const [teamConversations, setTeamConversations] = createSignal<TeamConversation[]>([])
+
+  // Teams are read when the dashboard opens rather than on the workspace poll:
+  // the transcript only matters while it is on screen, and the agent list has
+  // its own refresh already.
+  const refreshTeamConversations = async () => {
+    const teams = (
+      globalThis.window as unknown as {
+        api?: { agentTeams?: { list: (scope?: { sourcePath?: string }) => Promise<unknown[]> } }
+      }
+    )?.api?.agentTeams
+    if (!teams) return
+    const scope = activeWorkspaceScope()
+    const list = await teams.list({ sourcePath: scope.sourcePath }).catch(() => [])
+    setTeamConversations(
+      (list as { id: string; name: string; messages?: TeamConversation["messages"] }[]).map((team) => ({
+        teamId: team.id,
+        teamName: team.name,
+        messages: team.messages ?? [],
+      })),
+    )
+  }
   const [pullRequestsOpen, setPullRequestsOpen] = createSignal(false)
   const server = useServer()
   const tabs = useTabs()
@@ -5271,7 +5294,10 @@ export default function NewLayout(props: ParentProps) {
         }}
         onMoveWorkspace={moveAgentWorkspace}
         onCodeEditor={openCodespace}
-        onAgentDashboard={() => setAgentDashboardOpen(true)}
+        onAgentDashboard={() => {
+          setAgentDashboardOpen(true)
+          void refreshTeamConversations()
+        }}
         onPullRequests={() => setPullRequestsOpen(true)}
         onBrowser={openPreviewPanel}
         onCanvas={() => navigate(`/canvas${taskScopeSearch(activeTaskScope())}`)}
@@ -5319,6 +5345,7 @@ export default function NewLayout(props: ParentProps) {
       <AgentDashboard
         open={agentDashboardOpen()}
         agents={parallelRecords()}
+        conversations={teamConversations()}
         onClose={() => setAgentDashboardOpen(false)}
         onOpenAgent={(id) => {
           setAgentDashboardOpen(false)

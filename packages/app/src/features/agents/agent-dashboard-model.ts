@@ -34,6 +34,7 @@ export type DashboardAgentInput = {
   agent?: string
   swarmRunId?: string
   swarmRole?: "coordinator" | "worker"
+  teamId?: string
   mergeState: "none" | "merged" | "discarded"
   error?: string
 }
@@ -80,6 +81,35 @@ export function findClashes(agents: readonly DashboardAgentInput[]): AgentClash[
     .sort((a, b) => a.file.localeCompare(b.file))
 }
 
+// A relayed message between two agents on the same team, as the dashboard
+// renders it. Mirrors TeamMessage in the desktop main process; the app cannot
+// import from packages/desktop, so the shape is restated here.
+export type TeamConversationMessage = {
+  id: string
+  fromWorkspaceId: string
+  fromName: string
+  toWorkspaceId?: string
+  text: string
+  createdAt: string
+}
+
+export type TeamConversation = {
+  teamId: string
+  teamName: string
+  messages: TeamConversationMessage[]
+}
+
+// Oldest first, so the exchange reads top-down like a transcript.
+export function orderConversation(messages: readonly TeamConversationMessage[]) {
+  return [...messages].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
+}
+
+// A handoff broadcast carries no recipient; a reply names one. Worth
+// distinguishing so the transcript reads as a conversation rather than a log.
+export function isDirected(message: TeamConversationMessage) {
+  return Boolean(message.toWorkspaceId)
+}
+
 export type DashboardSummary = {
   total: number
   running: number
@@ -87,6 +117,7 @@ export type DashboardSummary = {
   finished: number
   changedFiles: number
   clashes: number
+  teams: number
 }
 
 export function summarize(agents: readonly DashboardAgentInput[]): DashboardSummary {
@@ -97,6 +128,7 @@ export function summarize(agents: readonly DashboardAgentInput[]): DashboardSumm
     finished: agents.filter((agent) => isFinished(agent.status)).length,
     changedFiles: new Set(agents.flatMap((agent) => agent.changedFiles)).size,
     clashes: findClashes(agents).length,
+    teams: new Set(agents.map((agent) => agent.teamId).filter(Boolean)).size,
   }
 }
 
