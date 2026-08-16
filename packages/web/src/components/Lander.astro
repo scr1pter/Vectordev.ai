@@ -3,7 +3,9 @@ import { ArrowRight, BadgeCheck, Bot, ChevronDown, Cloud, CloudUpload, Code2, Gl
 import MarketingFooter from "./marketing/MarketingFooter.astro"
 import MarketingNav from "./marketing/MarketingNav.astro"
 import screenshotAgent from "../assets/lander/vector-agent-current.png"
-import screenshotAgents from "../assets/lander/vector-workspaces-current.png"
+import screenshotAgents from "../assets/lander/vector-agents-current.png"
+import screenshotScheduled from "../assets/lander/vector-scheduled-current.png"
+import screenshotMemory from "../assets/lander/vector-memory-current.png"
 import screenshotBrowser from "../assets/lander/vector-browser-current.png"
 import screenshotCloud from "../assets/lander/vector-cloud-current.png"
 import screenshotEditor from "../assets/lander/vector-editor-current.png"
@@ -92,11 +94,21 @@ const features = [
     link: "Review a pull request",
   },
   {
+    title: "Work that happens whether or not you are there.",
+    body: "Schedule an agent to run on a recurrence — every weekday morning, Monday mornings, nightly — and Vector runs it against the project and leaves the result waiting. Pause anything you do not want running, and see when each task next fires.",
+    tag: "Scheduled tasks",
+    note: "Recurring or one-off",
+    image: screenshotScheduled,
+    alt: "Vector scheduled tasks listing recurring agent runs with their next run times",
+    href: "/docs",
+    link: "Schedule a task",
+  },
+  {
     title: "It remembers you. Only on your computer.",
     body: "Local memory keeps what Vector learns about how you work and carries it across every project and repository, so you stop repeating yourself. It is a plain file in your own config directory that is never uploaded. Settings shows exactly what is stored, how large it is, and where it lives, and erases all of it on request.",
     tag: "Local memory",
     note: "Never leaves your machine",
-    image: screenshotEditor,
+    image: screenshotMemory,
     alt: "Vector settings showing stored local memory with an option to erase it",
     href: "/docs",
     link: "How local memory works",
