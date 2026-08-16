@@ -79,6 +79,7 @@ export function WorkspaceNavigation(props: {
   onMoveWorkspace: (sourceID: string, targetID: string) => void
   onCodeEditor: () => void
   onAgentDashboard: () => void
+  onPullRequests: () => void
   onBrowser: () => void
   onCanvas: () => void
   onScheduled: () => void
@@ -394,6 +395,15 @@ export function WorkspaceNavigation(props: {
 
         <section data-vector-nav-group class="border-t border-[color:var(--vx-line)] px-2 py-3">
           <div data-vector-nav-label>Project tools</div>
+          <button type="button" data-vector-nav-item data-tour="nav-pull-requests" onClick={props.onPullRequests}>
+            <svg viewBox="0 0 16 16" class="size-3.5 shrink-0" aria-hidden="true">
+              <circle cx="4.2" cy="3.6" r="1.5" fill="none" stroke="currentColor" stroke-width="1.15" />
+              <circle cx="4.2" cy="12.4" r="1.5" fill="none" stroke="currentColor" stroke-width="1.15" />
+              <circle cx="11.8" cy="12.4" r="1.5" fill="none" stroke="currentColor" stroke-width="1.15" />
+              <path d="M4.2 5.1v5.8M11.8 10.9V6.4a2 2 0 0 0-2-2H7.4m0 0 1.6-1.5M7.4 4.4 9 5.9" fill="none" stroke="currentColor" stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+            <span>Pull Requests</span>
+          </button>
           <button type="button" data-vector-nav-item data-tour="nav-agent-dashboard" onClick={props.onAgentDashboard}>
             <svg viewBox="0 0 16 16" class="size-3.5 shrink-0" aria-hidden="true">
               <rect x="2.3" y="2.6" width="4.7" height="4.7" rx="1.1" fill="none" stroke="currentColor" stroke-width="1.15" />

@@ -35,6 +35,8 @@ import { useServerSDK } from "@/context/server-sdk"
 import { DialogReportBug } from "@/components/dialog-report-bug"
 import { HelpPanel } from "@/features/help/help-panel"
 import { AgentDashboard } from "@/features/agents/agent-dashboard"
+import { PullRequests } from "@/features/pull-requests/pull-requests"
+import { extractVelReply } from "@/features/vel/vel-call"
 import { isInternalProjectPath, useServer } from "@/context/server"
 import { useTabs } from "@/context/tabs"
 import { sessionHref } from "@/utils/session-route"
@@ -460,6 +462,7 @@ export default function NewLayout(props: ParentProps) {
   const [reportBugOpen, setReportBugOpen] = createSignal(false)
   const [helpPanelOpen, setHelpPanelOpen] = createSignal(false)
   const [agentDashboardOpen, setAgentDashboardOpen] = createSignal(false)
+  const [pullRequestsOpen, setPullRequestsOpen] = createSignal(false)
   const server = useServer()
   const tabs = useTabs()
   const layout = useLayout()
@@ -5239,6 +5242,7 @@ export default function NewLayout(props: ParentProps) {
         onMoveWorkspace={moveAgentWorkspace}
         onCodeEditor={openCodespace}
         onAgentDashboard={() => setAgentDashboardOpen(true)}
+        onPullRequests={() => setPullRequestsOpen(true)}
         onBrowser={openPreviewPanel}
         onCanvas={() => navigate(`/canvas${taskScopeSearch(activeTaskScope())}`)}
         onScheduled={openScheduledTasks}
@@ -5262,6 +5266,25 @@ export default function NewLayout(props: ParentProps) {
       <DialogReportBug open={reportBugOpen()} onClose={() => setReportBugOpen(false)} />
 
       <HelpPanel open={helpPanelOpen()} onClose={() => setHelpPanelOpen(false)} />
+
+      <PullRequests
+        open={pullRequestsOpen()}
+        projectPath={activeWorkspaceScope().sourcePath}
+        onClose={() => setPullRequestsOpen(false)}
+        onAiReview={async (prompt) => {
+          const directory = activeWorkspaceScope().sourcePath
+          if (!directory) throw new Error("Open a project before running a review.")
+          const client = serverSDK().createClient({ directory, throwOnError: true })
+          const created = await client.session.create().then((result) => result.data ?? undefined)
+          if (!created) throw new Error("Vector could not create a session for this review.")
+          const outcome = await client.session.prompt({
+            sessionID: created.id,
+            directory,
+            parts: [{ type: "text", text: prompt }],
+          })
+          return extractVelReply(outcome.data)
+        }}
+      />
 
       <AgentDashboard
         open={agentDashboardOpen()}

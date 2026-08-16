@@ -12,6 +12,15 @@ import { getStore, removeStoreFileIfEmpty } from "./store"
 import { sendBugReport } from "./bug-report"
 import { askHelpAssistant, type HelpInput } from "./help-assistant"
 import {
+  createPullRequest,
+  listPullRequests,
+  mergePullRequest,
+  pullRequestCliStatus,
+  pullRequestDiff,
+  submitPullRequestReview,
+  viewPullRequest,
+} from "./github-pr"
+import {
   getPinchZoomEnabled,
   getWindowID,
   isTrustedRendererUrl,
@@ -216,6 +225,23 @@ export function registerIpcHandlers(deps: Deps) {
   })
   handle("report-bug", (_event, input: { message: string; email?: string }) => sendBugReport(input))
   handle("help-assistant-ask", (_event, input: HelpInput) => askHelpAssistant(input))
+  handle("pr-cli-status", () => pullRequestCliStatus())
+  handle("pr-list", (_event, cwd: string, options?: { state?: "open" | "closed" | "merged" | "all"; limit?: number }) =>
+    listPullRequests(cwd, options),
+  )
+  handle("pr-view", (_event, cwd: string, number: number) => viewPullRequest(cwd, number))
+  handle("pr-diff", (_event, cwd: string, number: number) => pullRequestDiff(cwd, number))
+  handle("pr-create", (_event, input: { cwd: string; title: string; body: string; base?: string; draft?: boolean }) =>
+    createPullRequest(input),
+  )
+  handle(
+    "pr-review",
+    (_event, input: { cwd: string; number: number; body: string; event: "comment" | "approve" | "request-changes" }) =>
+      submitPullRequestReview(input),
+  )
+  handle("pr-merge", (_event, input: { cwd: string; number: number; strategy: "merge" | "squash" | "rebase" }) =>
+    mergePullRequest(input),
+  )
   handle("license-status", () => deps.license.status())
   handle("license-activate", (_event, licenseKey: string) => deps.license.activate(licenseKey))
   handle("license-deactivate", () => deps.license.deactivate())

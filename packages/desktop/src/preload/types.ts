@@ -50,6 +50,8 @@ import type {
 } from "../main/external-agents"
 import type { AgentTaskPreparation } from "../main/context-budget"
 import type { VoiceSpeechResult } from "../main/voice-synthesis"
+import type { PullRequestCliStatus, PullRequestDetail, PullRequestSummary } from "../main/github-pr"
+export type { PullRequestCliStatus, PullRequestDetail, PullRequestSummary } from "../main/github-pr"
 export type {
   CloudRuntimeLogResult,
   PublishProgressEvent,
@@ -143,6 +145,24 @@ export type LicenseAPI = {
   deactivate: () => Promise<VectorLicenseStatus>
   setCancellation: (cancel: boolean) => Promise<VectorLicenseStatus>
   openBillingPortal: () => Promise<string>
+}
+
+export type PullRequestsAPI = {
+  status: () => Promise<PullRequestCliStatus>
+  list: (
+    cwd: string,
+    options?: { state?: "open" | "closed" | "merged" | "all"; limit?: number },
+  ) => Promise<PullRequestSummary[]>
+  view: (cwd: string, number: number) => Promise<PullRequestDetail>
+  diff: (cwd: string, number: number) => Promise<string>
+  create: (input: { cwd: string; title: string; body: string; base?: string; draft?: boolean }) => Promise<{ url: string }>
+  review: (input: {
+    cwd: string
+    number: number
+    body: string
+    event: "comment" | "approve" | "request-changes"
+  }) => Promise<{ posted: boolean }>
+  merge: (input: { cwd: string; number: number; strategy: "merge" | "squash" | "rebase" }) => Promise<{ merged: boolean }>
 }
 
 export type LinuxDisplayBackend = "wayland" | "auto"
@@ -515,6 +535,7 @@ export type ElectronAPI = {
     messages: { role: "user" | "assistant"; content: string }[]
     context: string
   }) => Promise<{ reply?: string; error?: string }>
+  pullRequests: PullRequestsAPI
   consumeInitialDeepLinks: () => Promise<string[]>
   getDefaultServerUrl: () => Promise<string | null>
   setDefaultServerUrl: (url: string | null) => Promise<void>
