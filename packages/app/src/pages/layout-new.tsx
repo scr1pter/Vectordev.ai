@@ -35,6 +35,8 @@ import { useServerSDK } from "@/context/server-sdk"
 import { DialogReportBug } from "@/components/dialog-report-bug"
 import { HelpPanel } from "@/features/help/help-panel"
 import { AgentDashboard } from "@/features/agents/agent-dashboard"
+import { ScheduledTasks } from "@/features/scheduled/scheduled-tasks"
+import type { ScheduledTask } from "@/features/scheduled/schedule-model"
 import type { TeamConversation } from "@/features/agents/agent-dashboard-model"
 import { ExternalRuntimeSetupPanel } from "@/features/agents/external-runtime-setup"
 import { isExternalRuntime, type ExternalRuntime } from "@/features/agents/external-runtimes"
@@ -2456,6 +2458,25 @@ export default function NewLayout(props: ParentProps) {
     setParallelOpen(false)
     setScheduledOpen((open) => !open)
   }
+
+  const scheduledTasksForPanel = createMemo<ScheduledTask[]>(() =>
+    scheduledAgentRecords().map((record) => ({
+      id: record.id,
+      title: record.prompt.split("\n")[0]?.slice(0, 80) || "Scheduled run",
+      prompt: record.prompt,
+      directory: record.directory,
+      recurrence: { kind: "once", at: record.runAt },
+      // Nothing persists a paused flag yet, so a run that already finished is
+      // shown as inactive rather than pretending it is still pending.
+      paused: record.status !== "scheduled",
+      createdAt: record.createdAt,
+      lastRunAt: record.completedAt ?? record.startedAt,
+      lastStatus:
+        record.status === "completed" || record.status === "failed" || record.status === "canceled"
+          ? record.status
+          : undefined,
+    })),
+  )
 
   const insertScheduledPromptIntoComposer = (text: string) => {
     const field = document.querySelector<HTMLTextAreaElement | HTMLInputElement>(
@@ -5488,6 +5509,27 @@ export default function NewLayout(props: ParentProps) {
           })
           return extractVelReply(outcome.data)
         }}
+      />
+
+      <ScheduledTasks
+        open={scheduledOpen()}
+        tasks={scheduledTasksForPanel()}
+        onClose={() => setScheduledOpen(false)}
+        onCreate={() => {
+          setScheduledOpen(false)
+          insertScheduledPromptIntoComposer("Schedule a task: ")
+        }}
+        onUseSuggestion={(suggestion) => {
+          setScheduledOpen(false)
+          insertScheduledPromptIntoComposer(`${suggestion.prompt} (${suggestion.schedule})`)
+        }}
+        onTogglePause={(id, paused) => {
+          // Only cancelling is durable today; resuming a finished one-shot is
+          // not something the scheduler can currently express.
+          if (!paused) return
+          void scheduledAgentsApi()?.cancel(id).then(() => refreshScheduledAgents())
+        }}
+        onDelete={(id) => void scheduledAgentsApi()?.remove(id).then((records) => setScheduledAgentRecords(records))}
       />
 
       <AgentDashboard
