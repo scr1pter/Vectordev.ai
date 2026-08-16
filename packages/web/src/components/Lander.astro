@@ -62,6 +62,46 @@ const features = [
     link: "Learn about workspaces",
   },
   {
+    title: "Bring your own agent. Claude Code, Codex, or Cursor.",
+    body: "Vector runs the coding agents already installed on your computer as workspace engines. Pick Claude Code, Codex, or Cursor Agent for a task and it works inside an isolated branch with the same review, diff, and merge controls as Vector's own agent. Your existing subscription signs the run in \u2014 Vector never asks for another key.",
+    tag: "Agent runtimes",
+    note: "Uses your own CLI and account",
+    image: screenshotAgents,
+    alt: "Vector selecting between the Vector, Claude Code, Codex, and Cursor agent runtimes",
+    href: "/docs",
+    link: "Connect your agents",
+  },
+  {
+    title: "Every agent, and what each one is touching.",
+    body: "The Agent Dashboard shows every agent in the project at once \u2014 status, current action, model, files touched, spend, and elapsed time \u2014 with teams grouped under their coordinator. When two agents still hold the same file, Vector names the file and both agents before you merge either one.",
+    tag: "Agent Dashboard",
+    note: "Clash detection built in",
+    image: screenshotAgents,
+    alt: "Vector Agent Dashboard listing every running agent and flagging a file two agents are both editing",
+    href: "/docs",
+    link: "See the dashboard",
+  },
+  {
+    title: "Review pull requests. Or have Vector review them.",
+    body: "Create, read, and merge pull requests through the GitHub CLI you already use, so your existing sign-in and organization policies carry over. Vector AI review reads the diff and returns findings by severity with file and line, which you read before anything is posted. A finding naming a file outside the diff is discarded, and a review holding a blocking issue can never be submitted as an approval.",
+    tag: "Pull requests",
+    note: "You approve every post",
+    image: screenshotAgent,
+    alt: "Vector reviewing a GitHub pull request with findings grouped by severity",
+    href: "/docs",
+    link: "Review a pull request",
+  },
+  {
+    title: "It remembers you. Only on your computer.",
+    body: "Local memory keeps what Vector learns about how you work and carries it across every project and repository, so you stop repeating yourself. It is a plain file in your own config directory that is never uploaded. Settings shows exactly what is stored, how large it is, and where it lives, and erases all of it on request.",
+    tag: "Local memory",
+    note: "Never leaves your machine",
+    image: screenshotEditor,
+    alt: "Vector settings showing stored local memory with an option to erase it",
+    href: "/docs",
+    link: "How local memory works",
+  },
+  {
     title: "The browser is part of the engineering loop.",
     body: "Vector opens the running product, navigates it, reads console and network failures, captures evidence, repairs the code, and tests the result again. You can take over at any time.",
     tag: "Controlled browser",
@@ -103,11 +143,11 @@ const workflow = [
 
 const systemRows = [
   ["Context engine", "Indexes symbols, dependencies, references, and likely impact so each model receives the code that matters instead of an indiscriminate repository dump."],
-  ["Persistent project memory", "Keeps repository conventions, accepted decisions, and corrections attached to the project across sessions."],
+  ["Memory, local by default", "Project memory keeps repository conventions and accepted decisions with the project. Local memory carries what Vector learns about you across every repository. Both stay on your computer and both can be erased."],
   ["Execution controls", "Quick, normal, and fast modes plus effort settings let you trade latency and token depth without changing the workflow."],
   ["Trust boundary", "Diffs, checks, secret scanning, checkpoints, risk signals, and approvals stand between agent output and main."],
   ["Verified completion", "An optional LLM judge scores requirement coverage, correctness, regressions, evidence, and safety. Failed verdicts return to repair and retesting before Vector reports completion."],
-  ["Transparent economics", "Input, output, reasoning, cache, context, model, and recorded cost stay visible per session and workspace."],
+  ["Measured economics", "Vector records the tokens and cost each provider actually reports for a run \u2014 input, output, reasoning, and cache \u2014 and ranks models on measured spend once correctness ties. A run with no reported usage is shown as unmeasured rather than free."],
 ]
 
 const connectionGroups = [
