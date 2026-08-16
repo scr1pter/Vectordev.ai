@@ -152,6 +152,7 @@ type ParallelWorkspaceRecord = {
   swarmRunId?: string
   swarmTaskId?: string
   swarmRole?: "coordinator" | "worker"
+  teamId?: string
   status: ParallelWorkspaceStatus
   progress: number
   lastAction: string
@@ -190,6 +191,8 @@ type ParallelWorkspaceApi = {
     runtime?: ParallelAgentRuntime
     provider?: string
     model?: string
+    teamId?: string
+    sharedPath?: string
   }) => Promise<ParallelWorkspaceRecord>
   refresh: (id: string) => Promise<ParallelWorkspaceRecord>
   run: (id: string, concurrency?: number) => Promise<ParallelWorkspaceRecord>
@@ -466,6 +469,36 @@ export default function NewLayout(props: ParentProps) {
   const [helpPanelOpen, setHelpPanelOpen] = createSignal(false)
   const [agentDashboardOpen, setAgentDashboardOpen] = createSignal(false)
   const [teamConversations, setTeamConversations] = createSignal<TeamConversation[]>([])
+  const [parallelTopology, setParallelTopology] = createSignal<"isolated" | "collaborative">("isolated")
+  const [parallelJoinTeamId, setParallelJoinTeamId] = createSignal<string>()
+  const [openTeams, setOpenTeams] = createSignal<{ id: string; name: string; sharedPath?: string; memberIds: string[] }[]>([])
+
+  const agentTeamsApi = () =>
+    (
+      globalThis.window as unknown as {
+        api?: {
+          agentTeams?: {
+            list: (scope?: { sourcePath?: string }) => Promise<
+              { id: string; name: string; sharedPath?: string; memberIds: string[] }[]
+            >
+            create: (input: {
+              name: string
+              topology: string
+              sourcePath: string
+              parentSessionId?: string
+              sharedPath?: string
+            }) => Promise<{ id: string; sharedPath?: string }>
+            addMember: (teamId: string, workspaceId: string) => Promise<unknown>
+          }
+        }
+      }
+    )?.api?.agentTeams
+
+  const refreshOpenTeams = async () => {
+    const api = agentTeamsApi()
+    if (!api) return
+    setOpenTeams(await api.list({ sourcePath: activeWorkspaceScope().sourcePath }).catch(() => []))
+  }
 
   // Teams are read when the dashboard opens rather than on the workspace poll:
   // the transcript only matters while it is on screen, and the agent list has
@@ -588,6 +621,7 @@ export default function NewLayout(props: ParentProps) {
   }
   createEffect(() => {
     if (!parallelComposerOpen() || parallelLaunchMode() !== "agent") return
+    void refreshOpenTeams()
     if (externalAgentStatuses().length || externalAgentsChecking()) return
     const api = (
       globalThis.window?.api as
@@ -1617,6 +1651,25 @@ export default function NewLayout(props: ParentProps) {
     }
     setParallelBusy(true)
     setParallelError("")
+
+    // A collaborative launch either joins the team the user picked or creates a
+    // new one. The team exists before any member so every member can be
+    // attached to it as it is created.
+    const teamsApi = agentTeamsApi()
+    const team = await (async () => {
+      if (parallelTopology() !== "collaborative" || !teamsApi) return undefined
+      const existing = openTeams().find((item) => item.id === parallelJoinTeamId())
+      if (existing) return existing
+      return teamsApi
+        .create({
+          name: parallelName().trim() || "Agent team",
+          topology: "collaborative",
+          sourcePath,
+          parentSessionId: scope.parentSessionId,
+        })
+        .catch(() => undefined)
+    })()
+
     const records = await runtimes.reduce(async (pending, runtime) => {
       const current = await pending
       if (!current) return undefined
@@ -1631,11 +1684,16 @@ export default function NewLayout(props: ParentProps) {
           runtime,
           provider: runtime === "vector" ? parallelProvider() : undefined,
           model: runtime === "vector" ? parallelModel() : undefined,
+          teamId: team?.id,
+          // The first member provisions the tree; everyone after it joins that
+          // same checkout, which is what lets teammates see each other's edits.
+          sharedPath: team ? (team.sharedPath ?? current[0]?.isolatedPath) : undefined,
         })
         .catch((error: unknown) => {
           setParallelError(error instanceof Error ? error.message : String(error))
           return undefined
         })
+      if (record && team && teamsApi) await teamsApi.addMember(team.id, record.id).catch(() => undefined)
       return record ? [...current, record] : undefined
     }, Promise.resolve<ParallelWorkspaceRecord[] | undefined>([]))
     setParallelBusy(false)
@@ -3227,6 +3285,96 @@ export default function NewLayout(props: ParentProps) {
               </div>
 
               <Show when={parallelLaunchMode() === "agent"}>
+                <div class="mb-3">
+                  <div class="mb-1.5 flex items-center justify-between px-1">
+                    <span class="text-[10px] font-semibold uppercase tracking-[0.09em] text-white/35">
+                      How this agent works
+                    </span>
+                    <span class="text-[10px] text-white/30">Isolated is safest; collaborative is faster</span>
+                  </div>
+                  <div class="grid grid-cols-2 gap-1.5">
+                    <button
+                      type="button"
+                      class="rounded-[10px] border px-2.5 py-2 text-left transition"
+                      classList={{
+                        "border-[color:var(--vx-purple)]/55 bg-[color:var(--vx-purple-soft)] text-white":
+                          parallelTopology() === "isolated",
+                        "border-[color:var(--vx-line)] bg-white/[0.025] text-white/58 hover:bg-white/[0.05]":
+                          parallelTopology() !== "isolated",
+                      }}
+                      onClick={() => {
+                        setParallelTopology("isolated")
+                        setParallelJoinTeamId(undefined)
+                      }}
+                    >
+                      <span class="block text-[11px] font-semibold">Isolated</span>
+                      <span class="mt-0.5 block text-[9.5px] leading-3 opacity-70">
+                        Its own branch and files. Nothing it does can affect another agent.
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      class="rounded-[10px] border px-2.5 py-2 text-left transition"
+                      classList={{
+                        "border-[color:var(--vx-purple)]/55 bg-[color:var(--vx-purple-soft)] text-white":
+                          parallelTopology() === "collaborative",
+                        "border-[color:var(--vx-line)] bg-white/[0.025] text-white/58 hover:bg-white/[0.05]":
+                          parallelTopology() !== "collaborative",
+                      }}
+                      onClick={() => setParallelTopology("collaborative")}
+                    >
+                      <span class="block text-[11px] font-semibold">Work together</span>
+                      <span class="mt-0.5 block text-[9.5px] leading-3 opacity-70">
+                        Shares one workspace with teammates and can message them while working.
+                      </span>
+                    </button>
+                  </div>
+                  <Show when={parallelTopology() === "collaborative"}>
+                    <div class="mt-1.5 rounded-[10px] border border-[color:var(--vx-line)] bg-white/[0.02] px-2.5 py-2">
+                      <Show
+                        when={openTeams().length}
+                        fallback={
+                          <p class="text-[10px] leading-4 text-white/45">
+                            A new team is created for this agent. Launch another agent into it to have them work
+                            together.
+                          </p>
+                        }
+                      >
+                        <div class="mb-1 text-[9.5px] font-semibold uppercase tracking-[0.09em] text-white/35">
+                          Team
+                        </div>
+                        <div class="flex flex-wrap gap-1.5">
+                          <button
+                            type="button"
+                            class="rounded-[7px] border px-2 py-1 text-[10.5px] transition"
+                            classList={{
+                              "border-[color:var(--vx-purple)]/55 text-white": !parallelJoinTeamId(),
+                              "border-[color:var(--vx-line)] text-white/55": Boolean(parallelJoinTeamId()),
+                            }}
+                            onClick={() => setParallelJoinTeamId(undefined)}
+                          >
+                            New team
+                          </button>
+                          <For each={openTeams()}>
+                            {(item) => (
+                              <button
+                                type="button"
+                                class="rounded-[7px] border px-2 py-1 text-[10.5px] transition"
+                                classList={{
+                                  "border-[color:var(--vx-purple)]/55 text-white": parallelJoinTeamId() === item.id,
+                                  "border-[color:var(--vx-line)] text-white/55": parallelJoinTeamId() !== item.id,
+                                }}
+                                onClick={() => setParallelJoinTeamId(item.id)}
+                              >
+                                {item.name} · {item.memberIds.length}
+                              </button>
+                            )}
+                          </For>
+                        </div>
+                      </Show>
+                    </div>
+                  </Show>
+                </div>
                 <div>
                   <div class="mb-1.5 flex items-center justify-between px-1">
                     <span class="text-[10px] font-semibold uppercase tracking-[0.09em] text-white/35">
