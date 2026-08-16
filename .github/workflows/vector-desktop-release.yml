@@ -1,6 +1,9 @@
 name: vector desktop release
 
 on:
+  push:
+    tags:
+      - "v*"
   workflow_dispatch:
     inputs:
       tag:
@@ -18,6 +21,10 @@ permissions:
 
 env:
   NODE_OPTIONS: --max-old-space-size=6144
+  # A tag push carries the tag in the ref; a manual dispatch passes it as an
+  # input. Everything below reads these rather than inputs directly.
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+  RELEASE_PRERELEASE: ${{ inputs.prerelease || false }}
 
 jobs:
   prepare:
@@ -27,7 +34,7 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
       - name: Match tag to desktop version
         env:
-          TAG: ${{ inputs.tag }}
+          TAG: ${{ env.RELEASE_TAG }}
         run: |
           version=$(jq -r .version packages/desktop/package.json)
           test "$TAG" = "v$version" || {
@@ -37,7 +44,7 @@ jobs:
       - name: Prepare draft GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ inputs.tag }}
+          TAG: ${{ env.RELEASE_TAG }}
         run: |
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" --draft --title "Vector ${TAG}" --notes "Vector desktop builds for macOS, Windows, and Linux."
@@ -62,7 +69,7 @@ jobs:
       - name: Upload macOS assets to draft release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ inputs.tag }}
+          TAG: ${{ env.RELEASE_TAG }}
         run: |
           gh release upload "$TAG" --clobber \
             packages/desktop/dist/vector-desktop-mac-arm64.dmg \
@@ -107,7 +114,7 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ inputs.tag }}
+          TAG: ${{ env.RELEASE_TAG }}
         run: |
           $assets = @(
             "packages/desktop/dist/vector-desktop-win-x64.exe",
@@ -140,7 +147,7 @@ jobs:
       - name: Upload Linux assets to draft release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ inputs.tag }}
+          TAG: ${{ env.RELEASE_TAG }}
         run: |
           gh release upload "$TAG" --clobber \
             packages/desktop/dist/vector-desktop-linux-x86_64.AppImage \
@@ -161,7 +168,7 @@ jobs:
       - name: Download platform assets from draft release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ inputs.tag }}
+          TAG: ${{ env.RELEASE_TAG }}
         run: |
           mkdir -p release-assets
           gh release download "$TAG" --dir release-assets --clobber
@@ -172,8 +179,8 @@ jobs:
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ inputs.tag }}
-          PRERELEASE: ${{ inputs.prerelease }}
+          TAG: ${{ env.RELEASE_TAG }}
+          PRERELEASE: ${{ env.RELEASE_PRERELEASE }}
         run: |
           set -euo pipefail
           gh release upload "$TAG" release-assets/checksums.txt --clobber
@@ -181,8 +188,8 @@ jobs:
       - name: Publish Vector download and update feeds
         env:
           BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
-          TAG: ${{ inputs.tag }}
-          PRERELEASE: ${{ inputs.prerelease }}
+          TAG: ${{ env.RELEASE_TAG }}
+          PRERELEASE: ${{ env.RELEASE_PRERELEASE }}
         run: |
           set -euo pipefail
           channel=latest
