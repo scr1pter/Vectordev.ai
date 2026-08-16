@@ -630,43 +630,53 @@ const changelog = [
       return () => {}
     }
 
-    // Reserve the width of the longest phrase so swapping one for another never
-    // reflows the hero beneath it.
+    // Reserve the width of the longest phrase so a swap cannot reflow the hero
+    // beneath it mid-scramble.
     const measure = document.createElement("span")
     measure.setAttribute("aria-hidden", "true")
     measure.style.cssText = "position:absolute;visibility:hidden;white-space:nowrap;pointer-events:none"
     node.after(measure)
-    const widest = phrases.reduce((longest, phrase) => (phrase.length > longest.length ? phrase : longest), "")
-    measure.textContent = widest
     measure.style.font = getComputedStyle(node).font
+    measure.textContent = phrases.reduce((longest, phrase) => (phrase.length > longest.length ? phrase : longest), "")
     node.style.minWidth = `${Math.ceil(measure.getBoundingClientRect().width)}px`
     node.style.display = "inline-block"
     measure.remove()
 
-    let index = 0
-    let holdTimer = 0
-    let swapTimer = 0
-    const HOLD_MS = 2600
-    const FADE_MS = 320
-
-    const cycle = () => {
-      node.dataset.out = "true"
-      swapTimer = window.setTimeout(() => {
-        index = (index + 1) % phrases.length
-        node.textContent = phrases[index]
-        selectStage(index % Math.max(stages.length, 1))
-        node.dataset.out = "false"
-        holdTimer = window.setTimeout(cycle, HOLD_MS)
-      }, FADE_MS)
+    const glyphs = "abcdefghijklmnopqrstuvwxyz<>{}/\\=+*"
+    let phrase = 0
+    let frame = 0
+    let raf = 0
+    let timer = 0
+    const step = () => {
+      const target = phrases[phrase]
+      selectStage(phrase % Math.max(stages.length, 1))
+      const total = target.length + 10
+      frame++
+      const revealed = Math.max(0, Math.floor(((frame - 6) / total) * target.length))
+      const scrambled = Math.min(target.length - revealed, 9)
+      node.textContent =
+        target.slice(0, revealed) +
+        Array.from({ length: scrambled }, () => glyphs[Math.floor(Math.random() * glyphs.length)]).join("")
+      if (frame < total + 6) {
+        raf = requestAnimationFrame(step)
+        return
+      }
+      node.textContent = target
+      phrase = (phrase + 1) % phrases.length
+      frame = 0
+      timer = globalThis.setTimeout(() => {
+        if (!document.hidden) raf = requestAnimationFrame(step)
+        else timer = globalThis.setTimeout(() => (raf = requestAnimationFrame(step)), 4000)
+      }, 3600)
     }
-
     node.textContent = phrases[0]
     selectStage(0)
-    holdTimer = window.setTimeout(cycle, HOLD_MS)
-
+    timer = globalThis.setTimeout(() => (raf = requestAnimationFrame(step)), 2400)
     return () => {
-      window.clearTimeout(holdTimer)
-      window.clearTimeout(swapTimer)
+      globalThis.clearTimeout(timer)
+      if (raf) cancelAnimationFrame(raf)
+      node.textContent = phrases[0]
+      selectStage(0)
     }
   }
 
@@ -1364,15 +1374,7 @@ const changelog = [
   .headline-rotate {
     color: var(--purple-soft);
     text-shadow: 0 0 32px rgba(143, 82, 255, 0.24);
-    /* Fade only. Sliding or scaling the phrase reflows the line beneath it on
-       every swap, which reads as the page twitching rather than the words
-       changing. */
-    opacity: 1;
-    transition: opacity 320ms ease;
-  }
-
-  .headline-rotate[data-out="true"] {
-    opacity: 0;
+    font-variant-ligatures: none;
   }
 
   .hero-loop {
