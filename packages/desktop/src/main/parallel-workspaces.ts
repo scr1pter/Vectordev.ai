@@ -21,6 +21,8 @@ import {
 import { getStore } from "./store"
 import { createPullRequest } from "./github"
 import { runExternalCodingAgent, type CodingAgentRuntime } from "./external-agents"
+import { claimPendingMessages, postTeamMessage, teamForWorkspace } from "./agent-teams"
+import { formatDelivery, formatHandoff } from "./agent-team-model"
 import {
   formatValidationForRepair,
   validateWorkspace,
@@ -109,6 +111,7 @@ export type ParallelWorkspaceRecord = {
   swarmRunId?: string
   swarmTaskId?: string
   swarmRole?: "coordinator" | "worker"
+  teamId?: string
   status: ParallelWorkspaceStatus
   progress: number
   lastAction: string
@@ -197,6 +200,8 @@ export type CreateParallelWorkspaceInput = {
   swarmRunId?: string
   swarmTaskId?: string
   swarmRole?: "coordinator" | "worker"
+  teamId?: string
+  sharedPath?: string
 }
 
 type CommandResult = {
@@ -636,6 +641,31 @@ function normalizeStatusLine(line: string) {
   return file
 }
 
+
+// Teammates communicate by relay: a queued message is folded into the
+// recipient's next prompt rather than interrupting it mid-turn. Claiming marks
+// delivery, so a message is handed over exactly once.
+function withTeammateMessages(record: ParallelWorkspaceRecord, basePrompt: string) {
+  const team = teamForWorkspace(record.id)
+  if (!team) return basePrompt
+  const pending = claimPendingMessages(team.id, record.id)
+  if (!pending.length) return basePrompt
+  return [formatDelivery(pending, record.name), basePrompt].join("\n\n")
+}
+
+// Broadcasts what this agent just did so teammates sharing the workspace can
+// adapt instead of rediscovering it from the diff.
+function broadcastHandoff(record: ParallelWorkspaceRecord, summary: string) {
+  const team = teamForWorkspace(record.id)
+  if (!team || team.memberIds.length < 2) return
+  postTeamMessage({
+    teamId: team.id,
+    fromWorkspaceId: record.id,
+    fromName: record.name,
+    text: formatHandoff(record.name, summary, record.changedFiles),
+  })
+}
+
 async function fallbackDiff(record: ParallelWorkspaceRecord) {
   const sourceFiles = await listProjectFiles(record.sourcePath)
   const isolatedFiles = await listProjectFiles(record.isolatedPath)
@@ -818,7 +848,7 @@ export async function createParallelWorkspace(input: CreateParallelWorkspaceInpu
   }
   const root = workspaceRoot()
   const workspaceDir = join(root, id)
-  const isolatedPath = join(workspaceDir, "workspace")
+  let isolatedPath = join(workspaceDir, "workspace")
   const taskDifficulty = classifyTaskDifficulty(input.taskPrompt)
   const runtime = input.runtime ?? "vector"
   const estimatedCost =
@@ -837,9 +867,27 @@ export async function createParallelWorkspace(input: CreateParallelWorkspaceInpu
   let baseCommit: string | undefined
   const logs: string[] = []
 
+  // A collaborative member joins an existing tree instead of getting its own,
+  // which is the whole point of the topology: teammates see each other's edits
+  // as they happen rather than at merge time.
+  // A collaborative member joins an existing tree rather than getting its own,
+  // which is the point of the topology: teammates see each other's edits as
+  // they happen instead of at merge time. Skip worktree creation entirely and
+  // adopt the shared checkout.
+  const joinShared = Boolean(input.sharedPath)
+  if (input.sharedPath) {
+    isolatedPath = input.sharedPath
+    isolation = input.sharedPath === sourceRoot ? "copy" : "git-worktree"
+    baseCommit =
+      (await runGit(["rev-parse", "HEAD"], input.sharedPath, { allowFailure: true })).stdout.trim() || undefined
+    logs.push(`Joined the shared workspace at ${input.sharedPath}.`)
+  }
+
   await mkdir(workspaceDir, { recursive: true })
   const rootGit = await gitRoot(sourceRoot)
-  if (rootGit && (await gitIsClean(sourceRoot))) {
+  if (joinShared) {
+    // Nothing to provision: the tree already exists and teammates are in it.
+  } else if (rootGit && (await gitIsClean(sourceRoot))) {
     baseCommit = (await runGit(["rev-parse", "HEAD"], sourceRoot, { allowFailure: true })).stdout.trim() || undefined
     gitBranch = `vector-parallel/${safeName(name)}-${id.slice(0, 8)}`
     try {
@@ -921,6 +969,7 @@ export async function createParallelWorkspace(input: CreateParallelWorkspaceInpu
     swarmRunId: input.swarmRunId,
     swarmTaskId: input.swarmTaskId,
     swarmRole: input.swarmRole,
+    teamId: input.teamId,
     status: "queued",
     progress: 0,
     lastAction: "Isolated workspace created",
@@ -1237,7 +1286,7 @@ async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEng
 
     await engineRequest(engine, `/api/session/${encodeURIComponent(sessionId)}/prompt`, {
       method: "POST",
-      body: { prompt: { text: parallelAgentPrompt(record) }, resume: true },
+      body: { prompt: { text: withTeammateMessages(record, parallelAgentPrompt(record)) }, resume: true },
       signal: controller.signal,
     })
     record = updateRecord(id, (current) => ({
@@ -1357,6 +1406,7 @@ async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEng
       ].slice(0, 120),
     }))
     syncBackgroundTask(completed, completed.lastAction)
+    broadcastHandoff(completed, agentSummary)
   } catch (error) {
     const stopped = controller.signal.aborted
     // A failed or timed-out run must not leave the engine session running and
@@ -1499,6 +1549,11 @@ async function fileContentsEqual(a: string, b: string) {
 // again, so remove the worktree, its branch, and the per-run directory. The
 // record keeps the diff text and logs as durable history.
 async function cleanupIsolation(record: ParallelWorkspaceRecord) {
+  // A shared tree belongs to the team, not to one member. Removing it here
+  // would delete a checkout teammates are still working in, and for a
+  // shared-main workspace `dirname(isolatedPath)` is the parent of the user's
+  // own repository. Neither is ever safe to remove on one agent finishing.
+  if (record.teamId || record.isolatedPath === record.sourcePath) return
   if (record.isolation === "git-worktree") {
     await runGit(["worktree", "remove", "--force", record.isolatedPath], record.sourcePath, {
       allowFailure: true,
