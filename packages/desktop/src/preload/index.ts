@@ -64,6 +64,7 @@ const api: ElectronAPI = {
     openBillingPortal: () => ipcRenderer.invoke("license-open-billing-portal"),
   },
   reportBug: (input) => ipcRenderer.invoke("report-bug", input),
+  askHelpAssistant: (input) => ipcRenderer.invoke("help-assistant-ask", input),
   consumeInitialDeepLinks: () => ipcRenderer.invoke("consume-initial-deep-links"),
   getDefaultServerUrl: () => ipcRenderer.invoke("get-default-server-url"),
   setDefaultServerUrl: (url) => ipcRenderer.invoke("set-default-server-url", url),

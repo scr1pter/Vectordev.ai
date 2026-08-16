@@ -10,6 +10,7 @@ import { runDesktopMenuAction } from "./desktop-menu-actions"
 import { assertAttachmentBudget, createPickedFileAuthorizations } from "./attachment-picker"
 import { getStore, removeStoreFileIfEmpty } from "./store"
 import { sendBugReport } from "./bug-report"
+import { askHelpAssistant, type HelpInput } from "./help-assistant"
 import {
   getPinchZoomEnabled,
   getWindowID,
@@ -214,6 +215,7 @@ export function registerIpcHandlers(deps: Deps) {
     event.sender.once("destroyed", () => updaterSubscriptions.delete(id))
   })
   handle("report-bug", (_event, input: { message: string; email?: string }) => sendBugReport(input))
+  handle("help-assistant-ask", (_event, input: HelpInput) => askHelpAssistant(input))
   handle("license-status", () => deps.license.status())
   handle("license-activate", (_event, licenseKey: string) => deps.license.activate(licenseKey))
   handle("license-deactivate", () => deps.license.deactivate())

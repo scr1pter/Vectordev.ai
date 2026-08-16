@@ -511,6 +511,10 @@ export type ElectronAPI = {
   updater: UpdaterAPI
   license: LicenseAPI
   reportBug: (input: { message: string; email?: string }) => Promise<{ delivered: boolean; error?: string }>
+  askHelpAssistant: (input: {
+    messages: { role: "user" | "assistant"; content: string }[]
+    context: string
+  }) => Promise<{ reply?: string; error?: string }>
   consumeInitialDeepLinks: () => Promise<string[]>
   getDefaultServerUrl: () => Promise<string | null>
   setDefaultServerUrl: (url: string | null) => Promise<void>

@@ -33,6 +33,7 @@ import { SDKProvider } from "@/context/sdk"
 import { useServerSync } from "@/context/server-sync"
 import { useServerSDK } from "@/context/server-sdk"
 import { DialogReportBug } from "@/components/dialog-report-bug"
+import { HelpPanel } from "@/features/help/help-panel"
 import { isInternalProjectPath, useServer } from "@/context/server"
 import { useTabs } from "@/context/tabs"
 import { sessionHref } from "@/utils/session-route"
@@ -456,6 +457,7 @@ export default function NewLayout(props: ParentProps) {
   const serverSync = useServerSync()
   const serverSDK = useServerSDK()
   const [reportBugOpen, setReportBugOpen] = createSignal(false)
+  const [helpPanelOpen, setHelpPanelOpen] = createSignal(false)
   const server = useServer()
   const tabs = useTabs()
   const layout = useLayout()
@@ -5250,11 +5252,13 @@ export default function NewLayout(props: ParentProps) {
           command.show()
         }}
         onReportBug={() => setReportBugOpen(true)}
-        onGettingStarted={() => setOnboardingOpen(true)}
+        onGettingStarted={() => setHelpPanelOpen(true)}
         onUpdate={() => void updaterAction.updateLatest()}
       />
 
       <DialogReportBug open={reportBugOpen()} onClose={() => setReportBugOpen(false)} />
+
+      <HelpPanel open={helpPanelOpen()} onClose={() => setHelpPanelOpen(false)} />
 
       <nav
         data-vector-navigation-legacy
