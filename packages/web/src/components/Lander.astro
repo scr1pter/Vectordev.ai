@@ -64,6 +64,16 @@ const features = [
     link: "Learn about workspaces",
   },
   {
+    title: "You can see what every agent did, and what it cost.",
+    body: "Vector attributes each live edit to the agent that made it, names the file and both agents when two of them collide, scores finished work against the original request with an optional judge, and records the tokens and cost each provider actually reported. Other tools hand you a diff and ask you to trust it.",
+    tag: "Only in Vector",
+    note: "Attribution, clashes, judge, real spend",
+    image: screenshotAgents,
+    alt: "Vector Agent Dashboard showing per-agent activity, a file collision, and measured spend",
+    href: "/docs",
+    link: "See what Vector shows you",
+  },
+  {
     title: "Bring your own agent. Claude Code, Codex, or Cursor.",
     body: "Vector runs the coding agents already installed on your computer as workspace engines. Pick Claude Code, Codex, or Cursor Agent for a task and it works inside an isolated branch with the same review, diff, and merge controls as Vector's own agent. Your existing subscription signs the run in \u2014 Vector never asks for another key.",
     tag: "Agent runtimes",
@@ -154,6 +164,9 @@ const workflow = [
 ]
 
 const systemRows = [
+  ["Only in Vector — agents that talk", "Put agents in one workspace and they message each other while working, and you read the exchange. Every other tool runs agents in isolation and shows you the diffs afterwards."],
+  ["Only in Vector — see who edited what", "The editor attributes each live edit to the agent that made it, with a coloured gutter and a hover naming it. When two agents hold the same file, Vector names the file and both agents before either merges."],
+  ["Only in Vector — run the other agents", "Claude Code, Codex, and Cursor Agent run as engines inside Vector, on your existing subscriptions. Nothing else hosts its competitors."],
   ["Context engine", "Indexes symbols, dependencies, references, and likely impact so each model receives the code that matters instead of an indiscriminate repository dump."],
   ["Memory, local by default", "Project memory keeps repository conventions and accepted decisions with the project. Local memory carries what Vector learns about you across every repository. Both stay on your computer and both can be erased."],
   ["Execution controls", "Quick, normal, and fast modes plus effort settings let you trade latency and token depth without changing the workflow."],
@@ -237,6 +250,7 @@ const comparison = [
 ]
 
 const changelog = [
+  ["August 2026", "Economics that actually learn", "Every session now feeds measured token and cost evidence into model recommendations, and the site names the capabilities no other tool has."],
   ["August 2026", "Licensing and disclosure", "HEIC conversion moved to the operating system, removing the last copyleft dependency, with expanded privacy and terms coverage."],
   ["August 2026", "Plugins that install themselves", "Vector fetches whatever runtime a plugin needs, so Computer Use and other tools connect without a terminal detour."],
   ["August 2026", "Agents that work together", "Shared workspaces where agents message each other, an Agent Dashboard with clash detection, per-agent edit attribution in the editor, and AI pull request review."],

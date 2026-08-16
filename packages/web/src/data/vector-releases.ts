@@ -414,4 +414,10 @@ export const release117: VectorRelease[] = [
     summary:
       "Removed the last copyleft dependency: HEIC images are now converted by the operating system rather than a bundled LGPL decoder, which also drops about three megabytes from every build. Expanded the privacy policy to cover local memory, the help assistant, bug reports, and optional screen and desktop control, and added a terms section describing what Vector can do on your machine and on services you connect.",
   },
+  {
+    version: "1.17.55",
+    title: "Economics that actually learn",
+    summary:
+      "Model economics only ever learned from validated parallel runs, so it rarely gathered enough evidence to recommend anything. Every ordinary session now contributes what it truly cost — provider-reported tokens, spend, latency, and files touched — so recommendations appear from normal use. Removed a ranking signal nothing ever produced, which had been the primary sort key and rendered a permanently blank win rate. The site now says plainly which capabilities exist nowhere else: agents that message each other while working, per-agent attribution of live edits, and running Claude Code, Codex, or Cursor as engines inside Vector.",
+  },
 ]

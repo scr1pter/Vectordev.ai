@@ -17,14 +17,6 @@ function median(values: number[]): number {
   return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid]
 }
 
-// undefined when no outcome in this group has tournament data — never
-// fabricate a 0% or 100% win rate from an absence of evidence.
-function winRateOf(outcomes: ModelOutcome[]): number | undefined {
-  const judged = outcomes.filter((o) => o.tournamentWin !== undefined)
-  if (judged.length === 0) return undefined
-  return judged.filter((o) => o.tournamentWin === true).length / judged.length
-}
-
 // undefined when no outcome in this group ran validation checks.
 function checkPassRateOf(outcomes: ModelOutcome[]): number | undefined {
   const checked = outcomes.filter((o) => o.hadChecks && o.checksPassed !== undefined)
@@ -50,12 +42,6 @@ function medianTokensOf(outcomes: ModelOutcome[]): number | undefined {
 function evidenceFor(provider: string, model: string, category: TaskCategory, outcomes: ModelOutcome[]): string[] {
   const evidence: string[] = []
 
-  const judged = outcomes.filter((o) => o.tournamentWin !== undefined)
-  if (judged.length > 0) {
-    const wins = judged.filter((o) => o.tournamentWin === true).length
-    evidence.push(`won ${wins} of ${judged.length} recent ${category} tournaments`)
-  }
-
   const checked = outcomes.filter((o) => o.hadChecks && o.checksPassed !== undefined)
   if (checked.length > 0) {
     const passed = checked.filter((o) => o.checksPassed === true).length
@@ -72,8 +58,8 @@ function evidenceFor(provider: string, model: string, category: TaskCategory, ou
   return evidence
 }
 
-// Ranks models by verified outcomes for a task category: tournament win rate
-// first, then check pass rate, then median latency (lower is better). Below
+// Ranks models by verified outcomes for a task category: check pass rate
+// first, then measured cost, then median latency (lower is better). Below
 // minSamples for every model, returns undefined — cold start is honest: no
 // recommendation without enough evidence, never a guess dressed up as one.
 export function recommendModel(
@@ -97,15 +83,12 @@ export function recommendModel(
   const ranked = eligible
     .map((group) => ({
       group,
-      winRate: winRateOf(group.outcomes),
       checkPassRate: checkPassRateOf(group.outcomes),
       medianLatencyMs: median(group.outcomes.map((o) => o.latencyMs)),
       medianCostUsd: medianCostOf(group.outcomes),
       medianTokens: medianTokensOf(group.outcomes),
     }))
     .sort((a, b) => {
-      const winDiff = (b.winRate ?? -1) - (a.winRate ?? -1)
-      if (winDiff !== 0) return winDiff
       const passDiff = (b.checkPassRate ?? -1) - (a.checkPassRate ?? -1)
       if (passDiff !== 0) return passDiff
       // Cheaper wins once correctness ties. Unknown spend sorts last rather
@@ -123,7 +106,6 @@ export function recommendModel(
     provider: best.group.provider,
     model: best.group.model,
     sampleSize: best.group.outcomes.length,
-    winRate: best.winRate,
     checkPassRate: best.checkPassRate,
     medianLatencyMs: best.medianLatencyMs,
     medianCostUsd: best.medianCostUsd,

@@ -36,8 +36,6 @@ function rankModelsForCategory(outcomes: ModelOutcome[], category: ModelOutcome[
   }
   return [...groups.values()]
     .map((list) => {
-      const judged = list.filter((outcome) => outcome.tournamentWin !== undefined)
-      const winRate = judged.length ? judged.filter((outcome) => outcome.tournamentWin === true).length / judged.length : undefined
       const checked = list.filter((outcome) => outcome.hadChecks && outcome.checksPassed !== undefined)
       const checkPassRate = checked.length
         ? checked.filter((outcome) => outcome.checksPassed === true).length / checked.length
@@ -46,15 +44,12 @@ function rankModelsForCategory(outcomes: ModelOutcome[], category: ModelOutcome[
         provider: list[0].provider,
         model: list[0].model,
         sampleSize: list.length,
-        winRate,
         checkPassRate,
         medianLatencyMs: medianOf(list.map((outcome) => outcome.latencyMs)),
         cost: estimateCostForTokens(list[0].model, promptTokens),
       }
     })
     .sort((a, b) => {
-      const winDiff = (b.winRate ?? -1) - (a.winRate ?? -1)
-      if (winDiff !== 0) return winDiff
       const passDiff = (b.checkPassRate ?? -1) - (a.checkPassRate ?? -1)
       if (passDiff !== 0) return passDiff
       return a.medianLatencyMs - b.medianLatencyMs
@@ -337,7 +332,6 @@ export function SessionContextTab() {
                     </div>
                     <div class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-white/55">
                       <span>{row.sampleSize} run{row.sampleSize === 1 ? "" : "s"}</span>
-                      <span>win {formatPercent(row.winRate)}</span>
                       <span>checks {formatPercent(row.checkPassRate)}</span>
                       <span>median {formatLatency(row.medianLatencyMs)}</span>
                       <span>{row.cost ? `~${usd().format(row.cost.estimatedTotalCost)}` : "cost unknown"}</span>

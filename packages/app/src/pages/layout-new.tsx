@@ -52,6 +52,7 @@ import { createSpotlightSteps } from "@/features/onboarding/spotlight-steps"
 import { outcomesFromWorkspaceRecord, recordOutcome } from "@/features/economics/economics-repository"
 import { categorizeTask } from "@/features/economics/task-categorizer"
 import { measureUsage } from "@/features/economics/token-usage"
+import { outcomeFromSession } from "@/features/economics/session-outcomes"
 import {
   ONBOARDING_UPDATED_EVENT,
   readOnboardingFlags,
@@ -2461,6 +2462,36 @@ export default function NewLayout(props: ParentProps) {
     setParallelOpen(false)
     setScheduledOpen((open) => !open)
   }
+
+  // Ordinary sessions feed the economics engine too. Learning only from
+  // validated parallel runs left it with too few samples to ever recommend
+  // anything, which is why the feature looked dead.
+  const recordedSessionOutcomes = new Set<string>()
+  const stopSessionOutcomes = serverSDK().event.listen((event) => {
+    if (event.details.type !== "session.idle") return
+    const sessionID = (event.details as { id?: string }).id
+    const directory = (event as { name?: string }).name
+    if (!sessionID || !directory || recordedSessionOutcomes.has(sessionID)) return
+    recordedSessionOutcomes.add(sessionID)
+    void (async () => {
+      const client = serverSDK().createClient({ directory })
+      const history = await client.session.messages({ sessionID }).catch(() => undefined)
+      if (!Array.isArray(history?.data)) return
+      const parts: Record<string, unknown[]> = {}
+      for (const entry of history.data) {
+        const id = (entry.info as { id?: string } | undefined)?.id
+        if (id) parts[id] = (entry as { parts?: unknown[] }).parts ?? []
+      }
+      const outcome = outcomeFromSession({
+        sessionID,
+        projectId: directory,
+        messages: history.data as never,
+        parts: parts as never,
+      })
+      if (outcome) await recordOutcome(outcome)
+    })()
+  })
+  onCleanup(stopSessionOutcomes)
 
   const scheduledTasksForPanel = createMemo<ScheduledTask[]>(() =>
     scheduledAgentRecords().map((record) => ({

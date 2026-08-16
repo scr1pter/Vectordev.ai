@@ -39,23 +39,23 @@ describe("recommendModel", () => {
     expect(recommendModel(outcomes, "frontend", 3)).toBeUndefined()
   })
 
-  test("ranks by tournament win rate first", () => {
+  test("ranks by check pass rate first", () => {
     const outcomes: ModelOutcome[] = [
-      outcome({ provider: "anthropic", model: "claude-sonnet-5", tournamentWin: true }),
-      outcome({ provider: "anthropic", model: "claude-sonnet-5", tournamentWin: true }),
-      outcome({ provider: "anthropic", model: "claude-sonnet-5", tournamentWin: false }),
-      outcome({ provider: "openai", model: "gpt-4o", tournamentWin: true }),
-      outcome({ provider: "openai", model: "gpt-4o", tournamentWin: false }),
-      outcome({ provider: "openai", model: "gpt-4o", tournamentWin: false }),
+      outcome({ provider: "anthropic", model: "claude-sonnet-5", hadChecks: true, checksPassed: true }),
+      outcome({ provider: "anthropic", model: "claude-sonnet-5", hadChecks: true, checksPassed: true }),
+      outcome({ provider: "anthropic", model: "claude-sonnet-5", hadChecks: true, checksPassed: false }),
+      outcome({ provider: "openai", model: "gpt-4o", hadChecks: true, checksPassed: true }),
+      outcome({ provider: "openai", model: "gpt-4o", hadChecks: true, checksPassed: false }),
+      outcome({ provider: "openai", model: "gpt-4o", hadChecks: true, checksPassed: false }),
     ]
     const result = recommendModel(outcomes, "frontend", 3)
     expect(result?.provider).toBe("anthropic")
     expect(result?.model).toBe("claude-sonnet-5")
-    expect(result?.winRate).toBeCloseTo(2 / 3, 6)
+    expect(result?.checkPassRate).toBeCloseTo(2 / 3, 6)
     expect(result?.sampleSize).toBe(3)
   })
 
-  test("falls back to check pass rate when win rate is tied or absent", () => {
+  test("falls back to latency when check pass rate is tied or absent", () => {
     const outcomes: ModelOutcome[] = [
       outcome({ provider: "anthropic", model: "claude-sonnet-5", hadChecks: true, checksPassed: true }),
       outcome({ provider: "anthropic", model: "claude-sonnet-5", hadChecks: true, checksPassed: true }),
@@ -83,15 +83,14 @@ describe("recommendModel", () => {
     expect(result?.medianLatencyMs).toBe(1000)
   })
 
-  test("evidence strings describe wins and check pass rate in the expected format", () => {
+  test("evidence reports the check pass rate in the expected format", () => {
     const outcomes: ModelOutcome[] = [
-      outcome({ provider: "anthropic", model: "claude-sonnet-5", tournamentWin: true, hadChecks: true, checksPassed: true }),
-      outcome({ provider: "anthropic", model: "claude-sonnet-5", tournamentWin: true, hadChecks: true, checksPassed: true }),
-      outcome({ provider: "anthropic", model: "claude-sonnet-5", tournamentWin: false, hadChecks: true, checksPassed: false }),
-      outcome({ provider: "anthropic", model: "claude-sonnet-5", tournamentWin: true, hadChecks: true, checksPassed: true }),
+      outcome({ provider: "anthropic", model: "claude-sonnet-5", hadChecks: true, checksPassed: true }),
+      outcome({ provider: "anthropic", model: "claude-sonnet-5", hadChecks: true, checksPassed: true }),
+      outcome({ provider: "anthropic", model: "claude-sonnet-5", hadChecks: true, checksPassed: false }),
+      outcome({ provider: "anthropic", model: "claude-sonnet-5", hadChecks: true, checksPassed: true }),
     ]
     const result = recommendModel(outcomes, "frontend", 3)
-    expect(result?.evidence).toContain("won 3 of 4 recent frontend tournaments")
     expect(result?.evidence).toContain("checks passed 3/4 runs")
   })
 

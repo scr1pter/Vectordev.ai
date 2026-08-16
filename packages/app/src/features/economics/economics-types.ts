@@ -59,19 +59,18 @@ export type ModelOutcome = {
   hadChecks: boolean
   latencyMs: number
   changedFiles: number
-  tournamentWin?: boolean
   usage?: TokenUsage
   costUsd?: number
 }
 
-// A recommendation is only ever produced from real ModelOutcome history —
-// `winRate` and `checkPassRate` are omitted (not zeroed) when there is no
-// tournament or check data to compute them from.
+// A recommendation is only ever produced from real ModelOutcome history.
+// `checkPassRate`, `medianCostUsd`, and `medianTokens` are omitted rather than
+// zeroed when there is no data, so an unmeasured model never reads as free or
+// as failing.
 export type ModelRecommendation = {
   provider: string
   model: string
   sampleSize: number
-  winRate?: number
   checkPassRate?: number
   medianLatencyMs: number
   // Omitted when no run in the group reported usage — a model with unknown
