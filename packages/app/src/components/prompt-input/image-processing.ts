@@ -1,5 +1,7 @@
 const PROVIDER_READY = new Set(["image/gif", "image/jpeg", "image/png", "image/webp"])
 const HEIF_MIMES = new Set(["image/heic", "image/heif"])
+
+type HeicConverter = (bytes: Uint8Array) => Promise<{ data: Uint8Array; mime: string } | { error: string }>
 const MAX_EDGE = 2_000
 
 export type PreparedImage = {
@@ -72,14 +74,30 @@ async function drawToPng(blob: Blob) {
   }
 }
 
+
+// HEIC is decoded by the operating system rather than a bundled decoder. Every
+// JavaScript HEIC library wraps libheif, which is LGPL, and statically bundling
+// that into a closed-source product conflicts with the licence.
+async function decodeHeif(file: File): Promise<Blob> {
+  const convert = (globalThis.window as unknown as { api?: { convertHeic?: HeicConverter } } | undefined)?.api
+    ?.convertHeic
+  if (!convert) {
+    // The web build has no desktop bridge; the browser may still decode it.
+    return drawToPng(file).catch(() => {
+      throw new Error("Vector cannot convert HEIC images here. Attach a JPEG or PNG instead.")
+    })
+  }
+  const result = await convert(new Uint8Array(await file.arrayBuffer()))
+  if ("error" in result) throw new Error(result.error)
+  // Copy into a fresh ArrayBuffer: the IPC result can be backed by a shared
+  // buffer, which BlobPart does not accept.
+  return new Blob([new Uint8Array(result.data).slice().buffer], { type: result.mime })
+}
+
 export async function prepareImageForModel(file: File, mime: string): Promise<PreparedImage> {
   if (!mime.startsWith("image/") || PROVIDER_READY.has(mime)) return { blob: file, mime }
 
-  if (HEIF_MIMES.has(mime)) {
-    const { heicTo } = await import("heic-to")
-    const blob = await heicTo({ blob: file, type: "image/jpeg", quality: 0.9 })
-    return { blob, mime: "image/jpeg" }
-  }
+  if (HEIF_MIMES.has(mime)) return { blob: await decodeHeif(file), mime: "image/jpeg" }
 
   if (mime === "image/tiff") return { blob: await decodeTiff(file), mime: "image/png" }
   return { blob: await drawToPng(file), mime: "image/png" }

@@ -13,6 +13,7 @@ import { sendBugReport } from "./bug-report"
 import { askHelpAssistant, type HelpInput } from "./help-assistant"
 import { clearLocalMemory, readLocalMemory, writeLocalMemory } from "./local-memory"
 import { ensureRuntime, preparePluginCommand, type RuntimeName } from "./runtime-bootstrap"
+import { convertHeicToJpeg } from "./image-convert"
 import {
   addTeamMember,
   claimPendingMessages,
@@ -259,6 +260,7 @@ export function registerIpcHandlers(deps: Deps) {
   )
   handle("agent-teams-claim", (_event, teamId: string, workspaceId: string) => claimPendingMessages(teamId, workspaceId))
   handle("agent-teams-delete", (_event, teamId: string) => deleteAgentTeam(teamId))
+  handle("convert-heic", (_event, bytes: Uint8Array) => convertHeicToJpeg(new Uint8Array(bytes)))
   handle("runtime-ensure", (_event, name: RuntimeName) => ensureRuntime(name))
   handle("runtime-prepare-plugin-command", (_event, command: string[]) =>
     preparePluginCommand(Array.isArray(command) ? command.map(String) : []),

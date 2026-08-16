@@ -75,6 +75,7 @@ const api: ElectronAPI = {
     claim: (teamId, workspaceId) => ipcRenderer.invoke("agent-teams-claim", teamId, workspaceId),
     delete: (teamId) => ipcRenderer.invoke("agent-teams-delete", teamId),
   },
+  convertHeic: (bytes) => ipcRenderer.invoke("convert-heic", bytes),
   runtime: {
     ensure: (name) => ipcRenderer.invoke("runtime-ensure", name),
     preparePluginCommand: (command) => ipcRenderer.invoke("runtime-prepare-plugin-command", command),

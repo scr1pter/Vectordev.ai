@@ -576,6 +576,7 @@ export type ElectronAPI = {
     context: string
   }) => Promise<{ reply?: string; error?: string }>
   agentTeams: AgentTeamsAPI
+  convertHeic: (bytes: Uint8Array) => Promise<{ data: Uint8Array; mime: string } | { error: string }>
   runtime: RuntimeAPI
   localMemory: LocalMemoryAPI
   pullRequests: PullRequestsAPI
