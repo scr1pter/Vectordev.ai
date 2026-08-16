@@ -52,6 +52,8 @@ import type { AgentTaskPreparation } from "../main/context-budget"
 import type { VoiceSpeechResult } from "../main/voice-synthesis"
 import type { PullRequestCliStatus, PullRequestDetail, PullRequestSummary } from "../main/github-pr"
 import type { LocalMemoryState } from "../main/local-memory"
+import type { AgentTeam, TeamMessage, TeamTopology } from "../main/agent-team-model"
+export type { AgentTeam, TeamMessage, TeamTopology } from "../main/agent-team-model"
 export type { LocalMemoryState } from "../main/local-memory"
 export type { PullRequestCliStatus, PullRequestDetail, PullRequestSummary } from "../main/github-pr"
 export type {
@@ -147,6 +149,29 @@ export type LicenseAPI = {
   deactivate: () => Promise<VectorLicenseStatus>
   setCancellation: (cancel: boolean) => Promise<VectorLicenseStatus>
   openBillingPortal: () => Promise<string>
+}
+
+export type AgentTeamsAPI = {
+  list: (scope?: { sourcePath?: string; parentSessionId?: string }) => Promise<AgentTeam[]>
+  get: (id: string) => Promise<AgentTeam | undefined>
+  create: (input: {
+    name: string
+    topology: TeamTopology
+    sourcePath: string
+    parentSessionId?: string
+    sharedPath?: string
+  }) => Promise<AgentTeam>
+  addMember: (teamId: string, workspaceId: string) => Promise<AgentTeam | undefined>
+  removeMember: (teamId: string, workspaceId: string) => Promise<AgentTeam | undefined>
+  post: (input: {
+    teamId: string
+    fromWorkspaceId: string
+    fromName: string
+    toWorkspaceId?: string
+    text: string
+  }) => Promise<AgentTeam | undefined>
+  claim: (teamId: string, workspaceId: string) => Promise<TeamMessage[]>
+  delete: (teamId: string) => Promise<void>
 }
 
 export type LocalMemoryAPI = {
@@ -543,6 +568,7 @@ export type ElectronAPI = {
     messages: { role: "user" | "assistant"; content: string }[]
     context: string
   }) => Promise<{ reply?: string; error?: string }>
+  agentTeams: AgentTeamsAPI
   localMemory: LocalMemoryAPI
   pullRequests: PullRequestsAPI
   consumeInitialDeepLinks: () => Promise<string[]>

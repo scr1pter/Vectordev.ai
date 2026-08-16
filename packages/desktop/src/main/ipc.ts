@@ -13,6 +13,17 @@ import { sendBugReport } from "./bug-report"
 import { askHelpAssistant, type HelpInput } from "./help-assistant"
 import { clearLocalMemory, readLocalMemory, writeLocalMemory } from "./local-memory"
 import {
+  addTeamMember,
+  claimPendingMessages,
+  createAgentTeam,
+  deleteAgentTeam,
+  getAgentTeam,
+  listAgentTeams,
+  postTeamMessage,
+  removeTeamMember,
+} from "./agent-teams"
+import type { TeamTopology } from "./agent-team-model"
+import {
   createPullRequest,
   listPullRequests,
   mergePullRequest,
@@ -226,6 +237,26 @@ export function registerIpcHandlers(deps: Deps) {
   })
   handle("report-bug", (_event, input: { message: string; email?: string }) => sendBugReport(input))
   handle("help-assistant-ask", (_event, input: HelpInput) => askHelpAssistant(input))
+  handle("agent-teams-list", (_event, scope?: { sourcePath?: string; parentSessionId?: string }) => listAgentTeams(scope))
+  handle("agent-teams-get", (_event, id: string) => getAgentTeam(id))
+  handle(
+    "agent-teams-create",
+    (
+      _event,
+      input: { name: string; topology: TeamTopology; sourcePath: string; parentSessionId?: string; sharedPath?: string },
+    ) => createAgentTeam(input),
+  )
+  handle("agent-teams-add-member", (_event, teamId: string, workspaceId: string) => addTeamMember(teamId, workspaceId))
+  handle("agent-teams-remove-member", (_event, teamId: string, workspaceId: string) =>
+    removeTeamMember(teamId, workspaceId),
+  )
+  handle(
+    "agent-teams-post",
+    (_event, input: { teamId: string; fromWorkspaceId: string; fromName: string; toWorkspaceId?: string; text: string }) =>
+      postTeamMessage(input),
+  )
+  handle("agent-teams-claim", (_event, teamId: string, workspaceId: string) => claimPendingMessages(teamId, workspaceId))
+  handle("agent-teams-delete", (_event, teamId: string) => deleteAgentTeam(teamId))
   handle("local-memory-read", () => readLocalMemory())
   handle("local-memory-write", (_event, content: string) => writeLocalMemory(String(content ?? "")))
   handle("local-memory-clear", () => clearLocalMemory())

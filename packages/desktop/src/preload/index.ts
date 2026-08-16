@@ -65,6 +65,16 @@ const api: ElectronAPI = {
   },
   reportBug: (input) => ipcRenderer.invoke("report-bug", input),
   askHelpAssistant: (input) => ipcRenderer.invoke("help-assistant-ask", input),
+  agentTeams: {
+    list: (scope) => ipcRenderer.invoke("agent-teams-list", scope),
+    get: (id) => ipcRenderer.invoke("agent-teams-get", id),
+    create: (input) => ipcRenderer.invoke("agent-teams-create", input),
+    addMember: (teamId, workspaceId) => ipcRenderer.invoke("agent-teams-add-member", teamId, workspaceId),
+    removeMember: (teamId, workspaceId) => ipcRenderer.invoke("agent-teams-remove-member", teamId, workspaceId),
+    post: (input) => ipcRenderer.invoke("agent-teams-post", input),
+    claim: (teamId, workspaceId) => ipcRenderer.invoke("agent-teams-claim", teamId, workspaceId),
+    delete: (teamId) => ipcRenderer.invoke("agent-teams-delete", teamId),
+  },
   localMemory: {
     read: () => ipcRenderer.invoke("local-memory-read"),
     write: (content) => ipcRenderer.invoke("local-memory-write", content),
