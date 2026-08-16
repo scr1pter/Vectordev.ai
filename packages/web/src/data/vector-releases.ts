@@ -420,4 +420,10 @@ export const release117: VectorRelease[] = [
     summary:
       "Model economics only ever learned from validated parallel runs, so it rarely gathered enough evidence to recommend anything. Every ordinary session now contributes what it truly cost — provider-reported tokens, spend, latency, and files touched — so recommendations appear from normal use. Removed a ranking signal nothing ever produced, which had been the primary sort key and rendered a permanently blank win rate. The site now says plainly which capabilities exist nowhere else: agents that message each other while working, per-agent attribution of live edits, and running Claude Code, Codex, or Cursor as engines inside Vector.",
   },
+  {
+    version: "1.17.56",
+    title: "Agents can actually reach each other",
+    summary:
+      "Collaborative agents could not message each other. The teammate tool was registered in one tool registry while sessions resolve tools through another, so every call returned an unknown-tool error and the agent wrote its message into its own reply instead. The tool now lives where the engine looks, and the workspace is resolved through the location layer so the message queue lands in the right tree whether agents share one or work in isolation. Verified against a live model on a real repository: one agent renamed an export and told its teammate, and the teammate fixed the failing import.",
+  },
 ]
