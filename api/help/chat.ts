@@ -5,7 +5,7 @@ import { ApiError, handleApiError, json, readJson, requireMethod, type ApiReques
 // here rather than taken from the client, so a leaked endpoint cannot be turned
 // into a general-purpose inference gateway.
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
-const GROQ_KEY = process.env.GROQ_API_KEY || "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"
+const GROQ_KEY = process.env.GROQ_API_KEY
 const MODEL = process.env.GROQ_HELP_MODEL || "llama-3.3-70b-versatile"
 const MAX_TURNS = 24
 const MAX_CHARS = 6_000
