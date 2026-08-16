@@ -936,13 +936,6 @@ export default function LegacyLayout(props: ParentProps) {
         onSelect: () => openServer(),
       },
       {
-        id: "settings.open",
-        title: language.t("command.settings.open"),
-        category: language.t("command.category.settings"),
-        keybind: "mod+comma",
-        onSelect: () => openSettings(),
-      },
-      {
         id: "session.previous",
         title: language.t("command.session.previous"),
         category: language.t("command.category.session"),

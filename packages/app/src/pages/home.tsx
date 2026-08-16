@@ -17,6 +17,7 @@ import {
   Switch,
 } from "solid-js"
 import { makeEventListener } from "@solid-primitives/event-listener"
+import { useSettingsCommand } from "@/components/settings-dialog"
 import { useNavigate } from "@solidjs/router"
 import { createStore } from "solid-js/store"
 import { useQuery } from "@tanstack/solid-query"
@@ -502,6 +503,8 @@ export function NewHome() {
       onSelect: resolve,
     })
   }
+
+  useSettingsCommand()
 
   function openSettings() {
     void import("@/components/settings-v2/dialog-settings-v2").then((module) => {
