@@ -73,9 +73,16 @@ export default async function handler(request: ApiRequest, response: ApiResponse
     })
 
     if (!upstream.ok) {
-      // Surface a generic failure: the upstream body can echo account details.
+      // The upstream body can echo account details, so it is logged rather than
+      // returned. The status code is safe to surface and is the difference
+      // between a rejected key, a bad model id, and a rate limit — without it
+      // every failure looks identical from the client.
       console.error("Groq help request failed", upstream.status, await upstream.text().catch(() => ""))
-      throw new ApiError(502, "HELP_UPSTREAM_FAILED", "The help assistant is unavailable right now.")
+      throw new ApiError(
+        502,
+        `HELP_UPSTREAM_${upstream.status}`,
+        `The help assistant is unavailable right now (upstream ${upstream.status}).`,
+      )
     }
 
     const payload = (await upstream.json()) as { choices?: { message?: { content?: string } }[] }
