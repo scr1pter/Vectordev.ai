@@ -5,9 +5,17 @@ import { optional } from "./schema"
 import { define, inventory } from "./event"
 import { NonNegativeInt, PositiveInt, RelativePath } from "./schema"
 
+// Attribution is optional because the watcher and non-agent writers have no
+// session to report. When present it identifies which agent made the edit,
+// which is what lets the editor show several agents working at once.
 const Edited = define({
   type: "file.edited",
-  schema: { file: Schema.String },
+  schema: {
+    file: Schema.String,
+    sessionID: Schema.String.pipe(optional),
+    agent: Schema.String.pipe(optional),
+    messageID: Schema.String.pipe(optional),
+  },
 })
 export const Event = { Edited, Definitions: inventory(Edited) }
 

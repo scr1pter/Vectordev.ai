@@ -65,7 +65,12 @@ export const WriteTool = Tool.define(
           if (yield* format.file(filepath)) {
             yield* Bom.syncFile(fs, filepath, desiredBom)
           }
-          yield* events.publish(FileSystem.Event.Edited, { file: filepath })
+          yield* events.publish(FileSystem.Event.Edited, {
+            file: filepath,
+            sessionID: ctx.sessionID,
+            agent: ctx.agent,
+            messageID: ctx.messageID,
+          })
           yield* events.publish(Watcher.Event.Updated, {
             file: filepath,
             event: exists ? "change" : "add",

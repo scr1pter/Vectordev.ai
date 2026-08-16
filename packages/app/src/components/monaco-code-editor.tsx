@@ -1,5 +1,6 @@
 import { createEffect, onCleanup, onMount } from "solid-js"
 import * as monaco from "monaco-editor"
+import { activeAttributions, type AgentAttribution } from "./editor-attribution"
 import { useSettings } from "@/context/settings"
 import editorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker"
 import cssWorker from "monaco-editor/esm/vs/language/css/css.worker?worker"
@@ -361,9 +362,36 @@ function modelFor(path: string, value: string) {
   return monaco.editor.createModel(value, undefined, uri)
 }
 
+
+const cssId = (value: string) => value.replace(/[^a-z0-9_-]/gi, "")
+
+// Monaco decorations take class names, not inline colours, so each agent's
+// colour is injected as a rule once and reused.
+let attributionStyleEl: HTMLStyleElement | undefined
+function attributionStyles(entries: readonly AgentAttribution[]) {
+  if (!entries.length) return
+  attributionStyleEl ??= (() => {
+    const el = document.createElement("style")
+    el.dataset.vectorAgentAttribution = "true"
+    document.head.appendChild(el)
+    return el
+  })()
+  attributionStyleEl.textContent = entries
+    .map((entry) => {
+      const id = cssId(entry.agentId)
+      return [
+        `.vector-agent-gutter.vector-agent-${id}{border-left:2px solid ${entry.color};margin-left:2px}`,
+        `.vector-agent-line.vector-agent-${id}{background:${entry.color}14}`,
+      ].join("")
+    })
+    .join("")
+}
+
 export function MonacoCodeEditor(props: {
   path: string
   value: string
+  /** Agents whose recent edits should be attributed in the gutter and margin. */
+  attributions?: AgentAttribution[]
   onChange: (next: string) => void
   onSave?: (value: string) => void
   /** Cursor-style ghost-text completion source. When provided (and enabled by the
@@ -376,6 +404,7 @@ export function MonacoCodeEditor(props: {
 }) {
   const editorSettings = useSettings().editor
   let host: HTMLDivElement | undefined
+  let attributionCollection: ReturnType<monaco.editor.IStandaloneCodeEditor["createDecorationsCollection"]> | undefined
   let editor: monaco.editor.IStandaloneCodeEditor | undefined
   let applyingExternal = false
   let registeredUri: string | undefined
@@ -532,11 +561,42 @@ export function MonacoCodeEditor(props: {
       scheduleDiagnostics(0)
       return
     }
+    // Paint one gutter stripe and line highlight per agent that recently edited
+    // this file, so several agents working at once are visually distinguishable.
+    const attributions = activeAttributions(props.attributions ?? [], Date.now())
+    if (current) {
+      attributionStyles(attributions)
+      attributionCollection ??= editor.createDecorationsCollection()
+      attributionCollection.set(
+        attributions.flatMap((entry) =>
+          entry.ranges
+            .filter((range) => range.start >= 1 && range.end >= range.start)
+            .map((range) => ({
+              range: new monaco.Range(range.start, 1, Math.min(range.end, current.getLineCount()), 1),
+              options: {
+                isWholeLine: true,
+                className: `vector-agent-line vector-agent-${cssId(entry.agentId)}`,
+                linesDecorationsClassName: `vector-agent-gutter vector-agent-${cssId(entry.agentId)}`,
+                hoverMessage: { value: `Edited by ${entry.agentName}` },
+                overviewRuler: { color: entry.color, position: monaco.editor.OverviewRulerLane.Left },
+              },
+            })),
+        ),
+      )
+    }
+
     // External updates (agent edits the open file) sync in without clobbering
     // the cursor during the user's own typing.
     if (current && current.getValue() !== value && !editor.hasTextFocus()) {
       applyingExternal = true
-      current.setValue(value)
+      // Replace the range rather than setValue: setValue discards decorations
+      // and the undo stack, so per-agent attribution would vanish on the very
+      // update that produced it.
+      current.pushEditOperations(
+        editor.getSelections(),
+        [{ range: current.getFullModelRange(), text: value, forceMoveMarkers: true }],
+        () => null,
+      )
       applyingExternal = false
     }
   })

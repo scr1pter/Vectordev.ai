@@ -253,7 +253,12 @@ export const ApplyPatchTool = Tool.define(
           if (yield* format.file(edited)) {
             yield* Bom.syncFile(afs, edited, change.bom)
           }
-          yield* events.publish(FileSystem.Event.Edited, { file: edited })
+          yield* events.publish(FileSystem.Event.Edited, {
+            file: edited,
+            sessionID: ctx.sessionID,
+            agent: ctx.agent,
+            messageID: ctx.messageID,
+          })
         }
       }
 

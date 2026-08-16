@@ -112,7 +112,12 @@ export const EditTool = Tool.define(
                 if (yield* format.file(filePath)) {
                   contentNew = yield* Bom.syncFile(afs, filePath, desiredBom)
                 }
-                yield* events.publish(FileSystem.Event.Edited, { file: filePath })
+                yield* events.publish(FileSystem.Event.Edited, {
+                  file: filePath,
+                  sessionID: ctx.sessionID,
+                  agent: ctx.agent,
+                  messageID: ctx.messageID,
+                })
                 yield* events.publish(Watcher.Event.Updated, {
                   file: filePath,
                   event: "add",
@@ -156,7 +161,12 @@ export const EditTool = Tool.define(
               if (yield* format.file(filePath)) {
                 contentNew = yield* Bom.syncFile(afs, filePath, desiredBom)
               }
-              yield* events.publish(FileSystem.Event.Edited, { file: filePath })
+              yield* events.publish(FileSystem.Event.Edited, {
+                  file: filePath,
+                  sessionID: ctx.sessionID,
+                  agent: ctx.agent,
+                  messageID: ctx.messageID,
+                })
               yield* events.publish(Watcher.Event.Updated, {
                 file: filePath,
                 event: "change",
