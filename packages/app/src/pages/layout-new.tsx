@@ -35,6 +35,8 @@ import { useServerSDK } from "@/context/server-sdk"
 import { DialogReportBug } from "@/components/dialog-report-bug"
 import { HelpPanel } from "@/features/help/help-panel"
 import { AgentDashboard } from "@/features/agents/agent-dashboard"
+import { ExternalRuntimeSetupPanel } from "@/features/agents/external-runtime-setup"
+import { isExternalRuntime, type ExternalRuntime } from "@/features/agents/external-runtimes"
 import { PullRequests } from "@/features/pull-requests/pull-requests"
 import { extractVelReply } from "@/features/vel/vel-call"
 import { isInternalProjectPath, useServer } from "@/context/server"
@@ -545,6 +547,22 @@ export default function NewLayout(props: ParentProps) {
     setParallelProvider(selected.providerID)
     setParallelModel(selected.modelID)
   })
+  const detectExternalRuntimes = () => {
+    const api = (
+      globalThis.window?.api as
+        | (typeof globalThis.window.api & {
+            externalAgents?: { detect?: () => Promise<ExternalAgentStatus[]> }
+          })
+        | undefined
+    )?.externalAgents
+    if (!api?.detect) return
+    setExternalAgentsChecking(true)
+    void api
+      .detect()
+      .then(setExternalAgentStatuses)
+      .catch(() => setExternalAgentStatuses([]))
+      .finally(() => setExternalAgentsChecking(false))
+  }
   createEffect(() => {
     if (!parallelComposerOpen() || parallelLaunchMode() !== "agent") return
     if (externalAgentStatuses().length || externalAgentsChecking()) return
@@ -3239,6 +3257,18 @@ export default function NewLayout(props: ParentProps) {
                       }}
                     </For>
                   </div>
+                  <Show
+                    when={
+                      isExternalRuntime(parallelRuntime()) &&
+                      !externalRuntimeStatus(parallelRuntime())?.installed
+                    }
+                  >
+                    <ExternalRuntimeSetupPanel
+                      runtime={parallelRuntime() as ExternalRuntime}
+                      checking={externalAgentsChecking()}
+                      onRecheck={detectExternalRuntimes}
+                    />
+                  </Show>
                   <button
                     type="button"
                     class="mt-2 flex w-full items-center justify-between rounded-[10px] border px-3 py-2 text-left transition"
