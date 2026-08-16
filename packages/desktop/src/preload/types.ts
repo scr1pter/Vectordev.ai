@@ -52,6 +52,8 @@ import type { AgentTaskPreparation } from "../main/context-budget"
 import type { VoiceSpeechResult } from "../main/voice-synthesis"
 import type { PullRequestCliStatus, PullRequestDetail, PullRequestSummary } from "../main/github-pr"
 import type { LocalMemoryState } from "../main/local-memory"
+import type { RuntimeName, RuntimeStatus } from "../main/runtime-bootstrap"
+export type { RuntimeName, RuntimeStatus } from "../main/runtime-bootstrap"
 import type { AgentTeam, TeamMessage, TeamTopology } from "../main/agent-team-model"
 export type { AgentTeam, TeamMessage, TeamTopology } from "../main/agent-team-model"
 export type { LocalMemoryState } from "../main/local-memory"
@@ -172,6 +174,11 @@ export type AgentTeamsAPI = {
   }) => Promise<AgentTeam | undefined>
   claim: (teamId: string, workspaceId: string) => Promise<TeamMessage[]>
   delete: (teamId: string) => Promise<void>
+}
+
+export type RuntimeAPI = {
+  ensure: (name: RuntimeName) => Promise<RuntimeStatus>
+  preparePluginCommand: (command: string[]) => Promise<{ command: string[]; status?: RuntimeStatus }>
 }
 
 export type LocalMemoryAPI = {
@@ -569,6 +576,7 @@ export type ElectronAPI = {
     context: string
   }) => Promise<{ reply?: string; error?: string }>
   agentTeams: AgentTeamsAPI
+  runtime: RuntimeAPI
   localMemory: LocalMemoryAPI
   pullRequests: PullRequestsAPI
   consumeInitialDeepLinks: () => Promise<string[]>

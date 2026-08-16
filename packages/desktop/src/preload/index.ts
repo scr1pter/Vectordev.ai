@@ -75,6 +75,10 @@ const api: ElectronAPI = {
     claim: (teamId, workspaceId) => ipcRenderer.invoke("agent-teams-claim", teamId, workspaceId),
     delete: (teamId) => ipcRenderer.invoke("agent-teams-delete", teamId),
   },
+  runtime: {
+    ensure: (name) => ipcRenderer.invoke("runtime-ensure", name),
+    preparePluginCommand: (command) => ipcRenderer.invoke("runtime-prepare-plugin-command", command),
+  },
   localMemory: {
     read: () => ipcRenderer.invoke("local-memory-read"),
     write: (content) => ipcRenderer.invoke("local-memory-write", content),

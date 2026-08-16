@@ -12,6 +12,7 @@ import { getStore, removeStoreFileIfEmpty } from "./store"
 import { sendBugReport } from "./bug-report"
 import { askHelpAssistant, type HelpInput } from "./help-assistant"
 import { clearLocalMemory, readLocalMemory, writeLocalMemory } from "./local-memory"
+import { ensureRuntime, preparePluginCommand, type RuntimeName } from "./runtime-bootstrap"
 import {
   addTeamMember,
   claimPendingMessages,
@@ -258,6 +259,10 @@ export function registerIpcHandlers(deps: Deps) {
   )
   handle("agent-teams-claim", (_event, teamId: string, workspaceId: string) => claimPendingMessages(teamId, workspaceId))
   handle("agent-teams-delete", (_event, teamId: string) => deleteAgentTeam(teamId))
+  handle("runtime-ensure", (_event, name: RuntimeName) => ensureRuntime(name))
+  handle("runtime-prepare-plugin-command", (_event, command: string[]) =>
+    preparePluginCommand(Array.isArray(command) ? command.map(String) : []),
+  )
   handle("local-memory-read", () => readLocalMemory())
   handle("local-memory-write", (_event, content: string) => writeLocalMemory(String(content ?? "")))
   handle("local-memory-clear", () => clearLocalMemory())

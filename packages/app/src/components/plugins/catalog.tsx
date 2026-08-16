@@ -519,13 +519,16 @@ export const PLUGIN_CATALOG: PluginDef[] = [
   {
     id: "computer-use",
     name: "Computer Use",
-    blurb: "Controlled desktop workflows beyond the browser.",
+    blurb: "Full desktop control: see the screen, move the mouse, type, and read any window.",
     category: "Design & browser",
     logo: "computeruse",
     fill: "#B28CFF",
     badge: "community",
     auth: { kind: "none" },
-    build: () => local(["uvx", "computer-control-mcp@latest"]),
+    // Pin the interpreter: the package needs Python >= 3.10 and macOS still
+    // ships 3.9, so without this uv resolves against the system Python and the
+    // install fails with a dependency error rather than a missing runtime.
+    build: () => local(["uvx", "--python", "3.12", "computer-control-mcp@latest"]),
   },
   {
     id: "playwright",

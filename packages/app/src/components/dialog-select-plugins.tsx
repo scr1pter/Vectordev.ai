@@ -6,6 +6,12 @@ import { useSync } from "@/context/sync"
 import { useMcpAdd, useMcpToggle } from "@/context/mcp"
 import { PLUGIN_CATALOG, PLUGIN_CATEGORIES, PluginLogo, type PluginDef } from "./plugins/catalog"
 
+type RuntimeApi = {
+  preparePluginCommand: (
+    command: string[],
+  ) => Promise<{ command: string[]; status?: { name: string; available: boolean; error?: string } }>
+}
+
 const inputClass =
   "w-full rounded-[10px] border border-[rgba(178,140,255,0.16)] bg-white/[0.03] px-3 py-2 text-13-regular text-text-base outline-none transition-[border-color,box-shadow] duration-200 ease-[cubic-bezier(0.22,0.7,0.28,1)] focus:border-[rgba(147,116,236,0.55)] focus:shadow-[0_0_0_3px_rgba(147,116,236,0.14)]"
 
@@ -51,10 +57,26 @@ export const DialogSelectPlugins: Component = () => {
     void install(plugin, {})
   }
 
+  // Several catalog plugins run through uvx, which most machines do not have.
+  // Resolve the runner to an absolute path first — installing it when missing —
+  // so connecting a plugin never fails with a bare "command not found" the user
+  // has to go fix in a terminal.
+  const withResolvedRuntime = async (config: ReturnType<NonNullable<PluginDef["build"]>>) => {
+    if (config.type !== "local" || !Array.isArray(config.command) || !config.command.length) return config
+    const runtime = (globalThis.window as unknown as { api?: { runtime?: RuntimeApi } } | undefined)?.api?.runtime
+    if (!runtime) return config
+    const prepared = await runtime.preparePluginCommand(config.command).catch(() => undefined)
+    if (!prepared) return config
+    if (prepared.status && !prepared.status.available) {
+      throw new Error(prepared.status.error ?? `Vector could not prepare ${prepared.status.name}.`)
+    }
+    return { ...config, command: prepared.command }
+  }
+
   const install = async (plugin: PluginDef, values: Record<string, string>) => {
     if (!plugin.build || add.isPending) return
     try {
-      await add.mutateAsync({ name: serverName(plugin), config: plugin.build(values) })
+      await add.mutateAsync({ name: serverName(plugin), config: await withResolvedRuntime(plugin.build(values)) })
       await sync().mcp.refresh()
       // Only clear the form belonging to this plugin — an install started
       // from another card must not wipe a half-typed token elsewhere.
