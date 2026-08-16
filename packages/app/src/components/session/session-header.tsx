@@ -27,7 +27,6 @@ import { decode64 } from "@/utils/base64"
 import { Persist, persisted } from "@/utils/persist"
 import { hasActiveVerification } from "@/utils/session-activity"
 import { StatusPopover } from "../status-popover"
-import { DialogGithubReview } from "../dialog-github-review"
 
 const OPEN_APPS = [
   "vscode",
@@ -326,21 +325,6 @@ export function SessionHeader() {
               <Tooltip placement="bottom" value={language.t("status.popover.trigger")}>
                 <StatusPopover />
               </Tooltip>
-            </Show>
-            <Show when={params.id} keyed>
-              {(sessionID) => (
-                <Tooltip placement="bottom" value="Review a GitHub pull request in this session">
-                  <button
-                    type="button"
-                    data-vector-session-tool
-                    onClick={() => dialog.show(() => <DialogGithubReview sessionID={sessionID} />)}
-                    aria-label="Review GitHub pull request"
-                  >
-                    <Icon size="small" name="github" />
-                    <span>Review PR</span>
-                  </button>
-                </Tooltip>
-              )}
             </Show>
             <TooltipKeybind
               title={language.t("command.review.toggle")}
