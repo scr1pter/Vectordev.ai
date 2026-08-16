@@ -142,6 +142,15 @@ const layer = Layer.effect(
             "</process_safety_policy>",
           ].join("\n"),
           [
+            "<vector_local_memory>",
+            "MEMORY.md in the user's Vector config directory is local memory: durable facts about this user that follow them across every project and repository.",
+            "It never leaves their computer. Use it to avoid re-asking what they have already told you, and to apply their stated preferences without being reminded.",
+            "Record only stable, cross-project facts: how they prefer to work, tools and conventions they always use, corrections they have made more than once, and long-running goals.",
+            "Never record secrets, credentials, private personal data, transient details specific to one task, or anything the user asked you not to keep.",
+            "The user can erase all of it at any time by clearing Vector's application cache, so never treat it as authoritative over what they tell you now.",
+            "</vector_local_memory>",
+          ].join("\n"),
+          [
             "<vector_project_memory>",
             "When .vector/BRAIN.md is present, treat it as durable project memory.",
             "Keep it concise and update it only for stable architecture decisions, accepted conventions, important user corrections, and recurring failure lessons.",

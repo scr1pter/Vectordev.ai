@@ -51,6 +51,8 @@ import type {
 import type { AgentTaskPreparation } from "../main/context-budget"
 import type { VoiceSpeechResult } from "../main/voice-synthesis"
 import type { PullRequestCliStatus, PullRequestDetail, PullRequestSummary } from "../main/github-pr"
+import type { LocalMemoryState } from "../main/local-memory"
+export type { LocalMemoryState } from "../main/local-memory"
 export type { PullRequestCliStatus, PullRequestDetail, PullRequestSummary } from "../main/github-pr"
 export type {
   CloudRuntimeLogResult,
@@ -145,6 +147,12 @@ export type LicenseAPI = {
   deactivate: () => Promise<VectorLicenseStatus>
   setCancellation: (cancel: boolean) => Promise<VectorLicenseStatus>
   openBillingPortal: () => Promise<string>
+}
+
+export type LocalMemoryAPI = {
+  read: () => Promise<LocalMemoryState>
+  write: (content: string) => Promise<LocalMemoryState>
+  clear: () => Promise<LocalMemoryState>
 }
 
 export type PullRequestsAPI = {
@@ -535,6 +543,7 @@ export type ElectronAPI = {
     messages: { role: "user" | "assistant"; content: string }[]
     context: string
   }) => Promise<{ reply?: string; error?: string }>
+  localMemory: LocalMemoryAPI
   pullRequests: PullRequestsAPI
   consumeInitialDeepLinks: () => Promise<string[]>
   getDefaultServerUrl: () => Promise<string | null>

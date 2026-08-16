@@ -65,6 +65,11 @@ const api: ElectronAPI = {
   },
   reportBug: (input) => ipcRenderer.invoke("report-bug", input),
   askHelpAssistant: (input) => ipcRenderer.invoke("help-assistant-ask", input),
+  localMemory: {
+    read: () => ipcRenderer.invoke("local-memory-read"),
+    write: (content) => ipcRenderer.invoke("local-memory-write", content),
+    clear: () => ipcRenderer.invoke("local-memory-clear"),
+  },
   pullRequests: {
     status: () => ipcRenderer.invoke("pr-cli-status"),
     list: (cwd, options) => ipcRenderer.invoke("pr-list", cwd, options),

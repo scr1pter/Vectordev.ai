@@ -67,6 +67,11 @@ const layer: Layer.Layer<
       "CONTEXT.md", // deprecated
     ]
     const memoryFiles = [".vector/BRAIN.md", "BRAIN.md"]
+    // Local memory: durable facts about the user that follow them across every
+    // project, stored only in their own config directory and never uploaded.
+    // Loaded additively rather than through globalFiles, whose first-match
+    // break would drop it whenever a global AGENTS.md exists.
+    const globalMemoryFile = path.join(global.config, "MEMORY.md")
 
     const state = yield* InstanceState.make(
       Effect.fn("Instruction.state")(() =>
@@ -119,6 +124,8 @@ const layer: Layer.Layer<
           break
         }
       }
+
+      if (yield* fs.existsSafe(globalMemoryFile)) paths.add(path.resolve(globalMemoryFile))
 
       // Vector memory is additive rather than mutually exclusive with project
       // instructions. It must be loaded even when a global AGENTS.md or

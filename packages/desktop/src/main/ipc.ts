@@ -11,6 +11,7 @@ import { assertAttachmentBudget, createPickedFileAuthorizations } from "./attach
 import { getStore, removeStoreFileIfEmpty } from "./store"
 import { sendBugReport } from "./bug-report"
 import { askHelpAssistant, type HelpInput } from "./help-assistant"
+import { clearLocalMemory, readLocalMemory, writeLocalMemory } from "./local-memory"
 import {
   createPullRequest,
   listPullRequests,
@@ -225,6 +226,9 @@ export function registerIpcHandlers(deps: Deps) {
   })
   handle("report-bug", (_event, input: { message: string; email?: string }) => sendBugReport(input))
   handle("help-assistant-ask", (_event, input: HelpInput) => askHelpAssistant(input))
+  handle("local-memory-read", () => readLocalMemory())
+  handle("local-memory-write", (_event, content: string) => writeLocalMemory(String(content ?? "")))
+  handle("local-memory-clear", () => clearLocalMemory())
   handle("pr-cli-status", () => pullRequestCliStatus())
   handle("pr-list", (_event, cwd: string, options?: { state?: "open" | "closed" | "merged" | "all"; limit?: number }) =>
     listPullRequests(cwd, options),

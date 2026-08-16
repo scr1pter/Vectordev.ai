@@ -10,6 +10,8 @@ import {
 } from "@/context/settings"
 import "./settings-v2.css"
 
+import { LocalMemoryPanel } from "@/features/memory/local-memory-panel"
+
 export type SettingsSection = "general" | "appearance" | "editor" | "chat" | "notifications" | "accessibility"
 
 type Option = {
@@ -236,6 +238,7 @@ export const SettingsGeneralV2: Component<{
       description="Manage the preferences and temporary data Vector stores on this device."
     >
       <div class="settings-v2-section-grid">
+        <LocalMemoryPanel />
         <Card
           icon="reset"
           title="Local data"
