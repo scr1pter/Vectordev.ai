@@ -402,4 +402,10 @@ export const release117: VectorRelease[] = [
     summary:
       "Agents can now share one workspace instead of each getting their own: they see each other's edits as they happen, message each other while working, and Vector names the file and both agents when two of them hold the same one. The Agent Dashboard in Project tools shows every agent live with its task, model, spend, and the conversation between them, and the code editor attributes each edit to the agent that made it. Adds Pull Requests with Vector AI review, local memory that follows you across every repository and can be erased outright, a Vector Help AI Assistant answering only from Vector's own documentation, one-click bug reporting, selectable Claude Code, Codex, and Cursor runtimes, and a rebuilt Scheduled tasks screen with real recurrence.",
   },
+  {
+    version: "1.17.53",
+    title: "Plugins that install themselves",
+    summary:
+      "Connecting a plugin no longer sends you to a terminal. Vector resolves whatever runner a plugin needs, fetches it when it is missing, and pins an interpreter the package can actually run on, so Computer Use — full desktop control with screen reading, mouse, keyboard, and window management — connects on machines that had neither uv nor a recent Python. Retired the in-session Review PR button in favour of Project tools, Pull Requests, which lists, reviews, and merges rather than acting on one pasted link.",
+  },
 ]
