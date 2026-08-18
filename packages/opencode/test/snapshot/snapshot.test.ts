@@ -6,6 +6,8 @@ import { FSUtil } from "@opencode-ai/core/fs-util"
 import fs from "fs/promises"
 import path from "path"
 import { Effect, Fiber, Layer } from "effect"
+import { Global } from "@opencode-ai/core/global"
+import { Hash } from "@opencode-ai/core/util/hash"
 import { Snapshot } from "../../src/snapshot"
 import {
   disposeAllInstances,
@@ -1214,5 +1216,84 @@ it.instance(
     for (let i = 0; i < base.length; i++) expect(yield* readText(base[i])).toBe(`base-${i}`)
     for (const file of fresh) expect(yield* exists(file)).toBe(false)
   }),
+  { git: true },
+)
+
+// --- Snapshot durability -----------------------------------------------------
+// Snapshots used to be bare `write-tree` results with nothing referencing them,
+// so the hourly `git gc --prune=7.days` collected them. A revert against a
+// collected snapshot could not read the tree, read that as "the file was not in
+// this snapshot", and deleted the user's real file.
+
+const shadowGitdirFor = (worktree: string) =>
+  Effect.promise(async () => {
+    const root = path.join(Global.Path.data, "snapshot")
+    const projects = await fs.readdir(root, { withFileTypes: true }).catch(() => [])
+    for (const project of projects) {
+      if (!project.isDirectory()) continue
+      const dir = path.join(root, project.name, Hash.fast(worktree))
+      if (await fs.stat(dir).then(() => true).catch(() => false)) return dir
+    }
+    return undefined
+  })
+
+it.instance(
+  "a snapshot survives an aggressive gc of the shadow repo",
+  withTrackedSnapshot(({ tmp, snapshot, before }) =>
+    Effect.gen(function* () {
+      const gitdir = yield* shadowGitdirFor(tmp.path)
+      expect(gitdir).toBeTruthy()
+
+      // Take a later snapshot first. git's index carries a cache-tree extension
+      // naming the most recent write-tree result, which keeps that one tree
+      // reachable; only an OLDER snapshot is genuinely unreferenced, and an
+      // older snapshot is exactly what a week-old session reverts to.
+      yield* write(`${tmp.path}/later.txt`, "LATER")
+      const after = yield* snapshot.track()
+      expect(after).not.toBe(before)
+
+      // Far more aggressive than the scheduled 7-day prune: anything the repo
+      // does not reference is collected immediately.
+      yield* exec(tmp.path, ["git", "--git-dir", gitdir!, "gc", "--prune=now"])
+
+      const tree = yield* Effect.promise(async () => {
+        const proc = Bun.spawn(["git", "--git-dir", gitdir!, "cat-file", "-e", `${before}^{tree}`], {
+          stdout: "ignore",
+          stderr: "ignore",
+        })
+        return await proc.exited
+      })
+      expect(tree).toBe(0)
+
+      // And the snapshot is still functionally usable, not merely present.
+      yield* write(`${tmp.path}/new.txt`, "NEW")
+      const patch = yield* snapshot.patch(before)
+      yield* snapshot.revert([patch])
+      expect(yield* exists(`${tmp.path}/new.txt`)).toBe(false)
+      expect(yield* exists(`${tmp.path}/a.txt`)).toBe(true)
+    }),
+  ),
+  { git: true },
+)
+
+it.instance(
+  "revert against an unreadable snapshot fails instead of deleting the file",
+  withTrackedSnapshot(({ tmp, snapshot }) =>
+    Effect.gen(function* () {
+      yield* write(`${tmp.path}/precious.txt`, "USER WORK")
+
+      // A hash the object store has never seen stands in for a collected
+      // snapshot: from git's side both are simply unreadable.
+      const missing = "0".repeat(40)
+      const result = yield* Effect.exit(
+        snapshot.revert([{ hash: missing, files: [fwd(tmp.path, "precious.txt")] }]),
+      )
+
+      expect(result._tag).toBe("Failure")
+      // The whole point: the file is still there and still has its contents.
+      expect(yield* exists(`${tmp.path}/precious.txt`)).toBe(true)
+      expect(yield* readText(`${tmp.path}/precious.txt`)).toBe("USER WORK")
+    }),
+  ),
   { git: true },
 )

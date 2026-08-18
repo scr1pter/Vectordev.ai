@@ -8,7 +8,7 @@ import { useSessionLayout } from "@/pages/session/session-layout"
 import { useSync } from "@/context/sync"
 import { same } from "@/utils/same"
 import { listOutcomes } from "@/features/economics/economics-repository"
-import { estimateCostForTokens } from "@/features/economics/model-pricing"
+import { projectCost, ratesFor, type ModelCostSource } from "@/features/economics/model-pricing"
 import { categorizeTask } from "@/features/economics/task-categorizer"
 import type { ModelOutcome } from "@/features/economics/economics-types"
 import { getSessionContext, getSessionTokenTotal } from "./session-context-metrics"
@@ -24,8 +24,21 @@ function medianOf(values: number[]): number {
 }
 
 // Ranks recorded outcomes for one task category exactly like the recommender:
-// tournament win rate first, then check-pass rate, then median latency.
-function rankModelsForCategory(outcomes: ModelOutcome[], category: ModelOutcome["category"], promptTokens: number) {
+// check-pass rate first, then median latency.
+//
+// Two different cost numbers matter here and they are not interchangeable.
+// `medianCostUsd` is what runs on this model HAVE cost — the provider's own
+// reported spend, carried on each outcome and computed by the engine. That is
+// the honest measure, so it leads. `projectedCostUsd` is what one more turn at
+// the current context size WOULD cost, priced from the engine's live rate
+// catalog; it is the only way to say anything about cost before a model has
+// been run, and it is explicitly labelled as an estimate in the UI.
+function rankModelsForCategory(
+  outcomes: ModelOutcome[],
+  category: ModelOutcome["category"],
+  promptTokens: number,
+  providers: ReadonlyMap<string, ModelCostSource> | undefined,
+) {
   const matching = outcomes.filter((outcome) => outcome.category === category)
   const groups = new Map<string, ModelOutcome[]>()
   for (const outcome of matching) {
@@ -40,13 +53,23 @@ function rankModelsForCategory(outcomes: ModelOutcome[], category: ModelOutcome[
       const checkPassRate = checked.length
         ? checked.filter((outcome) => outcome.checksPassed === true).length / checked.length
         : undefined
+      // Absent rather than zero: a run whose provider reported no spend must
+      // not read as free next to one that reported real spend. The engine
+      // reports 0 both for a genuinely free model and for one missing from the
+      // rate catalog, and those are indistinguishable here — so a zero is
+      // dropped and the row falls back to "cost unknown" rather than claiming
+      // a paid model is free.
+      const measured = list
+        .map((outcome) => outcome.costUsd)
+        .filter((cost): cost is number => typeof cost === "number" && cost > 0)
       return {
         provider: list[0].provider,
         model: list[0].model,
         sampleSize: list.length,
         checkPassRate,
         medianLatencyMs: medianOf(list.map((outcome) => outcome.latencyMs)),
-        cost: estimateCostForTokens(list[0].model, promptTokens),
+        medianCostUsd: measured.length ? medianOf(measured) : undefined,
+        projectedCostUsd: projectCost(ratesFor(providers, list[0].provider, list[0].model), promptTokens)?.totalCost,
       }
     })
     .sort((a, b) => {
@@ -102,7 +125,9 @@ export function SessionContextTab() {
     (directory) => listOutcomes(directory),
   )
   const taskCategory = createMemo(() => categorizeTask(info()?.title ?? ""))
-  const modelEconomics = createMemo(() => rankModelsForCategory(economicsOutcomes() ?? [], taskCategory(), totalTokens()))
+  const modelEconomics = createMemo(() =>
+    rankModelsForCategory(economicsOutcomes() ?? [], taskCategory(), totalTokens(), providers.all()),
+  )
   const formatPercent = (value: number | undefined) =>
     value === undefined ? "-" : `${Math.round(value * 100)}%`
   const formatLatency = (ms: number) => (ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms)}ms`)
@@ -334,7 +359,14 @@ export function SessionContextTab() {
                       <span>{row.sampleSize} run{row.sampleSize === 1 ? "" : "s"}</span>
                       <span>checks {formatPercent(row.checkPassRate)}</span>
                       <span>median {formatLatency(row.medianLatencyMs)}</span>
-                      <span>{row.cost ? `~${usd().format(row.cost.estimatedTotalCost)}` : "cost unknown"}</span>
+                      <Show when={row.medianCostUsd !== undefined}>
+                        <span>median {usd().format(row.medianCostUsd ?? 0)}/run</span>
+                      </Show>
+                      <span>
+                        {row.projectedCostUsd !== undefined
+                          ? `~${usd().format(row.projectedCostUsd)} next turn`
+                          : "rate unknown"}
+                      </span>
                     </div>
                   </div>
                 )}

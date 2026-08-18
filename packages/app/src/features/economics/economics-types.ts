@@ -26,11 +26,14 @@ export type TokenUsage = {
 
 export const emptyUsage: TokenUsage = { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0 }
 
-// Billable total. Cache reads are counted because providers charge for them
-// (at a discount folded into the reported cost), while cache writes are
-// already billed as input by every provider Vector supports.
+// Every token the run put through the provider. Cache reads and writes are
+// both counted: each is separately metered and separately billed (reads at a
+// discount, writes at a premium), so leaving either out understates how much
+// work the run actually did. This is a token count, not a cost — spend comes
+// from the provider's own reported figure on the outcome, or from the engine's
+// rate catalog via costOfUsage.
 export function totalTokens(usage: TokenUsage) {
-  return usage.input + usage.output + usage.reasoning + usage.cacheRead
+  return usage.input + usage.output + usage.reasoning + usage.cacheRead + usage.cacheWrite
 }
 
 export function addUsage(a: TokenUsage, b: TokenUsage): TokenUsage {

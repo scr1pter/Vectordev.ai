@@ -17,6 +17,18 @@ export const Patch = Schema.Struct({
 })
 export type Patch = typeof Patch.Type
 
+// A snapshot's tree object is gone from the shadow repo — almost always because
+// `git gc --prune` collected it. Callers must treat this as a hard failure:
+// the old behaviour was to read an unreadable snapshot as "this file was not in
+// it" and delete the user's file.
+export class SnapshotUnavailableError extends Schema.TaggedErrorClass<SnapshotUnavailableError>()(
+  "SnapshotUnavailableError",
+  {
+    hash: Schema.String,
+    file: Schema.optional(Schema.String),
+  },
+) {}
+
 export const FileDiff = Info
 export type FileDiff = typeof FileDiff.Type
 
@@ -38,8 +50,8 @@ export interface Interface {
   readonly cleanup: () => Effect.Effect<void>
   readonly track: () => Effect.Effect<string | undefined>
   readonly patch: (hash: string) => Effect.Effect<Patch>
-  readonly restore: (snapshot: string) => Effect.Effect<void>
-  readonly revert: (patches: Patch[]) => Effect.Effect<void>
+  readonly restore: (snapshot: string) => Effect.Effect<void, SnapshotUnavailableError>
+  readonly revert: (patches: Patch[]) => Effect.Effect<void, SnapshotUnavailableError>
   readonly diff: (hash: string) => Effect.Effect<string>
   readonly diffFull: (from: string, to: string) => Effect.Effect<FileDiff[]>
 }
@@ -315,6 +327,37 @@ const layer: Layer.Layer<Service, never, FSUtil.Service | AppProcess.Service | C
           )
         })
 
+        // write-tree leaves the tree unreferenced, so the periodic `git gc
+        // --prune` below is free to collect it and the snapshot silently stops
+        // existing. Wrapping it in a commit under refs/vector keeps it
+        // reachable for as long as the shadow repo lives.
+        const anchor = Effect.fnUntraced(function* (hash: string) {
+          if (!hash) return
+          const commit = yield* git([...core, ...args(["commit-tree", hash, "-m", "vector snapshot"])], {
+            cwd: state.directory,
+            env: {
+              GIT_AUTHOR_NAME: "Vector",
+              GIT_AUTHOR_EMAIL: "noreply@vectordev.ai",
+              GIT_COMMITTER_NAME: "Vector",
+              GIT_COMMITTER_EMAIL: "noreply@vectordev.ai",
+            },
+          })
+          if (commit.code !== 0 || !commit.text.trim()) {
+            yield* Effect.logWarning("failed to anchor snapshot", { hash, stderr: commit.stderr })
+            return
+          }
+          const ref = yield* git(["--git-dir", state.gitdir, "update-ref", `refs/vector/snapshot/${hash}`, commit.text.trim()])
+          if (ref.code !== 0) yield* Effect.logWarning("failed to write snapshot ref", { hash, stderr: ref.stderr })
+        })
+
+        // Whether the snapshot's tree can still be read. This is the difference
+        // between "the file was not in this snapshot" and "the snapshot is
+        // gone", which look identical from a failed ls-tree.
+        const readable = Effect.fnUntraced(function* (hash: string) {
+          const result = yield* git([...core, ...args(["cat-file", "-e", `${hash}^{tree}`])], { cwd: state.worktree })
+          return result.code === 0
+        })
+
         const track = Effect.fnUntraced(function* () {
           return yield* locked(
             Effect.gen(function* () {
@@ -340,6 +383,7 @@ const layer: Layer.Layer<Service, never, FSUtil.Service | AppProcess.Service | C
               yield* add()
               const result = yield* git(args(["write-tree"]), { cwd: state.directory })
               const hash = result.text.trim()
+              yield* anchor(hash)
               yield* Effect.logInfo("tracking", { hash, cwd: state.directory, git: state.gitdir })
               return hash
             }),
@@ -394,13 +438,16 @@ const layer: Layer.Layer<Service, never, FSUtil.Service | AppProcess.Service | C
                   exitCode: checkout.code,
                   stderr: checkout.stderr,
                 })
-                return
+                return yield* Effect.fail(new SnapshotUnavailableError({ hash: snapshot }))
               }
               yield* Effect.logError("failed to restore snapshot", {
                 snapshot,
                 exitCode: result.code,
                 stderr: result.stderr,
               })
+              // Returning void here told the caller the checkout had succeeded,
+              // so a failed undo was reported to the user as a completed one.
+              return yield* Effect.fail(new SnapshotUnavailableError({ hash: snapshot }))
             }),
           )
         })
@@ -437,6 +484,18 @@ const layer: Layer.Layer<Service, never, FSUtil.Service | AppProcess.Service | C
                     hash: op.hash,
                   })
                   return
+                }
+                // ls-tree fails both when the path is absent from the tree and
+                // when the tree itself is unreadable. Only the first means the
+                // file did not exist at snapshot time; the second means we are
+                // about to delete work we can no longer restore, so fail loudly
+                // instead.
+                if (!(yield* readable(op.hash))) {
+                  yield* Effect.logError("snapshot is no longer readable, refusing to delete", {
+                    file: op.file,
+                    hash: op.hash,
+                  })
+                  return yield* Effect.fail(new SnapshotUnavailableError({ hash: op.hash, file: op.file }))
                 }
                 yield* Effect.logInfo("file did not exist in snapshot, deleting", { file: op.file, hash: op.hash })
                 yield* remove(op.file)

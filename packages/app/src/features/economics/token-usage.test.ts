@@ -56,8 +56,10 @@ describe("measureUsage", () => {
 })
 
 describe("usage arithmetic", () => {
-  test("totalTokens counts billable tokens and excludes cache writes", () => {
-    expect(totalTokens({ input: 100, output: 50, reasoning: 10, cacheRead: 40, cacheWrite: 999 })).toBe(200)
+  test("totalTokens counts every metered token, cache reads and writes included", () => {
+    // Cache writes are separately metered and billed at a premium, so omitting
+    // them understated how much work a run did.
+    expect(totalTokens({ input: 100, output: 50, reasoning: 10, cacheRead: 40, cacheWrite: 999 })).toBe(1199)
   })
 
   test("addUsage is additive across every field", () => {

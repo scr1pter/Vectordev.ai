@@ -518,10 +518,22 @@ describe("submission agent selection", () => {
     ).toBe("review")
   })
 
-  test("does not enable the completion judge in Plan Mode or trivial conversation", () => {
-    expect(shouldUseCompletionJudge({ enabled: true, agent: "plan", difficulty: "complex" })).toBe(false)
-    expect(shouldUseCompletionJudge({ enabled: true, agent: "build", difficulty: "trivial" })).toBe(false)
-    expect(shouldUseCompletionJudge({ enabled: true, agent: "build", difficulty: "complex" })).toBe(true)
+  test("judges every prompt that produces work once enabled", () => {
+    // Testing and automation is the point of the setting, so it must not skip
+    // requests it privately judges small — a gate like that hides regressions.
+    expect(shouldUseCompletionJudge({ enabled: true, agent: "build" })).toBe(true)
+    expect(shouldUseCompletionJudge({ enabled: true, agent: "review" })).toBe(true)
+  })
+
+  test("skips the lanes that cannot satisfy the policy", () => {
+    // plan produces no implementation to verify; quick is denied every tool in
+    // agent.ts, so it cannot spawn the judge subagent at all.
+    expect(shouldUseCompletionJudge({ enabled: true, agent: "plan" })).toBe(false)
+    expect(shouldUseCompletionJudge({ enabled: true, agent: "quick" })).toBe(false)
+  })
+
+  test("stays off when the setting is off", () => {
+    expect(shouldUseCompletionJudge({ enabled: false, agent: "build" })).toBe(false)
   })
 })
 

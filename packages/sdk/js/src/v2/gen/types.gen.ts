@@ -1245,6 +1245,9 @@ export type GlobalEvent = {
         type: "file.edited"
         properties: {
           file: string
+          sessionID?: string
+          agent?: string
+          messageID?: string
         }
       }
     | {
@@ -2714,6 +2717,12 @@ export type SessionBusyError = {
   message: string
 }
 
+export type ConflictError = {
+  _tag: "ConflictError"
+  message: string
+  resource?: string
+}
+
 export type EventTuiPromptAppend = {
   type: "tui.prompt.append"
   properties: {
@@ -2822,12 +2831,6 @@ export type PromptInput = {
   text: string
   files?: Array<PromptInputFileAttachment>
   agents?: Array<PromptAgentAttachment>
-}
-
-export type ConflictError = {
-  _tag: "ConflictError"
-  message: string
-  resource?: string
 }
 
 export type ServiceUnavailableError = {
@@ -5526,6 +5529,9 @@ export type FileEdited = {
   location?: LocationRef
   data: {
     file: string
+    sessionID?: string
+    agent?: string
+    messageID?: string
   }
 }
 
@@ -6824,6 +6830,9 @@ export type EventFileEdited = {
   type: "file.edited"
   properties: {
     file: string
+    sessionID?: string
+    agent?: string
+    messageID?: string
   }
 }
 
@@ -10691,9 +10700,9 @@ export type SessionRevertErrors = {
    */
   404: NotFoundError
   /**
-   * SessionBusyError
+   * SessionBusyError | ConflictError
    */
-  409: SessionBusyError
+  409: SessionBusyError | ConflictError
 }
 
 export type SessionRevertError = SessionRevertErrors[keyof SessionRevertErrors]
@@ -10729,9 +10738,9 @@ export type SessionUnrevertErrors = {
    */
   404: NotFoundError
   /**
-   * SessionBusyError
+   * SessionBusyError | ConflictError
    */
-  409: SessionBusyError
+  409: SessionBusyError | ConflictError
 }
 
 export type SessionUnrevertError = SessionUnrevertErrors[keyof SessionUnrevertErrors]

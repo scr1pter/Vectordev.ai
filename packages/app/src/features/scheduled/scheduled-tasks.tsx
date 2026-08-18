@@ -3,15 +3,42 @@ import {
   describeNextRun,
   describeRecurrence,
   filterTasks,
+  buildRecurrence,
   nextRun,
   sortByNextRun,
   SUGGESTIONS,
+  type Recurrence,
   type ScheduledTask,
   type Suggestion,
   type TaskFilter,
 } from "./schedule-model"
 
 const FILTERS: TaskFilter[] = ["all", "active", "paused"]
+
+const REPEATS = [
+  { kind: "once", label: "Once" },
+  { kind: "daily", label: "Every day" },
+  { kind: "weekdays", label: "Weekdays" },
+  { kind: "weekly", label: "Weekly" },
+] as const
+
+type RepeatKind = (typeof REPEATS)[number]["kind"]
+
+const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+
+// datetime-local wants "YYYY-MM-DDTHH:mm" in LOCAL time. toISOString() would
+// shift by the timezone offset and schedule the task at the wrong hour.
+function localDateTimeValue(date: Date) {
+  const pad = (value: number) => String(value).padStart(2, "0")
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
+export type ScheduleRequest = {
+  title: string
+  prompt: string
+  recurrence: Recurrence
+  runAt: string
+}
 
 function StatusDot(props: { task: ScheduledTask }) {
   return (
@@ -50,20 +77,179 @@ function SuggestionRow(props: { suggestion: Suggestion; onUse: (suggestion: Sugg
   )
 }
 
+
+function CreateForm(props: {
+  seed?: Suggestion
+  onCancel: () => void
+  onSchedule: (input: ScheduleRequest) => void
+}) {
+  const [title, setTitle] = createSignal(props.seed?.title ?? "")
+  const [prompt, setPrompt] = createSignal(props.seed?.prompt ?? "")
+  const seeded = props.seed?.recurrence
+  const [kind, setKind] = createSignal<RepeatKind>(seeded?.kind ?? "once")
+  const [at, setAt] = createSignal(
+    seeded?.kind === "once" ? localDateTimeValue(new Date(seeded.at)) : localDateTimeValue(new Date(Date.now() + 3_600_000)),
+  )
+  const [time, setTime] = createSignal(seeded && seeded.kind !== "once" ? seeded.time : "09:00")
+  const [weekday, setWeekday] = createSignal(seeded?.kind === "weekly" ? seeded.weekday : 1)
+
+  const recurrence = createMemo(() => buildRecurrence({ kind: kind(), at: at(), time: time(), weekday: weekday() }))
+  // A one-shot in the past has no next run, so nextRun returns undefined and
+  // the task would be created already dead. Block it at the form instead.
+  const runAt = createMemo(() => {
+    const value = recurrence()
+    if (!value) return undefined
+    return nextRun(value, new Date())?.toISOString()
+  })
+  const ready = createMemo(() => Boolean(prompt().trim() && recurrence() && runAt()))
+
+  const submit = (event: Event) => {
+    event.preventDefault()
+    const value = recurrence()
+    const when = runAt()
+    if (!prompt().trim() || !value || !when) return
+    props.onSchedule({
+      title: title().trim() || prompt().trim().split("\n")[0]?.slice(0, 80) || "Scheduled run",
+      prompt: prompt().trim(),
+      recurrence: value,
+      runAt: when,
+    })
+  }
+
+  const field = "w-full rounded-[10px] border border-[color:var(--vx-line)] bg-white/[0.045] px-3 py-2 text-[13.5px] text-white outline-none placeholder:text-white/35 focus:border-[color:var(--vx-purple)]"
+
+  return (
+    <form class="mt-5 rounded-[12px] border border-[color:var(--vx-line)] bg-white/[0.025] p-4" onSubmit={submit}>
+      <label class="block text-[12px] font-medium uppercase tracking-wide text-white/45" for="scheduled-prompt">
+        What should Vector do?
+      </label>
+      <textarea
+        id="scheduled-prompt"
+        rows={3}
+        value={prompt()}
+        placeholder="Summarise what changed in this repository since yesterday"
+        class={`mt-1.5 resize-y ${field}`}
+        onInput={(event) => setPrompt(event.currentTarget.value)}
+      />
+
+      <label class="mt-3 block text-[12px] font-medium uppercase tracking-wide text-white/45" for="scheduled-title">
+        Name <span class="normal-case text-white/30">(optional)</span>
+      </label>
+      <input
+        id="scheduled-title"
+        value={title()}
+        placeholder="Morning repo brief"
+        class={`mt-1.5 ${field}`}
+        onInput={(event) => setTitle(event.currentTarget.value)}
+      />
+
+      <div class="mt-3 flex flex-wrap gap-3">
+        <div class="min-w-[150px] flex-1">
+          <label class="block text-[12px] font-medium uppercase tracking-wide text-white/45" for="scheduled-repeat">
+            Repeat
+          </label>
+          <select
+            id="scheduled-repeat"
+            value={kind()}
+            class={`mt-1.5 ${field}`}
+            onChange={(event) => setKind(event.currentTarget.value as RepeatKind)}
+          >
+            <For each={REPEATS}>{(item) => <option value={item.kind}>{item.label}</option>}</For>
+          </select>
+        </div>
+
+        <Show when={kind() === "weekly"}>
+          <div class="min-w-[150px] flex-1">
+            <label class="block text-[12px] font-medium uppercase tracking-wide text-white/45" for="scheduled-weekday">
+              Day
+            </label>
+            <select
+              id="scheduled-weekday"
+              value={String(weekday())}
+              class={`mt-1.5 ${field}`}
+              onChange={(event) => setWeekday(Number(event.currentTarget.value))}
+            >
+              <For each={WEEKDAYS}>{(name, index) => <option value={String(index())}>{name}</option>}</For>
+            </select>
+          </div>
+        </Show>
+
+        <div class="min-w-[170px] flex-1">
+          <label class="block text-[12px] font-medium uppercase tracking-wide text-white/45" for="scheduled-when">
+            {kind() === "once" ? "When" : "Time"}
+          </label>
+          <Show
+            when={kind() === "once"}
+            fallback={
+              <input
+                id="scheduled-when"
+                type="time"
+                value={time()}
+                class={`mt-1.5 ${field}`}
+                onInput={(event) => setTime(event.currentTarget.value)}
+              />
+            }
+          >
+            <input
+              id="scheduled-when"
+              type="datetime-local"
+              value={at()}
+              class={`mt-1.5 ${field}`}
+              onInput={(event) => setAt(event.currentTarget.value)}
+            />
+          </Show>
+        </div>
+      </div>
+
+      <div class="mt-4 flex items-center justify-between gap-3">
+        <span class="text-[12.5px] text-white/40">
+          {recurrence() && runAt()
+            ? `${describeRecurrence(recurrence()!)} · first run ${describeNextRun(new Date(runAt()!), new Date())}`
+            : kind() === "once"
+              ? "Pick a time in the future."
+              : "Pick a valid time."}
+        </span>
+        <div class="flex shrink-0 gap-2">
+          <button
+            type="button"
+            class="rounded-full px-3.5 py-1.5 text-[13px] text-white/55 transition hover:text-white"
+            onClick={props.onCancel}
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={!ready()}
+            class="rounded-full bg-white/[0.12] px-4 py-1.5 text-[13px] font-medium text-white transition enabled:hover:bg-white/[0.18] disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Schedule
+          </button>
+        </div>
+      </div>
+    </form>
+  )
+}
+
 export function ScheduledTasks(props: {
   open: boolean
   tasks: ScheduledTask[]
   onClose: () => void
-  onCreate: () => void
-  onUseSuggestion: (suggestion: Suggestion) => void
+  onSchedule: (input: ScheduleRequest) => void
   onTogglePause: (id: string, paused: boolean) => void
   onDelete: (id: string) => void
 }) {
   const [filter, setFilter] = createSignal<TaskFilter>("all")
   const [query, setQuery] = createSignal("")
+  const [composing, setComposing] = createSignal(false)
+  const [seed, setSeed] = createSignal<Suggestion | undefined>(undefined)
   const now = new Date()
 
   const visible = createMemo(() => sortByNextRun(filterTasks(props.tasks, filter(), query()), now))
+
+  const compose = (suggestion?: Suggestion) => {
+    setSeed(suggestion)
+    setComposing(true)
+  }
 
   return (
     <Show when={props.open}>
@@ -78,7 +264,7 @@ export function ScheduledTasks(props: {
           <button
             type="button"
             class="rounded-full border border-[color:var(--vx-line)] bg-white/[0.04] px-4 py-1.5 text-[13px] font-medium text-white transition hover:bg-white/[0.08]"
-            onClick={props.onCreate}
+            onClick={() => compose(undefined)}
           >
             Create
           </button>
@@ -99,6 +285,17 @@ export function ScheduledTasks(props: {
           <p class="mt-2 text-[15px] text-white/45">
             Ask Vector to schedule tasks, set reminders, or watch a repository for changes
           </p>
+
+          <Show when={composing()}>
+            <CreateForm
+              seed={seed()}
+              onCancel={() => setComposing(false)}
+              onSchedule={(input) => {
+                props.onSchedule(input)
+                setComposing(false)
+              }}
+            />
+          </Show>
 
           <div class="relative mt-6">
             <span class="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-white/35">
@@ -195,7 +392,7 @@ export function ScheduledTasks(props: {
           <div class="mt-8 border-t border-[color:var(--vx-line)] pt-6">
             <h2 class="mb-2 text-[15px] font-medium text-white/70">Suggestions</h2>
             <For each={SUGGESTIONS}>
-              {(suggestion) => <SuggestionRow suggestion={suggestion} onUse={props.onUseSuggestion} />}
+              {(suggestion) => <SuggestionRow suggestion={suggestion} onUse={compose} />}
             </For>
           </div>
         </div>

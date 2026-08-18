@@ -1,3 +1,4 @@
+import { shouldUseCompletionJudge, VERIFIED_COMPLETION_POLICY } from "@/features/judge/verified-completion"
 import type { Message, Session } from "@opencode-ai/sdk/v2/client"
 import { showToast } from "@/utils/toast"
 import { base64Encode } from "@opencode-ai/core/util/encode"
@@ -37,16 +38,6 @@ type PendingPrompt = {
 
 const pending = new Map<string, PendingPrompt>()
 
-export const VERIFIED_COMPLETION_POLICY = [
-  "<vector_verified_completion>",
-  "LLM-as-a-judge is enabled for this request. Treat completion as a verified state, not a confident summary.",
-  "Before editing, identify observable success criteria. For complex work, coordinate specialized subagents with non-overlapping owned_paths and explicit dependencies.",
-  "After implementation, run the relevant tests, typechecks, builds, and browser checks. Then delegate an independent final evaluation to the judge subagent with the original request, success criteria, changed files, and verification evidence.",
-  "The judge must return PASS, FAIL, or INCONCLUSIVE. On FAIL, repair the blocking findings and re-run verification and judgment. Stop after three judge rounds and report the remaining blocker rather than looping forever.",
-  "Do not say the task is complete unless the final judge verdict is PASS. If required credentials, approvals, external services, or unavailable environments prevent verification, report INCONCLUSIVE and name the missing evidence.",
-  "</vector_verified_completion>",
-].join("\n")
-
 export function resolveSubmissionAgent(input: {
   planMode: boolean
   current: string
@@ -60,13 +51,7 @@ export function resolveSubmissionAgent(input: {
   )
 }
 
-export function shouldUseCompletionJudge(input: {
-  enabled: boolean
-  agent: string
-  difficulty: TaskDifficulty
-}) {
-  return input.enabled && input.agent !== "plan" && input.difficulty !== "trivial"
-}
+export { shouldUseCompletionJudge, VERIFIED_COMPLETION_POLICY }
 
 export type FollowupDraft = {
   sessionID: string
@@ -100,11 +85,7 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
   const images = draftImages(input.draft.prompt)
   const difficulty = input.draft.difficulty ?? classifyTaskDifficulty(text)
   const agent = difficulty === "trivial" && input.draft.agent !== "plan" ? "quick" : input.draft.agent
-  const llmJudge = shouldUseCompletionJudge({
-    enabled: input.draft.llmJudge === true,
-    agent,
-    difficulty,
-  })
+  const llmJudge = shouldUseCompletionJudge({ enabled: input.draft.llmJudge === true, agent })
   const setBusy = () => {
     if (!input.optimisticBusy) return
     input.serverSync.session.set("session_status", input.draft.sessionID, { type: "busy" })

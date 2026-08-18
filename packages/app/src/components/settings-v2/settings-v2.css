@@ -1372,6 +1372,13 @@ html[data-vector-reduce-animations="true"] *::after {
   min-width: 156px;
 }
 
+/* The 156px floor above exists for selects and inputs. A switch is 46px wide,
+   so inheriting it stole ~110px from the copy column and wrapped short
+   descriptions into a tall, cramped stack. */
+.settings-v2-row-control--compact {
+  min-width: 0;
+}
+
 .settings-v2-input,
 .settings-v2-number {
   width: 100%;

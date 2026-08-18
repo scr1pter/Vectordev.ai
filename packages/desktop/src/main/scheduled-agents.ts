@@ -304,8 +304,23 @@ export function setScheduledAgentPaused(id: string, paused: boolean) {
       !paused && record.recurrence && record.recurrence.kind !== "once"
         ? (nextRun(record.recurrence, new Date())?.toISOString() ?? record.runAt)
         : record.runAt,
-    status: paused && record.status === "scheduled" ? "canceled" : paused ? record.status : "scheduled",
+    status: pausedStatus(record, paused),
   }))
+}
+
+// Pausing parks a pending run; resuming re-arms it. Resuming must not
+// resurrect a one-shot run that already finished — that would execute the
+// task a second time. A recurring task is different: its whole purpose is to
+// fire again, and a pause that straddled a run leaves it "completed" (see the
+// `!item.paused` branch in the completion handler), so resuming has to put it
+// back on the schedule.
+export function pausedStatus(
+  record: Pick<ScheduledAgentRecord, "status" | "recurrence">,
+  paused: boolean,
+): ScheduledAgentStatus {
+  if (paused) return record.status === "scheduled" ? "canceled" : record.status
+  if (record.recurrence && record.recurrence.kind !== "once") return "scheduled"
+  return record.status === "canceled" ? "scheduled" : record.status
 }
 
 export function createScheduledAgent(input: CreateScheduledAgentInput): ScheduledAgentRecord {

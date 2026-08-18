@@ -18,8 +18,15 @@ export const RevertInput = Schema.Struct({
 export type RevertInput = Schema.Schema.Type<typeof RevertInput>
 
 export interface Interface {
-  readonly revert: (input: RevertInput) => Effect.Effect<Session.Info, Session.BusyError>
-  readonly unrevert: (input: { sessionID: SessionID }) => Effect.Effect<Session.Info, Session.BusyError>
+  // SnapshotUnavailableError surfaces when the snapshot a revert needs has been
+  // collected from the shadow repo. It must reach the caller: the alternative is
+  // reporting a successful undo that restored nothing.
+  readonly revert: (
+    input: RevertInput,
+  ) => Effect.Effect<Session.Info, Session.BusyError | Snapshot.SnapshotUnavailableError>
+  readonly unrevert: (input: {
+    sessionID: SessionID
+  }) => Effect.Effect<Session.Info, Session.BusyError | Snapshot.SnapshotUnavailableError>
   readonly cleanup: (session: Session.Info) => Effect.Effect<void>
 }
 

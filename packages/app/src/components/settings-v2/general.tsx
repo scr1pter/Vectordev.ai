@@ -120,7 +120,7 @@ const ToggleRow: Component<{
         <div class="settings-v2-row-description">{props.description}</div>
       </Show>
     </div>
-    <div class="settings-v2-row-control">
+    <div class="settings-v2-row-control settings-v2-row-control--compact">
       <Switch checked={props.checked} onChange={props.onChange} />
     </div>
   </div>
@@ -256,11 +256,11 @@ export const SettingsGeneralV2: Component<{
         <Card
           icon="circle-check"
           title="Verified completion"
-          description="Control whether Vector independently tests and scores engineering work before calling it complete."
+          description="Have Vector prove its work matches what you asked before it reports done."
         >
           <ToggleRow
             title="LLM-as-a-judge"
-            description="After implementation, a separate judge agent checks the request, diff, tests, runtime evidence, and regression risk. Failed verdicts trigger a bounded repair-and-retest loop. This uses additional model calls and tokens."
+            description="When Vector finishes, a separate judge compares the result against your request and the checks it ran. On a failed verdict it names the specific repair and Vector fixes it, up to three rounds. Applies to every prompt and every agent workspace, and costs extra model calls."
             checked={settings.general.llmJudge()}
             onChange={settings.general.setLlmJudge}
           />

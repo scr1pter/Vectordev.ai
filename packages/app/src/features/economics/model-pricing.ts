@@ -1,156 +1,136 @@
-// Real, public per-1M-token USD list prices for common models, keyed by
-// substring match on the model id string. Prices are hardcoded snapshots of
-// each provider's published pricing (see the "as of" date on each entry) —
-// never inferred or guessed. If a model id doesn't match any entry,
-// estimatePromptCost returns undefined so callers can render an honest
-// "cost unknown" rather than a fabricated number.
+// Prices a run from the engine's own per-model cost catalog.
+//
+// Vector already knows what every model charges: the engine resolves each
+// model's rates from models.dev and hands them to the renderer on
+// `Provider.models[id].cost` (USD per 1M tokens, with separate cache read and
+// write rates and optional context tiers). That is the same catalog the engine
+// bills sessions against, so pricing here agrees with the "Total cost" the user
+// sees on their session instead of drifting away from it.
+//
+// This module deliberately holds NO price constants. A hardcoded table can only
+// ever be a stale second opinion — it goes out of date the day a provider
+// changes a rate, and it silently knows nothing about models added after it was
+// written. If a model has no rates, these functions return undefined so callers
+// render an honest "cost unknown".
 
-export type ModelPricing = {
+import type { TokenUsage } from "./economics-types"
+
+// Structural subset of the SDK's `Model["cost"]`. Declared locally so this
+// module doesn't depend on generated SDK types that change shape on
+// regeneration; any real model cost satisfies it.
+export type ModelRates = {
   /** USD per 1,000,000 input tokens. */
-  inputPer1M: number
+  input: number
   /** USD per 1,000,000 output tokens. */
-  outputPer1M: number
-  /** Date this price was last confirmed against the provider's public pricing page. */
-  asOf: string
-  label: string
+  output: number
+  cache: {
+    /** USD per 1,000,000 tokens read from cache — typically ~0.1x input. */
+    read: number
+    /** USD per 1,000,000 tokens written to cache — typically 1.25x-2x input. */
+    write: number
+  }
+  /** Higher rates that apply once a request exceeds `tier.size` tokens. */
+  tiers?: readonly {
+    input: number
+    output: number
+    cache: { read: number; write: number }
+    tier: { type: "context"; size: number }
+  }[]
 }
 
-type PricingRule = { match: string; pricing: ModelPricing }
-
-// Order matters: entries are matched top-to-bottom by substring, so a more
-// specific id (e.g. "gpt-4o-mini") must precede any id it's a substring of
-// (e.g. "gpt-4o") or it would never be reached.
-const PRICING_TABLE: PricingRule[] = [
-  {
-    match: "gpt-4o-mini",
-    pricing: { inputPer1M: 0.15, outputPer1M: 0.6, asOf: "2024-08-06", label: "GPT-4o mini" },
-  },
-  {
-    match: "gpt-4o",
-    pricing: { inputPer1M: 2.5, outputPer1M: 10, asOf: "2024-08-06", label: "GPT-4o" },
-  },
-  {
-    // OpenAI cut o3 pricing ~80% on 2025-06-10 (from $10/$40 to $2/$8 per 1M).
-    match: "o3",
-    pricing: { inputPer1M: 2, outputPer1M: 8, asOf: "2025-06-10", label: "OpenAI o3" },
-  },
-  {
-    // Tiered by context length at GA; this is the <=200K-token tier.
-    match: "gemini-2.5-pro",
-    pricing: { inputPer1M: 1.25, outputPer1M: 10, asOf: "2025-06-17", label: "Gemini 2.5 Pro (<=200K context)" },
-  },
-  {
-    // GA pricing folds "thinking" tokens into the single output rate.
-    match: "gemini-2.5-flash",
-    pricing: { inputPer1M: 0.3, outputPer1M: 2.5, asOf: "2025-06-17", label: "Gemini 2.5 Flash" },
-  },
-  {
-    match: "claude-haiku",
-    pricing: { inputPer1M: 1, outputPer1M: 5, asOf: "2026-06-24", label: "Claude Haiku 4.5" },
-  },
-  {
-    match: "claude-sonnet",
-    pricing: { inputPer1M: 3, outputPer1M: 15, asOf: "2026-06-24", label: "Claude Sonnet 5" },
-  },
-  {
-    match: "claude-opus",
-    pricing: { inputPer1M: 5, outputPer1M: 25, asOf: "2026-06-24", label: "Claude Opus 4.8" },
-  },
-  {
-    // DeepSeek-V3 (deepseek-chat) standard rate; DeepSeek also offers a lower
-    // off-peak / cache-hit rate not modeled here.
-    match: "deepseek",
-    pricing: { inputPer1M: 0.27, outputPer1M: 1.1, asOf: "2025-02-01", label: "DeepSeek-V3 (deepseek-chat)" },
-  },
-]
-
-export function findModelPricing(model: string): ModelPricing | undefined {
-  const normalized = model.trim().toLowerCase()
-  if (!normalized) return undefined
-  return PRICING_TABLE.find((entry) => normalized.includes(entry.match))?.pricing
+export type ModelCostSource = {
+  models?: Record<string, { cost?: ModelRates } | undefined>
 }
 
-// Cost of a run from its MEASURED token counts, for the case where a provider
-// reported usage but no cost. Prefer the provider's own reported cost whenever
-// it exists — this is a fallback, and it returns undefined for unpriced models
-// rather than inventing a number. Cache reads are billed at the input rate
-// here, which slightly over-states spend on providers that discount them.
-export function costFromUsage(
-  model: string,
-  usage: { input: number; output: number; reasoning: number; cacheRead: number },
-): number | undefined {
-  const pricing = findModelPricing(model)
-  if (!pricing) return undefined
-  const inputTokens = Math.max(0, usage.input) + Math.max(0, usage.cacheRead)
-  const outputTokens = Math.max(0, usage.output) + Math.max(0, usage.reasoning)
-  return (inputTokens / 1_000_000) * pricing.inputPer1M + (outputTokens / 1_000_000) * pricing.outputPer1M
+// A model whose every rate is zero is either free (the anonymous gateway) or
+// simply unpriced in the catalog. Either way there is no spend to report, and
+// reporting $0.00 would make it look cheaper than a model that honestly costs
+// something — so callers get undefined and render "cost unknown".
+function priced(rates: ModelRates | undefined): ModelRates | undefined {
+  if (!rates) return undefined
+  if (rates.input === 0 && rates.output === 0 && rates.cache.read === 0 && rates.cache.write === 0) return undefined
+  return rates
 }
 
-// Rough token estimate: ~4 characters per token, the same ballpark heuristic
-// providers themselves publish for sizing prompts without a real tokenizer.
-const CHARS_PER_TOKEN = 4
+// Looks up a model's real rates in the engine's provider catalog. `providers`
+// is the same map the rest of the app already holds (`useProviders().all()`),
+// so no extra fetch is needed.
+export function ratesFor(
+  providers: ReadonlyMap<string, ModelCostSource> | undefined,
+  providerID: string | undefined,
+  modelID: string | undefined,
+): ModelRates | undefined {
+  if (!providers || !providerID || !modelID) return undefined
+  return priced(providers.get(providerID)?.models?.[modelID]?.cost)
+}
 
-// Assumed output length when the caller doesn't have a better estimate —
-// enough for a typical short-to-medium coding response. Callers with a real
-// expected output size should pass it explicitly.
+// Providers charge a higher rate above a context threshold (Gemini and the
+// long-context Claude tiers both do this). Picks the rate band that actually
+// applies to a request of `contextTokens`, falling back to the base rate.
+export function ratesAtContext(rates: ModelRates, contextTokens: number): ModelRates {
+  const applicable = (rates.tiers ?? [])
+    .filter((entry) => contextTokens > entry.tier.size)
+    .sort((a, b) => b.tier.size - a.tier.size)[0]
+  if (!applicable) return rates
+  return { input: applicable.input, output: applicable.output, cache: applicable.cache }
+}
+
+// What a run actually cost, from measured token counts and the model's real
+// rates. Cache reads and writes are billed at their own rates rather than
+// folded into the input rate — in an agentic coding loop cache traffic is most
+// of the tokens, so charging it as input overstates spend by roughly 10x.
+//
+// Prefer the provider's own reported cost (`ModelOutcome.costUsd`, which the
+// engine computes the same way) whenever it exists; this is for the case where
+// usage was reported but cost was not.
+export function costOfUsage(rates: ModelRates | undefined, usage: TokenUsage): number | undefined {
+  if (!rates) return undefined
+  const at = (count: number, rate: number) => (Math.max(0, count) / 1_000_000) * rate
+  const tiered = ratesAtContext(rates, usage.input + usage.cacheRead + usage.cacheWrite)
+  return (
+    at(usage.input, tiered.input) +
+    at(usage.output + usage.reasoning, tiered.output) +
+    at(usage.cacheRead, tiered.cache.read) +
+    at(usage.cacheWrite, tiered.cache.write)
+  )
+}
+
+// Assumed output length when the caller has no better estimate — enough for a
+// typical short-to-medium coding response. Callers that know the expected size
+// should pass it explicitly.
 const DEFAULT_ASSUMED_OUTPUT_TOKENS = 800
 
-export type PromptCostEstimate = {
-  model: string
-  pricing: ModelPricing
-  estimatedInputTokens: number
+export type ProjectedCost = {
+  rates: ModelRates
+  inputTokens: number
   assumedOutputTokens: number
-  estimatedInputCost: number
-  estimatedOutputCost: number
-  estimatedTotalCost: number
+  inputCost: number
+  outputCost: number
+  totalCost: number
 }
 
-// Prospective estimate from a token count the caller already knows. Prefer
-// this over estimatePromptCost whenever real token counts are available —
-// going through characters only to divide them back out loses precision and
-// invites the caller to fabricate a character count it never measured.
-export function estimateCostForTokens(
-  model: string,
+// Forward-looking estimate: what one more turn of this size would cost on this
+// model. Input tokens are treated as uncached, which is the conservative
+// direction — a warm cache only makes the real turn cheaper than quoted.
+export function projectCost(
+  rates: ModelRates | undefined,
   inputTokens: number,
   assumedOutputTokens = DEFAULT_ASSUMED_OUTPUT_TOKENS,
-): PromptCostEstimate | undefined {
-  const pricing = findModelPricing(model)
-  if (!pricing) return undefined
+): ProjectedCost | undefined {
+  if (!rates) return undefined
 
-  const estimatedInputTokens = Math.max(0, Math.round(inputTokens))
-  const estimatedInputCost = (estimatedInputTokens / 1_000_000) * pricing.inputPer1M
-  const estimatedOutputCost = (Math.max(0, assumedOutputTokens) / 1_000_000) * pricing.outputPer1M
-
-  return {
-    model,
-    pricing,
-    estimatedInputTokens,
-    assumedOutputTokens,
-    estimatedInputCost,
-    estimatedOutputCost,
-    estimatedTotalCost: estimatedInputCost + estimatedOutputCost,
-  }
-}
-
-export function estimatePromptCost(
-  model: string,
-  promptChars: number,
-  assumedOutputTokens = DEFAULT_ASSUMED_OUTPUT_TOKENS,
-): PromptCostEstimate | undefined {
-  const pricing = findModelPricing(model)
-  if (!pricing) return undefined // unknown model — honest "cost unknown", never guess
-
-  const estimatedInputTokens = Math.ceil(Math.max(0, promptChars) / CHARS_PER_TOKEN)
-  const estimatedInputCost = (estimatedInputTokens / 1_000_000) * pricing.inputPer1M
-  const estimatedOutputCost = (Math.max(0, assumedOutputTokens) / 1_000_000) * pricing.outputPer1M
+  const input = Math.max(0, Math.round(inputTokens))
+  const output = Math.max(0, Math.round(assumedOutputTokens))
+  const tiered = ratesAtContext(rates, input)
+  const inputCost = (input / 1_000_000) * tiered.input
+  const outputCost = (output / 1_000_000) * tiered.output
 
   return {
-    model,
-    pricing,
-    estimatedInputTokens,
-    assumedOutputTokens,
-    estimatedInputCost,
-    estimatedOutputCost,
-    estimatedTotalCost: estimatedInputCost + estimatedOutputCost,
+    rates: tiered,
+    inputTokens: input,
+    assumedOutputTokens: output,
+    inputCost,
+    outputCost,
+    totalCost: inputCost + outputCost,
   }
 }

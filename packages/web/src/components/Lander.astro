@@ -491,24 +491,6 @@ const changelog = [
       </div>
     </section>
 
-    <section class="evidence section-width" aria-labelledby="evidence-title">
-      <div class="section-heading chapter-head" data-reveal>
-        <p class="section-kicker">Measured, not implied</p>
-        <h2 id="evidence-title">One controlled repair task. A useful data point.</h2>
-        <p>
-          In a July 2026 scheduler-repair benchmark, Vector Balanced completed the task in 149 seconds
-          and reported roughly 67% fewer tokens than Codex CLI. Both passed all five public tests.
-          Codex passed more hidden tests, so this is one reproducible result, not a universal claim.
-        </p>
-      </div>
-      <dl class="evidence-grid" data-reveal>
-        <div><dt>Vector Balanced</dt><dd data-count="149" data-suffix="s">149s</dd><span>Completion time</span></div>
-        <div><dt>Codex CLI</dt><dd data-count="284" data-suffix="s">284s</dd><span>Completion time</span></div>
-        <div><dt>Reported usage</dt><dd data-count="67" data-suffix="%">67%</dd><span>Fewer tokens for Vector</span></div>
-        <div><dt>Public checks</dt><dd>5 / 5</dd><span>Passed by both</span></div>
-      </dl>
-    </section>
-
     <section class="connections section-width" aria-labelledby="connections-title">
       <div class="section-heading chapter-head" data-reveal>
         <p class="section-kicker">Bring your stack</p>
@@ -758,43 +740,6 @@ const changelog = [
     }
   }
 
-  // Benchmark numerals count up once when the stat band enters the viewport.
-  const initCounters = () => {
-    const nodes = Array.from(document.querySelectorAll<HTMLElement>("[data-count]"))
-    if (!nodes.length || reducedMotion() || !("IntersectionObserver" in globalThis)) return () => {}
-    const rafs = new Set<number>()
-    const run = (node: HTMLElement) => {
-      const target = Number(node.dataset.count)
-      const suffix = node.dataset.suffix ?? ""
-      if (!Number.isFinite(target)) return
-      const started = performance.now()
-      const duration = 1100
-      const tick = (now: number) => {
-        const t = Math.min(1, (now - started) / duration)
-        const eased = 1 - Math.pow(1 - t, 3)
-        node.textContent = `${Math.round(target * eased)}${suffix}`
-        if (t < 1) rafs.add(requestAnimationFrame(tick))
-      }
-      rafs.add(requestAnimationFrame(tick))
-    }
-    const observer = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((entry) => {
-          if (!entry.isIntersecting) return
-          observer.unobserve(entry.target)
-          run(entry.target as HTMLElement)
-        })
-      },
-      { threshold: 0.5 },
-    )
-    nodes.forEach((node) => observer.observe(node))
-    return () => {
-      observer.disconnect()
-      rafs.forEach((raf) => cancelAnimationFrame(raf))
-      nodes.forEach((node) => (node.textContent = `${node.dataset.count}${node.dataset.suffix ?? ""}`))
-    }
-  }
-
   const initParallax = () => {
     const node = document.querySelector<HTMLElement>("[data-parallax]")
     if (!node || reducedMotion()) return () => {}
@@ -1003,7 +948,7 @@ const changelog = [
   let cleanups: Array<() => void> = []
   const boot = () => {
     cleanups.forEach((cleanup) => cleanup())
-    cleanups = [initReveals(), initScramble(), initScenes(), initCounters(), initParallax(), initField()]
+    cleanups = [initReveals(), initScramble(), initScenes(), initParallax(), initField()]
   }
   const teardown = () => {
     cleanups.forEach((cleanup) => cleanup())
@@ -1963,7 +1908,6 @@ const changelog = [
   /* ---- observable runtime and proof ---- */
 
   .runtime,
-  .evidence,
   .connections,
   .comparison-section {
     margin-top: clamp(56px, 8vw, 96px);
@@ -2022,30 +1966,8 @@ const changelog = [
     line-height: 1.65;
   }
 
-  .evidence-grid {
-    margin: 48px 0 0;
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    border-top: 1px solid rgba(227, 215, 255, 0.14);
-    border-bottom: 1px solid rgba(227, 215, 255, 0.14);
-  }
 
-  .evidence-grid div {
-    min-height: 156px;
-    padding: 23px 20px;
-    border-right: 1px solid rgba(227, 215, 255, 0.12);
-  }
 
-  .evidence-grid div:last-child { border-right: 0; }
-  .evidence-grid dt { color: var(--ink-40); font-size: 11px; }
-  .evidence-grid dd {
-    margin: 21px 0 5px;
-    color: #f5f0fa;
-    font-size: clamp(29px, 4vw, 37px);
-    font-weight: 590;
-    letter-spacing: -0.03em;
-  }
-  .evidence-grid span { color: var(--ink-40); font-size: 11px; }
 
   .connection-grid {
     margin-top: 46px;
@@ -2379,9 +2301,6 @@ const changelog = [
 
     .runtime { grid-template-columns: 1fr; }
     .runtime-intro { position: static; }
-    .evidence-grid { grid-template-columns: repeat(2, 1fr); }
-    .evidence-grid div:nth-child(2) { border-right: 0; }
-    .evidence-grid div:nth-child(n + 3) { border-top: 1px solid rgba(227, 215, 255, 0.12); }
     .product-system-grid { grid-template-columns: 1fr 1fr; }
     .product-system-grid article,
     .product-system-grid article:nth-child(4),
@@ -2416,7 +2335,6 @@ const changelog = [
     .suite-grid article { min-height: 200px; padding: 22px; }
     .workflow,
     .runtime,
-    .evidence,
     .connections,
     .comparison-section { padding: 30px 20px; border-radius: 22px; }
     .product-system { padding: 30px 20px; border-radius: 22px; }
@@ -2433,9 +2351,6 @@ const changelog = [
 
     .runtime-list article { grid-template-columns: 28px 1fr; gap: 12px; }
     .runtime-list article p { grid-column: 2; }
-    .evidence-grid { grid-template-columns: 1fr 1fr; }
-    .evidence-grid div { min-height: 132px; padding: 18px 14px; }
-    .evidence-grid dd { font-size: 27px; }
     .connection-grid { grid-template-columns: 1fr; }
     .connection-grid article { min-height: 108px; }
 

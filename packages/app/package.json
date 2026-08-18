@@ -11,7 +11,8 @@
     "./schedule": "./src/features/scheduled/schedule-model.ts",
     "./wsl/types": "./src/wsl/types.ts",
     "./vite": "./vite.js",
-    "./index.css": "./src/index.css"
+    "./index.css": "./src/index.css",
+    "./judge": "./src/features/judge/verified-completion.ts"
   },
   "scripts": {
     "typecheck": "tsgo -b",

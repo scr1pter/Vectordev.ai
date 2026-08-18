@@ -35,6 +35,7 @@ import { useServerSDK } from "@/context/server-sdk"
 import { DialogReportBug } from "@/components/dialog-report-bug"
 import { HelpPanel } from "@/features/help/help-panel"
 import { AgentDashboard } from "@/features/agents/agent-dashboard"
+import { useSettings } from "@/context/settings"
 import { ScheduledTasks } from "@/features/scheduled/scheduled-tasks"
 import type { ScheduledTask } from "@/features/scheduled/schedule-model"
 import type { TeamConversation } from "@/features/agents/agent-dashboard-model"
@@ -196,6 +197,7 @@ type ParallelWorkspaceApi = {
     model?: string
     teamId?: string
     sharedPath?: string
+    llmJudge?: boolean
   }) => Promise<ParallelWorkspaceRecord>
   refresh: (id: string) => Promise<ParallelWorkspaceRecord>
   run: (id: string, concurrency?: number) => Promise<ParallelWorkspaceRecord>
@@ -472,6 +474,7 @@ export default function NewLayout(props: ParentProps) {
   const [helpPanelOpen, setHelpPanelOpen] = createSignal(false)
   const [agentDashboardOpen, setAgentDashboardOpen] = createSignal(false)
   const [teamConversations, setTeamConversations] = createSignal<TeamConversation[]>([])
+  const settings = useSettings()
   const [parallelTopology, setParallelTopology] = createSignal<"isolated" | "collaborative">("isolated")
   const [parallelJoinTeamId, setParallelJoinTeamId] = createSignal<string>()
   const [openTeams, setOpenTeams] = createSignal<{ id: string; name: string; sharedPath?: string; memberIds: string[] }[]>([])
@@ -1688,6 +1691,9 @@ export default function NewLayout(props: ParentProps) {
           provider: runtime === "vector" ? parallelProvider() : undefined,
           model: runtime === "vector" ? parallelModel() : undefined,
           teamId: team?.id,
+          // The verified-completion setting is global, so an isolated agent runs
+          // under the same policy as a prompt typed into the composer.
+          llmJudge: settings.general.llmJudge(),
           // The first member provisions the tree; everyone after it joins that
           // same checkout, which is what lets teammates see each other's edits.
           sharedPath: team ? (team.sharedPath ?? current[0]?.isolatedPath) : undefined,
@@ -2385,6 +2391,8 @@ export default function NewLayout(props: ParentProps) {
     paused?: boolean
     prompt: string
     directory: string
+    // Absent on records created before recurrence existed, which are one-shots.
+    recurrence?: ScheduledTask["recurrence"]
     runAt: string
     status: "scheduled" | "running" | "completed" | "failed" | "canceled"
     createdAt: string
@@ -2401,9 +2409,11 @@ export default function NewLayout(props: ParentProps) {
             scheduledAgents?: {
               list: (scope?: { directory?: string; parentSessionId?: string }) => Promise<ScheduledAgentRecordUI[]>
               create: (input: {
+                title?: string
                 prompt: string
                 directory: string
                 parentSessionId?: string
+                recurrence?: ScheduledTask["recurrence"]
                 runAt: string
               }) => Promise<ScheduledAgentRecordUI>
               cancel: (id: string) => Promise<ScheduledAgentRecordUI | undefined>
@@ -2493,13 +2503,21 @@ export default function NewLayout(props: ParentProps) {
   })
   onCleanup(stopSessionOutcomes)
 
+  // The desktop screen and the web reminder panel are two different features
+  // sharing one open flag. Rendering both stacked an opaque overlay on top of
+  // the panel, which is what made scheduling look completely dead on desktop.
+  const scheduledTasksOpen = createMemo(() => scheduledOpen() && realScheduler())
+  const scheduledRemindersOpen = createMemo(() => scheduledOpen() && !realScheduler())
+
   const scheduledTasksForPanel = createMemo<ScheduledTask[]>(() =>
     scheduledAgentRecords().map((record) => ({
       id: record.id,
       title: record.title || record.prompt.split("\n")[0]?.slice(0, 80) || "Scheduled run",
       prompt: record.prompt,
       directory: record.directory,
-      recurrence: { kind: "once", at: record.runAt },
+      // The record carries its real cadence; forcing "once" here made every
+      // recurring task read as a single run that had already happened.
+      recurrence: record.recurrence ?? { kind: "once", at: record.runAt },
       // Nothing persists a paused flag yet, so a run that already finished is
       // shown as inactive rather than pretending it is still pending.
       paused: record.paused ?? record.status !== "scheduled",
@@ -5546,16 +5564,40 @@ export default function NewLayout(props: ParentProps) {
       />
 
       <ScheduledTasks
-        open={scheduledOpen()}
+        open={scheduledTasksOpen()}
         tasks={scheduledTasksForPanel()}
         onClose={() => setScheduledOpen(false)}
-        onCreate={() => {
-          setScheduledOpen(false)
-          insertScheduledPromptIntoComposer("Schedule a task: ")
-        }}
-        onUseSuggestion={(suggestion) => {
-          setScheduledOpen(false)
-          insertScheduledPromptIntoComposer(`${suggestion.prompt} (${suggestion.schedule})`)
+        onSchedule={(input) => {
+          const api = scheduledAgentsApi()
+          if (!api) {
+            showToast({
+              title: "Scheduling needs the desktop app",
+              description: "Scheduled tasks run from Vector Desktop so they can fire while the browser is closed.",
+            })
+            return
+          }
+          const directory = activeProjectPath()
+          if (!directory) {
+            showToast({ title: "Open a project first", description: "Scheduled agents run inside a project workspace." })
+            return
+          }
+          void api
+            .create({
+              title: input.title,
+              prompt: input.prompt,
+              directory,
+              parentSessionId: activeTaskScope().taskId,
+              recurrence: input.recurrence,
+              runAt: input.runAt,
+            })
+            .then(() => refreshScheduledAgents())
+            .catch((error: unknown) => {
+              showToast({
+                variant: "error",
+                title: "Could not schedule that task",
+                description: error instanceof Error ? error.message : String(error),
+              })
+            })
         }}
         onTogglePause={(id, paused) => {
           const api = scheduledAgentsApi()
@@ -5929,11 +5971,11 @@ export default function NewLayout(props: ParentProps) {
         class="fixed bottom-4 top-4 z-50 w-[min(420px,calc(100vw-32px))] overflow-hidden rounded-2xl border border-[color:var(--vx-line)] bg-[color-mix(in_srgb,var(--vx-stage)_88%,transparent)] shadow-[0_28px_90px_rgba(0,0,0,0.55)] backdrop-blur-2xl transition duration-200 ease-out"
         style={{ left: "calc(var(--vector-navigation-effective-width) + 16px)" }}
         classList={{
-          "pointer-events-auto translate-x-0 opacity-100": scheduledOpen(),
-          "pointer-events-none -translate-x-5 opacity-0": !scheduledOpen(),
+          "pointer-events-auto translate-x-0 opacity-100": scheduledRemindersOpen(),
+          "pointer-events-none -translate-x-5 opacity-0": !scheduledRemindersOpen(),
         }}
-        aria-hidden={!scheduledOpen()}
-        inert={!scheduledOpen()}
+        aria-hidden={!scheduledRemindersOpen()}
+        inert={!scheduledRemindersOpen()}
       >
         <div class="flex h-full flex-col">
           <div class="flex items-center justify-between border-b border-[color:var(--vx-line)] px-4 py-3">

@@ -4,6 +4,7 @@ import { createReadStream } from "node:fs"
 import { cp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises"
 import { dirname, join, relative } from "node:path"
 import { app } from "electron"
+import { VERIFIED_COMPLETION_POLICY } from "@opencode-ai/app/judge"
 
 import {
   cancelBackgroundTask,
@@ -111,6 +112,9 @@ export type ParallelWorkspaceRecord = {
   swarmRunId?: string
   swarmTaskId?: string
   swarmRole?: "coordinator" | "worker"
+  // Whether this workspace's agent runs under the verified-completion policy.
+  // Captured per workspace so a run keeps the behaviour it was launched with.
+  llmJudge?: boolean
   teamId?: string
   status: ParallelWorkspaceStatus
   progress: number
@@ -202,6 +206,7 @@ export type CreateParallelWorkspaceInput = {
   swarmRole?: "coordinator" | "worker"
   teamId?: string
   sharedPath?: string
+  llmJudge?: boolean
 }
 
 type CommandResult = {
@@ -490,12 +495,18 @@ function parallelAgentPrompt(record: ParallelWorkspaceRecord) {
     "Do not expose credentials or copy secrets into source files.",
     "Finish with a concise summary of changed files, validation performed, and any remaining risk.",
     "Read .vector/BRAIN.md when present and update it only with durable decisions or recurring failure lessons; never store secrets or routine narration.",
+    // Same policy the composer injects, so turning the setting on covers
+    // isolated agents too rather than only the session you are typing in.
+    record.llmJudge ? "" : undefined,
+    record.llmJudge ? VERIFIED_COMPLETION_POLICY : undefined,
     "",
     contextPack,
     "",
     `Mission: ${record.name}`,
     `Task: ${record.taskPrompt}`,
-  ].join("\n")
+  ]
+    .filter((line) => line !== undefined)
+    .join("\n")
 }
 
 function validationLogLines(report: WorkspaceValidationReport) {
@@ -514,6 +525,29 @@ function validationSummary(report: WorkspaceValidationReport) {
   if (report.passed) return `${passed} deterministic check${passed === 1 ? "" : "s"} passed${skipped ? `; ${skipped} skipped` : ""}.`
   const failed = report.checks.find((check) => check.status === "failed")
   return `${failed?.label || "A deterministic check"} failed after the isolated edit.`
+}
+
+// `report.passed` is computed as `failures.length === 0`, so it is vacuously
+// true when no checks ran at all. Branching user-facing copy on it alone tells
+// the user their work was verified when nothing was executed. Every status
+// string routes through here so "nothing ran" can never render as "passed".
+function checksOutcome(report: WorkspaceValidationReport) {
+  if (!report.hadChecks || !report.checks.length) return "none" as const
+  return report.passed ? ("passed" as const) : ("failed" as const)
+}
+
+function checksAction(report: WorkspaceValidationReport) {
+  const outcome = checksOutcome(report)
+  if (outcome === "none") return "No deterministic checks were available to run"
+  return outcome === "passed" ? "Deterministic checks passed" : "Deterministic checks found a failure"
+}
+
+function reviewAction(report: WorkspaceValidationReport) {
+  const outcome = checksOutcome(report)
+  if (outcome === "none") return "Ready for review — no deterministic checks were available"
+  return outcome === "passed"
+    ? "Workspace is validated and ready for review"
+    : "Workspace needs review: deterministic checks failed"
 }
 
 function runGit(args: string[], cwd: string, options: { allowFailure?: boolean; input?: string } = {}) {
@@ -735,21 +769,42 @@ async function fallbackDiff(record: ParallelWorkspaceRecord) {
   return { changedFiles, diff: blocks.join("\n") }
 }
 
+// Vector's own coordination files live inside the workspace because the engine
+// resolves them relative to the agent's working directory. They are bookkeeping,
+// not the agent's work, so they never belong in a diff or a merge.
+// .vector/BRAIN.md is deliberately NOT here: durable project memory is
+// something the user may legitimately want to keep.
+const INTERNAL_WORKSPACE_FILES = new Set([
+  join(".vector", "team.json").replaceAll("\\", "/"),
+  join(".vector", "team-outbox.jsonl").replaceAll("\\", "/"),
+])
+
+const isInternalWorkspaceFile = (file: string) => INTERNAL_WORKSPACE_FILES.has(file.replaceAll("\\", "/"))
+
 async function gitDiff(record: ParallelWorkspaceRecord) {
-  const status = await runGit(["status", "--porcelain"], record.isolatedPath, { allowFailure: true })
+  // -uall lists untracked files individually. Without it git collapses a new
+  // directory to a single "dir/" entry, which both hid every file in a newly
+  // created directory from the review diff (textPreview cannot read a
+  // directory) and made per-file exclusions impossible to apply.
+  const status = await runGit(["status", "--porcelain", "-uall"], record.isolatedPath, { allowFailure: true })
   const untrackedFiles = status.stdout
     .split("\n")
     .map((line) => line.trim())
     .filter((line) => line.startsWith("??"))
     .map(normalizeStatusLine)
     .filter(Boolean)
+    .filter((file) => !isInternalWorkspaceFile(file))
   const baseCommit = record.baseCommit ?? "HEAD"
   const trackedFiles = await runGit(["diff", "--name-only", baseCommit, "--"], record.isolatedPath, {
     allowFailure: true,
   })
   const changedFiles = [
     ...new Set([
-      ...trackedFiles.stdout.split("\n").map((line) => line.trim()).filter(Boolean),
+      ...trackedFiles.stdout
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .filter((file) => !isInternalWorkspaceFile(file)),
       ...untrackedFiles,
     ]),
   ]
@@ -779,7 +834,9 @@ async function gitDiff(record: ParallelWorkspaceRecord) {
 // repository (read-only; never mutates the tree).
 export async function mainWorkingTreeDiff(sourcePath: string): Promise<string> {
   if (!(await gitRoot(sourcePath))) return ""
-  const status = await runGit(["status", "--porcelain"], sourcePath, { allowFailure: true })
+  // -uall for the same reason as gitDiff: a collapsed "dir/" entry cannot be
+  // read by textPreview, so new directories would silently show no changes.
+  const status = await runGit(["status", "--porcelain", "-uall"], sourcePath, { allowFailure: true })
   const untrackedFiles = status.stdout
     .split("\n")
     .map((line) => line.trim())
@@ -905,9 +962,6 @@ export async function createParallelWorkspace(input: CreateParallelWorkspaceInpu
   let baseCommit: string | undefined
   const logs: string[] = []
 
-  // A collaborative member joins an existing tree instead of getting its own,
-  // which is the whole point of the topology: teammates see each other's edits
-  // as they happen rather than at merge time.
   // A collaborative member joins an existing tree rather than getting its own,
   // which is the point of the topology: teammates see each other's edits as
   // they happen instead of at merge time. Skip worktree creation entirely and
@@ -919,17 +973,6 @@ export async function createParallelWorkspace(input: CreateParallelWorkspaceInpu
     baseCommit =
       (await runGit(["rev-parse", "HEAD"], input.sharedPath, { allowFailure: true })).stdout.trim() || undefined
     logs.push(`Joined the shared workspace at ${input.sharedPath}.`)
-  }
-
-  // The engine-side tool checks for this marker before offering to message a
-  // teammate, so an agent working alone is never told a message was queued.
-  if (input.teamId) {
-    await mkdir(join(isolatedPath, ".vector"), { recursive: true }).catch(() => undefined)
-    await writeFile(
-      join(isolatedPath, ".vector", "team.json"),
-      JSON.stringify({ teamId: input.teamId, workspaceId: id, name }, null, 2),
-      "utf8",
-    ).catch(() => undefined)
   }
 
   await mkdir(workspaceDir, { recursive: true })
@@ -954,6 +997,22 @@ export async function createParallelWorkspace(input: CreateParallelWorkspaceInpu
         : "No git repository found, using isolated copy.",
     )
     await copyProject(sourceRoot, isolatedPath)
+  }
+
+  // Written only after provisioning: `git worktree add` refuses a target
+  // directory that already has anything in it, so creating this marker first
+  // made worktree creation fail for the first member of every team and
+  // silently drop it into an unisolated copy.
+  //
+  // The engine-side tool checks for this marker before offering to message a
+  // teammate, so an agent working alone is never told a message was queued.
+  if (input.teamId) {
+    await mkdir(join(isolatedPath, ".vector"), { recursive: true }).catch(() => undefined)
+    await writeFile(
+      join(isolatedPath, ".vector", "team.json"),
+      JSON.stringify({ teamId: input.teamId, workspaceId: id, name }, null, 2),
+      "utf8",
+    ).catch(() => undefined)
   }
 
   await mkdir(join(workspaceDir, "metadata"), { recursive: true })
@@ -1019,6 +1078,7 @@ export async function createParallelWorkspace(input: CreateParallelWorkspaceInpu
     swarmTaskId: input.swarmTaskId,
     swarmRole: input.swarmRole,
     teamId: input.teamId,
+    llmJudge: input.llmJudge === true,
     status: "queued",
     progress: 0,
     lastAction: "Isolated workspace created",
@@ -1202,7 +1262,7 @@ async function executeExternalParallelWorkspace(
     validationReport: validation,
     validationPassed: validation.passed,
     terminalOutput: [...validationLogLines(validation), ...current.terminalOutput].slice(0, 240),
-    lastAction: validation.passed ? "Deterministic checks passed" : "Deterministic checks found a failure",
+    lastAction: checksAction(validation),
     lastActivityAt: now(),
     logs: [`Guardrails: ${validationSummary(validation)}`, ...current.logs].slice(0, 120),
   }))
@@ -1265,9 +1325,7 @@ async function executeExternalParallelWorkspace(
     actualCost: totalCost > 0 ? `$${totalCost.toFixed(4)}` : current.actualCost,
     riskLevel: validation.passed ? current.riskLevel : "high",
     lastAction: current.changedFilesCount
-      ? validation.passed
-        ? "Workspace is validated and ready for review"
-        : "Workspace needs review: deterministic checks failed"
+      ? reviewAction(validation)
       : `${runtimeLabel(current.runtime)} completed with no file changes`,
     lastActivityAt: now(),
     finalSummary,
@@ -1366,7 +1424,7 @@ async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEng
       validationReport: validation,
       validationPassed: validation.passed,
       terminalOutput: [...validationLogLines(validation), ...current.terminalOutput].slice(0, 160),
-      lastAction: validation.passed ? "Deterministic checks passed" : "Deterministic checks found a failure",
+      lastAction: checksAction(validation),
       lastActivityAt: now(),
       logs: [`Guardrails: ${validationSummary(validation)}`, ...current.logs].slice(0, 120),
     }))
@@ -1442,9 +1500,7 @@ async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEng
       progress: 100,
       riskLevel: validation.passed ? current.riskLevel : "high",
       lastAction: current.changedFilesCount
-        ? validation.passed
-          ? "Workspace is validated and ready for review"
-          : "Workspace needs review: deterministic checks failed"
+        ? reviewAction(validation)
         : "Agent completed with no file changes",
       lastActivityAt: now(),
       finalSummary,

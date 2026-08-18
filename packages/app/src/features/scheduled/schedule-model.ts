@@ -158,3 +158,26 @@ export const SUGGESTIONS: Suggestion[] = [
     prompt: "Review this week's commits and changes in the repository and write a concise status update.",
   },
 ]
+
+// The recurrence the form currently describes, or undefined when the inputs
+// cannot form a valid schedule (empty time, unparseable date). Returning
+// undefined keeps the submit button disabled instead of creating a task that
+// silently never runs.
+export function buildRecurrence(input: {
+  kind: Recurrence["kind"]
+  at: string
+  time: string
+  weekday: number
+}): Recurrence | undefined {
+  if (input.kind === "once") {
+    const at = new Date(input.at)
+    if (!input.at || Number.isNaN(at.getTime())) return undefined
+    return { kind: "once", at: at.toISOString() }
+  }
+  // parseTime is the single source of truth for a valid clock time; a bare
+  // regex here would accept "25:00" and build a schedule that never fires.
+  if (!parseTime(input.time)) return undefined
+  if (input.kind === "daily") return { kind: "daily", time: input.time }
+  if (input.kind === "weekdays") return { kind: "weekdays", time: input.time }
+  return { kind: "weekly", weekday: input.weekday, time: input.time }
+}

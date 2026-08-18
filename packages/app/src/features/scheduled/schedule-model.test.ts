@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  buildRecurrence,
   describeNextRun,
   describeRecurrence,
   filterTasks,
@@ -151,5 +152,54 @@ describe("sortByNextRun", () => {
       friday10,
     )
     expect(sorted[0]!.id).toBe("sooner")
+  })
+})
+
+describe("buildRecurrence", () => {
+  test("builds a one-shot from a datetime-local value", () => {
+    const built = buildRecurrence({ kind: "once", at: "2026-09-01T08:30", time: "", weekday: 0 })
+    expect(built?.kind).toBe("once")
+    // Interpreted as local time, so the ISO instant matches the wall clock the
+    // user picked rather than being shifted by the timezone offset.
+    expect(built?.kind === "once" && new Date(built.at).getHours()).toBe(8)
+  })
+
+  test("builds each recurring kind", () => {
+    expect(buildRecurrence({ kind: "daily", at: "", time: "07:15", weekday: 0 })).toEqual({
+      kind: "daily",
+      time: "07:15",
+    })
+    expect(buildRecurrence({ kind: "weekdays", at: "", time: "07:15", weekday: 0 })).toEqual({
+      kind: "weekdays",
+      time: "07:15",
+    })
+    expect(buildRecurrence({ kind: "weekly", at: "", time: "16:00", weekday: 5 })).toEqual({
+      kind: "weekly",
+      weekday: 5,
+      time: "16:00",
+    })
+  })
+
+  test("returns undefined for input that cannot form a schedule", () => {
+    // The form keeps Schedule disabled on undefined, so a task that would never
+    // fire cannot be created in the first place.
+    expect(buildRecurrence({ kind: "once", at: "", time: "", weekday: 0 })).toBeUndefined()
+    expect(buildRecurrence({ kind: "once", at: "not-a-date", time: "", weekday: 0 })).toBeUndefined()
+    expect(buildRecurrence({ kind: "daily", at: "", time: "", weekday: 0 })).toBeUndefined()
+    expect(buildRecurrence({ kind: "weekly", at: "", time: "09:60", weekday: 1 })).toBeUndefined()
+    expect(buildRecurrence({ kind: "weekly", at: "", time: "25:00", weekday: 1 })).toBeUndefined()
+  })
+
+  test("accepts a single-digit hour, which parseTime treats as valid", () => {
+    expect(buildRecurrence({ kind: "daily", at: "", time: "7:15", weekday: 0 })).toEqual({
+      kind: "daily",
+      time: "7:15",
+    })
+  })
+
+  test("a one-shot already in the past yields no next run, so the form blocks it", () => {
+    const past = buildRecurrence({ kind: "once", at: "2020-01-01T09:00", time: "", weekday: 0 })
+    expect(past).toBeDefined()
+    expect(nextRun(past!, new Date())).toBeUndefined()
   })
 })
