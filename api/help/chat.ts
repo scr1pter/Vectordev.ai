@@ -6,7 +6,14 @@ import { ApiError, handleApiError, json, readJson, requireMethod, type ApiReques
 // into a general-purpose inference gateway.
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 const GROQ_KEY = process.env.GROQ_API_KEY
-const MODEL = process.env.GROQ_HELP_MODEL || "llama-3.3-70b-versatile"
+// Groq retires hosted models without notice, and a retired id fails as a 404
+// on every request — which is what took the help assistant offline: the pinned
+// llama-3.3-70b-versatile stopped existing. Check
+// https://api.groq.com/openai/v1/models when help starts returning
+// HELP_UPSTREAM_404, and prefer a model that returns plain content: several
+// Groq models are reasoning models that emit a separate `reasoning` field, and
+// at least one (qwen3.6) writes its <think> block into `content` itself.
+const MODEL = process.env.GROQ_HELP_MODEL || "openai/gpt-oss-120b"
 const MAX_TURNS = 24
 const MAX_CHARS = 6_000
 const MAX_CONTEXT_CHARS = 24_000
@@ -85,9 +92,25 @@ export default async function handler(request: ApiRequest, response: ApiResponse
       )
     }
 
-    const payload = (await upstream.json()) as { choices?: { message?: { content?: string } }[] }
-    const reply = payload.choices?.[0]?.message?.content?.trim()
-    if (!reply) throw new ApiError(502, "HELP_EMPTY", "The help assistant returned an empty response.")
+    const payload = (await upstream.json()) as {
+      choices?: { finish_reason?: string; message?: { content?: string } }[]
+    }
+    const choice = payload.choices?.[0]
+    const reply = choice?.message?.content?.trim()
+    if (!reply) {
+      // A reasoning model that exhausts max_tokens while still thinking returns
+      // finish_reason "length" with empty content. That is a budget problem, not
+      // an upstream fault, and it needs a different message from a genuinely
+      // empty completion or the cause is impossible to tell apart.
+      if (choice?.finish_reason === "length") {
+        throw new ApiError(
+          502,
+          "HELP_TRUNCATED",
+          "The help assistant ran out of room before it finished answering. Try a narrower question.",
+        )
+      }
+      throw new ApiError(502, "HELP_EMPTY", "The help assistant returned an empty response.")
+    }
     json(response, 200, { reply, model: MODEL })
   } catch (error) {
     handleApiError(response, error)
