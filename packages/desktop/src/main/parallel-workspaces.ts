@@ -5,6 +5,7 @@ import { cp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promi
 import { dirname, join, relative } from "node:path"
 import { app } from "electron"
 import { VERIFIED_COMPLETION_POLICY } from "@opencode-ai/app/judge"
+import { backupBeforeOverwrite } from "./workspace-checkpoint"
 
 import {
   cancelBackgroundTask,
@@ -1630,20 +1631,41 @@ async function createCheckpoint(record: ParallelWorkspaceRecord) {
       "utf8",
     )
   } else {
-    await writeFile(checkpointPath, JSON.stringify(record.baselineHashes ?? {}, null, 2), "utf8")
+    // A non-git project has no diff to capture, so the only thing that can
+    // restore it is a copy of each file the merge is about to touch. The hash
+    // map is kept for conflict detection but it is not a backup — it was the
+    // whole of the "checkpoint" before, which meant a copy-mode merge could
+    // delete untracked work irrecoverably.
+    await Promise.all(
+      (record.changedFiles ?? []).map((file) => backupBeforeOverwrite(checkpointPath, record.sourcePath, file)),
+    )
+    await writeFile(
+      join(checkpointDir, "baseline-hashes.json"),
+      JSON.stringify(record.baselineHashes ?? {}, null, 2),
+      "utf8",
+    )
+    await writeFile(
+      checkpointPath,
+      "# This project is not a git repository, so there is no diff to capture.\n# Pre-merge copies of every affected file are in `overwritten/`.\n",
+      "utf8",
+    )
+    await writeFile(
+      join(checkpointDir, "README.md"),
+      [
+        "# Vector merge checkpoint",
+        "",
+        "This project is not a git repository, so Vector copied every file this merge",
+        "was about to change or delete into `overwritten/` before touching anything.",
+        "",
+        "To undo the merge for a file, copy it back from `overwritten/` over the version",
+        "in your project. `baseline-hashes.json` records what Vector believed each file",
+        "looked like when the workspace was created.",
+        "",
+      ].join("\n"),
+      "utf8",
+    )
   }
   return checkpointPath
-}
-
-// Preserve a copy of a main-project file that a merge is about to overwrite so
-// the "checkpoint" the merge dialog promises can actually restore it.
-async function backupBeforeOverwrite(checkpointPath: string, sourcePath: string, file: string) {
-  const from = join(sourcePath, file)
-  const exists = await stat(from).catch(() => undefined)
-  if (!exists) return
-  const to = join(dirname(checkpointPath), "overwritten", file)
-  await mkdir(dirname(to), { recursive: true })
-  await cp(from, to, { recursive: true, force: true }).catch(() => undefined)
 }
 
 async function fileContentsEqual(a: string, b: string) {
@@ -1716,7 +1738,7 @@ async function mergeGitWorktree(record: ParallelWorkspaceRecord, force: boolean,
   }
 }
 
-async function mergeCopy(record: ParallelWorkspaceRecord, force: boolean) {
+async function mergeCopy(record: ParallelWorkspaceRecord, force: boolean, checkpointPath: string) {
   const refreshed = await refreshParallelWorkspace(record.id)
   const conflicts: string[] = []
   for (const file of refreshed.changedFiles) {
@@ -1733,8 +1755,13 @@ async function mergeCopy(record: ParallelWorkspaceRecord, force: boolean) {
     const from = join(record.isolatedPath, file)
     const to = join(record.sourcePath, file)
     const fromStat = await stat(from).catch(() => undefined)
+    // Every path below either deletes or overwrites a file in the user's real
+    // project, so the current contents are copied into the checkpoint first.
+    // Without this a copy-mode merge destroyed untracked work with no way back:
+    // for a non-git project the checkpoint held only hashes.
+    await backupBeforeOverwrite(checkpointPath, record.sourcePath, file)
     if (!fromStat) {
-      await rm(to, { force: true })
+      await rm(to, { force: true, recursive: true })
       continue
     }
     await mkdir(dirname(to), { recursive: true })
@@ -1792,7 +1819,7 @@ export async function mergeParallelWorkspace(
   const checkpointPath = await createCheckpoint(record)
   try {
     if (record.isolation === "git-worktree") await mergeGitWorktree(record, force, checkpointPath)
-    else await mergeCopy(record, force)
+    else await mergeCopy(record, force, checkpointPath)
   } catch (error) {
     const failed = updateRecord(id, (current) => ({
       ...current,
@@ -1979,6 +2006,7 @@ async function mergeSelectedCopyChanges(
   record: ParallelWorkspaceRecord,
   selection: UnifiedDiffSelection,
   force: boolean,
+  checkpointPath: string,
 ) {
   if (selection.hunkIds?.length) {
     throw new Error("Non-Git projects support selective review one complete file at a time.")
@@ -2005,6 +2033,7 @@ async function mergeSelectedCopyChanges(
     const from = join(record.isolatedPath, file)
     const to = join(record.sourcePath, file)
     const fromStat = await stat(from).catch(() => undefined)
+    await backupBeforeOverwrite(checkpointPath, record.sourcePath, file)
     if (!fromStat) {
       await rm(to, { force: true, recursive: true })
       nextBaseline[file] = "missing"
@@ -2030,7 +2059,7 @@ export async function mergeParallelWorkspaceSelection(
 
   try {
     if (record.isolation === "git-worktree") await mergeSelectedGitChanges(record, selection, force, checkpointPath)
-    else await mergeSelectedCopyChanges(record, selection, force)
+    else await mergeSelectedCopyChanges(record, selection, force, checkpointPath)
   } catch (error) {
     const failed = updateRecord(id, (current) => ({
       ...current,
