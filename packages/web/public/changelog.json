@@ -1,0 +1,1096 @@
+{
+  "releases": [
+    {
+      "tag": "v1.17.59",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Nothing spends your key without saying so",
+              "description": "Vector silently rerouted prompts it judged complex to a stronger model — on a bring-your-own-key product that can be many times the token price you chose — while the composer kept showing the model you picked, so there was no way to tell what you were being billed for. Routing is now off by default, has its own setting, honours models you hid in Settings, and switches the composer to whatever it actually used. Theme, colour scheme, and language controls returned: they existed only in a legacy shell that a hardcoded flag made unreachable, so the shipped app had no way to change any of them. Billing stopped re-posting stale Stripe metadata, which let two webhooks arriving together drop the checkout session and permanently invalidate a licence key that had already been emailed. A dead or wiped computer is no longer a permanent lockout — moving a licence is self-service and simply bounded. The one-installer-per-licence rule became a rate limit, and a download is recorded once the bytes arrive rather than before they are sent. The what's-new feed is now generated at build time; it had never existed, so the release-notes dialog had never run."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17.58",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Merges that keep a copy",
+              "description": "Merging an agent workspace back into a project that is not a git repository could destroy work permanently. The copy-mode merge deleted and overwrote files in the real project directly, and the \"checkpoint\" it promised beforehand was only a map of file hashes — enough to detect a conflict, but incapable of restoring a single byte. Both copy merge paths now copy every file they are about to overwrite or delete into the checkpoint first, and a non-git checkpoint stores real file copies alongside a README explaining how to put them back. The same guarantee already covered git projects and now covers all four merge paths."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17.57",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Undo that cannot delete your work",
+              "description": "Session snapshots were written as bare git trees with nothing pointing at them, so the engine's own scheduled garbage collection removed them after a week. Reverting to a collected snapshot then read as \"this file was never in the snapshot\" and deleted the file from your working tree, while reporting that the undo had succeeded. Snapshots are now anchored behind a ref so collection cannot reach them, a revert that cannot read its snapshot refuses to delete anything and says why, and a restore that fails no longer claims to have worked. Scheduled tasks became usable: the screen had no way to create one, so the list was always empty. It now has a real form with one-off, daily, weekday, and weekly schedules, and the suggestions fill it in. Agent teams were running unisolated, because a coordination file was written into the workspace before the git worktree was created; git refuses to create a worktree in a directory that already has contents, so every team silently fell back to a plain copy. Teams now get real isolated worktrees. Files inside newly created directories were missing from every workspace diff. LLM-as-a-judge now applies to every prompt and every agent workspace instead of only the session you typed in, and a failed verdict must name the specific repair rather than only the problem. Model economics prices runs from the engine's own live rate catalog instead of a hand-maintained table that had no entry for the default models and billed cached tokens at ten times their real rate. An unsubstantiated performance comparison was removed from the site."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17.56",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Agents can actually reach each other",
+              "description": "Collaborative agents could not message each other. The teammate tool was registered in one tool registry while sessions resolve tools through another, so every call returned an unknown-tool error and the agent wrote its message into its own reply instead. The tool now lives where the engine looks, and the workspace is resolved through the location layer so the message queue lands in the right tree whether agents share one or work in isolation. Verified against a live model on a real repository: one agent renamed an export and told its teammate, and the teammate fixed the failing import."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17.55",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Economics that actually learn",
+              "description": "Model economics only ever learned from validated parallel runs, so it rarely gathered enough evidence to recommend anything. Every ordinary session now contributes what it truly cost — provider-reported tokens, spend, latency, and files touched — so recommendations appear from normal use. Removed a ranking signal nothing ever produced, which had been the primary sort key and rendered a permanently blank win rate. The site now says plainly which capabilities exist nowhere else: agents that message each other while working, per-agent attribution of live edits, and running Claude Code, Codex, or Cursor as engines inside Vector."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17.54",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Licensing and disclosure",
+              "description": "Removed the last copyleft dependency: HEIC images are now converted by the operating system rather than a bundled LGPL decoder, which also drops about three megabytes from every build. Expanded the privacy policy to cover local memory, the help assistant, bug reports, and optional screen and desktop control, and added a terms section describing what Vector can do on your machine and on services you connect."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17.53",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Plugins that install themselves",
+              "description": "Connecting a plugin no longer sends you to a terminal. Vector resolves whatever runner a plugin needs, fetches it when it is missing, and pins an interpreter the package can actually run on, so Computer Use — full desktop control with screen reading, mouse, keyboard, and window management — connects on machines that had neither uv nor a recent Python. Retired the in-session Review PR button in favour of Project tools, Pull Requests, which lists, reviews, and merges rather than acting on one pasted link."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17.52",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Agents that work together",
+              "description": "Agents can now share one workspace instead of each getting their own: they see each other's edits as they happen, message each other while working, and Vector names the file and both agents when two of them hold the same one. The Agent Dashboard in Project tools shows every agent live with its task, model, spend, and the conversation between them, and the code editor attributes each edit to the agent that made it. Adds Pull Requests with Vector AI review, local memory that follows you across every repository and can be erased outright, a Vector Help AI Assistant answering only from Vector's own documentation, one-click bug reporting, selectable Claude Code, Codex, and Cursor runtimes, and a rebuilt Scheduled tasks screen with real recurrence."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17.51",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Real spend, real answers",
+              "description": "The model economics engine now records the provider's own reported tokens and cost for every run instead of estimating from character counts, and ranks models on measured spend once correctness ties. Added the Vector Help AI Assistant, a docs-and-chat side panel answering strictly from Vector's own documentation so it cannot invent controls that do not exist. Replaced the workspace settings gear with a one-click bug reporter that sends your app version and platform along with the report."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17.50",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Orchestrated and verified completion",
+              "description": "Added dependency-aware subagent orchestration with file ownership boundaries, optional LLM-as-a-judge verification and repair loops, durable scheduled-agent completion tracking, in-session GitHub pull-request review, visible testing state, and a substantially expanded MCP plugin catalog."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17.49",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Desktop-first Vector",
+              "description": "Retired the experimental website account, Builder, Cloud Agent, and API Studio surfaces; restored Vector's public site to product, documentation, purchase, releases, and legal pages; preserved Stripe licensing; and removed the unused desktop companion while keeping Vector Cloud Services inside the IDE."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17.48",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Your models, tools, and computer",
+              "description": "Added encrypted BYOK model providers, managed MCP connections, and an approval-gated Vector desktop companion with independent browser and terminal permissions."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17.47",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "One account for every Vector surface",
+              "description": "Rebuilt the signed-in experience as an animated Vector command center, added complete website settings for profile, security, billing, and legal controls, unified product access behind one membership, and introduced secure internal grants for founder and beta accounts without weakening paid subscription enforcement."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17.46",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Unified account foundation",
+              "description": "Introduced unified Vector accounts and entitlements, protected subscription downloads, server-managed provider and MCP connections, and production-safe billing, quota, and security boundaries."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17.45",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Flexible Vector billing",
+              "description": "Added a separate $10 monthly subscription alongside the existing $99 annual license, with plan-aware desktop billing, failed-payment email notices, a three-day monthly grace period, automatic recovery after payment, and clear reactivation choices."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17.44",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "A quieter, focused IDE",
+              "description": "Reduced the Code Editor to one Explorer control and one Agent control, moved the compact shared-agent composer beneath its conversation, removed Vel from the editor composer, and replaced the purple file canvas with a mature charcoal Monaco theme."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17.43",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "One agent across chat and code",
+              "description": "Unified the Code Editor with the active Vector conversation, model, effort, speed, permissions, attachments, and voice controls; added live file following with conflict-safe drafts; and refined the full IDE shell with workspace search, a resizable explorer, code outline, Monaco editing, and a responsive agent pane."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17.42",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Editor Agent workbench",
+              "description": "Rebuilt the Code Editor into a focused explorer, Monaco, and resizable agent workspace; added shared model, effort, speed, Plan, and permission controls; and replaced the editor-only review queue with direct, visible workspace edits and inline Cmd+K changes."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17.41",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Cloud command center",
+              "description": "Rebuilt Cloud Services around explicit repository selection, moved GitHub and GitLab publishing into Cloud, added provider-backed Supabase and AWS service views, and connected Vector's main agent to real cloud preparation, inspection, environment sync, and deployment actions."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17.40",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Reliable visual context",
+              "description": "Made JPEG and other common image attachments dependable, added local conversion for camera and design formats, and taught Vector to select a connected image-capable model before a visual task begins."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17.39",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "A more focused private beta",
+              "description": "Expanded Vector's engineering plugin catalog, refined the new-session workspace, and closed public installer access while preserving every cross-platform release artifact for controlled distribution."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17.38",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Faster parallel sessions",
+              "description": "Made isolated agents appear faster as complete Vector sessions with their own subagent access, simplified inactive Settings controls, and introduced a continuous purple Matrix rainfall across the landing page."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17.37",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Open beta downloads",
+              "description": "Opened direct beta access to current macOS, Windows, and Linux installers, refreshed Vector's animated product story, and introduced a more distinct neon workspace editor treatment."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17.36",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Guided workspace onboarding",
+              "description": "Introduced an interactive spotlight tour over Vector's real controls, added a durable Getting Started guide, and made the path from repository setup to agents, tools, Cloud Services, and Settings easier to learn."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17.35",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Vel, inside every session",
+              "description": "Moved Vel into the chat composer, connected every spoken request directly to the selected session's real agent and reply, and made Cloud Services a repository-level destination available from Home."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17.34",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "One Vector workspace",
+              "description": "Retired the Vector Work product split, restored the repository-first home, moved Cloud Services directly into that workflow, and repositioned Vector as one local-first, bring-your-own-key agentic workspace for builders."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17.33",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Natural voice turns with Vel",
+              "description": "Added automatic end-of-speech detection, voice-first session creation, interruptible spoken replies, and clearly italicized Vel conversations inside the active Vector chat."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17.32",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Conversational Vel and separate Work projects",
+              "description": "Turned Vel into a spoken active-session agent with native desktop replies and real coding handoffs, while keeping Vector Work projects separate from Vector Code repositories."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17.31",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Focused Work and session-bound Vel",
+              "description": "Limited Vector Work to agent chat, parallel workspaces, browser control, Vel, MCP, and plugins; moved Vel into active task and session tools; and ensured voice requests stay inside the exact visible session."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17.30",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "The Vector product suite",
+              "description": "Introduced one unified Product Hub for Vector Code, Vector Work, and Vector Cloud; added project-based Work tasks with optional repositories; made Cloud globally project-selectable; and launched Vel as Vector's task-aware voice assistant."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17.29",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Licensed public release",
+              "description": "Added secure annual Stripe billing, purchase confirmation email, one-computer activation, renewal controls, legal notices, and a gated installer handoff for Vector's paid desktop launch."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17.28",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Task-bound agents",
+              "description": "Kept every isolated agent and worktree attached to the task that created it, prevented managed agent folders from appearing as standalone projects, and cleaned stale workspace entries from Vector's project memory."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17.27",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Living workspace",
+              "description": "Brought Vector's interactive ASCII field into the desktop Home workspace, made the packaged window open reliably on launch, refreshed the release history, and synchronized the macOS, Windows, and Linux release line."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17.26",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Updater and navigation repair",
+              "description": "Rebuilt the macOS replacement handoff, added clearer version state, simplified the workspace navigation, and refreshed the Vector website and documentation."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17.25",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "In-app updates",
+              "description": "Introduced the visible update workflow, refreshed release artifacts, and improved the path to the latest desktop build."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17.24",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Cross-platform repair",
+              "description": "Fixed installer, sidebar, browser, cloud, voice, and layout issues across macOS, Windows, and Linux builds."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17.23",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Editor navigation",
+              "description": "Separated code-editor search from project review navigation and improved direct file opening in Codespace."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17.22",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Repository language",
+              "description": "Updated project entry language, onboarding, and home navigation around repositories rather than generic tasks."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17.21",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Follow-up queue",
+              "description": "Added visible queued prompts, steering, queue limits, completion notifications, and focused settings cleanup."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17.20",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Stable project workspace",
+              "description": "Consolidated the project sidebar, agent workspaces, review affordances, and local execution behavior."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17.19",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Composer refinement",
+              "description": "Refined effort controls, prompt layout, voice dictation feedback, and task steering."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17.18",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Task-specific state",
+              "description": "Scoped browser, usage, context, cloud, and engineering-tool state more consistently to the active task and repository."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17.17",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Controlled-browser loop",
+              "description": "Improved the loop from page observation to diagnostics, repair, screenshot evidence, and retesting."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17.16",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Parallel workspace execution",
+              "description": "Strengthened isolated workspace creation, status, terminal boundaries, review, merge, and discard behavior."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17.15",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Agent runtime choices",
+              "description": "Added clearer integration paths for Vector Agent and detected Claude Code, Codex, and Cursor runtimes."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17.14",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Provider and MCP reliability",
+              "description": "Improved provider discovery, model selection, MCP setup, and clear connection states."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17.13",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Desktop hardening",
+              "description": "Addressed launch behavior, window lifecycle, permissions, platform identity, and packaging reliability."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17.12",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Cloud workspace",
+              "description": "Expanded deployment, domain, environment, health, log, and data-service project controls."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17.11",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Canvas",
+              "description": "Introduced a multitasking surface for arranging project tools without abandoning the active repository."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17.10",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Model economics",
+              "description": "Made model usage, token categories, context consumption, and recorded cost easier to inspect."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17.9",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Trust signals",
+              "description": "Expanded risk, secret, validation, rollback, and checkpoint information around proposed changes."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17.8",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Project memory",
+              "description": "Added repository-owned context and stronger task-specific indexing for later sessions."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17.7",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Review detail",
+              "description": "Improved changed-file inspection and the path from agent output to a reviewable diff."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17.6",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Codespace stabilization",
+              "description": "Focused the editor on real repository files, direct local saves, diagnostics, and dependable navigation."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17.5",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Engineering timeline",
+              "description": "Recorded important file, terminal, browser, checkpoint, and review events per project."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17.4",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Browser state",
+              "description": "Connected visible browser state, navigation, screenshots, and diagnostics more closely to project sessions."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17.3",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Background execution",
+              "description": "Agent runs could remain visible and manageable while users moved through other Vector surfaces."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17.2",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Agent workspace detail",
+              "description": "Expanded per-workspace conversation, terminal activity, changed files, status, and review context."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17.1",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Workspace navigation",
+              "description": "Improved movement between project sessions, tools, and isolated workspaces."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17.0",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Unified shell",
+              "description": "Introduced the current project-centered desktop shell and consolidated the primary engineering surfaces."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.17",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Unified Vector workspace",
+              "description": "The current line focuses on task-specific state, live multi-agent work, a controlled browser, transparent usage, and production packaging."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.16",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Agent coordination",
+              "description": "Parallel workspaces, background status, subagents, model routing, and orchestration controls were expanded."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.15",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Integrated engineering",
+              "description": "Agent, editor, browser, review, terminal, and cloud surfaces were brought into a more consistent project model."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.14",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Reliability pass",
+              "description": "Desktop launches, model selection, settings behavior, preview reliability, and cross-platform packaging received sustained fixes."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.13",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Cloud connections",
+              "description": "Publishing, deployment state, environment configuration, and project connections joined the workspace."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.12",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Parallel execution",
+              "description": "Isolated agent workspaces introduced independent files, branches, terminals, and review boundaries."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.11",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Project history",
+              "description": "Timeline events, checkpoints, change explanations, and project memory became easier to inspect."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.10",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Browser engineering",
+              "description": "Browser control evolved from a passive preview toward visible testing and diagnostic workflows."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.9",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Code intelligence",
+              "description": "Search, completion, diagnostics, inline assistance, and code-oriented context were strengthened."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.8",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Personal workspace",
+              "description": "Appearance, behavior, keyboard, editor, chat, and local preference controls were expanded."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.7",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Project tools",
+              "description": "Terminal, browser preview, project context, and engineering utilities became connected session tools."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.6",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Codespace",
+              "description": "A dedicated editor experience added file navigation, language-aware editing, and project diagnostics."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.5",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Review foundations",
+              "description": "Changed-file review, checkpoints, and safer project recovery began to form a trust layer."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.4",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Vector identity",
+              "description": "The interface, desktop packaging, assets, and product language moved to the Vector brand."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.3",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Visible execution",
+              "description": "Tool calls, file activity, terminal work, and clearer execution state became part of the session."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.2",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Provider choice",
+              "description": "Bring-your-own-key providers and model selection moved into the desktop workflow."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.1",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Project sessions",
+              "description": "Projects, conversations, local persistence, and repeatable repository entry flows were established."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "v1.0",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Desktop foundation",
+              "description": "Vector became a local desktop engineering workspace with repository-aware agent sessions."
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

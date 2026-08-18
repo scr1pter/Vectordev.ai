@@ -438,4 +438,10 @@ export const release117: VectorRelease[] = [
     summary:
       "Merging an agent workspace back into a project that is not a git repository could destroy work permanently. The copy-mode merge deleted and overwrote files in the real project directly, and the \"checkpoint\" it promised beforehand was only a map of file hashes — enough to detect a conflict, but incapable of restoring a single byte. Both copy merge paths now copy every file they are about to overwrite or delete into the checkpoint first, and a non-git checkpoint stores real file copies alongside a README explaining how to put them back. The same guarantee already covered git projects and now covers all four merge paths.",
   },
+  {
+    version: "1.17.59",
+    title: "Nothing spends your key without saying so",
+    summary:
+      "Vector silently rerouted prompts it judged complex to a stronger model — on a bring-your-own-key product that can be many times the token price you chose — while the composer kept showing the model you picked, so there was no way to tell what you were being billed for. Routing is now off by default, has its own setting, honours models you hid in Settings, and switches the composer to whatever it actually used. Theme, colour scheme, and language controls returned: they existed only in a legacy shell that a hardcoded flag made unreachable, so the shipped app had no way to change any of them. Billing stopped re-posting stale Stripe metadata, which let two webhooks arriving together drop the checkout session and permanently invalidate a licence key that had already been emailed. A dead or wiped computer is no longer a permanent lockout — moving a licence is self-service and simply bounded. The one-installer-per-licence rule became a rate limit, and a download is recorded once the bytes arrive rather than before they are sent. The what's-new feed is now generated at build time; it had never existed, so the release-notes dialog had never run.",
+  },
 ]

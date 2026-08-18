@@ -248,6 +248,7 @@ type PromptSubmitInput = {
   onSubmit?: () => void
   executionMode?: Accessor<"normal" | "quick" | "fast">
   llmJudge?: Accessor<boolean>
+  autoModelRouting?: Accessor<boolean>
 }
 
 export function createPromptSubmit(input: PromptSubmitInput) {
@@ -388,12 +389,24 @@ export function createPromptSubmit(input: PromptSubmitInput) {
 
     const difficulty =
       mode === "normal" && !text.trim().startsWith("/") ? classifyTaskDifficulty(text) : ("standard" as const)
-    const availableModels = typeof local.model.list === "function" ? local.model.list() : [currentModel]
-    const taskRoute = routeModelForTask({
-      difficulty,
-      current: currentModel,
-      available: availableModels,
-    })
+    // Hiding a model in Settings is how the first-run tour tells people to
+    // control what Vector uses, so routing must not reach past that filter and
+    // pick something they deliberately turned off.
+    const allModels = typeof local.model.list === "function" ? local.model.list() : [currentModel]
+    const availableModels = allModels.filter(
+      (item) =>
+        item.id === currentModel.id ||
+        typeof local.model.visible !== "function" ||
+        local.model.visible({ providerID: item.provider.id, modelID: item.id }),
+    )
+    // Automatic routing upgrades the model for work it judges complex, which
+    // spends the user's own key at up to an order of magnitude more per token.
+    // Opt-in only. Image routing below is deliberately NOT gated: that one is a
+    // capability fallback — without an image-capable model the request simply
+    // cannot be served — rather than a cost decision made on the user's behalf.
+    const taskRoute = input.autoModelRouting?.()
+      ? routeModelForTask({ difficulty, current: currentModel, available: availableModels })
+      : { model: currentModel, routed: false }
     const hasImageInput = images.some((attachment) => attachment.mime.startsWith("image/"))
     const imageRoute = hasImageInput
       ? routeModelForImages({ current: taskRoute.model, available: availableModels })
@@ -413,11 +426,13 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       task: taskRoute.routed,
       image: imageRoute?.routed ?? false,
     }
-    const variant = routeVariantForTask({
-      difficulty,
-      selected: selectedVariant,
-      variants: Object.keys(routed.model.variants ?? {}),
-    })
+    const variant = input.autoModelRouting?.()
+      ? routeVariantForTask({
+          difficulty,
+          selected: selectedVariant,
+          variants: Object.keys(routed.model.variants ?? {}),
+        })
+      : selectedVariant
     const model = {
       modelID: routed.model.id,
       providerID: routed.model.provider.id,
@@ -523,16 +538,22 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       return
     }
 
+    // A toast disappears; the composer chip is what the user reads before every
+    // subsequent prompt. Leaving it on the model they picked while sending to a
+    // different one meant they could not tell what they were being billed for.
+    if ((routed.image || routed.task) && routed.model.id !== currentModel.id) {
+      local.model.set({ providerID: routed.model.provider.id, modelID: routed.model.id }, { recent: true })
+    }
     if (routed.image) {
       showToast({
         title: "Vector selected an image-capable model",
-        description: `Using ${routed.model.name} to inspect the attached image.`,
+        description: `Switched to ${routed.model.name} to inspect the attached image.`,
         duration: 5_000,
       })
     } else if (routed.task) {
       showToast({
         title: "Vector routed a complex task",
-        description: `Using ${routed.model.name} for stronger planning and implementation.`,
+        description: `Switched to ${routed.model.name} for stronger planning and implementation.`,
         duration: 5_000,
       })
     }

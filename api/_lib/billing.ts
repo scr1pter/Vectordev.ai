@@ -464,8 +464,14 @@ export async function provisionCheckout(session: Stripe.Checkout.Session, option
   const email = session.customer_details?.email ?? customer.email
   if (!email) throw new ApiError(409, "EMAIL_MISSING", "Stripe did not provide an email for this purchase.")
 
+  // Only the keys being written. Stripe merges customer metadata, so spreading
+  // the snapshot read at the top of this request buys nothing and re-posts stale
+  // values: two webhooks arriving together (checkout.session.completed and
+  // invoice.paid land within milliseconds, in separate lambdas) would otherwise
+  // let the slower one restore a pre-write snapshot and drop
+  // vector_checkout_session_id, permanently invalidating the key already in the
+  // customer's inbox.
   const metadata = {
-    ...customer.metadata,
     vector_product: "desktop",
     vector_license_version: "1",
     vector_plan: plan.id,
@@ -558,20 +564,39 @@ export async function activateLicense(input: {
   const status = publicStatus(record.customer, record.subscription)
   if (!status.access) throw new ApiError(402, "LICENSE_EXPIRED", "This Vector subscription is not currently active.")
   const bound = record.customer.metadata.vector_device_hash
-  if (bound && bound !== deviceId) {
-    throw new ApiError(
-      409,
-      "DEVICE_LIMIT",
-      "This license is already active on another computer. Deactivate that computer first.",
-    )
+  const transfer = bound && bound !== deviceId
+  if (transfer) {
+    // Deactivation can only be run from the machine that holds the license, so
+    // requiring it made a dead, stolen, or wiped computer a permanent lockout
+    // with a support email as the only recourse. Moving a license is instead
+    // self-service and simply bounded: each activation unbinds the previous
+    // computer, so a bounded number of moves cannot be used to run two
+    // machines at once, while a customer whose laptop died is never stranded.
+    const moves = recentTransferCount(record.customer)
+    if (moves >= DEVICE_TRANSFER_LIMIT) {
+      throw new ApiError(
+        409,
+        "DEVICE_TRANSFER_LIMIT",
+        `This license has already moved between computers ${DEVICE_TRANSFER_LIMIT} times this month. Contact support and we will move it for you.`,
+      )
+    }
   }
   const token = activationToken(record.customer.id)
+  const transferWindowStart =
+    transfer && recentTransferCount(record.customer) === 0
+      ? new Date().toISOString()
+      : (record.customer.metadata.vector_transfer_window_started_at ?? "")
   const customer = await updateCustomer(record.stripe, record.customer.id, {
     metadata: {
-      ...record.customer.metadata,
       vector_device_hash: deviceId,
       vector_device_name: deviceName,
       vector_device_platform: platform,
+      ...(transfer
+        ? {
+            vector_transfer_count: `${recentTransferCount(record.customer) + 1}`,
+            vector_transfer_window_started_at: transferWindowStart,
+          }
+        : {}),
       vector_activation_hash: digest(token),
       vector_activated_at: new Date().toISOString(),
       vector_last_seen_at: new Date().toISOString(),
@@ -593,7 +618,7 @@ export async function activationStatus(input: { activationToken: string; deviceI
     throw new ApiError(401, "DEVICE_MISMATCH", "This activation belongs to another computer.")
   }
   const customer = await updateCustomer(record.stripe, record.customer.id, {
-    metadata: { ...record.customer.metadata, vector_last_seen_at: new Date().toISOString() },
+    metadata: { vector_last_seen_at: new Date().toISOString() },
   })
   return publicStatus(customer, record.subscription)
 }
@@ -612,7 +637,6 @@ export async function deactivateLicense(input: { activationToken: string; device
   }
   await updateCustomer(record.stripe, record.customer.id, {
     metadata: {
-      ...record.customer.metadata,
       vector_device_hash: "",
       vector_device_name: "",
       vector_device_platform: "",
@@ -690,21 +714,59 @@ export async function consumeDownload(token: string, target: string) {
     file,
     pathname: installerBlobPath(file),
     customerId: customer.id,
-    alreadyDownloaded: Boolean(customer.metadata.vector_downloaded_at),
+    recentDownloads: recentDownloadCount(customer),
   }
 }
 
-export async function completeDownload(input: { customerId: string; target: string; alreadyDownloaded: boolean }) {
-  if (input.alreadyDownloaded) {
-    throw new ApiError(409, "DOWNLOAD_USED", "The initial installer download for this license has already been used.")
+// Installers are published publicly on the GitHub release, so a one-per-license
+// rule protected nothing while reliably locking out real customers: the
+// purchase page offers six platform links against a single allowance, and an
+// interrupted 170MB transfer used it up. A rate limit keeps the endpoint from
+// being used as a CDN without punishing someone re-downloading after a failed
+// transfer or installing on a second platform.
+const DEVICE_TRANSFER_WINDOW_MS = 30 * 24 * 60 * 60 * 1000
+const DEVICE_TRANSFER_LIMIT = 3
+
+function recentTransferCount(customer: Stripe.Customer) {
+  const startedAt = Date.parse(customer.metadata.vector_transfer_window_started_at ?? "")
+  if (!Number.isFinite(startedAt) || Date.now() - startedAt > DEVICE_TRANSFER_WINDOW_MS) return 0
+  const count = Number(customer.metadata.vector_transfer_count ?? "0")
+  return Number.isFinite(count) && count > 0 ? count : 0
+}
+
+const DOWNLOAD_WINDOW_MS = 24 * 60 * 60 * 1000
+const DOWNLOAD_LIMIT_PER_WINDOW = 10
+
+function recentDownloadCount(customer: Stripe.Customer) {
+  const startedAt = Date.parse(customer.metadata.vector_download_window_started_at ?? "")
+  if (!Number.isFinite(startedAt) || Date.now() - startedAt > DOWNLOAD_WINDOW_MS) return 0
+  const count = Number(customer.metadata.vector_download_count ?? "0")
+  return Number.isFinite(count) && count > 0 ? count : 0
+}
+
+export function assertDownloadAllowed(recentDownloads: number) {
+  if (recentDownloads >= DOWNLOAD_LIMIT_PER_WINDOW) {
+    throw new ApiError(
+      429,
+      "DOWNLOAD_RATE_LIMITED",
+      "This license has downloaded installers many times today. Try again tomorrow, or contact support.",
+    )
   }
+}
+
+// Called once the bytes have actually reached the customer. Recording it before
+// the stream meant a transfer that failed halfway still counted.
+export async function completeDownload(input: { customerId: string; target: string }) {
   const stripe = stripeClient()
   const customer = await customerRecord(stripe, input.customerId)
+  const previous = recentDownloadCount(customer)
   await updateCustomer(stripe, customer.id, {
     metadata: {
-      ...customer.metadata,
       vector_downloaded_at: new Date().toISOString(),
       vector_download_target: input.target,
+      vector_download_count: `${previous + 1}`,
+      vector_download_window_started_at:
+        previous === 0 ? new Date().toISOString() : (customer.metadata.vector_download_window_started_at ?? new Date().toISOString()),
     },
   })
 }
@@ -718,7 +780,6 @@ export async function syncSubscription(snapshot: StripeSubscription) {
   const status = publicStatus(customer, subscription)
   await updateCustomer(stripe, customer.id, {
     metadata: {
-      ...customer.metadata,
       vector_subscription_id: subscription.id,
       vector_plan: plan.id,
       vector_subscription_status: subscription.status,
@@ -795,7 +856,6 @@ async function recordPaymentFailure(invoice: Stripe.Invoice, eventCreated: numbe
   const graceEndsAt = renewalFailure && plan.graceDays ? failedAt + plan.graceDays * DAY_SECONDS : undefined
   await updateCustomer(stripe, customer.id, {
     metadata: {
-      ...customer.metadata,
       vector_plan: plan.id,
       vector_payment_failed_at: `${failedAt}`,
       vector_payment_failed_invoice: invoice.id,
@@ -819,7 +879,6 @@ async function clearPaymentFailure(invoice: Stripe.Invoice, eventCreated: number
   if (failedInvoice && failedInvoice !== invoice.id && failedEvent && eventCreated < failedEvent) return
   await updateCustomer(stripe, customer.id, {
     metadata: {
-      ...customer.metadata,
       vector_payment_failed_at: "",
       vector_payment_failed_invoice: "",
       vector_payment_failed_event_created: "",

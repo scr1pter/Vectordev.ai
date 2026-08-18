@@ -4,7 +4,7 @@ import { ApiError, handleApiError, json, readJson, requireMethod, type ApiReques
 // Bug reports come from the desktop app's in-workspace bug button. The report
 // body is user-authored text, so it is only ever rendered as escaped HTML and
 // the reply-to address is validated before it reaches Resend.
-const REPORT_TO = process.env.VECTOR_BUG_REPORT_TO || "krishnabharadwaj0521@gmail.com"
+const REPORT_TO = process.env.VECTOR_BUG_REPORT_TO || "krishnabharadwaj@gmail.com"
 const MAX_MESSAGE = 8_000
 
 type BugReport = {

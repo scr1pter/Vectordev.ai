@@ -193,7 +193,7 @@ export const DESKTOP_MENU: DesktopMenu[] = [
     label: "Help",
     items: [
       { type: "item", label: "Vector Documentation", href: "https://vectordev.ai/docs" },
-      { type: "item", label: "Support", href: "mailto:contact.astr0gpt@gmail.com" },
+      { type: "item", label: "Support", href: "mailto:krishnabharadwaj@gmail.com" },
       { type: "item", label: "Export Logs...", command: "logs.export" },
       { type: "separator" },
       {

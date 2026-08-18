@@ -5,11 +5,14 @@ import { Switch } from "@opencode-ai/ui/v2/switch-v2"
 import { Icon, type IconProps } from "@opencode-ai/ui/icon"
 import {
   type VectorChatWidthPreference,
+  type VectorThemePreference,
   type VectorMessageSpacingPreference,
   useSettings,
 } from "@/context/settings"
 import "./settings-v2.css"
 
+import { useTheme } from "@opencode-ai/ui/theme/context"
+import { useLanguage } from "@/context/language"
 import { LocalMemoryPanel } from "@/features/memory/local-memory-panel"
 
 export type SettingsSection = "general" | "appearance" | "editor" | "chat" | "notifications" | "accessibility"
@@ -210,6 +213,8 @@ export const SettingsGeneralV2: Component<{
   section?: SettingsSection
 }> = (props) => {
   const settings = useSettings()
+  const theme = useTheme()
+  const language = useLanguage()
   const [status, setStatus] = createSignal("")
   let statusTimeout: ReturnType<typeof setTimeout> | undefined
 
@@ -259,6 +264,12 @@ export const SettingsGeneralV2: Component<{
           description="Have Vector prove its work matches what you asked before it reports done."
         >
           <ToggleRow
+            title="Automatic model routing"
+            description="Let Vector switch to a stronger model when it judges a task complex. This spends your own provider key at that model's rate, which can be many times higher than the one you picked. Off by default; the composer always shows the model actually in use."
+            checked={settings.general.autoModelRouting()}
+            onChange={settings.general.setAutoModelRouting}
+          />
+          <ToggleRow
             title="LLM-as-a-judge"
             description="When Vector finishes, a separate judge compares the result against your request and the checks it ran. On a failed verdict it names the specific repair and Vector fixes it, up to three rounds. Applies to every prompt and every agent workspace, and costs extra model calls."
             checked={settings.general.llmJudge()}
@@ -276,6 +287,41 @@ export const SettingsGeneralV2: Component<{
       description="Every visual choice below applies instantly and persists locally."
     >
       <div class="settings-v2-section-grid">
+        {/* Theme, colour scheme and language were only ever reachable from the
+            legacy shell's command palette, which the hardcoded newLayoutDesigns
+            flag made unreachable — so the shipped app had no way to change any
+            of them. The contexts always supported it; nothing exposed it. */}
+        <Card icon="photo" title="Appearance" description="Applies immediately and is remembered on this computer.">
+          <SelectRow
+            title="Color scheme"
+            description="Follow the system, or pin light or dark."
+            options={[
+              { value: "system", label: "Match system" },
+              { value: "light", label: "Light" },
+              { value: "dark", label: "Dark" },
+            ]}
+            // settings.appearance.theme is the source of truth, not the theme
+            // context: VectorThemeSync in app.tsx continuously pushes this
+            // preference into the context, so writing to the context directly
+            // is immediately overwritten and the control appears to do nothing.
+            value={settings.appearance.theme()}
+            onChange={(value) => settings.appearance.setTheme(value as VectorThemePreference)}
+          />
+          <SelectRow
+            title="Theme"
+            description="Editor and interface colors."
+            options={theme.ids().map((id) => ({ value: id, label: theme.name(id) }))}
+            value={theme.themeId()}
+            onChange={(value) => void theme.setTheme(value)}
+          />
+          <SelectRow
+            title="Language"
+            description="Interface language."
+            options={language.locales.map((locale) => ({ value: locale, label: language.label(locale) }))}
+            value={language.locale()}
+            onChange={(value) => language.setLocale(value as never)}
+          />
+        </Card>
         <Card icon="photo" title="Workspace colors" description="Set Vector's tone without external services.">
           <ColorRow
             title="Accent color"

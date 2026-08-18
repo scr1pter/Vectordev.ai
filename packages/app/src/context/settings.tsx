@@ -47,6 +47,7 @@ export interface Settings {
     showTerminal: boolean
     showReasoningSummaries: boolean
     llmJudge: boolean
+    autoModelRouting: boolean
     shellToolPartsExpanded: boolean
     editToolPartsExpanded: boolean
     showCustomAgents: boolean
@@ -172,6 +173,9 @@ const defaultSettings: Settings = {
     showTerminal: false,
     showReasoningSummaries: false,
     llmJudge: false,
+    // Off by default: this spends the user's own BYOK budget on a model they
+    // did not choose, so it has to be something they opt into.
+    autoModelRouting: false,
     shellToolPartsExpanded: false,
     editToolPartsExpanded: false,
     showCustomAgents: false,
@@ -427,8 +431,15 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
           setStore("general", "showReasoningSummaries", value)
         },
         llmJudge: withFallback(() => store.general?.llmJudge, defaultSettings.general.llmJudge),
+        autoModelRouting: withFallback(
+          () => store.general?.autoModelRouting,
+          defaultSettings.general.autoModelRouting,
+        ),
         setLlmJudge(value: boolean) {
           setStore("general", "llmJudge", value)
+        },
+        setAutoModelRouting(value: boolean) {
+          setStore("general", "autoModelRouting", value)
         },
         shellToolPartsExpanded: withFallback(
           () => store.general?.shellToolPartsExpanded,

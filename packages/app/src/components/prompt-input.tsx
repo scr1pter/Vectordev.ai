@@ -1528,6 +1528,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       onSubmit: props.onSubmit,
       executionMode,
       llmJudge: settings.general.llmJudge,
+      autoModelRouting: settings.general.autoModelRouting,
     })
 
   const handleKeyDown = (event: KeyboardEvent) => {
