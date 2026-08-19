@@ -54,6 +54,29 @@ import type { PullRequestCliStatus, PullRequestDetail, PullRequestSummary } from
 import type { LocalMemoryState } from "../main/local-memory"
 import type { RuntimeName, RuntimeStatus } from "../main/runtime-bootstrap"
 export type { RuntimeName, RuntimeStatus } from "../main/runtime-bootstrap"
+import type { CiFailure, CiRepo, CiRun, CiUnavailable } from "../main/ci-watch"
+export type {
+  CiFailedStep,
+  CiFailure,
+  CiFailureKind,
+  CiRepo,
+  CiRun,
+  CiUnavailable,
+  CiUnavailableReason,
+} from "../main/ci-watch"
+import type { SpendEvent, SpendPolicy, SpendSummary } from "../main/spend-limits"
+export type {
+  SpendDayTotal,
+  SpendEvent,
+  SpendLimit,
+  SpendLimitSet,
+  SpendPolicy,
+  SpendSource,
+  SpendSummary,
+  SpendWindowTotal,
+} from "../main/spend-limits"
+import type { FailureMemory } from "../main/failure-memory"
+export type { FailureMemory, FailureRepair, FailureSignatureRecord } from "../main/failure-memory"
 import type { AgentTeam, TeamMessage, TeamTopology } from "../main/agent-team-model"
 export type { AgentTeam, TeamMessage, TeamTopology } from "../main/agent-team-model"
 export type { LocalMemoryState } from "../main/local-memory"
@@ -203,6 +226,38 @@ export type PullRequestsAPI = {
     event: "comment" | "approve" | "request-changes"
   }) => Promise<{ posted: boolean }>
   merge: (input: { cwd: string; number: number; strategy: "merge" | "squash" | "rebase" }) => Promise<{ merged: boolean }>
+}
+
+// Nothing here rejects: `gh` missing, `gh` signed out, or a project that is not
+// a GitHub repository all arrive as CiUnavailable, which names the reason and
+// the one command that fixes it.
+export type CiAPI = {
+  status: (projectPath: string) => Promise<{ ok: true; repo: CiRepo } | CiUnavailable>
+  runs: (
+    projectPath: string,
+    options?: { branch?: string; limit?: number },
+  ) => Promise<{ ok: true; repo: CiRepo; runs: CiRun[] } | CiUnavailable>
+  failure: (projectPath: string, runId: number) => Promise<{ ok: true; failure: CiFailure } | CiUnavailable>
+  repair: (
+    projectPath: string,
+    runId: number,
+  ) => Promise<{ ok: true; failure: CiFailure; prompt: string } | CiUnavailable>
+}
+
+export type SpendLimitsAPI = {
+  limits: () => Promise<SpendPolicy>
+  // Omitted limit sets keep their stored value, so a settings pane can save the
+  // interactive caps without also rewriting the unattended ones.
+  setLimits: (next: Partial<SpendPolicy>) => Promise<SpendPolicy>
+  // With a projectPath the summary also carries that project's own day and
+  // month totals alongside the account-wide ones.
+  status: (projectPath?: string) => Promise<SpendSummary>
+  recent: (limit?: number) => Promise<SpendEvent[]>
+}
+
+export type FailureMemoryAPI = {
+  read: (projectPath: string) => Promise<FailureMemory>
+  clear: (projectPath: string) => Promise<FailureMemory>
 }
 
 export type LinuxDisplayBackend = "wayland" | "auto"
@@ -580,6 +635,9 @@ export type ElectronAPI = {
   runtime: RuntimeAPI
   localMemory: LocalMemoryAPI
   pullRequests: PullRequestsAPI
+  ci: CiAPI
+  spendLimits: SpendLimitsAPI
+  failureMemory: FailureMemoryAPI
   consumeInitialDeepLinks: () => Promise<string[]>
   getDefaultServerUrl: () => Promise<string | null>
   setDefaultServerUrl: (url: string | null) => Promise<void>

@@ -94,6 +94,22 @@ const api: ElectronAPI = {
     review: (input) => ipcRenderer.invoke("pr-review", input),
     merge: (input) => ipcRenderer.invoke("pr-merge", input),
   },
+  ci: {
+    status: (projectPath) => ipcRenderer.invoke("ci-status", projectPath),
+    runs: (projectPath, options) => ipcRenderer.invoke("ci-runs-list", projectPath, options),
+    failure: (projectPath, runId) => ipcRenderer.invoke("ci-failure-view", projectPath, runId),
+    repair: (projectPath, runId) => ipcRenderer.invoke("ci-repair-prepare", projectPath, runId),
+  },
+  spendLimits: {
+    limits: () => ipcRenderer.invoke("spend-limits-get"),
+    setLimits: (next) => ipcRenderer.invoke("spend-limits-set", next),
+    status: (projectPath) => ipcRenderer.invoke("spend-limits-status", projectPath),
+    recent: (limit) => ipcRenderer.invoke("spend-limits-recent", limit),
+  },
+  failureMemory: {
+    read: (projectPath) => ipcRenderer.invoke("failure-memory-read", projectPath),
+    clear: (projectPath) => ipcRenderer.invoke("failure-memory-clear", projectPath),
+  },
   consumeInitialDeepLinks: () => ipcRenderer.invoke("consume-initial-deep-links"),
   getDefaultServerUrl: () => ipcRenderer.invoke("get-default-server-url"),
   setDefaultServerUrl: (url) => ipcRenderer.invoke("set-default-server-url", url),

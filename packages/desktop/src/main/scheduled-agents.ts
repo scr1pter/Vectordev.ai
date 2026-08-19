@@ -55,6 +55,20 @@ let engineProvider: (() => Promise<ScheduledAgentEngine>) | undefined
 let tickTimer: NodeJS.Timeout | undefined
 let tickInProgress = false
 const activeRuns = new Set<string>()
+// One slot each rather than a listener list: the main process has exactly one
+// tray, and this module must never keep a torn-down one alive.
+let changeListener: (() => void) | undefined
+let runFinishedListener: ((record: ScheduledAgentRecord) => void) | undefined
+
+// Lets the tray redraw its menu the moment the schedule changes, instead of
+// waiting out its own refresh interval and showing a stale count.
+export function onScheduledAgentsChanged(listener: () => void) {
+  changeListener = listener
+}
+
+export function onScheduledAgentRunFinished(listener: (record: ScheduledAgentRecord) => void) {
+  runFinishedListener = listener
+}
 
 function readRecords(): ScheduledAgentRecord[] {
   const raw = getStore(STORE_NAME).get(STORE_KEY)
@@ -64,6 +78,9 @@ function readRecords(): ScheduledAgentRecord[] {
 
 function writeRecords(records: ScheduledAgentRecord[]) {
   getStore(STORE_NAME).set(STORE_KEY, records)
+  // Every mutation funnels through here, so this is the one place that has to
+  // announce a change.
+  changeListener?.()
 }
 
 function updateRecord(id: string, update: (record: ScheduledAgentRecord) => ScheduledAgentRecord) {
@@ -194,6 +211,7 @@ async function waitForSessionCompletion(engine: ScheduledAgentEngine, recordId: 
 
 async function launchScheduledAgent(id: string, awaitEngine: () => Promise<ScheduledAgentEngine>) {
   activeRuns.add(id)
+  let finished: ScheduledAgentRecord | undefined
   try {
     updateRecord(id, (current) => ({ ...current, status: "running", startedAt: now(), error: undefined }))
     const record = readRecords().find((item) => item.id === id)
@@ -219,7 +237,7 @@ async function launchScheduledAgent(id: string, awaitEngine: () => Promise<Sched
 
     const outcome = await waitForSessionCompletion(engine, id, sessionId)
     if (outcome === "canceled") return
-    updateRecord(id, (item) => {
+    finished = updateRecord(id, (item) => {
       const completedAt = now()
       // A recurring task returns to "scheduled" at its next moment rather than
       // finishing, which is what makes it repeat. nextRun is always strictly in
@@ -242,6 +260,9 @@ async function launchScheduledAgent(id: string, awaitEngine: () => Promise<Sched
     })
   } finally {
     activeRuns.delete(id)
+    // Announced only after the run leaves activeRuns, so the tray refresh this
+    // triggers no longer counts the finished run as still in flight.
+    if (finished) runFinishedListener?.(finished)
   }
 }
 
@@ -262,11 +283,13 @@ async function runDueScheduledAgents() {
       void launchScheduledAgent(record.id, engineProvider).catch((error) => {
         const message = error instanceof Error ? error.message : String(error)
         try {
-          updateRecord(record.id, (current) =>
+          const failed = updateRecord(record.id, (current) =>
             current.status === "canceled"
               ? current
               : { ...current, status: "failed", completedAt: now(), error: message },
           )
+          // A run the user cancelled mid-flight is not a finish worth announcing.
+          if (failed.status === "failed") runFinishedListener?.(failed)
         } catch {
           // The record was removed mid-run; there is nothing left to mark.
         }
@@ -284,6 +307,50 @@ export function initScheduledAgents(awaitEngine: () => Promise<ScheduledAgentEng
   tickTimer = setInterval(() => {
     void runDueScheduledAgents()
   }, TICK_INTERVAL_MS)
+}
+
+// What the tray shows and what the keep-alive decision runs on. Runs in flight
+// come from the live in-process set rather than record status, so a record left
+// "running" by a crash can never hold the app resident forever.
+export function scheduledAgentWorkState() {
+  const records = readRecords()
+  const armed = records.filter((record) => record.status === "scheduled" && !record.paused)
+  const upcoming = armed.map((record) => Date.parse(record.runAt)).filter((value) => Number.isFinite(value))
+  return {
+    armedTasks: armed.length,
+    inFlightRuns: activeRuns.size,
+    nextRunAt: upcoming.length === 0 ? undefined : Math.min(...upcoming),
+    // A paused record only counts as resumable if resuming would actually
+    // re-arm it; one that already ran to completion never will.
+    pausedTasks: records.filter((record) => record.paused === true && pausedStatus(record, false) === "scheduled")
+      .length,
+  }
+}
+
+// Pulls the soonest armed task forward instead of launching it directly, so a
+// manual run still goes through the same due selection and failure bookkeeping
+// as an ordinary tick.
+export function runNextScheduledAgent(): ScheduledAgentRecord | undefined {
+  const next = readRecords()
+    .filter((record) => record.status === "scheduled" && !record.paused)
+    // An unreadable runAt is already treated as due now by the tick, so the
+    // NaN-to-zero fallback keeps such a record sorted first here too.
+    .sort((left, right) => (Date.parse(left.runAt) || 0) - (Date.parse(right.runAt) || 0))
+    .at(0)
+  if (!next) return undefined
+  const pulled = updateRecord(next.id, (record) => ({ ...record, runAt: now() }))
+  void runDueScheduledAgents()
+  return pulled
+}
+
+export function setAllScheduledAgentsPaused(paused: boolean): ScheduledAgentRecord[] {
+  return readRecords()
+    .filter((record) =>
+      paused
+        ? record.status === "scheduled" && !record.paused
+        : record.paused === true && pausedStatus(record, false) === "scheduled",
+    )
+    .map((record) => setScheduledAgentPaused(record.id, paused))
 }
 
 export function listScheduledAgents(scope?: { directory?: string; parentSessionId?: string }): ScheduledAgentRecord[] {

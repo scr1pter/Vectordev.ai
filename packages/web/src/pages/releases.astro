@@ -3,7 +3,7 @@ import { ArrowDownToLine, ArrowUpRight, BookOpen, GitCommitHorizontal, Tag } fro
 import MarketingFooter from "../components/marketing/MarketingFooter.astro"
 import MarketingLayout from "../components/marketing/MarketingLayout.astro"
 import MarketingNav from "../components/marketing/MarketingNav.astro"
-import { release117, releaseSeries, type VectorRelease } from "../data/vector-releases"
+import { release117, release118, releaseSeries, type VectorRelease } from "../data/vector-releases"
 
 export const prerender = true
 
@@ -13,10 +13,14 @@ type ReleasePost = VectorRelease & {
 }
 
 const posts: ReleasePost[] = [
-  ...[...release117].reverse().map((release, index) => ({
+  ...[...release118].reverse().map((release, index) => ({
+    ...release,
+    line: "Vector 1.18",
+    latest: index === 0,
+  })),
+  ...[...release117].reverse().map((release) => ({
     ...release,
     line: "Vector 1.17",
-    latest: index === 0,
   })),
   ...[...releaseSeries]
     .filter((release) => release.version !== "1.17")

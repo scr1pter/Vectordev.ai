@@ -7,98 +7,111 @@
   .vector-effort-track {
     --vector-effort-progress: 0%;
     --vector-effort-t: 0;
+    /* Clearance for the thumb against the pill's rounded cap. The cap curves in
+       faster than the thumb's own corner does, so half the thumb width is not
+       enough: the track's inner box is 32px tall, so the cap is a circle of
+       r=16 centred at (16,16), and the thumb (25x32, radius 9) has its corner
+       arcs centred at (x-3.5, 9) and (x-3.5, 23). Staying inside needs
+       hypot(x-19.5, 7) <= 16-9, which is only true at x >= 19.5 — at 16px the
+       corners get sliced flat by overflow:hidden. 20px keeps a half-pixel of
+       margin. Both the thumb and the lit region key off this, which keeps the
+       fill ending exactly under the thumb. */
+    --vector-effort-x: clamp(20px, var(--vector-effort-progress), calc(100% - 20px));
+    /* Two crossed stripe grids intersected into a 3px dot on a 5px pitch. Kept
+       on the track so the dark layer and the lit layer share one phase and the
+       bright dots land precisely on top of the dim ones. */
+    --vector-effort-dots:
+      repeating-linear-gradient(90deg, #000 0 3px, #0000 3px 5px),
+      repeating-linear-gradient(180deg, #000 0 3px, #0000 3px 5px);
     position: relative;
     height: 34px;
     overflow: hidden;
     border: 1px solid var(--vx-line);
     border-radius: 9999px;
-    background: #17151d;
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    background: #141319;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
     transition:
-      border-color 220ms ease,
-      box-shadow 220ms ease;
+      border-color 220ms var(--vx-ease),
+      box-shadow 220ms var(--vx-ease);
   }
 
-  /* Progressive fill: its width tracks the level, and brightness + saturation
-     scale with it — so the bar is dark at the bottom, a faint lilac one step
-     up, really lights around the middle, and turns vivid purple near the top. */
-  .vector-effort-track::after {
-    content: "";
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    left: 0;
-    width: var(--vector-effort-progress);
-    background: linear-gradient(90deg, #565fc6 0%, #8163e6 52%, #b757ff 100%);
-    opacity: calc(0.24 + 0.76 * var(--vector-effort-t));
-    filter: saturate(calc(0.4 + var(--vector-effort-t)));
-    transition:
-      width 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
-      opacity 220ms ease,
-      filter 220ms ease;
-    pointer-events: none;
-  }
-
-  /* Twinkling stars — hidden until the level reaches the very top (the end). */
+  /* Unlit matrix: four rows of dim dots tiled across the whole pill, inset far
+     enough that the caps never clip a column. */
   .vector-effort-track::before {
     content: "";
     position: absolute;
-    inset: 0;
-    z-index: 1;
+    z-index: 0;
+    top: 6px;
+    bottom: 6px;
+    left: 7px;
+    right: 7px;
     pointer-events: none;
-    opacity: 0;
-    background-image:
-      radial-gradient(circle, rgba(255, 255, 255, 0.98) 0 1.25px, transparent 1.6px),
-      radial-gradient(circle, rgba(255, 255, 255, 0.7) 0 0.9px, transparent 1.3px),
-      radial-gradient(circle, rgba(255, 255, 255, 0.9) 0 1.1px, transparent 1.5px);
-    background-position:
-      4px 8px,
-      22px 23px,
-      46px 14px;
-    background-size:
-      58px 31px,
-      77px 37px,
-      96px 43px;
-    transition: opacity 320ms ease;
+    background: #3a3a3e;
+    mask-image: var(--vector-effort-dots);
+    mask-composite: intersect;
   }
 
-  .vector-effort-track[data-max="true"]::before {
-    opacity: 0.92;
-    animation:
-      vector-effort-stars-drift 6.5s linear infinite,
-      vector-effort-stars-twinkle 1.9s ease-in-out infinite alternate;
+  /* Lit matrix: the same grid clipped to the level. Its gradient is anchored to
+     the layer's own width, so the ramp always finishes at full lavender right
+     where the thumb sits, however short the lit run is. */
+  .vector-effort-track::after {
+    content: "";
+    position: absolute;
+    z-index: 1;
+    top: 6px;
+    bottom: 6px;
+    left: 7px;
+    width: calc(var(--vector-effort-x) - 7px);
+    pointer-events: none;
+    background-image: linear-gradient(
+      90deg,
+      rgb(120 108 168 / 0) 0%,
+      rgb(126 112 190 / 0.32) 38%,
+      rgb(150 130 220 / 0.62) 62%,
+      rgb(185 168 240 / 0.88) 84%,
+      rgb(222 215 247 / 1) 94%
+    );
+    opacity: calc(0.66 + 0.34 * var(--vector-effort-t));
+    mask-image: var(--vector-effort-dots);
+    mask-composite: intersect;
+    transition:
+      width 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+      opacity 220ms ease;
   }
 
-  /* At the top the fill turns brighter and slowly flows. */
+  /* At the top the lit dots simply breathe — the brightest end of the ramp
+     carries almost all of the alpha, so only the dots by the thumb read it. */
   .vector-effort-track[data-max="true"]::after {
-    background: linear-gradient(90deg, #7b5fe0 0%, #9f63ff 45%, #c95cff 100%);
-    background-size: 220% 100%;
-    animation: vector-effort-color-flow 4.5s ease-in-out infinite;
+    animation: vector-effort-dots-breathe 3.4s ease-in-out infinite;
   }
 
   .vector-effort-track:focus-within,
   .vector-effort-track[data-max="true"] {
-    border-color: rgba(221, 205, 255, 0.55);
+    border-color: rgba(221, 205, 255, 0.42);
     box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.22),
-      0 0 0 2px rgba(155, 108, 255, 0.16),
-      0 10px 30px rgba(119, 76, 231, 0.32);
+      inset 0 1px 0 rgba(255, 255, 255, 0.14),
+      0 0 0 2px rgba(155, 108, 255, 0.14),
+      0 8px 24px rgba(119, 76, 231, 0.22);
   }
 
   .vector-effort-thumb {
     position: absolute;
     z-index: 2;
     top: 50%;
-    left: clamp(16px, var(--vector-effort-progress), calc(100% - 16px));
-    width: 32px;
+    left: var(--vector-effort-x);
+    width: 25px;
     height: 32px;
     pointer-events: none;
-    border: 1px solid var(--vx-line);
-    border-radius: 9999px;
-    background: #fff;
+    /* Deliberately short of half the width: at 12px this reads as a circle at
+       this size. 9px leaves a visible flat run on all four sides so the thumb
+       stays a rounded rectangle rather than a pill. */
+    border-radius: 9px;
+    background: linear-gradient(180deg, #ece8fa 0%, #e6e1f7 46%, #ded9f2 100%);
     box-shadow:
-      0 3px 10px rgba(25, 17, 45, 0.36),
-      inset 0 -1px 0 rgba(77, 52, 120, 0.1);
+      0 6px 16px rgba(9, 6, 18, 0.55),
+      0 2px 5px rgba(9, 6, 18, 0.42),
+      inset 0 1px 0 rgba(255, 255, 255, 0.7),
+      inset 0 -1px 0 rgba(94, 74, 148, 0.16);
     transform: translate(-50%, -50%);
     transition: left 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
   }
@@ -114,42 +127,17 @@
     opacity: 0;
   }
 
-  @keyframes vector-effort-color-flow {
+  @keyframes vector-effort-dots-breathe {
     0%,
     100% {
-      background-position: 0% 50%;
+      opacity: 0.86;
     }
     50% {
-      background-position: 100% 50%;
-    }
-  }
-
-  @keyframes vector-effort-stars-drift {
-    from {
-      background-position:
-        4px 8px,
-        22px 23px,
-        46px 14px;
-    }
-    to {
-      background-position:
-        62px 8px,
-        99px 23px,
-        142px 14px;
-    }
-  }
-
-  @keyframes vector-effort-stars-twinkle {
-    from {
-      opacity: 0.58;
-    }
-    to {
       opacity: 1;
     }
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .vector-effort-track::before,
     .vector-effort-track[data-max="true"]::after {
       animation: none;
     }

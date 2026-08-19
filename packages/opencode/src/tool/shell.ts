@@ -13,7 +13,9 @@ import { fileURLToPath } from "url"
 import { Config } from "@/config/config"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Shell } from "@opencode-ai/core/shell"
+import { truthy } from "@opencode-ai/core/flag/flag"
 import { ShellID } from "./shell/id"
+import { Sandbox } from "./shell/sandbox"
 
 import * as Truncate from "./truncate"
 import { Plugin } from "@/plugin"
@@ -290,7 +292,41 @@ const ask = Effect.fn("ShellTool.ask")(function* (ctx: Tool.Context, scan: Scan,
   })
 })
 
-function cmd(shell: string, command: string, cwd: string, env: NodeJS.ProcessEnv) {
+const cmd = Effect.fn("ShellTool.cmd")(function* (
+  shell: string,
+  command: string,
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+  workspaceRoot: string,
+) {
+  // Opt-in and default-off. Sandboxing rewrites how every agent command is
+  // spawned, so a policy that is wrong for one toolchain would break the shell
+  // tool for everyone; users turn it on per install. A bare env flag rather than
+  // a RuntimeFlags entry or a config key because the flag has to be readable
+  // here without widening this change into files it does not own, and
+  // deliberately not named OPENCODE_EXPERIMENTAL_* so the blanket
+  // OPENCODE_EXPERIMENTAL=1 opt-in cannot switch it on behind a user's back.
+  if (truthy("OPENCODE_SHELL_SANDBOX")) {
+    // wrapCommand degrades to the plain invocation — the Windows PowerShell argv
+    // included — whenever the host has no sandbox mechanism, so an unsupported
+    // platform costs the user their sandbox and never their command.
+    const wrapped = Sandbox.wrapCommand({ shell, command, cwd, env, workspaceRoot })
+    yield* Effect.logInfo("shell tool sandbox", {
+      sandboxed: wrapped.sandboxed,
+      mechanism: wrapped.mechanism,
+      workspaceRoot,
+      cwd,
+      ...(wrapped.reason ? { reason: wrapped.reason } : {}),
+    })
+    return ChildProcess.make(wrapped.command, wrapped.args, {
+      shell: wrapped.shell,
+      cwd,
+      env: wrapped.env,
+      stdin: "ignore",
+      detached: process.platform !== "win32",
+    })
+  }
+
   if (process.platform === "win32" && Shell.ps(shell)) {
     return ChildProcess.make(shell, ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command], {
       cwd,
@@ -307,7 +343,7 @@ function cmd(shell: string, command: string, cwd: string, env: NodeJS.ProcessEnv
     stdin: "ignore",
     detached: process.platform !== "win32",
   })
-}
+})
 const parser = lazy(async () => {
   const { Parser } = await import("web-tree-sitter")
   const { default: treeWasm } = await import("web-tree-sitter/tree-sitter.wasm" as string, {
@@ -432,6 +468,7 @@ export const ShellTool = Tool.define(
         cwd: string
         env: NodeJS.ProcessEnv
         timeout: number
+        workspaceRoot: string
       },
       ctx: Tool.Context,
     ) {
@@ -481,7 +518,9 @@ export const ShellTool = Tool.define(
       const code: number | null = yield* Effect.scoped(
         Effect.gen(function* () {
           yield* Effect.addFinalizer(closeSink)
-          const handle = yield* spawner.spawn(cmd(input.shell, input.command, input.cwd, input.env))
+          const handle = yield* spawner.spawn(
+            yield* cmd(input.shell, input.command, input.cwd, input.env, input.workspaceRoot),
+          )
 
           yield* Effect.forkScoped(
             Stream.runForEach(Stream.decodeText(handle.all), (chunk) => {
@@ -635,6 +674,10 @@ export const ShellTool = Tool.define(
                   cwd,
                   env: yield* shellEnv(ctx, cwd),
                   timeout,
+                  // The worktree, not the working directory: a command run from
+                  // a subdirectory still has to be able to write anywhere in the
+                  // project it belongs to.
+                  workspaceRoot: instanceCtx.worktree,
                 },
                 ctx,
               )

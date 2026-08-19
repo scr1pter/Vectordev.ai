@@ -1,6 +1,20 @@
 {
   "releases": [
     {
+      "tag": "v1.18.0",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Agents you can leave alone",
+              "description": "Vector can now sandbox the commands its agents run. Enable OPENCODE_SHELL_SANDBOX and every shell command from an agent is confined to the workspace it belongs to by the operating system's own mechanism — a seatbelt profile on macOS, bubblewrap on Linux — with reads of SSH keys, cloud credentials, and keychains denied outright. Windows has no equivalent that ships with the OS, so Vector says so and runs unconfined rather than pretending. It is off by default and degrades to an ordinary command whenever a host cannot sandbox, so it can never cost you a command that used to work. Scheduled work now actually happens while you are away: Vector keeps a tray presence and stays resident after the last window closes, showing what is armed and when it next runs, notifying you when a run finishes, and never staying alive without a tray to quit from. Repository context stopped being a keyword search. An on-device structural index ranks files with BM25 over identifiers and paths, then spreads through the real import graph and the files git history shows change together, so an agent receives the code that matters instead of whatever happened to share a word with the request. Vector now remembers how a project fails: normalised failure signatures accumulate per repository, a repair that worked once is offered the next time the same failure appears, and a test that passes and fails without any relevant change is reported as flaky instead of being chased through another repair loop. Unattended spend is capped rather than merely displayed — five dollars a run and twenty-five a day by default for scheduled and background agents, with a run that reports no usage recorded as unmeasured rather than free, so it can never silently trip a limit. Adds an eval harness that scores Vector's own agent against objectively-checkable tasks, and can run the same set through the Claude Code, Codex, and Cursor runtimes for comparison. The model effort slider is now a dot matrix that brightens toward the level you pick. Fixed continuous integration: tests and typechecks were gated on a branch this repository does not have, so no push had run them."
+            }
+          ]
+        }
+      ]
+    },
+    {
       "tag": "v1.17.59",
       "highlights": [
         {

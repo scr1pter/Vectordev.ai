@@ -2,6 +2,7 @@ import { createHash } from "node:crypto"
 import { readFile, readdir, stat } from "node:fs/promises"
 import { extname, join, normalize, relative, resolve } from "node:path"
 
+import { rankFiles, refreshIndex } from "./repo-index"
 import { getStore } from "./store"
 
 const STORE_NAME = "context-budget-index"
@@ -339,9 +340,9 @@ function explicitPaths(task: string) {
   )
 }
 
-function architectureSummary(index: ContextProjectIndex) {
+function architectureSummary(files: { path: string; dependencies: string[] }[]) {
   const topDirectories = new Map<string, number>()
-  for (const file of index.files) {
+  for (const file of files) {
     const top = file.path.includes("/") ? file.path.split("/")[0]! : "(root)"
     topDirectories.set(top, (topDirectories.get(top) ?? 0) + 1)
   }
@@ -349,11 +350,61 @@ function architectureSummary(index: ContextProjectIndex) {
     .sort((left, right) => right[1] - left[1])
     .slice(0, 10)
     .map(([name, count]) => `${name} (${count})`)
-  const edges = index.files.reduce((total, file) => total + file.dependencies.length, 0)
-  return `${index.files.length} indexed source files across ${areas.join(", ") || "the project root"}; ${edges} local dependency links mapped.`
+  const edges = files.reduce((total, file) => total + file.dependencies.length, 0)
+  return `${files.length} indexed source files across ${areas.join(", ") || "the project root"}; ${edges} local dependency links mapped.`
 }
 
 export async function createContextBudgetPack(
+  root: string,
+  task: string,
+  options: { tokenBudget?: number; fileLimit?: number; forceIndex?: boolean } = {},
+): Promise<ContextBudgetPack> {
+  // The structural index ranks with BM25 over identifiers and paths, then
+  // spreads through the import graph and git co-change history. It replaces the
+  // keyword pass below rather than running beside it: both walk the whole tree,
+  // so keeping both would double the cost of every agent launch.
+  const indexed = await refreshIndex(root).catch(() => undefined)
+  if (!indexed) return keywordContextBudgetPack(root, task, options)
+
+  const tokenBudget = Math.max(4_000, options.tokenBudget ?? DEFAULT_TOKEN_BUDGET)
+  const fileLimit = Math.max(4, options.fileLimit ?? DEFAULT_FILE_LIMIT)
+  const selected: ContextBudgetFile[] = []
+  let totalTokens = 0
+  // Ranking is cheap relative to indexing, so ask for more candidates than the
+  // file limit: entries that would overflow the token budget get skipped, and a
+  // list cut to exactly fileLimit would leave the pack short.
+  for (const ranked of rankFiles(indexed, task, { limit: fileLimit * 4 })) {
+    if (selected.length >= fileLimit) break
+    // An explicitly named file is what the user asked about, so it is admitted
+    // even when it alone would exceed the budget.
+    const explicit = ranked.score >= 1_000
+    if (!explicit && totalTokens + ranked.estimatedTokens > tokenBudget) continue
+    selected.push({
+      path: ranked.path,
+      score: ranked.score,
+      reason: ranked.reasons.slice(0, 3).join("; "),
+      estimatedTokens: ranked.estimatedTokens,
+    })
+    totalTokens += ranked.estimatedTokens
+  }
+
+  return {
+    root: indexed.root,
+    task,
+    generatedAt: new Date().toISOString(),
+    indexedFileCount: indexed.files.length,
+    selectedFileCount: selected.length,
+    estimatedTokens: totalTokens,
+    tokenBudget,
+    files: selected,
+    architectureSummary: architectureSummary(indexed.files),
+  }
+}
+
+// Retained for projects the structural index cannot read — an unreadable tree,
+// a filesystem it cannot walk. A pack built from weaker ranking still beats
+// handing the agent no context at all.
+async function keywordContextBudgetPack(
   root: string,
   task: string,
   options: { tokenBudget?: number; fileLimit?: number; forceIndex?: boolean } = {},
@@ -429,7 +480,7 @@ export async function createContextBudgetPack(
     estimatedTokens: totalTokens,
     tokenBudget,
     files: selected,
-    architectureSummary: architectureSummary(index),
+    architectureSummary: architectureSummary(index.files),
   }
 }
 

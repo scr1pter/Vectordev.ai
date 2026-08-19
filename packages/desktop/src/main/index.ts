@@ -46,6 +46,15 @@ import { startCloudBridge, stopCloudBridge } from "./cloud-bridge"
 import { setupSecureRuntimeSecrets } from "./secure-runtime"
 import { handleCloudOAuthDeepLinks } from "./cloud-connections"
 import { createLicenseService } from "./license-service"
+import { backgroundModeStatus, requestQuit } from "./background-mode"
+import {
+  onScheduledAgentRunFinished,
+  onScheduledAgentsChanged,
+  runNextScheduledAgent,
+  scheduledAgentWorkState,
+  setAllScheduledAgentsPaused,
+} from "./scheduled-agents"
+import { createTray, destroyTray, notifyScheduledRunFinished, updateTray } from "./tray"
 
 const APP_NAMES: Record<string, string> = {
   dev: "Vector Dev",
@@ -62,6 +71,7 @@ const jsCallStackFeature = "DocumentPolicyIncludeJSCallStacksInCrashReports"
 
 let logger: ReturnType<typeof initLogging>
 let server: SidecarListener | null = null
+let trayReady = false
 
 const pendingDeepLinks: string[] = []
 
@@ -177,6 +187,10 @@ const main = Effect.gen(function* () {
     wslServers.stopAll()
   }
   const relaunch = () => {
+    // A relaunch ends this process, so it counts as an explicit quit: without
+    // the intent flag, the last window closing on the way out would ask
+    // background mode whether to stay resident and answer yes.
+    requestQuit()
     setAppQuitting()
     void stopSidecars().finally(() => {
       app.relaunch()
@@ -240,21 +254,34 @@ const main = Effect.gen(function* () {
   let quitting = false
   app.on("before-quit", () => {
     quitting = true
+    // Quitting through the app menu, Cmd+Q, or the updater is just as explicit
+    // as the tray's own item, and window-all-closed still fires on the way out.
+    requestQuit()
     setAppQuitting()
     void stopSidecars()
   })
 
   app.on("will-quit", () => {
     quitting = true
+    destroyTray()
     setAppQuitting()
     void stopSidecars()
   })
 
   app.on("window-all-closed", () => {
     logger.warn("all windows closed; waiting for explicit activation")
-    if (process.platform !== "darwin") {
-      app.quit()
+    // Without a tray there is no way back to a window and no way to quit, so a
+    // failed tray falls back to the old behaviour rather than stranding the
+    // user with an invisible process.
+    if (!trayReady) {
+      if (process.platform !== "darwin") app.quit()
+      return
     }
+    void backgroundModeStatus(scheduledAgentWorkState()).then((status) => {
+      logger.log("background mode decision", { keepAlive: status.keepAlive, reason: status.reason })
+      void updateTray()
+      if (!status.keepAlive) app.quit()
+    })
   })
 
   app.on("activate", () => {
@@ -435,6 +462,40 @@ const main = Effect.gen(function* () {
   }).pipe(forwardInitializationFailure(serverReady), Effect.forkChild)
 
   yield* Fiber.await(loadingTask)
+
+  // The tray is what makes staying resident survivable: without it a
+  // background-mode keep-alive would leave a process the user can see no window
+  // for and has no menu to quit. trayReady gates the keep-alive below on that.
+  trayReady = createTray({
+    readState: () => scheduledAgentWorkState(),
+    openVector: () => {
+      const win = getLastFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+      if (!win) {
+        restoreMainWindows()
+        return
+      }
+      if (win.isMinimized()) win.restore()
+      win.show()
+      win.focus()
+    },
+    runNext: () => {
+      runNextScheduledAgent()
+      void updateTray()
+    },
+    setAllPaused: (paused) => {
+      setAllScheduledAgentsPaused(paused)
+      void updateTray()
+    },
+    quit: () => {
+      requestQuit()
+      app.quit()
+    },
+  })
+  onScheduledAgentsChanged(() => void updateTray())
+  onScheduledAgentRunFinished((record) => {
+    notifyScheduledRunFinished(record)
+    void updateTray()
+  })
 
   const windows = restoreMainWindows()
   if (windows.length) {

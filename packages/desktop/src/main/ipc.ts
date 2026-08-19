@@ -159,6 +159,9 @@ import {
   type CreateScheduledAgentInput,
   setScheduledAgentPaused,
 } from "./scheduled-agents"
+import { ciStatus, listCiRuns, prepareCiRepair, viewCiFailure } from "./ci-watch"
+import { spendLedger, type SpendPolicy } from "./spend-limits"
+import { clearFailureMemory, readFailureMemory } from "./failure-memory"
 
 const pickerFilters = (ext?: string[]) => {
   if (!ext || ext.length === 0) return undefined
@@ -369,6 +372,39 @@ export function registerIpcHandlers(deps: Deps) {
     setScheduledAgentPaused(id, Boolean(paused)),
   )
   handle("scheduled-agents-remove", (_event: IpcMainInvokeEvent, id: string) => removeScheduledAgent(id))
+  // Every ci-* handler resolves to either the ok result or the module's typed
+  // CiUnavailable, so a missing or signed-out `gh` reaches the renderer as a
+  // reason plus the command that fixes it rather than as a rejected invoke.
+  handle("ci-status", (_event: IpcMainInvokeEvent, projectPath: string) => ciStatus(projectPath))
+  handle(
+    "ci-runs-list",
+    (_event: IpcMainInvokeEvent, projectPath: string, options?: { branch?: string; limit?: number }) =>
+      listCiRuns(projectPath, options),
+  )
+  handle("ci-failure-view", (_event: IpcMainInvokeEvent, projectPath: string, runId: number) =>
+    viewCiFailure(projectPath, runId),
+  )
+  handle("ci-repair-prepare", (_event: IpcMainInvokeEvent, projectPath: string, runId: number) =>
+    prepareCiRepair(projectPath, runId),
+  )
+  handle("spend-limits-get", async () => {
+    const ledger = await spendLedger()
+    return ledger.policy()
+  })
+  handle("spend-limits-set", async (_event: IpcMainInvokeEvent, next: Partial<SpendPolicy>) => {
+    const ledger = await spendLedger()
+    return ledger.setPolicy(next)
+  })
+  handle("spend-limits-status", async (_event: IpcMainInvokeEvent, projectPath?: string) => {
+    const ledger = await spendLedger()
+    return ledger.summary({ projectPath })
+  })
+  handle("spend-limits-recent", async (_event: IpcMainInvokeEvent, limit?: number) => {
+    const ledger = await spendLedger()
+    return ledger.recentEvents(limit)
+  })
+  handle("failure-memory-read", (_event: IpcMainInvokeEvent, projectPath: string) => readFailureMemory(projectPath))
+  handle("failure-memory-clear", (_event: IpcMainInvokeEvent, projectPath: string) => clearFailureMemory(projectPath))
   handle("publish-targets", () => detectPublishTargets())
   handle("publish-project", (event: IpcMainInvokeEvent, input: PublishProjectInput) =>
     publishProject(input, (progress) => {

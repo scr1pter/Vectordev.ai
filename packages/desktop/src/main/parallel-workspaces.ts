@@ -25,6 +25,7 @@ import { createPullRequest } from "./github"
 import { runExternalCodingAgent, type CodingAgentRuntime } from "./external-agents"
 import { claimPendingMessages, postTeamMessage, teamForWorkspace } from "./agent-teams"
 import { formatDelivery, formatHandoff } from "./agent-team-model"
+import { priorFor, recordValidationRun } from "./failure-memory"
 import {
   formatValidationForRepair,
   validateWorkspace,
@@ -32,6 +33,7 @@ import {
 } from "./workspace-guardrails"
 import { parseUnifiedDiff, selectUnifiedDiff, type UnifiedDiffSelection } from "./unified-diff"
 import { scanChangedSecrets } from "./secret-scanner"
+import { spendLedger } from "./spend-limits"
 import { parallelSessionCreateRequest } from "./parallel-session-scope"
 
 // Keep persisted metadata and isolated checkout directories on distinct paths.
@@ -549,6 +551,26 @@ function reviewAction(report: WorkspaceValidationReport) {
   return outcome === "passed"
     ? "Workspace is validated and ready for review"
     : "Workspace needs review: deterministic checks failed"
+}
+
+// Failure signatures are knowledge about the repository, not about this run, so
+// they accumulate against the source project even though the checks ran in a
+// throwaway worktree that is deleted on merge. Both paths are passed as roots
+// so the same failure seen from either tree collapses to one signature.
+// `repairDescription` is what the agent said it changed in the pass this run is
+// verifying: a passing check turns it into the known repair for that signature.
+function rememberValidation(
+  record: ParallelWorkspaceRecord,
+  report: WorkspaceValidationReport,
+  repairDescription = "",
+) {
+  return recordValidationRun(record.sourcePath, {
+    report,
+    changedFiles: record.changedFiles,
+    diff: record.diff,
+    roots: [record.isolatedPath, record.sourcePath],
+    repairDescription,
+  })
 }
 
 function runGit(args: string[], cwd: string, options: { allowFailure?: boolean; input?: string } = {}) {
@@ -1227,6 +1249,7 @@ async function executeExternalParallelWorkspace(
   id: string,
   initial: ParallelWorkspaceRecord,
   controller: AbortController,
+  runId: string,
 ) {
   let record = updateRecord(id, (current) => ({
     ...current,
@@ -1258,6 +1281,7 @@ async function executeExternalParallelWorkspace(
 
   let refreshed = await refreshParallelWorkspace(id)
   let validation = await validateWorkspace(refreshed.isolatedPath, refreshed.changedFiles)
+  await rememberValidation(refreshed, validation)
   record = updateRecord(id, (current) => ({
     ...current,
     validationReport: validation,
@@ -1271,6 +1295,10 @@ async function executeExternalParallelWorkspace(
 
   const retryLimit = record.retryLimit ?? (record.taskDifficulty === "complex" ? 2 : 1)
   for (let attempt = 1; !validation.passed && attempt <= retryLimit && !controller.signal.aborted; attempt += 1) {
+    // What this repository already knows about this exact failure, read after
+    // the run above was recorded so the count and the flakiness verdict include
+    // it. Empty until a signature has been seen before, hence the filter below.
+    const guidance = await priorFor(record.sourcePath, validation, [record.isolatedPath, record.sourcePath])
     record = updateRecord(id, (current) => ({
       ...current,
       status: "editing",
@@ -1279,6 +1307,7 @@ async function executeExternalParallelWorkspace(
       lastAction: `${runtimeLabel(current.runtime)} is repairing a failed check (${attempt}/${retryLimit})`,
       lastActivityAt: now(),
       logs: [
+        ...(guidance ? ["Prior failures in this repository were included in the repair prompt."] : []),
         `Vector returned the exact failing check to ${runtimeLabel(current.runtime)} for repair pass ${attempt} of ${retryLimit}.`,
         ...current.logs,
       ].slice(0, 120),
@@ -1289,14 +1318,20 @@ async function executeExternalParallelWorkspace(
       record,
       [
         parallelAgentPrompt(record),
+        guidance,
         formatValidationForRepair(validation),
         `This is repair pass ${attempt} of ${retryLimit}. Diagnose the exact output, make only evidence-backed changes, and rerun the relevant check before finishing.`,
-      ].join("\n\n"),
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
       controller,
     )
     if (repair.actualCost) costs.push(Number(repair.actualCost.replace("$", "")))
     refreshed = await refreshParallelWorkspace(id)
     validation = await validateWorkspace(refreshed.isolatedPath, refreshed.changedFiles)
+    // The runtime's own account of the repair, so a check that now passes
+    // records what actually fixed it instead of a bare file list.
+    await rememberValidation(refreshed, validation, repair.summary)
     record = updateRecord(id, (current) => ({
       ...current,
       status: "testing",
@@ -1317,7 +1352,20 @@ async function executeExternalParallelWorkspace(
   }
 
   refreshed = await refreshParallelWorkspace(id)
-  const totalCost = costs.filter(Number.isFinite).reduce((sum, value) => sum + value, 0)
+  const measuredCosts = costs.filter(Number.isFinite)
+  const totalCost = measuredCosts.reduce((sum, value) => sum + value, 0)
+  // The ledger the pre-flight allowance reads. A runtime that reported no cost
+  // at all is recorded with no total, which the ledger marks unmeasured: a 0
+  // would let unknown spend count as proof this run was free.
+  const ledger = await spendLedger()
+  await ledger.recordRunCost({
+    projectPath: refreshed.sourcePath,
+    runId,
+    provider: refreshed.provider,
+    model: refreshed.model,
+    source: "parallel",
+    totalCostUsd: measuredCosts.length ? totalCost : undefined,
+  })
   const finalSummary = `${firstRun.summary}\n\nGuardrails: ${validationSummary(validation)}`
   const completed = updateRecord(id, (current) => ({
     ...current,
@@ -1343,10 +1391,33 @@ async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEng
   try {
     const persisted = readRecords().find((record) => record.id === id)
     if (!persisted) throw new Error("Parallel workspace was not found.")
+    // One run is one execution of this workspace, not the workspace itself, so
+    // a rerun gets its own per-run budget instead of inheriting a spent one.
+    // The workspace id stays in front so a ledger row is traceable back here.
+    const runId = `${id}:${Date.now()}`
+    const ledger = await spendLedger()
+    const allowance = await ledger.checkAllowance({ projectPath: persisted.sourcePath, runId, source: "parallel" })
+    // Blocked means the money is already spent, so the agent must never start.
+    // Throwing lands in the catch below, which is the same failed-record shape
+    // every other pre-flight failure uses, so the reason reaches the UI.
+    if (!allowance.allowed) {
+      throw new Error(allowance.reason || "A spend limit blocked this parallel agent run.")
+    }
+    // A warning is information, not a gate: the run proceeds and the user gets
+    // told how close the cap is.
+    const warning = allowance.state === "warn" ? allowance.reason : undefined
+    if (warning) {
+      const warned = updateRecord(id, (current) => ({
+        ...current,
+        lastActivityAt: now(),
+        logs: [warning, ...current.logs].slice(0, 120),
+      }))
+      syncBackgroundTask(warned, warning)
+    }
     const initial = await ensureParallelWorkspaceIsolation(persisted)
     if (initial.runtime !== "vector") {
       const prepared = await prepareParallelWorkspaceContext(initial)
-      await executeExternalParallelWorkspace(id, prepared, controller)
+      await executeExternalParallelWorkspace(id, prepared, controller, runId)
       return
     }
 
@@ -1420,6 +1491,7 @@ async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEng
 
     let refreshed = await refreshParallelWorkspace(id)
     let validation = await validateWorkspace(refreshed.isolatedPath, refreshed.changedFiles)
+    await rememberValidation(refreshed, validation)
     record = updateRecord(id, (current) => ({
       ...current,
       validationReport: validation,
@@ -1433,6 +1505,10 @@ async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEng
 
     const retryLimit = record.retryLimit ?? (record.taskDifficulty === "complex" ? 2 : 1)
     for (let attempt = 1; !validation.passed && attempt <= retryLimit && !controller.signal.aborted; attempt += 1) {
+      // What this repository already knows about this exact failure, read after
+      // the run above was recorded so the count and the flakiness verdict
+      // include it. Empty until a signature has been seen before.
+      const guidance = await priorFor(record.sourcePath, validation, [record.isolatedPath, record.sourcePath])
       record = updateRecord(id, (current) => ({
         ...current,
         status: "editing",
@@ -1441,6 +1517,7 @@ async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEng
         lastAction: `Agent is repairing deterministic validation failure (${attempt}/${retryLimit})`,
         lastActivityAt: now(),
         logs: [
+          ...(guidance ? ["Prior failures in this repository were included in the repair prompt."] : []),
           `Vector returned the exact failing check to the agent for evidence-driven repair pass ${attempt} of ${retryLimit}.`,
           ...current.logs,
         ].slice(0, 120),
@@ -1451,9 +1528,12 @@ async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEng
         body: {
           prompt: {
             text: [
+              guidance,
               formatValidationForRepair(validation),
               `This is repair pass ${attempt} of ${retryLimit}. Diagnose from the exact output, make only evidence-backed changes, and rerun the relevant check yourself before finishing.`,
-            ].join("\n\n"),
+            ]
+              .filter(Boolean)
+              .join("\n\n"),
           },
           resume: true,
         },
@@ -1463,6 +1543,14 @@ async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEng
 
       refreshed = await refreshParallelWorkspace(id)
       validation = await validateWorkspace(refreshed.isolatedPath, refreshed.changedFiles)
+      // The agent's own account of this repair pass, so a check that now passes
+      // records what actually fixed it rather than a bare list of edited files.
+      const repairContext = await engineRequest<{ data?: unknown }>(
+        engine,
+        `/api/session/${encodeURIComponent(sessionId)}/context`,
+        { signal: controller.signal },
+      ).catch(() => undefined)
+      await rememberValidation(refreshed, validation, collectText(repairContext?.data).at(-1) ?? "")
       record = updateRecord(id, (current) => ({
         ...current,
         status: "testing",
@@ -1489,6 +1577,16 @@ async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEng
     ).catch(() => undefined)
     const summaries = collectText(context?.data)
     refreshed = await refreshParallelWorkspace(id)
+    // The engine reports no per-run cost for an isolated session today, so this
+    // run is recorded with no total at all. The ledger marks that unmeasured —
+    // a run whose spend is unknown, never a run that is known to be free.
+    await ledger.recordRunCost({
+      projectPath: refreshed.sourcePath,
+      runId,
+      provider: refreshed.provider,
+      model: refreshed.model,
+      source: "parallel",
+    })
     const agentSummary =
       summaries.at(-1) ||
       (refreshed.changedFilesCount
