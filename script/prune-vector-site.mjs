@@ -33,6 +33,9 @@ const keep = new Set([
   "sitemap-0.xml",
   "sitemap-index.xml",
   "theme.json",
+  // The feed the desktop app polls for "what's new". Pruning it is what made
+  // the release-notes dialog silently never run.
+  "changelog.json",
   "vector-logo.png",
   "vector-space-backdrop.png",
 ])
