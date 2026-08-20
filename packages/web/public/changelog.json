@@ -1,6 +1,20 @@
 {
   "releases": [
     {
+      "tag": "v1.19.1",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "One workspace, evenly told",
+              "description": "The site led with running many agents at once, which is one capability rather than the reason to use Vector. It now gives equal weight to nine parts of the same workspace — the editor with search, diagnostics and a terminal; local memory that stays on your machine; spend measured from what the provider actually reported; the browser that will not type into a password field; optional judge verification; deployments on accounts that are already yours; the connector catalogue; parallel agents; and recurring automations — with a section that states plainly where each one is conditional. The model effort control is now a rounded rectangle rather than a capsule, so its frame matches the handle inside it, and at full effort the dot matrix carries purple flowing toward the handle instead of a flat pulse. Repaired the first-run test, which had asserted onboarding copy that stopped existing when the tour was rebuilt on 10 August and had been failing unnoticed ever since."
+            }
+          ]
+        }
+      ]
+    },
+    {
       "tag": "v1.19.0",
       "highlights": [
         {

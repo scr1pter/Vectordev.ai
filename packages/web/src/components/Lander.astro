@@ -1,5 +1,5 @@
 ---
-import { ArrowRight, BadgeCheck, Bot, Boxes, Brain, CalendarClock, ChevronDown, Cloud, CloudUpload, Code2, GitBranch, GitPullRequest, Globe2, Laptop2, LayoutDashboard, MessagesSquare, Users } from "lucide-react"
+import { ArrowRight, BadgeCheck, Brain, CalendarClock, ChevronDown, Cloud, CloudUpload, Code2, Coins, Globe2, Puzzle, ShieldCheck, Terminal, Users } from "lucide-react"
 import MarketingFooter from "./marketing/MarketingFooter.astro"
 import MarketingNav from "./marketing/MarketingNav.astro"
 import screenshotAgent from "../assets/lander/vector-agent-current.png"
@@ -35,340 +35,307 @@ const ecosystem = [
   "MCP",
   "GitHub",
   "GitLab",
+  "Linear",
+  "Sentry",
+  "Figma",
+  "Stripe",
   "Vercel",
   "Netlify",
   "Supabase",
+  "AWS",
   "Playwright",
-  "Vel",
 ]
 
-// The four beats of the parallel model, in the order a run actually happens.
-const parallelSteps = [
-  ["Launch", "Name the work, choose which agent runs it, and start. One task can hold up to 16 active agents against a repository at a time."],
-  [
-    "Isolate",
-    "On a clean Git repository each agent gets its own worktree and its own branch cut from HEAD. When the project is not a Git repository, has uncommitted changes, or the worktree cannot be created, Vector provisions an isolated copy instead and records which one it used in the workspace log.",
-  ],
-  [
-    "Watch",
-    "The Agent Dashboard lists every agent at once — status, current action, model, files changed, cost so far, and elapsed time — with the agents of one coordinated run grouped under their coordinator.",
-  ],
-  [
-    "Merge",
-    "Read the diff, look at the checks Vector ran, then merge the whole workspace or only the files and hunks you trust. Your working tree is untouched until you do.",
-  ],
-]
-
-const collaboration = [
+// The nine parts of the workspace, in the order the page argues them. Each one
+// gets a card here and a full section below, so no single capability carries
+// the page on its own.
+const pillars = [
   {
-    eyebrow: "The default",
-    name: "Alone, on its own branch",
-    body: "An isolated agent gets its own checkout — a worktree on its own branch when the repository is clean, an isolated copy otherwise. Nothing it does can reach another agent, and nothing reaches your working tree until you review the diff and merge it.",
-    icon: GitBranch,
-  },
-  {
-    eyebrow: "Shared workspace",
-    name: "Or together, in one checkout",
-    body: "Choose “Work together” instead and the agent joins one shared checkout with its teammates, so they see each other's edits while the work is happening rather than discovering them in a diff at the end.",
-    icon: Users,
-  },
-  {
-    eyebrow: "Agent to agent",
-    name: "They can message each other",
-    body: "A teammate message can name one agent or go to the whole team. Vector delivers it at the start of the recipient's next turn rather than interrupting mid-turn, and it broadcasts a summary of what an agent changed when that agent's turn completes. Messaging is carried by Vector's own agent; an external CLI runtime shares the checkout but not the message channel.",
-    icon: MessagesSquare,
-  },
-  {
-    eyebrow: "New team, or join one",
-    name: "You pick the team at launch",
-    body: "Every collaborative agent you launch either opens a new team or joins one that is already running — your choice, one agent at a time. The Agent Dashboard shows the messages that passed between them, and names the file and both agents whenever two of them are holding the same one.",
-    icon: LayoutDashboard,
-  },
-  {
-    eyebrow: "Who talks to whom",
-    name: "And you choose who can reach who",
-    body: "A team can be everyone-to-everyone, a coordinator that broadcasts down to workers who do not chatter among themselves, or any pairing you set yourself. A message to a teammate you have not linked is refused and told so, rather than dropped somewhere the sender never finds out about.",
-    icon: Users,
-  },
-]
-
-const scheduling = [
-  [
-    "Pick a repeat",
-    "Every day, weekdays only, a chosen weekday, or once at a set time. Vector states the schedule in words and shows when each task fires next.",
-  ],
-  [
-    "Each run is a real session",
-    "A run opens a fresh Vector session in that project's directory, sends your prompt, and leaves the finished transcript waiting for you to read. You can point a run at an existing session instead, so a recurring task keeps adding to a thread you already have.",
-  ],
-  [
-    "One task, several repositories",
-    "Automations live on the home screen, not inside a session. Write the task yourself, then choose the repositories it runs in and, for each one, a new session or an existing one. Each repository reports its own result, so one failing does not stop or condemn the others.",
-  ],
-  [
-    "Recurring tasks re-arm themselves",
-    "The moment a recurring run settles, Vector schedules it again for its next time. It keeps going without being restarted.",
-  ],
-  [
-    "Not tied to what is on screen",
-    "Each task belongs to the project and session it was created in, and the scheduler fires every armed task across all of them — not only the ones belonging to the project you happen to be looking at.",
-  ],
-  [
-    "Pause, resume, delete",
-    "Pause anything you do not want running. Resuming a recurring task puts it back on schedule at its next real time rather than firing it immediately.",
-  ],
-  [
-    "It runs with no window open",
-    "Close the last window and Vector stays resident in the menu bar or system tray while tasks are armed, so the schedule still fires. That menu runs the next task now, pauses or resumes everything, reopens Vector, or quits completely. On a desktop that gives Vector no tray to live in, it closes as it always did rather than leaving behind a process you cannot see or quit.",
-  ],
-  [
-    "Closing the window does not kill a run",
-    "Losing the last window does not end a run that is still going; Vector stays up until it settles. A run that has not finished within six hours is stopped and reported as failed, and a run interrupted by a restart is reported as failed rather than left pending forever.",
-  ],
-  [
-    "You are told when it lands",
-    "Vector posts a desktop notification when a scheduled run finishes or fails, on systems that permit notifications, and clicking it brings Vector back to the front.",
-  ],
-]
-
-const features = [
-  {
-    title: "Give every responsibility its own agent.",
-    body: "Run up to 16 active agents at a time on one task. Each gets its own checkout — a Git worktree and branch on a clean repository, an isolated copy otherwise — plus its own files, terminal, conversation, model, and checks, so frontend, backend, testing, and deployment move at the same time without touching your working tree.",
-    tag: "Parallel workspaces",
-    note: "Isolated from main",
-    image: screenshotAgents,
-    alt: "Vector showing multiple isolated agent workspaces for the same repository",
-    href: "/docs",
-    link: "Learn about workspaces",
-  },
-  {
-    title: "Bring your own agent. Claude Code, Codex, or Cursor.",
-    body: "Vector runs the coding agents already installed on your computer as workspace engines. Pick Claude Code, Codex, or Cursor Agent for a task and it works inside an isolated branch with the same review, diff, and merge controls as Vector's own agent. Your existing subscription signs the run in \u2014 Vector never asks for another key.",
-    tag: "Agent runtimes",
-    note: "Uses your own CLI and account",
-    image: screenshotAgents,
-    alt: "Vector selecting between the Vector, Claude Code, Codex, and Cursor agent runtimes",
-    href: "/docs",
-    link: "Connect your agents",
-  },
-  {
-    title: "Every agent, and what each one is touching.",
-    body: "The Agent Dashboard shows every agent in the project at once \u2014 status, current action, model, files touched, spend, and elapsed time \u2014 with teams grouped under their coordinator. When two agents still hold the same file, Vector names the file and both agents before you merge either one.",
-    tag: "Agent Dashboard",
-    note: "Clash detection built in",
-    image: screenshotAgents,
-    alt: "Vector Agent Dashboard listing every running agent and flagging a file two agents are both editing",
-    href: "/docs",
-    link: "See the dashboard",
-  },
-  {
-    title: "Work that repeats, whether or not you are there.",
-    body: "Schedule an agent to run every day, on weekdays, on a chosen weekday, or once at a set time. Vector opens a fresh session in that project, sends your prompt, and leaves the finished transcript waiting. A recurring task re-arms itself the moment a run settles, and closing the last window does not stop it \u2014 Vector stays resident in the menu bar or system tray while tasks are armed.",
-    tag: "Scheduled automation",
-    note: "Runs with no window open",
-    image: screenshotScheduled,
-    alt: "Vector scheduled tasks listing recurring agent runs with their next run times",
-    href: "#automation",
-    link: "See how scheduling works",
-  },
-  {
-    title: "Ask for an outcome. Keep the engineering in view.",
-    body: "Vector reads the active repository, plans the work, edits real files, runs commands, and reports a reviewable result in one session. It can coordinate specialist subagents, review a GitHub pull request, and keep context, tool activity, token use, checkpoints, and changed files attached to that repository.",
-    tag: "Vector Agent",
-    note: "Repository-native",
-    image: screenshotAgent,
-    alt: "Vector Agent working inside a local software repository",
-    href: "/docs#vector-agent",
-    link: "Run your first session",
-  },
-  {
-    title: "You can see what every agent did, and what it cost.",
-    body: "Vector attributes each live edit to the agent that made it, names the file and both agents when two of them collide, scores finished work against the original request with an optional judge, and records the tokens and cost each provider actually reported — so what you approve rests on evidence rather than on a summary you have to take on faith.",
-    tag: "Evidence, not assurances",
-    note: "Attribution, clashes, judge, real spend",
-    image: screenshotAgents,
-    alt: "Vector Agent Dashboard showing per-agent activity, a file collision, and measured spend",
-    href: "/docs",
-    link: "See what Vector shows you",
-  },
-  {
-    title: "Review pull requests. Or have Vector review them.",
-    body: "Create, read, and merge pull requests through the GitHub CLI you already use, so your existing sign-in and organization policies carry over. Vector AI review reads the diff and returns findings by severity with file and line, which you read before anything is posted. A finding naming a file outside the diff is discarded, and a review holding a blocking issue can never be submitted as an approval.",
-    tag: "Pull requests",
-    note: "You approve every post",
-    image: screenshotAgent,
-    alt: "Vector reviewing a GitHub pull request with findings grouped by severity",
-    href: "/docs",
-    link: "Review a pull request",
-  },
-  {
-    title: "The browser is part of the engineering loop.",
-    body: "Vector opens the running product, navigates it, reads console and network failures, captures evidence, repairs the code, and tests the result again. You can take over at any time.",
-    tag: "Controlled browser",
-    note: "User takeover available",
-    image: screenshotBrowser,
-    alt: "Vector controlled browser beside an active engineering session",
-    href: "/docs",
-    link: "See the browser loop",
-  },
-  {
-    title: "Code yourself. Delegate beside it.",
-    body: "A real project editor with search, diagnostics, terminal access, and a resizable editor agent. Canvas arranges the editor, browser, terminal, notes, and cloud controls into one surface.",
-    tag: "Codespace and Canvas",
-    note: "Local workspace",
-    image: screenshotEditor,
-    alt: "Vector Codespace with project files, editor, and the integrated editor agent",
-    href: "/docs",
-    link: "Explore the Codespace",
-  },
-  {
-    title: "It remembers you. Only on your computer.",
-    body: "Local memory keeps what Vector learns about how you work and carries it across every project and repository, so you stop repeating yourself. It is a plain file in your own config directory that is never uploaded. Settings shows exactly what is stored, how large it is, and where it lives, and erases all of it on request.",
-    tag: "Local memory",
-    note: "Never leaves your machine",
-    image: screenshotMemory,
-    alt: "Vector settings showing stored local memory with an option to erase it",
-    href: "/docs",
-    link: "How local memory works",
-  },
-  {
-    title: "Ship without losing the context that built it.",
-    body: "Publish through your own Vercel, Netlify, GitHub, GitLab, and Supabase accounts. Manage environment variables, inspect releases and logs, and hand the live result back to the browser for verification.",
-    tag: "Cloud Services",
-    note: "Connected release",
-    image: screenshotCloud,
-    alt: "Vector Cloud Services showing deployment, infrastructure, and repository health",
-    href: "/docs",
-    link: "Read about Cloud Services",
-  },
-]
-
-const workflow = [
-  ["Open", "Attach the repository already on your computer."],
-  ["Direct", "Give one agent a task, split the work across isolated agents, or put it on a repeating schedule."],
-  ["Observe", "Follow plans, edits, commands, browser actions, tokens, and cost."],
-  ["Verify", "Run checks, inspect the product, review the diff, and optionally require an independent judge verdict."],
-  ["Ship", "Merge trusted work and publish through your connected accounts."],
-]
-
-const systemRows = [
-  ["Agents that talk to each other", "Put Vector agents in one shared workspace and they message each other while the work is happening — addressed to one teammate or to the whole team — and you read the exchange in the Agent Dashboard. Running each agent alone and reading the diffs afterwards remains a choice, not the only option."],
-  ["See who edited what", "The editor attributes each live edit to the agent that made it, with a coloured gutter and a hover naming it. When two agents hold the same file, Vector names the file and both agents before either merges."],
-  ["Run the other agents too", "Claude Code, Codex, and Cursor Agent run as engines inside Vector, on the CLIs and subscriptions you already have — alongside Vector's own agent, the browser, the editor, scheduling, and cloud delivery in the same workspace."],
-  ["Start with no key at all", "Curated free models are included, so there is a capable model available before you have connected a provider or paid anyone."],
-  ["Dictation that stays on device", "Speech is transcribed by a Whisper model running on your machine. Nothing is sent to a cloud speech service."],
-  ["A browser that refuses credentials", "The browser agent will not type into a password, one-time-code, or card field. It pauses and hands the live browser to you, then resumes with what it can see."],
-  ["Merge the hunks you trust", "Review an agent's diff and merge selected hunks or files rather than accepting the whole change, with secret scanning and a restorable checkpoint before anything lands on main."],
-  ["Ship without giving up your code", "Deploy through your own Vercel, Netlify, or Supabase account, manage domains, environment variables, and databases, all from a workspace that never uploads your repository."],
-  ["Context engine", "Indexes symbols, dependencies, references, and likely impact so each model receives the code that matters instead of an indiscriminate repository dump."],
-  ["Memory, local by default", "Project memory keeps repository conventions and accepted decisions with the project. Local memory carries what Vector learns about you across every repository. Both stay on your computer and both can be erased."],
-  ["Execution controls", "Quick, normal, and fast modes plus effort settings let you trade latency and token depth without changing the workflow."],
-  ["Trust boundary", "Diffs, checks, secret scanning, checkpoints, risk signals, and approvals stand between agent output and main."],
-  ["Verified completion", "An optional LLM judge scores requirement coverage, correctness, regressions, evidence, and safety. Failed verdicts return to repair and retesting before Vector reports completion."],
-  ["Measured economics", "Vector records the tokens and cost each provider actually reports for a run \u2014 input, output, reasoning, and cache \u2014 and ranks models on measured spend once correctness ties. A run with no reported usage is shown as unmeasured rather than free."],
-]
-
-const connectionGroups = [
-  ["Models", "Anthropic, OpenAI, Google, and other BYOK providers"],
-  ["Agent runtimes", "Local Claude Code, Codex, and Cursor tools when installed"],
-  ["Protocols and source", "MCP servers, GitHub, and GitLab"],
-  ["Cloud and validation", "Vercel, Netlify, Supabase, and Playwright"],
-]
-
-const products = [
-  {
-    name: "Parallel workspaces",
-    eyebrow: "Up to 16 isolated agents",
-    body: "Split independent responsibilities across Git worktrees — or isolated copies where Git cannot provide one — keep unfinished changes away from main, then inspect checks and merge only the work you trust.",
-    icon: Laptop2,
-  },
-  {
-    name: "Agent runtimes",
-    eyebrow: "Claude Code, Codex, Cursor",
-    body: "Hand a workspace to the coding-agent CLI you already pay for and it works inside the same isolated branch, with the same diff, checks, and merge controls as Vector's own agent. Vector launches only the runtimes it detects installed on this computer.",
-    icon: Boxes,
-  },
-  {
-    name: "Agents that work together",
-    eyebrow: "Shared or isolated",
-    body: "Put agents in one workspace and they see each other's edits as they happen and message each other while working, or keep each in its own isolated checkout. When two hold the same file, Vector names the file and both agents before you merge.",
-    icon: Users,
-  },
-  {
-    name: "Agent Dashboard",
-    eyebrow: "Status, cost, collisions",
-    body: "Every agent in the project at once \u2014 status, current action, model, files changed, cost so far, elapsed time \u2014 with a coordinated run's agents grouped under their coordinator, the messages teammates sent each other, and the file named whenever two agents are holding the same one.",
-    icon: LayoutDashboard,
-  },
-  {
-    name: "Scheduled automation",
-    eyebrow: "Daily, weekdays, weekly, once",
-    body: "Put recurring work on a repeat and Vector runs it against the project on its own, re-arms the task for next time, and keeps the schedule firing from the menu bar after the last window closes.",
-    icon: CalendarClock,
-  },
-  {
-    name: "Vector Agent",
-    eyebrow: "Plan, edit, run, verify",
-    body: "Give Vector a repository-level outcome and follow the plan, file edits, commands, checks, browser evidence, and final summary from one session.",
-    icon: Bot,
-  },
-  {
-    name: "AI code review",
-    eyebrow: "Before it reaches your team",
-    body: "Read, review, and merge pull requests without leaving Vector. Vector reviews the diff itself and returns findings by severity with file and line, which you read before anything is posted.",
-    icon: GitPullRequest,
-  },
-  {
-    name: "Controlled browser",
-    eyebrow: "Observe, interact, retest",
-    body: "Let the active agent inspect a running app, navigate, capture errors and screenshots, repair the code, and verify the result without losing session context.",
-    icon: Globe2,
-  },
-  {
-    name: "Codespace and Canvas",
-    eyebrow: "Code directly or delegate",
-    body: "Use the editor, project search, diagnostics, terminal, notes, browser, and editor agent together when you want hands-on control beside autonomous work.",
+    name: "The workspace",
+    eyebrow: "Editor, file search, diagnostics, terminal",
+    body: "A real code editor over the repository already on your disk, with file search across the whole project, language diagnostics, a terminal, an editor agent, and Canvas to hold them all at once.",
     icon: Code2,
   },
   {
     name: "Local memory",
-    eyebrow: "Never leaves your machine",
-    body: "Vector carries what it learns about how you work across every project and repository. A plain file in your own config directory, visible in Settings, erasable in one click.",
+    eyebrow: "One file, on your machine",
+    body: "What Vector learns about how you work lives in a Markdown file in your own config directory, is read in every repository, is never uploaded, and is deleted when you erase it.",
     icon: Brain,
   },
   {
+    name: "Model economics",
+    eyebrow: "Provider-reported, or nothing",
+    body: "The tokens and cost a run spent, taken from what the provider itself reported. Nothing estimated. A run nothing reported is marked unmeasured rather than shown as free.",
+    icon: Coins,
+  },
+  {
+    name: "Controlled browser",
+    eyebrow: "Observe, repair, retest",
+    body: "A real browser view the agent drives against the running product — and one that refuses to type into password, one-time-code and card fields, handing the step to you instead.",
+    icon: Globe2,
+  },
+  {
     name: "Verified completion",
-    eyebrow: "Test, judge, repair, repeat",
-    body: "Turn on LLM-as-a-judge when correctness matters more than the extra model call. Vector evaluates the original request against explicit evidence and keeps working after a failed verdict instead of stopping at a confident summary.",
+    eyebrow: "Opt-in · not on plan or quick",
+    body: "Turn on LLM-as-a-judge and a separate subagent compares the finished work against your original request and the evidence, and sends it back for repair on a failed verdict.",
     icon: BadgeCheck,
   },
   {
-    name: "Vector Cloud Services",
-    eyebrow: "Connected infrastructure · available",
-    body: "Deployments, databases, authentication, storage, environment variables, domains, logs, and infrastructure controls stay connected to the project that needs them.",
+    name: "Cloud Services",
+    eyebrow: "Your own accounts",
+    body: "Deployments, domains with real DNS checks, environment variables, databases and logs, run through the Vercel, Netlify, Supabase and AWS accounts that already belong to you.",
     icon: Cloud,
+  },
+  {
+    name: "MCP and plugins",
+    eyebrow: "112 ready to connect",
+    body: "GitHub, Linear, Sentry, Figma, Playwright, Postgres, Stripe, Slack and more, plus any MCP server you add — and Vector installs the runtime a plugin needs instead of sending you to a terminal.",
+    icon: Puzzle,
+  },
+  {
+    name: "Parallel agents",
+    eyebrow: "Up to 16 · isolated or shared",
+    body: "When one agent is not enough, run several in their own checkouts or together in one, watch them from a single dashboard, and merge only what you trust.",
+    icon: Users,
+  },
+  {
+    name: "Automations",
+    eyebrow: "Desktop · runs with no window open",
+    body: "Recurring work across repositories on a repeat you set, each run a real session with a transcript waiting, still firing after the last window is closed.",
+    icon: CalendarClock,
   },
 ]
 
+// Each pillar in full. `proof` stands in for a screenshot on the pillars the
+// product does not show in a single frame, so every one keeps the same weight.
+const features = [
+  {
+    title: "An editor, a terminal, and an agent in the same window.",
+    body: "Vector opens a repository that is already on your computer into a real code editor — file tree, file search across the whole project, language diagnostics from the language server, a terminal, and an editor agent in a panel beside the file you are reading. Edits an agent makes while you watch are attributed in the editor to the agent that made them, so work landing in an open file is never anonymous. Canvas arranges the editor, the browser, the terminal, notes and the cloud controls onto one surface when you want them together. None of this is a hosted IDE: the files are the files on your disk, and your repository is never proxied through Vector.",
+    tag: "Codespace and Canvas",
+    note: "Your files, on your disk",
+    image: screenshotEditor,
+    alt: "Vector Codespace showing the file tree, search and diagnostics icons, an open file, and the editor agent panel",
+    href: "/docs",
+    link: "Explore the Codespace",
+  },
+  {
+    title: "It remembers how you work. Only on your computer.",
+    body: "Vector keeps durable facts about how you work — your stack, your conventions, the corrections you would otherwise repeat — in one Markdown file inside your own config directory: MEMORY.md under ~/.config/vector, or wherever XDG_CONFIG_HOME points. It is read across every project and every repository, so something you say once in one codebase is still true in the next one. It is never uploaded. Settings shows the exact path, the file's size, the date it last changed, and the full text of what is stored. Erasing it deletes the file rather than blanking it, so nothing recoverable is left behind for someone who cleared memory precisely because they did not want it kept.",
+    tag: "Local memory",
+    note: "Never leaves your machine",
+    image: screenshotMemory,
+    alt: "Vector settings showing stored local memory with its size, file path, and an option to erase it",
+    href: "/docs",
+    link: "How local memory works",
+  },
+  {
+    title: "What the run cost, as the provider reported it.",
+    body: "Vector records what a run cost by reading the numbers the provider itself reported on the assistant messages — input, output, reasoning, cache reads and cache writes — along with the provider's own cost figure. Nothing is estimated from character counts. A run whose provider reported no usage is recorded as unmeasured rather than as zero, because a fabricated zero reads as free. Finished work builds a ledger of outcomes per kind of task, and once a model has at least three recorded runs in a category Vector can suggest it in the composer, ranked by check pass rate first, measured cost second, median latency third. Below three it suggests nothing at all: the cold start is silent rather than confident.",
+    tag: "Model economics",
+    note: "Measured, or marked unmeasured",
+    proof: [
+      ["What is counted", "Input, output, reasoning, cache read and cache write — as the provider reported them, plus its own cost figure."],
+      ["What is never counted", "Nothing is inferred from character counts, and a run with no reported usage is stored as unmeasured, not as zero."],
+      ["When a recommendation appears", "After three recorded runs of that kind of task. An unmeasured model never sorts ahead of one that reported a real cost."],
+    ],
+    href: "/docs",
+    link: "Read how spend is measured",
+  },
+  {
+    title: "The browser is part of the loop, and it will not touch your password.",
+    body: "The browser is a real Chromium view embedded in the Vector window, not a screenshot service. The agent opens the running product, clicks and types, reads console and network failures, captures what it saw, repairs the code, and loads the page again. It will not type into a password field, a one-time-code field, or a card number field — that is refused where the keystrokes are executed, not merely discouraged in a prompt — and the run hands you the live browser to finish that step yourself before carrying on from what it can see. You can take the browser back at any other moment too, and everything it observed stays attached to the session that asked for it.",
+    tag: "Controlled browser",
+    note: "Refuses credential fields",
+    image: screenshotBrowser,
+    alt: "Vector's controlled browser open beside an active engineering session in the same window",
+    href: "/docs",
+    link: "See the browser loop",
+  },
+  {
+    title: "Completion you can check, instead of a confident summary.",
+    body: "Turn on LLM-as-a-judge and finishing stops being the agent's own opinion. Before it starts, it writes down the observable success criteria your request implies. After implementing, it has to exercise the work rather than describe it — run the tests, typechecks, build, browser or CLI checks — and capture what they actually printed. It then hands the original request, those criteria, the changed files and that evidence to a separate judge subagent, which returns PASS, FAIL, or INCONCLUSIVE. A FAIL has to name each blocking finding with its evidence and the specific repair; the agent applies them and is judged again, up to three rounds, then reports what is still blocking. It is off until you turn it on, it costs extra model calls, and it does not apply to the plan or quick lanes.",
+    tag: "Verified completion",
+    note: "Opt-in · extra model calls",
+    proof: [
+      ["Criteria before code", "The observable success criteria are written down before the work starts, not reverse-engineered from whatever was built."],
+      ["Evidence, then a verdict", "Tests, typechecks, builds and browser or CLI checks are run and their real output is handed to a separate judge subagent."],
+      ["FAIL sends it back", "A failed verdict names the blocking finding and the specific repair. Three rounds maximum, then the blocker is reported plainly."],
+    ],
+    href: "/docs",
+    link: "Turn on verified completion",
+  },
+  {
+    title: "Ship it on the accounts that are already yours.",
+    body: "Deployments, domains, environment variables, databases, logs and build settings sit beside the project they belong to and run on accounts that already belong to you. Authorize Vercel, Netlify or Supabase once and Vector drives the deploy on your account, hands back the live URL, and can promote a release, roll one back, re-run its checks, or pull its runtime logs. An AWS profile already configured on this computer is read through the AWS CLI you installed. A custom domain is checked with a real DNS lookup, so “verified” means a CNAME actually resolves to the target rather than that a form was submitted. Your code is never proxied through Vector.",
+    tag: "Cloud Services",
+    note: "OAuth into your own account",
+    image: screenshotCloud,
+    alt: "Vector Cloud Services showing deployments, domains, environment, database, and build settings for a project",
+    href: "/docs",
+    link: "Read about Cloud Services",
+  },
+  {
+    title: "112 connectors, and the runtime installs itself.",
+    body: "Vector ships a catalog of 112 connectors you can turn on today — GitHub, Linear, Sentry, Figma, Playwright, Supabase, Postgres, Stripe, Notion, Slack, Chrome DevTools, Context7, Exa and more — grouped into categories like observability, project tracking, databases, design and search, alongside any MCP server you configure yourself. A further seventeen are listed in the catalog and marked coming soon rather than presented as ready. Several of them are published to PyPI and run through uvx, which most machines do not have. Rather than sending you to a terminal, Vector looks for that runner on your PATH and in the places uv actually installs itself, installs it through Astral's own installer when it is missing and tells you it is doing so, then rewrites the plugin's command to the resolved absolute path so it still spawns from a process that has no login shell.",
+    tag: "MCP and plugins",
+    note: "Catalog · plus your own servers",
+    proof: [
+      ["112 ready to connect", "GitHub, Linear, Sentry, Figma, Playwright, Supabase, Postgres, Stripe, Notion, Slack, Chrome DevTools, Context7, Exa and more, by category. Seventeen further entries are marked coming soon."],
+      ["Your own MCP servers too", "Anything you configure yourself runs beside the catalog entries, with the same tool surface for the agent."],
+      ["No terminal detour", "A plugin that needs uvx gets it: resolved on PATH, installed through Astral's installer when absent, then rewritten to an absolute path."],
+    ],
+    href: "/docs",
+    link: "Browse the connectors",
+  },
+  {
+    title: "And when one agent is not enough, run sixteen.",
+    body: "A single task can hold up to sixteen active agents. Each gets its own checkout: a Git worktree on its own branch cut from HEAD when the project is a Git repository with a clean working tree, and an isolated copy of the project otherwise — Vector records which one it used rather than failing quietly. Or put them in one shared checkout, where they see each other's edits as they happen and message a named teammate or the whole team; you choose who may reach whom, and a message to someone you have not linked is refused with a reason rather than dropped. The dashboard shows status, model, files touched, cost so far, elapsed time, and both agents whenever two are holding the same file.",
+    tag: "Parallel agents",
+    note: "Isolated by default",
+    image: screenshotAgents,
+    alt: "Vector Agent Dashboard listing running agents with model, files, spend and elapsed time, a flagged file clash, and messages between teammates",
+    href: "/docs",
+    link: "Learn about workspaces",
+  },
+  {
+    title: "Work that repeats, whether or not you are there.",
+    body: "Put recurring work on a repeat — every day, weekdays only, one weekday a week, or once at a set time — and each run opens a real Vector session in that project's directory, sends your prompt, and leaves the finished transcript waiting. One task can name several repositories, each with a new session or a thread you already have, and each reports its own result so one failure does not condemn the rest. A recurring task re-arms itself the moment a run settles. This lives in the Vector desktop app: close the last window and it stays resident in the menu bar or tray while tasks are armed, and on a desktop that offers no tray it closes as it always did rather than leaving a process you cannot quit.",
+    tag: "Automations",
+    note: "Desktop only",
+    image: screenshotScheduled,
+    alt: "Vector's scheduled tasks panel listing recurring agent runs and when each one next fires",
+    href: "#conditions",
+    link: "See what scheduling needs",
+  },
+]
+
+// Every capability above that carries a condition, stated once, in one place.
+const conditions = [
+  [
+    "Worktrees need clean Git",
+    "An isolated agent gets a Git worktree on its own branch only when the project is a Git repository and the working tree is clean. Without one — no repository, uncommitted changes, or a worktree that cannot be created — Vector provisions an isolated copy instead and records which it used in the workspace log.",
+  ],
+  [
+    "Recommendations need evidence",
+    "Model economics suggests nothing until a model has at least three recorded runs for that kind of task. There is no cold-start guess, and a model whose spend was never reported never sorts ahead of one that reported a real cost.",
+  ],
+  [
+    "Unmeasured is not zero",
+    "Cost and tokens come from the provider's own report for that run. When a provider reports nothing, the run is stored and shown as unmeasured. Vector will not print a zero that reads as free.",
+  ],
+  [
+    "The judge is opt-in",
+    "LLM-as-a-judge is off until you switch it on, and it spends extra model calls on every prompt it covers. It cannot apply to the plan lane, which produces nothing to verify, or to the quick lane, which has no ability to spawn the judge at all.",
+  ],
+  [
+    "External runtimes are yours",
+    "Claude Code, Codex, and Cursor Agent run as workspace engines, but only where Vector detects that CLI installed on this computer, and the run is signed in by the subscription already in it. Vector never asks for a second key — and teammate messaging is carried by Vector's own agent, so an external runtime shares the checkout but not the message channel.",
+  ],
+  [
+    "Automations are a desktop feature",
+    "Scheduling lives in the Vector desktop app, so tasks fire while that app is running — including with every window closed, but not while the machine is off or Vector has been quit from the tray. A scheduled run uses Vector's own agent rather than an external CLI runtime.",
+  ],
+  [
+    "The shell sandbox is off by default",
+    "Commands an agent runs can be confined to their workspace by the operating system's own mechanism — a seatbelt profile on macOS, bubblewrap on Linux where it is installed — by setting OPENCODE_SHELL_SANDBOX. It is opt-in, off by default, and Windows ships no equivalent, so Vector says so and runs unconfined there rather than pretending.",
+  ],
+  [
+    "Cloud actions need your authorization",
+    "Vercel, Netlify, and Supabase work once you authorize them, and AWS reads a profile you already configured for the AWS CLI. Vector acts inside those accounts; it does not host your project itself and does not proxy your code.",
+  ],
+  [
+    "Dictation downloads once, then stays local",
+    "Speech is transcribed by a Whisper model that runs on your machine. The model file is fetched and cached the first time, after which nothing is sent to a cloud speech service.",
+  ],
+]
+
+const workflow = [
+  ["Open", "Attach the repository already on your computer."],
+  ["Work", "Edit files yourself in the Codespace, or hand a task to an agent — one, or several in their own checkouts."],
+  ["Observe", "Follow plans, edits, commands, browser actions, and the tokens and cost the provider reported."],
+  ["Verify", "Run checks, inspect the product in the browser, review the diff, and optionally require an independent judge verdict."],
+  ["Ship", "Merge the hunks you trust and publish through your own connected accounts."],
+]
+
+const systemRows = [
+  [
+    "Memory that is one file you can delete",
+    "Local memory is a single MEMORY.md in your own config directory, read in every repository. Settings shows its path, size, last change, and full contents, and erasing removes the file rather than emptying it.",
+  ],
+  [
+    "Spend that is measured, not modelled",
+    "Tokens and cost come from what the provider reported for that run — input, output, reasoning, cache read and cache write. A run nothing reported is marked unmeasured, and an unmeasured model never outranks one that reported a real cost.",
+  ],
+  [
+    "A judge that can fail the work",
+    "Optional LLM-as-a-judge hands the original request, the success criteria, the changed files and the captured test output to a separate subagent. A FAIL names the specific repair and the agent goes back to work, up to three rounds.",
+  ],
+  [
+    "A browser that refuses credentials",
+    "The browser agent will not type into a password, one-time-code, or card field. It pauses and hands the live browser to you, then resumes with what it can see.",
+  ],
+  [
+    "Plugin runtimes that install themselves",
+    "A catalog plugin that needs uvx no longer becomes a terminal errand. Vector resolves the runner, installs it through Astral's own installer when it is missing, and rewrites the command to an absolute path so it spawns without a login shell.",
+  ],
+  [
+    "Publishing on accounts that stay yours",
+    "Deploy through your own Vercel, Netlify, or Supabase authorization, manage domains, environment variables, and databases, and verify a domain with a real CNAME lookup — from a workspace that never proxies your repository.",
+  ],
+  [
+    "See who edited what",
+    "The editor attributes each live edit to the agent that made it. When two agents hold the same file, Vector names the file and both agents before either merges.",
+  ],
+  [
+    "Start with no key at all",
+    "Curated free models are included, so there is a capable model available before you have connected a provider or paid anyone.",
+  ],
+  [
+    "Dictation that stays on device",
+    "Speech is transcribed by a Whisper model running on your machine. Nothing is sent to a cloud speech service.",
+  ],
+  [
+    "Merge the hunks you trust",
+    "Review an agent's diff and merge selected hunks or files rather than accepting the whole change, with secret scanning and a restorable checkpoint before anything lands on main.",
+  ],
+  [
+    "Run the other agents too",
+    "Claude Code, Codex, and Cursor Agent run as engines inside Vector, on the CLIs and subscriptions you already have — alongside Vector's own agent, the browser, the editor, scheduling, and cloud delivery in the same workspace.",
+  ],
+  [
+    "Agents wired the way you want",
+    "A team can be everyone-to-everyone, a coordinator broadcasting down to workers, or any pairing you set yourself. A message to a teammate you have not linked is refused and told so, rather than dropped where the sender never finds out.",
+  ],
+]
+
+const connectionGroups = [
+  ["Models", "Included free models, then Anthropic, OpenAI, Google, and other BYOK providers"],
+  ["Agent runtimes", "Local Claude Code, Codex, and Cursor tools when Vector detects them installed"],
+  ["Protocols and source", "112 catalog connectors, your own MCP servers, GitHub, and GitLab"],
+  ["Cloud and validation", "Vercel, Netlify, Supabase, AWS through its CLI, and Playwright"],
+]
+
 const comparison = [
-  ["Existing local repositories", "Native", "Native", "Native", "Native", "Git import"],
-  ["Editor and terminal", "Both built in", "Terminal-first", "Agent workspace", "IDE-native", "Managed editor"],
-  ["Parallel isolated agents", "Up to 16", "Subagents", "Worktrees", "Background agents", "Not core"],
-  ["Visible browser loop", "Built in", "Via tools", "Browser + CDP", "Via tools", "Preview-centric"],
-  ["Review before merge", "Diff + checks + risk", "Git workflow", "Diff + worktrees", "Diff + merge", "History / Git"],
-  ["Provider choice", "Multi-provider BYOK", "Claude", "OpenAI", "Multiple models", "Platform managed"],
-  ["Publishing surface", "Vercel + Netlify", "Via tools", "Via skills", "Via MCP", "Native hosting"],
+  ["Editor, file search, diagnostics, terminal", "Built in", "Terminal-first", "Terminal-first", "IDE-native", "Managed editor"],
+  ["Memory file the app shows and can erase", "One MEMORY.md, with path, size and one-click erase", "—", "—", "—", "—"],
+  ["Provider-reported spend recorded per run", "Ledger, plus model ranking", "Session cost readout", "—", "Usage dashboard", "—"],
+  ["Independent judge before “done”", "Opt-in judge subagent", "—", "—", "—", "—"],
+  ["Connector catalog", "112 connectors, plus your own MCP", "Via MCP", "Via MCP", "Via MCP", "—"],
+  ["Browser the agent drives", "Built in, refuses credentials", "Via tools", "Browser + CDP", "Via tools", "Preview-centric"],
+  ["Deploys on accounts you own", "Vercel, Netlify, Supabase, AWS", "Via tools", "Via tools", "Via MCP", "Native hosting"],
+  ["Parallel isolated agents", "Up to 16", "Subagents", "Worktrees", "Background agents", "—"],
+  ["Recurring work with no window open", "Desktop tray", "—", "—", "—", "—"],
 ]
 
 const changelog = [
   ["August 2026", "Scheduled work that runs while you are away", "Vector keeps a tray presence and stays resident after the last window closes, so a recurring task still fires with no window open. The tray shows what is armed and when it next runs, can run or pause everything from there, and notifies you when a run finishes."],
-  ["August 2026", "Agents can actually reach each other", "Fixed the teammate message tool, which was registered where the engine never looked, so collaborating agents could not reach each other."],
   ["August 2026", "Economics that actually learn", "Every session now feeds measured token and cost evidence into model recommendations, so the ranking is built from what providers actually reported rather than from list prices."],
-  ["August 2026", "Licensing and disclosure", "HEIC conversion moved to the operating system, removing the last copyleft dependency, with expanded privacy and terms coverage."],
   ["August 2026", "Plugins that install themselves", "Vector fetches whatever runtime a plugin needs, so Computer Use and other tools connect without a terminal detour."],
-  ["August 2026", "Agents that work together", "Shared workspaces where agents message each other, an Agent Dashboard with clash detection, per-agent edit attribution in the editor, and AI pull request review."],
   ["August 2026", "Measured spend and in-app help", "Model economics now records real provider-reported tokens and cost per run, plus a Help AI Assistant and one-click bug reporting inside the workspace."],
+  ["August 2026", "Agents can actually reach each other", "Fixed the teammate message tool, which was registered where the engine never looked, so collaborating agents could not reach each other."],
+  ["August 2026", "Agents that work together", "Shared workspaces where agents message each other, an Agent Dashboard with clash detection, per-agent edit attribution in the editor, and AI pull request review."],
+  ["August 2026", "Licensing and disclosure", "HEIC conversion moved to the operating system, removing the last copyleft dependency, with expanded privacy and terms coverage."],
   ["July 2026", "Vector desktop release and download refresh", "Signed installers for macOS, Windows, and Linux, served from the new download pipeline with automatic updates."],
   ["July 2026", "Review tools and shell polish", "A refined review panel, window recovery fixes, and a cleaner desktop chrome across the workspace."],
   ["July 2026", "Models and settings controls", "Restored provider management, model pickers, and execution settings throughout the rebuilt shell."],
@@ -402,31 +369,31 @@ const changelog = [
           </h1>
 
           <p class="headline">
-            <span class="headline-lead">Run a team of coding agents</span>{" "}
-            <span class="headline-rotate" data-scramble aria-hidden="true">in isolated workspaces.</span>
-            <span class="sr-only">Run a team of coding agents in isolated workspaces, together in one shared workspace, or on a repeating schedule — with Vector's own agent, or Claude Code, Codex, and Cursor Agent as the engine.</span>
+            <span class="headline-lead">An engineering workspace that</span>{" "}
+            <span class="headline-rotate" data-scramble aria-hidden="true">remembers how you work.</span>
+            <span class="sr-only">An engineering workspace that remembers how you work, records what a run really cost, verifies its work before calling it done, drives a real browser, ships from your own cloud accounts, and runs a team of agents on the days you want one.</span>
           </p>
 
           <p class="hero-deck">
-            Each agent works in its own checkout of the repository already on your computer — a Git worktree on its own
-            branch when the project is a clean Git repository, an isolated copy otherwise. Watch all of them from one
-            dashboard, then read the diff and merge only what you trust. Vector brings its own agent, and can run the
-            Claude Code, Codex, or Cursor Agent CLI you already have installed instead.
+            Vector opens a repository already on your computer and puts an editor, file search, diagnostics and a
+            terminal beside an agent that can plan, edit, run commands, and drive a real browser. What it learns about
+            you stays in a file on your machine. What a run cost is the number your provider reported. And on the days
+            one agent is not enough, you can run up to sixteen.
           </p>
 
           <div class="hero-loop" aria-label="How work moves through Vector">
             <div class="hero-loop-progress" aria-hidden="true"><i data-hero-progress></i></div>
             <div class="hero-loop-stage is-active" data-hero-stage="0">
-              <span class="hero-loop-icon"><GitBranch size={16} strokeWidth={1.8} aria-hidden="true" /></span>
-              <span><strong>Launch</strong><small>Isolated worktrees</small></span>
+              <span class="hero-loop-icon"><Code2 size={16} strokeWidth={1.8} aria-hidden="true" /></span>
+              <span><strong>Build</strong><small>Editor and agent</small></span>
             </div>
             <div class="hero-loop-stage" data-hero-stage="1">
-              <span class="hero-loop-icon"><LayoutDashboard size={16} strokeWidth={1.8} aria-hidden="true" /></span>
-              <span><strong>Watch</strong><small>One dashboard</small></span>
+              <span class="hero-loop-icon"><BadgeCheck size={16} strokeWidth={1.8} aria-hidden="true" /></span>
+              <span><strong>Verify</strong><small>Checks and browser</small></span>
             </div>
             <div class="hero-loop-stage" data-hero-stage="2">
-              <span class="hero-loop-icon"><GitPullRequest size={16} strokeWidth={1.8} aria-hidden="true" /></span>
-              <span><strong>Merge</strong><small>Diff and checks</small></span>
+              <span class="hero-loop-icon"><CloudUpload size={16} strokeWidth={1.8} aria-hidden="true" /></span>
+              <span><strong>Ship</strong><small>Your own accounts</small></span>
             </div>
           </div>
 
@@ -435,14 +402,14 @@ const changelog = [
             <ArrowRight size={18} strokeWidth={2} aria-hidden="true" />
           </a>
 
-          <p class="hero-note">Local-first. Bring your own models. Available for macOS, Windows, and Linux.</p>
+          <p class="hero-note">Local-first. Free models included, or bring your own. Available for macOS, Windows, and Linux.</p>
         </div>
 
         <div class="showcase" aria-label="Vector workspace screenshot">
           <figure class="product-window">
             <div class="product-bar" aria-hidden="true">
               <span class="traffic"><i></i><i></i><i></i></span>
-              <span class="product-title">Vector — Agent workspace</span>
+              <span class="product-title">Vector — Workspace</span>
               <span class="product-status"><i></i> Ready</span>
             </div>
             <img
@@ -450,7 +417,7 @@ const changelog = [
               src={screenshotAgent.src}
               width={screenshotAgent.width}
               height={screenshotAgent.height}
-              alt="Vector Agent working with a local repository"
+              alt="Vector open on a local repository, with the code editor, browser, Canvas, scheduled runs, MCP and plugins in the sidebar"
               loading="eager"
             />
           </figure>
@@ -458,145 +425,25 @@ const changelog = [
       </div>
     </section>
 
-    <section class="parallel section-width" aria-labelledby="parallel-title">
+    <section id="workspace" class="product-system section-width" aria-labelledby="product-system-title">
       <div class="section-heading chapter-head" data-reveal>
-        <p class="section-kicker">The parallel model</p>
-        <h2 id="parallel-title">Many agents. One repository. Nothing lands until you say so.</h2>
+        <p class="section-kicker">Nine parts, one workspace</p>
+        <h2 id="product-system-title">No single feature is the reason to use it.</h2>
         <p>
-          Open a repository already on your computer and give each piece of work its own agent. They run at the same
-          time in separate checkouts, you watch them from one place, and you decide one by one what comes back.
-        </p>
-      </div>
-      <div class="parallel-body">
-        <ol class="parallel-steps">
-          {parallelSteps.map(([title, body], index) => (
-            <li data-reveal style={`--rd: ${index * 60}ms`}>
-              <span>0{index + 1}</span>
-              <strong>{title}</strong>
-              <p>{body}</p>
-            </li>
-          ))}
-        </ol>
-        <figure class="feature-card reveal-zoom parallel-shot" data-reveal style="--rd: 120ms">
-          <div class="card-topline" aria-hidden="true">
-            <span>Agent Dashboard</span>
-            <span>Every agent, one view</span>
-          </div>
-          <img
-            src={screenshotAgents.src}
-            width={screenshotAgents.width}
-            height={screenshotAgents.height}
-            alt="Vector showing several isolated agent workspaces running against the same repository"
-            loading="lazy"
-          />
-        </figure>
-      </div>
-      <div class="parallel-notes" data-reveal>
-        <p>
-          <strong>Bring your own runtime</strong>
-          Claude Code, Codex, and Cursor Agent run as engines inside Vector — but only the ones whose CLI Vector
-          detects on this computer. The run goes through that CLI and the subscription already signed into it; Vector
-          never asks for a second key. Vector's own agent runs on a model provider you connect.
-        </p>
-        <p>
-          <strong>Git preferred, not required</strong>
-          Worktrees need a Git repository with a clean working tree. Without one — no repository, uncommitted changes,
-          or a worktree that cannot be created — Vector provisions an isolated copy of the project instead and records
-          which it used in the workspace log rather than failing quietly.
-        </p>
-        <p>
-          <strong>Sixteen at a time</strong>
-          One task can hold up to 16 active agents against a repository. Merge, discard, or remove one before starting
-          another, so the machine is never quietly oversubscribed.
-        </p>
-      </div>
-    </section>
-
-    <section class="collab section-width" aria-labelledby="collab-title">
-      <div class="section-heading chapter-head" data-reveal>
-        <p class="section-kicker">Alone, or as a team</p>
-        <h2 id="collab-title">Some work is better done apart. Some is better done together.</h2>
-        <p>
-          Every agent you launch is either sealed off in its own checkout or dropped into a shared workspace with
-          teammates it can message. You pick which, one agent at a time.
-        </p>
-      </div>
-      <div class="suite-grid">
-        {collaboration.map((item, index) => {
-          const Icon = item.icon
-          return (
-            <article data-reveal style={`--rd: ${index * 70}ms`}>
-              <span class="suite-icon"><Icon size={19} strokeWidth={1.7} aria-hidden="true" /></span>
-              <small>{item.eyebrow}</small>
-              <h3>{item.name}</h3>
-              <p>{item.body}</p>
-            </article>
-          )
-        })}
-      </div>
-    </section>
-
-    <section id="automation" class="automation section-width" aria-labelledby="automation-title">
-      <div class="section-heading chapter-head" data-reveal>
-        <p class="section-kicker">Scheduled automation</p>
-        <h2 id="automation-title">Some work should just happen every morning.</h2>
-        <p>
-          Give Vector a prompt and a repeat and it runs the task against your project on its own — the overnight
-          summary, the dependency sweep, the Friday status note — then leaves the finished transcript waiting for you.
-        </p>
-      </div>
-      <figure class="feature-card reveal-zoom automation-shot" data-reveal>
-        <div class="card-topline" aria-hidden="true">
-          <span><CalendarClock size={13} strokeWidth={1.8} aria-hidden="true" /> Scheduled tasks</span>
-          <span>Daily · weekdays · weekly · once</span>
-        </div>
-        <img
-          src={screenshotScheduled.src}
-          width={screenshotScheduled.width}
-          height={screenshotScheduled.height}
-          alt="Vector's scheduled tasks panel listing recurring agent runs and when each one next fires"
-          loading="lazy"
-        />
-      </figure>
-      <div class="runtime-list">
-        {scheduling.map(([title, body], index) => (
-          <article data-reveal>
-            <span>0{index + 1}</span>
-            <h3>{title}</h3>
-            <p>{body}</p>
-          </article>
-        ))}
-      </div>
-      <p class="automation-note" data-reveal>
-        <strong>What this needs.</strong> Scheduling lives in the Vector desktop app, so tasks fire while that app is
-        running — including with every window closed, but not while the machine is off or Vector has been quit from the
-        tray. A scheduled run uses Vector's own agent rather than an external CLI runtime. Commands an unattended agent
-        runs can additionally be confined to their workspace by the operating system's own mechanism — a seatbelt
-        profile on macOS, bubblewrap on Linux where <code>bwrap</code> is installed — by setting
-        <code>OPENCODE_SHELL_SANDBOX</code>. It is off by default, and Windows ships no equivalent, so Vector says so
-        and runs unconfined there instead of pretending.
-      </p>
-    </section>
-
-    <section class="product-system section-width" aria-labelledby="product-system-title">
-      <div class="section-heading chapter-head" data-reveal>
-        <p class="section-kicker">One engineering workspace</p>
-        <h2 id="product-system-title">A parallel runner is where Vector starts, not where it stops.</h2>
-        <p>
-          The same local workspace holds the agent sessions, the isolated worktrees, an editor and terminal, a
-          controlled browser, pull-request review, memory that stays on your machine, and cloud delivery — so work does
-          not have to leave the place it was written to be checked and shipped.
+          Vector is a workspace, not a wrapper around one trick. The editor, the memory, the measured spend, the
+          verification, the connectors, the browser, the cloud accounts, the parallel agents and the schedule all sit in
+          the same place, over the repository already on your disk.
         </p>
       </div>
       <div class="product-system-grid">
-        {products.map((product) => {
-          const Icon = product.icon
+        {pillars.map((pillar) => {
+          const Icon = pillar.icon
           return (
             <article data-reveal>
               <span class="product-system-icon"><Icon size={18} strokeWidth={1.7} aria-hidden="true" /></span>
-              <small>{product.eyebrow}</small>
-              <h3>{product.name}</h3>
-              <p>{product.body}</p>
+              <small>{pillar.eyebrow}</small>
+              <h3>{pillar.name}</h3>
+              <p>{pillar.body}</p>
             </article>
           )
         })}
@@ -606,29 +453,75 @@ const changelog = [
       </a>
     </section>
 
+    <div class="features">
+      {features.map((feature) => (
+        <section class="feature">
+          <div class="feature-copy" data-reveal>
+            <p class="feature-tag">{feature.tag}</p>
+            <h2>{feature.title}</h2>
+            <p class="feature-body">{feature.body}</p>
+          </div>
+          {feature.image ? (
+            <figure class="feature-card reveal-zoom" data-reveal style="--rd: 90ms">
+              <div class="card-topline" aria-hidden="true">
+                <span>{feature.tag}</span>
+                <span>{feature.note}</span>
+              </div>
+              <img
+                src={feature.image.src}
+                width={feature.image.width}
+                height={feature.image.height}
+                alt={feature.alt}
+                loading="lazy"
+              />
+            </figure>
+          ) : (
+            <div class="feature-card feature-proof reveal-zoom" data-reveal style="--rd: 90ms">
+              <div class="card-topline" aria-hidden="true">
+                <span>{feature.tag}</span>
+                <span>{feature.note}</span>
+              </div>
+              <dl>
+                {feature.proof?.map(([term, detail]) => (
+                  <div>
+                    <dt>{term}</dt>
+                    <dd>{detail}</dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+          )}
+          <a class="feature-link" href={feature.href} data-reveal style="--rd: 180ms">
+            <span>{feature.link}</span>
+            <ArrowRight size={15} strokeWidth={2} aria-hidden="true" />
+          </a>
+        </section>
+      ))}
+    </div>
+
     <section class="scene scene-suite" data-scene style="--scene-span: 3.1" aria-labelledby="suite-title">
       <div class="scene-stage">
         <div class="suite section-width">
           <div class="section-heading chapter-head">
             <p class="section-kicker">One Vector</p>
-            <h2 id="suite-title">One place to direct, build, test, and ship.</h2>
-            <p>Use one focused agent or coordinate independent workspaces while the repository, tools, evidence, and release destination remain connected.</p>
+            <h2 id="suite-title">One place to write, direct, verify, and ship.</h2>
+            <p>Type the code yourself or hand it over, and the repository, the tools, the evidence, and the release destination stay connected either way.</p>
           </div>
           <div class="suite-grid">
             <article style="--i: 0">
-              <span class="suite-icon"><Bot size={19} strokeWidth={1.7} aria-hidden="true" /></span>
-              <small>Repository intelligence</small>
-              <h3>Work from context</h3>
-              <p>Vector selects relevant files and symbols, remembers project decisions, and keeps each session grounded in the repository it belongs to.</p>
+              <span class="suite-icon"><Terminal size={19} strokeWidth={1.7} aria-hidden="true" /></span>
+              <small>Hands on the code</small>
+              <h3>Editor, file search, terminal</h3>
+              <p>A real editor over your own files, with file search across the project, language diagnostics, a terminal, and an editor agent in the panel beside them.</p>
             </article>
             <article style="--i: 1">
-              <span class="suite-icon"><Globe2 size={19} strokeWidth={1.7} aria-hidden="true" /></span>
-              <small>Execution you can observe</small>
-              <h3>Terminal and browser actions</h3>
-              <p>The agent can run commands, inspect the app in a controlled browser, collect failures, and retest while activity remains visible and interruptible.</p>
+              <span class="suite-icon"><Brain size={19} strokeWidth={1.7} aria-hidden="true" /></span>
+              <small>What Vector keeps</small>
+              <h3>Memory and measured spend</h3>
+              <p>Local memory carries how you work across every repository and stays on your machine. Model economics records the tokens and cost the provider reported, and marks the rest unmeasured.</p>
             </article>
             <article style="--i: 2">
-              <span class="suite-icon"><BadgeCheck size={19} strokeWidth={1.7} aria-hidden="true" /></span>
+              <span class="suite-icon"><ShieldCheck size={19} strokeWidth={1.7} aria-hidden="true" /></span>
               <small>Human control</small>
               <h3>Review before main</h3>
               <p>Inspect diffs, focused checks, GitHub pull-request findings, risk signals, checkpoints, and an optional independent judge verdict before work reaches the primary repository files.</p>
@@ -637,7 +530,7 @@ const changelog = [
               <span class="suite-icon"><CloudUpload size={19} strokeWidth={1.7} aria-hidden="true" /></span>
               <small>Connect and ship</small>
               <h3>MCP, providers, and Cloud</h3>
-              <p>Bring your own model provider, connect approved tools through MCP, and publish through the infrastructure accounts that already belong to you.</p>
+              <p>Bring your own model provider, connect approved tools through MCP and the plugin catalog, and publish through the infrastructure accounts that already belong to you.</p>
             </article>
           </div>
           <div class="scene-rail" aria-hidden="true"><i></i></div>
@@ -664,9 +557,9 @@ const changelog = [
             <p class="section-kicker">One operating loop</p>
             <h2 id="workflow-title">From a brief to verified, shipped work.</h2>
             <p>
-              Vector keeps the request, repository context, agent activity, files, terminal, browser,
-              usage, review, and release in one place. Enable verified completion when you want a rubric-based
-              judge to require evidence before the task can be called done; it uses an additional model call and tokens.
+              Vector keeps the request, repository context, your own edits, agent activity, files, terminal, browser,
+              measured usage, review, and release in one place. Enable verified completion when you want a rubric-based
+              judge to require evidence before the task can be called done; it uses additional model calls and tokens.
             </p>
           </div>
           <ol class="workflow-list">
@@ -683,42 +576,39 @@ const changelog = [
       </div>
     </section>
 
-    <div id="workspace" class="features">
-      {features.map((feature) => (
-        <section class="feature">
-          <div class="feature-copy" data-reveal>
-            <p class="feature-tag">{feature.tag}</p>
-            <h2>{feature.title}</h2>
-            <p class="feature-body">{feature.body}</p>
-          </div>
-          <figure class="feature-card reveal-zoom" data-reveal style="--rd: 90ms">
-            <div class="card-topline" aria-hidden="true">
-              <span>{feature.tag}</span>
-              <span>{feature.note}</span>
-            </div>
-            <img
-              src={feature.image.src}
-              width={feature.image.width}
-              height={feature.image.height}
-              alt={feature.alt}
-              loading="lazy"
-            />
-          </figure>
-          <a class="feature-link" href={feature.href} data-reveal style="--rd: 180ms">
-            <span>{feature.link}</span>
-            <ArrowRight size={15} strokeWidth={2} aria-hidden="true" />
-          </a>
-        </section>
-      ))}
-    </div>
+    <section id="conditions" class="automation section-width" aria-labelledby="conditions-title">
+      <div class="section-heading chapter-head" data-reveal>
+        <p class="section-kicker">The conditions, stated</p>
+        <h2 id="conditions-title">Where a capability has a catch, here it is.</h2>
+        <p>
+          Some of what is on this page only holds under a condition. Rather than leaving those in the footnotes of nine
+          different sections, every one of them is written out here.
+        </p>
+      </div>
+      <div class="runtime-list">
+        {conditions.map(([title, body], index) => (
+          <article data-reveal>
+            <span>0{index + 1}</span>
+            <h3>{title}</h3>
+            <p>{body}</p>
+          </article>
+        ))}
+      </div>
+      <p class="automation-note" data-reveal>
+        <strong>The sandbox flag.</strong> The operating system confinement above is enabled with the
+        <code>OPENCODE_SHELL_SANDBOX</code> environment variable. It is opt-in and off by default, uses a seatbelt
+        profile on macOS and <code>bwrap</code> on Linux where it is installed, and has no Windows equivalent — so on
+        Windows Vector reports that it is running unconfined instead of implying protection it cannot provide.
+      </p>
+    </section>
 
     <section class="runtime section-width" aria-labelledby="runtime-title">
       <div class="runtime-intro chapter-head" data-reveal>
-        <p class="section-kicker">The system underneath</p>
-        <h2 id="runtime-title">Powerful agents need an observable runtime.</h2>
+        <p class="section-kicker">Only in Vector</p>
+        <h2 id="runtime-title">Things that are rarely true in one place.</h2>
         <p>
-          The difficult part is not generating text. It is giving agents the right context,
-          preserving project knowledge, validating their work, and keeping the human in control.
+          The difficult part is not generating text. It is keeping what you know, knowing what it cost, proving the work
+          holds, and leaving you in control of what lands.
         </p>
       </div>
       <div class="runtime-list">
@@ -756,8 +646,9 @@ const changelog = [
         <p class="section-kicker">A wider product boundary</p>
         <h2 id="comparison-title">Fewer disconnected surfaces between request and release.</h2>
         <p>
-          Vector combines capabilities commonly split across an agent, editor, browser, Git client,
-          and deployment dashboard. Capabilities change quickly, so verify current vendor documentation.
+          Vector combines capabilities commonly split across an agent, editor, browser, Git client, and deployment
+          dashboard. Capabilities change quickly, so verify current vendor documentation. A dash means Vector makes no
+          claim either way.
         </p>
       </div>
       <details class="comparison" data-reveal>
@@ -807,7 +698,7 @@ const changelog = [
         <i class="sky-stars"></i>
       </div>
       <h2 data-reveal class="reveal-blur">Keep the whole build in view.</h2>
-      <p data-reveal style="--rd: 120ms">Open the repository. Direct the agents. Ship the result.</p>
+      <p data-reveal style="--rd: 120ms">Open the repository. Write, delegate, verify, ship — without leaving it.</p>
       <a class="closing-cta" href="/download" data-reveal style="--rd: 220ms">
         <span>Get Vector</span>
         <ArrowRight size={18} strokeWidth={2} aria-hidden="true" />
@@ -851,11 +742,12 @@ const changelog = [
     // Each phrase completes the same opening clause, so the headline always
     // reads as one sentence rather than a label with a caption.
     const phrases = [
-      "in isolated workspaces.",
-      "that message each other.",
-      "on Claude Code, Codex, or Cursor.",
-      "on a repeating schedule.",
-      "and merge only what you trust.",
+      "remembers how you work.",
+      "records what a run cost.",
+      "verifies before it says done.",
+      "drives a real browser.",
+      "ships from your own accounts.",
+      "runs sixteen agents when you want.",
     ]
     const stages = Array.from(document.querySelectorAll<HTMLElement>("[data-hero-stage]"))
     const progress = document.querySelector<HTMLElement>("[data-hero-progress]")
@@ -2127,6 +2019,39 @@ const changelog = [
     border-radius: 0 0 18px 18px;
   }
 
+  /* Stands in for a screenshot on the pillars the product does not show in one
+     frame, at the same card size so no pillar reads as the smaller claim. */
+  .feature-proof dl {
+    margin: 0;
+    display: grid;
+    gap: 1px;
+    overflow: hidden;
+    border-radius: 0 0 18px 18px;
+    background: rgba(190, 166, 255, 0.1);
+  }
+
+  .feature-proof dl > div {
+    padding: 28px 26px;
+    background: color-mix(in srgb, var(--glass-fill-strong) 96%, #15131a);
+  }
+
+  .feature-proof dt {
+    margin: 0;
+    color: var(--purple-soft);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 9.5px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .feature-proof dd {
+    margin: 11px 0 0;
+    color: var(--ink-40);
+    font-size: 13.5px;
+    line-height: 1.72;
+  }
+
   .feature-link {
     display: inline-flex;
     align-items: center;
@@ -2154,95 +2079,7 @@ const changelog = [
     transform: translateX(3px);
   }
 
-  /* ---- parallel model, collaboration, scheduled automation ---- */
-
-  .parallel,
-  .collab {
-    margin-top: clamp(64px, 9vw, 120px);
-  }
-
-  .parallel-body {
-    margin-top: clamp(32px, 4vw, 48px);
-    display: grid;
-    grid-template-columns: minmax(280px, 0.92fr) minmax(0, 1.08fr);
-    gap: clamp(28px, 4.5vw, 60px);
-    align-items: start;
-  }
-
-  .parallel-steps {
-    margin: 0;
-    padding: 0;
-    border-top: 1px solid rgba(227, 215, 255, 0.14);
-    list-style: none;
-  }
-
-  .parallel-steps li {
-    padding: 20px 0;
-    border-bottom: 1px solid rgba(227, 215, 255, 0.14);
-  }
-
-  .parallel-steps li > span {
-    color: var(--purple-soft);
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 10px;
-  }
-
-  .parallel-steps strong {
-    display: block;
-    margin-top: 9px;
-    color: #f3eef9;
-    font-size: 15px;
-    font-weight: 600;
-  }
-
-  .parallel-steps p {
-    margin: 8px 0 0;
-    color: var(--ink-40);
-    font-size: 12.5px;
-    line-height: 1.65;
-  }
-
-  /* The steps column is taller than the screenshot, so the shot rides along
-     rather than leaving a column of dead space beside the last two steps. */
-  .parallel-shot {
-    position: sticky;
-    top: 106px;
-  }
-
-  .parallel-notes {
-    margin-top: clamp(30px, 4vw, 44px);
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 1px;
-    overflow: hidden;
-    border: 1px solid var(--glass-line);
-    border-radius: 22px;
-    background: var(--glass-line);
-  }
-
-  .parallel-notes p {
-    margin: 0;
-    padding: 22px 24px;
-    color: var(--ink-40);
-    background: color-mix(in srgb, var(--glass-fill-strong) 96%, #15131a);
-    font-size: 12.5px;
-    line-height: 1.65;
-  }
-
-  .parallel-notes strong {
-    display: block;
-    margin-bottom: 9px;
-    color: var(--purple-soft);
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 9.5px;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
-
-  .automation-shot {
-    margin: clamp(30px, 4vw, 46px) 0 clamp(26px, 3.5vw, 40px);
-  }
+  /* ---- scheduled automation and stated conditions ---- */
 
   .card-topline span:first-child {
     display: inline-flex;
@@ -2672,9 +2509,6 @@ const changelog = [
 
     .runtime { grid-template-columns: 1fr; }
     .runtime-intro { position: static; }
-    .parallel-body { grid-template-columns: 1fr; }
-    .parallel-shot { position: static; }
-    .parallel-notes { grid-template-columns: 1fr; }
     .product-system-grid { grid-template-columns: 1fr 1fr; }
     .product-system-grid article,
     .product-system-grid article:nth-child(4),
@@ -2712,8 +2546,6 @@ const changelog = [
     .connections,
     .comparison-section,
     .automation { padding: 30px 20px; border-radius: 22px; }
-    .parallel-notes { border-radius: 18px; }
-    .parallel-notes p { padding: 18px 20px; }
     .automation-note { padding: 16px 18px; border-radius: 15px; font-size: 12.5px; }
     .product-system { padding: 30px 20px; border-radius: 22px; }
     .product-system-grid { grid-template-columns: 1fr; margin-top: 34px; }
@@ -2740,6 +2572,7 @@ const changelog = [
       object-fit: cover;
       object-position: top left;
     }
+    .feature-proof dl > div { padding: 16px 18px; }
     .card-topline span:last-child { display: none; }
 
     .changelog li { grid-template-columns: 1fr; gap: 6px; padding: 18px 0; }
