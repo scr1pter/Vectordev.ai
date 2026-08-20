@@ -6,7 +6,10 @@ import { Global } from "@opencode-ai/core/global"
 
 describe("global paths", () => {
   test("tmp path is under the system temp directory", () => {
-    expect(Global.Path.tmp).toBe(path.join(os.tmpdir(), "opencode"))
+    // Every Global path is namespaced by the app directory name, which the fork
+    // renamed from "opencode" to "vector". Joining onto os.tmpdir() rather than a
+    // literal keeps this correct on macOS, Linux, and Windows alike.
+    expect(Global.Path.tmp).toBe(path.join(os.tmpdir(), "vector"))
     expect(Global.make().tmp).toBe(Global.Path.tmp)
   })
 

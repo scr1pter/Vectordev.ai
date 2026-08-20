@@ -68,6 +68,13 @@ import { useMarked } from "@opencode-ai/ui/context/marked"
 import { preloadMarkdown } from "@opencode-ai/session-ui/markdown-cache"
 import { normalizeUsageSummary, usageStreakCalendar } from "@/utils/usage-summary"
 import { VectorAsciiField } from "@/components/vector-ascii-field"
+import {
+  Automations,
+  automationsApi,
+  type AutomationRepository,
+  type AutomationSession,
+} from "@/features/scheduled/automations"
+import { describeNextRun, type AutomationInput, type AutomationRecord } from "@/features/scheduled/schedule-model"
 
 const HOME_SESSION_LIMIT = 64
 const HOME_SESSION_HEADER_STICKY_TOP = 12
@@ -335,6 +342,98 @@ export function NewHome() {
     },
     staleTime: 30_000,
   }))
+
+  const [automationsOpen, setAutomationsOpen] = createSignal(false)
+  const [automations, setAutomations] = createSignal<AutomationRecord[]>([])
+  const automationDirectories = createMemo(() => projects().flatMap(directories))
+  const automationRepositories = createMemo<AutomationRepository[]>(() =>
+    projects().map((project) => ({ directory: project.worktree, name: displayName(project) })),
+  )
+  // Sessions come from the same sync store the recents list reads, but scoped to
+  // every open repository instead of the focused one: an automation can target a
+  // repository the home screen is not currently filtered to.
+  const automationSessions = createMemo<AutomationSession[]>(() =>
+    buildHomeSessionRecords({
+      sync: focusedSync(),
+      projectDirectories: automationDirectories,
+      projects,
+      projectByID,
+    }).map((record) => ({
+      id: record.session.id,
+      title: sessionTitle(record.session.title) || record.session.id,
+      // Where the session actually lives, which is the sandbox rather than the
+      // worktree for a sandboxed session — that is the directory a run has to
+      // resume in.
+      directory: record.session.directory,
+      repository: record.project.worktree,
+    })),
+  )
+  // The recents list only loads sessions for the focused repository, so opening
+  // the panel pulls in the rest before the picker claims a repository has none.
+  useQuery(() => ({
+    queryKey: ["home", "automations", "sessions", selection().server, ...automationDirectories()] as const,
+    enabled: automationsOpen(),
+    queryFn: async () => {
+      await Promise.all(
+        automationDirectories().map((directory) =>
+          focusedSync().project.loadSessions(directory, { limit: HOME_SESSION_LIMIT }),
+        ),
+      )
+      return null
+    },
+  }))
+
+  async function refreshAutomations() {
+    const api = automationsApi()
+    if (!api) return
+    setAutomations(await api.list().catch(() => [] as AutomationRecord[]))
+  }
+
+  createEffect(() => {
+    if (!automationsApi()) return
+    void refreshAutomations()
+    // The summary line reads "next run in 2 hours", so it has to keep being
+    // recomputed or it silently freezes on a home screen left open all day.
+    // Slow cadence when the panel is closed, since nothing else is watching.
+    const timer = setInterval(() => void refreshAutomations(), automationsOpen() ? 10_000 : 60_000)
+    onCleanup(() => clearInterval(timer))
+  })
+
+  function createAutomation(input: AutomationInput) {
+    const api = automationsApi()
+    if (!api) return
+    void api
+      .create(input)
+      .then(() => refreshAutomations())
+      .catch((error: unknown) => {
+        showToast({
+          variant: "error",
+          title: "Could not create that automation",
+          description: error instanceof Error ? error.message : String(error),
+        })
+      })
+  }
+
+  function toggleAutomationPause(id: string, paused: boolean) {
+    const api = automationsApi()
+    if (!api) return
+    // Older desktop builds expose only cancel, which can pause but cannot put a
+    // cancelled automation back on its schedule. Saying so beats a Resume button
+    // that quietly does nothing.
+    if (!api.setPaused) {
+      if (!paused) {
+        showToast({
+          variant: "error",
+          title: "Resuming needs a newer Vector",
+          description: "This build can pause an automation but cannot re-arm it. Update Vector to resume it.",
+        })
+        return
+      }
+      void Promise.resolve(api.cancel(id)).then(() => refreshAutomations())
+      return
+    }
+    void api.setPaused(id, paused).then(() => refreshAutomations())
+  }
 
   createEffect(() => {
     const ctx = focusedServerCtx()
@@ -632,6 +731,12 @@ export function NewHome() {
           }}
         />
 
+        <HomeAutomations
+          supported={Boolean(automationsApi())}
+          records={automations()}
+          onOpen={() => setAutomationsOpen(true)}
+        />
+
         <section class="vector-home-recents" aria-label={language.t("sidebar.project.recentSessions")}>
           <div class="vector-home-recents__header">
             <div>
@@ -704,7 +809,92 @@ export function NewHome() {
           </div>
         </section>
       </div>
+
+      <Automations
+        open={automationsOpen()}
+        supported={Boolean(automationsApi())}
+        repositories={automationRepositories()}
+        sessions={automationSessions()}
+        records={automations()}
+        focusedRepository={selectedProject()?.worktree}
+        onClose={() => setAutomationsOpen(false)}
+        onCreate={createAutomation}
+        onTogglePause={toggleAutomationPause}
+        onDelete={(id) => void automationsApi()?.remove(id).then((records) => setAutomations(records))}
+      />
     </div>
+  )
+}
+
+function HomeAutomations(props: { supported: boolean; records: AutomationRecord[]; onOpen: () => void }) {
+  // Still on the schedule. A settled one-shot keeps its runAt in the past, so
+  // counting it would pin the summary to "Due now" forever.
+  const pending = createMemo(() =>
+    props.records.filter((record) => !record.paused && (record.status === "scheduled" || record.status === "running")),
+  )
+  const paused = createMemo(() => props.records.filter((record) => record.paused).length)
+  const next = createMemo(() => {
+    const times = pending()
+      .map((record) => new Date(record.runAt).getTime())
+      .filter((time) => Number.isFinite(time))
+    if (times.length === 0) return undefined
+    return new Date(Math.min(...times))
+  })
+
+  return (
+    <section data-vector-home-automations class="shrink-0" aria-label="Automations">
+      <div class="min-w-0 px-0.5 pb-2.5">
+        <span class="block [font-family:var(--vx-mono)] text-[9.5px] uppercase [font-weight:650] text-v2-text-text-faint">
+          Automations
+        </span>
+        <strong class="mt-1 block text-[15px] [font-weight:620] text-v2-text-text-base">
+          Work Vector repeats without you
+        </strong>
+      </div>
+      <Show
+        when={props.supported}
+        fallback={
+          <p class="rounded-[8px] border border-v2-border-border-muted bg-[rgba(255,255,255,0.018)] px-3 py-2.5 text-[11.5px] leading-relaxed text-v2-text-text-muted">
+            Automations run from the Vector desktop app, which keeps a scheduler alive in the tray. This surface
+            activates once Vector connects to this workspace.
+          </p>
+        }
+      >
+        <button
+          type="button"
+          data-action="home-open-automations"
+          class="flex w-full items-center gap-3 rounded-[8px] border border-v2-border-border-muted bg-[rgba(255,255,255,0.018)] px-3 py-2.5 text-left transition-[background-color,border-color] duration-200 ease-[cubic-bezier(0.22,0.7,0.28,1)] hover:border-[rgba(178,140,255,0.3)] hover:bg-[rgba(147,116,236,0.08)]"
+          onClick={props.onOpen}
+        >
+          <span class="grid size-8 shrink-0 place-items-center rounded-[7px] border border-v2-border-border-muted bg-[rgba(255,255,255,0.025)] text-v2-icon-icon-muted">
+            <svg viewBox="0 0 16 16" class="size-4" aria-hidden="true">
+              <path
+                d="M2.9 8a5.1 5.1 0 0 1 8.7-3.6l1.5 1.5m0 0V3.2m0 2.7h-2.7M13.1 8a5.1 5.1 0 0 1-8.7 3.6l-1.5-1.5m0 0v2.7m0-2.7h2.7"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.15"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </span>
+          <span class="min-w-0 flex-1">
+            <span class="block text-[12.5px] [font-weight:570] text-v2-text-text-base">
+              {props.records.length === 0
+                ? "Set up a recurring run"
+                : `${pending().length === 1 ? "1 automation" : `${pending().length} automations`} on schedule${paused() ? ` · ${paused()} paused` : ""}`}
+            </span>
+            <span class="mt-0.5 block truncate text-[11.5px] text-v2-text-text-muted">
+              {props.records.length === 0
+                ? "One task, on a schedule, in the repositories and sessions you choose — while you are away."
+                : describeNextRun(next(), new Date())}
+            </span>
+          </span>
+          <span class="shrink-0 text-[11.5px] text-v2-text-text-muted">Open</span>
+          <IconV2 name="outline-chevron-down" class="-rotate-90" />
+        </button>
+      </Show>
+    </section>
   )
 }
 

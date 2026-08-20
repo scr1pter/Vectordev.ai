@@ -74,6 +74,8 @@ const api: ElectronAPI = {
     post: (input) => ipcRenderer.invoke("agent-teams-post", input),
     claim: (teamId, workspaceId) => ipcRenderer.invoke("agent-teams-claim", teamId, workspaceId),
     delete: (teamId) => ipcRenderer.invoke("agent-teams-delete", teamId),
+    getGraph: (teamId) => ipcRenderer.invoke("agent-teams-get-graph", teamId),
+    setGraph: (teamId, graph) => ipcRenderer.invoke("agent-teams-set-graph", teamId, graph),
   },
   convertHeic: (bytes) => ipcRenderer.invoke("convert-heic", bytes),
   runtime: {

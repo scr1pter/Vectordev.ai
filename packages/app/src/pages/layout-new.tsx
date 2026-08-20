@@ -40,7 +40,7 @@ import { ScheduledTasks } from "@/features/scheduled/scheduled-tasks"
 import type { ScheduledTask } from "@/features/scheduled/schedule-model"
 import type { TeamConversation } from "@/features/agents/agent-dashboard-model"
 import { ExternalRuntimeSetupPanel } from "@/features/agents/external-runtime-setup"
-import { isExternalRuntime, type ExternalRuntime } from "@/features/agents/external-runtimes"
+import { externalRuntimeSetup, isExternalRuntime, type ExternalRuntime } from "@/features/agents/external-runtimes"
 import { PullRequests } from "@/features/pull-requests/pull-requests"
 import { extractVelReply } from "@/features/vel/vel-call"
 import { isInternalProjectPath, useServer } from "@/context/server"
@@ -285,6 +285,85 @@ type SwarmRunRecord = {
   error?: string
 }
 
+// Mirrors packages/desktop/src/main/agent-team-model.ts. The app package cannot
+// import it — desktop depends on app, not the reverse — so these declarations
+// are duplicated and must stay byte-identical to the preload types. The last
+// bug in this area was a hand-rolled shape that omitted getGraph/setGraph and
+// therefore made a wired-up backend look unimplemented, so nothing here may be
+// narrowed to "only what this file happens to call".
+type TeamTopology = "isolated" | "collaborative" | "shared-main"
+
+type TeamLink = {
+  from: string
+  to: string
+  mutual?: boolean
+}
+
+type TeamCollaborationGraph = {
+  links: TeamLink[]
+}
+
+type TeamMessage = {
+  id: string
+  teamId: string
+  fromWorkspaceId: string
+  fromName: string
+  toWorkspaceId?: string
+  text: string
+  createdAt: string
+  deliveredTo: string[]
+}
+
+type AgentTeam = {
+  id: string
+  name: string
+  topology: TeamTopology
+  sourcePath: string
+  parentSessionId?: string
+  sharedPath?: string
+  memberIds: string[]
+  // Absent means all-to-all: every member may message every other member.
+  collaboration?: TeamCollaborationGraph
+  createdAt: string
+  messages: TeamMessage[]
+}
+
+// Mirrors AgentTeamsAPI in packages/desktop/src/preload/types.ts.
+type AgentTeamsApi = {
+  list: (scope?: { sourcePath?: string; parentSessionId?: string }) => Promise<AgentTeam[]>
+  get: (id: string) => Promise<AgentTeam | undefined>
+  create: (input: {
+    name: string
+    topology: TeamTopology
+    sourcePath: string
+    parentSessionId?: string
+    sharedPath?: string
+  }) => Promise<AgentTeam>
+  addMember: (teamId: string, workspaceId: string) => Promise<AgentTeam | undefined>
+  removeMember: (teamId: string, workspaceId: string) => Promise<AgentTeam | undefined>
+  post: (input: {
+    teamId: string
+    fromWorkspaceId: string
+    fromName: string
+    toWorkspaceId?: string
+    text: string
+    memberNames?: Record<string, string>
+  }) => Promise<
+    { ok: true; team?: AgentTeam; recipients: string[] } | { ok: false; reason: string; allowedRecipients: string[] }
+  >
+  claim: (teamId: string, workspaceId: string) => Promise<TeamMessage[]>
+  delete: (teamId: string) => Promise<void>
+  getGraph: (teamId: string) => Promise<TeamCollaborationGraph | undefined>
+  setGraph: (teamId: string, graph: TeamCollaborationGraph | undefined) => Promise<AgentTeam | undefined>
+}
+
+// The graph is drawn before the agents it describes exist, so a member this
+// launch is about to create is held under a placeholder id and swapped for the
+// real workspace id once the record comes back.
+const PENDING_MEMBER_PREFIX = "pending:"
+
+const collaborationLinkKey = (from: string, to: string) => `${from}>${to}`
+
 type SwarmOrchestratorApi = {
   list: (scope?: { sourcePath?: string; parentSessionId?: string }) => Promise<SwarmRunRecord[]>
   create: (input: {
@@ -475,30 +554,15 @@ export default function NewLayout(props: ParentProps) {
   const [agentDashboardOpen, setAgentDashboardOpen] = createSignal(false)
   const [teamConversations, setTeamConversations] = createSignal<TeamConversation[]>([])
   const settings = useSettings()
-  const [parallelTopology, setParallelTopology] = createSignal<"isolated" | "collaborative">("isolated")
+  const [parallelTopology, setParallelTopology] = createSignal<TeamTopology>("isolated")
   const [parallelJoinTeamId, setParallelJoinTeamId] = createSignal<string>()
-  const [openTeams, setOpenTeams] = createSignal<{ id: string; name: string; sharedPath?: string; memberIds: string[] }[]>([])
+  const [openTeams, setOpenTeams] = createSignal<AgentTeam[]>([])
+  const [collaborationShape, setCollaborationShape] = createSignal<"all" | "coordinator" | "custom">("all")
+  const [collaborationCoordinator, setCollaborationCoordinator] = createSignal<string>()
+  const [collaborationLinks, setCollaborationLinks] = createSignal<string[]>([])
 
   const agentTeamsApi = () =>
-    (
-      globalThis.window as unknown as {
-        api?: {
-          agentTeams?: {
-            list: (scope?: { sourcePath?: string }) => Promise<
-              { id: string; name: string; sharedPath?: string; memberIds: string[] }[]
-            >
-            create: (input: {
-              name: string
-              topology: string
-              sourcePath: string
-              parentSessionId?: string
-              sharedPath?: string
-            }) => Promise<{ id: string; sharedPath?: string }>
-            addMember: (teamId: string, workspaceId: string) => Promise<unknown>
-          }
-        }
-      }
-    )?.api?.agentTeams
+    (globalThis.window as unknown as { api?: { agentTeams?: AgentTeamsApi } })?.api?.agentTeams
 
   const refreshOpenTeams = async () => {
     const api = agentTeamsApi()
@@ -510,21 +574,10 @@ export default function NewLayout(props: ParentProps) {
   // the transcript only matters while it is on screen, and the agent list has
   // its own refresh already.
   const refreshTeamConversations = async () => {
-    const teams = (
-      globalThis.window as unknown as {
-        api?: { agentTeams?: { list: (scope?: { sourcePath?: string }) => Promise<unknown[]> } }
-      }
-    )?.api?.agentTeams
-    if (!teams) return
-    const scope = activeWorkspaceScope()
-    const list = await teams.list({ sourcePath: scope.sourcePath }).catch(() => [])
-    setTeamConversations(
-      (list as { id: string; name: string; messages?: TeamConversation["messages"] }[]).map((team) => ({
-        teamId: team.id,
-        teamName: team.name,
-        messages: team.messages ?? [],
-      })),
-    )
+    const api = agentTeamsApi()
+    if (!api) return
+    const list = await api.list({ sourcePath: activeWorkspaceScope().sourcePath }).catch(() => [])
+    setTeamConversations(list.map((team) => ({ teamId: team.id, teamName: team.name, messages: team.messages ?? [] })))
   }
   const [pullRequestsOpen, setPullRequestsOpen] = createSignal(false)
   const server = useServer()
@@ -1268,6 +1321,103 @@ export default function NewLayout(props: ParentProps) {
       runtime === "vector" ? parallelModelOptions().length > 0 : Boolean(externalRuntimeStatus(runtime)?.installed),
     )
 
+  // Runtimes the picker keeps visible but cannot launch, with the reason. A
+  // runtime that is simply hidden is why this feature read as broken.
+  const blockedRuntimes = () =>
+    (["claude-code", "codex", "cursor"] as ExternalRuntime[])
+      .filter((runtime) => !externalRuntimeStatus(runtime)?.installed)
+      .map((runtime) => ({ runtime, setup: externalRuntimeSetup(runtime) }))
+
+  // Who the collaboration graph is drawn over: teammates already in the picked
+  // team, plus the agents this launch is about to add. Names come from the
+  // workspace records because a team stores ids only.
+  const collaborationRoster = createMemo(() => {
+    const joined = openTeams().find((team) => team.id === parallelJoinTeamId())
+    const existing = (joined?.memberIds ?? []).map((id) => ({
+      id,
+      name: parallelRecords().find((record) => record.id === id)?.name || "Teammate",
+      pending: false,
+    }))
+    const pending = (parallelCompareRuntimes() ? readyComparisonRuntimes() : [parallelRuntime()]).map(
+      (runtime, index) => ({
+        id: `${PENDING_MEMBER_PREFIX}${index}`,
+        name: parallelCompareRuntimes()
+          ? `${parallelName().trim() || "Comparison"} · ${parallelRuntimeLabel(runtime)}`
+          : parallelName().trim() || "This agent",
+        pending: true,
+      }),
+    )
+    return [...existing, ...pending]
+  })
+
+  // The graph to store for a roster, or undefined for all-to-all. Undefined is
+  // not an empty graph: an empty link list means nobody may message anybody,
+  // while an absent graph is the everyone-talks default every existing team has.
+  const collaborationGraphFor = (memberIds: readonly string[]): TeamCollaborationGraph | undefined => {
+    if (collaborationShape() === "all") return undefined
+    if (collaborationShape() === "coordinator") {
+      const coordinator = collaborationCoordinator() ?? memberIds[0]
+      if (!coordinator) return undefined
+      // Mutual, so a worker can answer the coordinator without gaining the
+      // right to chatter with the other workers.
+      return {
+        links: memberIds.filter((id) => id !== coordinator).map((id) => ({ from: coordinator, to: id, mutual: true })),
+      }
+    }
+    return {
+      links: memberIds.flatMap((from) =>
+        memberIds
+          .filter((to) => to !== from && collaborationLinks().includes(collaborationLinkKey(from, to)))
+          .map((to) => ({ from, to })),
+      ),
+    }
+  }
+
+  // A stored graph is only recognisable as the coordinator shape when exactly
+  // one member is mutually linked to every other; anything else is custom.
+  const coordinatorInGraph = (graph: TeamCollaborationGraph, memberIds: readonly string[]) => {
+    const candidate = graph.links[0]?.from
+    if (!candidate || graph.links.length !== memberIds.length - 1) return undefined
+    if (!graph.links.every((link) => link.from === candidate && link.mutual === true)) return undefined
+    return candidate
+  }
+
+  // Joining a team adopts the pairing it already has, so the composer edits the
+  // live shape instead of silently overwriting it on launch.
+  createEffect(() => {
+    const teamId = parallelJoinTeamId()
+    const api = agentTeamsApi()
+    if (!teamId || !api) return
+    void api
+      .getGraph(teamId)
+      .then((graph) => {
+        if (!graph) {
+          setCollaborationShape("all")
+          setCollaborationCoordinator(undefined)
+          setCollaborationLinks([])
+          return
+        }
+        // Read after the await so refreshing the team list does not re-run this
+        // effect and discard pairing the user is in the middle of editing.
+        const coordinator = coordinatorInGraph(graph, openTeams().find((team) => team.id === teamId)?.memberIds ?? [])
+        setCollaborationCoordinator(coordinator)
+        setCollaborationShape(coordinator ? "coordinator" : "custom")
+        // A mutual link is one stored row standing for both directions, so it
+        // becomes two checked cells. Collapsing it to the single forward cell
+        // would show the team as more restricted than it is, and saving from
+        // the custom matrix — which only ever emits directed rows — would then
+        // silently revoke the reply permission the user never unchecked.
+        setCollaborationLinks(
+          graph.links.flatMap((link) =>
+            link.mutual === true
+              ? [collaborationLinkKey(link.from, link.to), collaborationLinkKey(link.to, link.from)]
+              : [collaborationLinkKey(link.from, link.to)],
+          ),
+        )
+      })
+      .catch(() => undefined)
+  })
+
   const swarmApi = () =>
     (
       globalThis.window?.api as
@@ -1658,20 +1808,29 @@ export default function NewLayout(props: ParentProps) {
     setParallelBusy(true)
     setParallelError("")
 
-    // A collaborative launch either joins the team the user picked or creates a
-    // new one. The team exists before any member so every member can be
-    // attached to it as it is created.
+    // Snapshot the roster the user drew the graph over before any await. The
+    // pending ids are positional against `runtimes`, and `collaborationRoster`
+    // recomputes from `readyComparisonRuntimes()` — so a runtime-detection poll
+    // landing mid-launch would renumber the placeholders and pair the wrong
+    // agents. Reading it once, here, keeps the two lists in lockstep.
+    const drawnRosterIds = collaborationRoster().map((member) => member.id)
+
+    // A "work together" launch either joins the team the user picked or creates
+    // a new one. The team exists before any member so every member can be
+    // attached to it as it is created. "shared-main" points the shared checkout
+    // at the project itself, which is what makes agents edit main directly.
     const teamsApi = agentTeamsApi()
     const team = await (async () => {
-      if (parallelTopology() !== "collaborative" || !teamsApi) return undefined
+      if (parallelTopology() === "isolated" || !teamsApi) return undefined
       const existing = openTeams().find((item) => item.id === parallelJoinTeamId())
       if (existing) return existing
       return teamsApi
         .create({
           name: parallelName().trim() || "Agent team",
-          topology: "collaborative",
+          topology: parallelTopology(),
           sourcePath,
           parentSessionId: scope.parentSessionId,
+          sharedPath: parallelTopology() === "shared-main" ? sourcePath : undefined,
         })
         .catch(() => undefined)
     })()
@@ -1705,6 +1864,31 @@ export default function NewLayout(props: ParentProps) {
       if (record && team && teamsApi) await teamsApi.addMember(team.id, record.id).catch(() => undefined)
       return record ? [...current, record] : undefined
     }, Promise.resolve<ParallelWorkspaceRecord[] | undefined>([]))
+
+    // Pairing is stored only after every member exists, because the composer
+    // draws it over agents that had no workspace id yet. "Everyone" is the
+    // absence of a graph, so it is written only to clear one a joined team
+    // already had — a brand-new team keeps storing nothing at all.
+    if (records?.length && team && teamsApi) {
+      // Placeholder ids are positional: the Nth pending roster entry is the Nth
+      // record this launch created, in the same runtime order.
+      const memberIds = [...new Set([...team.memberIds, ...records.map((record) => record.id)])]
+      const drawn = collaborationGraphFor(drawnRosterIds)
+      const graph = drawn && {
+        links: drawn.links.flatMap((link) => {
+          const from = link.from.startsWith(PENDING_MEMBER_PREFIX)
+            ? records[Number(link.from.slice(PENDING_MEMBER_PREFIX.length))]?.id
+            : link.from
+          const to = link.to.startsWith(PENDING_MEMBER_PREFIX)
+            ? records[Number(link.to.slice(PENDING_MEMBER_PREFIX.length))]?.id
+            : link.to
+          if (!from || !to || !memberIds.includes(from) || !memberIds.includes(to)) return []
+          return [{ from, to, mutual: link.mutual }]
+        }),
+      }
+      if (graph || parallelJoinTeamId()) await teamsApi.setGraph(team.id, graph).catch(() => undefined)
+    }
+
     setParallelBusy(false)
     if (!records?.length) return
     setParallelRecords((current) => {
@@ -1968,7 +2152,17 @@ export default function NewLayout(props: ParentProps) {
         id: record.id,
         name: record.name,
         status,
-        runtime: parallelRuntimeLabel(record.runtime),
+        // The row's secondary line is the only place a workspace shows what it
+        // is and how much it has touched, so the changed-file count and the
+        // shared-workspace marker ride along with the runtime label until
+        // WorkspaceNavigationItem grows fields of its own.
+        runtime: [
+          parallelRuntimeLabel(record.runtime),
+          record.changedFilesCount ? `${record.changedFilesCount} files` : "",
+          record.teamId ? "shared" : "",
+        ]
+          .filter(Boolean)
+          .join(" · "),
         added: stats.added,
         removed: stats.removed,
         active: sidebarActiveAgentID() === record.id,
@@ -3361,9 +3555,9 @@ export default function NewLayout(props: ParentProps) {
                 <div class="mb-3">
                   <div class="mb-1.5 flex items-center justify-between px-1">
                     <span class="text-[10px] font-semibold uppercase tracking-[0.09em] text-white/35">
-                      How this agent works
+                      Alone or together
                     </span>
-                    <span class="text-[10px] text-white/30">Isolated is safest; collaborative is faster</span>
+                    <span class="text-[10px] text-white/30">Alone is safest; together is faster</span>
                   </div>
                   <div class="grid grid-cols-2 gap-1.5">
                     <button
@@ -3378,31 +3572,86 @@ export default function NewLayout(props: ParentProps) {
                       onClick={() => {
                         setParallelTopology("isolated")
                         setParallelJoinTeamId(undefined)
+                        setCollaborationShape("all")
+                        setCollaborationCoordinator(undefined)
+                        setCollaborationLinks([])
                       }}
                     >
-                      <span class="block text-[11px] font-semibold">Isolated</span>
+                      <span class="block text-[11px] font-semibold">Work alone</span>
                       <span class="mt-0.5 block text-[9.5px] leading-3 opacity-70">
-                        Its own branch and files. Nothing it does can affect another agent.
+                        Its own git branch and files. Agents never see each other's edits and cannot message each other.
                       </span>
                     </button>
                     <button
                       type="button"
-                      class="rounded-[10px] border px-2.5 py-2 text-left transition"
+                      class="rounded-[10px] border px-2.5 py-2 text-left transition disabled:cursor-not-allowed disabled:opacity-45"
                       classList={{
                         "border-[color:var(--vx-purple)]/55 bg-[color:var(--vx-purple-soft)] text-white":
-                          parallelTopology() === "collaborative",
+                          parallelTopology() !== "isolated",
                         "border-[color:var(--vx-line)] bg-white/[0.025] text-white/58 hover:bg-white/[0.05]":
-                          parallelTopology() !== "collaborative",
+                          parallelTopology() === "isolated",
                       }}
+                      disabled={!agentTeamsApi()}
+                      title={agentTeamsApi() ? undefined : "Teamwork activates once Vector connects to this workspace."}
                       onClick={() => setParallelTopology("collaborative")}
                     >
                       <span class="block text-[11px] font-semibold">Work together</span>
                       <span class="mt-0.5 block text-[9.5px] leading-3 opacity-70">
-                        Shares one workspace with teammates and can message them while working.
+                        One shared checkout. Agents see each other's edits and can message each other while working.
                       </span>
                     </button>
                   </div>
-                  <Show when={parallelTopology() === "collaborative"}>
+                  <Show when={!agentTeamsApi()}>
+                    <p class="mt-1.5 px-1 text-[10px] leading-4 text-white/40">
+                      Teamwork activates once Vector connects to this workspace. Until then every agent runs alone in
+                      its own worktree.
+                    </p>
+                  </Show>
+                  {/* Only a new team chooses where it works: joining one adopts the
+                      checkout that team already provisioned. */}
+                  <Show when={parallelTopology() !== "isolated" && !parallelJoinTeamId()}>
+                    <div class="mt-1.5 grid grid-cols-2 gap-1.5">
+                      <button
+                        type="button"
+                        class="rounded-[10px] border px-2.5 py-2 text-left transition"
+                        classList={{
+                          "border-[color:var(--vx-purple)]/55 bg-[color:var(--vx-purple-soft)] text-white":
+                            parallelTopology() === "collaborative",
+                          "border-[color:var(--vx-line)] bg-white/[0.025] text-white/58 hover:bg-white/[0.05]":
+                            parallelTopology() !== "collaborative",
+                        }}
+                        onClick={() => setParallelTopology("collaborative")}
+                      >
+                        <span class="block text-[11px] font-semibold">Shared worktree</span>
+                        <span class="mt-0.5 block text-[9.5px] leading-3 opacity-70">
+                          One branch off HEAD that the whole team edits. Your project stays untouched until you merge.
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        class="rounded-[10px] border px-2.5 py-2 text-left transition"
+                        classList={{
+                          "border-amber-300/45 bg-amber-300/[0.07] text-amber-100":
+                            parallelTopology() === "shared-main",
+                          "border-[color:var(--vx-line)] bg-white/[0.025] text-white/58 hover:bg-white/[0.05]":
+                            parallelTopology() !== "shared-main",
+                        }}
+                        onClick={() => setParallelTopology("shared-main")}
+                      >
+                        <span class="block text-[11px] font-semibold">Directly on main</span>
+                        <span class="mt-0.5 block text-[9.5px] leading-3 opacity-70">
+                          Agents edit your real project files. Nothing to merge — the changes are already there.
+                        </span>
+                      </button>
+                    </div>
+                    <Show when={parallelTopology() === "shared-main"}>
+                      <p class="mt-1.5 rounded-[10px] border border-amber-300/20 bg-amber-300/[0.055] px-2.5 py-2 text-[10px] leading-4 text-amber-100/78">
+                        No worktree and no isolation: every edit lands in your working tree as it happens. Commit or
+                        stash what you care about first — review with git before you commit.
+                      </p>
+                    </Show>
+                  </Show>
+                  <Show when={parallelTopology() !== "isolated"}>
                     <div class="mt-1.5 rounded-[10px] border border-[color:var(--vx-line)] bg-white/[0.02] px-2.5 py-2">
                       <Show
                         when={openTeams().length}
@@ -3424,7 +3673,12 @@ export default function NewLayout(props: ParentProps) {
                               "border-[color:var(--vx-purple)]/55 text-white": !parallelJoinTeamId(),
                               "border-[color:var(--vx-line)] text-white/55": Boolean(parallelJoinTeamId()),
                             }}
-                            onClick={() => setParallelJoinTeamId(undefined)}
+                            onClick={() => {
+                              setParallelJoinTeamId(undefined)
+                              setCollaborationShape("all")
+                              setCollaborationCoordinator(undefined)
+                              setCollaborationLinks([])
+                            }}
                           >
                             New team
                           </button>
@@ -3437,13 +3691,195 @@ export default function NewLayout(props: ParentProps) {
                                   "border-[color:var(--vx-purple)]/55 text-white": parallelJoinTeamId() === item.id,
                                   "border-[color:var(--vx-line)] text-white/55": parallelJoinTeamId() !== item.id,
                                 }}
-                                onClick={() => setParallelJoinTeamId(item.id)}
+                                onClick={() => {
+                                  setParallelJoinTeamId(item.id)
+                                  setParallelTopology(item.topology)
+                                }}
                               >
                                 {item.name} · {item.memberIds.length}
                               </button>
                             )}
                           </For>
                         </div>
+                        <Show when={openTeams().find((item) => item.id === parallelJoinTeamId())}>
+                          {(joined) => (
+                            <p class="mt-1.5 text-[10px] leading-4 text-white/45">
+                              {joined().topology === "shared-main"
+                                ? "This team edits your project files directly — there is nothing to merge afterwards."
+                                : "This agent joins the team's existing shared checkout and sees the edits already in it."}
+                            </p>
+                          )}
+                        </Show>
+                      </Show>
+                    </div>
+                    <div class="mt-1.5 rounded-[10px] border border-[color:var(--vx-line)] bg-white/[0.02] px-2.5 py-2">
+                      <div class="mb-1.5 flex items-center justify-between">
+                        <span class="text-[9.5px] font-semibold uppercase tracking-[0.09em] text-white/35">
+                          Who can message whom
+                        </span>
+                        <span class="text-[9.5px] text-white/28">
+                          {collaborationRoster().length === 1 ? "1 agent" : `${collaborationRoster().length} agents`}
+                        </span>
+                      </div>
+                      <Show
+                        when={collaborationRoster().length > 1}
+                        fallback={
+                          <p class="text-[10px] leading-4 text-white/45">
+                            Pairing appears once this team has a second agent — a solo member has no one to message.
+                          </p>
+                        }
+                      >
+                        <div class="grid grid-cols-3 gap-1">
+                          <button
+                            type="button"
+                            class="rounded-[7px] border px-2 py-1.5 text-[10.5px] transition"
+                            classList={{
+                              "border-[color:var(--vx-purple)]/55 text-white": collaborationShape() === "all",
+                              "border-[color:var(--vx-line)] text-white/50 hover:text-white/75":
+                                collaborationShape() !== "all",
+                            }}
+                            onClick={() => setCollaborationShape("all")}
+                          >
+                            Everyone
+                          </button>
+                          <button
+                            type="button"
+                            class="rounded-[7px] border px-2 py-1.5 text-[10.5px] transition"
+                            classList={{
+                              "border-[color:var(--vx-purple)]/55 text-white": collaborationShape() === "coordinator",
+                              "border-[color:var(--vx-line)] text-white/50 hover:text-white/75":
+                                collaborationShape() !== "coordinator",
+                            }}
+                            onClick={() => {
+                              setCollaborationShape("coordinator")
+                              if (collaborationCoordinator()) return
+                              setCollaborationCoordinator(collaborationRoster()[0]?.id)
+                            }}
+                          >
+                            Coordinator
+                          </button>
+                          <button
+                            type="button"
+                            class="rounded-[7px] border px-2 py-1.5 text-[10.5px] transition"
+                            classList={{
+                              "border-[color:var(--vx-purple)]/55 text-white": collaborationShape() === "custom",
+                              "border-[color:var(--vx-line)] text-white/50 hover:text-white/75":
+                                collaborationShape() !== "custom",
+                            }}
+                            onClick={() => {
+                              setCollaborationShape("custom")
+                              // Seeded all-to-all so unchecking one pair edits the
+                              // team's current behaviour instead of muting it.
+                              if (collaborationLinks().length) return
+                              setCollaborationLinks(
+                                collaborationRoster().flatMap((from) =>
+                                  collaborationRoster()
+                                    .filter((to) => to.id !== from.id)
+                                    .map((to) => collaborationLinkKey(from.id, to.id)),
+                                ),
+                              )
+                            }}
+                          >
+                            Custom
+                          </button>
+                        </div>
+
+                        <Show when={collaborationShape() === "all"}>
+                          <p class="mt-1.5 text-[10px] leading-4 text-white/45">
+                            Every agent may message every other agent. This is the default and is stored as no
+                            restriction at all.
+                          </p>
+                        </Show>
+
+                        <Show when={collaborationShape() === "coordinator"}>
+                          <div class="mt-1.5 flex flex-wrap gap-1.5">
+                            <For each={collaborationRoster()}>
+                              {(member) => (
+                                <button
+                                  type="button"
+                                  class="max-w-full truncate rounded-[7px] border px-2 py-1 text-[10.5px] transition"
+                                  classList={{
+                                    "border-[color:var(--vx-purple)]/55 text-white":
+                                      collaborationCoordinator() === member.id,
+                                    "border-[color:var(--vx-line)] text-white/50":
+                                      collaborationCoordinator() !== member.id,
+                                  }}
+                                  onClick={() => setCollaborationCoordinator(member.id)}
+                                >
+                                  {member.name}
+                                </button>
+                              )}
+                            </For>
+                          </div>
+                          <p class="mt-1.5 text-[10px] leading-4 text-white/45">
+                            {collaborationRoster().find((member) => member.id === collaborationCoordinator())?.name ||
+                              collaborationRoster()[0]?.name}{" "}
+                            may message every teammate and each of them may reply to it. Workers cannot message each
+                            other.
+                          </p>
+                        </Show>
+
+                        <Show when={collaborationShape() === "custom"}>
+                          <div class="mt-1.5 overflow-x-auto [scrollbar-width:thin]">
+                            <table class="w-full border-separate border-spacing-0 text-[9.5px]">
+                              <thead>
+                                <tr>
+                                  <th class="px-1 py-1 text-left font-medium text-white/30">may message →</th>
+                                  <For each={collaborationRoster()}>
+                                    {(member) => (
+                                      <th class="px-1 py-1 font-medium text-white/35">
+                                        <span class="mx-auto block max-w-[56px] truncate">{member.name}</span>
+                                      </th>
+                                    )}
+                                  </For>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                <For each={collaborationRoster()}>
+                                  {(from) => (
+                                    <tr>
+                                      <td class="max-w-[120px] truncate px-1 py-1 text-[10px] text-white/55">
+                                        {from.name}
+                                      </td>
+                                      <For each={collaborationRoster()}>
+                                        {(to) => (
+                                          <td class="px-1 py-1 text-center">
+                                            <Show
+                                              when={from.id !== to.id}
+                                              fallback={<span class="text-white/15">—</span>}
+                                            >
+                                              <input
+                                                type="checkbox"
+                                                class="size-3 accent-[color:var(--vx-purple)]"
+                                                aria-label={`${from.name} may message ${to.name}`}
+                                                checked={collaborationLinks().includes(
+                                                  collaborationLinkKey(from.id, to.id),
+                                                )}
+                                                onChange={(event) => {
+                                                  const key = collaborationLinkKey(from.id, to.id)
+                                                  const allowed = event.currentTarget.checked
+                                                  setCollaborationLinks((links) =>
+                                                    allowed
+                                                      ? [...links.filter((item) => item !== key), key]
+                                                      : links.filter((item) => item !== key),
+                                                  )
+                                                }}
+                                              />
+                                            </Show>
+                                          </td>
+                                        )}
+                                      </For>
+                                    </tr>
+                                  )}
+                                </For>
+                              </tbody>
+                            </table>
+                          </div>
+                          <p class="mt-1.5 text-[10px] leading-4 text-white/45">
+                            A row may message the columns it has checked. An unchecked pair gets a written refusal
+                            naming who it may reach instead, so nothing is dropped silently.
+                          </p>
+                        </Show>
                       </Show>
                     </div>
                   </Show>
@@ -3461,6 +3897,22 @@ export default function NewLayout(props: ParentProps) {
                         const status = () => externalRuntimeStatus(runtime)
                         const ready = () =>
                           runtime === "vector" ? parallelModelOptions().length > 0 : Boolean(status()?.installed)
+                        // Every runtime stays on screen even when it cannot run.
+                        // A hidden option reads as a broken feature; a visible
+                        // one that names its blocker reads as a setup step.
+                        const reason = () => {
+                          if (runtime === "vector") return ready() ? "Ready on your keys" : "No provider connected"
+                          if (!globalThis.window?.api) return "Desktop only"
+                          if (externalAgentsChecking() && !status()) return "Checking…"
+                          if (ready()) return status()?.version || "Installed"
+                          return "Not installed"
+                        }
+                        // Deliberately not aria-disabled: picking an undetected
+                        // runtime is how its install and sign-in steps appear,
+                        // so the tile is fully actionable. Announcing it as
+                        // unavailable would hide the only route to setting it
+                        // up, and the status line inside the tile already
+                        // carries the reason into the accessible name.
                         return (
                           <button
                             type="button"
@@ -3470,7 +3922,15 @@ export default function NewLayout(props: ParentProps) {
                                 parallelRuntime() === runtime,
                               "border-[color:var(--vx-line)] bg-white/[0.025] text-white/58 hover:bg-white/[0.05]":
                                 parallelRuntime() !== runtime,
+                              "opacity-55": !ready() && parallelRuntime() !== runtime,
                             }}
+                            title={
+                              ready()
+                                ? undefined
+                                : runtime === "vector"
+                                  ? "Connect an AI provider — Vector agents run on your own keys."
+                                  : `${parallelRuntimeLabel(runtime)} is not detected. Install it with: ${externalRuntimeSetup(runtime)?.installCommand ?? ""}`
+                            }
                             onClick={() => {
                               setParallelRuntime(runtime)
                               setParallelCompareRuntimes(false)
@@ -3482,19 +3942,9 @@ export default function NewLayout(props: ParentProps) {
                             </span>
                             <span class="mt-1 flex items-center gap-1 text-[9.5px] text-white/38">
                               <span
-                                class={`size-1.5 rounded-full ${ready() ? "bg-emerald-400" : externalAgentsChecking() && runtime !== "vector" ? "animate-pulse bg-amber-300" : "bg-white/20"}`}
+                                class={`size-1.5 shrink-0 rounded-full ${ready() ? "bg-emerald-400" : externalAgentsChecking() && runtime !== "vector" ? "animate-pulse bg-amber-300" : "bg-white/20"}`}
                               />
-                              <span class="truncate">
-                                {runtime === "vector"
-                                  ? ready()
-                                    ? "BYOK ready"
-                                    : "Setup needed"
-                                  : externalAgentsChecking() && !status()
-                                    ? "Checking"
-                                    : ready()
-                                      ? "Installed"
-                                      : "Setup needed"}
-                              </span>
+                              <span class="truncate">{reason()}</span>
                             </span>
                           </button>
                         )
@@ -3502,10 +3952,7 @@ export default function NewLayout(props: ParentProps) {
                     </For>
                   </div>
                   <Show
-                    when={
-                      isExternalRuntime(parallelRuntime()) &&
-                      !externalRuntimeStatus(parallelRuntime())?.installed
-                    }
+                    when={isExternalRuntime(parallelRuntime()) && !externalRuntimeStatus(parallelRuntime())?.installed}
                   >
                     <ExternalRuntimeSetupPanel
                       runtime={parallelRuntime() as ExternalRuntime}
@@ -3513,9 +3960,38 @@ export default function NewLayout(props: ParentProps) {
                       onRecheck={detectExternalRuntimes}
                     />
                   </Show>
+                  <Show when={globalThis.window?.api && blockedRuntimes().length}>
+                    <div class="mt-2 rounded-[10px] border border-[color:var(--vx-line)] bg-white/[0.02] px-2.5 py-2">
+                      <div class="mb-1 text-[9.5px] font-semibold uppercase tracking-[0.09em] text-white/35">
+                        Not available on this computer
+                      </div>
+                      <For each={blockedRuntimes()}>
+                        {(entry) => (
+                          <div class="flex min-w-0 items-baseline gap-2 py-0.5">
+                            <span class="w-[74px] shrink-0 truncate text-[10px] text-white/50">
+                              {parallelRuntimeLabel(entry.runtime)}
+                            </span>
+                            <code class="min-w-0 flex-1 truncate font-mono text-[9.5px] text-white/38">
+                              {entry.setup?.installCommand}
+                            </code>
+                          </div>
+                        )}
+                      </For>
+                      <p class="mt-1 text-[9.5px] leading-4 text-white/30">
+                        Select one above for its full install and sign-in steps. Vector runs your own CLI and never
+                        falls back to a runtime you did not pick.
+                      </p>
+                    </div>
+                  </Show>
+                  <Show when={!globalThis.window?.api}>
+                    <p class="mt-2 px-1 text-[10px] leading-4 text-white/40">
+                      Claude Code, Codex, and Cursor Agent activate once Vector connects to this workspace — the browser
+                      build cannot see the CLIs installed on your computer.
+                    </p>
+                  </Show>
                   <button
                     type="button"
-                    class="mt-2 flex w-full items-center justify-between rounded-[10px] border px-3 py-2 text-left transition"
+                    class="mt-2 flex w-full items-center justify-between rounded-[10px] border px-3 py-2 text-left transition disabled:cursor-not-allowed disabled:opacity-45"
                     classList={{
                       "border-[color:var(--vx-purple)]/50 bg-[color:var(--vx-purple-soft)] text-[color:var(--vx-purple-bright)]":
                         parallelCompareRuntimes(),
@@ -3531,7 +4007,9 @@ export default function NewLayout(props: ParentProps) {
                     <span>
                       <span class="block text-[11px] font-semibold">Compare ready runtimes</span>
                       <span class="mt-0.5 block text-[9.5px] text-current opacity-65">
-                        Run the same mission in {readyComparisonRuntimes().length} isolated workspaces
+                        {readyComparisonRuntimes().length < 2
+                          ? `Needs two detected runtimes; ${readyComparisonRuntimes().length} found`
+                          : `Run the same mission in ${readyComparisonRuntimes().length} isolated workspaces`}
                       </span>
                     </span>
                     <span class="text-[10px] font-semibold">{parallelCompareRuntimes() ? "ON" : "OFF"}</span>
@@ -3540,6 +4018,13 @@ export default function NewLayout(props: ParentProps) {
                     <p class="mt-1.5 px-1 text-[10px] leading-4 text-amber-100/62">
                       Comparison runs consume each selected runtime's normal usage. Vector compares verified evidence
                       and never merges automatically.
+                      <Show when={blockedRuntimes().length}>
+                        {" "}
+                        {blockedRuntimes()
+                          .map((entry) => parallelRuntimeLabel(entry.runtime))
+                          .join(", ")}{" "}
+                        {blockedRuntimes().length > 1 ? "are" : "is"} excluded — not detected on this computer.
+                      </Show>
                     </p>
                   </Show>
                 </div>
@@ -4025,30 +4510,57 @@ export default function NewLayout(props: ParentProps) {
                     </div>
                     <div class="space-y-1">
                       <For each={agentTabRecords()}>
-                        {(record) => (
-                          <button
-                            type="button"
-                            class="w-full rounded-[10px] px-3 py-2.5 text-left transition hover:bg-white/[0.05]"
-                            onClick={() => openAgentByID(record.id)}
-                          >
-                            <div class="flex items-center gap-2">
-                              <span
-                                class={`size-1.5 shrink-0 rounded-full ${["running", "queued", "planning", "editing", "running commands", "testing"].includes(liveAgentStatus(record)) ? "animate-pulse bg-[color:var(--vx-purple-bright)]" : liveAgentStatus(record) === "waiting for approval" ? "bg-amber-300" : record.status === "failed" ? "bg-rose-400" : record.status === "needs review" || record.status === "complete" ? "bg-amber-300" : "bg-emerald-400"}`}
-                              />
-                              <span class="min-w-0 flex-1 truncate text-[12px] font-medium text-white/76">
-                                {record.name}
-                              </span>
-                              <span class="text-[10px] tabular-nums text-white/30">
-                                {record.changedFilesCount} files
-                              </span>
+                        {(record) => {
+                          const stats = () => parallelDiffStats(record)
+                          return (
+                            <div class="group/agentrow rounded-[10px] transition hover:bg-white/[0.05]">
+                              <button
+                                type="button"
+                                class="w-full rounded-[10px] px-3 py-2.5 text-left"
+                                onClick={() => openAgentByID(record.id)}
+                              >
+                                <div class="flex items-center gap-2">
+                                  <span
+                                    class={`size-1.5 shrink-0 rounded-full ${["running", "queued", "planning", "editing", "running commands", "testing"].includes(liveAgentStatus(record)) ? "animate-pulse bg-[color:var(--vx-purple-bright)]" : liveAgentStatus(record) === "waiting for approval" ? "bg-amber-300" : record.status === "failed" ? "bg-rose-400" : record.status === "needs review" || record.status === "complete" ? "bg-amber-300" : "bg-emerald-400"}`}
+                                  />
+                                  <span class="min-w-0 flex-1 truncate text-[12px] font-medium text-white/76">
+                                    {record.name}
+                                  </span>
+                                  <span class="flex shrink-0 items-center gap-1 text-[10px] tabular-nums">
+                                    <span class="text-emerald-400/80">+{stats().added}</span>
+                                    <span class="text-rose-400/80">-{stats().removed}</span>
+                                  </span>
+                                </div>
+                                <div class="mt-1 flex items-center gap-1.5 pl-3.5 text-[10.5px] text-white/38">
+                                  <span class="shrink-0">{parallelRuntimeLabel(record.runtime)}</span>
+                                  <span class="text-white/18">·</span>
+                                  <span class="shrink-0 tabular-nums">{record.changedFilesCount} files</span>
+                                  <Show when={record.teamId}>
+                                    <span class="text-white/18">·</span>
+                                    <span class="shrink-0">shared</span>
+                                  </Show>
+                                </div>
+                                <div class="mt-0.5 truncate pl-3.5 text-[10.5px] text-white/30">
+                                  {parallelWorkspaceCurrentStep(record)}
+                                </div>
+                              </button>
+                              <Show when={record.changedFilesCount > 0 && record.mergeState === "none"}>
+                                <div class="hidden px-3 pb-2 pl-[26px] group-hover/agentrow:block">
+                                  <button
+                                    type="button"
+                                    class="rounded-[7px] border border-[color:var(--vx-line)] px-2 py-1 text-[10px] font-medium text-white/62 transition hover:bg-white/[0.07] hover:text-white"
+                                    onClick={() => {
+                                      setOrchestrationOpen(false)
+                                      openAgentReviewByID(record.id)
+                                    }}
+                                  >
+                                    Review &amp; merge
+                                  </button>
+                                </div>
+                              </Show>
                             </div>
-                            <div class="mt-1 flex items-center gap-1.5 pl-3.5 text-[10.5px] text-white/38">
-                              <span class="truncate capitalize">{liveAgentStatus(record)}</span>
-                              <span>·</span>
-                              <span class="truncate">{record.model}</span>
-                            </div>
-                          </button>
-                        )}
+                          )
+                        }}
                       </For>
                     </div>
                   </div>
@@ -5578,7 +6090,10 @@ export default function NewLayout(props: ParentProps) {
           }
           const directory = activeProjectPath()
           if (!directory) {
-            showToast({ title: "Open a project first", description: "Scheduled agents run inside a project workspace." })
+            showToast({
+              title: "Open a project first",
+              description: "Scheduled agents run inside a project workspace.",
+            })
             return
           }
           void api
@@ -5606,7 +6121,11 @@ export default function NewLayout(props: ParentProps) {
           const action = api?.setPaused ? api.setPaused(id, paused) : paused ? api?.cancel(id) : undefined
           void Promise.resolve(action).then(() => refreshScheduledAgents())
         }}
-        onDelete={(id) => void scheduledAgentsApi()?.remove(id).then((records) => setScheduledAgentRecords(records))}
+        onDelete={(id) =>
+          void scheduledAgentsApi()
+            ?.remove(id)
+            .then((records) => setScheduledAgentRecords(records))
+        }
       />
 
       <AgentDashboard

@@ -77,8 +77,8 @@ export type {
 } from "../main/spend-limits"
 import type { FailureMemory } from "../main/failure-memory"
 export type { FailureMemory, FailureRepair, FailureSignatureRecord } from "../main/failure-memory"
-import type { AgentTeam, TeamMessage, TeamTopology } from "../main/agent-team-model"
-export type { AgentTeam, TeamMessage, TeamTopology } from "../main/agent-team-model"
+import type { AgentTeam, TeamCollaborationGraph, TeamMessage, TeamTopology } from "../main/agent-team-model"
+export type { AgentTeam, TeamCollaborationGraph, TeamLink, TeamMessage, TeamTopology } from "../main/agent-team-model"
 export type { LocalMemoryState } from "../main/local-memory"
 export type { PullRequestCliStatus, PullRequestDetail, PullRequestSummary } from "../main/github-pr"
 export type {
@@ -188,15 +188,22 @@ export type AgentTeamsAPI = {
   }) => Promise<AgentTeam>
   addMember: (teamId: string, workspaceId: string) => Promise<AgentTeam | undefined>
   removeMember: (teamId: string, workspaceId: string) => Promise<AgentTeam | undefined>
+  // Routing can refuse a message when the collaboration graph does not link the
+  // two members, so this reports the outcome rather than a team snapshot.
   post: (input: {
     teamId: string
     fromWorkspaceId: string
     fromName: string
     toWorkspaceId?: string
     text: string
-  }) => Promise<AgentTeam | undefined>
+    memberNames?: Record<string, string>
+  }) => Promise<
+    { ok: true; team?: AgentTeam; recipients: string[] } | { ok: false; reason: string; allowedRecipients: string[] }
+  >
   claim: (teamId: string, workspaceId: string) => Promise<TeamMessage[]>
   delete: (teamId: string) => Promise<void>
+  getGraph: (teamId: string) => Promise<TeamCollaborationGraph | undefined>
+  setGraph: (teamId: string, graph: TeamCollaborationGraph | undefined) => Promise<AgentTeam | undefined>
 }
 
 export type RuntimeAPI = {

@@ -20,11 +20,13 @@ import {
   createAgentTeam,
   deleteAgentTeam,
   getAgentTeam,
+  getCollaborationGraph,
   listAgentTeams,
   postTeamMessage,
   removeTeamMember,
+  setCollaborationGraph,
 } from "./agent-teams"
-import type { TeamTopology } from "./agent-team-model"
+import type { TeamCollaborationGraph, TeamTopology } from "./agent-team-model"
 import {
   createPullRequest,
   listPullRequests,
@@ -263,6 +265,10 @@ export function registerIpcHandlers(deps: Deps) {
   )
   handle("agent-teams-claim", (_event, teamId: string, workspaceId: string) => claimPendingMessages(teamId, workspaceId))
   handle("agent-teams-delete", (_event, teamId: string) => deleteAgentTeam(teamId))
+  handle("agent-teams-get-graph", (_event, teamId: string) => getCollaborationGraph(teamId))
+  handle("agent-teams-set-graph", (_event, teamId: string, graph: TeamCollaborationGraph | undefined) =>
+    setCollaborationGraph(teamId, graph),
+  )
   handle("convert-heic", (_event, bytes: Uint8Array) => convertHeicToJpeg(new Uint8Array(bytes)))
   handle("runtime-ensure", (_event, name: RuntimeName) => ensureRuntime(name))
   handle("runtime-prepare-plugin-command", (_event, command: string[]) =>

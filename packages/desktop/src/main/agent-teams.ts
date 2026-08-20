@@ -3,9 +3,17 @@ import { randomUUID } from "node:crypto"
 import { getStore } from "./store"
 import {
   appendMessage,
+  effectiveCollaborationGraph,
   markDelivered,
   pendingFor,
+  pruneCollaborationGraph,
+  routeMessage,
+  validateCollaborationGraph,
+  ROUTER_NAME,
+  ROUTER_WORKSPACE_ID,
   type AgentTeam,
+  type TeamCollaborationGraph,
+  type TeamLink,
   type TeamMessage,
   type TeamTopology,
 } from "./agent-team-model"
@@ -27,6 +35,7 @@ function readTeams(): AgentTeam[] {
     .map((team) => ({
       ...team,
       memberIds: Array.isArray(team.memberIds) ? team.memberIds : [],
+      collaboration: readGraph(team.collaboration),
       messages: Array.isArray(team.messages)
         ? team.messages.map((message) => ({
             ...message,
@@ -34,6 +43,23 @@ function readTeams(): AgentTeam[] {
           }))
         : [],
     }))
+}
+
+// A team stored before selective pairing has no `collaboration` key and must
+// stay that way: `undefined` is the all-to-all default, while `{ links: [] }`
+// is a deliberate "nobody may talk" the user chose. Malformed data therefore
+// degrades to the default rather than to silence — a bad read that muted a
+// running team would look exactly like the agents having nothing to say.
+function readGraph(value: unknown): TeamCollaborationGraph | undefined {
+  const links = (value as { links?: unknown } | null | undefined)?.links
+  if (!Array.isArray(links)) return undefined
+  return {
+    links: links.flatMap((entry) => {
+      const link = entry as Partial<TeamLink> | null
+      if (typeof link?.from !== "string" || typeof link.to !== "string") return []
+      return [{ from: link.from, to: link.to, mutual: link.mutual === true }]
+    }),
+  }
 }
 
 function writeTeams(teams: AgentTeam[]) {
@@ -88,6 +114,10 @@ export function createAgentTeam(input: {
   return team
 }
 
+// A member joining a team that has an explicit graph starts with no links, and
+// so can neither message nor be messaged until the user pairs it. Auto-linking
+// it to everyone would quietly undo the pairing the user configured; the new
+// member instead gets an actionable refusal the first time it tries to speak.
 export function addTeamMember(teamId: string, workspaceId: string) {
   return updateTeam(teamId, (team) =>
     team.memberIds.includes(workspaceId) ? team : { ...team, memberIds: [...team.memberIds, workspaceId] },
@@ -95,7 +125,30 @@ export function addTeamMember(teamId: string, workspaceId: string) {
 }
 
 export function removeTeamMember(teamId: string, workspaceId: string) {
-  return updateTeam(teamId, (team) => ({ ...team, memberIds: team.memberIds.filter((id) => id !== workspaceId) }))
+  return updateTeam(teamId, (team) => {
+    const memberIds = team.memberIds.filter((id) => id !== workspaceId)
+    return { ...team, memberIds, collaboration: pruneCollaborationGraph(team.collaboration, memberIds) }
+  })
+}
+
+// `explicit` tells a UI whether it is looking at a stored graph or at the
+// all-to-all default rendered for editing. Saving the returned graph unchanged
+// pins today's behaviour in place, which is the honest result of a user opening
+// the pairing editor and pressing save.
+export function getCollaborationGraph(teamId: string) {
+  const team = getAgentTeam(teamId)
+  if (!team) return undefined
+  return { explicit: Boolean(team.collaboration), graph: effectiveCollaborationGraph(team) }
+}
+
+// Pass `undefined` to clear the graph and return the team to all-to-all.
+// Pass `{ links: [] }` to make every member work alone.
+export function setCollaborationGraph(teamId: string, graph: TeamCollaborationGraph | undefined) {
+  const team = getAgentTeam(teamId)
+  if (!team) return { ok: false as const, errors: ["That team no longer exists."] }
+  const errors = graph ? validateCollaborationGraph(team.memberIds, graph) : []
+  if (errors.length) return { ok: false as const, errors }
+  return { ok: true as const, errors, team: updateTeam(teamId, (current) => ({ ...current, collaboration: graph })) }
 }
 
 export function postTeamMessage(input: {
@@ -104,9 +157,53 @@ export function postTeamMessage(input: {
   fromName: string
   toWorkspaceId?: string
   text: string
+  memberNames?: Record<string, string>
 }) {
   const text = input.text.trim()
-  if (!text) return undefined
+  if (!text)
+    return { ok: false as const, reason: "Message not delivered: the message body was empty.", allowedRecipients: [] }
+  const team = getAgentTeam(input.teamId)
+  if (!team)
+    return { ok: false as const, reason: "Message not delivered: that team no longer exists.", allowedRecipients: [] }
+
+  const routing = routeMessage(team, {
+    fromWorkspaceId: input.fromWorkspaceId,
+    toWorkspaceId: input.toWorkspaceId,
+    memberNames: input.memberNames,
+  })
+  // A refused message addressed to a named teammate is bounced back to its
+  // sender instead of dropped. The send tool runs in the engine sidecar and has
+  // already returned "queued" by the time routing happens, so this notice is
+  // the only way the agent learns that nobody received the work it delegated.
+  //
+  // A refused broadcast is not bounced: broadcasts include the per-step handoff
+  // the orchestrator sends on the agent's behalf, and a notice on every step
+  // would crowd out the agent's own task with news it cannot act on. Callers
+  // get `reason` back and should surface that to the user instead.
+  if (!routing.ok)
+    return {
+      ok: false as const,
+      reason: routing.reason,
+      allowedRecipients: routing.allowedRecipients,
+      team:
+        input.toWorkspaceId && team.memberIds.includes(input.fromWorkspaceId)
+          ? updateTeam(team.id, (current) =>
+              appendMessage(current, {
+                id: randomUUID(),
+                teamId: team.id,
+                fromWorkspaceId: ROUTER_WORKSPACE_ID,
+                fromName: ROUTER_NAME,
+                toWorkspaceId: input.fromWorkspaceId,
+                // Echo enough of the original for the agent to recognise which
+                // send failed, but not a whole pasted diff back into its prompt.
+                text: `${routing.reason}\n\nThe message you tried to send began:\n${text.slice(0, 800)}`,
+                createdAt: now(),
+                deliveredTo: [],
+              }),
+            )
+          : undefined,
+    }
+
   const message: TeamMessage = {
     id: randomUUID(),
     teamId: input.teamId,
@@ -117,7 +214,11 @@ export function postTeamMessage(input: {
     createdAt: now(),
     deliveredTo: [],
   }
-  return updateTeam(input.teamId, (team) => appendMessage(team, message))
+  return {
+    ok: true as const,
+    recipients: routing.recipients,
+    team: updateTeam(input.teamId, (current) => appendMessage(current, message)),
+  }
 }
 
 // Claims a member's pending messages and marks them delivered in one step, so

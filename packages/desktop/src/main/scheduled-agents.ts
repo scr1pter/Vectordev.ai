@@ -10,8 +10,28 @@ const TICK_INTERVAL_MS = 20_000
 const COMPLETION_POLL_MS = 1_500
 const COMPLETION_TIMEOUT_MS = 6 * 60 * 60_000
 const STARTUP_GRACE_MS = 3_000
+// Ceiling on how far a missed schedule is walked forward when catching up. Two
+// years of daily occurrences fit comfortably; past that the record re-anchors
+// wherever the walk stopped rather than spinning on a pathological rule.
+const MAX_CATCH_UP_OCCURRENCES = 800
 
 export type ScheduledAgentStatus = "scheduled" | "running" | "completed" | "failed" | "canceled"
+
+// One place a scheduled task runs. A task can carry several of these, which is
+// how the same prompt runs across repositories on one schedule.
+export type ScheduledAgentTarget = {
+  directory: string
+  // When set, the run continues this existing engine session instead of opening
+  // a new one, so a recurring task can keep adding to an established thread.
+  sessionId?: string
+}
+
+export type ScheduledAgentTargetResult = ScheduledAgentTarget & {
+  status: "running" | "completed" | "failed" | "canceled"
+  startedAt: string
+  completedAt?: string
+  error?: string
+}
 
 export type ScheduledAgentRecord = {
   id: string
@@ -21,15 +41,31 @@ export type ScheduledAgentRecord = {
   // recurrence existed is.
   recurrence?: Recurrence
   paused?: boolean
+  // The first target's directory, mirrored here so records written before
+  // multi-repo targeting — and every consumer that still reads a single
+  // directory — keep working without a migration step.
   directory: string
+  // Absent on single-directory records, which are left in their original shape
+  // so an older build reading this store still understands them.
+  targets?: ScheduledAgentTarget[]
   parentSessionId?: string
   runAt: string
+  // The recurrence occurrence this pending run belongs to, set only when runAt
+  // was pulled forward by a manual run. The following occurrence is computed
+  // from this, so running a task by hand never shifts its schedule.
+  scheduledFor?: string
   status: ScheduledAgentStatus
   createdAt: string
   startedAt?: string
   completedAt?: string
+  // The first target's session, kept for consumers that open "the" session of a
+  // run. The full set lives in `results`.
   sessionId?: string
   error?: string
+  results?: ScheduledAgentTargetResult[]
+  // Occurrences that elapsed unrun while Vector was closed. The single run that
+  // just finished stands in for all of them; they are never replayed.
+  missedRuns?: number
 }
 
 // Same shape as ServerReadyData; the IPC layer passes deps.awaitInitialization
@@ -44,52 +80,78 @@ export type CreateScheduledAgentInput = {
   title?: string
   recurrence?: Recurrence
   prompt: string
-  directory: string
+  // Either of these picks where the task runs; `targets` wins when both are
+  // given. `directory` stays accepted so existing callers are untouched.
+  directory?: string
+  targets?: ScheduledAgentTarget[]
   parentSessionId?: string
   runAt: string
 }
 
-const now = () => new Date().toISOString()
-
-let engineProvider: (() => Promise<ScheduledAgentEngine>) | undefined
-let tickTimer: NodeJS.Timeout | undefined
-let tickInProgress = false
-const activeRuns = new Set<string>()
-// One slot each rather than a listener list: the main process has exactly one
-// tray, and this module must never keep a torn-down one alive.
-let changeListener: (() => void) | undefined
-let runFinishedListener: ((record: ScheduledAgentRecord) => void) | undefined
-
-// Lets the tray redraw its menu the moment the schedule changes, instead of
-// waiting out its own refresh interval and showing a stale count.
-export function onScheduledAgentsChanged(listener: () => void) {
-  changeListener = listener
+export type ScheduledAgentsStore = {
+  get: (key: string) => unknown
+  set: (key: string, value: unknown) => void
 }
 
-export function onScheduledAgentRunFinished(listener: (record: ScheduledAgentRecord) => void) {
-  runFinishedListener = listener
+// Returns the parsed JSON body, which is untrusted: every caller narrows it
+// itself rather than pretending the engine promised a shape.
+export type ScheduledAgentRequest = (
+  engine: ScheduledAgentEngine,
+  path: string,
+  init?: { method?: string; body?: unknown },
+) => Promise<unknown>
+
+// The targets a record runs against. A record from before multi-repo targeting
+// has no `targets` array at all, and reads as the single directory it always
+// was — that is the whole compatibility story, no rewrite of the store.
+export function scheduledAgentTargets(
+  record: Pick<ScheduledAgentRecord, "directory" | "targets">,
+): ScheduledAgentTarget[] {
+  const listed = record.targets?.filter((target) => typeof target?.directory === "string" && target.directory !== "")
+  if (listed && listed.length > 0) return listed
+  return [{ directory: record.directory }]
 }
 
-function readRecords(): ScheduledAgentRecord[] {
-  const raw = getStore(STORE_NAME).get(STORE_KEY)
-  if (!Array.isArray(raw)) return []
-  return raw.filter((item): item is ScheduledAgentRecord => typeof item?.id === "string")
+// The next occurrence of a recurring task, walked forward from the slot it was
+// meant to run at rather than from the clock. Anchoring on the slot is what
+// stops a late start or a six-hour run from dragging every future run later and
+// later. Occurrences that fully elapsed while Vector was closed are counted and
+// skipped, never replayed: the run that just happened is the single catch-up
+// for the entire missed window.
+export function advanceSchedule(
+  recurrence: Recurrence,
+  slot: Date,
+  from: Date,
+  skipped = 0,
+): { next: Date; skipped: number } | undefined {
+  const next = nextRun(recurrence, slot)
+  if (!next || !Number.isFinite(next.getTime())) return undefined
+  if (next > from || skipped >= MAX_CATCH_UP_OCCURRENCES) return { next, skipped }
+  return advanceSchedule(recurrence, next, from, skipped + 1)
 }
 
-function writeRecords(records: ScheduledAgentRecord[]) {
-  getStore(STORE_NAME).set(STORE_KEY, records)
-  // Every mutation funnels through here, so this is the one place that has to
-  // announce a change.
-  changeListener?.()
+// Says out loud that a burst was collapsed, so the tray and the panel can admit
+// the task did not run while the app was closed instead of quietly pretending
+// it kept up.
+export function describeCatchUp(record: Pick<ScheduledAgentRecord, "missedRuns">): string | undefined {
+  if (!record.missedRuns) return undefined
+  const missed = record.missedRuns === 1 ? "1 earlier run was" : `${record.missedRuns} earlier runs were`
+  return `Caught up with a single run; ${missed} missed while Vector was closed and will not be replayed.`
 }
 
-function updateRecord(id: string, update: (record: ScheduledAgentRecord) => ScheduledAgentRecord) {
-  const records = readRecords()
-  const index = records.findIndex((record) => record.id === id)
-  if (index === -1) throw new Error("Scheduled agent was not found.")
-  records[index] = update(records[index]!)
-  writeRecords(records)
-  return records[index]!
+// Pausing parks a pending run; resuming re-arms it. Resuming must not
+// resurrect a one-shot run that already finished — that would execute the
+// task a second time. A recurring task is different: its whole purpose is to
+// fire again, and a pause that straddled a run leaves it "completed" (see the
+// `!item.paused` branch in the completion handler), so resuming has to put it
+// back on the schedule.
+export function pausedStatus(
+  record: Pick<ScheduledAgentRecord, "status" | "recurrence">,
+  paused: boolean,
+): ScheduledAgentStatus {
+  if (paused) return record.status === "scheduled" ? "canceled" : record.status
+  if (record.recurrence && record.recurrence.kind !== "once") return "scheduled"
+  return record.status === "canceled" ? "scheduled" : record.status
 }
 
 function engineHeaders(engine: ScheduledAgentEngine) {
@@ -103,11 +165,7 @@ function engineHeaders(engine: ScheduledAgentEngine) {
   return headers
 }
 
-async function engineRequest<T>(
-  engine: ScheduledAgentEngine,
-  path: string,
-  init: { method?: string; body?: unknown } = {},
-) {
+const engineRequest: ScheduledAgentRequest = async (engine, path, init = {}) => {
   const base = engine.url.endsWith("/") ? engine.url : `${engine.url}/`
   const response = await fetch(new URL(path.replace(/^\//, ""), base), {
     method: init.method ?? "GET",
@@ -118,25 +176,9 @@ async function engineRequest<T>(
     const body = await response.text().catch(() => "")
     throw new Error(`Vector engine request failed (${response.status})${body ? `: ${body.slice(0, 500)}` : ""}`)
   }
-  if (response.status === 204) return undefined as T
+  if (response.status === 204) return undefined
   const text = await response.text()
-  return (text ? JSON.parse(text) : undefined) as T
-}
-
-function reconcileInterruptedRecords(records: ScheduledAgentRecord[]) {
-  let changed = false
-  const next = records.map((record) => {
-    if (record.status !== "running" || activeRuns.has(record.id)) return record
-    changed = true
-    return {
-      ...record,
-      status: "failed" as const,
-      completedAt: now(),
-      error: "Interrupted by app restart before the agent completed.",
-    }
-  })
-  if (changed) writeRecords(next)
-  return next
+  return text ? JSON.parse(text) : undefined
 }
 
 type EngineMessageResponse = {
@@ -148,8 +190,6 @@ type EngineMessageResponse = {
     }
   }>
 }
-
-const delay = (milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds))
 
 function activeSessionMap(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object") return {}
@@ -170,265 +210,556 @@ function assistantFailure(response: EngineMessageResponse) {
   }
 }
 
-async function abortEngineSession(engine: ScheduledAgentEngine, sessionId: string) {
-  await engineRequest(engine, `/api/session/${encodeURIComponent(sessionId)}/abort`, { method: "POST" }).catch(() => {})
-}
+const failureMessage = (error: unknown) => (error instanceof Error ? error.message : String(error))
 
-async function waitForSessionCompletion(engine: ScheduledAgentEngine, recordId: string, sessionId: string) {
-  const startedAt = Date.now()
-  let observedActive = false
-  while (Date.now() - startedAt < COMPLETION_TIMEOUT_MS) {
-    const record = readRecords().find((item) => item.id === recordId)
-    if (!record || record.status === "canceled") {
+export function createScheduledAgents(
+  deps: {
+    store?: ScheduledAgentsStore
+    now?: () => Date
+    request?: ScheduledAgentRequest
+    delay?: (milliseconds: number) => Promise<void>
+  } = {},
+) {
+  // Resolved per call rather than captured, because electron-store cannot be
+  // instantiated before app.setPath("userData", ...) has run.
+  const store = deps.store ?? {
+    get: (key: string) => getStore(STORE_NAME).get(key),
+    set: (key: string, value: unknown) => getStore(STORE_NAME).set(key, value),
+  }
+  const clock = deps.now ?? (() => new Date())
+  const transport = deps.request ?? engineRequest
+  // The engine's JSON is untrusted, so this is the one place that pretends
+  // otherwise: every call site declares the shape it reads and treats every
+  // field in it as optional.
+  const request = <T>(engine: ScheduledAgentEngine, path: string, init?: { method?: string; body?: unknown }) =>
+    transport(engine, path, init) as Promise<T>
+  const delay =
+    deps.delay ?? ((milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)))
+
+  const activeRuns = new Set<string>()
+  const inFlight = new Set<Promise<void>>()
+  let engineProvider: (() => Promise<ScheduledAgentEngine>) | undefined
+  let tickTimer: NodeJS.Timeout | undefined
+  // One slot each rather than a listener list: the main process has exactly one
+  // tray, and this module must never keep a torn-down one alive.
+  let changeListener: (() => void) | undefined
+  let runFinishedListener: ((record: ScheduledAgentRecord) => void) | undefined
+
+  const nowIso = () => clock().toISOString()
+
+  function readRecords(): ScheduledAgentRecord[] {
+    const raw = store.get(STORE_KEY)
+    if (!Array.isArray(raw)) return []
+    return raw.filter((item): item is ScheduledAgentRecord => typeof item?.id === "string")
+  }
+
+  function writeRecords(records: ScheduledAgentRecord[]) {
+    store.set(STORE_KEY, records)
+    // Every mutation funnels through here, so this is the one place that has to
+    // announce a change.
+    changeListener?.()
+  }
+
+  function updateRecord(id: string, update: (record: ScheduledAgentRecord) => ScheduledAgentRecord) {
+    const records = readRecords()
+    const index = records.findIndex((record) => record.id === id)
+    if (index === -1) throw new Error("Scheduled agent was not found.")
+    records[index] = update(records[index]!)
+    writeRecords(records)
+    return records[index]!
+  }
+
+  // A record left "running" by a crash is settled the same way a run that ends
+  // badly is: reported as failed, but a recurring task is put back on its
+  // schedule so one bad shutdown does not silently end the automation.
+  function reconcileInterruptedRecords(records: ScheduledAgentRecord[]) {
+    const interrupted = records.filter((record) => record.status === "running" && !activeRuns.has(record.id))
+    if (interrupted.length === 0) return records
+    const next = records.map((record) => {
+      if (!interrupted.includes(record)) return record
+      return settledRecord(record, "Interrupted by app restart before the agent completed.", record.results)
+    })
+    writeRecords(next)
+    return next
+  }
+
+  function settledRecord(
+    record: ScheduledAgentRecord,
+    error: string | undefined,
+    results: ScheduledAgentTargetResult[] | undefined,
+  ): ScheduledAgentRecord {
+    const completedAt = nowIso()
+    // A target still marked running never gets to finish — the run is over —
+    // so it inherits the failure rather than sitting in the store as in-flight.
+    const settled = results?.map((result) =>
+      result.status === "running" ? { ...result, status: "failed" as const, completedAt, error } : result,
+    )
+    // One repository failing must not condemn the whole task: a run counts as
+    // failed only when nothing succeeded anywhere. Partial failures stay
+    // visible through `error` and the per-target results.
+    const status = (settled ?? []).some((result) => result.status === "completed") || !error ? "completed" : "failed"
+    const anchor = new Date(record.scheduledFor ?? record.runAt)
+    const advanced =
+      record.recurrence && record.recurrence.kind !== "once" && !record.paused
+        ? advanceSchedule(record.recurrence, Number.isFinite(anchor.getTime()) ? anchor : clock(), clock())
+        : undefined
+    if (!advanced) {
+      return { ...record, status, completedAt, error, results: settled, scheduledFor: undefined, missedRuns: undefined }
+    }
+    // A recurring task returns to "scheduled" at its next occurrence rather
+    // than finishing, which is what makes it repeat — including after a failure,
+    // because a daily task that dies on one bad morning is not a schedule.
+    return {
+      ...record,
+      status: "scheduled",
+      completedAt,
+      error,
+      results: settled,
+      runAt: advanced.next.toISOString(),
+      scheduledFor: undefined,
+      missedRuns: advanced.skipped || undefined,
+    }
+  }
+
+  async function abortEngineSession(engine: ScheduledAgentEngine, sessionId: string) {
+    await request(engine, `/api/session/${encodeURIComponent(sessionId)}/abort`, { method: "POST" }).catch(() => {})
+  }
+
+  async function waitForSessionCompletion(engine: ScheduledAgentEngine, recordId: string, sessionId: string) {
+    const startedAt = clock().getTime()
+    let observedActive = false
+    while (clock().getTime() - startedAt < COMPLETION_TIMEOUT_MS) {
+      const record = readRecords().find((item) => item.id === recordId)
+      if (!record || record.status === "canceled") {
+        await abortEngineSession(engine, sessionId)
+        return "canceled" as const
+      }
+
+      // Scheduled agents run on the V2 session engine. Active sessions are
+      // present in this registry and disappear only after the execution loop
+      // settles, which avoids marking a merely admitted prompt as complete.
+      const sessions = activeSessionMap(await request(engine, "/api/session/active"))
+      const active = Boolean(sessions[sessionId])
+      if (active) observedActive = true
+      if (!active && (observedActive || clock().getTime() - startedAt >= STARTUP_GRACE_MS)) {
+        const messages = await request<EngineMessageResponse | undefined>(
+          engine,
+          `/api/session/${encodeURIComponent(sessionId)}/message?limit=20`,
+        )
+        const outcome = assistantFailure(messages ?? {})
+        if (!outcome.settled) {
+          await delay(COMPLETION_POLL_MS)
+          continue
+        }
+        if (outcome.error) throw new Error(outcome.error)
+        return "completed" as const
+      }
+      await delay(COMPLETION_POLL_MS)
+    }
+    await abortEngineSession(engine, sessionId)
+    throw new Error("Scheduled agent exceeded the six-hour completion limit and was stopped.")
+  }
+
+  function patchResult(
+    id: string,
+    index: number,
+    update: (result: ScheduledAgentTargetResult) => ScheduledAgentTargetResult,
+  ) {
+    const record = updateRecord(id, (current) => {
+      const results = [...(current.results ?? [])]
+      const existing = results[index] ?? {
+        ...scheduledAgentTargets(current)[index],
+        status: "running" as const,
+        startedAt: nowIso(),
+      }
+      results[index] = update(existing)
+      return { ...current, results, sessionId: results[0]?.sessionId ?? current.sessionId }
+    })
+    return record.results?.[index]
+  }
+
+  async function promptTarget(
+    engine: ScheduledAgentEngine,
+    id: string,
+    index: number,
+    target: ScheduledAgentTarget,
+    prompt: string,
+  ) {
+    // An existing session is continued, not duplicated: that is what lets a
+    // recurring task keep appending to one established thread.
+    const sessionId = target.sessionId ?? (await openSession(engine, target.directory))
+    patchResult(id, index, (result) => ({ ...result, sessionId }))
+    if (readRecords().find((item) => item.id === id)?.status === "canceled") {
       await abortEngineSession(engine, sessionId)
       return "canceled" as const
     }
-
-    // Scheduled agents run on the V2 session engine. Active sessions are
-    // present in this registry and disappear only after the execution loop
-    // settles, which avoids marking a merely admitted prompt as complete.
-    const sessions = activeSessionMap(await engineRequest<unknown>(engine, "/api/session/active"))
-    const active = Boolean(sessions[sessionId])
-    if (active) observedActive = true
-    if (!active && (observedActive || Date.now() - startedAt >= STARTUP_GRACE_MS)) {
-      const messages = await engineRequest<EngineMessageResponse>(
-        engine,
-        `/api/session/${encodeURIComponent(sessionId)}/message?limit=20`,
-      )
-      const outcome = assistantFailure(messages)
-      if (!outcome.settled) {
-        await delay(COMPLETION_POLL_MS)
-        continue
-      }
-      if (outcome.error) throw new Error(outcome.error)
-      return "completed" as const
-    }
-    await delay(COMPLETION_POLL_MS)
-  }
-  await abortEngineSession(engine, sessionId)
-  throw new Error("Scheduled agent exceeded the six-hour completion limit and was stopped.")
-}
-
-async function launchScheduledAgent(id: string, awaitEngine: () => Promise<ScheduledAgentEngine>) {
-  activeRuns.add(id)
-  let finished: ScheduledAgentRecord | undefined
-  try {
-    updateRecord(id, (current) => ({ ...current, status: "running", startedAt: now(), error: undefined }))
-    const record = readRecords().find((item) => item.id === id)
-    if (!record) throw new Error("Scheduled agent was not found.")
-
-    const engine = await awaitEngine()
-    const created = await engineRequest<{ data?: { id?: string } }>(engine, "/api/session", {
+    await request(engine, `/api/session/${encodeURIComponent(sessionId)}/prompt`, {
       method: "POST",
-      body: { location: { directory: record.directory } },
+      body: { prompt: { text: prompt }, resume: true },
+    })
+    return waitForSessionCompletion(engine, id, sessionId)
+  }
+
+  async function openSession(engine: ScheduledAgentEngine, directory: string) {
+    const created = await request<{ data?: { id?: string } } | undefined>(engine, "/api/session", {
+      method: "POST",
+      body: { location: { directory } },
     })
     const sessionId = created?.data?.id
     if (!sessionId) throw new Error("Vector's engine did not return a session ID for the scheduled agent.")
-    const current = updateRecord(id, (item) => ({ ...item, sessionId }))
-    if (current.status === "canceled") {
-      await abortEngineSession(engine, sessionId)
-      return
-    }
-
-    await engineRequest(engine, `/api/session/${encodeURIComponent(sessionId)}/prompt`, {
-      method: "POST",
-      body: { prompt: { text: record.prompt }, resume: true },
-    })
-
-    const outcome = await waitForSessionCompletion(engine, id, sessionId)
-    if (outcome === "canceled") return
-    finished = updateRecord(id, (item) => {
-      const completedAt = now()
-      // A recurring task returns to "scheduled" at its next moment rather than
-      // finishing, which is what makes it repeat. nextRun is always strictly in
-      // the future, so it cannot immediately re-fire.
-      const upcoming =
-        item.recurrence && item.recurrence.kind !== "once" && !item.paused
-          ? nextRun(item.recurrence, new Date())
-          : undefined
-      if (!upcoming) {
-        return { ...item, status: "completed", completedAt, sessionId, error: undefined }
-      }
-      return {
-        ...item,
-        status: "scheduled",
-        completedAt,
-        runAt: upcoming.toISOString(),
-        sessionId,
-        error: undefined,
-      }
-    })
-  } finally {
-    activeRuns.delete(id)
-    // Announced only after the run leaves activeRuns, so the tray refresh this
-    // triggers no longer counts the finished run as still in flight.
-    if (finished) runFinishedListener?.(finished)
+    return sessionId
   }
-}
 
-async function runDueScheduledAgents() {
-  if (tickInProgress || !engineProvider) return
-  tickInProgress = true
-  try {
-    const nowMs = Date.now()
-    const due = readRecords().filter((record) => {
-      if (record.status !== "scheduled") return false
-      const runAtMs = Date.parse(record.runAt)
-      // A record with an unreadable time can never become due later; fire it
-      // now instead of leaving it stuck as "scheduled" forever.
-      if (record.paused) return false
-      return !Number.isFinite(runAtMs) || runAtMs <= nowMs
-    })
-    for (const record of due) {
-      void launchScheduledAgent(record.id, engineProvider).catch((error) => {
-        const message = error instanceof Error ? error.message : String(error)
-        try {
-          const failed = updateRecord(record.id, (current) =>
-            current.status === "canceled"
-              ? current
-              : { ...current, status: "failed", completedAt: now(), error: message },
-          )
-          // A run the user cancelled mid-flight is not a finish worth announcing.
-          if (failed.status === "failed") runFinishedListener?.(failed)
-        } catch {
-          // The record was removed mid-run; there is nothing left to mark.
+  // Every target settles on its own. A repository that throws is recorded as a
+  // failed target and nothing more — the other targets are already in flight
+  // beside it and are never cancelled by it.
+  async function runTarget(
+    engine: ScheduledAgentEngine,
+    id: string,
+    index: number,
+    target: ScheduledAgentTarget,
+    prompt: string,
+  ) {
+    const outcome = await promptTarget(engine, id, index, target, prompt).then(
+      (status) => ({ status }),
+      (error) => ({ status: "failed" as const, error: failureMessage(error) }),
+    )
+    return patchResult(id, index, (result) => ({
+      ...result,
+      status: outcome.status,
+      completedAt: nowIso(),
+      error: "error" in outcome ? outcome.error : undefined,
+    }))
+  }
+
+  async function launch(id: string, awaitEngine: () => Promise<ScheduledAgentEngine>) {
+    activeRuns.add(id)
+    let finished: ScheduledAgentRecord | undefined
+    try {
+      // Marking the record running happens before the first await, so a tick
+      // that overlaps this one can never select the same record twice.
+      const started = updateRecord(id, (current) => ({
+        ...current,
+        status: "running",
+        startedAt: nowIso(),
+        error: undefined,
+        results: scheduledAgentTargets(current).map((target) => ({
+          ...target,
+          status: "running" as const,
+          startedAt: nowIso(),
+        })),
+      }))
+
+      const engine = await awaitEngine()
+      const results = await Promise.all(
+        scheduledAgentTargets(started).map((target, index) => runTarget(engine, id, index, target, started.prompt)),
+      )
+      // patchResult returns undefined when the record moved out from under a
+      // target mid-run. Compacting those holes would shift every later entry,
+      // and the renderer pairs results to targets by position — so a single hole
+      // would relabel every repository after it with another one's outcome.
+      // Fill the hole instead, which keeps the pairing and is honest that the
+      // target never reported.
+      const targets = scheduledAgentTargets(started)
+      const settled = results.map((result, index) => {
+        if (result) return result
+        return {
+          ...targets[index]!,
+          status: "failed" as const,
+          startedAt: started.results?.[index]?.startedAt ?? nowIso(),
+          completedAt: nowIso(),
+          error: "The scheduled task changed while this repository was running, so its result was lost.",
         }
       })
+      const failures = settled.filter((result) => result.status === "failed")
+      finished = updateRecord(id, (current) => {
+        // A run the user cancelled mid-flight stays cancelled; rescheduling it
+        // here would undo the cancel the user just asked for.
+        if (current.status === "canceled") return current
+        return settledRecord(
+          current,
+          failures.length === 0
+            ? undefined
+            : failures
+                .map((result) => `${result.directory}: ${result.error ?? "The scheduled agent failed."}`)
+                .join("; ")
+                .slice(0, 500),
+          settled,
+        )
+      })
+      if (finished.status === "canceled") finished = undefined
+    } finally {
+      activeRuns.delete(id)
+      // Announced only after the run leaves activeRuns, so the tray refresh this
+      // triggers no longer counts the finished run as still in flight.
+      if (finished) runFinishedListener?.(finished)
     }
-  } finally {
-    tickInProgress = false
+  }
+
+  // Selection and every launch start synchronously — a record is marked running
+  // before the first await — so a tick that overlaps another never picks the
+  // same record twice, and a six-hour run never stops a later tick from
+  // starting other records.
+  async function tick() {
+    if (!engineProvider) return
+    const provider = engineProvider
+    const nowMs = clock().getTime()
+    readRecords()
+      .filter((record) => {
+        if (record.status !== "scheduled" || record.paused) return false
+        if (activeRuns.has(record.id)) return false
+        const runAtMs = Date.parse(record.runAt)
+        // A record with an unreadable time can never become due later; fire it
+        // now instead of leaving it stuck as "scheduled" forever.
+        return !Number.isFinite(runAtMs) || runAtMs <= nowMs
+      })
+      .forEach((record) => {
+        const run: Promise<void> = launch(record.id, provider)
+          .catch((error) => {
+            const failed = failRecord(record.id, failureMessage(error))
+            // A run the user cancelled mid-flight is not a finish worth announcing.
+            if (failed && failed.status !== "canceled") runFinishedListener?.(failed)
+          })
+          .finally(() => inFlight.delete(run))
+        inFlight.add(run)
+      })
+    // Resolves only once the scheduler has nothing in flight at all, including
+    // runs an earlier tick started, which is what makes a tick awaitable.
+    while (inFlight.size > 0) await Promise.all(inFlight)
+  }
+
+  function failRecord(id: string, message: string) {
+    const record = readRecords().find((item) => item.id === id)
+    // The record was removed mid-run; there is nothing left to mark.
+    if (!record) return undefined
+    if (record.status === "canceled") return record
+    return updateRecord(id, (current) => settledRecord(current, message, current.results))
+  }
+
+  function list(scope?: { directory?: string; parentSessionId?: string }) {
+    return reconcileInterruptedRecords(readRecords()).filter((record) => {
+      if (!scope) return true
+      // A multi-repo task belongs to every repository it targets, so it shows up
+      // in each of their panels rather than only the first one's.
+      if (scope.directory && !scheduledAgentTargets(record).some((target) => target.directory === scope.directory)) {
+        return false
+      }
+      return record.parentSessionId === scope.parentSessionId
+    })
+  }
+
+  function setPaused(id: string, paused: boolean) {
+    return updateRecord(id, (record) => ({
+      ...record,
+      paused,
+      // Resuming a recurring task moves it to its next real moment; without this
+      // it would still hold a runAt in the past and fire immediately. The parked
+      // occurrence is abandoned rather than caught up.
+      runAt:
+        !paused && record.recurrence && record.recurrence.kind !== "once"
+          ? (nextRun(record.recurrence, clock())?.toISOString() ?? record.runAt)
+          : record.runAt,
+      scheduledFor: paused ? record.scheduledFor : undefined,
+      status: pausedStatus(record, paused),
+    }))
+  }
+
+  return {
+    start(awaitEngine: () => Promise<ScheduledAgentEngine>) {
+      if (tickTimer) return
+      engineProvider = awaitEngine
+      reconcileInterruptedRecords(readRecords())
+      tickTimer = setInterval(() => {
+        void tick()
+      }, TICK_INTERVAL_MS)
+    },
+
+    stop() {
+      if (tickTimer) clearInterval(tickTimer)
+      tickTimer = undefined
+    },
+
+    tick,
+    list,
+    setPaused,
+
+    onChanged(listener: () => void) {
+      changeListener = listener
+    },
+
+    onRunFinished(listener: (record: ScheduledAgentRecord) => void) {
+      runFinishedListener = listener
+    },
+
+    // What the tray shows and what the keep-alive decision runs on. Runs in
+    // flight come from the live in-process set rather than record status, so a
+    // record left "running" by a crash can never hold the app resident forever.
+    workState() {
+      const records = readRecords()
+      const armed = records.filter((record) => record.status === "scheduled" && !record.paused)
+      const upcoming = armed.map((record) => Date.parse(record.runAt)).filter((value) => Number.isFinite(value))
+      return {
+        armedTasks: armed.length,
+        inFlightRuns: activeRuns.size,
+        nextRunAt: upcoming.length === 0 ? undefined : Math.min(...upcoming),
+        // A paused record only counts as resumable if resuming would actually
+        // re-arm it; one that already ran to completion never will.
+        pausedTasks: records.filter((record) => record.paused === true && pausedStatus(record, false) === "scheduled")
+          .length,
+      }
+    },
+
+    // Pulls the soonest armed task forward instead of launching it directly, so
+    // a manual run still goes through the same due selection and failure
+    // bookkeeping as an ordinary tick.
+    runNext() {
+      const next = readRecords()
+        .filter((record) => record.status === "scheduled" && !record.paused)
+        // An unreadable runAt is already treated as due now by the tick, so the
+        // NaN-to-zero fallback keeps such a record sorted first here too.
+        .sort((left, right) => (Date.parse(left.runAt) || 0) - (Date.parse(right.runAt) || 0))
+        .at(0)
+      if (!next) return undefined
+      const pulled = updateRecord(next.id, (record) => ({
+        ...record,
+        // Remembering the occurrence being pulled forward is what keeps a manual
+        // run from shifting the recurrence to whenever the user pressed it.
+        scheduledFor: record.scheduledFor ?? record.runAt,
+        runAt: nowIso(),
+      }))
+      void tick()
+      return pulled
+    },
+
+    setAllPaused(paused: boolean) {
+      return readRecords()
+        .filter((record) =>
+          paused
+            ? record.status === "scheduled" && !record.paused
+            : record.paused === true && pausedStatus(record, false) === "scheduled",
+        )
+        .map((record) => setPaused(record.id, paused))
+    },
+
+    create(input: CreateScheduledAgentInput): ScheduledAgentRecord {
+      const prompt = input.prompt?.trim()
+      if (!prompt) throw new Error("Write a prompt for the scheduled agent to run.")
+      const targets = normalizeTargets(input)
+      if (targets.length === 0) throw new Error("Choose at least one project directory for the scheduled agent.")
+      const parsed = Date.parse(input.runAt)
+      if (!Number.isFinite(parsed)) throw new Error("The scheduled time is not a valid date.")
+
+      // Past times are clamped to now so the record fires on the next scheduler
+      // tick instead of being rejected.
+      const record: ScheduledAgentRecord = {
+        id: randomUUID(),
+        title: input.title?.trim() || prompt.split("\n")[0]?.slice(0, 80),
+        prompt,
+        directory: targets[0].directory,
+        // Left off entirely for a plain one-directory task, so those records
+        // stay exactly the shape earlier versions wrote and read.
+        targets: targets.length > 1 || targets[0].sessionId ? targets : undefined,
+        recurrence: input.recurrence,
+        paused: false,
+        parentSessionId: input.parentSessionId?.trim() || undefined,
+        runAt: new Date(Math.max(parsed, clock().getTime())).toISOString(),
+        status: "scheduled",
+        createdAt: nowIso(),
+      }
+      writeRecords([record, ...readRecords()])
+      return record
+    },
+
+    async cancel(id: string) {
+      const record = readRecords().find((item) => item.id === id)
+      if (!record) return undefined
+      if (record.status !== "scheduled" && record.status !== "running") return record
+      const canceled = updateRecord(id, (current) => ({ ...current, status: "canceled", completedAt: nowIso() }))
+      // Every session the run opened has to be stopped, not just the first one,
+      // or a cancelled fan-out keeps burning tokens in the other repositories.
+      const sessions = [record.sessionId, ...(record.results ?? []).map((result) => result.sessionId)].filter(
+        (value): value is string => typeof value === "string" && value !== "",
+      )
+      if (sessions.length === 0 || !engineProvider) return canceled
+      const engine = await engineProvider().catch(() => undefined)
+      if (engine) await Promise.all([...new Set(sessions)].map((sessionId) => abortEngineSession(engine, sessionId)))
+      return canceled
+    },
+
+    remove(id: string) {
+      const next = readRecords().filter((item) => item.id !== id)
+      writeRecords(next)
+      return next
+    },
   }
 }
+
+function normalizeTargets(input: Pick<CreateScheduledAgentInput, "directory" | "targets">) {
+  const listed = input.targets?.length
+    ? input.targets
+    : input.directory
+      ? [{ directory: input.directory }]
+      : ([] as ScheduledAgentTarget[])
+  const seen = new Set<string>()
+  return listed
+    .map((target) => ({ directory: target.directory?.trim() ?? "", sessionId: target.sessionId?.trim() || undefined }))
+    .filter((target) => target.directory !== "")
+    .filter((target) => {
+      const key = `${target.directory}\u0000${target.sessionId ?? ""}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+}
+
+// The main process runs exactly one scheduler. It is created on first use
+// rather than at import time because the store underneath it cannot exist
+// before Electron has settled its userData path.
+let shared: ReturnType<typeof createScheduledAgents> | undefined
+const scheduler = () => (shared ??= createScheduledAgents())
 
 export function initScheduledAgents(awaitEngine: () => Promise<ScheduledAgentEngine>): void {
-  if (tickTimer) return
-  engineProvider = awaitEngine
-  reconcileInterruptedRecords(readRecords())
-  tickTimer = setInterval(() => {
-    void runDueScheduledAgents()
-  }, TICK_INTERVAL_MS)
+  scheduler().start(awaitEngine)
 }
 
-// What the tray shows and what the keep-alive decision runs on. Runs in flight
-// come from the live in-process set rather than record status, so a record left
-// "running" by a crash can never hold the app resident forever.
-export function scheduledAgentWorkState() {
-  const records = readRecords()
-  const armed = records.filter((record) => record.status === "scheduled" && !record.paused)
-  const upcoming = armed.map((record) => Date.parse(record.runAt)).filter((value) => Number.isFinite(value))
-  return {
-    armedTasks: armed.length,
-    inFlightRuns: activeRuns.size,
-    nextRunAt: upcoming.length === 0 ? undefined : Math.min(...upcoming),
-    // A paused record only counts as resumable if resuming would actually
-    // re-arm it; one that already ran to completion never will.
-    pausedTasks: records.filter((record) => record.paused === true && pausedStatus(record, false) === "scheduled")
-      .length,
-  }
+// Lets the tray redraw its menu the moment the schedule changes, instead of
+// waiting out its own refresh interval and showing a stale count.
+export function onScheduledAgentsChanged(listener: () => void) {
+  scheduler().onChanged(listener)
 }
 
-// Pulls the soonest armed task forward instead of launching it directly, so a
-// manual run still goes through the same due selection and failure bookkeeping
-// as an ordinary tick.
-export function runNextScheduledAgent(): ScheduledAgentRecord | undefined {
-  const next = readRecords()
-    .filter((record) => record.status === "scheduled" && !record.paused)
-    // An unreadable runAt is already treated as due now by the tick, so the
-    // NaN-to-zero fallback keeps such a record sorted first here too.
-    .sort((left, right) => (Date.parse(left.runAt) || 0) - (Date.parse(right.runAt) || 0))
-    .at(0)
-  if (!next) return undefined
-  const pulled = updateRecord(next.id, (record) => ({ ...record, runAt: now() }))
-  void runDueScheduledAgents()
-  return pulled
-}
-
-export function setAllScheduledAgentsPaused(paused: boolean): ScheduledAgentRecord[] {
-  return readRecords()
-    .filter((record) =>
-      paused
-        ? record.status === "scheduled" && !record.paused
-        : record.paused === true && pausedStatus(record, false) === "scheduled",
-    )
-    .map((record) => setScheduledAgentPaused(record.id, paused))
+export function onScheduledAgentRunFinished(listener: (record: ScheduledAgentRecord) => void) {
+  scheduler().onRunFinished(listener)
 }
 
 export function listScheduledAgents(scope?: { directory?: string; parentSessionId?: string }): ScheduledAgentRecord[] {
-  return reconcileInterruptedRecords(readRecords()).filter((record) => {
-    if (!scope) return true
-    if (scope.directory && record.directory !== scope.directory) return false
-    return record.parentSessionId === scope.parentSessionId
-  })
-}
-
-export function setScheduledAgentPaused(id: string, paused: boolean) {
-  return updateRecord(id, (record) => ({
-    ...record,
-    paused,
-    // Resuming a recurring task moves it to its next real moment; without this
-    // it would still hold a runAt in the past and fire immediately.
-    runAt:
-      !paused && record.recurrence && record.recurrence.kind !== "once"
-        ? (nextRun(record.recurrence, new Date())?.toISOString() ?? record.runAt)
-        : record.runAt,
-    status: pausedStatus(record, paused),
-  }))
-}
-
-// Pausing parks a pending run; resuming re-arms it. Resuming must not
-// resurrect a one-shot run that already finished — that would execute the
-// task a second time. A recurring task is different: its whole purpose is to
-// fire again, and a pause that straddled a run leaves it "completed" (see the
-// `!item.paused` branch in the completion handler), so resuming has to put it
-// back on the schedule.
-export function pausedStatus(
-  record: Pick<ScheduledAgentRecord, "status" | "recurrence">,
-  paused: boolean,
-): ScheduledAgentStatus {
-  if (paused) return record.status === "scheduled" ? "canceled" : record.status
-  if (record.recurrence && record.recurrence.kind !== "once") return "scheduled"
-  return record.status === "canceled" ? "scheduled" : record.status
+  return scheduler().list(scope)
 }
 
 export function createScheduledAgent(input: CreateScheduledAgentInput): ScheduledAgentRecord {
-  const prompt = input.prompt?.trim()
-  if (!prompt) throw new Error("Write a prompt for the scheduled agent to run.")
-  const directory = input.directory?.trim()
-  if (!directory) throw new Error("Choose a project directory for the scheduled agent.")
-  const parsed = Date.parse(input.runAt)
-  if (!Number.isFinite(parsed)) throw new Error("The scheduled time is not a valid date.")
-
-  // Past times are clamped to now so the record fires on the next scheduler
-  // tick instead of being rejected.
-  const record: ScheduledAgentRecord = {
-    id: randomUUID(),
-    title: input.title?.trim() || prompt.split("\n")[0]?.slice(0, 80),
-    prompt,
-    directory,
-    recurrence: input.recurrence,
-    paused: false,
-    parentSessionId: input.parentSessionId?.trim() || undefined,
-    runAt: new Date(Math.max(parsed, Date.now())).toISOString(),
-    status: "scheduled",
-    createdAt: now(),
-  }
-  writeRecords([record, ...readRecords()])
-  return record
+  return scheduler().create(input)
 }
 
-export async function cancelScheduledAgent(id: string): Promise<ScheduledAgentRecord | undefined> {
-  const record = readRecords().find((item) => item.id === id)
-  if (!record) return undefined
-  if (record.status !== "scheduled" && record.status !== "running") return record
-  const canceled = updateRecord(id, (current) => ({ ...current, status: "canceled", completedAt: now() }))
-  if (!record.sessionId || !engineProvider) return canceled
-  const engine = await engineProvider().catch(() => undefined)
-  if (engine) await abortEngineSession(engine, record.sessionId)
-  return canceled
+export function cancelScheduledAgent(id: string): Promise<ScheduledAgentRecord | undefined> {
+  return scheduler().cancel(id)
 }
 
 export function removeScheduledAgent(id: string): ScheduledAgentRecord[] {
-  const next = readRecords().filter((item) => item.id !== id)
-  writeRecords(next)
-  return next
+  return scheduler().remove(id)
+}
+
+export function setScheduledAgentPaused(id: string, paused: boolean): ScheduledAgentRecord {
+  return scheduler().setPaused(id, paused)
+}
+
+export function setAllScheduledAgentsPaused(paused: boolean): ScheduledAgentRecord[] {
+  return scheduler().setAllPaused(paused)
+}
+
+export function scheduledAgentWorkState() {
+  return scheduler().workState()
+}
+
+export function runNextScheduledAgent(): ScheduledAgentRecord | undefined {
+  return scheduler().runNext()
 }

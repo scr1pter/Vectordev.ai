@@ -181,3 +181,190 @@ export function buildRecurrence(input: {
   if (input.kind === "weekdays") return { kind: "weekdays", time: input.time }
   return { kind: "weekly", weekday: input.weekday, time: input.time }
 }
+
+// --- Automations -----------------------------------------------------------
+//
+// An automation is one prompt on one schedule that fans out across several
+// repositories. These shapes mirror the desktop scheduler's
+// ScheduledAgentTarget / ScheduledAgentRecord structurally; the renderer cannot
+// import from the main process, so they are declared here and the IPC boundary
+// checks them at the call site.
+
+export type AutomationTarget = {
+  directory: string
+  // Set to continue an existing session instead of opening a new one each run.
+  sessionId?: string
+}
+
+export type AutomationTargetResult = AutomationTarget & {
+  status: "running" | "completed" | "failed" | "canceled"
+  startedAt: string
+  completedAt?: string
+  error?: string
+}
+
+export type AutomationRecord = {
+  id: string
+  title?: string
+  prompt: string
+  recurrence?: Recurrence
+  paused?: boolean
+  directory: string
+  targets?: AutomationTarget[]
+  runAt: string
+  status: "scheduled" | "running" | "completed" | "failed" | "canceled"
+  createdAt: string
+  startedAt?: string
+  completedAt?: string
+  error?: string
+  results?: AutomationTargetResult[]
+  missedRuns?: number
+}
+
+// What the scheduler will actually be asked to create. Structurally a
+// CreateScheduledAgentInput: `directory` mirrors the first target so a build
+// that predates multi-repo targeting still understands the record.
+export type AutomationInput = {
+  title: string
+  prompt: string
+  recurrence: Recurrence
+  directory: string
+  targets: AutomationTarget[]
+  runAt: string
+}
+
+// One row of the "where does it run" picker. `directory` is the directory the
+// run happens in, which is the session's own directory when an existing session
+// was picked — a session living in a sandbox is not addressable from the
+// repository worktree.
+export type AutomationTargetDraft = {
+  directory: string
+  enabled: boolean
+  sessionId: string
+}
+
+export type AutomationDraft = {
+  title: string
+  prompt: string
+  targets: readonly AutomationTargetDraft[]
+  kind: Recurrence["kind"]
+  at: string
+  time: string
+  weekday: number
+}
+
+export function buildAutomationTargets(drafts: readonly AutomationTargetDraft[]): AutomationTarget[] {
+  return drafts
+    .filter((draft) => draft.enabled && draft.directory.trim() !== "")
+    .map((draft) => (draft.sessionId ? { directory: draft.directory, sessionId: draft.sessionId } : { directory: draft.directory }))
+}
+
+// The input the form currently describes, or the reason it cannot be created.
+// The reason is returned rather than a bare undefined so the panel can say why
+// the button is disabled instead of leaving the reader to guess which of four
+// fields is wrong.
+export function buildAutomationInput(
+  draft: AutomationDraft,
+  now: Date,
+): { ok: true; input: AutomationInput } | { ok: false; error: string } {
+  const prompt = draft.prompt.trim()
+  if (!prompt) return { ok: false, error: "Write the task this automation should run." }
+
+  const targets = buildAutomationTargets(draft.targets)
+  if (targets.length === 0) return { ok: false, error: "Choose at least one repository to run in." }
+
+  const recurrence = buildRecurrence({ kind: draft.kind, at: draft.at, time: draft.time, weekday: draft.weekday })
+  if (!recurrence) {
+    return { ok: false, error: draft.kind === "once" ? "Pick a date and time." : "Pick a valid time." }
+  }
+
+  // A one-shot already in the past has no next run, so the scheduler would
+  // store a record that can never fire. Refuse it at the form.
+  const runAt = nextRun(recurrence, now)
+  if (!runAt) return { ok: false, error: "That time has already passed. Pick a moment in the future." }
+
+  return {
+    ok: true,
+    input: {
+      title: draft.title.trim() || prompt.split("\n")[0]?.slice(0, 80) || "Automation",
+      prompt,
+      recurrence,
+      directory: targets[0].directory,
+      targets,
+      runAt: runAt.toISOString(),
+    },
+  }
+}
+
+// The targets a record runs against. A record written before multi-repo
+// targeting has no `targets` array and reads as the single directory it always
+// was.
+export function automationTargets(record: Pick<AutomationRecord, "directory" | "targets">): AutomationTarget[] {
+  const listed = record.targets?.filter((target) => typeof target?.directory === "string" && target.directory !== "")
+  if (listed && listed.length > 0) return listed
+  return [{ directory: record.directory }]
+}
+
+// Results are index-aligned with the targets, not keyed by directory or
+// session: the scheduler fills in `sessionId` on a result once it opens a
+// session, so a target that asked for a new session no longer matches its own
+// result by value.
+export function automationTargetResults(record: Pick<AutomationRecord, "directory" | "targets" | "results">) {
+  return automationTargets(record).map((target, index) => ({ target, result: record.results?.[index] }))
+}
+
+export function describeAutomationTargets(
+  targets: readonly AutomationTarget[],
+  name: (directory: string) => string,
+): string {
+  if (targets.length === 0) return "No repositories"
+  if (targets.length === 1) {
+    const only = targets[0]
+    return `${name(only.directory)} · ${only.sessionId ? "existing session" : "new session each run"}`
+  }
+  const continuing = targets.filter((target) => target.sessionId).length
+  if (continuing === 0) return `${targets.length} repositories · new session each run`
+  if (continuing === targets.length) return `${targets.length} repositories · existing sessions`
+  return `${targets.length} repositories · ${continuing} existing, ${targets.length - continuing} new`
+}
+
+// `runAt` is the scheduler's own pending slot, so it is trusted over recomputing
+// the recurrence here: a run pulled forward by hand, or advanced past a window
+// missed while the app was closed, sits somewhere the rule alone cannot predict.
+export function describeAutomationNextRun(
+  record: Pick<AutomationRecord, "runAt" | "paused" | "status" | "recurrence">,
+  now: Date,
+): string {
+  if (record.paused) return "Paused"
+  if (record.status === "running") return "Running now"
+  const at = new Date(record.runAt)
+  if (record.status === "scheduled") return describeNextRun(Number.isNaN(at.getTime()) ? undefined : at, now)
+  if (record.recurrence && record.recurrence.kind !== "once") {
+    return describeNextRun(nextRun(record.recurrence, now), now)
+  }
+  return "No further runs"
+}
+
+// Says out loud that a burst of occurrences was collapsed into one run. The
+// wording is the desktop scheduler's describeCatchUp, kept identical so the
+// window and the tray never tell the user two different stories.
+export function describeMissedRuns(missedRuns: number | undefined): string | undefined {
+  if (!missedRuns) return undefined
+  const missed = missedRuns === 1 ? "1 earlier run was" : `${missedRuns} earlier runs were`
+  return `Caught up with a single run; ${missed} missed while Vector was closed and will not be replayed.`
+}
+
+// Imminent first, paused last. Records the scheduler has already settled sink
+// below the ones still waiting to fire.
+export function sortAutomations(records: readonly AutomationRecord[]) {
+  return [...records].sort((a, b) => {
+    if (!!a.paused !== !!b.paused) return a.paused ? 1 : -1
+    const pending = (record: AutomationRecord) => (record.status === "scheduled" || record.status === "running" ? 0 : 1)
+    if (pending(a) !== pending(b)) return pending(a) - pending(b)
+    const at = (record: AutomationRecord) => {
+      const time = new Date(record.runAt).getTime()
+      return Number.isNaN(time) ? Infinity : time
+    }
+    return at(a) - at(b)
+  })
+}

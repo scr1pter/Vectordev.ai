@@ -81,7 +81,11 @@ describe("v2 pty HttpApi", () => {
     expect(body.data.title).toBe("v2")
 
     // The canonical surface keeps exited sessions observable with their exit code.
-    const deadline = Date.now() + 5_000
+    // The bound only has to outlast spawning a shell and letting it exit, which
+    // takes far longer than five seconds when the whole suite is running in
+    // parallel — matching the suite's own timeout keeps this from failing on a
+    // loaded machine while asserting exactly the same thing.
+    const deadline = Date.now() + 30_000
     let info: { status: string; exitCode?: number } | undefined
     while (Date.now() < deadline) {
       const found = await request(`/api/pty/${body.data.id}`, tmp.path)

@@ -1,6 +1,20 @@
 {
   "releases": [
     {
+      "tag": "v1.19.0",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Work that repeats, and agents you can pair",
+              "description": "Scheduled work moved out of the session and onto the home screen as Automations, and became a real automation engine rather than a reminder. Write the task yourself, then choose the repositories it runs in and, for each one, a fresh session or an existing thread to keep adding to. Every repository reports its own result, so one failing does not condemn the rest, and a recurring task now computes its next occurrence from the rule itself instead of drifting forward from whenever the last run happened to finish. A schedule missed while Vector was closed catches up once and says so rather than firing a burst. Agents can now be paired deliberately: a team is everyone-to-everyone, a coordinator broadcasting down to workers who do not chatter among themselves, or any pairing you set, and a message to an unlinked teammate is refused and told so instead of vanishing. Launching Claude Code, Codex, or Cursor Agent works again on ordinary machines: Vector looked for those CLIs using the stripped-down environment a desktop app inherits when it is opened from Finder, so anyone whose tools live under nvm, fnm, mise, asdf, volta, or a custom prefix was told the runtime was not installed, and the picker then hid it entirely. Vector now reads your login shell the way the engine already did, reports a runtime that is present but signed out as signed out with the command that fixes it, and shows an uninstalled runtime with its install steps rather than hiding the option. Fixed a defect that had been quietly deleting your work since 14 August: identifiers pack a millisecond timestamp into six bytes, which overflows and repeats roughly every 795 days, and the most recent repeat inverted the comparison behind tool-output retention — so every cleanup deleted the newest saved output and kept the oldest. Timestamps are now reconstructed across that boundary, with the identifier format unchanged. The test suite is green again: 24 failures, most of them assertions left behind by the rebrand, were repaired rather than deleted, and continuous integration, which had been running on a branch this repository does not have, now runs on every push."
+            }
+          ]
+        }
+      ]
+    },
+    {
       "tag": "v1.18.0",
       "highlights": [
         {

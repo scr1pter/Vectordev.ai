@@ -1,13 +1,23 @@
 import { describe, expect, test } from "bun:test"
 import {
+  automationTargetResults,
+  automationTargets,
+  buildAutomationInput,
+  buildAutomationTargets,
   buildRecurrence,
+  describeAutomationNextRun,
+  describeAutomationTargets,
+  describeMissedRuns,
   describeNextRun,
   describeRecurrence,
   filterTasks,
   formatTime,
   nextRun,
   parseTime,
+  sortAutomations,
   sortByNextRun,
+  type AutomationDraft,
+  type AutomationRecord,
   type ScheduledTask,
 } from "./schedule-model"
 
@@ -201,5 +211,226 @@ describe("buildRecurrence", () => {
     const past = buildRecurrence({ kind: "once", at: "2020-01-01T09:00", time: "", weekday: 0 })
     expect(past).toBeDefined()
     expect(nextRun(past!, new Date())).toBeUndefined()
+  })
+})
+
+// --- Automations -----------------------------------------------------------
+
+function draft(partial: Partial<AutomationDraft> = {}): AutomationDraft {
+  return {
+    title: "",
+    prompt: "Summarise what changed",
+    targets: [{ directory: "/repo-a", enabled: true, sessionId: "" }],
+    kind: "daily",
+    at: "",
+    time: "08:00",
+    weekday: 1,
+    ...partial,
+  }
+}
+
+describe("buildAutomationTargets", () => {
+  test("keeps only the selected repositories and drops the empty session marker", () => {
+    expect(
+      buildAutomationTargets([
+        { directory: "/repo-a", enabled: true, sessionId: "" },
+        { directory: "/repo-b", enabled: false, sessionId: "ses_b" },
+        { directory: "/repo-c", enabled: true, sessionId: "ses_c" },
+        { directory: "   ", enabled: true, sessionId: "" },
+      ]),
+    ).toEqual([{ directory: "/repo-a" }, { directory: "/repo-c", sessionId: "ses_c" }])
+  })
+})
+
+describe("buildAutomationInput", () => {
+  test("builds a multi-repo input and mirrors the first target onto directory", () => {
+    const built = buildAutomationInput(
+      draft({
+        title: "  Morning brief  ",
+        targets: [
+          { directory: "/repo-a", enabled: true, sessionId: "" },
+          { directory: "/repo-b/.sandbox", enabled: true, sessionId: "ses_b" },
+        ],
+      }),
+      friday10,
+    )
+    expect(built.ok).toBe(true)
+    expect(built.ok && built.input).toEqual({
+      title: "Morning brief",
+      prompt: "Summarise what changed",
+      recurrence: { kind: "daily", time: "08:00" },
+      directory: "/repo-a",
+      targets: [{ directory: "/repo-a" }, { directory: "/repo-b/.sandbox", sessionId: "ses_b" }],
+      // 08:00 has already passed at 10:00, so the first run is tomorrow.
+      runAt: new Date(2026, 7, 15, 8, 0, 0, 0).toISOString(),
+    })
+  })
+
+  test("names an unnamed automation from the first line of the prompt", () => {
+    const built = buildAutomationInput(draft({ prompt: "  Check the deploy\nand report back  " }), friday10)
+    expect(built.ok && built.input.title).toBe("Check the deploy")
+  })
+
+  test("refuses, with a reason, every way the form can be incomplete", () => {
+    expect(buildAutomationInput(draft({ prompt: "   " }), friday10)).toEqual({
+      ok: false,
+      error: "Write the task this automation should run.",
+    })
+    expect(buildAutomationInput(draft({ targets: [] }), friday10)).toEqual({
+      ok: false,
+      error: "Choose at least one repository to run in.",
+    })
+    expect(
+      buildAutomationInput(draft({ targets: [{ directory: "/repo-a", enabled: false, sessionId: "" }] }), friday10),
+    ).toEqual({ ok: false, error: "Choose at least one repository to run in." })
+    expect(buildAutomationInput(draft({ time: "25:00" }), friday10)).toEqual({
+      ok: false,
+      error: "Pick a valid time.",
+    })
+    expect(buildAutomationInput(draft({ kind: "once", at: "" }), friday10)).toEqual({
+      ok: false,
+      error: "Pick a date and time.",
+    })
+  })
+
+  test("blocks a one-shot whose moment has already passed instead of creating a dead record", () => {
+    expect(buildAutomationInput(draft({ kind: "once", at: "2020-01-01T09:00" }), friday10)).toEqual({
+      ok: false,
+      error: "That time has already passed. Pick a moment in the future.",
+    })
+    const future = buildAutomationInput(draft({ kind: "once", at: "2026-08-14T18:00" }), friday10)
+    expect(future.ok && future.input.runAt).toBe(new Date(2026, 7, 14, 18, 0, 0, 0).toISOString())
+  })
+})
+
+function record(partial: Partial<AutomationRecord> = {}): AutomationRecord {
+  return {
+    id: "a1",
+    title: "Automation",
+    prompt: "do it",
+    recurrence: { kind: "daily", time: "08:00" },
+    directory: "/repo-a",
+    runAt: new Date(2026, 7, 15, 8, 0, 0, 0).toISOString(),
+    status: "scheduled",
+    createdAt: friday10.toISOString(),
+    ...partial,
+  }
+}
+
+describe("automationTargets", () => {
+  test("reads a record written before multi-repo targeting as its single directory", () => {
+    expect(automationTargets(record())).toEqual([{ directory: "/repo-a" }])
+    expect(automationTargets(record({ targets: [] }))).toEqual([{ directory: "/repo-a" }])
+  })
+
+  test("uses the listed targets when there are any", () => {
+    expect(automationTargets(record({ targets: [{ directory: "/repo-b", sessionId: "ses_b" }] }))).toEqual([
+      { directory: "/repo-b", sessionId: "ses_b" },
+    ])
+  })
+})
+
+describe("automationTargetResults", () => {
+  test("pairs by index, so a new-session target still finds the result that gained a session ID", () => {
+    const paired = automationTargetResults(
+      record({
+        targets: [{ directory: "/repo-a" }, { directory: "/repo-b", sessionId: "ses_b" }],
+        results: [
+          { directory: "/repo-a", sessionId: "ses_fresh", status: "completed", startedAt: friday10.toISOString() },
+          { directory: "/repo-b", sessionId: "ses_b", status: "failed", startedAt: friday10.toISOString() },
+        ],
+      }),
+    )
+    expect(paired.map((entry) => [entry.target.directory, entry.result?.status])).toEqual([
+      ["/repo-a", "completed"],
+      ["/repo-b", "failed"],
+    ])
+  })
+
+  test("leaves a target that has never run without a result", () => {
+    expect(automationTargetResults(record()).map((entry) => entry.result)).toEqual([undefined])
+  })
+})
+
+describe("describeAutomationTargets", () => {
+  const name = (directory: string) => directory.split("/").at(-1) ?? directory
+
+  test("says which session a single target continues", () => {
+    expect(describeAutomationTargets([{ directory: "/src/repo-a" }], name)).toBe("repo-a · new session each run")
+    expect(describeAutomationTargets([{ directory: "/src/repo-a", sessionId: "ses" }], name)).toBe(
+      "repo-a · existing session",
+    )
+  })
+
+  test("counts repositories once there are several, and admits a mixed selection", () => {
+    expect(describeAutomationTargets([{ directory: "/a" }, { directory: "/b" }], name)).toBe(
+      "2 repositories · new session each run",
+    )
+    expect(
+      describeAutomationTargets([{ directory: "/a", sessionId: "x" }, { directory: "/b", sessionId: "y" }], name),
+    ).toBe("2 repositories · existing sessions")
+    expect(describeAutomationTargets([{ directory: "/a", sessionId: "x" }, { directory: "/b" }], name)).toBe(
+      "2 repositories · 1 existing, 1 new",
+    )
+  })
+
+  test("does not pretend an empty selection runs somewhere", () => {
+    expect(describeAutomationTargets([], name)).toBe("No repositories")
+  })
+})
+
+describe("describeAutomationNextRun", () => {
+  test("trusts the scheduler's own pending slot over recomputing the rule", () => {
+    // The rule says 08:00 daily, but the record was pulled forward to 14:00.
+    expect(
+      describeAutomationNextRun(record({ runAt: new Date(2026, 7, 14, 14, 0, 0, 0).toISOString() }), friday10),
+    ).toBe("Next run in 4 hours")
+  })
+
+  test("reports paused and running before any arithmetic", () => {
+    expect(describeAutomationNextRun(record({ paused: true }), friday10)).toBe("Paused")
+    expect(describeAutomationNextRun(record({ status: "running" }), friday10)).toBe("Running now")
+  })
+
+  test("falls back to the rule for a settled recurring record, and stops for a one-shot", () => {
+    expect(describeAutomationNextRun(record({ status: "completed" }), friday10)).toBe("Next run in 22 hours")
+    expect(
+      describeAutomationNextRun(
+        record({ status: "completed", recurrence: { kind: "once", at: friday10.toISOString() } }),
+        friday10,
+      ),
+    ).toBe("No further runs")
+  })
+
+  test("says nothing is coming rather than counting down to an unparseable date", () => {
+    expect(describeAutomationNextRun(record({ runAt: "whenever" }), friday10)).toBe("No further runs")
+  })
+})
+
+describe("describeMissedRuns", () => {
+  test("explains a collapsed catch-up instead of implying the schedule kept up", () => {
+    expect(describeMissedRuns(1)).toBe(
+      "Caught up with a single run; 1 earlier run was missed while Vector was closed and will not be replayed.",
+    )
+    expect(describeMissedRuns(4)).toBe(
+      "Caught up with a single run; 4 earlier runs were missed while Vector was closed and will not be replayed.",
+    )
+  })
+
+  test("stays silent when nothing was missed", () => {
+    expect(describeMissedRuns(0)).toBeUndefined()
+    expect(describeMissedRuns(undefined)).toBeUndefined()
+  })
+})
+
+describe("sortAutomations", () => {
+  test("puts imminent runs first, settled ones after, and paused ones last", () => {
+    const order = sortAutomations([
+      record({ id: "paused-soon", paused: true, runAt: new Date(2026, 7, 14, 11, 0).toISOString() }),
+      record({ id: "done", status: "completed", runAt: new Date(2026, 7, 14, 10, 30).toISOString() }),
+      record({ id: "later", runAt: new Date(2026, 7, 14, 20, 0).toISOString() }),
+      record({ id: "soon", runAt: new Date(2026, 7, 14, 12, 0).toISOString() }),
+    ]).map((item) => item.id)
+    expect(order).toEqual(["soon", "later", "done", "paused-soon"])
   })
 })

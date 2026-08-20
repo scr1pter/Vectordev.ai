@@ -263,15 +263,17 @@ describe("PublicApi OpenAPI v2 errors", () => {
   test("documents session busy errors", () => {
     const spec = OpenApi.fromApi(PublicApi) as OpenApiSpec
 
-    for (const route of [
-      ["post", "/session/{sessionID}/shell"],
-      ["post", "/session/{sessionID}/revert"],
-      ["post", "/session/{sessionID}/unrevert"],
-      ["delete", "/session/{sessionID}/message/{messageID}"],
+    // Revert and unrevert gained a second 409 alternative when restore got a
+    // real error channel, so their conflict response is a union. Asserting the
+    // whole set keeps both alternatives pinned rather than just checking that
+    // SessionBusyError appears somewhere.
+    for (const [method, path, expected] of [
+      ["post", "/session/{sessionID}/shell", ["SessionBusyError"]],
+      ["post", "/session/{sessionID}/revert", ["SessionBusyError", "ConflictError"]],
+      ["post", "/session/{sessionID}/unrevert", ["SessionBusyError", "ConflictError"]],
+      ["delete", "/session/{sessionID}/message/{messageID}", ["SessionBusyError"]],
     ] as const) {
-      expect(componentName(responseRef(spec.paths[route[1]]?.[route[0]]?.responses?.["409"]) ?? "")).toBe(
-        "SessionBusyError",
-      )
+      expect(componentNames(spec.paths[path]?.[method]?.responses?.["409"]).sort()).toEqual([...expected].sort())
     }
   })
 

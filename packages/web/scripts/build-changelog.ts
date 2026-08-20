@@ -2,11 +2,11 @@
 // "what's new". The file has never existed, so the release-notes dialog has
 // never once run. Generated from the same release series the site renders, so
 // the two cannot drift apart.
-import { release117, release118, releaseSeries } from "../src/data/vector-releases"
+import { release117, release118, release119, releaseSeries } from "../src/data/vector-releases"
 
 // Both arrays: releaseSeries is the 1.0-1.17 arc, release117 the 1.17.x
 // point releases the desktop app actually ships as.
-const releases = [...releaseSeries, ...release117, ...release118].reverse().map((release) => ({
+const releases = [...releaseSeries, ...release117, ...release118, ...release119].reverse().map((release) => ({
   tag: `v${release.version}`,
   highlights: [
     {
