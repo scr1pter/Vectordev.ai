@@ -2,6 +2,7 @@ import { execFile } from "node:child_process"
 import { createHash } from "node:crypto"
 import { mkdir, readFile, readdir, realpath, rename, stat, writeFile } from "node:fs/promises"
 import { dirname, extname, join, normalize, relative, resolve } from "node:path"
+import { untrustedChildEnvironment } from "@opencode-ai/core/child-environment"
 
 // A lexical + structural index: BM25 over identifiers and path segments, an
 // import graph, a symbol table, and git co-change counts. There are no
@@ -937,8 +938,11 @@ function git(cwd: string, args: string[]) {
   // A missing git binary, a detached worktree and a plain directory all just mean
   // there is no history signal to add, so every failure resolves to no output.
   return new Promise<string>((resolveOutput) =>
-    execFile("git", args, { cwd, timeout: 8_000, maxBuffer: 16 * 1024 * 1024 }, (error, stdout) =>
-      resolveOutput(error ? "" : stdout),
+    execFile(
+      "git",
+      args,
+      { cwd, env: untrustedChildEnvironment(), timeout: 8_000, maxBuffer: 16 * 1024 * 1024 },
+      (error, stdout) => resolveOutput(error ? "" : stdout),
     ),
   )
 }

@@ -7,6 +7,9 @@ import {
   handleNotificationClick,
   loadLocaleDict,
   normalizeLocale,
+  observeTelemetryPreference,
+  scrubDiagnosticEvent,
+  telemetryEnabled,
   type Locale,
   type Platform,
   PlatformProvider,
@@ -46,9 +49,21 @@ window.addEventListener(
   true,
 )
 
-if (import.meta.env.VITE_SENTRY_DSN) {
+let sentryStarted = false
+
+const configureCrashDiagnostics = () => {
+  if (!import.meta.env.VITE_SENTRY_DSN || !telemetryEnabled()) {
+    if (sentryStarted) void Sentry.close(2_000)
+    sentryStarted = false
+    return
+  }
+  if (sentryStarted) return
+  sentryStarted = true
   Sentry.init({
     dsn: import.meta.env.VITE_SENTRY_DSN,
+    sendDefaultPii: false,
+    tracesSampleRate: 0,
+    beforeSend: scrubDiagnosticEvent,
     environment: import.meta.env.VITE_SENTRY_ENVIRONMENT ?? import.meta.env.MODE,
     release: import.meta.env.VITE_SENTRY_RELEASE ?? `desktop@${pkg.version}`,
     initialScope: {
@@ -68,6 +83,9 @@ if (import.meta.env.VITE_SENTRY_DSN) {
     },
   })
 }
+
+configureCrashDiagnostics()
+observeTelemetryPreference(configureCrashDiagnostics)
 
 void initI18n()
 

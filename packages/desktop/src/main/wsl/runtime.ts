@@ -2,6 +2,7 @@ import { spawn } from "node:child_process"
 import { existsSync } from "node:fs"
 import { join } from "node:path"
 import * as pty from "@lydell/node-pty"
+import { untrustedChildEnvironment } from "@opencode-ai/core/child-environment"
 import type { WslDistroProbe, WslInstalledDistro, WslOnlineDistro, WslRuntimeCheck } from "../../preload/types"
 import { wslTerminalArgs } from "./policy"
 
@@ -52,6 +53,7 @@ function runPowerShell(command: string, opts: RunWslOptions = {}) {
 function runCommand(command: string, args: string[], opts: RunWslOptions = {}) {
   return new Promise<WslCommandResult>((resolve, reject) => {
     const child = spawn(command, args, {
+      env: untrustedChildEnvironment(),
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
       signal: opts.signal,
@@ -117,7 +119,7 @@ function runInteractiveCommand(command: string, args: string[], opts: RunWslOpti
       cols: 80,
       rows: 24,
       cwd: process.cwd(),
-      env: process.env,
+      env: untrustedChildEnvironment(),
       useConpty: true,
     })
 
@@ -323,6 +325,7 @@ export function openWslTerminal(distro?: string | null) {
   return new Promise<void>((resolve, reject) => {
     const child = spawn("cmd.exe", wslTerminalArgs(distro), {
       detached: true,
+      env: untrustedChildEnvironment(),
       stdio: "ignore",
       windowsHide: true,
     })

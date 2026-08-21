@@ -1,4 +1,4 @@
-name: vector desktop release
+name: Vector desktop release
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag, for example v0.1.0"
+        description: "Release tag, for example v1.19.3"
         required: true
         type: string
       prerelease:
@@ -16,100 +16,468 @@ on:
         default: false
         type: boolean
 
+concurrency:
+  group: vector-release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
 permissions:
-  contents: write
+  contents: read
 
 env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   NODE_OPTIONS: --max-old-space-size=6144
-  # A tag push carries the tag in the ref; a manual dispatch passes it as an
-  # input. Everything below reads these rather than inputs directly.
   RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
   RELEASE_PRERELEASE: ${{ inputs.prerelease || false }}
 
 jobs:
   prepare:
-    name: Validate release version
+    name: Validate release metadata
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
-      - name: Match tag to desktop version
+      - name: Check out release source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Validate tag, version, and release notes
         env:
           TAG: ${{ env.RELEASE_TAG }}
         run: |
+          set -euo pipefail
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+            echo "Release tag must use vMAJOR.MINOR.PATCH; received $TAG"
+            exit 1
+          }
+
+          case "$TAG" in
+            v1.2|v1.2.*)
+              echo "The 1.2 release line is reserved and cannot be published by this workflow."
+              exit 1
+              ;;
+          esac
+
           version=$(jq -r .version packages/desktop/package.json)
           test "$TAG" = "v$version" || {
             echo "Release tag $TAG must match packages/desktop version v$version"
             exit 1
           }
-      - name: Prepare draft GitHub release
+
+          jq -e --arg tag "$TAG" '.releases[] | select(.tag == $tag)' packages/web/public/changelog.json >/dev/null || {
+            echo "packages/web/public/changelog.json has no entry for $TAG"
+            exit 1
+          }
+
+          grep -Fq "version: \"$version\"" packages/web/src/data/vector-releases.ts || {
+            echo "packages/web/src/data/vector-releases.ts has no entry for $version"
+            exit 1
+          }
+
+          tag_commit=$(git ls-remote --tags origin "refs/tags/$TAG^{}" | awk 'NR == 1 { print $1 }')
+          if [ -z "$tag_commit" ]; then
+            tag_commit=$(git ls-remote --tags origin "refs/tags/$TAG" | awk 'NR == 1 { print $1 }')
+          fi
+          source_commit=$(git rev-parse HEAD)
+          if [ -n "$tag_commit" ] && [ "$tag_commit" != "$source_commit" ]; then
+            echo "Release tag $TAG resolves to $tag_commit, but this workflow is building $source_commit."
+            echo "Run the workflow from the exact release tag before replacing draft assets."
+            exit 1
+          fi
+
+  credentials:
+    name: Preflight production credentials
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CSC_LINK: ${{ secrets.CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      AZURE_TRUSTED_SIGNING_ENDPOINT: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+      AZURE_TRUSTED_SIGNING_ACCOUNT_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME }}
+      AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE: ${{ secrets.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE }}
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+      VECTOR_WINDOWS_PUBLISHER_NAME: ${{ secrets.VECTOR_WINDOWS_PUBLISHER_NAME }}
+      BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
+    steps:
+      - name: Require signing, notarization, and feed credentials
+        run: |
+          set -euo pipefail
+          required=(
+            CSC_LINK
+            CSC_KEY_PASSWORD
+            APPLE_ID
+            APPLE_APP_SPECIFIC_PASSWORD
+            APPLE_TEAM_ID
+            AZURE_TRUSTED_SIGNING_ENDPOINT
+            AZURE_TRUSTED_SIGNING_ACCOUNT_NAME
+            AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE
+            AZURE_CLIENT_ID
+            AZURE_TENANT_ID
+            AZURE_CLIENT_SECRET
+            VECTOR_WINDOWS_PUBLISHER_NAME
+            BLOB_READ_WRITE_TOKEN
+          )
+          missing=()
+          for name in "${required[@]}"; do
+            if [ -z "${!name:-}" ]; then missing+=("$name"); fi
+          done
+          if [ "${#missing[@]}" -ne 0 ]; then
+            echo "Production release credentials are missing: ${missing[*]}"
+            echo "Unsigned or unpublished desktop artifacts will not be released."
+            exit 1
+          fi
+
+  typecheck:
+    name: Typecheck (${{ matrix.package }})
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - app
+          - cloud
+          - core
+          - desktop
+          - opencode
+          - sdk-next
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Set up Bun
+        uses: ./.github/actions/setup-bun
+        with:
+          install-flags: --frozen-lockfile
+      - name: Run package typecheck
+        working-directory: packages/${{ matrix.package }}
+        run: bun typecheck
+
+  test:
+    name: Test (${{ matrix.name }})
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: app
+            directory: packages/app
+            command: bun run test
+          - name: core
+            directory: packages/core
+            command: bun test --timeout 30000 --only-failures
+          - name: desktop
+            directory: packages/desktop
+            command: bun test --only-failures
+          - name: opencode
+            directory: packages/opencode
+            command: bun test --timeout 30000 --only-failures
+          - name: sdk-next
+            directory: packages/sdk-next
+            command: bun run test
+          - name: hosted-abuse
+            directory: test
+            command: bun test --only-failures abuse-api.test.ts
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Set up Bun
+        uses: ./.github/actions/setup-bun
+        with:
+          install-flags: --frozen-lockfile
+      - name: Run package tests
+        working-directory: ${{ matrix.directory }}
+        env:
+          GITHUB_ACTIONS: "false"
+          OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER: "true"
+        run: ${{ matrix.command }}
+
+  build:
+    name: Build smoke (${{ matrix.name }})
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: desktop
+            package: desktop
+            command: bun run build
+          - name: website
+            package: web
+            command: bun run build
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Set up Bun
+        uses: ./.github/actions/setup-bun
+        with:
+          install-flags: --frozen-lockfile
+      - name: Set exact build version
+        shell: bash
+        run: |
+          version=$(node -p 'require("./packages/desktop/package.json").version')
+          echo "OPENCODE_VERSION=$version" >> "$GITHUB_ENV"
+          echo "VECTOR_VERSION=$version" >> "$GITHUB_ENV"
+      - name: Build release surface
+        working-directory: packages/${{ matrix.package }}
+        env:
+          OPENCODE_CHANNEL: prod
+        run: ${{ matrix.command }}
+
+  draft:
+    name: Prepare draft GitHub release
+    needs:
+      - credentials
+      - typecheck
+      - test
+      - build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Create release notes from the shipped changelog
+        env:
+          TAG: ${{ env.RELEASE_TAG }}
+        run: |
+          set -euo pipefail
+          jq -r --arg tag "$TAG" '
+            .releases[]
+            | select(.tag == $tag)
+            | .highlights[].items[]
+            | "## \(.title)\n\n\(.description)\n"
+          ' packages/web/public/changelog.json > release-notes.md
+          test -s release-notes.md
+
+      - name: Create or refresh draft release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ env.RELEASE_TAG }}
         run: |
-          if ! gh release view "$TAG" >/dev/null 2>&1; then
-            gh release create "$TAG" --draft --title "Vector ${TAG}" --notes "Vector desktop builds for macOS, Windows, and Linux."
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            draft=$(gh release view "$TAG" --json isDraft --jq .isDraft)
+            test "$draft" = "true" || {
+              echo "Release $TAG is already public; refusing to replace it."
+              exit 1
+            }
+            gh release edit "$TAG" --title "Vector ${TAG#v}" --notes-file release-notes.md
+            exit 0
           fi
+          gh release create "$TAG" \
+            --target "$GITHUB_SHA" \
+            --draft \
+            --title "Vector ${TAG#v}" \
+            --notes-file release-notes.md
 
   mac:
     name: macOS desktop apps
+    needs: draft
     runs-on: macos-latest
-    needs: prepare
+    timeout-minutes: 60
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
-      - uses: ./.github/actions/setup-bun
+      - name: Check out release source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Set up Bun
+        uses: ./.github/actions/setup-bun
+        with:
+          install-flags: --frozen-lockfile
+      - name: Set exact build version
+        run: |
+          version=$(node -p 'require("./packages/desktop/package.json").version')
+          echo "OPENCODE_VERSION=$version" >> "$GITHUB_ENV"
+          echo "VECTOR_VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Require Apple signing and notarization credentials
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          missing=()
+          for name in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
+            if [ -z "${!name:-}" ]; then missing+=("$name"); fi
+          done
+          if [ "${#missing[@]}" -ne 0 ]; then
+            echo "Production macOS releases require: ${missing[*]}"
+            exit 1
+          fi
+
       - name: Build desktop app
-        run: OPENCODE_CHANNEL=prod bun run --cwd packages/desktop build
-      - name: Package Apple Silicon and Intel builds
+        env:
+          OPENCODE_CHANNEL: prod
+        run: bun run --cwd packages/desktop build
+
+      - name: Package signed and notarized app
+        env:
+          OPENCODE_CHANNEL: prod
+          VECTOR_SIGN_MAC: true
+          VECTOR_NOTARIZE: true
+          VECTOR_SIGN_DMG: true
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           for attempt in 1 2 3; do
-            OPENCODE_CHANNEL=prod bun run --cwd packages/desktop package -- --mac dmg zip --arm64 --x64 --publish never && exit 0
+            bun run --cwd packages/desktop package -- --mac dmg zip --arm64 --x64 --publish never && exit 0
             if [ "$attempt" = "3" ]; then exit 1; fi
             sleep $((attempt * 15))
           done
+
+      - name: Verify app notarization and artifact signatures
+        run: |
+          set -euo pipefail
+          app_list=$(mktemp)
+          find packages/desktop/dist -type d -name Vector.app -prune -print > "$app_list"
+          test -s "$app_list" || {
+            echo "No packaged Vector.app was found"
+            exit 1
+          }
+          while IFS= read -r app; do
+            codesign --verify --deep --strict --verbose=4 "$app"
+            spctl --assess --type execute --verbose=4 "$app"
+            xcrun stapler validate "$app"
+          done < "$app_list"
+
+          shopt -s nullglob
+          dmgs=(packages/desktop/dist/*.dmg)
+          test "${#dmgs[@]}" -gt 0 || {
+            echo "No packaged DMG was found"
+            exit 1
+          }
+          for dmg in "${dmgs[@]}"; do
+            codesign --verify --verbose=4 "$dmg"
+          done
+
+          grep -Fq "vector-desktop-${VECTOR_VERSION}-mac-arm64.zip" packages/desktop/dist/latest-mac.yml
+          grep -Fq "vector-desktop-${VECTOR_VERSION}-mac-x64.zip" packages/desktop/dist/latest-mac.yml
+
       - name: Upload macOS assets to draft release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ env.RELEASE_TAG }}
         run: |
+          set -euo pipefail
           gh release upload "$TAG" --clobber \
-            packages/desktop/dist/vector-desktop-mac-arm64.dmg \
-            packages/desktop/dist/vector-desktop-mac-arm64.dmg.blockmap \
-            packages/desktop/dist/vector-desktop-mac-arm64.zip \
-            packages/desktop/dist/vector-desktop-mac-arm64.zip.blockmap \
-            packages/desktop/dist/vector-desktop-mac-x64.dmg \
-            packages/desktop/dist/vector-desktop-mac-x64.dmg.blockmap \
-            packages/desktop/dist/vector-desktop-mac-x64.zip \
-            packages/desktop/dist/vector-desktop-mac-x64.zip.blockmap \
+            packages/desktop/dist/vector-desktop-${VECTOR_VERSION}-mac-arm64.dmg \
+            packages/desktop/dist/vector-desktop-${VECTOR_VERSION}-mac-arm64.dmg.blockmap \
+            packages/desktop/dist/vector-desktop-${VECTOR_VERSION}-mac-arm64.zip \
+            packages/desktop/dist/vector-desktop-${VECTOR_VERSION}-mac-arm64.zip.blockmap \
+            packages/desktop/dist/vector-desktop-${VECTOR_VERSION}-mac-x64.dmg \
+            packages/desktop/dist/vector-desktop-${VECTOR_VERSION}-mac-x64.dmg.blockmap \
+            packages/desktop/dist/vector-desktop-${VECTOR_VERSION}-mac-x64.zip \
+            packages/desktop/dist/vector-desktop-${VECTOR_VERSION}-mac-x64.zip.blockmap \
             packages/desktop/dist/latest-mac.yml
 
   windows:
-    name: Windows desktop app
+    name: Windows desktop apps
+    needs: draft
     runs-on: windows-latest
-    needs: prepare
+    timeout-minutes: 60
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
-      - uses: ./.github/actions/setup-bun
-      - name: Build desktop app
-        run: $env:OPENCODE_CHANNEL="prod"; bun run --cwd packages/desktop build
-      - name: Package Windows installer
-        shell: pwsh
+      - name: Check out release source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Set up Bun
+        uses: ./.github/actions/setup-bun
+        with:
+          install-flags: --frozen-lockfile
+      - name: Set exact build version
+        shell: bash
         run: |
-          $env:OPENCODE_CHANNEL = "prod"
+          version=$(node -p 'require("./packages/desktop/package.json").version')
+          echo "OPENCODE_VERSION=$version" >> "$GITHUB_ENV"
+          echo "VECTOR_VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Require Windows signing credentials
+        shell: pwsh
+        env:
+          AZURE_TRUSTED_SIGNING_ENDPOINT: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+          AZURE_TRUSTED_SIGNING_ACCOUNT_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME }}
+          AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE: ${{ secrets.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          VECTOR_WINDOWS_PUBLISHER_NAME: ${{ secrets.VECTOR_WINDOWS_PUBLISHER_NAME }}
+        run: |
+          $required = @(
+            "AZURE_TRUSTED_SIGNING_ENDPOINT",
+            "AZURE_TRUSTED_SIGNING_ACCOUNT_NAME",
+            "AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE",
+            "AZURE_CLIENT_ID",
+            "AZURE_TENANT_ID",
+            "AZURE_CLIENT_SECRET",
+            "VECTOR_WINDOWS_PUBLISHER_NAME"
+          )
+          $missing = @($required | Where-Object { -not (Get-Item "env:$_" -ErrorAction SilentlyContinue).Value })
+          if ($missing.Count -gt 0) {
+            throw "Production Windows releases require: $($missing -join ', ')"
+          }
+
+      - name: Build desktop app
+        shell: pwsh
+        run: $env:OPENCODE_CHANNEL="prod"; bun run --cwd packages/desktop build
+
+      - name: Package signed installer
+        shell: pwsh
+        env:
+          OPENCODE_CHANNEL: prod
+          VECTOR_REQUIRE_WINDOWS_SIGNING: true
+          VECTOR_WINDOWS_PUBLISHER_NAME: ${{ secrets.VECTOR_WINDOWS_PUBLISHER_NAME }}
+          AZURE_TRUSTED_SIGNING_ENDPOINT: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+          AZURE_TRUSTED_SIGNING_ACCOUNT_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME }}
+          AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE: ${{ secrets.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        run: |
           for ($attempt = 1; $attempt -le 3; $attempt++) {
             bun run --cwd packages/desktop package -- --win nsis --x64 --arm64 --publish never
             if ($LASTEXITCODE -eq 0) { exit 0 }
             if ($attempt -eq 3) { exit $LASTEXITCODE }
             Start-Sleep -Seconds ($attempt * 15)
           }
-      - name: Preserve the stable Windows updater filename
+
+      - name: Verify installer signatures and updater metadata
         shell: pwsh
         run: |
-          if (!(Test-Path packages/desktop/dist/vector-desktop-win.exe)) {
-            Copy-Item packages/desktop/dist/vector-desktop-win-x64.exe packages/desktop/dist/vector-desktop-win.exe
+          $files = @(
+            "packages/desktop/dist/vector-desktop-$env:VECTOR_VERSION-win-x64.exe",
+            "packages/desktop/dist/vector-desktop-$env:VECTOR_VERSION-win-arm64.exe"
+          )
+          foreach ($file in $files) {
+            if (!(Test-Path $file)) { throw "Missing installer $file" }
+            $signature = Get-AuthenticodeSignature $file
+            if ($signature.Status -ne "Valid") {
+              throw "$file does not have a valid Authenticode signature: $($signature.Status) $($signature.StatusMessage)"
+            }
           }
-          if (!(Test-Path packages/desktop/dist/vector-desktop-win.exe.blockmap)) {
-            Copy-Item packages/desktop/dist/vector-desktop-win-x64.exe.blockmap packages/desktop/dist/vector-desktop-win.exe.blockmap
+          $metadata = Get-Content packages/desktop/dist/latest.yml -Raw
+          if (!$metadata.Contains("vector-desktop-$env:VECTOR_VERSION-win-x64.exe")) {
+            throw "latest.yml does not reference the x64 installer"
           }
+          if (!$metadata.Contains("vector-desktop-$env:VECTOR_VERSION-win-arm64.exe")) {
+            throw "latest.yml does not reference the arm64 installer"
+          }
+
       - name: Upload Windows assets to draft release
         shell: pwsh
         env:
@@ -117,54 +485,87 @@ jobs:
           TAG: ${{ env.RELEASE_TAG }}
         run: |
           $assets = @(
-            "packages/desktop/dist/vector-desktop-win-x64.exe",
-            "packages/desktop/dist/vector-desktop-win-x64.exe.blockmap",
-            "packages/desktop/dist/vector-desktop-win-arm64.exe",
-            "packages/desktop/dist/vector-desktop-win-arm64.exe.blockmap",
-            "packages/desktop/dist/vector-desktop-win.exe",
-            "packages/desktop/dist/vector-desktop-win.exe.blockmap",
+            "packages/desktop/dist/vector-desktop-$env:VECTOR_VERSION-win-x64.exe",
+            "packages/desktop/dist/vector-desktop-$env:VECTOR_VERSION-win-x64.exe.blockmap",
+            "packages/desktop/dist/vector-desktop-$env:VECTOR_VERSION-win-arm64.exe",
+            "packages/desktop/dist/vector-desktop-$env:VECTOR_VERSION-win-arm64.exe.blockmap",
             "packages/desktop/dist/latest.yml"
           )
           gh release upload $env:TAG $assets --clobber
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
   linux:
-    name: Linux desktop app
+    name: Linux desktop apps
+    needs: draft
     runs-on: ubuntu-latest
-    needs: prepare
+    timeout-minutes: 60
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
-      - uses: ./.github/actions/setup-bun
+      - name: Check out release source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Set up Bun
+        uses: ./.github/actions/setup-bun
+        with:
+          install-flags: --frozen-lockfile
+      - name: Set exact build version
+        run: |
+          version=$(node -p 'require("./packages/desktop/package.json").version')
+          echo "OPENCODE_VERSION=$version" >> "$GITHUB_ENV"
+          echo "VECTOR_VERSION=$version" >> "$GITHUB_ENV"
       - name: Build desktop app
-        run: OPENCODE_CHANNEL=prod bun run --cwd packages/desktop build
-      - name: Package Linux AppImage
+        env:
+          OPENCODE_CHANNEL: prod
+        run: bun run --cwd packages/desktop build
+      - name: Package AppImage
+        env:
+          OPENCODE_CHANNEL: prod
         run: |
           for attempt in 1 2 3; do
-            OPENCODE_CHANNEL=prod bun run --cwd packages/desktop package -- --linux AppImage --x64 --arm64 --publish never && exit 0
+            bun run --cwd packages/desktop package -- --linux AppImage --x64 --arm64 --publish never && exit 0
             if [ "$attempt" = "3" ]; then exit 1; fi
             sleep $((attempt * 15))
           done
+      - name: Verify Linux artifacts
+        run: |
+          set -euo pipefail
+          test -s packages/desktop/dist/vector-desktop-${VECTOR_VERSION}-linux-x86_64.AppImage
+          test -s packages/desktop/dist/vector-desktop-${VECTOR_VERSION}-linux-arm64.AppImage
+          test -s packages/desktop/dist/latest-linux.yml
+          test -s packages/desktop/dist/latest-linux-arm64.yml
+          file packages/desktop/dist/vector-desktop-${VECTOR_VERSION}-linux-x86_64.AppImage | grep -Eq 'x86-64|x86_64'
+          file packages/desktop/dist/vector-desktop-${VECTOR_VERSION}-linux-arm64.AppImage | grep -Eq 'ARM aarch64|aarch64'
+          grep -Fq "vector-desktop-${VECTOR_VERSION}-linux-x86_64.AppImage" packages/desktop/dist/latest-linux.yml
+          grep -Fq "vector-desktop-${VECTOR_VERSION}-linux-arm64.AppImage" packages/desktop/dist/latest-linux-arm64.yml
       - name: Upload Linux assets to draft release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ env.RELEASE_TAG }}
         run: |
           gh release upload "$TAG" --clobber \
-            packages/desktop/dist/vector-desktop-linux-x86_64.AppImage \
-            packages/desktop/dist/vector-desktop-linux-arm64.AppImage \
+            packages/desktop/dist/vector-desktop-${VECTOR_VERSION}-linux-x86_64.AppImage \
+            packages/desktop/dist/vector-desktop-${VECTOR_VERSION}-linux-arm64.AppImage \
             packages/desktop/dist/latest-linux.yml \
             packages/desktop/dist/latest-linux-arm64.yml
 
   release:
-    name: Publish GitHub release assets
-    runs-on: ubuntu-latest
+    name: Publish release and update feeds
     needs:
       - mac
       - windows
       - linux
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
-      - uses: ./.github/actions/setup-bun
+      - name: Check out release source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Set up Bun
+        uses: ./.github/actions/setup-bun
+        with:
+          install-flags: --frozen-lockfile
+
       - name: Download platform assets from draft release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -172,19 +573,58 @@ jobs:
         run: |
           mkdir -p release-assets
           gh release download "$TAG" --dir release-assets --clobber
-      - name: Create checksums
+
+      - name: Validate assets and create checksums
         run: |
-          cd release-assets
-          shasum -a 256 vector-desktop-* > checksums.txt
-      - name: Publish release
+          set -euo pipefail
+          version=$(jq -r .version packages/desktop/package.json)
+          expected=(
+            vector-desktop-${version}-linux-arm64.AppImage
+            vector-desktop-${version}-linux-x86_64.AppImage
+            vector-desktop-${version}-mac-arm64.dmg
+            vector-desktop-${version}-mac-arm64.dmg.blockmap
+            vector-desktop-${version}-mac-arm64.zip
+            vector-desktop-${version}-mac-arm64.zip.blockmap
+            vector-desktop-${version}-mac-x64.dmg
+            vector-desktop-${version}-mac-x64.dmg.blockmap
+            vector-desktop-${version}-mac-x64.zip
+            vector-desktop-${version}-mac-x64.zip.blockmap
+            vector-desktop-${version}-win-arm64.exe
+            vector-desktop-${version}-win-arm64.exe.blockmap
+            vector-desktop-${version}-win-x64.exe
+            vector-desktop-${version}-win-x64.exe.blockmap
+            latest-linux-arm64.yml
+            latest-linux.yml
+            latest-mac.yml
+            latest.yml
+          )
+          for asset in "${expected[@]}"; do
+            test -s "release-assets/$asset" || {
+              echo "Missing or empty release asset: $asset"
+              exit 1
+            }
+          done
+          (
+            cd release-assets
+            sha256sum "${expected[@]}" > checksums.txt
+            checksum_alias() {
+              hash=$(sha256sum "$1" | cut -d ' ' -f 1)
+              printf '%s  %s\n' "$hash" "$2" >> checksums.txt
+            }
+            checksum_alias "vector-desktop-${version}-mac-arm64.dmg" vector-desktop-mac-arm64.dmg
+            checksum_alias "vector-desktop-${version}-mac-x64.dmg" vector-desktop-mac-x64.dmg
+            checksum_alias "vector-desktop-${version}-win-x64.exe" vector-desktop-win-x64.exe
+            checksum_alias "vector-desktop-${version}-win-arm64.exe" vector-desktop-win-arm64.exe
+            checksum_alias "vector-desktop-${version}-linux-x86_64.AppImage" vector-desktop-linux-x86_64.AppImage
+            checksum_alias "vector-desktop-${version}-linux-arm64.AppImage" vector-desktop-linux-arm64.AppImage
+          )
+
+      - name: Upload checksums to draft release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ env.RELEASE_TAG }}
-          PRERELEASE: ${{ env.RELEASE_PRERELEASE }}
-        run: |
-          set -euo pipefail
-          gh release upload "$TAG" release-assets/checksums.txt --clobber
-          gh release edit "$TAG" --draft=false --prerelease="$PRERELEASE"
+        run: gh release upload "$TAG" release-assets/checksums.txt --clobber
+
       - name: Publish Vector download and update feeds
         env:
           BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
@@ -192,11 +632,23 @@ jobs:
           PRERELEASE: ${{ env.RELEASE_PRERELEASE }}
         run: |
           set -euo pipefail
+          test -n "$BLOB_READ_WRITE_TOKEN" || {
+            echo "BLOB_READ_WRITE_TOKEN is required to publish desktop downloads."
+            exit 1
+          }
           channel=latest
-          if [ "$PRERELEASE" = "true" ]; then
-            channel=beta
-          fi
+          if [ "$PRERELEASE" = "true" ]; then channel=beta; fi
           VECTOR_RELEASE_DIR="$PWD/release-assets" \
           VECTOR_RELEASE_VERSION="${TAG#v}" \
           VECTOR_RELEASE_CHANNEL="$channel" \
           bun packages/cloud/src/upload-desktop-release.ts
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ env.RELEASE_TAG }}
+          PRERELEASE: ${{ env.RELEASE_PRERELEASE }}
+        run: |
+          set -euo pipefail
+          gh release edit "$TAG" --draft=false --prerelease="$PRERELEASE"
+          if [ "$PRERELEASE" != "true" ]; then gh release edit "$TAG" --latest; fi

@@ -22,3 +22,11 @@ export {
 } from "./wsl/types"
 export { ServerConnection } from "./context/server"
 export { handleNotificationClick } from "./utils/notification-click"
+export {
+  diagnosticReportingAvailable,
+  observeTelemetryPreference,
+  scrubDiagnosticEvent,
+  setTelemetryEnabled,
+  telemetryEnabled,
+  telemetryPreferenceChanged,
+} from "./features/privacy/telemetry"

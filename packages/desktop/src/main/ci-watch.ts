@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process"
 import { platform } from "node:os"
+import { untrustedChildEnvironment } from "@opencode-ai/core/child-environment"
 
 import { GH_INSTALL_COMMAND } from "./github-pr"
 import { redactText } from "./security-redaction"
@@ -331,7 +332,12 @@ function run(command: string, args: string[], opts: { cwd?: string; timeoutMs?: 
     execFile(
       command,
       args,
-      { cwd: opts.cwd, timeout: opts.timeoutMs ?? 15_000, maxBuffer: opts.maxBuffer ?? 8 * 1024 * 1024 },
+      {
+        cwd: opts.cwd,
+        env: untrustedChildEnvironment(),
+        timeout: opts.timeoutMs ?? 15_000,
+        maxBuffer: opts.maxBuffer ?? 8 * 1024 * 1024,
+      },
       (error, stdout, stderr) =>
         resolve({ stdout: String(stdout ?? ""), stderr: String(stderr ?? ""), failed: Boolean(error) }),
     )

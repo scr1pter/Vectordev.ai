@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process"
 import { access, readFile } from "node:fs/promises"
 import { join } from "node:path"
+import { untrustedChildEnvironment } from "@opencode-ai/core/child-environment"
 
 const MAX_OUTPUT_BYTES = 80_000
 const DEFAULT_TIMEOUT_MS = 120_000
@@ -135,7 +136,7 @@ function runCheck(check: GuardrailCheck, root: string, timeoutMs: number): Promi
       check.args,
       {
         cwd: root,
-        env: { ...process.env, CI: "1", FORCE_COLOR: "0", NO_COLOR: "1" },
+        env: untrustedChildEnvironment(process.env, { CI: "1", FORCE_COLOR: "0", NO_COLOR: "1" }),
         maxBuffer: MAX_OUTPUT_BYTES * 4,
         timeout: timeoutMs,
       },

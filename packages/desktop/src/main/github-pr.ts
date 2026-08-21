@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process"
 import { platform } from "node:os"
+import { untrustedChildEnvironment } from "@opencode-ai/core/child-environment"
 
 // Pull request management through the user's own GitHub CLI. gh already holds
 // their credentials and honours their SSO and org policies, so Vector drives it
@@ -15,7 +16,12 @@ function gh(args: string[], opts: { cwd?: string; timeoutMs?: number } = {}) {
     execFile(
       "gh",
       args,
-      { cwd: opts.cwd, timeout: opts.timeoutMs ?? 30_000, maxBuffer: 64 * 1024 * 1024 },
+      {
+        cwd: opts.cwd,
+        env: untrustedChildEnvironment(),
+        timeout: opts.timeoutMs ?? 30_000,
+        maxBuffer: 64 * 1024 * 1024,
+      },
       (error, stdout, stderr) =>
         resolve({ stdout: String(stdout ?? ""), stderr: String(stderr ?? ""), failed: Boolean(error) }),
     )

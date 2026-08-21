@@ -73,6 +73,61 @@ describe("SessionRunnerModel", () => {
     }),
   )
 
+  it.effect("prices every normalized token category with the highest matching context tier", () =>
+    Effect.gen(function* () {
+      const resolved = yield* SessionRunnerModel.fromCatalogModel(
+        ModelV2.Info.make({
+          ...model({ type: "aisdk", package: "@ai-sdk/openai", url: "https://openai.example/v1" }),
+          cost: [
+            { input: 1, output: 2, cache: { read: 0.1, write: 0.5 } },
+            {
+              tier: { type: "context", size: 200_000 },
+              input: 3,
+              output: 4,
+              cache: { read: 0.3, write: 1.5 },
+            },
+            {
+              tier: { type: "context", size: 500_000 },
+              input: 5,
+              output: 6,
+              cache: { read: 0.5, write: 2.5 },
+            },
+          ],
+        }),
+      )
+
+      expect(
+        SessionRunnerModel.calculateCost(resolved, {
+          input: 550_000,
+          output: 100_000,
+          reasoning: 50_000,
+          cache: { read: 100_000, write: 50_000 },
+        }),
+      ).toBeCloseTo(3.825)
+    }),
+  )
+
+  it.effect("distinguishes unknown pricing from known free pricing and honors billed Copilot usage", () =>
+    Effect.gen(function* () {
+      const unpriced = yield* SessionRunnerModel.fromCatalogModel(
+        model({ type: "aisdk", package: "@ai-sdk/openai", url: "https://openai.example/v1" }),
+      )
+      const free = yield* SessionRunnerModel.fromCatalogModel(
+        ModelV2.Info.make({
+          ...model({ type: "aisdk", package: "@ai-sdk/openai", url: "https://openai.example/v1" }),
+          cost: [{ input: 0, output: 0, cache: { read: 0, write: 0 } }],
+        }),
+      )
+      const tokens = { input: 10, output: 5, reasoning: 2, cache: { read: 3, write: 1 } }
+
+      expect(SessionRunnerModel.calculateCost(unpriced, tokens)).toBeUndefined()
+      expect(SessionRunnerModel.calculateCost(free, tokens)).toBe(0)
+      expect(
+        SessionRunnerModel.calculateCost(unpriced, tokens, { copilot: { totalNanoAiu: 4_473_525_000 } }),
+      ).toBeCloseTo(0.04473525)
+    }),
+  )
+
   it.effect("uses merged API settings for OpenAI-compatible auth and request defaults", () =>
     Effect.gen(function* () {
       const resolved = yield* SessionRunnerModel.fromCatalogModel(

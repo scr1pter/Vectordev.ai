@@ -2,6 +2,7 @@ import { execFile } from "node:child_process"
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { untrustedChildEnvironment } from "@opencode-ai/core/child-environment"
 
 // HEIC decoding in JavaScript means libheif, which is LGPL, and bundling that
 // into a closed-source product creates a licensing conflict. Every desktop OS
@@ -12,8 +13,11 @@ export type ImageConversion = { data: Uint8Array; mime: string } | { error: stri
 
 function run(command: string, args: string[], timeoutMs = 30_000) {
   return new Promise<{ failed: boolean; stderr: string }>((resolve) => {
-    execFile(command, args, { timeout: timeoutMs, maxBuffer: 1024 * 1024 }, (error, _stdout, stderr) =>
-      resolve({ failed: Boolean(error), stderr: String(stderr ?? "") }),
+    execFile(
+      command,
+      args,
+      { env: untrustedChildEnvironment(), timeout: timeoutMs, maxBuffer: 1024 * 1024 },
+      (error, _stdout, stderr) => resolve({ failed: Boolean(error), stderr: String(stderr ?? "") }),
     )
   })
 }

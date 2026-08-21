@@ -126,9 +126,12 @@ const layer = Layer.effect(
         const defaults = Permission.fromConfig({
           "*": "allow",
           doom_loop: "ask",
+          unsandboxed_shell: "ask",
           browser_external: "ask",
           browser_interact: "ask",
           browser_sensitive: "ask",
+          webfetch: "ask",
+          websearch: "ask",
           external_directory: {
             "*": "ask",
             ...Object.fromEntries(whitelistedDirs.map((dir) => [dir, "allow"])),
@@ -142,6 +145,16 @@ const layer = Layer.effect(
             "*.env": "ask",
             "*.env.*": "ask",
             "*.env.example": "allow",
+            "*.key": "ask",
+            "*.pem": "ask",
+            ".aws/*": "ask",
+            "**/.aws/*": "ask",
+            ".docker/config.json": "ask",
+            "**/.docker/config.json": "ask",
+            ".kube/*": "ask",
+            "**/.kube/*": "ask",
+            ".ssh/*": "ask",
+            "**/.ssh/*": "ask",
           },
         })
 
@@ -219,7 +232,8 @@ const layer = Layer.effect(
           },
           quick: {
             name: "quick",
-            description: "A lightweight conversational lane for greetings and acknowledgements that does not load engineering tools.",
+            description:
+              "A lightweight conversational lane for greetings and acknowledgements that does not load engineering tools.",
             prompt:
               "Respond briefly and naturally. This lane is only for conversation, greetings, acknowledgements, and other requests that require no project inspection or tool use. Identify yourself as Vector when relevant.",
             options: {},

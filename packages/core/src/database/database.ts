@@ -54,4 +54,8 @@ export function path() {
   return join(Global.Path.data, `vector-${InstallationChannel.replace(/[^a-zA-Z0-9._-]/g, "-")}.db`)
 }
 
-export const node = makeGlobalNode({ service: Service, layer: layerFromPath(path()), deps: [] })
+// Resolve the configured path when the application layer is built, not when this
+// module is imported. Embedded hosts and test runners intentionally set the
+// database flag before constructing a runtime, and import-time capture otherwise
+// leaves every later host bound to a stale (and potentially deleted) directory.
+export const node = makeGlobalNode({ service: Service, layer: Layer.suspend(() => layerFromPath(path())), deps: [] })

@@ -26,9 +26,8 @@ export function AmbientSky() {
   )
 }
 
-// First-run onboarding: the interactive spotlight tour (spotlight-tour.tsx +
-// spotlight-steps.ts) walks every control in place, then hands off to the
-// progress timeline below. The full feature reference stays in Getting started.
+// First-run activation stays intentionally short. The exhaustive spotlight
+// tour and feature reference remain opt-in from this surface.
 
 export type ProgressStep = {
   id: string
@@ -327,45 +326,56 @@ export function OnboardingProgress(props: {
             </div>
           </div>
 
-          <div class="vguide">
-            <div class="vguide-head">
-              <div class="vguide-kicker">Feature guide</div>
-              <h2 class="vguide-title">Everything Vector can do</h2>
-              <p class="vguide-lede">
-                The whole workspace, surface by surface — what each one is for, where it lives, and how to get the most
-                out of it. Scroll at your own pace; it'll be here whenever you need it.
-              </p>
+          <details class="vguide">
+            <summary class="vguide-toggle">
+              <span>
+                <span class="vguide-kicker">Optional reference</span>
+                <strong>Explore the full feature guide</strong>
+              </span>
+              <span class="vguide-toggle-icon" aria-hidden="true">
+                ↓
+              </span>
+            </summary>
+            <div class="vguide-content">
+              <div class="vguide-head">
+                <div class="vguide-kicker">Feature guide</div>
+                <h2 class="vguide-title">Everything Vector can do</h2>
+                <p class="vguide-lede">
+                  The whole workspace, surface by surface — what each one is for, where it lives, and how to get the
+                  most out of it. Scroll at your own pace; it'll be here whenever you need it.
+                </p>
+              </div>
+              <For each={GUIDE_SECTIONS}>
+                {(section) => (
+                  <section class="vguide-section">
+                    <div class="vguide-kicker">{section.kicker}</div>
+                    <Show when={section.intro}>
+                      <p class="vguide-intro">{section.intro}</p>
+                    </Show>
+                    <div class="vguide-entries">
+                      <For each={section.entries}>
+                        {(entry) => (
+                          <article class="vguide-entry">
+                            <h3 class="vguide-entry-title">{entry.title}</h3>
+                            <div class="vguide-entry-where">{entry.where}</div>
+                            <p class="vguide-entry-body">{entry.body}</p>
+                            <p class="vguide-entry-tip">
+                              <span class="vguide-tip-label">Pro tip</span>
+                              {entry.tip}
+                            </p>
+                          </article>
+                        )}
+                      </For>
+                    </div>
+                  </section>
+                )}
+              </For>
             </div>
-            <For each={GUIDE_SECTIONS}>
-              {(section) => (
-                <section class="vguide-section">
-                  <div class="vguide-kicker">{section.kicker}</div>
-                  <Show when={section.intro}>
-                    <p class="vguide-intro">{section.intro}</p>
-                  </Show>
-                  <div class="vguide-entries">
-                    <For each={section.entries}>
-                      {(entry) => (
-                        <article class="vguide-entry">
-                          <h3 class="vguide-entry-title">{entry.title}</h3>
-                          <div class="vguide-entry-where">{entry.where}</div>
-                          <p class="vguide-entry-body">{entry.body}</p>
-                          <p class="vguide-entry-tip">
-                            <span class="vguide-tip-label">Pro tip</span>
-                            {entry.tip}
-                          </p>
-                        </article>
-                      )}
-                    </For>
-                  </div>
-                </section>
-              )}
-            </For>
-          </div>
+          </details>
 
           <div class="vprogress-footer">
             <button type="button" class="vtour-back" onClick={props.onReplayTour}>
-              Replay the tour
+              Take the full tour
             </button>
             <button type="button" class="vtour-next" onClick={props.onClose}>
               {allDone() ? "Done" : "Keep building"}

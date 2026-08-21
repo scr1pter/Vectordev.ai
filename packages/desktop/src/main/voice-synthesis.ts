@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process"
+import { untrustedChildEnvironment } from "@opencode-ai/core/child-environment"
 
 export type VoiceSpeechResult = {
   status: "spoken" | "unavailable" | "stopped" | "failed"
@@ -60,6 +61,7 @@ export async function speakVoiceText(ownerID: number, input: string): Promise<Vo
 
     return new Promise((resolve) => {
       const child = spawn(option.command, option.args, {
+        env: untrustedChildEnvironment(),
         stdio: ["pipe", "ignore", "ignore"],
         windowsHide: true,
       })

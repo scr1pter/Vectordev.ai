@@ -77,6 +77,38 @@ describe("util.process", () => {
     expect(out.stdout.toString()).toBe("set")
   })
 
+  test("scrubs internal runtime secrets from child environments by default", async () => {
+    const out = await Process.run(
+      node(`process.stdout.write(JSON.stringify({
+        vault: process.env.VECTOR_CREDENTIAL_KEY,
+        bridge: process.env.VECTOR_BROWSER_BRIDGE_TOKEN,
+        server: process.env.OPENCODE_SERVER_PASSWORD,
+        console: process.env.OPENCODE_CONSOLE_TOKEN,
+        provider: process.env.OPENAI_API_KEY,
+      }))`),
+      {
+        env: {
+          VECTOR_CREDENTIAL_KEY: "vault-secret",
+          VECTOR_BROWSER_BRIDGE_TOKEN: "bridge-secret",
+          OPENCODE_SERVER_PASSWORD: "server-secret",
+          OPENCODE_CONSOLE_TOKEN: "console-secret",
+          OPENAI_API_KEY: "provider-secret",
+        },
+      },
+    )
+
+    expect(JSON.parse(out.stdout.toString())).toEqual({ provider: "provider-secret" })
+  })
+
+  test("trusted self-spawns can explicitly inherit runtime control secrets", async () => {
+    const out = await Process.run(node('process.stdout.write(process.env.VECTOR_CREDENTIAL_KEY ?? "")'), {
+      env: { VECTOR_CREDENTIAL_KEY: "vault-secret" },
+      inheritInternalEnv: true,
+    })
+
+    expect(out.stdout.toString()).toBe("vault-secret")
+  })
+
   test("uses shell in run on Windows", async () => {
     if (process.platform !== "win32") return
 

@@ -27,6 +27,11 @@ export type Wrapped = {
 
 const SEATBELT = "/usr/bin/sandbox-exec"
 
+export function sandboxEnabled(value = process.env.OPENCODE_SHELL_SANDBOX) {
+  if (value === undefined) return false
+  return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase())
+}
+
 // Home-relative paths worth more than the convenience of reading them. An agent
 // that cannot read a key cannot leak one, and nothing in a normal build needs
 // these. Anything listed here still resolves for the user's own tools, which run
@@ -42,8 +47,14 @@ const SECRETS = [
   ".kube",
   ".docker/config.json",
   ".netrc",
+  ".npmrc",
   ".password-store",
+  ".pypirc",
+  ".cargo/credentials",
+  ".cargo/credentials.toml",
   ".gem/credentials",
+  ".gradle/gradle.properties",
+  ".m2/settings.xml",
   ".mozilla",
   "Library/Keychains",
   "Library/Cookies",
@@ -125,10 +136,12 @@ export function sandboxAvailability(platform: NodeJS.Platform = process.platform
 export function seatbeltProfile(input: {
   writable: readonly string[]
   denyRead: readonly string[]
+  denyWrite?: readonly string[]
   allowNetwork: boolean
 }) {
   const writable = Array.from(new Set(input.writable)).filter(Boolean)
   const denyRead = Array.from(new Set(input.denyRead)).filter(Boolean)
+  const denyWrite = Array.from(new Set([...denyRead, ...(input.denyWrite ?? [])])).filter(Boolean)
 
   return [
     "(version 1)",
@@ -160,10 +173,12 @@ export function seatbeltProfile(input: {
     // the writable ~/.gem), and the earlier (allow file-write*) would otherwise
     // let an agent clobber a credential it is not allowed to read. Denying the
     // write here overrides that grant without revoking the parent cache.
-    ...(denyRead.length > 0
-      ? ["(deny file-write*", ...denyRead.map((file) => `  (subpath ${literal(file)})`), ")"]
+    ...(denyWrite.length > 0
+      ? ["(deny file-write*", ...denyWrite.map((file) => `  (subpath ${literal(file)})`), ")"]
       : []),
-    ...(denyRead.length > 0 ? ["(deny file-read*", ...denyRead.map((file) => `  (subpath ${literal(file)})`), ")"] : []),
+    ...(denyRead.length > 0
+      ? ["(deny file-read*", ...denyRead.map((file) => `  (subpath ${literal(file)})`), ")"]
+      : []),
     // Registries and package downloads are the common case, so network stays on
     // unless the caller turns it off. Unix sockets survive either way because
     // local toolchains (compiler daemons, DNS) talk over them.
@@ -180,6 +195,7 @@ export function wrapCommand(input: {
   allowNetwork?: boolean
   workspaceRoot: string
   platform?: NodeJS.Platform
+  home?: string
 }): Wrapped {
   const platform = input.platform ?? process.platform
 
@@ -229,7 +245,8 @@ export function wrapCommand(input: {
   // sandbox-exec, where nothing here can catch it, and the command fails.
   try {
     const allowNetwork = input.allowNetwork ?? true
-    const home = canonical(os.homedir())
+    const home = canonical(input.home ?? os.homedir())
+    const git = linkedWorktreeMetadata(input.workspaceRoot)
     // cwd is writable on purpose. A workdir outside the project has already been
     // approved through the external_directory permission, and silently failing
     // writes there would contradict a prompt the user just answered.
@@ -241,8 +258,9 @@ export function wrapCommand(input: {
       canonical(input.cwd),
       canonical(os.tmpdir()),
       ...CACHES.map((entry) => canonical(path.join(home, entry))),
+      ...git.writable,
     ].filter((file) => file !== "/")
-    const denyRead = SECRETS.map((entry) => canonical(path.join(home, entry)))
+    const denyRead = [...SECRETS.map((entry) => canonical(path.join(home, entry))), ...cargoCredentialPaths(home)]
 
     if (availability.mechanism === "seatbelt") {
       return {
@@ -252,6 +270,7 @@ export function wrapCommand(input: {
           seatbeltProfile({
             writable: [...writable, "/tmp", "/private/tmp", "/var/folders", "/private/var/folders"],
             denyRead: [...denyRead, "/Library/Keychains"],
+            denyWrite: git.readonly,
             allowNetwork,
           }),
           input.shell,
@@ -287,6 +306,7 @@ export function wrapCommand(input: {
         "--tmpfs",
         "/tmp",
         ...writable.filter(fs.existsSync).flatMap((file) => ["--bind", file, file]),
+        ...git.readonly.filter(fs.existsSync).flatMap((file) => ["--ro-bind", file, file]),
         // bwrap has no read filter, so covering the path is how a secret gets
         // hidden. A tmpfs only mounts over a directory, so a secret that is a
         // plain file (.netrc, .docker/config.json) gets /dev/null bound over it
@@ -308,6 +328,57 @@ export function wrapCommand(input: {
   } catch (error) {
     return unwrapped(`sandbox profile could not be built (${error instanceof Error ? error.message : String(error)})`)
   }
+}
+
+function linkedWorktreeMetadata(workspaceRoot: string) {
+  const marker = path.join(canonical(workspaceRoot), ".git")
+  if (!fs.existsSync(marker) || !fs.statSync(marker).isFile()) return { writable: [], readonly: [] }
+
+  const match = fs.readFileSync(marker, "utf8").match(/^gitdir:\s*(.+?)\s*$/m)
+  if (!match) return { writable: [], readonly: [] }
+  const gitdir = canonical(path.resolve(path.dirname(marker), match[1]))
+  const commonMarker = path.join(gitdir, "commondir")
+  const backReference = path.join(gitdir, "gitdir")
+  if (!fs.existsSync(commonMarker) || !fs.existsSync(backReference)) return { writable: [], readonly: [] }
+  if (canonical(fs.readFileSync(backReference, "utf8").trim()) !== canonical(marker)) {
+    return { writable: [], readonly: [] }
+  }
+
+  const common = canonical(path.resolve(gitdir, fs.readFileSync(commonMarker, "utf8").trim()))
+  if (common === gitdir || !containsPath(gitdir, path.join(common, "worktrees"))) {
+    return { writable: [], readonly: [] }
+  }
+
+  return {
+    // The per-worktree directory owns HEAD, the index, and their lock files. Git
+    // mutations that also need a shared object, ref, or reflog intentionally fail
+    // in this preview instead of widening a workspace grant into the parent repo.
+    writable: [gitdir],
+    // The marker is inside the writable checkout. Keeping it read-only prevents
+    // a command from redirecting the next sandbox grant at arbitrary metadata.
+    // Keep shared stores explicit too, so a later broader grant cannot silently
+    // make linked-worktree commits writable.
+    readonly: [
+      canonical(marker),
+      canonical(path.join(common, "objects")),
+      canonical(path.join(common, "refs")),
+      canonical(path.join(common, "logs", "refs")),
+    ],
+  }
+}
+
+function containsPath(file: string, directory: string) {
+  const relative = path.relative(directory, file)
+  return relative !== "" && !relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative)
+}
+
+function cargoCredentialPaths(home: string) {
+  const directory = path.join(home, ".cargo")
+  if (!fs.existsSync(directory) || !fs.statSync(directory).isDirectory()) return []
+  return fs
+    .readdirSync(directory)
+    .filter((entry) => entry.startsWith("credentials"))
+    .map((entry) => canonical(path.join(directory, entry)))
 }
 
 /**

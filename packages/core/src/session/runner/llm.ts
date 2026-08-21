@@ -323,7 +323,11 @@ const layer = Layer.effect(
                 timestamp: yield* DateTime.now,
                 assistantMessageID: yield* publisher.startAssistant(),
                 finish: stepSettlement.finish,
-                cost: 0,
+                // The durable V2 event currently requires a finite number. Preserve unknown pricing
+                // until this boundary, then use the narrow compatibility fallback rather than
+                // treating an absent catalog entry as a measured free model internally.
+                cost:
+                  SessionRunnerModel.calculateCost(model, stepSettlement.tokens, stepSettlement.providerMetadata) ?? 0,
                 tokens: stepSettlement.tokens,
                 snapshot: endSnapshot,
                 files,

@@ -56,6 +56,7 @@ import {
   ONBOARDING_UPDATED_EVENT,
   readOnboardingFlags,
   setOnboardingFlag,
+  successfulActivationFromSession,
 } from "@/features/onboarding/onboarding-progress"
 import { ParallelDiffReview } from "@/components/parallel-diff-review"
 import { WorkspaceNavigation, type WorkspaceNavigationItem } from "@/components/workspace-navigation"
@@ -2487,12 +2488,22 @@ export default function NewLayout(props: ParentProps) {
     if (event.details.type !== "session.idle") return
     const sessionID = (event.details as { id?: string }).id
     const directory = (event as { name?: string }).name
-    if (!sessionID || !directory || recordedSessionOutcomes.has(sessionID)) return
-    recordedSessionOutcomes.add(sessionID)
+    if (!sessionID || !directory) return
+    const outcomeRecorded = recordedSessionOutcomes.has(sessionID)
+    if (outcomeRecorded && readOnboardingFlags().taskCompleted) return
+    if (!outcomeRecorded) recordedSessionOutcomes.add(sessionID)
     void (async () => {
       const client = serverSDK().createClient({ directory })
       const history = await client.session.messages({ sessionID }).catch(() => undefined)
-      if (!Array.isArray(history?.data)) return
+      if (!Array.isArray(history?.data)) {
+        if (!outcomeRecorded) recordedSessionOutcomes.delete(sessionID)
+        return
+      }
+      if (successfulActivationFromSession(history.data)) {
+        setOnboardingFlag("providerVerified")
+        setOnboardingFlag("taskCompleted")
+      }
+      if (outcomeRecorded) return
       const parts: Record<string, unknown[]> = {}
       for (const entry of history.data) {
         const id = (entry.info as { id?: string } | undefined)?.id
@@ -2600,13 +2611,17 @@ export default function NewLayout(props: ParentProps) {
   globalThis.window?.addEventListener(ONBOARDING_UPDATED_EVENT, refreshOnboardingFlags)
   onCleanup(() => globalThis.window?.removeEventListener(ONBOARDING_UPDATED_EVENT, refreshOnboardingFlags))
 
-  const onboardingProviderDone = () => parallelModelOptions().length > 0
+  const onboardingProviderDone = () => Boolean(onboardingFlags().providerVerified)
   const onboardingProjectDone = () => Boolean(activeProjectPath())
   const onboardingSteps = () => [
     {
       id: "provider",
-      title: "Connect a model provider",
-      detail: "Bring your own key — OpenAI, Anthropic, Google, or the free starter model.",
+      title: "Verify a model provider",
+      detail: onboardingProviderDone()
+        ? "Vector completed a real model response with your selected provider."
+        : parallelModelOptions().length > 0
+          ? "Connected. Complete the safe first task below to verify the model end to end."
+          : "Bring your own key — OpenAI, Anthropic, Google, or the free starter model.",
       done: onboardingProviderDone(),
       cta: "Connect",
       onGo: () => {
@@ -2631,24 +2646,17 @@ export default function NewLayout(props: ParentProps) {
     },
     {
       id: "task",
-      title: "Give the agent a project goal",
-      detail: "Describe a change in plain language and watch Vector work like an engineer.",
-      done: Boolean(onboardingFlags().task),
+      title: "Complete one safe first task",
+      detail: "Ask Vector to inspect the repository and summarize its architecture without changing files.",
+      done: Boolean(onboardingFlags().taskCompleted),
       cta: "Start",
       onGo: () => {
         setOnboardingOpen(false)
         startTask()
-      },
-    },
-    {
-      id: "preview",
-      title: "Open the built-in browser",
-      detail: "See your app running right next to the chat.",
-      done: Boolean(onboardingFlags().preview),
-      cta: "Browser",
-      onGo: () => {
-        setOnboardingOpen(false)
-        openPreviewPanel()
+        showToast({
+          title: "Try a read-only first task",
+          description: "Ask Vector to inspect this repository and summarize its architecture without changing files.",
+        })
       },
     },
   ]
@@ -2732,13 +2740,10 @@ export default function NewLayout(props: ParentProps) {
 
   onMount(() => {
     const flags = readOnboardingFlags()
-    if (flags.tour || flags.dismissed) return
-    // Let the shell paint first so the tour feels like a greeting, not a block.
-    setTimeout(() => setTourOpen(true), 600)
-  })
-
-  createEffect(() => {
-    if (taskRoute()) setOnboardingFlag("task")
+    if (flags.tour || flags.dismissed || flags.taskCompleted) return
+    // Activation is short and dismissible. The exhaustive spotlight tour is
+    // still available from Getting started, but never takes over first launch.
+    setTimeout(() => setOnboardingOpen(true), 600)
   })
 
   createEffect(() => {

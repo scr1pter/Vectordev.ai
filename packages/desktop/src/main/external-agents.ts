@@ -4,6 +4,7 @@ import { constants } from "node:fs"
 import { access, cp, mkdir, readdir, rm, stat } from "node:fs/promises"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
+import { untrustedChildEnvironment } from "@opencode-ai/core/child-environment"
 
 import { getUserShell, loadShellEnv } from "./shell-env"
 
@@ -67,15 +68,13 @@ export function agentEnvironment(): AgentEnvironment {
   // per process rather than once per detection or per run.
   const loaded = process.platform === "win32" ? null : loadShellEnv(getUserShell(), console)
   const separator = pathSeparator(process.platform)
-  environment = {
-    ...process.env,
-    ...loaded,
+  environment = untrustedChildEnvironment(process.env, loaded ?? undefined, {
     // Union rather than replacement: the login shell knows where the user's
     // tools live, the app environment knows what Electron's own helpers need.
     PATH: [...new Set([...(loaded?.PATH ?? "").split(separator), ...(process.env.PATH ?? "").split(separator)])]
       .filter(Boolean)
       .join(separator),
-  }
+  })
   return environment
 }
 
@@ -349,9 +348,14 @@ export type PrepareWorkspaceResult = { path: string; isolation: "git-worktree" |
 
 function runIn(command: string, args: string[], cwd: string, timeoutMs: number) {
   return new Promise<RunResult>((resolve) => {
-    execFile(command, args, { cwd, timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024 }, (error, stdout, stderr) => {
-      resolve({ stdout: String(stdout ?? ""), stderr: String(stderr ?? ""), failed: Boolean(error) })
-    })
+    execFile(
+      command,
+      args,
+      { cwd, timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024, env: agentEnvironment() },
+      (error, stdout, stderr) => {
+        resolve({ stdout: String(stdout ?? ""), stderr: String(stderr ?? ""), failed: Boolean(error) })
+      },
+    )
   })
 }
 
@@ -558,7 +562,7 @@ export async function runExternalCodingAgent(input: RunExternalAgentInput): Prom
     const child = spawn(launch.command, launch.args, {
       cwd: input.cwd,
       detached: process.platform !== "win32",
-      env: { ...env, NO_COLOR: "1", FORCE_COLOR: "0" },
+      env: untrustedChildEnvironment(env, { NO_COLOR: "1", FORCE_COLOR: "0" }),
       stdio: ["pipe", "pipe", "pipe"],
       windowsVerbatimArguments: launch.windowsVerbatimArguments,
     })

@@ -8,6 +8,7 @@ import { dict as en } from "@/i18n/en"
 import { dict as zh } from "@/i18n/zh"
 import { handleNotificationClick } from "@/utils/notification-click"
 import { authFromToken } from "@/utils/server"
+import { observeTelemetryPreference, scrubDiagnosticEvent, telemetryEnabled } from "@/features/privacy/telemetry"
 import pkg from "../package.json"
 import { ServerConnection } from "./context/server"
 
@@ -134,9 +135,21 @@ const platform: Platform = {
   setDefaultServer: writeDefaultServerUrl,
 }
 
-if (import.meta.env.VITE_SENTRY_DSN) {
+let sentryStarted = false
+
+const configureCrashDiagnostics = () => {
+  if (!import.meta.env.VITE_SENTRY_DSN || !telemetryEnabled()) {
+    if (sentryStarted) void Sentry.close(2_000)
+    sentryStarted = false
+    return
+  }
+  if (sentryStarted) return
+  sentryStarted = true
   Sentry.init({
     dsn: import.meta.env.VITE_SENTRY_DSN,
+    sendDefaultPii: false,
+    tracesSampleRate: 0,
+    beforeSend: scrubDiagnosticEvent,
     environment: import.meta.env.VITE_SENTRY_ENVIRONMENT ?? import.meta.env.MODE,
     release: import.meta.env.VITE_SENTRY_RELEASE ?? `web@${pkg.version}`,
     initialScope: {
@@ -152,6 +165,9 @@ if (import.meta.env.VITE_SENTRY_DSN) {
     },
   })
 }
+
+configureCrashDiagnostics()
+observeTelemetryPreference(configureCrashDiagnostics)
 
 if (root instanceof HTMLElement) {
   const auth = authFromToken(new URLSearchParams(location.search).get("auth_token"))

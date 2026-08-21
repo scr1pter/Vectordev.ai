@@ -2,11 +2,16 @@ import { TextField } from "@opencode-ai/ui/text-field"
 import * as Sentry from "@sentry/solid"
 import { Logo } from "@opencode-ai/ui/logo"
 import { Button } from "@opencode-ai/ui/button"
-import { Component, createSignal, onMount, Show } from "solid-js"
+import { Component, createSignal, onCleanup, onMount, Show } from "solid-js"
 import { createStore } from "solid-js/store"
 import { usePlatform } from "@/context/platform"
 import { useLanguage } from "@/context/language"
 import { Icon } from "@opencode-ai/ui/icon"
+import {
+  diagnosticReportingAvailable,
+  observeTelemetryPreference,
+  telemetryEnabled,
+} from "@/features/privacy/telemetry"
 import { errorDescriptionKey } from "./error-description"
 
 export type InitError = {
@@ -227,6 +232,8 @@ export const ErrorPage: Component<ErrorPageProps> = (props) => {
   const [store, setStore] = createStore({
     actionError: undefined as string | undefined,
   })
+  const [crashDiagnostics, setCrashDiagnostics] = createSignal(telemetryEnabled())
+  onCleanup(observeTelemetryPreference(setCrashDiagnostics))
 
   function ensureFatalErrorRecorded() {
     recordedFatalError ??=
@@ -304,7 +311,7 @@ export const ErrorPage: Component<ErrorPageProps> = (props) => {
               {language.t("error.page.action.exportLogs")}
             </Button>
           </Show>
-          <Show when={Sentry.isEnabled}>
+          <Show when={diagnosticReportingAvailable(crashDiagnostics(), Sentry.isEnabled())}>
             {(_) => {
               const [reported, setReported] = createSignal(false)
               return (

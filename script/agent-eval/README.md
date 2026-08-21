@@ -14,6 +14,7 @@ bun script/agent-eval/run.ts --list
 bun script/agent-eval/run.ts --runtime vector --tasks all
 bun script/agent-eval/run.ts --runtime codex --tasks bugfix-overdue-invoices
 bun script/agent-eval/run.ts --compare vector,claude-code,codex --tasks all
+bun script/agent-eval/run.ts --compare vector,claude-code,codex,cursor --tasks all --repeat 5
 ```
 
 | Flag              | Meaning                                                            |
@@ -24,6 +25,7 @@ bun script/agent-eval/run.ts --compare vector,claude-code,codex --tasks all
 | `--model <id>`    | Passed through to the runtime's own `--model` flag                 |
 | `--out <path>`    | Where to write the JSON report (default: a file in `$TMPDIR`)      |
 | `--timeout <sec>` | Per-task agent timeout, overriding the task's own                  |
+| `--repeat <n>`    | Repeat every task 1–20 times to expose run-to-run variance         |
 | `--keep`          | Keep the fixture directories so you can inspect what the agent did |
 | `--list`          | Print the task set and exit                                        |
 
@@ -44,17 +46,20 @@ Set `VECTOR_EVAL_ENGINE` to point at a specific build.
 
 ## The task set
 
-Five tasks. Each one builds its own fixture repository, and each declares its
+Eight tasks. Each one builds its own fixture repository, and each declares its
 objective check and the exact files it expects to be edited before any agent
 sees it, so the pass bar cannot drift to fit a result.
 
-| Id                            | Category     | What it measures                                                                                                                                |
-| ----------------------------- | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `bugfix-overdue-invoices`     | bug-fix      | A failing test exposes an off-by-one boundary bug. Can the agent read a red suite and fix the source?                                           |
-| `feature-retry-schedule`      | feature      | A provided test specifies a `retrySchedule` export that does not exist yet. Can the agent implement to a spec it has to read?                   |
-| `refactor-rename-symbol`      | refactor     | Rename an exported symbol across four files with no behaviour change and no compatibility alias left behind.                                    |
-| `discipline-single-file-fix`  | bug-fix      | A one-line fix in a repository seeded with a typo'd README, a stale doc, and a `TODO`-laden module. The prompt says to change exactly one file. |
-| `test-writing-parse-duration` | test-writing | Write tests for an untested function. Scored by whether the tests actually catch four seeded defects, not by whether they are green.            |
+| Id                               | Category     | What it measures                                                                                                                                |
+| -------------------------------- | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bugfix-overdue-invoices`        | bug-fix      | A failing test exposes an off-by-one boundary bug. Can the agent read a red suite and fix the source?                                           |
+| `feature-retry-schedule`         | feature      | A provided test specifies a `retrySchedule` export that does not exist yet. Can the agent implement to a spec it has to read?                   |
+| `refactor-rename-symbol`         | refactor     | Rename an exported symbol across four files with no behaviour change and no compatibility alias left behind.                                    |
+| `discipline-single-file-fix`     | bug-fix      | A one-line fix in a repository seeded with a typo'd README, a stale doc, and a `TODO`-laden module. The prompt says to change exactly one file. |
+| `test-writing-parse-duration`    | test-writing | Write tests for an untested function. Scored by whether the tests actually catch four seeded defects, not by whether they are green.            |
+| `bugfix-idempotent-webhooks`     | bug-fix      | Make a billing projection safe under duplicate and out-of-order webhook delivery without dropping valid credit grants.                          |
+| `security-path-containment`      | bug-fix      | Close a sibling-prefix traversal bug while preserving valid root and nested paths.                                                              |
+| `bugfix-concurrent-reservations` | bug-fix      | Prevent two concurrent model requests from reserving more than one shared allowance.                                                            |
 
 Every task nominates **protected files** — usually the tests that define
 success. Changing one invalidates the run outright, because deleting the test is
@@ -137,12 +142,12 @@ Be honest about the ceiling here. This harness does **not** measure:
   subagents, LSP, or long-context retrieval.
 - **Vector's product surface.** This measures the agent, not the desktop app,
   the cloud backend, or the editor.
-- **Statistical significance.** One run per task. Agents are non-deterministic;
-  a single-point difference between two runtimes is noise until you have run it
-  several times.
+- **Broad statistical significance.** `--repeat` exposes run-to-run variance,
+  but a handful of local runs is still not a publishable population and does
+  not control for provider or model changes.
 
-Five tasks that run honestly are worth more than fifty that are hand-waved, but
-five tasks is a smoke test for agent quality, not a benchmark.
+Eight tasks that run honestly are worth more than fifty that are hand-waved, but
+this set is still a smoke test for agent quality, not a benchmark of real-repository work.
 
 ## Reading results responsibly
 
@@ -155,6 +160,8 @@ put two such numbers next to each other and call the difference a regression.
 Practically:
 
 - To compare runtimes, use `--compare` in a single invocation.
+- Use `--repeat 5` or more before treating a pass-rate difference as a signal;
+  repeated attempts get fresh repositories and remain separate in the JSON.
 - To compare two Vector builds, run both back to back in one sitting, and pin
   `--model` so the model is not a free variable.
 - Re-run before believing any single result.

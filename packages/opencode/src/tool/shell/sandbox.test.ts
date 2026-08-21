@@ -5,7 +5,7 @@ import net from "node:net"
 import os from "node:os"
 import path from "node:path"
 
-import { sandboxAvailability, seatbeltProfile, wrapCommand } from "./sandbox"
+import { sandboxAvailability, sandboxEnabled, seatbeltProfile, wrapCommand } from "./sandbox"
 
 const darwin = process.platform === "darwin"
 const home = fs.realpathSync(os.homedir())
@@ -14,7 +14,13 @@ function workspace(prefix = "sbx-") {
   return fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)))
 }
 
-function sandboxed(input: { command: string; workspaceRoot: string; cwd?: string; allowNetwork?: boolean }) {
+function sandboxed(input: {
+  command: string
+  workspaceRoot: string
+  cwd?: string
+  allowNetwork?: boolean
+  home?: string
+}) {
   const wrapped = wrapCommand({
     shell: "/bin/zsh",
     command: input.command,
@@ -22,6 +28,7 @@ function sandboxed(input: { command: string; workspaceRoot: string; cwd?: string
     env: process.env,
     workspaceRoot: input.workspaceRoot,
     allowNetwork: input.allowNetwork,
+    home: input.home,
   })
   expect(wrapped.sandboxed).toBe(true)
   const result = spawnSync(wrapped.command, wrapped.args, {
@@ -31,6 +38,25 @@ function sandboxed(input: { command: string; workspaceRoot: string; cwd?: string
   })
   return { status: result.status, output: (result.stdout + result.stderr).trim() }
 }
+
+function git(directory: string, args: string[]) {
+  const result = spawnSync("git", ["-C", directory, ...args], { encoding: "utf8" })
+  expect(result.status, result.stderr).toBe(0)
+  return result.stdout.trim()
+}
+
+test("sandboxing is an opt-in preview with explicit enable values", () => {
+  expect(sandboxEnabled(undefined)).toBe(false)
+  expect(sandboxEnabled("")).toBe(false)
+  expect(sandboxEnabled("preview")).toBe(false)
+  expect(sandboxEnabled("1")).toBe(true)
+  expect(sandboxEnabled("true")).toBe(true)
+  expect(sandboxEnabled(" yes ")).toBe(true)
+  expect(sandboxEnabled("ON")).toBe(true)
+  expect(sandboxEnabled("0")).toBe(false)
+  expect(sandboxEnabled("false")).toBe(false)
+  expect(sandboxEnabled("off")).toBe(false)
+})
 
 test("profile grants writes to the workspace and keeps the default deny", () => {
   const profile = seatbeltProfile({ writable: ["/work/space"], denyRead: [], allowNetwork: true })
@@ -52,6 +78,20 @@ test("profile denies reads of secret paths after the broad read allowance", () =
   // SBPL is last-match-wins, so a denial emitted before (allow file-read*) would
   // be silently overridden and the whole protection would be decorative.
   expect(profile.indexOf("(deny file-read*")).toBeGreaterThan(profile.indexOf("(allow file-read*)"))
+})
+
+test("profile can keep a linked-worktree marker readable but not writable", () => {
+  const marker = "/work/linked/.git"
+  const profile = seatbeltProfile({
+    writable: ["/work/linked", "/repo/.git/worktrees/linked"],
+    denyRead: [],
+    denyWrite: [marker],
+    allowNetwork: true,
+  })
+  expect(profile.slice(profile.indexOf("(deny file-write*"), profile.indexOf("(deny file-read*"))).toContain(
+    `(subpath "${marker}")`,
+  )
+  expect(profile).not.toContain("(deny file-read*")
 })
 
 test("paths with quotes and backslashes cannot break out of the profile literal", () => {
@@ -146,6 +186,114 @@ test.skipIf(!darwin)("macos produces a runnable sandbox-exec invocation", () => 
   expect(wrapped.args[1]).toContain(`(subpath "${root}")`)
   expect(wrapped.args.slice(2)).toEqual(["/bin/zsh", "-c", "echo hi"])
   expect(wrapped.shell).toBe(false)
+})
+
+test.skipIf(!darwin)("package-manager credential files are masked inside writable caches", () => {
+  const root = workspace()
+  const fakeHome = workspace("sandbox-home-")
+  const credentials = [
+    ".npmrc",
+    ".pypirc",
+    ".cargo/credentials",
+    ".cargo/credentials.toml",
+    ".cargo/credentials-backup",
+    ".gradle/gradle.properties",
+    ".m2/settings.xml",
+  ]
+  credentials.forEach((entry) => {
+    const file = path.join(fakeHome, entry)
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, "secret")
+  })
+
+  const wrapped = wrapCommand({
+    shell: "/bin/zsh",
+    command: "true",
+    cwd: root,
+    env: process.env,
+    workspaceRoot: root,
+    home: fakeHome,
+  })
+  expect(wrapped.sandboxed).toBe(true)
+  credentials.forEach((entry) => expect(wrapped.args[1]).toContain(`(subpath "${path.join(fakeHome, entry)}")`))
+
+  const denied = sandboxed({
+    command: `cat ${credentials.map((entry) => JSON.stringify(path.join(fakeHome, entry))).join(" ")}`,
+    workspaceRoot: root,
+    home: fakeHome,
+  })
+  expect(denied.status).not.toBe(0)
+  expect(denied.output).not.toContain("secret")
+})
+
+test.skipIf(!darwin)("linked worktrees keep shared objects, refs, and reflogs read-only", () => {
+  // Keep both checkouts outside macOS's broad temporary-directory allowance so
+  // this proves the metadata grant does not accidentally open the parent tree.
+  const main = fs.realpathSync(fs.mkdtempSync(path.join(process.cwd(), ".sandbox-main-")))
+  const linkedParent = fs.realpathSync(fs.mkdtempSync(path.join(process.cwd(), ".sandbox-linked-")))
+  const linked = path.join(linkedParent, "checkout")
+  const escape = path.join(main, "sandbox-escape.txt")
+
+  try {
+    git(main, ["init", "-b", "main"])
+    git(main, ["config", "user.name", "Vector Sandbox Test"])
+    git(main, ["config", "user.email", "sandbox@vector.test"])
+    fs.writeFileSync(path.join(main, "tracked.txt"), "initial\n")
+    git(main, ["add", "tracked.txt"])
+    git(main, ["commit", "-m", "initial"])
+    git(main, ["worktree", "add", "-b", "linked-test", linked])
+
+    const marker = path.join(linked, ".git")
+    const gitdir = fs.realpathSync(
+      path.resolve(linked, fs.readFileSync(marker, "utf8").match(/^gitdir:\s*(.+?)\s*$/m)?.[1] ?? ""),
+    )
+    const common = fs.realpathSync(path.resolve(gitdir, fs.readFileSync(path.join(gitdir, "commondir"), "utf8").trim()))
+    const protectedPaths = [path.join(common, "objects"), path.join(common, "refs"), path.join(common, "logs", "refs")]
+    const probes = protectedPaths.map((directory) => path.join(directory, "vector-sandbox-probe"))
+
+    const wrapped = wrapCommand({
+      shell: "/bin/zsh",
+      command: "true",
+      cwd: linked,
+      env: process.env,
+      workspaceRoot: linked,
+    })
+    expect(wrapped.sandboxed).toBe(true)
+    const profile = wrapped.args[1]
+    const writableRules = profile.slice(
+      profile.indexOf("(allow file-write*"),
+      profile.indexOf('(allow file-write* (literal "/dev/null")'),
+    )
+    expect(writableRules).toContain(`(subpath "${gitdir}")`)
+    protectedPaths.forEach((directory) => expect(writableRules).not.toContain(`(subpath "${directory}")`))
+
+    const denyWriteRules = profile.slice(profile.indexOf("(deny file-write*"), profile.indexOf("(deny file-read*"))
+    expect(denyWriteRules).toContain(`(subpath "${marker}")`)
+    protectedPaths.forEach((directory) => expect(denyWriteRules).toContain(`(subpath "${directory}")`))
+
+    const result = sandboxed({
+      workspaceRoot: linked,
+      command: [
+        "printf 'linked\\n' >> tracked.txt",
+        `printf local > ${JSON.stringify(path.join(gitdir, "vector-sandbox-probe"))}`,
+        ...probes.map(
+          (probe, index) => `if printf tamper > ${JSON.stringify(probe)} 2>/dev/null; then exit ${91 + index}; fi`,
+        ),
+        `if printf escape > ${JSON.stringify(escape)} 2>/dev/null; then exit 91; fi`,
+        "if printf tamper > .git 2>/dev/null; then exit 92; fi",
+      ].join(" && "),
+    })
+
+    expect(result.status, result.output).toBe(0)
+    expect(fs.readFileSync(path.join(linked, "tracked.txt"), "utf8")).toBe("initial\nlinked\n")
+    expect(fs.readFileSync(path.join(gitdir, "vector-sandbox-probe"), "utf8")).toBe("local")
+    probes.forEach((probe) => expect(fs.existsSync(probe)).toBe(false))
+    expect(fs.existsSync(escape)).toBe(false)
+    expect(fs.readFileSync(marker, "utf8")).toStartWith("gitdir:")
+  } finally {
+    fs.rmSync(linkedParent, { recursive: true, force: true })
+    fs.rmSync(main, { recursive: true, force: true })
+  }
 })
 
 test.skipIf(!darwin)("writes inside the workspace succeed and writes to home are refused", () => {

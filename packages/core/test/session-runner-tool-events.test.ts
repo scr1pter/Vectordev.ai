@@ -134,3 +134,29 @@ test("step finish records settlement without publishing step ended", async () =>
   expect(published.some((event) => event.type === "session.next.step.ended.2")).toBe(false)
   expect(publisher.stepSettlement()).toMatchObject({ finish: "stop" })
 })
+
+test("step settlement preserves normalized usage and billing metadata", async () => {
+  const { publisher } = capture()
+  await Effect.runPromise(
+    publisher.publish(
+      LLMEvent.stepFinish({
+        index: 0,
+        reason: "stop",
+        usage: {
+          inputTokens: 100,
+          outputTokens: 25,
+          reasoningTokens: 5,
+          cacheReadInputTokens: 20,
+          cacheWriteInputTokens: 10,
+          providerMetadata: { copilot: { totalNanoAiu: 100_000_000 } },
+        },
+      }),
+    ),
+  )
+
+  expect(publisher.stepSettlement()).toEqual({
+    finish: "stop",
+    tokens: { input: 70, output: 20, reasoning: 5, cache: { read: 20, write: 10 } },
+    providerMetadata: { copilot: { totalNanoAiu: 100_000_000 } },
+  })
+})

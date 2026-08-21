@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process"
 import { userInfo } from "node:os"
 import { basename } from "node:path"
+import { untrustedChildEnvironment } from "@opencode-ai/core/child-environment"
 
 const TIMEOUT = 5_000
 
@@ -35,6 +36,7 @@ export function parseShellEnv(out: Buffer) {
 
 function probe(shell: string, mode: "-il" | "-l"): Probe {
   const out = spawnSync(shell, [mode, "-c", "env -0"], {
+    env: untrustedChildEnvironment(),
     stdio: ["ignore", "pipe", "ignore"],
     timeout: TIMEOUT,
     windowsHide: true,

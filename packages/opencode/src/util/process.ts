@@ -1,6 +1,7 @@
 import { type ChildProcess } from "child_process"
 import type { Stream } from "node:stream"
 import launch from "cross-spawn"
+import { untrustedChildEnvironment } from "@opencode-ai/core/child-environment"
 import { buffer } from "node:stream/consumers"
 import { errorMessage } from "./error"
 
@@ -17,6 +18,10 @@ export interface Options {
   abort?: AbortSignal
   kill?: NodeJS.Signals | number
   timeout?: number
+  /** Use `env` exactly instead of extending the current process environment. */
+  exactEnv?: boolean
+  /** Reserved for trusted OpenCode child processes that must share runtime control secrets. */
+  inheritInternalEnv?: boolean
 }
 
 export interface RunOptions extends Omit<Options, "stdout" | "stderr"> {
@@ -63,7 +68,18 @@ export function spawn(cmd: string[], opts: Options = {}): Child {
   const proc = launch(cmd[0], cmd.slice(1), {
     cwd: opts.cwd,
     shell: opts.shell,
-    env: opts.env === null ? {} : opts.env ? { ...process.env, ...opts.env } : undefined,
+    env:
+      opts.env === null
+        ? {}
+        : opts.inheritInternalEnv
+          ? opts.exactEnv
+            ? opts.env
+            : opts.env
+              ? { ...process.env, ...opts.env }
+              : process.env
+          : opts.exactEnv
+            ? untrustedChildEnvironment(opts.env)
+            : untrustedChildEnvironment(process.env, opts.env),
     stdio: [opts.stdin ?? "ignore", opts.stdout ?? "ignore", opts.stderr ?? "ignore"],
     windowsHide: process.platform === "win32",
   })
@@ -120,6 +136,8 @@ export async function run(cmd: string[], opts: RunOptions = {}): Promise<Result>
     abort: opts.abort,
     kill: opts.kill,
     timeout: opts.timeout,
+    exactEnv: opts.exactEnv,
+    inheritInternalEnv: opts.inheritInternalEnv,
     stdout: "pipe",
     stderr: "pipe",
   })

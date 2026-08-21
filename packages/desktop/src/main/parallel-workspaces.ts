@@ -5,6 +5,7 @@ import { cp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promi
 import { dirname, join, relative } from "node:path"
 import { app } from "electron"
 import { VERIFIED_COMPLETION_POLICY } from "@opencode-ai/app/judge"
+import { untrustedChildEnvironment } from "@opencode-ai/core/child-environment"
 import { backupBeforeOverwrite } from "./workspace-checkpoint"
 
 import {
@@ -614,15 +615,20 @@ function rememberValidation(
 // the single chokepoint covers status, ls-files and diff --name-only together.
 const GIT_PATH_CONFIG = ["-c", "core.quotePath=false"]
 
-function runGit(args: string[], cwd: string, options: { allowFailure?: boolean; input?: string } = {}) {
+export function runGit(args: string[], cwd: string, options: { allowFailure?: boolean; input?: string } = {}) {
   const allowFailure = options.allowFailure ?? false
   return withTimeout(
     new Promise<CommandResult>((resolve, reject) => {
-      const child = execFile("git", [...GIT_PATH_CONFIG, ...args], { cwd, maxBuffer: 96 * 1024 * 1024 }, (error, stdout, stderr) => {
-        const result = { stdout: String(stdout), stderr: String(stderr), failed: Boolean(error) }
-        if (error && !allowFailure) return reject(error)
-        resolve(result)
-      })
+      const child = execFile(
+        "git",
+        [...GIT_PATH_CONFIG, ...args],
+        { cwd, env: untrustedChildEnvironment(), maxBuffer: 96 * 1024 * 1024 },
+        (error, stdout, stderr) => {
+          const result = { stdout: String(stdout), stderr: String(stderr), failed: Boolean(error) }
+          if (error && !allowFailure) return reject(error)
+          resolve(result)
+        },
+      )
       if (options.input !== undefined) {
         child.stdin?.write(options.input)
         child.stdin?.end()

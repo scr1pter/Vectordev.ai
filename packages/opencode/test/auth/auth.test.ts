@@ -93,4 +93,27 @@ describe("Auth", () => {
       },
     })
   })
+
+  test("refuses to persist provider credentials when secure storage is required but unavailable", () => {
+    const previousKey = process.env.VECTOR_CREDENTIAL_KEY
+    const previousRequirement = process.env.VECTOR_REQUIRE_SECURE_CREDENTIAL_STORE
+    delete process.env.VECTOR_CREDENTIAL_KEY
+    process.env.VECTOR_REQUIRE_SECURE_CREDENTIAL_STORE = "1"
+
+    try {
+      expect(() =>
+        AuthStorage.encode({
+          anthropic: {
+            type: "api",
+            key: "provider-secret-value",
+          },
+        }),
+      ).toThrow("secure runtime vault")
+    } finally {
+      if (previousKey === undefined) delete process.env.VECTOR_CREDENTIAL_KEY
+      else process.env.VECTOR_CREDENTIAL_KEY = previousKey
+      if (previousRequirement === undefined) delete process.env.VECTOR_REQUIRE_SECURE_CREDENTIAL_STORE
+      else process.env.VECTOR_REQUIRE_SECURE_CREDENTIAL_STORE = previousRequirement
+    }
+  })
 })

@@ -5,6 +5,7 @@ import { spawn, type ChildProcess } from "child_process"
 import { readFile } from "fs/promises"
 import { statSync } from "fs"
 import { setTimeout as sleep } from "node:timers/promises"
+import { untrustedChildEnvironment } from "./child-environment"
 import { Flag } from "./flag/flag"
 import { FSUtil } from "./fs-util"
 import { which } from "./util/which"
@@ -35,6 +36,7 @@ export async function killTree(proc: ChildProcess, opts?: { exited?: () => boole
   if (process.platform === "win32") {
     await new Promise<void>((resolve) => {
       const killer = spawn("taskkill", ["/pid", String(pid), "/f", "/t"], {
+        env: untrustedChildEnvironment(),
         stdio: "ignore",
         windowsHide: true,
       })

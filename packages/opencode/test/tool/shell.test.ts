@@ -217,6 +217,61 @@ describe("tool.shell", () => {
       )
     }),
   )
+
+  it.live("does not expose Vector's internal vault and bridge secrets to commands", () =>
+    Effect.acquireUseRelease(
+      Effect.sync(() => {
+        const values = {
+          OPENCODE_AUTH_CONTENT: "aggregate-secret",
+          OPENCODE_CONSOLE_TOKEN: "console-secret",
+          OPENCODE_SERVER_PASSWORD: "server-secret",
+          VECTOR_CLOUD_TOKEN: "cloud-secret",
+          VECTOR_CREDENTIAL_KEY: "vault-secret",
+          VECTOR_INSTALLER_BLOB_TOKEN: "installer-secret",
+          VECTOR_MCP_AUTH_KEY: "mcp-secret",
+          OPENAI_API_KEY: "provider-secret",
+        }
+        const previous = Object.fromEntries(Object.keys(values).map((key) => [key, process.env[key]]))
+        Object.assign(process.env, values)
+        return previous
+      }),
+      () =>
+        runIn(
+          projectRoot,
+          Effect.gen(function* () {
+            const code = `process.stdout.write(JSON.stringify({
+              aggregate: process.env.OPENCODE_AUTH_CONTENT,
+              console: process.env.OPENCODE_CONSOLE_TOKEN,
+              password: process.env.OPENCODE_SERVER_PASSWORD,
+              cloud: process.env.VECTOR_CLOUD_TOKEN,
+              vault: process.env.VECTOR_CREDENTIAL_KEY,
+              installer: process.env.VECTOR_INSTALLER_BLOB_TOKEN,
+              mcp: process.env.VECTOR_MCP_AUTH_KEY,
+              provider: process.env.OPENAI_API_KEY,
+            }))`
+            const command = `${PS.has(sh()) ? "& " : ""}${bin} -e ${evalarg(code)}`
+            const result = yield* run({ command })
+            expect(result.output).toContain('"provider":"provider-secret"')
+            ;[
+              "aggregate-secret",
+              "console-secret",
+              "server-secret",
+              "cloud-secret",
+              "vault-secret",
+              "installer-secret",
+              "mcp-secret",
+            ].forEach((secret) => expect(result.output).not.toContain(secret))
+          }),
+        ),
+      (previous) =>
+        Effect.sync(() => {
+          Object.entries(previous).forEach(([key, value]) => {
+            if (value === undefined) delete process.env[key]
+            else process.env[key] = value
+          })
+        }),
+    ),
+  )
 })
 
 describe("tool.shell permissions", () => {

@@ -598,6 +598,52 @@
   border-top: 1px solid var(--vx-line);
 }
 
+.vguide-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--vx-line);
+  border-radius: 14px;
+  background: var(--vx-glass);
+  color: var(--vx-ink);
+  cursor: pointer;
+  list-style: none;
+  transition:
+    border-color 180ms var(--vx-ease),
+    background 180ms var(--vx-ease);
+}
+
+.vguide-toggle::-webkit-details-marker {
+  display: none;
+}
+
+.vguide-toggle:hover {
+  border-color: rgba(178, 140, 255, 0.4);
+  background: rgba(143, 82, 255, 0.1);
+}
+
+.vguide-toggle strong {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 0.94rem;
+}
+
+.vguide-toggle-icon {
+  color: var(--vx-purple-soft);
+  font-size: 1rem;
+  transition: transform 180ms var(--vx-ease);
+}
+
+.vguide[open] .vguide-toggle-icon {
+  transform: rotate(180deg);
+}
+
+.vguide-content {
+  padding-top: 2rem;
+}
+
 .vguide-kicker {
   color: var(--vx-purple-soft);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;

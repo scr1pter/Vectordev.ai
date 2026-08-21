@@ -1,5 +1,6 @@
 import type { Argv } from "yargs"
 import { spawn } from "child_process"
+import { untrustedChildEnvironment } from "@opencode-ai/core/child-environment"
 import { Database } from "@opencode-ai/core/database/database"
 import { Effect } from "effect"
 import { sql } from "drizzle-orm"
@@ -36,6 +37,7 @@ const QueryCommand = effectCmd({
       return
     }
     const child = spawn("sqlite3", [Database.path()], {
+      env: untrustedChildEnvironment(),
       stdio: "inherit",
     })
     yield* Effect.promise(() => new Promise((resolve) => child.on("close", resolve)))

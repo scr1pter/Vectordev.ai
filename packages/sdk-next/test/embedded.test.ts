@@ -6,11 +6,10 @@ import { Flag } from "@opencode-ai/core/flag/flag"
 import { Deferred, Effect, Latch, Option, Schema, Stream } from "effect"
 import type { OpenCodeEvent } from "../src"
 
-// Core resolves the global Database node's path once, while its module graph is first
-// evaluated by the `import("../src")` below, so the database location must be settled
-// before any test runs and stay valid until the last one finishes. A per-test database
-// would only ever bind the first test's directory, and every later test would try to
-// open a file under a directory that test's own cleanup already removed.
+// Import the public SDK before choosing the embedded database. The Database node must
+// resolve its path when a host is constructed rather than capturing a stale path while
+// the SDK module graph is evaluated.
+await import("../src")
 const root = await mkdtemp(join(tmpdir(), "opencode-embedded-"))
 Flag.OPENCODE_DB = join(root, "opencode.sqlite")
 

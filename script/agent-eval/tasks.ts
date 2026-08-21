@@ -436,6 +436,232 @@ export function parseDuration(input: string) {
       },
     ],
   },
+
+  {
+    id: "bugfix-idempotent-webhooks",
+    category: "bug-fix",
+    title: "Make a billing projection duplicate-safe and order-safe",
+    timeoutMs: DEFAULT_TIMEOUT_MS,
+    prompt: [
+      "The entitlement projection in src/entitlements.ts mishandles webhook delivery semantics.",
+      "Run `bun test`, then fix the implementation so duplicate events have no effect and an older",
+      "subscription update cannot overwrite newer subscription state.",
+      "",
+      "Constraints:",
+      "- Do not edit anything under test/.",
+      "- Do not add dependencies.",
+      "- Keep invoice credit grants independent from subscription event ordering.",
+    ].join("\n"),
+    files: {
+      "package.json": PACKAGE_JSON("eval-idempotent-webhooks"),
+      ".gitignore": GITIGNORE,
+      "tsconfig.json": TSCONFIG,
+      "src/entitlements.ts": `export type BillingEvent =
+  | { id: string; created: number; type: "invoice.paid"; credits: number }
+  | { id: string; created: number; type: "subscription.updated"; active: boolean }
+
+export type EntitlementState = {
+  active: boolean
+  credits: number
+  lastSubscriptionEventAt: number
+  processedEventIds: string[]
+}
+
+export const emptyEntitlement = (): EntitlementState => ({
+  active: false,
+  credits: 0,
+  lastSubscriptionEventAt: 0,
+  processedEventIds: [],
+})
+
+export function applyBillingEvent(state: EntitlementState, event: BillingEvent): EntitlementState {
+  if (event.type === "invoice.paid") {
+    return {
+      ...state,
+      credits: state.credits + event.credits,
+      processedEventIds: [...state.processedEventIds, event.id],
+    }
+  }
+  return {
+    ...state,
+    active: event.active,
+    lastSubscriptionEventAt: event.created,
+    processedEventIds: [...state.processedEventIds, event.id],
+  }
+}
+`,
+      "test/entitlements.test.ts": `import { expect, test } from "bun:test"
+import { applyBillingEvent, emptyEntitlement } from "../src/entitlements"
+
+test("a retried invoice webhook grants credits exactly once", () => {
+  const event = { id: "evt_invoice", created: 20, type: "invoice.paid" as const, credits: 500 }
+  const once = applyBillingEvent(emptyEntitlement(), event)
+  expect(applyBillingEvent(once, event)).toEqual(once)
+})
+
+test("an older subscription event cannot roll back newer state", () => {
+  const active = applyBillingEvent(emptyEntitlement(), {
+    id: "evt_new",
+    created: 200,
+    type: "subscription.updated",
+    active: true,
+  })
+  expect(
+    applyBillingEvent(active, {
+      id: "evt_old",
+      created: 100,
+      type: "subscription.updated",
+      active: false,
+    }),
+  ).toEqual({ ...active, processedEventIds: [...active.processedEventIds, "evt_old"] })
+})
+
+test("invoice grants are accepted even when their timestamps are older", () => {
+  const current = applyBillingEvent(emptyEntitlement(), {
+    id: "evt_subscription",
+    created: 200,
+    type: "subscription.updated",
+    active: true,
+  })
+  const credited = applyBillingEvent(current, {
+    id: "evt_invoice",
+    created: 50,
+    type: "invoice.paid",
+    credits: 250,
+  })
+  expect(credited.credits).toBe(250)
+  expect(credited.active).toBe(true)
+})
+`,
+    },
+    check: { command: "bun", args: ["test"] },
+    expectedFiles: ["src/entitlements.ts"],
+    protectedFiles: ["test/entitlements.test.ts"],
+    assertions: [],
+    mutations: [],
+  },
+
+  {
+    id: "security-path-containment",
+    category: "bug-fix",
+    title: "Close a sibling-prefix path traversal bug",
+    timeoutMs: DEFAULT_TIMEOUT_MS,
+    prompt: [
+      "resolveWorkspacePath is intended to reject every path outside its workspace root, but the tests expose",
+      "a containment bug. Run `bun test` and make the smallest robust fix in src/workspace-path.ts.",
+      "",
+      "Constraints:",
+      "- Do not edit anything under test/.",
+      "- Do not add dependencies.",
+      "- The root itself and genuinely nested paths must remain valid.",
+    ].join("\n"),
+    files: {
+      "package.json": PACKAGE_JSON("eval-path-containment"),
+      ".gitignore": GITIGNORE,
+      "tsconfig.json": TSCONFIG,
+      "src/workspace-path.ts": `import { resolve } from "node:path"
+
+export function resolveWorkspacePath(root: string, candidate: string) {
+  const workspace = resolve(root)
+  const target = resolve(workspace, candidate)
+  if (!target.startsWith(workspace)) throw new Error("Path escapes the workspace")
+  return target
+}
+`,
+      "test/workspace-path.test.ts": `import { expect, test } from "bun:test"
+import { resolveWorkspacePath } from "../src/workspace-path"
+
+test("accepts the root and nested files", () => {
+  expect(resolveWorkspacePath("/tmp/vector/project", ".")).toBe("/tmp/vector/project")
+  expect(resolveWorkspacePath("/tmp/vector/project", "src/index.ts")).toBe("/tmp/vector/project/src/index.ts")
+})
+
+test("rejects parent traversal", () => {
+  expect(() => resolveWorkspacePath("/tmp/vector/project", "../secret.txt")).toThrow("escapes")
+})
+
+test("rejects a sibling whose name merely shares the root prefix", () => {
+  expect(() => resolveWorkspacePath("/tmp/vector/project", "../project-secrets/token.txt")).toThrow("escapes")
+})
+`,
+    },
+    check: { command: "bun", args: ["test"] },
+    expectedFiles: ["src/workspace-path.ts"],
+    protectedFiles: ["test/workspace-path.test.ts"],
+    assertions: [],
+    mutations: [],
+  },
+
+  {
+    id: "bugfix-concurrent-reservations",
+    category: "bug-fix",
+    title: "Prevent concurrent model requests from overspending one allowance",
+    timeoutMs: DEFAULT_TIMEOUT_MS,
+    prompt: [
+      "CreditLedger.reserve has a race that lets concurrent model requests reserve more than the account balance.",
+      "Run `bun test`, diagnose the interleaving, and fix the source with the smallest clear change.",
+      "",
+      "Constraints:",
+      "- Do not edit anything under test/.",
+      "- Do not add dependencies.",
+      "- Preserve the public API and the refund behaviour.",
+    ].join("\n"),
+    files: {
+      "package.json": PACKAGE_JSON("eval-concurrent-reservations"),
+      ".gitignore": GITIGNORE,
+      "tsconfig.json": TSCONFIG,
+      "src/credit-ledger.ts": `export class CreditLedger {
+  #used = 0
+
+  constructor(readonly allowance: number) {}
+
+  get used() {
+    return this.#used
+  }
+
+  async reserve(amount: number) {
+    if (amount <= 0 || this.#used + amount > this.allowance) return false
+    await Promise.resolve()
+    this.#used += amount
+    return true
+  }
+
+  refund(amount: number) {
+    this.#used = Math.max(0, this.#used - amount)
+  }
+}
+`,
+      "test/credit-ledger.test.ts": `import { expect, test } from "bun:test"
+import { CreditLedger } from "../src/credit-ledger"
+
+test("one request cannot reserve beyond the allowance", async () => {
+  const ledger = new CreditLedger(100)
+  expect(await ledger.reserve(101)).toBe(false)
+  expect(ledger.used).toBe(0)
+})
+
+test("concurrent reservations cannot overspend", async () => {
+  const ledger = new CreditLedger(100)
+  const results = await Promise.all([ledger.reserve(70), ledger.reserve(70)])
+  expect(results.filter(Boolean)).toHaveLength(1)
+  expect(ledger.used).toBe(70)
+})
+
+test("a refund makes the released allowance available again", async () => {
+  const ledger = new CreditLedger(100)
+  expect(await ledger.reserve(80)).toBe(true)
+  ledger.refund(30)
+  expect(await ledger.reserve(50)).toBe(true)
+  expect(ledger.used).toBe(100)
+})
+`,
+    },
+    check: { command: "bun", args: ["test"] },
+    expectedFiles: ["src/credit-ledger.ts"],
+    protectedFiles: ["test/credit-ledger.test.ts"],
+    assertions: [],
+    mutations: [],
+  },
 ]
 
 export function taskById(id: string) {

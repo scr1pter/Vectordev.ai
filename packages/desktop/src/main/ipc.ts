@@ -4,6 +4,7 @@ import { basename } from "node:path"
 import { app, BrowserWindow, Notification, clipboard, dialog, ipcMain, shell, systemPreferences } from "electron"
 import type { IpcMainEvent, IpcMainInvokeEvent } from "electron"
 import type { DesktopMenuAction } from "@opencode-ai/app/desktop-menu"
+import { untrustedChildEnvironment } from "@opencode-ai/core/child-environment"
 
 import type { BrowserAgentInput, FatalRendererError, ServerReadyData, TitlebarTheme } from "../preload/types"
 import { runDesktopMenuAction } from "./desktop-menu-actions"
@@ -743,7 +744,7 @@ export function registerIpcHandlers(deps: Deps) {
     await new Promise<void>((resolve, reject) => {
       const [cmd, args] =
         process.platform === "darwin" ? (["open", ["-a", app, path]] as const) : ([app, [path]] as const)
-      execFile(cmd, args, (err) => (err ? reject(err) : resolve()))
+      execFile(cmd, args, { env: untrustedChildEnvironment() }, (err) => (err ? reject(err) : resolve()))
     })
   })
 

@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process"
 import { stat } from "node:fs/promises"
+import { untrustedChildEnvironment } from "@opencode-ai/core/child-environment"
 
 import { createRepo, getGitlabToken } from "./gitlab-auth"
 
@@ -18,7 +19,12 @@ function run(command: string, args: string[], opts: { cwd?: string; timeoutMs?: 
     execFile(
       command,
       args,
-      { cwd: opts.cwd, timeout: opts.timeoutMs ?? 10_000, maxBuffer: 8 * 1024 * 1024 },
+      {
+        cwd: opts.cwd,
+        env: untrustedChildEnvironment(),
+        timeout: opts.timeoutMs ?? 10_000,
+        maxBuffer: 8 * 1024 * 1024,
+      },
       (error, stdout, stderr) => {
         const err = error as (Error & { code?: number | string }) | null
         resolve({

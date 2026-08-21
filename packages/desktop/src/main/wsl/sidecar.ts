@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import { createServer } from "node:net"
+import { untrustedChildEnvironment } from "@opencode-ai/core/child-environment"
 import { app } from "electron"
 import { checkHealth } from "../server"
 import { type WslCommandLine, resolveWslOpencode, shellEscape, wslArgs } from "./runtime"
@@ -45,6 +46,7 @@ export async function spawnWslSidecar(
     `exec ${shellEscape(opencode)} --print-logs --log-level ${app.isPackaged ? "WARN" : "INFO"} serve --hostname 0.0.0.0 --port ${port}`,
   ].join("\n")
   const child = spawn("wsl", wslArgs(["bash", "-se"], distro), {
+    env: untrustedChildEnvironment(),
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
   })

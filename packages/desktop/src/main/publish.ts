@@ -1,6 +1,7 @@
 import { execFile, spawn } from "node:child_process"
 import { readdir, readFile, stat, writeFile } from "node:fs/promises"
 import { basename, extname, join, relative } from "node:path"
+import { untrustedChildEnvironment } from "@opencode-ai/core/child-environment"
 
 import {
   checkDeployment,
@@ -112,7 +113,7 @@ function emitProgress(
 
 function execOk(command: string, args: string[]) {
   return new Promise<boolean>((resolve) => {
-    execFile(command, args, { timeout: 10_000 }, (error) => resolve(!error))
+    execFile(command, args, { timeout: 10_000, env: untrustedChildEnvironment() }, (error) => resolve(!error))
   })
 }
 
@@ -120,7 +121,7 @@ function execOk(command: string, args: string[]) {
 // Read-only; returns undefined when the CLI is missing or not logged in.
 function execOut(command: string, args: string[]) {
   return new Promise<string | undefined>((resolve) => {
-    execFile(command, args, { timeout: 10_000 }, (error, stdout) =>
+    execFile(command, args, { timeout: 10_000, env: untrustedChildEnvironment() }, (error, stdout) =>
       resolve(error ? undefined : stdout.trim() || undefined),
     )
   })
@@ -138,7 +139,7 @@ function runProcess(input: {
   return new Promise<{ ok: boolean; code: number | null; signal: NodeJS.Signals | null; log: string }>((resolve) => {
     const child = spawn(input.command, input.args ?? [], {
       cwd: input.cwd,
-      env: { ...process.env, ...input.env, CI: "1", FORCE_COLOR: "0" },
+      env: untrustedChildEnvironment(process.env, input.env, { CI: "1", FORCE_COLOR: "0" }),
       shell: input.shell,
     })
     let output = ""
@@ -792,7 +793,7 @@ export async function publishProject(
     (resolve) => {
       const child = spawn(target.command[0], args, {
         cwd: directory,
-        env: { ...process.env, ...providerEnv, CI: "1", FORCE_COLOR: "0" },
+        env: untrustedChildEnvironment(process.env, providerEnv, { CI: "1", FORCE_COLOR: "0" }),
       })
       activePublishes.set(publishKey, child)
       let output = ""

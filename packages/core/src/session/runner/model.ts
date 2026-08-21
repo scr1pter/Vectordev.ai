@@ -1,7 +1,7 @@
 export * as SessionRunnerModel from "./model"
 
 import { makeLocationNode } from "../../effect/app-node"
-import { type Model } from "@opencode-ai/llm"
+import { type Model, type ProviderMetadata } from "@opencode-ai/llm"
 import * as AnthropicMessages from "@opencode-ai/llm/protocols/anthropic-messages"
 import * as OpenAICompatibleChat from "@opencode-ai/llm/protocols/openai-compatible-chat"
 import * as OpenAIResponses from "@opencode-ai/llm/protocols/openai-responses"
@@ -80,6 +80,44 @@ export class Service extends Context.Service<Service, Interface>()("@opencode/v2
 /** Test or embedding seam for supplying a model resolver directly. */
 export const layerWith = (resolve: Interface["resolve"]) => Layer.succeed(Service, Service.of({ resolve }))
 
+export type Tokens = {
+  readonly input: number
+  readonly output: number
+  readonly reasoning: number
+  readonly cache: { readonly read: number; readonly write: number }
+}
+
+const pricing = new WeakMap<Model, ModelV2.Info["cost"]>()
+
+export const withPricing = (model: Model, cost: ModelV2.Info["cost"]) => {
+  pricing.set(model, cost)
+  return model
+}
+
+export const calculateCost = (model: Model, tokens: Tokens, metadata?: ProviderMetadata) => {
+  const totalNanoAiu = metadata?.copilot?.totalNanoAiu
+  if (typeof totalNanoAiu === "number" && Number.isFinite(totalNanoAiu) && totalNanoAiu >= 0)
+    return totalNanoAiu / 100_000_000_000
+
+  const costs = pricing.get(model)
+  if (!costs?.length) return undefined
+  const context = tokens.input + tokens.cache.read + tokens.cache.write
+  const selected =
+    costs
+      .filter((item) => item.tier?.type === "context" && context > item.tier.size)
+      .sort((left, right) => (right.tier?.size ?? 0) - (left.tier?.size ?? 0))[0] ??
+    costs.find((item) => item.tier === undefined)
+  if (!selected) return undefined
+  const cost =
+    (tokens.input * selected.input +
+      (tokens.output + tokens.reasoning) * selected.output +
+      tokens.cache.read * selected.cache.read +
+      tokens.cache.write * selected.cache.write) /
+    1_000_000
+  if (!Number.isFinite(cost)) return undefined
+  return Math.max(0, cost)
+}
+
 const apiKey = (model: ModelV2.Info, credential?: Credential.Value) => {
   if (credential?.type === "key") return Auth.value(credential.key)
   if (credential?.type === "oauth") return Auth.value(credential.access)
@@ -141,23 +179,32 @@ export const fromCatalogModel = (
   const key = apiKey(resolved, credential)
   if (resolved.api.type === "aisdk" && resolved.api.package === "@ai-sdk/openai") {
     return Effect.succeed(
-      withDefaults(resolved, OpenAIResponses.route)
-        .with({ auth: key === undefined ? Auth.none : Auth.bearer(key) })
-        .model({ id: resolved.api.id }),
+      withPricing(
+        withDefaults(resolved, OpenAIResponses.route)
+          .with({ auth: key === undefined ? Auth.none : Auth.bearer(key) })
+          .model({ id: resolved.api.id }),
+        resolved.cost,
+      ),
     )
   }
   if (resolved.api.type === "aisdk" && resolved.api.package === "@ai-sdk/anthropic") {
     return Effect.succeed(
-      withDefaults(resolved, AnthropicMessages.route)
-        .with({ auth: key === undefined ? Auth.none : Auth.header("x-api-key", key) })
-        .model({ id: resolved.api.id }),
+      withPricing(
+        withDefaults(resolved, AnthropicMessages.route)
+          .with({ auth: key === undefined ? Auth.none : Auth.header("x-api-key", key) })
+          .model({ id: resolved.api.id }),
+        resolved.cost,
+      ),
     )
   }
   if (resolved.api.type === "aisdk" && resolved.api.package === "@ai-sdk/openai-compatible" && resolved.api.url) {
     return Effect.succeed(
-      withDefaults(resolved, OpenAICompatibleChat.route)
-        .with({ auth: key === undefined ? Auth.none : Auth.bearer(key) })
-        .model({ id: resolved.api.id }),
+      withPricing(
+        withDefaults(resolved, OpenAICompatibleChat.route)
+          .with({ auth: key === undefined ? Auth.none : Auth.bearer(key) })
+          .model({ id: resolved.api.id }),
+        resolved.cost,
+      ),
     )
   }
   return Effect.fail(

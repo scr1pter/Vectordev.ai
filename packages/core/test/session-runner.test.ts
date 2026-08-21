@@ -382,6 +382,19 @@ const replaySessionProjection = (id: SessionV2.ID) =>
     yield* events.remove(id)
     yield* db.delete(SessionInputTable).where(eq(SessionInputTable.session_id, id)).run().pipe(Effect.orDie)
     yield* db.delete(SessionMessageTable).where(eq(SessionMessageTable.session_id, id)).run().pipe(Effect.orDie)
+    yield* db
+      .update(SessionTable)
+      .set({
+        cost: 0,
+        tokens_input: 0,
+        tokens_output: 0,
+        tokens_reasoning: 0,
+        tokens_cache_read: 0,
+        tokens_cache_write: 0,
+      })
+      .where(eq(SessionTable.id, id))
+      .run()
+      .pipe(Effect.orDie)
     yield* events.replayAll(
       recorded.map((event) => ({
         id: event.id,
@@ -627,6 +640,71 @@ describe("SessionRunnerLLM", () => {
       expect(yield* session.messages({ sessionID })).toMatchObject([
         { id: message.id, type: "user", text: "Run automatically" },
       ])
+    }),
+  )
+
+  it.effect("persists catalog-priced normalized usage for a completed V2 turn", () =>
+    Effect.gen(function* () {
+      yield* setup
+      currentModel = SessionRunnerModel.withPricing(
+        Model.make({ id: "priced-model", provider: "fake", route: OpenAIChat.route }),
+        [{ input: 2, output: 10, cache: { read: 1, write: 4 } }],
+      )
+      const session = yield* SessionV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Measure this turn" }), resume: false })
+      response = [
+        LLMEvent.stepStart({ index: 0 }),
+        LLMEvent.stepFinish({
+          index: 0,
+          reason: "stop",
+          usage: {
+            inputTokens: 1_000_000,
+            nonCachedInputTokens: 700_000,
+            outputTokens: 100_000,
+            reasoningTokens: 20_000,
+            cacheReadInputTokens: 200_000,
+            cacheWriteInputTokens: 100_000,
+          },
+        }),
+        LLMEvent.finish({ reason: "stop" }),
+      ]
+
+      yield* session.resume(sessionID)
+
+      expect(yield* session.context(sessionID)).toMatchObject([
+        { type: "user", text: "Measure this turn" },
+        {
+          type: "assistant",
+          cost: 3,
+          tokens: {
+            input: 700_000,
+            output: 80_000,
+            reasoning: 20_000,
+            cache: { read: 200_000, write: 100_000 },
+          },
+        },
+      ])
+      expect(yield* session.get(sessionID)).toMatchObject({
+        cost: 3,
+        tokens: {
+          input: 700_000,
+          output: 80_000,
+          reasoning: 20_000,
+          cache: { read: 200_000, write: 100_000 },
+        },
+      })
+
+      yield* replaySessionProjection(sessionID)
+
+      expect(yield* session.get(sessionID)).toMatchObject({
+        cost: 3,
+        tokens: {
+          input: 700_000,
+          output: 80_000,
+          reasoning: 20_000,
+          cache: { read: 200_000, write: 100_000 },
+        },
+      })
     }),
   )
 

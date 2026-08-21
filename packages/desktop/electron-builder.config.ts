@@ -14,8 +14,8 @@ const desktopEntryFpm = `${desktopEntry}=/usr/share/applications/vector-desktop.
 const signMac = process.env.VECTOR_SIGN_MAC === "true"
 const notarizeMac = process.env.VECTOR_NOTARIZE === "true"
 const signDmg = process.env.VECTOR_SIGN_DMG === "true"
-const updateBaseUrl =
-  "https://42qryducihx01gl0.public.blob.vercel-storage.com/releases"
+const windowsPublisherName = process.env.VECTOR_WINDOWS_PUBLISHER_NAME?.trim()
+const updateBaseUrl = "https://42qryducihx01gl0.public.blob.vercel-storage.com/releases"
 
 async function signWindows(configuration: { path: string }) {
   if (process.platform !== "win32") return
@@ -34,6 +34,15 @@ const channel = (() => {
   return "dev"
 })()
 
+if (process.env.GITHUB_ACTIONS === "true" && channel === "prod") {
+  if (process.platform === "darwin" && (!signMac || !notarizeMac || !signDmg)) {
+    throw new Error("Production macOS artifacts must be signed and notarized.")
+  }
+  if (process.platform === "win32" && !windowsPublisherName) {
+    throw new Error("Production Windows artifacts require VECTOR_WINDOWS_PUBLISHER_NAME.")
+  }
+}
+
 const APP_IDS = {
   dev: "ai.vector.app.dev",
   beta: "ai.vector.app.beta",
@@ -41,7 +50,10 @@ const APP_IDS = {
 } as const
 
 const getBase = (appId: string): Configuration => ({
-  artifactName: "vector-desktop-${os}-${arch}.${ext}",
+  // Updater artifacts are immutable by version. Publishing latest*.yml last can
+  // then switch clients to a complete new set without invalidating the files
+  // referenced by the previous release metadata.
+  artifactName: "vector-desktop-${version}-${os}-${arch}.${ext}",
   directories: {
     output: "dist",
     buildResources: "resources",
@@ -75,7 +87,8 @@ const getBase = (appId: string): Configuration => ({
     category: "public.app-category.developer-tools",
     icon: `resources/icons/icon.icns`,
     extendInfo: {
-      NSMicrophoneUsageDescription: "Vector uses microphone access only when you start voice dictation or a conversation with Vel.",
+      NSMicrophoneUsageDescription:
+        "Vector uses microphone access only when you start voice dictation or a conversation with Vel.",
     },
     hardenedRuntime: true,
     identity: signMac ? undefined : "-",
@@ -95,10 +108,12 @@ const getBase = (appId: string): Configuration => ({
   win: {
     icon: `resources/icons/icon.ico`,
     signtoolOptions: {
+      publisherName: windowsPublisherName ? [windowsPublisherName] : undefined,
       sign: signWindows,
+      signingHashAlgorithms: ["sha256"],
     },
     target: ["nsis"],
-    verifyUpdateCodeSignature: false,
+    verifyUpdateCodeSignature: true,
   },
   nsis: {
     oneClick: true,

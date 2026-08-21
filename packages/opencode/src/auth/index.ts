@@ -72,7 +72,11 @@ const layer = Layer.effect(
         catch: fail("Failed to read encrypted auth data"),
       })
       if (credentialKey() && !storedAuthIsEncrypted(raw)) {
-        yield* fsys.writeWithDirs(file, encodeStoredAuth(data), 0o600).pipe(Effect.mapError(fail("Failed to migrate auth data")))
+        const migrated = yield* Effect.try({
+          try: () => encodeStoredAuth(data),
+          catch: fail("Failed to encrypt legacy auth data"),
+        })
+        yield* fsys.writeWithDirs(file, migrated, 0o600).pipe(Effect.mapError(fail("Failed to migrate auth data")))
       }
       return data
     })
@@ -87,9 +91,11 @@ const layer = Layer.effect(
     })
 
     const write = Effect.fn("Auth.write")(function* (data: Record<string, Info>) {
-      yield* fsys
-        .writeWithDirs(file, encodeStoredAuth(data), 0o600)
-        .pipe(Effect.mapError(fail("Failed to write auth data")))
+      const encoded = yield* Effect.try({
+        try: () => encodeStoredAuth(data),
+        catch: fail("Failed to encrypt auth data"),
+      })
+      yield* fsys.writeWithDirs(file, encoded, 0o600).pipe(Effect.mapError(fail("Failed to write auth data")))
     })
 
     const get = Effect.fn("Auth.get")(function* (providerID: string) {
@@ -142,10 +148,9 @@ function decodeStoredAuth(raw: string, key = credentialKey()) {
     return decodeAuthData(
       Option.getOrUndefined(
         decodeJson(
-          Buffer.concat([
-            decipher.update(Buffer.from(encrypted.ciphertext, "base64")),
-            decipher.final(),
-          ]).toString("utf8"),
+          Buffer.concat([decipher.update(Buffer.from(encrypted.ciphertext, "base64")), decipher.final()]).toString(
+            "utf8",
+          ),
         ),
       ),
     )
@@ -160,7 +165,12 @@ function storedAuthIsEncrypted(raw: string) {
 }
 
 function encodeStoredAuth(data: Record<string, Info>, key = credentialKey()) {
-  if (!key) return JSON.stringify(data, null, 2)
+  if (!key) {
+    if (process.env.VECTOR_REQUIRE_SECURE_CREDENTIAL_STORE === "1" && Object.keys(data).length > 0) {
+      throw new Error("Provider credentials require Vector's secure runtime vault.")
+    }
+    return JSON.stringify(data, null, 2)
+  }
   const iv = randomBytes(12)
   const cipher = createCipheriv("aes-256-gcm", key, iv)
   const ciphertext = Buffer.concat([cipher.update(JSON.stringify(data)), cipher.final()])

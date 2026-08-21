@@ -2,6 +2,7 @@ import type { ChildProcessWithoutNullStreams } from "child_process"
 import path from "path"
 import os from "os"
 import { Global } from "@opencode-ai/core/global"
+import { untrustedChildEnvironment } from "@opencode-ai/core/child-environment"
 import { text } from "node:stream/consumers"
 import fs from "fs/promises"
 import { Filesystem } from "@/util/filesystem"
@@ -19,8 +20,20 @@ const pathExists = async (p: string) =>
     .stat(p)
     .then(() => true)
     .catch(() => false)
-const run = (cmd: string[], opts: Process.RunOptions = {}) => Process.run(cmd, { ...opts, nothrow: true })
-const output = (cmd: string[], opts: Process.RunOptions = {}) => Process.text(cmd, { ...opts, nothrow: true })
+const run = (cmd: string[], opts: Process.RunOptions = {}) =>
+  Process.run(cmd, {
+    ...opts,
+    env: untrustedChildEnvironment(process.env, opts.env ?? undefined),
+    exactEnv: true,
+    nothrow: true,
+  })
+const output = (cmd: string[], opts: Process.RunOptions = {}) =>
+  Process.text(cmd, {
+    ...opts,
+    env: untrustedChildEnvironment(process.env, opts.env ?? undefined),
+    exactEnv: true,
+    nothrow: true,
+  })
 
 export interface Handle {
   process: ChildProcessWithoutNullStreams
@@ -204,8 +217,16 @@ export const ESLint: Info = {
       await fs.rename(extractedPath, finalPath)
 
       const npmCmd = process.platform === "win32" ? "npm.cmd" : "npm"
-      await Process.run([npmCmd, "install"], { cwd: finalPath })
-      await Process.run([npmCmd, "run", "compile"], { cwd: finalPath })
+      await Process.run([npmCmd, "install"], {
+        cwd: finalPath,
+        env: untrustedChildEnvironment(),
+        exactEnv: true,
+      })
+      await Process.run([npmCmd, "run", "compile"], {
+        cwd: finalPath,
+        env: untrustedChildEnvironment(),
+        exactEnv: true,
+      })
     }
 
     const proc = spawn("node", [serverPath, "--stdio"], {
@@ -370,7 +391,8 @@ export const Gopls: Info = {
       if (flags.disableLspDownload) return
 
       const proc = Process.spawn(["go", "install", "golang.org/x/tools/gopls@latest"], {
-        env: { ...process.env, GOBIN: Global.Path.bin },
+        env: untrustedChildEnvironment(process.env, { GOBIN: Global.Path.bin }),
+        exactEnv: true,
         stdout: "pipe",
         stderr: "pipe",
         stdin: "pipe",
@@ -403,6 +425,8 @@ export const Rubocop: Info = {
       }
       if (flags.disableLspDownload) return
       const proc = Process.spawn(["gem", "install", "rubocop", "--bindir", Global.Path.bin], {
+        env: untrustedChildEnvironment(),
+        exactEnv: true,
         stdout: "pipe",
         stderr: "pipe",
         stdin: "pipe",
@@ -567,10 +591,10 @@ export const ElixirLS: Info = {
         })
 
         const cwd = path.join(Global.Path.bin, "elixir-ls-master")
-        const env = { MIX_ENV: "prod", ...process.env }
-        await Process.run(["mix", "deps.get"], { cwd, env })
-        await Process.run(["mix", "compile"], { cwd, env })
-        await Process.run(["mix", "elixir_ls.release2", "-o", "release"], { cwd, env })
+        const env = untrustedChildEnvironment(process.env, { MIX_ENV: "prod" })
+        await Process.run(["mix", "deps.get"], { cwd, env, exactEnv: true })
+        await Process.run(["mix", "compile"], { cwd, env, exactEnv: true })
+        await Process.run(["mix", "elixir_ls.release2", "-o", "release"], { cwd, env, exactEnv: true })
       }
     }
 
@@ -754,6 +778,8 @@ async function installRoslynLanguageServer(disableLspDownload: boolean) {
 
   if (disableLspDownload) return
   const proc = Process.spawn(["dotnet", "tool", "install", "--global", "roslyn-language-server", "--prerelease"], {
+    env: untrustedChildEnvironment(),
+    exactEnv: true,
     stdout: "pipe",
     stderr: "pipe",
     stdin: "pipe",
@@ -833,6 +859,8 @@ export const FSharp: Info = {
 
       if (flags.disableLspDownload) return
       const proc = Process.spawn(["dotnet", "tool", "install", "fsautocomplete", "--tool-path", Global.Path.bin], {
+        env: untrustedChildEnvironment(),
+        exactEnv: true,
         stdout: "pipe",
         stderr: "pipe",
         stdin: "pipe",

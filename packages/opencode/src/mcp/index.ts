@@ -1,6 +1,7 @@
 import path from "node:path"
 import { pathToFileURL } from "node:url"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
+import { untrustedChildEnvironment } from "@opencode-ai/core/child-environment"
 import { type Tool } from "ai"
 import { ConfigV1 } from "@opencode-ai/core/v1/config/config"
 import { serviceUse } from "@opencode-ai/core/effect/service-use"
@@ -368,11 +369,11 @@ const layer = Layer.effect(
         command: cmd,
         args,
         cwd,
-        env: {
-          ...process.env,
-          ...(cmd === "opencode" ? { BUN_BE_BUN: "1" } : {}),
-          ...mcp.environment,
-        },
+        env: untrustedChildEnvironment(
+          process.env,
+          cmd === "opencode" ? { BUN_BE_BUN: "1" } : undefined,
+          mcp.environment,
+        ),
       })
 
       const connectTimeout = mcp.timeout ?? DEFAULT_TIMEOUT

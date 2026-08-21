@@ -73,6 +73,7 @@ const USAGE = `Usage: bun script/agent-eval/run.ts [options]
   --model <id>        Model passed through to the runtime's own --model flag
   --out <path>        Where to write the JSON report
   --timeout <sec>     Per-task agent timeout, overriding the task's own
+  --repeat <count>    Repeat every task 1-20 times (default 1)
   --keep              Keep the fixture directories after the run
   --list              Print the task set and exit
   --help              Print this message
@@ -101,6 +102,10 @@ async function main() {
     process.stderr.write(`${tasks}\n\n${USAGE}`)
     return 2
   }
+  if (!Number.isInteger(flags.repeat) || flags.repeat < 1 || flags.repeat > 20) {
+    process.stderr.write(`--repeat must be an integer between 1 and 20.\n\n${USAGE}`)
+    return 2
+  }
 
   const root = await mkdtemp(join(tmpdir(), "vector-agent-eval-"))
   const startedAt = new Date().toISOString()
@@ -111,9 +116,20 @@ async function main() {
     const launcher = await resolveLauncher(runtime)
     process.stderr.write(`\n=== ${RUNTIME_NAME[runtime]} — ${launcher ? launcher.label : "not installed"} ===\n`)
     const reports: TaskReport[] = []
-    for (const task of tasks) {
-      reports.push(await runTask({ runtime, launcher, task, root, model: flags.model, timeout: flags.timeout }))
-    }
+    for (const task of tasks)
+      for (const attempt of Array.from({ length: flags.repeat }, (_, index) => index + 1))
+        reports.push(
+          await runTask({
+            runtime,
+            launcher,
+            task,
+            root,
+            model: flags.model,
+            timeout: flags.timeout,
+            attempt,
+            repetitions: flags.repeat,
+          }),
+        )
     results.push({
       runtime,
       launcher: launcher?.label,
@@ -131,6 +147,7 @@ async function main() {
     model: flags.model,
     platform: `${process.platform}-${process.arch}`,
     bun: Bun.version,
+    repetitions: flags.repeat,
     fixtureRoot: root,
     runtimes: results,
   }
@@ -150,6 +167,7 @@ async function main() {
 type Launcher = { command: string; prefix: string[]; label: string }
 
 type TaskReport = {
+  attempt: number
   run: TaskRun
   score: TaskScore
   agentOutputTail: string
@@ -170,17 +188,20 @@ async function runTask(input: {
   root: string
   model?: string
   timeout?: number
+  attempt: number
+  repetitions: number
 }): Promise<TaskReport> {
   const spec = scoringSpec(input.task)
-  const label = `${input.runtime}/${input.task.id}`
+  const repetition = input.repetitions > 1 ? `#${input.attempt}/${input.repetitions}` : ""
+  const label = `${input.runtime}/${input.task.id}${repetition}`
   if (!input.launcher) {
     const detail = `${RUNTIME_NAME[input.runtime]} CLI (${RUNTIME_CLI[input.runtime]}) was not found on PATH.`
     process.stderr.write(`  ${label}: unavailable — ${detail}\n`)
     const run: TaskRun = { taskId: input.task.id, runtime: input.runtime, status: "unavailable", detail }
-    return { run, score: scoreTask(spec, run), agentOutputTail: "", checkOutputTail: "" }
+    return { attempt: input.attempt, run, score: scoreTask(spec, run), agentOutputTail: "", checkOutputTail: "" }
   }
 
-  const dir = join(input.root, input.runtime, input.task.id)
+  const dir = join(input.root, input.runtime, input.task.id, String(input.attempt))
   const fixture = await createFixture(input.task, dir)
   if ("error" in fixture) {
     process.stderr.write(`  ${label}: harness error — ${fixture.error}\n`)
@@ -190,7 +211,7 @@ async function runTask(input: {
       status: "harness-error",
       detail: fixture.error,
     }
-    return { run, score: scoreTask(spec, run), agentOutputTail: "", checkOutputTail: "" }
+    return { attempt: input.attempt, run, score: scoreTask(spec, run), agentOutputTail: "", checkOutputTail: "" }
   }
 
   process.stderr.write(`  ${label}: running…\n`)
@@ -212,7 +233,13 @@ async function runTask(input: {
       status: "harness-error",
       detail: collected.error,
     }
-    return { run, score: scoreTask(spec, run), agentOutputTail: tail(agent.output), checkOutputTail: "" }
+    return {
+      attempt: input.attempt,
+      run,
+      score: scoreTask(spec, run),
+      agentOutputTail: tail(agent.output),
+      checkOutputTail: "",
+    }
   }
   const diff = collected.diff
 
@@ -221,7 +248,13 @@ async function runTask(input: {
     const detail = `${RUNTIME_NAME[input.runtime]} exited ${agent.exitCode} with no edits: ${unusable}`
     process.stderr.write(`  ${label}: unavailable — ${detail}\n`)
     const run: TaskRun = { taskId: input.task.id, runtime: input.runtime, status: "unavailable", detail }
-    return { run, score: scoreTask(spec, run), agentOutputTail: tail(agent.output), checkOutputTail: "" }
+    return {
+      attempt: input.attempt,
+      run,
+      score: scoreTask(spec, run),
+      agentOutputTail: tail(agent.output),
+      checkOutputTail: "",
+    }
   }
   if (agent.timedOut) process.stderr.write(`  ${label}: agent hit the ${timeoutMs / 1000}s timeout\n`)
 
@@ -256,7 +289,13 @@ async function runTask(input: {
   process.stderr.write(
     `  ${label}: ${score.outcome} score=${score.score} files=${score.filesTouched} out-of-scope=${score.outOfScopeFiles.length} ${(wallMs / 1000).toFixed(1)}s\n`,
   )
-  return { run, score, agentOutputTail: tail(agent.output), checkOutputTail: tail(check.output) }
+  return {
+    attempt: input.attempt,
+    run,
+    score,
+    agentOutputTail: tail(agent.output),
+    checkOutputTail: tail(check.output),
+  }
 }
 
 // Mirrors packages/desktop/src/main/external-agents.ts runtimeArguments. It is
@@ -583,6 +622,7 @@ function parseFlags(argv: string[]) {
     model: raw.model,
     out: raw.out,
     timeout: raw.timeout ? Number(raw.timeout) : undefined,
+    repeat: raw.repeat ? Number(raw.repeat) : 1,
   }
 }
 
@@ -611,7 +651,7 @@ function renderReport(results: RuntimeReport[]) {
         const measured = report.score.outcome === "pass" || report.score.outcome === "fail"
         const seeded = taskById(report.score.taskId)?.mutations.length ?? 0
         return [
-          report.score.taskId,
+          `${report.score.taskId}${entry.tasks.filter((candidate) => candidate.score.taskId === report.score.taskId).length > 1 ? `#${report.attempt}` : ""}`,
           report.score.category,
           report.score.outcome,
           measured ? String(report.score.score) : "—",
@@ -630,7 +670,10 @@ function renderReport(results: RuntimeReport[]) {
         : `${summary.passed}/${summary.measured} passed · mean score ${summary.meanScore} · ${summary.unavailable} unavailable · ${summary.errored} harness errors`
     const notes = entry.tasks
       .filter((report) => report.score.outcome !== "pass")
-      .map((report) => `    ${report.score.taskId}: ${explain(report)}`)
+      .map(
+        (report) =>
+          `    ${report.score.taskId}${entry.tasks.filter((candidate) => candidate.score.taskId === report.score.taskId).length > 1 ? `#${report.attempt}` : ""}: ${explain(report)}`,
+      )
     return [
       `${RUNTIME_NAME[entry.runtime]} (${entry.launcher ?? "not installed"})`,
       formatTable(rows)
@@ -650,11 +693,15 @@ function renderReport(results: RuntimeReport[]) {
     ).map((task) => [
       task.id,
       ...results.map((entry) => {
-        const found = entry.tasks.find((report) => report.score.taskId === task.id)
-        if (!found) return "—"
-        if (found.score.outcome === "unavailable") return "unavailable"
-        if (found.score.outcome === "error") return "harness error"
-        return `${found.score.outcome} ${found.score.score}`
+        const found = entry.tasks.filter((report) => report.score.taskId === task.id)
+        if (found.length === 0) return "—"
+        const measured = found.filter((report) => report.score.outcome === "pass" || report.score.outcome === "fail")
+        if (measured.length === 0 && found.some((report) => report.score.outcome === "error")) return "harness error"
+        if (measured.length === 0) return "unavailable"
+        if (found.length === 1) return `${measured[0].score.outcome} ${measured[0].score.score}`
+        const passed = measured.filter((report) => report.score.outcome === "pass").length
+        const mean = measured.reduce((total, report) => total + report.score.score, 0) / measured.length
+        return `${passed}/${measured.length} · ${mean.toFixed(1)}`
       }),
     ]),
   ])

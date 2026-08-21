@@ -2,6 +2,7 @@ import { execFile } from "node:child_process"
 import { access, constants } from "node:fs/promises"
 import { homedir, platform } from "node:os"
 import { join } from "node:path"
+import { untrustedChildEnvironment } from "@opencode-ai/core/child-environment"
 
 // Several catalog plugins are published to PyPI and run through `uvx`, which is
 // not installed on most machines. Without this the plugin installs fine and then
@@ -32,8 +33,12 @@ const EXTRA_LOOKUP: Record<RuntimeName, string[]> = {
 
 function run(command: string, args: string[], timeoutMs = 20_000) {
   return new Promise<{ stdout: string; stderr: string; failed: boolean }>((resolve) => {
-    execFile(command, args, { timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024 }, (error, stdout, stderr) =>
-      resolve({ stdout: String(stdout ?? ""), stderr: String(stderr ?? ""), failed: Boolean(error) }),
+    execFile(
+      command,
+      args,
+      { env: untrustedChildEnvironment(), timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024 },
+      (error, stdout, stderr) =>
+        resolve({ stdout: String(stdout ?? ""), stderr: String(stderr ?? ""), failed: Boolean(error) }),
     )
   })
 }

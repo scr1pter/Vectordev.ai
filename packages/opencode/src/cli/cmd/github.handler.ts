@@ -1,5 +1,6 @@
 import path from "path"
 import { exec } from "child_process"
+import { untrustedChildEnvironment } from "@opencode-ai/core/child-environment"
 import { Filesystem } from "@/util/filesystem"
 import * as prompts from "@clack/prompts"
 import { map, pipe, sortBy, values } from "remeda"
@@ -292,7 +293,7 @@ export const githubInstall = Effect.fn("Cli.github.install")(function* () {
               ? `start "" "${url}"`
               : `xdg-open "${url}"`
 
-        exec(command, (error) => {
+        exec(command, { env: untrustedChildEnvironment() }, (error) => {
           if (error) {
             prompts.log.warn(`Could not open browser. Please visit: ${url}`)
           }

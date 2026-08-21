@@ -13,7 +13,7 @@ import { fileURLToPath } from "url"
 import { Config } from "@/config/config"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Shell } from "@opencode-ai/core/shell"
-import { truthy } from "@opencode-ai/core/flag/flag"
+import { untrustedChildEnvironment } from "@opencode-ai/core/child-environment"
 import { ShellID } from "./shell/id"
 import { Sandbox } from "./shell/sandbox"
 
@@ -298,18 +298,9 @@ const cmd = Effect.fn("ShellTool.cmd")(function* (
   cwd: string,
   env: NodeJS.ProcessEnv,
   workspaceRoot: string,
+  ctx: Tool.Context,
 ) {
-  // Opt-in and default-off. Sandboxing rewrites how every agent command is
-  // spawned, so a policy that is wrong for one toolchain would break the shell
-  // tool for everyone; users turn it on per install. A bare env flag rather than
-  // a RuntimeFlags entry or a config key because the flag has to be readable
-  // here without widening this change into files it does not own, and
-  // deliberately not named OPENCODE_EXPERIMENTAL_* so the blanket
-  // OPENCODE_EXPERIMENTAL=1 opt-in cannot switch it on behind a user's back.
-  if (truthy("OPENCODE_SHELL_SANDBOX")) {
-    // wrapCommand degrades to the plain invocation — the Windows PowerShell argv
-    // included — whenever the host has no sandbox mechanism, so an unsupported
-    // platform costs the user their sandbox and never their command.
+  if (Sandbox.sandboxEnabled()) {
     const wrapped = Sandbox.wrapCommand({ shell, command, cwd, env, workspaceRoot })
     yield* Effect.logInfo("shell tool sandbox", {
       sandboxed: wrapped.sandboxed,
@@ -318,6 +309,18 @@ const cmd = Effect.fn("ShellTool.cmd")(function* (
       cwd,
       ...(wrapped.reason ? { reason: wrapped.reason } : {}),
     })
+    if (!wrapped.sandboxed) {
+      yield* ctx.ask({
+        permission: "unsandboxed_shell",
+        patterns: [process.platform],
+        always: [process.platform],
+        metadata: {
+          command,
+          platform: process.platform,
+          reason: wrapped.reason ?? "Vector could not apply the shell sandbox.",
+        },
+      })
+    }
     return ChildProcess.make(wrapped.command, wrapped.args, {
       shell: wrapped.shell,
       cwd,
@@ -326,6 +329,8 @@ const cmd = Effect.fn("ShellTool.cmd")(function* (
       detached: process.platform !== "win32",
     })
   }
+
+  yield* Effect.logWarning("shell tool sandbox disabled", { workspaceRoot, cwd })
 
   if (process.platform === "win32" && Shell.ps(shell)) {
     return ChildProcess.make(shell, ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command], {
@@ -455,10 +460,7 @@ export const ShellTool = Tool.define(
         { cwd, sessionID: ctx.sessionID, callID: ctx.callID },
         { env: {} },
       )
-      return {
-        ...process.env,
-        ...extra.env,
-      }
+      return untrustedChildEnvironment(process.env, extra.env)
     })
 
     const run = Effect.fn("ShellTool.run")(function* (
@@ -519,7 +521,7 @@ export const ShellTool = Tool.define(
         Effect.gen(function* () {
           yield* Effect.addFinalizer(closeSink)
           const handle = yield* spawner.spawn(
-            yield* cmd(input.shell, input.command, input.cwd, input.env, input.workspaceRoot),
+            yield* cmd(input.shell, input.command, input.cwd, input.env, input.workspaceRoot, ctx),
           )
 
           yield* Effect.forkScoped(

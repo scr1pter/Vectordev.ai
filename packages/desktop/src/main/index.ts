@@ -6,7 +6,7 @@ import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 import { getCACertificates, setDefaultCACertificates } from "node:tls"
 import type { Event } from "electron"
-import { app, BrowserWindow } from "electron"
+import { app, BrowserWindow, dialog } from "electron"
 
 import { Deferred, Effect, Fiber } from "effect"
 import contextMenu from "electron-context-menu"
@@ -213,15 +213,11 @@ const main = Effect.gen(function* () {
   ensureLoopbackNoProxy()
   useEnvProxy()
   app.commandLine.appendSwitch("proxy-bypass-list", "<-loopback>")
-  // Ad-hoc desktop builds receive a new code identity on every release, which
-  // makes macOS repeatedly challenge Chromium's Safe Storage access. Keep the
-  // controlled browser on its app-local credential backend until Vector ships
-  // with a stable Developer ID signature.
-  if (process.platform === "darwin") {
-    app.commandLine.appendSwitch("password-store", "basic")
-    app.commandLine.appendSwitch("use-mock-keychain")
-    process.env.VECTOR_OS_CREDENTIAL_STORE_DISABLED = "1"
-  } else if (!app.isPackaged) {
+  // Local development builds have an unstable code identity, so keep their
+  // Chromium profile isolated from the user's OS credential prompts. Packaged
+  // builds must use the platform credential backend; setupSecureRuntimeSecrets
+  // fails visibly after app readiness if one is unavailable.
+  if (!app.isPackaged) {
     app.commandLine.appendSwitch("password-store", "basic")
   }
   const features = app.commandLine.getSwitchValue("enable-features")
@@ -318,10 +314,12 @@ const main = Effect.gen(function* () {
   const serverReady = Deferred.makeUnsafe<ServerReadyData, unknown>()
 
   yield* Effect.promise(() => app.whenReady())
-  yield* Effect.promise(() => setupSecureRuntimeSecrets()).pipe(
-    Effect.catch((error) =>
+  yield* Effect.tryPromise(() => setupSecureRuntimeSecrets()).pipe(
+    Effect.tapError((error) =>
       Effect.sync(() => {
-        logger.warn("secure runtime vault unavailable; MCP OAuth data will use owner-only file permissions", error)
+        logger.error("secure runtime vault unavailable", error)
+        dialog.showErrorBox("Vector couldn't open its secure credential vault", String(error))
+        app.quit()
       }),
     ),
   )

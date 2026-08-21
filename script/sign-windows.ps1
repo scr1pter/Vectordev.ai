@@ -14,6 +14,8 @@ if ($env:GITHUB_ACTIONS -ne "true") {
   exit 0
 }
 
+$required = $env:VECTOR_REQUIRE_WINDOWS_SIGNING -eq "true" -or $env:OPENCODE_CHANNEL -eq "prod"
+
 $vars = @{
   endpoint = $env:AZURE_TRUSTED_SIGNING_ENDPOINT
   account = $env:AZURE_TRUSTED_SIGNING_ACCOUNT_NAME
@@ -21,7 +23,24 @@ $vars = @{
 }
 
 if ($vars.Values | Where-Object { -not $_ }) {
-  Write-Host "Skipping Windows signing because Azure Artifact Signing is not configured"
+  if ($required) {
+    throw "Azure Trusted Signing is required for production artifacts but is not configured"
+  }
+  Write-Warning "Skipping Windows signing because Azure Trusted Signing is not configured"
+  exit 0
+}
+
+$credentials = @(
+  $env:AZURE_CLIENT_ID,
+  $env:AZURE_TENANT_ID,
+  $env:AZURE_CLIENT_SECRET
+)
+
+if ($credentials | Where-Object { -not $_ }) {
+  if ($required) {
+    throw "Azure client credentials are required for production Windows signing"
+  }
+  Write-Warning "Skipping Windows signing because Azure client credentials are not configured"
   exit 0
 }
 
@@ -55,13 +74,13 @@ $params = @{
   FileDigest                       = "SHA256"
   TimestampDigest                  = "SHA256"
   TimestampRfc3161                 = "http://timestamp.acs.microsoft.com"
-  ExcludeEnvironmentCredential     = $true
+  ExcludeEnvironmentCredential     = $false
   ExcludeWorkloadIdentityCredential = $true
   ExcludeManagedIdentityCredential = $true
   ExcludeSharedTokenCacheCredential = $true
   ExcludeVisualStudioCredential    = $true
   ExcludeVisualStudioCodeCredential = $true
-  ExcludeAzureCliCredential        = $false
+  ExcludeAzureCliCredential        = $true
   ExcludeAzurePowerShellCredential = $true
   ExcludeAzureDeveloperCliCredential = $true
   ExcludeInteractiveBrowserCredential = $true

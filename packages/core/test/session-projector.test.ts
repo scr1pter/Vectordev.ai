@@ -34,12 +34,23 @@ const assistantRow = (
   id: SessionMessage.ID,
   seq: number,
   time: { created: DateTime.Utc; completed?: DateTime.Utc } = { created },
+  settlement?: {
+    readonly cost: number
+    readonly tokens: {
+      readonly input: number
+      readonly output: number
+      readonly reasoning: number
+      readonly cache: { readonly read: number; readonly write: number }
+    }
+  },
 ) => {
   const {
     id: _,
     type,
     ...data
-  } = encodeMessage(SessionMessage.Assistant.make({ id, type: "assistant", agent: "build", model, content: [], time }))
+  } = encodeMessage(
+    SessionMessage.Assistant.make({ id, type: "assistant", agent: "build", model, content: [], time, ...settlement }),
+  )
   return { id, session_id: sessionID, type, seq, time_created: DateTime.toEpochMillis(time.created), data }
 }
 
@@ -47,6 +58,10 @@ describe("SessionProjector", () => {
   it.effect("projects staged, cleared, and committed reverts", () =>
     Effect.gen(function* () {
       const db = (yield* Database.Service).db
+      const settlement = {
+        cost: 1.5,
+        tokens: { input: 10, output: 20, reasoning: 3, cache: { read: 4, write: 5 } },
+      }
       yield* db
         .insert(ProjectTable)
         .values({ id: Project.ID.global, worktree: AbsolutePath.make("/project"), sandboxes: [] })
@@ -60,12 +75,26 @@ describe("SessionProjector", () => {
           directory: "/project",
           title: "test",
           version: "test",
+          cost: settlement.cost,
+          tokens_input: settlement.tokens.input,
+          tokens_output: settlement.tokens.output,
+          tokens_reasoning: settlement.tokens.reasoning,
+          tokens_cache_read: settlement.tokens.cache.read,
+          tokens_cache_write: settlement.tokens.cache.write,
         })
         .run()
       const boundary = SessionMessage.ID.make("msg_boundary")
       yield* db
         .insert(SessionMessageTable)
-        .values([assistantRow(boundary, 1), assistantRow(SessionMessage.ID.make("msg_later"), 2)])
+        .values([
+          assistantRow(boundary, 1),
+          assistantRow(
+            SessionMessage.ID.make("msg_later"),
+            2,
+            { created: DateTime.makeUnsafe(1), completed: DateTime.makeUnsafe(2) },
+            settlement,
+          ),
+        ])
         .run()
       const events = yield* EventV2.Service
       yield* events.publish(SessionEvent.RevertEvent.Staged, {
@@ -93,6 +122,14 @@ describe("SessionProjector", () => {
       expect(
         (yield* db.select({ id: SessionMessageTable.id }).from(SessionMessageTable).all()).map((row) => row.id),
       ).toEqual([boundary])
+      expect(yield* db.select().from(SessionTable).where(eq(SessionTable.id, sessionID)).get()).toMatchObject({
+        cost: 0,
+        tokens_input: 0,
+        tokens_output: 0,
+        tokens_reasoning: 0,
+        tokens_cache_read: 0,
+        tokens_cache_write: 0,
+      })
     }),
   )
 
@@ -458,6 +495,81 @@ describe("SessionProjector", () => {
         time: { completed: DateTime.makeUnsafe(1) },
       })
     }),
+  )
+
+  it.effect("aggregates V2 step usage exactly once and replaces an assistant settlement", () =>
+    Effect.gen(function* () {
+      const { db } = yield* Database.Service
+      yield* db
+        .insert(ProjectTable)
+        .values({ id: Project.ID.global, worktree: AbsolutePath.make("/project"), sandboxes: [] })
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: sessionID,
+          project_id: Project.ID.global,
+          slug: "test",
+          directory: "/project",
+          title: "test",
+          version: "test",
+        })
+        .run()
+        .pipe(Effect.orDie)
+      const events = yield* EventV2.Service
+      const assistantMessageID = SessionMessage.ID.make("msg_assistant_usage")
+      yield* events.publish(SessionEvent.Step.Started, {
+        sessionID,
+        timestamp: created,
+        assistantMessageID,
+        agent: "build",
+        model,
+      })
+      const ended = yield* events.publish(SessionEvent.Step.Ended, {
+        sessionID,
+        timestamp: DateTime.makeUnsafe(1),
+        assistantMessageID,
+        finish: "stop",
+        cost: 1.25,
+        tokens: { input: 10, output: 20, reasoning: 3, cache: { read: 4, write: 5 } },
+      })
+      const sessions = yield* SessionV2.Service
+
+      expect(yield* sessions.get(sessionID)).toMatchObject({
+        cost: 1.25,
+        tokens: { input: 10, output: 20, reasoning: 3, cache: { read: 4, write: 5 } },
+      })
+
+      const recorded = yield* db.select().from(EventTable).where(eq(EventTable.id, ended.id)).get().pipe(Effect.orDie)
+      if (!recorded) return yield* Effect.die("Step settlement event was not recorded")
+      yield* events.replay({
+        id: recorded.id,
+        aggregateID: recorded.aggregate_id,
+        seq: recorded.seq,
+        type: recorded.type,
+        data: recorded.data,
+      })
+
+      expect(yield* sessions.get(sessionID)).toMatchObject({
+        cost: 1.25,
+        tokens: { input: 10, output: 20, reasoning: 3, cache: { read: 4, write: 5 } },
+      })
+
+      yield* events.publish(SessionEvent.Step.Ended, {
+        sessionID,
+        timestamp: DateTime.makeUnsafe(2),
+        assistantMessageID,
+        finish: "length",
+        cost: 2.5,
+        tokens: { input: 100, output: 200, reasoning: 30, cache: { read: 40, write: 50 } },
+      })
+
+      expect(yield* sessions.get(sessionID)).toMatchObject({
+        cost: 2.5,
+        tokens: { input: 100, output: 200, reasoning: 30, cache: { read: 40, write: 50 } },
+      })
+    }).pipe(Effect.provide(sessionsLayer)),
   )
 
   it.effect("does not revive a stale incomplete assistant projection", () =>

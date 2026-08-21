@@ -1,4 +1,4 @@
-import { Component, JSX, Show, createSignal } from "solid-js"
+import { Component, JSX, Show, createSignal, onCleanup } from "solid-js"
 import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
 import { SelectV2 } from "@opencode-ai/ui/v2/select-v2"
 import { Switch } from "@opencode-ai/ui/v2/switch-v2"
@@ -14,6 +14,7 @@ import "./settings-v2.css"
 import { useTheme } from "@opencode-ai/ui/theme/context"
 import { useLanguage } from "@/context/language"
 import { LocalMemoryPanel } from "@/features/memory/local-memory-panel"
+import { observeTelemetryPreference, setTelemetryEnabled, telemetryEnabled } from "@/features/privacy/telemetry"
 
 export type SettingsSection = "general" | "appearance" | "editor" | "chat" | "notifications" | "accessibility"
 
@@ -216,6 +217,8 @@ export const SettingsGeneralV2: Component<{
   const theme = useTheme()
   const language = useLanguage()
   const [status, setStatus] = createSignal("")
+  const [crashDiagnostics, setCrashDiagnostics] = createSignal(telemetryEnabled())
+  onCleanup(observeTelemetryPreference(setCrashDiagnostics))
   let statusTimeout: ReturnType<typeof setTimeout> | undefined
 
   const section = () => props.section ?? "general"
@@ -244,6 +247,25 @@ export const SettingsGeneralV2: Component<{
     >
       <div class="settings-v2-section-grid">
         <LocalMemoryPanel />
+        <Card
+          icon="status"
+          title="Crash diagnostics"
+          description="Optional technical error reports. Disabled until you explicitly enable them."
+        >
+          <ToggleRow
+            title="Share crash diagnostics"
+            description="Send Vector's version, operating system, and stack traces to Sentry when the interface crashes. Request, user, breadcrumb, and extra fields are removed; repository files, prompts, terminal output, and provider credentials are not intentionally attached."
+            checked={crashDiagnostics()}
+            onChange={(enabled) => {
+              if (!setTelemetryEnabled(enabled)) {
+                announce("Could not save the diagnostics preference on this device.")
+                return
+              }
+              setCrashDiagnostics(enabled)
+              announce(enabled ? "Crash diagnostics enabled." : "Crash diagnostics disabled.")
+            }}
+          />
+        </Card>
         <Card
           icon="reset"
           title="Local data"
