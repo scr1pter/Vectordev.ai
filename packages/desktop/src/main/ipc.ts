@@ -12,6 +12,11 @@ import { getStore, removeStoreFileIfEmpty } from "./store"
 import { sendBugReport } from "./bug-report"
 import { askHelpAssistant, type HelpInput } from "./help-assistant"
 import { clearLocalMemory, readLocalMemory, writeLocalMemory } from "./local-memory"
+import {
+  clearCustomInstructions,
+  readCustomInstructions,
+  writeCustomInstructions,
+} from "./custom-instructions"
 import { ensureRuntime, preparePluginCommand, type RuntimeName } from "./runtime-bootstrap"
 import { convertHeicToJpeg } from "./image-convert"
 import {
@@ -277,6 +282,9 @@ export function registerIpcHandlers(deps: Deps) {
   handle("local-memory-read", () => readLocalMemory())
   handle("local-memory-write", (_event, content: string) => writeLocalMemory(String(content ?? "")))
   handle("local-memory-clear", () => clearLocalMemory())
+  handle("custom-instructions-read", () => readCustomInstructions())
+  handle("custom-instructions-write", (_event, content: string) => writeCustomInstructions(String(content ?? "")))
+  handle("custom-instructions-clear", () => clearCustomInstructions())
   handle("pr-cli-status", () => pullRequestCliStatus())
   handle("pr-list", (_event, cwd: string, options?: { state?: "open" | "closed" | "merged" | "all"; limit?: number }) =>
     listPullRequests(cwd, options),

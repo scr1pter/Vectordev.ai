@@ -2262,3 +2262,77 @@ html[data-vector-reduce-animations="true"] *::after {
     padding: 3px;
   }
 }
+
+/* The subagent crew showcase. A fixed minimum column so a pet's name, tagline
+   and role stay on their own lines at every dialog width. */
+.settings-v2-pets-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 10px;
+}
+
+.settings-v2-pet {
+  display: flex;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--vx-line);
+  border-radius: 10px;
+  background: var(--vx-surface);
+}
+
+.settings-v2-pet-copy {
+  min-width: 0;
+}
+
+.settings-v2-pet-name {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--v2-text-text-base, #fff);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.settings-v2-pet-species {
+  color: var(--v2-text-text-muted, rgba(255, 255, 255, 0.45));
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.settings-v2-pet-tagline {
+  margin-top: 2px;
+  color: var(--v2-text-text-muted, rgba(255, 255, 255, 0.6));
+  font-size: 11.5px;
+  font-style: italic;
+}
+
+.settings-v2-pet-role {
+  margin-top: 5px;
+  color: var(--v2-text-text-muted, rgba(255, 255, 255, 0.55));
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.settings-v2-pet-id {
+  margin-top: 6px;
+  color: var(--v2-text-text-faint, rgba(255, 255, 255, 0.32));
+  font-family: var(--font-family-mono, ui-monospace, monospace);
+  font-size: 10.5px;
+}
+
+.settings-v2-textarea {
+  padding: 10px 12px;
+  border: 1px solid var(--vx-line);
+  border-radius: 8px;
+  background: var(--vx-canvas);
+  color: var(--v2-text-text-base, #fff);
+  font-family: var(--font-family-mono, ui-monospace, monospace);
+  font-size: 12px;
+  line-height: 1.55;
+  resize: vertical;
+}
+
+.settings-v2-textarea:focus-visible {
+  border-color: var(--vx-purple, #9b6cff);
+  outline: none;
+}

@@ -1,6 +1,20 @@
 {
   "releases": [
     {
+      "tag": "v1.19.2",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Undo that keeps your files",
+              "description": "Undo could delete the work it was meant to restore. Reverting a step that touched two or more files asked git which of them were in the snapshot without disabling path quoting, so any name that is not plain ASCII came back quoted, failed to match, and the file was deleted as though it had never been in the snapshot — including untracked work that existed nowhere else. That path was also the only one that never checked the snapshot was readable first, so an unreadable snapshot read as an empty one. Reverting a rename was worse: git collapses a rename into a single entry naming only the destination, so undo deleted the new file and never restored the original. Both are fixed, the batch now refuses to delete when it cannot read the snapshot, and each has a regression test that fails without the fix. Scheduled automations could never report success — the poller looked for a message shape the route it calls does not return, so every run polled to its six-hour ceiling and was recorded as failed. A parallel agent whose turn ended in a provider error was recorded as complete with no changes, on exactly the unattended path the feature exists to protect. Merging was impossible in any project with local dev dependencies, because an isolated workspace has no node_modules and the resulting exit 127 was treated as a failed check rather than a skipped one. Non-ASCII paths broke merges after they had already written to the project, and files with Windows line endings could never be merged hunk by hunk. The one function guarding a merge against data loss silently skipped symlinks and swallowed every copy failure. Vector's subagents now have names and faces: Scout the fox explores, Veri the owl judges, Rook the raven watches the boundaries, and six more, each shown by name in the timeline and in the Agent Dashboard, with a new Pets page in Settings introducing the whole crew. Settings also gains Voice and Personalization, where custom instructions you write are applied to every new session in every repository. Pull Requests moved to Connections and now lists your CI runs, turning a failed one into a repair prompt. Scheduled runs left the session sidebar, since Automations on the home screen replaced it. Adds Graphify to the plugin catalogue."
+            }
+          ]
+        }
+      ]
+    },
+    {
       "tag": "v1.19.1",
       "highlights": [
         {

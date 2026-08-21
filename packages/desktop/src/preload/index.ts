@@ -87,6 +87,11 @@ const api: ElectronAPI = {
     write: (content) => ipcRenderer.invoke("local-memory-write", content),
     clear: () => ipcRenderer.invoke("local-memory-clear"),
   },
+  customInstructions: {
+    read: () => ipcRenderer.invoke("custom-instructions-read"),
+    write: (content) => ipcRenderer.invoke("custom-instructions-write", content),
+    clear: () => ipcRenderer.invoke("custom-instructions-clear"),
+  },
   pullRequests: {
     status: () => ipcRenderer.invoke("pr-cli-status"),
     list: (cwd, options) => ipcRenderer.invoke("pr-list", cwd, options),

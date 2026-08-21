@@ -52,6 +52,7 @@ import type { AgentTaskPreparation } from "../main/context-budget"
 import type { VoiceSpeechResult } from "../main/voice-synthesis"
 import type { PullRequestCliStatus, PullRequestDetail, PullRequestSummary } from "../main/github-pr"
 import type { LocalMemoryState } from "../main/local-memory"
+import type { CustomInstructionsState } from "../main/custom-instructions"
 import type { RuntimeName, RuntimeStatus } from "../main/runtime-bootstrap"
 export type { RuntimeName, RuntimeStatus } from "../main/runtime-bootstrap"
 import type { CiFailure, CiRepo, CiRun, CiUnavailable } from "../main/ci-watch"
@@ -80,6 +81,7 @@ export type { FailureMemory, FailureRepair, FailureSignatureRecord } from "../ma
 import type { AgentTeam, TeamCollaborationGraph, TeamMessage, TeamTopology } from "../main/agent-team-model"
 export type { AgentTeam, TeamCollaborationGraph, TeamLink, TeamMessage, TeamTopology } from "../main/agent-team-model"
 export type { LocalMemoryState } from "../main/local-memory"
+export type { CustomInstructionsState } from "../main/custom-instructions"
 export type { PullRequestCliStatus, PullRequestDetail, PullRequestSummary } from "../main/github-pr"
 export type {
   CloudRuntimeLogResult,
@@ -215,6 +217,14 @@ export type LocalMemoryAPI = {
   read: () => Promise<LocalMemoryState>
   write: (content: string) => Promise<LocalMemoryState>
   clear: () => Promise<LocalMemoryState>
+}
+
+// Edits the global AGENTS.md the engine already loads on every prompt, so these
+// instructions apply to every new session without a second mechanism.
+export type CustomInstructionsAPI = {
+  read: () => Promise<CustomInstructionsState>
+  write: (content: string) => Promise<CustomInstructionsState>
+  clear: () => Promise<CustomInstructionsState>
 }
 
 export type PullRequestsAPI = {
@@ -641,6 +651,7 @@ export type ElectronAPI = {
   convertHeic: (bytes: Uint8Array) => Promise<{ data: Uint8Array; mime: string } | { error: string }>
   runtime: RuntimeAPI
   localMemory: LocalMemoryAPI
+  customInstructions: CustomInstructionsAPI
   pullRequests: PullRequestsAPI
   ci: CiAPI
   spendLimits: SpendLimitsAPI

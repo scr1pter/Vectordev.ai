@@ -81,11 +81,7 @@ describe("v2 pty HttpApi", () => {
     expect(body.data.title).toBe("v2")
 
     // The canonical surface keeps exited sessions observable with their exit code.
-    // The bound only has to outlast spawning a shell and letting it exit, which
-    // takes far longer than five seconds when the whole suite is running in
-    // parallel — matching the suite's own timeout keeps this from failing on a
-    // loaded machine while asserting exactly the same thing.
-    const deadline = Date.now() + 30_000
+    const deadline = Date.now() + 45_000
     let info: { status: string; exitCode?: number } | undefined
     while (Date.now() < deadline) {
       const found = await request(`/api/pty/${body.data.id}`, tmp.path)
@@ -102,7 +98,11 @@ describe("v2 pty HttpApi", () => {
     const missing = await request(`/api/pty/${body.data.id}`, tmp.path)
     expect(missing.status).toBe(404)
     expect(await missing.json()).toMatchObject({ _tag: "PtyNotFoundError", ptyID: body.data.id })
-  })
+    // Spawning a shell and waiting for it to exit is load-sensitive, and the
+    // whole suite runs in parallel. The per-test timeout sits above the poll
+    // bound above so a slow machine reports the real assertion rather than a
+    // timeout that says nothing about the route being tested.
+  }, 60_000)
 
   testPty("rejects connect tokens without the CSRF header and connects with a valid ticket", async () => {
     await using tmp = await tmpdir({ git: true, config: { formatter: false, lsp: false } })
