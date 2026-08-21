@@ -142,14 +142,22 @@ function runCheck(check: GuardrailCheck, root: string, timeoutMs: number): Promi
       (error, stdout, stderr) => {
         const raw = `${stdout || ""}${stderr ? `${stdout ? "\n" : ""}${stderr}` : ""}`
         const output = raw.length > MAX_OUTPUT_BYTES ? `${raw.slice(0, MAX_OUTPUT_BYTES)}\n… output truncated` : raw
-        const missing = (error as NodeJS.ErrnoException | null)?.code === "ENOENT"
+        // ENOENT covers a missing runner, but the common case in an isolated
+        // workspace is a runner that exists and a project-local binary that
+        // does not: a git worktree never carries gitignored node_modules, so
+        // `bun run typecheck` exits 127 with "command not found". Treating that
+        // as a failure made every merge, selective merge and PR unreachable for
+        // any project with local dev dependencies — this repository included.
+        const exitCode = typeof (error as NodeJS.ErrnoException | null)?.code === "number" ? Number(error!.code) : undefined
+        const notInstalled = exitCode === 127 || /command not found|: not found\b/i.test(raw)
+        const missing = (error as NodeJS.ErrnoException | null)?.code === "ENOENT" || (Boolean(error) && notInstalled)
         resolve({
           ...check,
           status: missing ? "skipped" : error ? "failed" : "passed",
           exitCode: typeof (error as any)?.code === "number" ? (error as any).code : error ? 1 : 0,
           durationMs: Date.now() - started,
           output: missing
-            ? `${check.command} is not installed in this runtime, so ${check.label} was skipped.`
+            ? `${check.command} could not run in this isolated workspace (a tool it needs is not installed there), so ${check.label} was skipped.`
             : output.trim() || (error ? String(error) : `${check.label} passed.`),
         })
       },

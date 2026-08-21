@@ -1,4 +1,4 @@
-import { cp, mkdir, stat } from "fs/promises"
+import { cp, lstat, mkdir } from "fs/promises"
 import { dirname, join } from "path"
 
 // Merge-checkpoint file operations, kept free of electron imports so the
@@ -14,12 +14,17 @@ import { dirname, join } from "path"
 // between a merge and permanent loss of the user's untracked work.
 export async function backupBeforeOverwrite(checkpointPath: string, sourcePath: string, file: string) {
   const from = join(sourcePath, file)
-  const exists = await stat(from).catch(() => undefined)
+  // lstat, not stat: stat follows symlinks, so a dangling link read as "nothing
+  // to preserve" and the merge then destroyed the link itself with no copy.
+  const exists = await lstat(from).catch(() => undefined)
   // Nothing to preserve when the merge is creating a file rather than
   // replacing one. Writing an empty placeholder would be worse than nothing:
   // restoring it would blank a real file.
   if (!exists) return
   const to = join(dirname(checkpointPath), "overwritten", file)
   await mkdir(dirname(to), { recursive: true })
-  await cp(from, to, { recursive: true, force: true }).catch(() => undefined)
+  // A failed copy must propagate. Swallowing it meant the caller could not
+  // tell a made backup from a skipped one, and went on to overwrite the
+  // original with nothing standing behind the checkpoint's promise.
+  await cp(from, to, { recursive: true, force: true, verbatimSymlinks: true })
 }

@@ -212,6 +212,7 @@ function harness(options: {
   failing?: string[]
   sessions?: Record<string, string>
   onActivePoll?: () => void
+  legacyShape?: boolean
 }) {
   const clock = { at: options.at }
   const persisted = { value: JSON.parse(JSON.stringify(options.records ?? [])) as unknown }
@@ -266,16 +267,13 @@ function harness(options: {
         return undefined
       }
       const failed = options.failing?.includes(sessionDirectory.get(sessionId) ?? "")
-      return {
-        data: [
-          {
-            info: {
-              role: "assistant",
-              error: failed ? { message: `boom in ${sessionDirectory.get(sessionId)}` } : undefined,
-            },
-          },
-        ],
-      }
+      const error = failed ? { message: `boom in ${sessionDirectory.get(sessionId)}` } : undefined
+      // The shape the v2 route this module calls actually returns: a flat
+      // message, no `info` envelope. The fixture used to return the legacy
+      // envelope, which is precisely why every run being recorded as failed
+      // went unnoticed here while failing against a real engine.
+      if (options.legacyShape) return { data: [{ info: { role: "assistant", error } }] }
+      return { data: [{ type: "assistant", finish: "stop", error }] }
     },
   })
 
@@ -488,6 +486,37 @@ describe("targeting an existing session", () => {
 
     expect(record.directory).toBe("/repos/alpha")
     expect(record.targets).toEqual([{ directory: "/repos/alpha", sessionId: "ses_established" }])
+  })
+})
+
+describe("engine message shapes", () => {
+  test("a v2 flat assistant message settles the run as completed", async () => {
+    const harnessed = harness({ at: new Date(2026, 7, 19, 9, 0, 0, 0), records: [scheduledRecord({})] })
+    await harnessed.runtime.tick()
+    expect(harnessed.record()?.status).toBe("completed")
+  })
+
+  test("a v2 flat assistant error settles the run as failed", async () => {
+    const harnessed = harness({
+      at: new Date(2026, 7, 19, 9, 0, 0, 0),
+      records: [scheduledRecord({})],
+      failing: ["/repos/alpha"],
+    })
+    await harnessed.runtime.tick()
+    expect(harnessed.record()?.status).toBe("failed")
+    expect(harnessed.record()?.error).toContain("boom in /repos/alpha")
+  })
+
+  // The legacy envelope is still accepted so a future route change cannot
+  // silently strand the poller the way calling v2 did.
+  test("a legacy { info: { role } } assistant message still settles the run", async () => {
+    const harnessed = harness({
+      at: new Date(2026, 7, 19, 9, 0, 0, 0),
+      records: [scheduledRecord({})],
+      legacyShape: true,
+    })
+    await harnessed.runtime.tick()
+    expect(harnessed.record()?.status).toBe("completed")
   })
 })
 

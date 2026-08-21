@@ -45,6 +45,36 @@ function api(): PullRequestsApi | undefined {
   return (globalThis.window as unknown as { api?: { pullRequests?: PullRequestsApi } } | undefined)?.api?.pullRequests
 }
 
+type CiRun = {
+  id: number
+  workflow: string
+  title: string
+  branch: string
+  status: string
+  conclusion: string
+  url: string
+  createdAt: string
+}
+
+type CiFailedStep = { job: string; step: string; kind: string; excerpt: string }
+
+type CiApi = {
+  runs: (
+    projectPath: string,
+    options?: { branch?: string; limit?: number },
+  ) => Promise<{ ok: true; runs: CiRun[] } | { ok: false; reason: string; detail: string; command: string }>
+  repair: (
+    projectPath: string,
+    runId: number,
+  ) => Promise<
+    { ok: true; failure: { steps: CiFailedStep[] }; prompt: string } | { ok: false; detail: string; command: string }
+  >
+}
+
+function ciApi(): CiApi | undefined {
+  return (globalThis.window as unknown as { api?: { ci?: CiApi } } | undefined)?.api?.ci
+}
+
 function CopyableCommand(props: { command: string }) {
   const [copied, setCopied] = createSignal(false)
   return (
@@ -71,6 +101,11 @@ export function PullRequests(props: { open: boolean; projectPath?: string; onClo
   const [busy, setBusy] = createSignal<string>()
   const [error, setError] = createSignal<string>()
   const [posted, setPosted] = createSignal(false)
+  const [ciRuns, setCiRuns] = createSignal<CiRun[]>([])
+  const [ciNote, setCiNote] = createSignal<string>()
+  const [ciOpenRun, setCiOpenRun] = createSignal<number>()
+  const [ciDetail, setCiDetail] = createSignal<{ steps: CiFailedStep[]; prompt: string }>()
+  const [ciPromptCopied, setCiPromptCopied] = createSignal(false)
 
   const refresh = async () => {
     const bridge = api()
@@ -93,6 +128,40 @@ export function PullRequests(props: { open: boolean; projectPath?: string; onClo
     })
     setList(prs)
     setBusy(undefined)
+    // CI shares the same gh sign-in the panel just confirmed, so load it after
+    // the PR list rather than gating the whole panel on it — a repo with no
+    // workflows should still show its pull requests.
+    const ci = ciApi()
+    if (!ci) return
+    const runs = await ci.runs(props.projectPath, { limit: 10 }).catch(() => undefined)
+    if (!runs) return
+    if (!runs.ok) {
+      setCiRuns([])
+      setCiNote(runs.detail)
+      return
+    }
+    setCiNote(undefined)
+    setCiRuns(runs.runs)
+  }
+
+  const inspectCiRun = async (runId: number) => {
+    const ci = ciApi()
+    if (!ci || !props.projectPath) return
+    if (ciOpenRun() === runId) {
+      setCiOpenRun(undefined)
+      setCiDetail(undefined)
+      return
+    }
+    setCiOpenRun(runId)
+    setCiDetail(undefined)
+    setBusy("Reading the failure log…")
+    const result = await ci.repair(props.projectPath, runId).catch(() => undefined)
+    setBusy(undefined)
+    if (!result?.ok) {
+      setCiNote(result ? result.detail : "Vector could not read that run's log.")
+      return
+    }
+    setCiDetail({ steps: result.failure.steps, prompt: result.prompt })
   }
 
   // Refresh whenever the panel opens rather than on an interval; gh shells out
@@ -269,6 +338,82 @@ export function PullRequests(props: { open: boolean; projectPath?: string; onClo
                     )}
                   </For>
                 </Show>
+
+                <div class="mt-4 border-t border-[color:var(--vx-line)] pt-3">
+                  <div class="mb-1.5 flex items-baseline justify-between">
+                    <span class="text-[11px] font-semibold uppercase tracking-wide text-white/45">CI runs</span>
+                    <Show when={ciRuns()[0]}>
+                      <span class="text-[10.5px] text-white/35">{ciRuns()[0]!.branch}</span>
+                    </Show>
+                  </div>
+                  <Show when={ciNote()}>
+                    <p class="mb-1.5 text-[11.5px] leading-relaxed text-white/45">{ciNote()}</p>
+                  </Show>
+                  <Show when={!ciNote() && ciRuns().length === 0}>
+                    <p class="text-[11.5px] text-white/40">No workflow runs for this branch.</p>
+                  </Show>
+                  <For each={ciRuns()}>
+                    {(run) => (
+                      <div class="mb-1 rounded-[6px] border border-[color:var(--vx-line)]">
+                        <button
+                          type="button"
+                          class="flex w-full items-center gap-2 px-2.5 py-1.5 text-left"
+                          onClick={() => {
+                            if (run.conclusion === "failure") {
+                              void inspectCiRun(run.id)
+                              return
+                            }
+                            globalThis.window?.open(run.url, "_blank")
+                          }}
+                        >
+                          <span
+                            class="size-1.5 shrink-0 rounded-full"
+                            classList={{
+                              "bg-emerald-400": run.conclusion === "success",
+                              "bg-rose-400": run.conclusion === "failure",
+                              "bg-amber-400": run.status !== "completed",
+                              "bg-white/30":
+                                run.status === "completed" && !["success", "failure"].includes(run.conclusion),
+                            }}
+                          />
+                          <span class="min-w-0 flex-1 truncate text-[11.5px] text-white/70">
+                            {run.workflow} · {run.title}
+                          </span>
+                          <span class="shrink-0 text-[10.5px] text-white/35">
+                            {run.conclusion === "failure" ? (ciOpenRun() === run.id ? "Hide" : "Inspect") : run.conclusion || run.status}
+                          </span>
+                        </button>
+                        <Show when={ciOpenRun() === run.id && ciDetail()}>
+                          <div class="border-t border-[color:var(--vx-line)] px-2.5 py-2">
+                            <For each={ciDetail()!.steps.slice(0, 2)}>
+                              {(step) => (
+                                <div class="mb-1.5">
+                                  <div class="text-[10.5px] text-rose-300/80">
+                                    {step.job} › {step.step} · {step.kind}
+                                  </div>
+                                  <pre class="mt-1 max-h-28 overflow-auto rounded bg-black/30 p-2 font-mono text-[10px] leading-snug text-white/60">
+                                    {step.excerpt}
+                                  </pre>
+                                </div>
+                              )}
+                            </For>
+                            <button
+                              type="button"
+                              class="rounded-[6px] bg-[color:var(--vx-purple)] px-2.5 py-1 text-[11.5px] font-medium text-white"
+                              onClick={() => {
+                                void navigator.clipboard?.writeText(ciDetail()!.prompt)
+                                setCiPromptCopied(true)
+                                setTimeout(() => setCiPromptCopied(false), 1_500)
+                              }}
+                            >
+                              {ciPromptCopied() ? "Copied — paste it to the agent" : "Copy fix prompt for the agent"}
+                            </button>
+                          </div>
+                        </Show>
+                      </div>
+                    )}
+                  </For>
+                </div>
               </div>
 
               <div>

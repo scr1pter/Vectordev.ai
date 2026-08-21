@@ -42,7 +42,13 @@ function filePathFromBlock(lines: string[]) {
 }
 
 export function parseUnifiedDiff(diff: string): UnifiedDiffFile[] {
-  const lines = diff.replace(/\r\n/g, "\n").split("\n")
+  // Split on \n only. Git writes a diff's own structure (diff --git, @@, ---,
+  // +++) with bare newlines, so a \r surviving on a line belongs to the file's
+  // CRLF content. Normalising it away stripped those CRs from the +/- and
+  // context lines, and the patch selectUnifiedDiff rebuilt from them no longer
+  // matched the file on disk — every selective merge of a CRLF file was
+  // rejected by git apply as "patch does not apply".
+  const lines = diff.split("\n")
   const starts: number[] = []
   for (let index = 0; index < lines.length; index += 1) {
     if (/^diff --(?:git|vector) /.test(lines[index] ?? "")) starts.push(index)

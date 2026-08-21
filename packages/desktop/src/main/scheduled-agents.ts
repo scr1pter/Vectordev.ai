@@ -181,14 +181,27 @@ const engineRequest: ScheduledAgentRequest = async (engine, path, init = {}) => 
   return text ? JSON.parse(text) : undefined
 }
 
+type EngineMessageError = { message?: string; data?: { message?: string } } | string
+
+// The v2 route returns flat messages ({ type: "assistant", finish, error });
+// the legacy route wraps them as { info: { role: "assistant", ... } }. This
+// module calls v2, and matching only the legacy envelope meant no assistant
+// message was ever found — so every scheduled run polled to the six-hour
+// ceiling and was recorded as failed. Both shapes are accepted so the poller
+// cannot silently break again if the route it uses changes.
+type EngineMessage = {
+  type?: string
+  finish?: string
+  error?: EngineMessageError
+  info?: {
+    role?: string
+    finish?: string
+    error?: EngineMessageError
+  }
+}
+
 type EngineMessageResponse = {
-  data?: Array<{
-    info?: {
-      role?: string
-      finish?: string
-      error?: { message?: string; data?: { message?: string } } | string
-    }
-  }>
+  data?: EngineMessage[]
 }
 
 function activeSessionMap(value: unknown): Record<string, unknown> {
@@ -198,9 +211,15 @@ function activeSessionMap(value: unknown): Record<string, unknown> {
   return candidate as Record<string, unknown>
 }
 
+function assistantOf(item: EngineMessage) {
+  if (item.info?.role === "assistant") return item.info
+  if (item.type === "assistant") return item
+  return undefined
+}
+
 function assistantFailure(response: EngineMessageResponse) {
   const messages = response.data ?? []
-  const assistant = messages.filter((item) => item.info?.role === "assistant").at(-1)?.info
+  const assistant = messages.map(assistantOf).filter(Boolean).at(-1)
   if (!assistant) return { settled: false as const }
   if (!assistant.error) return { settled: true as const }
   if (typeof assistant.error === "string") return { settled: true as const, error: assistant.error }

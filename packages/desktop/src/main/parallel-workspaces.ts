@@ -411,6 +411,39 @@ async function refreshRunningWorkspace(id: string) {
   }))
 }
 
+// The engine going idle says the turn ended, not that it succeeded. A provider
+// 429, an auth failure or a context overflow all end the turn with
+// finish: "error", and without this the workspace was recorded as "complete
+// with no file changes" — a green result for a run that never did anything,
+// on exactly the unattended path the feature exists to protect.
+// Both message shapes are accepted: v2 is flat, the legacy route wraps in `info`.
+type EngineTurnMessage = {
+  type?: string
+  finish?: string
+  error?: { message?: string; data?: { message?: string } } | string
+  info?: { role?: string; finish?: string; error?: { message?: string; data?: { message?: string } } | string }
+}
+
+async function engineTurnFailure(
+  sessionId: string,
+  engine: ParallelWorkspaceEngine,
+  signal: AbortSignal,
+): Promise<string | undefined> {
+  const raw = await engineRequest<{ data?: EngineTurnMessage[] } | undefined>(
+    engine,
+    `/api/session/${encodeURIComponent(sessionId)}/message?limit=20`,
+    { signal },
+  ).catch(() => undefined)
+  const assistants = (raw?.data ?? [])
+    .map((item) => (item.info?.role === "assistant" ? item.info : item.type === "assistant" ? item : undefined))
+    .filter(Boolean)
+  const last = assistants.at(-1)
+  if (!last) return undefined
+  if (last.finish !== "error" && !last.error) return undefined
+  if (typeof last.error === "string") return last.error
+  return last.error?.data?.message ?? last.error?.message ?? "The agent's turn ended with an error."
+}
+
 async function waitForEngineSessionIdle(
   id: string,
   sessionId: string,
@@ -573,11 +606,19 @@ function rememberValidation(
   })
 }
 
+// core.quotePath defaults on, so git C-quotes any non-ASCII path — a file named
+// café.txt comes back as "caf\303\251.txt". Every caller here parses these
+// lists as literal paths, so a merge would list a name that does not exist,
+// skip it in the review diff and the secret scan, and then throw ENOENT partway
+// through — after `git apply` had already written to main. Disabling it once at
+// the single chokepoint covers status, ls-files and diff --name-only together.
+const GIT_PATH_CONFIG = ["-c", "core.quotePath=false"]
+
 function runGit(args: string[], cwd: string, options: { allowFailure?: boolean; input?: string } = {}) {
   const allowFailure = options.allowFailure ?? false
   return withTimeout(
     new Promise<CommandResult>((resolve, reject) => {
-      const child = execFile("git", args, { cwd, maxBuffer: 96 * 1024 * 1024 }, (error, stdout, stderr) => {
+      const child = execFile("git", [...GIT_PATH_CONFIG, ...args], { cwd, maxBuffer: 96 * 1024 * 1024 }, (error, stdout, stderr) => {
         const result = { stdout: String(stdout), stderr: String(stderr), failed: Boolean(error) }
         if (error && !allowFailure) return reject(error)
         resolve(result)
@@ -1480,6 +1521,9 @@ async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEng
 
     await waitForEngineSessionIdle(id, sessionId, engine, controller.signal)
 
+    const turnFailure = await engineTurnFailure(sessionId, engine, controller.signal)
+    if (turnFailure) throw new Error(turnFailure)
+
     record = updateRecord(id, (current) => ({
       ...current,
       status: "testing",
@@ -1540,6 +1584,11 @@ async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEng
         signal: controller.signal,
       })
       await waitForEngineSessionIdle(id, sessionId, engine, controller.signal)
+
+      // A repair pass that died on a provider error must not read as a repair
+      // attempt that simply did not fix anything.
+      const repairFailure = await engineTurnFailure(sessionId, engine, controller.signal)
+      if (repairFailure) throw new Error(repairFailure)
 
       refreshed = await refreshParallelWorkspace(id)
       validation = await validateWorkspace(refreshed.isolatedPath, refreshed.changedFiles)

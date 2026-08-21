@@ -142,10 +142,18 @@ export type AgentGroup = {
 }
 
 export function groupAgents(agents: readonly DashboardAgentInput[]): AgentGroup[] {
-  const solo = agents.filter((agent) => !agent.swarmRunId)
+  // Collaborative teams set teamId, not swarmRunId, so grouping only on the
+  // swarm key left every team member rendered as a solo row with no heading.
+  // A swarm id still wins when both are present: a swarm worker's membership in
+  // its run outranks any team it also joined.
+  const solo = agents.filter((agent) => !agent.swarmRunId && !agent.teamId)
   const swarms = new Map<string, DashboardAgentInput[]>()
   for (const agent of agents.filter((item) => item.swarmRunId)) {
     swarms.set(agent.swarmRunId!, [...(swarms.get(agent.swarmRunId!) ?? []), agent])
+  }
+  const teams = new Map<string, DashboardAgentInput[]>()
+  for (const agent of agents.filter((item) => !item.swarmRunId && item.teamId)) {
+    teams.set(agent.teamId!, [...(teams.get(agent.teamId!) ?? []), agent])
   }
 
   const swarmGroups = [...swarms.entries()].map(([id, members]) => ({
@@ -158,8 +166,22 @@ export function groupAgents(agents: readonly DashboardAgentInput[]): AgentGroup[
     }),
   }))
 
+  // The dashboard input carries no team name, so the heading names the members
+  // instead — that is what the user recognises the team by.
+  const teamGroups = [...teams.entries()].map(([id, members]) => {
+    const sorted = [...members].sort((a, b) => a.name.localeCompare(b.name))
+    const names = sorted.slice(0, 2).map((member) => member.name)
+    return {
+      id,
+      label: sorted.length > 2 ? `${names.join(" & ")} +${sorted.length - 2}` : names.join(" & "),
+      swarm: true,
+      agents: sorted,
+    }
+  })
+
   return [
     ...swarmGroups,
+    ...teamGroups,
     ...solo.map((agent) => ({ id: agent.id, label: agent.name, swarm: false, agents: [agent] })),
   ]
 }

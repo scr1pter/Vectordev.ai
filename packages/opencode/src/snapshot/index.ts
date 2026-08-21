@@ -394,8 +394,12 @@ const layer: Layer.Layer<Service, never, FSUtil.Service | AppProcess.Service | C
           return yield* locked(
             Effect.gen(function* () {
               yield* add()
+              // --no-renames: rename detection collapses a delete+create pair
+              // into one entry whose --name-only output is only the destination,
+              // so revert would delete the new file and never restore the old
+              // one — both halves of a rename gone. diffFull already disables it.
               const result = yield* git(
-                [...quote, ...args(["diff", "--cached", "--no-ext-diff", "--name-only", hash, "--", "."])],
+                [...quote, ...args(["diff", "--cached", "--no-ext-diff", "--no-renames", "--name-only", hash, "--", "."])],
                 {
                   cwd: state.directory,
                 },
@@ -522,8 +526,13 @@ const layer: Layer.Layer<Service, never, FSUtil.Service | AppProcess.Service | C
                   continue
                 }
 
+                // `quote`, not `core`: with core.quotepath at its default git
+                // C-quotes any non-ASCII name, so `have` would hold
+                // "caf\303\251.txt" while op.rel is café.txt — every such file
+                // then failed the membership test below and was deleted as
+                // "not in the snapshot".
                 const tree = yield* git(
-                  [...core, ...args(["ls-tree", "--name-only", first.hash, "--", ...run.map((item) => item.rel)])],
+                  [...quote, ...args(["ls-tree", "--name-only", first.hash, "--", ...run.map((item) => item.rel)])],
                   {
                     cwd: state.worktree,
                   },
@@ -570,8 +579,17 @@ const layer: Layer.Layer<Service, never, FSUtil.Service | AppProcess.Service | C
                   }
                 }
 
+                // The same fail-closed rule single() applies: deleting because a
+                // file is "not in the snapshot" is only safe when the snapshot
+                // itself is readable — otherwise an unreadable tree reads as an
+                // empty one and this loop would delete everything in the batch.
+                const treeReadable = yield* readable(first.hash)
                 for (const op of run) {
                   if (have.has(op.rel)) continue
+                  if (!treeReadable) {
+                    yield* Effect.logWarning("snapshot unreadable, refusing to delete", { file: op.file, hash: op.hash })
+                    continue
+                  }
                   yield* Effect.logInfo("file did not exist in snapshot, deleting", { file: op.file, hash: op.hash })
                   yield* remove(op.file)
                 }
@@ -586,9 +604,12 @@ const layer: Layer.Layer<Service, never, FSUtil.Service | AppProcess.Service | C
           return yield* locked(
             Effect.gen(function* () {
               yield* add()
-              const result = yield* git([...quote, ...args(["diff", "--cached", "--no-ext-diff", hash, "--", "."])], {
-                cwd: state.worktree,
-              })
+              const result = yield* git(
+                [...quote, ...args(["diff", "--cached", "--no-ext-diff", "--no-renames", hash, "--", "."])],
+                {
+                  cwd: state.worktree,
+                },
+              )
               if (result.code !== 0) {
                 yield* Effect.logWarning("failed to get diff", {
                   hash,

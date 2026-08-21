@@ -1297,3 +1297,58 @@ it.instance(
   ),
   { git: true },
 )
+
+// Regression: with core.quotepath at its default, the batched ls-tree C-quoted
+// non-ASCII names, so a multi-file revert saw "caf\303\251.txt" instead of
+// café.txt, failed the membership test, and deleted the user's file as "not in
+// the snapshot". Needs ≥2 files under one hash to take the batch path.
+nonWindowsIt(
+  "batched revert restores files with non-ASCII names instead of deleting them",
+  Effect.gen(function* () {
+    const dir = yield* scopedGitTmpdir()
+    yield* write(`${dir}/plain.txt`, "plain before")
+    yield* exec(dir, ["git", "add", "."])
+    yield* exec(dir, ["git", "commit", "-m", "init"])
+    yield* Effect.gen(function* () {
+      const snapshot = yield* Snapshot.Service
+      yield* write(`${dir}/文書.txt`, "IRREPLACEABLE")
+      const before = yield* snapshot.track()
+      expect(before).toBeTruthy()
+      yield* write(`${dir}/plain.txt`, "plain after")
+      yield* write(`${dir}/文書.txt`, "changed")
+      const patch = yield* snapshot.patch(before!)
+      expect(patch.files).toContain(fwd(dir, "文書.txt"))
+      yield* snapshot.revert([patch])
+      expect(yield* exists(`${dir}/文書.txt`)).toBe(true)
+      expect(yield* readText(`${dir}/文書.txt`)).toBe("IRREPLACEABLE")
+      expect(yield* readText(`${dir}/plain.txt`)).toBe("plain before")
+    }).pipe(provideInstance(dir))
+  }),
+)
+
+// Regression: rename detection collapsed a delete+create pair into a single
+// destination-only entry, so reverting a rename deleted the new file and never
+// restored the original — both halves of the user's work gone.
+it.live(
+  "reverting a rename restores the original file",
+  Effect.gen(function* () {
+    const dir = yield* scopedGitTmpdir()
+    yield* write(`${dir}/keep.txt`, "keep")
+    yield* exec(dir, ["git", "add", "."])
+    yield* exec(dir, ["git", "commit", "-m", "init"])
+    yield* Effect.gen(function* () {
+      const snapshot = yield* Snapshot.Service
+      yield* write(`${dir}/notes.txt`, "IRREPLACEABLE UNCOMMITTED NOTES")
+      const before = yield* snapshot.track()
+      expect(before).toBeTruthy()
+      yield* Effect.promise(() => fs.rename(`${dir}/notes.txt`, `${dir}/renamed.txt`))
+      const patch = yield* snapshot.patch(before!)
+      expect(patch.files).toContain(fwd(dir, "notes.txt"))
+      expect(patch.files).toContain(fwd(dir, "renamed.txt"))
+      yield* snapshot.revert([patch])
+      expect(yield* exists(`${dir}/notes.txt`)).toBe(true)
+      expect(yield* readText(`${dir}/notes.txt`)).toBe("IRREPLACEABLE UNCOMMITTED NOTES")
+      expect(yield* exists(`${dir}/renamed.txt`)).toBe(false)
+    }).pipe(provideInstance(dir))
+  }),
+)

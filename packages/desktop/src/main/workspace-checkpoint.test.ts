@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { mkdtemp, mkdir, readFile, writeFile, stat } from "fs/promises"
+import { chmod, lstat, mkdtemp, mkdir, readFile, readlink, symlink, writeFile, stat } from "fs/promises"
 import { tmpdir } from "os"
 import { join, dirname } from "path"
 import { backupBeforeOverwrite } from "./workspace-checkpoint"
@@ -68,5 +68,28 @@ describe("backupBeforeOverwrite", () => {
     await backupBeforeOverwrite(checkpointPath, source, "x.txt")
 
     expect(await readFile(restored(checkpointPath, "x.txt"), "utf8")).toBe("SECOND")
+  })
+
+  test("preserves a dangling symlink instead of skipping it", async () => {
+    const { source, checkpointPath } = await scratch()
+    await symlink("./missing-target", join(source, "link"))
+
+    await backupBeforeOverwrite(checkpointPath, source, "link")
+
+    const preserved = await lstat(restored(checkpointPath, "link"))
+    expect(preserved.isSymbolicLink()).toBe(true)
+    expect(await readlink(restored(checkpointPath, "link"))).toBe("./missing-target")
+  })
+
+  test("an unreadable file fails the backup loudly rather than silently skipping it", async () => {
+    if (process.platform === "win32" || process.getuid?.() === 0) return
+    const { source, checkpointPath } = await scratch()
+    await writeFile(join(source, "secret.txt"), "SECRET", "utf8")
+    await chmod(join(source, "secret.txt"), 0o000)
+
+    // The merge must abort when the copy cannot be made — a swallowed failure
+    // here meant the merge went on to overwrite a file with no backup behind it.
+    await expect(backupBeforeOverwrite(checkpointPath, source, "secret.txt")).rejects.toThrow()
+    await chmod(join(source, "secret.txt"), 0o644)
   })
 })

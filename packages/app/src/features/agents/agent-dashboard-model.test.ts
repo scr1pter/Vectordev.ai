@@ -112,6 +112,37 @@ describe("summarize", () => {
 })
 
 describe("groupAgents", () => {
+  test("groups collaborative team members under one heading", () => {
+    const groups = groupAgents([
+      agent({ id: "a", name: "Backend", teamId: "team-1" }),
+      agent({ id: "b", name: "Frontend", teamId: "team-1" }),
+      agent({ id: "c", name: "Solo" }),
+    ])
+    const team = groups.find((group) => group.id === "team-1")
+    expect(team?.swarm).toBe(true)
+    expect(team?.label).toBe("Backend & Frontend")
+    expect(team?.agents.map((member) => member.id)).toEqual(["a", "b"])
+    expect(groups.find((group) => group.id === "c")?.swarm).toBe(false)
+  })
+
+  test("a swarm id outranks a team id for grouping", () => {
+    const groups = groupAgents([
+      agent({ id: "a", name: "Worker", swarmRunId: "run-1", teamId: "team-1" }),
+      agent({ id: "b", name: "Mate", teamId: "team-1" }),
+    ])
+    expect(groups.find((group) => group.id === "run-1")?.agents.map((member) => member.id)).toEqual(["a"])
+    expect(groups.find((group) => group.id === "team-1")?.agents.map((member) => member.id)).toEqual(["b"])
+  })
+
+  test("a large team labels the first two members and counts the rest", () => {
+    const groups = groupAgents([
+      agent({ id: "a", name: "Alpha", teamId: "t" }),
+      agent({ id: "b", name: "Beta", teamId: "t" }),
+      agent({ id: "c", name: "Gamma", teamId: "t" }),
+    ])
+    expect(groups.find((group) => group.id === "t")?.label).toBe("Alpha & Beta +1")
+  })
+
   test("groups a swarm together and puts the coordinator first", () => {
     const groups = groupAgents([
       agent({ name: "Worker", swarmRunId: "run-1", swarmRole: "worker" }),
