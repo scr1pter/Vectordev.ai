@@ -14,8 +14,6 @@ export type SpotlightTourHost = {
   ensureWorkspace: () => void
   /** Un-hide the sidebar and expand the project tree. */
   showSidebar: () => void
-  openScheduledPanel: () => void
-  closeScheduledPanel: () => void
   goCloud: () => void
   openSettingsDialog: () => void
   closeSettingsDialog: () => void
@@ -306,22 +304,12 @@ export function createSpotlightSteps(host: SpotlightTourHost): SpotlightStep[] {
       placement: "right",
     }),
     workspace({
-      id: "conn-scheduled",
+      id: "conn-pull-requests",
       section: "Connections",
-      title: "Scheduled runs.",
-      body: "Write a prompt now, pick a time, and Vector launches the agent for you later — even while you work on something else. The badge counts runs that are waiting.",
-      tip: "Queue the unglamorous chores — dependency bumps, lint sweeps — for while you're away.",
-      target: '[data-tour="nav-scheduled"]',
+      title: "Pull Requests.",
+      body: "The project's open pull requests, right beside the work. Read a diff, or hand one to the agent for an AI review pass without leaving the session.",
+      target: '[data-tour="nav-pull-requests"]',
       placement: "right",
-    }),
-    workspace({
-      id: "scheduled-panel",
-      section: "Connections",
-      title: "The scheduling panel.",
-      body: "Describe the run, set date and time, done. On desktop Vector runs it unattended; elsewhere it saves the prompt, reminds you, and you choose when to run it.",
-      target: '[data-tour="scheduled-panel"]',
-      placement: "right",
-      prepare: host.openScheduledPanel,
     }),
     workspace({
       id: "conn-mcp",
@@ -331,7 +319,6 @@ export function createSpotlightSteps(host: SpotlightTourHost): SpotlightStep[] {
       tip: "Start with one server you actually need; every tool adds to what the agent weighs each step.",
       target: '[data-tour="nav-mcp"]',
       placement: "right",
-      prepare: host.closeScheduledPanel,
     }),
     workspace({
       id: "conn-plugins",
@@ -385,10 +372,7 @@ export function createSpotlightSteps(host: SpotlightTourHost): SpotlightStep[] {
       placement: "auto",
       group: "cloud",
       sentinel: true,
-      prepare: () => {
-        host.closeScheduledPanel()
-        host.goCloud()
-      },
+      prepare: host.goCloud,
     },
     {
       id: "cloud-sections",

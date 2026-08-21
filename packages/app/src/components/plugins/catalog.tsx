@@ -37,6 +37,7 @@ const brandPaths = {
   fetchglobe: `M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 1.8a8.2 8.2 0 0 1 0 16.4A8.2 8.2 0 0 1 12 3.8zM11.1 6h1.8v6.3l2.6-2.6 1.3 1.3-4.8 4.7-4.8-4.7 1.3-1.3 2.6 2.6V6z`,
   memorygraph: `M12 2.6a3 3 0 0 1 3 3c0 .5-.1 1-.4 1.4l2.9 2.9a3 3 0 1 1-1.2 1.3l-3-3a3 3 0 0 1-2.6 0l-3 3a3 3 0 1 1-1.2-1.3l2.9-2.9A3 3 0 0 1 12 2.6zM6 15.4a3 3 0 0 1 3 3 3 3 0 1 1-3-3zm12 0a3 3 0 1 1 0 6 3 3 0 0 1 0-6zM9.5 18h5v1.8h-5V18z`,
   chainsteps: `M3 3h6v6H3V3zm1.7 1.7v2.6h2.6V4.7H4.7zM9 9h6v6H9V9zm1.7 1.7v2.6h2.6v-2.6h-2.6zM15 15h6v6h-6v-6zm1.7 1.7v2.6h2.6v-2.6h-2.6z`,
+  graphify: `M2.3 12a2.7 2.7 0 1 0 5.4 0 2.7 2.7 0 1 0-5.4 0zM14.8 4.8a2.7 2.7 0 1 0 5.4 0 2.7 2.7 0 1 0-5.4 0zM14.8 19.2a2.7 2.7 0 1 0 5.4 0 2.7 2.7 0 1 0-5.4 0zM16.7 7.5h1.6v9h-1.6zM6.9 10l8-4.5.8 1.4-8 4.5zM6.9 14l8 4.5.8-1.4-8-4.5z`,
   higgsfield: `M13.4 2 4.6 13.6h5.2L9 22l8.9-11.6h-5.3L13.4 2z`,
   falai: `M12 2.2l1.9 5.6 5.6-1.6-3.6 4.6 4.6 3.5-5.8.4.5 5.8-4.1-4.2-4 4.2.4-5.8-5.8-.4 4.7-3.5-3.7-4.6 5.7 1.6L12 2.2z`,
   replicate: `M4 4h16v2.2H4V4zm4 4.6h12v2.2H8V8.6zm4 4.6h8v2.2h-8v-2.2zm4 4.6h4V20h-4v-2.2z`,
@@ -647,6 +648,21 @@ export const PLUGIN_CATALOG: PluginDef[] = [
     fill: "#B28CFF",
     auth: { kind: "none" },
     build: () => local(["npx", "-y", "@modelcontextprotocol/server-memory"]),
+  },
+  {
+    id: "graphify",
+    name: "Graphify",
+    blurb: "On-device codebase knowledge graph with token-budgeted queries.",
+    category: "Search & knowledge",
+    logo: "graphify",
+    fill: "#3FD7A2",
+    auth: { kind: "none" },
+    // The [mcp] extra carries the MCP SDK; graphifyy's `graphify-mcp` console
+    // script is the official stdio server and reads graphify-out/graph.json
+    // from the cwd, so no environment is needed. Pin the interpreter: the
+    // package needs Python >= 3.10 and macOS still ships 3.9, so without this
+    // uv resolves against the system Python and the install fails.
+    build: () => local(["uvx", "--python", "3.12", "--from", "graphifyy[mcp]", "graphify-mcp"]),
   },
   {
     id: "sequential-thinking",

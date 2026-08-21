@@ -61,7 +61,6 @@ export function WorkspaceNavigation(props: {
   treeOpen: boolean
   items: WorkspaceNavigationItem[]
   activeTool?: "browser" | "canvas"
-  scheduledCount: number
   currentVersion?: string
   updaterState?: UpdaterState
   onResizeStart: (event: PointerEvent) => void
@@ -82,7 +81,6 @@ export function WorkspaceNavigation(props: {
   onPullRequests: () => void
   onBrowser: () => void
   onCanvas: () => void
-  onScheduled: () => void
   onMcp: () => void
   onPlugins: () => void
   onFind: () => void
@@ -395,15 +393,6 @@ export function WorkspaceNavigation(props: {
 
         <section data-vector-nav-group class="border-t border-[color:var(--vx-line)] px-2 py-3">
           <div data-vector-nav-label>Project tools</div>
-          <button type="button" data-vector-nav-item data-tour="nav-pull-requests" onClick={props.onPullRequests}>
-            <svg viewBox="0 0 16 16" class="size-3.5 shrink-0" aria-hidden="true">
-              <circle cx="4.2" cy="3.6" r="1.5" fill="none" stroke="currentColor" stroke-width="1.15" />
-              <circle cx="4.2" cy="12.4" r="1.5" fill="none" stroke="currentColor" stroke-width="1.15" />
-              <circle cx="11.8" cy="12.4" r="1.5" fill="none" stroke="currentColor" stroke-width="1.15" />
-              <path d="M4.2 5.1v5.8M11.8 10.9V6.4a2 2 0 0 0-2-2H7.4m0 0 1.6-1.5M7.4 4.4 9 5.9" fill="none" stroke="currentColor" stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round" />
-            </svg>
-            <span>Pull Requests</span>
-          </button>
           <button type="button" data-vector-nav-item data-tour="nav-agent-dashboard" onClick={props.onAgentDashboard}>
             <svg viewBox="0 0 16 16" class="size-3.5 shrink-0" aria-hidden="true">
               <rect x="2.3" y="2.6" width="4.7" height="4.7" rx="1.1" fill="none" stroke="currentColor" stroke-width="1.15" />
@@ -486,23 +475,14 @@ export function WorkspaceNavigation(props: {
 
         <section data-vector-nav-group class="border-t border-[color:var(--vx-line)] px-2 py-3">
           <div data-vector-nav-label>Connections</div>
-          <button type="button" data-vector-nav-item data-tour="nav-scheduled" onClick={props.onScheduled}>
+          <button type="button" data-vector-nav-item data-tour="nav-pull-requests" onClick={props.onPullRequests}>
             <svg viewBox="0 0 16 16" class="size-3.5 shrink-0" aria-hidden="true">
-              <path
-                d="M8 2.55a5.45 5.45 0 1 0 0 10.9 5.45 5.45 0 0 0 0-10.9Zm0 2.6v3.1l2.15 1.25"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              />
+              <circle cx="4.2" cy="3.6" r="1.5" fill="none" stroke="currentColor" stroke-width="1.15" />
+              <circle cx="4.2" cy="12.4" r="1.5" fill="none" stroke="currentColor" stroke-width="1.15" />
+              <circle cx="11.8" cy="12.4" r="1.5" fill="none" stroke="currentColor" stroke-width="1.15" />
+              <path d="M4.2 5.1v5.8M11.8 10.9V6.4a2 2 0 0 0-2-2H7.4m0 0 1.6-1.5M7.4 4.4 9 5.9" fill="none" stroke="currentColor" stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round" />
             </svg>
-            <span class="min-w-0 flex-1">Scheduled runs</span>
-            <Show when={props.scheduledCount}>
-              <span class="rounded-full bg-[color:var(--vx-purple)]/80 px-1.5 py-0.5 text-[9.5px] font-semibold text-white">
-                {props.scheduledCount}
-              </span>
-            </Show>
+            <span>Pull Requests</span>
           </button>
           <button type="button" data-vector-nav-item data-tour="nav-mcp" onClick={props.onMcp}>
             <svg viewBox="0 0 16 16" class="size-3.5 shrink-0" aria-hidden="true">

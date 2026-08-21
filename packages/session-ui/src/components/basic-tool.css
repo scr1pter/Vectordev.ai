@@ -277,3 +277,10 @@ body:not([data-new-layout]) {
     }
   }
 }
+
+/* The engine agent name kept beside a subagent's pet name, so "Scout" reads as
+   a face with a role rather than replacing the id the user configured. */
+[data-component="task-tool-agent"] {
+  color: var(--text-weak);
+  font-size: 0.85em;
+}

@@ -36,8 +36,6 @@ import { DialogReportBug } from "@/components/dialog-report-bug"
 import { HelpPanel } from "@/features/help/help-panel"
 import { AgentDashboard } from "@/features/agents/agent-dashboard"
 import { useSettings } from "@/context/settings"
-import { ScheduledTasks } from "@/features/scheduled/scheduled-tasks"
-import type { ScheduledTask } from "@/features/scheduled/schedule-model"
 import type { TeamConversation } from "@/features/agents/agent-dashboard-model"
 import { ExternalRuntimeSetupPanel } from "@/features/agents/external-runtime-setup"
 import { externalRuntimeSetup, isExternalRuntime, type ExternalRuntime } from "@/features/agents/external-runtimes"
@@ -448,67 +446,6 @@ type BackgroundTasksApi = {
   clearCompleted: (scope?: { projectPath?: string; taskId?: string }) => Promise<BackgroundTaskRecord[]>
 }
 
-type ScheduledPromptStatus = "scheduled" | "ready" | "loaded"
-type ScheduledPrompt = {
-  id: string
-  text: string
-  runAt: string
-  createdAt: string
-  sessionPath: string
-  projectPath?: string
-  taskId?: string
-  status: ScheduledPromptStatus
-}
-
-const SCHEDULED_PROMPTS_STORAGE_KEY = "vector.scheduled-prompts.v1"
-
-const readScheduledPrompts = () => {
-  try {
-    const raw = globalThis.window?.localStorage?.getItem(SCHEDULED_PROMPTS_STORAGE_KEY)
-    if (!raw) return []
-    const parsed = JSON.parse(raw)
-    if (!Array.isArray(parsed)) return []
-    return parsed.filter((item): item is ScheduledPrompt => {
-      return (
-        typeof item?.id === "string" &&
-        typeof item?.text === "string" &&
-        typeof item?.runAt === "string" &&
-        typeof item?.createdAt === "string" &&
-        typeof item?.sessionPath === "string" &&
-        (item?.projectPath === undefined || typeof item.projectPath === "string") &&
-        (item?.taskId === undefined || typeof item.taskId === "string") &&
-        ["scheduled", "ready", "loaded"].includes(item?.status)
-      )
-    })
-  } catch {
-    return []
-  }
-}
-
-const writeScheduledPrompts = (tasks: ScheduledPrompt[]) => {
-  try {
-    globalThis.window?.localStorage?.setItem(SCHEDULED_PROMPTS_STORAGE_KEY, JSON.stringify(tasks))
-  } catch {
-    // Local storage can be unavailable in hardened desktop contexts.
-  }
-}
-
-const formatScheduledTime = (value: string) => {
-  const time = new Date(value)
-  if (Number.isNaN(time.getTime())) return "Invalid time"
-  return new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(time)
-}
-
-const newScheduledPromptID = () => {
-  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID()
-  return `scheduled-${Date.now()}-${Math.random().toString(16).slice(2)}`
-}
-
 type DiffViewMode = "agent" | "main" | "split"
 
 // Segmented control that switches the agent Review & Merge diff between the
@@ -597,10 +534,6 @@ export default function NewLayout(props: ParentProps) {
   const [velScopeKey, setVelScopeKey] = createSignal("")
   const [workspaceTreeOpen, setWorkspaceTreeOpen] = createSignal(true)
   const [browserAgentOpen, setBrowserAgentOpen] = createSignal(false)
-  const [scheduledOpen, setScheduledOpen] = createSignal(false)
-  const [scheduledText, setScheduledText] = createSignal("")
-  const [scheduledRunAt, setScheduledRunAt] = createSignal("")
-  const [scheduledPrompts, setScheduledPrompts] = createSignal<ScheduledPrompt[]>(readScheduledPrompts())
   const [parallelOpen, setParallelOpen] = createSignal(false)
   const [parallelRecords, setParallelRecords] = createSignal<ParallelWorkspaceRecord[]>([])
   const [parallelSelectedID, setParallelSelectedID] = createSignal<string>()
@@ -716,7 +649,6 @@ export default function NewLayout(props: ParentProps) {
   }
   const [agentTabOrder, setAgentTabOrder] = createSignal<string[]>([])
   let chatSearchRef: HTMLInputElement | undefined
-  let scheduledTextRef: HTMLTextAreaElement | undefined
   let parallelPromptRef: HTMLTextAreaElement | undefined
   let stopNavigationResize: (() => void) | undefined
   setNavigate(navigate)
@@ -783,13 +715,6 @@ export default function NewLayout(props: ParentProps) {
   createEffect(() => {
     if (!chatSearchOpen()) return
     queueMicrotask(() => chatSearchRef?.focus())
-  })
-
-  createEffect(() => writeScheduledPrompts(scheduledPrompts()))
-
-  createEffect(() => {
-    if (!scheduledOpen()) return
-    queueMicrotask(() => scheduledTextRef?.focus())
   })
 
   createEffect(() => {
@@ -961,7 +886,6 @@ export default function NewLayout(props: ParentProps) {
     setSidePanelOpen(false)
     setToolsOpen(false)
     setBrowserAgentOpen(false)
-    setScheduledOpen(false)
     setParallelOpen(false)
     if (!taskRoute() && targetIsTask) navigate(target)
     let tries = 0
@@ -1705,7 +1629,6 @@ export default function NewLayout(props: ParentProps) {
     setToolsOpen(false)
     setSidePanelOpen(false)
     setBrowserAgentOpen(false)
-    setScheduledOpen(false)
     setParallelOpen(false)
     setParallelLaunchMode("agent")
     setParallelCompareRuntimes(false)
@@ -1988,7 +1911,6 @@ export default function NewLayout(props: ParentProps) {
     setToolsOpen(false)
     setSidePanelOpen(false)
     setBrowserAgentOpen(false)
-    setScheduledOpen(false)
     setParallelOpen(false)
     setParallelComposerOpen(false)
     setParallelSelectedID(record.id)
@@ -2053,7 +1975,6 @@ export default function NewLayout(props: ParentProps) {
     setToolsOpen(false)
     setSidePanelOpen(false)
     setBrowserAgentOpen(false)
-    setScheduledOpen(false)
     setParallelOpen(false)
     setParallelComposerOpen(false)
     setParallelSelectedID(undefined)
@@ -2467,7 +2388,6 @@ export default function NewLayout(props: ParentProps) {
     setSidePanelOpen(false)
     setToolsOpen(false)
     setBrowserAgentOpen(false)
-    setScheduledOpen(false)
     setParallelOpen(false)
     command.trigger("terminal.toggle")
   }
@@ -2483,7 +2403,6 @@ export default function NewLayout(props: ParentProps) {
     setSidePanelOpen(false)
     setToolsOpen(false)
     setBrowserAgentOpen(false)
-    setScheduledOpen(false)
     setParallelOpen(false)
     command.trigger("tab.new")
   }
@@ -2493,7 +2412,6 @@ export default function NewLayout(props: ParentProps) {
     setSidePanelOpen(false)
     setToolsOpen(false)
     setBrowserAgentOpen(false)
-    setScheduledOpen(false)
     setParallelOpen(false)
     command.trigger("vector.codespace.open")
   }
@@ -2503,7 +2421,6 @@ export default function NewLayout(props: ParentProps) {
     setSidePanelOpen(false)
     setToolsOpen(false)
     setBrowserAgentOpen(false)
-    setScheduledOpen(false)
     setParallelOpen(false)
     command.trigger("vector.preview.open")
   }
@@ -2513,7 +2430,6 @@ export default function NewLayout(props: ParentProps) {
     setSidePanelOpen(false)
     setToolsOpen(false)
     setBrowserAgentOpen(false)
-    setScheduledOpen(false)
     setParallelOpen(false)
     command.trigger("review.open")
   }
@@ -2530,7 +2446,6 @@ export default function NewLayout(props: ParentProps) {
     setSidePanelOpen(false)
     setToolsOpen(false)
     setBrowserAgentOpen(false)
-    setScheduledOpen(false)
     setParallelOpen(false)
     // NewLayout is server-scoped but intentionally not directory-scoped. MCP
     // status and configuration are directory-owned, so mount the dialog in the
@@ -2554,7 +2469,6 @@ export default function NewLayout(props: ParentProps) {
     setSidePanelOpen(false)
     setToolsOpen(false)
     setBrowserAgentOpen(false)
-    setScheduledOpen(false)
     setParallelOpen(false)
     // Same directory-scoped SDK context as MCP: plugin installs are MCP
     // config writes owned by the active project.
@@ -2563,108 +2477,6 @@ export default function NewLayout(props: ParentProps) {
         <DialogSelectPlugins />
       </SDKProvider>
     ))
-  }
-
-  const scheduledPromptsForSession = () => {
-    const scope = activeTaskScope()
-    return scheduledPrompts()
-      .filter((task) => {
-        if (task.projectPath || task.taskId) {
-          return task.projectPath === scope.projectPath && task.taskId === scope.taskId
-        }
-        return task.sessionPath === location.pathname
-      })
-      .sort((a, b) => new Date(a.runAt).getTime() - new Date(b.runAt).getTime())
-  }
-
-  // Desktop builds run scheduled agents for real: the main process launches an
-  // engine session at the scheduled time. The web build keeps prompt reminders.
-  type ScheduledAgentRecordUI = {
-    id: string
-    title?: string
-    paused?: boolean
-    prompt: string
-    directory: string
-    // Absent on records created before recurrence existed, which are one-shots.
-    recurrence?: ScheduledTask["recurrence"]
-    runAt: string
-    status: "scheduled" | "running" | "completed" | "failed" | "canceled"
-    createdAt: string
-    startedAt?: string
-    completedAt?: string
-    sessionId?: string
-    parentSessionId?: string
-    error?: string
-  }
-  const scheduledAgentsApi = () =>
-    (
-      globalThis.window?.api as
-        | (Record<string, unknown> & {
-            scheduledAgents?: {
-              list: (scope?: { directory?: string; parentSessionId?: string }) => Promise<ScheduledAgentRecordUI[]>
-              create: (input: {
-                title?: string
-                prompt: string
-                directory: string
-                parentSessionId?: string
-                recurrence?: ScheduledTask["recurrence"]
-                runAt: string
-              }) => Promise<ScheduledAgentRecordUI>
-              cancel: (id: string) => Promise<ScheduledAgentRecordUI | undefined>
-              setPaused?: (id: string, paused: boolean) => Promise<ScheduledAgentRecordUI | undefined>
-              remove: (id: string) => Promise<ScheduledAgentRecordUI[]>
-            }
-          })
-        | undefined
-    )?.scheduledAgents
-  const realScheduler = () => Boolean(scheduledAgentsApi())
-  const [scheduledAgentRecords, setScheduledAgentRecords] = createSignal<ScheduledAgentRecordUI[]>([])
-  const refreshScheduledAgents = async () => {
-    const api = scheduledAgentsApi()
-    if (!api) return
-    const scope = activeTaskScope()
-    const records = await api
-      .list({ directory: scope.projectPath, parentSessionId: scope.taskId })
-      .catch(() => [] as ScheduledAgentRecordUI[])
-    if (taskScopeId(activeTaskScope()) !== taskScopeId(scope)) return
-    setScheduledAgentRecords(records)
-  }
-  let loadedScheduledScope = ""
-  createEffect(() => {
-    const scope = activeTaskScope()
-    const key = taskScopeId(scope)
-    if (key === loadedScheduledScope) return
-    loadedScheduledScope = key
-    setScheduledAgentRecords([])
-    if (realScheduler()) void refreshScheduledAgents()
-  })
-  createEffect(() => {
-    if (!scheduledOpen() || !realScheduler()) return
-    void refreshScheduledAgents()
-    const timer = setInterval(() => void refreshScheduledAgents(), 10_000)
-    onCleanup(() => clearInterval(timer))
-  })
-  const sortedScheduledAgents = () =>
-    [...scheduledAgentRecords()].sort((a, b) => new Date(a.runAt).getTime() - new Date(b.runAt).getTime())
-
-  const scheduledAgentTone = (status: ScheduledAgentRecordUI["status"]) => {
-    if (status === "completed") return "border-emerald-400/40 text-emerald-200"
-    if (status === "running") return "border-[color:var(--vx-purple)]/50 text-[color:var(--vx-purple-bright)]"
-    if (status === "failed") return "border-rose-400/45 text-rose-200"
-    if (status === "canceled") return "border-[color:var(--vx-line)] text-white/45"
-    return "border-[color:var(--vx-line)] text-white/58"
-  }
-
-  const activeScheduledCount = () => {
-    return scheduledPromptsForSession().filter((task) => task.status !== "loaded").length
-  }
-
-  const openScheduledTasks = () => {
-    setToolsOpen(false)
-    setSidePanelOpen(false)
-    setBrowserAgentOpen(false)
-    setParallelOpen(false)
-    setScheduledOpen((open) => !open)
   }
 
   // Ordinary sessions feed the economics engine too. Learning only from
@@ -2696,144 +2508,6 @@ export default function NewLayout(props: ParentProps) {
     })()
   })
   onCleanup(stopSessionOutcomes)
-
-  // The desktop screen and the web reminder panel are two different features
-  // sharing one open flag. Rendering both stacked an opaque overlay on top of
-  // the panel, which is what made scheduling look completely dead on desktop.
-  const scheduledTasksOpen = createMemo(() => scheduledOpen() && realScheduler())
-  const scheduledRemindersOpen = createMemo(() => scheduledOpen() && !realScheduler())
-
-  const scheduledTasksForPanel = createMemo<ScheduledTask[]>(() =>
-    scheduledAgentRecords().map((record) => ({
-      id: record.id,
-      title: record.title || record.prompt.split("\n")[0]?.slice(0, 80) || "Scheduled run",
-      prompt: record.prompt,
-      directory: record.directory,
-      // The record carries its real cadence; forcing "once" here made every
-      // recurring task read as a single run that had already happened.
-      recurrence: record.recurrence ?? { kind: "once", at: record.runAt },
-      // Nothing persists a paused flag yet, so a run that already finished is
-      // shown as inactive rather than pretending it is still pending.
-      paused: record.paused ?? record.status !== "scheduled",
-      createdAt: record.createdAt,
-      lastRunAt: record.completedAt ?? record.startedAt,
-      lastStatus:
-        record.status === "completed" || record.status === "failed" || record.status === "canceled"
-          ? record.status
-          : undefined,
-    })),
-  )
-
-  const insertScheduledPromptIntoComposer = (text: string) => {
-    const field = document.querySelector<HTMLTextAreaElement | HTMLInputElement>(
-      '[data-component="prompt-input"] textarea, [data-component="session-composer"] textarea, [data-component="session-new-composer"] textarea, textarea',
-    )
-    if (field) {
-      field.value = text
-      field.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }))
-      field.focus()
-      return true
-    }
-    const editable = document.querySelector<HTMLElement>('[contenteditable="true"]')
-    if (editable) {
-      editable.textContent = text
-      editable.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }))
-      editable.focus()
-      return true
-    }
-    return false
-  }
-
-  const loadScheduledPrompt = (task: ScheduledPrompt) => {
-    const loaded = insertScheduledPromptIntoComposer(task.text)
-    if (!loaded) void globalThis.navigator?.clipboard?.writeText(task.text).catch(() => {})
-    setScheduledPrompts((tasks) => tasks.map((item) => (item.id === task.id ? { ...item, status: "loaded" } : item)))
-    setScheduledOpen(false)
-  }
-
-  const schedulePrompt = () => {
-    const text = scheduledText().trim()
-    const runAt = scheduledRunAt()
-    const runAtTime = new Date(runAt).getTime()
-    if (!text || !runAt || Number.isNaN(runAtTime)) return
-    const api = scheduledAgentsApi()
-    if (api) {
-      const directory = activeProjectPath()
-      if (!directory) {
-        showToast({ title: "Open a project first", description: "Scheduled agents run inside a project workspace." })
-        return
-      }
-      void api
-        .create({
-          prompt: text,
-          directory,
-          parentSessionId: activeTaskScope().taskId,
-          runAt: new Date(runAtTime).toISOString(),
-        })
-        .then(() => {
-          setScheduledText("")
-          setScheduledRunAt("")
-          void refreshScheduledAgents()
-          showToast({
-            title: "Agent scheduled",
-            description: `Vector will start this agent ${formatScheduledTime(new Date(runAtTime).toISOString())} — even if you're doing something else.`,
-          })
-        })
-        .catch((error: unknown) => {
-          showToast({
-            variant: "error",
-            title: "Could not schedule",
-            description: error instanceof Error ? error.message : String(error),
-          })
-        })
-      return
-    }
-    setScheduledPrompts((tasks) => [
-      {
-        id: newScheduledPromptID(),
-        text,
-        runAt,
-        createdAt: new Date().toISOString(),
-        sessionPath: location.pathname,
-        projectPath: activeTaskScope().projectPath,
-        taskId: activeTaskScope().taskId,
-        status: runAtTime <= Date.now() ? "ready" : "scheduled",
-      },
-      ...tasks,
-    ])
-    setScheduledText("")
-    setScheduledRunAt("")
-  }
-
-  const removeScheduledPrompt = (id: string) => {
-    setScheduledPrompts((tasks) => tasks.filter((task) => task.id !== id))
-  }
-
-  const scheduledTimer = globalThis.window?.setInterval(() => {
-    const now = Date.now()
-    let readyCount = 0
-    setScheduledPrompts((tasks) => {
-      let changed = false
-      const next = tasks.map((task) => {
-        if (task.status !== "scheduled") return task
-        const runAt = new Date(task.runAt).getTime()
-        if (Number.isNaN(runAt) || runAt > now) return task
-        changed = true
-        readyCount += 1
-        return { ...task, status: "ready" as const }
-      })
-      return changed ? next : tasks
-    })
-    if (readyCount) {
-      showToast({
-        title: "Scheduled prompt ready",
-        description: `${readyCount} scheduled prompt${readyCount === 1 ? " is" : "s are"} ready. Open Scheduled Runs to load it into the composer.`,
-      })
-    }
-  }, 15_000)
-  onCleanup(() => {
-    if (scheduledTimer) clearInterval(scheduledTimer)
-  })
 
   const taskRoute = () => /\/session\/[^/?#]+/.test(location.pathname)
   const taskDraftRoute = () => location.pathname === "/new-session" && Boolean(activeDraftID())
@@ -2905,7 +2579,6 @@ export default function NewLayout(props: ParentProps) {
   const navUnlocked = () =>
     !["/", "/code", "/work", "/cloud"].includes(location.pathname) ||
     toolsOpen() ||
-    scheduledOpen() ||
     parallelOpen() ||
     browserAgentOpen() ||
     sidePanelOpen()
@@ -3025,8 +2698,6 @@ export default function NewLayout(props: ParentProps) {
       setNavigationVisible(true)
       setWorkspaceTreeOpen(true)
     },
-    openScheduledPanel: () => setScheduledOpen(true),
-    closeScheduledPanel: () => setScheduledOpen(false),
     goCloud: () => {
       closeTourSettings()
       if (location.pathname !== "/cloud") navigate("/cloud")
@@ -3038,7 +2709,6 @@ export default function NewLayout(props: ParentProps) {
   const finishTour = () => {
     setTourOpen(false)
     closeTourSettings()
-    setScheduledOpen(false)
     setOnboardingFlag("tour")
     navigate("/")
     // Hand off to the progress timeline so first steps are visible right away.
@@ -3048,7 +2718,6 @@ export default function NewLayout(props: ParentProps) {
   const skipTour = () => {
     setTourOpen(false)
     closeTourSettings()
-    setScheduledOpen(false)
     setOnboardingFlag("tour")
     setOnboardingFlag("dismissed")
     navigate("/")
@@ -3126,7 +2795,6 @@ export default function NewLayout(props: ParentProps) {
     setToolsOpen(false)
     setSidePanelOpen(false)
     setBrowserAgentOpen(false)
-    setScheduledOpen(false)
     setParallelOpen(false)
     if (scope.projectPath) layout.home.setSelection({ server: server.key, directory: scope.projectPath })
     navigate("/")
@@ -3189,7 +2857,6 @@ export default function NewLayout(props: ParentProps) {
       setToolsOpen(false)
       setSidePanelOpen(false)
       setChatSearchOpen(false)
-      setScheduledOpen(false)
     }
     if (browserAgentRoute()) {
       setBrowserAgentOpen(false)
@@ -3218,7 +2885,6 @@ export default function NewLayout(props: ParentProps) {
     setToolsOpen(false)
     setSidePanelOpen(false)
     setChatSearchOpen(false)
-    setScheduledOpen(false)
   })
 
   createEffect(() => {
@@ -3265,7 +2931,7 @@ export default function NewLayout(props: ParentProps) {
       parallelWorkspacesRoute() ||
       cloudRoute() ||
       canvasRoute()
-    if (event.key === "Escape" && (toolsOpen() || sidePanelOpen() || scheduledOpen() || fullscreenWorkspaceOpen)) {
+    if (event.key === "Escape" && (toolsOpen() || sidePanelOpen() || fullscreenWorkspaceOpen)) {
       // First Escape inside a form field only leaves the field so drafts
       // (mission text, browser prompts, URLs) survive; a second Escape closes.
       if (eventTargetIsEditable(event.target)) {
@@ -3281,7 +2947,6 @@ export default function NewLayout(props: ParentProps) {
       setToolsOpen(false)
       setSidePanelOpen(false)
       setBrowserAgentOpen(false)
-      setScheduledOpen(false)
       setParallelOpen(false)
       setParallelComposerOpen(false)
       return
@@ -5996,7 +5661,6 @@ export default function NewLayout(props: ParentProps) {
         treeOpen={workspaceTreeOpen()}
         items={workspaceNavigationItems()}
         activeTool={canvasRoute() ? "canvas" : undefined}
-        scheduledCount={activeScheduledCount()}
         currentVersion={platform.version}
         updaterState={platform.updater?.state()}
         onResizeStart={beginNavigationResize}
@@ -6009,7 +5673,6 @@ export default function NewLayout(props: ParentProps) {
           setToolsOpen(false)
           setSidePanelOpen(false)
           setBrowserAgentOpen(false)
-          setScheduledOpen(false)
           setParallelOpen(false)
           navigate("/")
         }}
@@ -6034,7 +5697,6 @@ export default function NewLayout(props: ParentProps) {
         onPullRequests={() => setPullRequestsOpen(true)}
         onBrowser={openPreviewPanel}
         onCanvas={() => navigate(`/canvas${taskScopeSearch(activeTaskScope())}`)}
-        onScheduled={openScheduledTasks}
         onMcp={() => void openMcpDialog()}
         onPlugins={() => void openPluginsDialog()}
         onFind={() => {
@@ -6073,59 +5735,6 @@ export default function NewLayout(props: ParentProps) {
           })
           return extractVelReply(outcome.data)
         }}
-      />
-
-      <ScheduledTasks
-        open={scheduledTasksOpen()}
-        tasks={scheduledTasksForPanel()}
-        onClose={() => setScheduledOpen(false)}
-        onSchedule={(input) => {
-          const api = scheduledAgentsApi()
-          if (!api) {
-            showToast({
-              title: "Scheduling needs the desktop app",
-              description: "Scheduled tasks run from Vector Desktop so they can fire while the browser is closed.",
-            })
-            return
-          }
-          const directory = activeProjectPath()
-          if (!directory) {
-            showToast({
-              title: "Open a project first",
-              description: "Scheduled agents run inside a project workspace.",
-            })
-            return
-          }
-          void api
-            .create({
-              title: input.title,
-              prompt: input.prompt,
-              directory,
-              parentSessionId: activeTaskScope().taskId,
-              recurrence: input.recurrence,
-              runAt: input.runAt,
-            })
-            .then(() => refreshScheduledAgents())
-            .catch((error: unknown) => {
-              showToast({
-                variant: "error",
-                title: "Could not schedule that task",
-                description: error instanceof Error ? error.message : String(error),
-              })
-            })
-        }}
-        onTogglePause={(id, paused) => {
-          const api = scheduledAgentsApi()
-          // Older builds expose only cancel, so fall back rather than making
-          // pause silently do nothing.
-          const action = api?.setPaused ? api.setPaused(id, paused) : paused ? api?.cancel(id) : undefined
-          void Promise.resolve(action).then(() => refreshScheduledAgents())
-        }}
-        onDelete={(id) =>
-          void scheduledAgentsApi()
-            ?.remove(id)
-            .then((records) => setScheduledAgentRecords(records))
-        }
       />
 
       <AgentDashboard
@@ -6225,7 +5834,6 @@ export default function NewLayout(props: ParentProps) {
                   location.pathname === "/" &&
                   !browserAgentOpen() &&
                   !browserAgentRoute() &&
-                  !scheduledOpen() &&
                   !parallelOpen() &&
                   !parallelWorkspacesRoute() &&
                   !toolsOpen(),
@@ -6234,7 +5842,6 @@ export default function NewLayout(props: ParentProps) {
                 setToolsOpen(false)
                 setSidePanelOpen(false)
                 setBrowserAgentOpen(false)
-                setScheduledOpen(false)
                 setParallelOpen(false)
                 navigate("/")
               }}
@@ -6263,7 +5870,6 @@ export default function NewLayout(props: ParentProps) {
                   return
                 }
                 setBrowserAgentOpen(false)
-                setScheduledOpen(false)
                 setParallelOpen(false)
                 command.show()
               }}
@@ -6310,31 +5916,6 @@ export default function NewLayout(props: ParentProps) {
               type="button"
               data-vector-nav-item
               class="flex h-9 w-full items-center gap-2.5 rounded-lg px-2.5 text-[13.5px] transition hover:bg-white/[0.06] hover:text-white"
-              classList={{ "bg-white/[0.08] text-white": scheduledOpen() }}
-              aria-expanded={scheduledOpen()}
-              onClick={openScheduledTasks}
-            >
-              <svg viewBox="0 0 16 16" class="size-4 shrink-0" aria-hidden="true">
-                <path
-                  d="M8 2.55a5.45 5.45 0 1 0 0 10.9 5.45 5.45 0 0 0 0-10.9Zm0 2.6v3.1l2.15 1.25"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.25"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                />
-              </svg>
-              <span class="min-w-0 flex-1 text-left">Scheduled Runs</span>
-              <Show when={activeScheduledCount()}>
-                <span class="rounded-full bg-[color:var(--vx-purple)] px-1.5 py-0.5 text-[10px] font-semibold text-white">
-                  {activeScheduledCount()}
-                </span>
-              </Show>
-            </button>
-            <button
-              type="button"
-              data-vector-nav-item
-              class="mt-1 flex h-9 w-full items-center gap-2.5 rounded-lg px-2.5 text-[13.5px] transition hover:bg-white/[0.06] hover:text-white"
               onClick={() => void openMcpDialog()}
             >
               <svg viewBox="0 0 16 16" class="size-4 shrink-0" aria-hidden="true">
@@ -6484,254 +6065,6 @@ export default function NewLayout(props: ParentProps) {
           </svg>
         </button>
       </Show>
-
-      <aside
-        data-tour="scheduled-panel"
-        class="fixed bottom-4 top-4 z-50 w-[min(420px,calc(100vw-32px))] overflow-hidden rounded-2xl border border-[color:var(--vx-line)] bg-[color-mix(in_srgb,var(--vx-stage)_88%,transparent)] shadow-[0_28px_90px_rgba(0,0,0,0.55)] backdrop-blur-2xl transition duration-200 ease-out"
-        style={{ left: "calc(var(--vector-navigation-effective-width) + 16px)" }}
-        classList={{
-          "pointer-events-auto translate-x-0 opacity-100": scheduledRemindersOpen(),
-          "pointer-events-none -translate-x-5 opacity-0": !scheduledRemindersOpen(),
-        }}
-        aria-hidden={!scheduledRemindersOpen()}
-        inert={!scheduledRemindersOpen()}
-      >
-        <div class="flex h-full flex-col">
-          <div class="flex items-center justify-between border-b border-[color:var(--vx-line)] px-4 py-3">
-            <div>
-              <div class="text-sm font-semibold text-white">Scheduled Runs</div>
-              <div class="mt-0.5 text-xs text-white/60">
-                {realScheduler()
-                  ? "Vector launches these agents for you at the scheduled time — even while you work on something else."
-                  : "Save prompts for later. Vector reminds you, then you choose when to load and run them."}
-              </div>
-            </div>
-            <button
-              type="button"
-              class="grid size-8 place-items-center rounded-full text-white/[0.55] transition hover:bg-white/10 hover:text-white"
-              aria-label="Close scheduled runs"
-              onClick={() => setScheduledOpen(false)}
-            >
-              <svg viewBox="0 0 16 16" class="size-4" aria-hidden="true">
-                <path d="m4 4 8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
-              </svg>
-            </button>
-          </div>
-
-          <div class="min-h-0 flex-1 overflow-y-auto p-4">
-            <form
-              class="rounded-2xl border border-[color:var(--vx-line)] bg-white/[0.035] p-3"
-              onSubmit={(event) => {
-                event.preventDefault()
-                schedulePrompt()
-              }}
-            >
-              <label class="text-xs font-semibold uppercase tracking-[0.14em] text-white/58" for="scheduled-prompt">
-                Prompt
-              </label>
-              <textarea
-                id="scheduled-prompt"
-                ref={scheduledTextRef}
-                class="mt-2 min-h-28 w-full resize-none rounded-xl border border-[color:var(--vx-line)] bg-white/[0.04] px-3 py-2 text-sm leading-6 text-white outline-none transition placeholder:text-white/40 focus:border-[color:var(--vx-purple)]/65"
-                value={scheduledText()}
-                placeholder={
-                  realScheduler()
-                    ? "Describe what Vector should run at this time..."
-                    : "Write a prompt to load later..."
-                }
-                onInput={(event) => setScheduledText(event.currentTarget.value)}
-              />
-
-              <label
-                class="mt-3 block text-xs font-semibold uppercase tracking-[0.14em] text-white/58"
-                for="scheduled-run-at"
-              >
-                When
-              </label>
-              <input
-                id="scheduled-run-at"
-                type="datetime-local"
-                class="mt-2 w-full rounded-xl border border-[color:var(--vx-line)] bg-white/[0.04] px-3 py-2 text-sm text-white outline-none transition [color-scheme:dark] focus:border-[color:var(--vx-purple)]/65 [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-50 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:transition-opacity hover:[&::-webkit-calendar-picker-indicator]:opacity-90"
-                value={scheduledRunAt()}
-                onInput={(event) => setScheduledRunAt(event.currentTarget.value)}
-              />
-
-              <button
-                type="submit"
-                class="mt-3 w-full rounded-full bg-[color:var(--vx-purple)] px-3 py-2 text-sm font-semibold text-white transition-colors duration-200 ease-[cubic-bezier(0.22,0.7,0.28,1)] hover:bg-[color:var(--vx-purple-bright)] disabled:cursor-not-allowed disabled:opacity-45"
-                disabled={!scheduledText().trim() || !scheduledRunAt()}
-              >
-                {realScheduler() ? "Schedule agent" : "Save reminder"}
-              </button>
-              <Show when={realScheduler() && !activeProjectPath()}>
-                <p class="mt-2 text-[11px] leading-4 text-amber-200/80">
-                  Open a project first — the agent runs inside it.
-                </p>
-              </Show>
-            </form>
-
-            <Show when={realScheduler()}>
-              <div class="mt-5 flex items-center justify-between">
-                <div class="text-xs font-semibold uppercase tracking-[0.14em] text-white/58">Scheduled agents</div>
-                <div class="text-xs text-white/55">{scheduledAgentRecords().length}</div>
-              </div>
-              <div class="mt-3 space-y-2">
-                <Show
-                  when={sortedScheduledAgents().length}
-                  fallback={
-                    <div class="rounded-3xl border border-dashed border-[color:var(--vx-line)] px-4 py-8 text-center text-sm text-white/60">
-                      Nothing scheduled. Write a prompt above and Vector will run it as a real agent session at that
-                      time.
-                    </div>
-                  }
-                >
-                  <For each={sortedScheduledAgents()}>
-                    {(task) => (
-                      <div class="rounded-3xl border border-[color:var(--vx-line)] bg-white/[0.04] p-3">
-                        <div class="flex items-center justify-between gap-3">
-                          <div class="min-w-0 text-xs font-semibold text-white/62">
-                            {formatScheduledTime(task.runAt)}
-                          </div>
-                          <span
-                            class={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.1em] ${scheduledAgentTone(task.status)}`}
-                          >
-                            {task.status}
-                          </span>
-                        </div>
-                        <p class="mt-2 line-clamp-3 whitespace-pre-wrap text-sm leading-6 text-white/78">
-                          {task.prompt}
-                        </p>
-                        <p class="mt-1 truncate text-[11px] text-white/40">{task.directory}</p>
-                        <Show when={task.error}>
-                          <p class="mt-1 text-[11px] leading-4 text-rose-300/90">{task.error}</p>
-                        </Show>
-                        <div class="mt-3 flex gap-2">
-                          <Show when={task.status === "completed" && task.sessionId}>
-                            <button
-                              type="button"
-                              class="rounded-[10px] border border-[color:var(--vx-purple)]/45 px-3 py-1.5 text-xs font-semibold text-[color:var(--vx-purple-bright)] transition hover:bg-[color:var(--vx-purple-soft)] hover:text-white"
-                              onClick={() => {
-                                setScheduledOpen(false)
-                                navigate(sessionHref(server.key, task.sessionId!))
-                              }}
-                            >
-                              Open session
-                            </button>
-                          </Show>
-                          <Show when={task.status === "scheduled"}>
-                            <button
-                              type="button"
-                              class="rounded-[10px] border border-[color:var(--vx-line)] px-3 py-1.5 text-xs font-semibold text-white/64 transition hover:bg-white/[0.06] hover:text-white"
-                              onClick={() =>
-                                void scheduledAgentsApi()
-                                  ?.cancel(task.id)
-                                  .then(() => void refreshScheduledAgents())
-                                  .catch((error: unknown) => {
-                                    showToast({
-                                      variant: "error",
-                                      title: "Could not cancel",
-                                      description: error instanceof Error ? error.message : String(error),
-                                    })
-                                    void refreshScheduledAgents()
-                                  })
-                              }
-                            >
-                              Cancel
-                            </button>
-                          </Show>
-                          <button
-                            type="button"
-                            class="rounded-[10px] border border-[color:var(--vx-line)] px-3 py-1.5 text-xs font-semibold text-white/64 transition hover:bg-white/[0.06] hover:text-white"
-                            onClick={() =>
-                              void scheduledAgentsApi()
-                                ?.remove(task.id)
-                                .then((next) => setScheduledAgentRecords(next))
-                                .catch((error: unknown) => {
-                                  showToast({
-                                    variant: "error",
-                                    title: "Could not remove",
-                                    description: error instanceof Error ? error.message : String(error),
-                                  })
-                                  void refreshScheduledAgents()
-                                })
-                            }
-                          >
-                            Remove
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </For>
-                </Show>
-              </div>
-            </Show>
-
-            <Show when={!realScheduler()}>
-              <div class="mt-5 flex items-center justify-between">
-                <div class="text-xs font-semibold uppercase tracking-[0.14em] text-white/58">This chat</div>
-                <div class="text-xs text-white/55">{scheduledPromptsForSession().length} saved</div>
-              </div>
-
-              <div class="mt-3 space-y-2">
-                <Show
-                  when={scheduledPromptsForSession().length}
-                  fallback={
-                    <div class="rounded-3xl border border-dashed border-[color:var(--vx-line)] px-4 py-8 text-center text-sm text-white/60">
-                      No prompt reminders yet. Save one here and Vector will mark it ready when it is time to load.
-                    </div>
-                  }
-                >
-                  <For each={scheduledPromptsForSession()}>
-                    {(task) => (
-                      <div
-                        class="rounded-3xl border border-[color:var(--vx-line)] bg-white/[0.04] p-3 transition"
-                        classList={{
-                          "border-[color:var(--vx-purple)]/60 bg-[color:var(--vx-purple-soft)]":
-                            task.status === "ready",
-                          "opacity-55": task.status === "loaded",
-                        }}
-                      >
-                        <div class="flex items-center justify-between gap-3">
-                          <div class="min-w-0 text-xs font-semibold text-white/62">
-                            {formatScheduledTime(task.runAt)}
-                          </div>
-                          <span
-                            class="rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.1em]"
-                            classList={{
-                              "border-[color:var(--vx-purple)]/50 text-[color:var(--vx-purple-bright)]":
-                                task.status === "ready",
-                              "border-[color:var(--vx-line)] text-white/58": task.status !== "ready",
-                            }}
-                          >
-                            {task.status === "ready" ? "Ready" : task.status}
-                          </span>
-                        </div>
-                        <p class="mt-2 line-clamp-4 whitespace-pre-wrap text-sm leading-6 text-white/78">{task.text}</p>
-                        <div class="mt-3 flex gap-2">
-                          <button
-                            type="button"
-                            class="rounded-[10px] border border-[color:var(--vx-purple)]/45 px-3 py-1.5 text-xs font-semibold text-[color:var(--vx-purple-bright)] transition hover:bg-[color:var(--vx-purple-soft)] hover:text-white"
-                            onClick={() => loadScheduledPrompt(task)}
-                          >
-                            Load prompt
-                          </button>
-                          <button
-                            type="button"
-                            class="rounded-[10px] border border-[color:var(--vx-line)] px-3 py-1.5 text-xs font-semibold text-white/64 transition hover:bg-white/[0.06] hover:text-white"
-                            onClick={() => removeScheduledPrompt(task.id)}
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </For>
-                </Show>
-              </div>
-            </Show>
-          </div>
-        </div>
-      </aside>
 
       <aside
         class="fixed bottom-0 right-0 top-0 z-40 w-[380px] overflow-hidden border-l border-[color:var(--vx-line)] bg-[color-mix(in_srgb,var(--vx-sidebar)_90%,transparent)] shadow-[-18px_0_64px_rgba(0,0,0,0.34)] backdrop-blur-2xl transition duration-200"

@@ -13,6 +13,7 @@ import {
   type JSX,
   type ComponentProps,
 } from "solid-js"
+import { SubagentAvatar, subagentIdentity } from "./subagent-identity"
 import { createStore } from "solid-js/store"
 import stripAnsi from "strip-ansi"
 import { Dynamic } from "solid-js/web"
@@ -1888,6 +1889,12 @@ ToolRegistry.register({
       return taskSession(props.input, location.pathname, data.store.session, data.store.agent)
     })
     const agent = createMemo(() => taskAgent(props.input.subagent_type, data.store.agent))
+    // A built-in subagent shows as its pet ("Scout"), with the engine agent name
+    // kept beside it. A user-defined agent has no identity and renders exactly
+    // as it did before.
+    const identity = createMemo(() =>
+      typeof props.input.subagent_type === "string" ? subagentIdentity(props.input.subagent_type) : undefined,
+    )
     const title = createMemo(() => agent().name ?? i18n.t("ui.tool.agent.default"))
     const tone = createMemo(() => agent().color)
     const subtitle = createMemo(() => {
@@ -1937,9 +1944,15 @@ ToolRegistry.register({
                 <Spinner />
               </span>
             </Show>
+            <Show when={identity()}>
+              <SubagentAvatar id={identity()!.id} size={15} />
+            </Show>
             <span data-component="task-tool-title" style={{ color: tone() ?? "var(--text-strong)" }}>
-              {title()}
+              {identity()?.petName ?? title()}
             </span>
+            <Show when={identity()}>
+              <span data-component="task-tool-agent">{title()}</span>
+            </Show>
             <Show when={subtitle()}>
               <span data-slot="basic-tool-tool-subtitle">{subtitle()}</span>
             </Show>

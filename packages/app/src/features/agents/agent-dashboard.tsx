@@ -1,4 +1,5 @@
 import { createMemo, createSignal, For, onCleanup, Show } from "solid-js"
+import { SubagentAvatar, subagentIdentity } from "@/features/agents/identities"
 import {
   elapsedLabel,
   isDirected,
@@ -49,7 +50,13 @@ function AgentRow(props: { agent: DashboardAgentInput; now: number; onOpen?: (id
       />
       <span class="min-w-0 flex-1">
         <span class="flex items-baseline gap-2">
+          <Show when={subagentIdentity(props.agent.agent)}>
+            {(identity) => <SubagentAvatar id={identity().id} size={15} />}
+          </Show>
           <span class="truncate text-[12.5px] font-medium text-white">{props.agent.name}</span>
+          <Show when={subagentIdentity(props.agent.agent)}>
+            {(identity) => <span class="shrink-0 text-[11px] text-white/40">{identity().petName}</span>}
+          </Show>
           <span class="shrink-0 text-[11px] text-white/40">{props.agent.status}</span>
           <Show when={props.agent.swarmRole}>
             <span class="shrink-0 rounded-full bg-white/[0.07] px-1.5 py-px text-[9.5px] uppercase tracking-wide text-white/50">

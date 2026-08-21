@@ -328,6 +328,95 @@ const comparison = [
   ["Recurring work with no window open", "Desktop tray", "—", "—", "—", "—"],
 ]
 
+// The engine's nine subagents (packages/opencode/src/agent/agent.ts) and the
+// display identities painted over them. Roles restate the engine descriptions
+// and the labels mirror the real permission sets — review and security cannot
+// write, the judge cannot edit files and only runs under verified completion —
+// so no card promises more than its agent is allowed to do.
+const crew = [
+  {
+    label: "explore",
+    pet: "Scout",
+    species: "the fox",
+    hue: 25,
+    tagline: "Finds anything, fast.",
+    role: "Finds files by pattern, searches code for keywords, and answers questions about how the codebase works.",
+    mark: `<path fill="currentColor" fill-opacity="0.28" stroke="none" d="M10 7l7 8-7 3z"/><path fill="currentColor" fill-opacity="0.28" stroke="none" d="M34 7l-7 8 7 3z"/><path d="M10 13q12-5 24 0 0 11-12 20-12-9-12-20z"/><circle cx="16.5" cy="20" r="1.6" fill="currentColor" stroke="none"/><circle cx="27.5" cy="20" r="1.6" fill="currentColor" stroke="none"/><circle cx="22" cy="27.5" r="1.8" fill="currentColor" stroke="none"/>`,
+  },
+  {
+    label: "general",
+    pet: "Atlas",
+    species: "the tortoise",
+    hue: 150,
+    tagline: "Slow is smooth, smooth is fast.",
+    role: "Researches complex questions and executes multi-step tasks — several units of work in parallel when needed.",
+    mark: `<path d="M8 25a14 14 0 0 1 28 0z"/><path d="M22 11.5v13.5m-8.5-9 3 9m14-9-3 9"/><circle cx="22" cy="31.5" r="5.5"/><circle cx="19.8" cy="30.8" r="1.4" fill="currentColor" stroke="none"/><circle cx="24.2" cy="30.8" r="1.4" fill="currentColor" stroke="none"/>`,
+  },
+  {
+    label: "judge · read-only · opt-in",
+    pet: "Veri",
+    species: "the owl",
+    hue: 265,
+    tagline: "Show me the evidence.",
+    role: "Scores finished work against your request and its evidence, then returns PASS, FAIL, or INCONCLUSIVE. It cannot edit files, and it only runs when verified completion is on.",
+    mark: `<path fill="currentColor" fill-opacity="0.28" stroke="none" d="M12 13l2-7 5 5z"/><path fill="currentColor" fill-opacity="0.28" stroke="none" d="M32 13l-2-7-5 5z"/><circle cx="22" cy="23" r="13"/><circle cx="16.5" cy="21" r="4.2"/><circle cx="27.5" cy="21" r="4.2"/><circle cx="16.5" cy="21" r="1.4" fill="currentColor" stroke="none"/><circle cx="27.5" cy="21" r="1.4" fill="currentColor" stroke="none"/><path fill="currentColor" stroke="none" d="M19.8 28h4.4L22 31.6z"/>`,
+  },
+  {
+    label: "debug",
+    pet: "Pip",
+    species: "the tree frog",
+    hue: 95,
+    tagline: "Every bug gets caught.",
+    role: "Reproduces the failure, isolates the root cause, applies a focused repair, and verifies the fix with targeted checks.",
+    mark: `<circle cx="13.5" cy="16" r="4.5" fill="currentColor" fill-opacity="0.28"/><circle cx="30.5" cy="16" r="4.5" fill="currentColor" fill-opacity="0.28"/><ellipse cx="22" cy="27" rx="14" ry="9.5"/><circle cx="13.5" cy="16" r="1.5" fill="currentColor" stroke="none"/><circle cx="30.5" cy="16" r="1.5" fill="currentColor" stroke="none"/><path d="M14 29.5q8 4 16 0"/>`,
+  },
+  {
+    label: "migration",
+    pet: "Tern",
+    species: "the arctic tern",
+    hue: 200,
+    tagline: "No journey too far.",
+    role: "Plans framework, dependency, API, and schema upgrades as staged changes, and validates rollback safety.",
+    mark: `<circle cx="22" cy="21" r="11"/><path fill="currentColor" fill-opacity="0.4" stroke="none" d="M12.6 16.5a11 11 0 0 1 18.8 0q-9.4-3.6-18.8 0z"/><path fill="currentColor" stroke="none" d="M19.6 31.5h4.8L22 39z"/><circle cx="17.5" cy="19.5" r="1.5" fill="currentColor" stroke="none"/><circle cx="26.5" cy="19.5" r="1.5" fill="currentColor" stroke="none"/>`,
+  },
+  {
+    label: "performance",
+    pet: "Bolt",
+    species: "the cheetah",
+    hue: 45,
+    tagline: "Make it fast, keep it right.",
+    role: "Measures a baseline, profiles slow paths — runtime, builds, bundles, queries, rendering — and verifies each optimization.",
+    mark: `<circle cx="12.5" cy="12.5" r="3.5" fill="currentColor" fill-opacity="0.28"/><circle cx="31.5" cy="12.5" r="3.5" fill="currentColor" fill-opacity="0.28"/><circle cx="22" cy="23" r="12"/><circle cx="17" cy="21" r="1.5" fill="currentColor" stroke="none"/><circle cx="27" cy="21" r="1.5" fill="currentColor" stroke="none"/><path d="M17 23.5q-.6 3.5-2.5 5.5m12.5-5.5q.6 3.5 2.5 5.5"/><circle cx="22" cy="27.5" r="1.6" fill="currentColor" stroke="none"/>`,
+  },
+  {
+    label: "review · read-only",
+    pet: "Quill",
+    species: "the hedgehog",
+    hue: 320,
+    tagline: "Sharp eyes, small notes.",
+    role: "Inspects a diff or implementation for correctness, regressions, missing tests, and maintainability, without changing files.",
+    mark: `<path d="M9 25l3-9 3.5 5 3.5-8 3 7 3-7 3.5 8 3.5-5 3 9a13 13 0 0 1-26 0z"/><circle cx="17.5" cy="26.5" r="1.5" fill="currentColor" stroke="none"/><circle cx="26.5" cy="26.5" r="1.5" fill="currentColor" stroke="none"/><circle cx="22" cy="31" r="1.7" fill="currentColor" stroke="none"/>`,
+  },
+  {
+    label: "security · read-only",
+    pet: "Rook",
+    species: "the raven",
+    hue: 220,
+    tagline: "Watches the boundaries.",
+    role: "Reviews trust boundaries, authentication, authorization, secrets, injection risks, and unsafe data flow — reading, never writing.",
+    mark: `<path d="M22 7l11 7-2 13-9 6-9-6-2-13z"/><path fill="currentColor" stroke="none" d="M18 23.5h8L22 31z"/><path d="M14.5 17.5l4.5 1.5m10.5-1.5-4.5 1.5"/>`,
+  },
+  {
+    label: "test",
+    pet: "Echo",
+    species: "the lyrebird",
+    hue: 175,
+    tagline: "Repeats it perfectly.",
+    role: "Designs focused coverage, writes or repairs tests, runs the relevant suite, and reports failures with evidence.",
+    mark: `<path d="M17 20q-8-5-6-13 5 1 7 11m9 2q8-5 6-13-5 1-7 11"/><circle cx="22" cy="27" r="8.5"/><circle cx="19" cy="25.5" r="1.4" fill="currentColor" stroke="none"/><circle cx="25" cy="25.5" r="1.4" fill="currentColor" stroke="none"/><path fill="currentColor" stroke="none" d="M20.4 33.5h3.2L22 37z"/>`,
+  },
+]
+
 const changelog = [
   ["August 2026", "Scheduled work that runs while you are away", "Vector keeps a tray presence and stays resident after the last window closes, so a recurring task still fires with no window open. The tray shows what is armed and when it next runs, can run or pause everything from there, and notifies you when a run finishes."],
   ["August 2026", "Economics that actually learn", "Every session now feeds measured token and cost evidence into model recommendations, so the ranking is built from what providers actually reported rather than from list prices."],
@@ -669,6 +758,39 @@ const changelog = [
           </table>
         </div>
       </details>
+    </section>
+
+    <section class="crew section-width" aria-labelledby="crew-title">
+      <div class="section-heading chapter-head" data-reveal>
+        <p class="section-kicker">Meet the crew</p>
+        <h2 id="crew-title">The specialists it delegates to.</h2>
+        <p>
+          Vector's agent does not do everything itself. When a task calls for a specialist, it hands the work to one of
+          nine subagents, each with its own focus and its own permission set. Quill and Rook can read but never write.
+          Veri cannot edit files at all — and it only runs when you turn verified completion on.
+        </p>
+      </div>
+      <div class="crew-grid">
+        {crew.map((member) => (
+          <article data-reveal style={`--crew-hue: ${member.hue}`}>
+            <span class="crew-mark" aria-hidden="true">
+              <svg
+                viewBox="0 0 44 44"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                set:html={member.mark}
+              />
+            </span>
+            <small>{member.label}</small>
+            <h3>{member.pet}<span class="crew-species">, {member.species}</span></h3>
+            <p class="crew-tagline">“{member.tagline}”</p>
+            <p class="crew-role">{member.role}</p>
+          </article>
+        ))}
+      </div>
     </section>
 
     <section class="changelog" aria-labelledby="changelog-title">
@@ -2117,7 +2239,8 @@ const changelog = [
   .runtime,
   .connections,
   .comparison-section,
-  .automation {
+  .automation,
+  .crew {
     margin-top: clamp(56px, 8vw, 96px);
     padding: clamp(34px, 5vw, 58px);
     background: var(--glass-fill-strong);
@@ -2240,6 +2363,82 @@ const changelog = [
   .comparison td:nth-child(2) {
     color: #d4c3ff;
     background: rgba(126, 83, 220, 0.08);
+  }
+
+  /* ---- the crew ---- */
+
+  .crew-grid {
+    margin-top: 46px;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .crew-grid article {
+    min-height: 224px;
+    padding: 22px;
+    background: rgba(7, 5, 10, 0.42);
+    border: 1px solid rgba(227, 215, 255, 0.11);
+    border-radius: 16px;
+    transition: transform 220ms ease, border-color 220ms ease, background 220ms ease;
+  }
+
+  .crew-grid article:hover {
+    transform: translateY(-3px);
+    border-color: hsl(var(--crew-hue) 70% 72% / 0.34);
+    background: rgba(38, 27, 57, 0.6);
+  }
+
+  .crew-mark {
+    width: 44px;
+    height: 44px;
+    display: grid;
+    place-items: center;
+    color: hsl(var(--crew-hue) 78% 72%);
+    background: hsl(var(--crew-hue) 72% 62% / 0.1);
+    border: 1px solid hsl(var(--crew-hue) 72% 72% / 0.2);
+    border-radius: 13px;
+  }
+
+  .crew-mark svg {
+    width: 30px;
+    height: 30px;
+  }
+
+  .crew-grid small {
+    display: block;
+    margin-top: 18px;
+    color: var(--ink-40);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 9.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .crew-grid h3 {
+    margin: 6px 0 0;
+    color: #f6f2fb;
+    font-size: 17px;
+    font-weight: 600;
+  }
+
+  .crew-species {
+    color: var(--ink-55);
+    font-weight: 500;
+  }
+
+  .crew-tagline {
+    margin: 8px 0 0;
+    color: hsl(var(--crew-hue) 72% 78%);
+    font-size: 12.5px;
+    font-style: italic;
+  }
+
+  .crew-role {
+    margin: 9px 0 0;
+    color: var(--ink-40);
+    font-size: 12.5px;
+    line-height: 1.62;
   }
 
   /* ---- changelog ---- */
@@ -2509,6 +2708,7 @@ const changelog = [
 
     .runtime { grid-template-columns: 1fr; }
     .runtime-intro { position: static; }
+    .crew-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .product-system-grid { grid-template-columns: 1fr 1fr; }
     .product-system-grid article,
     .product-system-grid article:nth-child(4),
@@ -2545,7 +2745,10 @@ const changelog = [
     .runtime,
     .connections,
     .comparison-section,
-    .automation { padding: 30px 20px; border-radius: 22px; }
+    .automation,
+    .crew { padding: 30px 20px; border-radius: 22px; }
+    .crew-grid { grid-template-columns: 1fr; margin-top: 34px; }
+    .crew-grid article { min-height: 0; }
     .automation-note { padding: 16px 18px; border-radius: 15px; font-size: 12.5px; }
     .product-system { padding: 30px 20px; border-radius: 22px; }
     .product-system-grid { grid-template-columns: 1fr; margin-top: 34px; }
