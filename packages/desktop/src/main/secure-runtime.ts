@@ -48,13 +48,29 @@ function secureStorageAvailable() {
 }
 
 function encryptKey(key: Buffer) {
-  return safeStorage.encryptString(key.toString("base64")).toString("base64")
+  return useSecureStorage(() => safeStorage.encryptString(key.toString("base64"))).toString("base64")
 }
 
 function decryptKey(ciphertext: Buffer) {
-  const key = Buffer.from(safeStorage.decryptString(ciphertext), "base64")
+  const key = Buffer.from(useSecureStorage(() => safeStorage.decryptString(ciphertext)), "base64")
   if (key.byteLength !== 32) throw new Error("Vector's secure runtime key is invalid.")
   return key
+}
+
+function useSecureStorage<T>(operation: () => T) {
+  try {
+    return operation()
+  } catch (cause) {
+    throw secureStorageAccessError(cause)
+  }
+}
+
+function secureStorageAccessError(cause: unknown) {
+  const detail =
+    process.platform === "darwin"
+      ? "Restart Vector and allow access to “Vector Safe Storage” when macOS Keychain asks. If access was previously denied, update that item in Keychain Access."
+      : "Unlock Credential Manager, libsecret, or KWallet, then restart Vector."
+  return new Error(`Vector could not access the operating system's secure credential store. ${detail}`, { cause })
 }
 
 async function writeKey(directory: string, path: string, value: string) {

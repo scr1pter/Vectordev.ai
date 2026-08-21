@@ -314,7 +314,10 @@ const main = Effect.gen(function* () {
   const serverReady = Deferred.makeUnsafe<ServerReadyData, unknown>()
 
   yield* Effect.promise(() => app.whenReady())
-  yield* Effect.tryPromise(() => setupSecureRuntimeSecrets()).pipe(
+  yield* Effect.tryPromise({
+    try: () => setupSecureRuntimeSecrets(),
+    catch: (error) => (error instanceof Error ? error : new Error(String(error))),
+  }).pipe(
     Effect.tapError((error) =>
       Effect.sync(() => {
         logger.error("secure runtime vault unavailable", error)
