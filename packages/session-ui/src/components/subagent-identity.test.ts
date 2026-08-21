@@ -13,18 +13,26 @@ describe("subagent identities", () => {
 
   test("every identity is complete and its hue is a real angle", () => {
     for (const identity of Object.values(SUBAGENT_IDENTITIES)) {
-      expect(identity.petName.length).toBeGreaterThan(0)
-      expect(identity.species.length).toBeGreaterThan(0)
-      expect(identity.tagline.length).toBeGreaterThan(0)
-      expect(identity.role.length).toBeGreaterThan(0)
+      expect(identity.name.length).toBeGreaterThan(0)
+      expect(identity.summary.length).toBeGreaterThan(0)
+      expect(identity.detail.length).toBeGreaterThan(0)
       expect(identity.hue).toBeGreaterThanOrEqual(0)
       expect(identity.hue).toBeLessThan(360)
     }
   })
 
-  test("pet names are unique so two agents can never be confused", () => {
-    const names = Object.values(SUBAGENT_IDENTITIES).map((identity) => identity.petName)
+  test("names are unique so two agents can never be confused", () => {
+    const names = Object.values(SUBAGENT_IDENTITIES).map((identity) => identity.name)
     expect(new Set(names).size).toBe(names.length)
+  })
+
+  // review, security and judge cannot edit files; saying so in the UI is only
+  // honest if the flag matches the engine's own permissions.
+  test("the read-only agents are marked read-only", () => {
+    expect(SUBAGENT_IDENTITIES.review!.readOnly).toBe(true)
+    expect(SUBAGENT_IDENTITIES.security!.readOnly).toBe(true)
+    expect(SUBAGENT_IDENTITIES.judge!.readOnly).toBe(true)
+    expect(SUBAGENT_IDENTITIES.explore!.readOnly).toBeUndefined()
   })
 
   test("each identity's key matches its own id", () => {
@@ -39,7 +47,7 @@ describe("subagent identities", () => {
   })
 
   test("a known id resolves", () => {
-    expect(subagentIdentity("explore")?.petName).toBe("Scout")
-    expect(subagentIdentity("judge")?.petName).toBe("Veri")
+    expect(subagentIdentity("explore")?.name).toBe("Explore")
+    expect(subagentIdentity("judge")?.name).toBe("Judge")
   })
 })

@@ -12,7 +12,7 @@ import { SettingsBillingV2 } from "./billing"
 import { SettingsAboutV2 } from "./about"
 import { SettingsVoiceV2 } from "./voice"
 import { SettingsPersonalizationV2 } from "./personalization"
-import { SettingsPetsV2 } from "./pets"
+import { SettingsSubagentsV2 } from "./subagents"
 import "./settings-v2.css"
 
 type SettingsTab =
@@ -25,7 +25,7 @@ type SettingsTab =
   | "about"
   | "voice"
   | "personalization"
-  | "pets"
+  | "subagents"
 
 const groups: {
   title: string
@@ -40,7 +40,7 @@ const groups: {
       { value: "appearance", label: "Appearance", icon: "photo" },
       { value: "voice", label: "Voice", icon: "comment" },
       { value: "personalization", label: "Personalization", icon: "brain" },
-      { value: "pets", label: "Pets", icon: "task" },
+      { value: "subagents", label: "Subagents", icon: "task" },
     ],
   },
   {
@@ -80,7 +80,7 @@ export const DialogSettings: Component<{
     if (item === "about") return <SettingsAboutV2 />
     if (item === "voice") return <SettingsVoiceV2 />
     if (item === "personalization") return <SettingsPersonalizationV2 />
-    if (item === "pets") return <SettingsPetsV2 />
+    if (item === "subagents") return <SettingsSubagentsV2 />
     if (item === "providers") return <SettingsProvidersV2 />
     if (item === "models") return <SettingsModelsV2 />
     if (item === "servers") return <SettingsServersV2 />

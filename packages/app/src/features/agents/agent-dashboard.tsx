@@ -55,7 +55,7 @@ function AgentRow(props: { agent: DashboardAgentInput; now: number; onOpen?: (id
           </Show>
           <span class="truncate text-[12.5px] font-medium text-white">{props.agent.name}</span>
           <Show when={subagentIdentity(props.agent.agent)}>
-            {(identity) => <span class="shrink-0 text-[11px] text-white/40">{identity().petName}</span>}
+            {(identity) => <span class="shrink-0 text-[11px] text-white/40">{identity().name}</span>}
           </Show>
           <span class="shrink-0 text-[11px] text-white/40">{props.agent.status}</span>
           <Show when={props.agent.swarmRole}>

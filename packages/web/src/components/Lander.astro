@@ -336,84 +336,84 @@ const comparison = [
 const crew = [
   {
     label: "explore",
-    pet: "Scout",
-    species: "the fox",
+    name: "Explore",
+    summary: "Finds code fast",
     hue: 25,
-    tagline: "Finds anything, fast.",
+    readOnly: false,
     role: "Finds files by pattern, searches code for keywords, and answers questions about how the codebase works.",
-    mark: `<path fill="currentColor" fill-opacity="0.28" stroke="none" d="M10 7l7 8-7 3z"/><path fill="currentColor" fill-opacity="0.28" stroke="none" d="M34 7l-7 8 7 3z"/><path d="M10 13q12-5 24 0 0 11-12 20-12-9-12-20z"/><circle cx="16.5" cy="20" r="1.6" fill="currentColor" stroke="none"/><circle cx="27.5" cy="20" r="1.6" fill="currentColor" stroke="none"/><circle cx="22" cy="27.5" r="1.8" fill="currentColor" stroke="none"/>`,
+    mark: `<circle cx="19" cy="19" r="8"/><path d="M25 25l7 7"/>`,
   },
   {
     label: "general",
-    pet: "Atlas",
-    species: "the tortoise",
+    name: "General",
+    summary: "Multi-step work",
     hue: 150,
-    tagline: "Slow is smooth, smooth is fast.",
-    role: "Researches complex questions and executes multi-step tasks — several units of work in parallel when needed.",
-    mark: `<path d="M8 25a14 14 0 0 1 28 0z"/><path d="M22 11.5v13.5m-8.5-9 3 9m14-9-3 9"/><circle cx="22" cy="31.5" r="5.5"/><circle cx="19.8" cy="30.8" r="1.4" fill="currentColor" stroke="none"/><circle cx="24.2" cy="30.8" r="1.4" fill="currentColor" stroke="none"/>`,
+    readOnly: false,
+    role: "Researches open-ended questions and carries multi-step tasks through to a result.",
+    mark: `<path d="M12 15h20M12 22h20M12 29h13"/>`,
   },
   {
-    label: "judge · read-only · opt-in",
-    pet: "Veri",
-    species: "the owl",
+    label: "judge",
+    name: "Judge",
+    summary: "Verifies completion",
     hue: 265,
-    tagline: "Show me the evidence.",
-    role: "Scores finished work against your request and its evidence, then returns PASS, FAIL, or INCONCLUSIVE. It cannot edit files, and it only runs when verified completion is on.",
-    mark: `<path fill="currentColor" fill-opacity="0.28" stroke="none" d="M12 13l2-7 5 5z"/><path fill="currentColor" fill-opacity="0.28" stroke="none" d="M32 13l-2-7-5 5z"/><circle cx="22" cy="23" r="13"/><circle cx="16.5" cy="21" r="4.2"/><circle cx="27.5" cy="21" r="4.2"/><circle cx="16.5" cy="21" r="1.4" fill="currentColor" stroke="none"/><circle cx="27.5" cy="21" r="1.4" fill="currentColor" stroke="none"/><path fill="currentColor" stroke="none" d="M19.8 28h4.4L22 31.6z"/>`,
+    readOnly: true,
+    role: "Scores finished work against the original request and returns PASS, FAIL or INCONCLUSIVE. Runs only when verified completion is on.",
+    mark: `<path d="M22 11v22M14 16h16M16.5 16l-3.5 7h7zM27.5 16l-3.5 7h7z"/>`,
   },
   {
     label: "debug",
-    pet: "Pip",
-    species: "the tree frog",
+    name: "Debug",
+    summary: "Finds root causes",
     hue: 95,
-    tagline: "Every bug gets caught.",
-    role: "Reproduces the failure, isolates the root cause, applies a focused repair, and verifies the fix with targeted checks.",
-    mark: `<circle cx="13.5" cy="16" r="4.5" fill="currentColor" fill-opacity="0.28"/><circle cx="30.5" cy="16" r="4.5" fill="currentColor" fill-opacity="0.28"/><ellipse cx="22" cy="27" rx="14" ry="9.5"/><circle cx="13.5" cy="16" r="1.5" fill="currentColor" stroke="none"/><circle cx="30.5" cy="16" r="1.5" fill="currentColor" stroke="none"/><path d="M14 29.5q8 4 16 0"/>`,
+    readOnly: false,
+    role: "Reproduces a failure, isolates the cause, applies a focused repair and re-checks that it holds.",
+    mark: `<rect x="16" y="15" width="12" height="15" rx="6"/><path d="M11 19h5M28 19h5M11 26h5M28 26h5M18 12l2 3M26 12l-2 3"/>`,
   },
   {
     label: "migration",
-    pet: "Tern",
-    species: "the arctic tern",
+    name: "Migration",
+    summary: "Upgrades safely",
     hue: 200,
-    tagline: "No journey too far.",
-    role: "Plans framework, dependency, API, and schema upgrades as staged changes, and validates rollback safety.",
-    mark: `<circle cx="22" cy="21" r="11"/><path fill="currentColor" fill-opacity="0.4" stroke="none" d="M12.6 16.5a11 11 0 0 1 18.8 0q-9.4-3.6-18.8 0z"/><path fill="currentColor" stroke="none" d="M19.6 31.5h4.8L22 39z"/><circle cx="17.5" cy="19.5" r="1.5" fill="currentColor" stroke="none"/><circle cx="26.5" cy="19.5" r="1.5" fill="currentColor" stroke="none"/>`,
+    readOnly: false,
+    role: "Plans and stages framework, dependency, API, schema and configuration upgrades across compatibility boundaries.",
+    mark: `<path d="M10 22h19M24.5 17.5 29 22l-4.5 4.5M34 12v20"/>`,
   },
   {
     label: "performance",
-    pet: "Bolt",
-    species: "the cheetah",
+    name: "Performance",
+    summary: "Makes it faster",
     hue: 45,
-    tagline: "Make it fast, keep it right.",
-    role: "Measures a baseline, profiles slow paths — runtime, builds, bundles, queries, rendering — and verifies each optimization.",
-    mark: `<circle cx="12.5" cy="12.5" r="3.5" fill="currentColor" fill-opacity="0.28"/><circle cx="31.5" cy="12.5" r="3.5" fill="currentColor" fill-opacity="0.28"/><circle cx="22" cy="23" r="12"/><circle cx="17" cy="21" r="1.5" fill="currentColor" stroke="none"/><circle cx="27" cy="21" r="1.5" fill="currentColor" stroke="none"/><path d="M17 23.5q-.6 3.5-2.5 5.5m12.5-5.5q.6 3.5 2.5 5.5"/><circle cx="22" cy="27.5" r="1.6" fill="currentColor" stroke="none"/>`,
+    readOnly: false,
+    role: "Measures a baseline, then optimises slow runtime paths, builds, bundles, queries and rendering against it.",
+    mark: `<path d="M11 30l7-9 5 5 9-11"/><path d="M26 15h6v6"/>`,
   },
   {
-    label: "review · read-only",
-    pet: "Quill",
-    species: "the hedgehog",
+    label: "review",
+    name: "Review",
+    summary: "Reads the diff",
     hue: 320,
-    tagline: "Sharp eyes, small notes.",
-    role: "Inspects a diff or implementation for correctness, regressions, missing tests, and maintainability, without changing files.",
-    mark: `<path d="M9 25l3-9 3.5 5 3.5-8 3 7 3-7 3.5 8 3.5-5 3 9a13 13 0 0 1-26 0z"/><circle cx="17.5" cy="26.5" r="1.5" fill="currentColor" stroke="none"/><circle cx="26.5" cy="26.5" r="1.5" fill="currentColor" stroke="none"/><circle cx="22" cy="31" r="1.7" fill="currentColor" stroke="none"/>`,
+    readOnly: true,
+    role: "Inspects a change for correctness, regressions, missing tests and maintainability, with file and line. Never edits.",
+    mark: `<path d="M14 10h11l6 6v18a1 1 0 0 1-1 1H14a1 1 0 0 1-1-1V11a1 1 0 0 1 1-1Z"/><path d="M17 24l3.4 3.4L27 20"/>`,
   },
   {
-    label: "security · read-only",
-    pet: "Rook",
-    species: "the raven",
+    label: "security",
+    name: "Security",
+    summary: "Checks the boundaries",
     hue: 220,
-    tagline: "Watches the boundaries.",
-    role: "Reviews trust boundaries, authentication, authorization, secrets, injection risks, and unsafe data flow — reading, never writing.",
-    mark: `<path d="M22 7l11 7-2 13-9 6-9-6-2-13z"/><path fill="currentColor" stroke="none" d="M18 23.5h8L22 31z"/><path d="M14.5 17.5l4.5 1.5m10.5-1.5-4.5 1.5"/>`,
+    readOnly: true,
+    role: "Reviews trust boundaries, authentication, secrets, injection risk and unsafe data flow. Never edits.",
+    mark: `<path d="M22 10l10 4v7c0 6-4 10.5-10 12.5C16 31.5 12 27 12 21v-7Z"/>`,
   },
   {
     label: "test",
-    pet: "Echo",
-    species: "the lyrebird",
+    name: "Test",
+    summary: "Writes coverage",
     hue: 175,
-    tagline: "Repeats it perfectly.",
-    role: "Designs focused coverage, writes or repairs tests, runs the relevant suite, and reports failures with evidence.",
-    mark: `<path d="M17 20q-8-5-6-13 5 1 7 11m9 2q8-5 6-13-5 1-7 11"/><circle cx="22" cy="27" r="8.5"/><circle cx="19" cy="25.5" r="1.4" fill="currentColor" stroke="none"/><circle cx="25" cy="25.5" r="1.4" fill="currentColor" stroke="none"/><path fill="currentColor" stroke="none" d="M20.4 33.5h3.2L22 37z"/>`,
+    readOnly: false,
+    role: "Designs focused coverage, writes or repairs tests, runs the suite and reports failures with evidence.",
+    mark: `<path d="M18 10v8l-6 12a2.4 2.4 0 0 0 2 3.6h16a2.4 2.4 0 0 0 2-3.6l-6-12v-8"/><path d="M16.5 10h11M15 25h14"/>`,
   },
 ]
 
@@ -762,12 +762,12 @@ const changelog = [
 
     <section class="crew section-width" aria-labelledby="crew-title">
       <div class="section-heading chapter-head" data-reveal>
-        <p class="section-kicker">Meet the crew</p>
+        <p class="section-kicker">Subagents</p>
         <h2 id="crew-title">The specialists it delegates to.</h2>
         <p>
           Vector's agent does not do everything itself. When a task calls for a specialist, it hands the work to one of
-          nine subagents, each with its own focus and its own permission set. Quill and Rook can read but never write.
-          Veri cannot edit files at all — and it only runs when you turn verified completion on.
+          nine subagents, each with its own focus and its own permission set. Review and Security can read but never
+          write. Judge cannot edit files at all, and only runs when you turn verified completion on.
         </p>
       </div>
       <div class="crew-grid">
@@ -785,8 +785,8 @@ const changelog = [
               />
             </span>
             <small>{member.label}</small>
-            <h3>{member.pet}<span class="crew-species">, {member.species}</span></h3>
-            <p class="crew-tagline">“{member.tagline}”</p>
+            <h3>{member.name}<span class="crew-species">{member.readOnly ? " · read-only" : ""}</span></h3>
+            <p class="crew-tagline">{member.summary}</p>
             <p class="crew-role">{member.role}</p>
           </article>
         ))}

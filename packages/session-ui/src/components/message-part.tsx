@@ -1889,9 +1889,8 @@ ToolRegistry.register({
       return taskSession(props.input, location.pathname, data.store.session, data.store.agent)
     })
     const agent = createMemo(() => taskAgent(props.input.subagent_type, data.store.agent))
-    // A built-in subagent shows as its pet ("Scout"), with the engine agent name
-    // kept beside it. A user-defined agent has no identity and renders exactly
-    // as it did before.
+    // A built-in subagent shows its own name and a short summary of what it
+    // does. A user-defined agent has no identity and renders exactly as before.
     const identity = createMemo(() =>
       typeof props.input.subagent_type === "string" ? subagentIdentity(props.input.subagent_type) : undefined,
     )
@@ -1948,10 +1947,10 @@ ToolRegistry.register({
               <SubagentAvatar id={identity()!.id} size={15} />
             </Show>
             <span data-component="task-tool-title" style={{ color: tone() ?? "var(--text-strong)" }}>
-              {identity()?.petName ?? title()}
+              {identity()?.name ?? title()}
             </span>
             <Show when={identity()}>
-              <span data-component="task-tool-agent">{title()}</span>
+              <span data-component="task-tool-agent">{identity()!.summary}</span>
             </Show>
             <Show when={subtitle()}>
               <span data-slot="basic-tool-tool-subtitle">{subtitle()}</span>
