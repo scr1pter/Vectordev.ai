@@ -61,6 +61,7 @@ import {
 import { ParallelDiffReview } from "@/components/parallel-diff-review"
 import { WorkspaceNavigation, type WorkspaceNavigationItem } from "@/components/workspace-navigation"
 import { CanvasWorkspace } from "@/features/canvas/canvas"
+import { ExternalAgentTranscript, type ExternalAgentTurn } from "@/features/agents/external-agent-transcript"
 import { useUpdaterAction } from "@/components/updater-action"
 import { VelCall } from "@/features/vel/vel-call"
 import { VEL_OPEN_EVENT } from "@/features/vel/vel-message"
@@ -96,6 +97,7 @@ type ExternalAgentStatus = {
   installed: boolean
   version?: string
   path?: string
+  signedIn?: boolean
 }
 
 function readAgentTabOrder(scopeID: string) {
@@ -158,6 +160,8 @@ type ParallelWorkspaceRecord = {
   gitBranch?: string
   baseCommit?: string
   agentSessionId?: string
+  externalSessionId?: string
+  turns?: ExternalAgentTurn[]
   agent?: string
   swarmRunId?: string
   swarmTaskId?: string
@@ -207,6 +211,7 @@ type ParallelWorkspaceApi = {
   }) => Promise<ParallelWorkspaceRecord>
   refresh: (id: string) => Promise<ParallelWorkspaceRecord>
   run: (id: string, concurrency?: number) => Promise<ParallelWorkspaceRecord>
+  followUp: (id: string, text: string) => Promise<ParallelWorkspaceRecord>
   stop: (id: string) => Promise<ParallelWorkspaceRecord>
   merge: (id: string, force?: boolean, commit?: { message: string }) => Promise<ParallelWorkspaceRecord>
   mainDiff: (sourcePath: string) => Promise<string>
@@ -643,6 +648,8 @@ export default function NewLayout(props: ParentProps) {
   const [commitMessage, setCommitMessage] = createSignal("")
   const [commitMessageTouched, setCommitMessageTouched] = createSignal(false)
   const [agentReviewOpen, setAgentReviewOpen] = createSignal(false)
+  const [followUpDraft, setFollowUpDraft] = createSignal("")
+  const [followUpBusy, setFollowUpBusy] = createSignal(false)
   const [orchestrationOpen, setOrchestrationOpen] = createSignal(false)
   const [pendingAgentOpenID, setPendingAgentOpenID] = createSignal<string>()
   const [backgroundTaskRecords, setBackgroundTaskRecords] = createSignal<BackgroundTaskRecord[]>([])
@@ -2056,6 +2063,29 @@ export default function NewLayout(props: ParentProps) {
     if (!record) return
     setParallelRecords((records) => records.map((item) => (item.id === id ? record : item)))
     logParallelTimeline("Isolated agent prepared", "running", record.lastAction, record.changedFiles)
+    void loadBackgroundTasks()
+  }
+
+  const sendWorkspaceFollowUp = async (id: string) => {
+    const api = parallelApi()
+    if (!api) {
+      reportDesktopOnlyParallel()
+      return
+    }
+    const text = followUpDraft().trim()
+    if (!text || followUpBusy()) return
+    setFollowUpBusy(true)
+    setParallelError("")
+    setFollowUpDraft("")
+    const record = await api.followUp(id, text).catch((error: unknown) => {
+      setParallelError(error instanceof Error ? error.message : String(error))
+      // The typed message is restored rather than lost when the send is refused.
+      setFollowUpDraft(text)
+      return undefined
+    })
+    setFollowUpBusy(false)
+    if (!record) return
+    setParallelRecords((records) => records.map((item) => (item.id === id ? record : item)))
     void loadBackgroundTasks()
   }
 
@@ -3581,6 +3611,10 @@ export default function NewLayout(props: ParentProps) {
                         const status = () => externalRuntimeStatus(runtime)
                         const ready = () =>
                           runtime === "vector" ? parallelModelOptions().length > 0 : Boolean(status()?.installed)
+                        // Installed and version-reporting, but every run would
+                        // stop at the sign-in wall. A green "ready" dot here was
+                        // the whole reason launching one "just didn't work".
+                        const signedOut = () => ready() && status()?.signedIn === false
                         // Every runtime stays on screen even when it cannot run.
                         // A hidden option reads as a broken feature; a visible
                         // one that names its blocker reads as a setup step.
@@ -3588,6 +3622,7 @@ export default function NewLayout(props: ParentProps) {
                           if (runtime === "vector") return ready() ? "Ready on your keys" : "No provider connected"
                           if (!globalThis.window?.api) return "Desktop only"
                           if (externalAgentsChecking() && !status()) return "Checking…"
+                          if (signedOut()) return "Signed out"
                           if (ready()) return status()?.version || "Installed"
                           return "Not installed"
                         }
@@ -3609,7 +3644,9 @@ export default function NewLayout(props: ParentProps) {
                               "opacity-55": !ready() && parallelRuntime() !== runtime,
                             }}
                             title={
-                              ready()
+                              signedOut()
+                                ? `${parallelRuntimeLabel(runtime)} is installed but not signed in. Run: ${externalRuntimeSetup(runtime)?.signInCommand ?? ""}`
+                                : ready()
                                 ? undefined
                                 : runtime === "vector"
                                   ? "Connect an AI provider — Vector agents run on your own keys."
@@ -3626,7 +3663,7 @@ export default function NewLayout(props: ParentProps) {
                             </span>
                             <span class="mt-1 flex items-center gap-1 text-[9.5px] text-white/38">
                               <span
-                                class={`size-1.5 shrink-0 rounded-full ${ready() ? "bg-emerald-400" : externalAgentsChecking() && runtime !== "vector" ? "animate-pulse bg-amber-300" : "bg-white/20"}`}
+                                class={`size-1.5 shrink-0 rounded-full ${signedOut() ? "bg-amber-300" : ready() ? "bg-emerald-400" : externalAgentsChecking() && runtime !== "vector" ? "animate-pulse bg-amber-300" : "bg-white/20"}`}
                               />
                               <span class="truncate">{reason()}</span>
                             </span>
@@ -3636,10 +3673,15 @@ export default function NewLayout(props: ParentProps) {
                     </For>
                   </div>
                   <Show
-                    when={isExternalRuntime(parallelRuntime()) && !externalRuntimeStatus(parallelRuntime())?.installed}
+                    when={
+                      isExternalRuntime(parallelRuntime()) &&
+                      (!externalRuntimeStatus(parallelRuntime())?.installed ||
+                        externalRuntimeStatus(parallelRuntime())?.signedIn === false)
+                    }
                   >
                     <ExternalRuntimeSetupPanel
                       runtime={parallelRuntime() as ExternalRuntime}
+                      mode={externalRuntimeStatus(parallelRuntime())?.installed ? "sign-in" : "install"}
                       checking={externalAgentsChecking()}
                       onRecheck={detectExternalRuntimes}
                     />
@@ -4041,10 +4083,21 @@ export default function NewLayout(props: ParentProps) {
                     )}
                   </Show>
 
+                  <Show when={record().runtime !== "vector" && (record().turns?.length ?? 0) > 0}>
+                    <ExternalAgentTranscript
+                      turns={record().turns ?? []}
+                      runtimeLabel={parallelRuntimeLabel(record().runtime)}
+                    />
+                  </Show>
+
                   <Show when={record().logs.length || record().terminalOutput.length}>
                     <details
                       class="mb-4 overflow-hidden rounded-[12px] border border-[color:var(--vx-line)] bg-black/20"
-                      open={record().runtime !== "vector" && isParallelWorkspaceRunning(record())}
+                      open={
+                        record().runtime !== "vector" &&
+                        isParallelWorkspaceRunning(record()) &&
+                        !record().turns?.length
+                      }
                     >
                       <summary class="flex cursor-pointer list-none items-center justify-between px-4 py-3 text-[11px] font-semibold text-white/70">
                         <span>Live agent activity</span>
@@ -4066,6 +4119,46 @@ export default function NewLayout(props: ParentProps) {
 
                   {renderDiffReview(record)}
                 </div>
+
+                <Show when={record().runtime !== "vector" && record().mergeState === "none"}>
+                  <form
+                    class="shrink-0 border-t border-[color:var(--vx-line)] px-5 py-3"
+                    onSubmit={(event) => {
+                      event.preventDefault()
+                      void sendWorkspaceFollowUp(record().id)
+                    }}
+                  >
+                    <textarea
+                      class="min-h-[60px] w-full resize-none rounded-[12px] border border-[color:var(--vx-line)] bg-black/20 px-3 py-2 text-[12.5px] text-white/85 outline-none disabled:opacity-40"
+                      placeholder={`Tell ${parallelRuntimeLabel(record().runtime)} what to do next…`}
+                      value={followUpDraft()}
+                      disabled={isParallelWorkspaceRunning(record()) || followUpBusy()}
+                      onInput={(event) => setFollowUpDraft(event.currentTarget.value)}
+                      onKeyDown={(event) => {
+                        if (event.key !== "Enter" || event.shiftKey) return
+                        event.preventDefault()
+                        void sendWorkspaceFollowUp(record().id)
+                      }}
+                    />
+                    <div class="mt-2 flex items-center gap-2">
+                      <span class="text-[11px] text-white/35">
+                        {isParallelWorkspaceRunning(record())
+                          ? "The agent is working. Wait for it to finish, or stop it."
+                          : record().externalSessionId
+                            ? "Continues the same conversation."
+                            : "Vector couldn't save this agent's conversation, so your next message restarts it with a written summary of the work so far."}
+                      </span>
+                      <div class="flex-1" />
+                      <button
+                        type="submit"
+                        class="h-8 rounded-[10px] border border-[color:var(--vx-line)] px-3 text-[12px] text-white/70 transition hover:bg-white/[0.05] hover:text-white disabled:opacity-40"
+                        disabled={!followUpDraft().trim() || isParallelWorkspaceRunning(record()) || followUpBusy()}
+                      >
+                        Send
+                      </button>
+                    </div>
+                  </form>
+                </Show>
 
                 <footer class="flex shrink-0 items-center gap-2 border-t border-[color:var(--vx-line)] px-5 py-3.5">
                   <button

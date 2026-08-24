@@ -36,6 +36,16 @@ import { parseUnifiedDiff, selectUnifiedDiff, type UnifiedDiffSelection } from "
 import { scanChangedSecrets } from "./secret-scanner"
 import { spendLedger } from "./spend-limits"
 import { parallelSessionCreateRequest } from "./parallel-session-scope"
+import {
+  appendTurn,
+  continuationPrompt,
+  extendStreamTail,
+  settleRunningTurns,
+  settleTurn,
+  type ParallelWorkspaceTurn,
+} from "./parallel-workspace-turns"
+
+export type { ParallelWorkspaceTurn } from "./parallel-workspace-turns"
 
 // Keep persisted metadata and isolated checkout directories on distinct paths.
 // electron-store creates a file with STORE_NAME, so sharing that name with the
@@ -111,6 +121,10 @@ export type ParallelWorkspaceRecord = {
   gitBranch?: string
   baseCommit?: string
   agentSessionId?: string
+  // The external CLI's own conversation id — codex thread_id, claude
+  // session_id. Deliberately not agentSessionId: that field is engine-session
+  // identity and drainTeamOutbox matches senders against it.
+  externalSessionId?: string
   backgroundTaskId?: string
   agent?: string
   swarmRunId?: string
@@ -143,6 +157,9 @@ export type ParallelWorkspaceRecord = {
   contextIndexedFiles?: number
   contextTokenEstimate?: number
   contextSummary?: string
+  // Optional so every already-persisted record stays valid with no migration;
+  // the UI falls back to the raw log view when it is empty.
+  turns?: ParallelWorkspaceTurn[]
   taskDifficulty?: TaskDifficulty
   retryLimit?: number
   validationReport?: WorkspaceValidationReport
@@ -161,6 +178,10 @@ type ActiveParallelRun = {
   controller: AbortController
   engine: ParallelWorkspaceEngine
   sessionId?: string
+  // Set only by followUpParallelWorkspace. Carried on the queue entry so a
+  // follow-up rides executeParallelWorkspace's existing ledger pre-flight,
+  // catch and finally instead of duplicating them.
+  followUp?: string
 }
 
 const activeRuns = new Map<string, ActiveParallelRun>()
@@ -994,7 +1015,15 @@ export async function refreshParallelWorkspace(id: string) {
     lastAction: changedFiles.length
       ? `${changedFiles.length} changed file${changedFiles.length === 1 ? "" : "s"} detected`
       : "No isolated changes yet",
-    status: current.mergeState !== "none" ? current.status : changedFiles.length ? "needs review" : current.status,
+    // A refresh during a live turn must not flip the record to "needs review"
+    // under the running agent: the mission path already refreshed mid-run, and
+    // a follow-up refreshes mid-turn too, which made the churn visible.
+    status:
+      current.mergeState !== "none" || activeRuns.has(id) || queuedRuns.has(id)
+        ? current.status
+        : changedFiles.length
+          ? "needs review"
+          : current.status,
   }))
   syncBackgroundTask(updated)
   return updated
@@ -1015,6 +1044,7 @@ export function listParallelWorkspaces(scope?: { sourcePath?: string; parentSess
       lastActivityAt: now(),
       error: "This agent stopped when Vector closed. Review the isolated files, then run the workspace again if needed.",
       finalSummary: "The previous run was interrupted before Vector received a completion signal.",
+      turns: settleRunningTurns(record.turns, { state: "failed", text: "This turn stopped when Vector closed." }),
       logs: ["Vector detected an interrupted agent run after restart.", ...record.logs].slice(0, 120),
     }
     syncBackgroundTask(interrupted, "Interrupted run detected after Vector restarted.")
@@ -1240,6 +1270,17 @@ async function ensureParallelWorkspaceIsolation(record: ParallelWorkspaceRecord)
     error: undefined,
     lastAction: "Rebuilt interrupted isolated workspace",
     lastActivityAt: now(),
+    // The rebuilt tree has none of the prior edits, and claude's resume is
+    // scoped to the cwd it was created in — resuming here would hand the agent
+    // a transcript describing files that no longer exist.
+    externalSessionId: undefined,
+    turns: appendTurn(current.turns, {
+      id: randomUUID(),
+      role: "vector",
+      text: "The isolated workspace was missing, so Vector rebuilt it from the main project. The previous conversation could not be carried over.",
+      at: now(),
+      state: "done",
+    }),
     logs: [
       "The isolated checkout was missing, so Vector rebuilt it from the current main project before starting the agent.",
       ...current.logs,
@@ -1290,12 +1331,14 @@ async function prepareParallelWorkspaceContext(record: ParallelWorkspaceRecord) 
   return updated
 }
 
-async function runExternalWorkspacePass(
-  id: string,
-  record: ParallelWorkspaceRecord,
-  prompt: string,
-  controller: AbortController,
-) {
+async function runExternalWorkspacePass(input: {
+  id: string
+  record: ParallelWorkspaceRecord
+  prompt: string
+  controller: AbortController
+  turnId: string
+  resumeSessionId?: string
+}) {
   const pendingLogs: string[] = []
   const pendingOutput: string[] = []
   let lastPersistedAt = 0
@@ -1304,32 +1347,50 @@ async function runExternalWorkspacePass(
     const logs = pendingLogs.splice(0)
     const output = pendingOutput.splice(0)
     lastPersistedAt = Date.now()
-    const updated = updateRecord(id, (current) => ({
+    const updated = updateRecord(input.id, (current) => ({
       ...current,
       status: "running commands",
       progress: 0,
       lastAction: logs.at(-1) ?? current.lastAction,
       lastActivityAt: now(),
-      logs: [...logs.reverse(), ...current.logs].slice(0, 120),
-      terminalOutput: [...output.reverse(), ...current.terminalOutput].slice(0, 240),
+      // Runs before the reversals below: `logs` is a live array and .reverse()
+      // mutates in place, which would make the transcript read backwards.
+      turns: extendStreamTail(current.turns, input.turnId, logs),
+      logs: [...[...logs].reverse(), ...current.logs].slice(0, 120),
+      terminalOutput: [...[...output].reverse(), ...current.terminalOutput].slice(0, 240),
     }))
     syncBackgroundTask(updated, updated.lastAction)
   }
 
   const result = await runExternalCodingAgent({
-    runtime: record.runtime as CodingAgentRuntime,
-    cwd: record.isolatedPath,
-    prompt,
-    signal: controller.signal,
+    runtime: input.record.runtime as CodingAgentRuntime,
+    cwd: input.record.isolatedPath,
+    prompt: input.prompt,
+    resumeSessionId: input.resumeSessionId,
+    signal: input.controller.signal,
+    // Persisted the moment it appears rather than at close: a crash or a user
+    // stop mid-turn must still leave a resumable conversation behind.
+    onSessionId: (sessionId) => {
+      updateRecord(input.id, (current) => ({ ...current, externalSessionId: sessionId }))
+    },
     onEvent: (event) => {
       if (event.stream === "activity") pendingLogs.push(event.text)
       if (event.stream !== "activity") pendingOutput.push(event.text)
       if (Date.now() - lastPersistedAt >= 400) flush()
     },
   }).finally(flush)
+  // A CLI that refused the resume FLAGS is not a failed task — the caller
+  // retries without resume rather than reporting a broken agent.
+  if (result.resumeRejected) return result
   if (result.exitCode !== 0) {
+    // agentOutcome already classified this failure — "installed but not signed
+    // in", "exited with code N" — and that sentence is the only part the user
+    // can act on. Throwing the raw stream-json tail instead buried it, so a
+    // signed-out CLI read as "Vector is broken" rather than "run `claude`".
+    const tail = result.output.slice(-12).join("\n").trim()
     throw new Error(
-      `${runtimeLabel(record.runtime)} exited with code ${result.exitCode}.\n${result.output.slice(-12).join("\n")}`.trim(),
+      result.error?.trim() ||
+        `${runtimeLabel(input.record.runtime)} exited with code ${result.exitCode}.\n${tail}`.trim(),
     )
   }
   return result
@@ -1340,34 +1401,136 @@ async function executeExternalParallelWorkspace(
   initial: ParallelWorkspaceRecord,
   controller: AbortController,
   runId: string,
+  followUp?: string,
 ) {
+  const resumeSessionId = followUp ? initial.externalSessionId : undefined
+  const turnId = randomUUID()
   let record = updateRecord(id, (current) => ({
     ...current,
     agentSessionId: undefined,
+    // A fresh run is a NEW conversation; a follow-up must keep the id or it
+    // restarts from nothing instead of resuming.
+    externalSessionId: followUp ? current.externalSessionId : undefined,
     status: "editing",
     progress: 0,
-    lastAction: `${runtimeLabel(current.runtime)} is inspecting the isolated project`,
+    lastAction: followUp
+      ? `${runtimeLabel(current.runtime)} is working on your message`
+      : `${runtimeLabel(current.runtime)} is inspecting the isolated project`,
     lastActivityAt: now(),
     error: undefined,
+    turns: followUp
+      ? appendTurn(current.turns, {
+          id: turnId,
+          role: "agent",
+          text: "",
+          at: now(),
+          state: "running",
+          resumed: Boolean(resumeSessionId),
+        })
+      : [
+          { id: randomUUID(), role: "user", text: current.taskPrompt, at: now(), state: "done" },
+          { id: turnId, role: "agent", text: "", at: now(), state: "running", resumed: false },
+        ],
     logs: [
-      `${runtimeLabel(current.runtime)} started in ${current.isolatedPath}.`,
+      followUp
+        ? resumeSessionId
+          ? `${runtimeLabel(current.runtime)} resumed its existing conversation.`
+          : `${runtimeLabel(current.runtime)} could not resume, so the follow-up restates the task.`
+        : `${runtimeLabel(current.runtime)} started in ${current.isolatedPath}.`,
       ...current.logs,
     ].slice(0, 120),
   }))
-  syncBackgroundTask(record, `${runtimeLabel(record.runtime)} started in the isolated workspace.`)
+  syncBackgroundTask(record, record.lastAction)
 
   const costs: number[] = []
+  const beforeDiff = record.diff
   // External CLIs have no send_teammate_message tool — a real `claude -p` run
   // exposes 28 tools and none of them is it — so they cannot send. They do take
   // a prompt, so they can still RECEIVE what teammates queued for them, which is
-  // the honest half of the capability rather than silently neither.
-  const firstRun = await runExternalWorkspacePass(
+  // the honest half of the capability rather than silently neither. Claimed
+  // exactly once here because withTeammateMessages is destructive, and the
+  // resume-rejected retry below must not re-claim and drop messages the refused
+  // attempt never delivered.
+  const delivery = withTeammateMessages(record, "")
+  const briefBody = () =>
+    continuationPrompt({
+      missionBrief: parallelAgentPrompt(record),
+      previousSummary: record.finalSummary,
+      changedFiles: record.changedFiles,
+      instruction: followUp ?? "",
+    })
+  const compose = (body: string) => [delivery, body].filter(Boolean).join("\n\n")
+
+  const attempt = await runExternalWorkspacePass({
     id,
     record,
-    withTeammateMessages(record, parallelAgentPrompt(record)),
+    turnId,
     controller,
-  )
+    resumeSessionId,
+    prompt: followUp ? compose(resumeSessionId ? followUp : briefBody()) : compose(parallelAgentPrompt(record)),
+  })
+
+  // The CLI refused the resume flags — cursor is unverified, and a CLI upgrade
+  // can retire a flag. Re-brief once, and forget the id so later turns do not
+  // pay for the same rejection again.
+  const firstRun = attempt.resumeRejected
+    ? await runExternalWorkspacePass({
+        id,
+        record: updateRecord(id, (current) => ({
+          ...current,
+          externalSessionId: undefined,
+          // The turn was opened claiming a resume. The CLI refused it, so the
+          // transcript has to stop claiming the agent remembers anything.
+          turns: (current.turns ?? []).map((turn) => (turn.id === turnId ? { ...turn, resumed: false } : turn)),
+          logs: [
+            `${runtimeLabel(current.runtime)} would not resume the previous conversation, so Vector restarted it with a written summary of the work so far.`,
+            ...current.logs,
+          ].slice(0, 120),
+        })),
+        turnId,
+        controller,
+        prompt: compose(briefBody()),
+      })
+    : attempt
   if (firstRun.actualCost) costs.push(Number(firstRun.actualCost.replace("$", "")))
+
+  record = updateRecord(id, (current) => ({
+    ...current,
+    turns: settleTurn(current.turns, turnId, {
+      text: firstRun.summary,
+      state: "done",
+      cost: firstRun.actualCost,
+    }),
+  }))
+
+  // A follow-up is often a question, not an edit. Running the whole check suite
+  // to answer "which file did you touch?" would make the chat unusable, so the
+  // guardrails only run when the tree actually moved.
+  if (followUp) {
+    const answered = await refreshParallelWorkspace(id)
+    if (answered.diff === beforeDiff) {
+      const noopLedger = await spendLedger()
+      await noopLedger.recordRunCost({
+        projectPath: answered.sourcePath,
+        runId,
+        provider: answered.provider,
+        model: answered.model,
+        source: "parallel",
+        totalCostUsd: costs.length ? costs.reduce((sum, value) => sum + value, 0) : undefined,
+      })
+      const unchanged = updateRecord(id, (current) => ({
+        ...current,
+        status: current.changedFilesCount ? "needs review" : "complete",
+        progress: 100,
+        lastActivityAt: now(),
+        lastAction: `${runtimeLabel(current.runtime)} replied with no file changes`,
+        finalSummary: firstRun.summary,
+        logs: ["No files changed on this turn, so the deterministic checks were skipped.", ...current.logs].slice(0, 120),
+      }))
+      syncBackgroundTask(unchanged, unchanged.lastAction)
+      return
+    }
+  }
 
   record = updateRecord(id, (current) => ({
     ...current,
@@ -1398,11 +1561,22 @@ async function executeExternalParallelWorkspace(
     // the run above was recorded so the count and the flakiness verdict include
     // it. Empty until a signature has been seen before, hence the filter below.
     const guidance = await priorFor(record.sourcePath, validation, [record.isolatedPath, record.sourcePath])
+    const repairTurnId = randomUUID()
     record = updateRecord(id, (current) => ({
       ...current,
       status: "editing",
       riskLevel: "high",
       repairAttempts: attempt,
+      turns: appendTurn(
+        appendTurn(current.turns, {
+          id: randomUUID(),
+          role: "vector",
+          text: `A deterministic check failed. Vector returned the exact failure for repair pass ${attempt} of ${retryLimit}.`,
+          at: now(),
+          state: "done",
+        }),
+        { id: repairTurnId, role: "agent", text: "", at: now(), state: "running", resumed: false },
+      ),
       lastAction: `${runtimeLabel(current.runtime)} is repairing a failed check (${attempt}/${retryLimit})`,
       lastActivityAt: now(),
       logs: [
@@ -1412,13 +1586,19 @@ async function executeExternalParallelWorkspace(
       ].slice(0, 120),
     }))
     syncBackgroundTask(record, record.lastAction)
-    const repair = await runExternalWorkspacePass(
+    // Deliberately a fresh, non-resumed spawn with the full mission brief: this
+    // is the path verified working end-to-end today, and resume is not worth
+    // changing it in the same change that introduces resume.
+    const repair = await runExternalWorkspacePass({
       id,
       record,
-      withTeammateMessages(
+      turnId: repairTurnId,
+      controller,
+      prompt: withTeammateMessages(
         record,
         [
           parallelAgentPrompt(record),
+          followUp ? `The user's most recent follow-up request was: ${followUp}` : "",
           guidance,
           formatValidationForRepair(validation),
           `This is repair pass ${attempt} of ${retryLimit}. Diagnose the exact output, make only evidence-backed changes, and rerun the relevant check before finishing.`,
@@ -1426,8 +1606,7 @@ async function executeExternalParallelWorkspace(
           .filter(Boolean)
           .join("\n\n"),
       ),
-      controller,
-    )
+    })
     if (repair.actualCost) costs.push(Number(repair.actualCost.replace("$", "")))
     refreshed = await refreshParallelWorkspace(id)
     validation = await validateWorkspace(refreshed.isolatedPath, refreshed.changedFiles)
@@ -1444,6 +1623,11 @@ async function executeExternalParallelWorkspace(
         ...validationLogLines(validation),
         ...current.terminalOutput,
       ].slice(0, 280),
+      turns: settleTurn(current.turns, repairTurnId, {
+        text: repair.summary,
+        state: "done",
+        cost: repair.actualCost,
+      }),
       lastAction: validation.passed
         ? `Repair ${attempt} verified by deterministic checks`
         : `Repair ${attempt} did not pass validation`,
@@ -1516,6 +1700,15 @@ async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEng
       }))
       syncBackgroundTask(warned, warning)
     }
+    const followUp = activeRuns.get(id)?.followUp
+    // ensureParallelWorkspaceIsolation rebuilds a missing tree from sourcePath
+    // as a fresh copy, which would silently discard exactly the work being
+    // followed up on. A follow-up has to fail loudly instead.
+    if (followUp && !(await stat(persisted.isolatedPath).catch(() => undefined))) {
+      throw new Error(
+        "The isolated workspace folder is gone, so this agent cannot continue. Run the workspace again to start fresh.",
+      )
+    }
     const initial = await ensureParallelWorkspaceIsolation(persisted)
     // Started before either runtime branch: every member of a team has to be
     // swept while the others are still working, which is the only window in
@@ -1523,7 +1716,7 @@ async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEng
     startTeamSweep(initial)
     if (initial.runtime !== "vector") {
       const prepared = await prepareParallelWorkspaceContext(initial)
-      await executeExternalParallelWorkspace(id, prepared, controller, runId)
+      await executeExternalParallelWorkspace(id, prepared, controller, runId, followUp)
       return
     }
 
@@ -1747,12 +1940,20 @@ async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEng
       : error instanceof Error
         ? error.message
         : String(error)
+    // A workspace can be discarded while its agent is still running, and then
+    // this bookkeeping has nothing left to write to. updateRecord throws on a
+    // missing id, so without this the failure handler itself raised an
+    // unhandled rejection out of a background run.
+    if (!readRecords().some((record) => record.id === id)) return
     const failed = updateRecord(id, (current) => ({
       ...current,
       status: stopped ? "stopped" : "failed",
       progress: 0,
       lastAction: stopped ? "Workspace stopped" : "Agent execution failed",
       lastActivityAt: now(),
+      // Load-bearing: without it a spend-cap block or a signed-out CLI leaves a
+      // spinner in the transcript, which reads as "my message broke this".
+      turns: settleRunningTurns(current.turns, { state: stopped ? "stopped" : "failed", text: detail }),
       error: stopped ? undefined : detail,
       finalSummary: detail,
       logs: [detail, ...current.logs].slice(0, 120),
@@ -1796,6 +1997,53 @@ export async function runParallelWorkspace(id: string, engine: ParallelWorkspace
     logs: [`Run requested at ${now()}.`, ...record.logs].slice(0, 120),
   }))
   syncBackgroundTask(queued, `Parallel agent queued for ${runtimeLabel(queued.runtime)}.`)
+  drainParallelRunQueue()
+  return readRecords().find((record) => record.id === id) ?? queued
+}
+
+// A follow-up is another pass on the same record, so it goes through the same
+// queue as a run: concurrency, abort, the ledger pre-flight and the restart
+// sweep all keep working with no second code path.
+export async function followUpParallelWorkspace(id: string, engine: ParallelWorkspaceEngine, text: string) {
+  const instruction = text.trim()
+  if (!instruction) throw new Error("Type a message before sending it to the agent.")
+  const current = readRecords().find((record) => record.id === id)
+  if (!current) throw new Error("Parallel workspace was not found.")
+  if (current.runtime === "vector") throw new Error("Vector agents continue in their own chat session.")
+  if (current.mergeState !== "none") throw new Error("Merged or discarded workspaces cannot be continued.")
+  // runParallelWorkspace returns silently when a run is in flight; a typed
+  // message must never be dropped without the user being told.
+  if (activeRuns.has(id) || queuedRuns.has(id)) {
+    throw new Error("This agent is still working. Wait for the current turn to finish, or stop it first.")
+  }
+  if (!(await stat(current.isolatedPath).catch(() => undefined))) {
+    throw new Error(
+      "This workspace's isolated folder is gone, so the conversation cannot continue. Run it again to start a new one.",
+    )
+  }
+
+  const controller = new AbortController()
+  // Registered BEFORE any status write: listParallelWorkspaces rewrites a
+  // running record it cannot find in these maps to "failed", and the renderer
+  // polls that list every 1.5s.
+  queuedRuns.set(id, { controller, engine, followUp: instruction })
+  const queued = updateRecord(id, (record) => ({
+    ...record,
+    status: "queued",
+    progress: 0,
+    error: undefined,
+    lastAction: activeRuns.size < maxConcurrentRuns ? "Sending your message to the agent" : "Queued for an agent slot",
+    lastActivityAt: now(),
+    turns: appendTurn(record.turns, {
+      id: randomUUID(),
+      role: "user",
+      text: instruction,
+      at: now(),
+      state: "done",
+    }),
+    logs: [`Follow-up message sent at ${now()}.`, ...record.logs].slice(0, 120),
+  }))
+  syncBackgroundTask(queued, `Follow-up message queued for ${runtimeLabel(queued.runtime)}.`)
   drainParallelRunQueue()
   return readRecords().find((record) => record.id === id) ?? queued
 }

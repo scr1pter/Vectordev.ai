@@ -22,16 +22,31 @@ function CommandRow(props: { label: string; command: string }) {
   )
 }
 
-// Shown when a selected runtime is not installed. Without this the picker is a
-// dead end: it reports "Setup needed" and never says what setup means.
-export function ExternalRuntimeSetupPanel(props: { runtime: ExternalRuntime; onRecheck: () => void; checking?: boolean }) {
+// Shown when a selected runtime is not installed, or is installed but signed
+// out. Without this the picker is a dead end: it reports the blocker and never
+// says what clearing it means.
+export function ExternalRuntimeSetupPanel(props: {
+  runtime: ExternalRuntime
+  onRecheck: () => void
+  checking?: boolean
+  mode?: "install" | "sign-in"
+}) {
   const setup = () => externalRuntimeSetup(props.runtime)
+  const signInOnly = () => props.mode === "sign-in"
   return (
     <Show when={setup()}>
       <div class="mt-2 rounded-[10px] border border-[color:var(--vx-line)] bg-white/[0.02] px-3 py-2.5">
-        <div class="mb-1 text-[11px] font-semibold text-white">Set up {setup()!.label}</div>
-        <p class="mb-2 text-[10.5px] leading-4 text-white/50">{setup()!.note}</p>
-        <For each={setupSteps(props.runtime)}>{(step) => <CommandRow label={step.label} command={step.command} />}</For>
+        <div class="mb-1 text-[11px] font-semibold text-white">
+          {signInOnly() ? `Sign in to ${setup()!.label}` : `Set up ${setup()!.label}`}
+        </div>
+        <p class="mb-2 text-[10.5px] leading-4 text-white/50">
+          {signInOnly()
+            ? `${setup()!.label} is installed on this computer but is not signed in, so every run would stop before it started. Run this once in a terminal, then check again.`
+            : setup()!.note}
+        </p>
+        <For each={setupSteps(props.runtime, props.mode ?? "install")}>
+          {(step) => <CommandRow label={step.label} command={step.command} />}
+        </For>
         <div class="mt-2 flex items-center gap-2">
           <button
             type="button"

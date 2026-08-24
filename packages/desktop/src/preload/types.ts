@@ -435,6 +435,19 @@ export type WorkspaceValidationReport = {
   failureSummary: string
 }
 
+// Hand-mirrored from main/parallel-workspace-turns.ts, the same convention the
+// record below already follows across this boundary.
+export type ParallelWorkspaceTurn = {
+  id: string
+  role: "user" | "agent" | "vector"
+  text: string
+  at: string
+  state: "running" | "done" | "failed" | "stopped"
+  resumed?: boolean
+  cost?: string
+  streamTail?: string[]
+}
+
 export type ParallelWorkspaceRecord = {
   id: string
   name: string
@@ -450,6 +463,8 @@ export type ParallelWorkspaceRecord = {
   gitBranch?: string
   baseCommit?: string
   agentSessionId?: string
+  externalSessionId?: string
+  turns?: ParallelWorkspaceTurn[]
   backgroundTaskId?: string
   agent?: string
   swarmRunId?: string
@@ -732,6 +747,7 @@ export type ElectronAPI = {
     create: (input: CreateParallelWorkspaceInput) => Promise<ParallelWorkspaceRecord>
     refresh: (id: string) => Promise<ParallelWorkspaceRecord>
     run: (id: string, concurrency?: number) => Promise<ParallelWorkspaceRecord>
+    followUp: (id: string, text: string) => Promise<ParallelWorkspaceRecord>
     stop: (id: string) => Promise<ParallelWorkspaceRecord>
     merge: (id: string, force?: boolean, commit?: { message: string }) => Promise<ParallelWorkspaceRecord>
     mainDiff: (sourcePath: string) => Promise<string>

@@ -11,6 +11,10 @@ import {
   detectExternalAgents,
   executableNames,
   resolveAgentPath,
+  runExternalCodingAgent,
+  signedInFromProbe,
+  runtimeArguments,
+  sessionFromAgentLine,
   shimmedCommand,
 } from "./external-agents"
 
@@ -257,6 +261,182 @@ describe("external agent run outcome", () => {
     ])
 
     expect(outcome).toEqual({ exitCode: 0 })
+  })
+})
+
+describe("external agent resume argv", () => {
+  // The regression lock that protects the one path verified working end to end:
+  // a fresh Codex run. Any drift here changes what every first turn spawns.
+  test("fresh argv is unchanged for every runtime when there is no session to resume", () => {
+    expect(runtimeArguments("codex", "/w", "do it")).toEqual([
+      "exec",
+      "--json",
+      "--sandbox",
+      "workspace-write",
+      "--skip-git-repo-check",
+      "-C",
+      "/w",
+      "do it",
+    ])
+    expect(runtimeArguments("claude-code", "/w", "do it")).toEqual([
+      "-p",
+      "do it",
+      "--output-format",
+      "stream-json",
+      "--verbose",
+      "--permission-mode",
+      "acceptEdits",
+    ])
+    expect(runtimeArguments("cursor", "/w", "do it")).toEqual([
+      "-p",
+      "--force",
+      "--output-format",
+      "stream-json",
+      "do it",
+    ])
+  })
+
+  test("codex resume drops --sandbox and -C, and puts options before the session id", () => {
+    const args = runtimeArguments("codex", "/w", "next", "sid-1")
+    expect(args).toEqual([
+      "exec",
+      "resume",
+      "--json",
+      "--skip-git-repo-check",
+      "-c",
+      'sandbox_mode="workspace-write"',
+      "sid-1",
+      "next",
+    ])
+    // `codex exec resume` rejects both outright rather than ignoring them.
+    expect(args).not.toContain("--sandbox")
+    expect(args).not.toContain("-C")
+    expect(args.indexOf("sid-1")).toBeGreaterThan(args.indexOf("--skip-git-repo-check"))
+    expect(args.at(-1)).toBe("next")
+  })
+
+  test("claude --resume is followed immediately by the id so it cannot swallow the prompt", () => {
+    const args = runtimeArguments("claude-code", "/w", "next", "sid-2")
+    // --resume takes an OPTIONAL value: any gap and it consumes the prompt and
+    // opens the interactive picker instead of running headless.
+    expect(args[args.indexOf("--resume") + 1]).toBe("sid-2")
+    expect(args).toContain("-p")
+    expect(args[args.indexOf("-p") + 1]).toBe("next")
+  })
+
+  test("cursor resume carries the id (unverified: cursor-agent could not be installed)", () => {
+    const args = runtimeArguments("cursor", "/w", "next", "sid-3")
+    expect(args[args.indexOf("--resume") + 1]).toBe("sid-3")
+    expect(args.at(-1)).toBe("next")
+  })
+})
+
+describe("session id extraction", () => {
+  test("reads the id each runtime actually emits", () => {
+    expect(sessionFromAgentLine('{"type":"thread.started","thread_id":"t1"}')).toBe("t1")
+    expect(sessionFromAgentLine('{"type":"system","subtype":"init","session_id":"a1"}')).toBe("a1")
+    expect(sessionFromAgentLine('[stdout] {"type":"thread.started","thread_id":"t2"}')).toBe("t2")
+    expect(sessionFromAgentLine('[stdout] {"type":"system","subtype":"init","session_id":"a2"}')).toBe("a2")
+  })
+
+  test("ignores non-JSON banners and nested ids", () => {
+    expect(sessionFromAgentLine("Reading additional input from stdin...")).toBeUndefined()
+    // Top-level only: a nested id is a different protocol version, and guessing
+    // at it would resume the wrong conversation.
+    expect(sessionFromAgentLine('{"msg":{"session_id":"x"}}')).toBeUndefined()
+  })
+
+  test("survives secret redaction of a sibling field", () => {
+    // redactAgentOutput rewrites the authorization value in place; the id must
+    // still parse out of the line afterwards.
+    expect(sessionFromAgentLine('{"session_id":"keep-me","authorization":"[redacted]"}')).toBe("keep-me")
+  })
+})
+
+describe("capturing a session id from a live run", () => {
+  async function installStreamingCli(name: string, body: string) {
+    const directory = join(root, "stream", name)
+    await mkdir(directory, { recursive: true })
+    const path = join(directory, name)
+    await writeFile(path, body)
+    await chmod(path, 0o755)
+    return directory
+  }
+
+  test("the id survives even after the 240-line output ring has evicted it", async () => {
+    // The exact production failure a post-hoc scan of result.output would ship:
+    // codex emits thread.started once, on line 1, and every real run is longer
+    // than the ring.
+    const directory = await installStreamingCli(
+      "codex",
+      '#!/bin/sh\necho \'{"type":"thread.started","thread_id":"first"}\'\ni=0\nwhile [ $i -lt 400 ]; do echo \'{"type":"item.completed"}\'; i=$((i+1)); done\n',
+    )
+    const result = await runExternalCodingAgent({
+      runtime: "codex",
+      cwd: root,
+      prompt: "go",
+      env: { HOME: root, PATH: `${directory}:/usr/bin:/bin` },
+    })
+    expect(result.sessionId).toBe("first")
+    expect(result.output.length).toBe(240)
+  })
+
+  test("the first id wins and onSessionId fires exactly once", async () => {
+    const directory = await installStreamingCli(
+      "codex",
+      '#!/bin/sh\necho \'{"session_id":"one"}\'\necho \'{"session_id":"two"}\'\n',
+    )
+    const seen: string[] = []
+    const result = await runExternalCodingAgent({
+      runtime: "codex",
+      cwd: root,
+      prompt: "go",
+      env: { HOME: root, PATH: `${directory}:/usr/bin:/bin` },
+      onSessionId: (id) => seen.push(id),
+    })
+    expect(result.sessionId).toBe("one")
+    expect(seen).toEqual(["one"])
+  })
+
+  test("a refused resume is reported as resumeRejected, not as a failed task", async () => {
+    const directory = await installStreamingCli(
+      "codex",
+      "#!/bin/sh\necho \"error: unexpected argument '--resume' found\" >&2\nexit 2\n",
+    )
+    const env = { HOME: root, PATH: `${directory}:/usr/bin:/bin` }
+    const refused = await runExternalCodingAgent({
+      runtime: "codex",
+      cwd: root,
+      prompt: "go",
+      resumeSessionId: "sid",
+      env,
+    })
+    expect(refused.resumeRejected).toBe(true)
+    // Without a resume id the same output is an ordinary failure: an "unknown
+    // option" inside agent output must never downgrade a working conversation.
+    const plain = await runExternalCodingAgent({ runtime: "codex", cwd: root, prompt: "go", env })
+    expect(plain.resumeRejected).toBeFalsy()
+  })
+})
+
+describe("reading sign-in state from an auth probe", () => {
+  test("claude auth status reports through its JSON flag", () => {
+    expect(signedInFromProbe('{\n  "loggedIn": false,\n  "authMethod": "none"\n}')).toBe(false)
+    expect(signedInFromProbe('{\n  "loggedIn": true,\n  "authMethod": "oauth"\n}')).toBe(true)
+  })
+
+  test("codex login status reports through its sentence", () => {
+    expect(signedInFromProbe("Logged in using ChatGPT")).toBe(true)
+    // The negative test has to win: "not logged in" contains "logged in".
+    expect(signedInFromProbe("Not logged in")).toBe(false)
+    expect(signedInFromProbe("Not logged in · Please run /login")).toBe(false)
+  })
+
+  test("an unreadable probe is unknown rather than signed out", () => {
+    // A picker that wrongly claims a working CLI is signed out is worse than one
+    // that says nothing, so anything unrecognised stays undefined.
+    expect(signedInFromProbe("")).toBeUndefined()
+    expect(signedInFromProbe("some unrelated banner text")).toBeUndefined()
   })
 })
 

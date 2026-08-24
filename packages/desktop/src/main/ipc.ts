@@ -137,6 +137,7 @@ import { detectExternalAgents, openInEditor, prepareWorkspace, type OpenInEditor
 import {
   createParallelWorkspace,
   discardParallelWorkspace,
+  followUpParallelWorkspace,
   listParallelWorkspaces,
   mainWorkingTreeDiff,
   mergeParallelWorkspace,
@@ -332,6 +333,10 @@ export function registerIpcHandlers(deps: Deps) {
   handle("parallel-workspaces-run", async (_event: IpcMainInvokeEvent, id: string, concurrency?: number) => {
     const engine = await deps.awaitInitialization()
     return runParallelWorkspace(id, engine, concurrency)
+  })
+  handle("parallel-workspaces-follow-up", async (_event: IpcMainInvokeEvent, id: string, text: string) => {
+    const engine = await deps.awaitInitialization()
+    return followUpParallelWorkspace(id, engine, text)
   })
   handle("parallel-workspaces-stop", (_event: IpcMainInvokeEvent, id: string) => stopParallelWorkspace(id))
   handle(

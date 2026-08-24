@@ -54,10 +54,11 @@ export function externalRuntimeSetup(runtime: string): ExternalRuntimeSetup | un
 }
 
 // Every step a user must complete before the runtime can be selected, in order.
-export function setupSteps(runtime: ExternalRuntime) {
+export function setupSteps(runtime: ExternalRuntime, mode: "install" | "sign-in" = "install") {
   const setup = EXTERNAL_RUNTIMES[runtime]
-  return [
-    { label: "Install", command: setup.installCommand },
-    ...(setup.signInCommand ? [{ label: "Sign in", command: setup.signInCommand }] : []),
-  ]
+  const signIn = setup.signInCommand ? [{ label: "Sign in", command: setup.signInCommand }] : []
+  // An installed CLI that is merely signed out needs one step, not two: showing
+  // the install command again reads as "reinstall it", which is the wrong fix.
+  if (mode === "sign-in") return signIn
+  return [{ label: "Install", command: setup.installCommand }, ...signIn]
 }

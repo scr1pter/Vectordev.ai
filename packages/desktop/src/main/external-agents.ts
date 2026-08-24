@@ -22,6 +22,9 @@ export type ExternalAgentStatus = {
   installed: boolean
   version?: string
   path?: string
+  // undefined means "could not tell", never "signed out": a picker that claims
+  // a working CLI is signed out is worse than one that stays quiet.
+  signedIn?: boolean
 }
 
 type ExternalAgentCandidate = { id: ExternalAgentId; name: string; cli: string }
@@ -250,6 +253,29 @@ function firstLine(text: string): string | undefined {
     .find(Boolean)
 }
 
+// The question detection could not answer before: a CLI can be installed, report
+// a version, and still refuse every run because nobody signed in — which is
+// exactly what a green "Installed" tile promised and then failed to deliver.
+// Both probes are local and quick (codex ~0.03s, claude ~0.3s); neither reaches
+// a model. cursor-agent is deliberately absent: its contract is unverified, and
+// guessing would produce exactly the false claim this is meant to prevent.
+const AUTH_PROBE: Partial<Record<ExternalAgentId, string[]>> = {
+  "claude-code": ["auth", "status"],
+  codex: ["login", "status"],
+}
+
+// `claude auth status` prints JSON; `codex login status` prints a sentence. The
+// negative test runs first because "not logged in" contains "logged in".
+const LOGGED_IN_FLAG = /"loggedIn"\s*:\s*(true|false)/i
+
+export function signedInFromProbe(output: string) {
+  const flag = LOGGED_IN_FLAG.exec(output)
+  if (flag) return flag[1]?.toLowerCase() === "true"
+  if (/\bnot logged in\b|\blogged out\b|\bno credentials\b|\bplease run\b.*\blogin\b/i.test(output)) return false
+  if (/\blogged in\b|\bauthenticated\b/i.test(output)) return true
+  return undefined
+}
+
 async function detectOne(candidate: ExternalAgentCandidate): Promise<ExternalAgentStatus> {
   const path = await resolveAgentPath(candidate.cli)
   if (!path) return { id: candidate.id, name: candidate.name, cli: candidate.cli, installed: false }
@@ -257,7 +283,12 @@ async function detectOne(candidate: ExternalAgentCandidate): Promise<ExternalAge
   // version probe gets the same environment the real run will get.
   const result = await run(path, ["--version"], 5_000, agentEnvironment())
   const version = result.failed ? undefined : (firstLine(result.stdout) ?? firstLine(result.stderr))
-  return { id: candidate.id, name: candidate.name, cli: candidate.cli, installed: true, version, path }
+  const probe = AUTH_PROBE[candidate.id]
+  // Parsed even when the probe exits non-zero: a signed-out CLI is entitled to
+  // report that with a failing exit code.
+  const auth = probe ? await run(path, probe, 5_000, agentEnvironment()) : undefined
+  const signedIn = auth ? signedInFromProbe(`${auth.stdout}\n${auth.stderr}`) : undefined
+  return { id: candidate.id, name: candidate.name, cli: candidate.cli, installed: true, version, path, signedIn }
 }
 
 // Detection touches the filesystem and spawns a `--version` probe per candidate;
@@ -422,6 +453,8 @@ export type ExternalAgentRunResult = {
   summary: string
   error?: string
   actualCost?: string
+  sessionId?: string
+  resumeRejected?: boolean
   output: string[]
 }
 
@@ -429,8 +462,17 @@ export type RunExternalAgentInput = {
   runtime: CodingAgentRuntime
   cwd: string
   prompt: string
+  resumeSessionId?: string
   signal?: AbortSignal
   onEvent?: (event: ExternalAgentEvent) => void
+  // Fires at most once per run, the moment the id first appears on the stream.
+  // A field on ExternalAgentEvent would arrive duplicated, because emitLine
+  // fires onEvent twice per line — once raw, once as derived activity.
+  onSessionId?: (sessionId: string) => void
+  // Overrides the memoized login-shell environment. agentEnvironment() reads
+  // the real machine once per process, so without this seam no test can point
+  // a run at a fake CLI.
+  env?: AgentEnvironment
 }
 
 const SECRET_VALUE_PATTERN =
@@ -441,12 +483,54 @@ function redactAgentOutput(value: string) {
   return value.replace(SECRET_VALUE_PATTERN, "$1[redacted]").replace(BEARER_PATTERN, "$1[redacted]")
 }
 
-function runtimeArguments(runtime: CodingAgentRuntime, cwd: string, prompt: string) {
+// Resume argv is not the fresh argv plus a flag: `codex exec resume` rejects
+// --sandbox and -C outright, so each runtime branches before its fresh form.
+export function runtimeArguments(
+  runtime: CodingAgentRuntime,
+  cwd: string,
+  prompt: string,
+  resumeSessionId?: string,
+) {
+  if (runtime === "claude-code" && resumeSessionId) {
+    // The id must be the immediately-following argv element: --resume takes an
+    // OPTIONAL value, so any gap lets it swallow the prompt and open the
+    // interactive picker instead of running headless.
+    return [
+      "--resume",
+      resumeSessionId,
+      "-p",
+      prompt,
+      "--output-format",
+      "stream-json",
+      "--verbose",
+      "--permission-mode",
+      "acceptEdits",
+    ]
+  }
   if (runtime === "claude-code") {
     return ["-p", prompt, "--output-format", "stream-json", "--verbose", "--permission-mode", "acceptEdits"]
   }
+  if (runtime === "codex" && resumeSessionId) {
+    // Options must precede SESSION_ID, and resume takes neither --sandbox nor
+    // -C. The inner quotes are literal TOML for -c; spawn's cwd covers -C.
+    return [
+      "exec",
+      "resume",
+      "--json",
+      "--skip-git-repo-check",
+      "-c",
+      'sandbox_mode="workspace-write"',
+      resumeSessionId,
+      prompt,
+    ]
+  }
   if (runtime === "codex") {
     return ["exec", "--json", "--sandbox", "workspace-write", "--skip-git-repo-check", "-C", cwd, prompt]
+  }
+  // Unverified: cursor-agent could not be installed to confirm these flags, so
+  // a rejection degrades through resumeRejected into a re-brief.
+  if (resumeSessionId) {
+    return ["--resume", resumeSessionId, "-p", "--force", "--output-format", "stream-json", prompt]
   }
   return ["-p", "--force", "--output-format", "stream-json", prompt]
 }
@@ -488,6 +572,22 @@ function summaryFromAgentLine(line: string) {
     (event.item && typeof event.item === "object" ? textAt(event.item, ["text", "message"]) : undefined)
   )
 }
+
+// One rule covers all three runtimes: codex puts the id on thread.started as
+// thread_id, claude puts it on system/init as session_id, and cursor's envelope
+// mirrors claude's but its docs call the value a chatId. The keys do not
+// collide, so branching on runtime would buy nothing. Top-level only, matching
+// textAt — a nested id is a different protocol version, better treated as
+// absent than guessed at.
+export function sessionFromAgentLine(line: string) {
+  return textAt(parseAgentJson(line), ["session_id", "thread_id", "sessionId", "threadId", "chat_id", "chatId"])
+}
+
+// A resume the CLI itself refused, as opposed to a task that failed. Only
+// consulted when a resume id was actually passed, so an unrelated "unknown
+// option" inside agent output cannot silently downgrade a working conversation.
+const RESUME_REJECTED_PATTERN =
+  /unexpected argument|unknown (?:option|command)|unrecognized (?:option|argument)|invalid (?:option|argument)|no conversation found|session id .*(?:not found|already in use)/i
 
 function costFromAgentLine(line: string) {
   const event = parseAgentJson(line)
@@ -549,7 +649,7 @@ function stopAgentProcess(child: ChildProcessWithoutNullStreams) {
 
 export async function runExternalCodingAgent(input: RunExternalAgentInput): Promise<ExternalAgentRunResult> {
   const setup = RUNTIME_SETUP[input.runtime]
-  const env = agentEnvironment()
+  const env = input.env ?? agentEnvironment()
   const path = await resolveAgentPath(setup.cli, env)
   if (!path) {
     throw new Error(
@@ -558,7 +658,10 @@ export async function runExternalCodingAgent(input: RunExternalAgentInput): Prom
   }
 
   return new Promise((resolve, reject) => {
-    const launch = shimmedCommand(path, runtimeArguments(input.runtime, input.cwd, input.prompt))
+    const launch = shimmedCommand(
+      path,
+      runtimeArguments(input.runtime, input.cwd, input.prompt, input.resumeSessionId),
+    )
     const child = spawn(launch.command, launch.args, {
       cwd: input.cwd,
       detached: process.platform !== "win32",
@@ -569,6 +672,7 @@ export async function runExternalCodingAgent(input: RunExternalAgentInput): Prom
     const output: string[] = []
     const summaries: string[] = []
     let actualCost: string | undefined
+    let sessionId: string | undefined
     let stdoutBuffer = ""
     let stderrBuffer = ""
     let settled = false
@@ -581,6 +685,15 @@ export async function runExternalCodingAgent(input: RunExternalAgentInput): Prom
       const summary = summaryFromAgentLine(text)
       if (summary) summaries.push(summary)
       actualCost = costFromAgentLine(text) ?? actualCost
+      // FIRST wins, inverted from actualCost above: claude repeats session_id on
+      // nearly every event, and codex emits thread_id exactly once, on line 1.
+      // This must happen here rather than as a post-hoc scan of `output`, which
+      // is capped at 240 lines FIFO — every real-length run has already evicted
+      // codex's thread.started by the time close fires.
+      if (!sessionId) {
+        sessionId = sessionFromAgentLine(text)
+        if (sessionId) input.onSessionId?.(sessionId)
+      }
       input.onEvent?.({ stream, text })
       input.onEvent?.({ stream: "activity", text: activityFromAgentLine(text) })
     }
@@ -618,6 +731,12 @@ export async function runExternalCodingAgent(input: RunExternalAgentInput): Prom
         summary: outcome.error ?? summaries.at(-1) ?? `${setup.label} completed the isolated task.`,
         error: outcome.error,
         actualCost,
+        // Not seeded from resumeSessionId before the stream: if a runtime mints
+        // a NEW id on resume (cursor is unverified), seeding would hide it and
+        // every later turn would resume a thread that no longer grows.
+        sessionId: sessionId ?? input.resumeSessionId,
+        resumeRejected:
+          Boolean(input.resumeSessionId) && outcome.exitCode !== 0 && RESUME_REJECTED_PATTERN.test(output.join("\n")),
         output,
       })
     })
