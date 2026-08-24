@@ -62,7 +62,7 @@ const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Frida
 
 const FIELD =
   "w-full rounded-[10px] border border-[color:var(--vx-line)] bg-white/[0.045] px-3 py-2 text-[13.5px] text-white outline-none placeholder:text-white/35 focus:border-[color:var(--vx-purple)]"
-const LABEL = "block text-[12px] font-medium uppercase tracking-wide text-white/45"
+const LABEL = "block text-[11px] font-semibold uppercase tracking-[0.09em] text-white/40"
 
 // datetime-local wants "YYYY-MM-DDTHH:mm" in LOCAL time. toISOString() would
 // shift by the timezone offset and schedule the run at the wrong hour.
@@ -127,11 +127,16 @@ export function Automations(props: {
           aria-label="Automations"
           class="fixed inset-0 z-[90] overflow-y-auto bg-[color:var(--vx-canvas)]"
         >
-          <div class="flex justify-end px-6 pt-5">
+          <header class="sticky top-0 z-10 flex h-14 items-center gap-3 border-b border-[color:var(--vx-line)] bg-[color:var(--vx-canvas)]/95 px-6 backdrop-blur">
+            <span class="text-[13.5px] font-semibold text-white">Automations</span>
+            <span class="text-[12.5px] text-white/40">
+              {props.records.length === 1 ? "1 scheduled" : `${props.records.length} scheduled`}
+            </span>
+            <div class="flex-1" />
             <button
               type="button"
               aria-label="Close automations"
-              class="grid size-8 place-items-center rounded-full text-white/45 transition hover:bg-white/[0.06] hover:text-white"
+              class="grid size-8 place-items-center rounded-[8px] text-white/45 transition hover:bg-white/[0.06] hover:text-white"
               onClick={props.onClose}
             >
               <svg viewBox="0 0 16 16" class="size-4" aria-hidden="true">
@@ -144,17 +149,19 @@ export function Automations(props: {
                 />
               </svg>
             </button>
-          </div>
+          </header>
 
-          <div class="mx-auto w-full max-w-[820px] px-6 pb-20 pt-2">
-            <h1 class="text-[34px] font-semibold leading-tight text-white">Automations</h1>
-            <p class="mt-2 max-w-[620px] text-[15px] leading-relaxed text-white/50">
-              An automation is one task Vector runs again and again on a schedule. You write the task, pick the
-              repositories it runs in — and, in each one, whether it starts a new session or continues a session you
-              already have — then choose how often it repeats.
+          <div class="mx-auto w-full max-w-[840px] px-6 pb-24 pt-10">
+            <h1 class="text-[32px] font-semibold leading-[1.15] tracking-[-0.02em] text-white">
+              Work Vector repeats without you
+            </h1>
+            <p class="mt-3 max-w-[640px] text-[15px] leading-[1.6] text-white/60">
+              An automation is one task Vector runs again and again on a schedule. Write the task, pick the
+              repositories it runs in — and in each one whether it starts a new session or continues one you already
+              have — then choose how often it repeats.
             </p>
 
-            <ul class="mt-5 grid gap-2 sm:grid-cols-3">
+            <ul class="mt-8 grid gap-2.5 sm:grid-cols-3">
               <For
                 each={[
                   {
@@ -172,15 +179,15 @@ export function Automations(props: {
                 ]}
               >
                 {(point) => (
-                  <li class="rounded-[10px] border border-[color:var(--vx-line)] bg-white/[0.022] px-3 py-2.5">
+                  <li class="rounded-[10px] border border-[color:var(--vx-line)] bg-white/[0.022] px-3.5 py-3">
                     <span class="block text-[12.5px] font-medium text-white">{point.title}</span>
-                    <span class="mt-1 block text-[12.5px] leading-relaxed text-white/45">{point.body}</span>
+                    <span class="mt-1.5 block text-[12.5px] leading-[1.55] text-white/50">{point.body}</span>
                   </li>
                 )}
               </For>
             </ul>
 
-            <p class="mt-3 text-[12.5px] leading-relaxed text-white/35">
+            <p class="mt-3 text-[12.5px] leading-[1.55] text-white/40">
               Runs that fall due while Vector is fully closed are not replayed one by one — the next start catches up
               with a single run and says how many it skipped.
             </p>
@@ -188,24 +195,21 @@ export function Automations(props: {
             <Show
               when={props.supported}
               fallback={
-                <p class="mt-6 rounded-[10px] border border-[color:var(--vx-line)] bg-white/[0.022] px-4 py-3 text-[13px] leading-relaxed text-white/50">
+                <p class="mt-10 rounded-[10px] border border-[color:var(--vx-line)] bg-white/[0.022] px-4 py-3.5 text-[13px] leading-[1.6] text-white/60">
                   Automations run from the Vector desktop app, which keeps a scheduler alive in the tray. This surface
                   activates once Vector connects to this workspace.
                 </p>
               }
             >
               <Show when={!composing()}>
-                <div class="mt-6 flex flex-wrap items-center gap-3">
+                <div class="mt-10">
                   <button
                     type="button"
-                    class="rounded-full bg-white/[0.12] px-4 py-1.5 text-[13px] font-medium text-white transition hover:bg-white/[0.18]"
+                    class="rounded-[9px] bg-[color:var(--vx-purple)] px-4 py-2 text-[13px] font-medium text-white transition hover:brightness-110"
                     onClick={() => compose(undefined)}
                   >
                     New automation
                   </button>
-                  <span class="text-[12.5px] text-white/35">
-                    {props.records.length === 1 ? "1 automation" : `${props.records.length} automations`}
-                  </span>
                 </div>
               </Show>
 
@@ -228,17 +232,17 @@ export function Automations(props: {
                 </Show>
               </Show>
 
-              <div class="mt-8">
-                <h2 class="mb-1 text-[15px] font-medium text-white/70">Your automations</h2>
+              <div class="mt-10">
+                <h2 class="text-[11px] font-semibold uppercase tracking-[0.09em] text-white/40">Your automations</h2>
                 <Show
                   when={visible().length}
                   fallback={
-                    <p class="px-1 py-4 text-[13.5px] text-white/40">
+                    <p class="mt-3 rounded-[10px] border border-dashed border-[color:var(--vx-line)] px-4 py-6 text-center text-[13px] text-white/40">
                       Nothing scheduled yet. Create one above, or start from a suggestion below.
                     </p>
                   }
                 >
-                  <div class="mt-2 flex flex-col gap-2">
+                  <div class="mt-3 flex flex-col gap-2">
                     <For each={visible()}>
                       {(record) => (
                         <AutomationRow
@@ -254,13 +258,15 @@ export function Automations(props: {
                 </Show>
               </div>
 
-              <div class="mt-8 border-t border-[color:var(--vx-line)] pt-6">
-                <h2 class="mb-2 text-[15px] font-medium text-white/70">Start from a suggestion</h2>
+              <div class="mt-10 border-t border-[color:var(--vx-line)] pt-8">
+                <h2 class="mb-3 text-[11px] font-semibold uppercase tracking-[0.09em] text-white/40">
+                  Start from a suggestion
+                </h2>
                 <For each={SUGGESTIONS}>
                   {(suggestion) => (
                     <button
                       type="button"
-                      class="flex w-full items-start gap-3 rounded-[8px] px-2 py-2.5 text-left transition hover:bg-white/[0.035]"
+                      class="flex w-full items-start gap-3 rounded-[9px] border border-transparent px-3 py-3 text-left transition hover:border-[color:var(--vx-line)] hover:bg-white/[0.03]"
                       onClick={() => compose(suggestion)}
                     >
                       <span class="mt-0.5 grid size-4 shrink-0 place-items-center text-[color:var(--vx-purple-bright)]">
@@ -281,7 +287,7 @@ export function Automations(props: {
                           <span class="text-[13px] font-medium text-white">{suggestion.title}</span>
                           <span class="text-[12.5px] text-white/40">{suggestion.schedule}</span>
                         </span>
-                        <span class="mt-0.5 block text-[12.5px] leading-relaxed text-white/45">
+                        <span class="mt-1 block text-[12.5px] leading-[1.55] text-white/50">
                           {suggestion.description}
                         </span>
                       </span>
@@ -460,7 +466,7 @@ function AutomationForm(props: {
   }
 
   return (
-    <form class="mt-6 rounded-[12px] border border-[color:var(--vx-line)] bg-white/[0.025] p-4" onSubmit={submit}>
+    <form class="mt-10 rounded-[12px] border border-[color:var(--vx-line)] bg-white/[0.025] p-5" onSubmit={submit}>
       <label class={LABEL} for="automation-prompt">
         What should Vector do, every time?
       </label>
@@ -469,22 +475,22 @@ function AutomationForm(props: {
         rows={3}
         value={prompt()}
         placeholder="Summarise what changed since yesterday and open issues for anything broken"
-        class={`mt-1.5 resize-y ${FIELD}`}
+        class={`mt-2 resize-y ${FIELD}`}
         onInput={(event) => setPrompt(event.currentTarget.value)}
       />
 
-      <label class={`mt-3 ${LABEL}`} for="automation-title">
+      <label class={`mt-5 ${LABEL}`} for="automation-title">
         Name <span class="normal-case text-white/30">(optional)</span>
       </label>
       <input
         id="automation-title"
         value={title()}
         placeholder="Morning repo brief"
-        class={`mt-1.5 ${FIELD}`}
+        class={`mt-2 ${FIELD}`}
         onInput={(event) => setTitle(event.currentTarget.value)}
       />
 
-      <div class="mt-4">
+      <div class="mt-5">
         <span class={LABEL}>Where it runs</span>
         <Show
           when={props.repositories.length}
@@ -536,7 +542,7 @@ function AutomationForm(props: {
         </Show>
       </div>
 
-      <div class="mt-4 flex flex-wrap gap-3">
+      <div class="mt-5 flex flex-wrap gap-3">
         <div class="min-w-[150px] flex-1">
           <label class={LABEL} for="automation-repeat">
             Repeat
@@ -544,7 +550,7 @@ function AutomationForm(props: {
           <select
             id="automation-repeat"
             value={kind()}
-            class={`mt-1.5 ${FIELD}`}
+            class={`mt-2 ${FIELD}`}
             onChange={(event) => setKind(event.currentTarget.value as Recurrence["kind"])}
           >
             <For each={REPEATS}>{(item) => <option value={item.kind}>{item.label}</option>}</For>
@@ -559,7 +565,7 @@ function AutomationForm(props: {
             <select
               id="automation-weekday"
               value={String(weekday())}
-              class={`mt-1.5 ${FIELD}`}
+              class={`mt-2 ${FIELD}`}
               onChange={(event) => setWeekday(Number(event.currentTarget.value))}
             >
               <For each={WEEKDAYS}>{(name, index) => <option value={String(index())}>{name}</option>}</For>
@@ -578,7 +584,7 @@ function AutomationForm(props: {
                 id="automation-when"
                 type="time"
                 value={time()}
-                class={`mt-1.5 ${FIELD}`}
+                class={`mt-2 ${FIELD}`}
                 onInput={(event) => setTime(event.currentTarget.value)}
               />
             }
@@ -587,7 +593,7 @@ function AutomationForm(props: {
               id="automation-when"
               type="datetime-local"
               value={at()}
-              class={`mt-1.5 ${FIELD}`}
+              class={`mt-2 ${FIELD}`}
               onInput={(event) => setAt(event.currentTarget.value)}
             />
           </Show>

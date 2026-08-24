@@ -20,6 +20,10 @@ const navigation = [
     links: [
       ["Vector Agent", "vector-agent"],
       ["Agent workspaces", "agent-workspaces"],
+      ["Project rules", "project-rules"],
+      ["Agent Dashboard", "agent-dashboard"],
+      ["Claude Code, Codex, Cursor", "external-agents"],
+      ["Automations", "automations"],
       ["Codespace", "codespace"],
       ["Browser", "browser"],
       ["Terminal and Canvas", "terminal-canvas"],
@@ -213,8 +217,90 @@ const faqs = [
           </p>
         </section>
 
-        <section id="codespace" class="doc-section">
+        <section id="project-rules" class="doc-section">
           <p class="section-number">06</p>
+          <h2>Project rules</h2>
+          <p>
+            A rule is a standard written the way you would say it to a new teammate — "we don't put database query
+            logic in the controller". Open <strong>Project rules</strong> from the workspace rail, the home screen, or
+            Settings, write the rule, and point it at a repository and optionally at the files it governs.
+          </p>
+          <ol class="steps">
+            <li><span>1</span><div><strong>Write it in plain English</strong><p>No rule language, no schema. One sentence describing the standard.</p></div></li>
+            <li><span>2</span><div><strong>Scope it</strong><p>Leave the repository empty to apply it everywhere, or name one. Add file paths like <code>src/app/web/*.tsx</code> to narrow it further.</p></div></li>
+            <li><span>3</span><div><strong>Commit it</strong><p>Vector writes the rules to <code>.vector/RULES.md</code> in the repository. Commit that file and your whole team gets the same rules.</p></div></li>
+          </ol>
+          <ul class="feature-list">
+            <li><strong>Vector agents</strong><span>Read the rules file directly — the engine loads it as an instruction file on every prompt.</span></li>
+            <li><strong>Claude Code, Codex, Cursor</strong><span>Read their own instruction files and never see it, so Vector copies the matching rules into the prompt it hands them.</span></li>
+            <li><strong>Scope survives as words</strong><span>Instruction files load whole, so the file paths a rule covers are stated in the sentence the agent reads.</span></li>
+          </ul>
+          <p class="note">
+            A rule that conflicts with the task you asked for is reported rather than silently resolved. Vector tells
+            the agent to say so instead of quietly picking a side.
+          </p>
+        </section>
+
+        <section id="agent-dashboard" class="doc-section">
+          <p class="section-number">07</p>
+          <h2>Agent Dashboard</h2>
+          <p>
+            Every agent in the project on one board: <strong>Running</strong>, <strong>Needs you</strong> and
+            <strong>Done</strong>. Open it from the workspace rail. Switch to a list for a denser view of the same
+            three groups.
+          </p>
+          <ul class="feature-list">
+            <li><strong>Needs you</strong><span>Merges failed with needs-review, including a finished run that reported an error. Both are stopped and waiting on a person.</span></li>
+            <li><strong>Filters that compose</strong><span>Status, Team, Pull request and Agent. Two values in one menu means either; values in two menus means both.</span></li>
+            <li><strong>Pull request state</strong><span>Open, merged, or never opened — merge state wins, so a merged run does not sit under "open" forever.</span></li>
+            <li><strong>Teams as a unit</strong><span>Agents sharing a team or swarm filter together, and the board shows the messages they sent each other mid-run.</span></li>
+          </ul>
+          <p class="note">
+            Two agents holding uncommitted work on the same file are reported as a clash. Merging both will conflict —
+            review one before merging the other.
+          </p>
+        </section>
+
+        <section id="external-agents" class="doc-section">
+          <p class="section-number">08</p>
+          <h2>Claude Code, Codex and Cursor</h2>
+          <p>
+            A workspace can run someone else's CLI instead of Vector's own agent. Vector finds the CLI through your
+            login shell, so a tool installed by nvm, Homebrew or an app bundle is detected even though a desktop app
+            inherits none of that.
+          </p>
+          <ol class="steps">
+            <li><span>1</span><div><strong>Pick the runtime</strong><p>Choose Claude Code, Codex or Cursor when you create the workspace. The tile shows the version it found, or that it is signed out.</p></div></li>
+            <li><span>2</span><div><strong>Let it work</strong><p>The run happens in an isolated worktree or copy. Vector streams its output and runs the project's own checks afterwards.</p></div></li>
+            <li><span>3</span><div><strong>Keep talking</strong><p>The workspace has a message box. A follow-up resumes the CLI's own conversation, so it still remembers the file it just changed.</p></div></li>
+          </ol>
+          <ul class="feature-list">
+            <li><strong>Signed out is visible</strong><span>Vector asks each CLI whether it is authenticated and shows "Signed out" with the one command that fixes it.</span></li>
+            <li><strong>Resume, or an honest restart</strong><span>If a CLI refuses to resume, Vector re-briefs it with a written summary and labels that turn as restarted rather than pretending it remembers.</span></li>
+            <li><strong>They can receive, not send</strong><span>External CLIs have no teammate-message tool, so they can be told what teammates did but cannot reply.</span></li>
+          </ul>
+        </section>
+
+        <section id="automations" class="doc-section">
+          <p class="section-number">09</p>
+          <h2>Automations</h2>
+          <p>
+            An automation is one task Vector runs again and again on a schedule. Open <strong>Automations</strong> from
+            the home screen, write the task, choose the repositories it runs in, and pick how often it repeats.
+          </p>
+          <ul class="feature-list">
+            <li><strong>Across repositories</strong><span>One task and one schedule, in every repository you select. Each run reports back separately.</span></li>
+            <li><strong>New or existing sessions</strong><span>Continue a thread you already started, or open a fresh session for every run.</span></li>
+            <li><strong>While you are away</strong><span>Vector stays in the tray after you close the window, so runs fire without you there.</span></li>
+          </ul>
+          <p class="note">
+            Runs that fall due while Vector is fully closed are not replayed one by one. The next start catches up with
+            a single run and says how many it skipped.
+          </p>
+        </section>
+
+        <section id="codespace" class="doc-section">
+          <p class="section-number">10</p>
           <h2>Codespace</h2>
           <p>
             Open Codespace when you want to work directly. It includes the project tree, editor tabs,
@@ -229,7 +315,7 @@ const faqs = [
         </section>
 
         <section id="browser" class="doc-section">
-          <p class="section-number">07</p>
+          <p class="section-number">11</p>
           <h2>Controlled browser</h2>
           <p>
             The Browser is attached to the current repository and session. Open a local preview or URL,
@@ -248,7 +334,7 @@ const faqs = [
         </section>
 
         <section id="terminal-canvas" class="doc-section">
-          <p class="section-number">08</p>
+          <p class="section-number">12</p>
           <h2>Terminal and Canvas</h2>
           <p>
             The Terminal runs commands inside the active repository. Canvas lets you arrange project
@@ -258,7 +344,7 @@ const faqs = [
         </section>
 
         <section id="cloud-services" class="doc-section">
-          <p class="section-number">09</p>
+          <p class="section-number">13</p>
           <h2>Cloud Services</h2>
           <p>
             Cloud Services keeps publishing controls with the repository. Connect a supported hosting
@@ -274,7 +360,7 @@ const faqs = [
         </section>
 
         <section id="models" class="doc-section">
-          <p class="section-number">10</p>
+          <p class="section-number">14</p>
           <h2>Models and BYOK</h2>
           <p>
             Connect a provider in Settings, then select a model in the session composer. Model
@@ -284,7 +370,7 @@ const faqs = [
         </section>
 
         <section id="connections" class="doc-section">
-          <p class="section-number">11</p>
+          <p class="section-number">15</p>
           <h2>MCP and connections</h2>
           <p>
             MCP servers and project connections give an agent structured access to approved tools.
@@ -298,7 +384,7 @@ const faqs = [
         </section>
 
         <section id="review" class="doc-section">
-          <p class="section-number">12</p>
+          <p class="section-number">16</p>
           <h2>Review and recovery</h2>
           <p>
             Review changed files before merging or publishing. Checkpoints preserve recoverable
@@ -308,7 +394,7 @@ const faqs = [
         </section>
 
         <section id="troubleshooting" class="doc-section">
-          <p class="section-number">13</p>
+          <p class="section-number">17</p>
           <h2>Troubleshooting</h2>
           <div class="troubleshooting">
             <article><strong>The agent does not respond</strong><p>Confirm a provider and model are connected, then check whether the provider reports a quota or authentication error.</p></article>
@@ -319,7 +405,7 @@ const faqs = [
         </section>
 
         <section id="faq" class="doc-section">
-          <p class="section-number">14</p>
+          <p class="section-number">18</p>
           <h2>Frequently asked questions</h2>
           <div class="faq-list">
             {faqs.map((item) => (

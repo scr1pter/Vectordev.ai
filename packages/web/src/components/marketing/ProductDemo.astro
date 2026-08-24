@@ -126,7 +126,8 @@ const filters = [
     <p class="demo-kicker">Try it right here</p>
     <h2 id="demo-title">Click around the real thing.</h2>
     <p class="demo-deck">
-      This is Vector's Agent Dashboard, running in the page. Switch the board to a list, filter by status, team, pull
+      This is Vector, running in the page. Move between the Agent Dashboard, Codespace, your project rules and the
+      browser from the rail on the left. On the dashboard, switch the board to a list, filter by status, team, pull
       request or which agent ran it, and search. No download, no account — see whether you like it first.
     </p>
   </div>
@@ -139,8 +140,11 @@ const filters = [
 
     <div class="demo-body">
       <aside class="demo-rail" aria-label="Workspace">
-        <p class="demo-rail-action">New session</p>
-        <p class="demo-rail-item is-active">Agent Dashboard</p>
+        <p class="demo-rail-heading">Workspace</p>
+        <button type="button" class="demo-rail-nav is-on" data-surface-nav="dashboard">Agent Dashboard</button>
+        <button type="button" class="demo-rail-nav" data-surface-nav="codespace">Codespace</button>
+        <button type="button" class="demo-rail-nav" data-surface-nav="rules">Project rules</button>
+        <button type="button" class="demo-rail-nav" data-surface-nav="browser">Browser</button>
         <p class="demo-rail-heading">Spaces</p>
         <p class="demo-rail-group">Auth hardening</p>
         {sessions.filter((session) => session.space).map((session) => (
@@ -152,6 +156,7 @@ const filters = [
       </aside>
 
       <div class="demo-main">
+        <div class="demo-surface" data-surface="dashboard">
         <div class="demo-toolbar">
           <div class="demo-views" role="tablist" aria-label="View">
             <button type="button" role="tab" class="is-on" data-view="board" aria-selected="true">Board</button>
@@ -252,6 +257,82 @@ const filters = [
 
           <p class="demo-none" data-none hidden>No agents match these filters.</p>
         </div>
+        </div>
+
+        <div class="demo-surface" data-surface="codespace" hidden>
+          <div class="demo-code">
+            <div class="demo-tree">
+              <p class="demo-tree-head">middleware</p>
+              <p class="demo-tree-file is-open">limit.ts</p>
+              <p class="demo-tree-file">auth.ts</p>
+              <p class="demo-tree-head">routes</p>
+              <p class="demo-tree-file">upload.ts</p>
+              <p class="demo-tree-file">billing.ts</p>
+            </div>
+            <div class="demo-editor">
+              <div class="demo-editor-tabs">
+                <span class="is-on">limit.ts</span>
+                <span>auth.ts</span>
+              </div>
+              <pre class="demo-editor-code"><code>{`const WINDOW_MS = 60_000
+const MAX = 100
+
+// Keyed on the API token, not the IP: everyone
+// behind one office NAT is not one caller.
+export function allow(token: string) {
+  const now = Date.now()
+  const hits = seen.get(token) ?? []
+  const live = hits.filter((at) => now - at < WINDOW_MS)
+  if (live.length >= MAX) return false
+  seen.set(token, [...live, now])
+  return true
+}`}</code></pre>
+              <div class="demo-editor-foot">
+                <span class="demo-diag">2 diagnostics</span>
+                <span>TypeScript</span>
+                <span>Edited by Vector agent</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="demo-surface" data-surface="rules" hidden>
+          <div class="demo-rules">
+            <p class="demo-rules-lead">
+              Standards in plain English, scoped to a repository and the files they govern. Saved to
+              <code>.vector/RULES.md</code> in the repo, so they are committed and every agent follows them.
+            </p>
+            <div class="demo-rule">
+              <p class="demo-rule-text">We don't put database query logic in the controller.</p>
+              <p class="demo-rule-scope">vectordev.ai · whole repository</p>
+            </div>
+            <div class="demo-rule">
+              <p class="demo-rule-text">Components stay presentational — no data fetching inside them.</p>
+              <p class="demo-rule-scope">vectordev.ai · src/app/web/*.tsx</p>
+            </div>
+            <div class="demo-rule">
+              <p class="demo-rule-text">Never widen a public type without a migration note.</p>
+              <p class="demo-rule-scope">Every project</p>
+            </div>
+            <p class="demo-rules-foot">Vector · Claude Code · Codex · Cursor all follow these.</p>
+          </div>
+        </div>
+
+        <div class="demo-surface" data-surface="browser" hidden>
+          <div class="demo-browser">
+            <div class="demo-browser-bar">
+              <span class="demo-browser-url">localhost:3000/checkout</span>
+            </div>
+            <div class="demo-browser-page">
+              <p class="demo-browser-step">Filled the card field with a test number</p>
+              <p class="demo-browser-step">Clicked Pay</p>
+              <p class="demo-browser-step is-fail">Expected a receipt, got a 500</p>
+              <p class="demo-browser-note">
+                The agent drives a real browser and refuses to type into password, one-time-code and card fields.
+              </p>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -310,6 +391,20 @@ const filters = [
       none.hidden = !empty
       clear.hidden = !(state.query.trim() || Object.values(state.filters).some((chosen) => chosen.length))
     }
+
+    // The rail switches which surface of the app you are looking at. Everything
+    // is server-rendered and only toggled, so this stays a visibility flip.
+    root.querySelectorAll("[data-surface-nav]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const target = button.dataset.surfaceNav
+        root.querySelectorAll("[data-surface]").forEach((surface) => {
+          surface.hidden = surface.dataset.surface !== target
+        })
+        root.querySelectorAll("[data-surface-nav]").forEach((other) => {
+          other.classList.toggle("is-on", other === button)
+        })
+      })
+    })
 
     root.querySelectorAll("[data-view]").forEach((button) => {
       button.addEventListener("click", () => {
@@ -501,6 +596,204 @@ const filters = [
 
   .demo-rail-session.is-nested {
     padding-left: 18px;
+  }
+
+  .demo-rail-nav {
+    display: block;
+    width: 100%;
+    margin-bottom: 2px;
+    padding: 5px 8px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--ink-55, rgba(255, 255, 255, 0.55));
+    font: inherit;
+    font-size: 12px;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .demo-rail-nav:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: #fff;
+  }
+
+  .demo-rail-nav.is-on {
+    background: rgba(143, 82, 255, 0.16);
+    color: #fff;
+  }
+
+  .demo-code {
+    display: grid;
+    grid-template-columns: 150px minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .demo-tree p {
+    margin: 0 0 2px;
+    padding: 4px 8px;
+    border-radius: 6px;
+    font-size: 11.5px;
+    color: var(--ink-55, rgba(255, 255, 255, 0.55));
+  }
+
+  .demo-tree-head {
+    font-size: 9.5px !important;
+    font-weight: 600;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.3) !important;
+    margin-top: 8px !important;
+  }
+
+  .demo-tree-file {
+    padding-left: 16px !important;
+  }
+
+  .demo-tree-file.is-open {
+    background: rgba(143, 82, 255, 0.14);
+    color: #fff !important;
+  }
+
+  .demo-editor {
+    overflow: hidden;
+    border: 1px solid var(--hairline, rgba(224, 211, 255, 0.16));
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.02);
+  }
+
+  .demo-editor-tabs {
+    display: flex;
+    gap: 2px;
+    padding: 6px 8px 0;
+    border-bottom: 1px solid var(--hairline, rgba(224, 211, 255, 0.16));
+  }
+
+  .demo-editor-tabs span {
+    padding: 5px 12px;
+    border-radius: 6px 6px 0 0;
+    font-size: 11.5px;
+    color: rgba(255, 255, 255, 0.4);
+  }
+
+  .demo-editor-tabs span.is-on {
+    background: rgba(255, 255, 255, 0.05);
+    color: #fff;
+  }
+
+  .demo-editor-code {
+    margin: 0;
+    padding: 12px 14px;
+    overflow-x: auto;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11.5px;
+    line-height: 1.65;
+    color: rgba(255, 255, 255, 0.72);
+  }
+
+  .demo-editor-foot {
+    display: flex;
+    gap: 14px;
+    padding: 7px 14px;
+    border-top: 1px solid var(--hairline, rgba(224, 211, 255, 0.16));
+    font-size: 10.5px;
+    color: rgba(255, 255, 255, 0.35);
+  }
+
+  .demo-diag {
+    color: #fcd34d;
+  }
+
+  .demo-rules-lead,
+  .demo-rules-foot {
+    margin: 0 0 12px;
+    font-size: 12.5px;
+    line-height: 1.6;
+    color: var(--ink-55, rgba(255, 255, 255, 0.55));
+  }
+
+  .demo-rules-foot {
+    margin: 12px 0 0;
+    color: rgba(255, 255, 255, 0.4);
+  }
+
+  .demo-rules-lead code {
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.07);
+    font-size: 11.5px;
+  }
+
+  .demo-rule {
+    margin-bottom: 8px;
+    padding: 10px 12px;
+    border: 1px solid var(--hairline, rgba(224, 211, 255, 0.16));
+    border-radius: 9px;
+    background: rgba(255, 255, 255, 0.025);
+  }
+
+  .demo-rule-text {
+    margin: 0;
+    font-size: 12.5px;
+    color: #fff;
+  }
+
+  .demo-rule-scope {
+    margin: 4px 0 0;
+    font-size: 11px;
+    color: var(--purple-soft, #c9b0ff);
+  }
+
+  .demo-browser {
+    overflow: hidden;
+    border: 1px solid var(--hairline, rgba(224, 211, 255, 0.16));
+    border-radius: 10px;
+  }
+
+  .demo-browser-bar {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--hairline, rgba(224, 211, 255, 0.16));
+    background: rgba(255, 255, 255, 0.03);
+  }
+
+  .demo-browser-url {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11.5px;
+    color: rgba(255, 255, 255, 0.5);
+  }
+
+  .demo-browser-page {
+    padding: 14px;
+  }
+
+  .demo-browser-step {
+    margin: 0 0 7px;
+    padding-left: 16px;
+    position: relative;
+    font-size: 12.5px;
+    color: rgba(255, 255, 255, 0.7);
+  }
+
+  .demo-browser-step::before {
+    content: "";
+    position: absolute;
+    top: 6px;
+    left: 0;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #34d399;
+  }
+
+  .demo-browser-step.is-fail::before {
+    background: #fb7185;
+  }
+
+  .demo-browser-note {
+    margin: 12px 0 0;
+    font-size: 11.5px;
+    line-height: 1.55;
+    color: rgba(255, 255, 255, 0.4);
   }
 
   .demo-main {

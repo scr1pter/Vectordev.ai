@@ -737,6 +737,14 @@ export function NewHome() {
           onOpen={() => setAutomationsOpen(true)}
         />
 
+        <HomeProjectRules
+          onOpen={() => {
+            void import("@/components/settings-v2/dialog-settings-v2").then((module) => {
+              dialog.show(() => <module.DialogSettings section="rules" />)
+            })
+          }}
+        />
+
         <section class="vector-home-recents" aria-label={language.t("sidebar.project.recentSessions")}>
           <div class="vector-home-recents__header">
             <div>
@@ -894,6 +902,57 @@ function HomeAutomations(props: { supported: boolean; records: AutomationRecord[
           <IconV2 name="outline-chevron-down" class="-rotate-90" />
         </button>
       </Show>
+    </section>
+  )
+}
+
+// Rules only work if people can find them, and a settings panel nobody opens is
+// the same as a feature nobody shipped.
+function HomeProjectRules(props: { onOpen: () => void }) {
+  return (
+    <section data-vector-home-rules class="shrink-0" aria-label="Project rules">
+      <div class="min-w-0 px-0.5 pb-2.5">
+        <span class="block [font-family:var(--vx-mono)] text-[9.5px] uppercase [font-weight:650] text-v2-text-text-faint">
+          Project rules
+        </span>
+        <strong class="mt-1 block text-[15px] [font-weight:620] text-v2-text-text-base">
+          Your house, your rules
+        </strong>
+      </div>
+      <button
+        type="button"
+        data-action="home-open-rules"
+        class="flex w-full items-center gap-3 rounded-[8px] border border-v2-border-border-muted bg-[rgba(255,255,255,0.018)] px-3 py-2.5 text-left transition-[background-color,border-color] duration-200 ease-[cubic-bezier(0.22,0.7,0.28,1)] hover:border-[rgba(178,140,255,0.3)] hover:bg-[rgba(147,116,236,0.08)]"
+        onClick={props.onOpen}
+      >
+        <span class="grid size-8 shrink-0 place-items-center rounded-[7px] border border-v2-border-border-muted bg-[rgba(255,255,255,0.025)] text-v2-icon-icon-muted">
+          <svg viewBox="0 0 16 16" class="size-4" aria-hidden="true">
+            <path
+              d="M8 1.9 13.2 4v3.6c0 3-2.1 5.4-5.2 6.5-3.1-1.1-5.2-3.5-5.2-6.5V4L8 1.9Z"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.15"
+              stroke-linejoin="round"
+            />
+            <path
+              d="m5.9 7.9 1.5 1.5 2.8-3"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.15"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+        </span>
+        <span class="min-w-0 flex-1">
+          <span class="block text-[12.5px] [font-weight:570] text-v2-text-text-base">Set your rules</span>
+          <span class="mt-0.5 block truncate text-[11.5px] text-v2-text-text-muted">
+            Standards in plain English that every agent follows — Vector's, Claude Code, Codex and Cursor.
+          </span>
+        </span>
+        <span class="shrink-0 text-[11.5px] text-v2-text-text-muted">Open</span>
+        <IconV2 name="outline-chevron-down" class="-rotate-90" />
+      </button>
     </section>
   )
 }

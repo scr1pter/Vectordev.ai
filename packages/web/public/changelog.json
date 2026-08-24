@@ -1,6 +1,20 @@
 {
   "releases": [
     {
+      "tag": "v1.19.9",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Three doors to your rules",
+              "description": "Rules shipped in 1.19.7 and were almost impossible to find, which is the same as not shipping them. They now have three doors: <strong>Project rules</strong> in the workspace rail, a <strong>Set your rules</strong> card on the home screen next to Automations, and their own page in Settings. All three open the same panel, where you write a standard in plain English, point it at a repository and optionally at the files it governs, and Vector writes it to .vector/RULES.md in the repo for the whole team. Automations was redesigned. It had a close button floating alone above the title, four different text opacities competing inside one paragraph, and vertical spacing that changed with every block. It now opens under a real header bar that carries the title and the count, uses one spacing rhythm between sections, one uppercase treatment for every section heading and form label, and two text tones instead of five. The empty state reads as a state rather than a stray sentence, and the primary action is an actual primary button. The landing page demo grew from one screen into the app. A rail on the left moves between the Agent Dashboard, Codespace, your project rules and the browser, so you can look around Vector before downloading it — real clicks, real filtering, no video and no screenshots. The documentation gained four sections for everything added recently: Project rules, the Agent Dashboard board and its filters, running Claude Code, Codex and Cursor including how follow-up turns resume their conversation, and Automations."
+            }
+          ]
+        }
+      ]
+    },
+    {
       "tag": "v1.19.8",
       "highlights": [
         {

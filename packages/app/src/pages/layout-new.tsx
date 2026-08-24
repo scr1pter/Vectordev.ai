@@ -2866,6 +2866,14 @@ export default function NewLayout(props: ParentProps) {
     })
   }
 
+  // Rules were reachable only by knowing they lived in Settings, which is the
+  // same as not shipping them. This opens that panel directly.
+  const openProjectRules = () => {
+    void import("@/components/settings-v2/dialog-settings-v2").then((x) => {
+      dialog.show(() => <x.DialogSettings section="rules" />)
+    })
+  }
+
   const activeParallelCount = createMemo(
     () => parallelRecords().filter((record) => isParallelWorkspaceRunning(record)).length,
   )
@@ -5802,6 +5810,7 @@ export default function NewLayout(props: ParentProps) {
         }}
         onMoveWorkspace={moveAgentWorkspace}
         onCodeEditor={openCodespace}
+        onProjectRules={openProjectRules}
         onAgentDashboard={() => {
           setAgentDashboardOpen(true)
           void refreshTeamConversations()
