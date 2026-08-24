@@ -11,7 +11,6 @@ import {
   groupAgents,
   isRunning,
   needsAttention,
-  sortForDisplay,
   summarize,
   type DashboardAgentInput,
   type DashboardAgentStatus,
@@ -24,30 +23,119 @@ function toggled<T>(values: readonly T[], value: T) {
   return values.includes(value) ? values.filter((item) => item !== value) : [...values, value]
 }
 
-function FilterChip(props: { label: string; active: boolean; onClick: () => void }) {
+type FilterOption = { value: string; label: string }
+
+// A labelled dropdown rather than a row of bare chips: with four facets the
+// chips lose their heading, and "merged" on its own does not say which facet it
+// belongs to.
+function FilterMenu(props: {
+  label: string
+  options: FilterOption[]
+  selected: string[]
+  onToggle: (value: string) => void
+}) {
+  const [open, setOpen] = createSignal(false)
+  const summary = () => {
+    if (!props.selected.length) return ""
+    const first = props.options.find((option) => option.value === props.selected[0])?.label ?? ""
+    return props.selected.length > 1 ? `${first} +${props.selected.length - 1}` : first
+  }
+  return (
+    <div class="relative shrink-0">
+      <button
+        type="button"
+        class="flex items-center gap-1.5 rounded-[7px] border px-2.5 py-1 text-[11.5px] transition"
+        classList={{
+          "border-[color:var(--vx-purple)]/55 bg-[color:var(--vx-purple-soft)] text-white": props.selected.length > 0,
+          "border-[color:var(--vx-line)] text-white/55 hover:text-white": props.selected.length === 0,
+        }}
+        aria-expanded={open()}
+        aria-haspopup="menu"
+        onClick={() => setOpen((current) => !current)}
+      >
+        <span>{props.label}</span>
+        <Show when={summary()}>
+          <span class="text-white/70">{summary()}</span>
+        </Show>
+        <svg viewBox="0 0 12 12" class="size-2.5 opacity-60" aria-hidden="true">
+          <path d="m3 4.5 3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+        </svg>
+      </button>
+      <Show when={open()}>
+        {/* Click-away closes without a document listener: the backdrop is the
+            only thing that can receive the next click while the menu is open. */}
+        <div class="fixed inset-0 z-[1]" onClick={() => setOpen(false)} aria-hidden="true" />
+        <div
+          role="menu"
+          class="absolute left-0 z-[2] mt-1 min-w-[190px] overflow-hidden rounded-[8px] border border-[color:var(--vx-line)] bg-[color:var(--vx-surface)] py-1 shadow-xl"
+        >
+          <div class="px-2.5 py-1 text-[9.5px] font-semibold uppercase tracking-[0.09em] text-white/35">
+            {props.label}
+          </div>
+          <For each={props.options}>
+            {(option) => (
+              <button
+                type="button"
+                role="menuitemcheckbox"
+                aria-checked={props.selected.includes(option.value)}
+                class="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[12px] text-white/75 transition hover:bg-white/[0.06]"
+                onClick={() => props.onToggle(option.value)}
+              >
+                <span class="min-w-0 flex-1 truncate">{option.label}</span>
+                <Show when={props.selected.includes(option.value)}>
+                  <svg viewBox="0 0 12 12" class="size-3 text-[color:var(--vx-purple-bright)]" aria-hidden="true">
+                    <path d="m2.5 6.5 2.5 2.5 4.5-5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                  </svg>
+                </Show>
+              </button>
+            )}
+          </For>
+        </div>
+      </Show>
+    </div>
+  )
+}
+
+function ListRow(props: { agent: DashboardAgentInput; now: number; groupLabel?: string; onOpen?: (id: string) => void }) {
   return (
     <button
       type="button"
-      class="shrink-0 rounded-[6px] border px-2 py-1 text-[11px] transition"
-      classList={{
-        "border-[color:var(--vx-purple)]/60 bg-[color:var(--vx-purple-soft)] text-white": props.active,
-        "border-[color:var(--vx-line)] text-white/50 hover:text-white": !props.active,
-      }}
-      aria-pressed={props.active}
-      onClick={props.onClick}
+      class="flex w-full items-center gap-3 border-b border-[color:var(--vx-line)] px-3 py-2.5 text-left transition last:border-0 hover:bg-white/[0.03]"
+      onClick={() => props.onOpen?.(props.agent.id)}
     >
-      {props.label}
+      <span class="min-w-0 flex-1 truncate text-[12.5px] text-white">{props.agent.name}</span>
+      <Show when={props.groupLabel}>
+        <span class="hidden shrink-0 truncate text-[11.5px] text-white/35 sm:block">{props.groupLabel}</span>
+      </Show>
+      <span class="shrink-0 text-[11.5px] text-white/45">{props.agent.lastAction || props.agent.status}</span>
+      <span class="shrink-0 text-[11px] text-white/30">{elapsedLabel(props.agent, props.now)}</span>
+      <span
+        class="size-1.5 shrink-0 rounded-full"
+        classList={{
+          [statusTone(props.agent.status)]: true,
+          "animate-pulse": isRunning(props.agent.status),
+        }}
+        aria-hidden="true"
+      />
     </button>
   )
 }
 
-function BoardCard(props: { agent: DashboardAgentInput; now: number; onOpen?: (id: string) => void }) {
+function BoardCard(props: {
+  agent: DashboardAgentInput
+  now: number
+  groupLabel?: string
+  onOpen?: (id: string) => void
+}) {
   return (
     <button
       type="button"
       class="w-full rounded-[8px] border border-[color:var(--vx-line)] bg-[color:var(--vx-surface)] px-3 py-2.5 text-left transition hover:border-[color:var(--vx-purple)]"
       onClick={() => props.onOpen?.(props.agent.id)}
     >
+      <Show when={props.groupLabel}>
+        <div class="mb-1 truncate text-[11px] text-white/35">{props.groupLabel}</div>
+      </Show>
       <div class="mb-1 truncate text-[12.5px] font-medium text-white">{props.agent.name}</div>
       <div class="mb-2 line-clamp-2 text-[11.5px] leading-4 text-white/50">{props.agent.taskPrompt}</div>
       <div class="flex items-center gap-1.5 text-[11px] text-white/40">
@@ -87,63 +175,6 @@ function Stat(props: { label: string; value: number; tone?: string }) {
     </div>
   )
 }
-
-function AgentRow(props: { agent: DashboardAgentInput; now: number; onOpen?: (id: string) => void }) {
-  return (
-    <button
-      type="button"
-      class="flex w-full items-start gap-3 rounded-[6px] border border-[color:var(--vx-line)] bg-[color:var(--vx-surface)] px-3 py-2.5 text-left transition hover:border-[color:var(--vx-purple)]"
-      onClick={() => props.onOpen?.(props.agent.id)}
-    >
-      <span
-        class="mt-1.5 size-2 shrink-0 rounded-full"
-        classList={{
-          [statusTone(props.agent.status)]: true,
-          "animate-pulse": isRunning(props.agent.status),
-        }}
-        aria-hidden="true"
-      />
-      <span class="min-w-0 flex-1">
-        <span class="flex items-baseline gap-2">
-          <Show when={subagentIdentity(props.agent.agent)}>
-            {(identity) => <SubagentAvatar id={identity().id} size={15} />}
-          </Show>
-          <span class="truncate text-[12.5px] font-medium text-white">{props.agent.name}</span>
-          <Show when={subagentIdentity(props.agent.agent)}>
-            {(identity) => <span class="shrink-0 text-[11px] text-white/40">{identity().name}</span>}
-          </Show>
-          <span class="shrink-0 text-[11px] text-white/40">{props.agent.status}</span>
-          <Show when={props.agent.swarmRole}>
-            <span class="shrink-0 rounded-full bg-white/[0.07] px-1.5 py-px text-[9.5px] uppercase tracking-wide text-white/50">
-              {props.agent.swarmRole}
-            </span>
-          </Show>
-        </span>
-        <span class="mt-0.5 block truncate text-[11.5px] text-white/55">{props.agent.lastAction}</span>
-        <span class="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[10.5px] text-white/38">
-          <span>{props.agent.model}</span>
-          <span>{props.agent.changedFilesCount} files</span>
-          <span>{props.agent.actualCost || props.agent.estimatedCost}</span>
-          <span>{elapsedLabel(props.agent, props.now)}</span>
-        </span>
-        <Show when={props.agent.error}>
-          <span class="mt-1 block truncate text-[11px] text-rose-300">{props.agent.error}</span>
-        </Show>
-      </span>
-      <Show when={isRunning(props.agent.status)}>
-        <span class="mt-1 w-14 shrink-0">
-          <span class="block h-1 rounded-full bg-white/10">
-            <span
-              class="block h-1 rounded-full bg-[color:var(--vx-purple-bright)]"
-              style={{ width: `${Math.max(0, Math.min(100, props.agent.progress))}%` }}
-            />
-          </span>
-        </span>
-      </Show>
-    </button>
-  )
-}
-
 
 function Conversation(props: { conversation: TeamConversation }) {
   return (
@@ -192,7 +223,7 @@ export function AgentDashboard(props: {
   const [statuses, setStatuses] = createSignal<DashboardAgentStatus[]>([])
   const [runtimes, setRuntimes] = createSignal<string[]>([])
   const [teams, setTeams] = createSignal<string[]>([])
-  const [pullRequest, setPullRequest] = createSignal<"with" | "without" | undefined>()
+  const [pullRequest, setPullRequest] = createSignal<"open" | "merged" | "none" | undefined>()
 
   const filters = createMemo(() => ({
     query: query(),
@@ -221,12 +252,14 @@ export function AgentDashboard(props: {
     setPullRequest(undefined)
   }
 
+  // The label a card and a row show above the task, naming the crew the run
+  // belongs to. Solo runs have none, and showing "solo" would be noise.
+  const teamLabelFor = (agent: DashboardAgentInput) =>
+    teamOptions().find((team) => team.id === (agent.swarmRunId ?? agent.teamId))?.label
+
   const summary = createMemo(() => summarize(props.agents))
   const clashes = createMemo(() => findClashes(props.agents))
   const columns = createMemo(() => boardColumns(visible()))
-  const groups = createMemo(() =>
-    groupAgents(sortForDisplay(visible())).sort((a, b) => Number(b.swarm) - Number(a.swarm)),
-  )
 
   return (
     <Show when={props.open}>
@@ -290,49 +323,44 @@ export function AgentDashboard(props: {
           </div>
 
           <div class="mb-3 flex flex-wrap items-center gap-1.5">
-            <For each={statusOptions()}>
-              {(status) => (
-                <FilterChip
-                  label={status}
-                  active={statuses().includes(status)}
-                  onClick={() => setStatuses((current) => toggled(current, status))}
-                />
-              )}
-            </For>
-            <Show when={runtimeOptions().length > 1}>
-              <span class="mx-1 h-4 w-px bg-[color:var(--vx-line)]" />
-              <For each={runtimeOptions()}>
-                {(runtime) => (
-                  <FilterChip
-                    label={runtime}
-                    active={runtimes().includes(runtime)}
-                    onClick={() => setRuntimes((current) => toggled(current, runtime))}
-                  />
-                )}
-              </For>
-            </Show>
+            <FilterMenu
+              label="Status"
+              options={statusOptions().map((status) => ({ value: status, label: status }))}
+              selected={statuses()}
+              onToggle={(value) => setStatuses((current) => toggled(current, value as DashboardAgentStatus))}
+            />
             <Show when={teamOptions().length}>
-              <span class="mx-1 h-4 w-px bg-[color:var(--vx-line)]" />
-              <For each={teamOptions()}>
-                {(team) => (
-                  <FilterChip
-                    label={team.label}
-                    active={teams().includes(team.id)}
-                    onClick={() => setTeams((current) => toggled(current, team.id))}
-                  />
-                )}
-              </For>
+              <FilterMenu
+                label="Team"
+                options={teamOptions().map((team) => ({ value: team.id, label: team.label }))}
+                selected={teams()}
+                onToggle={(value) => setTeams((current) => toggled(current, value))}
+              />
             </Show>
-            <span class="mx-1 h-4 w-px bg-[color:var(--vx-line)]" />
-            <FilterChip
-              label="Has PR"
-              active={pullRequest() === "with"}
-              onClick={() => setPullRequest((current) => (current === "with" ? undefined : "with"))}
+            <FilterMenu
+              label="Pull request"
+              options={[
+                { value: "open", label: "Open" },
+                { value: "merged", label: "Merged" },
+                { value: "none", label: "No pull request" },
+              ]}
+              selected={pullRequest() ? [pullRequest()!] : []}
+              onToggle={(value) =>
+                setPullRequest((current) =>
+                  current === value ? undefined : (value as "open" | "merged" | "none"),
+                )
+              }
+            />
+            <FilterMenu
+              label="Agent"
+              options={runtimeOptions().map((runtime) => ({ value: runtime, label: runtime }))}
+              selected={runtimes()}
+              onToggle={(value) => setRuntimes((current) => toggled(current, value))}
             />
             <Show when={hasActiveFilters(filters())}>
               <button
                 type="button"
-                class="ml-auto shrink-0 text-[11px] text-white/45 transition hover:text-white"
+                class="ml-auto shrink-0 text-[11.5px] text-white/45 transition hover:text-white"
                 onClick={clearFilters}
               >
                 Clear filters
@@ -390,7 +418,14 @@ export function AgentDashboard(props: {
                       </div>
                       <div class="flex flex-col gap-2">
                         <For each={column.agents}>
-                          {(item) => <BoardCard agent={item} now={now()} onOpen={props.onOpenAgent} />}
+                          {(item) => (
+                            <BoardCard
+                              agent={item}
+                              now={now()}
+                              groupLabel={teamLabelFor(item)}
+                              onOpen={props.onOpenAgent}
+                            />
+                          )}
                         </For>
                       </div>
                       <Show when={!column.agents.length}>
@@ -402,24 +437,28 @@ export function AgentDashboard(props: {
               </div>
             </Show>
             <Show when={view() === "list"}>
-            <For each={groups()}>
-              {(group) => (
-                <div class="mb-3">
-                  <Show when={group.swarm}>
-                    <div class="mb-1.5 flex items-center gap-2 text-[11px] uppercase tracking-wide text-white/40">
-                      <span>Team · {group.label}</span>
-                      <span class="h-px flex-1 bg-[color:var(--vx-line)]" />
-                      <span>{group.agents.length} agents</span>
-                    </div>
-                  </Show>
-                  <div class="flex flex-col gap-1.5" classList={{ "pl-3": group.swarm }}>
-                    <For each={group.agents}>
-                      {(item) => <AgentRow agent={item} now={now()} onOpen={props.onOpenAgent} />}
-                    </For>
-                  </div>
-                </div>
-              )}
-            </For>
+              <div class="overflow-hidden rounded-[8px] border border-[color:var(--vx-line)]">
+                <For each={columns()}>
+                  {(column) => (
+                    <Show when={column.agents.length}>
+                      <div class="flex items-center gap-2 border-b border-[color:var(--vx-line)] bg-white/[0.025] px-3 py-2 text-[11.5px] font-semibold text-white/70">
+                        <span>{column.label}</span>
+                        <span class="text-white/35">{column.agents.length}</span>
+                      </div>
+                      <For each={column.agents}>
+                        {(item) => (
+                          <ListRow
+                            agent={item}
+                            now={now()}
+                            groupLabel={teamLabelFor(item)}
+                            onOpen={props.onOpenAgent}
+                          />
+                        )}
+                      </For>
+                    </Show>
+                  )}
+                </For>
+              </div>
             </Show>
           </Show>
         </div>

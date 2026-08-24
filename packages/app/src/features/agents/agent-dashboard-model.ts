@@ -250,7 +250,14 @@ export type AgentFilters = {
   runtimes?: string[]
   // A team id, a swarm id, or "solo" for the agents that belong to neither.
   groups?: string[]
-  pullRequest?: "with" | "without"
+  // Mirrors what a reviewer asks about a run: is there a PR waiting, did it
+  // already land, or did this one never open one.
+  pullRequest?: "open" | "merged" | "none"
+}
+
+export function pullRequestStateFor(agent: DashboardAgentInput): "open" | "merged" | "none" {
+  if (agent.mergeState === "merged") return "merged"
+  return agent.pullRequestUrl ? "open" : "none"
 }
 
 function matchesQuery(agent: DashboardAgentInput, query: string) {
@@ -276,8 +283,7 @@ export function filterAgents(
     if (filters.statuses?.length && !filters.statuses.includes(agent.status)) return false
     if (filters.runtimes?.length && !filters.runtimes.includes(agent.runtime)) return false
     if (filters.groups?.length && !filters.groups.includes(groupKeyFor(agent))) return false
-    if (filters.pullRequest === "with" && !agent.pullRequestUrl) return false
-    if (filters.pullRequest === "without" && agent.pullRequestUrl) return false
+    if (filters.pullRequest && pullRequestStateFor(agent) !== filters.pullRequest) return false
     return true
   })
 }

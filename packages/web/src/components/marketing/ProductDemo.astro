@@ -1,0 +1,902 @@
+---
+// A working replica of Vector's Agent Dashboard, embedded in the marketing page
+// so a visitor can decide whether they like the product before downloading it.
+// Everything here is real interaction against local data — the filters filter,
+// the views switch, the search searches. Nothing is a screenshot, and nothing
+// talks to a server.
+
+const sessions = [
+  {
+    id: "s1",
+    name: "Add rate limiting to the public API",
+    space: "Auth hardening",
+    column: "running",
+    state: "Editing middleware/limit.ts",
+    runtime: "vector",
+    pr: "none",
+    age: "4m",
+  },
+  {
+    id: "s2",
+    name: "Migrate the session store to Postgres",
+    space: "",
+    column: "running",
+    state: "Running commands",
+    runtime: "codex",
+    pr: "none",
+    age: "11m",
+  },
+  {
+    id: "s3",
+    name: "Fix the flaky upload test",
+    space: "Auth hardening",
+    column: "attention",
+    state: "PR is ready",
+    runtime: "claude-code",
+    pr: "open",
+    age: "26m",
+  },
+  {
+    id: "s4",
+    name: "Upgrade the app to React 19",
+    space: "",
+    column: "attention",
+    state: "A typecheck failed",
+    runtime: "vector",
+    pr: "none",
+    age: "38m",
+  },
+  {
+    id: "s5",
+    name: "Add the OAuth device flow",
+    space: "Auth hardening",
+    column: "done",
+    state: "Merged",
+    runtime: "vector",
+    pr: "merged",
+    age: "1h",
+  },
+  {
+    id: "s6",
+    name: "Write the billing webhook handler",
+    space: "",
+    column: "done",
+    state: "Complete",
+    runtime: "cursor",
+    pr: "none",
+    age: "3h",
+  },
+  {
+    id: "s7",
+    name: "Redact secrets from deploy logs",
+    space: "",
+    column: "done",
+    state: "Merged",
+    runtime: "codex",
+    pr: "merged",
+    age: "5h",
+  },
+]
+
+const columns = [
+  { id: "running", label: "Running" },
+  { id: "attention", label: "Needs you" },
+  { id: "done", label: "Done" },
+]
+
+const filters = [
+  {
+    key: "column",
+    label: "Status",
+    options: [
+      { value: "running", label: "Running" },
+      { value: "attention", label: "Needs you" },
+      { value: "done", label: "Done" },
+    ],
+  },
+  {
+    key: "space",
+    label: "Team",
+    options: [{ value: "Auth hardening", label: "Auth hardening" }],
+  },
+  {
+    key: "pr",
+    label: "Pull request",
+    options: [
+      { value: "open", label: "Open" },
+      { value: "merged", label: "Merged" },
+      { value: "none", label: "No pull request" },
+    ],
+  },
+  {
+    key: "runtime",
+    label: "Agent",
+    options: [
+      { value: "vector", label: "Vector" },
+      { value: "claude-code", label: "Claude Code" },
+      { value: "codex", label: "Codex" },
+      { value: "cursor", label: "Cursor" },
+    ],
+  },
+]
+---
+
+<section class="demo" aria-labelledby="demo-title" data-reveal>
+  <div class="demo-intro">
+    <p class="demo-kicker">Try it right here</p>
+    <h2 id="demo-title">Click around the real thing.</h2>
+    <p class="demo-deck">
+      This is Vector's Agent Dashboard, running in the page. Switch the board to a list, filter by status, team, pull
+      request or which agent ran it, and search. No download, no account — see whether you like it first.
+    </p>
+  </div>
+
+  <div class="demo-frame" data-demo>
+    <div class="demo-titlebar">
+      <span class="demo-lights" aria-hidden="true"><i></i><i></i><i></i></span>
+      <span class="demo-titlebar-name">Vector</span>
+    </div>
+
+    <div class="demo-body">
+      <aside class="demo-rail" aria-label="Workspace">
+        <p class="demo-rail-action">New session</p>
+        <p class="demo-rail-item is-active">Agent Dashboard</p>
+        <p class="demo-rail-heading">Spaces</p>
+        <p class="demo-rail-group">Auth hardening</p>
+        {sessions.filter((session) => session.space).map((session) => (
+          <p class="demo-rail-session is-nested">{session.name}</p>
+        ))}
+        {sessions.filter((session) => !session.space).map((session) => (
+          <p class="demo-rail-session">{session.name}</p>
+        ))}
+      </aside>
+
+      <div class="demo-main">
+        <div class="demo-toolbar">
+          <div class="demo-views" role="tablist" aria-label="View">
+            <button type="button" role="tab" class="is-on" data-view="board" aria-selected="true">Board</button>
+            <button type="button" role="tab" data-view="list" aria-selected="false">List</button>
+          </div>
+          <label class="demo-search">
+            <span class="sr-only">Search agents</span>
+            <input type="search" placeholder="Search agents" data-search autocomplete="off" />
+          </label>
+        </div>
+
+        <div class="demo-filters">
+          {filters.map((filter) => (
+            <div class="demo-filter" data-filter={filter.key}>
+              <button type="button" class="demo-filter-button" aria-expanded="false" aria-haspopup="menu">
+                <span>{filter.label}</span>
+                <span class="demo-filter-value" data-filter-value></span>
+                <svg viewBox="0 0 12 12" aria-hidden="true"><path d="m3 4.5 3 3 3-3" /></svg>
+              </button>
+              <div class="demo-menu" role="menu" hidden>
+                <p class="demo-menu-head">{filter.label}</p>
+                {filter.options.map((option) => (
+                  <button type="button" role="menuitemcheckbox" aria-checked="false" data-value={option.value}>
+                    <span>{option.label}</span>
+                    <svg viewBox="0 0 12 12" aria-hidden="true"><path d="m2.5 6.5 2.5 2.5 4.5-5" /></svg>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+          <button type="button" class="demo-clear" data-clear hidden>Clear filters</button>
+        </div>
+
+        <div class="demo-stage">
+          <div class="demo-board" data-board>
+            {columns.map((column) => (
+              <div class="demo-column" data-column={column.id}>
+                <div class="demo-column-head">
+                  <span>{column.label}</span>
+                  <span class="demo-count" data-count>0</span>
+                </div>
+                <div class="demo-column-body">
+                  {sessions.filter((session) => session.column === column.id).map((session) => (
+                    <button
+                      type="button"
+                      class="demo-card"
+                      data-session
+                      data-column-value={session.column}
+                      data-space-value={session.space}
+                      data-pr-value={session.pr}
+                      data-runtime-value={session.runtime}
+                      data-text={`${session.name} ${session.space} ${session.state}`.toLowerCase()}
+                    >
+                      {session.space ? <span class="demo-card-space">{session.space}</span> : null}
+                      <span class="demo-card-name">{session.name}</span>
+                      <span class="demo-card-foot">
+                        <i class={`demo-dot is-${session.column}`}></i>
+                        <span class="demo-card-state">{session.state}</span>
+                        <span class="demo-card-age">{session.age}</span>
+                      </span>
+                      {session.pr === "open" ? <span class="demo-card-pr">PR is ready</span> : null}
+                    </button>
+                  ))}
+                </div>
+                <p class="demo-empty" data-empty hidden>Nothing here</p>
+              </div>
+            ))}
+          </div>
+
+          <div class="demo-list" data-list hidden>
+            {columns.map((column) => (
+              <div class="demo-list-group" data-list-group={column.id}>
+                <p class="demo-list-head">
+                  <span>{column.label}</span>
+                  <span class="demo-count" data-count>0</span>
+                </p>
+                {sessions.filter((session) => session.column === column.id).map((session) => (
+                  <button
+                    type="button"
+                    class="demo-row"
+                    data-session
+                    data-column-value={session.column}
+                    data-space-value={session.space}
+                    data-pr-value={session.pr}
+                    data-runtime-value={session.runtime}
+                    data-text={`${session.name} ${session.space} ${session.state}`.toLowerCase()}
+                  >
+                    <span class="demo-row-name">{session.name}</span>
+                    <span class="demo-row-space">{session.space}</span>
+                    <span class="demo-row-state">{session.state}</span>
+                    <span class="demo-row-age">{session.age}</span>
+                    <i class={`demo-dot is-${session.column}`}></i>
+                  </button>
+                ))}
+              </div>
+            ))}
+          </div>
+
+          <p class="demo-none" data-none hidden>No agents match these filters.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <p class="demo-foot">
+    Everything above runs locally in this page. In the app, these are real isolated workspaces you can open, review and
+    merge.
+  </p>
+</section>
+
+<script is:inline>
+  function bootVectorDemo() {
+    const root = document.querySelector("[data-demo]")
+    if (!root || root.dataset.booted === "1") return
+    root.dataset.booted = "1"
+
+    const state = { view: "board", query: "", filters: { column: [], space: [], pr: [], runtime: [] } }
+    const board = root.querySelector("[data-board]")
+    const list = root.querySelector("[data-list]")
+    const none = root.querySelector("[data-none]")
+    const clear = root.querySelector("[data-clear]")
+
+    // Every card and row is server-rendered; filtering only toggles them. Astro
+    // scopes component CSS to the elements it rendered, so nodes built in
+    // JavaScript would carry none of the styles below.
+    const matches = (el) => {
+      const needle = state.query.trim().toLowerCase()
+      if (needle && !el.dataset.text.includes(needle)) return false
+      for (const [key, chosen] of Object.entries(state.filters)) {
+        if (!chosen.length) continue
+        if (!chosen.includes(el.dataset[`${key}Value`])) return false
+      }
+      return true
+    }
+
+    const render = () => {
+      let total = 0
+      for (const el of root.querySelectorAll("[data-session]")) {
+        const show = matches(el)
+        el.hidden = !show
+      }
+      for (const column of root.querySelectorAll("[data-column]")) {
+        const shown = [...column.querySelectorAll("[data-session]")].filter((el) => !el.hidden).length
+        column.querySelector("[data-count]").textContent = String(shown)
+        column.querySelector("[data-empty]").hidden = shown > 0
+        total += shown
+      }
+      for (const group of root.querySelectorAll("[data-list-group]")) {
+        const shown = [...group.querySelectorAll("[data-session]")].filter((el) => !el.hidden).length
+        group.querySelector("[data-count]").textContent = String(shown)
+        group.hidden = shown === 0
+      }
+      const empty = total === 0
+      board.hidden = empty || state.view !== "board"
+      list.hidden = empty || state.view !== "list"
+      none.hidden = !empty
+      clear.hidden = !(state.query.trim() || Object.values(state.filters).some((chosen) => chosen.length))
+    }
+
+    root.querySelectorAll("[data-view]").forEach((button) => {
+      button.addEventListener("click", () => {
+        state.view = button.dataset.view
+        root.querySelectorAll("[data-view]").forEach((other) => {
+          const on = other === button
+          other.classList.toggle("is-on", on)
+          other.setAttribute("aria-selected", String(on))
+        })
+        render()
+      })
+    })
+
+    root.querySelector("[data-search]").addEventListener("input", (event) => {
+      state.query = event.currentTarget.value
+      render()
+    })
+
+    const closeMenus = (except) => {
+      root.querySelectorAll(".demo-filter").forEach((filter) => {
+        if (filter === except) return
+        filter.querySelector(".demo-menu").hidden = true
+        filter.querySelector(".demo-filter-button").setAttribute("aria-expanded", "false")
+      })
+    }
+
+    root.querySelectorAll(".demo-filter").forEach((filter) => {
+      const key = filter.dataset.filter
+      const button = filter.querySelector(".demo-filter-button")
+      const menu = filter.querySelector(".demo-menu")
+      button.addEventListener("click", (event) => {
+        event.stopPropagation()
+        const open = menu.hidden
+        closeMenus(filter)
+        menu.hidden = !open
+        button.setAttribute("aria-expanded", String(open))
+      })
+      menu.querySelectorAll("[data-value]").forEach((option) => {
+        option.addEventListener("click", (event) => {
+          event.stopPropagation()
+          const value = option.dataset.value
+          const chosen = state.filters[key]
+          state.filters[key] = chosen.includes(value) ? chosen.filter((item) => item !== value) : [...chosen, value]
+          option.setAttribute("aria-checked", String(state.filters[key].includes(value)))
+          const labels = state.filters[key].map(
+            (item) => menu.querySelector(`[data-value="${item}"] span`).textContent,
+          )
+          filter.querySelector("[data-filter-value]").textContent =
+            labels.length > 1 ? `${labels[0]} +${labels.length - 1}` : (labels[0] ?? "")
+          button.classList.toggle("is-on", state.filters[key].length > 0)
+          render()
+        })
+      })
+    })
+
+    document.addEventListener("click", () => closeMenus(null))
+
+    clear.addEventListener("click", () => {
+      state.query = ""
+      state.filters = { column: [], space: [], pr: [], runtime: [] }
+      root.querySelector("[data-search]").value = ""
+      root.querySelectorAll("[data-filter-value]").forEach((slot) => (slot.textContent = ""))
+      root.querySelectorAll("[data-value]").forEach((option) => option.setAttribute("aria-checked", "false"))
+      root.querySelectorAll(".demo-filter-button").forEach((button) => button.classList.remove("is-on"))
+      render()
+    })
+
+    render()
+  }
+
+  bootVectorDemo()
+  document.addEventListener("astro:page-load", bootVectorDemo)
+</script>
+
+<style>
+  .demo {
+    width: min(1080px, calc(100% - 40px));
+    margin-inline: auto;
+    padding: clamp(40px, 6vw, 72px) 0 clamp(16px, 3vw, 28px);
+  }
+
+  .demo-intro {
+    max-width: 640px;
+    margin-bottom: 22px;
+  }
+
+  .demo-kicker {
+    margin: 0 0 8px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--purple-soft, #c9b0ff);
+  }
+
+  .demo-intro h2 {
+    margin: 0 0 10px;
+    font-size: clamp(24px, 3.2vw, 34px);
+    line-height: 1.15;
+    letter-spacing: -0.02em;
+  }
+
+  .demo-deck {
+    margin: 0;
+    font-size: 14.5px;
+    line-height: 1.55;
+    color: var(--ink-55, rgba(255, 255, 255, 0.55));
+  }
+
+  .demo-frame {
+    overflow: hidden;
+    border: 1px solid var(--hairline, rgba(224, 211, 255, 0.16));
+    border-radius: 14px;
+    background: rgba(10, 8, 16, 0.86);
+    box-shadow: 0 30px 80px -40px rgba(0, 0, 0, 0.9);
+  }
+
+  .demo-titlebar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 14px;
+    border-bottom: 1px solid var(--hairline, rgba(224, 211, 255, 0.16));
+    background: rgba(255, 255, 255, 0.02);
+  }
+
+  .demo-lights {
+    display: inline-flex;
+    gap: 6px;
+  }
+
+  .demo-lights i {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.16);
+  }
+
+  .demo-titlebar-name {
+    font-size: 11.5px;
+    color: var(--ink-40, rgba(255, 255, 255, 0.4));
+  }
+
+  .demo-body {
+    display: grid;
+    grid-template-columns: 216px minmax(0, 1fr);
+    min-height: 430px;
+  }
+
+  .demo-rail {
+    padding: 12px 10px;
+    border-right: 1px solid var(--hairline, rgba(224, 211, 255, 0.16));
+    background: rgba(255, 255, 255, 0.012);
+  }
+
+  .demo-rail p {
+    margin: 0 0 2px;
+    padding: 5px 8px;
+    border-radius: 6px;
+    font-size: 12px;
+    color: var(--ink-55, rgba(255, 255, 255, 0.55));
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .demo-rail-action {
+    color: var(--ink-40, rgba(255, 255, 255, 0.4));
+  }
+
+  .demo-rail-item.is-active {
+    background: rgba(143, 82, 255, 0.16);
+    color: #fff;
+  }
+
+  .demo-rail-heading {
+    margin-top: 12px !important;
+    font-size: 10px !important;
+    font-weight: 600;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.3) !important;
+  }
+
+  .demo-rail-group {
+    color: var(--purple-soft, #c9b0ff) !important;
+    font-size: 11.5px !important;
+  }
+
+  .demo-rail-session.is-nested {
+    padding-left: 18px;
+  }
+
+  .demo-main {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    padding: 12px 14px 16px;
+  }
+
+  .demo-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .demo-views {
+    display: inline-flex;
+    gap: 2px;
+    padding: 2px;
+    border: 1px solid var(--hairline, rgba(224, 211, 255, 0.16));
+    border-radius: 8px;
+  }
+
+  .demo-views button {
+    padding: 4px 12px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--ink-45, rgba(255, 255, 255, 0.45));
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+  }
+
+  .demo-views button.is-on {
+    background: rgba(143, 82, 255, 0.2);
+    color: #fff;
+  }
+
+  .demo-search {
+    flex: 1;
+    min-width: 160px;
+  }
+
+  .demo-search input {
+    width: 100%;
+    padding: 6px 10px;
+    border: 1px solid var(--hairline, rgba(224, 211, 255, 0.16));
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.03);
+    color: #fff;
+    font: inherit;
+    font-size: 12.5px;
+  }
+
+  .demo-search input::placeholder {
+    color: rgba(255, 255, 255, 0.3);
+  }
+
+  .demo-filters {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-top: 10px;
+  }
+
+  .demo-filter {
+    position: relative;
+  }
+
+  .demo-filter-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border: 1px solid var(--hairline, rgba(224, 211, 255, 0.16));
+    border-radius: 7px;
+    background: transparent;
+    color: var(--ink-55, rgba(255, 255, 255, 0.55));
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+  }
+
+  .demo-filter-button.is-on {
+    border-color: rgba(143, 82, 255, 0.55);
+    background: rgba(143, 82, 255, 0.14);
+    color: #fff;
+  }
+
+  .demo-filter-value:not(:empty) {
+    color: var(--purple-soft, #c9b0ff);
+  }
+
+  .demo-filter-button svg {
+    width: 10px;
+    height: 10px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.4;
+    stroke-linecap: round;
+    opacity: 0.65;
+  }
+
+  .demo-menu {
+    position: absolute;
+    z-index: 3;
+    top: calc(100% + 4px);
+    left: 0;
+    min-width: 190px;
+    padding: 4px;
+    border: 1px solid var(--hairline, rgba(224, 211, 255, 0.16));
+    border-radius: 9px;
+    background: #14101f;
+    box-shadow: 0 18px 44px -18px rgba(0, 0, 0, 0.9);
+  }
+
+  .demo-menu-head {
+    margin: 2px 0 4px;
+    padding: 0 8px;
+    font-size: 9.5px;
+    font-weight: 600;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.35);
+  }
+
+  .demo-menu button {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.78);
+    font: inherit;
+    font-size: 12.5px;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .demo-menu button:hover {
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  .demo-menu button span {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .demo-menu button svg {
+    width: 12px;
+    height: 12px;
+    fill: none;
+    stroke: var(--purple-soft, #c9b0ff);
+    stroke-width: 1.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    opacity: 0;
+  }
+
+  .demo-menu button[aria-checked="true"] svg {
+    opacity: 1;
+  }
+
+  .demo-clear {
+    margin-left: auto;
+    border: 0;
+    background: transparent;
+    color: var(--ink-40, rgba(255, 255, 255, 0.4));
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+  }
+
+  .demo-clear:hover {
+    color: #fff;
+  }
+
+  .demo-stage {
+    margin-top: 12px;
+  }
+
+  .demo-board {
+    display: grid;
+    gap: 10px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    align-items: start;
+  }
+
+  .demo-column {
+    padding: 8px;
+    border: 1px solid var(--hairline, rgba(224, 211, 255, 0.16));
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.015);
+  }
+
+  .demo-column-head {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 2px 4px 8px;
+    font-size: 12px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.72);
+  }
+
+  .demo-count {
+    color: rgba(255, 255, 255, 0.35);
+    font-weight: 400;
+  }
+
+  .demo-column-body {
+    display: grid;
+    gap: 8px;
+  }
+
+  .demo-card {
+    display: block;
+    width: 100%;
+    padding: 10px;
+    border: 1px solid var(--hairline, rgba(224, 211, 255, 0.16));
+    border-radius: 9px;
+    background: rgba(255, 255, 255, 0.03);
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: border-color 0.16s ease, background 0.16s ease;
+  }
+
+  .demo-card:hover {
+    border-color: rgba(143, 82, 255, 0.6);
+    background: rgba(143, 82, 255, 0.08);
+  }
+
+  .demo-card-space {
+    display: block;
+    margin-bottom: 3px;
+    font-size: 10.5px;
+    color: rgba(255, 255, 255, 0.35);
+  }
+
+  .demo-card-name {
+    display: block;
+    font-size: 12.5px;
+    font-weight: 500;
+    color: #fff;
+    line-height: 1.35;
+  }
+
+  .demo-card-foot {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 7px;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.42);
+  }
+
+  .demo-card-age {
+    margin-left: auto;
+  }
+
+  .demo-card-pr {
+    display: block;
+    margin-top: 5px;
+    font-size: 10.5px;
+    color: #6ee7b7;
+  }
+
+  .demo-dot {
+    width: 6px;
+    height: 6px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.28);
+  }
+
+  .demo-dot.is-running {
+    background: var(--purple-bright, #a77cff);
+  }
+
+  .demo-dot.is-attention {
+    background: #fcd34d;
+  }
+
+  .demo-dot.is-done {
+    background: #34d399;
+  }
+
+  .demo-empty {
+    margin: 6px 0 2px;
+    padding: 0 4px;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.28);
+  }
+
+  .demo-list {
+    overflow: hidden;
+    border: 1px solid var(--hairline, rgba(224, 211, 255, 0.16));
+    border-radius: 10px;
+  }
+
+  .demo-list-head {
+    display: flex;
+    gap: 7px;
+    margin: 0;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--hairline, rgba(224, 211, 255, 0.16));
+    background: rgba(255, 255, 255, 0.025);
+    font-size: 11.5px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.72);
+  }
+
+  .demo-row {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    gap: 12px;
+    padding: 9px 12px;
+    border: 0;
+    border-bottom: 1px solid var(--hairline, rgba(224, 211, 255, 0.16));
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .demo-row:hover {
+    background: rgba(255, 255, 255, 0.03);
+  }
+
+  .demo-row-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12.5px;
+    color: #fff;
+  }
+
+  .demo-row-space {
+    font-size: 11.5px;
+    color: rgba(255, 255, 255, 0.35);
+  }
+
+  .demo-row-state {
+    font-size: 11.5px;
+    color: rgba(255, 255, 255, 0.45);
+  }
+
+  .demo-row-age {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.3);
+  }
+
+  .demo-none {
+    margin: 0;
+    padding: 34px 0;
+    border: 1px solid var(--hairline, rgba(224, 211, 255, 0.16));
+    border-radius: 10px;
+    text-align: center;
+    font-size: 12.5px;
+    color: rgba(255, 255, 255, 0.45);
+  }
+
+  .demo-foot {
+    margin: 14px 0 0;
+    font-size: 12px;
+    color: var(--ink-40, rgba(255, 255, 255, 0.4));
+  }
+
+  @media (max-width: 860px) {
+    .demo-body {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .demo-rail {
+      display: none;
+    }
+
+    .demo-board {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .demo-row-space,
+    .demo-row-state {
+      display: none;
+    }
+  }
+</style>

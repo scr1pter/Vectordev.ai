@@ -283,11 +283,16 @@ describe("filtering agents", () => {
     expect(filterAgents([a, b, c], { statuses: ["editing"], runtimes: ["codex"] })).toEqual([c])
   })
 
-  test("pull request filters split on whether a PR was opened", () => {
-    const withPr = agent({ pullRequestUrl: "https://github.com/o/r/pull/1" })
-    const withoutPr = agent({})
-    expect(filterAgents([withPr, withoutPr], { pullRequest: "with" })).toEqual([withPr])
-    expect(filterAgents([withPr, withoutPr], { pullRequest: "without" })).toEqual([withoutPr])
+  test("pull request filters separate open, merged and never-opened", () => {
+    const open = agent({ pullRequestUrl: "https://github.com/o/r/pull/1" })
+    const merged = agent({ pullRequestUrl: "https://github.com/o/r/pull/2", mergeState: "merged" })
+    const none = agent({})
+    const all = [open, merged, none]
+    expect(filterAgents(all, { pullRequest: "open" })).toEqual([open])
+    // A merged run still has a pullRequestUrl, so merge state has to win or it
+    // would show up under "open" forever.
+    expect(filterAgents(all, { pullRequest: "merged" })).toEqual([merged])
+    expect(filterAgents(all, { pullRequest: "none" })).toEqual([none])
   })
 
   test("grouping filters treat unteamed agents as solo", () => {
@@ -303,6 +308,6 @@ describe("filtering agents", () => {
     expect(hasActiveFilters({ query: "   " })).toBe(false)
     expect(hasActiveFilters({ query: "warmup" })).toBe(true)
     expect(hasActiveFilters({ statuses: [] })).toBe(false)
-    expect(hasActiveFilters({ pullRequest: "with" })).toBe(true)
+    expect(hasActiveFilters({ pullRequest: "open" })).toBe(true)
   })
 })

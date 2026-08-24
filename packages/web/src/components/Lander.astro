@@ -2,6 +2,7 @@
 import { ArrowRight, BadgeCheck, Brain, CalendarClock, ChevronDown, Cloud, CloudUpload, Code2, Coins, Globe2, Puzzle, ShieldCheck, Terminal, Users } from "lucide-react"
 import MarketingFooter from "./marketing/MarketingFooter.astro"
 import MarketingNav from "./marketing/MarketingNav.astro"
+import ProductDemo from "./marketing/ProductDemo.astro"
 import screenshotAgent from "../assets/lander/vector-agent-current.png"
 import screenshotAgents from "../assets/lander/vector-agents-current.png"
 import screenshotScheduled from "../assets/lander/vector-scheduled-current.png"
@@ -567,6 +568,8 @@ const changelog = [
         Choose monthly or annual access and download Vector for your platform <ArrowRight size={15} strokeWidth={2} aria-hidden="true" />
       </a>
     </section>
+
+    <ProductDemo />
 
     <div class="features">
       {features.map((feature) => (
