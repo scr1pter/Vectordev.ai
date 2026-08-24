@@ -1,6 +1,20 @@
 {
   "releases": [
     {
+      "tag": "v1.19.5",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Agents that actually reach each other",
+              "description": "Putting agents in one workspace so they can message each other is something only Vector offers, and it did not work. The machinery was right — an agent really did queue its message — but there was one point where messages were read and one where they were written, and they sat at opposite ends of a run. Every member of a team starts at the same moment, so when the first prompts went out nobody had written anything yet, and by the time anything was collected everyone had already finished. The tool told each agent its message would arrive at the start of its teammate's next turn, and there was no next turn. Messages are now delivered while the team is still working, so one agent renaming a module can tell another to fix its imports and have that actually land. A repair pass counts as a turn and delivers too, and a run that fails or is stopped no longer strands whatever it had queued. Claude Code, Codex and Cursor agents can now be told what their teammates did, but they cannot reply — none of them has a teammate-message tool to call — so the launch screen now says which runtimes can send instead of promising it to all of them."
+            }
+          ]
+        }
+      ]
+    },
+    {
       "tag": "v1.19.4",
       "highlights": [
         {
