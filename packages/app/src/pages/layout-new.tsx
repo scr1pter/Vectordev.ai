@@ -3278,7 +3278,9 @@ export default function NewLayout(props: ParentProps) {
                     >
                       <span class="block text-[11px] font-semibold">Work together</span>
                       <span class="mt-0.5 block text-[9.5px] leading-3 opacity-70">
-                        One shared checkout. Agents see each other's edits and can message each other while working.
+                        {parallelRuntime() === "vector"
+                          ? "One shared checkout. Agents see each other's edits and can message each other while working."
+                          : `One shared checkout. ${parallelRuntimeLabel(parallelRuntime())} agents see each other's edits and are told what teammates did, but cannot message back — only Vector's own agent can send.`}
                       </span>
                     </button>
                   </div>

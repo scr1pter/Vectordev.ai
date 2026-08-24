@@ -761,7 +761,7 @@ function withTeammateMessages(record: ParallelWorkspaceRecord, basePrompt: strin
 // the sending session. Draining is destructive: an entry is routed exactly once
 // and the file is truncated, otherwise every later turn would replay the whole
 // history to the team.
-async function drainTeamOutbox(record: ParallelWorkspaceRecord) {
+export async function drainTeamOutbox(record: ParallelWorkspaceRecord) {
   const team = teamForWorkspace(record.id)
   if (!team) return
   const outbox = join(record.isolatedPath, ".vector", "team-outbox.jsonl")
@@ -793,6 +793,49 @@ async function drainTeamOutbox(record: ParallelWorkspaceRecord) {
       text: entry.message,
     })
   }
+}
+
+// Delivery only ever happens at a turn boundary, because the engine cannot
+// inject into a turn already in progress. Everything in a team therefore has to
+// be drained WHILE the members are running: they all start together, so at the
+// moment the first prompts go out nobody has written anything yet, and draining
+// only at the end meant a queued message was never read by anyone.
+const TEAM_SWEEP_INTERVAL_MS = 4_000
+const teamSweeps = new Map<string, { timer: NodeJS.Timeout; runs: Set<string> }>()
+
+function startTeamSweep(record: ParallelWorkspaceRecord) {
+  const team = teamForWorkspace(record.id)
+  if (!team) return
+  const existing = teamSweeps.get(team.id)
+  if (existing) {
+    existing.runs.add(record.id)
+    return
+  }
+  const timer = setInterval(() => {
+    void sweepTeamOutboxes(team.id)
+  }, TEAM_SWEEP_INTERVAL_MS)
+  // A sweep must never hold the process open on its own.
+  timer.unref?.()
+  teamSweeps.set(team.id, { timer, runs: new Set([record.id]) })
+}
+
+function stopTeamSweep(record: ParallelWorkspaceRecord) {
+  const team = teamForWorkspace(record.id)
+  if (!team) return
+  const sweep = teamSweeps.get(team.id)
+  if (!sweep) return
+  sweep.runs.delete(record.id)
+  if (sweep.runs.size > 0) return
+  clearInterval(sweep.timer)
+  teamSweeps.delete(team.id)
+}
+
+// Routes whatever every member has written so far. Reading each member's outbox
+// rather than only the one that just finished is what lets a message cross
+// between two agents that are both still working.
+export async function sweepTeamOutboxes(teamId: string) {
+  const members = readRecords().filter((record) => teamForWorkspace(record.id)?.id === teamId)
+  for (const member of members) await drainTeamOutbox(member)
 }
 
 // Broadcasts what this agent just did so teammates sharing the workspace can
@@ -1314,7 +1357,16 @@ async function executeExternalParallelWorkspace(
   syncBackgroundTask(record, `${runtimeLabel(record.runtime)} started in the isolated workspace.`)
 
   const costs: number[] = []
-  const firstRun = await runExternalWorkspacePass(id, record, parallelAgentPrompt(record), controller)
+  // External CLIs have no send_teammate_message tool — a real `claude -p` run
+  // exposes 28 tools and none of them is it — so they cannot send. They do take
+  // a prompt, so they can still RECEIVE what teammates queued for them, which is
+  // the honest half of the capability rather than silently neither.
+  const firstRun = await runExternalWorkspacePass(
+    id,
+    record,
+    withTeammateMessages(record, parallelAgentPrompt(record)),
+    controller,
+  )
   if (firstRun.actualCost) costs.push(Number(firstRun.actualCost.replace("$", "")))
 
   record = updateRecord(id, (current) => ({
@@ -1363,14 +1415,17 @@ async function executeExternalParallelWorkspace(
     const repair = await runExternalWorkspacePass(
       id,
       record,
-      [
-        parallelAgentPrompt(record),
-        guidance,
-        formatValidationForRepair(validation),
-        `This is repair pass ${attempt} of ${retryLimit}. Diagnose the exact output, make only evidence-backed changes, and rerun the relevant check before finishing.`,
-      ]
-        .filter(Boolean)
-        .join("\n\n"),
+      withTeammateMessages(
+        record,
+        [
+          parallelAgentPrompt(record),
+          guidance,
+          formatValidationForRepair(validation),
+          `This is repair pass ${attempt} of ${retryLimit}. Diagnose the exact output, make only evidence-backed changes, and rerun the relevant check before finishing.`,
+        ]
+          .filter(Boolean)
+          .join("\n\n"),
+      ),
       controller,
     )
     if (repair.actualCost) costs.push(Number(repair.actualCost.replace("$", "")))
@@ -1462,6 +1517,10 @@ async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEng
       syncBackgroundTask(warned, warning)
     }
     const initial = await ensureParallelWorkspaceIsolation(persisted)
+    // Started before either runtime branch: every member of a team has to be
+    // swept while the others are still working, which is the only window in
+    // which a queued message can reach anybody.
+    startTeamSweep(initial)
     if (initial.runtime !== "vector") {
       const prepared = await prepareParallelWorkspaceContext(initial)
       await executeExternalParallelWorkspace(id, prepared, controller, runId)
@@ -1577,13 +1636,19 @@ async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEng
         method: "POST",
         body: {
           prompt: {
-            text: [
-              guidance,
-              formatValidationForRepair(validation),
-              `This is repair pass ${attempt} of ${retryLimit}. Diagnose from the exact output, make only evidence-backed changes, and rerun the relevant check yourself before finishing.`,
-            ]
-              .filter(Boolean)
-              .join("\n\n"),
+            // A repair pass is a turn like any other, so it is also a delivery
+            // point. Leaving it out meant the one extra turn a run does get
+            // still skipped whatever a teammate had queued in the meantime.
+            text: withTeammateMessages(
+              record,
+              [
+                guidance,
+                formatValidationForRepair(validation),
+                `This is repair pass ${attempt} of ${retryLimit}. Diagnose from the exact output, make only evidence-backed changes, and rerun the relevant check yourself before finishing.`,
+              ]
+                .filter(Boolean)
+                .join("\n\n"),
+            ),
           },
           resume: true,
         },
@@ -1694,6 +1759,13 @@ async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEng
     }))
     syncBackgroundTask(failed, detail)
   } finally {
+    // An aborted or failed run would otherwise strand whatever it wrote, so the
+    // outbox is drained on every exit path, not only the success path.
+    const settled = readRecords().find((record) => record.id === id)
+    if (settled) {
+      await drainTeamOutbox(settled).catch(() => undefined)
+      stopTeamSweep(settled)
+    }
     activeRuns.delete(id)
     drainParallelRunQueue()
   }
