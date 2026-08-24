@@ -606,6 +606,10 @@ export const ShellTool = Tool.define(
         )
       }
       if (aborted) meta.push("User aborted the command")
+      // Only `output` reaches the model; `metadata` does not. Without this a
+      // failure that writes nothing to stdout or stderr — `grep -q`, `git diff
+      // --quiet`, a build that logs to a file — reads as a clean run.
+      if (code !== null && code !== 0) meta.push(`Command exited with code ${code}`)
       const raw = list.map((item) => item.text).join("")
       const end = tail(raw, limits.maxLines, limits.maxBytes)
       if (end.cut) cut = true

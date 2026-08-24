@@ -1,10 +1,12 @@
 import { randomUUID, createHash } from "node:crypto"
 import { resolveCname } from "node:dns/promises"
+import { chmodSync } from "node:fs"
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises"
 import { isAbsolute, join, normalize } from "node:path"
 
 import { getStore } from "./store"
 import { transitionReleaseRecords } from "./cloud-release-state"
+import { redactText } from "./security-redaction"
 
 // The Vector Cloud console is the desktop-side brain behind the full-page
 // dashboard: it tracks real deployments, writes env vars into the project's
@@ -278,18 +280,21 @@ export function recordDeployment(input: {
   return record
 }
 
+// A deployment belongs to the project it shipped, not to the chat session that
+// happened to trigger it. `taskId` is kept on the record for provenance but is
+// deliberately not part of the scope: the console renders with no taskId while
+// the vector_cloud tool passes its session id, and matching on it hid every
+// agent-made release from the UI that promotes and rolls releases back.
 function sameDeploymentScope(a: CloudDeployment, b: CloudDeployment): boolean {
-  return a.projectPath === b.projectPath && a.taskId === b.taskId && a.target === b.target
+  return a.projectPath === b.projectPath && a.target === b.target
 }
 
 export function listDeployments(projectPath: string, taskId?: string): CloudDeployment[] {
-  return readDeployments().filter((record) => record.projectPath === projectPath && record.taskId === taskId)
+  return readDeployments().filter((record) => record.projectPath === projectPath)
 }
 
 export function getDeployment(projectPath: string, taskId: string | undefined, id: string): CloudDeployment {
-  const deployment = readDeployments().find(
-    (item) => item.id === id && item.projectPath === projectPath && item.taskId === taskId,
-  )
+  const deployment = readDeployments().find((item) => item.id === id && item.projectPath === projectPath)
   if (!deployment) throw new Error("That deployment is no longer in this project's history.")
   return deployment
 }
@@ -301,11 +306,9 @@ export function updateDeployment(
   update: Partial<CloudDeployment>,
 ): CloudDeployment {
   const records = readDeployments()
-  const deployment = records.find(
-    (item) => item.id === id && item.projectPath === projectPath && item.taskId === taskId,
-  )
+  const deployment = records.find((item) => item.id === id && item.projectPath === projectPath)
   if (!deployment) throw new Error("That deployment is no longer in this project's history.")
-  const next = { ...deployment, ...update, id: deployment.id, projectPath, taskId }
+  const next = { ...deployment, ...update, id: deployment.id, projectPath }
   writeDeployments(records.map((item) => (item.id === id ? next : item)))
   return next
 }
@@ -317,7 +320,7 @@ export function markDeploymentPromoted(
   input: { productionUrl?: string; rollback?: boolean } = {},
 ): CloudDeployment {
   const records = readDeployments()
-  const selected = records.find((item) => item.id === id && item.projectPath === projectPath && item.taskId === taskId)
+  const selected = records.find((item) => item.id === id && item.projectPath === projectPath)
   if (!selected) throw new Error("That deployment is no longer in this project's history.")
   const promotedAt = now()
   const updated = transitionReleaseRecords(records, selected.id, {
@@ -331,7 +334,7 @@ export function markDeploymentPromoted(
 
 export function removeDeployment(projectPath: string, taskId: string | undefined, id: string): CloudDeployment[] {
   const records = readDeployments()
-  const removed = records.find((item) => item.id === id && item.projectPath === projectPath && item.taskId === taskId)
+  const removed = records.find((item) => item.id === id && item.projectPath === projectPath)
   if (removed?.releaseStatus === "current") {
     throw new Error("Promote or roll back to another release before removing the live production deployment.")
   }
@@ -429,15 +432,22 @@ type ProjectData = {
   build: CloudBuildSettings | null
 }
 
-function projectKey(projectPath: string, taskId?: string): string {
-  return createHash("sha256")
-    .update(`${projectPath}\n${taskId || "project"}`)
-    .digest("hex")
-    .slice(0, 32)
+// A project's cloud state (env, database, domains, build settings) belongs to
+// the project, not to whichever chat session touched it. The Cloud Console
+// renders with no taskId while the vector_cloud tool passes its session id, so
+// keying on taskId gave the agent an empty second copy of everything the user
+// had configured. `taskId` is still accepted across this module because the IPC
+// and bridge callers pass it, but it deliberately does not reach the key.
+//
+// The literal "project" is load-bearing: it is exactly what the console has
+// always hashed, so every record a user already has stays addressable. Hashing
+// projectPath alone would be tidier and would orphan all of it.
+export function cloudProjectScopeKey(projectPath: string): string {
+  return createHash("sha256").update(`${projectPath}\nproject`).digest("hex").slice(0, 32)
 }
 
-function readProject(projectPath: string, taskId?: string): ProjectData {
-  const raw = getStore(PROJECTS_STORE).get(projectKey(projectPath, taskId))
+function readProject(projectPath: string): ProjectData {
+  const raw = getStore(PROJECTS_STORE).get(cloudProjectScopeKey(projectPath))
   if (!raw || typeof raw !== "object") return { env: [], database: null, domains: [], build: null }
   const data = raw as Partial<ProjectData>
   const env = Array.isArray(data.env)
@@ -488,14 +498,26 @@ function isCloudRequiredChecks(value: unknown): value is CloudRequiredChecks {
   )
 }
 
-function writeProject(projectPath: string, taskId: string | undefined, data: ProjectData) {
-  getStore(PROJECTS_STORE).set(projectKey(projectPath, taskId), data)
+function writeProject(projectPath: string, data: ProjectData) {
+  const store = getStore(PROJECTS_STORE)
+  store.set(cloudProjectScopeKey(projectPath), data)
+  // This file holds DATABASE_URL and service-role keys in plaintext and
+  // electron-store creates it with the process umask (0644). It also rewrites
+  // the file atomically through a temp file plus rename, which drops the mode
+  // again, so the tightening has to be reapplied on every write.
+  chmodSync(store.path, 0o600)
 }
 
 export function redactCloudLog(projectPath: string, taskId: string | undefined, value: string): string {
-  return readProject(projectPath, taskId).env.reduce(
-    (output, item) => (item.value.length >= 4 ? output.split(item.value).join("[redacted]") : output),
-    value,
+  // Two layers, and both are needed: the stored env values catch the user's own
+  // secrets verbatim, and redactText catches everything a build or provider CLI
+  // prints that Vector never stored — including the VERCEL_TOKEN /
+  // NETLIFY_AUTH_TOKEN that publish injects into the build child's environment.
+  return redactText(
+    readProject(projectPath).env.reduce(
+      (output, item) => (item.value.length >= 4 ? output.split(item.value).join("[redacted]") : output),
+      value,
+    ),
   )
 }
 
@@ -503,7 +525,7 @@ export function redactCloudLog(projectPath: string, taskId: string | undefined, 
 
 export function getBuildSettings(projectPath: string, taskId?: string): CloudBuildSettings | null {
   if (!(projectPath ?? "").trim()) return null
-  return readProject(projectPath, taskId).build
+  return readProject(projectPath).build
 }
 
 export async function detectBuildSettings(projectPath: string, taskId?: string): Promise<CloudBuildSettings> {
@@ -593,8 +615,8 @@ export async function detectBuildSettings(projectPath: string, taskId?: string):
     source: "detected",
     updatedAt: now(),
   }
-  const data = readProject(projectPath, taskId)
-  writeProject(projectPath, taskId, { ...data, build: settings })
+  const data = readProject(projectPath)
+  writeProject(projectPath, { ...data, build: settings })
   return settings
 }
 
@@ -661,8 +683,8 @@ export function setBuildSettings(
     source: "custom",
     updatedAt: now(),
   }
-  const data = readProject(path, taskId)
-  writeProject(path, taskId, { ...data, build: settings })
+  const data = readProject(path)
+  writeProject(path, { ...data, build: settings })
   return settings
 }
 
@@ -677,7 +699,7 @@ function normalizeHealthPath(value: string): string {
 // ---- Environment variables ------------------------------------------------
 
 export function listEnv(projectPath: string, taskId?: string): CloudEnvVar[] {
-  return readProject(projectPath, taskId).env
+  return readProject(projectPath).env
 }
 
 export function setEnv(projectPath: string, taskId: string | undefined, key: string, value: string): CloudEnvVar[] {
@@ -687,19 +709,19 @@ export function setEnv(projectPath: string, taskId: string | undefined, key: str
       `"${trimmedKey}" is not a valid environment variable name. Use letters, digits and underscores, starting with a letter or underscore.`,
     )
   }
-  const data = readProject(projectPath, taskId)
+  const data = readProject(projectPath)
   const existing = data.env.find((item) => item.key === trimmedKey)
   const nextEnv = existing
     ? data.env.map((item) => (item.key === trimmedKey ? { key: trimmedKey, value } : item))
     : [...data.env, { key: trimmedKey, value }]
-  writeProject(projectPath, taskId, { ...data, env: nextEnv })
+  writeProject(projectPath, { ...data, env: nextEnv })
   return nextEnv
 }
 
 export function removeEnv(projectPath: string, taskId: string | undefined, key: string): CloudEnvVar[] {
-  const data = readProject(projectPath, taskId)
+  const data = readProject(projectPath)
   const nextEnv = data.env.filter((item) => item.key !== key)
-  writeProject(projectPath, taskId, { ...data, env: nextEnv })
+  writeProject(projectPath, { ...data, env: nextEnv })
   return nextEnv
 }
 
@@ -711,7 +733,7 @@ export async function applyEnv(projectPath: string, taskId?: string): Promise<{ 
   if (!stats?.isDirectory()) {
     throw new Error("Open a project folder before applying environment variables.")
   }
-  const vars = readProject(projectPath, taskId).env
+  const vars = readProject(projectPath).env
   for (const item of vars) {
     if (/[\r\n]/.test(item.value)) {
       throw new Error(`The value for "${item.key}" contains a line break, which cannot be written to .env.`)
@@ -763,7 +785,7 @@ function requireProject(projectPath: string): string {
 // manages its own custom domains instead of a single global pool.
 export function listDomains(projectPath: string, taskId?: string): CloudDomain[] {
   if (!(projectPath ?? "").trim()) return []
-  return readProject(projectPath, taskId).domains
+  return readProject(projectPath).domains
 }
 
 export function addDomain(
@@ -782,7 +804,7 @@ export function addDomain(
 ): CloudDomain {
   const path = requireProject(projectPath)
   const domain = normalizeCloudDomain(input.domain)
-  const data = readProject(path, taskId)
+  const data = readProject(path)
   if (data.domains.find((item) => item.domain === domain)) {
     throw new Error(`${domain} is already connected to this project.`)
   }
@@ -799,7 +821,7 @@ export function addDomain(
     detail: input.detail?.trim() || undefined,
     createdAt: now(),
   }
-  writeProject(path, taskId, { ...data, domains: [record, ...data.domains] })
+  writeProject(path, { ...data, domains: [record, ...data.domains] })
   return record
 }
 
@@ -810,13 +832,13 @@ export function updateDomainRecord(
   patch: Partial<Omit<CloudDomain, "id" | "domain" | "projectPath" | "createdAt">>,
 ): CloudDomain {
   const path = requireProject(projectPath)
-  const data = readProject(path, taskId)
+  const data = readProject(path)
   const index = data.domains.findIndex((item) => item.id === id)
   if (index === -1) throw new Error("That domain is no longer connected to this project.")
   const updated = { ...data.domains[index], ...patch }
   const domains = [...data.domains]
   domains[index] = updated
-  writeProject(path, taskId, { ...data, domains })
+  writeProject(path, { ...data, domains })
   return updated
 }
 
@@ -824,7 +846,7 @@ export function updateDomainRecord(
 // at our target. DNS propagation lag looks like a missing record, not an error.
 export async function verifyDomain(projectPath: string, taskId: string | undefined, id: string): Promise<CloudDomain> {
   const path = requireProject(projectPath)
-  const data = readProject(path, taskId)
+  const data = readProject(path)
   const index = data.domains.findIndex((item) => item.id === id)
   if (index === -1) throw new Error("That domain is no longer connected to this project.")
   const record = data.domains[index]
@@ -860,22 +882,22 @@ export async function verifyDomain(projectPath: string, taskId: string | undefin
   const next: CloudDomain = { ...record, status, detail, lastCheckedAt: now() }
   const domains = [...data.domains]
   domains[index] = next
-  writeProject(path, taskId, { ...data, domains })
+  writeProject(path, { ...data, domains })
   return next
 }
 
 export function removeDomain(projectPath: string, taskId: string | undefined, id: string): CloudDomain[] {
   const path = requireProject(projectPath)
-  const data = readProject(path, taskId)
+  const data = readProject(path)
   const domains = data.domains.filter((item) => item.id !== id)
-  writeProject(path, taskId, { ...data, domains })
+  writeProject(path, { ...data, domains })
   return domains
 }
 
 // ---- Database connector (Supabase) ----------------------------------------
 
 export function getDatabase(projectPath: string, taskId?: string): CloudDatabaseConnection {
-  return readProject(projectPath, taskId).database
+  return readProject(projectPath).database
 }
 
 const SUPABASE_CLIENT_SNIPPET = `import { createClient } from "@supabase/supabase-js"
@@ -934,8 +956,8 @@ export async function connectDatabase(
   setEnv(projectPath, taskId, "SUPABASE_URL", url)
   setEnv(projectPath, taskId, "SUPABASE_ANON_KEY", anonKey)
 
-  const data = readProject(projectPath, taskId)
-  writeProject(projectPath, taskId, { ...data, database: connection })
+  const data = readProject(projectPath)
+  writeProject(projectPath, { ...data, database: connection })
 
   // Scaffold a minimal client so `import { supabase }` just works. Never
   // clobber an existing file, and don't fail the connection if src/ is locked.
@@ -957,6 +979,6 @@ export async function connectDatabase(
 }
 
 export function disconnectDatabase(projectPath: string, taskId?: string): void {
-  const data = readProject(projectPath, taskId)
-  writeProject(projectPath, taskId, { ...data, database: null })
+  const data = readProject(projectPath)
+  writeProject(projectPath, { ...data, database: null })
 }

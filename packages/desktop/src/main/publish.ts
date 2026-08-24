@@ -229,6 +229,11 @@ const BADGE_SNIPPET = `    <!-- ${BADGE_MARKER} -->
     </a>
 `
 
+function stampVectorBadge(html: string) {
+  if (html.includes(BADGE_MARKER) || !/<\/body>/i.test(html)) return html
+  return html.replace(/<\/body>/i, `${BADGE_SNIPPET}  </body>`)
+}
+
 async function injectVectorBadge(directory: string) {
   for (const candidate of ["index.html", join("public", "index.html")]) {
     const path = join(directory, candidate)
@@ -236,7 +241,7 @@ async function injectVectorBadge(directory: string) {
     if (html === undefined) continue
     if (html.includes(BADGE_MARKER)) return "present"
     if (!/<\/body>/i.test(html)) continue
-    await writeFile(path, html.replace(/<\/body>/i, `${BADGE_SNIPPET}  </body>`), "utf8")
+    await writeFile(path, stampVectorBadge(html), "utf8")
     return "injected"
   }
   // Framework apps without a plain index.html (e.g. Next.js) skip the badge
@@ -273,40 +278,59 @@ const TEXT_EXTENSIONS = new Set([
   ".webmanifest",
 ])
 const SKIP_DIRECTORIES = new Set(["node_modules", ".git", ".vercel", ".netlify", "dist", ".next", ".turbo"])
+// Any framework build with code splitting and images clears a few hundred files,
+// so this is a real ceiling rather than a working limit — but it is enforced by
+// throwing, because the previous cap stopped the walk mid-directory and shipped
+// whatever half of the site readdir happened to reach.
+const MAX_UPLOAD_FILES = 2_000
+// Hidden entries are excluded by default: .npmrc carries a registry auth token,
+// .git carries the whole history. These are the hidden names a static host
+// genuinely serves, and dropping .well-known broke ACME and app-site-association.
+const PUBLISHABLE_HIDDEN_NAMES = new Set([".htaccess", ".nojekyll", ".well-known"])
+
+// The directory that actually ships. Publish-time checks have to look here and
+// not only at the project root: a bundler bakes VITE_*/NEXT_PUBLIC_* values into
+// these files, and a scan of the source never sees them. Returns undefined when
+// the project publishes from its own root, as a plain static site does.
+async function resolveDeployRoot(projectPath: string, configuredOutput?: string) {
+  if (configuredOutput && configuredOutput !== ".") {
+    const configuredRoot = join(projectPath, configuredOutput)
+    return (await stat(configuredRoot).catch(() => undefined))?.isDirectory() ? configuredRoot : undefined
+  }
+  for (const candidate of ["dist", "build", "out"]) {
+    if (await stat(join(projectPath, candidate, "index.html")).catch(() => undefined)) {
+      return join(projectPath, candidate)
+    }
+  }
+  return undefined
+}
 
 // Collect a static bundle for Vector Cloud: prefer a built dist/ (or build/)
 // with an index.html, otherwise the project root for plain static apps.
 async function collectStaticFiles(projectPath: string, configuredOutput?: string) {
-  let root = projectPath
-  if (configuredOutput && configuredOutput !== ".") {
-    const configuredRoot = join(projectPath, configuredOutput)
-    if (!(await stat(join(configuredRoot, "index.html")).catch(() => undefined))) {
-      throw new Error(
-        `The configured output directory "${configuredOutput}" does not contain index.html. Run the build or update Build & runtime settings.`,
-      )
-    }
-    root = configuredRoot
-  } else {
-    for (const candidate of ["dist", "build", "out"]) {
-      if (await stat(join(projectPath, candidate, "index.html")).catch(() => undefined)) {
-        root = join(projectPath, candidate)
-        break
-      }
-    }
+  const root = (await resolveDeployRoot(projectPath, configuredOutput)) ?? projectPath
+  if (configuredOutput && configuredOutput !== "." && !(await stat(join(root, "index.html")).catch(() => undefined))) {
+    throw new Error(
+      `The configured output directory "${configuredOutput}" does not contain index.html. Run the build or update Build & runtime settings.`,
+    )
   }
   const files: { path: string; content: string; encoding: "utf8" | "base64" }[] = []
   let total = 0
   const walk = async (directory: string) => {
     for (const entry of await readdir(directory, { withFileTypes: true })) {
-      if (files.length >= 200) return
       const full = join(directory, entry.name)
+      if (entry.name.startsWith(".") && !PUBLISHABLE_HIDDEN_NAMES.has(entry.name)) continue
       if (entry.isDirectory()) {
         if (root === projectPath && SKIP_DIRECTORIES.has(entry.name)) continue
-        if (entry.name.startsWith(".")) continue
         await walk(full)
         continue
       }
-      if (!entry.isFile() || entry.name === ".DS_Store" || entry.name.startsWith(".env")) continue
+      if (!entry.isFile()) continue
+      if (files.length >= MAX_UPLOAD_FILES) {
+        throw new Error(
+          `This app has more than ${MAX_UPLOAD_FILES} files, which is over Vector Cloud's alpha limit. Publish the built output instead.`,
+        )
+      }
       const buffer = await readFile(full)
       total += buffer.byteLength
       if (total > 10 * 1024 * 1024)
@@ -460,7 +484,17 @@ async function runPreflightChecks(
 
   emitProgress(input, emit, "checking", "info", "Scanning deployable source for exposed secrets.")
   const secretStartedAt = Date.now()
-  const findings = await scanProjectSecrets(input.projectPath)
+  // The build just ran, so scan what it produced as well as the source. The
+  // source scan skips dist/build/out by design, and that is exactly where a
+  // bundler bakes a VITE_*/NEXT_PUBLIC_* value into a file this publish then
+  // uploads and serves publicly — the leak this gate is advertised to stop.
+  const deployRoot = await resolveDeployRoot(input.projectPath, settings?.outputDirectory)
+  const findings = (
+    await Promise.all([
+      scanProjectSecrets(input.projectPath),
+      deployRoot ? scanProjectSecrets(deployRoot, input.projectPath) : [],
+    ])
+  ).flat()
   const secretsRequired = settings?.requiredChecks.secrets ?? true
   checks.push(
     makeCheck({
@@ -589,8 +623,13 @@ async function publishToVectorCloud(input: PublishProjectInput, emit?: PublishPr
     }
   }
 
-  await injectVectorBadge(directory).catch(() => "skipped")
-  const files = await collectStaticFiles(directory, settings?.outputDirectory)
+  // Stamp the badge into the copy that ships, never into the project. Writing to
+  // the source index.html here both missed the deploy — the build has already run,
+  // so dist/index.html is what uploads — and left an edit the user never asked for
+  // in a tracked file.
+  const files = (await collectStaticFiles(directory, settings?.outputDirectory)).map((file) =>
+    file.path === "index.html" ? { ...file, content: stampVectorBadge(file.content) } : file,
+  )
   emitProgress(input, emit, "uploading", "info", `Uploading ${files.length} files to Vector Cloud.`)
   const response = await fetch(`${endpoint}/api/publish`, {
     method: "POST",

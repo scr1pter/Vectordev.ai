@@ -60,28 +60,29 @@ export const GrepTool = Tool.define(
           const search = FSUtil.resolve(requested)
           const info = yield* fs.stat(search).pipe(Effect.catch(() => Effect.succeed(undefined)))
           const cwd = info?.type === "Directory" ? search : path.dirname(search)
+          const limit = 100
           const result = yield* ripgrep.grep({
             cwd,
             pattern: params.pattern,
+            // ripgrep searches a directory, so a file target has to be named
+            // explicitly or every sibling in its directory gets searched too.
+            file: info?.type === "Directory" ? undefined : path.basename(search),
             include: params.include,
-            limit: 100,
+            // One over the limit distinguishes "exactly limit matches" from
+            // "more than we are showing"; only the first limit are reported.
+            limit: limit + 1,
           })
           if (result.length === 0) return empty
 
-          const rows = result.map((item) => ({
+          const truncated = result.length > limit
+          const final = result.slice(0, limit).map((item) => ({
             path: path.resolve(cwd, item.entry.path),
             line: item.line,
             text: item.text,
           }))
 
-          const limit = 100
-          const truncated = rows.length === limit
-          const final = rows
-          if (final.length === 0) return empty
-
-          const total = rows.length
-          const hasMore = truncated || result.length === limit
-          const output = [`Found ${total} matches${hasMore ? " (more matches available)" : ""}`]
+          const total = final.length
+          const output = [`Found ${total} matches${truncated ? " (more matches available)" : ""}`]
 
           let current = ""
           for (const match of final) {

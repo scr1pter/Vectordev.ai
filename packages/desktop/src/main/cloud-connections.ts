@@ -3,6 +3,7 @@ import { shell } from "electron"
 
 import {
   addDomain,
+  cloudProjectScopeKey,
   connectDatabase,
   getDatabase,
   listDomains,
@@ -639,15 +640,12 @@ export async function listCloudProviderResources(provider: CloudProviderId): Pro
     .filter((project): project is CloudProviderResource => Boolean(project))
 }
 
-function linksKey(projectPath: string, taskId?: string): string {
-  return createHash("sha256")
-    .update(`${projectPath}\n${taskId || "project"}`)
-    .digest("hex")
-    .slice(0, 32)
-}
-
-function readLinks(projectPath: string, taskId?: string): CloudProviderProjectLink[] {
-  const raw = getStore(LINKS_STORE).get(linksKey(projectPath, taskId))
+// Same scope as the rest of a project's cloud state: the link the user picked in
+// the Cloud Console has to be the link an agent-driven publish finds, or publish
+// dead-ends on "Choose a Vercel project in Vector Cloud" with no way to comply.
+// See cloudProjectScopeKey for why taskId is accepted here but never hashed.
+function readLinks(projectPath: string): CloudProviderProjectLink[] {
+  const raw = getStore(LINKS_STORE).get(cloudProjectScopeKey(projectPath))
   if (!Array.isArray(raw)) return []
   return raw.filter((value): value is CloudProviderProjectLink => {
     if (!value || typeof value !== "object") return false
@@ -663,7 +661,7 @@ function readLinks(projectPath: string, taskId?: string): CloudProviderProjectLi
 
 export function listCloudProviderProjectLinks(projectPath: string, taskId?: string): CloudProviderProjectLink[] {
   if (!projectPath.trim()) return []
-  return readLinks(projectPath, taskId)
+  return readLinks(projectPath)
 }
 
 export function getCloudProviderProjectLink(
@@ -672,7 +670,7 @@ export function getCloudProviderProjectLink(
   provider: Exclude<CloudProviderId, "supabase">,
 ): CloudProviderProjectLink | undefined {
   if (!projectPath.trim()) return
-  return readLinks(projectPath, taskId).find((item) => item.provider === provider)
+  return readLinks(projectPath).find((item) => item.provider === provider)
 }
 
 export async function linkCloudProviderProject(
@@ -693,8 +691,8 @@ export async function linkCloudProviderProject(
     url: resource.url,
     linkedAt: now(),
   }
-  const next = [link, ...readLinks(projectPath, taskId).filter((item) => item.provider !== provider)]
-  getStore(LINKS_STORE).set(linksKey(projectPath, taskId), next)
+  const next = [link, ...readLinks(projectPath).filter((item) => item.provider !== provider)]
+  getStore(LINKS_STORE).set(cloudProjectScopeKey(projectPath), next)
   return link
 }
 
@@ -703,10 +701,10 @@ export async function unlinkCloudProviderProject(
   taskId: string | undefined,
   provider: Exclude<CloudProviderId, "supabase">,
 ): Promise<CloudProviderProjectLink[]> {
-  const next = readLinks(projectPath, taskId).filter((item) => item.provider !== provider)
+  const next = readLinks(projectPath).filter((item) => item.provider !== provider)
   const store = getStore(LINKS_STORE)
-  if (next.length) store.set(linksKey(projectPath, taskId), next)
-  else store.delete(linksKey(projectPath, taskId))
+  if (next.length) store.set(cloudProjectScopeKey(projectPath), next)
+  else store.delete(cloudProjectScopeKey(projectPath))
   await removeStoreFileIfEmpty(LINKS_STORE)
   return next
 }

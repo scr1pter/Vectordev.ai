@@ -1,4 +1,5 @@
 import { BrowserWindow, WebContentsView, session, type IpcMainInvokeEvent, type WebContents } from "electron"
+import { isCredentialField } from "./browser-credential-field"
 import { AsyncLocalStorage } from "node:async_hooks"
 
 import type { BrowserAgentInput, BrowserAgentPageEvent, BrowserAutomationRun } from "../preload/types"
@@ -343,28 +344,91 @@ export async function click(selector: string) {
   pushAction(`Clicked ${selector}`)
 }
 
-// Executor-level guard (defense in depth beyond the planner prompt): typing
-// into credential fields is always refused so the run hands control to the
-// user via wait_for_user instead of ever filling passwords, OTPs, or cards.
-const CREDENTIAL_FIELD_GUARD = `
-    const kind = (el.getAttribute("type") || "").toLowerCase();
-    const auto = (el.getAttribute("autocomplete") || "").toLowerCase();
-    if (
-      kind === "password" ||
-      auto.includes("one-time-code") ||
-      auto.includes("current-password") ||
-      auto.includes("new-password") ||
-      auto.includes("cc-number") ||
-      auto.includes("cc-csc")
-    ) return { guarded: true };`
+/**
+ * Executor-level guard (defense in depth beyond the planner prompt): typing
+ * into credential fields is always refused so the run hands control to the user
+ * via wait_for_user instead of ever filling passwords, OTPs, or cards.
+ *
+ * This is serialized into the page with toString(), so the body has to stay
+ * self-contained: anything it read from module scope would be a ReferenceError
+ * inside the renderer.
+ */
+export { isCredentialField } from "./browser-credential-field"
+
+// Every injected script that is about to put characters somewhere opens with
+// this so all of them decide with the same predicate rather than each carrying
+// its own copy of the rule.
+const CREDENTIAL_GUARD = `
+    const isCredentialField = ${isCredentialField.toString()};
+    const describeField = (el) => ({
+      type: el.getAttribute("type"),
+      autocomplete: el.getAttribute("autocomplete"),
+      name: el.getAttribute("name"),
+      id: el.getAttribute("id"),
+      textSecurity: getComputedStyle(el).getPropertyValue("-webkit-text-security"),
+    });`
+
+// Keystrokes land on whatever holds focus, not on the selector a caller named,
+// so the paths that type blind (press, and type's phase 2) ask about focus.
+const FOCUSED_CREDENTIAL_CHECK = `(() => {${CREDENTIAL_GUARD}
+    const el = document.activeElement;
+    if (!el || el === document.body) return false;
+    return isCredentialField(describeField(el));
+  })()`
+
+// Keys that navigate, submit, or edit without inserting a character. Anything
+// absent from this list counts as typing, so an unfamiliar key code fails closed
+// into the guard rather than around it.
+const NON_TYPING_KEYS = new Set([
+  "tab",
+  "enter",
+  "return",
+  "escape",
+  "esc",
+  "backspace",
+  "delete",
+  "insert",
+  "home",
+  "end",
+  "pageup",
+  "pagedown",
+  "up",
+  "down",
+  "left",
+  "right",
+  "arrowup",
+  "arrowdown",
+  "arrowleft",
+  "arrowright",
+  "shift",
+  "control",
+  "ctrl",
+  "alt",
+  "option",
+  "meta",
+  "command",
+  "cmd",
+  "super",
+  "capslock",
+  "numlock",
+  "scrolllock",
+  "printscreen",
+  "pause",
+  ...Array.from({ length: 24 }, (_, index) => `f${index + 1}`),
+])
+
+function credentialRefusal(target: string) {
+  return `Refused to send keystrokes to ${target}: it is a credential field (password, one-time code, or card number). Vector never fills credentials — emit the wait_for_user action so the user can complete this step in the live browser.`
+}
 
 export async function type(selector: string, text: string, clear = true) {
   const contents = ensureView()
   // Phase 1 (in-page): locate, guard, focus, and set the selection so that
   // trusted keystrokes replace (clear) or append to the existing value.
-  const prep = await runScript<{ missing?: boolean; guarded?: boolean; before?: string }>(`(() => {
+  const prep = await runScript<{ missing?: boolean; guarded?: boolean; before?: string }>(`(() => {${CREDENTIAL_GUARD}
     const el = document.querySelector(${JSON.stringify(selector)});
-    if (!el) return { missing: true };${CREDENTIAL_FIELD_GUARD}
+    if (!el) return { missing: true };
+    if (isCredentialField(describeField(el))) return { guarded: true };
     el.scrollIntoView({ block: "center", inline: "center" });
     el.focus();
     if ("value" in el) {
@@ -386,17 +450,17 @@ export async function type(selector: string, text: string, clear = true) {
     return { before: String(el.textContent ?? "") };
   })()`)
   if (prep.missing) throw new Error(`No element matches selector: ${selector}`)
-  if (prep.guarded) {
-    throw new Error(
-      `Refused to type into ${selector}: it is a credential field (password, one-time code, or card number). Vector never fills credentials — emit the wait_for_user action so the user can complete this step in the live browser.`,
-    )
-  }
+  if (prep.guarded) throw new Error(credentialRefusal(selector))
   const expected = clear ? text : `${prep.before ?? ""}${text}`
 
   // Phase 2: real key events through sendInputEvent, char by char, so
   // React/Vue/Svelte controlled inputs see native keystrokes and update state.
   if (text.length > 0) {
     contents.focus()
+    // Phase 1 focused the element it checked, but a page can move focus on the
+    // focus/select events it just fired, and these keystrokes go wherever focus
+    // ended up rather than to the selector that was cleared above.
+    if (await runScript<boolean>(FOCUSED_CREDENTIAL_CHECK)) throw new Error(credentialRefusal("the focused field"))
     for (const ch of Array.from(text)) {
       const keyCode = ch === " " ? "Space" : ch === "\n" ? "Enter" : ch === "\t" ? "Tab" : ch
       const modifiers: Electron.InputEvent["modifiers"] = ch >= "A" && ch <= "Z" ? ["shift"] : []
@@ -425,9 +489,13 @@ export async function type(selector: string, text: string, clear = true) {
     pushAction(`Typed into ${selector}`)
     return
   }
-  await runScript(`(() => {
+  // The element behind the selector can have been swapped or re-typed while
+  // phase 2 ran, so the fallback that writes the whole value at once re-checks
+  // rather than trusting phase 1's verdict.
+  const applied = await runScript<{ missing?: boolean; guarded?: boolean }>(`(() => {${CREDENTIAL_GUARD}
     const el = document.querySelector(${JSON.stringify(selector)});
     if (!el) return { missing: true };
+    if (isCredentialField(describeField(el))) return { guarded: true };
     el.focus();
     const value = ${JSON.stringify(expected)};
     const data = ${JSON.stringify(text)};
@@ -449,11 +517,18 @@ export async function type(selector: string, text: string, clear = true) {
     }
     return { ok: true };
   })()`)
+  if (applied.guarded) throw new Error(credentialRefusal(selector))
   pushAction(`Typed into ${selector} (native setter fallback)`)
 }
 
 export async function press(key: string) {
   const contents = ensureView()
+  // press() reaches the page through the same trusted key pipeline as type(),
+  // so without this a caller spells a password out one single-character press
+  // at a time and walks straight around type()'s guard.
+  if (!NON_TYPING_KEYS.has(key.toLowerCase()) && (await runScript<boolean>(FOCUSED_CREDENTIAL_CHECK))) {
+    throw new Error(credentialRefusal("the focused field"))
+  }
   try {
     // Electron's documented pattern: keyDown + char + keyUp. The char event is
     // what makes Enter actually submit forms and reach framework key handlers.

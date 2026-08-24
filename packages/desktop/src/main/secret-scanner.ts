@@ -14,6 +14,9 @@ const PATTERNS = [
   { kind: "Slack token", pattern: /\bxox[baprs]-[A-Za-z0-9-]{16,}\b/g },
   { kind: "Stripe secret", pattern: /\bsk_(?:live|test)_[A-Za-z0-9]{16,}\b/g },
   { kind: "provider API key", pattern: /\bsk-[A-Za-z0-9_-]{20,}\b/g },
+  { kind: "npm token", pattern: /\bnpm_[A-Za-z0-9]{30,}\b/g },
+  { kind: "Netlify token", pattern: /\bnfp_[A-Za-z0-9]{20,}\b/g },
+  { kind: "Supabase token", pattern: /\bsbp_[A-Za-z0-9]{20,}\b/g },
   { kind: "JWT", pattern: /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g },
 ] as const
 
@@ -40,7 +43,10 @@ export async function scanChangedSecrets(sourcePath: string, isolatedPath: strin
   return findings.toSorted((a, b) => a.file.localeCompare(b.file) || a.line - b.line)
 }
 
-export async function scanProjectSecrets(projectPath: string) {
+// `reportRoot` exists so publish can scan the built output as a second root: the
+// findings still have to name a path the user recognises inside their project
+// ("dist/assets/index-a1b2.js"), not one relative to the build directory.
+export async function scanProjectSecrets(projectPath: string, reportRoot = projectPath) {
   const files: string[] = []
   const walk = async (directory: string): Promise<void> => {
     if (files.length >= MAX_PROJECT_FILES) return
@@ -66,7 +72,7 @@ export async function scanProjectSecrets(projectPath: string) {
         if (!content) return []
         return matches(content).map(
           (item): SecretFinding => ({
-            file: relative(projectPath, file).split("\\").join("/"),
+            file: relative(reportRoot, file).split("\\").join("/"),
             line: item.line,
             kind: item.kind,
           }),
@@ -89,11 +95,24 @@ function matches(content: string) {
   return content.split(/\r?\n/).flatMap((line, index) => {
     if (PLACEHOLDER.test(line)) return []
     return PATTERNS.flatMap(({ kind, pattern }) =>
-      Array.from(line.matchAll(pattern)).map((match) => ({
-        kind,
-        line: index + 1,
-        fingerprint: createHash("sha256").update(`${kind}:${match[0]}`).digest("hex"),
-      })),
+      Array.from(line.matchAll(pattern))
+        .filter((match) => kind !== "JWT" || !isPublicClientJwt(match[0]))
+        .map((match) => ({
+          kind,
+          line: index + 1,
+          fingerprint: createHash("sha256").update(`${kind}:${match[0]}`).digest("hex"),
+        })),
     )
   })
+}
+
+// A Supabase anon key is a JWT that belongs in the client bundle by design, and
+// the Cloud Console writes one into every project it connects to a database.
+// Without this the deploy-output scan would fail the release gate on every
+// Supabase app — which teaches users to switch the gate off. The `service_role`
+// key has the same shape and is the leak actually worth blocking, so only the
+// public roles are excused.
+function isPublicClientJwt(token: string) {
+  const payload = Buffer.from(token.split(".")[1], "base64url").toString("utf8")
+  return /"role"\s*:\s*"(?:anon|authenticated)"/.test(payload)
 }

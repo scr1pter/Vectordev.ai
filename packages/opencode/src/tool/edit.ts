@@ -699,8 +699,6 @@ export function replace(content: string, oldString: string, newString: string, r
     )
   }
 
-  let notFound = true
-
   for (const replacer of [
     SimpleReplacer,
     LineTrimmedReplacer,
@@ -712,36 +710,89 @@ export function replace(content: string, oldString: string, newString: string, r
     ContextAwareReplacer,
     MultiOccurrenceReplacer,
   ]) {
+    // Distinct spans, because a replacer may yield the same span from more than
+    // one of its strategies, and because two different spans mean two different
+    // places in the file matched — ambiguity the caller has to resolve.
+    const spans = new Set<string>()
     for (const search of replacer(content, oldString)) {
-      const index = content.indexOf(search)
-      if (index === -1) continue
-      notFound = false
-      if (isDisproportionateMatch(search, oldString)) {
-        throw new Error(
-          "Refusing replacement because the matched span is much larger than oldString. Re-read the file and provide the full exact oldString for the intended replacement.",
-        )
-      }
-      if (replaceAll) {
-        return content.replaceAll(search, newString)
-      }
-      const lastIndex = content.lastIndexOf(search)
-      if (index !== lastIndex) continue
-      return content.substring(0, index) + newString + content.substring(index + search.length)
+      if (!search || !content.includes(search)) continue
+      spans.add(search)
     }
+    if (spans.size === 0) continue
+
+    const matches = [...spans].map((span) => ({ span, count: content.split(span).length - 1 }))
+    const total = matches.reduce((sum, match) => sum + match.count, 0)
+    if (total > 1 && !replaceAll) {
+      throw new Error("Found multiple matches for oldString. Provide more surrounding context to make the match unique.")
+    }
+
+    // A fuzzy replacer hands back a span taken from the file, which can cover
+    // more than oldString described. Substituting newString into a wider span
+    // rewrites lines the model never saw while still reporting success, so a
+    // span that cannot be reconciled is dropped rather than applied.
+    const applied = matches.flatMap((match) => {
+      const next = reconcile(match.span, oldString, newString)
+      return next === undefined ? [] : [{ span: match.span, next }]
+    })
+    if (applied.length !== matches.length) continue
+
+    if (replaceAll) {
+      return applied.reduce((result, item) => result.replaceAll(item.span, item.next), content)
+    }
+    const index = content.indexOf(applied[0].span)
+    return content.substring(0, index) + applied[0].next + content.substring(index + applied[0].span.length)
   }
 
-  if (notFound) {
-    throw new Error(
-      "Could not find oldString in the file. It must match exactly, including whitespace, indentation, and line endings.",
-    )
-  }
-  throw new Error("Found multiple matches for oldString. Provide more surrounding context to make the match unique.")
+  throw new Error(
+    "Could not find oldString in the file. It must match exactly, including whitespace, indentation, and line endings.",
+  )
 }
 
-function isDisproportionateMatch(search: string, oldString: string) {
-  const oldLines = oldString.split("\n").length
-  const searchLines = search.split("\n").length
-  if (searchLines >= Math.max(oldLines + 3, oldLines * 2)) return true
-  if (oldLines === 1) return false
-  return search.trim().length > Math.max(oldString.trim().length + 500, oldString.trim().length * 4)
+/**
+ * Text to substitute for a matched span, or undefined when the span covers more
+ * than oldString accounted for and no safe narrowing exists.
+ *
+ * Only two shapes are reconcilable. The span is oldString exactly, or the span
+ * is oldString shifted right by one uniform indent — models routinely strip
+ * indentation when quoting a file back, and newString is then written against
+ * the stripped form, so shifting it by the same indent reproduces exactly the
+ * edit that was described. Whitespace inside a line is negotiable too, since
+ * newString respecifies the whole line. Anything else (a different number of
+ * lines, per-line indentation that does not shift uniformly, different code in
+ * the middle of the block) is refused: there is no way to tell which part of
+ * the span was meant to survive, so guessing loses code.
+ */
+function reconcile(search: string, oldString: string, newString: string) {
+  if (search === oldString) return newString
+
+  const searchLines = search.split("\n")
+  const oldLines = oldString.split("\n")
+  if (searchLines.length !== oldLines.length) return undefined
+
+  const anchor = oldLines.findIndex((line) => line.trim().length > 0)
+  if (anchor === -1) return undefined
+  const base = indentation(oldLines[anchor])
+  const indent = indentation(searchLines[anchor])
+  if (!indent.startsWith(base)) return undefined
+  const shift = indent.slice(base.length)
+
+  const aligned = searchLines.every((line, index) => {
+    if (line.trim().length === 0) return oldLines[index].trim().length === 0
+    if (!line.startsWith(shift)) return false
+    return collapse(line.slice(shift.length)) === collapse(oldLines[index])
+  })
+  if (!aligned) return undefined
+  if (shift === "") return newString
+  return newString
+    .split("\n")
+    .map((line) => (line.trim().length === 0 ? line : shift + line))
+    .join("\n")
+}
+
+function indentation(line: string) {
+  return /^[ \t]*/.exec(line)![0]
+}
+
+function collapse(line: string) {
+  return indentation(line) + line.trim().replace(/\s+/g, " ")
 }

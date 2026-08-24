@@ -204,8 +204,17 @@ export type AgentTeamsAPI = {
   >
   claim: (teamId: string, workspaceId: string) => Promise<TeamMessage[]>
   delete: (teamId: string) => Promise<void>
-  getGraph: (teamId: string) => Promise<TeamCollaborationGraph | undefined>
-  setGraph: (teamId: string, graph: TeamCollaborationGraph | undefined) => Promise<AgentTeam | undefined>
+  // `explicit` distinguishes a graph the user actually configured from the
+  // all-to-all default that is synthesised for a team without one — a caller
+  // that cannot tell them apart will persist the default over the user's own
+  // pairing. Undefined only when the team is gone.
+  getGraph: (teamId: string) => Promise<{ explicit: boolean; graph: TeamCollaborationGraph } | undefined>
+  // Validation failures come back as errors rather than throwing, so the caller
+  // can show which links were rejected instead of losing the edit.
+  setGraph: (
+    teamId: string,
+    graph: TeamCollaborationGraph | undefined,
+  ) => Promise<{ ok: true; errors: string[]; team?: AgentTeam } | { ok: false; errors: string[] }>
 }
 
 export type RuntimeAPI = {

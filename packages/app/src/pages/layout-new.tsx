@@ -64,6 +64,13 @@ import { CanvasWorkspace } from "@/features/canvas/canvas"
 import { useUpdaterAction } from "@/components/updater-action"
 import { VelCall } from "@/features/vel/vel-call"
 import { VEL_OPEN_EVENT } from "@/features/vel/vel-message"
+import {
+  adoptCollaborationGraph,
+  collaborationLinkKey,
+  PENDING_MEMBER_PREFIX,
+  shouldPersistCollaborationGraph,
+  type TeamCollaborationGraph,
+} from "./layout-collaboration"
 
 const NAVIGATION_DEFAULT_WIDTH = 320
 const NAVIGATION_MINIMUM_WIDTH = 228
@@ -289,18 +296,11 @@ type SwarmRunRecord = {
 // are duplicated and must stay byte-identical to the preload types. The last
 // bug in this area was a hand-rolled shape that omitted getGraph/setGraph and
 // therefore made a wired-up backend look unimplemented, so nothing here may be
-// narrowed to "only what this file happens to call".
+// narrowed to "only what this file happens to call". The one after that was
+// getGraph declared as a bare graph when main returns `{ explicit, graph }`:
+// the adopt effect threw, the composer kept its default, and the launch wrote
+// that default over the pairing the user had configured.
 type TeamTopology = "isolated" | "collaborative" | "shared-main"
-
-type TeamLink = {
-  from: string
-  to: string
-  mutual?: boolean
-}
-
-type TeamCollaborationGraph = {
-  links: TeamLink[]
-}
 
 type TeamMessage = {
   id: string
@@ -352,16 +352,18 @@ type AgentTeamsApi = {
   >
   claim: (teamId: string, workspaceId: string) => Promise<TeamMessage[]>
   delete: (teamId: string) => Promise<void>
-  getGraph: (teamId: string) => Promise<TeamCollaborationGraph | undefined>
-  setGraph: (teamId: string, graph: TeamCollaborationGraph | undefined) => Promise<AgentTeam | undefined>
+  // `explicit` distinguishes a graph the user actually configured from the
+  // all-to-all default that is synthesised for a team without one — a caller
+  // that cannot tell them apart will persist the default over the user's own
+  // pairing. Undefined only when the team is gone.
+  getGraph: (teamId: string) => Promise<{ explicit: boolean; graph: TeamCollaborationGraph } | undefined>
+  // Validation failures come back as errors rather than throwing, so the caller
+  // can show which links were rejected instead of losing the edit.
+  setGraph: (
+    teamId: string,
+    graph: TeamCollaborationGraph | undefined,
+  ) => Promise<{ ok: true; errors: string[]; team?: AgentTeam } | { ok: false; errors: string[] }>
 }
-
-// The graph is drawn before the agents it describes exist, so a member this
-// launch is about to create is held under a placeholder id and swapped for the
-// real workspace id once the record comes back.
-const PENDING_MEMBER_PREFIX = "pending:"
-
-const collaborationLinkKey = (from: string, to: string) => `${from}>${to}`
 
 type SwarmOrchestratorApi = {
   list: (scope?: { sourcePath?: string; parentSessionId?: string }) => Promise<SwarmRunRecord[]>
@@ -498,6 +500,10 @@ export default function NewLayout(props: ParentProps) {
   const [collaborationShape, setCollaborationShape] = createSignal<"all" | "coordinator" | "custom">("all")
   const [collaborationCoordinator, setCollaborationCoordinator] = createSignal<string>()
   const [collaborationLinks, setCollaborationLinks] = createSignal<string[]>([])
+  // The team whose stored pairing the editor below is actually showing. Only a
+  // launch into that same team is allowed to clear its graph — see
+  // shouldPersistCollaborationGraph.
+  const [collaborationAdoptedTeamID, setCollaborationAdoptedTeamID] = createSignal<string>()
 
   const agentTeamsApi = () =>
     (globalThis.window as unknown as { api?: { agentTeams?: AgentTeamsApi } })?.api?.agentTeams
@@ -1298,47 +1304,41 @@ export default function NewLayout(props: ParentProps) {
     }
   }
 
-  // A stored graph is only recognisable as the coordinator shape when exactly
-  // one member is mutually linked to every other; anything else is custom.
-  const coordinatorInGraph = (graph: TeamCollaborationGraph, memberIds: readonly string[]) => {
-    const candidate = graph.links[0]?.from
-    if (!candidate || graph.links.length !== memberIds.length - 1) return undefined
-    if (!graph.links.every((link) => link.from === candidate && link.mutual === true)) return undefined
-    return candidate
-  }
-
   // Joining a team adopts the pairing it already has, so the composer edits the
-  // live shape instead of silently overwriting it on launch.
+  // live shape instead of silently overwriting it on launch. Only
+  // parallelJoinTeamId() is tracked here — agentTeamsApi() reads off window —
+  // so this runs exactly once per team the user picks.
   createEffect(() => {
     const teamId = parallelJoinTeamId()
     const api = agentTeamsApi()
     if (!teamId || !api) return
+    // Drop the previous team's pairing before awaiting. A read that fails must
+    // not leave the editor showing one team's graph while pointed at another,
+    // because the launch would then write it over the team the user picked.
+    setCollaborationAdoptedTeamID(undefined)
+    setCollaborationShape("all")
+    setCollaborationCoordinator(undefined)
+    setCollaborationLinks([])
     void api
       .getGraph(teamId)
-      .then((graph) => {
-        if (!graph) {
-          setCollaborationShape("all")
-          setCollaborationCoordinator(undefined)
-          setCollaborationLinks([])
-          return
-        }
+      .then((result) => {
+        // Picking a second team leaves two reads in flight. Adopting a reply for
+        // a team the composer has already moved off would show one team's
+        // pairing while pointed at another, and the launch persists a drawn
+        // graph regardless of which team it was adopted from — so that stale
+        // reply would be written over the team the user actually picked.
+        if (parallelJoinTeamId() !== teamId) return
         // Read after the await so refreshing the team list does not re-run this
         // effect and discard pairing the user is in the middle of editing.
-        const coordinator = coordinatorInGraph(graph, openTeams().find((team) => team.id === teamId)?.memberIds ?? [])
-        setCollaborationCoordinator(coordinator)
-        setCollaborationShape(coordinator ? "coordinator" : "custom")
-        // A mutual link is one stored row standing for both directions, so it
-        // becomes two checked cells. Collapsing it to the single forward cell
-        // would show the team as more restricted than it is, and saving from
-        // the custom matrix — which only ever emits directed rows — would then
-        // silently revoke the reply permission the user never unchecked.
-        setCollaborationLinks(
-          graph.links.flatMap((link) =>
-            link.mutual === true
-              ? [collaborationLinkKey(link.from, link.to), collaborationLinkKey(link.to, link.from)]
-              : [collaborationLinkKey(link.from, link.to)],
-          ),
-        )
+        const adopted = adoptCollaborationGraph(result, openTeams().find((team) => team.id === teamId)?.memberIds ?? [])
+        // Nothing to adopt means the team is gone or the payload is not a graph.
+        // Leaving the flag unset is what stops the launch from persisting this
+        // editor's untouched default over whatever the team actually has.
+        if (!adopted) return
+        setCollaborationShape(adopted.shape)
+        setCollaborationCoordinator(adopted.coordinator)
+        setCollaborationLinks(adopted.links)
+        setCollaborationAdoptedTeamID(teamId)
       })
       .catch(() => undefined)
   })
@@ -1810,7 +1810,17 @@ export default function NewLayout(props: ParentProps) {
           return [{ from, to, mutual: link.mutual }]
         }),
       }
-      if (graph || parallelJoinTeamId()) await teamsApi.setGraph(team.id, graph).catch(() => undefined)
+      const persist = shouldPersistCollaborationGraph({
+        teamId: team.id,
+        graph,
+        joinedTeamId: parallelJoinTeamId(),
+        adoptedTeamId: collaborationAdoptedTeamID(),
+      })
+      const stored = persist ? await teamsApi.setGraph(team.id, graph).catch(() => undefined) : undefined
+      // Validation errors come back rather than throwing, and losing the pairing
+      // silently is what made this area a data-loss bug in the first place. The
+      // agents panel renders parallelError once the composer closes.
+      if (stored && !stored.ok) setParallelError(`Pairing was not saved: ${stored.errors.join(" ")}`)
     }
 
     setParallelBusy(false)
@@ -3242,6 +3252,7 @@ export default function NewLayout(props: ParentProps) {
                       onClick={() => {
                         setParallelTopology("isolated")
                         setParallelJoinTeamId(undefined)
+                        setCollaborationAdoptedTeamID(undefined)
                         setCollaborationShape("all")
                         setCollaborationCoordinator(undefined)
                         setCollaborationLinks([])
@@ -3345,6 +3356,7 @@ export default function NewLayout(props: ParentProps) {
                             }}
                             onClick={() => {
                               setParallelJoinTeamId(undefined)
+                              setCollaborationAdoptedTeamID(undefined)
                               setCollaborationShape("all")
                               setCollaborationCoordinator(undefined)
                               setCollaborationLinks([])
