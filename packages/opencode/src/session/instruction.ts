@@ -66,7 +66,11 @@ const layer: Layer.Layer<
       ...(!flags.disableClaudeCodePrompt ? ["CLAUDE.md"] : []),
       "CONTEXT.md", // deprecated
     ]
-    const memoryFiles = [".vector/BRAIN.md", "BRAIN.md"]
+    // Loaded in addition to project instructions rather than instead of them.
+    // BRAIN.md is what Vector remembers about a project; RULES.md is what the
+    // team told Vector about it — standards written in the app and committed
+    // with the repository so a clone carries them.
+    const additiveProjectFiles = [".vector/RULES.md", ".vector/BRAIN.md", "BRAIN.md"]
     // Local memory: durable facts about the user that follow them across every
     // project, stored only in their own config directory and never uploaded.
     // Loaded additively rather than through globalFiles, whose first-match
@@ -127,10 +131,10 @@ const layer: Layer.Layer<
 
       if (yield* fs.existsSafe(globalMemoryFile)) paths.add(path.resolve(globalMemoryFile))
 
-      // Vector memory is additive rather than mutually exclusive with project
-      // instructions. It must be loaded even when a global AGENTS.md or
-      // CLAUDE.md exists.
-      for (const file of memoryFiles) {
+      // Vector memory and project rules are additive rather than mutually
+      // exclusive with project instructions. They must be loaded even when a
+      // global AGENTS.md or CLAUDE.md exists.
+      for (const file of additiveProjectFiles) {
         const matches = yield* fs
           .findUp(file, ctx.directory, ctx.worktree)
           .pipe(Effect.catch(() => Effect.succeed([])))

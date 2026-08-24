@@ -37,6 +37,8 @@ const brandPaths = {
   fetchglobe: `M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 1.8a8.2 8.2 0 0 1 0 16.4A8.2 8.2 0 0 1 12 3.8zM11.1 6h1.8v6.3l2.6-2.6 1.3 1.3-4.8 4.7-4.8-4.7 1.3-1.3 2.6 2.6V6z`,
   memorygraph: `M12 2.6a3 3 0 0 1 3 3c0 .5-.1 1-.4 1.4l2.9 2.9a3 3 0 1 1-1.2 1.3l-3-3a3 3 0 0 1-2.6 0l-3 3a3 3 0 1 1-1.2-1.3l2.9-2.9A3 3 0 0 1 12 2.6zM6 15.4a3 3 0 0 1 3 3 3 3 0 1 1-3-3zm12 0a3 3 0 1 1 0 6 3 3 0 0 1 0-6zM9.5 18h5v1.8h-5V18z`,
   chainsteps: `M3 3h6v6H3V3zm1.7 1.7v2.6h2.6V4.7H4.7zM9 9h6v6H9V9zm1.7 1.7v2.6h2.6v-2.6h-2.6zM15 15h6v6h-6v-6zm1.7 1.7v2.6h2.6v-2.6h-2.6z`,
+  greptile: `M10.5 3a7.5 7.5 0 1 1 0 15 7.5 7.5 0 0 1 0-15zm0 2.2a5.3 5.3 0 1 0 0 10.6 5.3 5.3 0 0 0 0-10.6zM16.7 16.9l1.5-1.5 3.6 3.6-1.5 1.5z`,
+  coderabbit: `M2 3h13v9H7l-5 4V3zm7 12h13v9l-5-4h-8v-5z`,
   graphify: `M2.3 12a2.7 2.7 0 1 0 5.4 0 2.7 2.7 0 1 0-5.4 0zM14.8 4.8a2.7 2.7 0 1 0 5.4 0 2.7 2.7 0 1 0-5.4 0zM14.8 19.2a2.7 2.7 0 1 0 5.4 0 2.7 2.7 0 1 0-5.4 0zM16.7 7.5h1.6v9h-1.6zM6.9 10l8-4.5.8 1.4-8 4.5zM6.9 14l8 4.5.8-1.4-8-4.5z`,
   higgsfield: `M13.4 2 4.6 13.6h5.2L9 22l8.9-11.6h-5.3L13.4 2z`,
   falai: `M12 2.2l1.9 5.6 5.6-1.6-3.6 4.6 4.6 3.5-5.8.4.5 5.8-4.1-4.2-4 4.2.4-5.8-5.8-.4 4.7-3.5-3.7-4.6 5.7 1.6L12 2.2z`,
@@ -648,6 +650,44 @@ export const PLUGIN_CATALOG: PluginDef[] = [
     fill: "#B28CFF",
     auth: { kind: "none" },
     build: () => local(["npx", "-y", "@modelcontextprotocol/server-memory"]),
+  },
+  {
+    id: "greptile",
+    name: "Greptile",
+    blurb: "Ask questions about an indexed codebase, and read its review findings.",
+    category: "Search & knowledge",
+    logo: "greptile",
+    fill: "#3ECF8E",
+    // Greptile's own hosted MCP endpoint, authenticated with a bearer API key
+    // from app.greptile.com — there is no stdio server to install.
+    auth: {
+      kind: "token",
+      fields: [{ key: "token", label: "Greptile API key", placeholder: "Your Greptile API key", secret: true }],
+      docsUrl: "https://app.greptile.com/settings/api",
+      docsLabel: "Get your API key from Greptile",
+    },
+    build: (v) => remote("https://api.greptile.com/mcp", { Authorization: `Bearer ${v.token}` }),
+  },
+  {
+    id: "coderabbit",
+    name: "CodeRabbit",
+    blurb: "Read CodeRabbit's review comments on a pull request, and resolve them.",
+    category: "Source & deploy",
+    logo: "coderabbit",
+    fill: "#FF8A4C",
+    // CodeRabbit publishes no MCP server of its own — it is an MCP *client*
+    // that reads other servers for review context. This is the community
+    // server that reads CodeRabbit's review threads back off a GitHub PR, so
+    // it authenticates with a GitHub token rather than a CodeRabbit one.
+    auth: {
+      kind: "token",
+      fields: [
+        { key: "token", label: "GitHub personal access token", placeholder: "ghp_… or github_pat_…", secret: true },
+      ],
+      docsUrl: "https://github.com/bradthebeeble/coderabbitai-mcp",
+      docsLabel: "Community server · needs repo scope",
+    },
+    build: (v) => local(["npx", "-y", "coderabbitai-mcp@latest"], { GITHUB_PAT: v.token }),
   },
   {
     id: "graphify",

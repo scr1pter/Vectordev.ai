@@ -1,7 +1,10 @@
 import { createMemo, createSignal, For, onCleanup, Show } from "solid-js"
 import { SubagentAvatar, subagentIdentity } from "@/features/agents/identities"
 import {
+  boardColumns,
   elapsedLabel,
+  filterAgents,
+  hasActiveFilters,
   isDirected,
   orderConversation,
   findClashes,
@@ -11,8 +14,60 @@ import {
   sortForDisplay,
   summarize,
   type DashboardAgentInput,
+  type DashboardAgentStatus,
   type TeamConversation,
 } from "./agent-dashboard-model"
+
+// A chip is a set membership toggle, not a radio: clicking two statuses means
+// "either of these", which is what a row of chips reads as.
+function toggled<T>(values: readonly T[], value: T) {
+  return values.includes(value) ? values.filter((item) => item !== value) : [...values, value]
+}
+
+function FilterChip(props: { label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      class="shrink-0 rounded-[6px] border px-2 py-1 text-[11px] transition"
+      classList={{
+        "border-[color:var(--vx-purple)]/60 bg-[color:var(--vx-purple-soft)] text-white": props.active,
+        "border-[color:var(--vx-line)] text-white/50 hover:text-white": !props.active,
+      }}
+      aria-pressed={props.active}
+      onClick={props.onClick}
+    >
+      {props.label}
+    </button>
+  )
+}
+
+function BoardCard(props: { agent: DashboardAgentInput; now: number; onOpen?: (id: string) => void }) {
+  return (
+    <button
+      type="button"
+      class="w-full rounded-[8px] border border-[color:var(--vx-line)] bg-[color:var(--vx-surface)] px-3 py-2.5 text-left transition hover:border-[color:var(--vx-purple)]"
+      onClick={() => props.onOpen?.(props.agent.id)}
+    >
+      <div class="mb-1 truncate text-[12.5px] font-medium text-white">{props.agent.name}</div>
+      <div class="mb-2 line-clamp-2 text-[11.5px] leading-4 text-white/50">{props.agent.taskPrompt}</div>
+      <div class="flex items-center gap-1.5 text-[11px] text-white/40">
+        <span
+          class="size-1.5 shrink-0 rounded-full"
+          classList={{
+            [statusTone(props.agent.status)]: true,
+            "animate-pulse": isRunning(props.agent.status),
+          }}
+          aria-hidden="true"
+        />
+        <span class="truncate">{props.agent.lastAction || props.agent.status}</span>
+        <span class="ml-auto shrink-0">{elapsedLabel(props.agent, props.now)}</span>
+      </div>
+      <Show when={props.agent.pullRequestUrl}>
+        <div class="mt-1 text-[10.5px] text-emerald-300/80">PR is ready</div>
+      </Show>
+    </button>
+  )
+}
 
 const statusTone = (status: DashboardAgentInput["status"]) => {
   if (status === "failed") return "bg-rose-400"
@@ -132,10 +187,45 @@ export function AgentDashboard(props: {
   const timer = setInterval(() => setNow(Date.now()), 1_000)
   onCleanup(() => clearInterval(timer))
 
+  const [view, setView] = createSignal<"board" | "list">("board")
+  const [query, setQuery] = createSignal("")
+  const [statuses, setStatuses] = createSignal<DashboardAgentStatus[]>([])
+  const [runtimes, setRuntimes] = createSignal<string[]>([])
+  const [teams, setTeams] = createSignal<string[]>([])
+  const [pullRequest, setPullRequest] = createSignal<"with" | "without" | undefined>()
+
+  const filters = createMemo(() => ({
+    query: query(),
+    statuses: statuses(),
+    runtimes: runtimes(),
+    groups: teams(),
+    pullRequest: pullRequest(),
+  }))
+  const visible = createMemo(() => filterAgents(props.agents, filters()))
+
+  // Facets are derived from what is actually on screen, so a chip never offers
+  // a status or runtime that would filter everything away.
+  const statusOptions = createMemo(() => [...new Set(props.agents.map((agent) => agent.status))].sort())
+  const runtimeOptions = createMemo(() => [...new Set(props.agents.map((agent) => agent.runtime))].sort())
+  const teamOptions = createMemo(() =>
+    groupAgents(props.agents)
+      .filter((group) => group.swarm)
+      .map((group) => ({ id: group.id, label: group.label })),
+  )
+
+  const clearFilters = () => {
+    setQuery("")
+    setStatuses([])
+    setRuntimes([])
+    setTeams([])
+    setPullRequest(undefined)
+  }
+
   const summary = createMemo(() => summarize(props.agents))
   const clashes = createMemo(() => findClashes(props.agents))
+  const columns = createMemo(() => boardColumns(visible()))
   const groups = createMemo(() =>
-    groupAgents(sortForDisplay(props.agents)).sort((a, b) => Number(b.swarm) - Number(a.swarm)),
+    groupAgents(sortForDisplay(visible())).sort((a, b) => Number(b.swarm) - Number(a.swarm)),
   )
 
   return (
@@ -148,10 +238,34 @@ export function AgentDashboard(props: {
         class="fixed inset-0 z-[90] flex flex-col bg-[color:var(--vx-canvas)]"
       >
         <header class="flex h-14 shrink-0 items-center gap-3 border-b border-[color:var(--vx-line)] px-5">
-          <div class="min-w-0 flex-1">
+          <div class="min-w-0">
             <div class="text-[14px] font-semibold text-white">Agent Dashboard</div>
             <div class="text-[11px] text-white/45">Every agent in this project, live</div>
           </div>
+          <div class="flex shrink-0 items-center gap-1 rounded-[6px] border border-[color:var(--vx-line)] p-0.5">
+            <For each={["board", "list"] as const}>
+              {(mode) => (
+                <button
+                  type="button"
+                  class="rounded-[4px] px-2.5 py-1 text-[11.5px] capitalize transition"
+                  classList={{
+                    "bg-[color:var(--vx-purple-soft)] text-white": view() === mode,
+                    "text-white/45 hover:text-white": view() !== mode,
+                  }}
+                  onClick={() => setView(mode)}
+                >
+                  {mode}
+                </button>
+              )}
+            </For>
+          </div>
+          <input
+            class="h-7 w-52 shrink-0 rounded-[6px] border border-[color:var(--vx-line)] bg-[color:var(--vx-surface)] px-2.5 text-[12px] text-white/85 outline-none placeholder:text-white/30"
+            placeholder="Search agents"
+            value={query()}
+            onInput={(event) => setQuery(event.currentTarget.value)}
+          />
+          <div class="flex-1" />
           <button
             type="button"
             aria-label="Close Agent Dashboard"
@@ -173,6 +287,57 @@ export function AgentDashboard(props: {
             <Stat label="Files touched" value={summary().changedFiles} />
             <Stat label="Teams" value={summary().teams} />
             <Stat label="Clashes" value={summary().clashes} tone={summary().clashes ? "text-rose-300" : "text-white"} />
+          </div>
+
+          <div class="mb-3 flex flex-wrap items-center gap-1.5">
+            <For each={statusOptions()}>
+              {(status) => (
+                <FilterChip
+                  label={status}
+                  active={statuses().includes(status)}
+                  onClick={() => setStatuses((current) => toggled(current, status))}
+                />
+              )}
+            </For>
+            <Show when={runtimeOptions().length > 1}>
+              <span class="mx-1 h-4 w-px bg-[color:var(--vx-line)]" />
+              <For each={runtimeOptions()}>
+                {(runtime) => (
+                  <FilterChip
+                    label={runtime}
+                    active={runtimes().includes(runtime)}
+                    onClick={() => setRuntimes((current) => toggled(current, runtime))}
+                  />
+                )}
+              </For>
+            </Show>
+            <Show when={teamOptions().length}>
+              <span class="mx-1 h-4 w-px bg-[color:var(--vx-line)]" />
+              <For each={teamOptions()}>
+                {(team) => (
+                  <FilterChip
+                    label={team.label}
+                    active={teams().includes(team.id)}
+                    onClick={() => setTeams((current) => toggled(current, team.id))}
+                  />
+                )}
+              </For>
+            </Show>
+            <span class="mx-1 h-4 w-px bg-[color:var(--vx-line)]" />
+            <FilterChip
+              label="Has PR"
+              active={pullRequest() === "with"}
+              onClick={() => setPullRequest((current) => (current === "with" ? undefined : "with"))}
+            />
+            <Show when={hasActiveFilters(filters())}>
+              <button
+                type="button"
+                class="ml-auto shrink-0 text-[11px] text-white/45 transition hover:text-white"
+                onClick={clearFilters}
+              >
+                Clear filters
+              </button>
+            </Show>
           </div>
 
           <Show when={clashes().length}>
@@ -202,13 +367,41 @@ export function AgentDashboard(props: {
           </For>
 
           <Show
-            when={props.agents.length}
+            when={visible().length}
             fallback={
               <div class="rounded-[6px] border border-[color:var(--vx-line)] px-4 py-8 text-center text-[12.5px] text-white/45">
-                No agents yet. Start one from the sidebar and it will appear here.
+                <Show
+                  when={props.agents.length}
+                  fallback={<>No agents yet. Start one from the sidebar and it will appear here.</>}
+                >
+                  No agents match these filters.
+                </Show>
               </div>
             }
           >
+            <Show when={view() === "board"}>
+              <div class="grid grid-cols-1 items-start gap-3 md:grid-cols-3">
+                <For each={columns()}>
+                  {(column) => (
+                    <div class="rounded-[8px] border border-[color:var(--vx-line)] bg-white/[0.015] p-2">
+                      <div class="mb-2 flex items-center gap-2 px-1 text-[11.5px] font-semibold text-white/70">
+                        <span>{column.label}</span>
+                        <span class="text-white/35">{column.agents.length}</span>
+                      </div>
+                      <div class="flex flex-col gap-2">
+                        <For each={column.agents}>
+                          {(item) => <BoardCard agent={item} now={now()} onOpen={props.onOpenAgent} />}
+                        </For>
+                      </div>
+                      <Show when={!column.agents.length}>
+                        <div class="px-1 py-3 text-[11px] text-white/30">Nothing here</div>
+                      </Show>
+                    </div>
+                  )}
+                </For>
+              </div>
+            </Show>
+            <Show when={view() === "list"}>
             <For each={groups()}>
               {(group) => (
                 <div class="mb-3">
@@ -227,6 +420,7 @@ export function AgentDashboard(props: {
                 </div>
               )}
             </For>
+            </Show>
           </Show>
         </div>
       </div>

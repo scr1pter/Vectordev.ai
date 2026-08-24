@@ -35,6 +35,7 @@ export type DashboardAgentInput = {
   swarmRunId?: string
   swarmRole?: "coordinator" | "worker"
   teamId?: string
+  pullRequestUrl?: string
   mergeState: "none" | "merged" | "discarded"
   error?: string
 }
@@ -209,4 +210,84 @@ export function elapsedLabel(agent: DashboardAgentInput, now: number) {
   if (seconds < 60) return `${seconds}s`
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`
   return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`
+}
+
+// The board mirrors what a reviewer actually does with a run: watch it, act on
+// it, or leave it alone. "Needs you" deliberately merges failed with needs
+// review — both are stopped and waiting on a person, and splitting them puts
+// the same decision in two places.
+export type BoardColumnId = "running" | "attention" | "done"
+
+export type BoardColumn = {
+  id: BoardColumnId
+  label: string
+  agents: DashboardAgentInput[]
+}
+
+export function boardColumnFor(agent: DashboardAgentInput): BoardColumnId {
+  if (isRunning(agent.status)) return "running"
+  if (needsAttention(agent)) return "attention"
+  return "done"
+}
+
+export function boardColumns(agents: readonly DashboardAgentInput[]): BoardColumn[] {
+  const sorted = sortForDisplay(agents)
+  const labels: Record<BoardColumnId, string> = {
+    running: "Running",
+    attention: "Needs you",
+    done: "Done",
+  }
+  return (["running", "attention", "done"] as BoardColumnId[]).map((id) => ({
+    id,
+    label: labels[id],
+    agents: sorted.filter((agent) => boardColumnFor(agent) === id),
+  }))
+}
+
+export type AgentFilters = {
+  query?: string
+  statuses?: DashboardAgentStatus[]
+  runtimes?: string[]
+  // A team id, a swarm id, or "solo" for the agents that belong to neither.
+  groups?: string[]
+  pullRequest?: "with" | "without"
+}
+
+function matchesQuery(agent: DashboardAgentInput, query: string) {
+  const needle = query.trim().toLowerCase()
+  if (!needle) return true
+  return [agent.name, agent.taskPrompt, agent.lastAction, agent.runtime, agent.model]
+    .some((field) => field?.toLowerCase().includes(needle))
+}
+
+function groupKeyFor(agent: DashboardAgentInput) {
+  return agent.swarmRunId ?? agent.teamId ?? "solo"
+}
+
+// Every filter is an OR within itself and an AND against the others, which is
+// what a chip row reads as: two statuses means either, a status and a runtime
+// means both.
+export function filterAgents(
+  agents: readonly DashboardAgentInput[],
+  filters: AgentFilters,
+): DashboardAgentInput[] {
+  return agents.filter((agent) => {
+    if (!matchesQuery(agent, filters.query ?? "")) return false
+    if (filters.statuses?.length && !filters.statuses.includes(agent.status)) return false
+    if (filters.runtimes?.length && !filters.runtimes.includes(agent.runtime)) return false
+    if (filters.groups?.length && !filters.groups.includes(groupKeyFor(agent))) return false
+    if (filters.pullRequest === "with" && !agent.pullRequestUrl) return false
+    if (filters.pullRequest === "without" && agent.pullRequestUrl) return false
+    return true
+  })
+}
+
+export function hasActiveFilters(filters: AgentFilters) {
+  return Boolean(
+    filters.query?.trim() ||
+      filters.statuses?.length ||
+      filters.runtimes?.length ||
+      filters.groups?.length ||
+      filters.pullRequest,
+  )
 }

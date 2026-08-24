@@ -1,6 +1,20 @@
 {
   "releases": [
     {
+      "tag": "v1.19.7",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Your house, your rules",
+              "description": "Two things your team already does in review, now done by every agent. Rules are standards written the way you would say them to a new teammate — we don't put database query logic in the controller — pointed at a repository and, when it matters, at the files they govern. Vector saves them to .vector/RULES.md inside the repository itself, which makes them a committed, reviewable file rather than a preference buried on one machine: clone the repo and the rules come with it. Vector's own agents read that file on every prompt. Claude Code, Codex and Cursor read their own instruction files and would never see it, so Vector carries the matching rules into the prompt it hands them instead — one rule, written once, enforced by whichever agent picks up the work. A rule can be scoped to a folder or a glob, and the scope travels as words rather than as a pattern nothing downstream re-reads, so it still means something to the model. The Agent Dashboard now opens on a board: Running, Needs you, Done. Cards carry the task, what the agent is doing right now, how long it has been at it, and whether a pull request is already waiting. Search across names and tasks, then narrow by status, runtime, team, or to just the runs that opened a PR — two statuses means either, a status and a runtime means both, and the chips are built from the agents actually on screen so one can never empty the board. Needs you deliberately merges failed with needs review, including a finished run that reported an error: both are stopped and waiting on a person, and splitting them would put the same decision in two places. Teams stay first-class and filter as a unit, because in Vector they are not independent runs that happen to sit next to each other — they message each other while they work. Two connectors join the catalogue. Greptile connects through its own hosted MCP endpoint with your API key. CodeRabbit publishes no MCP server at all — it is an MCP client that reads other servers for review context — so the entry is the community server that reads CodeRabbit's review threads back off a GitHub pull request, labelled as community and authenticating with a GitHub token rather than pretending to be official. The catalogue count on the site was also four behind reality and now reads 118, which is what is actually there."
+            }
+          ]
+        }
+      ]
+    },
+    {
       "tag": "v1.19.6",
       "highlights": [
         {

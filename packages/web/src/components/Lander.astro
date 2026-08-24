@@ -88,7 +88,7 @@ const pillars = [
   },
   {
     name: "MCP and plugins",
-    eyebrow: "112 ready to connect",
+    eyebrow: "118 ready to connect",
     body: "GitHub, Linear, Sentry, Figma, Playwright, Postgres, Stripe, Slack and more, plus any MCP server you add — and Vector installs the runtime a plugin needs instead of sending you to a terminal.",
     icon: Puzzle,
   },
@@ -176,17 +176,43 @@ const features = [
     link: "Read about Cloud Services",
   },
   {
-    title: "112 connectors, and the runtime installs itself.",
-    body: "Vector ships a catalog of 112 connectors you can turn on today — GitHub, Linear, Sentry, Figma, Playwright, Supabase, Postgres, Stripe, Notion, Slack, Chrome DevTools, Context7, Exa and more — grouped into categories like observability, project tracking, databases, design and search, alongside any MCP server you configure yourself. A further seventeen are listed in the catalog and marked coming soon rather than presented as ready. Several of them are published to PyPI and run through uvx, which most machines do not have. Rather than sending you to a terminal, Vector looks for that runner on your PATH and in the places uv actually installs itself, installs it through Astral's own installer when it is missing and tells you it is doing so, then rewrites the plugin's command to the resolved absolute path so it still spawns from a process that has no login shell.",
+    title: "118 connectors, and the runtime installs itself.",
+    body: "Vector ships a catalog of 118 connectors you can turn on today — GitHub, Linear, Sentry, Figma, Playwright, Supabase, Postgres, Stripe, Notion, Slack, Chrome DevTools, Context7, Exa, Greptile, CodeRabbit and more — grouped into categories like observability, project tracking, databases, design and search, alongside any MCP server you configure yourself. A further seventeen are listed in the catalog and marked coming soon rather than presented as ready. Several of them are published to PyPI and run through uvx, which most machines do not have. Rather than sending you to a terminal, Vector looks for that runner on your PATH and in the places uv actually installs itself, installs it through Astral's own installer when it is missing and tells you it is doing so, then rewrites the plugin's command to the resolved absolute path so it still spawns from a process that has no login shell.",
     tag: "MCP and plugins",
     note: "Catalog · plus your own servers",
     proof: [
-      ["112 ready to connect", "GitHub, Linear, Sentry, Figma, Playwright, Supabase, Postgres, Stripe, Notion, Slack, Chrome DevTools, Context7, Exa and more, by category. Seventeen further entries are marked coming soon."],
+      ["118 ready to connect", "GitHub, Linear, Sentry, Figma, Playwright, Supabase, Postgres, Stripe, Notion, Slack, Chrome DevTools, Context7, Exa, Greptile, CodeRabbit and more, by category. Seventeen further entries are marked coming soon."],
       ["Your own MCP servers too", "Anything you configure yourself runs beside the catalog entries, with the same tool surface for the agent."],
       ["No terminal detour", "A plugin that needs uvx gets it: resolved on PATH, installed through Astral's installer when absent, then rewritten to an absolute path."],
     ],
     href: "/docs",
     link: "Browse the connectors",
+  },
+  {
+    title: "Write the rule once. Every agent follows it.",
+    body: "Standards your team actually cares about, written the way you would say them to a new teammate — we don't put database query logic in the controller — pointed at a repository and, when it matters, at the files they govern. Vector saves them to .vector/RULES.md inside the repository itself, which means they are a committed, reviewable file rather than a setting buried in one developer's machine: clone the repo and the rules come with it. Vector's own agents read that file on every prompt, and because Claude Code, Codex and Cursor read their own instruction files and would never see it, Vector also carries the matching rules into the prompt it hands them. One rule, written once, enforced by whichever agent happens to pick up the work.",
+    tag: "Project rules",
+    note: "Committed with the repo",
+    proof: [
+      ["Plain English", "Describe the standard the way you would in review. No configuration language, no rule engine, no schema to learn."],
+      ["Scoped where it matters", "A rule can cover a whole repository, a folder, or a glob like src/app/web/*.tsx — and the scope travels into the prompt as words, so it still means something to the model."],
+      ["Every runtime, not just ours", "Vector agents read the committed file; Claude Code, Codex and Cursor get the same rules injected into their prompt, because they cannot read it."],
+    ],
+    href: "/docs",
+    link: "Set your rules",
+  },
+  {
+    title: "Every agent, on one board.",
+    body: "The Agent Dashboard now opens on a board: Running, Needs you, Done. A card carries the task, what the agent is doing right now, how long it has been at it, and whether a pull request is already waiting. Search across names and tasks, then narrow by status, by runtime, by team, or to just the runs that opened a PR. Needs you deliberately merges failed with needs review — both are stopped and waiting on a person, and splitting them would put the same decision in two places. Teams stay first-class: agents that share a team or a swarm can be filtered as a unit, because in Vector they are not independent runs that happen to be adjacent — they message each other while they work.",
+    tag: "Agent Dashboard",
+    note: "Board or list",
+    proof: [
+      ["Three columns, honest ones", "Running, Needs you, Done — derived from real run state, including a finished run that reported an error and still needs a person."],
+      ["Filters that compose", "Two statuses means either; a status and a runtime means both. Facets are built from the agents actually on screen, so a chip never empties the board."],
+      ["Teams are a unit", "Filter by a team or a swarm and see only that crew, including the messages they sent each other mid-run."],
+    ],
+    href: "/docs",
+    link: "See the dashboard",
   },
   {
     title: "And when one agent is not enough, run sixteen.",
@@ -312,7 +338,7 @@ const systemRows = [
 const connectionGroups = [
   ["Models", "Included free models, then Anthropic, OpenAI, Google, and other BYOK providers"],
   ["Agent runtimes", "Local Claude Code, Codex, and Cursor tools when Vector detects them installed"],
-  ["Protocols and source", "112 catalog connectors, your own MCP servers, GitHub, and GitLab"],
+  ["Protocols and source", "118 catalog connectors, your own MCP servers, GitHub, and GitLab"],
   ["Cloud and validation", "Vercel, Netlify, Supabase, AWS through its CLI, and Playwright"],
 ]
 
@@ -321,7 +347,7 @@ const comparison = [
   ["Memory file the app shows and can erase", "One MEMORY.md, with path, size and one-click erase", "—", "—", "—", "—"],
   ["Provider-reported spend recorded per run", "Ledger, plus model ranking", "Session cost readout", "—", "Usage dashboard", "—"],
   ["Independent judge before “done”", "Opt-in judge subagent", "—", "—", "—", "—"],
-  ["Connector catalog", "112 connectors, plus your own MCP", "Via MCP", "Via MCP", "Via MCP", "—"],
+  ["Connector catalog", "118 connectors, plus your own MCP", "Via MCP", "Via MCP", "Via MCP", "—"],
   ["Browser the agent drives", "Built in, refuses credentials", "Via tools", "Browser + CDP", "Via tools", "Preview-centric"],
   ["Deploys on accounts you own", "Vercel, Netlify, Supabase, AWS", "Via tools", "Via tools", "Via MCP", "Native hosting"],
   ["Parallel isolated agents", "Up to 16", "Subagents", "Worktrees", "Background agents", "—"],
@@ -1233,7 +1259,7 @@ const changelog = [
     overflow: clip;
     color: #fff;
     background:
-      linear-gradient(112deg, rgba(143, 82, 255, 0.065), transparent 27%, transparent 72%, rgba(95, 49, 185, 0.055)),
+      linear-gradient(118deg, rgba(143, 82, 255, 0.065), transparent 27%, transparent 72%, rgba(95, 49, 185, 0.055)),
       rgba(8, 6, 13, 0.5);
     font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   }
@@ -1380,7 +1406,7 @@ const changelog = [
     }
 
     :global(html.va) .scene[data-static].scene-workflow .workflow {
-      margin-top: clamp(64px, 9vw, 112px);
+      margin-top: clamp(64px, 9vw, 118px);
     }
 
     :global(html.va) .scene[data-static].scene-hero .hero {
@@ -2004,7 +2030,7 @@ const changelog = [
   }
 
   .workflow {
-    margin-top: clamp(64px, 9vw, 112px);
+    margin-top: clamp(64px, 9vw, 118px);
     padding: clamp(34px, 5vw, 58px);
     background: var(--glass-fill-strong);
     border: 1px solid var(--glass-line);

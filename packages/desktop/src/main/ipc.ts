@@ -18,6 +18,7 @@ import {
   readCustomInstructions,
   writeCustomInstructions,
 } from "./custom-instructions"
+import { deleteRepoRule, listRepoRules, saveRepoRule, type SaveRepoRuleInput } from "./repo-rules"
 import { ensureRuntime, preparePluginCommand, type RuntimeName } from "./runtime-bootstrap"
 import { convertHeicToJpeg } from "./image-convert"
 import {
@@ -284,6 +285,11 @@ export function registerIpcHandlers(deps: Deps) {
   handle("local-memory-read", () => readLocalMemory())
   handle("local-memory-write", (_event, content: string) => writeLocalMemory(String(content ?? "")))
   handle("local-memory-clear", () => clearLocalMemory())
+  handle("repo-rules-list", (_event: IpcMainInvokeEvent, repositoryPath?: string) =>
+    listRepoRules(repositoryPath ? String(repositoryPath) : undefined),
+  )
+  handle("repo-rules-save", (_event: IpcMainInvokeEvent, input: SaveRepoRuleInput) => saveRepoRule(input))
+  handle("repo-rules-delete", (_event: IpcMainInvokeEvent, id: string) => deleteRepoRule(String(id)))
   handle("custom-instructions-read", () => readCustomInstructions())
   handle("custom-instructions-write", (_event, content: string) => writeCustomInstructions(String(content ?? "")))
   handle("custom-instructions-clear", () => clearCustomInstructions())

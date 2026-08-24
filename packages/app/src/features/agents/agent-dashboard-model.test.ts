@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test"
 import {
+  boardColumns,
   elapsedLabel,
+  filterAgents,
+  hasActiveFilters,
   isDirected,
   orderConversation,
   findClashes,
@@ -225,5 +228,81 @@ describe("team conversation", () => {
 describe("summarize teams", () => {
   test("counts distinct teams and ignores agents without one", () => {
     expect(summarize([agent({ teamId: "t1" }), agent({ teamId: "t1" }), agent({ teamId: "t2" }), agent()]).teams).toBe(2)
+  })
+})
+
+describe("board columns", () => {
+  test("every agent lands in exactly one of running, needs you, or done", () => {
+    const agents = [
+      agent({ status: "editing" }),
+      agent({ status: "queued" }),
+      agent({ status: "needs review" }),
+      agent({ status: "failed" }),
+      agent({ status: "complete" }),
+      agent({ status: "merged" }),
+    ]
+    const columns = boardColumns(agents)
+    expect(columns.map((column) => column.id)).toEqual(["running", "attention", "done"])
+    expect(columns.flatMap((column) => column.agents).length).toBe(agents.length)
+    expect(columns[0]?.agents.length).toBe(2)
+    expect(columns[1]?.agents.length).toBe(2)
+    expect(columns[2]?.agents.length).toBe(2)
+  })
+
+  test("a completed agent carrying an error still needs a person", () => {
+    // needsAttention keys on the error too, and a run that reported one is not
+    // finished business just because its status says complete.
+    const columns = boardColumns([agent({ status: "complete", error: "guardrails failed" })])
+    expect(columns[1]?.agents.length).toBe(1)
+    expect(columns[2]?.agents.length).toBe(0)
+  })
+
+  test("the columns keep the display sort, so live work leads", () => {
+    const columns = boardColumns([
+      agent({ status: "editing", lastActivityAt: "2026-08-15T20:01:00.000Z" }),
+      agent({ status: "editing", lastActivityAt: "2026-08-15T20:09:00.000Z" }),
+    ])
+    expect(columns[0]?.agents[0]?.lastActivityAt).toBe("2026-08-15T20:09:00.000Z")
+  })
+})
+
+describe("filtering agents", () => {
+  test("a query matches name, task, last action, runtime or model", () => {
+    const target = agent({ name: "Warmup", taskPrompt: "add a learning rate warmup phase" })
+    const other = agent({ name: "Baseline", taskPrompt: "establish the training baseline" })
+    expect(filterAgents([target, other], { query: "warmup" })).toEqual([target])
+    expect(filterAgents([target, other], { query: "TRAINING" })).toEqual([other])
+    expect(filterAgents([target, other], { query: "   " }).length).toBe(2)
+  })
+
+  test("filters are OR within a facet and AND across facets", () => {
+    const a = agent({ status: "editing", runtime: "vector" })
+    const b = agent({ status: "failed", runtime: "codex" })
+    const c = agent({ status: "editing", runtime: "codex" })
+    expect(filterAgents([a, b, c], { statuses: ["editing", "failed"] }).length).toBe(3)
+    expect(filterAgents([a, b, c], { statuses: ["editing"], runtimes: ["codex"] })).toEqual([c])
+  })
+
+  test("pull request filters split on whether a PR was opened", () => {
+    const withPr = agent({ pullRequestUrl: "https://github.com/o/r/pull/1" })
+    const withoutPr = agent({})
+    expect(filterAgents([withPr, withoutPr], { pullRequest: "with" })).toEqual([withPr])
+    expect(filterAgents([withPr, withoutPr], { pullRequest: "without" })).toEqual([withoutPr])
+  })
+
+  test("grouping filters treat unteamed agents as solo", () => {
+    const teamed = agent({ teamId: "team-1" })
+    const swarmed = agent({ swarmRunId: "swarm-1" })
+    const alone = agent({})
+    expect(filterAgents([teamed, swarmed, alone], { groups: ["solo"] })).toEqual([alone])
+    expect(filterAgents([teamed, swarmed, alone], { groups: ["team-1", "swarm-1"] }).length).toBe(2)
+  })
+
+  test("hasActiveFilters ignores an all-whitespace query", () => {
+    expect(hasActiveFilters({})).toBe(false)
+    expect(hasActiveFilters({ query: "   " })).toBe(false)
+    expect(hasActiveFilters({ query: "warmup" })).toBe(true)
+    expect(hasActiveFilters({ statuses: [] })).toBe(false)
+    expect(hasActiveFilters({ pullRequest: "with" })).toBe(true)
   })
 })

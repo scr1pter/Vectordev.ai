@@ -230,6 +230,32 @@ export type LocalMemoryAPI = {
 
 // Edits the global AGENTS.md the engine already loads on every prompt, so these
 // instructions apply to every new session without a second mechanism.
+// Hand-mirrored from main/repo-rules-model.ts, the same convention every other
+// type crossing this boundary follows.
+export type RepoRule = {
+  id: string
+  description: string
+  repositoryPath: string
+  filePatterns: string[]
+  enabled: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export type SaveRepoRuleInput = {
+  id?: string
+  description: string
+  repositoryPath: string
+  filePatterns: string[]
+  enabled?: boolean
+}
+
+export type RepoRulesAPI = {
+  list: (repositoryPath?: string) => Promise<RepoRule[]>
+  save: (input: SaveRepoRuleInput) => Promise<RepoRule>
+  remove: (id: string) => Promise<RepoRule[]>
+}
+
 export type CustomInstructionsAPI = {
   read: () => Promise<CustomInstructionsState>
   write: (content: string) => Promise<CustomInstructionsState>
@@ -676,6 +702,7 @@ export type ElectronAPI = {
   runtime: RuntimeAPI
   localMemory: LocalMemoryAPI
   customInstructions: CustomInstructionsAPI
+  repoRules: RepoRulesAPI
   pullRequests: PullRequestsAPI
   ci: CiAPI
   spendLimits: SpendLimitsAPI

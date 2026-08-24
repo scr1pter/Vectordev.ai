@@ -36,6 +36,8 @@ import { parseUnifiedDiff, selectUnifiedDiff, type UnifiedDiffSelection } from "
 import { scanChangedSecrets } from "./secret-scanner"
 import { spendLedger } from "./spend-limits"
 import { parallelSessionCreateRequest } from "./parallel-session-scope"
+import { repoRulesForPrompt } from "./repo-rules"
+import { formatRulesForPrompt } from "./repo-rules-model"
 import {
   appendTurn,
   continuationPrompt,
@@ -553,6 +555,12 @@ function parallelAgentPrompt(record: ParallelWorkspaceRecord) {
     "Do not expose credentials or copy secrets into source files.",
     "Finish with a concise summary of changed files, validation performed, and any remaining risk.",
     "Read .vector/BRAIN.md when present and update it only with durable decisions or recurring failure lessons; never store secrets or routine narration.",
+    // Rules are keyed on the MAIN project path, not the isolated checkout: a
+    // worktree lives under Vector's own directory and would match nothing. The
+    // engine also loads .vector/RULES.md for Vector-runtime agents, but an
+    // external CLI reads its own instruction files and never sees that one, so
+    // the prompt is the only place the rules reliably reach every runtime.
+    formatRulesForPrompt(repoRulesForPrompt(record.sourcePath, record.changedFiles)),
     // Same policy the composer injects, so turning the setting on covers
     // isolated agents too rather than only the session you are typing in.
     record.llmJudge ? "" : undefined,
