@@ -1,6 +1,20 @@
 {
   "releases": [
     {
+      "tag": "v1.19.4",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "The boundaries hold",
+              "description": "A symlink committed inside a project defeated the permission gate that keeps an agent within your workspace. The check compared paths as text, so a link placed by a dependency, a merged pull request, or an agent following instructions in a page it fetched gave read and write access to the rest of the disk with no prompt. Containment is now decided on where a path really lands, dangling links are followed by hand, and a file that does not exist yet is resolved through its parent, so creating one cannot escape either; a permission you already granted on a link keeps working, because only the containment decision changed. The edit tool could replace more than it was asked to and report success: a difference of a single space matched a whole indented line and wrote back an unindented replacement, and an anchored match swallowed a line the model never saw. Edits are now reconciled against exactly what was described, and an edit that cannot be reconciled is refused rather than quietly applied. The browser's refusal to type into password, one-time-code and card fields was reachable only through one input path, so the agent's own key-press command walked around it; every path that can put characters into a field now shares the same check, decides on the focused element rather than a named selector, recognises a masked field whose type claims otherwise, and refuses on an unfamiliar key. Beyond those: the shell tool now tells the model when a command exits non-zero instead of leaving it to assume success, searching a single file no longer searches its whole directory, the Cloud Console and the agent's own cloud tool finally read the same saved setup, the secret scan inspects the directory that actually gets deployed, deployments are no longer silently cut off at two hundred files, publish and cloud logs are redacted, the file holding cloud environment variables is no longer world-readable, and joining an existing team no longer erases the pairing you configured."
+            }
+          ]
+        }
+      ]
+    },
+    {
       "tag": "v1.19.3",
       "highlights": [
         {
