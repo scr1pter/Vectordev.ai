@@ -3,8 +3,16 @@ import { ArrowRight, BadgeCheck, Brain, CalendarClock, ChevronDown, Cloud, Cloud
 import MarketingFooter from "./marketing/MarketingFooter.astro"
 import MarketingNav from "./marketing/MarketingNav.astro"
 import ProductDemo from "./marketing/ProductDemo.astro"
+import LanderMotion from "./marketing/LanderMotion.astro"
+import desktopPackage from "../../../desktop/package.json"
+import { release119 } from "../data/vector-releases"
 import sessionScreenshot from "../assets/lander/vector-session-live.png"
 import FeatureDemo from "./marketing/FeatureDemo.astro"
+
+// Read from the desktop package and the release log at build time rather than
+// typed in, so the page cannot advertise a version that was never shipped.
+const currentVersion = desktopPackage.version
+const currentRelease = release119.at(-1)
 
 const pixelFont: Record<string, string[]> = {
   V: ["10001", "10001", "10001", "10001", "10001", "01010", "00100"],
@@ -499,10 +507,11 @@ const changelog = [
 
 <div class="vector-marketing">
   <canvas class="ascii-field" data-vector-field aria-hidden="true"></canvas>
+  <LanderMotion />
   <MarketingNav active="product" />
 
   <main>
-    <section class="scene scene-hero" data-scene style="--scene-span: 2.3" aria-labelledby="hero-title">
+    <section id="ch-start" data-chapter="Start" class="scene scene-hero" data-scene style="--scene-span: 2.3" aria-labelledby="hero-title">
       <div class="scene-stage">
         <div class="sky" aria-hidden="true">
           <i class="sky-aurora"></i>
@@ -558,6 +567,12 @@ const changelog = [
           </a>
 
           <p class="hero-note">Local-first. Free models included, or bring your own. Available for macOS, Windows, and Linux.</p>
+          <p class="hero-ship">
+            <span class="hero-ship-dot" aria-hidden="true"></span>
+            <span>v{currentVersion} — {currentRelease?.title}</span>
+            <span class="hero-ship-sep" aria-hidden="true">·</span>
+            <span>this page ships 20 KB of JavaScript and CSS</span>
+          </p>
         </div>
 
         <div class="showcase" aria-label="Vector, running in this page">
@@ -625,7 +640,18 @@ const changelog = [
       </a>
     </section>
 
-    <div class="features">
+    <section class="tally section-width" aria-label="Vector by the numbers" data-reveal>
+      <div><strong data-count-to="118">0</strong><span>connectors ready to turn on</span></div>
+      <div><strong data-count-to="16">0</strong><span>agents you can run at once</span></div>
+      <div><strong data-count-to="4">0</strong><span>runtimes, Vector's and three others</span></div>
+      <div><strong data-count-to="0">0</strong><span>lines of your code uploaded</span></div>
+    </section>
+
+    <figure class="pullquote section-width" data-reveal>
+      <blockquote>Most tools write the code. The hard part was never the writing.</blockquote>
+    </figure>
+
+    <div id="ch-features" data-chapter="What it does" class="features">
       {features.map((feature) => (
         <section class="feature">
           <div class="feature-copy" data-reveal>
@@ -778,7 +804,7 @@ const changelog = [
       </p>
     </section>
 
-    <section class="runtime section-width" aria-labelledby="runtime-title">
+    <section id="ch-only" data-chapter="Only in Vector" class="runtime section-width" aria-labelledby="runtime-title">
       <div class="runtime-intro chapter-head" data-reveal>
         <p class="section-kicker">Only in Vector</p>
         <h2 id="runtime-title">Things that are rarely true in one place.</h2>
@@ -798,7 +824,7 @@ const changelog = [
       </div>
     </section>
 
-    <section class="licensing section-width" aria-labelledby="licensing-title">
+    <section id="ch-pricing" data-chapter="Licensing" class="licensing section-width" aria-labelledby="licensing-title">
       <div class="section-heading chapter-head" data-reveal>
         <p class="section-kicker">Licensing and spend</p>
         <h2 id="licensing-title">What you pay for, and what it costs to run.</h2>
@@ -854,7 +880,7 @@ const changelog = [
       </div>
     </section>
 
-    <section class="connections section-width" aria-labelledby="connections-title">
+    <section id="ch-connect" data-chapter="Connections" class="connections section-width" aria-labelledby="connections-title">
       <div class="section-heading chapter-head" data-reveal>
         <p class="section-kicker">Bring your stack</p>
         <h2 id="connections-title">One workspace for the tools you already trust.</h2>
@@ -873,7 +899,7 @@ const changelog = [
       </div>
     </section>
 
-    <section class="comparison-section section-width" aria-labelledby="comparison-title">
+    <section id="ch-compare" data-chapter="Comparison" class="comparison-section section-width" aria-labelledby="comparison-title">
       <div class="section-heading chapter-head" data-reveal>
         <p class="section-kicker">A wider product boundary</p>
         <h2 id="comparison-title">Fewer disconnected surfaces between request and release.</h2>
@@ -894,8 +920,10 @@ const changelog = [
               <tr><th>Capability</th><th>Vector</th><th>Claude Code</th><th>Codex</th><th>Cursor</th><th>App builders</th></tr>
             </thead>
             <tbody>
-              {comparison.map((row) => (
-                <tr>{row.map((cell, index) => index === 0 ? <th>{cell}</th> : <td>{cell}</td>)}</tr>
+              {comparison.map((row, rowIndex) => (
+                <tr style={`--row: ${rowIndex}`}>
+                  {row.map((cell, index) => (index === 0 ? <th>{cell}</th> : <td>{cell}</td>))}
+                </tr>
               ))}
             </tbody>
           </table>
@@ -957,7 +985,7 @@ const changelog = [
       </div>
     </section>
 
-    <section class="closing">
+    <section id="ch-get" data-chapter="Get Vector" class="closing">
       <div class="sky" aria-hidden="true">
         <i class="sky-aurora"></i>
         <i class="sky-stars"></i>
@@ -2032,6 +2060,105 @@ const changelog = [
     width: 100%;
     height: auto;
     border-radius: 14px;
+  }
+
+  /* ---- tally ---- */
+
+  .tally {
+    display: grid;
+    gap: 18px;
+    margin-top: clamp(52px, 7vw, 92px);
+    padding: clamp(26px, 3vw, 38px) clamp(22px, 3vw, 40px);
+    border: 1px solid var(--glass-line);
+    border-radius: 24px;
+    background: var(--glass-fill);
+    box-shadow: var(--glass-shadow-soft);
+  }
+
+  @media (min-width: 760px) {
+    .tally {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 26px;
+    }
+  }
+
+  .tally strong {
+    display: block;
+    color: #fff;
+    font-size: clamp(30px, 4.4vw, 46px);
+    font-weight: 600;
+    letter-spacing: -0.03em;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+  }
+
+  .tally span {
+    display: block;
+    margin-top: 8px;
+    color: var(--ink-45);
+    font-size: 12.5px;
+    line-height: 1.5;
+  }
+
+  /* ---- pull quote ---- */
+
+  .pullquote {
+    margin: clamp(64px, 10vw, 132px) auto;
+    text-align: center;
+  }
+
+  .pullquote blockquote {
+    max-width: 20ch;
+    margin: 0 auto;
+    color: #fff;
+    font-size: clamp(28px, 5.2vw, 58px);
+    font-weight: 600;
+    letter-spacing: -0.03em;
+    line-height: 1.1;
+  }
+
+  .hero-ship {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 14px 0 0;
+    color: var(--ink-40);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11.5px;
+    letter-spacing: 0.01em;
+  }
+
+  .hero-ship-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #6ee7b7;
+    box-shadow: 0 0 10px rgba(110, 231, 183, 0.55);
+  }
+
+  .hero-ship-sep {
+    opacity: 0.4;
+  }
+
+  /* Rows land one after another instead of the whole grid appearing at once. */
+  .comparison-section tbody tr {
+    animation: row-land 520ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
+    animation-delay: calc(var(--row, 0) * 55ms);
+  }
+
+  @keyframes row-land {
+    from {
+      opacity: 0;
+      transform: translateY(9px);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .comparison-section tbody tr {
+      animation: none;
+    }
   }
 
   .showcase-note {

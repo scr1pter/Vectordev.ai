@@ -1,0 +1,379 @@
+---
+// The motion layer for the landing page: film grain, a tilting product window,
+// counters that count, a chapter rail, and a command palette on ⌘K. Everything
+// here is additive — the page reads and works with this file deleted, and every
+// effect switches itself off under prefers-reduced-motion.
+//
+// No background canvas here on purpose. Lander.astro already runs an animated
+// ASCII glyph field with pointer tracking, and a second full-screen canvas
+// would be a duplicate frame budget for a competing effect. Anything ambient
+// belongs in that one.
+---
+
+<div class="grain" aria-hidden="true"></div>
+
+<nav class="chapters" data-chapters aria-label="Sections">
+  <ul></ul>
+</nav>
+
+<div class="palette" data-palette hidden>
+  <div class="palette-scrim" data-palette-close></div>
+  <div class="palette-box" role="dialog" aria-modal="true" aria-label="Jump to a section">
+    <input type="text" class="palette-input" data-palette-input placeholder="Jump to…" autocomplete="off" />
+    <ul class="palette-list" data-palette-list></ul>
+    <p class="palette-foot"><kbd>↑</kbd><kbd>↓</kbd> to move · <kbd>↵</kbd> to jump · <kbd>esc</kbd> to close</p>
+  </div>
+</div>
+
+<script is:inline>
+  function bootLanderMotion() {
+    const reduced = globalThis.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches
+    const root = document.querySelector(".vector-marketing")
+    if (!root || root.dataset.motion === "1") return
+    root.dataset.motion = "1"
+
+    /* ---- 2. tilt on the product window -------------------------------- */
+    const window_ = document.querySelector(".product-window")
+    if (window_ && !reduced && globalThis.matchMedia("(pointer: fine)").matches) {
+      const shell = window_.parentElement ?? window_
+      shell.addEventListener("pointermove", (event) => {
+        const box = window_.getBoundingClientRect()
+        const dx = (event.clientX - box.left) / box.width - 0.5
+        const dy = (event.clientY - box.top) / box.height - 0.5
+        window_.style.setProperty("--tilt-x", `${(-dy * 4).toFixed(2)}deg`)
+        window_.style.setProperty("--tilt-y", `${(dx * 5).toFixed(2)}deg`)
+      })
+      shell.addEventListener("pointerleave", () => {
+        window_.style.setProperty("--tilt-x", "0deg")
+        window_.style.setProperty("--tilt-y", "0deg")
+      })
+      window_.classList.add("is-tiltable")
+    }
+
+    /* ---- 3. counters --------------------------------------------------- */
+    const counters = [...document.querySelectorAll("[data-count-to]")]
+    if (counters.length) {
+      const run = (el) => {
+        const target = Number(el.dataset.countTo)
+        if (!Number.isFinite(target)) return
+        if (reduced) {
+          el.textContent = String(target)
+          return
+        }
+        const started = performance.now()
+        const duration = 1100
+        const step = (now) => {
+          const t = Math.min(1, (now - started) / duration)
+          // easeOutExpo: fast start, long settle — reads as a value landing
+          // rather than a number spinning.
+          const eased = t === 1 ? 1 : 1 - Math.pow(2, -10 * t)
+          el.textContent = String(Math.round(target * eased))
+          if (t < 1) requestAnimationFrame(step)
+        }
+        requestAnimationFrame(step)
+      }
+      const observer = new IntersectionObserver(
+        (entries) => {
+          for (const entry of entries) {
+            if (!entry.isIntersecting) continue
+            run(entry.target)
+            observer.unobserve(entry.target)
+          }
+        },
+        { threshold: 0.6 },
+      )
+      counters.forEach((el) => observer.observe(el))
+    }
+
+    /* ---- 4. chapter rail ----------------------------------------------- */
+    const sections = [...document.querySelectorAll("[data-chapter]")]
+    const rail = document.querySelector("[data-chapters] ul")
+    if (sections.length && rail) {
+      for (const section of sections) {
+        const item = document.createElement("li")
+        const button = document.createElement("button")
+        button.type = "button"
+        button.dataset.jump = section.id
+        button.innerHTML = `<i></i><span></span>`
+        button.querySelector("span").textContent = section.dataset.chapter
+        button.addEventListener("click", () => section.scrollIntoView({ behavior: reduced ? "auto" : "smooth" }))
+        item.appendChild(button)
+        rail.appendChild(item)
+      }
+      const marks = [...rail.querySelectorAll("button")]
+      const seen = new IntersectionObserver(
+        (entries) => {
+          for (const entry of entries) {
+            if (!entry.isIntersecting) continue
+            marks.forEach((mark) => mark.classList.toggle("is-on", mark.dataset.jump === entry.target.id))
+          }
+        },
+        { rootMargin: "-45% 0px -45% 0px" },
+      )
+      sections.forEach((section) => seen.observe(section))
+    }
+
+    /* ---- 5. ⌘K palette -------------------------------------------------- */
+    const palette = document.querySelector("[data-palette]")
+    if (palette && sections.length) {
+      const input = palette.querySelector("[data-palette-input]")
+      const list = palette.querySelector("[data-palette-list]")
+      const entries = sections.map((section) => ({ id: section.id, label: section.dataset.chapter, node: section }))
+      let active = 0
+
+      const paint = () => {
+        const needle = input.value.trim().toLowerCase()
+        const hits = entries.filter((entry) => entry.label.toLowerCase().includes(needle))
+        active = Math.min(active, Math.max(hits.length - 1, 0))
+        list.replaceChildren()
+        hits.forEach((hit, index) => {
+          const li = document.createElement("li")
+          li.textContent = hit.label
+          li.className = index === active ? "is-on" : ""
+          li.addEventListener("click", () => {
+            hit.node.scrollIntoView({ behavior: reduced ? "auto" : "smooth" })
+            close()
+          })
+          list.appendChild(li)
+        })
+        return hits
+      }
+
+      const open = () => {
+        palette.hidden = false
+        input.value = ""
+        active = 0
+        paint()
+        input.focus()
+      }
+      const close = () => {
+        palette.hidden = true
+      }
+
+      document.addEventListener("keydown", (event) => {
+        if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+          event.preventDefault()
+          palette.hidden ? open() : close()
+          return
+        }
+        if (palette.hidden) return
+        if (event.key === "Escape") return close()
+        const hits = entries.filter((entry) => entry.label.toLowerCase().includes(input.value.trim().toLowerCase()))
+        if (event.key === "ArrowDown") {
+          event.preventDefault()
+          active = Math.min(active + 1, hits.length - 1)
+          paint()
+        }
+        if (event.key === "ArrowUp") {
+          event.preventDefault()
+          active = Math.max(active - 1, 0)
+          paint()
+        }
+        if (event.key === "Enter" && hits[active]) {
+          hits[active].node.scrollIntoView({ behavior: reduced ? "auto" : "smooth" })
+          close()
+        }
+      })
+      input.addEventListener("input", () => {
+        active = 0
+        paint()
+      })
+      palette.querySelector("[data-palette-close]").addEventListener("click", close)
+    }
+
+    /* ---- 6. pause the logo belt on hover -------------------------------- */
+    document.querySelectorAll(".marquee-track").forEach((track) => {
+      const belt = track.closest(".belt") ?? track
+      belt.addEventListener("pointerenter", () => track.style.setProperty("animation-play-state", "paused"))
+      belt.addEventListener("pointerleave", () => track.style.setProperty("animation-play-state", "running"))
+    })
+  }
+
+  // This component renders above the sections it wires up, and an inline script
+  // executes while the parser is still on it — so at first run everything below
+  // does not exist yet. Wait for the document before querying for it.
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", bootLanderMotion, { once: true })
+  } else {
+    bootLanderMotion()
+  }
+  document.addEventListener("astro:page-load", bootLanderMotion)
+</script>
+
+<style is:global>
+  /* Film grain. One tiny tiled SVG at very low opacity kills the banding in
+     the page's purple gradients and is most of what reads as "expensive". */
+  .grain {
+    position: fixed;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+    opacity: 0.035;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  .vector-marketing > * {
+    position: relative;
+    z-index: 2;
+  }
+
+  .product-window.is-tiltable {
+    transform: perspective(1400px) rotateX(var(--tilt-x, 0deg)) rotateY(var(--tilt-y, 0deg));
+    transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  /* ---- chapter rail ---- */
+  .chapters {
+    position: fixed;
+    top: 50%;
+    right: 22px;
+    z-index: 40;
+    transform: translateY(-50%);
+    pointer-events: none;
+  }
+
+  .chapters ul {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .chapters button {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 9px;
+    width: 100%;
+    padding: 4px 0;
+    border: 0;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.32);
+    font: inherit;
+    font-size: 11px;
+    cursor: pointer;
+    pointer-events: auto;
+  }
+
+  .chapters button span {
+    opacity: 0;
+    transform: translateX(6px);
+    transition: opacity 220ms ease, transform 220ms ease;
+    white-space: nowrap;
+  }
+
+  .chapters:hover button span,
+  .chapters button.is-on span {
+    opacity: 1;
+    transform: none;
+  }
+
+  .chapters button i {
+    width: 18px;
+    height: 2px;
+    border-radius: 2px;
+    background: currentColor;
+    transition: width 220ms ease, background 220ms ease;
+  }
+
+  .chapters button.is-on {
+    color: #fff;
+  }
+
+  .chapters button.is-on i {
+    width: 28px;
+    background: var(--purple-soft, #c9b0ff);
+  }
+
+  @media (max-width: 1180px) {
+    .chapters {
+      display: none;
+    }
+  }
+
+  /* ---- command palette ---- */
+  .palette {
+    position: fixed;
+    inset: 0;
+    z-index: 90;
+    display: grid;
+    place-items: start center;
+    padding-top: 14vh;
+  }
+
+  .palette-scrim {
+    position: absolute;
+    inset: 0;
+    background: rgba(6, 4, 12, 0.66);
+    backdrop-filter: blur(6px);
+  }
+
+  .palette-box {
+    position: relative;
+    width: min(460px, calc(100% - 40px));
+    overflow: hidden;
+    border: 1px solid var(--glass-line, rgba(235, 228, 255, 0.16));
+    border-radius: 16px;
+    background: #14111d;
+    box-shadow: 0 40px 120px -30px rgba(0, 0, 0, 0.9);
+  }
+
+  .palette-input {
+    width: 100%;
+    padding: 15px 17px;
+    border: 0;
+    border-bottom: 1px solid var(--glass-line, rgba(235, 228, 255, 0.16));
+    background: transparent;
+    color: #fff;
+    font: inherit;
+    font-size: 14.5px;
+    outline: none;
+  }
+
+  .palette-list {
+    max-height: 320px;
+    margin: 0;
+    padding: 6px;
+    overflow-y: auto;
+    list-style: none;
+  }
+
+  .palette-list li {
+    padding: 9px 12px;
+    border-radius: 8px;
+    color: rgba(255, 255, 255, 0.66);
+    font-size: 13.5px;
+    cursor: pointer;
+  }
+
+  .palette-list li.is-on,
+  .palette-list li:hover {
+    background: rgba(143, 82, 255, 0.18);
+    color: #fff;
+  }
+
+  .palette-foot {
+    margin: 0;
+    padding: 10px 14px;
+    border-top: 1px solid var(--glass-line, rgba(235, 228, 255, 0.16));
+    color: rgba(255, 255, 255, 0.3);
+    font-size: 11px;
+  }
+
+  .palette-foot kbd {
+    margin-right: 4px;
+    padding: 1px 5px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 4px;
+    font-family: inherit;
+    font-size: 10px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .product-window.is-tiltable {
+      transform: none;
+    }
+  }
+</style>
