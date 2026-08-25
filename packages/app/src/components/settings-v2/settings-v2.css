@@ -1261,7 +1261,8 @@ html[data-vector-reduce-animations="true"] *::after {
   align-items: flex-end;
   justify-content: space-between;
   gap: 18px;
-  padding-bottom: 2px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--vx-line);
 }
 
 .settings-v2-page-kicker {
@@ -1286,7 +1287,7 @@ html[data-vector-reduce-animations="true"] *::after {
   margin: 10px 0 0;
   color: rgba(255, 255, 255, 0.54);
   font-size: 13px;
-  line-height: 1.55;
+  line-height: 1.6;
 }
 
 .settings-v2-section-grid {
@@ -1319,7 +1320,7 @@ html[data-vector-reduce-animations="true"] *::after {
   grid-template-columns: auto 1fr;
   gap: 13px;
   align-items: center;
-  padding: 18px 18px 14px;
+  padding: 18px 18px 12px;
 }
 
 .settings-v2-card-icon {
@@ -1345,17 +1346,84 @@ html[data-vector-reduce-animations="true"] *::after {
 }
 
 .settings-v2-card-description {
-  margin: 4px 0 0;
+  margin: 5px 0 0;
   color: rgba(255, 255, 255, 0.48);
   font-size: 12px;
-  line-height: 1.45;
+  line-height: 1.55;
+}
+
+/* Shared form furniture for settings pages, so a panel does not have to invent
+   its own with inline styles and drift away from every other one. */
+.settings-v2-field {
+  display: block;
+  width: 100%;
+}
+
+.settings-v2-field + .settings-v2-field {
+  margin-top: 12px;
+}
+
+.settings-v2-field-label {
+  display: block;
+  margin-bottom: 6px;
+  color: rgba(255, 255, 255, 0.42);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.settings-v2-field .settings-v2-textarea {
+  width: 100%;
+}
+
+.settings-v2-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.settings-v2-list-item {
+  padding: 12px 14px;
+  border: 1px solid var(--vx-line);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.022);
+}
+
+.settings-v2-list-item + .settings-v2-list-item {
+  margin-top: 8px;
+}
+
+.settings-v2-list-item.is-off {
+  opacity: 0.5;
+}
+
+.settings-v2-list-title {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.settings-v2-list-meta {
+  margin: 5px 0 0;
+  color: color-mix(in oklab, var(--vector-accent, #9b6cff) 55%, rgba(255, 255, 255, 0.6));
+  font-size: 11.5px;
+}
+
+.settings-v2-error {
+  margin: 10px 0 0;
+  color: #fda4af;
+  font-size: 12px;
 }
 
 .settings-v2-card-body {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 0 14px 16px;
+  gap: 12px;
+  /* Shares the head's 18px inset: at 14px the title sat proud of everything
+     underneath it and every card looked very slightly broken. */
+  padding: 0 18px 18px;
 }
 
 .settings-v2-row-modern {

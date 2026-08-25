@@ -165,16 +165,6 @@ const statusTone = (status: DashboardAgentInput["status"]) => {
   return "bg-[color:var(--vx-purple-bright)]"
 }
 
-function Stat(props: { label: string; value: number; tone?: string }) {
-  return (
-    <div class="rounded-[6px] border border-[color:var(--vx-line)] bg-[color:var(--vx-surface)] px-3 py-2">
-      <div class="text-[18px] font-semibold" classList={{ [props.tone ?? "text-white"]: true }}>
-        {props.value}
-      </div>
-      <div class="text-[11px] text-white/45">{props.label}</div>
-    </div>
-  )
-}
 
 function Conversation(props: { conversation: TeamConversation }) {
   return (
@@ -271,9 +261,8 @@ export function AgentDashboard(props: {
         class="fixed inset-0 z-[90] flex flex-col bg-[color:var(--vx-canvas)]"
       >
         <header class="flex h-14 shrink-0 items-center gap-3 border-b border-[color:var(--vx-line)] px-5">
-          <div class="min-w-0">
-            <div class="text-[14px] font-semibold text-white">Agent Dashboard</div>
-            <div class="text-[11px] text-white/45">Every agent in this project, live</div>
+          <div class="min-w-0 shrink-0">
+            <span class="text-[13.5px] font-semibold text-white">Agent Dashboard</span>
           </div>
           <div class="flex shrink-0 items-center gap-1 rounded-[6px] border border-[color:var(--vx-line)] p-0.5">
             <For each={["board", "list"] as const}>
@@ -311,15 +300,30 @@ export function AgentDashboard(props: {
           </button>
         </header>
 
-        <div class="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-          <div class="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
-            <Stat label="Agents" value={summary().total} />
-            <Stat label="Working" value={summary().running} tone="text-[color:var(--vx-purple-bright)]" />
-            <Stat label="Need you" value={summary().attention} tone="text-amber-300" />
-            <Stat label="Finished" value={summary().finished} tone="text-emerald-300" />
-            <Stat label="Files touched" value={summary().changedFiles} />
-            <Stat label="Teams" value={summary().teams} />
-            <Stat label="Clashes" value={summary().clashes} tone={summary().clashes ? "text-rose-300" : "text-white"} />
+        <div class="min-h-0 flex-1 overflow-y-auto px-6 py-6">
+          {/* Working / Need you / Finished are the three column headings, so
+              showing them again above the board is the same number twice. What
+              is left is what the columns cannot say. */}
+          <div class="mb-5 flex flex-wrap items-center gap-x-6 gap-y-2 text-[12px] text-white/45">
+            <span>
+              <span class="text-[15px] font-semibold text-white">{summary().total}</span>{" "}
+              {summary().total === 1 ? "agent" : "agents"}
+            </span>
+            <span>
+              <span class="text-[15px] font-semibold text-white">{summary().changedFiles}</span> files touched
+            </span>
+            <Show when={summary().teams}>
+              <span>
+                <span class="text-[15px] font-semibold text-white">{summary().teams}</span>{" "}
+                {summary().teams === 1 ? "team" : "teams"}
+              </span>
+            </Show>
+            <Show when={summary().clashes}>
+              <span class="text-rose-300">
+                <span class="text-[15px] font-semibold">{summary().clashes}</span>{" "}
+                {summary().clashes === 1 ? "clash" : "clashes"}
+              </span>
+            </Show>
           </div>
 
           <div class="mb-3 flex flex-wrap items-center gap-1.5">
@@ -412,9 +416,9 @@ export function AgentDashboard(props: {
                 <For each={columns()}>
                   {(column) => (
                     <div class="rounded-[8px] border border-[color:var(--vx-line)] bg-white/[0.015] p-2">
-                      <div class="mb-2 flex items-center gap-2 px-1 text-[11.5px] font-semibold text-white/70">
+                      <div class="mb-2.5 flex items-center gap-2 px-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-white/45">
                         <span>{column.label}</span>
-                        <span class="text-white/35">{column.agents.length}</span>
+                        <span class="text-white/25">{column.agents.length}</span>
                       </div>
                       <div class="flex flex-col gap-2">
                         <For each={column.agents}>
@@ -441,9 +445,9 @@ export function AgentDashboard(props: {
                 <For each={columns()}>
                   {(column) => (
                     <Show when={column.agents.length}>
-                      <div class="flex items-center gap-2 border-b border-[color:var(--vx-line)] bg-white/[0.025] px-3 py-2 text-[11.5px] font-semibold text-white/70">
+                      <div class="flex items-center gap-2 border-b border-[color:var(--vx-line)] bg-white/[0.025] px-3 py-2.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-white/45">
                         <span>{column.label}</span>
-                        <span class="text-white/35">{column.agents.length}</span>
+                        <span class="text-white/25">{column.agents.length}</span>
                       </div>
                       <For each={column.agents}>
                         {(item) => (

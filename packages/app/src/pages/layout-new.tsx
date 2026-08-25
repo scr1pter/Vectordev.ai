@@ -62,7 +62,6 @@ import { ParallelDiffReview } from "@/components/parallel-diff-review"
 import { WorkspaceNavigation, type WorkspaceNavigationItem } from "@/components/workspace-navigation"
 import { CanvasWorkspace } from "@/features/canvas/canvas"
 import { ExternalAgentTranscript, type ExternalAgentTurn } from "@/features/agents/external-agent-transcript"
-import { WorkInbox, type WorkItem } from "@/features/work/work-inbox"
 import { useUpdaterAction } from "@/components/updater-action"
 import { VelCall } from "@/features/vel/vel-call"
 import { VEL_OPEN_EVENT } from "@/features/vel/vel-message"
@@ -498,7 +497,6 @@ export default function NewLayout(props: ParentProps) {
   const [reportBugOpen, setReportBugOpen] = createSignal(false)
   const [helpPanelOpen, setHelpPanelOpen] = createSignal(false)
   const [agentDashboardOpen, setAgentDashboardOpen] = createSignal(false)
-  const [workInboxOpen, setWorkInboxOpen] = createSignal(false)
   const [teamConversations, setTeamConversations] = createSignal<TeamConversation[]>([])
   const settings = useSettings()
   const [parallelTopology, setParallelTopology] = createSignal<TeamTopology>("isolated")
@@ -2068,39 +2066,6 @@ export default function NewLayout(props: ParentProps) {
     void loadBackgroundTasks()
   }
 
-  // A ticket handed to an agent becomes an ordinary isolated workspace, so it
-  // lands on the same board, under the same review and merge flow, as work
-  // started any other way. The brief is composed in the main process from the
-  // ticket's own description and comments.
-  const startAgentForWorkItem = async (item: WorkItem) => {
-    const api = parallelApi()
-    const sourcePath = activeProjectPath()
-    if (!api || !sourcePath) {
-      reportDesktopOnlyParallel()
-      return
-    }
-    const record = await api
-      .create({
-        sourcePath,
-        name: `${item.key} · ${item.title.slice(0, 48)}`,
-        taskPrompt: item.brief,
-        runtime: "vector",
-        provider: parallelProvider(),
-        model: parallelModel(),
-        llmJudge: settings.general.llmJudge(),
-      })
-      .catch((error: unknown) => {
-        setParallelError(error instanceof Error ? error.message : String(error))
-        return undefined
-      })
-    if (!record) return
-    setParallelRecords((records) => [record, ...records])
-    await parallelApi()?.run?.(record.id, 16).catch(() => undefined)
-    setWorkInboxOpen(false)
-    setAgentDashboardOpen(true)
-    void loadBackgroundTasks()
-  }
-
   const sendWorkspaceFollowUp = async (id: string) => {
     const api = parallelApi()
     if (!api) {
@@ -3307,7 +3272,7 @@ export default function NewLayout(props: ParentProps) {
               <Show when={parallelLaunchMode() === "agent"}>
                 <div class="mb-3">
                   <div class="mb-1.5 flex items-center justify-between px-1">
-                    <span class="text-[10px] font-semibold uppercase tracking-[0.09em] text-white/35">
+                    <span class="text-[10px] font-semibold uppercase tracking-[0.09em] text-white/40">
                       Alone or together
                     </span>
                     <span class="text-[10px] text-white/30">Alone is safest; together is faster</span>
@@ -3418,7 +3383,7 @@ export default function NewLayout(props: ParentProps) {
                           </p>
                         }
                       >
-                        <div class="mb-1 text-[9.5px] font-semibold uppercase tracking-[0.09em] text-white/35">
+                        <div class="mb-1 text-[10px] font-semibold uppercase tracking-[0.09em] text-white/40">
                           Team
                         </div>
                         <div class="flex flex-wrap gap-1.5">
@@ -3471,7 +3436,7 @@ export default function NewLayout(props: ParentProps) {
                     </div>
                     <div class="mt-1.5 rounded-[10px] border border-[color:var(--vx-line)] bg-white/[0.02] px-2.5 py-2">
                       <div class="mb-1.5 flex items-center justify-between">
-                        <span class="text-[9.5px] font-semibold uppercase tracking-[0.09em] text-white/35">
+                        <span class="text-[10px] font-semibold uppercase tracking-[0.09em] text-white/40">
                           Who can message whom
                         </span>
                         <span class="text-[9.5px] text-white/28">
@@ -3643,7 +3608,7 @@ export default function NewLayout(props: ParentProps) {
                 </div>
                 <div>
                   <div class="mb-1.5 flex items-center justify-between px-1">
-                    <span class="text-[10px] font-semibold uppercase tracking-[0.09em] text-white/35">
+                    <span class="text-[10px] font-semibold uppercase tracking-[0.09em] text-white/40">
                       Agent runtime
                     </span>
                     <span class="text-[10px] text-white/30">Uses the runtime already installed on this computer</span>
@@ -3731,7 +3696,7 @@ export default function NewLayout(props: ParentProps) {
                   </Show>
                   <Show when={globalThis.window?.api && blockedRuntimes().length}>
                     <div class="mt-2 rounded-[10px] border border-[color:var(--vx-line)] bg-white/[0.02] px-2.5 py-2">
-                      <div class="mb-1 text-[9.5px] font-semibold uppercase tracking-[0.09em] text-white/35">
+                      <div class="mb-1 text-[10px] font-semibold uppercase tracking-[0.09em] text-white/40">
                         Not available on this computer
                       </div>
                       <For each={blockedRuntimes()}>
@@ -5846,7 +5811,6 @@ export default function NewLayout(props: ParentProps) {
         onMoveWorkspace={moveAgentWorkspace}
         onCodeEditor={openCodespace}
         onProjectRules={openProjectRules}
-        onWork={() => setWorkInboxOpen(true)}
         onAgentDashboard={() => {
           setAgentDashboardOpen(true)
           void refreshTeamConversations()
@@ -5892,13 +5856,6 @@ export default function NewLayout(props: ParentProps) {
           })
           return extractVelReply(outcome.data)
         }}
-      />
-
-      <WorkInbox
-        open={workInboxOpen()}
-        sourcePath={activeProjectPath() ?? ""}
-        onClose={() => setWorkInboxOpen(false)}
-        onStartAgent={startAgentForWorkItem}
       />
 
       <AgentDashboard

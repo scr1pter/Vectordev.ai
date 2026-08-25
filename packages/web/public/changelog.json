@@ -1,6 +1,20 @@
 {
   "releases": [
     {
+      "tag": "v1.19.95",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Straight lines",
+              "description": "Work is gone. It was built last release and it is not what Vector is for, so it has been removed rather than left in the sidebar collecting dust. Four surfaces got the same treatment Automations got. Settings cards had their heading inset at 18px and their contents at 14px, so on every card in the app the title sat very slightly proud of everything beneath it; both are 18px now, the page header carries a rule so it reads as a header, and the Rules page stopped inventing its own form styling with inline styles and uses the shared fields like every other panel. The Agent Dashboard dropped the strip of seven counters above the board — three of them were Working, Needs you and Done, which are the column headings directly underneath, so it was the same number printed twice — keeping only what the columns cannot say, and its column headings now share one treatment with the rest of the app. The new workspace panel had three different sizes of uppercase section label in a single dialog, at three different opacities; there is one now. And the code editor's header was painted #101010, a near-black that appears nowhere else in the product and is darker than the canvas it sits on, which is why that screen never looked like the rest of Vector; it uses the sidebar token now. The help assistant also stops repeating the server's own words at you. It has been answering with an internal message about request protection, which describes a problem on our side and gives you nothing to do about it — it now says plainly that the outage is ours, and where to reach us."
+            }
+          ]
+        }
+      ]
+    },
+    {
       "tag": "v1.19.94",
       "highlights": [
         {

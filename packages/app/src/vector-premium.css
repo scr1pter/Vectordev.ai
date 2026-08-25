@@ -1740,14 +1740,16 @@ html[data-vector-navigation-resizing] * {
 
 [data-vector-codespace] > header {
   height: 48px !important;
+  padding-inline: 14px !important;
   border-color: var(--vx-line) !important;
-  background: #101010 !important;
+  background: var(--vx-sidebar) !important;
 }
 
 [data-vector-codespace] > header nav {
+  padding: 2px !important;
   border-color: var(--vx-line) !important;
   border-radius: 9px !important;
-  background: var(--vx-surface-raised) !important;
+  background: var(--vx-control) !important;
 }
 
 [data-vector-codespace] > header button {

@@ -87,12 +87,6 @@ const api: ElectronAPI = {
     write: (content) => ipcRenderer.invoke("local-memory-write", content),
     clear: () => ipcRenderer.invoke("local-memory-clear"),
   },
-  workItems: {
-    list: (cwd) => ipcRenderer.invoke("work-items-list", cwd),
-    config: () => ipcRenderer.invoke("work-items-config"),
-    saveConfig: (next) => ipcRenderer.invoke("work-items-save-config", next),
-    clear: (provider) => ipcRenderer.invoke("work-items-clear", provider),
-  },
   repoRules: {
     list: (repositoryPath) => ipcRenderer.invoke("repo-rules-list", repositoryPath),
     save: (input) => ipcRenderer.invoke("repo-rules-save", input),

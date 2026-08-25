@@ -173,27 +173,24 @@ export function SettingsRulesV2() {
           >
             <textarea
               class="settings-v2-textarea"
-              style={{ width: "100%" }}
               rows="3"
               placeholder="We don't put database query logic in the controller."
               value={description()}
               onInput={(event) => setDescription(event.currentTarget.value)}
             />
-            <label class="settings-v2-card-description" style={{ display: "block", "margin-top": "10px" }}>
-              Repository
+            <label class="settings-v2-field" style={{ "margin-top": "12px" }}>
+              <span class="settings-v2-field-label">Repository</span>
               <input
                 class="settings-v2-textarea"
-                style={{ width: "100%", "margin-top": "4px" }}
                 placeholder="Every project"
                 value={repository()}
                 onInput={(event) => setRepository(event.currentTarget.value)}
               />
             </label>
-            <label class="settings-v2-card-description" style={{ display: "block", "margin-top": "10px" }}>
-              File paths — comma separated, blank for the whole repository
+            <label class="settings-v2-field">
+              <span class="settings-v2-field-label">File paths — blank for the whole repository</span>
               <input
                 class="settings-v2-textarea"
-                style={{ width: "100%", "margin-top": "4px" }}
                 placeholder="src/app/web/*.tsx, server/**/*.ts"
                 value={patterns()}
                 onInput={(event) => setPatterns(event.currentTarget.value)}
@@ -210,9 +207,7 @@ export function SettingsRulesV2() {
               </Show>
             </div>
             <Show when={error()}>
-              <p class="settings-v2-card-description" style={{ color: "#fda4af" }}>
-                {error()}
-              </p>
+              <p class="settings-v2-error">{error()}</p>
             </Show>
           </Show>
         </div>
@@ -235,16 +230,10 @@ export function SettingsRulesV2() {
           >
             <For each={rules()}>
               {(rule) => (
-                <div
-                  class="settings-v2-card"
-                  style={{ "margin-bottom": "8px", opacity: rule.enabled ? "1" : "0.5" }}
-                >
-                  <div class="settings-v2-card-body">
-                    <p class="settings-v2-card-title" style={{ "font-size": "13px" }}>
-                      {rule.description}
-                    </p>
-                    <p class="settings-v2-card-description">{scopeLabel(rule)}</p>
-                    <div class="settings-v2-action-grid">
+                <div class="settings-v2-list-item" classList={{ "is-off": !rule.enabled }}>
+                  <p class="settings-v2-list-title">{rule.description}</p>
+                  <p class="settings-v2-list-meta">{scopeLabel(rule)}</p>
+                  <div class="settings-v2-action-grid">
                       <button type="button" class="settings-v2-action" disabled={busy()} onClick={() => edit(rule)}>
                         Edit
                       </button>
@@ -263,8 +252,7 @@ export function SettingsRulesV2() {
                         onClick={() => void remove(rule)}
                       >
                         Delete
-                      </button>
-                    </div>
+                    </button>
                   </div>
                 </div>
               )}

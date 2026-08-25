@@ -250,35 +250,6 @@ export type SaveRepoRuleInput = {
   enabled?: boolean
 }
 
-export type WorkItem = {
-  id: string
-  provider: "github" | "linear" | "jira"
-  key: string
-  title: string
-  body: string
-  url: string
-  state: string
-  status: "todo" | "in-progress" | "review" | "done"
-  assignee?: string
-  labels: string[]
-  updatedAt: string
-  comments: { author: string; text: string }[]
-  brief: string
-}
-
-export type WorkItemsAPI = {
-  list: (cwd: string) => Promise<{
-    items: WorkItem[]
-    problems: { provider: "github" | "linear" | "jira"; message: string }[]
-  }>
-  config: () => Promise<{ linear: boolean; jira: boolean; jiraSite?: string }>
-  saveConfig: (next: {
-    linear?: { token: string }
-    jira?: { site: string; email: string; token: string; jql?: string }
-  }) => Promise<{ linear: boolean; jira: boolean; jiraSite?: string }>
-  clear: (provider: "linear" | "jira") => Promise<{ linear: boolean; jira: boolean; jiraSite?: string }>
-}
-
 export type RepoRulesAPI = {
   list: (repositoryPath?: string) => Promise<RepoRule[]>
   save: (input: SaveRepoRuleInput) => Promise<RepoRule>
@@ -732,7 +703,6 @@ export type ElectronAPI = {
   localMemory: LocalMemoryAPI
   customInstructions: CustomInstructionsAPI
   repoRules: RepoRulesAPI
-  workItems: WorkItemsAPI
   pullRequests: PullRequestsAPI
   ci: CiAPI
   spendLimits: SpendLimitsAPI

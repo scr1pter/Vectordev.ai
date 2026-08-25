@@ -19,13 +19,6 @@ import {
   writeCustomInstructions,
 } from "./custom-instructions"
 import { deleteRepoRule, listRepoRules, saveRepoRule, type SaveRepoRuleInput } from "./repo-rules"
-import {
-  clearWorkItemsProvider,
-  listWorkItems,
-  saveWorkItemsConfig,
-  workItemsConfig,
-  type WorkItemsConfig,
-} from "./work-items"
 import { ensureRuntime, preparePluginCommand, type RuntimeName } from "./runtime-bootstrap"
 import { convertHeicToJpeg } from "./image-convert"
 import {
@@ -292,12 +285,6 @@ export function registerIpcHandlers(deps: Deps) {
   handle("local-memory-read", () => readLocalMemory())
   handle("local-memory-write", (_event, content: string) => writeLocalMemory(String(content ?? "")))
   handle("local-memory-clear", () => clearLocalMemory())
-  handle("work-items-list", (_event: IpcMainInvokeEvent, cwd: string) => listWorkItems(String(cwd)))
-  handle("work-items-config", () => workItemsConfig())
-  handle("work-items-save-config", (_event: IpcMainInvokeEvent, next: WorkItemsConfig) => saveWorkItemsConfig(next))
-  handle("work-items-clear", (_event: IpcMainInvokeEvent, provider: "linear" | "jira") =>
-    clearWorkItemsProvider(provider),
-  )
   handle("repo-rules-list", (_event: IpcMainInvokeEvent, repositoryPath?: string) =>
     listRepoRules(repositoryPath ? String(repositoryPath) : undefined),
   )
