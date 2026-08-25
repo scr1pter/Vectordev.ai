@@ -440,9 +440,12 @@ const plugins = [
     --c-control: #27242f;
     --c-control-hover: #322f3b;
     --c-line: #35313f;
-    --c-text: #f0eff3;
+    /* Text uses the v2 scale rather than --vx-text-*: the app's chrome is built
+       from v2 components, and index.css overrides that palette to these. */
+    --c-text: #f5f4f8;
     --c-subtle: #c0bdc7;
-    --c-muted: #8d8995;
+    --c-muted: #a7a2b5;
+    --c-faint: #777184;
     --c-purple: #9274ec;
     --c-bright: #b69ff7;
     --c-soft: rgba(182, 159, 247, 0.14);
@@ -477,7 +480,7 @@ const plugins = [
   .demo-rail { padding: 12px 10px; border-right: 1px solid var(--c-line); background: var(--c-sidebar); }
 
   /* [data-vector-nav-label] in the app. */
-  .demo-nav-label { margin: 14px 0 0; padding: 0 10px 5px; font-size: 9.5px; font-weight: 600; color: rgba(255, 255, 255, 0.27); }
+  .demo-nav-label { margin: 14px 0 0; padding: 0 10px 5px; font-size: 9.5px; font-weight: 600; color: var(--c-faint); }
   .demo-nav-label:first-child { margin-top: 0; }
 
   /* [data-vector-nav-item] in the app. */
@@ -599,7 +602,7 @@ const plugins = [
   .demo-badge.is-open, .demo-badge.is-on { border-color: rgba(101, 199, 142, 0.4); color: var(--c-green); }
 
   .demo-code { display: grid; grid-template-columns: 138px minmax(0, 1fr); gap: 10px; }
-  .demo-tree-dir { margin: 8px 0 3px; font-size: 9.5px; font-weight: 600; color: rgba(255, 255, 255, 0.27); }
+  .demo-tree-dir { margin: 8px 0 3px; font-size: 9.5px; font-weight: 600; color: var(--c-faint); }
   .demo-tree-dir:first-child { margin-top: 0; }
   .demo-tree-file { display: block; width: 100%; margin-bottom: 1px; padding: 5px 10px; border: 0; border-radius: 7px; background: transparent; color: rgba(255, 255, 255, 0.5); font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
   .demo-tree-file:hover { background: var(--c-control); color: var(--c-text); }
