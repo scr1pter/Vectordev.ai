@@ -560,6 +560,10 @@ const changelog = [
             <p class="feature-tag">{feature.tag}</p>
             <h2>{feature.title}</h2>
             <p class="feature-body">{feature.body}</p>
+            <a class="feature-link" href={feature.href}>
+              <span>{feature.link}</span>
+              <ArrowRight size={15} strokeWidth={2} aria-hidden="true" />
+            </a>
           </div>
           {feature.demo ? (
             <div class="feature-card feature-live reveal-zoom" data-reveal style="--rd: 90ms">
@@ -595,10 +599,6 @@ const changelog = [
               </dl>
             </div>
           )}
-          <a class="feature-link" href={feature.href} data-reveal style="--rd: 180ms">
-            <span>{feature.link}</span>
-            <ArrowRight size={15} strokeWidth={2} aria-hidden="true" />
-          </a>
         </section>
       ))}
     </div>
@@ -1239,6 +1239,11 @@ const changelog = [
     --purple-soft: #c9b0ff;
     --lavender: #e2d7ff;
     --hairline: rgba(224, 211, 255, 0.16);
+    /* One measure for the whole page. Six unrelated widths — 620, 820, 980,
+       1080, 1150 — read as a narrow ribbon down the middle of a wide screen
+       rather than as a layout. */
+    --page: min(1240px, calc(100% - 56px));
+    --page-wide: min(1440px, calc(100% - 40px));
     --ink-70: rgba(255, 255, 255, 0.7);
     --ink-55: rgba(255, 255, 255, 0.55);
     --ink-40: rgba(255, 255, 255, 0.4);
@@ -1443,7 +1448,7 @@ const changelog = [
     }
 
     :global(html.va) .scene-hero .showcase {
-      width: min(1150px, calc(100vw - 48px));
+      width: min(1440px, calc(100vw - 40px));
       padding-top: 0;
       opacity: min(1, calc(var(--t-window) * 2.4));
       transform: translateY(calc((1 - var(--t-window)) * 84vh)) scale(calc(0.94 + var(--t-window) * 0.06));
@@ -1571,7 +1576,7 @@ const changelog = [
   /* ---- hero ---- */
 
   .hero {
-    width: min(620px, calc(100% - 40px));
+    width: min(780px, calc(100% - 40px));
     margin-inline: auto;
     padding-top: clamp(72px, 10vw, 128px);
   }
@@ -1768,7 +1773,7 @@ const changelog = [
   /* ---- showcase ---- */
 
   .showcase {
-    width: min(1150px, calc(100% - 32px));
+    width: var(--page-wide);
     margin-inline: auto;
     padding-top: clamp(56px, 7vw, 88px);
   }
@@ -1836,7 +1841,7 @@ const changelog = [
   /* ---- belt ---- */
 
   .belt {
-    width: min(980px, calc(100% - 40px));
+    width: var(--page);
     margin: clamp(52px, 7vw, 88px) auto 0;
     padding: 30px 0;
     overflow: hidden;
@@ -1912,7 +1917,7 @@ const changelog = [
   /* ---- product loop ---- */
 
   .section-width {
-    width: min(1080px, calc(100% - 40px));
+    width: var(--page);
     margin-inline: auto;
   }
 
@@ -2079,11 +2084,26 @@ const changelog = [
   }
 
   .feature {
-    width: min(820px, calc(100% - 40px));
+    width: var(--page);
     margin-inline: auto;
     padding: clamp(44px, 6vw, 64px) 0;
     display: grid;
     gap: 22px;
+  }
+
+  /* Side by side once there is room for both: the copy keeps a readable
+     measure while the live surface gets the width it needs, and alternating
+     which side leads stops the run of features reading as one long column. */
+  @media (min-width: 1000px) {
+    .feature {
+      grid-template-columns: minmax(0, 0.86fr) minmax(0, 1.14fr);
+      gap: clamp(28px, 3.4vw, 52px);
+      align-items: center;
+    }
+
+    .features > .feature:nth-child(even) > .feature-copy {
+      order: 2;
+    }
   }
 
   .feature-tag {
@@ -2201,6 +2221,7 @@ const changelog = [
     align-items: center;
     gap: 7px;
     width: fit-content;
+    margin-top: 20px;
     min-height: 38px;
     padding: 0 14px;
     color: #fff !important;
@@ -2470,7 +2491,7 @@ const changelog = [
   }
 
   .changelog-inner {
-    width: min(820px, calc(100% - 40px));
+    width: var(--page);
     margin-inline: auto;
     padding: clamp(42px, 6vw, 66px);
     background: var(--glass-fill-strong);
@@ -2644,7 +2665,7 @@ const changelog = [
 
   .closing {
     position: relative;
-    width: min(980px, calc(100% - 40px));
+    width: var(--page);
     margin: clamp(72px, 10vw, 150px) auto clamp(88px, 12vw, 170px);
     padding: clamp(56px, 9vw, 120px) 20px;
     display: flex;

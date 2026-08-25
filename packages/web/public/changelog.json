@@ -1,6 +1,20 @@
 {
   "releases": [
     {
+      "tag": "v1.19.91",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Room to breathe",
+              "description": "The landing page stopped being a narrow ribbon down the middle of the screen. It had six unrelated container widths — 620, 820, 980, 1080, 1150 — which on any wide display left most of the screen empty while the content queued up in a column through the centre. There is now one measure for the whole page: 1240px for sections, 1440px for the app itself, and a hero that is wider without becoming harder to read. Feature sections became two columns wherever there is room, with the writing on one side and the working surface on the other, and each one alternating which side leads so the run of them stops reading as a single long column. The call to action moved inside the copy it belongs to, instead of orphaning onto a row of its own once the layout split in two. Below 1000px everything returns to a single column, and the line length in the copy stays around sixty characters at every width — wider was the goal, harder to read was not. Every product screenshot is also gone: the hero is the real app running in the page, and each feature carries a working surface you can click rather than a picture of one. Open a file in the editor and the code changes; forget a fact in local memory and it leaves the list; step through a browser check; pick a deploy target; pause an automation and watch its next-run line change."
+            }
+          ]
+        }
+      ]
+    },
+    {
       "tag": "v1.19.9",
       "highlights": [
         {
