@@ -12,16 +12,6 @@
 
 <div class="grain" aria-hidden="true"></div>
 
-<button type="button" class="theme-toggle" data-theme-toggle aria-label="Switch between light and dark">
-  <svg viewBox="0 0 16 16" aria-hidden="true" class="theme-sun">
-    <circle cx="8" cy="8" r="3.1" />
-    <path d="M8 1v1.8M8 13.2V15M15 8h-1.8M2.8 8H1M12.9 3.1l-1.3 1.3M4.4 11.6l-1.3 1.3M12.9 12.9l-1.3-1.3M4.4 4.4 3.1 3.1" />
-  </svg>
-  <svg viewBox="0 0 16 16" aria-hidden="true" class="theme-moon">
-    <path d="M13.4 9.6A5.6 5.6 0 0 1 6.4 2.6a5.8 5.8 0 1 0 7 7Z" />
-  </svg>
-</button>
-
 <nav class="chapters" data-chapters aria-label="Sections">
   <ul></ul>
 </nav>
@@ -191,18 +181,6 @@
       palette.querySelector("[data-palette-close]").addEventListener("click", close)
     }
 
-    /* ---- theme ---------------------------------------------------------- */
-    const toggle = document.querySelector("[data-theme-toggle]")
-    if (toggle) {
-      toggle.addEventListener("click", () => {
-        const next = document.documentElement.dataset.siteTheme === "light" ? "dark" : "light"
-        document.documentElement.dataset.siteTheme = next
-        try {
-          localStorage.setItem("vector-site-theme", next)
-        } catch {}
-      })
-    }
-
     /* ---- 6. pause the logo belt on hover -------------------------------- */
     document.querySelectorAll(".marquee-track").forEach((track) => {
       const belt = track.closest(".belt") ?? track
@@ -244,57 +222,127 @@
     transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1);
   }
 
-  .theme-toggle {
-    position: fixed;
-    right: 22px;
-    bottom: 22px;
-    z-index: 50;
-    display: grid;
-    width: 38px;
-    height: 38px;
-    place-items: center;
-    border: 1px solid var(--glass-line, rgba(235, 228, 255, 0.16));
-    border-radius: 50%;
-    background: var(--glass-strong, rgba(30, 22, 46, 0.76));
-    color: var(--ink, #fff);
-    cursor: pointer;
-    backdrop-filter: blur(14px);
-    transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  /* ---- surfaces that answer the cursor -------------------------------
+     Greptile's page is not carried by one big effect; it is carried by almost
+     everything reacting a little. Its DOM shows 17 elements transitioning
+     transform and 59 transitioning fill and opacity — hover response as a
+     system rather than as a garnish. These are the equivalents here, done as
+     one rule each so nothing has to be touched component by component. */
+
+  .feature-card,
+  .licensing-card,
+  .runtime-list article,
+  .crew-card,
+  .suite-card,
+  .tally > div,
+  .changelog-inner li {
+    transition:
+      transform 420ms cubic-bezier(0.16, 1, 0.3, 1),
+      border-color 420ms ease,
+      box-shadow 420ms ease;
   }
 
-  .theme-toggle:hover {
-    transform: scale(1.07);
+  .feature-card:hover,
+  .licensing-card:hover,
+  .runtime-list article:hover,
+  .crew-card:hover,
+  .suite-card:hover {
+    transform: translateY(-3px);
+    border-color: var(--glass-line-strong, rgba(235, 228, 255, 0.27));
   }
 
-  .theme-toggle svg {
-    position: absolute;
-    width: 16px;
-    height: 16px;
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 1.4;
-    stroke-linecap: round;
-    transition: opacity 200ms ease, transform 200ms ease;
+  /* Icons and marks brighten with their card rather than staying inert. */
+  .suite-icon,
+  .hero-loop-icon,
+  .section-kicker,
+  .licensing-tag {
+    transition:
+      color 340ms ease,
+      opacity 340ms ease,
+      transform 340ms cubic-bezier(0.16, 1, 0.3, 1);
   }
 
-  .theme-sun {
-    opacity: 0;
-    transform: rotate(-40deg) scale(0.7);
-  }
-
-  :root[data-site-theme="light"] .theme-sun {
+  .feature:hover .section-kicker,
+  .licensing-card:hover .licensing-tag,
+  .suite-card:hover .suite-icon {
     opacity: 1;
-    transform: none;
+    transform: translateY(-1px);
   }
 
-  :root[data-site-theme="light"] .theme-moon {
-    opacity: 0;
-    transform: rotate(40deg) scale(0.7);
+  /* A slow bob on the product window, the way Greptile floats its sphere.
+     Paused whenever the pointer is on it so the tilt has something steady to
+     work against. */
+  @keyframes vector-float {
+    50% {
+      transform: translateY(-7px);
+    }
   }
 
-  /* Grain is a dark-surface trick; on paper it just looks dirty. */
-  :root[data-site-theme="light"] .grain {
-    opacity: 0.02;
+  .showcase .product-window {
+    animation: vector-float 7.5s ease-in-out infinite;
+  }
+
+  .showcase:hover .product-window {
+    animation-play-state: paused;
+  }
+
+  /* The tilt writes its own transform, so the float has to move the wrapper
+     instead or the two fight over the same property. */
+  .product-window.is-tiltable {
+    animation: none;
+  }
+
+  .showcase:has(.product-window.is-tiltable) {
+    animation: vector-float 7.5s ease-in-out infinite;
+  }
+
+  .showcase:hover {
+    animation-play-state: paused;
+  }
+
+  /* A soft pulse on live indicators, Greptile's lizard-glow equivalent. */
+  @keyframes vector-pulse {
+    0%,
+    100% {
+      opacity: 1;
+      box-shadow: 0 0 0 0 rgba(110, 231, 183, 0.45);
+    }
+    60% {
+      opacity: 0.72;
+      box-shadow: 0 0 0 5px rgba(110, 231, 183, 0);
+    }
+  }
+
+  .hero-ship-dot {
+    animation: vector-pulse 2.8s ease-out infinite;
+  }
+
+  /* Links pull their arrow along, which is the smallest possible version of
+     the same idea and the one people notice most. */
+  .feature-link svg,
+  .product-system-account svg {
+    transition: transform 320ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .feature-link:hover svg,
+  .product-system-account:hover svg {
+    transform: translateX(3px);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .showcase,
+    .showcase .product-window,
+    .hero-ship-dot {
+      animation: none;
+    }
+
+    .feature-card:hover,
+    .licensing-card:hover,
+    .runtime-list article:hover,
+    .crew-card:hover,
+    .suite-card:hover {
+      transform: none;
+    }
   }
 
   /* ---- chapter rail ---- */
@@ -325,7 +373,7 @@
     padding: 4px 0;
     border: 0;
     background: transparent;
-    color: rgba(var(--shade, 255, 255, 255), 0.32);
+    color: rgba(255, 255, 255, 0.32);
     font: inherit;
     font-size: 11px;
     cursor: pointer;
@@ -418,7 +466,7 @@
   .palette-list li {
     padding: 9px 12px;
     border-radius: 8px;
-    color: rgba(var(--shade, 255, 255, 255), 0.66);
+    color: rgba(255, 255, 255, 0.66);
     font-size: 13.5px;
     cursor: pointer;
   }
@@ -433,14 +481,14 @@
     margin: 0;
     padding: 10px 14px;
     border-top: 1px solid var(--glass-line, rgba(235, 228, 255, 0.16));
-    color: rgba(var(--shade, 255, 255, 255), 0.3);
+    color: rgba(255, 255, 255, 0.3);
     font-size: 11px;
   }
 
   .palette-foot kbd {
     margin-right: 4px;
     padding: 1px 5px;
-    border: 1px solid rgba(var(--shade, 255, 255, 255), 0.14);
+    border: 1px solid rgba(255, 255, 255, 0.14);
     border-radius: 4px;
     font-family: inherit;
     font-size: 10px;
