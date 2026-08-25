@@ -1,6 +1,20 @@
 {
   "releases": [
     {
+      "tag": "v1.19.92",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "The real thing, in the page",
+              "description": "The demo on the landing page did not look like Vector, and the reason turned out to be simple: it was drawn with the website's palette rather than the product's. The site is near-black with a vivid purple; the app is a grey ramp — #15141a canvas, #222028 sidebar, #201e27 surfaces, #35313f borders — with a muted #9274ec. It has been rebuilt from the app's own token file, so the frame, the sidebar, the panels, the type colours and the accent are the literal values the product ships. The sidebar is the real one too: Project tools with Session, Agent Dashboard, Project rules, Code editor, Browser and Canvas, then Connections with Pull Requests, MCP and Plugins — the same labels, the same grouping, the same 32px rows and 7px corners the app uses. All nine go somewhere. There is a session view with a transcript, tool calls and a composer; the composer is deliberately inert, because a prompt box on a page with no model behind it can only pretend, and it says so rather than swallowing what you type. The effort control was rebuilt to match its reference: a dark capsule, a blue-to-purple fill, a scattered starfield across it and a white circular thumb. The dots sit on three pitches with no common factor, so they read as scattered instead of as a grid, and at maximum effort the whole field drifts along the bar — each layer travelling a whole number of its own tiles, so the loop closes with no seam."
+            }
+          ]
+        }
+      ]
+    },
+    {
       "tag": "v1.19.91",
       "highlights": [
         {

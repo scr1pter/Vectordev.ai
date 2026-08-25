@@ -1,81 +1,49 @@
 ---
-// A working replica of Vector's Agent Dashboard, embedded in the marketing page
-// so a visitor can decide whether they like the product before downloading it.
-// Everything here is real interaction against local data — the filters filter,
-// the views switch, the search searches. Nothing is a screenshot, and nothing
-// talks to a server.
+// A replica of the real Vector window, built from the app's own design tokens
+// (packages/app/src/vector-premium.css) rather than the marketing palette — the
+// product is a grey ramp with a muted purple, not near-black with a vivid one,
+// and using the site's colours here made it look like a different application.
+//
+// Every nav item goes somewhere. The composer is deliberately inert: it is the
+// one thing that cannot honestly work in a page with no model behind it, so it
+// is shown as a picture of the composer rather than a box that swallows what
+// you type.
 
-const sessions = [
+interface Props {
+  bare?: boolean
+}
+
+const { bare = false } = Astro.props
+
+const navGroups = [
   {
-    id: "s1",
-    name: "Add rate limiting to the public API",
-    space: "Auth hardening",
-    column: "running",
-    state: "Editing middleware/limit.ts",
-    runtime: "vector",
-    pr: "none",
-    age: "4m",
+    label: "Project tools",
+    items: [
+      { id: "session", name: "Session" },
+      { id: "dashboard", name: "Agent Dashboard" },
+      { id: "rules", name: "Project rules" },
+      { id: "editor", name: "Code editor" },
+      { id: "browser", name: "Browser" },
+      { id: "canvas", name: "Canvas" },
+    ],
   },
   {
-    id: "s2",
-    name: "Migrate the session store to Postgres",
-    space: "",
-    column: "running",
-    state: "Running commands",
-    runtime: "codex",
-    pr: "none",
-    age: "11m",
+    label: "Connections",
+    items: [
+      { id: "pulls", name: "Pull Requests" },
+      { id: "mcp", name: "MCP" },
+      { id: "plugins", name: "Plugins" },
+    ],
   },
-  {
-    id: "s3",
-    name: "Fix the flaky upload test",
-    space: "Auth hardening",
-    column: "attention",
-    state: "PR is ready",
-    runtime: "claude-code",
-    pr: "open",
-    age: "26m",
-  },
-  {
-    id: "s4",
-    name: "Upgrade the app to React 19",
-    space: "",
-    column: "attention",
-    state: "A typecheck failed",
-    runtime: "vector",
-    pr: "none",
-    age: "38m",
-  },
-  {
-    id: "s5",
-    name: "Add the OAuth device flow",
-    space: "Auth hardening",
-    column: "done",
-    state: "Merged",
-    runtime: "vector",
-    pr: "merged",
-    age: "1h",
-  },
-  {
-    id: "s6",
-    name: "Write the billing webhook handler",
-    space: "",
-    column: "done",
-    state: "Complete",
-    runtime: "cursor",
-    pr: "none",
-    age: "3h",
-  },
-  {
-    id: "s7",
-    name: "Redact secrets from deploy logs",
-    space: "",
-    column: "done",
-    state: "Merged",
-    runtime: "codex",
-    pr: "merged",
-    age: "5h",
-  },
+]
+
+const board = [
+  { id: "b1", col: "running", space: "Auth hardening", name: "Add rate limiting to the public API", state: "Editing middleware/limit.ts", age: "4m" },
+  { id: "b2", col: "running", space: "", name: "Migrate the session store to Postgres", state: "Running commands", age: "11m" },
+  { id: "b3", col: "attention", space: "Auth hardening", name: "Fix the flaky upload test", state: "PR is ready", age: "26m" },
+  { id: "b4", col: "attention", space: "", name: "Upgrade the app to React 19", state: "A typecheck failed", age: "38m" },
+  { id: "b5", col: "done", space: "Auth hardening", name: "Add the OAuth device flow", state: "Merged", age: "1h" },
+  { id: "b6", col: "done", space: "", name: "Write the billing webhook handler", state: "Complete", age: "3h" },
 ]
 
 const columns = [
@@ -84,152 +52,133 @@ const columns = [
   { id: "done", label: "Done" },
 ]
 
-interface Props {
-  bare?: boolean
-}
+const files = [
+  { id: "limit", dir: "middleware", name: "limit.ts", code: `const WINDOW_MS = 60_000\nconst MAX = 100\n\n// Keyed on the API token, not the IP: everyone\n// behind one office NAT is not one caller.\nexport function allow(token: string) {\n  const now = Date.now()\n  const live = (seen.get(token) ?? [])\n    .filter((at) => now - at < WINDOW_MS)\n  if (live.length >= MAX) return false\n  seen.set(token, [...live, now])\n  return true\n}` },
+  { id: "auth", dir: "middleware", name: "auth.ts", code: `export async function requireUser(req: Request) {\n  const token = bearer(req)\n  if (!token) throw new Unauthorized()\n  // Verified against the session store rather than\n  // decoded locally: a revoked session has to stop\n  // working the moment it is revoked.\n  const session = await sessions.find(token)\n  if (!session) throw new Unauthorized()\n  return session.user\n}` },
+  { id: "upload", dir: "routes", name: "upload.ts", code: `export const config = { bodyParser: false }\n\nexport async function POST(req: Request) {\n  const user = await requireUser(req)\n  if (!allow(user.token)) return tooMany()\n  const file = await readMultipart(req)\n  // Streamed to storage, never buffered whole.\n  return store.put(user.id, file.stream)\n}` },
+]
 
-const { bare = false } = Astro.props
-
-const filters = [
-  {
-    key: "column",
-    label: "Status",
-    options: [
-      { value: "running", label: "Running" },
-      { value: "attention", label: "Needs you" },
-      { value: "done", label: "Done" },
-    ],
-  },
-  {
-    key: "space",
-    label: "Team",
-    options: [{ value: "Auth hardening", label: "Auth hardening" }],
-  },
-  {
-    key: "pr",
-    label: "Pull request",
-    options: [
-      { value: "open", label: "Open" },
-      { value: "merged", label: "Merged" },
-      { value: "none", label: "No pull request" },
-    ],
-  },
-  {
-    key: "runtime",
-    label: "Agent",
-    options: [
-      { value: "vector", label: "Vector" },
-      { value: "claude-code", label: "Claude Code" },
-      { value: "codex", label: "Codex" },
-      { value: "cursor", label: "Cursor" },
-    ],
-  },
+const plugins = [
+  { name: "GitHub", blurb: "Repositories, issues, pull requests" },
+  { name: "Linear", blurb: "Issues and project tracking" },
+  { name: "Greptile", blurb: "Ask questions about an indexed codebase" },
+  { name: "Sentry", blurb: "Errors, traces and releases" },
+  { name: "Postgres", blurb: "Query and inspect your database" },
+  { name: "Figma", blurb: "Files, frames and design tokens" },
 ]
 ---
 
-<section class={bare ? "demo is-bare" : "demo"} aria-labelledby={bare ? undefined : "demo-title"} data-reveal={bare ? undefined : true}>
+<section class={bare ? "demo is-bare" : "demo"} data-reveal={bare ? undefined : true}>
   {!bare && (
     <div class="demo-intro">
       <p class="demo-kicker">Try it right here</p>
-      <h2 id="demo-title">Click around the real thing.</h2>
+      <h2>Click around the real thing.</h2>
       <p class="demo-deck">
-        This is Vector, running in the page. Move between the Agent Dashboard, Codespace, your project rules and the
-        browser from the rail on the left. On the dashboard, switch the board to a list, filter by status, team, pull
-        request or which agent ran it, and search. No download, no account — see whether you like it first.
+        This is Vector's own interface, running in the page. Every item in the sidebar goes somewhere. No download, no
+        account — see whether you like it first.
       </p>
     </div>
   )}
 
   <div class={bare ? "demo-frame is-bare" : "demo-frame"} data-demo>
-    {!bare && (
-      <div class="demo-titlebar">
-        <span class="demo-lights" aria-hidden="true"><i></i><i></i><i></i></span>
-        <span class="demo-titlebar-name">Vector</span>
-      </div>
-    )}
+    <div class="demo-titlebar">
+      <span class="demo-lights" aria-hidden="true"><i></i><i></i><i></i></span>
+      <span class="demo-titlebar-name">vectordev.ai — main</span>
+      <span class="demo-titlebar-right" aria-hidden="true"><i class="demo-chip">Opus 5</i></span>
+    </div>
 
     <div class="demo-body">
       <aside class="demo-rail" aria-label="Workspace">
-        <p class="demo-rail-heading">Workspace</p>
-        <button type="button" class="demo-rail-nav is-on" data-surface-nav="dashboard">Agent Dashboard</button>
-        <button type="button" class="demo-rail-nav" data-surface-nav="codespace">Codespace</button>
-        <button type="button" class="demo-rail-nav" data-surface-nav="rules">Project rules</button>
-        <button type="button" class="demo-rail-nav" data-surface-nav="browser">Browser</button>
-        <p class="demo-rail-heading">Spaces</p>
-        <p class="demo-rail-group">Auth hardening</p>
-        {sessions.filter((session) => session.space).map((session) => (
-          <p class="demo-rail-session is-nested">{session.name}</p>
-        ))}
-        {sessions.filter((session) => !session.space).map((session) => (
-          <p class="demo-rail-session">{session.name}</p>
+        {navGroups.map((group) => (
+          <>
+            <p class="demo-nav-label">{group.label}</p>
+            {group.items.map((item) => (
+              <button type="button" class={`demo-nav-item${item.id === "session" ? " is-on" : ""}`} data-surface-nav={item.id}>
+                <i class="demo-nav-dot" aria-hidden="true"></i>
+                <span>{item.name}</span>
+              </button>
+            ))}
+          </>
         ))}
       </aside>
 
       <div class="demo-main">
-        <div class="demo-surface" data-surface="dashboard">
-        <div class="demo-toolbar">
-          <div class="demo-views" role="tablist" aria-label="View">
-            <button type="button" role="tab" class="is-on" data-view="board" aria-selected="true">Board</button>
-            <button type="button" role="tab" data-view="list" aria-selected="false">List</button>
-          </div>
-          <label class="demo-search">
-            <span class="sr-only">Search agents</span>
-            <input type="search" placeholder="Search agents" data-search autocomplete="off" />
-          </label>
-        </div>
-
-        <div class="demo-filters">
-          {filters.map((filter) => (
-            <div class="demo-filter" data-filter={filter.key}>
-              <button type="button" class="demo-filter-button" aria-expanded="false" aria-haspopup="menu">
-                <span>{filter.label}</span>
-                <span class="demo-filter-value" data-filter-value></span>
-                <svg viewBox="0 0 12 12" aria-hidden="true"><path d="m3 4.5 3 3 3-3" /></svg>
-              </button>
-              <div class="demo-menu" role="menu" hidden>
-                <p class="demo-menu-head">{filter.label}</p>
-                {filter.options.map((option) => (
-                  <button type="button" role="menuitemcheckbox" aria-checked="false" data-value={option.value}>
-                    <span>{option.label}</span>
-                    <svg viewBox="0 0 12 12" aria-hidden="true"><path d="m2.5 6.5 2.5 2.5 4.5-5" /></svg>
-                  </button>
-                ))}
-              </div>
+        <div class="demo-surface" data-surface="session">
+          <div class="demo-thread">
+            <div class="demo-msg is-user"><p>Add rate limiting to the public API. Key it on the API token, not the IP.</p></div>
+            <div class="demo-msg">
+              <p>Reading <code>middleware/</code> to see how requests are already wrapped, then I'll add the limiter and a test.</p>
+              <div class="demo-tool"><span class="demo-tool-k">read</span><span>middleware/auth.ts</span></div>
+              <div class="demo-tool"><span class="demo-tool-k">edit</span><span>middleware/limit.ts</span><span class="demo-tool-add">+18</span></div>
+              <div class="demo-tool"><span class="demo-tool-k">bash</span><span>bun test middleware</span><span class="demo-tool-ok">passed</span></div>
+              <p>Added a sliding window keyed on the token — everyone behind one office NAT is not one caller. Tests pass.</p>
             </div>
-          ))}
-          <button type="button" class="demo-clear" data-clear hidden>Clear filters</button>
+          </div>
+
+          <div class="demo-composer" aria-label="Prompt composer (static preview)">
+            <p class="demo-composer-text">Ask Vector to build, fix, or explain something…</p>
+            <div class="demo-composer-row">
+              <span class="demo-control">Opus 5</span>
+              <span class="demo-control demo-effort-control">
+                <span class="demo-effort"><i class="demo-effort-thumb"></i></span>
+                <span class="demo-effort-label">Max</span>
+              </span>
+              <span class="demo-control"><i class="demo-mode-dot"></i>Fast</span>
+              <span class="demo-spacer"></span>
+              <span class="demo-send" aria-hidden="true">
+                <svg viewBox="0 0 16 16"><path d="M8 12.5v-9M4.5 7 8 3.5 11.5 7" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
+              </span>
+            </div>
+            <p class="demo-composer-note">The composer is a preview — there is no model behind this page.</p>
+          </div>
         </div>
 
-        <div class="demo-stage">
+        <div class="demo-surface" data-surface="dashboard" hidden>
+          <div class="demo-toolbar">
+            <div class="demo-views" role="tablist" aria-label="View">
+              <button type="button" role="tab" class="is-on" data-view="board" aria-selected="true">Board</button>
+              <button type="button" role="tab" data-view="list" aria-selected="false">List</button>
+            </div>
+            <label class="demo-search">
+              <span class="sr-only">Search agents</span>
+              <input type="search" placeholder="Search agents" data-search autocomplete="off" />
+            </label>
+          </div>
+
+          <div class="demo-filters">
+            {[
+              { key: "col", label: "Status", options: columns.map((c) => ({ value: c.id, label: c.label })) },
+              { key: "space", label: "Team", options: [{ value: "Auth hardening", label: "Auth hardening" }] },
+            ].map((filter) => (
+              <div class="demo-filter" data-filter={filter.key}>
+                <button type="button" class="demo-filter-button" aria-expanded="false" aria-haspopup="menu">
+                  <span>{filter.label}</span>
+                  <span class="demo-filter-value" data-filter-value></span>
+                  <svg viewBox="0 0 12 12" aria-hidden="true"><path d="m3 4.5 3 3 3-3" /></svg>
+                </button>
+                <div class="demo-menu" role="menu" hidden>
+                  {filter.options.map((option) => (
+                    <button type="button" role="menuitemcheckbox" aria-checked="false" data-value={option.value}>
+                      <span>{option.label}</span>
+                      <svg viewBox="0 0 12 12" aria-hidden="true"><path d="m2.5 6.5 2.5 2.5 4.5-5" /></svg>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+            <button type="button" class="demo-clear" data-clear hidden>Clear filters</button>
+          </div>
+
           <div class="demo-board" data-board>
             {columns.map((column) => (
               <div class="demo-column" data-column={column.id}>
-                <div class="demo-column-head">
-                  <span>{column.label}</span>
-                  <span class="demo-count" data-count>0</span>
-                </div>
+                <div class="demo-column-head"><span>{column.label}</span><span class="demo-count" data-count>0</span></div>
                 <div class="demo-column-body">
-                  {sessions.filter((session) => session.column === column.id).map((session) => (
-                    <button
-                      type="button"
-                      class="demo-card"
-                      data-session
-                      data-column-value={session.column}
-                      data-space-value={session.space}
-                      data-pr-value={session.pr}
-                      data-runtime-value={session.runtime}
-                      data-text={`${session.name} ${session.space} ${session.state}`.toLowerCase()}
-                    >
-                      {session.space ? <span class="demo-card-space">{session.space}</span> : null}
-                      <span class="demo-card-name">{session.name}</span>
-                      <span class="demo-card-foot">
-                        <i class={`demo-dot is-${session.column}`}></i>
-                        <span class="demo-card-state">{session.state}</span>
-                        <span class="demo-card-age">{session.age}</span>
-                      </span>
-                      {session.pr === "open" && session.state !== "PR is ready" ? (
-                        <span class="demo-card-pr">PR is ready</span>
-                      ) : null}
+                  {board.filter((item) => item.col === column.id).map((item) => (
+                    <button type="button" class="demo-card" data-item data-col-value={item.col} data-space-value={item.space} data-text={`${item.name} ${item.space} ${item.state}`.toLowerCase()}>
+                      {item.space ? <span class="demo-card-space">{item.space}</span> : null}
+                      <span class="demo-card-name">{item.name}</span>
+                      <span class="demo-card-foot"><i class={`demo-dot is-${item.col}`}></i><span>{item.state}</span><span class="demo-card-age">{item.age}</span></span>
                     </button>
                   ))}
                 </div>
@@ -241,26 +190,13 @@ const filters = [
           <div class="demo-list" data-list hidden>
             {columns.map((column) => (
               <div class="demo-list-group" data-list-group={column.id}>
-                <p class="demo-list-head">
-                  <span>{column.label}</span>
-                  <span class="demo-count" data-count>0</span>
-                </p>
-                {sessions.filter((session) => session.column === column.id).map((session) => (
-                  <button
-                    type="button"
-                    class="demo-row"
-                    data-session
-                    data-column-value={session.column}
-                    data-space-value={session.space}
-                    data-pr-value={session.pr}
-                    data-runtime-value={session.runtime}
-                    data-text={`${session.name} ${session.space} ${session.state}`.toLowerCase()}
-                  >
-                    <span class="demo-row-name">{session.name}</span>
-                    <span class="demo-row-space">{session.space}</span>
-                    <span class="demo-row-state">{session.state}</span>
-                    <span class="demo-row-age">{session.age}</span>
-                    <i class={`demo-dot is-${session.column}`}></i>
+                <p class="demo-list-head"><span>{column.label}</span><span class="demo-count" data-count>0</span></p>
+                {board.filter((item) => item.col === column.id).map((item) => (
+                  <button type="button" class="demo-row" data-item data-col-value={item.col} data-space-value={item.space} data-text={`${item.name} ${item.space} ${item.state}`.toLowerCase()}>
+                    <span class="demo-row-name">{item.name}</span>
+                    <span class="demo-row-space">{item.space}</span>
+                    <span class="demo-row-state">{item.state}</span>
+                    <span class="demo-row-age">{item.age}</span>
                   </button>
                 ))}
               </div>
@@ -269,81 +205,83 @@ const filters = [
 
           <p class="demo-none" data-none hidden>No agents match these filters.</p>
         </div>
-        </div>
-
-        <div class="demo-surface" data-surface="codespace" hidden>
-          <div class="demo-code">
-            <div class="demo-tree">
-              <p class="demo-tree-head">middleware</p>
-              <p class="demo-tree-file is-open">limit.ts</p>
-              <p class="demo-tree-file">auth.ts</p>
-              <p class="demo-tree-head">routes</p>
-              <p class="demo-tree-file">upload.ts</p>
-              <p class="demo-tree-file">billing.ts</p>
-            </div>
-            <div class="demo-editor">
-              <div class="demo-editor-tabs">
-                <span class="is-on">limit.ts</span>
-                <span>auth.ts</span>
-              </div>
-              <pre class="demo-editor-code"><code>{`const WINDOW_MS = 60_000
-const MAX = 100
-
-// Keyed on the API token, not the IP: everyone
-// behind one office NAT is not one caller.
-export function allow(token: string) {
-  const now = Date.now()
-  const hits = seen.get(token) ?? []
-  const live = hits.filter((at) => now - at < WINDOW_MS)
-  if (live.length >= MAX) return false
-  seen.set(token, [...live, now])
-  return true
-}`}</code></pre>
-              <div class="demo-editor-foot">
-                <span class="demo-diag">2 diagnostics</span>
-                <span>TypeScript</span>
-                <span>Edited by Vector agent</span>
-              </div>
-            </div>
-          </div>
-        </div>
 
         <div class="demo-surface" data-surface="rules" hidden>
-          <div class="demo-rules">
-            <p class="demo-rules-lead">
-              Standards in plain English, scoped to a repository and the files they govern. Saved to
-              <code>.vector/RULES.md</code> in the repo, so they are committed and every agent follows them.
-            </p>
-            <div class="demo-rule">
-              <p class="demo-rule-text">We don't put database query logic in the controller.</p>
-              <p class="demo-rule-scope">vectordev.ai · whole repository</p>
+          <p class="demo-lead">
+            Standards in plain English, scoped to a repository and the files they govern. Saved to
+            <code>.vector/RULES.md</code>, so they are committed and every agent follows them.
+          </p>
+          <div class="demo-panel"><p class="demo-panel-title">We don't put database query logic in the controller.</p><p class="demo-panel-sub">vectordev.ai · whole repository</p></div>
+          <div class="demo-panel"><p class="demo-panel-title">Components stay presentational — no data fetching inside them.</p><p class="demo-panel-sub">vectordev.ai · src/app/web/*.tsx</p></div>
+          <div class="demo-panel"><p class="demo-panel-title">Never widen a public type without a migration note.</p><p class="demo-panel-sub">Every project</p></div>
+          <p class="demo-note">Vector · Claude Code · Codex · Cursor all follow these.</p>
+        </div>
+
+        <div class="demo-surface" data-surface="editor" hidden>
+          <div class="demo-code">
+            <div class="demo-tree">
+              {files.map((file, index) => (
+                <>
+                  {index === 0 || files[index - 1].dir !== file.dir ? <p class="demo-tree-dir">{file.dir}</p> : null}
+                  <button type="button" class={`demo-tree-file${index === 0 ? " is-on" : ""}`} data-file={file.id}>{file.name}</button>
+                </>
+              ))}
             </div>
-            <div class="demo-rule">
-              <p class="demo-rule-text">Components stay presentational — no data fetching inside them.</p>
-              <p class="demo-rule-scope">vectordev.ai · src/app/web/*.tsx</p>
+            <div class="demo-pane">
+              <div class="demo-tabs">
+                {files.map((file, index) => (
+                  <span class={`demo-tab${index === 0 ? " is-on" : ""}`} data-tab={file.id}>{file.name}</span>
+                ))}
+              </div>
+              {files.map((file, index) => (
+                <pre class="demo-editor-code" data-code={file.id} hidden={index !== 0}><code>{file.code}</code></pre>
+              ))}
+              <div class="demo-statusbar"><span class="demo-warn">2 diagnostics</span><span>TypeScript</span><span>Edited by Vector agent</span></div>
             </div>
-            <div class="demo-rule">
-              <p class="demo-rule-text">Never widen a public type without a migration note.</p>
-              <p class="demo-rule-scope">Every project</p>
-            </div>
-            <p class="demo-rules-foot">Vector · Claude Code · Codex · Cursor all follow these.</p>
           </div>
         </div>
 
         <div class="demo-surface" data-surface="browser" hidden>
-          <div class="demo-browser">
-            <div class="demo-browser-bar">
-              <span class="demo-browser-url">localhost:3000/checkout</span>
-            </div>
-            <div class="demo-browser-page">
-              <p class="demo-browser-step">Filled the card field with a test number</p>
-              <p class="demo-browser-step">Clicked Pay</p>
-              <p class="demo-browser-step is-fail">Expected a receipt, got a 500</p>
-              <p class="demo-browser-note">
-                The agent drives a real browser and refuses to type into password, one-time-code and card fields.
-              </p>
-            </div>
+          <div class="demo-urlbar">localhost:3000/checkout</div>
+          <p class="demo-step">Opened the checkout page</p>
+          <p class="demo-step">Filled the card field with a test number</p>
+          <p class="demo-step is-guard">Refused to type into the CVC field</p>
+          <p class="demo-step">Clicked Pay</p>
+          <p class="demo-step is-fail">Expected a receipt, got a 500</p>
+          <p class="demo-note">A real Chromium view in the window. It will not type into password, one-time-code or card fields.</p>
+        </div>
+
+        <div class="demo-surface" data-surface="canvas" hidden>
+          <div class="demo-canvas">
+            <div class="demo-canvas-tile"><span>Editor</span><i>middleware/limit.ts</i></div>
+            <div class="demo-canvas-tile"><span>Browser</span><i>localhost:3000</i></div>
+            <div class="demo-canvas-tile"><span>Terminal</span><i>bun test — 41 passed</i></div>
+            <div class="demo-canvas-tile"><span>Notes</span><i>Rate limit design</i></div>
           </div>
+          <p class="demo-note">Canvas puts the editor, the browser, the terminal and your notes on one surface.</p>
+        </div>
+
+        <div class="demo-surface" data-surface="pulls" hidden>
+          <div class="demo-panel demo-row-flex"><span class="demo-panel-title">Add the OAuth device flow</span><span class="demo-badge is-merged">Merged</span></div>
+          <div class="demo-panel demo-row-flex"><span class="demo-panel-title">Fix the flaky upload test</span><span class="demo-badge is-open">Open · checks passing</span></div>
+          <div class="demo-panel demo-row-flex"><span class="demo-panel-title">Redact secrets from deploy logs</span><span class="demo-badge is-merged">Merged</span></div>
+          <p class="demo-note">Pull requests and their CI runs, with a failed run turned into a repair prompt.</p>
+        </div>
+
+        <div class="demo-surface" data-surface="mcp" hidden>
+          <div class="demo-panel demo-row-flex"><span class="demo-panel-title">github</span><span class="demo-badge is-on">Connected · 24 tools</span></div>
+          <div class="demo-panel demo-row-flex"><span class="demo-panel-title">greptile</span><span class="demo-badge is-on">Connected · 4 tools</span></div>
+          <div class="demo-panel demo-row-flex"><span class="demo-panel-title">postgres</span><span class="demo-badge">Not connected</span></div>
+          <p class="demo-note">Any MCP server you configure, alongside the ones in the catalogue.</p>
+        </div>
+
+        <div class="demo-surface" data-surface="plugins" hidden>
+          <div class="demo-grid">
+            {plugins.map((plugin) => (
+              <div class="demo-plugin"><span class="demo-plugin-name">{plugin.name}</span><span class="demo-plugin-blurb">{plugin.blurb}</span></div>
+            ))}
+          </div>
+          <p class="demo-note">118 connectors ready to turn on, and the runtime installs itself.</p>
         </div>
       </div>
     </div>
@@ -351,7 +289,7 @@ export function allow(token: string) {
 
   {!bare && (
     <p class="demo-foot">
-      Everything above runs locally in this page. In the app, these are real isolated workspaces you can open, review
+      Everything above runs locally in this page. In the app these are real isolated workspaces you can open, review
       and merge.
     </p>
   )}
@@ -363,51 +301,6 @@ export function allow(token: string) {
     if (!root || root.dataset.booted === "1") return
     root.dataset.booted = "1"
 
-    const state = { view: "board", query: "", filters: { column: [], space: [], pr: [], runtime: [] } }
-    const board = root.querySelector("[data-board]")
-    const list = root.querySelector("[data-list]")
-    const none = root.querySelector("[data-none]")
-    const clear = root.querySelector("[data-clear]")
-
-    // Every card and row is server-rendered; filtering only toggles them. Astro
-    // scopes component CSS to the elements it rendered, so nodes built in
-    // JavaScript would carry none of the styles below.
-    const matches = (el) => {
-      const needle = state.query.trim().toLowerCase()
-      if (needle && !el.dataset.text.includes(needle)) return false
-      for (const [key, chosen] of Object.entries(state.filters)) {
-        if (!chosen.length) continue
-        if (!chosen.includes(el.dataset[`${key}Value`])) return false
-      }
-      return true
-    }
-
-    const render = () => {
-      let total = 0
-      for (const el of root.querySelectorAll("[data-session]")) {
-        const show = matches(el)
-        el.hidden = !show
-      }
-      for (const column of root.querySelectorAll("[data-column]")) {
-        const shown = [...column.querySelectorAll("[data-session]")].filter((el) => !el.hidden).length
-        column.querySelector("[data-count]").textContent = String(shown)
-        column.querySelector("[data-empty]").hidden = shown > 0
-        total += shown
-      }
-      for (const group of root.querySelectorAll("[data-list-group]")) {
-        const shown = [...group.querySelectorAll("[data-session]")].filter((el) => !el.hidden).length
-        group.querySelector("[data-count]").textContent = String(shown)
-        group.hidden = shown === 0
-      }
-      const empty = total === 0
-      board.hidden = empty || state.view !== "board"
-      list.hidden = empty || state.view !== "list"
-      none.hidden = !empty
-      clear.hidden = !(state.query.trim() || Object.values(state.filters).some((chosen) => chosen.length))
-    }
-
-    // The rail switches which surface of the app you are looking at. Everything
-    // is server-rendered and only toggled, so this stays a visibility flip.
     root.querySelectorAll("[data-surface-nav]").forEach((button) => {
       button.addEventListener("click", () => {
         const target = button.dataset.surfaceNav
@@ -419,6 +312,42 @@ export function allow(token: string) {
         })
       })
     })
+
+    const state = { view: "board", query: "", filters: { col: [], space: [] } }
+    const board = root.querySelector("[data-board]")
+    const list = root.querySelector("[data-list]")
+    const none = root.querySelector("[data-none]")
+    const clear = root.querySelector("[data-clear]")
+
+    const matches = (el) => {
+      const needle = state.query.trim().toLowerCase()
+      if (needle && !el.dataset.text.includes(needle)) return false
+      for (const [key, chosen] of Object.entries(state.filters)) {
+        if (chosen.length && !chosen.includes(el.dataset[`${key}Value`])) return false
+      }
+      return true
+    }
+
+    const render = () => {
+      let total = 0
+      root.querySelectorAll("[data-item]").forEach((el) => (el.hidden = !matches(el)))
+      root.querySelectorAll("[data-column]").forEach((column) => {
+        const shown = [...column.querySelectorAll("[data-item]")].filter((el) => !el.hidden).length
+        column.querySelector("[data-count]").textContent = String(shown)
+        column.querySelector("[data-empty]").hidden = shown > 0
+        total += shown
+      })
+      root.querySelectorAll("[data-list-group]").forEach((group) => {
+        const shown = [...group.querySelectorAll("[data-item]")].filter((el) => !el.hidden).length
+        group.querySelector("[data-count]").textContent = String(shown)
+        group.hidden = shown === 0
+      })
+      const empty = total === 0
+      board.hidden = empty || state.view !== "board"
+      list.hidden = empty || state.view !== "list"
+      none.hidden = !empty
+      clear.hidden = !(state.query.trim() || Object.values(state.filters).some((chosen) => chosen.length))
+    }
 
     root.querySelectorAll("[data-view]").forEach((button) => {
       button.addEventListener("click", () => {
@@ -463,9 +392,7 @@ export function allow(token: string) {
           const chosen = state.filters[key]
           state.filters[key] = chosen.includes(value) ? chosen.filter((item) => item !== value) : [...chosen, value]
           option.setAttribute("aria-checked", String(state.filters[key].includes(value)))
-          const labels = state.filters[key].map(
-            (item) => menu.querySelector(`[data-value="${item}"] span`).textContent,
-          )
+          const labels = state.filters[key].map((item) => menu.querySelector(`[data-value="${item}"] span`).textContent)
           filter.querySelector("[data-filter-value]").textContent =
             labels.length > 1 ? `${labels[0]} +${labels.length - 1}` : (labels[0] ?? "")
           button.classList.toggle("is-on", state.filters[key].length > 0)
@@ -478,12 +405,21 @@ export function allow(token: string) {
 
     clear.addEventListener("click", () => {
       state.query = ""
-      state.filters = { column: [], space: [], pr: [], runtime: [] }
+      state.filters = { col: [], space: [] }
       root.querySelector("[data-search]").value = ""
       root.querySelectorAll("[data-filter-value]").forEach((slot) => (slot.textContent = ""))
       root.querySelectorAll("[data-value]").forEach((option) => option.setAttribute("aria-checked", "false"))
       root.querySelectorAll(".demo-filter-button").forEach((button) => button.classList.remove("is-on"))
       render()
+    })
+
+    root.querySelectorAll("[data-file]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const id = button.dataset.file
+        root.querySelectorAll("[data-file]").forEach((other) => other.classList.toggle("is-on", other === button))
+        root.querySelectorAll("[data-tab]").forEach((tab) => tab.classList.toggle("is-on", tab.dataset.tab === id))
+        root.querySelectorAll("[data-code]").forEach((code) => (code.hidden = code.dataset.code !== id))
+      })
     })
 
     render()
@@ -494,730 +430,210 @@ export function allow(token: string) {
 </script>
 
 <style>
+  /* Vector's own tokens, copied from packages/app/src/vector-premium.css. */
   .demo {
-    width: min(1080px, calc(100% - 40px));
+    --c-canvas: #15141a;
+    --c-stage: #19181f;
+    --c-sidebar: #222028;
+    --c-surface: #201e27;
+    --c-raised: #292631;
+    --c-control: #27242f;
+    --c-control-hover: #322f3b;
+    --c-line: #35313f;
+    --c-text: #f0eff3;
+    --c-subtle: #c0bdc7;
+    --c-muted: #8d8995;
+    --c-purple: #9274ec;
+    --c-bright: #b69ff7;
+    --c-soft: rgba(182, 159, 247, 0.14);
+    --c-green: #65c78e;
+    --c-amber: #d6a95c;
+    --c-red: #e6787d;
+    --c-mono: "SFMono-Regular", "Cascadia Code", ui-monospace, monospace;
+    width: min(1240px, calc(100% - 56px));
     margin-inline: auto;
     padding: clamp(40px, 6vw, 72px) 0 clamp(16px, 3vw, 28px);
-  }
-
-  /* Inside the hero's own product window, which already supplies the frame,
-     the chrome and the shadow. */
-  .demo.is-bare {
-    width: 100%;
-    padding: 0;
-  }
-
-  .demo-frame.is-bare {
-    border: 0;
-    border-radius: 0 0 20px 20px;
-    background: transparent;
-    box-shadow: none;
-  }
-
-  .demo-intro {
-    max-width: 640px;
-    margin-bottom: 22px;
-  }
-
-  .demo-kicker {
-    margin: 0 0 8px;
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: var(--purple-soft, #c9b0ff);
-  }
-
-  .demo-intro h2 {
-    margin: 0 0 10px;
-    font-size: clamp(24px, 3.2vw, 34px);
-    line-height: 1.15;
-    letter-spacing: -0.02em;
-  }
-
-  .demo-deck {
-    margin: 0;
-    font-size: 14.5px;
-    line-height: 1.55;
-    color: var(--ink-55, rgba(255, 255, 255, 0.55));
-  }
-
-  .demo-frame {
-    overflow: hidden;
-    border: 1px solid var(--hairline, rgba(224, 211, 255, 0.16));
-    border-radius: 14px;
-    background: rgba(10, 8, 16, 0.86);
-    box-shadow: 0 30px 80px -40px rgba(0, 0, 0, 0.9);
-  }
-
-  .demo-titlebar {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 9px 14px;
-    border-bottom: 1px solid var(--hairline, rgba(224, 211, 255, 0.16));
-    background: rgba(255, 255, 255, 0.02);
-  }
-
-  .demo-lights {
-    display: inline-flex;
-    gap: 6px;
-  }
-
-  .demo-lights i {
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    background: rgba(255, 255, 255, 0.16);
-  }
-
-  .demo-titlebar-name {
-    font-size: 11.5px;
-    color: var(--ink-40, rgba(255, 255, 255, 0.4));
-  }
-
-  .demo-body {
-    display: grid;
-    grid-template-columns: 216px minmax(0, 1fr);
-    min-height: 430px;
-  }
-
-  .demo-rail {
-    padding: 12px 10px;
-    border-right: 1px solid var(--hairline, rgba(224, 211, 255, 0.16));
-    background: rgba(255, 255, 255, 0.012);
-  }
-
-  .demo-rail p {
-    margin: 0 0 2px;
-    padding: 5px 8px;
-    border-radius: 6px;
-    font-size: 12px;
-    color: var(--ink-55, rgba(255, 255, 255, 0.55));
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .demo-rail-action {
-    color: var(--ink-40, rgba(255, 255, 255, 0.4));
-  }
-
-  .demo-rail-item.is-active {
-    background: rgba(143, 82, 255, 0.16);
-    color: #fff;
-  }
-
-  .demo-rail-heading {
-    margin-top: 12px !important;
-    font-size: 10px !important;
-    font-weight: 600;
-    letter-spacing: 0.09em;
-    text-transform: uppercase;
-    color: rgba(255, 255, 255, 0.3) !important;
-  }
-
-  .demo-rail-group {
-    color: var(--purple-soft, #c9b0ff) !important;
-    font-size: 11.5px !important;
-  }
-
-  .demo-rail-session.is-nested {
-    padding-left: 18px;
-  }
-
-  .demo-rail-nav {
-    display: block;
-    width: 100%;
-    margin-bottom: 2px;
-    padding: 5px 8px;
-    border: 0;
-    border-radius: 6px;
-    background: transparent;
-    color: var(--ink-55, rgba(255, 255, 255, 0.55));
-    font: inherit;
-    font-size: 12px;
-    text-align: left;
-    cursor: pointer;
-  }
-
-  .demo-rail-nav:hover {
-    background: rgba(255, 255, 255, 0.05);
-    color: #fff;
-  }
-
-  .demo-rail-nav.is-on {
-    background: rgba(143, 82, 255, 0.16);
-    color: #fff;
-  }
-
-  .demo-code {
-    display: grid;
-    grid-template-columns: 150px minmax(0, 1fr);
-    gap: 10px;
-  }
-
-  .demo-tree p {
-    margin: 0 0 2px;
-    padding: 4px 8px;
-    border-radius: 6px;
-    font-size: 11.5px;
-    color: var(--ink-55, rgba(255, 255, 255, 0.55));
-  }
-
-  .demo-tree-head {
-    font-size: 9.5px !important;
-    font-weight: 600;
-    letter-spacing: 0.09em;
-    text-transform: uppercase;
-    color: rgba(255, 255, 255, 0.3) !important;
-    margin-top: 8px !important;
-  }
-
-  .demo-tree-file {
-    padding-left: 16px !important;
-  }
-
-  .demo-tree-file.is-open {
-    background: rgba(143, 82, 255, 0.14);
-    color: #fff !important;
-  }
-
-  .demo-editor {
-    overflow: hidden;
-    border: 1px solid var(--hairline, rgba(224, 211, 255, 0.16));
-    border-radius: 10px;
-    background: rgba(255, 255, 255, 0.02);
-  }
-
-  .demo-editor-tabs {
-    display: flex;
-    gap: 2px;
-    padding: 6px 8px 0;
-    border-bottom: 1px solid var(--hairline, rgba(224, 211, 255, 0.16));
-  }
-
-  .demo-editor-tabs span {
-    padding: 5px 12px;
-    border-radius: 6px 6px 0 0;
-    font-size: 11.5px;
-    color: rgba(255, 255, 255, 0.4);
-  }
-
-  .demo-editor-tabs span.is-on {
-    background: rgba(255, 255, 255, 0.05);
-    color: #fff;
-  }
-
-  .demo-editor-code {
-    margin: 0;
-    padding: 12px 14px;
-    overflow-x: auto;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 11.5px;
-    line-height: 1.65;
-    color: rgba(255, 255, 255, 0.72);
-  }
-
-  .demo-editor-foot {
-    display: flex;
-    gap: 14px;
-    padding: 7px 14px;
-    border-top: 1px solid var(--hairline, rgba(224, 211, 255, 0.16));
-    font-size: 10.5px;
-    color: rgba(255, 255, 255, 0.35);
-  }
-
-  .demo-diag {
-    color: #fcd34d;
-  }
-
-  .demo-rules-lead,
-  .demo-rules-foot {
-    margin: 0 0 12px;
-    font-size: 12.5px;
-    line-height: 1.6;
-    color: var(--ink-55, rgba(255, 255, 255, 0.55));
-  }
-
-  .demo-rules-foot {
-    margin: 12px 0 0;
-    color: rgba(255, 255, 255, 0.4);
-  }
-
-  .demo-rules-lead code {
-    padding: 1px 5px;
-    border-radius: 4px;
-    background: rgba(255, 255, 255, 0.07);
-    font-size: 11.5px;
-  }
-
-  .demo-rule {
-    margin-bottom: 8px;
-    padding: 10px 12px;
-    border: 1px solid var(--hairline, rgba(224, 211, 255, 0.16));
-    border-radius: 9px;
-    background: rgba(255, 255, 255, 0.025);
-  }
-
-  .demo-rule-text {
-    margin: 0;
-    font-size: 12.5px;
-    color: #fff;
-  }
-
-  .demo-rule-scope {
-    margin: 4px 0 0;
-    font-size: 11px;
-    color: var(--purple-soft, #c9b0ff);
-  }
-
-  .demo-browser {
-    overflow: hidden;
-    border: 1px solid var(--hairline, rgba(224, 211, 255, 0.16));
-    border-radius: 10px;
-  }
-
-  .demo-browser-bar {
-    padding: 8px 12px;
-    border-bottom: 1px solid var(--hairline, rgba(224, 211, 255, 0.16));
-    background: rgba(255, 255, 255, 0.03);
-  }
-
-  .demo-browser-url {
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 11.5px;
-    color: rgba(255, 255, 255, 0.5);
-  }
-
-  .demo-browser-page {
-    padding: 14px;
-  }
-
-  .demo-browser-step {
-    margin: 0 0 7px;
-    padding-left: 16px;
-    position: relative;
-    font-size: 12.5px;
-    color: rgba(255, 255, 255, 0.7);
-  }
-
-  .demo-browser-step::before {
-    content: "";
-    position: absolute;
-    top: 6px;
-    left: 0;
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: #34d399;
-  }
-
-  .demo-browser-step.is-fail::before {
-    background: #fb7185;
-  }
-
-  .demo-browser-note {
-    margin: 12px 0 0;
-    font-size: 11.5px;
-    line-height: 1.55;
-    color: rgba(255, 255, 255, 0.4);
-  }
-
-  .demo-main {
-    display: flex;
-    min-width: 0;
-    flex-direction: column;
-    padding: 12px 14px 16px;
-  }
-
-  .demo-toolbar {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    flex-wrap: wrap;
-  }
-
-  .demo-views {
-    display: inline-flex;
-    gap: 2px;
-    padding: 2px;
-    border: 1px solid var(--hairline, rgba(224, 211, 255, 0.16));
-    border-radius: 8px;
-  }
-
-  .demo-views button {
-    padding: 4px 12px;
-    border: 0;
-    border-radius: 6px;
-    background: transparent;
-    color: var(--ink-45, rgba(255, 255, 255, 0.45));
-    font: inherit;
-    font-size: 12px;
-    cursor: pointer;
-  }
-
-  .demo-views button.is-on {
-    background: rgba(143, 82, 255, 0.2);
-    color: #fff;
-  }
-
-  .demo-search {
-    flex: 1;
-    min-width: 160px;
-  }
-
-  .demo-search input {
-    width: 100%;
-    padding: 6px 10px;
-    border: 1px solid var(--hairline, rgba(224, 211, 255, 0.16));
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.03);
-    color: #fff;
-    font: inherit;
-    font-size: 12.5px;
-  }
-
-  .demo-search input::placeholder {
-    color: rgba(255, 255, 255, 0.3);
-  }
-
-  .demo-filters {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    flex-wrap: wrap;
-    margin-top: 10px;
-  }
-
-  .demo-filter {
-    position: relative;
-  }
-
-  .demo-filter-button {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 10px;
-    border: 1px solid var(--hairline, rgba(224, 211, 255, 0.16));
-    border-radius: 7px;
-    background: transparent;
-    color: var(--ink-55, rgba(255, 255, 255, 0.55));
-    font: inherit;
-    font-size: 12px;
-    cursor: pointer;
-  }
-
-  .demo-filter-button.is-on {
-    border-color: rgba(143, 82, 255, 0.55);
-    background: rgba(143, 82, 255, 0.14);
-    color: #fff;
-  }
-
-  .demo-filter-value:not(:empty) {
-    color: var(--purple-soft, #c9b0ff);
-  }
-
-  .demo-filter-button svg {
-    width: 10px;
-    height: 10px;
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 1.4;
-    stroke-linecap: round;
-    opacity: 0.65;
-  }
-
-  .demo-menu {
-    position: absolute;
-    z-index: 3;
-    top: calc(100% + 4px);
-    left: 0;
-    min-width: 190px;
-    padding: 4px;
-    border: 1px solid var(--hairline, rgba(224, 211, 255, 0.16));
-    border-radius: 9px;
-    background: #14101f;
-    box-shadow: 0 18px 44px -18px rgba(0, 0, 0, 0.9);
-  }
-
-  .demo-menu-head {
-    margin: 2px 0 4px;
-    padding: 0 8px;
-    font-size: 9.5px;
-    font-weight: 600;
-    letter-spacing: 0.09em;
-    text-transform: uppercase;
-    color: rgba(255, 255, 255, 0.35);
-  }
-
-  .demo-menu button {
-    display: flex;
-    width: 100%;
-    align-items: center;
-    gap: 8px;
-    padding: 6px 8px;
-    border: 0;
-    border-radius: 6px;
-    background: transparent;
-    color: rgba(255, 255, 255, 0.78);
-    font: inherit;
-    font-size: 12.5px;
-    text-align: left;
-    cursor: pointer;
-  }
-
-  .demo-menu button:hover {
-    background: rgba(255, 255, 255, 0.06);
-  }
-
-  .demo-menu button span {
-    flex: 1;
-    min-width: 0;
-  }
-
-  .demo-menu button svg {
-    width: 12px;
-    height: 12px;
-    fill: none;
-    stroke: var(--purple-soft, #c9b0ff);
-    stroke-width: 1.5;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-    opacity: 0;
-  }
-
-  .demo-menu button[aria-checked="true"] svg {
-    opacity: 1;
-  }
-
-  .demo-clear {
-    margin-left: auto;
-    border: 0;
-    background: transparent;
-    color: var(--ink-40, rgba(255, 255, 255, 0.4));
-    font: inherit;
-    font-size: 12px;
-    cursor: pointer;
-  }
-
-  .demo-clear:hover {
-    color: #fff;
-  }
-
-  .demo-stage {
-    margin-top: 12px;
-  }
-
-  .demo-board {
-    display: grid;
-    gap: 10px;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    align-items: start;
-  }
-
-  .demo-column {
-    padding: 8px;
-    border: 1px solid var(--hairline, rgba(224, 211, 255, 0.16));
-    border-radius: 10px;
-    background: rgba(255, 255, 255, 0.015);
-  }
-
-  .demo-column-head {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    padding: 2px 4px 8px;
-    font-size: 12px;
-    font-weight: 600;
-    color: rgba(255, 255, 255, 0.72);
-  }
-
-  .demo-count {
-    color: rgba(255, 255, 255, 0.35);
-    font-weight: 400;
-  }
-
-  .demo-column-body {
-    display: grid;
-    gap: 8px;
-  }
-
-  .demo-card {
-    display: block;
-    width: 100%;
-    padding: 10px;
-    border: 1px solid var(--hairline, rgba(224, 211, 255, 0.16));
-    border-radius: 9px;
-    background: rgba(255, 255, 255, 0.03);
-    color: inherit;
-    font: inherit;
-    text-align: left;
-    cursor: pointer;
-    transition: border-color 0.16s ease, background 0.16s ease;
-  }
-
-  .demo-card:hover {
-    border-color: rgba(143, 82, 255, 0.6);
-    background: rgba(143, 82, 255, 0.08);
-  }
-
-  .demo-card-space {
-    display: block;
-    margin-bottom: 3px;
-    font-size: 10.5px;
-    color: rgba(255, 255, 255, 0.35);
-  }
-
-  .demo-card-name {
-    display: block;
-    font-size: 12.5px;
-    font-weight: 500;
-    color: #fff;
-    line-height: 1.35;
-  }
-
-  .demo-card-foot {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin-top: 7px;
-    font-size: 11px;
-    color: rgba(255, 255, 255, 0.42);
-  }
-
-  .demo-card-age {
-    margin-left: auto;
-  }
-
-  .demo-card-pr {
-    display: block;
-    margin-top: 5px;
-    font-size: 10.5px;
-    color: #6ee7b7;
-  }
-
-  .demo-dot {
-    width: 6px;
-    height: 6px;
-    flex-shrink: 0;
-    border-radius: 50%;
-    background: rgba(255, 255, 255, 0.28);
-  }
-
-  .demo-dot.is-running {
-    background: var(--purple-bright, #a77cff);
-  }
-
-  .demo-dot.is-attention {
-    background: #fcd34d;
-  }
-
-  .demo-dot.is-done {
-    background: #34d399;
-  }
-
-  .demo-empty {
-    margin: 6px 0 2px;
-    padding: 0 4px;
-    font-size: 11px;
-    color: rgba(255, 255, 255, 0.28);
-  }
-
-  .demo-list {
-    overflow: hidden;
-    border: 1px solid var(--hairline, rgba(224, 211, 255, 0.16));
-    border-radius: 10px;
-  }
-
-  .demo-list-head {
-    display: flex;
-    gap: 7px;
-    margin: 0;
-    padding: 8px 12px;
-    border-bottom: 1px solid var(--hairline, rgba(224, 211, 255, 0.16));
-    background: rgba(255, 255, 255, 0.025);
-    font-size: 11.5px;
-    font-weight: 600;
-    color: rgba(255, 255, 255, 0.72);
-  }
-
-  .demo-row {
-    display: flex;
-    width: 100%;
-    align-items: center;
-    gap: 12px;
-    padding: 9px 12px;
-    border: 0;
-    border-bottom: 1px solid var(--hairline, rgba(224, 211, 255, 0.16));
-    background: transparent;
-    color: inherit;
-    font: inherit;
-    text-align: left;
-    cursor: pointer;
-  }
-
-  .demo-row:hover {
-    background: rgba(255, 255, 255, 0.03);
-  }
-
-  .demo-row-name {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-size: 12.5px;
-    color: #fff;
-  }
-
-  .demo-row-space {
-    font-size: 11.5px;
-    color: rgba(255, 255, 255, 0.35);
-  }
-
-  .demo-row-state {
-    font-size: 11.5px;
-    color: rgba(255, 255, 255, 0.45);
-  }
-
-  .demo-row-age {
-    font-size: 11px;
-    color: rgba(255, 255, 255, 0.3);
-  }
-
-  .demo-none {
-    margin: 0;
-    padding: 34px 0;
-    border: 1px solid var(--hairline, rgba(224, 211, 255, 0.16));
-    border-radius: 10px;
-    text-align: center;
-    font-size: 12.5px;
-    color: rgba(255, 255, 255, 0.45);
-  }
-
-  .demo-foot {
-    margin: 14px 0 0;
-    font-size: 12px;
-    color: var(--ink-40, rgba(255, 255, 255, 0.4));
-  }
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif;
+  }
+
+  .demo.is-bare { width: 100%; padding: 0; }
+
+  .demo-intro { max-width: 640px; margin-bottom: 22px; }
+  .demo-kicker { margin: 0 0 8px; font-size: 11px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--c-bright); }
+  .demo-intro h2 { margin: 0 0 10px; font-size: clamp(24px, 3.2vw, 34px); line-height: 1.15; letter-spacing: -0.02em; }
+  .demo-deck { margin: 0; font-size: 14.5px; line-height: 1.55; color: rgba(255, 255, 255, 0.55); }
+
+  .demo-frame { overflow: hidden; border: 1px solid var(--c-line); border-radius: 14px; background: var(--c-canvas); box-shadow: 0 30px 80px -40px rgba(0, 0, 0, 0.9); }
+  .demo-frame.is-bare { border: 0; border-radius: 0 0 20px 20px; box-shadow: none; }
+
+  .demo-titlebar { display: flex; align-items: center; gap: 10px; padding: 9px 14px; border-bottom: 1px solid var(--c-line); background: var(--c-sidebar); }
+  .demo-lights { display: inline-flex; gap: 6px; }
+  .demo-lights i { width: 10px; height: 10px; border-radius: 50%; background: #3a3742; }
+  .demo-titlebar-name { font-size: 11.5px; color: var(--c-muted); }
+  .demo-titlebar-right { margin-left: auto; }
+  .demo-chip { padding: 3px 9px; border: 1px solid var(--c-line); border-radius: 7px; background: var(--c-control); font-size: 11px; font-style: normal; color: var(--c-subtle); }
+
+  .demo-body { display: grid; grid-template-columns: 218px minmax(0, 1fr); min-height: 452px; }
+  .demo-rail { padding: 12px 10px; border-right: 1px solid var(--c-line); background: var(--c-sidebar); }
+
+  /* [data-vector-nav-label] in the app. */
+  .demo-nav-label { margin: 14px 0 0; padding: 0 10px 5px; font-size: 9.5px; font-weight: 600; color: rgba(255, 255, 255, 0.27); }
+  .demo-nav-label:first-child { margin-top: 0; }
+
+  /* [data-vector-nav-item] in the app. */
+  .demo-nav-item {
+    display: flex; width: 100%; min-height: 32px; align-items: center; gap: 10px;
+    border: 1px solid transparent; border-radius: 7px; padding: 0 10px;
+    background: transparent; color: rgba(255, 255, 255, 0.5);
+    font: inherit; font-size: 12.5px; font-weight: 500; text-align: left; cursor: pointer;
+    transition: background-color 150ms ease, color 150ms ease;
+  }
+  .demo-nav-item:hover { background: var(--c-control-hover); color: var(--c-text); }
+  .demo-nav-item.is-on { background: var(--c-soft); color: var(--c-text); }
+  .demo-nav-dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; opacity: 0.5; flex-shrink: 0; }
+
+  .demo-main { display: flex; min-width: 0; flex-direction: column; padding: 14px 16px 16px; background: var(--c-canvas); }
+  .demo-surface { display: flex; min-height: 0; flex: 1; flex-direction: column; }
+
+  /* The session is a reading column, not a full-bleed pane — the app does the
+     same, and stretched across 1200px the transcript reads as sparse. */
+  .demo-surface[data-surface="session"] { width: 100%; max-width: 780px; margin-inline: auto; }
+  .demo-thread { flex: 1; }
+  .demo-msg { margin-bottom: 14px; font-size: 13px; line-height: 1.6; color: var(--c-subtle); }
+  .demo-msg p { margin: 0 0 8px; }
+  .demo-msg.is-user { margin-left: 22%; padding: 10px 13px; border: 1px solid var(--c-line); border-radius: 12px; background: var(--c-surface); color: var(--c-text); }
+  .demo-msg code { padding: 1px 5px; border-radius: 4px; background: var(--c-control); font-family: var(--c-mono); font-size: 11.5px; }
+  .demo-tool { display: flex; align-items: center; gap: 9px; margin-bottom: 5px; padding: 6px 10px; border: 1px solid var(--c-line); border-radius: 8px; background: var(--c-surface); font-family: var(--c-mono); font-size: 11px; color: var(--c-muted); }
+  .demo-tool-k { color: var(--c-bright); }
+  .demo-tool-add, .demo-tool-ok { margin-left: auto; color: var(--c-green); }
+
+  .demo-composer { margin-top: 10px; padding: 12px 14px; border: 1px solid var(--c-line); border-radius: 14px; background: var(--c-surface); }
+  .demo-composer-text { margin: 0 0 12px; font-size: 13.5px; color: var(--c-muted); }
+  .demo-composer-row { display: flex; align-items: center; gap: 8px; }
+  .demo-control { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border: 1px solid var(--c-line); border-radius: 9px; background: var(--c-control); font-size: 11.5px; color: var(--c-subtle); }
+  .demo-mode-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--c-bright); }
+  .demo-spacer { flex: 1; }
+  .demo-send { display: grid; width: 30px; height: 30px; place-items: center; border-radius: 9px; background: var(--c-purple); color: #fff; }
+  .demo-send svg { width: 15px; height: 15px; }
+  .demo-composer-note { margin: 9px 0 0; font-size: 10.5px; color: rgba(255, 255, 255, 0.3); }
+
+  /* The app's effort control at max, same construction as the real one. */
+  .demo-effort-control { padding-right: 8px; }
+  .demo-effort { position: relative; display: inline-block; width: 62px; height: 18px; overflow: hidden; border: 1px solid var(--c-line); border-radius: 999px; background: #16151c; }
+  .demo-effort::after {
+    content: ""; position: absolute; inset: 0; border-radius: 999px;
+    background-image:
+      radial-gradient(circle, rgba(255, 255, 255, 0.95) 0 0.9px, transparent 1.3px),
+      radial-gradient(circle, rgba(255, 255, 255, 0.6) 0 0.7px, transparent 1.1px),
+      linear-gradient(90deg, #4f6ae8 0%, #6560e2 42%, #7d5cf0 72%, #8b5cf6 100%);
+    background-size: 11px 9px, 17px 7px, 100% 100%;
+    background-position: 2px 3px, 7px 6px, 0 0;
+    animation: demo-effort-flow 3.2s linear infinite;
+  }
+  .demo-effort-thumb { position: absolute; z-index: 2; top: 50%; right: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; box-shadow: 0 2px 6px rgba(9, 6, 18, 0.55); transform: translateY(-50%); }
+  .demo-effort-label { color: var(--c-bright); }
+
+  @keyframes demo-effort-flow {
+    from { background-position: 2px 3px, 7px 6px, 0 0; }
+    to { background-position: 112px 3px, 177px 6px, 0 0; }
+  }
+
+  .demo-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .demo-views { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid var(--c-line); border-radius: 8px; }
+  .demo-views button { padding: 4px 12px; border: 0; border-radius: 6px; background: transparent; color: var(--c-muted); font: inherit; font-size: 12px; cursor: pointer; }
+  .demo-views button.is-on { background: var(--c-soft); color: var(--c-text); }
+  .demo-search { flex: 1; min-width: 160px; }
+  .demo-search input { width: 100%; padding: 6px 10px; border: 1px solid var(--c-line); border-radius: 8px; background: var(--c-surface); color: var(--c-text); font: inherit; font-size: 12.5px; }
+  .demo-search input::placeholder { color: var(--c-muted); }
+
+  .demo-filters { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+  .demo-filter { position: relative; }
+  .demo-filter-button { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border: 1px solid var(--c-line); border-radius: 7px; background: var(--c-control); color: var(--c-subtle); font: inherit; font-size: 12px; cursor: pointer; }
+  .demo-filter-button.is-on { border-color: rgba(146, 116, 236, 0.6); background: var(--c-soft); color: var(--c-text); }
+  .demo-filter-value:not(:empty) { color: var(--c-bright); }
+  .demo-filter-button svg { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; opacity: 0.6; }
+  .demo-menu { position: absolute; z-index: 3; top: calc(100% + 4px); left: 0; min-width: 180px; padding: 4px; border: 1px solid var(--c-line); border-radius: 9px; background: var(--c-raised); box-shadow: 0 18px 44px -18px rgba(0, 0, 0, 0.9); }
+  .demo-menu button { display: flex; width: 100%; align-items: center; gap: 8px; padding: 6px 8px; border: 0; border-radius: 6px; background: transparent; color: var(--c-subtle); font: inherit; font-size: 12.5px; text-align: left; cursor: pointer; }
+  .demo-menu button:hover { background: var(--c-control); }
+  .demo-menu button span { flex: 1; min-width: 0; }
+  .demo-menu button svg { width: 12px; height: 12px; fill: none; stroke: var(--c-bright); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; opacity: 0; }
+  .demo-menu button[aria-checked="true"] svg { opacity: 1; }
+  .demo-clear { margin-left: auto; border: 0; background: transparent; color: var(--c-muted); font: inherit; font-size: 12px; cursor: pointer; }
+  .demo-clear:hover { color: var(--c-text); }
+
+  .demo-board { display: grid; gap: 10px; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: start; margin-top: 12px; }
+  .demo-column { padding: 8px; border: 1px solid var(--c-line); border-radius: 10px; background: var(--c-stage); }
+  .demo-column-head { display: flex; align-items: center; gap: 7px; padding: 2px 4px 8px; font-size: 12px; font-weight: 600; color: var(--c-subtle); }
+  .demo-count { color: var(--c-muted); font-weight: 400; }
+  .demo-column-body { display: grid; gap: 8px; }
+  .demo-card { display: block; width: 100%; padding: 10px; border: 1px solid var(--c-line); border-radius: 9px; background: var(--c-surface); color: inherit; font: inherit; text-align: left; cursor: pointer; transition: border-color 0.16s ease, background 0.16s ease; }
+  .demo-card:hover { border-color: rgba(146, 116, 236, 0.6); background: var(--c-raised); }
+  .demo-card-space { display: block; margin-bottom: 3px; font-size: 10.5px; color: var(--c-muted); }
+  .demo-card-name { display: block; font-size: 12.5px; font-weight: 500; color: var(--c-text); line-height: 1.35; }
+  .demo-card-foot { display: flex; align-items: center; gap: 6px; margin-top: 7px; font-size: 11px; color: var(--c-muted); }
+  .demo-card-age { margin-left: auto; }
+  .demo-dot { width: 6px; height: 6px; flex-shrink: 0; border-radius: 50%; background: var(--c-muted); }
+  .demo-dot.is-running { background: var(--c-bright); }
+  .demo-dot.is-attention { background: var(--c-amber); }
+  .demo-dot.is-done { background: var(--c-green); }
+  .demo-empty { margin: 6px 0 2px; padding: 0 4px; font-size: 11px; color: var(--c-muted); opacity: 0.7; }
+
+  .demo-list { overflow: hidden; border: 1px solid var(--c-line); border-radius: 10px; margin-top: 12px; }
+  .demo-list-head { display: flex; gap: 7px; margin: 0; padding: 8px 12px; border-bottom: 1px solid var(--c-line); background: var(--c-surface); font-size: 11.5px; font-weight: 600; color: var(--c-subtle); }
+  .demo-row { display: flex; width: 100%; align-items: center; gap: 12px; padding: 9px 12px; border: 0; border-bottom: 1px solid var(--c-line); background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+  .demo-row:hover { background: var(--c-surface); }
+  .demo-row-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: var(--c-text); }
+  .demo-row-space, .demo-row-state { font-size: 11.5px; color: var(--c-muted); }
+  .demo-row-age { font-size: 11px; color: var(--c-muted); opacity: 0.8; }
+  .demo-none { margin: 12px 0 0; padding: 34px 0; border: 1px solid var(--c-line); border-radius: 10px; text-align: center; font-size: 12.5px; color: var(--c-muted); }
+
+  .demo-lead { margin: 0 0 12px; font-size: 12.5px; line-height: 1.6; color: var(--c-subtle); }
+  .demo-lead code { padding: 1px 5px; border-radius: 4px; background: var(--c-control); font-family: var(--c-mono); font-size: 11.5px; }
+  .demo-panel { margin-bottom: 8px; padding: 10px 12px; border: 1px solid var(--c-line); border-radius: 9px; background: var(--c-surface); }
+  .demo-row-flex { display: flex; align-items: center; gap: 10px; }
+  .demo-panel-title { margin: 0; flex: 1; font-size: 12.5px; color: var(--c-text); }
+  .demo-panel-sub { margin: 4px 0 0; font-size: 11px; color: var(--c-bright); }
+  .demo-note { margin: 10px 0 0; font-size: 11.5px; line-height: 1.55; color: var(--c-muted); }
+  .demo-badge { padding: 3px 9px; border: 1px solid var(--c-line); border-radius: 999px; font-size: 10.5px; color: var(--c-muted); }
+  .demo-badge.is-merged { border-color: rgba(146, 116, 236, 0.45); color: var(--c-bright); }
+  .demo-badge.is-open, .demo-badge.is-on { border-color: rgba(101, 199, 142, 0.4); color: var(--c-green); }
+
+  .demo-code { display: grid; grid-template-columns: 138px minmax(0, 1fr); gap: 10px; }
+  .demo-tree-dir { margin: 8px 0 3px; font-size: 9.5px; font-weight: 600; color: rgba(255, 255, 255, 0.27); }
+  .demo-tree-dir:first-child { margin-top: 0; }
+  .demo-tree-file { display: block; width: 100%; margin-bottom: 1px; padding: 5px 10px; border: 0; border-radius: 7px; background: transparent; color: rgba(255, 255, 255, 0.5); font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+  .demo-tree-file:hover { background: var(--c-control); color: var(--c-text); }
+  .demo-tree-file.is-on { background: var(--c-soft); color: var(--c-text); }
+  .demo-pane { overflow: hidden; border: 1px solid var(--c-line); border-radius: 10px; background: var(--c-surface); }
+  .demo-tabs { display: flex; gap: 2px; padding: 5px 6px 0; border-bottom: 1px solid var(--c-line); }
+  .demo-tab { padding: 5px 11px; border-radius: 6px 6px 0 0; font-size: 11.5px; color: var(--c-muted); }
+  .demo-tab.is-on { background: var(--c-raised); color: var(--c-text); }
+  .demo-editor-code { margin: 0; padding: 12px 14px; overflow-x: auto; font-family: var(--c-mono); font-size: 11.5px; line-height: 1.65; color: var(--c-subtle); }
+  .demo-statusbar { display: flex; gap: 14px; padding: 7px 14px; border-top: 1px solid var(--c-line); font-size: 10.5px; color: var(--c-muted); }
+  .demo-warn { color: var(--c-amber); }
+
+  .demo-urlbar { margin-bottom: 12px; padding: 8px 12px; border: 1px solid var(--c-line); border-radius: 9px; background: var(--c-surface); font-family: var(--c-mono); font-size: 11.5px; color: var(--c-muted); }
+  .demo-step { position: relative; margin: 0 0 8px; padding-left: 18px; font-size: 12.5px; color: var(--c-subtle); }
+  .demo-step::before { content: ""; position: absolute; top: 6px; left: 0; width: 6px; height: 6px; border-radius: 50%; background: var(--c-green); }
+  .demo-step.is-guard::before { background: var(--c-bright); }
+  .demo-step.is-fail::before { background: var(--c-red); }
+
+  .demo-canvas { display: grid; gap: 8px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .demo-canvas-tile { padding: 14px; border: 1px solid var(--c-line); border-radius: 10px; background: var(--c-surface); }
+  .demo-canvas-tile span { display: block; font-size: 12.5px; color: var(--c-text); }
+  .demo-canvas-tile i { display: block; margin-top: 4px; font-style: normal; font-family: var(--c-mono); font-size: 11px; color: var(--c-muted); }
+  .demo-grid { display: grid; gap: 8px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .demo-plugin { padding: 11px; border: 1px solid var(--c-line); border-radius: 9px; background: var(--c-surface); }
+  .demo-plugin-name { display: block; font-size: 12.5px; color: var(--c-text); }
+  .demo-plugin-blurb { display: block; margin-top: 3px; font-size: 11px; line-height: 1.45; color: var(--c-muted); }
+
+  .demo-foot { margin: 14px 0 0; font-size: 12px; color: rgba(255, 255, 255, 0.4); }
 
   @media (max-width: 860px) {
-    .demo-body {
-      grid-template-columns: minmax(0, 1fr);
-    }
-
-    .demo-rail {
-      display: none;
-    }
-
-    .demo-board {
-      grid-template-columns: minmax(0, 1fr);
-    }
-
-    .demo-row-space,
-    .demo-row-state {
-      display: none;
-    }
+    .demo-body { grid-template-columns: minmax(0, 1fr); }
+    .demo-rail { display: none; }
+    .demo-board, .demo-code, .demo-canvas, .demo-grid { grid-template-columns: minmax(0, 1fr); }
+    .demo-row-space, .demo-row-state { display: none; }
+    .demo-msg.is-user { margin-left: 0; }
   }
 </style>
