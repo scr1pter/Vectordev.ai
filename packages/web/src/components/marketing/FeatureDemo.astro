@@ -1,0 +1,784 @@
+---
+// Interactive replacements for the landing page's product screenshots. A
+// screenshot tells you what a thing looks like; these let you use it. Every one
+// is server-rendered and only toggled by script, so nothing depends on
+// JavaScript to read and the component's scoped styles always apply.
+
+interface Props {
+  kind: "editor" | "memory" | "browser" | "cloud" | "agents" | "automations"
+  tag: string
+  note: string
+}
+
+const { kind, tag, note } = Astro.props
+
+const editorFiles = [
+  {
+    id: "limit",
+    name: "limit.ts",
+    dir: "middleware",
+    code: `const WINDOW_MS = 60_000
+const MAX = 100
+
+// Keyed on the API token, not the IP: everyone
+// behind one office NAT is not one caller.
+export function allow(token: string) {
+  const now = Date.now()
+  const live = (seen.get(token) ?? [])
+    .filter((at) => now - at < WINDOW_MS)
+  if (live.length >= MAX) return false
+  seen.set(token, [...live, now])
+  return true
+}`,
+  },
+  {
+    id: "auth",
+    name: "auth.ts",
+    dir: "middleware",
+    code: `export async function requireUser(req: Request) {
+  const token = bearer(req)
+  if (!token) throw new Unauthorized()
+  // Verified against the session store rather
+  // than decoded locally: a revoked session has
+  // to stop working the moment it is revoked.
+  const session = await sessions.find(token)
+  if (!session) throw new Unauthorized()
+  return session.user
+}`,
+  },
+  {
+    id: "upload",
+    name: "upload.ts",
+    dir: "routes",
+    code: `export const config = { bodyParser: false }
+
+export async function POST(req: Request) {
+  const user = await requireUser(req)
+  if (!allow(user.token)) return tooMany()
+  const file = await readMultipart(req)
+  // Streamed to storage, never buffered whole:
+  // a 2GB upload should not become 2GB of RAM.
+  return store.put(user.id, file.stream)
+}`,
+  },
+]
+
+const memoryFacts = [
+  "Prefers Bun over npm in every project.",
+  "Wants tests run before work is called done.",
+  "Writes SolidJS, never destructures props.",
+  "Keeps commits small and scoped to one change.",
+]
+
+const browserSteps = [
+  { text: "Opened localhost:3000/checkout", ok: true },
+  { text: "Filled the card field with a test number", ok: true },
+  { text: "Refused to type into the CVC field", ok: true, guard: true },
+  { text: "Clicked Pay", ok: true },
+  { text: "Expected a receipt, got a 500", ok: false },
+]
+
+const cloudTargets = [
+  { id: "vercel", name: "Vercel", detail: "vector-web · production", status: "Deployed 4m ago", meta: "Your account, your billing." },
+  { id: "cloudflare", name: "Cloudflare", detail: "vector-api · workers", status: "Deployed 1h ago", meta: "Secrets redacted from every log line." },
+  { id: "netlify", name: "Netlify", detail: "docs-site · main", status: "Building", meta: "Vector never proxies your repository." },
+]
+
+const boardAgents = [
+  { id: "a1", column: "running", name: "Add rate limiting", state: "Editing limit.ts", age: "4m" },
+  { id: "a2", column: "running", name: "Migrate session store", state: "Running commands", age: "11m" },
+  { id: "a3", column: "attention", name: "Fix the flaky test", state: "PR is ready", age: "26m" },
+  { id: "a4", column: "done", name: "OAuth device flow", state: "Merged", age: "1h" },
+]
+
+const boardColumns = [
+  { id: "running", label: "Running" },
+  { id: "attention", label: "Needs you" },
+  { id: "done", label: "Done" },
+]
+
+const automations = [
+  { id: "r1", name: "Morning repo brief", schedule: "Every weekday at 8:00", next: "Tomorrow, 8:00" },
+  { id: "r2", name: "Upgrade minor dependencies", schedule: "Every Monday", next: "Mon, 9:00" },
+  { id: "r3", name: "Close stale branches", schedule: "First of the month", next: "1 Sep, 7:00" },
+]
+---
+
+<div class="fd" data-fd={kind}>
+  <div class="fd-top" aria-hidden="true">
+    <span>{tag}</span>
+    <span>{note}</span>
+  </div>
+
+  <div class="fd-body">
+    {kind === "editor" && (
+      <div class="fd-editor">
+        <div class="fd-tree">
+          {editorFiles.map((file, index) => (
+            <>
+              {index === 0 || editorFiles[index - 1].dir !== file.dir ? <p class="fd-tree-dir">{file.dir}</p> : null}
+              <button type="button" class={`fd-tree-file${index === 0 ? " is-on" : ""}`} data-file={file.id}>
+                {file.name}
+              </button>
+            </>
+          ))}
+        </div>
+        <div class="fd-pane">
+          <div class="fd-tabs">
+            {editorFiles.map((file, index) => (
+              <span class={`fd-tab${index === 0 ? " is-on" : ""}`} data-tab={file.id}>{file.name}</span>
+            ))}
+          </div>
+          {editorFiles.map((file, index) => (
+            <pre class="fd-code" data-code={file.id} hidden={index !== 0}><code>{file.code}</code></pre>
+          ))}
+          <div class="fd-foot">
+            <span class="fd-warn">2 diagnostics</span>
+            <span>TypeScript</span>
+            <span>Edited by Vector agent</span>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {kind === "memory" && (
+      <div class="fd-memory">
+        <div class="fd-seg" role="tablist">
+          <button type="button" role="tab" class="is-on" data-mem="facts">What Vector knows</button>
+          <button type="button" role="tab" data-mem="path">Where it lives</button>
+        </div>
+        <div data-mem-panel="facts">
+          {memoryFacts.map((fact) => (
+            <div class="fd-fact">
+              <span>{fact}</span>
+              <button type="button" class="fd-forget" data-forget>Forget</button>
+            </div>
+          ))}
+          <p class="fd-hint" data-forgotten hidden>Removed. Erasing deletes the line from the file, not just the view.</p>
+        </div>
+        <div data-mem-panel="path" hidden>
+          <p class="fd-path">~/.config/vector/MEMORY.md</p>
+          <p class="fd-hint">
+            One Markdown file in your own config directory. Read in every repository, never uploaded, and deleted from
+            disk when you erase it.
+          </p>
+        </div>
+      </div>
+    )}
+
+    {kind === "browser" && (
+      <div class="fd-browser">
+        <div class="fd-url">localhost:3000/checkout</div>
+        <div class="fd-steps">
+          {browserSteps.map((step, index) => (
+            <p class={`fd-step${step.ok ? "" : " is-fail"}${step.guard ? " is-guard" : ""}`} data-step hidden={index > 0}>
+              {step.text}
+            </p>
+          ))}
+        </div>
+        <button type="button" class="fd-run" data-run>Run the check</button>
+      </div>
+    )}
+
+    {kind === "cloud" && (
+      <div class="fd-cloud">
+        <div class="fd-targets">
+          {cloudTargets.map((target, index) => (
+            <button type="button" class={`fd-target${index === 0 ? " is-on" : ""}`} data-target={target.id}>
+              <span class="fd-target-name">{target.name}</span>
+              <span class="fd-target-detail">{target.detail}</span>
+            </button>
+          ))}
+        </div>
+        {cloudTargets.map((target, index) => (
+          <div class="fd-detail" data-detail={target.id} hidden={index !== 0}>
+            <p class="fd-detail-status">{target.status}</p>
+            <p class="fd-hint">{target.meta}</p>
+          </div>
+        ))}
+      </div>
+    )}
+
+    {kind === "agents" && (
+      <div class="fd-board">
+        {boardColumns.map((column) => (
+          <div class="fd-col">
+            <p class="fd-col-head">
+              <span>{column.label}</span>
+              <span class="fd-col-count" data-col-count={column.id}>
+                {boardAgents.filter((agent) => agent.column === column.id).length}
+              </span>
+            </p>
+            {boardAgents
+              .filter((agent) => agent.column === column.id)
+              .map((agent) => (
+                <button type="button" class="fd-agent" data-agent={agent.id}>
+                  <span class="fd-agent-name">{agent.name}</span>
+                  <span class="fd-agent-foot">
+                    <i class={`fd-dot is-${agent.column}`}></i>
+                    <span>{agent.state}</span>
+                    <span class="fd-agent-age">{agent.age}</span>
+                  </span>
+                </button>
+              ))}
+          </div>
+        ))}
+        <p class="fd-hint fd-board-hint" data-agent-hint>Pick an agent to see what it is doing.</p>
+      </div>
+    )}
+
+    {kind === "automations" && (
+      <div class="fd-autos">
+        {automations.map((automation) => (
+          <div class="fd-auto" data-auto>
+            <span class="fd-auto-main">
+              <span class="fd-auto-name">{automation.name}</span>
+              <span class="fd-auto-when" data-when={automation.next}>{automation.schedule} · next {automation.next}</span>
+            </span>
+            <button type="button" class="fd-pause" data-pause>Pause</button>
+          </div>
+        ))}
+        <p class="fd-hint">Vector stays in the tray after you close the window, so these fire without you here.</p>
+      </div>
+    )}
+  </div>
+</div>
+
+<script is:inline>
+  function bootFeatureDemos() {
+    for (const root of document.querySelectorAll("[data-fd]")) {
+      if (root.dataset.booted === "1") continue
+      root.dataset.booted = "1"
+      const kind = root.dataset.fd
+
+      if (kind === "editor") {
+        root.querySelectorAll("[data-file]").forEach((button) => {
+          button.addEventListener("click", () => {
+            const id = button.dataset.file
+            root.querySelectorAll("[data-file]").forEach((other) => other.classList.toggle("is-on", other === button))
+            root.querySelectorAll("[data-tab]").forEach((tab) => tab.classList.toggle("is-on", tab.dataset.tab === id))
+            root.querySelectorAll("[data-code]").forEach((code) => (code.hidden = code.dataset.code !== id))
+          })
+        })
+      }
+
+      if (kind === "memory") {
+        root.querySelectorAll("[data-mem]").forEach((button) => {
+          button.addEventListener("click", () => {
+            const id = button.dataset.mem
+            root.querySelectorAll("[data-mem]").forEach((other) => other.classList.toggle("is-on", other === button))
+            root.querySelectorAll("[data-mem-panel]").forEach((panel) => {
+              panel.hidden = panel.dataset.memPanel !== id
+            })
+          })
+        })
+        root.querySelectorAll("[data-forget]").forEach((button) => {
+          button.addEventListener("click", () => {
+            button.closest(".fd-fact").remove()
+            root.querySelector("[data-forgotten]").hidden = false
+          })
+        })
+      }
+
+      if (kind === "browser") {
+        const steps = [...root.querySelectorAll("[data-step]")]
+        const run = root.querySelector("[data-run]")
+        let shown = 1
+        run.addEventListener("click", () => {
+          if (shown >= steps.length) {
+            steps.forEach((step, index) => (step.hidden = index > 0))
+            shown = 1
+            run.textContent = "Run the check"
+            return
+          }
+          steps[shown].hidden = false
+          shown += 1
+          run.textContent = shown >= steps.length ? "Run it again" : "Next step"
+        })
+      }
+
+      if (kind === "cloud") {
+        root.querySelectorAll("[data-target]").forEach((button) => {
+          button.addEventListener("click", () => {
+            const id = button.dataset.target
+            root.querySelectorAll("[data-target]").forEach((other) => other.classList.toggle("is-on", other === button))
+            root.querySelectorAll("[data-detail]").forEach((detail) => {
+              detail.hidden = detail.dataset.detail !== id
+            })
+          })
+        })
+      }
+
+      if (kind === "agents") {
+        const hint = root.querySelector("[data-agent-hint]")
+        root.querySelectorAll("[data-agent]").forEach((button) => {
+          button.addEventListener("click", () => {
+            root.querySelectorAll("[data-agent]").forEach((other) => other.classList.toggle("is-on", other === button))
+            const name = button.querySelector(".fd-agent-name").textContent
+            const state = button.querySelector(".fd-agent-foot span").textContent
+            hint.textContent = `${name} — ${state}. Its work is isolated in its own worktree until you merge it.`
+          })
+        })
+      }
+
+      if (kind === "automations") {
+        root.querySelectorAll("[data-pause]").forEach((button) => {
+          button.addEventListener("click", () => {
+            const row = button.closest(".fd-auto")
+            const when = row.querySelector("[data-when]")
+            const paused = row.classList.toggle("is-paused")
+            button.textContent = paused ? "Resume" : "Pause"
+            when.textContent = paused ? "Paused — it will not run" : when.dataset.original
+          })
+        })
+        root.querySelectorAll("[data-when]").forEach((when) => {
+          when.dataset.original = when.textContent
+        })
+      }
+    }
+  }
+
+  bootFeatureDemos()
+  document.addEventListener("astro:page-load", bootFeatureDemos)
+</script>
+
+<style>
+  .fd {
+    overflow: hidden;
+    border: 1px solid var(--hairline, rgba(224, 211, 255, 0.16));
+    border-radius: 12px;
+    background: rgba(10, 8, 16, 0.7);
+  }
+
+  .fd-top {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 13px;
+    border-bottom: 1px solid var(--hairline, rgba(224, 211, 255, 0.16));
+    background: rgba(255, 255, 255, 0.022);
+    font-size: 10.5px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.38);
+  }
+
+  .fd-body {
+    padding: 13px;
+  }
+
+  .fd-hint {
+    margin: 9px 0 0;
+    font-size: 11.5px;
+    line-height: 1.55;
+    color: rgba(255, 255, 255, 0.42);
+  }
+
+  .fd-editor {
+    display: grid;
+    grid-template-columns: 118px minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .fd-tree-dir {
+    margin: 8px 0 3px;
+    font-size: 9.5px;
+    font-weight: 600;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.3);
+  }
+
+  .fd-tree-dir:first-child {
+    margin-top: 0;
+  }
+
+  .fd-tree-file {
+    display: block;
+    width: 100%;
+    margin-bottom: 1px;
+    padding: 4px 8px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.5);
+    font: inherit;
+    font-size: 11.5px;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .fd-tree-file:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: #fff;
+  }
+
+  .fd-tree-file.is-on {
+    background: rgba(143, 82, 255, 0.16);
+    color: #fff;
+  }
+
+  .fd-pane {
+    overflow: hidden;
+    border: 1px solid var(--hairline, rgba(224, 211, 255, 0.16));
+    border-radius: 9px;
+    background: rgba(255, 255, 255, 0.018);
+  }
+
+  .fd-tabs {
+    display: flex;
+    gap: 2px;
+    padding: 5px 6px 0;
+    border-bottom: 1px solid var(--hairline, rgba(224, 211, 255, 0.16));
+  }
+
+  .fd-tab {
+    padding: 4px 10px;
+    border-radius: 5px 5px 0 0;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.38);
+  }
+
+  .fd-tab.is-on {
+    background: rgba(255, 255, 255, 0.05);
+    color: #fff;
+  }
+
+  .fd-code {
+    margin: 0;
+    padding: 11px 13px;
+    overflow-x: auto;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px;
+    line-height: 1.6;
+    color: rgba(255, 255, 255, 0.7);
+  }
+
+  .fd-foot {
+    display: flex;
+    gap: 13px;
+    padding: 6px 13px;
+    border-top: 1px solid var(--hairline, rgba(224, 211, 255, 0.16));
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.33);
+  }
+
+  .fd-warn {
+    color: #fcd34d;
+  }
+
+  .fd-seg {
+    display: inline-flex;
+    gap: 2px;
+    margin-bottom: 10px;
+    padding: 2px;
+    border: 1px solid var(--hairline, rgba(224, 211, 255, 0.16));
+    border-radius: 8px;
+  }
+
+  .fd-seg button {
+    padding: 4px 11px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.45);
+    font: inherit;
+    font-size: 11.5px;
+    cursor: pointer;
+  }
+
+  .fd-seg button.is-on {
+    background: rgba(143, 82, 255, 0.2);
+    color: #fff;
+  }
+
+  .fd-fact {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 6px;
+    padding: 8px 11px;
+    border: 1px solid var(--hairline, rgba(224, 211, 255, 0.16));
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.022);
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.78);
+  }
+
+  .fd-fact span {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .fd-forget {
+    flex-shrink: 0;
+    padding: 3px 9px;
+    border: 1px solid var(--hairline, rgba(224, 211, 255, 0.16));
+    border-radius: 6px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.45);
+    font: inherit;
+    font-size: 11px;
+    cursor: pointer;
+  }
+
+  .fd-forget:hover {
+    border-color: rgba(251, 113, 133, 0.5);
+    color: #fda4af;
+  }
+
+  .fd-path {
+    margin: 0;
+    padding: 9px 11px;
+    border: 1px solid var(--hairline, rgba(224, 211, 255, 0.16));
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.022);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11.5px;
+    color: var(--purple-soft, #c9b0ff);
+  }
+
+  .fd-url {
+    padding: 7px 11px;
+    border: 1px solid var(--hairline, rgba(224, 211, 255, 0.16));
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.03);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11.5px;
+    color: rgba(255, 255, 255, 0.5);
+  }
+
+  .fd-steps {
+    margin-top: 10px;
+    min-height: 108px;
+  }
+
+  .fd-step {
+    position: relative;
+    margin: 0 0 7px;
+    padding-left: 17px;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.72);
+  }
+
+  .fd-step::before {
+    content: "";
+    position: absolute;
+    top: 5px;
+    left: 0;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #34d399;
+  }
+
+  .fd-step.is-guard::before {
+    background: var(--purple-bright, #a77cff);
+  }
+
+  .fd-step.is-fail::before {
+    background: #fb7185;
+  }
+
+  .fd-run {
+    padding: 5px 12px;
+    border: 1px solid var(--hairline, rgba(224, 211, 255, 0.16));
+    border-radius: 8px;
+    background: rgba(143, 82, 255, 0.16);
+    color: #fff;
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+  }
+
+  .fd-run:hover {
+    background: rgba(143, 82, 255, 0.28);
+  }
+
+  .fd-targets {
+    display: grid;
+    gap: 6px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    margin-bottom: 10px;
+  }
+
+  .fd-target {
+    padding: 8px 10px;
+    border: 1px solid var(--hairline, rgba(224, 211, 255, 0.16));
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.022);
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .fd-target.is-on {
+    border-color: rgba(143, 82, 255, 0.55);
+    background: rgba(143, 82, 255, 0.12);
+  }
+
+  .fd-target-name {
+    display: block;
+    font-size: 12px;
+    font-weight: 500;
+    color: #fff;
+  }
+
+  .fd-target-detail {
+    display: block;
+    margin-top: 2px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 10.5px;
+    color: rgba(255, 255, 255, 0.4);
+  }
+
+  .fd-detail-status {
+    margin: 0;
+    font-size: 12.5px;
+    color: #6ee7b7;
+  }
+
+  .fd-board {
+    display: grid;
+    gap: 8px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .fd-col-head {
+    display: flex;
+    gap: 6px;
+    margin: 0 0 6px;
+    font-size: 11px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.66);
+  }
+
+  .fd-col-count {
+    color: rgba(255, 255, 255, 0.32);
+    font-weight: 400;
+  }
+
+  .fd-agent {
+    display: block;
+    width: 100%;
+    margin-bottom: 6px;
+    padding: 8px 10px;
+    border: 1px solid var(--hairline, rgba(224, 211, 255, 0.16));
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.025);
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .fd-agent:hover,
+  .fd-agent.is-on {
+    border-color: rgba(143, 82, 255, 0.55);
+    background: rgba(143, 82, 255, 0.1);
+  }
+
+  .fd-agent-name {
+    display: block;
+    font-size: 11.5px;
+    color: #fff;
+  }
+
+  .fd-agent-foot {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-top: 5px;
+    font-size: 10.5px;
+    color: rgba(255, 255, 255, 0.4);
+  }
+
+  .fd-agent-age {
+    margin-left: auto;
+  }
+
+  .fd-dot {
+    width: 5px;
+    height: 5px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.3);
+  }
+
+  .fd-dot.is-running {
+    background: var(--purple-bright, #a77cff);
+  }
+
+  .fd-dot.is-attention {
+    background: #fcd34d;
+  }
+
+  .fd-dot.is-done {
+    background: #34d399;
+  }
+
+  .fd-board-hint {
+    grid-column: 1 / -1;
+  }
+
+  .fd-auto {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 6px;
+    padding: 9px 11px;
+    border: 1px solid var(--hairline, rgba(224, 211, 255, 0.16));
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.022);
+  }
+
+  .fd-auto.is-paused {
+    opacity: 0.55;
+  }
+
+  .fd-auto-main {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .fd-auto-name {
+    display: block;
+    font-size: 12px;
+    color: #fff;
+  }
+
+  .fd-auto-when {
+    display: block;
+    margin-top: 2px;
+    font-size: 10.5px;
+    color: rgba(255, 255, 255, 0.4);
+  }
+
+  .fd-pause {
+    flex-shrink: 0;
+    padding: 4px 11px;
+    border: 1px solid var(--hairline, rgba(224, 211, 255, 0.16));
+    border-radius: 6px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.6);
+    font: inherit;
+    font-size: 11px;
+    cursor: pointer;
+  }
+
+  .fd-pause:hover {
+    background: rgba(255, 255, 255, 0.06);
+    color: #fff;
+  }
+
+  @media (max-width: 720px) {
+    .fd-editor,
+    .fd-board,
+    .fd-targets {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+</style>

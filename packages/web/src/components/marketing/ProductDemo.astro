@@ -84,6 +84,12 @@ const columns = [
   { id: "done", label: "Done" },
 ]
 
+interface Props {
+  bare?: boolean
+}
+
+const { bare = false } = Astro.props
+
 const filters = [
   {
     key: "column",
@@ -121,22 +127,26 @@ const filters = [
 ]
 ---
 
-<section class="demo" aria-labelledby="demo-title" data-reveal>
-  <div class="demo-intro">
-    <p class="demo-kicker">Try it right here</p>
-    <h2 id="demo-title">Click around the real thing.</h2>
-    <p class="demo-deck">
-      This is Vector, running in the page. Move between the Agent Dashboard, Codespace, your project rules and the
-      browser from the rail on the left. On the dashboard, switch the board to a list, filter by status, team, pull
-      request or which agent ran it, and search. No download, no account — see whether you like it first.
-    </p>
-  </div>
-
-  <div class="demo-frame" data-demo>
-    <div class="demo-titlebar">
-      <span class="demo-lights" aria-hidden="true"><i></i><i></i><i></i></span>
-      <span class="demo-titlebar-name">Vector</span>
+<section class={bare ? "demo is-bare" : "demo"} aria-labelledby={bare ? undefined : "demo-title"} data-reveal={bare ? undefined : true}>
+  {!bare && (
+    <div class="demo-intro">
+      <p class="demo-kicker">Try it right here</p>
+      <h2 id="demo-title">Click around the real thing.</h2>
+      <p class="demo-deck">
+        This is Vector, running in the page. Move between the Agent Dashboard, Codespace, your project rules and the
+        browser from the rail on the left. On the dashboard, switch the board to a list, filter by status, team, pull
+        request or which agent ran it, and search. No download, no account — see whether you like it first.
+      </p>
     </div>
+  )}
+
+  <div class={bare ? "demo-frame is-bare" : "demo-frame"} data-demo>
+    {!bare && (
+      <div class="demo-titlebar">
+        <span class="demo-lights" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span class="demo-titlebar-name">Vector</span>
+      </div>
+    )}
 
     <div class="demo-body">
       <aside class="demo-rail" aria-label="Workspace">
@@ -217,7 +227,9 @@ const filters = [
                         <span class="demo-card-state">{session.state}</span>
                         <span class="demo-card-age">{session.age}</span>
                       </span>
-                      {session.pr === "open" ? <span class="demo-card-pr">PR is ready</span> : null}
+                      {session.pr === "open" && session.state !== "PR is ready" ? (
+                        <span class="demo-card-pr">PR is ready</span>
+                      ) : null}
                     </button>
                   ))}
                 </div>
@@ -337,10 +349,12 @@ export function allow(token: string) {
     </div>
   </div>
 
-  <p class="demo-foot">
-    Everything above runs locally in this page. In the app, these are real isolated workspaces you can open, review and
-    merge.
-  </p>
+  {!bare && (
+    <p class="demo-foot">
+      Everything above runs locally in this page. In the app, these are real isolated workspaces you can open, review
+      and merge.
+    </p>
+  )}
 </section>
 
 <script is:inline>
@@ -484,6 +498,20 @@ export function allow(token: string) {
     width: min(1080px, calc(100% - 40px));
     margin-inline: auto;
     padding: clamp(40px, 6vw, 72px) 0 clamp(16px, 3vw, 28px);
+  }
+
+  /* Inside the hero's own product window, which already supplies the frame,
+     the chrome and the shadow. */
+  .demo.is-bare {
+    width: 100%;
+    padding: 0;
+  }
+
+  .demo-frame.is-bare {
+    border: 0;
+    border-radius: 0 0 20px 20px;
+    background: transparent;
+    box-shadow: none;
   }
 
   .demo-intro {

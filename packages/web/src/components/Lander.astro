@@ -3,13 +3,7 @@ import { ArrowRight, BadgeCheck, Brain, CalendarClock, ChevronDown, Cloud, Cloud
 import MarketingFooter from "./marketing/MarketingFooter.astro"
 import MarketingNav from "./marketing/MarketingNav.astro"
 import ProductDemo from "./marketing/ProductDemo.astro"
-import screenshotAgent from "../assets/lander/vector-agent-current.png"
-import screenshotAgents from "../assets/lander/vector-agents-current.png"
-import screenshotScheduled from "../assets/lander/vector-scheduled-current.png"
-import screenshotMemory from "../assets/lander/vector-memory-current.png"
-import screenshotBrowser from "../assets/lander/vector-browser-current.png"
-import screenshotCloud from "../assets/lander/vector-cloud-current.png"
-import screenshotEditor from "../assets/lander/vector-editor-current.png"
+import FeatureDemo from "./marketing/FeatureDemo.astro"
 
 const pixelFont: Record<string, string[]> = {
   V: ["10001", "10001", "10001", "10001", "10001", "01010", "00100"],
@@ -115,8 +109,7 @@ const features = [
     body: "Vector opens a repository that is already on your computer into a real code editor — file tree, file search across the whole project, language diagnostics from the language server, a terminal, and an editor agent in a panel beside the file you are reading. Edits an agent makes while you watch are attributed in the editor to the agent that made them, so work landing in an open file is never anonymous. Canvas arranges the editor, the browser, the terminal, notes and the cloud controls onto one surface when you want them together. None of this is a hosted IDE: the files are the files on your disk, and your repository is never proxied through Vector.",
     tag: "Codespace and Canvas",
     note: "Your files, on your disk",
-    image: screenshotEditor,
-    alt: "Vector Codespace showing the file tree, search and diagnostics icons, an open file, and the editor agent panel",
+    demo: "editor",
     href: "/docs",
     link: "Explore the Codespace",
   },
@@ -125,8 +118,7 @@ const features = [
     body: "Vector keeps durable facts about how you work — your stack, your conventions, the corrections you would otherwise repeat — in one Markdown file inside your own config directory: MEMORY.md under ~/.config/vector, or wherever XDG_CONFIG_HOME points. It is read across every project and every repository, so something you say once in one codebase is still true in the next one. It is never uploaded. Settings shows the exact path, the file's size, the date it last changed, and the full text of what is stored. Erasing it deletes the file rather than blanking it, so nothing recoverable is left behind for someone who cleared memory precisely because they did not want it kept.",
     tag: "Local memory",
     note: "Never leaves your machine",
-    image: screenshotMemory,
-    alt: "Vector settings showing stored local memory with its size, file path, and an option to erase it",
+    demo: "memory",
     href: "/docs",
     link: "How local memory works",
   },
@@ -148,8 +140,7 @@ const features = [
     body: "The browser is a real Chromium view embedded in the Vector window, not a screenshot service. The agent opens the running product, clicks and types, reads console and network failures, captures what it saw, repairs the code, and loads the page again. It will not type into a password field, a one-time-code field, or a card number field — that is refused where the keystrokes are executed, not merely discouraged in a prompt — and the run hands you the live browser to finish that step yourself before carrying on from what it can see. You can take the browser back at any other moment too, and everything it observed stays attached to the session that asked for it.",
     tag: "Controlled browser",
     note: "Refuses credential fields",
-    image: screenshotBrowser,
-    alt: "Vector's controlled browser open beside an active engineering session in the same window",
+    demo: "browser",
     href: "/docs",
     link: "See the browser loop",
   },
@@ -171,8 +162,7 @@ const features = [
     body: "Deployments, domains, environment variables, databases, logs and build settings sit beside the project they belong to and run on accounts that already belong to you. Authorize Vercel, Netlify or Supabase once and Vector drives the deploy on your account, hands back the live URL, and can promote a release, roll one back, re-run its checks, or pull its runtime logs. An AWS profile already configured on this computer is read through the AWS CLI you installed. A custom domain is checked with a real DNS lookup, so “verified” means a CNAME actually resolves to the target rather than that a form was submitted. Your code is never proxied through Vector.",
     tag: "Cloud Services",
     note: "OAuth into your own account",
-    image: screenshotCloud,
-    alt: "Vector Cloud Services showing deployments, domains, environment, database, and build settings for a project",
+    demo: "cloud",
     href: "/docs",
     link: "Read about Cloud Services",
   },
@@ -220,8 +210,7 @@ const features = [
     body: "A single task can hold up to sixteen active agents. Each gets its own checkout: a Git worktree on its own branch cut from HEAD when the project is a Git repository with a clean working tree, and an isolated copy of the project otherwise — Vector records which one it used rather than failing quietly. Or put them in one shared checkout, where they see each other's edits as they happen and message a named teammate or the whole team; you choose who may reach whom, and a message to someone you have not linked is refused with a reason rather than dropped. The dashboard shows status, model, files touched, cost so far, elapsed time, and both agents whenever two are holding the same file.",
     tag: "Parallel agents",
     note: "Isolated by default",
-    image: screenshotAgents,
-    alt: "Vector Agent Dashboard listing running agents with model, files, spend and elapsed time, a flagged file clash, and messages between teammates",
+    demo: "agents",
     href: "/docs",
     link: "Learn about workspaces",
   },
@@ -230,8 +219,7 @@ const features = [
     body: "Put recurring work on a repeat — every day, weekdays only, one weekday a week, or once at a set time — and each run opens a real Vector session in that project's directory, sends your prompt, and leaves the finished transcript waiting. One task can name several repositories, each with a new session or a thread you already have, and each reports its own result so one failure does not condemn the rest. A recurring task re-arms itself the moment a run settles. This lives in the Vector desktop app: close the last window and it stays resident in the menu bar or tray while tasks are armed, and on a desktop that offers no tray it closes as it always did rather than leaving a process you cannot quit.",
     tag: "Automations",
     note: "Desktop only",
-    image: screenshotScheduled,
-    alt: "Vector's scheduled tasks panel listing recurring agent runs and when each one next fires",
+    demo: "automations",
     href: "#conditions",
     link: "See what scheduling needs",
   },
@@ -521,22 +509,18 @@ const changelog = [
           <p class="hero-note">Local-first. Free models included, or bring your own. Available for macOS, Windows, and Linux.</p>
         </div>
 
-        <div class="showcase" aria-label="Vector workspace screenshot">
+        <div class="showcase" aria-label="Vector, running in this page">
           <figure class="product-window">
             <div class="product-bar" aria-hidden="true">
               <span class="traffic"><i></i><i></i><i></i></span>
               <span class="product-title">Vector — Workspace</span>
               <span class="product-status"><i></i> Ready</span>
             </div>
-            <img
-              data-parallax
-              src={screenshotAgent.src}
-              width={screenshotAgent.width}
-              height={screenshotAgent.height}
-              alt="Vector open on a local repository, with the code editor, browser, Canvas, scheduled runs, MCP and plugins in the sidebar"
-              loading="eager"
-            />
+            <ProductDemo bare />
           </figure>
+          <p class="showcase-note">
+            That is the real app, not a picture of it — move around the rail, filter the board, open a file.
+          </p>
         </div>
       </div>
     </section>
@@ -569,8 +553,6 @@ const changelog = [
       </a>
     </section>
 
-    <ProductDemo />
-
     <div class="features">
       {features.map((feature) => (
         <section class="feature">
@@ -579,7 +561,11 @@ const changelog = [
             <h2>{feature.title}</h2>
             <p class="feature-body">{feature.body}</p>
           </div>
-          {feature.image ? (
+          {feature.demo ? (
+            <div class="feature-card feature-live reveal-zoom" data-reveal style="--rd: 90ms">
+              <FeatureDemo kind={feature.demo} tag={feature.tag} note={feature.note} />
+            </div>
+          ) : feature.image ? (
             <figure class="feature-card reveal-zoom" data-reveal style="--rd: 90ms">
               <div class="card-topline" aria-hidden="true">
                 <span>{feature.tag}</span>
@@ -1785,6 +1771,13 @@ const changelog = [
     width: min(1150px, calc(100% - 32px));
     margin-inline: auto;
     padding-top: clamp(56px, 7vw, 88px);
+  }
+
+  .showcase-note {
+    margin: 12px 0 0;
+    text-align: center;
+    font-size: 12.5px;
+    color: var(--ink-40);
   }
 
   .product-window {
