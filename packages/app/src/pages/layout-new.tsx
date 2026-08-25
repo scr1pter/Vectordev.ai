@@ -62,6 +62,7 @@ import { ParallelDiffReview } from "@/components/parallel-diff-review"
 import { WorkspaceNavigation, type WorkspaceNavigationItem } from "@/components/workspace-navigation"
 import { CanvasWorkspace } from "@/features/canvas/canvas"
 import { ExternalAgentTranscript, type ExternalAgentTurn } from "@/features/agents/external-agent-transcript"
+import { WorkInbox, type WorkItem } from "@/features/work/work-inbox"
 import { useUpdaterAction } from "@/components/updater-action"
 import { VelCall } from "@/features/vel/vel-call"
 import { VEL_OPEN_EVENT } from "@/features/vel/vel-message"
@@ -497,6 +498,7 @@ export default function NewLayout(props: ParentProps) {
   const [reportBugOpen, setReportBugOpen] = createSignal(false)
   const [helpPanelOpen, setHelpPanelOpen] = createSignal(false)
   const [agentDashboardOpen, setAgentDashboardOpen] = createSignal(false)
+  const [workInboxOpen, setWorkInboxOpen] = createSignal(false)
   const [teamConversations, setTeamConversations] = createSignal<TeamConversation[]>([])
   const settings = useSettings()
   const [parallelTopology, setParallelTopology] = createSignal<TeamTopology>("isolated")
@@ -2063,6 +2065,39 @@ export default function NewLayout(props: ParentProps) {
     if (!record) return
     setParallelRecords((records) => records.map((item) => (item.id === id ? record : item)))
     logParallelTimeline("Isolated agent prepared", "running", record.lastAction, record.changedFiles)
+    void loadBackgroundTasks()
+  }
+
+  // A ticket handed to an agent becomes an ordinary isolated workspace, so it
+  // lands on the same board, under the same review and merge flow, as work
+  // started any other way. The brief is composed in the main process from the
+  // ticket's own description and comments.
+  const startAgentForWorkItem = async (item: WorkItem) => {
+    const api = parallelApi()
+    const sourcePath = activeProjectPath()
+    if (!api || !sourcePath) {
+      reportDesktopOnlyParallel()
+      return
+    }
+    const record = await api
+      .create({
+        sourcePath,
+        name: `${item.key} · ${item.title.slice(0, 48)}`,
+        taskPrompt: item.brief,
+        runtime: "vector",
+        provider: parallelProvider(),
+        model: parallelModel(),
+        llmJudge: settings.general.llmJudge(),
+      })
+      .catch((error: unknown) => {
+        setParallelError(error instanceof Error ? error.message : String(error))
+        return undefined
+      })
+    if (!record) return
+    setParallelRecords((records) => [record, ...records])
+    await parallelApi()?.run?.(record.id, 16).catch(() => undefined)
+    setWorkInboxOpen(false)
+    setAgentDashboardOpen(true)
     void loadBackgroundTasks()
   }
 
@@ -5811,6 +5846,7 @@ export default function NewLayout(props: ParentProps) {
         onMoveWorkspace={moveAgentWorkspace}
         onCodeEditor={openCodespace}
         onProjectRules={openProjectRules}
+        onWork={() => setWorkInboxOpen(true)}
         onAgentDashboard={() => {
           setAgentDashboardOpen(true)
           void refreshTeamConversations()
@@ -5856,6 +5892,13 @@ export default function NewLayout(props: ParentProps) {
           })
           return extractVelReply(outcome.data)
         }}
+      />
+
+      <WorkInbox
+        open={workInboxOpen()}
+        sourcePath={activeProjectPath() ?? ""}
+        onClose={() => setWorkInboxOpen(false)}
+        onStartAgent={startAgentForWorkItem}
       />
 
       <AgentDashboard

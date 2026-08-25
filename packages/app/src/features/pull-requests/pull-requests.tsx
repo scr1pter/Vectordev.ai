@@ -5,7 +5,9 @@ type CliStatus = {
   installed: boolean
   authenticated: boolean
   login?: string
-  installCommand: string
+  installCommand?: string
+  installUrl: string
+  installDetail: string
   authCommand: string
   detail: string
 }
@@ -274,7 +276,23 @@ export function PullRequests(props: { open: boolean; projectPath?: string; onClo
                 Vector drives your own <span class="font-mono">gh</span> installation, so it uses your existing GitHub
                 sign-in and respects your organization's policies. No extra token needed.
               </p>
-              <CopyableCommand command={status()!.installCommand} />
+              <Show
+                when={status()!.installCommand}
+                fallback={
+                  <a
+                    class="flex items-center justify-between gap-3 rounded-[6px] border border-[color:var(--vx-line)] bg-black/25 px-3 py-2.5 text-[12.5px] text-white/80 transition hover:border-[color:var(--vx-purple)]"
+                    href={status()!.installUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <span>Download the GitHub CLI</span>
+                    <span class="shrink-0 text-[11.5px] text-white/40">{status()!.installUrl}</span>
+                  </a>
+                }
+              >
+                <CopyableCommand command={status()!.installCommand!} />
+              </Show>
+              <p class="mt-2 text-[11.5px] leading-relaxed text-white/45">{status()!.installDetail}</p>
               <p class="mb-2 mt-3 text-[12px] text-white/50">Then sign in:</p>
               <CopyableCommand command={status()!.authCommand} />
               <button

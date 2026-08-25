@@ -1,6 +1,20 @@
 {
   "releases": [
     {
+      "tag": "v1.19.94",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Where the work comes from",
+              "description": "Work is the new surface in the rail, and it is the piece that turns Vector from a coding tool into somewhere the job actually starts. It reads the tickets assigned to you — GitHub issues through your own gh sign-in with nothing to connect, plus Linear and Jira once you paste a token — and groups them the way you already think about them: in progress, in review, to do, done. Each tracker's own vocabulary is normalised on the way in, so Backlog and Icebox and To Do all land in one column and a board built from three systems still reads as one list. Pressing Start an agent hands the ticket over whole. Not the title retyped into a prompt — the description, the labels, the link, and the comments underneath, which is where the actual requirement usually hides. The agent is told to read the repository before changing anything and to say so plainly if the ticket is ambiguous or the code contradicts it, rather than guessing. What comes back is an ordinary isolated workspace on the same board, under the same review and merge flow as work started any other way. Every tracker is read independently, so one expired Jira token reports itself and leaves the rest of the board standing instead of quietly emptying it. Also fixed: the install command on the Pull Requests screen. Vector handed out one command per platform — brew install gh on a Mac, sudo apt install gh on Linux — and both fail often enough to matter. A Mac without Homebrew answers command not found, and gh is not in Debian's or Ubuntu's default repositories at all. Vector now looks for what is actually installed and only ever prints a command that can run; when nothing on the machine can install it in one step, it offers the download instead of a line that was always going to fail."
+            }
+          ]
+        }
+      ]
+    },
+    {
       "tag": "v1.19.93",
       "highlights": [
         {

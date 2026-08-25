@@ -1,6 +1,8 @@
 import { execFile } from "node:child_process"
 import { platform } from "node:os"
 import { untrustedChildEnvironment } from "@opencode-ai/core/child-environment"
+import { agentEnvironment, resolveAgentPath } from "./external-agents"
+import { GH_PACKAGE_MANAGERS, ghInstallHint, type GhPackageManager } from "./gh-install"
 
 // Pull request management through the user's own GitHub CLI. gh already holds
 // their credentials and honours their SSO and org policies, so Vector drives it
@@ -28,23 +30,47 @@ function gh(args: string[], opts: { cwd?: string; timeoutMs?: number } = {}) {
   })
 }
 
+// Kept for ci-watch's one-line hint. The real answer comes from
+// resolveGhInstall below, which only ever names a manager this machine has.
 export const GH_INSTALL_COMMAND: Record<string, string> = {
   darwin: "brew install gh",
-  win32: "winget install --id GitHub.cli",
-  linux: "sudo apt install gh",
+  win32: "winget install --id GitHub.cli -e",
+  linux: "sudo snap install gh",
+}
+
+// Looked up through the login-shell PATH for the same reason external agents
+// are: a Finder-launched app inherits none of the user's shell setup, so
+// Homebrew at /opt/homebrew/bin is invisible without it.
+async function availablePackageManagers() {
+  const environment = agentEnvironment()
+  const found = await Promise.all(
+    GH_PACKAGE_MANAGERS.map(async (manager) => [manager, Boolean(await resolveAgentPath(manager, environment))] as const),
+  )
+  return Object.fromEntries(found) as Partial<Record<GhPackageManager, boolean>>
+}
+
+export async function resolveGhInstall() {
+  return ghInstallHint(platform(), await availablePackageManagers())
 }
 
 export type PullRequestCliStatus = {
   installed: boolean
   authenticated: boolean
   login?: string
-  installCommand: string
+  // Absent when nothing on this machine can install gh in one command; the URL
+  // is always present so the panel can still offer a way forward.
+  installCommand?: string
+  installUrl: string
+  installDetail: string
   authCommand: string
   detail: string
 }
 
 export async function pullRequestCliStatus(): Promise<PullRequestCliStatus> {
-  const installCommand = GH_INSTALL_COMMAND[platform()] ?? "See https://cli.github.com"
+  const install = await resolveGhInstall()
+  const installCommand = install.command
+  const installUrl = install.url
+  const installDetail = install.detail
   const authCommand = "gh auth login"
   const version = await gh(["--version"], { timeoutMs: 10_000 })
   if (version.failed) {
@@ -52,6 +78,8 @@ export async function pullRequestCliStatus(): Promise<PullRequestCliStatus> {
       installed: false,
       authenticated: false,
       installCommand,
+      installUrl,
+      installDetail,
       authCommand,
       detail: "Install the GitHub CLI to create, review, and merge pull requests from Vector.",
     }
@@ -65,6 +93,8 @@ export async function pullRequestCliStatus(): Promise<PullRequestCliStatus> {
     authenticated: !status.failed && Boolean(login),
     login,
     installCommand,
+    installUrl,
+    installDetail,
     authCommand,
     detail: status.failed || !login ? "Sign in to GitHub to load pull requests." : `Signed in as ${login}.`,
   }
