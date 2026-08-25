@@ -32,6 +32,14 @@ const canonical = new URL(Astro.url.pathname, Astro.site ?? "https://vectordev.a
     <meta name="twitter:description" content={description} />
     <meta name="twitter:image" content="https://vectordev.ai/vector-logo.png" />
     <title>{title}</title>
+    <script is:inline>
+      // Applied before paint so a light-mode visitor never sees a dark flash.
+      try {
+        const saved = localStorage.getItem("vector-site-theme")
+        const wants = saved ?? (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark")
+        if (wants === "light") document.documentElement.dataset.siteTheme = "light"
+      } catch {}
+    </script>
   </head>
   <body>
     <slot />
@@ -41,6 +49,7 @@ const canonical = new URL(Astro.url.pathname, Astro.site ?? "https://vectordev.a
 <style is:global>
   :root {
     color-scheme: dark;
+    --shade: 255, 255, 255;
     --page: #08060d;
     --surface: rgba(30, 23, 46, 0.58);
     --surface-soft: rgba(42, 31, 64, 0.68);
@@ -65,6 +74,41 @@ const canonical = new URL(Astro.url.pathname, Astro.site ?? "https://vectordev.a
     --glass-shadow-soft: 0 14px 46px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.13), inset 1px 0 0 rgba(255, 255, 255, 0.035), inset 0 -1px 0 rgba(255, 255, 255, 0.03);
     --glass-radius: 26px;
     --glass-radius-small: 18px;
+  }
+
+  /* Light mode covers the marketing chrome only. The embedded product demos
+     keep the app's own dark tokens on purpose — Vector ships dark, and a
+     replica that changed colour with the website would stop being a replica. */
+  :root[data-site-theme="light"] {
+    color-scheme: light;
+    --shade: 24, 20, 34;
+    --page: #f6f5f9;
+    --surface: rgba(255, 255, 255, 0.86);
+    --surface-soft: rgba(255, 255, 255, 0.95);
+    --ink: #17141f;
+    --muted: #5f5a6b;
+    --muted-strong: #3c3748;
+    --line: rgba(32, 24, 52, 0.12);
+    --line-strong: rgba(32, 24, 52, 0.2);
+    --accent: #6f42d8;
+    --accent-soft: rgba(111, 66, 216, 0.1);
+    --accent-strong: #5a31c0;
+    --glass: rgba(255, 255, 255, 0.72);
+    --glass-strong: rgba(255, 255, 255, 0.88);
+    --glass-soft: rgba(32, 24, 52, 0.04);
+    --glass-line: rgba(32, 24, 52, 0.12);
+    --glass-line-strong: rgba(32, 24, 52, 0.2);
+    --glass-highlight: rgba(255, 255, 255, 0.9);
+    --glass-fill: linear-gradient(145deg, rgba(255, 255, 255, 0.92), rgba(238, 233, 252, 0.8) 46%, rgba(255, 255, 255, 0.86) 78%);
+    --glass-fill-strong: linear-gradient(145deg, #ffffff, rgba(240, 236, 253, 0.9) 46%, #ffffff 80%);
+    --glass-shadow: 0 24px 60px rgba(38, 26, 74, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+    --glass-shadow-soft: 0 12px 34px rgba(38, 26, 74, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+    /* Backgrounds the page paints for itself, rather than inherits. */
+    --ground: rgba(246, 245, 249, 0.86);
+    --slab: linear-gradient(145deg, #ffffff, rgba(243, 240, 253, 0.92));
+    --grid-ink: 90, 70, 150;
+    --mark: #2a2140;
+    --mark-accent: #6f42d8;
   }
 
   * {
@@ -99,8 +143,8 @@ const canonical = new URL(Astro.url.pathname, Astro.site ?? "https://vectordev.a
     z-index: 0;
     pointer-events: none;
     background-image:
-      linear-gradient(rgba(194, 166, 255, 0.026) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(194, 166, 255, 0.026) 1px, transparent 1px);
+      linear-gradient(rgba(var(--grid-ink, 194, 166, 255), 0.026) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(var(--grid-ink, 194, 166, 255), 0.026) 1px, transparent 1px);
     background-size: 54px 54px;
   }
 

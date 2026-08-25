@@ -136,11 +136,7 @@ const features = [
     body: "Vector records what a run cost by reading the numbers the provider itself reported on the assistant messages — input, output, reasoning, cache reads and cache writes — along with the provider's own cost figure. Nothing is estimated from character counts. A run whose provider reported no usage is recorded as unmeasured rather than as zero, because a fabricated zero reads as free. Finished work builds a ledger of outcomes per kind of task, and once a model has at least three recorded runs in a category Vector can suggest it in the composer, ranked by check pass rate first, measured cost second, median latency third. Below three it suggests nothing at all: the cold start is silent rather than confident.",
     tag: "Model economics",
     note: "Measured, or marked unmeasured",
-    proof: [
-      ["What is counted", "Input, output, reasoning, cache read and cache write — as the provider reported them, plus its own cost figure."],
-      ["What is never counted", "Nothing is inferred from character counts, and a run with no reported usage is stored as unmeasured, not as zero."],
-      ["When a recommendation appears", "After three recorded runs of that kind of task. An unmeasured model never sorts ahead of one that reported a real cost."],
-    ],
+    demo: "cost",
     href: "/docs",
     link: "Read how spend is measured",
   },
@@ -158,11 +154,7 @@ const features = [
     body: "Turn on LLM-as-a-judge and finishing stops being the agent's own opinion. Before it starts, it writes down the observable success criteria your request implies. After implementing, it has to exercise the work rather than describe it — run the tests, typechecks, build, browser or CLI checks — and capture what they actually printed. It then hands the original request, those criteria, the changed files and that evidence to a separate judge subagent, which returns PASS, FAIL, or INCONCLUSIVE. A FAIL has to name each blocking finding with its evidence and the specific repair; the agent applies them and is judged again, up to three rounds, then reports what is still blocking. It is off until you turn it on, it costs extra model calls, and it does not apply to the plan or quick lanes.",
     tag: "Verified completion",
     note: "Opt-in · extra model calls",
-    proof: [
-      ["Criteria before code", "The observable success criteria are written down before the work starts, not reverse-engineered from whatever was built."],
-      ["Evidence, then a verdict", "Tests, typechecks, builds and browser or CLI checks are run and their real output is handed to a separate judge subagent."],
-      ["FAIL sends it back", "A failed verdict names the blocking finding and the specific repair. Three rounds maximum, then the blocker is reported plainly."],
-    ],
+    demo: "terminal",
     href: "/docs",
     link: "Turn on verified completion",
   },
@@ -222,6 +214,15 @@ const features = [
     ],
     href: "/docs",
     link: "See the dashboard",
+  },
+  {
+    title: "Nothing lands until you say it lands.",
+    body: "An agent works in its own git worktree or its own copy of the project, so while it is running your files are untouched. What comes back is a diff you review — and you merge it the way you would review a colleague's branch: hunk by hunk, keeping the parts that are right and leaving the rest behind. Vector writes a checkpoint before it touches your working tree, refuses the merge outright when a deterministic check is still failing, and tells you which files two agents are both holding so you never discover the conflict by merging into it. The agent proposes. You are still the one who decides what your project becomes.",
+    tag: "Review and merge",
+    note: "Hunk by hunk",
+    demo: "diff",
+    href: "/docs",
+    link: "How review works",
   },
   {
     title: "And when one agent is not enough, run sixteen.",
@@ -1388,7 +1389,7 @@ const changelog = [
 
 <style>
   .vector-marketing {
-    --paper: #08060d;
+    --paper: var(--page, #08060d);
     --card: var(--glass-fill);
     --purple: #8f52ff;
     --purple-bright: #a77cff;
@@ -1400,17 +1401,17 @@ const changelog = [
        rather than as a layout. */
     --page: min(1240px, calc(100% - 56px));
     --page-wide: min(1440px, calc(100% - 40px));
-    --ink-70: rgba(255, 255, 255, 0.7);
-    --ink-55: rgba(255, 255, 255, 0.55);
-    --ink-40: rgba(255, 255, 255, 0.4);
+    --ink-70: rgba(var(--shade, 255, 255, 255), 0.7);
+    --ink-55: rgba(var(--shade, 255, 255, 255), 0.55);
+    --ink-40: rgba(var(--shade, 255, 255, 255), 0.4);
     position: relative;
     isolation: isolate;
     min-height: 100vh;
     overflow: clip;
-    color: #fff;
+    color: var(--ink);
     background:
       linear-gradient(118deg, rgba(143, 82, 255, 0.065), transparent 27%, transparent 72%, rgba(95, 49, 185, 0.055)),
-      rgba(8, 6, 13, 0.5);
+      var(--ground, rgba(8, 6, 13, 0.5));
     font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   }
 
@@ -1698,12 +1699,12 @@ const changelog = [
     position: absolute;
     inset: 0;
     background-image:
-      radial-gradient(1.5px 1.5px at 12% 22%, rgba(255, 255, 255, 0.5), transparent 100%),
-      radial-gradient(1px 1px at 34% 64%, rgba(255, 255, 255, 0.35), transparent 100%),
+      radial-gradient(1.5px 1.5px at 12% 22%, rgba(var(--shade, 255, 255, 255), 0.5), transparent 100%),
+      radial-gradient(1px 1px at 34% 64%, rgba(var(--shade, 255, 255, 255), 0.35), transparent 100%),
       radial-gradient(1.5px 1.5px at 58% 18%, rgba(220, 200, 255, 0.4), transparent 100%),
-      radial-gradient(1px 1px at 76% 48%, rgba(255, 255, 255, 0.3), transparent 100%),
+      radial-gradient(1px 1px at 76% 48%, rgba(var(--shade, 255, 255, 255), 0.3), transparent 100%),
       radial-gradient(1.5px 1.5px at 88% 76%, rgba(220, 200, 255, 0.35), transparent 100%),
-      radial-gradient(1px 1px at 22% 86%, rgba(255, 255, 255, 0.3), transparent 100%);
+      radial-gradient(1px 1px at 22% 86%, rgba(var(--shade, 255, 255, 255), 0.3), transparent 100%);
     animation: sky-twinkle 7s ease-in-out infinite alternate;
   }
 
@@ -1739,8 +1740,13 @@ const changelog = [
 
   .wordmark {
     margin: 0 0 34px;
-    color: var(--lavender);
+    /* --lavender is a glow colour, which has nothing to glow against on paper. */
+    color: var(--mark, var(--lavender));
     filter: drop-shadow(0 0 24px rgba(143, 82, 255, 0.28));
+  }
+
+  :root[data-site-theme="light"] .wordmark {
+    filter: none;
   }
 
   .wordmark svg {
@@ -1752,7 +1758,7 @@ const changelog = [
   .headline {
     margin: 0;
     min-height: 2.3em;
-    color: #fff;
+    color: var(--ink);
     font-size: clamp(28px, 4.5vw, 37px);
     font-weight: 600;
     line-height: 1.12;
@@ -1764,7 +1770,7 @@ const changelog = [
   }
 
   .headline-rotate {
-    color: var(--purple-soft);
+    color: var(--mark-accent, var(--purple-soft));
     text-shadow: 0 0 32px rgba(143, 82, 255, 0.24);
     font-variant-ligatures: none;
   }
@@ -1787,13 +1793,13 @@ const changelog = [
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 6px;
     overflow: hidden;
-    background: linear-gradient(145deg, rgba(32, 23, 49, 0.78), rgba(11, 8, 17, 0.74));
+    background: var(--slab, linear-gradient(145deg, rgba(32, 23, 49, 0.78), rgba(11, 8, 17, 0.74)));
     border: 1px solid rgba(201, 176, 255, 0.2);
     border-radius: 20px;
     box-shadow:
       0 22px 70px rgba(0, 0, 0, 0.34),
       0 0 42px rgba(143, 82, 255, 0.08),
-      inset 0 1px 0 rgba(255, 255, 255, 0.1);
+      inset 0 1px 0 rgba(var(--shade, 255, 255, 255), 0.1);
     backdrop-filter: blur(24px) saturate(145%);
     -webkit-backdrop-filter: blur(24px) saturate(145%);
   }
@@ -1837,7 +1843,7 @@ const changelog = [
   }
 
   .hero-loop-stage.is-active {
-    color: #fff;
+    color: var(--ink);
     background: rgba(143, 82, 255, 0.12);
     border-color: rgba(201, 176, 255, 0.2);
     transform: translateY(-1px);
@@ -1850,8 +1856,8 @@ const changelog = [
     display: grid;
     place-items: center;
     color: var(--ink-40);
-    background: rgba(255, 255, 255, 0.045);
-    border: 1px solid rgba(255, 255, 255, 0.07);
+    background: rgba(var(--shade, 255, 255, 255), 0.045);
+    border: 1px solid rgba(var(--shade, 255, 255, 255), 0.07);
     border-radius: 9px;
     transition: color 240ms ease, background 240ms ease, box-shadow 240ms ease;
   }
@@ -1893,9 +1899,9 @@ const changelog = [
     gap: 16px;
     color: #120d17 !important;
     background: linear-gradient(180deg, rgba(245, 240, 255, 0.98), rgba(207, 184, 255, 0.94));
-    border: 1px solid rgba(255, 255, 255, 0.62);
+    border: 1px solid rgba(var(--shade, 255, 255, 255), 0.62);
     border-radius: 18px;
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82), 0 16px 45px rgba(79, 51, 137, 0.2);
+    box-shadow: inset 0 1px 0 rgba(var(--shade, 255, 255, 255), 0.82), 0 16px 45px rgba(79, 51, 137, 0.2);
     backdrop-filter: blur(20px) saturate(150%);
     -webkit-backdrop-filter: blur(20px) saturate(150%);
     font-size: 15px;
@@ -1906,7 +1912,7 @@ const changelog = [
 
   .hero-cta:hover {
     background: linear-gradient(180deg, #f7f2ff, #c9b0ff);
-    border-color: rgba(255, 255, 255, 0.74);
+    border-color: rgba(var(--shade, 255, 255, 255), 0.74);
     transform: translateY(-1px);
     box-shadow: 0 12px 44px rgba(146, 116, 236, 0.32);
   }
@@ -1974,7 +1980,7 @@ const changelog = [
 
   .licensing-card h3 {
     margin: 0;
-    color: #fff;
+    color: var(--ink);
     font-size: clamp(18px, 2.1vw, 21px);
     font-weight: 600;
     letter-spacing: -0.015em;
@@ -1995,7 +2001,7 @@ const changelog = [
   }
 
   .licensing-card dt {
-    color: #fff;
+    color: var(--ink);
     font-size: 13px;
     font-weight: 600;
   }
@@ -2031,7 +2037,7 @@ const changelog = [
 
   .proof-shot-copy h2 {
     margin: 0 0 12px;
-    color: #fff;
+    color: var(--ink);
     font-size: clamp(21px, 2.5vw, 27px);
     font-weight: 600;
     letter-spacing: -0.018em;
@@ -2084,7 +2090,7 @@ const changelog = [
 
   .tally strong {
     display: block;
-    color: #fff;
+    color: var(--ink);
     font-size: clamp(30px, 4.4vw, 46px);
     font-weight: 600;
     letter-spacing: -0.03em;
@@ -2110,7 +2116,7 @@ const changelog = [
   .pullquote blockquote {
     max-width: 20ch;
     margin: 0 auto;
-    color: #fff;
+    color: var(--ink);
     font-size: clamp(28px, 5.2vw, 58px);
     font-weight: 600;
     letter-spacing: -0.03em;
@@ -2178,7 +2184,7 @@ const changelog = [
     box-shadow:
       0 40px 120px rgba(0, 0, 0, 0.66),
       0 0 80px rgba(132, 86, 219, 0.12),
-      inset 0 1px 0 rgba(255, 255, 255, 0.13);
+      inset 0 1px 0 rgba(var(--shade, 255, 255, 255), 0.13);
     backdrop-filter: blur(28px) saturate(145%);
     -webkit-backdrop-filter: blur(28px) saturate(145%);
   }
@@ -2191,7 +2197,7 @@ const changelog = [
     justify-content: space-between;
     gap: 16px;
     color: var(--ink-40);
-    background: rgba(255, 255, 255, 0.045);
+    background: rgba(var(--shade, 255, 255, 255), 0.045);
     border-bottom: 1px solid rgba(190, 166, 255, 0.1);
     border-radius: 20px 20px 0 0;
     font-size: 11.5px;
@@ -2321,7 +2327,7 @@ const changelog = [
   .section-heading h2,
   .runtime-intro h2 {
     margin: 0;
-    color: #fff;
+    color: var(--ink);
     font-size: clamp(30px, 4.4vw, 50px);
     font-weight: 590;
     line-height: 1.06;
@@ -2511,7 +2517,7 @@ const changelog = [
 
   .feature h2 {
     margin: 0;
-    color: #fff;
+    color: var(--ink);
     font-size: clamp(20px, 2.6vw, 24px);
     font-weight: 600;
     letter-spacing: -0.015em;
@@ -2551,7 +2557,7 @@ const changelog = [
     justify-content: space-between;
     gap: 14px;
     color: var(--ink-40);
-    background: rgba(255, 255, 255, 0.04);
+    background: rgba(var(--shade, 255, 255, 255), 0.04);
     border-bottom: 1px solid rgba(190, 166, 255, 0.1);
     border-radius: 18px 18px 0 0;
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -2608,10 +2614,10 @@ const changelog = [
     min-height: 38px;
     padding: 0 14px;
     color: #fff !important;
-    background: rgba(255, 255, 255, 0.055);
+    background: rgba(var(--shade, 255, 255, 255), 0.055);
     border: 1px solid var(--glass-line);
     border-radius: 999px;
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    box-shadow: inset 0 1px 0 rgba(var(--shade, 255, 255, 255), 0.08);
     backdrop-filter: blur(18px);
     -webkit-backdrop-filter: blur(18px);
     font-size: 14px;
@@ -2639,7 +2645,7 @@ const changelog = [
     margin: clamp(24px, 3vw, 34px) 0 0;
     padding: 20px 22px;
     color: var(--ink-55);
-    background: rgba(255, 255, 255, 0.03);
+    background: rgba(var(--shade, 255, 255, 255), 0.03);
     border: 1px solid var(--glass-line);
     border-radius: 18px;
     font-size: 13px;
@@ -2653,7 +2659,7 @@ const changelog = [
 
   .automation-note code {
     padding: 1px 6px;
-    background: rgba(255, 255, 255, 0.05);
+    background: rgba(var(--shade, 255, 255, 255), 0.05);
     border: 1px solid rgba(227, 215, 255, 0.16);
     border-radius: 6px;
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
@@ -2739,7 +2745,7 @@ const changelog = [
   .connection-grid article {
     min-height: 126px;
     padding: 23px;
-    background: rgba(255, 255, 255, 0.025);
+    background: rgba(var(--shade, 255, 255, 255), 0.025);
     border-right: 1px solid rgba(227, 215, 255, 0.14);
     border-bottom: 1px solid rgba(227, 215, 255, 0.14);
   }
@@ -2887,7 +2893,7 @@ const changelog = [
 
   .changelog h2 {
     margin: 0 0 34px;
-    color: #fff;
+    color: var(--ink);
     font-size: 24px;
     font-weight: 600;
     letter-spacing: -0.015em;
@@ -2897,7 +2903,7 @@ const changelog = [
     margin: 0;
     padding: 0;
     list-style: none;
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    border-top: 1px solid rgba(var(--shade, 255, 255, 255), 0.08);
   }
 
   .changelog li {
@@ -2905,7 +2911,7 @@ const changelog = [
     display: grid;
     grid-template-columns: 118px 1fr;
     gap: 18px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    border-bottom: 1px solid rgba(var(--shade, 255, 255, 255), 0.08);
   }
 
   .changelog-date {
@@ -2917,7 +2923,7 @@ const changelog = [
 
   .changelog strong {
     display: block;
-    color: #fff;
+    color: var(--ink);
     font-size: 15px;
     font-weight: 600;
   }
@@ -2937,7 +2943,7 @@ const changelog = [
     min-height: 38px;
     padding: 0 14px;
     color: #fff !important;
-    background: rgba(255, 255, 255, 0.055);
+    background: rgba(var(--shade, 255, 255, 255), 0.055);
     border: 1px solid var(--glass-line);
     border-radius: 999px;
     font-size: 14px;
@@ -3085,10 +3091,10 @@ const changelog = [
     gap: 12px;
     color: #120d17 !important;
     background: linear-gradient(180deg, rgba(245, 240, 255, 0.98), rgba(207, 184, 255, 0.94));
-    border: 1px solid rgba(255, 255, 255, 0.62);
+    border: 1px solid rgba(var(--shade, 255, 255, 255), 0.62);
     border-radius: 999px;
     box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.82),
+      inset 0 1px 0 rgba(var(--shade, 255, 255, 255), 0.82),
       0 16px 45px rgba(79, 51, 137, 0.2),
       0 0 60px rgba(143, 82, 255, 0.22);
     font-size: 16px;
@@ -3099,7 +3105,7 @@ const changelog = [
 
   .closing-cta:hover {
     background: linear-gradient(180deg, #f7f2ff, #c9b0ff);
-    border-color: rgba(255, 255, 255, 0.74);
+    border-color: rgba(var(--shade, 255, 255, 255), 0.74);
     transform: translateY(-1px);
     box-shadow: 0 12px 44px rgba(146, 116, 236, 0.32);
   }

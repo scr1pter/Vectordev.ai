@@ -5,7 +5,7 @@
 // JavaScript to read and the component's scoped styles always apply.
 
 interface Props {
-  kind: "editor" | "memory" | "browser" | "cloud" | "agents" | "automations" | "work"
+  kind: "editor" | "memory" | "browser" | "cloud" | "agents" | "automations" | "work" | "cost" | "terminal" | "diff"
   tag: string
   note: string
 }
@@ -106,6 +106,61 @@ const workSteps = [
   { text: "Posted the diff summary to #eng-releases", ok: true },
 ]
 
+// Every figure here is a plausible shape for a real run, and the demo says so:
+// the point of the meter is that Vector reports the provider's number, so the
+// page must not imply these particular numbers came from anywhere.
+const costRows = [
+  { label: "Input", tokens: 48210, rate: 0.000003 },
+  { label: "Cached input", tokens: 121400, rate: 0.0000003 },
+  { label: "Output", tokens: 6120, rate: 0.000015 },
+  { label: "Reasoning", tokens: 2840, rate: 0.000015 },
+]
+
+const terminalLines = [
+  { text: "$ bun test middleware", kind: "cmd" },
+  { text: "bun test v1.3.14", kind: "out" },
+  { text: "middleware/limit.test.ts:", kind: "out" },
+  { text: "  ✓ allows the first 100 calls in a window", kind: "ok" },
+  { text: "  ✓ keys on the token, not the address", kind: "ok" },
+  { text: "  ✗ resets the window on the boundary", kind: "bad" },
+  { text: "1 fail, 2 pass", kind: "bad" },
+  { text: "$ vector repair --last", kind: "cmd" },
+  { text: "Reading the failing assertion, then limit.ts:24", kind: "out" },
+  { text: "  edited middleware/limit.ts  +3 −1", kind: "out" },
+  { text: "$ bun test middleware", kind: "cmd" },
+  { text: "3 pass, 0 fail", kind: "ok" },
+]
+
+const diffHunks = [
+  {
+    id: "h1",
+    file: "middleware/limit.ts",
+    lines: [
+      { text: "const WINDOW_MS = 60_000", kind: "ctx" },
+      { text: "-const MAX = 60", kind: "del" },
+      { text: "+const MAX = 100", kind: "add" },
+    ],
+  },
+  {
+    id: "h2",
+    file: "middleware/limit.ts",
+    lines: [
+      { text: "export function allow(token: string) {", kind: "ctx" },
+      { text: "-  const hits = seen.get(ip) ?? []", kind: "del" },
+      { text: "+  // Keyed on the token: one office NAT is not one caller.", kind: "add" },
+      { text: "+  const hits = seen.get(token) ?? []", kind: "add" },
+    ],
+  },
+  {
+    id: "h3",
+    file: "middleware/limit.ts",
+    lines: [
+      { text: "  seen.set(token, [...live, now])", kind: "ctx" },
+      { text: "+  metrics.increment(\"ratelimit.allow\")", kind: "add" },
+    ],
+  },
+]
+
 const automations = [
   { id: "r1", name: "Morning repo brief", schedule: "Every weekday at 8:00", next: "Tomorrow, 8:00" },
   { id: "r2", name: "Upgrade minor dependencies", schedule: "Every Monday", next: "Mon, 9:00" },
@@ -113,7 +168,7 @@ const automations = [
 ]
 ---
 
-<div class="fd" data-fd={kind}>
+<div class="fd" data-fd={kind} data-term-lines={kind === "terminal" ? JSON.stringify(terminalLines) : undefined}>
   <div class="fd-top" aria-hidden="true">
     <span>{tag}</span>
     <span>{note}</span>
@@ -252,6 +307,67 @@ const automations = [
       </div>
     )}
 
+    {kind === "cost" && (
+      <div class="fd-cost">
+        <table class="fd-cost-table">
+          <tbody>
+            {costRows.map((row) => (
+              <tr>
+                <th>{row.label}</th>
+                <td class="fd-cost-tokens" data-cost-tokens={row.tokens}>0</td>
+                <td class="fd-cost-cash" data-cost-cash={(row.tokens * row.rate).toFixed(4)}>$0.0000</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div class="fd-cost-total">
+          <span>Reported by the provider</span>
+          <strong data-cost-total={costRows.reduce((sum, row) => sum + row.tokens * row.rate, 0).toFixed(4)}>
+            $0.0000
+          </strong>
+        </div>
+        <button type="button" class="fd-run" data-cost-run>Meter a run</button>
+        <p class="fd-hint">
+          Illustrative figures. In the app every number here comes from what the provider itself reported — a run that
+          reported nothing is stored as unmeasured, never as zero.
+        </p>
+      </div>
+    )}
+
+    {kind === "terminal" && (
+      <div class="fd-term">
+        <pre class="fd-term-screen" data-term-screen></pre>
+        <button type="button" class="fd-run" data-term-run>Run the checks</button>
+        <p class="fd-hint">
+          A failed check is handed back with its real output. Vector repairs, reruns, and only then calls it done.
+        </p>
+      </div>
+    )}
+
+    {kind === "diff" && (
+      <div class="fd-diff">
+        {diffHunks.map((hunk) => (
+          <div class="fd-hunk" data-hunk={hunk.id}>
+            <div class="fd-hunk-head">
+              <span class="fd-hunk-file">{hunk.file}</span>
+              <span class="fd-hunk-actions">
+                <button type="button" data-hunk-take={hunk.id}>Keep</button>
+                <button type="button" data-hunk-drop={hunk.id}>Drop</button>
+              </span>
+            </div>
+            <pre class="fd-hunk-body">{hunk.lines.map((line) => (
+              <span class={`fd-line is-${line.kind}`}>{line.text}</span>
+            ))}</pre>
+          </div>
+        ))}
+        <p class="fd-diff-tally" data-diff-tally>3 of 3 hunks selected</p>
+        <p class="fd-hint">
+          Merging is hunk by hunk. What you drop stays behind in the agent's own worktree — your project only ever gets
+          what you kept.
+        </p>
+      </div>
+    )}
+
     {kind === "automations" && (
       <div class="fd-autos">
         {automations.map((automation) => (
@@ -347,6 +463,98 @@ const automations = [
             hint.textContent = `${name} — ${state}. Its work is isolated in its own worktree until you merge it.`
           })
         })
+      }
+
+      if (kind === "cost") {
+        const run = root.querySelector("[data-cost-run]")
+        const rows = [...root.querySelectorAll("[data-cost-tokens]")]
+        const cash = [...root.querySelectorAll("[data-cost-cash]")]
+        const total = root.querySelector("[data-cost-total]")
+        const nf = new Intl.NumberFormat("en-US")
+        let playing = false
+        run.addEventListener("click", () => {
+          if (playing) return
+          playing = true
+          run.textContent = "Metering…"
+          const started = performance.now()
+          const duration = 1500
+          const step = (now) => {
+            const t = Math.min(1, (now - started) / duration)
+            const eased = 1 - Math.pow(1 - t, 3)
+            rows.forEach((cell) => (cell.textContent = nf.format(Math.round(Number(cell.dataset.costTokens) * eased))))
+            cash.forEach((cell) => (cell.textContent = "$" + (Number(cell.dataset.costCash) * eased).toFixed(4)))
+            total.textContent = "$" + (Number(total.dataset.costTotal) * eased).toFixed(4)
+            if (t < 1) return requestAnimationFrame(step)
+            playing = false
+            run.textContent = "Meter it again"
+          }
+          requestAnimationFrame(step)
+        })
+      }
+
+      if (kind === "terminal") {
+        const screen = root.querySelector("[data-term-screen]")
+        const run = root.querySelector("[data-term-run]")
+        const lines = JSON.parse(root.dataset.termLines ?? "[]")
+        let timer = 0
+        const play = () => {
+          clearTimeout(timer)
+          screen.replaceChildren()
+          run.textContent = "Running…"
+          let index = 0
+          const next = () => {
+            if (index >= lines.length) {
+              run.textContent = "Run it again"
+              return
+            }
+            const line = lines[index]
+            const el = document.createElement("span")
+            el.className = "fd-term-line is-" + line.kind
+            screen.appendChild(el)
+            // A command types out; its output arrives whole, the way a real
+            // terminal behaves.
+            if (line.kind !== "cmd") {
+              el.textContent = line.text
+              index += 1
+              timer = setTimeout(next, 220)
+              return
+            }
+            let at = 0
+            const type = () => {
+              el.textContent = line.text.slice(0, at)
+              at += 1
+              if (at <= line.text.length) return (timer = setTimeout(type, 22))
+              index += 1
+              timer = setTimeout(next, 320)
+            }
+            type()
+          }
+          next()
+        }
+        run.addEventListener("click", play)
+      }
+
+      if (kind === "diff") {
+        const tally = root.querySelector("[data-diff-tally]")
+        const hunks = [...root.querySelectorAll("[data-hunk]")]
+        const paint = () => {
+          const kept = hunks.filter((hunk) => !hunk.classList.contains("is-dropped")).length
+          tally.textContent = `${kept} of ${hunks.length} hunk${hunks.length === 1 ? "" : "s"} selected`
+          tally.classList.toggle("is-none", kept === 0)
+        }
+        root.querySelectorAll("[data-hunk-drop]").forEach((button) => {
+          button.addEventListener("click", () => {
+            root.querySelector(`[data-hunk="${button.dataset.hunkDrop}"]`).classList.add("is-dropped")
+            paint()
+          })
+        })
+        root.querySelectorAll("[data-hunk-take]").forEach((button) => {
+          button.addEventListener("click", () => {
+            root.querySelector(`[data-hunk="${button.dataset.hunkTake}"]`).classList.remove("is-dropped")
+            paint()
+          })
+        })
+        paint()
       }
 
       if (kind === "automations") {
@@ -582,6 +790,162 @@ const automations = [
   }
 
   .fd-work .fd-steps { min-height: 132px; }
+
+  .fd-cost-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+
+  .fd-cost-table th {
+    padding: 6px 0;
+    color: rgba(255, 255, 255, 0.62);
+    font-weight: 400;
+    text-align: left;
+  }
+
+  .fd-cost-tokens,
+  .fd-cost-cash {
+    padding: 6px 0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+    color: rgba(255, 255, 255, 0.5);
+  }
+
+  .fd-cost-cash {
+    width: 82px;
+    color: rgba(255, 255, 255, 0.8);
+  }
+
+  .fd-cost-total {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin: 10px 0 12px;
+    padding-top: 10px;
+    border-top: 1px solid var(--hairline, rgba(224, 211, 255, 0.16));
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.45);
+  }
+
+  .fd-cost-total strong {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 20px;
+    font-variant-numeric: tabular-nums;
+    color: #fff;
+  }
+
+  .fd-term-screen {
+    display: block;
+    min-height: 186px;
+    margin: 0 0 12px;
+    padding: 12px 13px;
+    overflow: hidden;
+    border: 1px solid var(--hairline, rgba(224, 211, 255, 0.16));
+    border-radius: 9px;
+    background: rgba(0, 0, 0, 0.34);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px;
+    line-height: 1.7;
+  }
+
+  .fd-term-line {
+    display: block;
+    color: rgba(255, 255, 255, 0.6);
+    white-space: pre-wrap;
+  }
+
+  .fd-term-line.is-cmd {
+    color: #fff;
+  }
+
+  .fd-term-line.is-ok {
+    color: #6ee7b7;
+  }
+
+  .fd-term-line.is-bad {
+    color: #fb7185;
+  }
+
+  .fd-hunk {
+    margin-bottom: 8px;
+    overflow: hidden;
+    border: 1px solid var(--hairline, rgba(224, 211, 255, 0.16));
+    border-radius: 9px;
+    transition: opacity 200ms ease;
+  }
+
+  .fd-hunk.is-dropped {
+    opacity: 0.36;
+  }
+
+  .fd-hunk-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 10px;
+    background: rgba(255, 255, 255, 0.03);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 10.5px;
+    color: rgba(255, 255, 255, 0.5);
+  }
+
+  .fd-hunk-file {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .fd-hunk-actions button {
+    margin-left: 5px;
+    padding: 2px 9px;
+    border: 1px solid var(--hairline, rgba(224, 211, 255, 0.16));
+    border-radius: 999px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.6);
+    font: inherit;
+    font-size: 10.5px;
+    cursor: pointer;
+  }
+
+  .fd-hunk-actions button:hover {
+    color: #fff;
+    border-color: rgba(143, 82, 255, 0.6);
+  }
+
+  .fd-hunk-body {
+    margin: 0;
+    padding: 8px 10px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px;
+    line-height: 1.65;
+  }
+
+  .fd-line {
+    display: block;
+    white-space: pre-wrap;
+    color: rgba(255, 255, 255, 0.45);
+  }
+
+  .fd-line.is-add {
+    color: #86efac;
+    background: rgba(34, 197, 94, 0.09);
+  }
+
+  .fd-line.is-del {
+    color: #fda4af;
+    background: rgba(244, 63, 94, 0.09);
+  }
+
+  .fd-diff-tally {
+    margin: 10px 0 0;
+    font-size: 11.5px;
+    color: var(--purple-soft, #c9b0ff);
+  }
+
+  .fd-diff-tally.is-none {
+    color: #fda4af;
+  }
 
   .fd-ticket {
     padding: 11px 13px;
