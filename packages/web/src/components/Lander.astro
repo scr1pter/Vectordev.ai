@@ -3,6 +3,7 @@ import { ArrowRight, BadgeCheck, Brain, CalendarClock, ChevronDown, Cloud, Cloud
 import MarketingFooter from "./marketing/MarketingFooter.astro"
 import MarketingNav from "./marketing/MarketingNav.astro"
 import ProductDemo from "./marketing/ProductDemo.astro"
+import sessionScreenshot from "../assets/lander/vector-session-live.png"
 import FeatureDemo from "./marketing/FeatureDemo.astro"
 
 const pixelFont: Record<string, string[]> = {
@@ -571,6 +572,27 @@ const changelog = [
           <p class="showcase-note">
             That is the real app, not a picture of it — move around the rail, filter the board, open a file.
           </p>
+        </div>
+
+        <div class="proof-shot section-width" data-reveal>
+          <div class="proof-shot-copy">
+            <p class="section-kicker">A real run</p>
+            <h2>And this is one that already happened.</h2>
+            <p>
+              A session shipping a site: the agent hit a Vercel CLI failure caused by spaces in the folder name, worked
+              out why, redeployed under a valid project name, then opened the deployed URL in Vector's own browser and
+              read the console and network output back to check it. Not a mock-up of a workflow — a screenshot of one.
+            </p>
+          </div>
+          <figure class="proof-shot-frame">
+            <img
+              src={sessionScreenshot.src}
+              width={sessionScreenshot.width}
+              height={sessionScreenshot.height}
+              alt="A Vector session deploying a site: the agent diagnoses a Vercel CLI failure caused by spaces in the folder name, redeploys with a valid project name, then opens the deployed URL in Vector's browser and reads the console and network output"
+              loading="lazy"
+            />
+          </figure>
         </div>
       </div>
     </section>
@@ -1964,6 +1986,52 @@ const changelog = [
     color: var(--ink-40);
     font-size: 12.5px;
     line-height: 1.6;
+  }
+
+  .proof-shot {
+    margin-top: clamp(48px, 7vw, 92px);
+    display: grid;
+    gap: clamp(20px, 3vw, 34px);
+  }
+
+  @media (min-width: 1000px) {
+    .proof-shot {
+      grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+      align-items: center;
+    }
+  }
+
+  .proof-shot-copy h2 {
+    margin: 0 0 12px;
+    color: #fff;
+    font-size: clamp(21px, 2.5vw, 27px);
+    font-weight: 600;
+    letter-spacing: -0.018em;
+    line-height: 1.2;
+  }
+
+  .proof-shot-copy p:last-child {
+    margin: 0;
+    color: var(--ink-55);
+    font-size: 14.5px;
+    line-height: 1.65;
+  }
+
+  .proof-shot-frame {
+    margin: 0;
+    overflow: hidden;
+    padding: 6px;
+    border: 1px solid var(--glass-line);
+    border-radius: 20px;
+    background: var(--glass-fill-strong);
+    box-shadow: var(--glass-shadow);
+  }
+
+  .proof-shot-frame img {
+    display: block;
+    width: 100%;
+    height: auto;
+    border-radius: 14px;
   }
 
   .showcase-note {
