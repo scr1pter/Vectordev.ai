@@ -4,109 +4,83 @@
 @import "tw-animate-css";
 
 @layer components {
+  /* Effort is a discrete choice — four or five named levels — so the control is
+     drawn as one segment per level rather than as a continuous slider. It reads
+     as "three of five" at a glance, which a smooth bar never does, and it stops
+     implying precision the setting does not have. */
   .vector-effort-track {
-    --vector-effort-progress: 0%;
+    --vector-effort-fill: 0%;
+    --vector-effort-steps: 4;
     --vector-effort-t: 0;
-    /* Half the thumb, so the circle stays fully inside the capsule at either
-       end and the fill always finishes exactly under it. */
-    --vector-effort-x: clamp(15px, var(--vector-effort-progress), calc(100% - 15px));
+    /* One segment wide, minus the gap that separates it from the next. */
+    --vector-effort-seg: calc(100% / var(--vector-effort-steps));
+    --vector-effort-mask: repeating-linear-gradient(
+      90deg,
+      #000 0 calc(var(--vector-effort-seg) - 5px),
+      transparent calc(var(--vector-effort-seg) - 5px) var(--vector-effort-seg)
+    );
     position: relative;
-    height: 34px;
-    overflow: hidden;
-    border: 1px solid var(--vx-line);
-    border-radius: 999px;
-    background: #16151c;
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
-    transition:
-      border-color 220ms var(--vx-ease),
-      box-shadow 220ms var(--vx-ease);
+    height: 28px;
+    border-radius: 8px;
+    background: transparent;
+    transition: filter 220ms var(--vx-ease);
   }
 
-  /* The unlit run: the same starfield as the lit region but barely there, so a
-     low setting still reads as a level meter rather than an empty pill. */
+  /* The unlit levels. */
   .vector-effort-track::before {
     content: "";
     position: absolute;
-    z-index: 0;
     inset: 0;
     pointer-events: none;
-    background-image:
-      radial-gradient(circle, rgba(255, 255, 255, 0.5) 0 1.1px, transparent 1.6px),
-      radial-gradient(circle, rgba(255, 255, 255, 0.34) 0 0.9px, transparent 1.4px),
-      radial-gradient(circle, rgba(255, 255, 255, 0.42) 0 1px, transparent 1.5px);
-    background-size: 13px 11px, 19px 9px, 23px 15px;
-    background-position: 3px 4px, 9px 9px, 16px 2px;
-    opacity: 0.13;
+    border-radius: inherit;
+    background: var(--vx-control);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.045);
+    mask-image: var(--vector-effort-mask);
+    -webkit-mask-image: var(--vector-effort-mask);
   }
 
-  /* The lit run. Two dot grids on different pitches read as an irregular
-     starfield rather than a matrix, over a blue-to-purple ramp. */
+  /* The lit run, clipped to whole segments. The gradient is Vector's own, so
+     the control carries the product's colour rather than a second palette. */
   .vector-effort-track::after {
     content: "";
     position: absolute;
-    z-index: 1;
-    top: 0;
-    bottom: 0;
-    left: 0;
-    width: var(--vector-effort-x);
+    inset: 0;
     pointer-events: none;
-    border-radius: 999px;
-    /* Three pitches with no common factor, so the grids never line up and the
-       field reads as scattered rather than as a matrix. */
-    background-image:
-      radial-gradient(circle, rgba(255, 255, 255, 0.95) 0 1.1px, transparent 1.6px),
-      radial-gradient(circle, rgba(255, 255, 255, 0.62) 0 0.9px, transparent 1.4px),
-      radial-gradient(circle, rgba(255, 255, 255, 0.8) 0 1px, transparent 1.5px),
-      linear-gradient(90deg, #4f6ae8 0%, #6560e2 42%, #7d5cf0 72%, #8b5cf6 100%);
-    background-size:
-      13px 11px,
-      19px 9px,
-      23px 15px,
-      100% 100%;
-    background-position:
-      3px 4px,
-      9px 9px,
-      16px 2px,
-      0 0;
-    opacity: calc(0.72 + 0.28 * var(--vector-effort-t));
+    border-radius: inherit;
+    background: var(--vx-gradient);
+    /* Full width and masked at the TRACK's pitch, then cut back to the lit run
+       with clip-path. Sizing this layer to the fill instead would compress the
+       segment pitch, so a low setting rendered as a fan of thin slivers. */
+    mask-image: var(--vector-effort-mask);
+    -webkit-mask-image: var(--vector-effort-mask);
+    clip-path: inset(0 calc(100% - var(--vector-effort-fill)) 0 0);
+    filter: drop-shadow(0 0 10px rgba(146, 116, 236, calc(0.12 + 0.28 * var(--vector-effort-t))));
     transition:
-      width 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
-      opacity 220ms ease;
+      clip-path 260ms cubic-bezier(0.2, 0.8, 0.2, 1),
+      filter 260ms ease;
   }
 
-  /* At the top the whole bar is lit and the starfield drifts along it. Each
-     layer travels a whole number of its own tiles, so the loop closes with no
-     seam. */
+  /* At the top every level is lit, and a single highlight sweeps across them.
+     One moving thing, not a field of them — the bar should read as charged,
+     not as busy. */
   .vector-effort-track[data-max="true"]::after {
-    opacity: 1;
-    animation: vector-effort-spark-flow 3.2s linear infinite;
+    background:
+      linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.42) 50%, transparent 100%) 0 0 / 42% 100% no-repeat,
+      var(--vx-gradient);
+    animation: vector-effort-sweep 2.4s var(--vx-ease) infinite;
   }
 
-  .vector-effort-track:focus-within,
-  .vector-effort-track[data-max="true"] {
-    border-color: rgba(221, 205, 255, 0.42);
-    box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.14),
-      0 0 0 2px rgba(155, 108, 255, 0.14),
-      0 8px 24px rgba(119, 76, 231, 0.22);
+  .vector-effort-track:focus-within {
+    filter: brightness(1.08);
   }
 
+  .vector-effort-track:focus-within::before {
+    box-shadow: inset 0 0 0 1px rgba(182, 159, 247, 0.4);
+  }
+
+  /* The segments are the control, so there is nothing left for a thumb to say. */
   .vector-effort-thumb {
-    position: absolute;
-    z-index: 2;
-    top: 50%;
-    left: var(--vector-effort-x);
-    width: 26px;
-    height: 26px;
-    pointer-events: none;
-    border-radius: 50%;
-    background: radial-gradient(circle at 50% 34%, #ffffff 0%, #f7f5ff 58%, #e9e5f8 100%);
-    box-shadow:
-      0 6px 16px rgba(9, 6, 18, 0.55),
-      0 2px 5px rgba(9, 6, 18, 0.42),
-      inset 0 1px 0 rgba(255, 255, 255, 0.9);
-    transform: translate(-50%, -50%);
-    transition: left 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+    display: none;
   }
 
   .vector-effort-input {
@@ -120,19 +94,15 @@
     opacity: 0;
   }
 
-  @keyframes vector-effort-spark-flow {
+  @keyframes vector-effort-sweep {
     from {
       background-position:
-        3px 4px,
-        9px 9px,
-        16px 2px,
+        -46% 0,
         0 0;
     }
     to {
       background-position:
-        133px 4px,
-        199px 9px,
-        246px 2px,
+        146% 0,
         0 0;
     }
   }

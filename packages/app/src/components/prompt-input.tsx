@@ -1440,6 +1440,12 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     const steps = variants().length - 1
     return steps <= 0 ? 0 : (effortIndex() / steps) * 100
   })
+  // The lit run covers whole segments: the lowest level is one segment, not an
+  // empty bar, because "low" is a setting rather than the absence of one.
+  const effortFill = createMemo(() => {
+    const total = variants().length
+    return total <= 0 ? 0 : ((effortIndex() + 1) / total) * 100
+  })
   const selectEffortIndex = (index: number) => {
     const value = variants()[Math.max(0, Math.min(index, variants().length - 1))]
     props.controls.model.selection.variant.set(value === "default" ? undefined : value)
@@ -2030,7 +2036,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                                 <div
                                   class="vector-effort-track"
                                   data-max={effortProgress() >= 100 ? "true" : "false"}
-                                  style={`--vector-effort-progress: ${effortProgress()}%; --vector-effort-t: ${(effortProgress() / 100).toFixed(3)};`}
+                                  style={`--vector-effort-progress: ${effortProgress()}%; --vector-effort-fill: ${effortFill()}%; --vector-effort-steps: ${Math.max(variants().length, 1)}; --vector-effort-t: ${(effortProgress() / 100).toFixed(3)};`}
                                 >
                                   <div class="vector-effort-thumb" aria-hidden="true" />
                                   <input

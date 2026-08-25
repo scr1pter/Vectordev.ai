@@ -1,6 +1,20 @@
 {
   "releases": [
     {
+      "tag": "v1.19.93",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Levels, tickets, and where the money goes",
+              "description": "The effort control was redrawn around what it actually is. Effort is four or five named levels, not a continuous quantity, so it is now one segment per level rather than a smooth bar — it reads as three of five at a glance, which a gradient never does, and it stops implying a precision the setting does not have. The lit run uses Vector's own gradient rather than a second palette, and at maximum a single highlight sweeps across it: one moving thing, not a field of them. The landing page gained two things. The first is what engineering work actually looks like: most coding tools stop at the code, but the work starts in a tracker and ends in a review, a deploy and a message to the people waiting. Vector reaches Jira, Linear, Slack, GitHub, Sentry and the rest of the catalogue through MCP, so a ticket is something an agent reads in full rather than something you paraphrase into a prompt — and the page now walks that round trip, from ticket to pull request to the channel your team is already watching. The second is an honest account of money. Licensing and model spend are separate and the page says so. Every purchase mints its own key; activation reads a stable machine identifier and immediately SHA-256 hashes it with a Vector-specific salt, so only the hash is ever sent and the raw identifier never leaves your computer; the activated licence is stored owner-only and replaced atomically; and if licensing cannot be reached Vector keeps working on the last good answer for seven days rather than failing closed on a timed-out request. Spend is measured from what the provider itself reported, an unmeasured run is recorded as unmeasured rather than as free, and the ledger stays on your machine."
+            }
+          ]
+        }
+      ]
+    },
+    {
       "tag": "v1.19.92",
       "highlights": [
         {

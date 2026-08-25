@@ -5,7 +5,7 @@
 // JavaScript to read and the component's scoped styles always apply.
 
 interface Props {
-  kind: "editor" | "memory" | "browser" | "cloud" | "agents" | "automations"
+  kind: "editor" | "memory" | "browser" | "cloud" | "agents" | "automations" | "work"
   tag: string
   note: string
 }
@@ -95,6 +95,15 @@ const boardColumns = [
   { id: "running", label: "Running" },
   { id: "attention", label: "Needs you" },
   { id: "done", label: "Done" },
+]
+
+const workSteps = [
+  { text: "Read VEC-2481 from Jira, including the two linked comments", ok: true },
+  { text: "Opened the repository and found the three call sites", ok: true },
+  { text: "Wrote the fix and a regression test", ok: true },
+  { text: "bun test — 214 passed", ok: true },
+  { text: "Opened PR #612 and moved the ticket to In Review", ok: true },
+  { text: "Posted the diff summary to #eng-releases", ok: true },
 ]
 
 const automations = [
@@ -227,6 +236,22 @@ const automations = [
       </div>
     )}
 
+    {kind === "work" && (
+      <div class="fd-work">
+        <div class="fd-ticket">
+          <span class="fd-ticket-key">VEC-2481</span>
+          <span class="fd-ticket-title">Uploads over 2GB fail silently on Safari</span>
+          <span class="fd-ticket-meta">Jira · Bug · P2 · assigned to Vector</span>
+        </div>
+        <div class="fd-steps">
+          {workSteps.map((step, index) => (
+            <p class="fd-step" data-step hidden={index > 0}>{step.text}</p>
+          ))}
+        </div>
+        <button type="button" class="fd-run" data-run>Next step</button>
+      </div>
+    )}
+
     {kind === "automations" && (
       <div class="fd-autos">
         {automations.map((automation) => (
@@ -280,15 +305,18 @@ const automations = [
         })
       }
 
-      if (kind === "browser") {
+      if (kind === "browser" || kind === "work") {
         const steps = [...root.querySelectorAll("[data-step]")]
         const run = root.querySelector("[data-run]")
+        // Each kind labels its own button, so the reset has to restore what it
+        // started as rather than one demo's wording for all of them.
+        const initialLabel = run.textContent
         let shown = 1
         run.addEventListener("click", () => {
           if (shown >= steps.length) {
             steps.forEach((step, index) => (step.hidden = index > 0))
             shown = 1
-            run.textContent = "Run the check"
+            run.textContent = initialLabel
             return
           }
           steps[shown].hidden = false
@@ -551,6 +579,39 @@ const automations = [
   .fd-steps {
     margin-top: 10px;
     min-height: 108px;
+  }
+
+  .fd-work .fd-steps { min-height: 132px; }
+
+  .fd-ticket {
+    padding: 11px 13px;
+    border: 1px solid var(--hairline, rgba(224, 211, 255, 0.16));
+    border-radius: 9px;
+    background: rgba(255, 255, 255, 0.025);
+  }
+
+  .fd-ticket-key {
+    display: inline-block;
+    margin-bottom: 5px;
+    padding: 2px 7px;
+    border-radius: 5px;
+    background: rgba(107, 166, 221, 0.16);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 10.5px;
+    color: #8fc0ea;
+  }
+
+  .fd-ticket-title {
+    display: block;
+    font-size: 12.5px;
+    color: #fff;
+  }
+
+  .fd-ticket-meta {
+    display: block;
+    margin-top: 4px;
+    font-size: 10.5px;
+    color: rgba(255, 255, 255, 0.4);
   }
 
   .fd-step {

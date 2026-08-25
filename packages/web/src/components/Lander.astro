@@ -180,6 +180,15 @@ const features = [
     link: "Browse the connectors",
   },
   {
+    title: "It picks up the ticket, and it closes the loop.",
+    body: "Most coding tools stop at the code. Engineering work does not: it starts in a tracker and ends in a review, a deploy and a message to the people waiting on it. Vector connects to Jira, Linear, Slack, GitHub, Sentry and a hundred-odd other systems through MCP, so a ticket is something an agent can actually read \u2014 description, comments, links and all \u2014 rather than something you paraphrase into a prompt. From there it navigates the repository, writes the change, runs the project's own checks, repairs what it broke, opens the pull request, and reports back where your team is already looking. You stay the reviewer. It does the round trip.",
+    tag: "End to end",
+    note: "Tracker to deploy",
+    demo: "work",
+    href: "/docs",
+    link: "See the connectors",
+  },
+  {
     title: "Write the rule once. Every agent follows it.",
     body: "Standards your team actually cares about, written the way you would say them to a new teammate — we don't put database query logic in the controller — pointed at a repository and, when it matters, at the files they govern. Vector saves them to .vector/RULES.md inside the repository itself, which means they are a committed, reviewable file rather than a setting buried in one developer's machine: clone the repo and the rules come with it. Vector's own agents read that file on every prompt, and because Claude Code, Codex and Cursor read their own instruction files and would never see it, Vector also carries the matching rules into the prompt it hands them. One rule, written once, enforced by whichever agent happens to pick up the work.",
     tag: "Project rules",
@@ -271,6 +280,47 @@ const workflow = [
   ["Observe", "Follow plans, edits, commands, browser actions, and the tokens and cost the provider reported."],
   ["Verify", "Run checks, inspect the product in the browser, review the diff, and optionally require an independent judge verdict."],
   ["Ship", "Merge the hunks you trust and publish through your own connected accounts."],
+]
+
+// What actually happens when someone buys Vector and when a run spends money.
+// Every claim here is checked against the implementation: license-service.ts
+// for activation and the grace window, spend-limits.ts for the ledger.
+const licenseRows = [
+  [
+    "One key, minted per purchase",
+    "Stripe takes the payment; Vector never sees a card number. Your key is emailed and shown on the purchase-complete page. There is no website account to create — the key is the account.",
+  ],
+  [
+    "Bound to a hash, not to your hardware",
+    "Activation reads a stable machine identifier — the platform UUID on macOS and Windows, /etc/machine-id on Linux — and immediately SHA-256 hashes it with a Vector-specific salt. Only that hash is ever sent. The raw identifier never leaves your computer, so the licence can tell two machines apart without ever learning anything about either.",
+  ],
+  [
+    "Stored where only you can read it",
+    "The activated licence lives in one file in Vector's own application data, written with 0600 permissions — owner read and write, nobody else — and replaced atomically, so an interrupted write can never leave a half-file behind.",
+  ],
+  [
+    "Seven days offline before it asks again",
+    "Vector re-checks in the background. If it cannot reach licensing — you are on a plane, the network is down, the service is having a bad day — it keeps working on the last good answer for seven days and tells you it is doing so. It does not fail closed the moment a request times out.",
+  ],
+]
+
+const spendRows = [
+  [
+    "Measured, never estimated",
+    "What a run cost comes from the numbers the provider itself reported — input, output, reasoning, cache reads and cache writes — alongside its own cost figure. Nothing is inferred from character counts.",
+  ],
+  [
+    "Unmeasured is not free",
+    "A run whose provider reported no usage is recorded as unmeasured rather than as zero, because a fabricated zero reads as free and quietly poisons every total built on top of it.",
+  ],
+  [
+    "The ledger is yours and it is local",
+    "Spend is kept in a file on your machine, with daily totals retained far longer than the raw events behind them. Vector reads it to enforce the caps you set and to stop a run before it goes past them.",
+  ],
+  [
+    "Your keys, your bill",
+    "Bring your own provider keys and the model spend is between you and that provider. Vector's own price is the licence — it does not resell tokens or add a margin to them.",
+  ],
 ]
 
 const systemRows = [
@@ -723,6 +773,62 @@ const changelog = [
             <p>{body}</p>
           </article>
         ))}
+      </div>
+    </section>
+
+    <section class="licensing section-width" aria-labelledby="licensing-title">
+      <div class="section-heading chapter-head" data-reveal>
+        <p class="section-kicker">Licensing and spend</p>
+        <h2 id="licensing-title">What you pay for, and what it costs to run.</h2>
+        <p>
+          Two separate things, deliberately. Vector's licence is a fixed price you pay us. Model usage is metered by
+          whichever provider you brought, and Vector's job there is to measure it honestly and stop it going past the
+          cap you set.
+        </p>
+      </div>
+
+      <div class="licensing-grid">
+        <article class="licensing-card" data-reveal>
+          <p class="licensing-tag">HULK · hidden unique licence keys</p>
+          <h3>Every copy has its own key.</h3>
+          <p class="licensing-lead">
+            No shared serial, no keygen-shaped pattern, nothing embedded in the installer. Each purchase mints a key
+            that exists only for that buyer, and activation ties it to the machines it runs on.
+          </p>
+          <dl>
+            {licenseRows.map(([term, detail]) => (
+              <div>
+                <dt>{term}</dt>
+                <dd>{detail}</dd>
+              </div>
+            ))}
+          </dl>
+          <p class="licensing-note">
+            This is designed to make casual key-sharing not work and to keep your hardware private while doing it. It
+            is not, and no licence system is, a guarantee against a determined attacker with your machine in hand.
+          </p>
+        </article>
+
+        <article class="licensing-card" data-reveal style="--rd: 90ms">
+          <p class="licensing-tag">Tokenomics engine</p>
+          <h3>The number is the provider's, not ours.</h3>
+          <p class="licensing-lead">
+            Vector records what a run really spent by reading what the provider reported, then holds that against the
+            limits you set — per day, per run, per project.
+          </p>
+          <dl>
+            {spendRows.map(([term, detail]) => (
+              <div>
+                <dt>{term}</dt>
+                <dd>{detail}</dd>
+              </div>
+            ))}
+          </dl>
+          <p class="licensing-note">
+            Free models are included so you can work without connecting anything. Connect your own keys when you want
+            a specific model, and that spend is yours.
+          </p>
+        </article>
       </div>
     </section>
 
@@ -1776,6 +1882,88 @@ const changelog = [
     width: var(--page-wide);
     margin-inline: auto;
     padding-top: clamp(56px, 7vw, 88px);
+  }
+
+  /* ---- licensing ---- */
+
+  .licensing {
+    margin-top: clamp(56px, 8vw, 104px);
+  }
+
+  .licensing-grid {
+    display: grid;
+    gap: 16px;
+    margin-top: 30px;
+  }
+
+  @media (min-width: 900px) {
+    .licensing-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  .licensing-card {
+    padding: clamp(22px, 2.6vw, 30px);
+    background: var(--glass-fill);
+    border: 1px solid var(--glass-line);
+    border-radius: 24px;
+    box-shadow: var(--glass-shadow-soft);
+    backdrop-filter: blur(24px) saturate(145%);
+    -webkit-backdrop-filter: blur(24px) saturate(145%);
+  }
+
+  .licensing-tag {
+    margin: 0 0 10px;
+    color: var(--purple-soft);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .licensing-card h3 {
+    margin: 0;
+    color: #fff;
+    font-size: clamp(18px, 2.1vw, 21px);
+    font-weight: 600;
+    letter-spacing: -0.015em;
+    line-height: 1.25;
+  }
+
+  .licensing-lead {
+    margin: 11px 0 0;
+    color: var(--ink-55);
+    font-size: 14.5px;
+    line-height: 1.6;
+  }
+
+  .licensing-card dl {
+    margin: 20px 0 0;
+    display: grid;
+    gap: 14px;
+  }
+
+  .licensing-card dt {
+    color: #fff;
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .licensing-card dd {
+    margin: 4px 0 0;
+    color: var(--ink-45);
+    font-size: 13px;
+    line-height: 1.6;
+  }
+
+  .licensing-note {
+    margin: 20px 0 0;
+    padding-top: 14px;
+    border-top: 1px solid var(--hairline);
+    color: var(--ink-40);
+    font-size: 12.5px;
+    line-height: 1.6;
   }
 
   .showcase-note {
