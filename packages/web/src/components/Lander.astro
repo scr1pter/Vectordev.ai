@@ -4,6 +4,7 @@ import MarketingFooter from "./marketing/MarketingFooter.astro"
 import MarketingNav from "./marketing/MarketingNav.astro"
 import ProductDemo from "./marketing/ProductDemo.astro"
 import LanderMotion from "./marketing/LanderMotion.astro"
+import LanderMaterials from "./marketing/LanderMaterials.astro"
 import desktopPackage from "../../../desktop/package.json"
 import { release119 } from "../data/vector-releases"
 import sessionScreenshot from "../assets/lander/vector-session-live.png"
@@ -509,6 +510,7 @@ const changelog = [
 <div class="vector-marketing">
   <canvas class="ascii-field" data-vector-field aria-hidden="true"></canvas>
   <LanderMotion />
+  <LanderMaterials />
   <MarketingNav active="product" />
 
   <main>

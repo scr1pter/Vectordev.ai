@@ -1,0 +1,541 @@
+---
+// The material layer for the landing page.
+//
+// Nine design languages were asked for, and several of them are direct
+// opposites — brutalism against neumorphism, minimalism against maximalism.
+// Blending opposites everywhere gives mud, so nothing here is blended. Each
+// language is given ONE zone where it is the honest choice for that content,
+// and the quiet zones are spaced between the loud ones so no two ever touch:
+//
+//   liquid glass   floating chrome (nav, chapter rail, ⌘K palette)
+//   skeuomorphism  the product window — it is pretending to be a real screen
+//   spatial UI     the same window's depth, and the subagent grid
+//   neumorphism    the hero's three-stage loop — soft controls, pressed when on
+//   claymorphism   every icon tile, the one place chunky and toyish is allowed
+//   glassmorphism  feature and connection cards (already the house style)
+//   brutalism      licensing — hard facts deserve hard edges and no decoration
+//   minimalism     the feature sections, which is the air the loud zones need
+//   maximalism     the tally and the logo belt — one deliberate crescendo
+//
+// Colour and layout are untouched on purpose. Every value below derives from
+// the tokens already in MarketingLayout.astro; what changes is the *physics* of
+// each surface — how light falls on it, how deep it sits, how hard its edge is.
+//
+// NOTE: `:global()` is only rewritten inside *scoped* style blocks. In an
+// `is:global` block it reaches the browser verbatim, where it is invalid and
+// the whole rule is dropped. Nothing below uses it.
+---
+
+<style is:global>
+  /* ==================================================================
+     0. Shared material tokens
+     ================================================================== */
+  .vector-marketing {
+    /* Where the light is. Liquid glass and neumorphism both need a single
+       agreed light source or the page looks lit from four directions. */
+    --lux: 145deg;
+    --lux-hot: rgba(255, 255, 255, 0.9);
+    --lux-warm: rgba(226, 214, 255, 0.5);
+
+    /* clay */
+    --clay-lift: 0 10px 20px -6px rgba(0, 0, 0, 0.55), 0 2px 5px rgba(0, 0, 0, 0.35);
+    --clay-in: inset 0 2px 3px rgba(255, 255, 255, 0.34), inset 0 -3px 6px rgba(0, 0, 0, 0.3);
+
+    /* neumorphic — dark-mode neumorphism is a bright top edge and a black
+       bottom one, not the two greys the light-mode version uses. */
+    --neu-out: -4px -4px 10px rgba(255, 255, 255, 0.045), 5px 6px 14px rgba(0, 0, 0, 0.5);
+    --neu-in: inset -3px -3px 8px rgba(255, 255, 255, 0.05), inset 4px 4px 10px rgba(0, 0, 0, 0.55);
+  }
+
+  /* ==================================================================
+     1. LIQUID GLASS — the floating chrome
+     Not the same thing as glassmorphism. Frosted glass scatters light
+     evenly; liquid glass refracts it, so the rim is brightest where the
+     light hits and the surface carries a specular smear that MOVES with
+     the pointer. That movement is the whole tell.
+     ================================================================== */
+  .vector-marketing .site-header .site-nav,
+  .vector-marketing .chapters ul,
+  .vector-marketing .palette-box {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+  }
+
+  /* the specular smear — a soft light that tracks the cursor */
+  .vector-marketing .site-header .site-nav::before,
+  .vector-marketing .chapters ul::before,
+  .vector-marketing .palette-box::before {
+    content: "";
+    position: absolute;
+    inset: -40%;
+    z-index: -1;
+    pointer-events: none;
+    background: radial-gradient(
+      42% 58% at var(--lx, 50%) var(--ly, 0%),
+      rgba(255, 255, 255, 0.16),
+      rgba(190, 160, 255, 0.07) 42%,
+      transparent 72%
+    );
+    opacity: 0;
+    transition: opacity 420ms ease;
+  }
+
+  .vector-marketing .site-header .site-nav:hover::before,
+  .vector-marketing .chapters ul:hover::before,
+  .vector-marketing .palette-box::before {
+    opacity: 1;
+  }
+
+  /* the refraction rim — a 1px border that is bright at the light source
+     and fades to nothing at the far edge. A plain border-color cannot do
+     this; the gradient has to be masked down to the border box. */
+  .vector-marketing .site-header .site-nav::after,
+  .vector-marketing .chapters ul::after,
+  .vector-marketing .palette-box::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    pointer-events: none;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(
+      var(--lux),
+      var(--lux-hot) 0%,
+      var(--lux-warm) 18%,
+      rgba(255, 255, 255, 0.06) 44%,
+      rgba(255, 255, 255, 0.02) 70%,
+      rgba(255, 255, 255, 0.14) 100%
+    );
+    -webkit-mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    opacity: 0.75;
+  }
+
+  /* lensing: glass this thick bends what is behind it */
+  .vector-marketing .site-header .site-nav {
+    backdrop-filter: blur(26px) saturate(180%) brightness(1.06);
+    -webkit-backdrop-filter: blur(26px) saturate(180%) brightness(1.06);
+  }
+
+  /* ==================================================================
+     2. SKEUOMORPHISM — the product window is pretending to be hardware
+     A machined bezel, a screen that is actually glass (so it catches a
+     diagonal reflection), and a contact shadow where it meets the page.
+     ================================================================== */
+  .vector-marketing .showcase .product-window {
+    position: relative;
+    border-radius: 30px;
+    /* the bezel: a hard bright top edge, a dark underside, and the thin
+       dark seam where anodised metal meets glass */
+    box-shadow:
+      0 50px 130px rgba(0, 0, 0, 0.7),
+      0 0 90px rgba(132, 86, 219, 0.12),
+      inset 0 1.5px 0 rgba(255, 255, 255, 0.22),
+      inset 0 -1.5px 0 rgba(0, 0, 0, 0.55),
+      inset 1px 0 0 rgba(255, 255, 255, 0.07),
+      inset -1px 0 0 rgba(255, 255, 255, 0.07),
+      inset 0 0 0 1px rgba(0, 0, 0, 0.4);
+  }
+
+  /* the reflection ON the glass — a single wide diagonal band, pinned to
+     the top-left because that is where the page's light lives */
+  .vector-marketing .showcase .product-window::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 4;
+    pointer-events: none;
+    border-radius: inherit;
+    background: linear-gradient(
+      104deg,
+      rgba(255, 255, 255, 0.11) 0%,
+      rgba(255, 255, 255, 0.05) 16%,
+      transparent 34%,
+      transparent 100%
+    );
+    mix-blend-mode: screen;
+    opacity: 0.85;
+  }
+
+  /* The contact shadow — the window is a physical object resting on the page,
+     and objects resting on things darken what is under them.
+     This hangs off .showcase, NOT off .product-window: the window sets
+     `overflow: hidden` to clip its own screen content, which silently clips
+     anything a pseudo-element paints outside the border box too. */
+  .vector-marketing .showcase {
+    position: relative;
+  }
+
+  .vector-marketing .showcase::after {
+    content: "";
+    position: absolute;
+    inset: auto 9% -26px 9%;
+    z-index: -1;
+    height: 54px;
+    pointer-events: none;
+    background: radial-gradient(50% 50% at 50% 50%, rgba(0, 0, 0, 0.62), transparent 72%);
+    filter: blur(15px);
+    /* The window floats 7px on the same 7.5s cycle (LanderMotion). A real
+       shadow softens as its object lifts, so this runs the same clock. */
+    animation: vector-contact 7.5s ease-in-out infinite;
+  }
+
+  @keyframes vector-contact {
+    50% {
+      opacity: 0.55;
+      scale: 0.94 1;
+    }
+  }
+
+  .vector-marketing .showcase:hover::after {
+    animation-play-state: paused;
+  }
+
+  /* ==================================================================
+     3. SPATIAL UI — real depth, not painted depth
+     Deliberately NOT applied to .showcase. The product window's tilt in
+     LanderMotion.astro already carries its own perspective(1400px) inside
+     its transform, and the `perspective` property on the parent would
+     apply a second one to the same rotation — foreshortening a tuned
+     effect harder than it was tuned for. The window is already spatial;
+     the subagent grid was not, so that is where this goes.
+     ================================================================== */
+  .vector-marketing .crew .crew-grid {
+    perspective: 1400px;
+  }
+
+  .vector-marketing .crew .crew-grid > article {
+    transform-style: preserve-3d;
+    transition:
+      transform 520ms cubic-bezier(0.16, 1, 0.3, 1),
+      box-shadow 520ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .vector-marketing .crew .crew-grid > article:hover {
+    /* pulled toward the reader on the z axis, not scaled up: scaling is a
+       picture getting bigger, translateZ is an object coming closer */
+    transform: translateZ(38px);
+    box-shadow:
+      0 34px 70px -24px rgba(0, 0, 0, 0.72),
+      0 0 42px hsl(var(--crew-hue) 72% 60% / 0.14);
+  }
+
+  .vector-marketing .crew .crew-grid > article > * {
+    transform: translateZ(14px);
+  }
+
+  .vector-marketing .crew .crew-grid > article .crew-mark {
+    transform: translateZ(34px);
+  }
+
+  /* ==================================================================
+     4. NEUMORPHISM — the hero's three-stage loop
+     Soft controls extruded from their own surface. The active stage is
+     PRESSED IN, which is the only version of neumorphism that carries
+     information rather than just texture.
+     ================================================================== */
+  .vector-marketing .hero-loop .hero-loop-stage {
+    border-radius: 15px;
+    background: linear-gradient(var(--lux), rgba(255, 255, 255, 0.045), rgba(0, 0, 0, 0.16));
+    box-shadow: var(--neu-out);
+    transition:
+      color 300ms ease,
+      background 300ms ease,
+      box-shadow 380ms cubic-bezier(0.16, 1, 0.3, 1),
+      transform 300ms ease;
+  }
+
+  .vector-marketing .hero-loop .hero-loop-stage.is-active {
+    /* pressed: the light source flips to the far side, which is what your
+       eye reads as "this went down" */
+    background: linear-gradient(var(--lux), rgba(0, 0, 0, 0.22), rgba(143, 82, 255, 0.14));
+    box-shadow: var(--neu-in);
+    transform: translateY(1px);
+  }
+
+  /* ==================================================================
+     5. CLAYMORPHISM — every icon tile
+     Puffy, chunky, oversized radius, lit from inside the top edge. This
+     is the one register on the page allowed to be toyish, and confining
+     it to 30–44px squares is what keeps it charming instead of childish.
+     ================================================================== */
+  .vector-marketing .hero-loop .hero-loop-icon,
+  .vector-marketing .suite-grid .suite-icon,
+  .vector-marketing .crew .crew-mark {
+    border-radius: 34%;
+    border: none;
+    box-shadow: var(--clay-lift), var(--clay-in);
+    transition:
+      transform 420ms cubic-bezier(0.34, 1.56, 0.64, 1),
+      box-shadow 420ms ease,
+      border-radius 420ms ease;
+  }
+
+  .vector-marketing .hero-loop .hero-loop-icon {
+    background: linear-gradient(var(--lux), rgba(196, 172, 255, 0.16), rgba(94, 62, 168, 0.22));
+  }
+
+  .vector-marketing .hero-loop .hero-loop-stage.is-active .hero-loop-icon {
+    background: linear-gradient(var(--lux), rgba(214, 194, 255, 0.34), rgba(122, 74, 232, 0.4));
+    box-shadow: var(--clay-lift), var(--clay-in), 0 0 26px rgba(143, 82, 255, 0.34);
+  }
+
+  .vector-marketing .suite-grid .suite-icon {
+    background: linear-gradient(var(--lux), rgba(196, 172, 255, 0.24), rgba(103, 70, 186, 0.28));
+  }
+
+  .vector-marketing .crew .crew-mark {
+    background: linear-gradient(
+      var(--lux),
+      hsl(var(--crew-hue) 78% 74% / 0.34),
+      hsl(var(--crew-hue) 66% 42% / 0.36)
+    );
+  }
+
+  /* clay squashes when you press on it. The two hover states need different
+     transforms, not one shared rule: the crew mark lives inside a card that is
+     already translated on z, so it has to keep its own translateZ or it snaps
+     back to the card's plane mid-hover. */
+  .vector-marketing .suite-grid .suite-icon:hover,
+  .vector-marketing .crew .crew-grid > article:hover .crew-mark {
+    border-radius: 42%;
+  }
+
+  .vector-marketing .suite-grid .suite-icon:hover {
+    transform: scale(1.09) rotate(-3deg);
+  }
+
+  .vector-marketing .crew .crew-grid > article:hover .crew-mark {
+    transform: translateZ(34px) scale(1.09) rotate(-3deg);
+  }
+
+  /* ==================================================================
+     6. BRUTALISM — licensing
+     No radius, no blur, no gradient, no glow. A 2px border, a hard offset
+     shadow that is a printing artefact rather than a light effect, and
+     monospace throughout. This section is the money and the legal terms;
+     making it the least decorated thing on the page is the point.
+     ================================================================== */
+  .vector-marketing .licensing .licensing-card {
+    border-radius: 0;
+    border: 2px solid var(--ink);
+    background: rgba(10, 7, 16, 0.72);
+    box-shadow: 9px 9px 0 rgba(143, 82, 255, 0.92);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    transition:
+      transform 160ms steps(3, end),
+      box-shadow 160ms steps(3, end);
+  }
+
+  .vector-marketing .licensing .licensing-card:hover {
+    /* it slides onto its own shadow, mechanically, in three steps — no
+       easing, because brutalism does not ease */
+    transform: translate(4px, 4px);
+    box-shadow: 5px 5px 0 rgba(143, 82, 255, 0.92);
+  }
+
+  .vector-marketing .licensing .licensing-card h3 {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    letter-spacing: -0.02em;
+    text-transform: uppercase;
+  }
+
+  .vector-marketing .licensing .licensing-tag {
+    padding: 5px 8px;
+    display: inline-block;
+    color: #0b0710;
+    background: var(--ink);
+    letter-spacing: 0.1em;
+  }
+
+  .vector-marketing .licensing .licensing-card dt {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+  }
+
+  /* exposed structure: brutalism shows the grid instead of hiding it */
+  .vector-marketing .licensing .licensing-card dl {
+    border-top: 2px solid var(--line-strong);
+    padding-top: 16px;
+  }
+
+  /* ==================================================================
+     7. MINIMALISM — the feature sections
+     The restraint that makes everything above legible. Decoration is
+     removed rather than added: no card, no border box, one hairline, and
+     the space that a loud page has to earn somewhere.
+     ================================================================== */
+  .vector-marketing .features .feature .feature-copy {
+    position: relative;
+    padding-left: 22px;
+  }
+
+  .vector-marketing .features .feature .feature-copy::before {
+    content: "";
+    position: absolute;
+    inset: 4px auto 4px 0;
+    width: 1px;
+    background: linear-gradient(180deg, var(--line-strong), transparent 82%);
+  }
+
+  .vector-marketing .features .feature .feature-tag {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    letter-spacing: 0.14em;
+  }
+
+  /* ==================================================================
+     8. MAXIMALISM — the tally, and the logo belt
+     One crescendo, and only one. Layered backdrops, a plotted grid, a
+     gradient numeral with a glow under it, and a rule between every cell
+     so the band reads as dense rather than airy.
+     ================================================================== */
+  .vector-marketing .tally.section-width {
+    position: relative;
+    overflow: hidden;
+    border-radius: 26px;
+    border: 1px solid var(--glass-line-strong);
+    background:
+      radial-gradient(120% 160% at 12% -30%, rgba(143, 82, 255, 0.22), transparent 58%),
+      radial-gradient(110% 150% at 92% 130%, rgba(97, 201, 150, 0.12), transparent 60%),
+      linear-gradient(160deg, rgba(38, 27, 58, 0.9), rgba(11, 8, 18, 0.92));
+    box-shadow:
+      0 30px 90px rgba(0, 0, 0, 0.5),
+      0 0 70px rgba(143, 82, 255, 0.1),
+      inset 0 1px 0 rgba(255, 255, 255, 0.16);
+  }
+
+  /* the plotted grid behind it — density you feel before you notice */
+  .vector-marketing .tally.section-width::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background-image:
+      linear-gradient(rgba(201, 176, 255, 0.11) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(201, 176, 255, 0.11) 1px, transparent 1px);
+    background-size: 28px 28px;
+    -webkit-mask-image: radial-gradient(120% 100% at 50% 0%, #000, transparent 76%);
+    mask-image: radial-gradient(120% 100% at 50% 0%, #000, transparent 76%);
+  }
+
+  .vector-marketing .tally.section-width > div {
+    position: relative;
+    z-index: 1;
+  }
+
+  @media (min-width: 760px) {
+    .vector-marketing .tally.section-width > div + div {
+      padding-left: 26px;
+      border-left: 1px solid var(--line-strong);
+    }
+  }
+
+  /* The numerals are the crescendo, so they have to stay bright the whole way
+     down the glyph. A gradient that ends in saturated purple looks rich on a
+     swatch and unreadable on a near-black page — the bottom third of every
+     digit disappears. The darkest stop here is still a light lavender. */
+  .vector-marketing .tally.section-width strong {
+    position: relative;
+    font-size: clamp(38px, 5.6vw, 62px);
+    font-weight: 620;
+    letter-spacing: -0.045em;
+    background: linear-gradient(170deg, #ffffff 0%, #f1eaff 44%, var(--accent-strong) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    -webkit-text-fill-color: transparent;
+    filter: drop-shadow(0 6px 26px rgba(143, 82, 255, 0.55));
+  }
+
+  /* a bloom under each figure — the layer that makes the band read as loud */
+  .vector-marketing .tally.section-width > div::before {
+    content: "";
+    position: absolute;
+    top: -14px;
+    left: -10px;
+    z-index: -1;
+    width: 130px;
+    height: 90px;
+    pointer-events: none;
+    background: radial-gradient(50% 50% at 50% 50%, rgba(143, 82, 255, 0.3), transparent 70%);
+  }
+
+  .vector-marketing .belt {
+    position: relative;
+    background:
+      radial-gradient(80% 220% at 50% 50%, rgba(143, 82, 255, 0.14), transparent 66%),
+      var(--glass-fill);
+  }
+
+  /* the belt fades into the page at both ends instead of being clipped */
+  .vector-marketing .belt .marquee {
+    -webkit-mask-image: linear-gradient(90deg, transparent, #000 9%, #000 91%, transparent);
+    mask-image: linear-gradient(90deg, transparent, #000 9%, #000 91%, transparent);
+  }
+
+  /* ==================================================================
+     9. Reduced motion
+     Every material above still reads with the movement removed: the
+     surfaces keep their depth, they just stop responding.
+     ================================================================== */
+  @media (prefers-reduced-motion: reduce) {
+    .vector-marketing .crew .crew-grid > article:hover,
+    .vector-marketing .suite-grid .suite-icon:hover,
+    .vector-marketing .licensing .licensing-card:hover {
+      transform: none;
+    }
+
+    .vector-marketing .site-header .site-nav::before,
+    .vector-marketing .chapters ul::before {
+      transition: none;
+    }
+  }
+</style>
+
+<script is:inline>
+  // Liquid glass only reads as liquid if the specular highlight moves. This
+  // writes the pointer position into --lx/--ly on the floating chrome; the CSS
+  // above puts the highlight there.
+  function bootLanderMaterials() {
+    const root = document.querySelector(".vector-marketing")
+    if (!root || root.dataset.materials === "1") return
+    root.dataset.materials = "1"
+
+    if (globalThis.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches) return
+    if (!globalThis.matchMedia?.("(pointer: fine)")?.matches) return
+
+    const lit = [...document.querySelectorAll(".site-nav, .chapters ul, .palette-box")]
+    for (const surface of lit) {
+      surface.addEventListener("pointermove", (event) => {
+        const box = surface.getBoundingClientRect()
+        if (!box.width || !box.height) return
+        surface.style.setProperty("--lx", `${(((event.clientX - box.left) / box.width) * 100).toFixed(1)}%`)
+        surface.style.setProperty("--ly", `${(((event.clientY - box.top) / box.height) * 100).toFixed(1)}%`)
+      })
+      surface.addEventListener("pointerleave", () => {
+        surface.style.setProperty("--lx", "50%")
+        surface.style.setProperty("--ly", "0%")
+      })
+    }
+  }
+
+  // This component renders above most of what it wires, so it cannot run at
+  // parse time.
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", bootLanderMaterials, { once: true })
+  } else {
+    bootLanderMaterials()
+  }
+  document.addEventListener("astro:page-load", bootLanderMaterials)
+</script>
