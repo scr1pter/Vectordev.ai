@@ -42,6 +42,17 @@ export const RenameRequest = Schema.Struct({
 }).annotate({ identifier: "LSPRenameRequest" })
 export type RenameRequest = typeof RenameRequest.Type
 
+// A code action is the ⌘. menu: extract function, inline variable, add the
+// missing import, fix this diagnostic. Only actions that carry a workspace edit
+// are returned. LSP also allows an action to be a `command`, which the server
+// runs via workspace/executeCommand — those cannot be applied from edits alone,
+// and offering one the editor then fails to apply is worse than not listing it.
+export const CodeActionRequest = Schema.Struct({
+  file: Schema.String,
+  range: Range,
+}).annotate({ identifier: "LSPCodeActionRequest" })
+export type CodeActionRequest = typeof CodeActionRequest.Type
+
 export const Location = Schema.Struct({
   uri: Schema.String,
   range: Range,
@@ -79,6 +90,19 @@ export const RenameResult = Schema.Struct({
   files: Schema.Array(FileEdit),
 }).annotate({ identifier: "LSPRenameResult" })
 export type RenameResult = typeof RenameResult.Type
+
+export const CodeAction = Schema.Struct({
+  title: Schema.String,
+  kind: Schema.optional(Schema.String),
+  isPreferred: Schema.optional(Schema.Boolean),
+  files: Schema.Array(FileEdit),
+}).annotate({ identifier: "LSPCodeAction" })
+export type CodeAction = typeof CodeAction.Type
+
+export const CodeActionResult = Schema.Struct({
+  actions: Schema.Array(CodeAction),
+}).annotate({ identifier: "LSPCodeActionResult" })
+export type CodeActionResult = typeof CodeActionResult.Type
 
 export const Symbol = Schema.Struct({
   name: Schema.String,
@@ -179,6 +203,7 @@ export interface Interface {
   readonly references: (input: LocInput) => Effect.Effect<unknown[]>
   readonly implementation: (input: LocInput) => Effect.Effect<unknown[]>
   readonly rename?: (input: RenameRequest) => Effect.Effect<unknown[]>
+  readonly codeAction?: (input: CodeActionRequest) => Effect.Effect<unknown[]>
   readonly documentSymbol: (uri: string) => Effect.Effect<(DocumentSymbol | Symbol)[]>
   readonly workspaceSymbol: (query: string) => Effect.Effect<Symbol[]>
   readonly prepareCallHierarchy: (input: LocInput) => Effect.Effect<any[]>
@@ -488,6 +513,22 @@ const layer = Layer.effect(
       return results.filter(Boolean)
     })
 
+    const codeAction = Effect.fn("LSP.codeAction")(function* (input: CodeActionRequest) {
+      const results = yield* run(input.file, (client) =>
+        client.connection
+          .sendRequest("textDocument/codeAction", {
+            textDocument: { uri: pathToFileURL(input.file).href },
+            range: input.range,
+            // An empty diagnostics list asks for refactors as well as fixes.
+            // Servers narrow to quick-fixes only when told which diagnostics
+            // are in play, which would hide extract/inline entirely.
+            context: { diagnostics: [] },
+          })
+          .catch(() => null),
+      )
+      return results.flat().filter(Boolean)
+    })
+
     const documentSymbol = Effect.fn("LSP.documentSymbol")(function* (uri: string) {
       const file = fileURLToPath(uri)
       const results = yield* run(file, (client) =>
@@ -554,6 +595,7 @@ const layer = Layer.effect(
       references,
       implementation,
       rename,
+      codeAction,
       documentSymbol,
       workspaceSymbol,
       prepareCallHierarchy,

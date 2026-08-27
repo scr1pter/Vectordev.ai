@@ -95,6 +95,9 @@ import type {
   InstanceDisposeErrors,
   InstanceDisposeResponses,
   LocationRef,
+  LspCodeActionErrors,
+  LspCodeActionRequest,
+  LspCodeActionResponses,
   LspDefinitionErrors,
   LspDefinitionResponses,
   LspDiagnosticsErrors,
@@ -2563,6 +2566,43 @@ export class Lsp extends HeyApiClient {
     )
     return (options?.client ?? this.client).post<LspRenameResponses, LspRenameErrors, ThrowOnError>({
       url: "/lsp/rename",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Get code actions
+   *
+   * Return language-server refactors and quick fixes for a range: extract, inline, add missing import, fix diagnostic.
+   */
+  public codeAction<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      lspCodeActionRequest?: LspCodeActionRequest
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { key: "lspCodeActionRequest", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<LspCodeActionResponses, LspCodeActionErrors, ThrowOnError>({
+      url: "/lsp/code-action",
       ...options,
       ...params,
       headers: {

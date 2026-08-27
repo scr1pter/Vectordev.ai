@@ -73,6 +73,13 @@ export type MonacoLanguageFileEdit = {
   }[]
 }
 
+export type MonacoLanguageCodeAction = {
+  title: string
+  kind?: string
+  isPreferred?: boolean
+  files: MonacoLanguageFileEdit[]
+}
+
 export type MonacoLanguageService = {
   diagnostics: (file: string) => Promise<MonacoLanguageDiagnostic[]>
   hover: (file: string, position: LanguagePosition) => Promise<MonacoLanguageHover | undefined>
@@ -80,6 +87,7 @@ export type MonacoLanguageService = {
   references: (file: string, position: LanguagePosition) => Promise<MonacoLanguageLocation[]>
   symbols: (file: string) => Promise<MonacoLanguageSymbol[]>
   rename: (file: string, position: LanguagePosition, newName: string) => Promise<MonacoLanguageFileEdit[]>
+  codeActions?: (file: string, range: LanguageRange) => Promise<MonacoLanguageCodeAction[]>
   readFile: (file: string) => Promise<string>
   writeFile: (file: string, content: string) => Promise<void>
   filesChanged?: (files: string[]) => Promise<void>
@@ -95,10 +103,21 @@ const languageServiceRegistry = new Map<string, MonacoLanguageService>()
 let inlineProviderReady = false
 let languageProvidersReady = false
 
+const APPLY_CODE_ACTION = "vector.applyCodeAction"
+
 function languagePosition(position: monaco.Position): LanguagePosition {
   return {
     line: position.lineNumber - 1,
     character: position.column - 1,
+  }
+}
+
+// Monaco ranges are 1-based; the language protocol is 0-based. The inverse of
+// monacoRange below.
+function languageRange(range: monaco.IRange): LanguageRange {
+  return {
+    start: { line: range.startLineNumber - 1, character: range.startColumn - 1 },
+    end: { line: range.endLineNumber - 1, character: range.endColumn - 1 },
   }
 }
 
@@ -221,6 +240,40 @@ function ensureLanguageProviders() {
             },
           ]
         })
+      },
+    },
+  )
+
+  // The lightbulb: extract function, inline variable, add the missing import,
+  // fix this diagnostic. Edits are applied through the same path as rename
+  // rather than handed back to Monaco, because an action can touch files that
+  // have no open model and Monaco will not create one for us.
+  monaco.editor.registerCommand(APPLY_CODE_ACTION, async (_accessor, key: string, files: MonacoLanguageFileEdit[]) => {
+    const service = languageServiceRegistry.get(key)
+    if (!service || !files?.length) return
+    await applyRenameEdits(service, files)
+  })
+
+  monaco.languages.registerCodeActionProvider(
+    { pattern: "**" },
+    {
+      provideCodeActions: async (model, range) => {
+        const key = model.uri.toString()
+        const service = languageServiceRegistry.get(key)
+        if (!service?.codeActions) return { actions: [], dispose: () => {} }
+        // The server reads the file from disk, so unsaved edits must land first
+        // or it computes actions against stale text.
+        await service.writeFile(model.uri.fsPath, model.getValue())
+        const found = await service.codeActions(model.uri.fsPath, languageRange(range)).catch(() => [])
+        return {
+          actions: found.map((action) => ({
+            title: action.title,
+            kind: action.kind ?? "refactor",
+            isPreferred: action.isPreferred,
+            command: { id: APPLY_CODE_ACTION, title: action.title, arguments: [key, action.files] },
+          })),
+          dispose: () => {},
+        }
       },
     },
   )

@@ -2492,6 +2492,22 @@ export type LspRenameResult = {
   files: Array<LspFileEdit>
 }
 
+export type LspCodeActionRequest = {
+  file: string
+  range: Range
+}
+
+export type LspCodeAction = {
+  title: string
+  kind?: string
+  isPreferred?: boolean
+  files: Array<LspFileEdit>
+}
+
+export type LspCodeActionResult = {
+  actions: Array<LspCodeAction>
+}
+
 export type FormatterStatus = {
   name: string
   extensions: Array<string>
@@ -8783,6 +8799,34 @@ export type LspRenameResponses = {
 }
 
 export type LspRenameResponse = LspRenameResponses[keyof LspRenameResponses]
+
+export type LspCodeActionData = {
+  body?: LspCodeActionRequest
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/lsp/code-action"
+}
+
+export type LspCodeActionErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type LspCodeActionError = LspCodeActionErrors[keyof LspCodeActionErrors]
+
+export type LspCodeActionResponses = {
+  /**
+   * Available code actions
+   */
+  200: LspCodeActionResult
+}
+
+export type LspCodeActionResponse = LspCodeActionResponses[keyof LspCodeActionResponses]
 
 export type FormatterStatusData = {
   body?: never

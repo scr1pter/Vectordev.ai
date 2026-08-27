@@ -2511,6 +2511,13 @@ export function CodespaceWorkbench(props: {
           lspRenameRequest: { file: workspacePath(path), ...position, newName },
         })
         .then((result) => result.data?.files ?? []),
+    codeActions: (path, range) =>
+      sdk()
+        .client.lsp.codeAction({
+          directory: sdk().directory,
+          lspCodeActionRequest: { file: workspacePath(path), range },
+        })
+        .then((result) => result.data?.actions ?? []),
     readFile: async (path) => {
       const result = await sdk().client.file.read({
         directory: sdk().directory,

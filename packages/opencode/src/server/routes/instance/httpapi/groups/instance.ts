@@ -70,6 +70,7 @@ export const InstancePaths = {
   lspReferences: "/lsp/references",
   lspSymbols: "/lsp/symbols",
   lspRename: "/lsp/rename",
+  lspCodeAction: "/lsp/code-action",
   formatter: "/formatter",
 } as const
 
@@ -271,6 +272,18 @@ export const InstanceApi = HttpApi.make("instance")
             identifier: "lsp.rename",
             summary: "Rename symbol",
             description: "Return language-server workspace edits for a safe symbol rename.",
+          }),
+        ),
+        HttpApiEndpoint.post("lspCodeAction", InstancePaths.lspCodeAction, {
+          query: WorkspaceRoutingQuery,
+          payload: LSP.CodeActionRequest,
+          success: described(LSP.CodeActionResult, "Available code actions"),
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "lsp.codeAction",
+            summary: "Get code actions",
+            description:
+              "Return language-server refactors and quick fixes for a range: extract, inline, add missing import, fix diagnostic.",
           }),
         ),
         HttpApiEndpoint.get("formatter", InstancePaths.formatter, {

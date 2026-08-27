@@ -167,6 +167,31 @@ export const instanceHandlers = HttpApiBuilder.group(InstanceHttpApi, "instance"
       return { files: normalizeWorkspaceEdits(result) }
     })
 
+    const lspCodeAction = Effect.fn("InstanceHttpApi.lspCodeAction")(function* (ctx: {
+      payload: LSP.CodeActionRequest
+    }) {
+      if (!lsp.codeAction) return { actions: [] }
+      const file = yield* resolveLspFile(ctx.payload.file)
+      const raw = yield* lsp.codeAction({ ...ctx.payload, file })
+      const actions: LSP.CodeAction[] = []
+      for (const entry of raw) {
+        const item = record(entry)
+        if (!item || typeof item.title !== "string") continue
+        // Command-only actions are dropped on purpose: applying one needs
+        // workspace/executeCommand, and listing an action the editor cannot
+        // apply is worse than not listing it.
+        const files = item.edit ? normalizeWorkspaceEdits(item.edit) : []
+        if (!files.length) continue
+        actions.push({
+          title: item.title,
+          kind: typeof item.kind === "string" ? item.kind : undefined,
+          isPreferred: item.isPreferred === true ? true : undefined,
+          files,
+        })
+      }
+      return { actions }
+    })
+
     const getFormatter = Effect.fn("InstanceHttpApi.formatter")(function* () {
       return yield* format.status()
     })
@@ -190,6 +215,7 @@ export const instanceHandlers = HttpApiBuilder.group(InstanceHttpApi, "instance"
       .handle("lspReferences", lspReferences)
       .handle("lspSymbols", lspSymbols)
       .handle("lspRename", lspRename)
+      .handle("lspCodeAction", lspCodeAction)
       .handle("formatter", getFormatter)
   }),
 )
