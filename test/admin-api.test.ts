@@ -10,6 +10,7 @@ import {
   MAX_GRACE_EXTENSION_DAYS,
   requireOperator,
   searchLicences,
+  seenWithin,
   summarise,
   toOperatorLicence,
 } from "../api/_lib/admin"
@@ -192,6 +193,10 @@ describe("counting and finding licences", () => {
       revoked: 1,
       activated: 1,
       neverActivated: 3,
+      onlineNow: 0,
+      activeToday: 0,
+      activeThisWeek: 0,
+      dormant: 1,
     })
   })
 
@@ -217,5 +222,45 @@ describe("listing every licensee", () => {
   test("a page that reports more but returns nothing does not loop forever", async () => {
     const stripe = { customers: { list: async () => ({ data: [], has_more: true }) } } as never
     expect((await listVectorLicences(stripe)).length).toBe(0)
+  })
+})
+
+describe("active installs", () => {
+  // The desktop licence gate re-checks every 15 minutes while Vector is open,
+  // and every check stamps last_seen_at. That makes this a real usage signal
+  // rather than a count of who once activated.
+  const at = (iso: string) =>
+    toOperatorLicence(
+      { id: "c", metadata: { vector_license_hash: "1", vector_device_hash: "d".repeat(64), vector_last_seen_at: iso } },
+      NOW,
+    )
+
+  test("a licence seen minutes ago is online now", () => {
+    expect(seenWithin(at("2026-08-26T11:52:00.000Z"), 20 * 60 * 1_000, NOW)).toBe(true)
+  })
+
+  test("the window is a little wider than the 15 minute re-check", () => {
+    // Otherwise a client that is slightly late, or mid-request, flickers out.
+    expect(seenWithin(at("2026-08-26T11:44:00.000Z"), 20 * 60 * 1_000, NOW)).toBe(true)
+    expect(seenWithin(at("2026-08-26T11:30:00.000Z"), 20 * 60 * 1_000, NOW)).toBe(false)
+  })
+
+  test("a licence never seen counts as neither online nor active", () => {
+    const never = toOperatorLicence({ id: "c", metadata: { vector_license_hash: "1" } }, NOW)
+    expect(seenWithin(never, 7 * 24 * 60 * 60 * 1_000, NOW)).toBe(false)
+  })
+
+  test("counts separate online, today, this week and dormant", () => {
+    const licences = [
+      at("2026-08-26T11:55:00.000Z"),
+      at("2026-08-26T02:00:00.000Z"),
+      at("2026-08-22T12:00:00.000Z"),
+      at("2026-06-01T12:00:00.000Z"),
+    ]
+    const summary = summarise(licences, NOW)
+    expect(summary.onlineNow).toBe(1)
+    expect(summary.activeToday).toBe(2)
+    expect(summary.activeThisWeek).toBe(3)
+    expect(summary.dormant).toBe(1)
   })
 })

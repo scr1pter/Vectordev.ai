@@ -35,7 +35,7 @@ export const prerender = true
         <thead>
           <tr>
             <th>Customer</th><th>State</th><th>Plan</th><th>Device</th>
-            <th>Activated</th><th>Moves</th><th>Renews</th><th>Actions</th>
+            <th>Last seen</th><th>Activated</th><th>Moves</th><th>Renews</th><th>Actions</th>
           </tr>
         </thead>
         <tbody data-rows></tbody>
@@ -187,7 +187,11 @@ export const prerender = true
 
       const STATS = [
         ["total", "licences"],
-        ["active", "active"],
+        ["onlineNow", "online now"],
+        ["activeToday", "active today"],
+        ["activeThisWeek", "active this week"],
+        ["dormant", "dormant 30d+"],
+        ["active", "active licence"],
         ["grace", "in grace"],
         ["pastDue", "past due"],
         ["canceling", "canceling"],
@@ -269,6 +273,20 @@ export const prerender = true
             device.textContent = "—"
           }
 
+          // "Last seen" is the honest answer to who is actually using Vector:
+          // the desktop licence gate re-checks every 15 minutes while the app
+          // is open, and each check stamps it.
+          const seen = document.createElement("td")
+          if (licence.lastSeenAt) {
+            const ago = Date.now() - Date.parse(licence.lastSeenAt)
+            const mins = Math.round(ago / 60000)
+            seen.textContent =
+              mins < 20 ? "online now" : mins < 90 ? `${mins}m ago` : ago < 86400000 ? `${Math.round(ago / 3600000)}h ago` : `${Math.round(ago / 86400000)}d ago`
+            if (mins < 20) seen.style.color = "#7ce0aa"
+          } else {
+            seen.textContent = "never"
+          }
+
           const activated = document.createElement("td")
           activated.textContent = date(licence.activatedAt)
 
@@ -295,7 +313,7 @@ export const prerender = true
           if (licence.state === "past_due" || licence.state === "grace") add("+7d grace", "extend-grace")
           actions.appendChild(box)
 
-          tr.append(who, state, plan, device, activated, moves, renews, actions)
+          tr.append(who, state, plan, device, seen, activated, moves, renews, actions)
           rows.appendChild(tr)
         }
       }
@@ -310,7 +328,9 @@ export const prerender = true
           paintRows(all)
           el("[data-toolbar]").hidden = false
           el("[data-table-wrap]").hidden = false
-          say(`${payload.summary.total} licences · ${payload.summary.active} active`)
+          say(
+            `${payload.summary.total} licences · ${payload.summary.onlineNow} online now · ${payload.summary.activeToday} active today · ${payload.summary.active} on an active plan`,
+          )
           sessionStorage.setItem("vector-ops-token", token)
         } catch (error) {
           say(error.message, "error")

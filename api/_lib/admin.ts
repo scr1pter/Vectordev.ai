@@ -54,6 +54,13 @@ export type LicenceSummary = {
   revoked: number
   activated: number
   neverActivated: number
+  /** Installs that phoned home recently. The desktop licence gate re-checks
+   *  every 15 minutes while Vector is open and each check stamps last_seen_at,
+   *  so these are genuine usage counts, not activation counts. */
+  onlineNow: number
+  activeToday: number
+  activeThisWeek: number
+  dormant: number
 }
 
 function operatorToken() {
@@ -182,9 +189,25 @@ export function isVectorLicensee(customer: { metadata?: Record<string, string> }
   return Boolean(meta.vector_license_hash || meta.vector_subscription_id || meta.vector_checkout_session_id)
 }
 
-export function summarise(licences: readonly OperatorLicence[]): LicenceSummary {
+export const ONLINE_WINDOW_MS = 20 * 60 * 1_000
+export const DAY_MS = 24 * 60 * 60 * 1_000
+
+export function seenWithin(licence: OperatorLicence, windowMs: number, now: Date) {
+  if (!licence.lastSeenAt) return false
+  const seen = Date.parse(licence.lastSeenAt)
+  return Number.isFinite(seen) && now.getTime() - seen <= windowMs
+}
+
+export function summarise(licences: readonly OperatorLicence[], now = new Date()): LicenceSummary {
   const of = (state: OperatorLicenceState) => licences.filter((licence) => licence.state === state).length
+  const within = (ms: number) => licences.filter((licence) => seenWithin(licence, ms, now)).length
   return {
+    // A little wider than the 15-minute re-check so a client that is slightly
+    // late, or was mid-request, does not flicker out of "online".
+    onlineNow: within(ONLINE_WINDOW_MS),
+    activeToday: within(DAY_MS),
+    activeThisWeek: within(7 * DAY_MS),
+    dormant: licences.filter((licence) => licence.deviceFingerprint && !seenWithin(licence, 30 * DAY_MS, now)).length,
     total: licences.length,
     active: of("active"),
     canceling: of("canceling"),
