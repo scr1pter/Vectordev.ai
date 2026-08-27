@@ -36,6 +36,10 @@ const keep = new Set([
   // The feed the desktop app polls for "what's new". Pruning it is what made
   // the release-notes dialog silently never run.
   "changelog.json",
+  // The operator console. Pruning it is what made /admin/licenses 404 while its
+  // API answered fine — the endpoints are Vercel functions and never lived in
+  // dist, so only the page disappeared.
+  "admin",
   "vector-logo.png",
   "vector-space-backdrop.png",
 ])

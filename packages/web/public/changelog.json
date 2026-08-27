@@ -1,20 +1,6 @@
 {
   "releases": [
     {
-      "tag": "v1.19.98",
-      "highlights": [
-        {
-          "source": "desktop",
-          "items": [
-            {
-              "title": "Every refactor your language server knows, and a console for licences",
-              "description": "The editor gained the refactor menu. Vector could already rename a symbol across a project through the language server, but the rest of what a language server offers — extract this into a function, extract a variable, inline it, add the missing import, fix the diagnostic under the cursor — was never wired to anything, so the lightbulb never appeared. It does now: put the cursor on a selection and the actions your language server already computes are listed and applied across every file they touch, including files you have not opened. Actions that carry a workspace edit are the ones offered. The protocol also allows an action to be a command the server runs itself, and those are deliberately left out rather than listed and then quietly failing to apply. Licensing gained an operator console at /admin/licenses. Every billing endpoint until now acted only on the caller's own licence, proved by a signed token from their own machine, which meant there was no way to answer how many customers there are, who is in a payment grace period, or whose laptop died and needs its seat freed — short of reading Stripe metadata by hand. The console lists every licence with its state, plan, bound machine, activation date, transfer count and renewal date, counts them by state, and offers the four actions support actually needs: free a device, revoke, restore, and extend a grace period. Freeing a device also clears the transfer window, because a customer who has already used their moves this month would otherwise be blocked again by the very limit that sent them to support. Two things it deliberately does not do: the licence key is never listed, since it is derived from an HMAC and never stored, and machine fingerprints are truncated — an operator console is for answering support questions, not for collecting a copy of the customer database. It refuses to run at all unless an operator token of at least thirty-two characters is configured, reads that token only from the request header so it cannot leak through access logs or browser history, and is kept out of the sitemap and search results."
-            }
-          ]
-        }
-      ]
-    },
-    {
       "tag": "v1.19.97",
       "highlights": [
         {
