@@ -5,11 +5,13 @@ import {
   createServerProjects,
   isInternalProjectPath,
   isManagedAgentWorkspacePath,
+  isUsableProjectPath,
   migrateCanonicalLocalServerState,
   nextServerAfterRemoval,
   pruneMissingLocalProjects,
   resolveServerList,
   ServerConnection,
+  validatedRouteProjectPath,
 } from "./server"
 import { ServerScope } from "@/utils/server-scope"
 
@@ -158,6 +160,37 @@ describe("isInternalProjectPath", () => {
       isInternalProjectPath("/Users/me/Library/Application Support/Vector/work-projects/launch-project-ab12"),
     ).toBe(true)
     expect(isInternalProjectPath("/Users/me/code/launch-project")).toBe(false)
+  })
+})
+
+describe("isUsableProjectPath", () => {
+  test("accepts normal Unicode paths and rejects corrupted persisted values", () => {
+    expect(isUsableProjectPath("/Users/me/代码/vector")).toBe(true)
+    expect(isUsableProjectPath("C:\\Users\\me\\Vector")).toBe(true)
+    expect(isUsableProjectPath("\\\\server\\share\\Vector")).toBe(true)
+    expect(isUsableProjectPath("��>��,��")).toBe(false)
+    expect(isUsableProjectPath("/Users/me/Vector\nother")).toBe(false)
+    expect(isUsableProjectPath("relative/project")).toBe(false)
+    expect(isUsableProjectPath("https://example.com/repository")).toBe(false)
+    expect(isUsableProjectPath("   ")).toBe(false)
+  })
+})
+
+describe("validatedRouteProjectPath", () => {
+  test("requires an absolute, non-internal path", () => {
+    expect(validatedRouteProjectPath("relative/project", false, undefined, ["relative/project"])).toBe("")
+    expect(validatedRouteProjectPath("https://example.com/repository", false, undefined, [])).toBe("")
+    expect(validatedRouteProjectPath("/tmp/work-projects/agent", false, undefined, [])).toBe("")
+    expect(validatedRouteProjectPath("/Users/me/Vector", false, undefined, [])).toBe("")
+    expect(validatedRouteProjectPath("/Users/me/Vector", false, undefined, ["/Users/me/Vector/"])).toBe(
+      "/Users/me/Vector",
+    )
+  })
+
+  test("pairs a parent session only with its own project directory", () => {
+    expect(validatedRouteProjectPath("/Users/me/Vector", true, undefined, [])).toBe("")
+    expect(validatedRouteProjectPath("/Users/me/Vector", true, "/Users/me/Other", [])).toBe("")
+    expect(validatedRouteProjectPath("/Users/me/Vector/", true, "/Users/me/Vector", [])).toBe("/Users/me/Vector/")
   })
 })
 

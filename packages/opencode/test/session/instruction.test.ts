@@ -210,6 +210,18 @@ describe("Instruction.resolve", () => {
 })
 
 describe("Instruction.system", () => {
+  it.live("does not silently drop an unreadable repository rules target", () =>
+    provideTmpdirInstance((dir) =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        yield* fs.makeDirectory(path.join(dir, ".vector", "RULES.md"), { recursive: true })
+        const result = yield* (yield* Instruction.Service).system().pipe(Effect.exit)
+
+        expect(result._tag).toBe("Failure")
+      }).pipe(provideInstruction({ home: dir, config: dir })),
+    ),
+  )
+
   it.live("loads both project and global AGENTS.md when both exist", () =>
     Effect.gen(function* () {
       const globalTmp = yield* tmpWithFiles({ "AGENTS.md": "# Global Instructions" })
@@ -258,6 +270,41 @@ describe("Instruction.systemPaths global config", () => {
         const svc = yield* Instruction.Service
         const paths = yield* svc.systemPaths()
         expect(paths.has(path.join(globalTmp, "AGENTS.md"))).toBe(true)
+      }).pipe(provideInstance(projectTmp), provideInstruction({ home: globalTmp, config: globalTmp }))
+    }),
+  )
+
+  it.live("loads global Vector rules additively with AGENTS.md", () =>
+    Effect.gen(function* () {
+      const globalTmp = yield* tmpWithFiles({
+        "AGENTS.md": "# Global Instructions",
+        "RULES.md": "# Global rules\n\n- Never commit generated credentials.",
+      })
+      const projectTmp = yield* tmpdirScoped()
+
+      yield* Effect.gen(function* () {
+        const svc = yield* Instruction.Service
+        const paths = yield* svc.systemPaths()
+        expect(paths.has(path.join(globalTmp, "AGENTS.md"))).toBe(true)
+        expect(paths.has(path.join(globalTmp, "RULES.md"))).toBe(true)
+      }).pipe(provideInstance(projectTmp), provideInstruction({ home: globalTmp, config: globalTmp }))
+    }),
+  )
+
+  it.live("loads local memory additively with global instructions", () =>
+    Effect.gen(function* () {
+      const globalTmp = yield* tmpWithFiles({
+        "AGENTS.md": "# Global Instructions",
+        "MEMORY.md": "# Working preferences\n\n- Use Bun for JavaScript projects.",
+      })
+      const projectTmp = yield* tmpdirScoped()
+
+      yield* Effect.gen(function* () {
+        const svc = yield* Instruction.Service
+        const paths = yield* svc.systemPaths()
+        expect(paths.has(path.join(globalTmp, "AGENTS.md"))).toBe(true)
+        expect(paths.has(path.join(globalTmp, "MEMORY.md"))).toBe(true)
+        expect((yield* svc.system()).join("\n")).toContain("Use Bun for JavaScript projects.")
       }).pipe(provideInstance(projectTmp), provideInstruction({ home: globalTmp, config: globalTmp }))
     }),
   )

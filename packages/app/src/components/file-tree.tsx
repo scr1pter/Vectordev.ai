@@ -38,6 +38,23 @@ export type Filter = {
   dirs: Set<string>
 }
 
+export const CODESPACE_EXCLUDED_DIRECTORIES = [
+  ".git",
+  ".next",
+  ".turbo",
+  "build",
+  "coverage",
+  "dist",
+  "node_modules",
+  "out",
+  "target",
+  "vendor",
+] as const
+
+export function fileTreeNodeExcluded(node: Pick<FileNode, "name" | "type">, directories?: readonly string[]) {
+  return node.type === "directory" && Boolean(directories?.includes(node.name))
+}
+
 export function shouldListRoot(input: { level: number; dir?: { loaded?: boolean; loading?: boolean } }) {
   if (input.level !== 0) return false
   if (input.dir?.loaded) return false
@@ -233,6 +250,7 @@ export default function FileTree(props: {
   modified?: readonly string[]
   kinds?: ReadonlyMap<string, Kind>
   markers?: ReadonlyMap<string, readonly FileTreeMarker[]>
+  excludeDirectories?: readonly string[]
   draggable?: boolean
   onFileClick?: (file: FileNode) => void
 
@@ -359,7 +377,9 @@ export default function FileTree(props: {
   )
 
   const nodes = createMemo(() => {
-    const nodes = file.tree.children(props.path)
+    const nodes = file.tree
+      .children(props.path)
+      .filter((node) => !fileTreeNodeExcluded(node, props.excludeDirectories))
     const current = filter()
     if (!current) return nodes
 
@@ -473,6 +493,7 @@ export default function FileTree(props: {
                         modified={props.modified}
                         kinds={props.kinds}
                         markers={props.markers}
+                        excludeDirectories={props.excludeDirectories}
                         active={props.active}
                         draggable={props.draggable}
                         onFileClick={props.onFileClick}

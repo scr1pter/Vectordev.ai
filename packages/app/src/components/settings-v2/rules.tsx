@@ -1,4 +1,4 @@
-import { createSignal, For, onMount, Show } from "solid-js"
+import { createEffect, createSignal, For, Show } from "solid-js"
 
 type RepoRule = {
   id: string
@@ -28,30 +28,54 @@ function api(): RepoRulesApi | undefined {
   return (globalThis.window as unknown as { api?: { repoRules?: RepoRulesApi } } | undefined)?.api?.repoRules
 }
 
-function projectRoot() {
-  return (globalThis.window as unknown as { api?: { projectPath?: string } } | undefined)?.api?.projectPath ?? ""
-}
-
 function scopeLabel(rule: RepoRule) {
-  const where = rule.repositoryPath ? rule.repositoryPath.split("/").filter(Boolean).at(-1) : "Every project"
+  const where = rule.repositoryPath ? rule.repositoryPath.split(/[\\/]/).filter(Boolean).at(-1) : "Every project"
   if (!rule.filePatterns.length) return where
   return `${where} · ${rule.filePatterns.join(", ")}`
 }
 
-// Standards the team writes in plain English, scoped to a repository and
-// optionally to the files they govern. Saved rules are written to
-// .vector/RULES.md in the repository — a committed file the engine already
-// loads on every prompt — so they travel with the clone instead of living in
-// one developer's application data.
-export function SettingsRulesV2() {
+export function ruleRepositoryPath(repositoryPath?: string) {
+  return repositoryPath?.trim() ?? ""
+}
+
+export function ruleSaveInput(input: {
+  id: string
+  description: string
+  repositoryPath: string
+  filePatterns: string
+}): SaveRepoRuleInput {
+  return {
+    id: input.id || undefined,
+    description: input.description,
+    repositoryPath: input.repositoryPath.trim(),
+    filePatterns: input.filePatterns
+      .split(",")
+      .map((pattern) => pattern.trim())
+      .filter(Boolean),
+  }
+}
+
+export function ruleDeleteAction(confirmingID: string, ruleID: string) {
+  return confirmingID === ruleID ? "delete" : "confirm"
+}
+
+// Standards the team writes in plain English, scoped globally or to a
+// repository and optionally to the files they govern. Repository rules travel
+// with the clone while global rules stay in Vector's local configuration.
+export function SettingsRulesV2(props: { repositoryPath?: string }) {
   const [rules, setRules] = createSignal<RepoRule[]>([])
   const [description, setDescription] = createSignal("")
   const [repository, setRepository] = createSignal("")
   const [patterns, setPatterns] = createSignal("")
   const [editing, setEditing] = createSignal("")
+  const [confirmingDelete, setConfirmingDelete] = createSignal("")
   const [busy, setBusy] = createSignal(false)
   const [error, setError] = createSignal("")
   const [unavailable, setUnavailable] = createSignal(false)
+  const projectRoot = () => ruleRepositoryPath(props.repositoryPath)
+
+  const message = (action: string, cause: unknown) =>
+    `${action}: ${cause instanceof Error ? cause.message : String(cause)}`
 
   const refresh = async () => {
     const bridge = api()
@@ -59,17 +83,30 @@ export function SettingsRulesV2() {
       setUnavailable(true)
       return
     }
-    const next = await bridge.list().catch(() => undefined)
-    if (next) setRules(next)
+    setUnavailable(false)
+    // Scoped to the repository this panel was opened for. Calling list() bare
+    // returned every rule from every project, so each repo's panel showed all
+    // of them and "project rules" were not per-project at all.
+    const next = await bridge.list(projectRoot()).catch((cause: unknown) => {
+      setError(message("Vector could not load repository rules", cause))
+      return undefined
+    })
+    if (!next) return
+    setError("")
+    setRules(next)
   }
 
-  onMount(() => {
-    setRepository(projectRoot())
+  createEffect(() => {
+    const root = projectRoot()
+    if (!editing()) setRepository(root)
+    // Re-read whenever the repository changes: the panel is reused across
+    // projects, so a stale list would show the previous repo's rules.
     void refresh()
   })
 
   const reset = () => {
     setEditing("")
+    setConfirmingDelete("")
     setDescription("")
     setPatterns("")
     setRepository(projectRoot())
@@ -86,17 +123,16 @@ export function SettingsRulesV2() {
     setBusy(true)
     setError("")
     const saved = await bridge
-      .save({
-        id: editing() || undefined,
-        description: description(),
-        repositoryPath: repository().trim(),
-        filePatterns: patterns()
-          .split(",")
-          .map((pattern) => pattern.trim())
-          .filter(Boolean),
-      })
+      .save(
+        ruleSaveInput({
+          id: editing(),
+          description: description(),
+          repositoryPath: repository(),
+          filePatterns: patterns(),
+        }),
+      )
       .catch((cause: unknown) => {
-        setError(cause instanceof Error ? cause.message : String(cause))
+        setError(message("Vector could not save that rule", cause))
         return undefined
       })
     setBusy(false)
@@ -106,6 +142,7 @@ export function SettingsRulesV2() {
   }
 
   const edit = (rule: RepoRule) => {
+    setConfirmingDelete("")
     setEditing(rule.id)
     setDescription(rule.description)
     setRepository(rule.repositoryPath)
@@ -116,8 +153,10 @@ export function SettingsRulesV2() {
   const toggle = async (rule: RepoRule) => {
     const bridge = api()
     if (!bridge || busy()) return
+    setConfirmingDelete("")
     setBusy(true)
-    await bridge
+    setError("")
+    const saved = await bridge
       .save({
         id: rule.id,
         description: rule.description,
@@ -125,18 +164,35 @@ export function SettingsRulesV2() {
         filePatterns: rule.filePatterns,
         enabled: !rule.enabled,
       })
-      .catch(() => undefined)
+      .catch((cause: unknown) => {
+        setError(message(`Vector could not ${rule.enabled ? "disable" : "enable"} that rule`, cause))
+        return undefined
+      })
     setBusy(false)
+    if (!saved) return
     await refresh()
   }
 
   const remove = async (rule: RepoRule) => {
     const bridge = api()
     if (!bridge || busy()) return
+    if (ruleDeleteAction(confirmingDelete(), rule.id) === "confirm") {
+      setConfirmingDelete(rule.id)
+      setError("")
+      return
+    }
+    setConfirmingDelete("")
     setBusy(true)
-    const next = await bridge.remove(rule.id).catch(() => undefined)
+    setError("")
+    const next = await bridge.remove(rule.id).catch((cause: unknown) => {
+      setError(message("Vector could not delete that rule", cause))
+      return undefined
+    })
     setBusy(false)
-    if (next) setRules(next)
+    if (!next) return
+    // Not setRules(next): deleteRepoRule returns every rule, unscoped, which
+    // would repopulate this panel with other projects' rules. Re-read scoped.
+    await refresh()
     if (editing() === rule.id) reset()
   }
 
@@ -167,7 +223,7 @@ export function SettingsRulesV2() {
             when={!unavailable()}
             fallback={
               <p class="settings-v2-card-description">
-                Rules are stored on your computer and activate once Vector connects to this workspace.
+                Repository rules are available in the Vector desktop app after it connects to this workspace.
               </p>
             }
           >
@@ -206,9 +262,9 @@ export function SettingsRulesV2() {
                 </button>
               </Show>
             </div>
-            <Show when={error()}>
-              <p class="settings-v2-error">{error()}</p>
-            </Show>
+          </Show>
+          <Show when={error()}>
+            <p class="settings-v2-error" role="alert">{error()}</p>
           </Show>
         </div>
       </div>
@@ -218,22 +274,30 @@ export function SettingsRulesV2() {
           <div class="settings-v2-card-copy">
             <h3 class="settings-v2-card-title">Active rules</h3>
             <p class="settings-v2-card-description">
-              Saved to <code>.vector/RULES.md</code> in each repository, so committing that file shares the rules with
-              your whole team.
+              Repository rules live in <code>.vector/RULES.md</code> and travel with the clone. Every-project rules stay
+              in Vector's local global rules file.
             </p>
           </div>
         </div>
         <div class="settings-v2-card-body">
           <Show
-            when={rules().length}
-            fallback={<p class="settings-v2-card-description">No rules yet. The first one takes about ten seconds.</p>}
+            when={!unavailable()}
+            fallback={
+              <p class="settings-v2-card-description">
+                Connect the Vector desktop app to view rules for this workspace.
+              </p>
+            }
           >
-            <For each={rules()}>
-              {(rule) => (
-                <div class="settings-v2-list-item" classList={{ "is-off": !rule.enabled }}>
-                  <p class="settings-v2-list-title">{rule.description}</p>
-                  <p class="settings-v2-list-meta">{scopeLabel(rule)}</p>
-                  <div class="settings-v2-action-grid">
+            <Show
+              when={rules().length}
+              fallback={<p class="settings-v2-card-description">No rules yet. The first one takes about ten seconds.</p>}
+            >
+              <For each={rules()}>
+                {(rule) => (
+                  <div class="settings-v2-list-item" classList={{ "is-off": !rule.enabled }}>
+                    <p class="settings-v2-list-title">{rule.description}</p>
+                    <p class="settings-v2-list-meta">{scopeLabel(rule)}</p>
+                    <div class="settings-v2-action-grid">
                       <button type="button" class="settings-v2-action" disabled={busy()} onClick={() => edit(rule)}>
                         Edit
                       </button>
@@ -251,12 +315,13 @@ export function SettingsRulesV2() {
                         disabled={busy()}
                         onClick={() => void remove(rule)}
                       >
-                        Delete
-                    </button>
+                        {confirmingDelete() === rule.id ? "Confirm delete" : "Delete"}
+                      </button>
+                    </div>
                   </div>
-                </div>
-              )}
-            </For>
+                )}
+              </For>
+            </Show>
           </Show>
         </div>
       </div>

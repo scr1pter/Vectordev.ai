@@ -5,7 +5,7 @@ import type { Agent } from "../../src/agent/agent"
 import { NamedError } from "@opencode-ai/core/util/error"
 import { Skill } from "../../src/skill"
 import { Permission } from "../../src/permission"
-import { COMPLETION_POLICY, SUBAGENT_POLICY, SystemPrompt } from "../../src/session/system"
+import { COMPLETION_POLICY, LOCAL_MEMORY_POLICY, SUBAGENT_POLICY, SystemPrompt } from "../../src/session/system"
 import { MCP } from "../../src/mcp"
 import { testEffect } from "../lib/effect"
 
@@ -97,6 +97,10 @@ describe("session.system", () => {
       expect(SUBAGENT_POLICY).toContain("owned_paths")
       expect(SUBAGENT_POLICY).toContain("depends_on")
       expect(SUBAGENT_POLICY).toContain("inherit the current provider and model")
+      expect(SUBAGENT_POLICY).toContain("separate child sessions")
+      expect(SUBAGENT_POLICY).toContain("stop that coordination attempt")
+      expect(SUBAGENT_POLICY).toContain("Do not search outside the workspace")
+      expect(SUBAGENT_POLICY).toContain("report the unavailable exchange to the parent")
     }),
   )
 
@@ -105,6 +109,16 @@ describe("session.system", () => {
       expect(COMPLETION_POLICY).toContain("full implementation and verification loop")
       expect(COMPLETION_POLICY).toContain("three unsuccessful attempts")
       expect(COMPLETION_POLICY).toContain("Completion requires")
+    }),
+  )
+
+  it.effect("describes local memory storage and provider context honestly", () =>
+    Effect.sync(() => {
+      expect(LOCAL_MEMORY_POLICY).toContain("stored as plain Markdown only on this computer")
+      expect(LOCAL_MEMORY_POLICY).toContain("context sent to the model provider")
+      expect(LOCAL_MEMORY_POLICY).toContain("inspect, edit, or erase")
+      expect(LOCAL_MEMORY_POLICY).toContain("Do not create or update it on your own")
+      expect(LOCAL_MEMORY_POLICY).not.toContain("never leaves")
     }),
   )
 

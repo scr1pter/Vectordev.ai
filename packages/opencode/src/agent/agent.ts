@@ -182,6 +182,13 @@ const layer = Layer.effect(
           "cargo test*": "allow",
           "go test*": "allow",
         } as const
+        const readonlySpecialistBoundary = Permission.fromConfig({
+          edit: "deny",
+          write: "deny",
+          patch: "deny",
+          task: "deny",
+          bash: readonlyVerificationBash,
+        })
 
         const agents: Record<string, Info> = {
           build: {
@@ -260,18 +267,18 @@ const layer = Layer.effect(
             name: "explore",
             permission: Permission.merge(
               defaults,
+              user,
               Permission.fromConfig({
                 "*": "deny",
                 grep: "allow",
                 glob: "allow",
                 list: "allow",
-                bash: "allow",
+                bash: readonlyVerificationBash,
                 webfetch: "allow",
                 websearch: "allow",
                 read: "allow",
                 external_directory: readonlyExternalDirectory,
               }),
-              user,
             ),
             description: `Fast agent specialized for exploring codebases. Use this when you need to quickly find files by patterns (eg. "src/components/**/*.tsx"), search code for keywords (eg. "API endpoints"), or answer questions about the codebase (eg. "how do API endpoints work?"). When calling this agent, specify the desired thoroughness level: "quick" for basic searches, "medium" for moderate exploration, or "very thorough" for comprehensive analysis across multiple locations and naming conventions.`,
             prompt: PROMPT_EXPLORE,
@@ -489,6 +496,15 @@ const layer = Layer.effect(
           item.steps = value.steps ?? item.steps
           item.options = mergeDeep(item.options, value.options ?? {})
           item.permission = Permission.merge(item.permission, Permission.fromConfig(value.permission ?? {}))
+        }
+
+        // Repository config may customize native agents, but a checked-in
+        // config must not turn a read-only specialist into a mutation-capable
+        // child behind the parent's back.
+        for (const name of ["explore", "review", "judge", "security"]) {
+          const item = agents[name]
+          if (!item) continue
+          item.permission = Permission.merge(item.permission, readonlySpecialistBoundary)
         }
 
         // Ensure Truncate.GLOB is allowed unless explicitly configured

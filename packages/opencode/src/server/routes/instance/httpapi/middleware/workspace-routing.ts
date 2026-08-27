@@ -30,7 +30,7 @@ type RemoteTarget = Extract<Target, { type: "remote" }>
 
 type RequestPlan = Data.TaggedEnum<{
   InvalidWorkspace: {}
-  MissingWorkspace: { readonly workspaceID: WorkspaceV2.ID }
+  MissingWorkspace: { readonly workspaceID: string }
   Local: { readonly directory: string; readonly workspaceID?: WorkspaceV2.ID }
   Remote: {
     readonly request: HttpServerRequest.HttpServerRequest
@@ -66,12 +66,7 @@ function configuredWorkspaceID(): WorkspaceV2.ID | undefined {
   return Flag.OPENCODE_WORKSPACE_ID ? WorkspaceV2.ID.make(Flag.OPENCODE_WORKSPACE_ID) : undefined
 }
 
-function selectedWorkspaceID(url: URL, sessionWorkspaceID?: WorkspaceV2.ID): WorkspaceV2.ID | undefined {
-  const workspaceParam = url.searchParams.get("workspace")
-  return sessionWorkspaceID ?? (workspaceParam ? WorkspaceV2.ID.make(workspaceParam) : undefined)
-}
-
-function selectedV2WorkspaceID(
+function selectedWorkspaceID(
   url: URL,
   sessionWorkspaceID?: WorkspaceV2.ID,
 ): WorkspaceV2.ID | typeof InvalidWorkspaceID | undefined {
@@ -99,7 +94,7 @@ function resolveWorkspace(
   return Workspace.Service.use((workspace) => workspace.get(id))
 }
 
-function missingWorkspaceResponse(id: WorkspaceV2.ID): HttpServerResponse.HttpServerResponse {
+function missingWorkspaceResponse(id: string): HttpServerResponse.HttpServerResponse {
   return HttpServerResponse.text(`Workspace not found: ${id}`, {
     status: 500,
     contentType: "text/plain; charset=utf-8",
@@ -164,10 +159,11 @@ function planRequest(
   return Effect.gen(function* () {
     const url = requestURL(request)
     const envWorkspaceID = configuredWorkspaceID()
-    const workspaceID = url.pathname.startsWith("/api/")
-      ? selectedV2WorkspaceID(url, session?.workspaceID)
-      : selectedWorkspaceID(url, session?.workspaceID)
-    if (workspaceID === InvalidWorkspaceID) return RequestPlan.InvalidWorkspace()
+    const workspaceID = selectedWorkspaceID(url, session?.workspaceID)
+    if (workspaceID === InvalidWorkspaceID) {
+      if (url.pathname.startsWith("/api/")) return RequestPlan.InvalidWorkspace()
+      return RequestPlan.MissingWorkspace({ workspaceID: url.searchParams.get("workspace") ?? "unknown" })
+    }
     const workspace = yield* resolveWorkspace(workspaceID, envWorkspaceID)
 
     if (workspaceID && workspace === undefined && !envWorkspaceID) {

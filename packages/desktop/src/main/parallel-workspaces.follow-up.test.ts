@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
 import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import type { ExternalAgentRunResult, RunExternalAgentInput } from "./external-agents"
 
 let userDataPath = ""
 const store = new Map<string, Map<string, unknown>>()
@@ -38,8 +39,6 @@ mock.module("./store", () => ({
   },
   removeStoreFileIfEmpty: () => undefined,
 }))
-// drainParallelRunQueue fires synchronously off followUpParallelWorkspace, so
-// without this a queued happy-path test would spawn a real CLI.
 type StubRunInput = { runtime: string; prompt: string; resumeSessionId?: string }
 type StubRunResult = { exitCode: number; summary: string; output: string[]; resumeRejected?: boolean }
 const runCalls: StubRunInput[] = []
@@ -48,15 +47,12 @@ let runHandler = async (_input: StubRunInput, _index: number): Promise<StubRunRe
   summary: "stubbed",
   output: [],
 })
-mock.module("./external-agents", () => ({
-  runExternalCodingAgent: async (input: StubRunInput) => {
+const dependencies = {
+  runExternalCodingAgent: async (input: RunExternalAgentInput): Promise<ExternalAgentRunResult> => {
     runCalls.push(input)
     return runHandler(input, runCalls.length - 1)
   },
-  detectExternalAgents: async () => [],
-  openInEditor: async () => ({ ok: true }),
-  prepareWorkspace: async () => ({ path: userDataPath, isolation: "copy" }),
-}))
+}
 
 const { followUpParallelWorkspace, listParallelWorkspaces, refreshParallelWorkspace, stopParallelWorkspace } =
   await import("./parallel-workspaces")
@@ -152,6 +148,39 @@ describe("sending a follow-up to an external workspace", () => {
     await expect(followUpParallelWorkspace(seeded.id, engine, "hi")).rejects.toThrow("cannot be continued")
   })
 
+  test("closed workspace history drops review-only payloads before the next store write", async () => {
+    const seeded = await seed({
+      status: "discarded",
+      mergeState: "discarded",
+      changedFilesCount: 2,
+      changedFiles: ["large-a.ts", "large-b.ts"],
+      diff: "large diff\n".repeat(10_000),
+      baselineHashes: { "large-a.ts": "a", "large-b.ts": "b" },
+    })
+
+    const listed = listParallelWorkspaces().find((record) => record.id === seeded.id)!
+    expect(listed.changedFilesCount).toBe(2)
+    expect(listed.changedFiles).toEqual([])
+    expect(listed.diff).toBe("")
+    expect(listed.baselineHashes).toBeUndefined()
+
+    const persisted = store.get("parallel-workspaces-state")?.get("records") as (typeof listed)[]
+    expect(persisted[0]?.diff).toBe("")
+    expect(persisted[0]?.baselineHashes).toBeUndefined()
+  })
+
+  test("an open review keeps the payload required for selective merge", async () => {
+    const seeded = await seed({
+      diff: "diff --git a/a.ts b/a.ts",
+      baselineHashes: { "a.ts": "hash" },
+    })
+
+    const listed = listParallelWorkspaces().find((record) => record.id === seeded.id)!
+    expect(listed.changedFiles).toEqual(["a.ts"])
+    expect(listed.diff).toContain("diff --git")
+    expect(listed.baselineHashes).toEqual({ "a.ts": "hash" })
+  })
+
   test("a workspace whose isolated folder is gone is refused rather than silently rebuilt", async () => {
     // ensureParallelWorkspaceIsolation would rebuild it as a fresh copy, which
     // discards exactly the work being followed up on.
@@ -162,7 +191,7 @@ describe("sending a follow-up to an external workspace", () => {
   test("the message is appended as a user turn and the record is left queued", async () => {
     const seeded = await seed()
     started.push(seeded.id)
-    const queued = await followUpParallelWorkspace(seeded.id, engine, "now add a test")
+    const queued = await followUpParallelWorkspace(seeded.id, engine, "now add a test", dependencies)
     const userTurns = (queued.turns ?? []).filter((turn) => turn.role === "user")
     expect(userTurns.length).toBe(1)
     expect(userTurns[0]?.text).toBe("now add a test")
@@ -175,7 +204,7 @@ describe("sending a follow-up to an external workspace", () => {
   test("a refresh mid-turn does not flip the record out from under the running agent", async () => {
     const seeded = await seed()
     started.push(seeded.id)
-    await followUpParallelWorkspace(seeded.id, engine, "now add a test")
+    await followUpParallelWorkspace(seeded.id, engine, "now add a test", dependencies)
     // The turn has already been picked up by the queue drain, so the status has
     // legitimately advanced. What must NOT happen is a flip to "needs review"
     // under the running agent, which is what the activeRuns/queuedRuns gate
@@ -184,20 +213,34 @@ describe("sending a follow-up to an external workspace", () => {
     expect(refreshed.status).not.toBe("needs review")
   })
 
-  // cursor-agent could not be installed on this machine, so its resume flags are
-  // an informed guess. This is the guarantee that makes shipping that guess
-  // defensible: a CLI that refuses the flags re-briefs instead of failing.
+  test("every external runtime turn is told to load repository-authored Vector rules", async () => {
+    const seeded = await seed()
+    started.push(seeded.id)
+    await followUpParallelWorkspace(seeded.id, engine, "now add a test", dependencies)
+    await settle(seeded.id)
+
+    expect(runCalls[0]?.prompt).toContain("Read .vector/RULES.md when present before making changes")
+    expect(runCalls[0]?.prompt).toContain("teammate-authored content outside Vector's managed rules block")
+  })
+
+  // A future CLI can still retire a verified resume flag. The compatibility
+  // guarantee is that a refusal re-briefs instead of failing.
   test("a refused resume re-briefs the agent instead of reporting a broken run", async () => {
     const seeded = await seed({ runtime: "cursor" })
     started.push(seeded.id)
     runHandler = async (input, index) => {
       if (index === 0 && input.resumeSessionId) {
-        return { exitCode: 2, summary: "", output: ["[stderr] error: unexpected argument '--resume'"], resumeRejected: true }
+        return {
+          exitCode: 2,
+          summary: "",
+          output: ["[stderr] error: unexpected argument '--resume'"],
+          resumeRejected: true,
+        }
       }
       return { exitCode: 0, summary: "re-briefed and done", output: [] }
     }
 
-    await followUpParallelWorkspace(seeded.id, engine, "now add a test")
+    await followUpParallelWorkspace(seeded.id, engine, "now add a test", dependencies)
     const settled = await settle(seeded.id)
 
     expect(runCalls.length).toBe(2)
@@ -216,7 +259,7 @@ describe("sending a follow-up to an external workspace", () => {
   test("a second message while one is in flight is refused instead of being dropped", async () => {
     const seeded = await seed()
     started.push(seeded.id)
-    await followUpParallelWorkspace(seeded.id, engine, "first")
+    await followUpParallelWorkspace(seeded.id, engine, "first", dependencies)
     await expect(followUpParallelWorkspace(seeded.id, engine, "second")).rejects.toThrow("still working")
   })
 })

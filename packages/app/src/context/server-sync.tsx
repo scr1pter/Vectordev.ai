@@ -495,10 +495,15 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
     project: projectApi,
     session,
     mcp: {
-      add: async (directory: string, name: string, config: McpLocalConfig | McpRemoteConfig) => {
+      add: async (
+        directory: string,
+        name: string,
+        config: McpLocalConfig | McpRemoteConfig,
+        secrets?: Record<string, string>,
+      ) => {
         const key = directoryKey(directory)
         const sdk = sdkFor(key)
-        await sdk.mcp.add({ name, config })
+        await sdk.mcp.add({ name, config, secrets })
         await queryClient.refetchQueries(queryOptionsApi.mcp(key))
         await queryClient.refetchQueries(queryOptionsApi.mcpResources(key))
         await sdk.mcp.connect({ name }).catch(() => undefined)
@@ -508,6 +513,12 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
         // came up — connect() can fail (bad command, missing npx/Chrome, timeout) and we
         // must not report success for a server that never started.
         return children.child(key, { bootstrap: false })[0].mcp[name]
+      },
+      remove: async (directory: string, name: string) => {
+        const key = directoryKey(directory)
+        await sdkFor(key).mcp.remove({ name })
+        await queryClient.refetchQueries(queryOptionsApi.mcp(key))
+        await queryClient.refetchQueries(queryOptionsApi.mcpResources(key))
       },
       refresh: async (directory: string) => {
         const key = directoryKey(directory)

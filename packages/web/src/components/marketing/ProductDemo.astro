@@ -1,8 +1,7 @@
 ---
-// A replica of the real Vector window, built from the app's own design tokens
-// (packages/app/src/vector-premium.css) rather than the marketing palette — the
-// product is a grey ramp with a muted purple, not near-black with a vivid one,
-// and using the site's colours here made it look like a different application.
+// A fixture-driven, interactive tour of the Vector window, built from the
+// app's own design tokens (packages/app/src/vector-premium.css). This is not
+// the desktop runtime and does not connect to a repository or model.
 //
 // Every nav item goes somewhere. The composer is deliberately inert: it is the
 // one thing that cannot honestly work in a page with no model behind it, so it
@@ -72,10 +71,10 @@ const plugins = [
   {!bare && (
     <div class="demo-intro">
       <p class="demo-kicker">Try it right here</p>
-      <h2>Click around the real thing.</h2>
+      <h2>Try an interactive interface preview.</h2>
       <p class="demo-deck">
-        This is Vector's own interface, running in the page. Every item in the sidebar goes somewhere. No download, no
-        account — see whether you like it first.
+        This fixture-driven tour mirrors Vector's interface and lets you explore its main surfaces. No download or
+        account required; the desktop app is what connects them to your repository and agents.
       </p>
     </div>
   )}
@@ -219,12 +218,12 @@ const plugins = [
         <div class="demo-surface" data-surface="rules" hidden>
           <p class="demo-lead">
             Standards in plain English, scoped to a repository and the files they govern. Saved to
-            <code>.vector/RULES.md</code>, so they are committed and every agent follows them.
+            <code>.vector/RULES.md</code>, so project rules can be committed and reviewed with the code.
           </p>
           <div class="demo-panel"><p class="demo-panel-title">We don't put database query logic in the controller.</p><p class="demo-panel-sub">vectordev.ai · whole repository</p></div>
           <div class="demo-panel"><p class="demo-panel-title">Components stay presentational — no data fetching inside them.</p><p class="demo-panel-sub">vectordev.ai · src/app/web/*.tsx</p></div>
-          <div class="demo-panel"><p class="demo-panel-title">Never widen a public type without a migration note.</p><p class="demo-panel-sub">Every project</p></div>
-          <p class="demo-note">Vector · Claude Code · Codex · Cursor all follow these.</p>
+          <div class="demo-panel"><p class="demo-panel-title">Never widen a public type without a migration note.</p><p class="demo-panel-sub">vectordev.ai · packages/protocol/**</p></div>
+          <p class="demo-note">Committed project rules can be carried across Vector, Claude Code, Codex and Cursor runs.</p>
         </div>
 
         <div class="demo-surface" data-surface="editor" hidden>
@@ -254,11 +253,12 @@ const plugins = [
         <div class="demo-surface" data-surface="browser" hidden>
           <div class="demo-urlbar">localhost:3000/checkout</div>
           <p class="demo-step">Opened the checkout page</p>
-          <p class="demo-step">Filled the card field with a test number</p>
-          <p class="demo-step is-guard">Refused to type into the CVC field</p>
-          <p class="demo-step">Clicked Pay</p>
+          <p class="demo-step">Filled the non-sensitive checkout fields</p>
+          <p class="demo-step is-guard">Refused to type into the card-number field</p>
+          <p class="demo-step">Handed the live browser to you</p>
+          <p class="demo-step">Resumed after you completed the protected step</p>
           <p class="demo-step is-fail">Expected a receipt, got a 500</p>
-          <p class="demo-note">A real Chromium view in the window. It will not type into password, one-time-code or card fields.</p>
+          <p class="demo-note">The desktop app embeds Chromium and will not type into password, one-time-code or card fields.</p>
         </div>
 
         <div class="demo-surface" data-surface="canvas" hidden>
@@ -299,8 +299,8 @@ const plugins = [
 
   {!bare && (
     <p class="demo-foot">
-      Everything above runs locally in this page. In the app these are real isolated workspaces you can open, review
-      and merge.
+      This interface preview runs locally in the page using sample data. In the desktop app, these surfaces connect to
+      real isolated workspaces you can open, review and merge.
     </p>
   )}
 </section>

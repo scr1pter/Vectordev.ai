@@ -8,11 +8,7 @@ export function transitionReleaseRecords(
   const selected = records.find((item) => item.id === selectedId)
   if (!selected) return records
   return records.map((item) => {
-    if (
-      item.projectPath !== selected.projectPath ||
-      item.taskId !== selected.taskId ||
-      item.target !== selected.target
-    ) return item
+    if (item.projectPath !== selected.projectPath || item.target !== selected.target) return item
     if (item.id === selected.id) {
       return {
         ...item,

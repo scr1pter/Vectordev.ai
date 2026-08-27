@@ -1,6 +1,6 @@
 /** @jsxImportSource react */
 import { ArrowRight, Check, CreditCard, Download, Laptop, ShieldCheck } from "lucide-react"
-import { type FormEvent, useEffect, useMemo, useState } from "react"
+import { type SubmitEventHandler, useEffect, useMemo, useState } from "react"
 import "./purchase.css"
 
 type BillingConfig = {
@@ -43,7 +43,7 @@ export function PurchasePage() {
     [config.plans, plan],
   )
 
-  const checkout = async (event: FormEvent<HTMLFormElement>) => {
+  const checkout: SubmitEventHandler<HTMLFormElement> = async (event) => {
     event.preventDefault()
     setError("")
     setLoading(true)

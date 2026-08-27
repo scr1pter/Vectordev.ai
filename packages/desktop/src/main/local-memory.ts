@@ -1,24 +1,15 @@
 import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises"
-import { homedir } from "node:os"
 import { join } from "node:path"
+import { vectorConfigDir } from "./config-path"
 
-// Local memory is durable, cross-project knowledge about the user. It lives in
-// the same config directory the engine reads from, it is never uploaded, and
-// the user can erase it outright. This module is the only writer the desktop
-// side has, so "clear" here genuinely means gone.
-
-const APP_NAMESPACE = process.env.VECTOR_APP_NAMESPACE ?? "vector"
-
-// Mirrors xdg-basedir's resolution in packages/core/src/global.ts. If these
-// drift, the app would clear a file the engine never reads.
-function configDir() {
-  const xdg = process.env.XDG_CONFIG_HOME?.trim()
-  if (xdg) return join(xdg, APP_NAMESPACE)
-  return join(homedir(), ".config", APP_NAMESPACE)
-}
+// Local memory is durable, cross-project knowledge about the user. The plain
+// Markdown source lives in the same local config directory the engine reads
+// from; when it exists, its contents enter the selected provider's context for
+// built-in agent sessions. The user can inspect, edit, or erase it outright,
+// and this module is the desktop writer, so "clear" here genuinely means gone.
 
 export function localMemoryPath() {
-  return join(configDir(), "MEMORY.md")
+  return join(vectorConfigDir(), "MEMORY.md")
 }
 
 export type LocalMemoryState = {
@@ -38,9 +29,12 @@ function countEntries(content: string) {
 
 export async function readLocalMemory(): Promise<LocalMemoryState> {
   const target = localMemoryPath()
-  const info = await stat(target).catch(() => undefined)
+  const info = await stat(target).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return undefined
+    throw error
+  })
   if (!info) return { path: target, exists: false, bytes: 0, entries: 0, content: "" }
-  const content = await readFile(target, "utf8").catch(() => "")
+  const content = await readFile(target, "utf8")
   return {
     path: target,
     exists: true,
@@ -53,14 +47,14 @@ export async function readLocalMemory(): Promise<LocalMemoryState> {
 
 export async function writeLocalMemory(content: string): Promise<LocalMemoryState> {
   const target = localMemoryPath()
-  await mkdir(configDir(), { recursive: true })
+  await mkdir(vectorConfigDir(), { recursive: true })
   await writeFile(target, content, "utf8")
   return readLocalMemory()
 }
 
-// Deletes the file rather than truncating it, so nothing recoverable is left
-// behind for a user who cleared memory specifically because they did not want
-// it retained.
+// Deletes the file rather than retaining an empty memory file. This is an
+// application-level delete, not a promise of secure erasure from storage media
+// or backups.
 export async function clearLocalMemory(): Promise<LocalMemoryState> {
   await rm(localMemoryPath(), { force: true })
   return readLocalMemory()

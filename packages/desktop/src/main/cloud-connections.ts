@@ -23,14 +23,15 @@ import {
   vercelEnvironmentPayload,
 } from "./cloud-provider-payloads"
 import { getStore, removeStoreFileIfEmpty } from "./store"
+import { validateCloudProviderToken, type CloudProviderId } from "./cloud-provider-token"
 
 export { decryptCloudCredential, encryptCloudCredential } from "./cloud-credential-vault"
-
-export type CloudProviderId = "vercel" | "netlify" | "supabase"
+export type { CloudProviderId } from "./cloud-provider-token"
 
 export type CloudProviderConnection = {
   provider: CloudProviderId
   configured: boolean
+  manualTokenSupported: true
   connected: boolean
   account?: string
   accountId?: string
@@ -225,13 +226,14 @@ export async function listCloudProviderConnections(): Promise<CloudProviderConne
     const appConfigured = remote?.configured === true
     const connected = Boolean(local)
     let detail = connected ? `Connected${local?.account ? ` as ${local.account}` : ""}.` : "Not connected."
-    if (!appConfigured) {
+    if (!appConfigured && !connected) {
       detail = remote
-        ? `OAuth setup is incomplete: ${(remote.missing ?? []).join(", ")}.`
-        : "Vector's connection service is unavailable."
+        ? "Browser sign-in is not available yet. Connect with a personal access token instead."
+        : "Vector's connection service is unavailable. You can still connect with a personal access token."
     }
     return {
       provider,
+      manualTokenSupported: true,
       configured: appConfigured,
       connected,
       account: local?.account,
@@ -248,6 +250,7 @@ export function cachedCloudProviderConnection(provider: CloudProviderId): CloudP
   return {
     provider,
     configured: true,
+    manualTokenSupported: true,
     connected: Boolean(local),
     account: local?.account,
     accountId: local?.accountId,
@@ -318,6 +321,33 @@ export async function connectCloudProvider(provider: CloudProviderId): Promise<C
   return pending
 }
 
+export async function connectCloudProviderWithToken(
+  provider: CloudProviderId,
+  value: string,
+): Promise<CloudProviderConnection> {
+  cancelFlow(provider, new Error(`${connectionLabel(provider)} connection was restarted.`))
+  const accessToken = value.trim()
+  const identity = await validateCloudProviderToken(provider, accessToken)
+  const connectedAt = now()
+  saveConnection({
+    provider,
+    accessToken: encryptCloudCredential(accessToken),
+    account: identity.account,
+    accountId: identity.accountId,
+    connectedAt,
+  })
+  return {
+    provider,
+    configured: false,
+    manualTokenSupported: true,
+    connected: true,
+    account: identity.account,
+    accountId: identity.accountId,
+    connectedAt,
+    detail: `Connected${identity.account ? ` as ${identity.account}` : ""}.`,
+  }
+}
+
 function constantTimeEqual(left: string, right: string): boolean {
   const leftHash = createHash("sha256").update(left).digest()
   const rightHash = createHash("sha256").update(right).digest()
@@ -374,34 +404,6 @@ function providerApiUrl(
   return url
 }
 
-async function loadProviderIdentity(
-  provider: CloudProviderId,
-  token: string,
-  teamId?: string,
-): Promise<{ account?: string; accountId?: string }> {
-  if (provider === "vercel") {
-    const body = await providerJson(token, "https://api.vercel.com/v2/user")
-    const user = body && typeof body === "object" && Reflect.get(body, "user") ? Reflect.get(body, "user") : body
-    return {
-      account: stringField(user, "username") ?? stringField(user, "name") ?? stringField(user, "email"),
-      accountId: teamId ?? stringField(user, "id"),
-    }
-  }
-  if (provider === "netlify") {
-    const body = await providerJson(token, "https://api.netlify.com/api/v1/user")
-    return {
-      account: stringField(body, "full_name") ?? stringField(body, "email"),
-      accountId: stringField(body, "id"),
-    }
-  }
-  const body = await providerJson(token, "https://api.supabase.com/v1/organizations")
-  const organization = Array.isArray(body) ? body[0] : undefined
-  return {
-    account: stringField(organization, "name") ?? stringField(organization, "slug") ?? "Supabase account",
-    accountId: stringField(organization, "id") ?? stringField(organization, "slug"),
-  }
-}
-
 async function finishOAuthDeepLink(url: URL): Promise<void> {
   const providerValue = url.searchParams.get("provider")
   if (!isProvider(providerValue)) return
@@ -453,7 +455,7 @@ async function finishOAuthDeepLink(url: URL): Promise<void> {
   }
   if (!accessToken) throw new Error(`${connectionLabel(providerValue)} did not return an access token.`)
 
-  const identity = await loadProviderIdentity(providerValue, accessToken, teamId).catch(() => ({
+  const identity = await validateCloudProviderToken(providerValue, accessToken, fetch, teamId).catch(() => ({
     account: connectionLabel(providerValue),
     accountId: teamId,
   }))
@@ -474,6 +476,7 @@ async function finishOAuthDeepLink(url: URL): Promise<void> {
   flow.resolve({
     provider: providerValue,
     configured: true,
+    manualTokenSupported: true,
     connected: true,
     account: identity.account,
     accountId: identity.accountId,

@@ -1,21 +1,28 @@
 import { Effect, Schema } from "effect"
-import * as path from "path"
-import { access, appendFile, mkdir } from "node:fs/promises"
+import { randomUUID } from "node:crypto"
+import { join } from "node:path"
+import { access, mkdir, rename, rm, writeFile } from "node:fs/promises"
 import * as Tool from "./tool"
 import DESCRIPTION from "./teammate.txt"
 import { InstanceState } from "@/effect/instance-state"
 
 // Agents reach teammates through an on-disk outbox rather than a direct call:
 // the tool runs in the engine sidecar, which has no access to the desktop's
-// team store. The orchestrator drains this file between turns and routes each
-// entry. Both processes already share the workspace directory, so this needs no
-// new transport and survives either side restarting.
-export const OUTBOX_RELATIVE_PATH = path.join(".vector", "team-outbox.jsonl")
+// team store. The orchestrator drains these atomic files continuously and
+// routes each entry. Both processes already share the workspace directory, so
+// this needs no new transport and survives either side restarting.
+export const OUTBOX_DIRECTORY_RELATIVE_PATH = join(".vector", "team-outbox")
 
 // Written by the orchestrator when a workspace joins a team. Its absence means
 // this agent is working alone, and reporting a queued message in that case
 // would be a lie the agent then acts on.
-export const TEAM_MARKER_RELATIVE_PATH = path.join(".vector", "team.json")
+export const TEAM_MARKER_RELATIVE_PATH = join(".vector", "team.json")
+
+export const NO_TEAMMATES_DETAIL = [
+  "No Parallel Workspace team is configured here. Task-tool sibling subagents are separate child sessions, not workspace teammates, so this message was not sent.",
+  "Stop this coordination attempt. Do not search outside the workspace for team state, inspect Vector application data, logs, or packaged resources, or create a team marker.",
+  "Continue independently and report the unavailable teammate exchange to the parent.",
+].join("\n")
 
 export const Parameters = Schema.Struct({
   message: Schema.String.annotate({
@@ -31,6 +38,7 @@ export const Parameters = Schema.Struct({
 type Metadata = { to?: string }
 
 export type OutboxEntry = {
+  id: string
   to?: string
   message: string
   sessionID: string
@@ -51,7 +59,7 @@ export const TeammateMessageTool = Tool.define<typeof Parameters, Metadata, neve
           }
 
           const instance = yield* InstanceState.context
-          const marker = path.join(instance.directory, TEAM_MARKER_RELATIVE_PATH)
+          const marker = join(instance.directory, TEAM_MARKER_RELATIVE_PATH)
           const hasTeam = yield* Effect.promise(() =>
             access(marker)
               .then(() => true)
@@ -60,34 +68,48 @@ export const TeammateMessageTool = Tool.define<typeof Parameters, Metadata, neve
           if (!hasTeam) {
             return {
               title: "No teammates",
-              output:
-                "You are working alone in this workspace, so there is no one to message. Continue with your task and report the result normally.",
+              output: NO_TEAMMATES_DETAIL,
               metadata: {},
             }
           }
 
-          const outbox = path.join(instance.directory, OUTBOX_RELATIVE_PATH)
           const entry: OutboxEntry = {
+            id: randomUUID(),
             to: params.to?.trim() || undefined,
             message,
             sessionID: ctx.sessionID,
             createdAt: new Date().toISOString(),
           }
 
-          // Append rather than rewrite: several agents share this workspace and
-          // rewriting the file would drop a teammate's queued message.
-          yield* Effect.promise(() =>
-            mkdir(path.dirname(outbox), { recursive: true })
-              .then(() => appendFile(outbox, `${JSON.stringify(entry)}\n`, "utf8"))
-              .catch(() => undefined),
+          // One atomically-renamed file per message avoids the race where the
+          // desktop rotates a shared append-only file while another process
+          // still has that file open. Unique ids make concurrent writers and
+          // crash replay independent.
+          const outbox = join(instance.directory, OUTBOX_DIRECTORY_RELATIVE_PATH)
+          const temporary = join(outbox, `${entry.id}.tmp`)
+          const target = join(outbox, `${entry.id}.json`)
+          const queued = yield* Effect.promise(() =>
+            mkdir(outbox, { recursive: true })
+              .then(() => writeFile(temporary, JSON.stringify(entry), "utf8"))
+              .then(() => rename(temporary, target))
+              .then(() => true)
+              .catch(() => rm(temporary, { force: true }).then(() => false)),
           )
+          if (!queued) {
+            return {
+              title: "Message not queued",
+              output:
+                "Vector could not write the team's durable message outbox, so no teammate received this message. Continue independently and include the dependency in your final report.",
+              metadata: { to: entry.to },
+            }
+          }
 
           return {
             title: params.to ? `Message queued for ${params.to}` : "Message queued for the team",
             output: [
               params.to
-                ? `Queued for ${params.to}. It is delivered at the start of their next turn.`
-                : "Queued for every teammate. It is delivered at the start of their next turn.",
+                ? `Queued for ${params.to}. Vector will deliver it into their active session when possible, or at the start of their next turn.`
+                : "Queued for every teammate. Vector will deliver it into active sessions when possible, or at the start of their next turn.",
               "Continue with work that does not depend on a reply.",
             ].join("\n"),
             metadata: { to: entry.to },

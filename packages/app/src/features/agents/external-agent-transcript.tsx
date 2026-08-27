@@ -11,46 +11,57 @@ export type ExternalAgentTurn = {
   streamTail?: string[]
 }
 
+export function restartedConversation(turns: readonly ExternalAgentTurn[], index: number) {
+  const turn = turns[index]
+  if (turn?.role !== "agent" || turn.resumed !== false) return false
+  // The first provider turn starts a conversation; it cannot have failed to
+  // resume one. `resumed: false` is meaningful only after an earlier agent
+  // response exists and a follow-up had to restart with Vector's summary.
+  return turns.slice(0, index).some((entry) => entry.role === "agent")
+}
+
 export function ExternalAgentTranscript(props: { turns: ExternalAgentTurn[]; runtimeLabel: string }) {
   return (
     <div class="mb-4 space-y-2.5">
       <For each={props.turns}>
-        {(turn) => (
+        {(turn, index) => (
           <div
             class={
               turn.role === "user"
-                ? "ml-10 rounded-[12px] border border-[color:var(--vx-line)] bg-white/[0.05] px-3.5 py-2.5"
+                ? "vx-turn vx-turn--user"
                 : turn.role === "vector"
-                  ? "px-1 py-1 text-[11px] text-white/40"
-                  : "mr-10 rounded-[12px] border border-[color:var(--vx-line)] bg-black/20 px-3.5 py-2.5"
+                  ? "px-1 py-1 text-[11px] text-[color:var(--vx-text-muted)]"
+                  : "vx-turn vx-turn--agent"
             }
           >
             <Show when={turn.role !== "vector"}>
-              <div class="mb-1 flex items-center gap-2 text-[10.5px] font-semibold uppercase tracking-wide text-white/38">
+              <div class="vx-turn__who">
                 <span>{turn.role === "user" ? "You" : props.runtimeLabel}</span>
-                <Show when={turn.role === "agent" && turn.resumed === false}>
-                  <span class="font-normal normal-case tracking-normal text-amber-200/70">
+                <Show when={restartedConversation(props.turns, index())}>
+                  <span class="font-normal normal-case tracking-normal text-[color:var(--vx-amber)]">
                     restarted without the previous conversation
                   </span>
                 </Show>
                 <Show when={turn.cost}>
-                  <span class="ml-auto font-normal text-white/28">{turn.cost}</span>
+                  <span class="ml-auto font-normal tracking-normal text-[color:var(--vx-text-muted)]">{turn.cost}</span>
                 </Show>
               </div>
             </Show>
             <Show when={turn.text}>
-              <p class="whitespace-pre-wrap break-words text-[12.5px] leading-5 text-white/80">{turn.text}</p>
+              <p class="vx-turn__body">{turn.text}</p>
             </Show>
             <Show when={turn.state === "running"}>
-              <div class="max-h-[160px] overflow-auto font-mono text-[10.5px] leading-4 text-white/45">
+              <div class="vx-turn__stream">
                 <For each={turn.streamTail ?? []}>{(line) => <div class="truncate">{line}</div>}</For>
                 <Show when={!turn.streamTail?.length}>
-                  <div class="text-white/35">Working…</div>
+                  <div>Working…</div>
                 </Show>
               </div>
             </Show>
             <Show when={turn.state === "failed" || turn.state === "stopped"}>
-              <span class="text-[11px] text-rose-300/80">{turn.state === "stopped" ? "Stopped" : "Failed"}</span>
+              <span class="text-[11px] text-[color:var(--vx-red)]">
+                {turn.state === "stopped" ? "Stopped" : "Failed"}
+              </span>
             </Show>
           </div>
         )}

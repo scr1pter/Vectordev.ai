@@ -33,6 +33,7 @@ export type AutomationsApi = {
   create: (input: {
     title?: string
     prompt: string
+    model?: { providerID: string; id: string; variant?: string }
     recurrence?: Recurrence
     directory?: string
     targets?: { directory: string; sessionId?: string }[]
@@ -77,11 +78,12 @@ export function Automations(props: {
   repositories: AutomationRepository[]
   sessions: AutomationSession[]
   records: AutomationRecord[]
+  loadError?: string
   // Preselected in the form, so opening this from a focused repository does not
   // make the user find it again.
   focusedRepository?: string
   onClose: () => void
-  onCreate: (input: AutomationInput) => void
+  onCreate: (input: AutomationInput) => Promise<boolean>
   onTogglePause: (id: string, paused: boolean) => void
   onDelete: (id: string) => void
 }) {
@@ -161,6 +163,15 @@ export function Automations(props: {
               have — then choose how often it repeats.
             </p>
 
+            <Show when={props.loadError}>
+              <p
+                class="mt-4 rounded-[8px] border border-rose-400/35 bg-rose-400/[0.07] px-3 py-2 text-[12.5px] text-rose-100"
+                role="alert"
+              >
+                {props.loadError}
+              </p>
+            </Show>
+
             <ul class="mt-8 grid gap-2.5 sm:grid-cols-3">
               <For
                 each={[
@@ -224,9 +235,10 @@ export function Automations(props: {
                     sessions={props.sessions}
                     focusedRepository={props.focusedRepository}
                     onCancel={() => setComposing(false)}
-                    onCreate={(input) => {
-                      props.onCreate(input)
-                      setComposing(false)
+                    onCreate={async (input) => {
+                      const created = await props.onCreate(input)
+                      if (created) setComposing(false)
+                      return created
                     }}
                   />
                 </Show>
@@ -401,7 +413,7 @@ function AutomationForm(props: {
   sessions: AutomationSession[]
   focusedRepository?: string
   onCancel: () => void
-  onCreate: (input: AutomationInput) => void
+  onCreate: (input: AutomationInput) => Promise<boolean>
 }) {
   const [title, setTitle] = createSignal(props.seed?.title ?? "")
   const [prompt, setPrompt] = createSignal(props.seed?.prompt ?? "")
@@ -420,6 +432,7 @@ function AutomationForm(props: {
   const [selection, setSelection] = createSignal<Record<string, { directory: string; sessionId: string }>>(
     props.focusedRepository ? { [props.focusedRepository]: { directory: props.focusedRepository, sessionId: "" } } : {},
   )
+  const [submitting, setSubmitting] = createSignal(false)
 
   const drafts = createMemo(() =>
     props.repositories.map((repository) => ({
@@ -458,11 +471,13 @@ function AutomationForm(props: {
     return `${describeRecurrence(result.input.recurrence)} · first run ${new Date(result.input.runAt).toLocaleString()}`
   })
 
-  const submit = (event: Event) => {
+  const submit = async (event: Event) => {
     event.preventDefault()
     const result = built()
-    if (!result.ok) return
-    props.onCreate(result.input)
+    if (!result.ok || submitting()) return
+    setSubmitting(true)
+    await props.onCreate(result.input)
+    setSubmitting(false)
   }
 
   return (
@@ -612,10 +627,10 @@ function AutomationForm(props: {
           </button>
           <button
             type="submit"
-            disabled={!built().ok}
+            disabled={!built().ok || submitting()}
             class="rounded-full bg-white/[0.12] px-4 py-1.5 text-[13px] font-medium text-white transition enabled:hover:bg-white/[0.18] disabled:cursor-not-allowed disabled:opacity-40"
           >
-            Create automation
+            {submitting() ? "Creating…" : "Create automation"}
           </button>
         </div>
       </div>

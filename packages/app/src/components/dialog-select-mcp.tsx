@@ -4,7 +4,7 @@ import { Dialog } from "@opencode-ai/ui/dialog"
 import { List } from "@opencode-ai/ui/list"
 import { Switch } from "@opencode-ai/ui/switch"
 import { useLanguage } from "@/context/language"
-import { useMcpAdd, useMcpToggle } from "@/context/mcp"
+import { useMcpAdd, useMcpRemove, useMcpToggle } from "@/context/mcp"
 import type { McpLocalConfig, McpRemoteConfig } from "@opencode-ai/sdk/v2/client"
 import { showToast } from "@/utils/toast"
 
@@ -68,6 +68,7 @@ export const DialogSelectMcp: Component = () => {
 
   const toggle = useMcpToggle()
   const add = useMcpAdd()
+  const remove = useMcpRemove()
 
   const enabledCount = createMemo(() => items().filter((i) => i.status === "connected").length)
   const totalCount = createMemo(() => items().length)
@@ -108,7 +109,8 @@ export const DialogSelectMcp: Component = () => {
       showToast({
         variant: "error",
         title: "Invalid environment variable",
-        description: "Use a variable name such as GITHUB_TOKEN. Vector will never store the token in MCP configuration.",
+        description:
+          "Use a variable name such as GITHUB_TOKEN. Vector will never store the token in MCP configuration.",
       })
       return
     }
@@ -148,12 +150,21 @@ export const DialogSelectMcp: Component = () => {
               classList={{ "rotate-180": connectOpen() }}
               aria-hidden="true"
             >
-              <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
+              <path
+                d="M4 6l4 4 4-4"
+                stroke="currentColor"
+                stroke-width="1.4"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
             </svg>
           </button>
 
           <Show when={connectOpen()}>
-            <div id="mcp-connect-panel" class="flex flex-col gap-4 rounded-[14px] border border-[rgba(178,140,255,0.16)] bg-white/[0.02] p-4">
+            <div
+              id="mcp-connect-panel"
+              class="flex flex-col gap-4 rounded-[14px] border border-[rgba(178,140,255,0.16)] bg-white/[0.02] p-4"
+            >
               <p class="text-12-regular text-text-muted">{language.t("dialog.mcp.connect.subtitle")}</p>
               <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <form class="flex flex-col gap-2" onSubmit={addLocal}>
@@ -173,7 +184,11 @@ export const DialogSelectMcp: Component = () => {
                     value={localCommand()}
                     onInput={(event) => setLocalCommand(event.currentTarget.value)}
                   />
-                  <button type="submit" disabled={!localName().trim() || !localCommand().trim() || add.isPending} class={submitButtonClass}>
+                  <button
+                    type="submit"
+                    disabled={!localName().trim() || !localCommand().trim() || add.isPending}
+                    class={submitButtonClass}
+                  >
                     {language.t("dialog.mcp.local.submit")}
                   </button>
                 </form>
@@ -203,7 +218,11 @@ export const DialogSelectMcp: Component = () => {
                     value={remoteAuth()}
                     onInput={(event) => setRemoteAuth(event.currentTarget.value)}
                   />
-                  <button type="submit" disabled={!remoteName().trim() || !remoteUrl().trim() || add.isPending} class={submitButtonClass}>
+                  <button
+                    type="submit"
+                    disabled={!remoteName().trim() || !remoteUrl().trim() || add.isPending}
+                    class={submitButtonClass}
+                  >
                     {language.t("dialog.mcp.remote.submit")}
                   </button>
                 </form>
@@ -245,6 +264,7 @@ export const DialogSelectMcp: Component = () => {
               }
               const enabled = () => status() === "connected"
               const [errorExpanded, setErrorExpanded] = createSignal(false)
+              const [confirmingRemove, setConfirmingRemove] = createSignal(false)
               return (
                 <div class="w-full flex items-center justify-between gap-x-3 px-2 py-1.5">
                   <div class="flex flex-col gap-0.5 min-w-0">
@@ -280,7 +300,21 @@ export const DialogSelectMcp: Component = () => {
                       </button>
                     </Show>
                   </div>
-                  <div onClick={(e) => e.stopPropagation()}>
+                  <div class="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      type="button"
+                      class="text-11-regular text-text-weaker transition-colors hover:text-[#e6787d] disabled:opacity-50"
+                      disabled={remove.isPending}
+                      onClick={() => {
+                        if (!confirmingRemove()) {
+                          setConfirmingRemove(true)
+                          return
+                        }
+                        remove.mutate(i.name, { onSuccess: () => setConfirmingRemove(false) })
+                      }}
+                    >
+                      {confirmingRemove() ? "Remove server?" : "Remove"}
+                    </button>
                     <Switch
                       checked={enabled()}
                       disabled={toggle.isPending && toggle.variables === i.name}

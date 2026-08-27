@@ -237,6 +237,7 @@ const api: ElectronAPI = {
     connections: {
       list: () => ipcRenderer.invoke("cloud-connections-list"),
       connect: (provider) => ipcRenderer.invoke("cloud-connections-connect", provider),
+      connectWithToken: (provider, token) => ipcRenderer.invoke("cloud-connections-connect-token", provider, token),
       disconnect: (provider) => ipcRenderer.invoke("cloud-connections-disconnect", provider),
     },
     providers: {

@@ -11,7 +11,7 @@ import { Flag } from "@opencode-ai/core/flag/flag"
 import { Auth } from "../auth"
 import { Env } from "../env"
 import { applyEdits, modify } from "jsonc-parser"
-import { InstallationLocal, InstallationVersion } from "@opencode-ai/core/installation/version"
+import { InstallationLocal } from "@opencode-ai/core/installation/version"
 import { existsSync } from "fs"
 import { Account } from "@/account/account"
 import { isRecord } from "@/util/record"
@@ -33,6 +33,7 @@ import { ConfigManaged } from "./managed"
 import { ConfigParse } from "./parse"
 import { ConfigPaths } from "./paths"
 import { ConfigPlugin } from "./plugin"
+import { PluginDependencyVersion } from "./plugin-version"
 import { ConfigVariable } from "./variable"
 import { Npm } from "@opencode-ai/core/npm"
 import { withTransientReadRetry } from "@/util/effect-http-client"
@@ -129,6 +130,7 @@ export interface Interface {
   readonly update: (config: Info) => Effect.Effect<void>
   readonly updateGlobal: (config: Info) => Effect.Effect<{ info: Info; changed: boolean }>
   readonly updateMcpLocal: (name: string, entry: ConfigMCPV1.Info | { enabled: boolean }) => Effect.Effect<void>
+  readonly removeMcpLocal: (name: string) => Effect.Effect<void>
   readonly invalidate: () => Effect.Effect<void>
   readonly directories: () => Effect.Effect<string[]>
   readonly waitForDependencies: () => Effect.Effect<void>
@@ -450,7 +452,7 @@ const layer = Layer.effect(
                 add: [
                   {
                     name: "@opencode-ai/plugin",
-                    version: InstallationVersion,
+                    version: PluginDependencyVersion,
                   },
                 ],
               })
@@ -682,6 +684,22 @@ const layer = Layer.effect(
       }
     })
 
+    const removeMcpLocal = Effect.fn("Config.removeMcpLocal")(function* (name: string) {
+      const ctx = yield* InstanceState.context
+      const root = ctx.worktree === "/" ? ctx.directory : ctx.worktree
+      const dir = path.join(root, ".opencode")
+      const jsonc = path.join(dir, "opencode.local.jsonc")
+      const json = path.join(dir, "opencode.local.json")
+      const file = (yield* fs.existsSafe(jsonc)) ? jsonc : json
+      const before = yield* readConfigFile(file)
+      if (!before) return
+      const edits = modify(before, ["mcp", name], undefined, {
+        formattingOptions: { insertSpaces: true, tabSize: 2 },
+      })
+      if (!edits.length) return
+      yield* fs.writeFileString(file, applyEdits(before, edits)).pipe(Effect.orDie)
+    })
+
     const updateGlobal = Effect.fn("Config.updateGlobal")(function* (config: Info) {
       const file = globalConfigFile()
       const before = (yield* readConfigFile(file)) ?? "{}"
@@ -714,6 +732,7 @@ const layer = Layer.effect(
       update,
       updateGlobal,
       updateMcpLocal,
+      removeMcpLocal,
       invalidate,
       directories,
       waitForDependencies,

@@ -124,16 +124,11 @@ export function normalizeBrowserUrl(value: string) {
 
 export function isLocalBrowserUrl(value: string) {
   try {
-    const host = new URL(value).hostname.toLowerCase()
+    const url = new URL(value)
+    if (url.protocol !== "http:" && url.protocol !== "https:") return false
+    const host = url.hostname.toLowerCase()
     return (
-      host === "localhost" ||
-      host === "127.0.0.1" ||
-      host === "::1" ||
-      host === "[::1]" ||
-      host.endsWith(".localhost") ||
-      host.startsWith("192.168.") ||
-      host.startsWith("10.") ||
-      /^172\.(1[6-9]|2\d|3[01])\./.test(host)
+      host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]" || host.endsWith(".localhost")
     )
   } catch {
     return false

@@ -128,4 +128,41 @@ describe("mcp.headers", () => {
       }
     }),
   )
+
+  it.instance("resolves encrypted vault credentials without persisting them in headers", () =>
+    Effect.gen(function* () {
+      const mcp = yield* MCP.Service
+      yield* mcp
+        .add(
+          "vault-server",
+          {
+            type: "remote",
+            url: "https://example.com/mcp",
+            oauth: false,
+            headers: { Authorization: "Bearer {vault:token}" },
+          },
+          { token: "vault-token" },
+        )
+        .pipe(Effect.catch(() => Effect.void))
+
+      expect(transportCalls.length).toBeGreaterThanOrEqual(1)
+      for (const call of transportCalls) {
+        expect(call.options.requestInit?.headers).toEqual({ Authorization: "Bearer vault-token" })
+      }
+    }),
+  )
+
+  it.instance("rejects a raw credential even when it also contains an environment reference", () =>
+    Effect.gen(function* () {
+      const mcp = yield* MCP.Service
+      const result = yield* mcp.add("mixed-header", {
+        type: "remote",
+        url: "https://example.com/mcp",
+        headers: { Authorization: "Bearer raw-secret {env:VECTOR_TEST_MCP_TOKEN}" },
+      })
+
+      expect(result.status).toMatchObject({ status: "failed" })
+      expect(transportCalls).toHaveLength(0)
+    }),
+  )
 })

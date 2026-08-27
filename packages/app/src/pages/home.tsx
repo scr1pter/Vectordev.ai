@@ -75,6 +75,7 @@ import {
   type AutomationSession,
 } from "@/features/scheduled/automations"
 import { describeNextRun, type AutomationInput, type AutomationRecord } from "@/features/scheduled/schedule-model"
+import { useModels } from "@/context/models"
 
 const HOME_SESSION_LIMIT = 64
 const HOME_SESSION_HEADER_STICKY_TOP = 12
@@ -256,6 +257,7 @@ export function NewHome() {
   const command = useCommand()
   const notification = useNotification()
   const marked = useMarked()
+  const models = useModels()
   let focusSessionSearch: (() => void) | undefined
   const [state, setState] = createStore({
     search: "",
@@ -345,6 +347,8 @@ export function NewHome() {
 
   const [automationsOpen, setAutomationsOpen] = createSignal(false)
   const [automations, setAutomations] = createSignal<AutomationRecord[]>([])
+  const [automationsError, setAutomationsError] = createSignal("")
+  let automationRefresh = 0
   const automationDirectories = createMemo(() => projects().flatMap(directories))
   const automationRepositories = createMemo<AutomationRepository[]>(() =>
     projects().map((project) => ({ directory: project.worktree, name: displayName(project) })),
@@ -386,31 +390,71 @@ export function NewHome() {
   async function refreshAutomations() {
     const api = automationsApi()
     if (!api) return
-    setAutomations(await api.list().catch(() => [] as AutomationRecord[]))
+    const refresh = ++automationRefresh
+    // Home is the global automation surface. Passing no scope is deliberate:
+    // changing the selected repository must not hide schedules elsewhere.
+    const next = await api.list(undefined).catch((error: unknown) => {
+      if (refresh === automationRefresh) {
+        setAutomationsError(
+          `Vector could not refresh automations: ${error instanceof Error ? error.message : String(error)}`,
+        )
+      }
+      return undefined
+    })
+    if (!next || refresh !== automationRefresh) return
+    setAutomations(next)
+    setAutomationsError("")
   }
 
   createEffect(() => {
     if (!automationsApi()) return
+    // Home can switch repositories without remounting. Re-read the same global
+    // schedule after that transition and keep the last good result on failure.
+    selection().server
+    selection().directory
     void refreshAutomations()
     // The summary line reads "next run in 2 hours", so it has to keep being
     // recomputed or it silently freezes on a home screen left open all day.
     // Slow cadence when the panel is closed, since nothing else is watching.
     const timer = setInterval(() => void refreshAutomations(), automationsOpen() ? 10_000 : 60_000)
-    onCleanup(() => clearInterval(timer))
+    const focus = () => void refreshAutomations()
+    globalThis.window?.addEventListener("focus", focus)
+    onCleanup(() => {
+      clearInterval(timer)
+      globalThis.window?.removeEventListener("focus", focus)
+    })
   })
 
-  function createAutomation(input: AutomationInput) {
+  async function createAutomation(input: AutomationInput) {
     const api = automationsApi()
-    if (!api) return
-    void api
-      .create(input)
-      .then(() => refreshAutomations())
+    if (!api) return false
+    await models.ready.promise
+    const recent = models.recent.list().find((item) => models.find(item))
+    if (!recent) {
+      showToast({
+        variant: "error",
+        title: "Choose a model first",
+        description: "Start or open a session and choose the model Vector should use for unattended runs.",
+      })
+      return false
+    }
+    const variant = models.variant.get(recent)
+    return api
+      .create({
+        ...input,
+        model: { providerID: recent.providerID, id: recent.modelID, variant },
+      })
+      .then(async () => {
+        await refreshAutomations()
+        return true
+      })
       .catch((error: unknown) => {
         showToast({
           variant: "error",
           title: "Could not create that automation",
           description: error instanceof Error ? error.message : String(error),
         })
+        return false
       })
   }
 
@@ -429,10 +473,42 @@ export function NewHome() {
         })
         return
       }
-      void Promise.resolve(api.cancel(id)).then(() => refreshAutomations())
+      void Promise.resolve(api.cancel(id))
+        .then(() => refreshAutomations())
+        .catch((error: unknown) => {
+          showToast({
+            variant: "error",
+            title: "Could not pause that automation",
+            description: error instanceof Error ? error.message : String(error),
+          })
+        })
       return
     }
-    void api.setPaused(id, paused).then(() => refreshAutomations())
+    void api
+      .setPaused(id, paused)
+      .then(() => refreshAutomations())
+      .catch((error: unknown) => {
+        showToast({
+          variant: "error",
+          title: `Could not ${paused ? "pause" : "resume"} that automation`,
+          description: error instanceof Error ? error.message : String(error),
+        })
+      })
+  }
+
+  function deleteAutomation(id: string) {
+    const api = automationsApi()
+    if (!api) return
+    void api
+      .remove(id)
+      .then(setAutomations)
+      .catch((error: unknown) => {
+        showToast({
+          variant: "error",
+          title: "Could not delete that automation",
+          description: error instanceof Error ? error.message : String(error),
+        })
+      })
   }
 
   createEffect(() => {
@@ -603,11 +679,11 @@ export function NewHome() {
     })
   }
 
-  useSettingsCommand()
+  useSettingsCommand(() => newSessionProject()?.worktree)
 
   function openSettings() {
     void import("@/components/settings-v2/dialog-settings-v2").then((module) => {
-      dialog.show(() => <module.DialogSettings />)
+      dialog.show(() => <module.DialogSettings repositoryPath={newSessionProject()?.worktree} />)
     })
   }
 
@@ -726,7 +802,9 @@ export function NewHome() {
           failed={usageLoad.isError}
           onOpenUsage={() => {
             void import("@/components/settings-v2/dialog-settings-v2").then((module) => {
-              dialog.show(() => <module.DialogSettings section="usage" />)
+              dialog.show(() => (
+                <module.DialogSettings section="usage" repositoryPath={newSessionProject()?.worktree} />
+              ))
             })
           }}
         />
@@ -734,13 +812,16 @@ export function NewHome() {
         <HomeAutomations
           supported={Boolean(automationsApi())}
           records={automations()}
+          error={automationsError()}
           onOpen={() => setAutomationsOpen(true)}
         />
 
         <HomeProjectRules
           onOpen={() => {
             void import("@/components/settings-v2/dialog-settings-v2").then((module) => {
-              dialog.show(() => <module.DialogSettings section="rules" />)
+              dialog.show(() => (
+                <module.DialogSettings section="rules" repositoryPath={newSessionProject()?.worktree} />
+              ))
             })
           }}
         />
@@ -824,17 +905,18 @@ export function NewHome() {
         repositories={automationRepositories()}
         sessions={automationSessions()}
         records={automations()}
+        loadError={automationsError()}
         focusedRepository={selectedProject()?.worktree}
         onClose={() => setAutomationsOpen(false)}
         onCreate={createAutomation}
         onTogglePause={toggleAutomationPause}
-        onDelete={(id) => void automationsApi()?.remove(id).then((records) => setAutomations(records))}
+        onDelete={deleteAutomation}
       />
     </div>
   )
 }
 
-function HomeAutomations(props: { supported: boolean; records: AutomationRecord[]; onOpen: () => void }) {
+function HomeAutomations(props: { supported: boolean; records: AutomationRecord[]; error?: string; onOpen: () => void }) {
   // Still on the schedule. A settled one-shot keeps its runAt in the past, so
   // counting it would pin the summary to "Due now" forever.
   const pending = createMemo(() =>
@@ -893,9 +975,11 @@ function HomeAutomations(props: { supported: boolean; records: AutomationRecord[
                 : `${pending().length === 1 ? "1 automation" : `${pending().length} automations`} on schedule${paused() ? ` · ${paused()} paused` : ""}`}
             </span>
             <span class="mt-0.5 block truncate text-[11.5px] text-v2-text-text-muted">
-              {props.records.length === 0
-                ? "One task, on a schedule, in the repositories and sessions you choose — while you are away."
-                : describeNextRun(next(), new Date())}
+              {props.error
+                ? props.error
+                : props.records.length === 0
+                  ? "One task, on a schedule, in the repositories and sessions you choose — while you are away."
+                  : describeNextRun(next(), new Date())}
             </span>
           </span>
           <span class="shrink-0 text-[11.5px] text-v2-text-text-muted">Open</span>

@@ -2,6 +2,7 @@ import { createSimpleContext } from "@opencode-ai/ui/context"
 import { type Accessor, batch, createEffect, createMemo, createSignal } from "solid-js"
 import { createStore, type SetStoreFunction, type Store } from "solid-js/store"
 import { Persist, persisted } from "@/utils/persist"
+import { pathKey } from "@/utils/path-key"
 import { ServerScope } from "@/utils/server-scope"
 
 type StoredProject = { worktree: string; expanded: boolean }
@@ -46,6 +47,26 @@ export function isInternalProjectPath(directory: string | undefined) {
   return /(?:^|\/)work-projects\/[^/]+$/i.test(normalized)
 }
 
+// File paths may contain any Unicode the operating system supports, but the
+// replacement character means a persisted value was decoded incorrectly. Do
+// not present that stale value as a connected repository.
+export function isUsableProjectPath(directory: string | undefined) {
+  if (!directory?.trim()) return false
+  if (/[\u0000-\u001f\u007f\ufffd]/u.test(directory)) return false
+  return directory.startsWith("/") || /^[A-Za-z]:[\\/]/.test(directory) || /^\\\\[^\\]+\\[^\\]+/.test(directory)
+}
+
+export function validatedRouteProjectPath(
+  path: string,
+  parentSessionSpecified: boolean,
+  sessionDirectory: string | undefined,
+  knownProjectPaths: readonly string[],
+) {
+  if (!isUsableProjectPath(path) || isInternalProjectPath(path)) return ""
+  if (parentSessionSpecified) return sessionDirectory && pathKey(sessionDirectory) === pathKey(path) ? path : ""
+  return knownProjectPaths.some((known) => pathKey(known) === pathKey(path)) ? path : ""
+}
+
 export function migrateCanonicalLocalServerState(value: unknown, canonicalLocalServer?: ServerConnection.Key) {
   if (!canonicalLocalServer || canonicalLocalServer === "local") return value
   if (!isRecord(value)) return value
@@ -87,11 +108,13 @@ export function createServerProjects<T extends ServerProjectState>(input: {
 }) {
   const setStore = input.setStore as unknown as SetStoreFunction<ServerProjectState>
   const current = () =>
-    (input.store.projects[input.scope()] ?? []).filter((project) => !isInternalProjectPath(project.worktree))
+    (input.store.projects[input.scope()] ?? []).filter(
+      (project) => isUsableProjectPath(project.worktree) && !isInternalProjectPath(project.worktree),
+    )
   return {
     list: current,
     open(directory: string) {
-      if (isInternalProjectPath(directory)) return
+      if (!isUsableProjectPath(directory) || isInternalProjectPath(directory)) return
       const scope = input.scope()
       if (current().some((project) => project.worktree === directory)) return
       setStore("projects", scope, [{ worktree: directory, expanded: true }, ...current()])
@@ -121,10 +144,10 @@ export function createServerProjects<T extends ServerProjectState>(input: {
     },
     last() {
       const directory = input.store.lastProject[input.scope()]
-      return isInternalProjectPath(directory) ? undefined : directory
+      return !isUsableProjectPath(directory) || isInternalProjectPath(directory) ? undefined : directory
     },
     touch(directory: string) {
-      if (isInternalProjectPath(directory)) return
+      if (!isUsableProjectPath(directory) || isInternalProjectPath(directory)) return
       setStore("lastProject", input.scope(), directory)
     },
   }
@@ -137,7 +160,7 @@ export async function pruneMissingLocalProjects(input: {
 }) {
   const checked = await Promise.all(
     input.projects
-      .filter((project) => !isInternalProjectPath(project.worktree))
+      .filter((project) => isUsableProjectPath(project.worktree) && !isInternalProjectPath(project.worktree))
       .map(async (project) => ((await input.pathExists(project.worktree).catch(() => false)) ? project : undefined)),
   )
   const projects = checked.filter((project): project is StoredProject => !!project)

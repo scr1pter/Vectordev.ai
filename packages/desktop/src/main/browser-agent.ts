@@ -1,5 +1,7 @@
 import { BrowserWindow, WebContentsView, session, type IpcMainInvokeEvent, type WebContents } from "electron"
 import { isCredentialField } from "./browser-credential-field"
+import { CredentialFocusChangedError, sendGuardedCharacters } from "./browser-credential-input"
+import { browserOrigin, isAllowedBrowserNavigation, isLocalBrowserUrl } from "./browser-navigation-policy"
 import { AsyncLocalStorage } from "node:async_hooks"
 
 import type { BrowserAgentInput, BrowserAgentPageEvent, BrowserAutomationRun } from "../preload/types"
@@ -22,6 +24,8 @@ type BrowserContext = {
   actionTimeline: BrowserAgentActionLog[]
   currentPageTitle: string
   lastUsedAt: number
+  allowedExternalOrigins: Set<string>
+  blockedNavigationError?: string
 }
 
 // The agent drives a WebContentsView embedded in the main Vector window, so
@@ -51,6 +55,7 @@ function getContext(id: string, create = true) {
     actionTimeline: [],
     currentPageTitle: "",
     lastUsedAt: Date.now(),
+    allowedExternalOrigins: new Set(),
   }
   contexts.set(id, context)
   return context
@@ -82,23 +87,7 @@ function pushAction(label: string, ok = true, error?: unknown, result?: unknown,
   ].slice(0, 80)
 }
 
-export function isLocalBrowserUrl(rawUrl: string) {
-  try {
-    const host = new URL(rawUrl).hostname.toLowerCase()
-    return (
-      host === "localhost" ||
-      host === "127.0.0.1" ||
-      host === "::1" ||
-      host === "[::1]" ||
-      host.endsWith(".localhost") ||
-      host.startsWith("192.168.") ||
-      host.startsWith("10.") ||
-      /^172\.(1[6-9]|2\d|3[01])\./.test(host)
-    )
-  } catch {
-    return false
-  }
-}
+export { isLocalBrowserUrl } from "./browser-navigation-policy"
 
 function safeUrl(rawUrl: string, allowExternal = false) {
   const url = new URL(rawUrl)
@@ -141,11 +130,27 @@ function emitPageEvent(context = currentContext()) {
 }
 
 function wireView(context: BrowserContext, contents: WebContents) {
+  const blockNavigation = (url: string) => {
+    const message =
+      "Browser Agent blocked a redirect to an external origin that was not approved. Open that URL explicitly to continue."
+    context.blockedNavigationError = message
+    context.networkErrors.push({ url: redactText(url), error: message })
+    context.networkErrors = context.networkErrors.slice(-50)
+    pushAction("Blocked unapproved external navigation", false, message, undefined, context)
+  }
   contents.setWindowOpenHandler(({ url }) => {
     // Keep the agent's world on one surface: popups navigate in place.
-    if (/^https?:/i.test(url)) void contents.loadURL(url)
+    if (isAllowedBrowserNavigation(url, context.allowedExternalOrigins)) void contents.loadURL(url)
+    else blockNavigation(url)
     return { action: "deny" }
   })
+  const guardNavigation = (event: Electron.Event, url: string) => {
+    if (isAllowedBrowserNavigation(url, context.allowedExternalOrigins)) return
+    event.preventDefault()
+    blockNavigation(url)
+  }
+  contents.on("will-navigate", guardNavigation)
+  contents.on("will-redirect", guardNavigation)
   contents.on("did-navigate", () => {
     context.consoleLogs = []
     context.pageErrors = []
@@ -178,7 +183,11 @@ function wireView(context: BrowserContext, contents: WebContents) {
   })
   contents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {
     if (errorCode === -3) return
-    context.networkErrors.push({ url: redactText(validatedURL), status: errorCode, error: redactText(errorDescription) })
+    context.networkErrors.push({
+      url: redactText(validatedURL),
+      status: errorCode,
+      error: redactText(errorDescription),
+    })
     context.networkErrors = context.networkErrors.slice(-50)
   })
 }
@@ -223,7 +232,8 @@ async function attachView(event: IpcMainInvokeEvent, bounds?: { x: number; y: nu
       if (item.id !== context.id && item.hostWindow === win && item.view) item.view.setVisible(false)
     }
     if (context.hostWindow !== win) {
-      if (context.hostWindow && !context.hostWindow.isDestroyed()) context.hostWindow.contentView.removeChildView(active)
+      if (context.hostWindow && !context.hostWindow.isDestroyed())
+        context.hostWindow.contentView.removeChildView(active)
       win.contentView.addChildView(active)
       win.once("closed", () => {
         if (context.hostWindow !== win) return
@@ -286,6 +296,8 @@ function destroyContext(context: BrowserContext) {
   context.pageErrors = []
   context.networkErrors = []
   context.currentPageTitle = ""
+  context.allowedExternalOrigins.clear()
+  context.blockedNavigationError = undefined
   context.actionTimeline = [
     {
       label: "Browser stopped",
@@ -312,6 +324,8 @@ async function runScript<T>(script: string): Promise<T> {
 export async function openUrl(url: string, allowExternal = false) {
   const context = currentContext()
   const target = safeUrl(url, allowExternal)
+  const origin = browserOrigin(target)
+  if (origin && !isLocalBrowserUrl(target) && allowExternal) context.allowedExternalOrigins.add(origin)
   const contents = ensureView()
   try {
     await contents.loadURL(target)
@@ -457,21 +471,16 @@ export async function type(selector: string, text: string, clear = true) {
   // React/Vue/Svelte controlled inputs see native keystrokes and update state.
   if (text.length > 0) {
     contents.focus()
-    // Phase 1 focused the element it checked, but a page can move focus on the
-    // focus/select events it just fired, and these keystrokes go wherever focus
-    // ended up rather than to the selector that was cleared above.
-    if (await runScript<boolean>(FOCUSED_CREDENTIAL_CHECK)) throw new Error(credentialRefusal("the focused field"))
-    for (const ch of Array.from(text)) {
-      const keyCode = ch === " " ? "Space" : ch === "\n" ? "Enter" : ch === "\t" ? "Tab" : ch
-      const modifiers: Electron.InputEvent["modifiers"] = ch >= "A" && ch <= "Z" ? ["shift"] : []
-      try {
-        contents.sendInputEvent({ type: "keyDown", keyCode, modifiers })
-        contents.sendInputEvent({ type: "char", keyCode, modifiers })
-        contents.sendInputEvent({ type: "keyUp", keyCode, modifiers })
-      } catch {
-        // Characters that are not valid key codes (emoji, some symbols) fall
-        // through; the verification pass below repairs the value natively.
-      }
+    try {
+      await sendGuardedCharacters(
+        text,
+        () => runScript<boolean>(FOCUSED_CREDENTIAL_CHECK),
+        (event) => contents.sendInputEvent(event),
+      )
+    } catch (error) {
+      if (error instanceof CredentialFocusChangedError) throw new Error(credentialRefusal("the focused field"))
+      // Characters that are not valid key codes (emoji, some symbols) fall
+      // through; the verification pass below repairs the value natively.
     }
     // Let the queued input events flush and the framework re-render.
     await new Promise((resolve) => setTimeout(resolve, 80))
@@ -497,6 +506,7 @@ export async function type(selector: string, text: string, clear = true) {
     if (!el) return { missing: true };
     if (isCredentialField(describeField(el))) return { guarded: true };
     el.focus();
+    if (isCredentialField(describeField(el))) return { guarded: true };
     const value = ${JSON.stringify(expected)};
     const data = ${JSON.stringify(text)};
     if ("value" in el) {
@@ -526,7 +536,8 @@ export async function press(key: string) {
   // press() reaches the page through the same trusted key pipeline as type(),
   // so without this a caller spells a password out one single-character press
   // at a time and walks straight around type()'s guard.
-  if (!NON_TYPING_KEYS.has(key.toLowerCase()) && (await runScript<boolean>(FOCUSED_CREDENTIAL_CHECK))) {
+  const typesCharacter = !NON_TYPING_KEYS.has(key.toLowerCase())
+  if (typesCharacter && (await runScript<boolean>(FOCUSED_CREDENTIAL_CHECK))) {
     throw new Error(credentialRefusal("the focused field"))
   }
   try {
@@ -534,20 +545,33 @@ export async function press(key: string) {
     // what makes Enter actually submit forms and reach framework key handlers.
     contents.focus()
     contents.sendInputEvent({ type: "keyDown", keyCode: key })
+    if (typesCharacter && (await runScript<boolean>(FOCUSED_CREDENTIAL_CHECK))) {
+      throw new CredentialFocusChangedError()
+    }
     if (key.length === 1 || key === "Enter" || key === "Return" || key === "Tab" || key === "Space") {
       contents.sendInputEvent({ type: "char", keyCode: key })
     }
+    if (typesCharacter && (await runScript<boolean>(FOCUSED_CREDENTIAL_CHECK))) {
+      throw new CredentialFocusChangedError()
+    }
     contents.sendInputEvent({ type: "keyUp", keyCode: key })
     pushAction(`Pressed ${key}`)
-  } catch {
+  } catch (error) {
+    if (error instanceof CredentialFocusChangedError) throw new Error(credentialRefusal("the focused field"))
     // JS fallback for keys sendInputEvent rejects: synthetic key events on the
     // focused element, plus explicit form submission for Enter.
-    await runScript(`(() => {
+    const fallback = await runScript<{ guarded?: boolean }>(`(() => {${CREDENTIAL_GUARD}
       const key = ${JSON.stringify(key)};
-      const el = document.activeElement && document.activeElement !== document.body ? document.activeElement : document.body;
+      const typesCharacter = ${JSON.stringify(typesCharacter)};
+      const active = () => document.activeElement && document.activeElement !== document.body ? document.activeElement : document.body;
+      const guarded = () => typesCharacter && isCredentialField(describeField(active()));
+      if (guarded()) return { guarded: true };
+      const el = active();
       const init = { key, code: key.length === 1 ? undefined : key, bubbles: true, cancelable: true };
       const proceed = el.dispatchEvent(new KeyboardEvent("keydown", init));
+      if (guarded()) return { guarded: true };
       el.dispatchEvent(new KeyboardEvent("keypress", init));
+      if (guarded()) return { guarded: true };
       el.dispatchEvent(new KeyboardEvent("keyup", init));
       if (key === "Enter" && proceed) {
         const form = el.form || (el.closest ? el.closest("form") : null);
@@ -556,8 +580,9 @@ export async function press(key: string) {
           else form.submit();
         }
       }
-      return true;
+      return { guarded: false };
     })()`)
+    if (fallback.guarded) throw new Error(credentialRefusal("the focused field"))
     pushAction(`Pressed ${key} (synthetic fallback)`)
   }
 }
@@ -776,12 +801,18 @@ async function runBrowserAgentInContext(
   try {
     if (input.command === "setVisible") {
       const context = currentContext()
-      if (context.view && !context.view.webContents.isDestroyed() && context.hostWindow && !context.hostWindow.isDestroyed()) {
+      if (
+        context.view &&
+        !context.view.webContents.isDestroyed() &&
+        context.hostWindow &&
+        !context.hostWindow.isDestroyed()
+      ) {
         context.view.setVisible(input.visible !== false)
       }
       return stoppedReport()
     }
-    const passiveCommand = input.command === "detach" || input.command === "setBounds" || input.command === "closeBrowser"
+    const passiveCommand =
+      input.command === "detach" || input.command === "setBounds" || input.command === "closeBrowser"
     if (!passiveCommand) ensureBrowserView()
     switch (input.command) {
       case "attach":
@@ -868,6 +899,13 @@ async function runBrowserAgentInContext(
   }
 
   const context = currentContext()
+  if (context.blockedNavigationError) {
+    if (commandOk) {
+      commandOk = false
+      commandError = context.blockedNavigationError
+    }
+    context.blockedNavigationError = undefined
+  }
   const contents = context.view?.webContents
   const alive = Boolean(contents && !contents.isDestroyed())
   let dom: BrowserAgentDom = {

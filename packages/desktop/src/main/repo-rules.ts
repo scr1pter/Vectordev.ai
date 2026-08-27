@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto"
-import { mkdir, rm, writeFile } from "node:fs/promises"
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
+import { vectorConfigDir } from "./config-path"
 import { getStore } from "./store"
-import { formatRulesFile, selectRules, type RepoRule } from "./repo-rules-model"
+import { mergeRulesFile, rulesForRepository, selectRules, type RepoRule } from "./repo-rules-model"
 
 const STORE_NAME = "repo-rules-state"
 const STORE_KEY = "rules"
@@ -18,6 +19,10 @@ export function rulesFilePath(repositoryPath: string) {
   return join(repositoryPath, RULES_FILE_RELATIVE)
 }
 
+export function globalRulesFilePath() {
+  return join(vectorConfigDir(), "RULES.md")
+}
+
 function readAll(): RepoRule[] {
   const raw = getStore(STORE_NAME).get(STORE_KEY)
   if (!Array.isArray(raw)) return []
@@ -31,7 +36,10 @@ function writeAll(rules: RepoRule[]) {
 export function listRepoRules(repositoryPath?: string): RepoRule[] {
   const all = readAll()
   if (!repositoryPath) return all
-  return selectRules(all, { repositoryPath })
+  // rulesForRepository, not selectRules: selectRules is the prompt filter and
+  // drops disabled rules, which would make a disabled rule impossible to find
+  // and re-enable from the panel that manages it.
+  return rulesForRepository(all, repositoryPath)
 }
 
 export type SaveRepoRuleInput = {
@@ -58,11 +66,10 @@ export async function saveRepoRule(input: SaveRepoRuleInput) {
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
   }
-  writeAll(existing ? all.map((rule) => (rule.id === saved.id ? saved : rule)) : [...all, saved])
+  const next = existing ? all.map((rule) => (rule.id === saved.id ? saved : rule)) : [...all, saved]
   // A rule that moved between repositories has to leave the file it used to be
   // written into, or the old repository keeps enforcing it.
-  if (existing && existing.repositoryPath !== saved.repositoryPath) await syncRulesFile(existing.repositoryPath)
-  await syncRulesFile(saved.repositoryPath)
+  await commitRules(next, all, [existing?.repositoryPath, saved.repositoryPath])
   return saved
 }
 
@@ -70,24 +77,68 @@ export async function deleteRepoRule(id: string) {
   const all = readAll()
   const removed = all.find((rule) => rule.id === id)
   if (!removed) return listRepoRules()
-  writeAll(all.filter((rule) => rule.id !== id))
-  await syncRulesFile(removed.repositoryPath)
+  await commitRules(
+    all.filter((rule) => rule.id !== id),
+    all,
+    [removed.repositoryPath],
+  )
   return listRepoRules()
 }
 
-// Rewrites the repository's rules file from the store. An empty rule set deletes
-// the file rather than leaving an empty heading behind, so a project the user
-// cleared out stops carrying a Vector artifact around.
-export async function syncRulesFile(repositoryPath: string) {
-  if (!repositoryPath) return
-  const target = rulesFilePath(repositoryPath)
-  const body = formatRulesFile(selectRules(readAll(), { repositoryPath }))
-  if (!body) {
-    await rm(target, { force: true }).catch(() => undefined)
+// Rewrites only Vector's managed block in the instruction file. Removing the
+// last managed rule deletes an otherwise empty file but preserves any Markdown
+// a teammate authored outside that block.
+export async function syncRulesFile(repositoryPath: string, rules = readAll(), previousRules = rules) {
+  const target = repositoryPath ? rulesFilePath(repositoryPath) : globalRulesFilePath()
+  const applies = (rule: RepoRule) =>
+    rule.enabled && (repositoryPath ? rule.repositoryPath === repositoryPath : !rule.repositoryPath)
+  const body = mergeRulesFile(
+    (await readOptionalFile(target, "utf8")) ?? "",
+    rules.filter(applies),
+    previousRules.filter(applies),
+    repositoryPath ? "Project rules" : "Global rules",
+  )
+  if (!body.trim()) {
+    await rm(target, { force: true })
     return
   }
-  await mkdir(dirname(target), { recursive: true }).catch(() => undefined)
-  await writeFile(target, body, "utf8")
+  await mkdir(dirname(target), { recursive: true })
+  const temporary = `${target}.${randomUUID()}.tmp`
+  await writeFile(temporary, body, "utf8")
+  await rename(temporary, target).catch(async (error) => {
+    await rm(temporary, { force: true }).catch(() => undefined)
+    throw error
+  })
+}
+
+async function commitRules(next: RepoRule[], previous: RepoRule[], repositoryPaths: (string | undefined)[]) {
+  const paths = [...new Set(repositoryPaths.filter((path): path is string => path !== undefined))]
+  const targets = paths.map((path) => (path ? rulesFilePath(path) : globalRulesFilePath()))
+  const snapshots = await Promise.all(targets.map((target) => readOptionalFile(target)))
+  try {
+    for (const path of paths) await syncRulesFile(path, next, previous)
+    writeAll(next)
+  } catch (error) {
+    await Promise.all(
+      targets.map(async (target, index) => {
+        const snapshot = snapshots[index]
+        if (!snapshot) return rm(target, { force: true }).catch(() => undefined)
+        await mkdir(dirname(target), { recursive: true }).catch(() => undefined)
+        return writeFile(target, snapshot).catch(() => undefined)
+      }),
+    )
+    throw error
+  }
+}
+
+function readOptionalFile(path: string): Promise<Buffer | undefined>
+function readOptionalFile(path: string, encoding: "utf8"): Promise<string | undefined>
+function readOptionalFile(path: string, encoding?: "utf8"): Promise<Buffer | string | undefined> {
+  const content = encoding === "utf8" ? readFile(path, encoding) : readFile(path)
+  return content.catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return undefined
+    throw error
+  })
 }
 
 // The rules that should ride along with an agent prompt. Kept separate from the

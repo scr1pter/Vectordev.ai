@@ -226,6 +226,7 @@ const ProbeApi = HttpApi.make("workspace-routing-probe").add(
   HttpApiGroup.make("probe")
     .add(
       HttpApiEndpoint.get("get", "/probe", { query: WorkspaceRoutingQuery, success: ProbeResult }),
+      HttpApiEndpoint.get("api", "/api/probe", { query: WorkspaceRoutingQuery, success: ProbeResult }),
       HttpApiEndpoint.patch("patch", "/probe", { query: WorkspaceRoutingQuery, success: Schema.Boolean }),
       HttpApiEndpoint.get("session", "/session", { query: WorkspaceRoutingQuery, success: ProbeResult }),
       HttpApiEndpoint.get("workspace", WorkspacePaths.list, {
@@ -244,6 +245,7 @@ const routeContextResponse = Effect.gen(function* () {
 const probeHandlers = HttpApiBuilder.group(ProbeApi, "probe", (handlers) =>
   handlers
     .handle("get", () => routeContextResponse)
+    .handle("api", () => routeContextResponse)
     .handle("patch", () => Effect.succeed(false))
     .handle("session", () => routeContextResponse)
     .handle("workspace", () => routeContextResponse),
@@ -453,6 +455,31 @@ describe("HttpApi workspace routing middleware", () => {
 
       expect(response.status).toBe(500)
       expect(yield* response.text).toBe(`Workspace not found: ${workspaceID}`)
+    }),
+  )
+
+  it.live("rejects a malformed workspace id without defecting the request", () =>
+    Effect.gen(function* () {
+      yield* serveProbe
+
+      const response = yield* HttpClient.get("/api/probe?workspace=evt_not_a_workspace")
+
+      expect(response.status).toBe(400)
+      expect(yield* response.json).toMatchObject({
+        message: "Invalid workspace query parameter",
+        field: "workspace",
+      })
+    }),
+  )
+
+  it.live("handles a malformed legacy workspace id without defecting the request", () =>
+    Effect.gen(function* () {
+      yield* serveProbe
+
+      const response = yield* HttpClient.get("/probe?workspace=ws_legacy")
+
+      expect(response.status).toBe(500)
+      expect(yield* response.text).toBe("Workspace not found: ws_legacy")
     }),
   )
 

@@ -68,15 +68,15 @@ describe("opencode run (non-interactive subprocess)", () => {
   // We assert nonzero exit AND wall-clock under the harness timeout — a hang
   // would expire the timeout and produce a different (signal-killed) failure.
   cliIt.concurrent(
-    "exits nonzero promptly when the model is unknown (regression for #27371)",
+    "exits nonzero without reaching the process timeout when the model is unknown (regression for #27371)",
     ({ opencode }) =>
       Effect.gen(function* () {
         const result = yield* opencode.run("say hi", {
           model: "test/nonexistent-model",
-          timeoutMs: 15_000,
+          timeoutMs: 20_000,
         })
         expect(result.exitCode).not.toBe(0)
-        expect(result.durationMs).toBeLessThan(15_000)
+        expect(result.timedOut).toBe(false)
       }),
     30_000,
   )

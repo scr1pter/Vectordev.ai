@@ -22,11 +22,18 @@ type Context = {
   modelLabel: string
   limit: number | undefined
   input: number
+  tokens: number
   usage: number | null
 }
 
 const tokenTotal = (msg: AssistantMessage) => {
-  return msg.tokens.input + msg.tokens.output + msg.tokens.reasoning + msg.tokens.cache.read + msg.tokens.cache.write
+  // Match the runtime overflow calculation. Reasoning is metered spend but is
+  // not automatically retained in the next prompt; providers that include it
+  // in their authoritative total still surface it through `tokens.total`.
+  const components = msg.tokens.input + msg.tokens.output + msg.tokens.cache.read + msg.tokens.cache.write
+  const reported = msg.tokens.total
+  if (typeof reported !== "number" || !Number.isFinite(reported)) return components
+  return Math.max(reported, components)
 }
 
 const providerDisplayName = (id: string, name?: string) => brandProviderName(id, name)
@@ -57,6 +64,7 @@ const build = (messages: Message[] = [], providers: Provider[] = []): Context | 
     modelLabel: model?.name ?? message.modelID,
     limit,
     input: message.tokens.input,
+    tokens: total,
     usage: limit ? Math.round((total / limit) * 100) : null,
   }
 }

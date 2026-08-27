@@ -78,7 +78,6 @@ export function WorkspaceNavigation(props: {
   onMoveWorkspace: (sourceID: string, targetID: string) => void
   onCodeEditor: () => void
   onAgentDashboard: () => void
-  onProjectRules: () => void
   onPullRequests: () => void
   onBrowser: () => void
   onCanvas: () => void
@@ -402,19 +401,6 @@ export function WorkspaceNavigation(props: {
               <rect x="9" y="8.7" width="4.7" height="4.7" rx="1.1" fill="none" stroke="currentColor" stroke-width="1.15" />
             </svg>
             <span>Agent Dashboard</span>
-          </button>
-          <button type="button" data-vector-nav-item data-tour="nav-project-rules" onClick={props.onProjectRules}>
-            <svg viewBox="0 0 16 16" class="size-3.5 shrink-0" aria-hidden="true">
-              <path
-                d="M8 1.9 13.2 4v3.6c0 3-2.1 5.4-5.2 6.5-3.1-1.1-5.2-3.5-5.2-6.5V4L8 1.9Z"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.15"
-                stroke-linejoin="round"
-              />
-              <path d="m5.9 7.9 1.5 1.5 2.8-3" fill="none" stroke="currentColor" stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round" />
-            </svg>
-            <span>Project rules</span>
           </button>
           <button type="button" data-vector-nav-item data-tour="nav-code-editor" onClick={props.onCodeEditor}>
             <svg viewBox="0 0 16 16" class="size-3.5 shrink-0" aria-hidden="true">

@@ -16,7 +16,12 @@ export function updaterAction(state: UpdaterState | undefined) {
     case "installing":
       return { label: "settings.updates.action.installing" as const }
     case "disabled":
-      return { label: "settings.updates.action.checkNow" as const }
+      // Distinct from the idle label. This state renders a greyed-out button,
+      // and labelling it "Check now" made the updater look broken: the control
+      // invites a click, does nothing, and never says why. Automatic updates
+      // only run in a packaged release build (see updaterEnabled) — a local or
+      // dev-channel build has no release feed to check against.
+      return { label: "settings.updates.action.unavailable" as const }
     default:
       return { label: "settings.updates.action.checkNow" as const, run: "check" as const }
   }

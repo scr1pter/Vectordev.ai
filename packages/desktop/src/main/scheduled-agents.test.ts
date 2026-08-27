@@ -34,7 +34,13 @@ function inNewYork(script: string): unknown {
     env: { ...process.env, TZ: "America/New_York" },
   })
   if (result.exitCode !== 0) throw new Error(result.stderr.toString())
-  return JSON.parse(result.stdout.toString())
+  const report = result.stdout
+    .toString()
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .findLast((line) => line.startsWith("{") || line.startsWith("["))
+  if (!report) throw new Error(`The time-zone subprocess returned no JSON.\n${result.stdout.toString()}`)
+  return JSON.parse(report)
 }
 
 describe("pausedStatus — pausing", () => {
@@ -213,6 +219,9 @@ function harness(options: {
   sessions?: Record<string, string>
   onActivePoll?: () => void
   legacyShape?: boolean
+  staleAssistantPolls?: number
+  incompleteAssistantPolls?: number
+  allowance?: { allowed: boolean; state: "ok" | "warn" | "blocked"; reason?: string }
 }) {
   const clock = { at: options.at }
   const persisted = { value: JSON.parse(JSON.stringify(options.records ?? [])) as unknown }
@@ -221,6 +230,18 @@ function harness(options: {
   const sessionDirectory = new Map(Object.entries(options.sessions ?? {}))
   const promptedAt = new Map<string, number>()
   const created: string[] = []
+  const createdModels: unknown[] = []
+  const spendChecks: Array<{ projectPath: string; runId: string; source: string }> = []
+  const spendRecords: Array<{
+    projectPath: string
+    runId: string
+    provider: string
+    model: string
+    source: string
+    totalCostUsd?: number
+    totalTokens?: number
+  }> = []
+  let contextPolls = 0
 
   const runtime = createScheduledAgents({
     // Round-trips through JSON exactly as electron-store does, so a field this
@@ -235,13 +256,26 @@ function harness(options: {
     delay: async (milliseconds) => {
       clock.at = new Date(clock.at.getTime() + milliseconds)
     },
+    spend: async () => ({
+      checkAllowance: async (input) => {
+        spendChecks.push(input)
+        return { unmeasuredRuns: 0, ...(options.allowance ?? { allowed: true, state: "ok" as const }) }
+      },
+      recordRunCost: async (input) => {
+        spendRecords.push(input)
+        return undefined
+      },
+    }),
     request: async (_engine, path, init) => {
       calls.push(`${init?.method ?? "GET"} ${path}`)
       if (path === "/api/session") {
         const id = `ses_new_${created.length + 1}`
         created.push(id)
-        const body = init?.body as { location?: { directory?: string } } | undefined
+        const body = init?.body as
+          | { location?: { directory?: string }; model?: { providerID?: string; id?: string; variant?: string } }
+          | undefined
         sessionDirectory.set(id, body?.location?.directory ?? "")
+        createdModels.push(body?.model)
         return { data: { id } }
       }
       if (path === "/api/session/active") {
@@ -255,25 +289,49 @@ function harness(options: {
           ),
         }
       }
+      const session = /^\/api\/session\/([^/]+)$/.exec(path)
+      if (session) {
+        const sessionId = decodeURIComponent(session[1] ?? "")
+        const completed = promptedAt.has(sessionId)
+        return {
+          data: {
+            cost: completed ? 0.25 : 0,
+            tokens: {
+              input: completed ? 10 : 0,
+              output: completed ? 5 : 0,
+              reasoning: 0,
+              cache: { read: 0, write: 0 },
+            },
+            model: { providerID: "provider-test", id: "model-test" },
+          },
+        }
+      }
       const match = /^\/api\/session\/([^/]+)\/([a-z]+)/.exec(path)
       const sessionId = decodeURIComponent(match?.[1] ?? "")
       if (match?.[2] === "prompt") {
         promptedAt.set(sessionId, clock.at.getTime())
-        return {}
+        return { data: { id: "msg_0001" } }
       }
-      if (match?.[2] === "abort") {
+      if (match?.[2] === "interrupt") {
         aborted.push(sessionId)
         promptedAt.delete(sessionId)
         return undefined
       }
       const failed = options.failing?.includes(sessionDirectory.get(sessionId) ?? "")
       const error = failed ? { message: `boom in ${sessionDirectory.get(sessionId)}` } : undefined
+      contextPolls += 1
+      if (contextPolls <= (options.staleAssistantPolls ?? 0)) {
+        return { data: [{ id: "msg_0000", type: "assistant", finish: "stop" }] }
+      }
+      if (contextPolls <= (options.staleAssistantPolls ?? 0) + (options.incompleteAssistantPolls ?? 0)) {
+        return { data: [{ id: "msg_0002", type: "assistant" }] }
+      }
       // The shape the v2 route this module calls actually returns: a flat
       // message, no `info` envelope. The fixture used to return the legacy
       // envelope, which is precisely why every run being recorded as failed
       // went unnoticed here while failing against a real engine.
-      if (options.legacyShape) return { data: [{ info: { role: "assistant", error } }] }
-      return { data: [{ type: "assistant", finish: "stop", error }] }
+      if (options.legacyShape) return { data: [{ info: { id: "msg_0002", role: "assistant", error } }] }
+      return { data: [{ id: "msg_0002", type: "assistant", finish: "stop", error }] }
     },
   })
 
@@ -285,6 +343,10 @@ function harness(options: {
     calls,
     aborted,
     created,
+    createdModels,
+    spendChecks,
+    spendRecords,
+    contextPolls: () => contextPolls,
     record: (id = "task-1") => runtime.list().find((item) => item.id === id),
   }
 }
@@ -293,6 +355,7 @@ function scheduledRecord(overrides: Partial<ScheduledAgentRecord>): ScheduledAge
   return {
     id: "task-1",
     prompt: "Summarise what changed overnight.",
+    model: { providerID: "provider-current", id: "model-current", variant: "balanced" },
     directory: "/repos/alpha",
     runAt: new Date(2026, 7, 19, 9, 0, 0, 0).toISOString(),
     status: "scheduled",
@@ -487,13 +550,34 @@ describe("targeting an existing session", () => {
     expect(record.directory).toBe("/repos/alpha")
     expect(record.targets).toEqual([{ directory: "/repos/alpha", sessionId: "ses_established" }])
   })
+
+  test("create() rejects a fresh unattended session without a pinned model", () => {
+    const harnessed = harness({ at: new Date(2026, 7, 19, 8, 0, 0, 0) })
+    expect(() =>
+      harnessed.runtime.create({
+        prompt: "Check the release.",
+        directory: "/repos/alpha",
+        runAt: new Date(2026, 7, 19, 9, 0, 0, 0).toISOString(),
+      }),
+    ).toThrow("Choose a model")
+  })
 })
 
 describe("engine message shapes", () => {
+  test("pins the saved model when opening an unattended session", async () => {
+    const harnessed = harness({ at: new Date(2026, 7, 19, 9, 0, 0, 0), records: [scheduledRecord({})] })
+    await harnessed.runtime.tick()
+    expect(harnessed.createdModels).toEqual([
+      { providerID: "provider-current", id: "model-current", variant: "balanced" },
+    ])
+  })
+
   test("a v2 flat assistant message settles the run as completed", async () => {
     const harnessed = harness({ at: new Date(2026, 7, 19, 9, 0, 0, 0), records: [scheduledRecord({})] })
     await harnessed.runtime.tick()
     expect(harnessed.record()?.status).toBe("completed")
+    expect(harnessed.calls).toContain("GET /api/session/ses_new_1/context")
+    expect(harnessed.calls.some((call) => call.includes("/message?limit="))).toBe(false)
   })
 
   test("a v2 flat assistant error settles the run as failed", async () => {
@@ -507,6 +591,32 @@ describe("engine message shapes", () => {
     expect(harnessed.record()?.error).toContain("boom in /repos/alpha")
   })
 
+  test("does not mistake an older assistant turn for the scheduled response", async () => {
+    const harnessed = harness({
+      at: new Date(2026, 7, 19, 9, 0, 0, 0),
+      records: [scheduledRecord({ targets: [{ directory: "/repos/alpha", sessionId: "ses_established" }] })],
+      staleAssistantPolls: 1,
+    })
+
+    await harnessed.runtime.tick()
+
+    expect(harnessed.record()?.status).toBe("completed")
+    expect(harnessed.contextPolls()).toBe(2)
+  })
+
+  test("waits for a V2 assistant finish reason instead of accepting a projected partial turn", async () => {
+    const harnessed = harness({
+      at: new Date(2026, 7, 19, 9, 0, 0, 0),
+      records: [scheduledRecord({})],
+      incompleteAssistantPolls: 1,
+    })
+
+    await harnessed.runtime.tick()
+
+    expect(harnessed.record()?.status).toBe("completed")
+    expect(harnessed.contextPolls()).toBe(2)
+  })
+
   // The legacy envelope is still accepted so a future route change cannot
   // silently strand the poller the way calling v2 did.
   test("a legacy { info: { role } } assistant message still settles the run", async () => {
@@ -517,6 +627,58 @@ describe("engine message shapes", () => {
     })
     await harnessed.runtime.tick()
     expect(harnessed.record()?.status).toBe("completed")
+  })
+})
+
+describe("unattended spend limits", () => {
+  test("checks the scheduled allowance before opening an engine session", async () => {
+    const harnessed = harness({
+      at: new Date(2026, 7, 19, 9, 0, 0, 0),
+      records: [scheduledRecord({})],
+      allowance: { allowed: false, state: "blocked", reason: "Daily automation spend cap reached." },
+    })
+
+    await harnessed.runtime.tick()
+
+    expect(harnessed.created).toHaveLength(0)
+    expect(harnessed.calls).toHaveLength(0)
+    expect(harnessed.record()?.status).toBe("failed")
+    expect(harnessed.record()?.error).toContain("Daily automation spend cap reached")
+    expect(harnessed.spendChecks).toHaveLength(1)
+    expect(harnessed.spendChecks[0]?.source).toBe("scheduled")
+  })
+
+  test("records the session's cost and tokens against the scheduled run", async () => {
+    const harnessed = harness({
+      at: new Date(2026, 7, 19, 9, 0, 0, 0),
+      records: [scheduledRecord({})],
+    })
+
+    await harnessed.runtime.tick()
+
+    expect(harnessed.spendRecords).toHaveLength(1)
+    expect(harnessed.spendRecords[0]).toMatchObject({
+      projectPath: "/repos/alpha",
+      provider: "provider-test",
+      model: "model-test",
+      source: "scheduled",
+      totalCostUsd: 0.25,
+      totalTokens: 15,
+    })
+  })
+
+  test("still records usage when the provider finishes with an error", async () => {
+    const harnessed = harness({
+      at: new Date(2026, 7, 19, 9, 0, 0, 0),
+      records: [scheduledRecord({})],
+      failing: ["/repos/alpha"],
+    })
+
+    await harnessed.runtime.tick()
+
+    expect(harnessed.record()?.status).toBe("failed")
+    expect(harnessed.spendRecords).toHaveLength(1)
+    expect(harnessed.spendRecords[0]?.totalCostUsd).toBe(0.25)
   })
 })
 
@@ -533,19 +695,20 @@ describe("legacy single-directory records", () => {
     createdAt: "2026-08-01T12:00:00.000Z",
   }
 
-  test("load and run without a migration step", async () => {
+  test("fails a model-less legacy run before opening a session", async () => {
     const harnessed = harness({ at: new Date(2026, 7, 19, 9, 0, 0, 0), records: [legacy] })
 
     expect(harnessed.runtime.list({ directory: "/repos/legacy" })).toHaveLength(1)
     await harnessed.runtime.tick()
 
     const record = harnessed.record("task-legacy")
-    expect(harnessed.created).toEqual(["ses_new_1"])
+    expect(harnessed.created).toEqual([])
     expect(record?.directory).toBe("/repos/legacy")
     expect(record?.results?.map((result) => [result.directory, result.status])).toEqual([
-      ["/repos/legacy", "completed"],
+      ["/repos/legacy", "failed"],
     ])
     expect(record?.status).toBe("scheduled")
+    expect(record?.results?.[0]?.error).toContain("saved without a model")
     expect(new Date(record?.runAt ?? 0).getDate()).toBe(20)
   })
 
@@ -554,12 +717,14 @@ describe("legacy single-directory records", () => {
 
     const record = harnessed.runtime.create({
       prompt: "Check the dependencies.",
+      model: { providerID: "provider-current", id: "model-current" },
       directory: "/repos/legacy",
       runAt: new Date(2026, 7, 19, 9, 0, 0, 0).toISOString(),
     })
 
     expect(record.directory).toBe("/repos/legacy")
     expect(record.targets).toBeUndefined()
+    expect(record.model).toEqual({ providerID: "provider-current", id: "model-current" })
   })
 
   test("a record left running by a crash is failed, and a recurring one is re-armed", async () => {
@@ -596,6 +761,30 @@ describe("pause, resume and cancel", () => {
     expect(harnessed.runtime.workState().armedTasks).toBe(1)
   })
 
+  test("pausing and resuming an active recurring run does not skip its next occurrence", async () => {
+    let toggle = () => {}
+    let toggled = false
+    const harnessed = harness({
+      at: new Date(2026, 7, 19, 9, 0, 0, 0),
+      records: [scheduledRecord({ recurrence: daily })],
+      onActivePoll: () => {
+        if (toggled) return
+        toggled = true
+        toggle()
+      },
+    })
+    toggle = () => {
+      expect(harnessed.runtime.setPaused("task-1", true).status).toBe("running")
+      expect(harnessed.runtime.setPaused("task-1", false).status).toBe("running")
+    }
+
+    await harnessed.runtime.tick()
+
+    const next = new Date(harnessed.record()?.runAt ?? 0)
+    expect(next.getDate()).toBe(20)
+    expect(next.getHours()).toBe(9)
+  })
+
   test("cancelling a scheduled task stops it from ever running", async () => {
     const harnessed = harness({
       at: new Date(2026, 7, 19, 10, 0, 0, 0),
@@ -625,6 +814,8 @@ describe("pause, resume and cancel", () => {
     await harnessed.runtime.tick()
 
     expect([...new Set(harnessed.aborted)].sort()).toEqual(["ses_new_1", "ses_new_2"])
+    expect(harnessed.calls.some((call) => call.endsWith("/interrupt"))).toBe(true)
+    expect(harnessed.calls.some((call) => call.endsWith("/abort"))).toBe(false)
     const record = harnessed.record()
     expect(record?.status).toBe("canceled")
     // Still the original slot: a cancelled run must not roll the task forward.
@@ -671,6 +862,22 @@ describe("manual runs and reporting", () => {
     await harnessed.runtime.tick()
 
     expect(finished).toEqual(["/repos/beta: boom in /repos/beta"])
+  })
+
+  test("a notification listener failure cannot fail or advance the run again", async () => {
+    const harnessed = harness({
+      at: new Date(2026, 7, 19, 9, 0, 0, 0),
+      records: [scheduledRecord({ recurrence: daily })],
+    })
+    harnessed.runtime.onRunFinished(() => {
+      throw new Error("desktop notifications are unavailable")
+    })
+
+    await harnessed.runtime.tick()
+
+    const record = harnessed.record()
+    expect(record?.error).toBeUndefined()
+    expect(new Date(record?.runAt ?? 0).getDate()).toBe(20)
   })
 
   test("work state counts armed tasks and the soonest run", () => {

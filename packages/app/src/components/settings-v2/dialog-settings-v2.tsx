@@ -74,6 +74,7 @@ const groups: {
 export const DialogSettings: Component<{
   sessionID?: string
   section?: SettingsTab
+  repositoryPath?: string
 }> = (props) => {
   const platform = usePlatform()
 
@@ -83,7 +84,7 @@ export const DialogSettings: Component<{
     if (item === "about") return <SettingsAboutV2 />
     if (item === "voice") return <SettingsVoiceV2 />
     if (item === "personalization") return <SettingsPersonalizationV2 />
-    if (item === "rules") return <SettingsRulesV2 />
+    if (item === "rules") return <SettingsRulesV2 repositoryPath={props.repositoryPath} />
     if (item === "subagents") return <SettingsSubagentsV2 />
     if (item === "providers") return <SettingsProvidersV2 />
     if (item === "models") return <SettingsModelsV2 />

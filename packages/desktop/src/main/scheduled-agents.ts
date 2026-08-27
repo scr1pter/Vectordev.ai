@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto"
 
 import { getStore } from "./store"
 import { nextRun, type Recurrence } from "@opencode-ai/app/schedule"
+import type { SpendLedger } from "./spend-limits"
 
 const STORE_NAME = "scheduled-agents"
 const STORE_KEY = "records"
@@ -37,6 +38,11 @@ export type ScheduledAgentRecord = {
   id: string
   title?: string
   prompt: string
+  // Fresh sessions must pin the model selected when the automation was
+  // created. Falling through to the engine default is unsafe for unattended
+  // work: a retired catalog default can remain locally enabled after the
+  // upstream deployment has disappeared.
+  model?: { providerID: string; id: string; variant?: string }
   // Absent means a one-shot run, which is what every record created before
   // recurrence existed is.
   recurrence?: Recurrence
@@ -80,6 +86,7 @@ export type CreateScheduledAgentInput = {
   title?: string
   recurrence?: Recurrence
   prompt: string
+  model?: { providerID: string; id: string; variant?: string }
   // Either of these picks where the task runs; `targets` wins when both are
   // given. `directory` stays accepted so existing callers are untouched.
   directory?: string
@@ -190,10 +197,12 @@ type EngineMessageError = { message?: string; data?: { message?: string } } | st
 // ceiling and was recorded as failed. Both shapes are accepted so the poller
 // cannot silently break again if the route it uses changes.
 type EngineMessage = {
+  id?: string
   type?: string
   finish?: string
   error?: EngineMessageError
   info?: {
+    id?: string
     role?: string
     finish?: string
     error?: EngineMessageError
@@ -202,6 +211,19 @@ type EngineMessage = {
 
 type EngineMessageResponse = {
   data?: EngineMessage[]
+}
+
+type EngineSessionResponse = {
+  data?: {
+    cost?: number
+    tokens?: {
+      input?: number
+      output?: number
+      reasoning?: number
+      cache?: { read?: number; write?: number }
+    }
+    model?: { id?: string; providerID?: string }
+  }
 }
 
 function activeSessionMap(value: unknown): Record<string, unknown> {
@@ -217,11 +239,24 @@ function assistantOf(item: EngineMessage) {
   return undefined
 }
 
-function assistantFailure(response: EngineMessageResponse) {
+function assistantFailure(response: EngineMessageResponse, afterMessageId?: string) {
   const messages = response.data ?? []
-  const assistant = messages.map(assistantOf).filter(Boolean).at(-1)
+  const item = messages
+    .filter((message) => {
+      const assistant = assistantOf(message)
+      if (!assistant) return false
+      const id = assistant.id
+      return !afterMessageId || !id || id > afterMessageId
+    })
+    .at(-1)
+  const assistant = item && assistantOf(item)
   if (!assistant) return { settled: false as const }
-  if (!assistant.error) return { settled: true as const }
+  if (!assistant.error) {
+    // A projected V2 assistant without a finish reason is an in-progress turn,
+    // even if the process-local active registry briefly has not observed it.
+    if (item?.type === "assistant" && !item.finish) return { settled: false as const }
+    return { settled: true as const }
+  }
   if (typeof assistant.error === "string") return { settled: true as const, error: assistant.error }
   return {
     settled: true as const,
@@ -237,6 +272,7 @@ export function createScheduledAgents(
     now?: () => Date
     request?: ScheduledAgentRequest
     delay?: (milliseconds: number) => Promise<void>
+    spend?: () => Promise<Pick<SpendLedger, "checkAllowance" | "recordRunCost">>
   } = {},
 ) {
   // Resolved per call rather than captured, because electron-store cannot be
@@ -254,6 +290,12 @@ export function createScheduledAgents(
     transport(engine, path, init) as Promise<T>
   const delay =
     deps.delay ?? ((milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)))
+  const spend =
+    deps.spend ??
+    (async () => {
+      const { spendLedger } = await import("./spend-limits")
+      return spendLedger()
+    })
 
   const activeRuns = new Set<string>()
   const inFlight = new Set<Promise<void>>()
@@ -265,6 +307,18 @@ export function createScheduledAgents(
   let runFinishedListener: ((record: ScheduledAgentRecord) => void) | undefined
 
   const nowIso = () => clock().toISOString()
+
+  function announceFinished(record: ScheduledAgentRecord) {
+    const listener = runFinishedListener
+    if (!listener) return
+    // Desktop notifications and tray refreshes are observers, never part of a
+    // run's transaction. Isolating them on a promise boundary keeps a platform
+    // notification failure from rewriting a successful run as failed (and, for
+    // recurring tasks, advancing its schedule a second time).
+    void Promise.resolve()
+      .then(() => listener(record))
+      .catch(() => {})
+  }
 
   function readRecords(): ScheduledAgentRecord[] {
     const raw = store.get(STORE_KEY)
@@ -341,10 +395,17 @@ export function createScheduledAgents(
   }
 
   async function abortEngineSession(engine: ScheduledAgentEngine, sessionId: string) {
-    await request(engine, `/api/session/${encodeURIComponent(sessionId)}/abort`, { method: "POST" }).catch(() => {})
+    await request(engine, `/api/session/${encodeURIComponent(sessionId)}/interrupt`, { method: "POST" }).catch(
+      () => {},
+    )
   }
 
-  async function waitForSessionCompletion(engine: ScheduledAgentEngine, recordId: string, sessionId: string) {
+  async function waitForSessionCompletion(
+    engine: ScheduledAgentEngine,
+    recordId: string,
+    sessionId: string,
+    afterMessageId?: string,
+  ) {
     const startedAt = clock().getTime()
     let observedActive = false
     while (clock().getTime() - startedAt < COMPLETION_TIMEOUT_MS) {
@@ -363,9 +424,9 @@ export function createScheduledAgents(
       if (!active && (observedActive || clock().getTime() - startedAt >= STARTUP_GRACE_MS)) {
         const messages = await request<EngineMessageResponse | undefined>(
           engine,
-          `/api/session/${encodeURIComponent(sessionId)}/message?limit=20`,
+          `/api/session/${encodeURIComponent(sessionId)}/context`,
         )
-        const outcome = assistantFailure(messages ?? {})
+        const outcome = assistantFailure(messages ?? {}, afterMessageId)
         if (!outcome.settled) {
           await delay(COMPLETION_POLL_MS)
           continue
@@ -403,26 +464,64 @@ export function createScheduledAgents(
     index: number,
     target: ScheduledAgentTarget,
     prompt: string,
+    model: ScheduledAgentRecord["model"],
+    ledger: Pick<SpendLedger, "recordRunCost">,
+    runId: string,
   ) {
     // An existing session is continued, not duplicated: that is what lets a
     // recurring task keep appending to one established thread.
-    const sessionId = target.sessionId ?? (await openSession(engine, target.directory))
+    if (!target.sessionId && !model) {
+      throw new Error(
+        "This automation was saved without a model. Open Automations and recreate it so Vector can pin your current model before it runs.",
+      )
+    }
+    const sessionId = target.sessionId ?? (await openSession(engine, target.directory, model!))
     patchResult(id, index, (result) => ({ ...result, sessionId }))
     if (readRecords().find((item) => item.id === id)?.status === "canceled") {
       await abortEngineSession(engine, sessionId)
       return "canceled" as const
     }
-    await request(engine, `/api/session/${encodeURIComponent(sessionId)}/prompt`, {
-      method: "POST",
-      body: { prompt: { text: prompt }, resume: true },
+    const before = await request<EngineSessionResponse | undefined>(
+      engine,
+      `/api/session/${encodeURIComponent(sessionId)}`,
+    ).catch(() => undefined)
+    const execution = request<{ data?: { id?: string } } | undefined>(
+      engine,
+      `/api/session/${encodeURIComponent(sessionId)}/prompt`,
+      {
+        method: "POST",
+        body: { prompt: { text: prompt }, resume: true },
+      },
+    ).then((admitted) => waitForSessionCompletion(engine, id, sessionId, admitted?.data?.id))
+    return execution.finally(async () => {
+      const after = await request<EngineSessionResponse | undefined>(
+        engine,
+        `/api/session/${encodeURIComponent(sessionId)}`,
+      ).catch(() => undefined)
+      const cost = usageDelta(before?.data?.cost, after?.data?.cost)
+      const tokens = usageDelta(tokenTotal(before?.data?.tokens), tokenTotal(after?.data?.tokens))
+      await ledger
+        .recordRunCost({
+          projectPath: target.directory,
+          runId,
+          provider: after?.data?.model?.providerID ?? before?.data?.model?.providerID ?? "Current Vector provider",
+          model: after?.data?.model?.id ?? before?.data?.model?.id ?? "Current selected model",
+          source: "scheduled",
+          totalCostUsd: cost,
+          totalTokens: tokens,
+        })
+        .catch(() => undefined)
     })
-    return waitForSessionCompletion(engine, id, sessionId)
   }
 
-  async function openSession(engine: ScheduledAgentEngine, directory: string) {
+  async function openSession(
+    engine: ScheduledAgentEngine,
+    directory: string,
+    model: NonNullable<ScheduledAgentRecord["model"]>,
+  ) {
     const created = await request<{ data?: { id?: string } } | undefined>(engine, "/api/session", {
       method: "POST",
-      body: { location: { directory } },
+      body: { location: { directory }, model },
     })
     const sessionId = created?.data?.id
     if (!sessionId) throw new Error("Vector's engine did not return a session ID for the scheduled agent.")
@@ -439,7 +538,18 @@ export function createScheduledAgents(
     target: ScheduledAgentTarget,
     prompt: string,
   ) {
-    const outcome = await promptTarget(engine, id, index, target, prompt).then(
+    const record = readRecords().find((item) => item.id === id)
+    const runId = `${id}:${record?.startedAt ?? nowIso()}:${index}`
+    const execution = spend().then(async (ledger) => {
+      const allowance = await ledger.checkAllowance({
+        projectPath: target.directory,
+        runId,
+        source: "scheduled",
+      })
+      if (!allowance.allowed) throw new Error(allowance.reason || "A spend limit blocked this scheduled run.")
+      return promptTarget(engine, id, index, target, prompt, record?.model, ledger, runId)
+    })
+    const outcome = await execution.then(
       (status) => ({ status }),
       (error) => ({ status: "failed" as const, error: failureMessage(error) }),
     )
@@ -511,7 +621,7 @@ export function createScheduledAgents(
       activeRuns.delete(id)
       // Announced only after the run leaves activeRuns, so the tray refresh this
       // triggers no longer counts the finished run as still in flight.
-      if (finished) runFinishedListener?.(finished)
+      if (finished) announceFinished(finished)
     }
   }
 
@@ -537,7 +647,7 @@ export function createScheduledAgents(
           .catch((error) => {
             const failed = failRecord(record.id, failureMessage(error))
             // A run the user cancelled mid-flight is not a finish worth announcing.
-            if (failed && failed.status !== "canceled") runFinishedListener?.(failed)
+            if (failed && failed.status !== "canceled") announceFinished(failed)
           })
           .finally(() => inFlight.delete(run))
         inFlight.add(run)
@@ -573,12 +683,14 @@ export function createScheduledAgents(
       paused,
       // Resuming a recurring task moves it to its next real moment; without this
       // it would still hold a runAt in the past and fire immediately. The parked
-      // occurrence is abandoned rather than caught up.
+      // occurrence is abandoned rather than caught up. A run that is still in
+      // flight keeps its current anchor: completion advances that slot itself,
+      // and moving it here as well would skip the next occurrence.
       runAt:
-        !paused && record.recurrence && record.recurrence.kind !== "once"
+        !paused && record.status !== "running" && record.recurrence && record.recurrence.kind !== "once"
           ? (nextRun(record.recurrence, clock())?.toISOString() ?? record.runAt)
           : record.runAt,
-      scheduledFor: paused ? record.scheduledFor : undefined,
+      scheduledFor: paused || record.status === "running" ? record.scheduledFor : undefined,
       status: pausedStatus(record, paused),
     }))
   }
@@ -665,6 +777,10 @@ export function createScheduledAgents(
       if (!prompt) throw new Error("Write a prompt for the scheduled agent to run.")
       const targets = normalizeTargets(input)
       if (targets.length === 0) throw new Error("Choose at least one project directory for the scheduled agent.")
+      const model = normalizeModel(input.model)
+      if (!model && targets.some((target) => !target.sessionId)) {
+        throw new Error("Choose a model for this automation before scheduling a fresh session.")
+      }
       const parsed = Date.parse(input.runAt)
       if (!Number.isFinite(parsed)) throw new Error("The scheduled time is not a valid date.")
 
@@ -674,6 +790,7 @@ export function createScheduledAgents(
         id: randomUUID(),
         title: input.title?.trim() || prompt.split("\n")[0]?.slice(0, 80),
         prompt,
+        model,
         directory: targets[0].directory,
         // Left off entirely for a plain one-directory task, so those records
         // stay exactly the shape earlier versions wrote and read.
@@ -711,6 +828,29 @@ export function createScheduledAgents(
       return next
     },
   }
+}
+
+function normalizeModel(model: CreateScheduledAgentInput["model"]) {
+  if (!model) return undefined
+  const providerID = model.providerID?.trim()
+  const id = model.id?.trim()
+  if (!providerID || !id) throw new Error("Choose a model for this automation to use.")
+  return { providerID, id, variant: model.variant?.trim() || undefined }
+}
+
+function tokenTotal(tokens: NonNullable<EngineSessionResponse["data"]>["tokens"]) {
+  if (!tokens) return undefined
+  const values = [tokens.input, tokens.output, tokens.reasoning, tokens.cache?.read, tokens.cache?.write]
+  if (!values.some((value) => typeof value === "number" && Number.isFinite(value))) return undefined
+  return values.reduce<number>(
+    (sum, value) => sum + (typeof value === "number" && Number.isFinite(value) ? value : 0),
+    0,
+  )
+}
+
+function usageDelta(before: number | undefined, after: number | undefined) {
+  if (!Number.isFinite(before) || !Number.isFinite(after)) return undefined
+  return Math.max((after ?? 0) - (before ?? 0), 0)
 }
 
 function normalizeTargets(input: Pick<CreateScheduledAgentInput, "directory" | "targets">) {

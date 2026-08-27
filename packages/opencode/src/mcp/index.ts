@@ -122,34 +122,61 @@ function isMcpConfigured(entry: McpEntry): entry is ConfigMCPV1.Info {
   return typeof entry === "object" && entry !== null && "type" in entry
 }
 
+function validMcpName(name: string) {
+  return name.trim() === name && name.length > 0 && name.length <= 256 && !Object.hasOwn(Object.prototype, name)
+}
+
+const credentialReference = String.raw`\{(?:env|vault):[A-Za-z_][A-Za-z0-9_]*\}`
+
 function unsafeCredentialHeader(headers?: Record<string, string>) {
   if (!headers) return
   return Object.entries(headers).find(
     ([name, value]) =>
-      /^(authorization|cookie|proxy-authorization|x-api-key)$/i.test(name) &&
-      !/\{env:[A-Za-z_][A-Za-z0-9_]*\}/.test(value),
+      (/^(authorization|cookie|proxy-authorization)$/i.test(name) ||
+        /(?:^|[-_])(?:api[-_]?key|token|secret|password)(?:$|[-_])/i.test(name)) &&
+      !new RegExp(`^\\s*(?:(?:Bearer|Basic|Token)\\s+)?${credentialReference}\\s*$`, "i").test(value),
   )?.[0]
+}
+
+export function resolveMcpValue(
+  value: string,
+  label: string,
+  environment: Record<string, string | undefined> = process.env,
+  secrets: Record<string, string> = {},
+) {
+  return value
+    .replace(/\{env:([A-Za-z_][A-Za-z0-9_]*)\}/g, (_, variable: string) => {
+      const resolved = environment[variable]
+      if (resolved === undefined) throw new Error(`${label} requires environment variable ${variable}.`)
+      return resolved
+    })
+    .replace(/\{vault:([A-Za-z_][A-Za-z0-9_]*)\}/g, (_, key: string) => {
+      const resolved = secrets[key]
+      if (resolved === undefined) throw new Error(`${label} requires a credential named ${key}.`)
+      return resolved
+    })
 }
 
 export function resolveMcpHeaders(
   headers: Record<string, string> | undefined,
   environment: Record<string, string | undefined> = process.env,
+  secrets: Record<string, string> = {},
 ) {
   if (!headers) return
   return Object.fromEntries(
     Object.entries(headers).map(([name, value]) => [
       name,
-      value.replace(/\{env:([A-Za-z_][A-Za-z0-9_]*)\}/g, (_, variable: string) => {
-        const resolved = environment[variable]
-        if (resolved === undefined) throw new Error(`MCP header "${name}" requires environment variable ${variable}.`)
-        return resolved
-      }),
+      resolveMcpValue(value, `MCP header "${name}"`, environment, secrets),
     ]),
   )
 }
 
 function remoteURL(value: string) {
-  if (URL.canParse(value)) return new URL(value)
+  if (!URL.canParse(value)) return
+  const url = new URL(value)
+  if (url.protocol !== "http:" && url.protocol !== "https:") return
+  if (url.username || url.password) return
+  return url
 }
 
 interface CreateResult {
@@ -173,6 +200,7 @@ interface State {
   clients: Record<string, MCPClient>
   defs: Record<string, MCPToolDef[]>
   instructions: Record<string, string>
+  removed: Set<string>
 }
 
 export interface ServerInstructions {
@@ -191,7 +219,12 @@ export interface Interface {
   readonly resourceTemplates: (
     clientName?: string,
   ) => Effect.Effect<Record<string, ResourceTemplateInfo & { client: string }>>
-  readonly add: (name: string, mcp: ConfigMCPV1.Info) => Effect.Effect<{ status: Record<string, Status> | Status }>
+  readonly add: (
+    name: string,
+    mcp: ConfigMCPV1.Info,
+    secrets?: Record<string, string>,
+  ) => Effect.Effect<{ status: Record<string, Status> | Status }>
+  readonly remove: (name: string) => Effect.Effect<void, NotFoundError>
   readonly connect: (name: string) => Effect.Effect<void, NotFoundError>
   readonly disconnect: (name: string) => Effect.Effect<void, NotFoundError>
   readonly getPrompt: (
@@ -256,6 +289,7 @@ const layer = Layer.effect(
       key: string,
       mcp: ConfigMCPV1.Info & { type: "remote" },
     ) {
+      const secrets = (yield* auth.get(key))?.secrets ?? {}
       const oauthDisabled = mcp.oauth === false
       const oauthConfig = typeof mcp.oauth === "object" ? mcp.oauth : undefined
       const url = remoteURL(mcp.url)
@@ -285,7 +319,7 @@ const layer = Layer.effect(
         )
       }
 
-      const headers = resolveMcpHeaders(mcp.headers)
+      const headers = resolveMcpHeaders(mcp.headers, process.env, secrets)
       const transports: Array<{ name: string; transport: TransportWithAuth }> = [
         {
           name: "StreamableHTTP",
@@ -361,19 +395,26 @@ const layer = Layer.effect(
       key: string,
       mcp: ConfigMCPV1.Info & { type: "local" },
     ) {
-      const [cmd, ...args] = mcp.command
+      const secrets = (yield* auth.get(key))?.secrets ?? {}
+      const [cmd, ...args] = mcp.command.map((value) =>
+        resolveMcpValue(value, `MCP command for "${key}"`, process.env, secrets),
+      )
       const baseDir = yield* InstanceState.directory
       const cwd = mcp.cwd ? path.resolve(baseDir, mcp.cwd) : baseDir
+      const environment = mcp.environment
+        ? Object.fromEntries(
+            Object.entries(mcp.environment).map(([name, value]) => [
+              name,
+              resolveMcpValue(value, `MCP environment variable ${name}`, process.env, secrets),
+            ]),
+          )
+        : undefined
       const transport = new StdioClientTransport({
         stderr: "pipe",
         command: cmd,
         args,
         cwd,
-        env: untrustedChildEnvironment(
-          process.env,
-          cmd === "opencode" ? { BUN_BE_BUN: "1" } : undefined,
-          mcp.environment,
-        ),
+        env: untrustedChildEnvironment(process.env, cmd === "opencode" ? { BUN_BE_BUN: "1" } : undefined, environment),
       })
 
       const connectTimeout = mcp.timeout ?? DEFAULT_TIMEOUT
@@ -519,12 +560,17 @@ const layer = Layer.effect(
           clients: {},
           defs: {},
           instructions: {},
+          removed: new Set(),
         }
 
         yield* Effect.forEach(
           Object.entries(config),
           ([key, mcp]) =>
             Effect.gen(function* () {
+              if (!validMcpName(key)) {
+                yield* Effect.logError("Ignoring MCP config entry with invalid name", { key })
+                return
+              }
               if (!isMcpConfigured(mcp)) {
                 yield* Effect.logError("Ignoring MCP config entry without type", { key })
                 return
@@ -615,7 +661,9 @@ const layer = Layer.effect(
       const result: Record<string, Status> = {}
 
       for (const [key, mcp] of Object.entries(config)) {
+        if (!validMcpName(key)) continue
         if (!isMcpConfigured(mcp)) continue
+        if (s.removed.has(key)) continue
         result[key] = s.status[key] ?? { status: "disabled" }
       }
 
@@ -682,22 +730,81 @@ const layer = Layer.effect(
       )
     })
 
-    const add = Effect.fn("MCP.add")(function* (name: string, mcp: ConfigMCPV1.Info) {
+    const add = Effect.fn("MCP.add")(function* (name: string, mcp: ConfigMCPV1.Info, secrets?: Record<string, string>) {
       const unsafeHeader = mcp.type === "remote" ? unsafeCredentialHeader(mcp.headers) : undefined
+      if (!validMcpName(name)) {
+        return {
+          status: {
+            status: "failed",
+            error: "MCP server names must be between 1 and 256 characters and cannot use reserved object keys.",
+          } satisfies Status,
+        }
+      }
+      if (mcp.type === "remote" && !remoteURL(mcp.url)) {
+        return {
+          status: {
+            status: "failed",
+            error: "MCP remote URLs must use HTTP or HTTPS and cannot contain embedded credentials.",
+          } satisfies Status,
+        }
+      }
+      if (mcp.type === "local" && (!mcp.command.length || !mcp.command[0]?.trim())) {
+        return {
+          status: {
+            status: "failed",
+            error: "Local MCP servers require a command to run.",
+          } satisfies Status,
+        }
+      }
       if (unsafeHeader) {
         return {
           status: {
             status: "failed",
-            error: `MCP header "${unsafeHeader}" must reference an environment variable such as "Bearer {env:MCP_TOKEN}". Vector does not store raw MCP credentials in project configuration.`,
+            error: `MCP header "${unsafeHeader}" must reference an environment variable or encrypted vault credential, such as "Bearer {env:MCP_TOKEN}". Vector does not store raw MCP credentials in project configuration.`,
           } satisfies Status,
         }
       }
+      const invalidSecret = Object.entries(secrets ?? {}).find(
+        ([key, value]) => !/^[A-Za-z_][A-Za-z0-9_]*$/.test(key) || !value || value.length > 64 * 1024,
+      )
+      if (invalidSecret || Object.keys(secrets ?? {}).length > 128) {
+        return {
+          status: {
+            status: "failed",
+            error: invalidSecret
+              ? `MCP credential "${invalidSecret[0]}" is invalid.`
+              : "MCP credentials may contain at most 128 entries.",
+          } satisfies Status,
+        }
+      }
+      // An add replaces the credential set as well as the server config. This
+      // prevents a later config with a guessed vault key from inheriting a
+      // secret left behind by a previous integration under the same name.
+      yield* auth.updateSecrets(name, secrets ?? {})
       const s = yield* InstanceState.get(state)
+      s.removed.delete(name)
       s.config[name] = mcp
       yield* persistConfig(name, mcp)
       yield* createAndStore(name, mcp)
       yield* events.publish(ToolsChanged, { server: name }).pipe(Effect.ignore)
       return { status: s.status }
+    })
+
+    const remove = Effect.fn("MCP.remove")(function* (name: string) {
+      yield* requireMcpConfig(name)
+      // Delete the durable entry before clearing the in-memory client and
+      // encrypted credentials. If the file cannot be written, the caller sees
+      // a failure and the working integration remains intact and retryable.
+      yield* cfgSvc.removeMcpLocal(name)
+      const s = yield* InstanceState.get(state)
+      yield* closeClient(s, name)
+      delete s.config[name]
+      delete s.status[name]
+      s.removed.add(name)
+      McpOAuthCallback.cancelPending(name)
+      pendingOAuthTransports.delete(name)
+      yield* auth.remove(name)
+      yield* events.publish(ToolsChanged, { server: name }).pipe(Effect.ignore)
     })
 
     const connect = Effect.fn("MCP.connect")(function* (name: string) {
@@ -853,11 +960,12 @@ const layer = Layer.effect(
     })
 
     const getMcpConfig = Effect.fnUntraced(function* (mcpName: string) {
+      if (!validMcpName(mcpName)) return undefined
       const s = yield* InstanceState.get(state)
-      if (s.config[mcpName]) return s.config[mcpName]
+      if (Object.hasOwn(s.config, mcpName)) return s.config[mcpName]
 
       const cfg = yield* cfgSvc.get()
-      const mcpConfig = cfg.mcp?.[mcpName]
+      const mcpConfig = cfg.mcp && Object.hasOwn(cfg.mcp, mcpName) ? cfg.mcp[mcpName] : undefined
       if (!mcpConfig || !isMcpConfigured(mcpConfig)) return undefined
       return mcpConfig
     })
@@ -908,9 +1016,12 @@ const layer = Layer.effect(
         auth,
       )
 
+      const secrets = (yield* auth.get(mcpName))?.secrets ?? {}
       const transport = new StreamableHTTPClientTransport(url, {
         authProvider,
-        requestInit: mcpConfig.headers ? { headers: mcpConfig.headers } : undefined,
+        requestInit: mcpConfig.headers
+          ? { headers: resolveMcpHeaders(mcpConfig.headers, process.env, secrets) }
+          : undefined,
       })
       const directory = yield* InstanceState.directory
 
@@ -1058,6 +1169,7 @@ const layer = Layer.effect(
       resources,
       resourceTemplates,
       add,
+      remove,
       connect,
       disconnect,
       getPrompt,

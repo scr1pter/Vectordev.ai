@@ -11,6 +11,7 @@ import { described } from "./metadata"
 export const AddPayload = Schema.Struct({
   name: Schema.String,
   config: ConfigMCPV1.Info,
+  secrets: Schema.optional(Schema.Record(Schema.String, Schema.String)),
 })
 
 export const StatusMap = Schema.Record(Schema.String, MCP.Status)
@@ -22,6 +23,9 @@ export const AuthCallbackPayload = Schema.Struct({
   code: Schema.String,
 })
 export const AuthRemoveResponse = Schema.Struct({
+  success: Schema.Literal(true),
+})
+export const RemoveResponse = Schema.Struct({
   success: Schema.Literal(true),
 })
 export class UnsupportedOAuthError extends Schema.ErrorClass<UnsupportedOAuthError>("McpUnsupportedOAuthError")(
@@ -36,6 +40,7 @@ export const McpPaths = {
   authAuthenticate: "/mcp/:name/auth/authenticate",
   connect: "/mcp/:name/connect",
   disconnect: "/mcp/:name/disconnect",
+  remove: "/mcp/:name",
 } as const
 
 export const McpApi = HttpApi.make("mcp")
@@ -134,6 +139,18 @@ export const McpApi = HttpApi.make("mcp")
           OpenApi.annotations({
             identifier: "mcp.disconnect",
             description: "Disconnect an MCP server.",
+          }),
+        ),
+        HttpApiEndpoint.delete("remove", McpPaths.remove, {
+          params: { name: Schema.String },
+          query: WorkspaceRoutingQuery,
+          success: described(RemoveResponse, "MCP server removed successfully"),
+          error: McpServerNotFoundError,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "mcp.remove",
+            summary: "Remove MCP server",
+            description: "Disconnect and remove a dynamically added Model Context Protocol (MCP) server.",
           }),
         ),
       )

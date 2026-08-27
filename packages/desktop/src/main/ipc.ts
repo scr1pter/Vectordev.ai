@@ -13,11 +13,7 @@ import { getStore, removeStoreFileIfEmpty } from "./store"
 import { sendBugReport } from "./bug-report"
 import { askHelpAssistant, type HelpInput } from "./help-assistant"
 import { clearLocalMemory, readLocalMemory, writeLocalMemory } from "./local-memory"
-import {
-  clearCustomInstructions,
-  readCustomInstructions,
-  writeCustomInstructions,
-} from "./custom-instructions"
+import { clearCustomInstructions, readCustomInstructions, writeCustomInstructions } from "./custom-instructions"
 import { deleteRepoRule, listRepoRules, saveRepoRule, type SaveRepoRuleInput } from "./repo-rules"
 import { ensureRuntime, preparePluginCommand, type RuntimeName } from "./runtime-bootstrap"
 import { convertHeicToJpeg } from "./image-convert"
@@ -90,6 +86,7 @@ import {
 import {
   addCloudProviderDomain,
   connectCloudProvider,
+  connectCloudProviderWithToken,
   connectSupabaseProject,
   disconnectCloudProvider,
   getSupabaseServiceSnapshot,
@@ -253,13 +250,21 @@ export function registerIpcHandlers(deps: Deps) {
   })
   handle("report-bug", (_event, input: { message: string; email?: string }) => sendBugReport(input))
   handle("help-assistant-ask", (_event, input: HelpInput) => askHelpAssistant(input))
-  handle("agent-teams-list", (_event, scope?: { sourcePath?: string; parentSessionId?: string }) => listAgentTeams(scope))
+  handle("agent-teams-list", (_event, scope?: { sourcePath?: string; parentSessionId?: string }) =>
+    listAgentTeams(scope),
+  )
   handle("agent-teams-get", (_event, id: string) => getAgentTeam(id))
   handle(
     "agent-teams-create",
     (
       _event,
-      input: { name: string; topology: TeamTopology; sourcePath: string; parentSessionId?: string; sharedPath?: string },
+      input: {
+        name: string
+        topology: TeamTopology
+        sourcePath: string
+        parentSessionId?: string
+        sharedPath?: string
+      },
     ) => createAgentTeam(input),
   )
   handle("agent-teams-add-member", (_event, teamId: string, workspaceId: string) => addTeamMember(teamId, workspaceId))
@@ -268,10 +273,14 @@ export function registerIpcHandlers(deps: Deps) {
   )
   handle(
     "agent-teams-post",
-    (_event, input: { teamId: string; fromWorkspaceId: string; fromName: string; toWorkspaceId?: string; text: string }) =>
-      postTeamMessage(input),
+    (
+      _event,
+      input: { teamId: string; fromWorkspaceId: string; fromName: string; toWorkspaceId?: string; text: string },
+    ) => postTeamMessage(input),
   )
-  handle("agent-teams-claim", (_event, teamId: string, workspaceId: string) => claimPendingMessages(teamId, workspaceId))
+  handle("agent-teams-claim", (_event, teamId: string, workspaceId: string) =>
+    claimPendingMessages(teamId, workspaceId),
+  )
   handle("agent-teams-delete", (_event, teamId: string) => deleteAgentTeam(teamId))
   handle("agent-teams-get-graph", (_event, teamId: string) => getCollaborationGraph(teamId))
   handle("agent-teams-set-graph", (_event, teamId: string, graph: TeamCollaborationGraph | undefined) =>
@@ -465,6 +474,9 @@ export function registerIpcHandlers(deps: Deps) {
   handle("cloud-connections-list", () => listCloudProviderConnections())
   handle("cloud-connections-connect", (_event: IpcMainInvokeEvent, provider: CloudProviderId) =>
     connectCloudProvider(provider),
+  )
+  handle("cloud-connections-connect-token", (_event: IpcMainInvokeEvent, provider: CloudProviderId, token: string) =>
+    connectCloudProviderWithToken(provider, token),
   )
   handle("cloud-connections-disconnect", (_event: IpcMainInvokeEvent, provider: CloudProviderId) =>
     disconnectCloudProvider(provider),

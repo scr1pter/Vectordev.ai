@@ -4,6 +4,8 @@ import {
   formatRulesFile,
   formatRulesForPrompt,
   matchesPattern,
+  mergeRulesFile,
+  rulesForRepository,
   selectRules,
   type RepoRule,
 } from "./repo-rules-model"
@@ -60,7 +62,12 @@ describe("selecting the rules that apply", () => {
   const repo = "/Users/k/project"
   const rules = [
     rule({ id: "1", description: "No query logic in controllers", repositoryPath: repo }),
-    rule({ id: "2", description: "Components stay presentational", repositoryPath: repo, filePatterns: ["src/**/*.tsx"] }),
+    rule({
+      id: "2",
+      description: "Components stay presentational",
+      repositoryPath: repo,
+      filePatterns: ["src/**/*.tsx"],
+    }),
     rule({ id: "3", description: "Other project rule", repositoryPath: "/Users/k/other" }),
     rule({ id: "4", description: "Disabled rule", repositoryPath: repo, enabled: false }),
     rule({ id: "5", description: "Applies everywhere" }),
@@ -73,6 +80,15 @@ describe("selecting the rules that apply", () => {
 
   test("a trailing slash on either side is not a different repository", () => {
     expect(selectRules(rules, { repositoryPath: `${repo}/` }).map((item) => item.id)).toEqual(["1", "2", "5"])
+  })
+
+  test("a trailing Windows separator is not a different repository", () => {
+    expect(
+      selectRules(
+        [rule({ repositoryPath: "C:\\Users\\me\\Vector\\" })],
+        { repositoryPath: "C:\\Users\\me\\Vector" },
+      ),
+    ).toHaveLength(1)
   })
 
   test("file scope narrows the selection once the touched files are known", () => {
@@ -91,6 +107,10 @@ describe("selecting the rules that apply", () => {
       "2",
       "5",
     ])
+  })
+
+  test("an empty initial file list is still unknown and keeps scoped rules", () => {
+    expect(selectRules(rules, { repositoryPath: repo, files: [] }).map((item) => item.id)).toEqual(["1", "2", "5"])
   })
 })
 
@@ -118,5 +138,52 @@ describe("rendering rules for the agent", () => {
     expect(file).toContain("# Project rules")
     expect(file).toContain("- No query logic in controllers")
     expect(file).toContain("Managed by Vector")
+  })
+
+  test("managed updates preserve teammate-authored Markdown outside the block", () => {
+    const first = formatRulesFile([rule({ id: "1", description: "No query logic in controllers" })])
+    const withManual = `# Team notes\n\nNever commit generated fixtures.\n\n${first}`
+    const merged = mergeRulesFile(withManual, [rule({ id: "2", description: "Use repository services" })])
+    expect(merged).toContain("Never commit generated fixtures.")
+    expect(merged).toContain("Use repository services")
+    expect(merged).not.toContain("No query logic in controllers")
+  })
+
+  test("removing the last managed rule leaves manual Markdown intact", () => {
+    const existing = `# Team notes\n\nKeep this.\n\n${formatRulesFile([rule({ id: "1", description: "Managed" })])}`
+    expect(mergeRulesFile(existing, [])).toBe("# Team notes\n\nKeep this.\n")
+  })
+})
+
+describe("listing the rules that govern one repository", () => {
+  const alpha = "/work/alpha"
+  const beta = "/work/beta"
+  const all = [
+    rule({ id: "a", description: "Alpha only", repositoryPath: alpha }),
+    rule({ id: "b", description: "Beta only", repositoryPath: beta }),
+    rule({ id: "g", description: "Everywhere", repositoryPath: "" }),
+    rule({ id: "a-off", description: "Alpha, switched off", repositoryPath: alpha, enabled: false }),
+  ]
+
+  test("one repository never sees another repository's rules", () => {
+    // The reported bug: every project's panel listed every project's rules,
+    // because the caller asked for the unscoped list.
+    expect(rulesForRepository(all, alpha).map((r) => r.id)).toEqual(["a", "g", "a-off"])
+    expect(rulesForRepository(all, beta).map((r) => r.id)).toEqual(["b", "g"])
+  })
+
+  test("a global rule governs every repository", () => {
+    expect(rulesForRepository(all, "/work/gamma").map((r) => r.id)).toEqual(["g"])
+  })
+
+  test("disabled rules stay listed, unlike the prompt filter", () => {
+    // A disabled rule has to remain on screen or there is no way to switch it
+    // back on. selectRules drops it because prompts must not carry it.
+    expect(rulesForRepository(all, alpha).some((r) => r.id === "a-off")).toBe(true)
+    expect(selectRules(all, { repositoryPath: alpha }).some((r) => r.id === "a-off")).toBe(false)
+  })
+
+  test("a trailing separator does not make a repository foreign to itself", () => {
+    expect(rulesForRepository(all, `${alpha}/`).map((r) => r.id)).toEqual(["a", "g", "a-off"])
   })
 })

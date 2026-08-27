@@ -16,6 +16,16 @@ const notarizeMac = process.env.VECTOR_NOTARIZE === "true"
 const signDmg = process.env.VECTOR_SIGN_DMG === "true"
 const windowsPublisherName = process.env.VECTOR_WINDOWS_PUBLISHER_NAME?.trim()
 const updateBaseUrl = "https://42qryducihx01gl0.public.blob.vercel-storage.com/releases"
+const releaseElectronFuses = {
+  // The server sidecar uses utilityProcess.fork, so packaged releases do not
+  // depend on Electron's Node-compatible executable mode.
+  runAsNode: false,
+  enableNodeOptionsEnvironmentVariable: false,
+  enableNodeCliInspectArguments: false,
+  enableEmbeddedAsarIntegrityValidation: true,
+  onlyLoadAppFromAsar: true,
+  grantFileProtocolExtraPrivileges: false,
+} satisfies NonNullable<Configuration["electronFuses"]>
 
 async function signWindows(configuration: { path: string }) {
   if (process.platform !== "win32") return
@@ -156,6 +166,7 @@ function getConfig() {
       protocols: { name: "Vector Beta", schemes: ["vector"] },
       publish: { provider: "generic", url: `${updateBaseUrl}/vector-beta-updates` },
       rpm: { packageName: "vector-beta" },
+      electronFuses: releaseElectronFuses,
     }
   }
   return {
@@ -166,6 +177,7 @@ function getConfig() {
     publish: { provider: "generic", url: `${updateBaseUrl}/vector-updates` },
     deb: { fpm: [desktopEntryFpm] },
     rpm: { packageName: "vector", fpm: [desktopEntryFpm] },
+    electronFuses: releaseElectronFuses,
   }
 }
 

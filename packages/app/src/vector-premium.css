@@ -2635,3 +2635,316 @@ html[data-vector-navigation-resizing] * {
   text-shadow: none;
   box-shadow: none;
 }
+
+/* ============================================================================
+ * Agent surfaces — the runtime picker, its setup panel, the external agent
+ * transcript, and Code Archaeology.
+ *
+ * These screens were built from raw white-alpha utilities rather than the ramp
+ * above: fourteen different text opacities, flat `white/[0.02]` fills, and a
+ * hairline on every box. That combination is what reads as "black and white
+ * and grey lines" — a flat black rectangle, a 1px grey edge, grey text, no
+ * depth anywhere and no single thing for the eye to land on.
+ *
+ * The fix is the one the token block at the top of this file already
+ * describes, applied properly:
+ *   - depth comes from a vertical gradient on a real surface token, not from
+ *     an outline. Borders separate quietly; they are not the structure.
+ *   - three text tones (--vx-text / -subtle / -muted). Not fourteen.
+ *   - the accent appears once per surface, and it glows rather than outlines.
+ * ========================================================================= */
+
+.vx-card {
+  position: relative;
+  border-radius: 12px;
+  border: 1px solid var(--vx-line);
+  /* Lit from above: the top edge catches light, the body falls away. A flat
+     fill plus a border is the thing that reads as a wireframe. */
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0) 42%),
+    var(--vx-surface);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.05) inset,
+    0 8px 22px -14px rgba(0, 0, 0, 0.9);
+}
+
+/* One uppercase micro-label treatment for every agent surface. Previously each
+   panel invented its own size, tracking and opacity. */
+.vx-label {
+  color: var(--vx-text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.085em;
+  text-transform: uppercase;
+}
+
+/* ---- runtime picker ---- */
+.vx-pick {
+  min-width: 0;
+  padding: 9px 10px;
+  text-align: left;
+  border-radius: 11px;
+  border: 1px solid var(--vx-line);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0) 46%), var(--vx-control);
+  color: var(--vx-text-subtle);
+  transition:
+    background 180ms var(--vx-ease),
+    border-color 180ms var(--vx-ease),
+    box-shadow 180ms var(--vx-ease),
+    transform 180ms var(--vx-ease);
+}
+
+.vx-pick:hover:not(.is-on) {
+  border-color: var(--vx-line-strong);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0) 46%), var(--vx-control-hover);
+  transform: translateY(-1px);
+}
+
+/* The selected runtime is the one moment of accent on this screen. It glows
+   from within rather than gaining a bright outline — an outline on a dark
+   panel is exactly the "white edge" the ramp warns against. */
+.vx-pick.is-on {
+  border-color: color-mix(in oklab, var(--vx-purple) 52%, var(--vx-line));
+  background:
+    linear-gradient(180deg, rgba(182, 159, 247, 0.16), rgba(182, 159, 247, 0.05) 60%),
+    var(--vx-surface-raised);
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--vx-purple) 22%, transparent),
+    0 6px 20px -10px color-mix(in oklab, var(--vx-purple) 55%, transparent);
+  color: var(--vx-text);
+}
+
+/* Not-installed / not-connected. Dimmed, never hidden: a runtime that
+   disappears reads as a broken feature, one that names its blocker reads as a
+   setup step. */
+.vx-pick.is-blocked:not(.is-on) {
+  opacity: 0.62;
+}
+
+.vx-pick__name {
+  display: block;
+  color: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+
+.vx-pick__meta {
+  margin-top: 3px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--vx-text-muted);
+  font-size: 9.5px;
+}
+
+.vx-dot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 6px;
+  border-radius: 999px;
+  background: var(--vx-line-strong);
+}
+
+/* Ready / signed-out / absent each get a colour AND a halo, so the state
+   survives at 6px and for viewers who cannot separate the hues. */
+.vx-dot--ready {
+  background: var(--vx-green);
+  box-shadow: 0 0 0 2.5px color-mix(in oklab, var(--vx-green) 22%, transparent);
+}
+
+.vx-dot--warn {
+  background: var(--vx-amber);
+  box-shadow: 0 0 0 2.5px color-mix(in oklab, var(--vx-amber) 22%, transparent);
+}
+
+.vx-dot--busy {
+  background: var(--vx-amber);
+  animation: vx-dot-pulse 1.4s var(--vx-ease) infinite;
+}
+
+@keyframes vx-dot-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* ---- copyable command ---- */
+.vx-cmd {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  text-align: left;
+  border-radius: 9px;
+  border: 1px solid var(--vx-line);
+  background: var(--vx-canvas);
+  color: var(--vx-text-subtle);
+  font-family: var(--vx-mono);
+  font-size: 11px;
+  transition:
+    border-color 160ms var(--vx-ease),
+    background 160ms var(--vx-ease);
+}
+
+.vx-cmd:hover {
+  border-color: color-mix(in oklab, var(--vx-purple) 40%, var(--vx-line));
+  background: color-mix(in oklab, var(--vx-purple) 6%, var(--vx-canvas));
+}
+
+.vx-cmd__hint {
+  flex-shrink: 0;
+  color: var(--vx-text-muted);
+  font-family: var(--vx-font);
+  font-size: 10px;
+}
+
+/* ---- external agent transcript ---- */
+.vx-turn {
+  padding: 10px 13px;
+  border-radius: 13px;
+  border: 1px solid var(--vx-line);
+}
+
+/* Your turn sits right and lifts; the agent's sits left and recedes. The
+   asymmetry does the work that two near-identical grey boxes could not. */
+.vx-turn--user {
+  margin-left: 40px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.02) 60%), var(--vx-surface-raised);
+}
+
+.vx-turn--agent {
+  margin-right: 40px;
+  border-color: color-mix(in oklab, var(--vx-line) 82%, transparent);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.028), rgba(255, 255, 255, 0) 50%), var(--vx-surface);
+}
+
+.vx-turn__who {
+  margin-bottom: 5px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--vx-text-muted);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.vx-turn__body {
+  color: var(--vx-text-subtle);
+  font-size: 12.5px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+.vx-turn__stream {
+  max-height: 160px;
+  overflow: auto;
+  color: var(--vx-text-muted);
+  font-family: var(--vx-mono);
+  font-size: 10.5px;
+  line-height: 1.42;
+}
+
+/* ---- Code Archaeology ---- */
+.vx-arch {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  height: min(720px, 88vh);
+  width: min(760px, 92vw);
+  border-radius: 16px;
+  border: 1px solid var(--vx-line);
+  background: var(--vector-workspace-bg, #1d1d1f);
+  box-shadow: var(--vx-shadow-float);
+}
+
+.vx-arch__head {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--vx-line);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0) 100%);
+}
+
+.vx-arch__glyph {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border-radius: 10px;
+  color: var(--vx-purple-bright);
+  background: linear-gradient(180deg, rgba(182, 159, 247, 0.22), rgba(182, 159, 247, 0.08));
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--vx-purple) 26%, transparent);
+}
+
+/* Each checkpoint is a station on one line. The rail is what turns a stack of
+   identical grey rows into a history you can read top to bottom. */
+.vx-arch__list {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.vx-arch__list::before {
+  content: "";
+  position: absolute;
+  top: 18px;
+  bottom: 18px;
+  left: 25px;
+  width: 1px;
+  background: linear-gradient(180deg, transparent, var(--vx-line-strong) 8%, var(--vx-line-strong) 92%, transparent);
+}
+
+.vx-arch__item {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px 10px 44px;
+  border-radius: 11px;
+  border: 1px solid var(--vx-line);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0) 44%), var(--vx-surface);
+  transition:
+    border-color 180ms var(--vx-ease),
+    background 180ms var(--vx-ease);
+}
+
+.vx-arch__item:hover {
+  border-color: var(--vx-line-strong);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0) 44%), var(--vx-surface-raised);
+}
+
+.vx-arch__seq {
+  position: absolute;
+  top: 11px;
+  left: 12px;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  color: var(--vx-purple-bright);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  background: linear-gradient(180deg, rgba(182, 159, 247, 0.2), rgba(182, 159, 247, 0.07));
+  /* Rings the workspace colour so the rail passes behind, not through. */
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--vx-purple) 30%, transparent),
+    0 0 0 4px var(--vector-workspace-bg, #1d1d1f);
+}
+
+.vx-arch__name {
+  min-width: 0;
+  color: var(--vx-text);
+  font-size: 13px;
+  font-weight: 550;
+}

@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsgo --noEmit",
-    "test": "bun test src/shared.test.ts src/oauth.test.ts",
+    "test": "bun test src/shared.test.ts src/oauth.test.ts src/desktop-release-version.test.ts",
     "dev": "bun run dev-server.ts"
   },
   "dependencies": {

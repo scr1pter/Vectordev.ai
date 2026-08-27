@@ -18,9 +18,7 @@ function authFile() {
       return FSUtil.Service.of({
         ...fs,
         readFileStringSafe: (file) =>
-          file.endsWith("mcp-auth.json")
-            ? Effect.succeed(raw || undefined)
-            : fs.readFileStringSafe(file),
+          file.endsWith("mcp-auth.json") ? Effect.succeed(raw || undefined) : fs.readFileStringSafe(file),
         writeWithDirs: (file, value, mode) =>
           file.endsWith("mcp-auth.json")
             ? Effect.promise(async () => {
@@ -71,17 +69,20 @@ test("serializes concurrent auth file updates across service instances", async (
   )
 })
 
-test("encrypts MCP OAuth credentials with Vector's vault key", () => {
+test("encrypts MCP OAuth and catalog credentials with Vector's vault key", () => {
   const key = Buffer.alloc(32, 9)
   const encoded = McpAuthStorage.encode(
     {
       posthog: {
         tokens: { accessToken: "access-token" },
+        secrets: { apiKey: "catalog-secret" },
         serverUrl: "https://mcp.posthog.com/mcp",
       },
     },
     key,
   )
   expect(encoded).not.toContain("access-token")
+  expect(encoded).not.toContain("catalog-secret")
   expect(McpAuthStorage.decode(encoded, key).posthog?.tokens?.accessToken).toBe("access-token")
+  expect(McpAuthStorage.decode(encoded, key).posthog?.secrets?.apiKey).toBe("catalog-secret")
 })

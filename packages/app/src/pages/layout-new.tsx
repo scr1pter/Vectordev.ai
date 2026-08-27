@@ -17,9 +17,11 @@ import { useCommand } from "@/context/command"
 import { useLayout } from "@/context/layout"
 import { usePlanMode } from "@/context/plan-mode"
 import { usePlatform } from "@/context/platform"
-import { decode64 } from "@/utils/base64"
 import { pathKey } from "@/utils/path-key"
+import { decodeRouteSegment, projectPathFromWorkspaceRoute, sessionIDFromRouteValue } from "@/utils/project-route"
 import { taskScopeId, taskScopeSearch, type TaskScope } from "@/utils/task-scope"
+import { sessionIDFromEvent } from "@/utils/session-event"
+import { WORKSPACE_FILE_SAVED_EVENT, workspaceFileSavedDetail } from "@/utils/workspace-file-saved"
 import { setNavigate } from "@/utils/notification-click"
 import { setV2Toast, showToast, ToastRegion } from "@/utils/toast"
 import { useProviders } from "@/hooks/use-providers"
@@ -35,13 +37,25 @@ import { useServerSDK } from "@/context/server-sdk"
 import { DialogReportBug } from "@/components/dialog-report-bug"
 import { HelpPanel } from "@/features/help/help-panel"
 import { AgentDashboard } from "@/features/agents/agent-dashboard"
+import { agentReviewCopy, agentRuntimeLabel, type AgentRuntime } from "@/features/agents/agent-runtime-copy"
 import { useSettings } from "@/context/settings"
 import type { TeamConversation } from "@/features/agents/agent-dashboard-model"
 import { ExternalRuntimeSetupPanel } from "@/features/agents/external-runtime-setup"
-import { externalRuntimeSetup, isExternalRuntime, type ExternalRuntime } from "@/features/agents/external-runtimes"
+import {
+  externalRuntimeReady,
+  externalRuntimeSetup,
+  isExternalRuntime,
+  type ExternalRuntime,
+} from "@/features/agents/external-runtimes"
 import { PullRequests } from "@/features/pull-requests/pull-requests"
 import { extractVelReply } from "@/features/vel/vel-call"
-import { isInternalProjectPath, useServer } from "@/context/server"
+import {
+  isInternalProjectPath,
+  isManagedAgentWorkspacePath,
+  isUsableProjectPath,
+  useServer,
+  validatedRouteProjectPath,
+} from "@/context/server"
 import { useTabs } from "@/context/tabs"
 import { sessionHref } from "@/utils/session-route"
 import { DB_INTENT_EVENT } from "@/features/cloud/db-intent"
@@ -62,6 +76,11 @@ import { ParallelDiffReview } from "@/components/parallel-diff-review"
 import { WorkspaceNavigation, type WorkspaceNavigationItem } from "@/components/workspace-navigation"
 import { CanvasWorkspace } from "@/features/canvas/canvas"
 import { ExternalAgentTranscript, type ExternalAgentTurn } from "@/features/agents/external-agent-transcript"
+import {
+  externalAgentFollowUpDraft,
+  withExternalAgentFollowUpDraft,
+  type ExternalAgentFollowUpDrafts,
+} from "@/features/agents/external-agent-follow-up"
 import { useUpdaterAction } from "@/components/updater-action"
 import { VelCall } from "@/features/vel/vel-call"
 import { VEL_OPEN_EVENT } from "@/features/vel/vel-message"
@@ -72,6 +91,7 @@ import {
   shouldPersistCollaborationGraph,
   type TeamCollaborationGraph,
 } from "./layout-collaboration"
+import { materializeParallelWorkspaceParent, parallelWorkspaceComposerAvailable } from "./layout-workspace-launch"
 
 const NAVIGATION_DEFAULT_WIDTH = 320
 const NAVIGATION_MINIMUM_WIDTH = 228
@@ -80,8 +100,7 @@ const NAVIGATION_WIDTH_KEY = "vector.navigation-width.v1"
 const LAST_ACTIVE_PROJECT_KEY = "vector.last-active-project-path.v1"
 const RETIRED_WORK_STATE_KEY = "vector.work.state.v1"
 const AGENT_TAB_ORDER_PREFIX = "vector.agent-tab-order.v1:"
-const RESERVED_TOP_LEVEL_ROUTES = new Set(["code", "work", "parallel-workspaces", "cloud", "canvas"])
-type ParallelAgentRuntime = "vector" | "claude-code" | "codex" | "cursor"
+type ParallelAgentRuntime = AgentRuntime
 
 function readNavigationWidth() {
   const raw = globalThis.localStorage?.getItem(NAVIGATION_WIDTH_KEY)
@@ -648,7 +667,7 @@ export default function NewLayout(props: ParentProps) {
   const [commitMessage, setCommitMessage] = createSignal("")
   const [commitMessageTouched, setCommitMessageTouched] = createSignal(false)
   const [agentReviewOpen, setAgentReviewOpen] = createSignal(false)
-  const [followUpDraft, setFollowUpDraft] = createSignal("")
+  const [followUpDrafts, setFollowUpDrafts] = createSignal<ExternalAgentFollowUpDrafts>({})
   const [followUpBusy, setFollowUpBusy] = createSignal(false)
   const [orchestrationOpen, setOrchestrationOpen] = createSignal(false)
   const [pendingAgentOpenID, setPendingAgentOpenID] = createSignal<string>()
@@ -656,9 +675,11 @@ export default function NewLayout(props: ParentProps) {
   globalThis.localStorage?.removeItem(RETIRED_WORK_STATE_KEY)
   const persistedLastProjectPath = globalThis.localStorage?.getItem(LAST_ACTIVE_PROJECT_KEY) ?? ""
   const [lastProjectPath, setLastProjectPath] = createSignal(
-    isInternalProjectPath(persistedLastProjectPath) ? "" : persistedLastProjectPath,
+    isUsableProjectPath(persistedLastProjectPath) && !isInternalProjectPath(persistedLastProjectPath)
+      ? persistedLastProjectPath
+      : "",
   )
-  if (isInternalProjectPath(persistedLastProjectPath)) {
+  if (!isUsableProjectPath(persistedLastProjectPath) || isInternalProjectPath(persistedLastProjectPath)) {
     globalThis.localStorage?.removeItem(LAST_ACTIVE_PROJECT_KEY)
   }
   const [agentTabOrder, setAgentTabOrder] = createSignal<string[]>([])
@@ -736,23 +757,39 @@ export default function NewLayout(props: ParentProps) {
     queueMicrotask(() => parallelPromptRef?.focus())
   })
 
-  const routeProjectPath = () => {
-    const parts = location.pathname.split("/").filter(Boolean)
-    if (!parts.length || parts[0] === "server" || RESERVED_TOP_LEVEL_ROUTES.has(parts[0])) return ""
-    return decode64(parts[0]) ?? ""
-  }
+  const routeProjectPath = () => projectPathFromWorkspaceRoute(location.pathname)
   const routeSessionDirectory = () => {
-    const sessionID = /\/session\/([^/?#]+)/.exec(location.pathname)?.[1]
+    const sessionID = sessionIDFromRouteValue(decodeRouteSegment(/\/session\/([^/?#]+)/.exec(location.pathname)?.[1]))
     if (!sessionID) return ""
-    return serverSync().session.get(decodeURIComponent(sessionID))?.directory ?? ""
+    return serverSync().session.get(sessionID)?.directory ?? ""
   }
-  const routeContextProjectPath = () => new URLSearchParams(location.search).get("project") ?? ""
-  const routeContextSessionID = () => new URLSearchParams(location.search).get("parentSession") ?? ""
+  const routeContextSessionID = () => {
+    const id = sessionIDFromRouteValue(new URLSearchParams(location.search).get("parentSession"))
+    if (!id || !serverSync().session.get(id)) return ""
+    return id
+  }
+  const routeContextProjectPath = () => {
+    const path = new URLSearchParams(location.search).get("project") ?? ""
+    const sessionID = routeContextSessionID()
+    return validatedRouteProjectPath(
+      path,
+      new URLSearchParams(location.search).has("parentSession"),
+      sessionID ? serverSync().session.get(sessionID)?.directory : undefined,
+      layout.projects.list().map((project) => project.worktree),
+    )
+  }
   const currentSessionID = () => {
     if (browserAgentRoute() || parallelWorkspacesRoute()) return routeContextSessionID()
-    return decodeURIComponent(/\/session\/([^/?#]+)/.exec(location.pathname)?.[1] ?? "")
+    return sessionIDFromRouteValue(decodeRouteSegment(/\/session\/([^/?#]+)/.exec(location.pathname)?.[1]))
   }
   const activeDraftID = () => new URLSearchParams(location.search).get("draftId") ?? undefined
+  const activeDraftDirectory = () => {
+    const draftID = activeDraftID()
+    if (!draftID) return ""
+    const draft = tabs.store.find((tab) => tab.type === "draft" && tab.draftID === draftID)
+    if (!draft || draft.type !== "draft") return ""
+    return draft.worktree || draft.directory
+  }
   const activeTaskSessionID = () => routeContextSessionID() || currentSessionID() || undefined
   const recentProjectPath = () => layout.projects.list().find((project) => project.worktree)?.worktree ?? ""
   const projectPathCandidates = () => [
@@ -761,9 +798,10 @@ export default function NewLayout(props: ParentProps) {
         routeContextProjectPath(),
         routeProjectPath(),
         routeSessionDirectory(),
+        activeDraftDirectory(),
         recentProjectPath(),
         lastProjectPath(),
-      ].filter((path): path is string => Boolean(path) && !isInternalProjectPath(path)),
+      ].filter((path): path is string => isUsableProjectPath(path) && !isInternalProjectPath(path)),
     ),
   ]
   const activeProjectPath = () => projectPathCandidates()[0] ?? ""
@@ -793,7 +831,7 @@ export default function NewLayout(props: ParentProps) {
   }
 
   const rememberProjectPath = (path: string) => {
-    if (!path || isInternalProjectPath(path)) return
+    if (!isUsableProjectPath(path) || isInternalProjectPath(path)) return
     if (path !== lastProjectPath()) setLastProjectPath(path)
     globalThis.localStorage?.setItem(LAST_ACTIVE_PROJECT_KEY, path)
   }
@@ -805,15 +843,16 @@ export default function NewLayout(props: ParentProps) {
           .session.lineage.resolve(requestedSessionID)
           .catch(() => undefined)
       : undefined
-    const parentSessionId = lineage?.root.id ?? (requestedSessionID || undefined)
+    const parentSessionId = lineage?.root.id ?? serverSync().session.get(requestedSessionID)?.id
     const candidates = [
       routeContextProjectPath(),
       lineage?.root.directory,
       lineage?.session.directory,
       routeProjectPath(),
       routeSessionDirectory(),
+      activeDraftDirectory(),
       lastProjectPath(),
-    ].filter((path): path is string => Boolean(path))
+    ].filter((path): path is string => isUsableProjectPath(path) && !isInternalProjectPath(path))
     const unique = [...new Set(candidates)]
     const api = globalThis.window?.api as
       | (typeof globalThis.window.api & {
@@ -833,9 +872,28 @@ export default function NewLayout(props: ParentProps) {
     return { sourcePath: "", parentSessionId }
   }
 
+  const ensureTaskWorkspaceParent = (scope: { sourcePath: string; parentSessionId?: string }) =>
+    materializeParallelWorkspaceParent({
+      scope,
+      draftID: activeDraftID(),
+      createSession: async (sourcePath) => {
+        const session = await serverSDK()
+          .createClient({ directory: sourcePath, throwOnError: true })
+          .session.create()
+          .then((result) => result.data ?? undefined)
+        if (!session) throw new Error("Vector could not create the parent task for this agent workspace.")
+        return session
+      },
+      rememberSession: (session) => serverSync().session.remember(session),
+      promoteDraft: (draftID, sessionID) => {
+        const draft = tabs.draft(draftID)
+        tabs.promoteDraft(draftID, { server: draft.server, sessionId: sessionID })
+      },
+    })
+
   createEffect(() => {
-    const path = routeContextProjectPath() || routeProjectPath() || routeSessionDirectory()
-    if (!path || isInternalProjectPath(path)) return
+    const path = routeContextProjectPath() || routeProjectPath() || routeSessionDirectory() || activeDraftDirectory()
+    if (!isUsableProjectPath(path) || isInternalProjectPath(path)) return
     setLastProjectPath(path)
     globalThis.localStorage?.setItem(LAST_ACTIVE_PROJECT_KEY, path)
   })
@@ -1237,33 +1295,26 @@ export default function NewLayout(props: ParentProps) {
         | undefined
     )?.parallelWorkspaces
 
-  const parallelRuntimeLabel = (runtime: ParallelAgentRuntime) =>
-    runtime === "claude-code"
-      ? "Claude Code"
-      : runtime === "codex"
-        ? "Codex"
-        : runtime === "cursor"
-          ? "Cursor Agent"
-          : "Vector"
+  const parallelRuntimeLabel = agentRuntimeLabel
 
   const externalRuntimeStatus = (runtime: ParallelAgentRuntime) =>
     runtime === "vector" ? undefined : externalAgentStatuses().find((agent) => agent.id === runtime)
 
+  const externalReady = (runtime: ParallelAgentRuntime) => externalRuntimeReady(externalRuntimeStatus(runtime))
+
   const parallelRuntimeReady = () =>
-    parallelRuntime() === "vector"
-      ? parallelModelOptions().length > 0
-      : Boolean(externalRuntimeStatus(parallelRuntime())?.installed)
+    parallelRuntime() === "vector" ? parallelModelOptions().length > 0 : externalReady(parallelRuntime())
 
   const readyComparisonRuntimes = () =>
     (["vector", "claude-code", "codex", "cursor"] as ParallelAgentRuntime[]).filter((runtime) =>
-      runtime === "vector" ? parallelModelOptions().length > 0 : Boolean(externalRuntimeStatus(runtime)?.installed),
+      runtime === "vector" ? parallelModelOptions().length > 0 : externalReady(runtime),
     )
 
   // Runtimes the picker keeps visible but cannot launch, with the reason. A
   // runtime that is simply hidden is why this feature read as broken.
   const blockedRuntimes = () =>
     (["claude-code", "codex", "cursor"] as ExternalRuntime[])
-      .filter((runtime) => !externalRuntimeStatus(runtime)?.installed)
+      .filter((runtime) => !externalReady(runtime))
       .map((runtime) => ({ runtime, setup: externalRuntimeSetup(runtime) }))
 
   // Who the collaboration graph is drawn over: teammates already in the picked
@@ -1627,7 +1678,15 @@ export default function NewLayout(props: ParentProps) {
 
   const openParallelWorkspaces = () => {
     const target = fullscreenReturnPath()
-    if (!taskRoute() && !/\/session\/[^/?#]+/.test(target)) {
+    const targetIsTask = /\/session\/[^/?#]+/.test(target)
+    if (
+      !parallelWorkspaceComposerAvailable({
+        projectPath: activeProjectPath(),
+        taskOpen: taskRoute(),
+        draftOpen: taskDraftRoute(),
+        returnTaskOpen: targetIsTask,
+      })
+    ) {
       showToast({
         title: "Open a project first",
         description: "Agent workspaces belong to the project you are working on.",
@@ -1644,7 +1703,7 @@ export default function NewLayout(props: ParentProps) {
     setOrchestrationOpen(false)
     setAgentReviewOpen(false)
     const scope = activeWorkspaceScope()
-    if (!taskRoute() && /\/session\/[^/?#]+/.test(target)) navigate(target)
+    if (!taskConversationRoute() && targetIsTask) navigate(target)
     void loadParallelWorkspaces(scope)
   }
 
@@ -1670,6 +1729,22 @@ export default function NewLayout(props: ParentProps) {
     recordEconomicsOutcomes([record])
   }
 
+  onMount(() => {
+    const refreshSavedWorkspace = async (event: Event) => {
+      const detail = workspaceFileSavedDetail(event)
+      if (!detail || !isManagedAgentWorkspacePath(detail.directory)) return
+      const findRecord = () =>
+        parallelRecords().find((record) => pathKey(record.isolatedPath) === pathKey(detail.directory))
+      if (!findRecord()) await loadParallelWorkspaces()
+      const record = findRecord()
+      if (!record) return
+      await refreshParallelWorkspace(record.id)
+    }
+    const listener = (event: Event) => void refreshSavedWorkspace(event)
+    globalThis.window?.addEventListener(WORKSPACE_FILE_SAVED_EVENT, listener)
+    onCleanup(() => globalThis.window?.removeEventListener(WORKSPACE_FILE_SAVED_EVENT, listener))
+  })
+
   // Only live work occupies launch slots: running/queued agents and results
   // that still need review. Merged, discarded, failed, stopped, and
   // no-change records are history and can be removed from the list.
@@ -1685,15 +1760,15 @@ export default function NewLayout(props: ParentProps) {
 
   const createParallelWorkspace = async () => {
     const api = parallelApi()
-    const scope = await resolveTaskWorkspace()
-    const sourcePath = scope.sourcePath
+    const unresolvedScope = await resolveTaskWorkspace()
+    const sourcePath = unresolvedScope.sourcePath
     const taskPrompt = parallelPrompt().trim()
     const availableSlots = availableWorkspaceSlots()
     if (!api) {
       reportDesktopOnlyParallel()
       return
     }
-    if (!scope.parentSessionId) {
+    if (!unresolvedScope.parentSessionId && !activeDraftID()) {
       setParallelError(
         "Open a task session before launching an isolated agent. Agent workspaces belong only to that task.",
       )
@@ -1727,9 +1802,7 @@ export default function NewLayout(props: ParentProps) {
       openProviderSettings()
       return
     }
-    const missingRuntime = runtimes.find(
-      (runtime) => runtime !== "vector" && !externalRuntimeStatus(runtime)?.installed,
-    )
+    const missingRuntime = runtimes.find((runtime) => runtime !== "vector" && !externalReady(runtime))
     if (missingRuntime) {
       setParallelError(
         `${parallelRuntimeLabel(missingRuntime)} is not installed or signed in on this computer. Vector only launches real, detected runtimes.`,
@@ -1738,6 +1811,17 @@ export default function NewLayout(props: ParentProps) {
     }
     setParallelBusy(true)
     setParallelError("")
+    const scope = await ensureTaskWorkspaceParent(unresolvedScope).catch((error: unknown) => {
+      setParallelError(error instanceof Error ? error.message : String(error))
+      return undefined
+    })
+    if (!scope?.parentSessionId) {
+      setParallelBusy(false)
+      if (!parallelError()) {
+        setParallelError("Vector could not create the parent task for this agent workspace.")
+      }
+      return
+    }
 
     // Snapshot the roster the user drew the graph over before any await. The
     // pending ids are positional against `runtimes`, and `collaborationRoster`
@@ -1858,14 +1942,14 @@ export default function NewLayout(props: ParentProps) {
 
   const createSwarm = async () => {
     const api = swarmApi()
-    const scope = await resolveTaskWorkspace()
-    const sourcePath = scope.sourcePath
+    const unresolvedScope = await resolveTaskWorkspace()
+    const sourcePath = unresolvedScope.sourcePath
     const objective = parallelPrompt().trim()
     if (!api) {
       reportDesktopOnlyParallel()
       return
     }
-    if (!scope.parentSessionId) {
+    if (!unresolvedScope.parentSessionId && !activeDraftID()) {
       setParallelError("Open a task session before launching a swarm. Every agent run must belong to one task.")
       return
     }
@@ -1886,6 +1970,15 @@ export default function NewLayout(props: ParentProps) {
     }
     setParallelBusy(true)
     setParallelError("")
+    const scope = await ensureTaskWorkspaceParent(unresolvedScope).catch((error: unknown) => {
+      setParallelError(error instanceof Error ? error.message : String(error))
+      return undefined
+    })
+    if (!scope?.parentSessionId) {
+      setParallelBusy(false)
+      if (!parallelError()) setParallelError("Vector could not create the parent task for this coordinated run.")
+      return
+    }
     const run = await api
       .create({
         sourcePath,
@@ -2072,15 +2165,15 @@ export default function NewLayout(props: ParentProps) {
       reportDesktopOnlyParallel()
       return
     }
-    const text = followUpDraft().trim()
+    const text = externalAgentFollowUpDraft(followUpDrafts(), id).trim()
     if (!text || followUpBusy()) return
     setFollowUpBusy(true)
     setParallelError("")
-    setFollowUpDraft("")
+    setFollowUpDrafts((drafts) => withExternalAgentFollowUpDraft(drafts, id, ""))
     const record = await api.followUp(id, text).catch((error: unknown) => {
       setParallelError(error instanceof Error ? error.message : String(error))
       // The typed message is restored rather than lost when the send is refused.
-      setFollowUpDraft(text)
+      setFollowUpDrafts((drafts) => withExternalAgentFollowUpDraft(drafts, id, text))
       return undefined
     })
     setFollowUpBusy(false)
@@ -2526,7 +2619,7 @@ export default function NewLayout(props: ParentProps) {
   const recordedSessionOutcomes = new Set<string>()
   const stopSessionOutcomes = serverSDK().event.listen((event) => {
     if (event.details.type !== "session.idle") return
-    const sessionID = (event.details as { id?: string }).id
+    const sessionID = sessionIDFromEvent(event.details)
     const directory = (event as { name?: string }).name
     if (!sessionID || !directory) return
     const outcomeRecorded = recordedSessionOutcomes.has(sessionID)
@@ -2613,7 +2706,7 @@ export default function NewLayout(props: ParentProps) {
     typeof globalThis.window === "undefined" || globalThis.window.matchMedia("(min-width: 768px)").matches
 
   const requireTaskRoute = (feature: string) => {
-    if (taskRoute()) return true
+    if (taskConversationRoute() && activeProjectPath()) return true
     showToast({
       title: "Open a project first",
       description: `${feature} is available inside an active Vector project.`,
@@ -2715,7 +2808,7 @@ export default function NewLayout(props: ParentProps) {
   const openTourSettings = () => {
     if (tourSettings.pending) return
     tourSettings.pending = import("@/components/settings-v2/dialog-settings-v2").then((x) => {
-      dialog.show(() => <x.DialogSettings />)
+      dialog.show(() => <x.DialogSettings repositoryPath={activeWorkspaceScope().sourcePath} />)
     })
   }
   const closeTourSettings = () => {
@@ -2856,24 +2949,18 @@ export default function NewLayout(props: ParentProps) {
 
   const openProviderSettings = () => {
     void import("@/components/settings-v2/dialog-settings-v2").then((x) => {
-      dialog.show(() => <x.DialogSettings section="providers" />)
+      dialog.show(() => <x.DialogSettings section="providers" repositoryPath={activeWorkspaceScope().sourcePath} />)
     })
   }
 
   const openSettings = () => {
     void import("@/components/settings-v2/dialog-settings-v2").then((x) => {
-      dialog.show(() => <x.DialogSettings />)
+      dialog.show(() => <x.DialogSettings repositoryPath={activeWorkspaceScope().sourcePath} />)
     })
   }
 
   // Rules were reachable only by knowing they lived in Settings, which is the
   // same as not shipping them. This opens that panel directly.
-  const openProjectRules = () => {
-    void import("@/components/settings-v2/dialog-settings-v2").then((x) => {
-      dialog.show(() => <x.DialogSettings section="rules" />)
-    })
-  }
-
   const activeParallelCount = createMemo(
     () => parallelRecords().filter((record) => isParallelWorkspaceRunning(record)).length,
   )
@@ -3383,9 +3470,7 @@ export default function NewLayout(props: ParentProps) {
                           </p>
                         }
                       >
-                        <div class="mb-1 text-[10px] font-semibold uppercase tracking-[0.09em] text-white/40">
-                          Team
-                        </div>
+                        <div class="mb-1 text-[10px] font-semibold uppercase tracking-[0.09em] text-white/40">Team</div>
                         <div class="flex flex-wrap gap-1.5">
                           <button
                             type="button"
@@ -3597,7 +3682,7 @@ export default function NewLayout(props: ParentProps) {
                               </tbody>
                             </table>
                           </div>
-                          <p class="mt-1.5 text-[10px] leading-4 text-white/45">
+                          <p class="mt-1.5 text-[10px] leading-4 text-[color:var(--vx-text-muted)]">
                             A row may message the columns it has checked. An unchecked pair gets a written refusal
                             naming who it may reach instead, so nothing is dropped silently.
                           </p>
@@ -3608,21 +3693,21 @@ export default function NewLayout(props: ParentProps) {
                 </div>
                 <div>
                   <div class="mb-1.5 flex items-center justify-between px-1">
-                    <span class="text-[10px] font-semibold uppercase tracking-[0.09em] text-white/40">
-                      Agent runtime
+                    <span class="vx-label">Agent runtime</span>
+                    <span class="text-[10px] text-[color:var(--vx-text-muted)]">
+                      Uses the runtime already installed on this computer
                     </span>
-                    <span class="text-[10px] text-white/30">Uses the runtime already installed on this computer</span>
                   </div>
                   <div class="grid grid-cols-4 gap-1.5">
                     <For each={["vector", "claude-code", "codex", "cursor"] as ParallelAgentRuntime[]}>
                       {(runtime) => {
                         const status = () => externalRuntimeStatus(runtime)
                         const ready = () =>
-                          runtime === "vector" ? parallelModelOptions().length > 0 : Boolean(status()?.installed)
+                          runtime === "vector" ? parallelModelOptions().length > 0 : externalReady(runtime)
                         // Installed and version-reporting, but every run would
                         // stop at the sign-in wall. A green "ready" dot here was
                         // the whole reason launching one "just didn't work".
-                        const signedOut = () => ready() && status()?.signedIn === false
+                        const signedOut = () => Boolean(status()?.installed && status()?.signedIn === false)
                         // Every runtime stays on screen even when it cannot run.
                         // A hidden option reads as a broken feature; a visible
                         // one that names its blocker reads as a setup step.
@@ -3643,22 +3728,19 @@ export default function NewLayout(props: ParentProps) {
                         return (
                           <button
                             type="button"
-                            class="min-w-0 rounded-[10px] border px-2 py-2 text-left transition"
+                            class="vx-pick"
                             classList={{
-                              "border-[color:var(--vx-purple)]/55 bg-[color:var(--vx-purple-soft)] text-white":
-                                parallelRuntime() === runtime,
-                              "border-[color:var(--vx-line)] bg-white/[0.025] text-white/58 hover:bg-white/[0.05]":
-                                parallelRuntime() !== runtime,
-                              "opacity-55": !ready() && parallelRuntime() !== runtime,
+                              "is-on": parallelRuntime() === runtime,
+                              "is-blocked": !ready(),
                             }}
                             title={
                               signedOut()
                                 ? `${parallelRuntimeLabel(runtime)} is installed but not signed in. Run: ${externalRuntimeSetup(runtime)?.signInCommand ?? ""}`
                                 : ready()
-                                ? undefined
-                                : runtime === "vector"
-                                  ? "Connect an AI provider — Vector agents run on your own keys."
-                                  : `${parallelRuntimeLabel(runtime)} is not detected. Install it with: ${externalRuntimeSetup(runtime)?.installCommand ?? ""}`
+                                  ? undefined
+                                  : runtime === "vector"
+                                    ? "Connect an AI provider — Vector agents run on your own keys."
+                                    : `${parallelRuntimeLabel(runtime)} is not detected. Install it with: ${externalRuntimeSetup(runtime)?.installCommand ?? ""}`
                             }
                             onClick={() => {
                               setParallelRuntime(runtime)
@@ -3666,12 +3748,10 @@ export default function NewLayout(props: ParentProps) {
                               setParallelError("")
                             }}
                           >
-                            <span class="block truncate text-[11px] font-semibold">
-                              {parallelRuntimeLabel(runtime)}
-                            </span>
-                            <span class="mt-1 flex items-center gap-1 text-[9.5px] text-white/38">
+                            <span class="vx-pick__name truncate">{parallelRuntimeLabel(runtime)}</span>
+                            <span class="vx-pick__meta">
                               <span
-                                class={`size-1.5 shrink-0 rounded-full ${signedOut() ? "bg-amber-300" : ready() ? "bg-emerald-400" : externalAgentsChecking() && runtime !== "vector" ? "animate-pulse bg-amber-300" : "bg-white/20"}`}
+                                class={`vx-dot ${signedOut() ? "vx-dot--warn" : ready() ? "vx-dot--ready" : externalAgentsChecking() && runtime !== "vector" ? "vx-dot--busy" : ""}`}
                               />
                               <span class="truncate">{reason()}</span>
                             </span>
@@ -3695,43 +3775,38 @@ export default function NewLayout(props: ParentProps) {
                     />
                   </Show>
                   <Show when={globalThis.window?.api && blockedRuntimes().length}>
-                    <div class="mt-2 rounded-[10px] border border-[color:var(--vx-line)] bg-white/[0.02] px-2.5 py-2">
-                      <div class="mb-1 text-[10px] font-semibold uppercase tracking-[0.09em] text-white/40">
-                        Not available on this computer
-                      </div>
+                    <div class="vx-card mt-2 px-3 py-2.5">
+                      <div class="vx-label mb-1.5">Needs setup on this computer</div>
                       <For each={blockedRuntimes()}>
                         {(entry) => (
                           <div class="flex min-w-0 items-baseline gap-2 py-0.5">
-                            <span class="w-[74px] shrink-0 truncate text-[10px] text-white/50">
+                            <span class="w-[74px] shrink-0 truncate text-[10px] text-[color:var(--vx-text-subtle)]">
                               {parallelRuntimeLabel(entry.runtime)}
                             </span>
-                            <code class="min-w-0 flex-1 truncate font-mono text-[9.5px] text-white/38">
-                              {entry.setup?.installCommand}
+                            <code class="min-w-0 flex-1 truncate font-mono text-[9.5px] text-[color:var(--vx-text-muted)]">
+                              {externalRuntimeStatus(entry.runtime)?.installed
+                                ? entry.setup?.signInCommand
+                                : entry.setup?.installCommand}
                             </code>
                           </div>
                         )}
                       </For>
-                      <p class="mt-1 text-[9.5px] leading-4 text-white/30">
+                      <p class="mt-1 text-[9.5px] leading-4 text-[color:var(--vx-text-muted)]">
                         Select one above for its full install and sign-in steps. Vector runs your own CLI and never
                         falls back to a runtime you did not pick.
                       </p>
                     </div>
                   </Show>
                   <Show when={!globalThis.window?.api}>
-                    <p class="mt-2 px-1 text-[10px] leading-4 text-white/40">
+                    <p class="mt-2 px-1 text-[10px] leading-4 text-[color:var(--vx-text-muted)]">
                       Claude Code, Codex, and Cursor Agent activate once Vector connects to this workspace — the browser
                       build cannot see the CLIs installed on your computer.
                     </p>
                   </Show>
                   <button
                     type="button"
-                    class="mt-2 flex w-full items-center justify-between rounded-[10px] border px-3 py-2 text-left transition disabled:cursor-not-allowed disabled:opacity-45"
-                    classList={{
-                      "border-[color:var(--vx-purple)]/50 bg-[color:var(--vx-purple-soft)] text-[color:var(--vx-purple-bright)]":
-                        parallelCompareRuntimes(),
-                      "border-[color:var(--vx-line)] bg-white/[0.02] text-white/52 hover:bg-white/[0.045]":
-                        !parallelCompareRuntimes(),
-                    }}
+                    class="vx-pick mt-2 flex w-full items-center justify-between disabled:cursor-not-allowed disabled:opacity-45"
+                    classList={{ "is-on": parallelCompareRuntimes() }}
                     disabled={readyComparisonRuntimes().length < 2}
                     onClick={() => {
                       setParallelCompareRuntimes((enabled) => !enabled)
@@ -3757,7 +3832,7 @@ export default function NewLayout(props: ParentProps) {
                         {blockedRuntimes()
                           .map((entry) => parallelRuntimeLabel(entry.runtime))
                           .join(", ")}{" "}
-                        {blockedRuntimes().length > 1 ? "are" : "is"} excluded — not detected on this computer.
+                        {blockedRuntimes().length > 1 ? "are" : "is"} excluded — not ready on this computer.
                       </Show>
                     </p>
                   </Show>
@@ -3765,14 +3840,14 @@ export default function NewLayout(props: ParentProps) {
               </Show>
 
               <input
-                class="vx-input-quiet h-10 w-full rounded-[11px] border px-3 text-[13px] text-white outline-none placeholder:text-white/35"
+                class="vx-input-quiet h-10 w-full rounded-[11px] border px-3 text-[13px] text-white outline-none placeholder:text-[color:var(--vx-text-muted)]"
                 placeholder={parallelLaunchMode() === "swarm" ? "Run name (optional)" : "Workspace name"}
                 value={parallelName()}
                 onInput={(event) => setParallelName(event.currentTarget.value)}
               />
               <textarea
                 ref={parallelPromptRef}
-                class="vx-input-quiet min-h-[124px] w-full resize-none rounded-[12px] border px-3 py-3 text-[13px] leading-5 text-white outline-none placeholder:text-white/35"
+                class="vx-input-quiet min-h-[124px] w-full resize-none rounded-[12px] border px-3 py-3 text-[13px] leading-5 text-white outline-none placeholder:text-[color:var(--vx-text-muted)]"
                 placeholder={
                   parallelLaunchMode() === "swarm"
                     ? "Describe the complete outcome. Vector will split it into dependent specialist work."
@@ -3915,6 +3990,11 @@ export default function NewLayout(props: ParentProps) {
         {(selected) => {
           const record = () => selected()
           const stats = () => parallelDiffStats(record())
+          const reviewCopy = () =>
+            agentReviewCopy(record().runtime, {
+              running: isParallelWorkspaceRunning(record()),
+              resumable: Boolean(record().externalSessionId),
+            })
           return (
             <div
               class="fixed inset-0 z-[160] flex justify-end bg-black/38 backdrop-blur-[2px]"
@@ -3934,7 +4014,7 @@ export default function NewLayout(props: ParentProps) {
                       </span>
                     </div>
                     <p class="mt-1 truncate text-[11.5px] text-white/42">
-                      {parallelRuntimeLabel(record().runtime)} ·{" "}
+                      {reviewCopy().label} ·{" "}
                       {record().isolation === "git-worktree" ? record().gitBranch : "Managed isolated copy"} ·{" "}
                       {record().model}
                     </p>
@@ -4092,23 +4172,21 @@ export default function NewLayout(props: ParentProps) {
                   </Show>
 
                   <Show when={record().runtime !== "vector" && (record().turns?.length ?? 0) > 0}>
-                    <ExternalAgentTranscript
-                      turns={record().turns ?? []}
-                      runtimeLabel={parallelRuntimeLabel(record().runtime)}
-                    />
+                    <ExternalAgentTranscript turns={record().turns ?? []} runtimeLabel={reviewCopy().label} />
                   </Show>
 
                   <Show when={record().logs.length || record().terminalOutput.length}>
                     <details
                       class="mb-4 overflow-hidden rounded-[12px] border border-[color:var(--vx-line)] bg-black/20"
                       open={
-                        record().runtime !== "vector" &&
-                        isParallelWorkspaceRunning(record()) &&
-                        !record().turns?.length
+                        record().runtime !== "vector" && isParallelWorkspaceRunning(record()) && !record().turns?.length
                       }
                     >
-                      <summary class="flex cursor-pointer list-none items-center justify-between px-4 py-3 text-[11px] font-semibold text-white/70">
-                        <span>Live agent activity</span>
+                      <summary
+                        class="flex cursor-pointer list-none items-center justify-between px-4 py-3 text-[11px] font-semibold text-white/70"
+                        aria-label={reviewCopy().activityLabel}
+                      >
+                        <span>{reviewCopy().activityLabel}</span>
                         <span class="font-normal text-white/35">
                           {record().logs.length + record().terminalOutput.length} events
                         </span>
@@ -4138,10 +4216,15 @@ export default function NewLayout(props: ParentProps) {
                   >
                     <textarea
                       class="min-h-[60px] w-full resize-none rounded-[12px] border border-[color:var(--vx-line)] bg-black/20 px-3 py-2 text-[12.5px] text-white/85 outline-none disabled:opacity-40"
-                      placeholder={`Tell ${parallelRuntimeLabel(record().runtime)} what to do next…`}
-                      value={followUpDraft()}
+                      placeholder={reviewCopy().followUpPlaceholder}
+                      aria-label={reviewCopy().followUpAriaLabel}
+                      value={externalAgentFollowUpDraft(followUpDrafts(), record().id)}
                       disabled={isParallelWorkspaceRunning(record()) || followUpBusy()}
-                      onInput={(event) => setFollowUpDraft(event.currentTarget.value)}
+                      onInput={(event) =>
+                        setFollowUpDrafts((drafts) =>
+                          withExternalAgentFollowUpDraft(drafts, record().id, event.currentTarget.value),
+                        )
+                      }
                       onKeyDown={(event) => {
                         if (event.key !== "Enter" || event.shiftKey) return
                         event.preventDefault()
@@ -4149,18 +4232,17 @@ export default function NewLayout(props: ParentProps) {
                       }}
                     />
                     <div class="mt-2 flex items-center gap-2">
-                      <span class="text-[11px] text-white/35">
-                        {isParallelWorkspaceRunning(record())
-                          ? "The agent is working. Wait for it to finish, or stop it."
-                          : record().externalSessionId
-                            ? "Continues the same conversation."
-                            : "Vector couldn't save this agent's conversation, so your next message restarts it with a written summary of the work so far."}
-                      </span>
+                      <span class="text-[11px] text-white/35">{reviewCopy().followUpHelp}</span>
                       <div class="flex-1" />
                       <button
                         type="submit"
                         class="h-8 rounded-[10px] border border-[color:var(--vx-line)] px-3 text-[12px] text-white/70 transition hover:bg-white/[0.05] hover:text-white disabled:opacity-40"
-                        disabled={!followUpDraft().trim() || isParallelWorkspaceRunning(record()) || followUpBusy()}
+                        aria-label={reviewCopy().sendFollowUpAriaLabel}
+                        disabled={
+                          !externalAgentFollowUpDraft(followUpDrafts(), record().id).trim() ||
+                          isParallelWorkspaceRunning(record()) ||
+                          followUpBusy()
+                        }
                       >
                         Send
                       </button>
@@ -4178,15 +4260,16 @@ export default function NewLayout(props: ParentProps) {
                         : void refreshParallelWorkspace(record().id)
                     }
                   >
-                    {record().runtime === "vector" ? "Open agent" : "Refresh activity"}
+                    {record().runtime === "vector" ? "Open Vector" : reviewCopy().refreshActivityLabel}
                   </button>
                   <Show when={isParallelWorkspaceRunning(record())}>
                     <button
                       type="button"
                       class="h-9 rounded-[10px] border border-rose-400/25 px-3 text-[12px] text-rose-200 transition hover:bg-rose-400/[0.08]"
+                      aria-label={reviewCopy().stopLabel}
                       onClick={() => void stopParallelWorkspace(record().id)}
                     >
-                      Stop
+                      {reviewCopy().stopLabel}
                     </button>
                   </Show>
                   <Show when={record().pullRequestUrl}>
@@ -5810,7 +5893,6 @@ export default function NewLayout(props: ParentProps) {
         }}
         onMoveWorkspace={moveAgentWorkspace}
         onCodeEditor={openCodespace}
-        onProjectRules={openProjectRules}
         onAgentDashboard={() => {
           setAgentDashboardOpen(true)
           void refreshTeamConversations()

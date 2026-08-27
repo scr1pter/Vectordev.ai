@@ -224,8 +224,8 @@ export function AgentDashboard(props: {
   }))
   const visible = createMemo(() => filterAgents(props.agents, filters()))
 
-  // Facets are derived from what is actually on screen, so a chip never offers
-  // a status or runtime that would filter everything away.
+  // Facets describe the whole dashboard. Keeping every available option here
+  // lets users widen or replace a filter without first clearing it.
   const statusOptions = createMemo(() => [...new Set(props.agents.map((agent) => agent.status))].sort())
   const runtimeOptions = createMemo(() => [...new Set(props.agents.map((agent) => agent.runtime))].sort())
   const teamOptions = createMemo(() =>
@@ -247,9 +247,17 @@ export function AgentDashboard(props: {
   const teamLabelFor = (agent: DashboardAgentInput) =>
     teamOptions().find((team) => team.id === (agent.swarmRunId ?? agent.teamId))?.label
 
-  const summary = createMemo(() => summarize(props.agents))
-  const clashes = createMemo(() => findClashes(props.agents))
+  // Header counts and warnings must describe the cards the user can see. A
+  // hidden agent should not keep contributing files, teams, or clashes after a
+  // filter is applied.
+  const summary = createMemo(() => summarize(visible()))
+  const clashes = createMemo(() => findClashes(visible()))
   const columns = createMemo(() => boardColumns(visible()))
+  const conversations = createMemo(() => {
+    if (!hasActiveFilters(filters())) return props.conversations ?? []
+    const groups = new Set(visible().flatMap((agent) => [agent.swarmRunId, agent.teamId].filter(Boolean)))
+    return (props.conversations ?? []).filter((conversation) => groups.has(conversation.teamId))
+  })
 
   return (
     <Show when={props.open}>
@@ -390,7 +398,7 @@ export function AgentDashboard(props: {
             </div>
           </Show>
 
-          <For each={props.conversations ?? []}>
+          <For each={conversations()}>
             {(conversation) => (
               <Show when={conversation.messages.length}>
                 <Conversation conversation={conversation} />

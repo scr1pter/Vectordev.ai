@@ -4,6 +4,8 @@ import { useServerSDK } from "@/context/server-sdk"
 import { SDKProvider, useSDK } from "@/context/sdk"
 import { FileProvider } from "@/context/file"
 import { LocalProvider } from "@/context/local"
+import { PromptProvider } from "@/context/prompt"
+import { CommentsProvider } from "@/context/comments"
 import { Terminal } from "@/components/terminal"
 import type { LocalPTY } from "@/context/terminal"
 import { showToast } from "@/utils/toast"
@@ -1245,17 +1247,21 @@ function CodespaceWindow(props: {
           <SDKProvider directory={ready.directory}>
             <LocalProvider>
               <FileProvider>
-                <CodespaceWorkbench
-                  modified={() => []}
-                  kinds={() => new Map()}
-                  empty={() => <div />}
-                  diffs={() => []}
-                  focusReviewDiff={() => undefined}
-                  sessionId={props.taskId}
-                  onClose={props.onClose}
-                  embedded
-                  portalMount={ready.mount}
-                />
+                <PromptProvider>
+                  <CommentsProvider>
+                    <CodespaceWorkbench
+                      modified={() => []}
+                      kinds={() => new Map()}
+                      empty={() => <div />}
+                      diffs={() => []}
+                      focusReviewDiff={() => undefined}
+                      sessionId={props.taskId}
+                      onClose={props.onClose}
+                      embedded
+                      portalMount={ready.mount}
+                    />
+                  </CommentsProvider>
+                </PromptProvider>
               </FileProvider>
             </LocalProvider>
           </SDKProvider>

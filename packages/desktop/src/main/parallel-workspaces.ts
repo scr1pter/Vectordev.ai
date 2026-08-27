@@ -1,8 +1,8 @@
 import { execFile } from "node:child_process"
 import { createHash, randomUUID } from "node:crypto"
 import { createReadStream } from "node:fs"
-import { cp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises"
-import { dirname, join, relative } from "node:path"
+import { cp, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises"
+import { basename, dirname, join, relative } from "node:path"
 import { app } from "electron"
 import { VERIFIED_COMPLETION_POLICY } from "@opencode-ai/app/judge"
 import { untrustedChildEnvironment } from "@opencode-ai/core/child-environment"
@@ -23,15 +23,16 @@ import {
 } from "./context-budget"
 import { getStore } from "./store"
 import { createPullRequest } from "./github"
-import { runExternalCodingAgent, type CodingAgentRuntime } from "./external-agents"
-import { claimPendingMessages, postTeamMessage, teamForWorkspace } from "./agent-teams"
-import { formatDelivery, formatHandoff } from "./agent-team-model"
-import { priorFor, recordValidationRun } from "./failure-memory"
 import {
-  formatValidationForRepair,
-  validateWorkspace,
-  type WorkspaceValidationReport,
-} from "./workspace-guardrails"
+  runExternalCodingAgent,
+  type CodingAgentRuntime,
+  type RunExternalAgentInput,
+  type ExternalAgentRunResult,
+} from "./external-agents"
+import { markTeamMessagesDelivered, pendingTeamMessages, postTeamMessage, teamForWorkspace } from "./agent-teams"
+import { formatDelivery, formatHandoff, type TeamMessage } from "./agent-team-model"
+import { priorFor, recordValidationRun } from "./failure-memory"
+import { formatValidationForRepair, validateWorkspace, type WorkspaceValidationReport } from "./workspace-guardrails"
 import { parseUnifiedDiff, selectUnifiedDiff, type UnifiedDiffSelection } from "./unified-diff"
 import { scanChangedSecrets } from "./secret-scanner"
 import { spendLedger } from "./spend-limits"
@@ -180,10 +181,12 @@ type ActiveParallelRun = {
   controller: AbortController
   engine: ParallelWorkspaceEngine
   sessionId?: string
+  acceptsTeamMessages?: boolean
   // Set only by followUpParallelWorkspace. Carried on the queue entry so a
   // follow-up rides executeParallelWorkspace's existing ledger pre-flight,
   // catch and finally instead of duplicating them.
   followUp?: string
+  externalAgentRunner?: (input: RunExternalAgentInput) => Promise<ExternalAgentRunResult>
 }
 
 const activeRuns = new Map<string, ActiveParallelRun>()
@@ -245,20 +248,56 @@ type CommandResult = {
 const now = () => new Date().toISOString()
 const workspaceRoot = () => join(app.getPath("userData"), WORKSPACE_DIRECTORY_NAME)
 const runtimeLabel = (runtime: ParallelWorkspaceRuntime) =>
-  runtime === "claude-code" ? "Claude Code" : runtime === "codex" ? "Codex" : runtime === "cursor" ? "Cursor Agent" : "Vector"
+  runtime === "claude-code"
+    ? "Claude Code"
+    : runtime === "codex"
+      ? "Codex"
+      : runtime === "cursor"
+        ? "Cursor Agent"
+        : "Vector"
 
 function readRecords(): ParallelWorkspaceRecord[] {
-  const raw = getStore(STORE_NAME).get(STORE_KEY)
+  const store = getStore(STORE_NAME)
+  const raw = store.get(STORE_KEY)
   if (!Array.isArray(raw)) return []
-  return raw
+  const records = raw
     .filter((item): item is ParallelWorkspaceRecord => typeof item?.id === "string")
-    .map((item) => ({
-      ...item,
-      runtime:
-        item.runtime === "claude-code" || item.runtime === "codex" || item.runtime === "cursor"
-          ? item.runtime
-          : "vector",
-    }))
+    .map(
+      (item): ParallelWorkspaceRecord => ({
+        ...item,
+        runtime:
+          item.runtime === "claude-code" || item.runtime === "codex" || item.runtime === "cursor"
+            ? item.runtime
+            : "vector",
+      }),
+    )
+  const compacted = records.map(compactClosedParallelWorkspace)
+  // Closed workspaces have no checkout left and cannot be run or reviewed
+  // again. Older versions nevertheless retained their full binary diff,
+  // baseline hash table and every changed filename. One real history file had
+  // reached 48 MB, so each streamed agent event synchronously serialized that
+  // whole file and pinned Electron's main thread. Migrate it on the first read;
+  // identity is preserved for already-compact records, so this writes once.
+  if (compacted.some((record, index) => record !== records[index])) store.set(STORE_KEY, compacted)
+  return compacted
+}
+
+export function compactClosedParallelWorkspace(record: ParallelWorkspaceRecord) {
+  const closed =
+    record.mergeState === "merged" ||
+    record.mergeState === "discarded" ||
+    record.status === "merged" ||
+    record.status === "discarded"
+  if (!closed || (!record.diff && !record.baselineHashes && (record.changedFiles?.length ?? 0) === 0)) return record
+  return {
+    ...record,
+    // changedFilesCount and finalSummary retain the useful historical result.
+    // These payloads only support review, rerun, and merge, all of which are
+    // forbidden once the isolated checkout is closed.
+    diff: "",
+    baselineHashes: undefined,
+    changedFiles: [],
+  }
 }
 
 function writeRecords(records: ParallelWorkspaceRecord[]) {
@@ -269,7 +308,7 @@ function updateRecord(id: string, update: (record: ParallelWorkspaceRecord) => P
   const records = readRecords()
   const index = records.findIndex((record) => record.id === id)
   if (index === -1) throw new Error("Parallel workspace was not found.")
-  records[index] = update(records[index]!)
+  records[index] = compactClosedParallelWorkspace(update(records[index]!))
   writeRecords(records)
   return records[index]!
 }
@@ -506,10 +545,7 @@ async function waitForEngineSessionIdle(
 
     if (state !== lastState) {
       lastState = state
-      const label =
-        state === "busy"
-          ? "Agent is editing and running tools"
-          : "Waiting for the isolated agent to start"
+      const label = state === "busy" ? "Agent is editing and running tools" : "Waiting for the isolated agent to start"
       const updated = updateRecord(id, (current) => ({
         ...current,
         status: "running commands",
@@ -530,6 +566,9 @@ async function waitForEngineSessionIdle(
 
   throw new Error("The isolated agent did not become idle within 30 minutes. Its files are preserved for review.")
 }
+
+const EXTERNAL_RUNTIME_RULES_POLICY =
+  "Read .vector/RULES.md when present before making changes. It is authoritative for this repository, including teammate-authored content outside Vector's managed rules block."
 
 function parallelAgentPrompt(record: ParallelWorkspaceRecord) {
   const contextPack = record.contextFiles?.length
@@ -554,6 +593,7 @@ function parallelAgentPrompt(record: ParallelWorkspaceRecord) {
     "Use terminal tools when useful, run the most relevant available checks, and repair failures you introduce.",
     "Do not expose credentials or copy secrets into source files.",
     "Finish with a concise summary of changed files, validation performed, and any remaining risk.",
+    EXTERNAL_RUNTIME_RULES_POLICY,
     "Read .vector/BRAIN.md when present and update it only with durable decisions or recurring failure lessons; never store secrets or routine narration.",
     // Rules are keyed on the MAIN project path, not the isolated checkout: a
     // worktree lives under Vector's own directory and would match nothing. The
@@ -588,7 +628,8 @@ function validationSummary(report: WorkspaceValidationReport) {
   if (!report.checks.length || !report.hadChecks) return "No runnable deterministic checks were available."
   const passed = report.checks.filter((check) => check.status === "passed").length
   const skipped = report.checks.filter((check) => check.status === "skipped").length
-  if (report.passed) return `${passed} deterministic check${passed === 1 ? "" : "s"} passed${skipped ? `; ${skipped} skipped` : ""}.`
+  if (report.passed)
+    return `${passed} deterministic check${passed === 1 ? "" : "s"} passed${skipped ? `; ${skipped} skipped` : ""}.`
   const failed = report.checks.find((check) => check.status === "failed")
   return `${failed?.label || "A deterministic check"} failed after the isolated edit.`
 }
@@ -774,63 +815,145 @@ function normalizeStatusLine(line: string) {
   return file
 }
 
-
-// Teammates communicate by relay: a queued message is folded into the
-// recipient's next prompt rather than interrupting it mid-turn. Claiming marks
-// delivery, so a message is handed over exactly once.
-function withTeammateMessages(record: ParallelWorkspaceRecord, basePrompt: string) {
+// External runtimes cannot accept a prompt while their CLI is running, so
+// their queued messages are folded into the next prompt. Vector sessions use
+// durable live admission below instead.
+export function pendingTeammateDelivery(record: Pick<ParallelWorkspaceRecord, "id" | "name">, basePrompt: string) {
   const team = teamForWorkspace(record.id)
-  if (!team) return basePrompt
-  const pending = claimPendingMessages(team.id, record.id)
-  if (!pending.length) return basePrompt
-  return [formatDelivery(pending, record.name), basePrompt].join("\n\n")
+  if (!team) return { prompt: basePrompt, messageIds: [] }
+  const pending = pendingTeamMessages(team.id, record.id)
+  if (!pending.length) return { prompt: basePrompt, messageIds: [] }
+  return {
+    prompt: [formatDelivery(pending, record.name), basePrompt].filter(Boolean).join("\n\n"),
+    messageIds: pending.map((message) => message.id),
+  }
 }
 
 // Members of a shared workspace all write to one outbox, so each entry carries
-// the sending session. Draining is destructive: an entry is routed exactly once
-// and the file is truncated, otherwise every later turn would replay the whole
-// history to the team.
+// the sending session. Files are atomically claimed and every entry has a
+// durable id, making a crash between routing and cleanup safe to replay.
 export async function drainTeamOutbox(record: ParallelWorkspaceRecord) {
   const team = teamForWorkspace(record.id)
   if (!team) return
   const outbox = join(record.isolatedPath, ".vector", "team-outbox.jsonl")
-  const raw = await readFile(outbox, "utf8").catch(() => "")
-  if (!raw.trim()) return
-  await writeFile(outbox, "", "utf8").catch(() => undefined)
-
-  const siblings = readRecords().filter((item) => team.memberIds.includes(item.id))
-  for (const line of raw.split("\n")) {
-    if (!line.trim()) continue
-    const entry = ((): { to?: string; message?: string; sessionID?: string } | undefined => {
-      try {
-        return JSON.parse(line)
-      } catch {
-        return undefined
+  const existing = outboxDrains.get(outbox)
+  if (existing) return existing
+  const drain = (async () => {
+    const directory = dirname(outbox)
+    const prefix = `${basename(outbox)}.`
+    const legacy = (await readDirectoryIfExists(directory))
+      .filter((name) => name.startsWith(prefix) && name.endsWith(".processing"))
+      .map((name) => join(directory, name))
+    const processing = `${outbox}.${randomUUID()}.processing`
+    const rotated = await rename(outbox, processing)
+      .then(() => processing)
+      .catch((error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") return undefined
+        throw error
+      })
+    const durableDirectory = join(record.isolatedPath, ".vector", "team-outbox")
+    const durable = await Promise.all(
+      (await readDirectoryIfExists(durableDirectory))
+        .filter((name) => name.endsWith(".processing") || name.endsWith(".json"))
+        .map(async (name) => {
+          const source = join(durableDirectory, name)
+          if (name.endsWith(".processing")) return source
+          return rename(source, `${source}.processing`)
+            .then(() => `${source}.processing`)
+            .catch((error: NodeJS.ErrnoException) => {
+              if (error.code === "ENOENT") return undefined
+              throw error
+            })
+        }),
+    )
+    const siblings = readRecords().filter((item) => team.memberIds.includes(item.id))
+    const memberNames = Object.fromEntries(siblings.map((item) => [item.id, item.name]))
+    for (const claimed of [
+      ...new Set([
+        ...legacy,
+        ...(rotated ? [rotated] : []),
+        ...durable.filter((path): path is string => Boolean(path)),
+      ]),
+    ].sort()) {
+      const raw = await readFile(claimed, "utf8")
+      for (const line of raw.split("\n")) {
+        if (!line.trim()) continue
+        const entry = parseTeamOutboxEntry(line)
+        if (!entry) continue
+        // Attribute by session so a shared outbox routes to the right sender.
+        const sender = siblings.find((item) => item.agentSessionId === entry.sessionID) ?? record
+        const recipient = entry.to
+          ? siblings.find((item) => item.name.toLowerCase() === entry.to!.trim().toLowerCase())
+          : undefined
+        postTeamMessage({
+          messageId:
+            entry.id ??
+            createHash("sha256")
+              .update(`${entry.sessionID ?? ""}\n${entry.to ?? ""}\n${entry.message}\n${entry.createdAt ?? ""}`)
+              .digest("hex"),
+          teamId: team.id,
+          fromWorkspaceId: sender.id,
+          fromName: sender.name,
+          // Preserve an unknown requested recipient as an invalid id so the
+          // router bounces it. Dropping it to undefined turns a typo into a
+          // broadcast to the entire team.
+          toWorkspaceId: entry.to ? (recipient?.id ?? `unknown:${entry.to.trim()}`) : undefined,
+          text: entry.message,
+          memberNames:
+            entry.to && !recipient ? { ...memberNames, [`unknown:${entry.to.trim()}`]: entry.to.trim() } : memberNames,
+        })
       }
-    })()
-    if (!entry?.message) continue
-    // Attribute by session so a shared outbox routes to the right sender.
-    const sender = siblings.find((item) => item.agentSessionId === entry.sessionID) ?? record
-    const recipient = entry.to
-      ? siblings.find((item) => item.name.toLowerCase() === entry.to!.trim().toLowerCase())
-      : undefined
-    postTeamMessage({
-      teamId: team.id,
-      fromWorkspaceId: sender.id,
-      fromName: sender.name,
-      toWorkspaceId: recipient?.id,
-      text: entry.message,
-    })
+      // If the process dies after routing but before this remove, replay is
+      // harmless because every entry carries an id and appendMessage dedupes.
+      await rm(claimed, { force: true })
+    }
+  })()
+  outboxDrains.set(outbox, drain)
+  try {
+    await drain
+  } finally {
+    if (outboxDrains.get(outbox) === drain) outboxDrains.delete(outbox)
   }
 }
 
-// Delivery only ever happens at a turn boundary, because the engine cannot
-// inject into a turn already in progress. Everything in a team therefore has to
-// be drained WHILE the members are running: they all start together, so at the
-// moment the first prompts go out nobody has written anything yet, and draining
-// only at the end meant a queued message was never read by anyone.
+const outboxDrains = new Map<string, Promise<void>>()
+
+async function readDirectoryIfExists(directory: string) {
+  return readdir(directory).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return []
+    throw error
+  })
+}
+
+function parseTeamOutboxEntry(line: string) {
+  const value = (() => {
+    try {
+      return JSON.parse(line) as unknown
+    } catch {
+      return undefined
+    }
+  })()
+  if (!value || typeof value !== "object") return
+  const message = Reflect.get(value, "message")
+  const id = Reflect.get(value, "id")
+  const to = Reflect.get(value, "to")
+  const sessionID = Reflect.get(value, "sessionID")
+  const createdAt = Reflect.get(value, "createdAt")
+  if (typeof message !== "string" || !message.trim()) return
+  if (id !== undefined && typeof id !== "string") return
+  if (to !== undefined && typeof to !== "string") return
+  if (sessionID !== undefined && typeof sessionID !== "string") return
+  if (createdAt !== undefined && typeof createdAt !== "string") return
+  return { id, to, message, sessionID, createdAt }
+}
+
+// Outboxes must be drained while members are running: everyone starts together,
+// so no messages exist when the initial prompts are admitted. Active Vector
+// sessions receive them through the durable prompt inbox; external runtimes
+// keep them pending for their next turn.
 const TEAM_SWEEP_INTERVAL_MS = 4_000
 const teamSweeps = new Map<string, { timer: NodeJS.Timeout; runs: Set<string> }>()
+const activeTeamSweeps = new Map<string, Promise<void>>()
 
 function startTeamSweep(record: ParallelWorkspaceRecord) {
   const team = teamForWorkspace(record.id)
@@ -863,8 +986,72 @@ function stopTeamSweep(record: ParallelWorkspaceRecord) {
 // rather than only the one that just finished is what lets a message cross
 // between two agents that are both still working.
 export async function sweepTeamOutboxes(teamId: string) {
-  const members = readRecords().filter((record) => teamForWorkspace(record.id)?.id === teamId)
-  for (const member of members) await drainTeamOutbox(member)
+  const existing = activeTeamSweeps.get(teamId)
+  if (existing) return existing
+  const sweep = (async () => {
+    const members = readRecords().filter((record) => teamForWorkspace(record.id)?.id === teamId)
+    for (const member of members) await drainTeamOutbox(member)
+    for (const member of members) {
+      const active = activeRuns.get(member.id)
+      if (!active?.sessionId || !active.acceptsTeamMessages || member.runtime !== "vector") continue
+      await admitVectorPrompt(member, active, "", false)
+    }
+  })()
+  activeTeamSweeps.set(teamId, sweep)
+  try {
+    await sweep
+  } finally {
+    if (activeTeamSweeps.get(teamId) === sweep) activeTeamSweeps.delete(teamId)
+  }
+}
+
+async function admitVectorPrompt(
+  record: ParallelWorkspaceRecord,
+  active: ActiveParallelRun,
+  prompt: string,
+  required = true,
+) {
+  if (!active.sessionId) throw new Error("Vector's isolated agent session is not ready.")
+  const team = teamForWorkspace(record.id)
+  const pending = team ? nextVectorTeammateDelivery(pendingTeamMessages(team.id, record.id)) : []
+  if (!prompt && !pending.length && !required) return false
+  const text = [pending.length ? formatDelivery(pending, record.name) : "", prompt].filter(Boolean).join("\n\n")
+  await engineRequest(active.engine, `/api/session/${encodeURIComponent(active.sessionId)}/prompt`, {
+    method: "POST",
+    // A response can be lost after the server durably admitted the input. The
+    // same message id turns the next sweep into an exact retry instead of
+    // delivering the teammate note twice.
+    body: {
+      id: vectorPromptMessageId(
+        active.sessionId,
+        text,
+        pending.map((message) => message.id),
+      ),
+      prompt: { text },
+      resume: true,
+    },
+    signal: active.controller.signal,
+  })
+  if (team && pending.length)
+    markTeamMessagesDelivered(
+      team.id,
+      record.id,
+      pending.map((message) => message.id),
+    )
+  return true
+}
+
+// Keep the retry identity stable if another teammate message arrives after a
+// server admitted this prompt but before its response reached the desktop.
+// The next sweep sends the next oldest message after this one is acknowledged.
+export function nextVectorTeammateDelivery(pending: readonly TeamMessage[]) {
+  return pending.slice(0, 1)
+}
+
+export function vectorPromptMessageId(sessionId: string, prompt: string, teammateMessageIds: readonly string[]) {
+  return `msg_vector_${createHash("sha256")
+    .update(`${sessionId}\n${teammateMessageIds.join("\n")}\n${prompt}`)
+    .digest("hex")}`
 }
 
 // Broadcasts what this agent just did so teammates sharing the workspace can
@@ -904,8 +1091,24 @@ async function fallbackDiff(record: ParallelWorkspaceRecord) {
     blocks.push(`--- a/${file}`)
     blocks.push(`+++ b/${file}`)
     blocks.push("@@")
-    blocks.push(sourceText ? sourceText.split("\n").slice(0, 80).map((line) => `- ${line}`).join("\n") : "- <missing>")
-    blocks.push(isolatedText ? isolatedText.split("\n").slice(0, 120).map((line) => `+ ${line}`).join("\n") : "+ <deleted>")
+    blocks.push(
+      sourceText
+        ? sourceText
+            .split("\n")
+            .slice(0, 80)
+            .map((line) => `- ${line}`)
+            .join("\n")
+        : "- <missing>",
+    )
+    blocks.push(
+      isolatedText
+        ? isolatedText
+            .split("\n")
+            .slice(0, 120)
+            .map((line) => `+ ${line}`)
+            .join("\n")
+        : "+ <deleted>",
+    )
   }
 
   return { changedFiles, diff: blocks.join("\n") }
@@ -921,7 +1124,14 @@ const INTERNAL_WORKSPACE_FILES = new Set([
   join(".vector", "team-outbox.jsonl").replaceAll("\\", "/"),
 ])
 
-const isInternalWorkspaceFile = (file: string) => INTERNAL_WORKSPACE_FILES.has(file.replaceAll("\\", "/"))
+export function isInternalWorkspaceFile(file: string) {
+  const normalized = file.replaceAll("\\", "/")
+  return (
+    INTERNAL_WORKSPACE_FILES.has(normalized) ||
+    normalized.startsWith(".vector/team-outbox/") ||
+    normalized.startsWith(".vector/team-outbox.jsonl.")
+  )
+}
 
 async function gitDiff(record: ParallelWorkspaceRecord) {
   // -uall lists untracked files individually. Without it git collapses a new
@@ -964,7 +1174,13 @@ async function gitDiff(record: ParallelWorkspaceRecord) {
     blocks.push("--- /dev/null")
     blocks.push(`+++ b/${file}`)
     blocks.push("@@")
-    blocks.push(text.split("\n").slice(0, 300).map((line) => `+${line}`).join("\n"))
+    blocks.push(
+      text
+        .split("\n")
+        .slice(0, 300)
+        .map((line) => `+${line}`)
+        .join("\n"),
+    )
   }
   return { changedFiles, diff: blocks.filter(Boolean).join("\n") }
 }
@@ -999,7 +1215,13 @@ export async function mainWorkingTreeDiff(sourcePath: string): Promise<string> {
     blocks.push("--- /dev/null")
     blocks.push(`+++ b/${file}`)
     blocks.push("@@")
-    blocks.push(text.split("\n").slice(0, 300).map((line) => `+${line}`).join("\n"))
+    blocks.push(
+      text
+        .split("\n")
+        .slice(0, 300)
+        .map((line) => `+${line}`)
+        .join("\n"),
+    )
   }
   return blocks.filter(Boolean).join("\n")
 }
@@ -1050,7 +1272,8 @@ export function listParallelWorkspaces(scope?: { sourcePath?: string; parentSess
       progress: 0,
       lastAction: "Interrupted by app restart",
       lastActivityAt: now(),
-      error: "This agent stopped when Vector closed. Review the isolated files, then run the workspace again if needed.",
+      error:
+        "This agent stopped when Vector closed. Review the isolated files, then run the workspace again if needed.",
       finalSummary: "The previous run was interrupted before Vector received a completion signal.",
       turns: settleRunningTurns(record.turns, { state: "failed", text: "This turn stopped when Vector closed." }),
       logs: ["Vector detected an interrupted agent run after restart.", ...record.logs].slice(0, 120),
@@ -1090,7 +1313,9 @@ export async function createParallelWorkspace(input: CreateParallelWorkspaceInpu
       !["failed", "stopped", "complete"].includes(record.status),
   )
   if (activeInScope.length >= 16) {
-    throw new Error("This task already has 16 active parallel agents. Merge, discard, or remove one before creating another.")
+    throw new Error(
+      "This task already has 16 active parallel agents. Merge, discard, or remove one before creating another.",
+    )
   }
   const root = workspaceRoot()
   const workspaceDir = join(root, id)
@@ -1186,28 +1411,29 @@ export async function createParallelWorkspace(input: CreateParallelWorkspaceInpu
     "utf8",
   )
 
-  const backgroundTask = input.swarmRole === "coordinator"
-    ? undefined
-    : createBackgroundTask({
-        kind: "parallel-workspace",
-        projectPath: sourceRoot,
-        taskId: input.parentSessionId,
-        workspaceId: id,
-        workspaceName: name,
-        name,
-        prompt: input.taskPrompt.trim(),
-        provider,
-        model,
-        status: "queued",
-        progress: 0,
-        currentStep: "Isolated workspace created",
-        changedFilesCount: 0,
-        terminalActive: false,
-        browserActive: false,
-        costEstimate: estimatedCost,
-        mergeState: "none",
-        logs: [`Created isolated workspace at ${isolatedPath}.`, ...logs],
-      })
+  const backgroundTask =
+    input.swarmRole === "coordinator"
+      ? undefined
+      : createBackgroundTask({
+          kind: "parallel-workspace",
+          projectPath: sourceRoot,
+          taskId: input.parentSessionId,
+          workspaceId: id,
+          workspaceName: name,
+          name,
+          prompt: input.taskPrompt.trim(),
+          provider,
+          model,
+          status: "queued",
+          progress: 0,
+          currentStep: "Isolated workspace created",
+          changedFilesCount: 0,
+          terminalActive: false,
+          browserActive: false,
+          costEstimate: estimatedCost,
+          mergeState: "none",
+          logs: [`Created isolated workspace at ${isolatedPath}.`, ...logs],
+        })
 
   const record: ParallelWorkspaceRecord = {
     id,
@@ -1324,9 +1550,7 @@ async function prepareParallelWorkspaceContext(record: ParallelWorkspaceRecord) 
     contextFiles: contextPack?.files.map((file) => file.path) ?? current.contextFiles,
     contextIndexedFiles: contextPack?.indexedFileCount ?? current.contextIndexedFiles,
     contextTokenEstimate: contextTokens,
-    contextSummary: contextPack
-      ? formatContextBudgetForAgent(contextPack).split("\n")[0]
-      : current.contextSummary,
+    contextSummary: contextPack ? formatContextBudgetForAgent(contextPack).split("\n")[0] : current.contextSummary,
     logs: contextPack
       ? [
           `Context budget selected ${contextPack.selectedFileCount} of ${contextPack.indexedFileCount} indexed files (~${contextPack.estimatedTokens.toLocaleString()} tokens).`,
@@ -1346,15 +1570,18 @@ async function runExternalWorkspacePass(input: {
   controller: AbortController
   turnId: string
   resumeSessionId?: string
+  runner?: (input: RunExternalAgentInput) => Promise<ExternalAgentRunResult>
 }) {
   const pendingLogs: string[] = []
   const pendingOutput: string[] = []
   let lastPersistedAt = 0
+  let flushTimer: NodeJS.Timeout | undefined
   const flush = () => {
+    if (flushTimer) clearTimeout(flushTimer)
+    flushTimer = undefined
     if (!pendingLogs.length && !pendingOutput.length) return
     const logs = pendingLogs.splice(0)
     const output = pendingOutput.splice(0)
-    lastPersistedAt = Date.now()
     const updated = updateRecord(input.id, (current) => ({
       ...current,
       status: "running commands",
@@ -1367,10 +1594,19 @@ async function runExternalWorkspacePass(input: {
       logs: [...[...logs].reverse(), ...current.logs].slice(0, 120),
       terminalOutput: [...[...output].reverse(), ...current.terminalOutput].slice(0, 240),
     }))
+    // Measure the quiet period from the END of the synchronous store write.
+    // With a large legacy store, measuring from its start made every queued
+    // stdout line immediately eligible for another full-file rewrite.
+    lastPersistedAt = Date.now()
     syncBackgroundTask(updated, updated.lastAction)
   }
+  const scheduleFlush = () => {
+    if (flushTimer) return
+    flushTimer = setTimeout(flush, Math.max(0, 400 - (Date.now() - lastPersistedAt)))
+    flushTimer.unref?.()
+  }
 
-  const result = await runExternalCodingAgent({
+  const result = await (input.runner ?? runExternalCodingAgent)({
     runtime: input.record.runtime as CodingAgentRuntime,
     cwd: input.record.isolatedPath,
     prompt: input.prompt,
@@ -1384,7 +1620,7 @@ async function runExternalWorkspacePass(input: {
     onEvent: (event) => {
       if (event.stream === "activity") pendingLogs.push(event.text)
       if (event.stream !== "activity") pendingOutput.push(event.text)
-      if (Date.now() - lastPersistedAt >= 400) flush()
+      scheduleFlush()
     },
   }).finally(flush)
   // A CLI that refused the resume FLAGS is not a failed task — the caller
@@ -1410,6 +1646,7 @@ async function executeExternalParallelWorkspace(
   controller: AbortController,
   runId: string,
   followUp?: string,
+  runner?: (input: RunExternalAgentInput) => Promise<ExternalAgentRunResult>,
 ) {
   const resumeSessionId = followUp ? initial.externalSessionId : undefined
   const turnId = randomUUID()
@@ -1455,11 +1692,10 @@ async function executeExternalParallelWorkspace(
   // External CLIs have no send_teammate_message tool — a real `claude -p` run
   // exposes 28 tools and none of them is it — so they cannot send. They do take
   // a prompt, so they can still RECEIVE what teammates queued for them, which is
-  // the honest half of the capability rather than silently neither. Claimed
-  // exactly once here because withTeammateMessages is destructive, and the
-  // resume-rejected retry below must not re-claim and drop messages the refused
-  // attempt never delivered.
-  const delivery = withTeammateMessages(record, "")
+  // the honest half of the capability rather than silently neither. The pending
+  // messages remain durable until a CLI run succeeds, including across a failed
+  // resolution, spawn, sign-in, or resume attempt.
+  const delivery = pendingTeammateDelivery(record, "")
   const briefBody = () =>
     continuationPrompt({
       missionBrief: parallelAgentPrompt(record),
@@ -1467,7 +1703,13 @@ async function executeExternalParallelWorkspace(
       changedFiles: record.changedFiles,
       instruction: followUp ?? "",
     })
-  const compose = (body: string) => [delivery, body].filter(Boolean).join("\n\n")
+  // Resumed external CLIs receive only the follow-up text, not the original
+  // mission brief. Repeat the repository-file contract so rules added or
+  // edited between turns still reach Claude Code, Codex, and Cursor.
+  const compose = (body: string) =>
+    [delivery.prompt, followUp && resumeSessionId ? EXTERNAL_RUNTIME_RULES_POLICY : "", body]
+      .filter(Boolean)
+      .join("\n\n")
 
   const attempt = await runExternalWorkspacePass({
     id,
@@ -1475,11 +1717,12 @@ async function executeExternalParallelWorkspace(
     turnId,
     controller,
     resumeSessionId,
+    runner,
     prompt: followUp ? compose(resumeSessionId ? followUp : briefBody()) : compose(parallelAgentPrompt(record)),
   })
 
-  // The CLI refused the resume flags — cursor is unverified, and a CLI upgrade
-  // can retire a flag. Re-brief once, and forget the id so later turns do not
+  // The CLI refused the resume flags — a CLI upgrade can retire a flag.
+  // Re-brief once, and forget the id so later turns do not
   // pay for the same rejection again.
   const firstRun = attempt.resumeRejected
     ? await runExternalWorkspacePass({
@@ -1497,9 +1740,12 @@ async function executeExternalParallelWorkspace(
         })),
         turnId,
         controller,
+        runner,
         prompt: compose(briefBody()),
       })
     : attempt
+  const team = teamForWorkspace(record.id)
+  if (team && delivery.messageIds.length) markTeamMessagesDelivered(team.id, record.id, delivery.messageIds)
   if (firstRun.actualCost) costs.push(Number(firstRun.actualCost.replace("$", "")))
 
   record = updateRecord(id, (current) => ({
@@ -1533,7 +1779,10 @@ async function executeExternalParallelWorkspace(
         lastActivityAt: now(),
         lastAction: `${runtimeLabel(current.runtime)} replied with no file changes`,
         finalSummary: firstRun.summary,
-        logs: ["No files changed on this turn, so the deterministic checks were skipped.", ...current.logs].slice(0, 120),
+        logs: ["No files changed on this turn, so the deterministic checks were skipped.", ...current.logs].slice(
+          0,
+          120,
+        ),
       }))
       syncBackgroundTask(unchanged, unchanged.lastAction)
       return
@@ -1597,24 +1846,29 @@ async function executeExternalParallelWorkspace(
     // Deliberately a fresh, non-resumed spawn with the full mission brief: this
     // is the path verified working end-to-end today, and resume is not worth
     // changing it in the same change that introduces resume.
+    const repairDelivery = pendingTeammateDelivery(
+      record,
+      [
+        parallelAgentPrompt(record),
+        followUp ? `The user's most recent follow-up request was: ${followUp}` : "",
+        guidance,
+        formatValidationForRepair(validation),
+        `This is repair pass ${attempt} of ${retryLimit}. Diagnose the exact output, make only evidence-backed changes, and rerun the relevant check before finishing.`,
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
+    )
     const repair = await runExternalWorkspacePass({
       id,
       record,
       turnId: repairTurnId,
       controller,
-      prompt: withTeammateMessages(
-        record,
-        [
-          parallelAgentPrompt(record),
-          followUp ? `The user's most recent follow-up request was: ${followUp}` : "",
-          guidance,
-          formatValidationForRepair(validation),
-          `This is repair pass ${attempt} of ${retryLimit}. Diagnose the exact output, make only evidence-backed changes, and rerun the relevant check before finishing.`,
-        ]
-          .filter(Boolean)
-          .join("\n\n"),
-      ),
+      runner,
+      prompt: repairDelivery.prompt,
     })
+    const repairTeam = teamForWorkspace(record.id)
+    if (repairTeam && repairDelivery.messageIds.length)
+      markTeamMessagesDelivered(repairTeam.id, record.id, repairDelivery.messageIds)
     if (repair.actualCost) costs.push(Number(repair.actualCost.replace("$", "")))
     refreshed = await refreshParallelWorkspace(id)
     validation = await validateWorkspace(refreshed.isolatedPath, refreshed.changedFiles)
@@ -1640,7 +1894,10 @@ async function executeExternalParallelWorkspace(
         ? `Repair ${attempt} verified by deterministic checks`
         : `Repair ${attempt} did not pass validation`,
       lastActivityAt: now(),
-      logs: [`Repair verification ${attempt}/${retryLimit}: ${validationSummary(validation)}`, ...current.logs].slice(0, 120),
+      logs: [`Repair verification ${attempt}/${retryLimit}: ${validationSummary(validation)}`, ...current.logs].slice(
+        0,
+        120,
+      ),
     }))
     syncBackgroundTask(record, record.lastAction)
   }
@@ -1708,7 +1965,8 @@ async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEng
       }))
       syncBackgroundTask(warned, warning)
     }
-    const followUp = activeRuns.get(id)?.followUp
+    const queuedRun = activeRuns.get(id)
+    const followUp = queuedRun?.followUp
     // ensureParallelWorkspaceIsolation rebuilds a missing tree from sourcePath
     // as a fresh copy, which would silently discard exactly the work being
     // followed up on. A follow-up has to fail loudly instead.
@@ -1724,7 +1982,7 @@ async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEng
     startTeamSweep(initial)
     if (initial.runtime !== "vector") {
       const prepared = await prepareParallelWorkspaceContext(initial)
-      await executeExternalParallelWorkspace(id, prepared, controller, runId, followUp)
+      await executeExternalParallelWorkspace(id, prepared, controller, runId, followUp, queuedRun?.externalAgentRunner)
       return
     }
 
@@ -1747,7 +2005,9 @@ async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEng
     const sessionId = created?.id
     if (!sessionId) throw new Error("Vector's engine did not return a session ID for the isolated workspace.")
     const active = activeRuns.get(id)
-    if (active) active.sessionId = sessionId
+    if (!active) throw new Error("Vector's isolated agent run was interrupted before its session started.")
+    active.sessionId = sessionId
+    const vectorTurnId = randomUUID()
 
     let record = updateRecord(id, (current) => ({
       ...current,
@@ -1757,6 +2017,19 @@ async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEng
       lastAction: "Preparing task-specific project context",
       lastActivityAt: now(),
       error: undefined,
+      turns: followUp
+        ? appendTurn(current.turns, {
+            id: vectorTurnId,
+            role: "agent",
+            text: "",
+            at: now(),
+            state: "running",
+            resumed: false,
+          })
+        : [
+            { id: randomUUID(), role: "user", text: current.taskPrompt, at: now(), state: "done" },
+            { id: vectorTurnId, role: "agent", text: "", at: now(), state: "running", resumed: false },
+          ],
       logs: [`Engine session ${sessionId} started in ${current.isolatedPath}.`, ...current.logs].slice(0, 120),
     }))
     syncBackgroundTask(record, "Vector agent session started in the isolated workspace.")
@@ -1770,22 +2043,34 @@ async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEng
     }))
     syncBackgroundTask(record, "Task context prepared; the Vector agent is now working.")
 
-    await engineRequest(engine, `/api/session/${encodeURIComponent(sessionId)}/prompt`, {
-      method: "POST",
-      body: { prompt: { text: withTeammateMessages(record, parallelAgentPrompt(record)) }, resume: true },
-      signal: controller.signal,
-    })
+    await admitVectorPrompt(
+      record,
+      active,
+      followUp
+        ? continuationPrompt({
+            missionBrief: parallelAgentPrompt(record),
+            previousSummary: record.finalSummary,
+            changedFiles: record.changedFiles,
+            instruction: followUp,
+          })
+        : parallelAgentPrompt(record),
+    )
+    active.acceptsTeamMessages = true
     record = updateRecord(id, (current) => ({
       ...current,
       status: "running commands",
       progress: 0,
       lastAction: "Agent is editing and validating the workspace",
       lastActivityAt: now(),
-      logs: ["Task admitted by the Vector engine. Waiting for tool execution and validation.", ...current.logs].slice(0, 120),
+      logs: ["Task admitted by the Vector engine. Waiting for tool execution and validation.", ...current.logs].slice(
+        0,
+        120,
+      ),
     }))
     syncBackgroundTask(record, "Task admitted; agent tool execution is active.")
 
     await waitForEngineSessionIdle(id, sessionId, engine, controller.signal)
+    active.acceptsTeamMessages = false
 
     const turnFailure = await engineTurnFailure(sessionId, engine, controller.signal)
     if (turnFailure) throw new Error(turnFailure)
@@ -1833,29 +2118,20 @@ async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEng
         ].slice(0, 120),
       }))
       syncBackgroundTask(record, `Repairing the failed deterministic check (${attempt}/${retryLimit}).`)
-      await engineRequest(engine, `/api/session/${encodeURIComponent(sessionId)}/prompt`, {
-        method: "POST",
-        body: {
-          prompt: {
-            // A repair pass is a turn like any other, so it is also a delivery
-            // point. Leaving it out meant the one extra turn a run does get
-            // still skipped whatever a teammate had queued in the meantime.
-            text: withTeammateMessages(
-              record,
-              [
-                guidance,
-                formatValidationForRepair(validation),
-                `This is repair pass ${attempt} of ${retryLimit}. Diagnose from the exact output, make only evidence-backed changes, and rerun the relevant check yourself before finishing.`,
-              ]
-                .filter(Boolean)
-                .join("\n\n"),
-            ),
-          },
-          resume: true,
-        },
-        signal: controller.signal,
-      })
+      await admitVectorPrompt(
+        record,
+        active,
+        [
+          guidance,
+          formatValidationForRepair(validation),
+          `This is repair pass ${attempt} of ${retryLimit}. Diagnose from the exact output, make only evidence-backed changes, and rerun the relevant check yourself before finishing.`,
+        ]
+          .filter(Boolean)
+          .join("\n\n"),
+      )
+      active.acceptsTeamMessages = true
       await waitForEngineSessionIdle(id, sessionId, engine, controller.signal)
+      active.acceptsTeamMessages = false
 
       // A repair pass that died on a provider error must not read as a repair
       // attempt that simply did not fix anything.
@@ -1886,7 +2162,10 @@ async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEng
           ? `Repair ${attempt} verified by deterministic checks`
           : `Repair ${attempt} did not pass validation`,
         lastActivityAt: now(),
-        logs: [`Repair verification ${attempt}/${retryLimit}: ${validationSummary(validation)}`, ...current.logs].slice(0, 120),
+        logs: [`Repair verification ${attempt}/${retryLimit}: ${validationSummary(validation)}`, ...current.logs].slice(
+          0,
+          120,
+        ),
       }))
       syncBackgroundTask(record, `Repair verification ${attempt}/${retryLimit}: ${validationSummary(validation)}`)
     }
@@ -1919,11 +2198,10 @@ async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEng
       status: current.changedFilesCount ? "needs review" : "complete",
       progress: 100,
       riskLevel: validation.passed ? current.riskLevel : "high",
-      lastAction: current.changedFilesCount
-        ? reviewAction(validation)
-        : "Agent completed with no file changes",
+      lastAction: current.changedFilesCount ? reviewAction(validation) : "Agent completed with no file changes",
       lastActivityAt: now(),
       finalSummary,
+      turns: settleTurn(current.turns, vectorTurnId, { text: agentSummary, state: "done" }),
       error: validation.passed ? undefined : validation.failureSummary.slice(0, 12_000),
       logs: [
         `${current.changedFilesCount ? `Agent completed with ${current.changedFilesCount} changed file${current.changedFilesCount === 1 ? "" : "s"}.` : "Agent completed without changing files."} ${validationSummary(validation)}`,
@@ -2012,7 +2290,12 @@ export async function runParallelWorkspace(id: string, engine: ParallelWorkspace
 // A follow-up is another pass on the same record, so it goes through the same
 // queue as a run: concurrency, abort, the ledger pre-flight and the restart
 // sweep all keep working with no second code path.
-export async function followUpParallelWorkspace(id: string, engine: ParallelWorkspaceEngine, text: string) {
+export async function followUpParallelWorkspace(
+  id: string,
+  engine: ParallelWorkspaceEngine,
+  text: string,
+  dependencies?: { runExternalCodingAgent?: (input: RunExternalAgentInput) => Promise<ExternalAgentRunResult> },
+) {
   const instruction = text.trim()
   if (!instruction) throw new Error("Type a message before sending it to the agent.")
   const current = readRecords().find((record) => record.id === id)
@@ -2034,7 +2317,12 @@ export async function followUpParallelWorkspace(id: string, engine: ParallelWork
   // Registered BEFORE any status write: listParallelWorkspaces rewrites a
   // running record it cannot find in these maps to "failed", and the renderer
   // polls that list every 1.5s.
-  queuedRuns.set(id, { controller, engine, followUp: instruction })
+  queuedRuns.set(id, {
+    controller,
+    engine,
+    followUp: instruction,
+    externalAgentRunner: dependencies?.runExternalCodingAgent,
+  })
   const queued = updateRecord(id, (record) => ({
     ...record,
     status: "queued",
@@ -2175,7 +2463,9 @@ async function cleanupIsolation(record: ParallelWorkspaceRecord) {
 }
 
 async function mergeGitWorktree(record: ParallelWorkspaceRecord, force: boolean, checkpointPath: string) {
-  const patch = (await runGit(["diff", "--binary", record.baseCommit ?? "HEAD", "--"], record.isolatedPath, { allowFailure: true })).stdout
+  const patch = (
+    await runGit(["diff", "--binary", record.baseCommit ?? "HEAD", "--"], record.isolatedPath, { allowFailure: true })
+  ).stdout
   const untracked = (
     await runGit(["ls-files", "--others", "--exclude-standard"], record.isolatedPath, { allowFailure: true })
   ).stdout
@@ -2282,16 +2572,14 @@ async function validateBeforeIntegration(record: ParallelWorkspaceRecord, allowS
   }))
   syncBackgroundTask(updated, validationSummary(validationReport))
   if (!validationReport.passed) {
-    throw new Error(validationReport.failureSummary || "Workspace checks failed. Fix them before integrating these changes.")
+    throw new Error(
+      validationReport.failureSummary || "Workspace checks failed. Fix them before integrating these changes.",
+    )
   }
   return updated
 }
 
-export async function mergeParallelWorkspace(
-  id: string,
-  force = false,
-  commit?: { message: string },
-) {
+export async function mergeParallelWorkspace(id: string, force = false, commit?: { message: string }) {
   const refreshed = await refreshParallelWorkspace(id)
   if (refreshed.mergeState === "merged") return refreshed
   if (refreshed.mergeState === "discarded") throw new Error("Discarded workspaces cannot be merged.")
@@ -2348,7 +2636,9 @@ export async function mergeParallelWorkspace(
     mergeState: "merged",
     checkpointPath,
     error: commitError || undefined,
-    lastAction: commitNote.startsWith("Committed") ? "Merged and committed to the main project" : "Merged into main project",
+    lastAction: commitNote.startsWith("Committed")
+      ? "Merged and committed to the main project"
+      : "Merged into main project",
     lastActivityAt: now(),
     finalSummary: [
       `Merged ${current.changedFiles.length} changed file${current.changedFiles.length === 1 ? "" : "s"} into the main project.`,
@@ -2406,8 +2696,9 @@ async function mergeSelectedGitChanges(
   force: boolean,
   checkpointPath: string,
 ) {
-  const patch = (await runGit(["diff", "--binary", record.baseCommit ?? "HEAD", "--"], record.isolatedPath, { allowFailure: true }))
-    .stdout
+  const patch = (
+    await runGit(["diff", "--binary", record.baseCommit ?? "HEAD", "--"], record.isolatedPath, { allowFailure: true })
+  ).stdout
   // Hunk IDs were hashed from the diff snapshot the user reviewed. If the
   // workspace changed since, missing IDs must fail loudly instead of being
   // silently dropped while the log claims every approved hunk merged.
@@ -2443,7 +2734,9 @@ async function mergeSelectedGitChanges(
       input: selectedPatch,
     })
     if (reverseCheck.failed) {
-      throw new Error(`The selected diff is stale and can no longer be separated safely.\n${reverseCheck.stderr.trim()}`)
+      throw new Error(
+        `The selected diff is stale and can no longer be separated safely.\n${reverseCheck.stderr.trim()}`,
+      )
     }
     const sourceCheck = await runGit(["apply", "--3way", "--check", "-"], record.sourcePath, {
       allowFailure: true,
@@ -2504,9 +2797,7 @@ async function mergeSelectedCopyChanges(
     if (sourceHash !== baselineHash) conflicts.push(file)
   }
   if (conflicts.length && !force) {
-    throw new Error(
-      `Selected files conflict with newer main-project edits: ${conflicts.slice(0, 8).join(", ")}.`,
-    )
+    throw new Error(`Selected files conflict with newer main-project edits: ${conflicts.slice(0, 8).join(", ")}.`)
   }
 
   const nextBaseline = { ...(record.baselineHashes ?? {}) }
@@ -2527,11 +2818,7 @@ async function mergeSelectedCopyChanges(
   updateRecord(record.id, (current) => ({ ...current, baselineHashes: nextBaseline }))
 }
 
-export async function mergeParallelWorkspaceSelection(
-  id: string,
-  selection: UnifiedDiffSelection,
-  force = false,
-) {
+export async function mergeParallelWorkspaceSelection(id: string, selection: UnifiedDiffSelection, force = false) {
   const refreshed = await refreshParallelWorkspace(id)
   if (refreshed.mergeState !== "none") throw new Error("This workspace is no longer available for review.")
   if (!refreshed.changedFiles.length) throw new Error("There are no changes to merge.")
@@ -2622,7 +2909,11 @@ export async function removeParallelWorkspaceRecord(id: string) {
   if (activeRuns.has(id) || queuedRuns.has(id)) {
     throw new Error("Stop this workspace before removing it from the list.")
   }
-  if (record.mergeState === "none" && ["needs review", "complete"].includes(record.status) && record.changedFilesCount > 0) {
+  if (
+    record.mergeState === "none" &&
+    ["needs review", "complete"].includes(record.status) &&
+    record.changedFilesCount > 0
+  ) {
     throw new Error("This workspace still has unreviewed changes. Merge or discard it first.")
   }
   await cleanupIsolation(record)

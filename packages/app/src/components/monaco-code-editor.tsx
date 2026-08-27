@@ -291,6 +291,18 @@ function ensureMonacoEnvironment() {
       return new editorWorker()
     },
   }
+  // Vector's editor is backed by the repository LSP below, which resolves the
+  // workspace tsconfig, package graph, and aliases. Monaco's standalone worker
+  // sees only one open model and otherwise paints valid imports and JSX red.
+  // Keep its completions and syntax services, but let the workspace LSP own
+  // diagnostics so users see the same result as the repository toolchain.
+  const diagnostics = { noSemanticValidation: true, noSyntaxValidation: true, noSuggestionDiagnostics: true }
+  const typescript = monaco.languages.typescript as unknown as {
+    typescriptDefaults: { setDiagnosticsOptions: (options: typeof diagnostics) => void }
+    javascriptDefaults: { setDiagnosticsOptions: (options: typeof diagnostics) => void }
+  }
+  typescript.typescriptDefaults.setDiagnosticsOptions(diagnostics)
+  typescript.javascriptDefaults.setDiagnosticsOptions(diagnostics)
   monaco.editor.defineTheme("vector-dark", {
     base: "vs-dark",
     inherit: true,

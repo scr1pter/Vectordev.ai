@@ -130,17 +130,15 @@ export type CloudDomain = {
   createdAt: string
 }
 
-export type CloudDatabaseConnection =
-  | {
-      provider: "supabase"
-      url: string
-      anonKey: string
-      projectRef?: string
-      projectName?: string
-      managedByOAuth?: boolean
-      connectedAt: string
-    }
-  | null
+export type CloudDatabaseConnection = {
+  provider: "supabase"
+  url: string
+  anonKey: string
+  projectRef?: string
+  projectName?: string
+  managedByOAuth?: boolean
+  connectedAt: string
+} | null
 
 // ---- Deployments ----------------------------------------------------------
 
@@ -351,7 +349,7 @@ export function removeDeployment(projectPath: string, taskId: string | undefined
       signal: AbortSignal.timeout(10_000),
     }).catch(() => undefined)
   }
-  return next.filter((record) => record.projectPath === projectPath && record.taskId === taskId)
+  return next.filter((record) => record.projectPath === projectPath)
 }
 
 export async function checkDeployment(
@@ -360,9 +358,7 @@ export async function checkDeployment(
   id: string,
 ): Promise<CloudDeployment> {
   const records = readDeployments()
-  const deployment = records.find(
-    (item) => item.id === id && item.projectPath === projectPath && item.taskId === taskId,
-  )
+  const deployment = records.find((item) => item.id === id && item.projectPath === projectPath)
   if (!deployment) throw new Error("That deployment is no longer in this project's history.")
 
   const startedAt = Date.now()
@@ -457,9 +453,7 @@ function readProject(projectPath: string): ProjectData {
     data.database && typeof data.database === "object" && data.database.provider === "supabase" ? data.database : null
   const domains = Array.isArray(data.domains)
     ? data.domains
-        .filter(
-          (item): item is CloudDomain => typeof item?.id === "string" && typeof item?.domain === "string",
-        )
+        .filter((item): item is CloudDomain => typeof item?.id === "string" && typeof item?.domain === "string")
         .map((item) => ({
           ...item,
           provider:

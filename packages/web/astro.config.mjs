@@ -30,7 +30,10 @@ export default defineConfig({
   },
   build: {},
   vite: {
-    plugins: [tailwindcss()],
+    // Astro 5 carries Vite 6 while the workspace-wide Tailwind peer resolves
+    // against Vite 7. The plugin API is compatible, but the duplicated Vite
+    // type identities are not.
+    plugins: [/** @type {never} */ (tailwindcss())],
   },
   integrations: [
     configSchema(),

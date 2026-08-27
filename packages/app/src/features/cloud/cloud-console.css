@@ -266,6 +266,59 @@
   max-width: 58ch;
   line-height: 1.5;
 }
+.cloud-token-form {
+  display: grid;
+  max-width: 620px;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid color-mix(in oklab, var(--cc-purple) 28%, var(--cc-line));
+  border-radius: 8px;
+  background: rgba(147, 116, 236, 0.055);
+}
+.cloud-token-guide {
+  color: var(--cc-muted);
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+.cloud-token-guide strong {
+  color: rgba(255, 255, 255, 0.78);
+  font-weight: 600;
+}
+.cloud-token-link {
+  width: fit-content;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: color-mix(in oklab, var(--cc-purple) 72%, white);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.cloud-token-link:hover {
+  text-decoration: underline;
+}
+.cloud-token-field {
+  display: grid;
+  gap: 6px;
+}
+.cloud-token-field > span {
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 11.5px;
+  font-weight: 550;
+}
+.cloud-token-field .cloud-input {
+  width: 100%;
+}
+.cloud-token-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.cloud-token-error {
+  color: #f8b4bd;
+  font-size: 11.5px;
+  line-height: 1.45;
+}
 
 .cloud-source-control {
   display: flex;

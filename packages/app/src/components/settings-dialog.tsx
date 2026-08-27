@@ -4,7 +4,7 @@ import { useCommand } from "@/context/command"
 import { useLanguage } from "@/context/language"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 
-export function useSettingsDialog() {
+export function useSettingsDialog(repositoryPath?: () => string | undefined) {
   const dialog = useDialog()
   const params = useParams<{ id?: string }>()
   let run = 0
@@ -19,15 +19,15 @@ export function useSettingsDialog() {
     const sessionID = params.id
     void import("@/components/settings-v2").then((module) => {
       if (dead || run !== current) return
-      void dialog.show(() => <module.DialogSettings sessionID={sessionID} />)
+      void dialog.show(() => <module.DialogSettings sessionID={sessionID} repositoryPath={repositoryPath?.()} />)
     })
   }
 }
 
-export function useSettingsCommand() {
+export function useSettingsCommand(repositoryPath?: () => string | undefined) {
   const command = useCommand()
   const language = useLanguage()
-  const show = useSettingsDialog()
+  const show = useSettingsDialog(repositoryPath)
 
   command.register("settings", () => [
     {

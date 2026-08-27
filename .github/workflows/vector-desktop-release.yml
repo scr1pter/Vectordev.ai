@@ -168,6 +168,9 @@ jobs:
           - name: app
             directory: packages/app
             command: bun run test
+          - name: cloud
+            directory: packages/cloud
+            command: bun run test
           - name: core
             directory: packages/core
             command: bun test --timeout 30000 --only-failures

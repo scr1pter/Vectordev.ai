@@ -110,7 +110,11 @@ describe("recommendModel cost ranking", () => {
     [0, 1, 2].map(() => outcome({ provider, model, costUsd, usage, latencyMs: 1_000 }))
 
   test("prefers the cheaper model when correctness and latency tie", () => {
-    const result = recommendModel([...runs("openai", "gpt-4o", 0.05), ...runs("openai", "gpt-4o-mini", 0.002)], "frontend", 3)
+    const result = recommendModel(
+      [...runs("openai", "gpt-4o", 0.05), ...runs("openai", "gpt-4o-mini", 0.002)],
+      "frontend",
+      3,
+    )
     expect(result?.model).toBe("gpt-4o-mini")
     expect(result?.medianCostUsd).toBeCloseTo(0.002, 10)
     expect(result?.medianTokens).toBe(1_200)
@@ -128,12 +132,28 @@ describe("recommendModel cost ranking", () => {
 
   test("a model with unmeasured spend never sorts ahead of one that reported cost", () => {
     const unmeasured = [0, 1, 2].map(() => outcome({ provider: "x", model: "unmeasured", latencyMs: 1_000 }))
-    const measured = [0, 1, 2].map(() => outcome({ provider: "y", model: "measured", costUsd: 9.99, usage, latencyMs: 1_000 }))
+    const measured = [0, 1, 2].map(() =>
+      outcome({ provider: "y", model: "measured", costUsd: 9.99, usage, latencyMs: 1_000 }),
+    )
     expect(recommendModel([...unmeasured, ...measured], "frontend", 3)?.model).toBe("measured")
   })
 
+  test("the engine's zero-cost compatibility fallback is not mistaken for a free model", () => {
+    const unknown = [0, 1, 2].map(() =>
+      outcome({ provider: "x", model: "unpriced", costUsd: 0, usage, latencyMs: 1_000 }),
+    )
+    const measured = runs("y", "priced", 9.99)
+    const result = recommendModel([...unknown, ...measured], "frontend", 3)
+    expect(result?.model).toBe("priced")
+    expect(result?.medianCostUsd).toBe(9.99)
+  })
+
   test("omits cost fields entirely when no run reported usage", () => {
-    const result = recommendModel([0, 1, 2].map(() => outcome({ provider: "x", model: "m" })), "frontend", 3)
+    const result = recommendModel(
+      [0, 1, 2].map(() => outcome({ provider: "x", model: "m" })),
+      "frontend",
+      3,
+    )
     expect(result?.medianCostUsd).toBeUndefined()
     expect(result?.medianTokens).toBeUndefined()
     expect(result?.evidence.some((line) => line.includes("tokens at $"))).toBe(false)

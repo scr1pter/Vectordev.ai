@@ -64,7 +64,7 @@ const pillars = [
   {
     name: "Local memory",
     eyebrow: "One file, on your machine",
-    body: "What Vector learns about how you work lives in a Markdown file in your own config directory, is read in every repository, is never uploaded, and is deleted when you erase it.",
+    body: "What you choose to save about how you work is stored in a Markdown file in Vector's local app config directory and deleted when you erase it. The file is not uploaded to Vector's servers; when it exists, Vector automatically includes it in built-in agent context sent to the model provider you chose.",
     icon: Brain,
   },
   {
@@ -111,9 +111,22 @@ const pillars = [
   },
 ]
 
-// Each pillar in full. `proof` stands in for a screenshot on the pillars the
-// product does not show in a single frame, so every one keeps the same weight.
-const features = [
+type FeatureKind = "editor" | "memory" | "browser" | "cloud" | "agents" | "automations" | "work" | "cost" | "terminal" | "diff"
+
+type Feature = {
+  title: string
+  body: string
+  tag: string
+  note: string
+  href: string
+  link: string
+  demo?: FeatureKind
+  proof?: string[][]
+}
+
+// Each pillar in full. `proof` stands in for an interactive demo on the
+// pillars the product does not show in a single frame.
+const features: Feature[] = [
   {
     title: "An editor, a terminal, and an agent in the same window.",
     body: "Vector opens a repository that is already on your computer into a real code editor — file tree, file search across the whole project, language diagnostics from the language server, a terminal, and an editor agent in a panel beside the file you are reading. Edits an agent makes while you watch are attributed in the editor to the agent that made them, so work landing in an open file is never anonymous. Canvas arranges the editor, the browser, the terminal, notes and the cloud controls onto one surface when you want them together. None of this is a hosted IDE: the files are the files on your disk, and your repository is never proxied through Vector.",
@@ -124,10 +137,10 @@ const features = [
     link: "Explore the Codespace",
   },
   {
-    title: "It remembers how you work. Only on your computer.",
-    body: "Vector keeps durable facts about how you work — your stack, your conventions, the corrections you would otherwise repeat — in one Markdown file inside your own config directory: MEMORY.md under ~/.config/vector, or wherever XDG_CONFIG_HOME points. It is read across every project and every repository, so something you say once in one codebase is still true in the next one. It is never uploaded. Settings shows the exact path, the file's size, the date it last changed, and the full text of what is stored. Erasing it deletes the file rather than blanking it, so nothing recoverable is left behind for someone who cleared memory precisely because they did not want it kept.",
+    title: "It remembers how you work, with storage you can inspect.",
+    body: "Vector lets you save durable facts about how you work — your stack, your conventions, the corrections you would otherwise repeat — in one MEMORY.md file inside Vector's local app config directory. It is read across every project and repository. The file stays on your computer rather than being uploaded to Vector's servers; when it exists, Vector automatically includes it in built-in agent context sent to the model provider you selected. Settings lets you add and edit the text and shows the exact platform-specific path, size, and last change. Erasing it deletes the file rather than blanking it.",
     tag: "Local memory",
-    note: "Never leaves your machine",
+    note: "Stored locally · inspect or erase",
     demo: "memory",
     href: "/docs",
     link: "How local memory works",
@@ -182,23 +195,23 @@ const features = [
     link: "Browse the connectors",
   },
   {
-    title: "It picks up the ticket, and it closes the loop.",
-    body: "Most coding tools stop at the code. Engineering work does not: it starts in a tracker and ends in a review, a deploy and a message to the people waiting on it. Vector connects to Jira, Linear, Slack, GitHub, Sentry and a hundred-odd other systems through MCP, so a ticket is something an agent can actually read \u2014 description, comments, links and all \u2014 rather than something you paraphrase into a prompt. From there it navigates the repository, writes the change, runs the project's own checks, repairs what it broke, opens the pull request, and reports back where your team is already looking. You stay the reviewer. It does the round trip.",
+    title: "Start with the ticket. Close the loop from the same session.",
+    body: "There is no separate Work product or ticket board in Vector. Instead, connect Jira, Linear, Slack, GitHub, Sentry and other systems through MCP, then use those tools from an ordinary project session. An agent can read the ticket's description, comments and links, navigate the repository, make the change, run the project's checks, open a pull request, and report back through the connected service. You stay the reviewer; the connected session handles the round trip.",
     tag: "End to end",
-    note: "Tracker to deploy",
+    note: "Connected-tool workflow",
     demo: "work",
     href: "/docs",
     link: "See the connectors",
   },
   {
-    title: "Write the rule once. Every agent follows it.",
-    body: "Standards your team actually cares about, written the way you would say them to a new teammate — we don't put database query logic in the controller — pointed at a repository and, when it matters, at the files they govern. Vector saves them to .vector/RULES.md inside the repository itself, which means they are a committed, reviewable file rather than a setting buried in one developer's machine: clone the repo and the rules come with it. Vector's own agents read that file on every prompt, and because Claude Code, Codex and Cursor read their own instruction files and would never see it, Vector also carries the matching rules into the prompt it hands them. One rule, written once, enforced by whichever agent happens to pick up the work.",
+    title: "Write the project rule once. Carry it across runtimes.",
+    body: "Standards your team cares about, written the way you would say them in review and scoped to a repository or the files they govern. Vector saves project rules to .vector/RULES.md, making them committed and reviewable instead of a preference buried on one machine. Vector agents read that file as project instructions, while matching rules are included in the prompts Vector starts for Claude Code, Codex and Cursor. Clone the repository and the committed project rules come with it.",
     tag: "Project rules",
     note: "Committed with the repo",
     proof: [
       ["Plain English", "Describe the standard the way you would in review. No configuration language, no rule engine, no schema to learn."],
       ["Scoped where it matters", "A rule can cover a whole repository, a folder, or a glob like src/app/web/*.tsx — and the scope travels into the prompt as words, so it still means something to the model."],
-      ["Every runtime, not just ours", "Vector agents read the committed file; Claude Code, Codex and Cursor get the same rules injected into their prompt, because they cannot read it."],
+      ["Across supported runtimes", "Vector agents read the committed file; matching rules are included when Vector starts Claude Code, Codex or Cursor for that project."],
     ],
     href: "/docs",
     link: "Set your rules",
@@ -210,7 +223,7 @@ const features = [
     note: "Board or list",
     proof: [
       ["Three columns, honest ones", "Running, Needs you, Done — derived from real run state, including a finished run that reported an error and still needs a person."],
-      ["Filters that compose", "Two statuses means either; a status and a runtime means both. Facets are built from the agents actually on screen, so a chip never empties the board."],
+      ["Filters that compose", "Two statuses means either; a status and a runtime means both. Facet choices stay available from the whole dashboard, while counts, warnings, cards and team conversations follow the visible result."],
       ["Teams are a unit", "Filter by a team or a swarm and see only that crew, including the messages they sent each other mid-run."],
     ],
     href: "/docs",
@@ -574,11 +587,11 @@ const changelog = [
             <span class="hero-ship-dot" aria-hidden="true"></span>
             <span>v{currentVersion} — {currentRelease?.title}</span>
             <span class="hero-ship-sep" aria-hidden="true">·</span>
-            <span>this page ships 20 KB of JavaScript and CSS</span>
+            <span>static-first, with JavaScript used for interaction</span>
           </p>
         </div>
 
-        <div class="showcase" aria-label="Vector, running in this page">
+        <div class="showcase" aria-label="Interactive preview of the Vector interface">
           <figure class="product-window">
             <div class="product-bar" aria-hidden="true">
               <span class="traffic"><i></i><i></i><i></i></span>
@@ -588,7 +601,8 @@ const changelog = [
             <ProductDemo bare />
           </figure>
           <p class="showcase-note">
-            That is the real app, not a picture of it — move around the rail, filter the board, open a file.
+            An interactive, fixture-driven preview of Vector's interface — move around the rail, filter the board, and
+            open a file. The desktop app connects these surfaces to your real repository and agents.
           </p>
         </div>
 
@@ -644,10 +658,10 @@ const changelog = [
     </section>
 
     <section class="tally section-width" aria-label="Vector by the numbers" data-reveal>
-      <div><strong data-count-to="118">0</strong><span>connectors ready to turn on</span></div>
-      <div><strong data-count-to="16">0</strong><span>agents you can run at once</span></div>
-      <div><strong data-count-to="4">0</strong><span>runtimes, Vector's and three others</span></div>
-      <div><strong data-count-to="0">0</strong><span>lines of your code uploaded</span></div>
+      <div><strong>118</strong><span>connectors ready to turn on</span></div>
+      <div><strong>16</strong><span>agents you can run at once</span></div>
+      <div><strong>4</strong><span>runtimes, Vector's and three others</span></div>
+      <div><strong>0</strong><span>lines of your code uploaded to Vector by default</span></div>
     </section>
 
     <figure class="pullquote section-width" data-reveal>
@@ -670,20 +684,6 @@ const changelog = [
             <div class="feature-card feature-live reveal-zoom" data-reveal style="--rd: 90ms">
               <FeatureDemo kind={feature.demo} tag={feature.tag} note={feature.note} />
             </div>
-          ) : feature.image ? (
-            <figure class="feature-card reveal-zoom" data-reveal style="--rd: 90ms">
-              <div class="card-topline" aria-hidden="true">
-                <span>{feature.tag}</span>
-                <span>{feature.note}</span>
-              </div>
-              <img
-                src={feature.image.src}
-                width={feature.image.width}
-                height={feature.image.height}
-                alt={feature.alt}
-                loading="lazy"
-              />
-            </figure>
           ) : (
             <div class="feature-card feature-proof reveal-zoom" data-reveal style="--rd: 90ms">
               <div class="card-topline" aria-hidden="true">
@@ -723,7 +723,7 @@ const changelog = [
               <span class="suite-icon"><Brain size={19} strokeWidth={1.7} aria-hidden="true" /></span>
               <small>What Vector keeps</small>
               <h3>Memory and measured spend</h3>
-              <p>Local memory carries how you work across every repository and stays on your machine. Model economics records the tokens and cost the provider reported, and marks the rest unmeasured.</p>
+              <p>Local memory is stored in one file you can inspect, edit, or erase. When that file exists, Vector automatically includes it in built-in agent context sent to the model provider you choose. Model economics records the tokens and cost the provider reported, and marks the rest unmeasured.</p>
             </article>
             <article style="--i: 2">
               <span class="suite-icon"><ShieldCheck size={19} strokeWidth={1.7} aria-hidden="true" /></span>
@@ -1073,7 +1073,7 @@ const changelog = [
     let phrase = 0
     let frame = 0
     let raf = 0
-    let timer = 0
+    let timer: ReturnType<typeof globalThis.setTimeout> | undefined
     const step = () => {
       const target = phrases[phrase]
       selectStage(phrase % Math.max(stages.length, 1))
@@ -1100,7 +1100,7 @@ const changelog = [
     selectStage(0)
     timer = globalThis.setTimeout(() => (raf = requestAnimationFrame(step)), 2400)
     return () => {
-      globalThis.clearTimeout(timer)
+      if (timer) globalThis.clearTimeout(timer)
       if (raf) cancelAnimationFrame(raf)
       node.textContent = phrases[0]
       selectStage(0)

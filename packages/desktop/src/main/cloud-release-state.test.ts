@@ -38,15 +38,25 @@ describe("cloud release transitions", () => {
   })
 
   test("marks the displaced production release as rolled back", () => {
-    const result = transitionReleaseRecords(
-      [release("old", "superseded"), release("current", "current")],
-      "old",
-      { rollback: true, at: "now" },
-    )
+    const result = transitionReleaseRecords([release("old", "superseded"), release("current", "current")], "old", {
+      rollback: true,
+      at: "now",
+    })
     expect(result.find((item) => item.id === "old")?.releaseStatus).toBe("current")
     expect(result.find((item) => item.id === "current")).toMatchObject({
       releaseStatus: "rolled-back",
       rolledBackAt: "now",
     })
+  })
+
+  test("a release supersedes the same project's target even when another chat created it", () => {
+    const previous = release("previous", "current")
+    const selected = { ...release("selected", "preview"), taskId: "another-session" }
+    const result = transitionReleaseRecords([previous, selected], selected.id, {
+      rollback: false,
+      at: "now",
+    })
+    expect(result.find((item) => item.id === previous.id)?.releaseStatus).toBe("superseded")
+    expect(result.find((item) => item.id === selected.id)?.releaseStatus).toBe("current")
   })
 })

@@ -1,7 +1,15 @@
 import { describe, expect, test } from "bun:test"
-import { describeSensitiveBrowserAction } from "../../src/tool/browser"
+import { describeSensitiveBrowserAction, isLocalUrl } from "../../src/tool/browser"
 
 describe("browser sensitive action detection", () => {
+  test("requires permission for LAN hosts as well as internet hosts", () => {
+    expect(isLocalUrl("http://localhost:3000")).toBe(true)
+    expect(isLocalUrl("http://127.0.0.1:4173")).toBe(true)
+    expect(isLocalUrl("http://10.0.0.2")).toBe(false)
+    expect(isLocalUrl("http://172.16.0.2")).toBe(false)
+    expect(isLocalUrl("http://192.168.1.2")).toBe(false)
+  })
+
   test("requires approval for external form submission", () => {
     expect(describeSensitiveBrowserAction({ action: "press", key: "Enter" }, undefined)).toContain("submit")
   })

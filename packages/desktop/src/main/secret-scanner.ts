@@ -1,11 +1,11 @@
 import { createHash } from "node:crypto"
-import { readdir, readFile, stat } from "node:fs/promises"
+import { isUtf8 } from "node:buffer"
+import { open, readdir, readFile, stat } from "node:fs/promises"
 import { join, relative } from "node:path"
 
 const MAX_FILE_SIZE = 2 * 1024 * 1024
 const MAX_PROJECT_FILES = 2_000
 const SKIP_DIRECTORIES = new Set([".git", ".next", ".turbo", ".vercel", "build", "dist", "node_modules", "out"])
-const PLACEHOLDER = /(?:change[-_ ]?me|example|fake|placeholder|replace[-_ ]?me|your[-_ ]?(?:key|token|secret)|x{6,})/i
 const PATTERNS = [
   { kind: "private key", pattern: /-----BEGIN (?:EC |OPENSSH |PGP |RSA )?PRIVATE KEY-----/g },
   { kind: "AWS access key", pattern: /\bAKIA[A-Z0-9]{16}\b/g },
@@ -31,10 +31,12 @@ export async function scanChangedSecrets(sourcePath: string, isolatedPath: strin
     await Promise.all(
       files.map(async (file) => {
         const isolated = await readText(join(isolatedPath, file))
-        if (!isolated) return []
+        if (isolated.incomplete) return [{ file, line: 0, kind: isolated.incomplete }]
+        if (!isolated.content) return []
         const source = await readText(join(sourcePath, file))
-        const existing = new Set(source ? matches(source).map((item) => item.fingerprint) : [])
-        return matches(isolated)
+        if (source.incomplete) return [{ file, line: 0, kind: source.incomplete }]
+        const existing = new Set(source.content ? matches(source.content).map((item) => item.fingerprint) : [])
+        return matches(isolated.content)
           .filter((item) => !existing.has(item.fingerprint))
           .map((item): SecretFinding => ({ file, line: item.line, kind: item.kind }))
       }),
@@ -48,31 +50,44 @@ export async function scanChangedSecrets(sourcePath: string, isolatedPath: strin
 // ("dist/assets/index-a1b2.js"), not one relative to the build directory.
 export async function scanProjectSecrets(projectPath: string, reportRoot = projectPath) {
   const files: string[] = []
+  const traversalFindings: SecretFinding[] = []
+  let truncated = false
   const walk = async (directory: string): Promise<void> => {
-    if (files.length >= MAX_PROJECT_FILES) return
-    const entries = await readdir(directory, { withFileTypes: true }).catch(() => [])
-    await Promise.all(
-      entries.map(async (entry) => {
-        if (files.length >= MAX_PROJECT_FILES) return
-        if (entry.isDirectory()) {
-          if (SKIP_DIRECTORIES.has(entry.name)) return
-          await walk(join(directory, entry.name))
-          return
-        }
-        if (!entry.isFile() || entry.name.startsWith(".env")) return
-        files.push(join(directory, entry.name))
-      }),
-    )
+    const entries = await readdir(directory, { withFileTypes: true }).catch(() => undefined)
+    if (!entries) {
+      traversalFindings.push({
+        file: relative(reportRoot, directory).split("\\").join("/") || ".",
+        line: 0,
+        kind: "secret scan incomplete: directory could not be read",
+      })
+      return
+    }
+    for (const entry of entries.toSorted((a, b) => a.name.localeCompare(b.name))) {
+      if (entry.isDirectory()) {
+        if (SKIP_DIRECTORIES.has(entry.name)) continue
+        await walk(join(directory, entry.name))
+        if (truncated) return
+        continue
+      }
+      if (!entry.isFile() || entry.name.startsWith(".env")) continue
+      if (files.length >= MAX_PROJECT_FILES) {
+        truncated = true
+        return
+      }
+      files.push(join(directory, entry.name))
+    }
   }
   await walk(projectPath)
   const findings = (
     await Promise.all(
       files.map(async (file) => {
-        const content = await readText(file)
-        if (!content) return []
-        return matches(content).map(
+        const scanned = await readText(file)
+        const reported = relative(reportRoot, file).split("\\").join("/")
+        if (scanned.incomplete) return [{ file: reported, line: 0, kind: scanned.incomplete }]
+        if (!scanned.content) return []
+        return matches(scanned.content).map(
           (item): SecretFinding => ({
-            file: relative(reportRoot, file).split("\\").join("/"),
+            file: reported,
             line: item.line,
             kind: item.kind,
           }),
@@ -80,20 +95,54 @@ export async function scanProjectSecrets(projectPath: string, reportRoot = proje
       }),
     )
   ).flat()
-  return findings.toSorted((a, b) => a.file.localeCompare(b.file) || a.line - b.line)
+  return [
+    ...traversalFindings,
+    ...findings,
+    ...(truncated
+      ? [
+          {
+            file: relative(reportRoot, projectPath).split("\\").join("/") || ".",
+            line: 0,
+            kind: `secret scan incomplete: more than ${MAX_PROJECT_FILES.toLocaleString("en-US")} files`,
+          },
+        ]
+      : []),
+  ].toSorted((a, b) => a.file.localeCompare(b.file) || a.line - b.line)
 }
 
 async function readText(file: string) {
-  const info = await stat(file).catch(() => undefined)
-  if (!info?.isFile() || info.size > MAX_FILE_SIZE) return undefined
+  const result = await stat(file).then(
+    (info) => ({ info }),
+    (error: NodeJS.ErrnoException) => ({ error }),
+  )
+  if ("error" in result) {
+    if (result.error.code === "ENOENT") return {}
+    return { incomplete: "secret scan incomplete: file metadata could not be read" }
+  }
+  if (!result.info.isFile()) return {}
+  if (result.info.size > MAX_FILE_SIZE) {
+    const prefix = await readPrefix(file).catch(() => undefined)
+    if (!prefix) return { incomplete: "secret scan incomplete: file could not be read" }
+    if (prefix.includes(0) || !isUtf8(prefix)) return {}
+    return { incomplete: `secret scan incomplete: file exceeds ${MAX_FILE_SIZE / (1024 * 1024)} MB` }
+  }
   const content = await readFile(file).catch(() => undefined)
-  if (!content || content.includes(0)) return undefined
-  return content.toString("utf8")
+  if (!content) return { incomplete: "secret scan incomplete: file could not be read" }
+  if (content.includes(0)) return {}
+  return { content: content.toString("utf8") }
+}
+
+async function readPrefix(file: string) {
+  const handle = await open(file, "r")
+  const buffer = Buffer.alloc(8 * 1024)
+  return handle
+    .read(buffer, 0, buffer.length, 0)
+    .then((result) => result.buffer.subarray(0, result.bytesRead))
+    .finally(() => handle.close())
 }
 
 function matches(content: string) {
   return content.split(/\r?\n/).flatMap((line, index) => {
-    if (PLACEHOLDER.test(line)) return []
     return PATTERNS.flatMap(({ kind, pattern }) =>
       Array.from(line.matchAll(pattern))
         .filter((match) => kind !== "JWT" || !isPublicClientJwt(match[0]))
@@ -111,8 +160,24 @@ function matches(content: string) {
 // Without this the deploy-output scan would fail the release gate on every
 // Supabase app — which teaches users to switch the gate off. The `service_role`
 // key has the same shape and is the leak actually worth blocking, so only the
-// public roles are excused.
+// anonymous browser role is excused.
 function isPublicClientJwt(token: string) {
-  const payload = Buffer.from(token.split(".")[1], "base64url").toString("utf8")
-  return /"role"\s*:\s*"(?:anon|authenticated)"/.test(payload)
+  const payload = (() => {
+    try {
+      return JSON.parse(Buffer.from(token.split(".")[1] ?? "", "base64url").toString("utf8")) as {
+        iss?: unknown
+        ref?: unknown
+        role?: unknown
+      }
+    } catch {
+      return undefined
+    }
+  })()
+  // Supabase's anonymous browser key is intentionally public. `authenticated`
+  // is a user session and must never receive the same exemption. Requiring the
+  // Supabase issuer and project reference also prevents an unrelated JWT from
+  // bypassing the scanner merely by claiming a public-looking role.
+  return (
+    payload?.iss === "supabase" && payload.role === "anon" && typeof payload.ref === "string" && payload.ref.length > 0
+  )
 }

@@ -150,6 +150,8 @@ export type PluginAuthField = {
   placeholder: string
   /** Masks the input. Leave unset for identifiers the user needs to see. */
   secret?: boolean
+  /** Required by default. Set false for values the integration can omit. */
+  required?: boolean
 }
 
 export type PluginAuth =
@@ -327,7 +329,14 @@ export const PLUGIN_CATALOG: PluginDef[] = [
     fill: "#7B9FE8",
     auth: {
       kind: "token",
-      fields: [{ key: "connection", label: "Connection string", placeholder: "postgresql://user:pass@host:5432/db" }],
+      fields: [
+        {
+          key: "connection",
+          label: "Connection string",
+          placeholder: "postgresql://user:pass@host:5432/db",
+          secret: true,
+        },
+      ],
       docsUrl: "https://www.postgresql.org/docs/current/libpq-connstring.html",
       docsLabel: "Connection string format",
     },
@@ -886,7 +895,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
       fields: [
         { key: "REDIS_HOST", label: "Host", placeholder: "127.0.0.1" },
         { key: "REDIS_PORT", label: "Port", placeholder: "6379" },
-        { key: "REDIS_PWD", label: "Password", placeholder: "Leave blank if none", secret: true },
+        { key: "REDIS_PWD", label: "Password", placeholder: "Leave blank if none", secret: true, required: false },
       ],
       docsUrl: "https://redis.io/docs/latest/integrate/redis-mcp/install/",
       docsLabel: "Redis MCP setup guide",

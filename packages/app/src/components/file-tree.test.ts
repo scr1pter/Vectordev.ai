@@ -3,6 +3,8 @@ import { beforeAll, describe, expect, mock, test } from "bun:test"
 let shouldListRoot: typeof import("./file-tree").shouldListRoot
 let shouldListExpanded: typeof import("./file-tree").shouldListExpanded
 let dirsToExpand: typeof import("./file-tree").dirsToExpand
+let fileTreeNodeExcluded: typeof import("./file-tree").fileTreeNodeExcluded
+let codespaceExcludedDirectories: typeof import("./file-tree").CODESPACE_EXCLUDED_DIRECTORIES
 
 beforeAll(async () => {
   mock.module("@solidjs/router", () => ({
@@ -35,6 +37,17 @@ beforeAll(async () => {
   shouldListRoot = mod.shouldListRoot
   shouldListExpanded = mod.shouldListExpanded
   dirsToExpand = mod.dirsToExpand
+  fileTreeNodeExcluded = mod.fileTreeNodeExcluded
+  codespaceExcludedDirectories = mod.CODESPACE_EXCLUDED_DIRECTORIES
+})
+
+describe("file tree exclusions", () => {
+  test("codespace hides dependency and generated directories without hiding similarly named files", () => {
+    expect(fileTreeNodeExcluded({ name: "node_modules", type: "directory" }, codespaceExcludedDirectories)).toBe(true)
+    expect(fileTreeNodeExcluded({ name: "dist", type: "directory" }, codespaceExcludedDirectories)).toBe(true)
+    expect(fileTreeNodeExcluded({ name: "node_modules", type: "file" }, codespaceExcludedDirectories)).toBe(false)
+    expect(fileTreeNodeExcluded({ name: "src", type: "directory" }, codespaceExcludedDirectories)).toBe(false)
+  })
 })
 
 describe("file tree fetch discipline", () => {

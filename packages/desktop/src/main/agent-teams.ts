@@ -7,6 +7,7 @@ import {
   markDelivered,
   pendingFor,
   pruneCollaborationGraph,
+  recipientsFor,
   routeMessage,
   validateCollaborationGraph,
   ROUTER_NAME,
@@ -152,6 +153,7 @@ export function setCollaborationGraph(teamId: string, graph: TeamCollaborationGr
 }
 
 export function postTeamMessage(input: {
+  messageId?: string
   teamId: string
   fromWorkspaceId: string
   fromName: string
@@ -165,6 +167,11 @@ export function postTeamMessage(input: {
   const team = getAgentTeam(input.teamId)
   if (!team)
     return { ok: false as const, reason: "Message not delivered: that team no longer exists.", allowedRecipients: [] }
+  const existing = input.messageId ? team.messages.find((message) => message.id === input.messageId) : undefined
+  if (existing) {
+    const recipients = existing.toWorkspaceId ? [existing.toWorkspaceId] : recipientsFor(team, existing.fromWorkspaceId)
+    return { ok: true as const, recipients, team }
+  }
 
   const routing = routeMessage(team, {
     fromWorkspaceId: input.fromWorkspaceId,
@@ -189,7 +196,7 @@ export function postTeamMessage(input: {
         input.toWorkspaceId && team.memberIds.includes(input.fromWorkspaceId)
           ? updateTeam(team.id, (current) =>
               appendMessage(current, {
-                id: randomUUID(),
+                id: input.messageId ? `${input.messageId}:bounce` : randomUUID(),
                 teamId: team.id,
                 fromWorkspaceId: ROUTER_WORKSPACE_ID,
                 fromName: ROUTER_NAME,
@@ -205,7 +212,7 @@ export function postTeamMessage(input: {
     }
 
   const message: TeamMessage = {
-    id: randomUUID(),
+    id: input.messageId ?? randomUUID(),
     teamId: input.teamId,
     fromWorkspaceId: input.fromWorkspaceId,
     fromName: input.fromName,
@@ -228,8 +235,23 @@ export function claimPendingMessages(teamId: string, workspaceId: string) {
   if (!team) return []
   const pending = pendingFor(team, workspaceId)
   if (!pending.length) return []
-  updateTeam(teamId, (current) => markDelivered(current, workspaceId, pending.map((message) => message.id)))
+  updateTeam(teamId, (current) =>
+    markDelivered(
+      current,
+      workspaceId,
+      pending.map((message) => message.id),
+    ),
+  )
   return pending
+}
+
+export function pendingTeamMessages(teamId: string, workspaceId: string) {
+  const team = getAgentTeam(teamId)
+  return team ? pendingFor(team, workspaceId) : []
+}
+
+export function markTeamMessagesDelivered(teamId: string, workspaceId: string, messageIds: readonly string[]) {
+  return updateTeam(teamId, (team) => markDelivered(team, workspaceId, messageIds))
 }
 
 export function deleteAgentTeam(teamId: string) {

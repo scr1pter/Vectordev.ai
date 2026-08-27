@@ -85,7 +85,7 @@ import type { Message, Part, SnapshotFileDiff, VcsFileDiff } from "@opencode-ai/
 import { Message as SessionMessage } from "@opencode-ai/session-ui/message-part"
 import { ConstrainDragYAxis, getDraggableId } from "@/utils/solid-dnd"
 
-import FileTree, { type FileTreeMarker, type Kind } from "@/components/file-tree"
+import FileTree, { CODESPACE_EXCLUDED_DIRECTORIES, type FileTreeMarker, type Kind } from "@/components/file-tree"
 import { PromptInput } from "@/components/prompt-input"
 import { SessionContextUsage } from "@/components/session-context-usage"
 import { SessionContextTab, SortableTab, FileVisual } from "@/components/session"
@@ -127,6 +127,7 @@ import {
   boundInlineCompletionContext,
   sanitizeInlineCompletion,
 } from "@/utils/codespace-ai"
+import { notifyWorkspaceFileSaved } from "@/utils/workspace-file-saved"
 
 const DialogSelectFile = lazy(() =>
   import("@/components/dialog-select-file").then((module) => ({ default: module.DialogSelectFile })),
@@ -2241,6 +2242,7 @@ export function CodespaceWorkbench(props: {
     setSaving(true)
     try {
       await sdk().client.file.write({ directory: sdk().directory, path, content: nextContent })
+      notifyWorkspaceFileSaved({ directory: sdk().directory, path })
       if (selectedPath() === path) await file.load(path, { force: true })
       await file.tree.refresh("")
       setDrafts(path, nextContent)
@@ -2684,6 +2686,7 @@ export function CodespaceWorkbench(props: {
                     modified={props.modified()}
                     kinds={props.kinds()}
                     markers={liveFileMarkers()}
+                    excludeDirectories={CODESPACE_EXCLUDED_DIRECTORIES}
                     active={selectedPath()}
                     onFileClick={(node) => openFile(node.path)}
                   />
@@ -3389,6 +3392,7 @@ function StableCodespaceWorkbench(props: {
                   class="py-1"
                   modified={[...modifiedSet()]}
                   kinds={props.kinds()}
+                  excludeDirectories={CODESPACE_EXCLUDED_DIRECTORIES}
                   active={selectedPath()}
                   onFileClick={(node) => openFile(node.path)}
                 />
@@ -4096,9 +4100,9 @@ function CodeArchaeologyPanel(props: {
         class="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm"
         onClick={(e) => e.target === e.currentTarget && props.onClose()}
       >
-        <div class="flex h-[min(720px,88vh)] w-[min(760px,92vw)] flex-col overflow-hidden rounded-2xl border border-[color:var(--vx-line)] bg-[#1d1d1f] shadow-2xl">
-          <div class="flex shrink-0 items-center gap-3 border-b border-[color:var(--vx-line)] px-4 py-3">
-            <div class="flex size-8 items-center justify-center rounded-lg bg-[#9374ec]/15 text-[#c4a6ff]">
+        <div class="vx-arch">
+          <div class="vx-arch__head">
+            <div class="vx-arch__glyph">
               <svg viewBox="0 0 16 16" class="size-4" aria-hidden="true">
                 <path
                   d="M2.75 8A5.25 5.25 0 1 1 8 13.25M2.75 8V4.5M2.75 8H6.25"
@@ -4119,14 +4123,14 @@ function CodeArchaeologyPanel(props: {
               </svg>
             </div>
             <div class="min-w-0 flex-1">
-              <div class="text-[14px] font-semibold text-white">Code Archaeology</div>
-              <div class="truncate text-[11.5px] text-white/40">
+              <div class="text-[14px] font-semibold text-[color:var(--vx-text)]">Code Archaeology</div>
+              <div class="truncate text-[11.5px] text-[color:var(--vx-text-muted)]">
                 Every checkpoint this task has made, from the first to the latest.
               </div>
             </div>
             <button
               type="button"
-              class="grid size-7 place-items-center rounded-md text-white/40 hover:bg-white/[0.06] hover:text-white"
+              class="grid size-7 place-items-center rounded-md text-[color:var(--vx-text-muted)] transition hover:bg-[color:var(--vx-control-hover)] hover:text-[color:var(--vx-text)]"
               aria-label="Close"
               onClick={() => props.onClose()}
             >
@@ -4140,12 +4144,12 @@ function CodeArchaeologyPanel(props: {
             <Show
               when={chronological().length}
               fallback={
-                <p class="px-2 py-10 text-center text-[13px] text-white/40">
+                <p class="px-2 py-10 text-center text-[13px] text-[color:var(--vx-text-muted)]">
                   No checkpoints yet. Vector captures one automatically whenever an agent edits your files.
                 </p>
               }
             >
-              <div class="flex flex-col gap-2">
+              <div class="vx-arch__list">
                 <For each={chronological()}>
                   {(checkpoint, index) => {
                     const [renaming, setRenaming] = createSignal(false)
@@ -4173,9 +4177,9 @@ function CodeArchaeologyPanel(props: {
                     }
 
                     return (
-                      <div class="flex flex-col gap-1.5 rounded-lg border border-[color:var(--vx-line)] bg-white/[0.02] px-3 py-2.5">
+                      <div class="vx-arch__item">
                         <div class="flex items-center gap-2">
-                          <span class="grid size-5 shrink-0 place-items-center rounded-full bg-[#9374ec]/15 text-[10px] text-[#c4a6ff]">
+                          <span class="vx-arch__seq">
                             {index() + 1}
                           </span>
                           <Show
@@ -4187,12 +4191,12 @@ function CodeArchaeologyPanel(props: {
                                 title="Rename checkpoint"
                                 onClick={startRename}
                               >
-                                <span class="min-w-0 truncate text-[13px] font-medium text-white/85 group-hover/name:text-white">
+                                <span class="vx-arch__name truncate group-hover/name:text-[color:var(--vx-text)]">
                                   {displayName()}
                                 </span>
                                 <svg
                                   viewBox="0 0 16 16"
-                                  class="size-3 shrink-0 text-white/25 transition group-hover/name:text-[#c4a6ff]"
+                                  class="size-3 shrink-0 text-[color:var(--vx-text-muted)] transition group-hover/name:text-[color:var(--vx-purple-bright)]"
                                   aria-hidden="true"
                                 >
                                   <path
@@ -4206,7 +4210,7 @@ function CodeArchaeologyPanel(props: {
                             <input
                               ref={nameInput}
                               value={nameDraft()}
-                              class="h-6 min-w-0 flex-1 rounded-md border border-[#9374ec]/50 bg-black/30 px-1.5 text-[13px] font-medium text-white outline-none focus:border-[#ad95f5]"
+                              class="h-6 min-w-0 flex-1 rounded-md border border-[color:var(--vx-purple)]/50 bg-[color:var(--vx-canvas)] px-1.5 text-[13px] font-medium text-[color:var(--vx-text)] outline-none focus:border-[color:var(--vx-purple-bright)]"
                               aria-label="Checkpoint name"
                               onInput={(event) => setNameDraft(event.currentTarget.value)}
                               onKeyDown={(event) => {
@@ -4223,11 +4227,11 @@ function CodeArchaeologyPanel(props: {
                               onBlur={commitRename}
                             />
                           </Show>
-                          <div class="shrink-0 text-[10.5px] text-white/35">
+                          <div class="shrink-0 text-[10.5px] text-[color:var(--vx-text-muted)]">
                             {formatCheckpointTime(checkpoint.createdAt)}
                           </div>
                         </div>
-                        <div class="pl-7 text-[10.5px] text-white/35">
+                        <div class="pl-7 text-[10.5px] text-[color:var(--vx-text-muted)]">
                           {checkpoint.files.length} {checkpoint.files.length === 1 ? "file" : "files"} captured
                           automatically after AI edits
                         </div>
@@ -4236,7 +4240,7 @@ function CodeArchaeologyPanel(props: {
                             value={checkpoint.note ?? ""}
                             rows={2}
                             placeholder="Write documentation for this checkpoint…"
-                            class="w-full resize-y rounded-md border border-[color:var(--vx-line)] bg-black/25 px-2 py-1.5 text-[12px] leading-5 text-white/75 outline-none transition placeholder:text-white/25 focus:border-[#9374ec]/60 focus:text-white/90"
+                            class="w-full resize-y rounded-md border border-[color:var(--vx-line)] bg-[color:var(--vx-canvas)] px-2 py-1.5 text-[12px] leading-5 text-[color:var(--vx-text-subtle)] outline-none transition placeholder:text-[color:var(--vx-text-muted)] focus:border-[color:var(--vx-purple)]/60 focus:text-[color:var(--vx-text)]"
                             aria-label="Checkpoint documentation"
                             onKeyDown={(event) => event.stopPropagation()}
                             onChange={(event) => commitNote(event.currentTarget.value)}
@@ -4248,7 +4252,7 @@ function CodeArchaeologyPanel(props: {
                               {(path) => (
                                 <button
                                   type="button"
-                                  class="rounded border border-[color:var(--vx-line)] bg-white/[0.03] px-1.5 py-0.5 text-[10.5px] text-white/55 hover:text-white"
+                                  class="rounded border border-[color:var(--vx-line)] bg-[color:var(--vx-control)] px-1.5 py-0.5 text-[10.5px] text-[color:var(--vx-text-subtle)] hover:text-[color:var(--vx-text)]"
                                   onClick={() => props.onOpenDiff(path)}
                                 >
                                   {path.split("/").at(-1)}
@@ -4258,7 +4262,7 @@ function CodeArchaeologyPanel(props: {
                           </div>
                           <button
                             type="button"
-                            class="shrink-0 rounded-md border border-[color:var(--vx-line)] px-2 py-1 text-[11px] text-white/70 transition hover:bg-white/[0.06] hover:text-white disabled:opacity-40"
+                            class="shrink-0 rounded-md border border-[color:var(--vx-line)] px-2 py-1 text-[11px] text-[color:var(--vx-text-subtle)] transition hover:bg-[color:var(--vx-control-hover)] hover:text-white disabled:opacity-40"
                             disabled={props.restoringCheckpoint === checkpoint.id}
                             onClick={() => props.onRestoreCheckpoint(checkpoint)}
                           >

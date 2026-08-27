@@ -13,6 +13,7 @@
     "build": "astro build"
   },
   "dependencies": {
+    "@opencode-ai/core": "workspace:*",
     "@astrojs/cloudflare": "12.6.3",
     "@astrojs/markdown-remark": "6.3.1",
     "@astrojs/react": "4.4.0",

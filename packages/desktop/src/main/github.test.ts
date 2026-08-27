@@ -1,4 +1,7 @@
 import { describe, expect, mock, test } from "bun:test"
+import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 
 // github.ts / github-auth.ts import electron (safeStorage, shell) and
 // electron-store through ./store — mock the electron surface so the pure
@@ -14,7 +17,7 @@ const electronMock = {
 }
 mock.module("electron", () => ({ default: electronMock, ...electronMock }))
 
-const { buildOauthPushHeader, parseGithubRemote } = await import("./github")
+const { buildOauthPushHeader, detectGithub, parseGithubRemote } = await import("./github")
 const { mapGithubRepo } = await import("./github-auth")
 
 describe("buildOauthPushHeader", () => {
@@ -48,6 +51,22 @@ describe("parseGithubRemote", () => {
     expect(parseGithubRemote("https://gitlab.com/octo/hello.git")).toBeUndefined()
     expect(parseGithubRemote("https://github.com/octo")).toBeUndefined()
     expect(parseGithubRemote("")).toBeUndefined()
+  })
+})
+
+describe("GitHub CLI resolution", () => {
+  test("runs gh from the supplied user-shell PATH instead of the GUI process PATH", async () => {
+    const root = await mkdtemp(join(tmpdir(), "vector-gh-path-"))
+    const bin = join(root, "bin")
+    await mkdir(bin)
+    await writeFile(
+      join(bin, "gh"),
+      '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "gh version 2.80.0"; else echo "Logged in to github.com account vector-user"; fi\n',
+    )
+    await chmod(join(bin, "gh"), 0o755)
+    const status = await detectGithub({ HOME: root, PATH: `${bin}:/usr/bin:/bin` })
+    expect(status).toMatchObject({ ghInstalled: true, authenticated: true, login: "vector-user" })
+    await rm(root, { recursive: true, force: true })
   })
 })
 

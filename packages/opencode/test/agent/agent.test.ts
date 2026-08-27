@@ -130,6 +130,8 @@ it.instance("explore agent denies edit and write", () =>
     expect(evalPerm(explore, "edit")).toBe("deny")
     expect(evalPerm(explore, "write")).toBe("deny")
     expect(evalPerm(explore, "todowrite")).toBe("deny")
+    expect(Permission.evaluate("bash", "rm -rf src", explore!.permission).action).toBe("deny")
+    expect(Permission.evaluate("bash", "git status --short", explore!.permission).action).toBe("allow")
   }),
 )
 
@@ -219,7 +221,7 @@ it.instance(
   "user permissions cannot make read-only specialists mutate files",
   () =>
     Effect.gen(function* () {
-      for (const name of ["review", "judge", "security"] as const) {
+      for (const name of ["explore", "review", "judge", "security"] as const) {
         const agent = yield* load((svc) => svc.get(name))
         expect(Permission.evaluate("edit", "src/app.ts", agent!.permission).action).toBe("deny")
         expect(Permission.evaluate("bash", "rm -rf src", agent!.permission).action).toBe("deny")
@@ -230,6 +232,29 @@ it.instance(
       permission: {
         edit: "allow",
         bash: "allow",
+      },
+    },
+  },
+)
+
+it.instance(
+  "agent-specific config cannot make native read-only specialists mutate files or delegate mutations",
+  () =>
+    Effect.gen(function* () {
+      for (const name of ["explore", "review", "judge", "security"] as const) {
+        const agent = yield* load((svc) => svc.get(name))
+        expect(Permission.evaluate("edit", "src/app.ts", agent!.permission).action).toBe("deny")
+        expect(Permission.evaluate("bash", "rm -rf src", agent!.permission).action).toBe("deny")
+        expect(Permission.evaluate("task", "general", agent!.permission).action).toBe("deny")
+      }
+    }),
+  {
+    config: {
+      agent: {
+        explore: { permission: { edit: "allow", bash: "allow", task: "allow" } },
+        review: { permission: { edit: "allow", bash: "allow", task: "allow" } },
+        judge: { permission: { edit: "allow", bash: "allow", task: "allow" } },
+        security: { permission: { edit: "allow", bash: "allow", task: "allow" } },
       },
     },
   },

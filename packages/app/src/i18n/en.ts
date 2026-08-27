@@ -924,6 +924,9 @@ export const dict = {
   "settings.updates.row.check.title": "Check for updates",
   "settings.updates.row.check.description": "Manually check for updates and install if available",
   "settings.updates.action.checkNow": "Check now",
+  "settings.updates.action.unavailable": "Not available in this build",
+  "settings.updates.row.check.unavailable":
+    "Automatic updates run in released builds of Vector. This copy was built locally, so there is no release channel to check.",
   "settings.updates.action.checking": "Checking...",
   "settings.updates.action.downloading": "Downloading...",
   "settings.updates.action.installing": "Installing...",

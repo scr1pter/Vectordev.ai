@@ -127,6 +127,8 @@ import type {
   McpDisconnectResponses,
   McpLocalConfig,
   McpRemoteConfig,
+  McpRemoveErrors,
+  McpRemoveResponses,
   McpStatusErrors,
   McpStatusResponses,
   ModelRef,
@@ -2785,6 +2787,9 @@ export class Mcp extends HeyApiClient {
       workspace?: string
       name?: string
       config?: McpLocalConfig | McpRemoteConfig
+      secrets?: {
+        [key: string]: string
+      }
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -2797,6 +2802,7 @@ export class Mcp extends HeyApiClient {
             { in: "query", key: "workspace" },
             { in: "body", key: "name" },
             { in: "body", key: "config" },
+            { in: "body", key: "secrets" },
           ],
         },
       ],
@@ -2868,6 +2874,38 @@ export class Mcp extends HeyApiClient {
     )
     return (options?.client ?? this.client).post<McpDisconnectResponses, McpDisconnectErrors, ThrowOnError>({
       url: "/mcp/{name}/disconnect",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Remove MCP server
+   *
+   * Disconnect and remove a dynamically added Model Context Protocol (MCP) server.
+   */
+  public remove<ThrowOnError extends boolean = false>(
+    parameters: {
+      name: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "name" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).delete<McpRemoveResponses, McpRemoveErrors, ThrowOnError>({
+      url: "/mcp/{name}",
       ...options,
       ...params,
     })

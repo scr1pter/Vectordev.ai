@@ -71,11 +71,12 @@ const layer: Layer.Layer<
     // team told Vector about it — standards written in the app and committed
     // with the repository so a clone carries them.
     const additiveProjectFiles = [".vector/RULES.md", ".vector/BRAIN.md", "BRAIN.md"]
-    // Local memory: durable facts about the user that follow them across every
-    // project, stored only in their own config directory and never uploaded.
-    // Loaded additively rather than through globalFiles, whose first-match
-    // break would drop it whenever a global AGENTS.md exists.
+    // Local memory is a plain Markdown file stored in the user's config
+    // directory. It is loaded additively into model context rather than through
+    // globalFiles, whose first-match break would drop it whenever a global
+    // AGENTS.md exists.
     const globalMemoryFile = path.join(global.config, "MEMORY.md")
+    const globalRulesFile = path.join(global.config, "RULES.md")
 
     const state = yield* InstanceState.make(
       Effect.fn("Instruction.state")(() =>
@@ -99,7 +100,7 @@ const layer: Layer.Layer<
     })
 
     const read = Effect.fnUntraced(function* (filepath: string) {
-      return yield* fs.readFileString(filepath).pipe(Effect.catch(() => Effect.succeed("")))
+      return (yield* fs.readFileStringSafe(filepath)) ?? ""
     })
 
     const fetch = Effect.fnUntraced(function* (url: string) {
@@ -130,14 +131,13 @@ const layer: Layer.Layer<
       }
 
       if (yield* fs.existsSafe(globalMemoryFile)) paths.add(path.resolve(globalMemoryFile))
+      if (yield* fs.existsSafe(globalRulesFile)) paths.add(path.resolve(globalRulesFile))
 
       // Vector memory and project rules are additive rather than mutually
       // exclusive with project instructions. They must be loaded even when a
       // global AGENTS.md or CLAUDE.md exists.
       for (const file of additiveProjectFiles) {
-        const matches = yield* fs
-          .findUp(file, ctx.directory, ctx.worktree)
-          .pipe(Effect.catch(() => Effect.succeed([])))
+        const matches = yield* fs.findUp(file, ctx.directory, ctx.worktree).pipe(Effect.catch(() => Effect.succeed([])))
         matches.forEach((item) => paths.add(path.resolve(item)))
       }
 

@@ -10,6 +10,7 @@ export function make(overrides: Partial<Config.Interface> = {}) {
     update: () => Effect.void,
     updateGlobal: (config) => Effect.succeed({ info: config, changed: false }),
     updateMcpLocal: () => Effect.void,
+    removeMcpLocal: () => Effect.void,
     invalidate: () => Effect.void,
     directories: () => Effect.succeed([]),
     waitForDependencies: () => Effect.void,

@@ -35,6 +35,10 @@ export function SettingsPersonalizationV2() {
   const [busy, setBusy] = createSignal(false)
   const [saved, setSaved] = createSignal(false)
   const [unavailable, setUnavailable] = createSignal(false)
+  const [error, setError] = createSignal("")
+
+  const message = (action: string, cause: unknown) =>
+    `${action}: ${cause instanceof Error ? cause.message : String(cause)}`
 
   const refresh = async () => {
     const bridge = api()
@@ -42,8 +46,13 @@ export function SettingsPersonalizationV2() {
       setUnavailable(true)
       return
     }
-    const next = await bridge.read().catch(() => undefined)
+    setUnavailable(false)
+    const next = await bridge.read().catch((cause: unknown) => {
+      setError(message("Vector could not load custom instructions", cause))
+      return undefined
+    })
     if (!next) return
+    setError("")
     setState(next)
     setDraft(next.content)
   }
@@ -54,7 +63,11 @@ export function SettingsPersonalizationV2() {
     const bridge = api()
     if (!bridge || busy()) return
     setBusy(true)
-    const next = await bridge.write(draft()).catch(() => undefined)
+    setError("")
+    const next = await bridge.write(draft()).catch((cause: unknown) => {
+      setError(message("Vector could not save custom instructions", cause))
+      return undefined
+    })
     setBusy(false)
     if (!next) return
     setState(next)
@@ -67,7 +80,11 @@ export function SettingsPersonalizationV2() {
     const bridge = api()
     if (!bridge || busy()) return
     setBusy(true)
-    const next = await bridge.clear().catch(() => undefined)
+    setError("")
+    const next = await bridge.clear().catch((cause: unknown) => {
+      setError(message("Vector could not clear custom instructions", cause))
+      return undefined
+    })
     setBusy(false)
     if (!next) return
     setState(next)
@@ -102,6 +119,7 @@ export function SettingsPersonalizationV2() {
             fallback={
               <p class="settings-v2-card-description">
                 Custom instructions are stored on your computer and activate once Vector connects to this workspace.
+                When used, they are included in requests sent to the model provider you choose.
               </p>
             }
           >
@@ -127,6 +145,12 @@ export function SettingsPersonalizationV2() {
                 {formatBytes(state()!.bytes)} · read by every new session · {state()!.path}
               </Show>
             </p>
+            <p class="settings-v2-card-description">
+              Stored locally, then included in requests sent to the model provider you choose for a session.
+            </p>
+            <Show when={error()}>
+              <p class="settings-v2-error" role="alert">{error()}</p>
+            </Show>
           </Show>
         </div>
       </div>

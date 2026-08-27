@@ -1097,7 +1097,7 @@ export default function LegacyLayout(props: ParentProps) {
       : import("@/components/dialog-settings")
     void module.then((x) => {
       if (dialogDead || dialogRun !== run) return
-      dialog.show(() => <x.DialogSettings />)
+      dialog.show(() => <x.DialogSettings repositoryPath={projectRoot(currentDir())} />)
     })
   }
 

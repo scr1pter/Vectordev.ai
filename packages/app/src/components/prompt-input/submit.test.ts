@@ -2,6 +2,7 @@ import { beforeAll, beforeEach, describe, expect, mock, test } from "bun:test"
 import type { Prompt } from "@/context/prompt"
 
 let createPromptSubmit: typeof import("./submit").createPromptSubmit
+let resolveExecutionAgent: typeof import("./submit").resolveExecutionAgent
 let resolveSubmissionAgent: typeof import("./submit").resolveSubmissionAgent
 let shouldUseCompletionJudge: typeof import("./submit").shouldUseCompletionJudge
 
@@ -255,6 +256,7 @@ beforeAll(async () => {
 
   const mod = await import("./submit")
   createPromptSubmit = mod.createPromptSubmit
+  resolveExecutionAgent = mod.resolveExecutionAgent
   resolveSubmissionAgent = mod.resolveSubmissionAgent
   shouldUseCompletionJudge = mod.shouldUseCompletionJudge
 })
@@ -523,6 +525,51 @@ describe("submission agent selection", () => {
     // requests it privately judges small — a gate like that hides regressions.
     expect(shouldUseCompletionJudge({ enabled: true, agent: "build" })).toBe(true)
     expect(shouldUseCompletionJudge({ enabled: true, agent: "review" })).toBe(true)
+  })
+
+  test("does not silently route a judged trivial prompt into the tool-less quick agent", () => {
+    expect(
+      resolveExecutionAgent({
+        planMode: false,
+        quickRequested: false,
+        difficulty: "trivial",
+        current: "build",
+        judgeEnabled: true,
+      }),
+    ).toBe("build")
+    expect(
+      resolveExecutionAgent({
+        planMode: false,
+        quickRequested: false,
+        difficulty: "trivial",
+        current: "build",
+        judgeEnabled: false,
+      }),
+    ).toBe("quick")
+  })
+
+  test("promotes explicit quick mode when verified completion is enabled", () => {
+    expect(
+      resolveExecutionAgent({
+        planMode: false,
+        quickRequested: true,
+        difficulty: "standard",
+        current: "build",
+        judgeEnabled: true,
+      }),
+    ).toBe("build")
+  })
+
+  test("repairs a stale quick agent before applying verified completion", () => {
+    expect(
+      resolveExecutionAgent({
+        planMode: false,
+        quickRequested: false,
+        difficulty: "standard",
+        current: "quick",
+        judgeEnabled: true,
+      }),
+    ).toBe("build")
   })
 
   test("skips the lanes that cannot satisfy the policy", () => {

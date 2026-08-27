@@ -670,7 +670,14 @@ export const SettingsGeneral: Component = () => {
 
         <SettingsRow
           title={language.t("settings.updates.row.check.title")}
-          description={language.t("settings.updates.row.check.description")}
+          description={
+            // A disabled updater used to render a dead "Check now" button and no
+            // reason for it, which reads as a broken feature rather than a
+            // build that has no release channel.
+            platform.updater?.state().status === "disabled"
+              ? language.t("settings.updates.row.check.unavailable")
+              : language.t("settings.updates.row.check.description")
+          }
         >
           <Button size="small" variant="secondary" disabled={!updater.action().run} onClick={updater.run}>
             {language.t(updater.action().label)}

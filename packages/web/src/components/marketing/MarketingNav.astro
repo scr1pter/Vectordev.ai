@@ -1,6 +1,4 @@
 ---
-import { MarketingMobileNav } from "../MarketingMobileNav"
-
 interface Props {
   active?: "product" | "docs" | "releases" | "download"
 }
@@ -20,9 +18,42 @@ const { active = "product" } = Astro.props
       <a class:list={{ active: active === "releases" }} href="/releases">Releases</a>
       <a class:list={["download-link", { active: active === "download" }]} href="/download"><span>Get Vector</span></a>
     </nav>
-    <div class="mobile-menu">
-      <MarketingMobileNav active={active} client:only="solid-js" />
-    </div>
+  </div>
+  <div class="mobile-menu">
+    <details class="mobile-nav-details">
+        <summary class="mobile-nav-trigger" aria-label="Navigation menu">
+          <svg
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+            stroke-linecap="round"
+            aria-hidden="true"
+          >
+            <line x1="4" y1="7" x2="20" y2="7" />
+            <line x1="4" y1="12" x2="20" y2="12" />
+            <line x1="4" y1="17" x2="20" y2="17" />
+          </svg>
+        </summary>
+        <div class="mobile-nav-panel">
+          <div class="mobile-nav-head">
+            <strong>Navigate Vector</strong>
+            <span>Tap the menu button to close</span>
+          </div>
+          <p class="mobile-nav-copy">
+            Open a repository, direct agents, inspect their work, and ship from one desktop workspace.
+          </p>
+          <nav class="mobile-nav-links" aria-label="Mobile navigation">
+            <a href="/" aria-current={active === "product" ? "page" : undefined} class:list={{ current: active === "product" }}>Product</a>
+            <a href="/docs" aria-current={active === "docs" ? "page" : undefined} class:list={{ current: active === "docs" }}>Documentation</a>
+            <a href="/releases" aria-current={active === "releases" ? "page" : undefined} class:list={{ current: active === "releases" }}>Releases</a>
+            <a href="/download" aria-current={active === "download" ? "page" : undefined} class:list={{ current: active === "download" }}>Get Vector</a>
+          </nav>
+          <p class="mobile-nav-foot">Vector is available for macOS, Windows, and Linux.</p>
+        </div>
+    </details>
   </div>
 </header>
 
@@ -106,6 +137,7 @@ const { active = "product" } = Astro.props
 
   .mobile-menu {
     display: none;
+    pointer-events: auto;
   }
 
   .download-link {
@@ -164,6 +196,52 @@ const { active = "product" } = Astro.props
 </style>
 
 <style is:global>
+  .mobile-nav-details {
+    position: fixed;
+    top: 20px;
+    right: max(22px, calc((100vw - 1280px) / 2 + 9px));
+    z-index: 50;
+  }
+
+  .mobile-nav-details > summary {
+    list-style: none;
+  }
+
+  .mobile-nav-details > summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .mobile-nav-details[open]::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 90;
+    background: rgba(5, 3, 9, 0.58);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
+
+  .mobile-nav-details[open] > summary {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 110;
+  }
+
+  .mobile-nav-details[open] > summary line:nth-child(1) {
+    transform: translate(0, 5px) rotate(45deg);
+    transform-origin: center;
+  }
+
+  .mobile-nav-details[open] > summary line:nth-child(2) {
+    opacity: 0;
+  }
+
+  .mobile-nav-details[open] > summary line:nth-child(3) {
+    transform: translate(0, -5px) rotate(-45deg);
+    transform-origin: center;
+  }
+
   .mobile-nav-trigger {
     width: 40px;
     height: 40px;
@@ -183,16 +261,6 @@ const { active = "product" } = Astro.props
     color: #fff;
     border-color: rgba(255, 255, 255, 0.22);
     background: rgba(255, 255, 255, 0.06);
-  }
-
-  .mobile-nav-overlay {
-    position: fixed;
-    inset: 0;
-    z-index: 90;
-    background: rgba(5, 3, 9, 0.58);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    animation: mobile-nav-fade 220ms ease;
   }
 
   .mobile-nav-panel {
@@ -219,13 +287,18 @@ const { active = "product" } = Astro.props
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding-bottom: 16px;
+    padding: 0 52px 16px 0;
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   }
 
   .mobile-nav-head strong {
     font-size: 14px;
     font-weight: 600;
+  }
+
+  .mobile-nav-head span {
+    color: #77737e;
+    font-size: 11px;
   }
 
   .mobile-nav-copy {
@@ -276,16 +349,11 @@ const { active = "product" } = Astro.props
     line-height: 1.6;
   }
 
-  @keyframes mobile-nav-fade {
-    from { opacity: 0; }
-  }
-
   @keyframes mobile-nav-slide {
     from { transform: translateX(100%); }
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .mobile-nav-overlay,
     .mobile-nav-panel {
       animation: none;
     }

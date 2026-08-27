@@ -111,6 +111,7 @@ export type CloudProviderId = "vercel" | "netlify" | "supabase"
 export type CloudProviderConnection = {
   provider: CloudProviderId
   configured: boolean
+  manualTokenSupported?: boolean
   connected: boolean
   account?: string
   accountId?: string
@@ -217,6 +218,7 @@ export type CloudApi = {
   connections: {
     list: () => Promise<CloudProviderConnection[]>
     connect: (provider: CloudProviderId) => Promise<CloudProviderConnection>
+    connectWithToken: (provider: CloudProviderId, token: string) => Promise<CloudProviderConnection>
     disconnect: (provider: CloudProviderId) => Promise<void>
   }
   providers: {

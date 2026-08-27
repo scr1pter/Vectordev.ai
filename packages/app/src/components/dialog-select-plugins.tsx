@@ -3,8 +3,9 @@ import { createStore, reconcile } from "solid-js/store"
 import { Dialog } from "@opencode-ai/ui/dialog"
 import { Switch } from "@opencode-ai/ui/switch"
 import { useSync } from "@/context/sync"
-import { useMcpAdd, useMcpToggle } from "@/context/mcp"
+import { useMcpAdd, useMcpRemove, useMcpToggle } from "@/context/mcp"
 import { PLUGIN_CATALOG, PLUGIN_CATEGORIES, PluginLogo, type PluginDef } from "./plugins/catalog"
+import { pluginAuthValues, securePluginConfig } from "./plugins/secure-config"
 
 type RuntimeApi = {
   preparePluginCommand: (
@@ -30,6 +31,7 @@ export const DialogSelectPlugins: Component = () => {
   const sync = useSync()
   const add = useMcpAdd()
   const toggle = useMcpToggle()
+  const remove = useMcpRemove()
 
   const [openForm, setOpenForm] = createSignal<string>()
   const [fields, setFields] = createStore<Record<string, string>>({})
@@ -42,9 +44,8 @@ export const DialogSelectPlugins: Component = () => {
   const mcpEntry = (plugin: PluginDef) => sync().data.mcp?.[serverName(plugin)]
   const installedCount = createMemo(
     () =>
-      new Set(
-        PLUGIN_CATALOG.filter((plugin) => !plugin.soon && sync().data.mcp?.[serverName(plugin)]).map(serverName),
-      ).size,
+      new Set(PLUGIN_CATALOG.filter((plugin) => !plugin.soon && sync().data.mcp?.[serverName(plugin)]).map(serverName))
+        .size,
   )
   const availableCount = new Set(PLUGIN_CATALOG.filter((plugin) => !plugin.soon).map(serverName)).size
 
@@ -76,7 +77,13 @@ export const DialogSelectPlugins: Component = () => {
   const install = async (plugin: PluginDef, values: Record<string, string>) => {
     if (!plugin.build || add.isPending) return
     try {
-      await add.mutateAsync({ name: serverName(plugin), config: await withResolvedRuntime(plugin.build(values)) })
+      const prepared = securePluginConfig(plugin, values)
+      if (!prepared) return
+      await add.mutateAsync({
+        name: serverName(plugin),
+        config: await withResolvedRuntime(prepared.config),
+        secrets: prepared.secrets,
+      })
       await sync().mcp.refresh()
       // Only clear the form belonging to this plugin — an install started
       // from another card must not wipe a half-typed token elsewhere.
@@ -91,18 +98,12 @@ export const DialogSelectPlugins: Component = () => {
 
   const submitToken = (plugin: PluginDef, event: SubmitEvent) => {
     event.preventDefault()
-    if (plugin.auth.kind !== "token") return
-    const values: Record<string, string> = {}
-    for (const field of plugin.auth.fields) {
-      const value = fields[field.key]?.trim()
-      if (!value) return
-      values[field.key] = value
-    }
+    const values = pluginAuthValues(plugin, fields)
+    if (!values) return
     void install(plugin, values)
   }
 
-  const formReady = (plugin: PluginDef) =>
-    plugin.auth.kind === "token" && plugin.auth.fields.every((field) => fields[field.key]?.trim())
+  const formReady = (plugin: PluginDef) => Boolean(pluginAuthValues(plugin, fields))
 
   return (
     <Dialog
@@ -128,6 +129,7 @@ export const DialogSelectPlugins: Component = () => {
                       return undefined
                     }
                     const [errorExpanded, setErrorExpanded] = createSignal(false)
+                    const [confirmingRemove, setConfirmingRemove] = createSignal(false)
                     return (
                       <div
                         class="flex flex-col gap-3 rounded-[14px] border border-[rgba(178,140,255,0.16)] bg-white/[0.02] p-3.5 transition-colors duration-200 ease-[cubic-bezier(0.22,0.7,0.28,1)] hover:border-[rgba(178,140,255,0.3)]"
@@ -164,7 +166,9 @@ export const DialogSelectPlugins: Component = () => {
                                   class={pillButtonClass}
                                   disabled={add.isPending}
                                   aria-expanded={plugin.auth.kind === "token" ? openForm() === plugin.id : undefined}
-                                  aria-controls={plugin.auth.kind === "token" ? `plugin-token-form-${plugin.id}` : undefined}
+                                  aria-controls={
+                                    plugin.auth.kind === "token" ? `plugin-token-form-${plugin.id}` : undefined
+                                  }
                                   onClick={() => startConnect(plugin)}
                                 >
                                   {plugin.auth.kind === "token" ? "Connect…" : "Connect"}
@@ -210,6 +214,22 @@ export const DialogSelectPlugins: Component = () => {
                                     Authorize
                                   </button>
                                 </Show>
+                                <button
+                                  type="button"
+                                  class="text-11-regular text-text-weaker transition-colors hover:text-[#e6787d] disabled:opacity-50"
+                                  disabled={remove.isPending}
+                                  onClick={() => {
+                                    if (!confirmingRemove()) {
+                                      setConfirmingRemove(true)
+                                      return
+                                    }
+                                    remove.mutate(serverName(plugin), {
+                                      onSuccess: () => setConfirmingRemove(false),
+                                    })
+                                  }}
+                                >
+                                  {confirmingRemove() ? "Remove integration?" : "Remove"}
+                                </button>
                               </div>
                             </Show>
                           </Show>
@@ -275,8 +295,14 @@ export const DialogSelectPlugins: Component = () => {
                                   </a>
                                 )}
                               </Show>
-                              <button type="submit" class={pillButtonClass} disabled={!formReady(plugin) || add.isPending}>
-                                {add.isPending && add.variables?.name === serverName(plugin) ? "Connecting…" : "Install"}
+                              <button
+                                type="submit"
+                                class={pillButtonClass}
+                                disabled={!formReady(plugin) || add.isPending}
+                              >
+                                {add.isPending && add.variables?.name === serverName(plugin)
+                                  ? "Connecting…"
+                                  : "Install"}
                               </button>
                             </div>
                           </form>
@@ -291,8 +317,8 @@ export const DialogSelectPlugins: Component = () => {
         </For>
 
         <p class="px-1 text-11-regular text-text-weaker">
-          Plugins run as MCP servers scoped to this project. Tokens stay in your local MCP configuration and are never
-          sent anywhere except the service itself.
+          Plugins run as MCP servers scoped to this project. Tokens stay in Vector's encrypted credential vault and are
+          only revealed to the service process or request that needs them.
         </p>
       </div>
     </Dialog>

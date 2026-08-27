@@ -336,6 +336,35 @@ it.instance(
   { config: { mcp: {} } },
 )
 
+it.instance(
+  "rejects prototype keys, credential-like raw headers, and non-http remote URLs",
+  () =>
+    MCP.Service.use((mcp: MCPNS.Interface) =>
+      Effect.gen(function* () {
+        const prototype = yield* mcp.add("__proto__", {
+          type: "local",
+          command: ["echo", "test"],
+        })
+        expect(statusName(prototype.status, "__proto__")).toBe("failed")
+
+        const header = yield* mcp.add("raw-google-key", {
+          type: "remote",
+          url: "https://mcp.example.com",
+          headers: { "X-Goog-Api-Key": "raw-secret" },
+        })
+        expect(statusName(header.status, "raw-google-key")).toBe("failed")
+
+        const invalidUrl = yield* mcp.add("file-server", {
+          type: "remote",
+          url: "file:///tmp/mcp.sock",
+        })
+        expect(statusName(invalidUrl.status, "file-server")).toBe("failed")
+        expect(yield* mcp.status()).toEqual({})
+      }),
+    ),
+  { config: { mcp: {} } },
+)
+
 // ========================================================================
 // Test: tools() are cached after connect
 // ========================================================================
@@ -679,6 +708,61 @@ it.instance("add persists the server to .opencode/opencode.local.json and toggle
 
       const gitignore = yield* Effect.promise(() => Bun.file(path.join(directory, ".opencode", ".gitignore")).text())
       expect(gitignore).toContain("opencode.local.json")
+    }),
+  ),
+)
+
+it.instance("vault placeholders resolve only in the child process and removal clears the project config", () =>
+  MCP.Service.use((mcp: MCPNS.Interface) =>
+    Effect.gen(function* () {
+      const { directory } = yield* TestInstance
+      lastCreatedClientName = "vault-local"
+      getOrCreateClientState("vault-local")
+
+      yield* mcp.add(
+        "vault-local",
+        {
+          type: "local",
+          command: ["echo", "{vault:argument}"],
+          environment: { TOKEN: "{vault:token}" },
+        },
+        { argument: "resolved-argument", token: "resolved-token" },
+      )
+
+      const options = stdioOptsByName.get("vault-local")
+      expect(options?.args).toEqual(["resolved-argument"])
+      expect(options?.env?.TOKEN).toBe("resolved-token")
+
+      const file = path.join(directory, ".opencode", "opencode.local.json")
+      const written = yield* Effect.promise(() => Bun.file(file).text())
+      expect(written).toContain("{vault:argument}")
+      expect(written).toContain("{vault:token}")
+      expect(written).not.toContain("resolved-argument")
+      expect(written).not.toContain("resolved-token")
+
+      yield* mcp.remove("vault-local")
+      expect((yield* mcp.status())["vault-local"]).toBeUndefined()
+      expect(JSON.parse(yield* Effect.promise(() => Bun.file(file).text())).mcp["vault-local"]).toBeUndefined()
+      expect(getOrCreateClientState("vault-local").closed).toBe(true)
+    }),
+  ),
+)
+
+it.instance("replacing an MCP server cannot inherit a stale vault credential", () =>
+  MCP.Service.use((mcp: MCPNS.Interface) =>
+    Effect.gen(function* () {
+      lastCreatedClientName = "replaced-vault"
+      yield* mcp.add("replaced-vault", { type: "local", command: ["echo", "{vault:token}"] }, { token: "first-secret" })
+
+      const replaced = yield* mcp.add("replaced-vault", {
+        type: "local",
+        command: ["echo", "{vault:token}"],
+      })
+      expect(statusName(replaced.status, "replaced-vault")).toBe("failed")
+      expect((yield* mcp.status())["replaced-vault"]).toMatchObject({
+        status: "failed",
+        error: expect.stringContaining("requires a credential named token"),
+      })
     }),
   ),
 )

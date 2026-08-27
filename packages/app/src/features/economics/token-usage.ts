@@ -29,7 +29,8 @@ export type MeasuredUsage = {
   messageCount: number
 }
 
-const finite = (value: number | undefined) => (typeof value === "number" && Number.isFinite(value) ? value : 0)
+const finite = (value: number | undefined) =>
+  typeof value === "number" && Number.isFinite(value) ? Math.max(0, value) : 0
 
 function usageOf(message: UsageBearingMessage): TokenUsage {
   return {

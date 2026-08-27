@@ -1,7 +1,8 @@
 import path from "node:path"
 import { copy, put } from "@vercel/blob"
+import { desktopReleaseVersion } from "./desktop-release-version"
 
-const version = process.env.VECTOR_RELEASE_VERSION?.replace(/^v/, "")
+const version = desktopReleaseVersion(process.env.VECTOR_RELEASE_VERSION)
 const channel = process.env.VECTOR_RELEASE_CHANNEL === "beta" ? "beta" : "latest"
 const source = path.resolve(process.env.VECTOR_RELEASE_DIR ?? path.join(import.meta.dir, "../../desktop/dist"))
 const dryRun = process.env.VECTOR_RELEASE_DRY_RUN === "true"
@@ -15,7 +16,6 @@ const putOptions = {
   multipart: true,
 } as const
 
-if (!version) throw new Error("VECTOR_RELEASE_VERSION is required")
 if (!dryRun && !process.env.BLOB_READ_WRITE_TOKEN) {
   throw new Error("BLOB_READ_WRITE_TOKEN is required")
 }

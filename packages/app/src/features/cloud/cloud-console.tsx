@@ -25,6 +25,7 @@ import {
   type PublishTarget,
   type PublishTargetId,
 } from "./cloud-api"
+import { cloudProviderConnectionMode, cloudProviderTokenGuide } from "./cloud-provider-token"
 import "./cloud-console.css"
 
 export type CloudSection =
@@ -365,6 +366,9 @@ export function CloudConsole(props: {
   const [providerLinks, setProviderLinks] = createSignal<CloudProviderProjectLink[]>([])
   const [providerSelections, setProviderSelections] = createSignal<Partial<Record<CloudProviderId, string>>>({})
   const [providerBusy, setProviderBusy] = createSignal<CloudProviderId | "">("")
+  const [manualTokenProvider, setManualTokenProvider] = createSignal<CloudProviderId | "">("")
+  const [manualToken, setManualToken] = createSignal("")
+  const [manualTokenError, setManualTokenError] = createSignal("")
   const [buildSettings, setBuildSettings] = createSignal<CloudBuildSettings | null>(null)
   const [supabaseServices, setSupabaseServices] = createSignal<CloudSupabaseServices>()
   const [supabaseServicesBusy, setSupabaseServicesBusy] = createSignal(false)
@@ -955,7 +959,7 @@ export function CloudConsole(props: {
     try {
       const connection = await api.connections.connect(provider)
       setConnections((items) => [connection, ...items.filter((item) => item.provider !== provider)])
-      const resources = await api.providers.resources(provider)
+      const resources = await api.providers.resources(provider).catch(() => [])
       setProviderResources((current) => ({ ...current, [provider]: resources }))
       setNotice({
         tone: "success",
@@ -966,6 +970,52 @@ export function CloudConsole(props: {
         tone: "error",
         text: error instanceof Error ? error.message : `Could not connect ${providerLabel(provider)}.`,
       })
+    } finally {
+      setProviderBusy("")
+    }
+  }
+
+  const openManualToken = (provider: CloudProviderId) => {
+    setManualTokenProvider(provider)
+    setManualToken("")
+    setManualTokenError("")
+  }
+
+  const cancelManualToken = () => {
+    setManualTokenProvider("")
+    setManualToken("")
+    setManualTokenError("")
+  }
+
+  const connectProviderWithToken = async (provider: CloudProviderId) => {
+    if (!api || providerBusy()) return
+    const token = manualToken().trim()
+    if (!token) {
+      setManualTokenError(`Paste a ${providerLabel(provider)} access token before connecting.`)
+      return
+    }
+    if (!api.connections.connectWithToken) {
+      setManualTokenError("Update Vector to connect this provider with an access token.")
+      return
+    }
+    setProviderBusy(provider)
+    setManualTokenError("")
+    try {
+      const connection = await api.connections.connectWithToken(provider, token)
+      setConnections((items) => [connection, ...items.filter((item) => item.provider !== provider)])
+      const resources = await api.providers.resources(provider).catch(() => [])
+      setProviderResources((current) => ({ ...current, [provider]: resources }))
+      // The renderer forgets the secret immediately. The bridge returns only
+      // account metadata after encrypting the token in Vector's local vault.
+      cancelManualToken()
+      setNotice({
+        tone: "success",
+        text: `${providerLabel(provider)} connected${connection.account ? ` as ${connection.account}` : ""}.`,
+      })
+    } catch (error) {
+      setManualTokenError(
+        error instanceof Error ? error.message : `${providerLabel(provider)} rejected that access token.`,
+      )
     } finally {
       setProviderBusy("")
     }
@@ -984,6 +1034,7 @@ export function CloudConsole(props: {
         ),
       )
       setProviderResources((current) => ({ ...current, [provider]: [] }))
+      cancelManualToken()
       setNotice({ tone: "info", text: `${providerLabel(provider)} disconnected from Vector.` })
     } catch (error) {
       setNotice({
@@ -1246,6 +1297,8 @@ export function CloudConsole(props: {
                 <For each={["vercel", "netlify", "supabase"] as CloudProviderId[]}>
                   {(provider) => {
                     const connection = () => providerConnection(provider)
+                    const connectionMode = () => cloudProviderConnectionMode(connection())
+                    const tokenGuide = () => cloudProviderTokenGuide(provider)
                     const linked = () => (provider === "supabase" ? undefined : providerLink(provider))
                     const resources = () => providerResources()[provider] ?? []
                     return (
@@ -1259,23 +1312,93 @@ export function CloudConsole(props: {
                             <span
                               class="cloud-status"
                               data-tone={
-                                connection()?.connected ? "success" : connection()?.configured ? undefined : "warning"
+                                connectionMode() === "connected"
+                                  ? "success"
+                                  : connectionMode() === "unavailable"
+                                    ? "warning"
+                                    : undefined
                               }
                             >
-                              {connection()?.connected
+                              {connectionMode() === "connected"
                                 ? "Connected"
-                                : connection()?.configured
+                                : connectionMode() === "oauth"
                                   ? "Not connected"
-                                  : "Setup required"}
+                                  : connectionMode() === "token"
+                                    ? "Manual connection"
+                                    : connectionMode() === "checking"
+                                      ? "Checking…"
+                                      : "Unavailable"}
                             </span>
                           </div>
                           <p class="cloud-muted mt-1 text-[12px]">
-                            {connection()?.connected
+                            {connectionMode() === "connected"
                               ? connection()?.account
                                 ? `Signed in as ${connection()?.account}`
                                 : "Account authorized"
-                              : (connection()?.detail ?? "Checking provider availability…")}
+                              : connectionMode() === "token"
+                                ? "Hosted sign-in is not configured. Connect with a personal access token encrypted on this device."
+                                : (connection()?.detail ?? "Checking provider availability…")}
                           </p>
+
+                          <Show when={manualTokenProvider() === provider && connectionMode() === "token"}>
+                            <form
+                              class="cloud-token-form"
+                              onSubmit={(event) => {
+                                event.preventDefault()
+                                void connectProviderWithToken(provider)
+                              }}
+                            >
+                              <p class="cloud-token-guide">
+                                Create a token in <strong>{tokenGuide().location}</strong>. {tokenGuide().instruction}
+                                Vector validates it, encrypts it in the local credential vault, and never shows it
+                                again after saving.
+                              </p>
+                              <button
+                                class="cloud-token-link"
+                                type="button"
+                                onClick={() => platform.openLink(tokenGuide().url)}
+                              >
+                                Open {providerLabel(provider)} token settings
+                              </button>
+                              <label class="cloud-token-field">
+                                <span>{providerLabel(provider)} access token</span>
+                                <input
+                                  class="cloud-input"
+                                  type="password"
+                                  name={`${provider}-access-token`}
+                                  autocomplete="off"
+                                  spellcheck={false}
+                                  placeholder={tokenGuide().placeholder}
+                                  value={manualToken()}
+                                  onInput={(event) => {
+                                    setManualToken(event.currentTarget.value)
+                                    setManualTokenError("")
+                                  }}
+                                />
+                              </label>
+                              <Show when={manualTokenError()}>
+                                <p class="cloud-token-error" role="alert">{manualTokenError()}</p>
+                              </Show>
+                              <div class="cloud-token-actions">
+                                <button
+                                  class="cloud-button"
+                                  data-variant="primary"
+                                  type="submit"
+                                  disabled={!manualToken().trim() || providerBusy() === provider}
+                                >
+                                  {providerBusy() === provider ? "Validating…" : "Save and connect"}
+                                </button>
+                                <button
+                                  class="cloud-button"
+                                  type="button"
+                                  disabled={providerBusy() === provider}
+                                  onClick={cancelManualToken}
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            </form>
+                          </Show>
 
                           <Show when={connection()?.connected && provider !== "supabase"}>
                             <Show
@@ -1340,19 +1463,43 @@ export function CloudConsole(props: {
                         </div>
                         <div class="cloud-connection-actions">
                           <Show
-                            when={connection()?.connected}
+                            when={connectionMode() === "connected"}
                             fallback={
-                              <button
-                                class="cloud-button"
-                                data-variant="primary"
-                                type="button"
-                                disabled={!api || !connection()?.configured || providerBusy() === provider}
-                                onClick={() => void connectProvider(provider)}
+                              <Show
+                                when={connectionMode() === "oauth"}
+                                fallback={
+                                  <Show
+                                    when={connectionMode() === "token"}
+                                    fallback={
+                                      <button class="cloud-button" type="button" disabled>
+                                        {connectionMode() === "checking" ? "Checking…" : "Connection unavailable"}
+                                      </button>
+                                    }
+                                  >
+                                    <button
+                                      class="cloud-button"
+                                      data-variant="primary"
+                                      type="button"
+                                      disabled={providerBusy() === provider || manualTokenProvider() === provider}
+                                      onClick={() => openManualToken(provider)}
+                                    >
+                                      {manualTokenProvider() === provider ? "Enter token below" : "Use access token"}
+                                    </button>
+                                  </Show>
+                                }
                               >
-                                {providerBusy() === provider
-                                  ? "Waiting for sign-in…"
-                                  : `Connect ${providerLabel(provider)}`}
-                              </button>
+                                <button
+                                  class="cloud-button"
+                                  data-variant="primary"
+                                  type="button"
+                                  disabled={!api || providerBusy() === provider}
+                                  onClick={() => void connectProvider(provider)}
+                                >
+                                  {providerBusy() === provider
+                                    ? "Waiting for sign-in…"
+                                    : `Connect ${providerLabel(provider)}`}
+                                </button>
+                              </Show>
                             }
                           >
                             <button

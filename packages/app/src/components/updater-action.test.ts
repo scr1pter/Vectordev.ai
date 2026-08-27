@@ -87,3 +87,19 @@ describe("updaterAction", () => {
     expect(result).toEqual({ status: "up-to-date" })
   })
 })
+
+describe("an updater that cannot run", () => {
+  test("says so instead of offering a dead Check now button", () => {
+    // The reported symptom: "the update feature is unavailable". A local or
+    // dev-channel build disables the updater, and the row rendered a greyed
+    // "Check now" with no explanation, which reads as a broken feature.
+    const action = updaterAction({ status: "disabled" })
+    expect(action.label).toBe("settings.updates.action.unavailable")
+    expect(action.run).toBeUndefined()
+  })
+
+  test("an unchecked updater still offers a real check", () => {
+    expect(updaterAction({ status: "idle" }).run).toBe("check")
+  })
+})
+

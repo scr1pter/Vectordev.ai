@@ -60,7 +60,10 @@ describe("getSessionContext", () => {
     const ctx = getSessionContext(messages, providers)
 
     expect(ctx?.message.id).toBe("a2")
-    expect(ctx?.usage).toBe(50)
+    // Hidden reasoning is billed, but it is not necessarily retained in the
+    // next prompt, so the context ring follows the runtime overflow count.
+    expect(ctx?.usage).toBe(45)
+    expect(ctx?.tokens).toBe(450)
     expect(ctx?.providerLabel).toBe("OpenAI")
     expect(ctx?.modelLabel).toBe("GPT-4.1")
   })
@@ -75,6 +78,14 @@ describe("getSessionContext", () => {
     expect(ctx?.modelLabel).toBe("m-1")
     expect(ctx?.limit).toBeUndefined()
     expect(ctx?.usage).toBeNull()
+  })
+
+  test("prefers the provider-reported total when it exceeds reconstructed context", () => {
+    const message = assistant("a1", { input: 100, output: 20, reasoning: 500, read: 30, write: 10 }, 0.1)
+    if (message.role === "assistant") message.tokens.total = 175
+    const providers = [{ id: "openai", models: { "gpt-4.1": { name: "GPT-4.1", limit: { context: 1_000 } } } }]
+
+    expect(getSessionContext([message], providers)).toMatchObject({ tokens: 175, usage: 18 })
   })
 
   test("recomputes when message array is mutated in place", () => {

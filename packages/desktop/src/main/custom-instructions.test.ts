@@ -11,15 +11,23 @@ import {
 
 let scratch = ""
 const originalXdg = process.env.XDG_CONFIG_HOME
+const originalConfig = process.env.OPENCODE_CONFIG_DIR
+const originalNamespace = process.env.VECTOR_APP_NAMESPACE
 
 beforeEach(async () => {
   scratch = await mkdtemp(join(tmpdir(), "vector-instructions-"))
   process.env.XDG_CONFIG_HOME = scratch
+  delete process.env.OPENCODE_CONFIG_DIR
+  delete process.env.VECTOR_APP_NAMESPACE
 })
 
 afterEach(async () => {
   if (originalXdg === undefined) delete process.env.XDG_CONFIG_HOME
   if (originalXdg !== undefined) process.env.XDG_CONFIG_HOME = originalXdg
+  if (originalConfig === undefined) delete process.env.OPENCODE_CONFIG_DIR
+  if (originalConfig !== undefined) process.env.OPENCODE_CONFIG_DIR = originalConfig
+  if (originalNamespace === undefined) delete process.env.VECTOR_APP_NAMESPACE
+  if (originalNamespace !== undefined) process.env.VECTOR_APP_NAMESPACE = originalNamespace
   await rm(scratch, { recursive: true, force: true })
 })
 
@@ -31,13 +39,13 @@ describe("custom instructions", () => {
   })
 
   test("honours VECTOR_APP_NAMESPACE the way the engine's config dir does", async () => {
-    const previous = process.env.VECTOR_APP_NAMESPACE
     process.env.VECTOR_APP_NAMESPACE = "vector-beta"
-    // The module reads the namespace at import time, so assert the resolution
-    // rule rather than re-importing: the engine applies the same rule.
-    expect(join(scratch, previous ?? "vector", "AGENTS.md")).toBe(customInstructionsPath())
-    if (previous === undefined) delete process.env.VECTOR_APP_NAMESPACE
-    if (previous !== undefined) process.env.VECTOR_APP_NAMESPACE = previous
+    expect(customInstructionsPath()).toBe(join(scratch, "vector-beta", "AGENTS.md"))
+  })
+
+  test("uses the sidecar's explicit config directory when packaged", () => {
+    process.env.OPENCODE_CONFIG_DIR = join(scratch, "sidecar-config")
+    expect(customInstructionsPath()).toBe(join(scratch, "sidecar-config", "AGENTS.md"))
   })
 
   test("reports absent instructions without inventing a file", async () => {
@@ -75,5 +83,10 @@ describe("custom instructions", () => {
     await mkdir(join(scratch, "vector"), { recursive: true })
     await writeFile(join(scratch, "vector", "AGENTS.md"), "hand written", "utf8")
     expect((await readCustomInstructions()).content).toBe("hand written")
+  })
+
+  test("does not disguise an unreadable existing target as empty instructions", async () => {
+    await mkdir(customInstructionsPath(), { recursive: true })
+    await expect(readCustomInstructions()).rejects.toMatchObject({ code: "EISDIR" })
   })
 })

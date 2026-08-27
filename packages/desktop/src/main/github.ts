@@ -4,6 +4,7 @@ import { basename } from "node:path"
 import { untrustedChildEnvironment } from "@opencode-ai/core/child-environment"
 
 import { createRepo, getGithubToken } from "./github-auth"
+import { agentEnvironment, resolveAgentPath, shimmedCommand, type AgentEnvironment } from "./external-agents"
 
 // Push a Vector project straight to GitHub. Two paths share the git plumbing:
 // - publishToGithub: BYOK via the USER's own `gh` CLI login (kept as fallback),
@@ -38,16 +39,26 @@ export type GithubPullRequestResult = { ok: boolean; url?: string; error?: strin
 
 type RunResult = { stdout: string; stderr: string; failed: boolean; code: number | null }
 
-function run(command: string, args: string[], opts: { cwd?: string; timeoutMs?: number } = {}) {
+async function run(
+  command: string,
+  args: string[],
+  opts: { cwd?: string; timeoutMs?: number; environment?: AgentEnvironment } = {},
+) {
+  const environment = command === "gh" ? (opts.environment ?? agentEnvironment()) : untrustedChildEnvironment()
+  const executable = command === "gh" ? await resolveAgentPath(command, environment) : command
+  if (!executable) return { stdout: "", stderr: "GitHub CLI was not found.", failed: true, code: null }
+  const launch =
+    command === "gh" ? shimmedCommand(executable, args) : { command: executable, args, windowsVerbatimArguments: false }
   return new Promise<RunResult>((resolve) => {
     execFile(
-      command,
-      args,
+      launch.command,
+      launch.args,
       {
         cwd: opts.cwd,
-        env: untrustedChildEnvironment(),
+        env: environment,
         timeout: opts.timeoutMs ?? 10_000,
         maxBuffer: 8 * 1024 * 1024,
+        windowsVerbatimArguments: launch.windowsVerbatimArguments,
       },
       (error, stdout, stderr) => {
         const err = error as (Error & { code?: number | string }) | null
@@ -66,8 +77,8 @@ function run(command: string, args: string[], opts: { cwd?: string; timeoutMs?: 
 // create` runs at once.
 const activeGithubPublishes = new Set<string>()
 
-export async function detectGithub(): Promise<GithubStatus> {
-  const version = await run("gh", ["--version"], { timeoutMs: 10_000 })
+export async function detectGithub(environment?: AgentEnvironment): Promise<GithubStatus> {
+  const version = await run("gh", ["--version"], { timeoutMs: 10_000, environment })
   if (version.failed) {
     return {
       ghInstalled: false,
@@ -78,11 +89,10 @@ export async function detectGithub(): Promise<GithubStatus> {
   // gh writes `auth status` to stderr on older releases, stdout on newer ones —
   // read both. It prints "Logged in to github.com account <login>" (newer) or
   // "Logged in to github.com as <login>" (older).
-  const status = await run("gh", ["auth", "status"], { timeoutMs: 10_000 })
+  const status = await run("gh", ["auth", "status"], { timeoutMs: 10_000, environment })
   const output = `${status.stdout}\n${status.stderr}`
   const authenticated = /logged in to/i.test(output)
-  const login =
-    output.match(/logged in to \S+ account (\S+)/i)?.[1] ?? output.match(/logged in to \S+ as (\S+)/i)?.[1]
+  const login = output.match(/logged in to \S+ account (\S+)/i)?.[1] ?? output.match(/logged in to \S+ as (\S+)/i)?.[1]
   if (authenticated) {
     return {
       ghInstalled: true,
@@ -180,7 +190,12 @@ export async function createPullRequest(input: GithubPullRequestInput): Promise<
 
   const add = await run("git", ["add", "-A"], { cwd: input.projectPath, timeoutMs: 60_000 })
   record("git add -A", add)
-  if (add.failed) return { ok: false, log: logs.join("\n"), error: lastLines(add.stderr, 4) || "Git could not stage the workspace changes." }
+  if (add.failed)
+    return {
+      ok: false,
+      log: logs.join("\n"),
+      error: lastLines(add.stderr, 4) || "Git could not stage the workspace changes.",
+    }
 
   const staged = await run("git", ["diff", "--cached", "--quiet"], { cwd: input.projectPath })
   if (staged.failed) {
@@ -190,7 +205,11 @@ export async function createPullRequest(input: GithubPullRequestInput): Promise<
     })
     record(`git commit -m "${input.title}"`, commit)
     if (commit.failed) {
-      return { ok: false, log: logs.join("\n"), error: lastLines(commit.stderr, 4) || "Git could not commit the workspace changes." }
+      return {
+        ok: false,
+        log: logs.join("\n"),
+        error: lastLines(commit.stderr, 4) || "Git could not commit the workspace changes.",
+      }
     }
   }
 
@@ -209,7 +228,14 @@ export async function createPullRequest(input: GithubPullRequestInput): Promise<
 
   const existing = await viewPullRequestUrl(input.projectPath)
   if (existing) return { ok: true, url: existing, log: logs.join("\n") }
-  const args = ["pr", "create", "--title", input.title, "--body", input.body?.trim() || "Created from an isolated Vector agent workspace."]
+  const args = [
+    "pr",
+    "create",
+    "--title",
+    input.title,
+    "--body",
+    input.body?.trim() || "Created from an isolated Vector agent workspace.",
+  ]
   const created = await run("gh", args, { cwd: input.projectPath, timeoutMs: 120_000 })
   record(`gh pr create --title "${input.title}"`, created)
   const url = `${created.stdout}\n${created.stderr}`.match(/https:\/\/github\.com\/[^\s]+\/pull\/\d+/)?.[0]
@@ -360,8 +386,7 @@ export async function publishToGithub(input: GithubPublishInput): Promise<Github
     const combined = `${create.stdout}\n${create.stderr}`
     if (!create.failed) {
       const url =
-        combined.match(/https:\/\/github\.com\/\S+/i)?.[0]?.replace(/[).,]+$/, "") ??
-        (await viewRepoUrl(projectPath))
+        combined.match(/https:\/\/github\.com\/\S+/i)?.[0]?.replace(/[).,]+$/, "") ?? (await viewRepoUrl(projectPath))
       return { ok: true, url, log: logs.join("\n") }
     }
 
@@ -508,7 +533,9 @@ export async function pushWithOauth(input: GithubOauthPushInput): Promise<Github
     let error: string
     if (/non-fast-forward|fetch first|rejected/.test(lower)) {
       error = "GitHub has newer commits. Pull and resolve them before pushing again."
-    } else if (/error: 403|permission to .* denied|write access to repository not granted|protected branch/.test(lower)) {
+    } else if (
+      /error: 403|permission to .* denied|write access to repository not granted|protected branch/.test(lower)
+    ) {
       error =
         "GitHub rejected this push (403). Your token may lack access to this repository — if it belongs to an organization, authorize SSO for Vector, then try again."
     } else if (/error: 401|authentication failed|invalid username or password/.test(lower)) {

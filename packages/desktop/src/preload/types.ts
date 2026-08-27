@@ -270,14 +270,24 @@ export type PullRequestsAPI = {
   ) => Promise<PullRequestSummary[]>
   view: (cwd: string, number: number) => Promise<PullRequestDetail>
   diff: (cwd: string, number: number) => Promise<string>
-  create: (input: { cwd: string; title: string; body: string; base?: string; draft?: boolean }) => Promise<{ url: string }>
+  create: (input: {
+    cwd: string
+    title: string
+    body: string
+    base?: string
+    draft?: boolean
+  }) => Promise<{ url: string }>
   review: (input: {
     cwd: string
     number: number
     body: string
     event: "comment" | "approve" | "request-changes"
   }) => Promise<{ posted: boolean }>
-  merge: (input: { cwd: string; number: number; strategy: "merge" | "squash" | "rebase" }) => Promise<{ merged: boolean }>
+  merge: (input: {
+    cwd: string
+    number: number
+    strategy: "merge" | "squash" | "rebase"
+  }) => Promise<{ merged: boolean }>
 }
 
 // Nothing here rejects: `gh` missing, `gh` signed out, or a project that is not
@@ -810,6 +820,7 @@ export type ElectronAPI = {
     connections: {
       list: () => Promise<CloudProviderConnection[]>
       connect: (provider: CloudProviderId) => Promise<CloudProviderConnection>
+      connectWithToken: (provider: CloudProviderId, token: string) => Promise<CloudProviderConnection>
       disconnect: (provider: CloudProviderId) => Promise<void>
     }
     providers: {
@@ -940,7 +951,7 @@ export type ElectronAPI = {
     list: (scope?: { directory?: string; parentSessionId?: string }) => Promise<ScheduledAgentRecord[]>
     create: (input: CreateScheduledAgentInput) => Promise<ScheduledAgentRecord>
     cancel: (id: string) => Promise<ScheduledAgentRecord | undefined>
-  setPaused: (id: string, paused: boolean) => Promise<ScheduledAgentRecord | undefined>
+    setPaused: (id: string, paused: boolean) => Promise<ScheduledAgentRecord | undefined>
     remove: (id: string) => Promise<ScheduledAgentRecord[]>
   }
   externalAgents: {

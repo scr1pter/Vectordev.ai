@@ -91,6 +91,7 @@ import { useSessionHashScroll } from "@/pages/session/use-session-hash-scroll"
 import { Identifier } from "@/utils/id"
 import { diffs as list } from "@/utils/diffs"
 import { Persist, persisted } from "@/utils/persist"
+import { WORKSPACE_FILE_SAVED_EVENT, workspaceFileSavedMatchesDirectory } from "@/utils/workspace-file-saved"
 import { extractPromptFromParts } from "@/utils/prompt"
 import { formatServerError, isLocalSessionNotFoundError, isSessionNotFoundError } from "@/utils/server-errors"
 import { legacySessionHref, requireServerKey, sessionHref } from "@/utils/session-route"
@@ -959,6 +960,15 @@ export default function Page() {
     refreshVcs()
   })
   onCleanup(stopVcs)
+
+  onMount(() => {
+    const refreshSavedFile = (event: Event) => {
+      if (!workspaceFileSavedMatchesDirectory(event, sdk().directory)) return
+      refreshVcs()
+    }
+    globalThis.window?.addEventListener(WORKSPACE_FILE_SAVED_EVENT, refreshSavedFile)
+    onCleanup(() => globalThis.window?.removeEventListener(WORKSPACE_FILE_SAVED_EVENT, refreshSavedFile))
+  })
 
   createEffect(
     on(

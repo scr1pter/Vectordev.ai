@@ -27,7 +27,9 @@ const Action = Schema.Literals([
 export const Parameters = Schema.Struct({
   action: Action.annotate({ description: "The browser action to perform" }),
   url: Schema.optional(Schema.String).annotate({ description: "URL for open_url" }),
-  selector: Schema.optional(Schema.String).annotate({ description: "CSS selector for click, type, or wait_for_selector" }),
+  selector: Schema.optional(Schema.String).annotate({
+    description: "CSS selector for click, type, or wait_for_selector",
+  }),
   text: Schema.optional(Schema.String).annotate({ description: "Text for type or wait_for_text" }),
   key: Schema.optional(Schema.String).annotate({ description: "Keyboard key for press" }),
   milliseconds: Schema.optional(Schema.Number).annotate({ description: "Wait duration, capped at 15 seconds" }),
@@ -97,18 +99,13 @@ const COMMANDS: Record<Schema.Schema.Type<typeof Action>, string> = {
   close: "closeBrowser",
 }
 
-function isLocalUrl(rawUrl: string) {
+export function isLocalUrl(rawUrl: string) {
   try {
-    const host = new URL(rawUrl).hostname.toLowerCase()
+    const url = new URL(rawUrl)
+    if (url.protocol !== "http:" && url.protocol !== "https:") return false
+    const host = url.hostname.toLowerCase()
     return (
-      host === "localhost" ||
-      host === "127.0.0.1" ||
-      host === "::1" ||
-      host === "[::1]" ||
-      host.endsWith(".localhost") ||
-      host.startsWith("192.168.") ||
-      host.startsWith("10.") ||
-      /^172\.(1[6-9]|2\d|3[01])\./.test(host)
+      host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]" || host.endsWith(".localhost")
     )
   } catch {
     return false
@@ -154,11 +151,19 @@ function formatReport(report: BrowserReport) {
     report.computedStyles?.length
       ? `Computed styles:\n${report.computedStyles
           .slice(0, 20)
-          .map((item) => `- ${item.selector}: display=${item.display}; color=${item.color}; background=${item.backgroundColor}; font-size=${item.fontSize}`)
+          .map(
+            (item) =>
+              `- ${item.selector}: display=${item.display}; color=${item.color}; background=${item.backgroundColor}; font-size=${item.fontSize}`,
+          )
           .join("\n")}`
       : undefined,
     report.pageHtml ? `Page HTML excerpt:\n${report.pageHtml.slice(0, 8_000)}` : undefined,
-    report.pageErrors.length ? `Runtime errors:\n${report.pageErrors.slice(-8).map((item) => `- ${item}`).join("\n")}` : undefined,
+    report.pageErrors.length
+      ? `Runtime errors:\n${report.pageErrors
+          .slice(-8)
+          .map((item) => `- ${item}`)
+          .join("\n")}`
+      : undefined,
     consoleErrors.length
       ? `Console errors:\n${consoleErrors.map((item) => `- ${item.message}${item.location ? ` (${item.location})` : ""}`).join("\n")}`
       : undefined,
@@ -174,7 +179,11 @@ function safeReportUrl(value: string) {
   if (!URL.canParse(value)) return value
   const url = new URL(value)
   for (const key of Array.from(url.searchParams.keys())) {
-    if (/^(access_token|api[-_]?key|auth|authorization|code|key|password|refresh_token|secret|signature|sig|token)$/i.test(key)) {
+    if (
+      /^(access_token|api[-_]?key|auth|authorization|code|key|password|refresh_token|secret|signature|sig|token)$/i.test(
+        key,
+      )
+    ) {
       url.searchParams.set(key, "[REDACTED]")
     }
   }
@@ -213,9 +222,7 @@ export const BrowserTool = Tool.define<typeof Parameters, Metadata, never>(
         const current =
           params.action === "open_url" || params.action === "close"
             ? undefined
-            : yield* Effect.promise(() =>
-                bridgeRequest({ contextId: ctx.sessionID, command: "inspectDom" }, ctx.abort),
-              )
+            : yield* Effect.promise(() => bridgeRequest({ contextId: ctx.sessionID, command: "inspectDom" }, ctx.abort))
         const targetUrl = params.action === "open_url" ? params.url : current?.finalUrl
         const external = Boolean(targetUrl && !isLocalUrl(targetUrl))
         if (external) {
@@ -258,7 +265,14 @@ export const BrowserTool = Tool.define<typeof Parameters, Metadata, never>(
           output: formatReport(report),
           attachments:
             params.action === "screenshot" && report.screenshotDataUrl
-              ? [{ type: "file" as const, mime: "image/png", url: report.screenshotDataUrl, filename: "vector-browser.png" }]
+              ? [
+                  {
+                    type: "file" as const,
+                    mime: "image/png",
+                    url: report.screenshotDataUrl,
+                    filename: "vector-browser.png",
+                  },
+                ]
               : undefined,
           metadata: { url: safeReportUrl(report.finalUrl), action: params.action, diagnostics: report.diagnostics },
         }

@@ -5,12 +5,22 @@ import { IconArrowDown } from "./icons"
 import { IconOpencode } from "./icons/custom"
 import { ShareI18nProvider, formatCurrency, formatNumber, normalizeLocale } from "./share/common"
 import styles from "./share.module.css"
-import type { MessageV2 } from "opencode/session/message-v2"
+import type { SessionV1 } from "@opencode-ai/core/v1/session"
+import type { ModelV2 } from "@opencode-ai/core/model"
+import type { ProviderV2 } from "@opencode-ai/core/provider"
 import type { Message } from "opencode/session/message"
-import type { Session } from "opencode/session/index"
+import type { Session } from "opencode/session/session"
 import { Part, ProviderIcon } from "./share/part"
+import { parseShareStreamEvent, shareMessageBelongsToSession } from "./share/stream"
 
-type MessageWithParts = MessageV2.Info & { parts: MessageV2.Part[] }
+type MessageWithParts = SessionV1.Info & { parts: SessionV1.Part[] }
+
+const legacyMessageID = (value: string) => value as SessionV1.MessageID
+const legacyPartID = (value: string) => value as SessionV1.PartID
+const legacyModelID = (value: string) => value as ModelV2.ID
+const legacyProviderID = (value: string) => value as ProviderV2.ID
+const legacyToolInput = (value: unknown) =>
+  typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
 
 type Status = "disconnected" | "connecting" | "connected" | "error" | "reconnecting"
 
@@ -62,7 +72,7 @@ export default function Share(props: {
     messages: Record<string, MessageWithParts>
   }>({
     info: {
-      id: props.id,
+      id: props.info.id,
       slug: props.info.slug,
       projectID: props.info.projectID,
       directory: props.info.directory,
@@ -118,26 +128,38 @@ export default function Share(props: {
       // Handle incoming messages
       socket.onmessage = (event) => {
         try {
-          const d = JSON.parse(event.data)
-          const [root, type, ...splits] = d.key.split("/")
-          if (root !== "session") return
-          if (type === "info") {
-            setStore("info", reconcile(d.content))
+          const streamEvent = parseShareStreamEvent(JSON.parse(event.data), props.info.id)
+          if (!streamEvent) return
+          if (streamEvent.type === "info") {
+            setStore("info", reconcile(streamEvent.content as Session.Info))
             return
           }
-          if (type === "message") {
-            const [, messageID] = splits
-            if ("metadata" in d.content) {
-              d.content = fromV1(d.content)
+          if (streamEvent.type === "message") {
+            const incoming =
+              "metadata" in streamEvent.content
+                ? fromV1(streamEvent.content as Message.Info)
+                : (streamEvent.content as MessageWithParts)
+            const content = {
+              ...incoming,
+              parts: incoming.parts ?? store.messages[streamEvent.messageID]?.parts ?? [],
             }
-            d.content.parts = d.content.parts ?? store.messages[messageID]?.parts ?? []
-            setStore("messages", messageID, reconcile(d.content))
+            if (!shareMessageBelongsToSession(content, props.info.id, streamEvent.messageID)) return
+            setStore("messages", streamEvent.messageID, reconcile(content))
           }
-          if (type === "part") {
-            setStore("messages", d.content.messageID, "parts", (arr) => {
-              const index = arr.findIndex((x) => x.id === d.content.id)
-              if (index === -1) arr.push(d.content)
-              if (index > -1) arr[index] = d.content
+          if (streamEvent.type === "part") {
+            if (
+              !shareMessageBelongsToSession(
+                store.messages[streamEvent.messageID],
+                props.info.id,
+                streamEvent.messageID,
+              )
+            )
+              return
+            const content = streamEvent.content as SessionV1.Part
+            setStore("messages", streamEvent.messageID, "parts", (arr) => {
+              const index = arr.findIndex((x) => x.id === content.id)
+              if (index === -1) arr.push(content)
+              if (index > -1) arr[index] = content
               return [...arr]
             })
           }
@@ -501,10 +523,10 @@ export default function Share(props: {
 export function fromV1(v1: Message.Info): MessageWithParts {
   if (v1.role === "assistant") {
     return {
-      id: v1.id,
+      id: legacyMessageID(v1.id),
       sessionID: v1.metadata.sessionID,
       role: "assistant",
-      parentID: "",
+      parentID: legacyMessageID(""),
       agent: "build",
       time: {
         created: v1.metadata.time.created,
@@ -526,10 +548,10 @@ export function fromV1(v1: Message.Info): MessageWithParts {
       providerID: v1.metadata.assistant!.providerID,
       mode: "build",
       error: v1.metadata.error,
-      parts: v1.parts.flatMap((part, index): MessageV2.Part[] => {
+      parts: v1.parts.flatMap((part, index): SessionV1.Part[] => {
         const base = {
-          id: index.toString(),
-          messageID: v1.id,
+          id: legacyPartID(`prt_legacy_${index}`),
+          messageID: legacyMessageID(v1.id),
           sessionID: v1.metadata.sessionID,
         }
         if (part.type === "text") {
@@ -569,7 +591,7 @@ export function fromV1(v1: Message.Info): MessageWithParts {
                 if (part.toolInvocation.state === "call") {
                   return {
                     status: "running",
-                    input: part.toolInvocation.args,
+                    input: legacyToolInput(part.toolInvocation.args),
                     time: {
                       start: time.start,
                     },
@@ -579,7 +601,7 @@ export function fromV1(v1: Message.Info): MessageWithParts {
                 if (part.toolInvocation.state === "result") {
                   return {
                     status: "completed",
-                    input: part.toolInvocation.args,
+                    input: legacyToolInput(part.toolInvocation.args),
                     output: part.toolInvocation.result,
                     title,
                     time,
@@ -598,21 +620,21 @@ export function fromV1(v1: Message.Info): MessageWithParts {
 
   if (v1.role === "user") {
     return {
-      id: v1.id,
+      id: legacyMessageID(v1.id),
       sessionID: v1.metadata.sessionID,
       role: "user",
       agent: "user",
       model: {
-        providerID: "",
-        modelID: "",
+        providerID: legacyProviderID(""),
+        modelID: legacyModelID(""),
       },
       time: {
         created: v1.metadata.time.created,
       },
-      parts: v1.parts.flatMap((part, index): MessageV2.Part[] => {
+      parts: v1.parts.flatMap((part, index): SessionV1.Part[] => {
         const base = {
-          id: index.toString(),
-          messageID: v1.id,
+          id: legacyPartID(`prt_legacy_${index}`),
+          messageID: legacyMessageID(v1.id),
           sessionID: v1.metadata.sessionID,
         }
         if (part.type === "text") {

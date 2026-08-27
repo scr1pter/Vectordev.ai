@@ -72,9 +72,10 @@ const memoryFacts = [
 
 const browserSteps = [
   { text: "Opened localhost:3000/checkout", ok: true },
-  { text: "Filled the card field with a test number", ok: true },
-  { text: "Refused to type into the CVC field", ok: true, guard: true },
-  { text: "Clicked Pay", ok: true },
+  { text: "Filled the non-sensitive checkout fields", ok: true },
+  { text: "Refused to type into the card-number field", ok: true, guard: true },
+  { text: "Handed the live browser to you", ok: true },
+  { text: "Resumed after you completed the protected step", ok: true },
   { text: "Expected a receipt, got a 500", ok: false },
 ]
 
@@ -221,10 +222,11 @@ const automations = [
           <p class="fd-hint" data-forgotten hidden>Removed. Erasing deletes the line from the file, not just the view.</p>
         </div>
         <div data-mem-panel="path" hidden>
-          <p class="fd-path">~/.config/vector/MEMORY.md</p>
+          <p class="fd-path">Vector app config / MEMORY.md</p>
           <p class="fd-hint">
-            One Markdown file in your own config directory. Read in every repository, never uploaded, and deleted from
-            disk when you erase it.
+            One Markdown file at the platform-specific path shown in Settings. It is not uploaded to Vector's servers;
+            when it exists, Vector automatically includes it in built-in agent context sent to the selected model
+            provider. Erasing it deletes the local file.
           </p>
         </div>
       </div>

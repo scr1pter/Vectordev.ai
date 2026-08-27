@@ -1,8 +1,16 @@
 import { execFile } from "node:child_process"
 import { platform } from "node:os"
-import { untrustedChildEnvironment } from "@opencode-ai/core/child-environment"
-import { agentEnvironment, resolveAgentPath } from "./external-agents"
+import { agentEnvironment, resolveAgentPath, shimmedCommand } from "./external-agents"
 import { GH_PACKAGE_MANAGERS, ghInstallHint, type GhPackageManager } from "./gh-install"
+import {
+  requireMergeStrategy,
+  requirePullRequestDirectory,
+  requirePullRequestLimit,
+  requirePullRequestNumber,
+  requirePullRequestState,
+  requirePullRequestText,
+  requireReviewEvent,
+} from "./github-pr-input"
 
 // Pull request management through the user's own GitHub CLI. gh already holds
 // their credentials and honours their SSO and org policies, so Vector drives it
@@ -13,16 +21,21 @@ export type GhRunResult = { stdout: string; stderr: string; failed: boolean }
 // gh pr diff on a large PR blows past a small buffer and surfaces as a generic
 // spawn failure, so give it real headroom. List/view calls are quick; diff and
 // review can be slow on big repos.
-function gh(args: string[], opts: { cwd?: string; timeoutMs?: number } = {}) {
+async function gh(args: string[], opts: { cwd?: string; timeoutMs?: number } = {}) {
+  const environment = agentEnvironment()
+  const executable = await resolveAgentPath("gh", environment)
+  if (!executable) return { stdout: "", stderr: "GitHub CLI was not found.", failed: true }
+  const launch = shimmedCommand(executable, args)
   return new Promise<GhRunResult>((resolve) => {
     execFile(
-      "gh",
-      args,
+      launch.command,
+      launch.args,
       {
         cwd: opts.cwd,
-        env: untrustedChildEnvironment(),
+        env: environment,
         timeout: opts.timeoutMs ?? 30_000,
         maxBuffer: 64 * 1024 * 1024,
+        windowsVerbatimArguments: launch.windowsVerbatimArguments,
       },
       (error, stdout, stderr) =>
         resolve({ stdout: String(stdout ?? ""), stderr: String(stderr ?? ""), failed: Boolean(error) }),
@@ -44,7 +57,9 @@ export const GH_INSTALL_COMMAND: Record<string, string> = {
 async function availablePackageManagers() {
   const environment = agentEnvironment()
   const found = await Promise.all(
-    GH_PACKAGE_MANAGERS.map(async (manager) => [manager, Boolean(await resolveAgentPath(manager, environment))] as const),
+    GH_PACKAGE_MANAGERS.map(
+      async (manager) => [manager, Boolean(await resolveAgentPath(manager, environment))] as const,
+    ),
   )
   return Object.fromEntries(found) as Partial<Record<GhPackageManager, boolean>>
 }
@@ -137,10 +152,23 @@ function normalize(raw: RawPullRequest): PullRequestSummary {
 
 // gh defaults to 30 results and never paginates, so ask for a real limit up
 // front rather than silently truncating the user's PR list.
-export async function listPullRequests(cwd: string, options?: { state?: "open" | "closed" | "merged" | "all"; limit?: number }) {
+export async function listPullRequests(
+  cwd: string,
+  options?: { state?: "open" | "closed" | "merged" | "all"; limit?: number },
+) {
+  const directory = requirePullRequestDirectory(cwd)
   const result = await gh(
-    ["pr", "list", "--state", options?.state ?? "open", "--limit", String(options?.limit ?? 100), "--json", LIST_FIELDS],
-    { cwd, timeoutMs: 45_000 },
+    [
+      "pr",
+      "list",
+      "--state",
+      requirePullRequestState(options?.state ?? "open"),
+      "--limit",
+      String(requirePullRequestLimit(options?.limit ?? 100)),
+      "--json",
+      LIST_FIELDS,
+    ],
+    { cwd: directory, timeoutMs: 45_000 },
   )
   if (result.failed) throw new Error(result.stderr.trim() || "Could not list pull requests.")
   return (parseJson<RawPullRequest[]>(result.stdout) ?? []).map(normalize)
@@ -153,10 +181,13 @@ export type PullRequestDetail = PullRequestSummary & {
 }
 
 export async function viewPullRequest(cwd: string, number: number): Promise<PullRequestDetail> {
-  const result = await gh(["pr", "view", String(number), "--json", `${LIST_FIELDS},body,files,comments`], {
-    cwd,
-    timeoutMs: 45_000,
-  })
+  const result = await gh(
+    ["pr", "view", String(requirePullRequestNumber(number)), "--json", `${LIST_FIELDS},body,files,comments`],
+    {
+      cwd: requirePullRequestDirectory(cwd),
+      timeoutMs: 45_000,
+    },
+  )
   if (result.failed) throw new Error(result.stderr.trim() || `Could not load pull request #${number}.`)
   const raw = parseJson<
     RawPullRequest & {
@@ -179,7 +210,10 @@ export async function viewPullRequest(cwd: string, number: number): Promise<Pull
 }
 
 export async function pullRequestDiff(cwd: string, number: number) {
-  const result = await gh(["pr", "diff", String(number)], { cwd, timeoutMs: 90_000 })
+  const result = await gh(["pr", "diff", String(requirePullRequestNumber(number))], {
+    cwd: requirePullRequestDirectory(cwd),
+    timeoutMs: 90_000,
+  })
   if (result.failed) throw new Error(result.stderr.trim() || `Could not load the diff for #${number}.`)
   return result.stdout
 }
@@ -191,12 +225,25 @@ export async function createPullRequest(input: {
   base?: string
   draft?: boolean
 }) {
-  const args = ["pr", "create", "--title", input.title, "--body", input.body]
-  if (input.base) args.push("--base", input.base)
-  if (input.draft) args.push("--draft")
-  const result = await gh(args, { cwd: input.cwd, timeoutMs: 90_000 })
+  const args = [
+    "pr",
+    "create",
+    "--title",
+    requirePullRequestText(input.title, "Pull request title", 256, false),
+    "--body",
+    requirePullRequestText(input.body, "Pull request body", 1_000_000),
+  ]
+  if (input.base) args.push("--base", requirePullRequestText(input.base, "Base branch", 255, false))
+  if (input.draft === true) args.push("--draft")
+  const result = await gh(args, { cwd: requirePullRequestDirectory(input.cwd), timeoutMs: 90_000 })
   if (result.failed) throw new Error(result.stderr.trim() || "Could not create the pull request.")
-  return { url: result.stdout.trim().split(/\s+/).find((token) => token.startsWith("http")) ?? "" }
+  return {
+    url:
+      result.stdout
+        .trim()
+        .split(/\s+/)
+        .find((token) => token.startsWith("http")) ?? "",
+  }
 }
 
 // Posting a review is the one action here that is visible to other people, so
@@ -207,10 +254,20 @@ export async function submitPullRequestReview(input: {
   body: string
   event: "comment" | "approve" | "request-changes"
 }) {
-  const result = await gh(["pr", "review", String(input.number), `--${input.event}`, "--body", input.body], {
-    cwd: input.cwd,
-    timeoutMs: 60_000,
-  })
+  const result = await gh(
+    [
+      "pr",
+      "review",
+      String(requirePullRequestNumber(input.number)),
+      `--${requireReviewEvent(input.event)}`,
+      "--body",
+      requirePullRequestText(input.body, "Review body", 1_000_000, false),
+    ],
+    {
+      cwd: requirePullRequestDirectory(input.cwd),
+      timeoutMs: 60_000,
+    },
+  )
   if (result.failed) throw new Error(result.stderr.trim() || "Could not post the review.")
   return { posted: true }
 }
@@ -220,10 +277,13 @@ export async function mergePullRequest(input: {
   number: number
   strategy: "merge" | "squash" | "rebase"
 }) {
-  const result = await gh(["pr", "merge", String(input.number), `--${input.strategy}`], {
-    cwd: input.cwd,
-    timeoutMs: 90_000,
-  })
+  const result = await gh(
+    ["pr", "merge", String(requirePullRequestNumber(input.number)), `--${requireMergeStrategy(input.strategy)}`],
+    {
+      cwd: requirePullRequestDirectory(input.cwd),
+      timeoutMs: 90_000,
+    },
+  )
   if (result.failed) throw new Error(result.stderr.trim() || "Could not merge the pull request.")
   return { merged: true }
 }

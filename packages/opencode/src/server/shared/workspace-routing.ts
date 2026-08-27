@@ -1,4 +1,5 @@
 import { SessionID } from "@/session/schema"
+import { Option, Schema } from "effect"
 
 type Rule = { method?: string; path: string; exact?: boolean; action: "local" | "forward" }
 
@@ -25,7 +26,13 @@ export function getWorkspaceRouteSessionID(url: URL) {
     url.pathname.match(/^\/experimental\/session\/([^/]+)\/background$/)?.[1]
   if (!id) return null
 
-  return SessionID.make(id)
+  // URL path segments are untrusted. Global SSE event IDs also use an `evt_`
+  // prefix and one accidentally routed through this middleware in the desktop
+  // app; calling the branded constructor turned that ordinary bad request into
+  // a server defect that interrupted the active subagent. Only a decoded
+  // session ID may participate in workspace lookup.
+  const decoded = Schema.decodeUnknownOption(SessionID)(id)
+  return Option.isSome(decoded) ? decoded.value : null
 }
 
 export function workspaceProxyURL(target: string | URL, requestURL: URL) {

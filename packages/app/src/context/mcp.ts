@@ -7,6 +7,7 @@ import type { McpLocalConfig, McpRemoteConfig, McpStatus } from "@opencode-ai/sd
 type AddMcpInput = {
   name: string
   config: McpLocalConfig | McpRemoteConfig
+  secrets?: Record<string, string>
 }
 
 export function useMcpAdd() {
@@ -58,6 +59,27 @@ export function useMcpToggle() {
 
   return useMutation(() => ({
     mutationFn: sync().mcp.toggle,
+    onError: (error) =>
+      showToast({
+        variant: "error",
+        title: language.t("common.requestFailed"),
+        description: error instanceof Error ? error.message : String(error),
+      }),
+  }))
+}
+
+export function useMcpRemove() {
+  const sync = useSync()
+  const language = useLanguage()
+
+  return useMutation(() => ({
+    mutationFn: (name: string) => sync().mcp.remove(name),
+    onSuccess: (_result, name) =>
+      showToast({
+        variant: "success",
+        title: "Integration removed",
+        description: `${name} and its stored credentials were removed from this project.`,
+      }),
     onError: (error) =>
       showToast({
         variant: "error",

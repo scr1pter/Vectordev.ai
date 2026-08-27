@@ -14,10 +14,23 @@ export const mcpHandlers = HttpApiBuilder.group(InstanceHttpApi, "mcp", (handler
     })
 
     const add = Effect.fn("McpHttpApi.add")(function* (ctx: { payload: typeof AddPayload.Type }) {
-      const result = (yield* mcp.add(ctx.payload.name, ctx.payload.config)).status
+      const result = (yield* mcp.add(ctx.payload.name, ctx.payload.config, ctx.payload.secrets)).status
       return yield* Schema.decodeUnknownEffect(StatusMap)(
         "status" in result ? { [ctx.payload.name]: result } : result,
       ).pipe(Effect.mapError(() => new HttpApiError.BadRequest({})))
+    })
+
+    const remove = Effect.fn("McpHttpApi.remove")(function* (ctx: { params: { name: string } }) {
+      yield* mcp
+        .remove(ctx.params.name)
+        .pipe(
+          Effect.catchTag("MCP.NotFoundError", (error) =>
+            Effect.fail(
+              new McpServerNotFoundError({ name: error.name, message: `MCP server not found: ${error.name}` }),
+            ),
+          ),
+        )
+      return { success: true as const }
     })
 
     const authStart = Effect.fn("McpHttpApi.authStart")(function* (ctx: { params: { name: string } }) {
@@ -101,6 +114,7 @@ export const mcpHandlers = HttpApiBuilder.group(InstanceHttpApi, "mcp", (handler
     return handlers
       .handle("status", status)
       .handle("add", add)
+      .handle("remove", remove)
       .handle("authStart", authStart)
       .handle("authCallback", authCallback)
       .handle("authAuthenticate", authAuthenticate)

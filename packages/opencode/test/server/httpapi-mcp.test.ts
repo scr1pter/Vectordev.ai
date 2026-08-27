@@ -81,7 +81,7 @@ describe("mcp HttpApi", () => {
   )
 
   it.instance(
-    "serves add, connect, and disconnect endpoints",
+    "serves add, connect, disconnect, and remove endpoints",
     () =>
       Effect.gen(function* () {
         const tmp = yield* TestInstance
@@ -112,6 +112,13 @@ describe("mcp HttpApi", () => {
         const disconnected = yield* request(handler, "/mcp/demo/disconnect", tmp.directory, { method: "POST" })
         expect(disconnected.status).toBe(200)
         expect(yield* json(disconnected)).toBe(true)
+
+        const removed = yield* request(handler, "/mcp/added", tmp.directory, { method: "DELETE" })
+        expect(removed.status).toBe(200)
+        expect(yield* json(removed)).toEqual({ success: true })
+
+        const status = yield* request(handler, McpPaths.status, tmp.directory)
+        expect(yield* json<Record<string, unknown>>(status)).not.toHaveProperty("added")
       }),
     {
       config: {
@@ -203,6 +210,7 @@ describe("mcp HttpApi", () => {
           { method: "DELETE", route: "/mcp/missing/auth" },
           { method: "POST", route: "/mcp/missing/connect" },
           { method: "POST", route: "/mcp/missing/disconnect" },
+          { method: "DELETE", route: "/mcp/missing" },
         ]) {
           const response = yield* request(handler, input.route, tmp.directory, {
             method: input.method,

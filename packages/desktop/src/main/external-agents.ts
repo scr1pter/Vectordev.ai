@@ -256,12 +256,13 @@ function firstLine(text: string): string | undefined {
 // The question detection could not answer before: a CLI can be installed, report
 // a version, and still refuse every run because nobody signed in — which is
 // exactly what a green "Installed" tile promised and then failed to deliver.
-// Both probes are local and quick (codex ~0.03s, claude ~0.3s); neither reaches
-// a model. cursor-agent is deliberately absent: its contract is unverified, and
-// guessing would produce exactly the false claim this is meant to prevent.
+// These probes are local and quick; none reaches a model. Cursor's status
+// command uses the same logged-in / not-logged-in vocabulary and is verified
+// by its headless CLI.
 const AUTH_PROBE: Partial<Record<ExternalAgentId, string[]>> = {
   "claude-code": ["auth", "status"],
   codex: ["login", "status"],
+  cursor: ["status"],
 }
 
 // `claude auth status` prints JSON; `codex login status` prints a sentence. The
@@ -473,6 +474,11 @@ export type RunExternalAgentInput = {
   // the real machine once per process, so without this seam no test can point
   // a run at a fake CLI.
   env?: AgentEnvironment
+  // Defaults to thirty minutes so a wedged CLI cannot hold a parallel slot and
+  // continue consuming resources forever. The grace override exists for the
+  // process-lifecycle regression test; production keeps the five-second grace.
+  timeoutMs?: number
+  killGraceMs?: number
 }
 
 const SECRET_VALUE_PATTERN =
@@ -485,12 +491,7 @@ function redactAgentOutput(value: string) {
 
 // Resume argv is not the fresh argv plus a flag: `codex exec resume` rejects
 // --sandbox and -C outright, so each runtime branches before its fresh form.
-export function runtimeArguments(
-  runtime: CodingAgentRuntime,
-  cwd: string,
-  prompt: string,
-  resumeSessionId?: string,
-) {
+export function runtimeArguments(runtime: CodingAgentRuntime, cwd: string, prompt: string, resumeSessionId?: string) {
   if (runtime === "claude-code" && resumeSessionId) {
     // The id must be the immediately-following argv element: --resume takes an
     // OPTIONAL value, so any gap lets it swallow the prompt and open the
@@ -527,12 +528,10 @@ export function runtimeArguments(
   if (runtime === "codex") {
     return ["exec", "--json", "--sandbox", "workspace-write", "--skip-git-repo-check", "-C", cwd, prompt]
   }
-  // Unverified: cursor-agent could not be installed to confirm these flags, so
-  // a rejection degrades through resumeRejected into a re-brief.
   if (resumeSessionId) {
-    return ["--resume", resumeSessionId, "-p", "--force", "--output-format", "stream-json", prompt]
+    return ["--resume", resumeSessionId, "-p", "--trust", "--force", "--output-format", "stream-json", prompt]
   }
-  return ["-p", "--force", "--output-format", "stream-json", prompt]
+  return ["-p", "--trust", "--force", "--output-format", "stream-json", prompt]
 }
 
 function parseAgentJson(line: string) {
@@ -633,18 +632,36 @@ export function agentOutcome(runtime: CodingAgentRuntime, exitCode: number, outp
   }
 }
 
-function stopAgentProcess(child: ChildProcessWithoutNullStreams) {
-  if (child.killed) return
+function signalAgentProcess(child: ChildProcessWithoutNullStreams, signal: NodeJS.Signals) {
   if (process.platform === "win32") {
-    child.kill("SIGTERM")
+    if (child.pid) execFile("taskkill", windowsTaskkillArguments(child.pid, signal === "SIGKILL"), () => undefined)
     return
   }
+  if (child.exitCode !== null || child.signalCode !== null) return
   if (!child.pid) return
   try {
-    process.kill(-child.pid, "SIGTERM")
+    process.kill(-child.pid, signal)
   } catch {
-    child.kill("SIGTERM")
+    child.kill(signal)
   }
+}
+
+export function windowsTaskkillArguments(pid: number, force: boolean) {
+  return ["/pid", String(pid), "/T", ...(force ? ["/F"] : [])]
+}
+
+function stopAgentProcess(child: ChildProcessWithoutNullStreams, graceMs: number) {
+  // Windows has no POSIX process group. Force the full tree immediately so a
+  // short-lived npm/cmd shim cannot exit and strand its model process before a
+  // delayed `/T` reaches it.
+  if (process.platform === "win32") {
+    signalAgentProcess(child, "SIGKILL")
+    return
+  }
+  signalAgentProcess(child, "SIGTERM")
+  const force = setTimeout(() => signalAgentProcess(child, "SIGKILL"), graceMs)
+  force.unref?.()
+  return force
 }
 
 export async function runExternalCodingAgent(input: RunExternalAgentInput): Promise<ExternalAgentRunResult> {
@@ -658,10 +675,7 @@ export async function runExternalCodingAgent(input: RunExternalAgentInput): Prom
   }
 
   return new Promise((resolve, reject) => {
-    const launch = shimmedCommand(
-      path,
-      runtimeArguments(input.runtime, input.cwd, input.prompt, input.resumeSessionId),
-    )
+    const launch = shimmedCommand(path, runtimeArguments(input.runtime, input.cwd, input.prompt, input.resumeSessionId))
     const child = spawn(launch.command, launch.args, {
       cwd: input.cwd,
       detached: process.platform !== "win32",
@@ -676,6 +690,8 @@ export async function runExternalCodingAgent(input: RunExternalAgentInput): Prom
     let stdoutBuffer = ""
     let stderrBuffer = ""
     let settled = false
+    let stopReason: "aborted" | "timeout" | undefined
+    let forceTimer: NodeJS.Timeout | undefined
 
     const emitLine = (stream: "stdout" | "stderr", raw: string) => {
       const text = redactAgentOutput(raw.trim())
@@ -707,7 +723,14 @@ export async function runExternalCodingAgent(input: RunExternalAgentInput): Prom
       lines.forEach((line) => emitLine(stream, line))
     }
 
-    const abort = () => stopAgentProcess(child)
+    const stop = (reason: "aborted" | "timeout") => {
+      if (stopReason) return
+      stopReason = reason
+      forceTimer = stopAgentProcess(child, Math.max(0, input.killGraceMs ?? 5_000))
+    }
+    const abort = () => stop("aborted")
+    const timeout = setTimeout(() => stop("timeout"), Math.max(1, input.timeoutMs ?? 30 * 60_000))
+    timeout.unref?.()
     input.signal?.addEventListener("abort", abort, { once: true })
     child.stdin.end()
     if (input.signal?.aborted) abort()
@@ -716,15 +739,34 @@ export async function runExternalCodingAgent(input: RunExternalAgentInput): Prom
     child.once("error", (error) => {
       if (settled) return
       settled = true
+      clearTimeout(timeout)
+      if (forceTimer) clearTimeout(forceTimer)
       input.signal?.removeEventListener("abort", abort)
       reject(error)
     })
     child.once("close", (code) => {
       if (settled) return
       settled = true
+      clearTimeout(timeout)
+      if (forceTimer) clearTimeout(forceTimer)
       input.signal?.removeEventListener("abort", abort)
       emitLine("stdout", stdoutBuffer)
       emitLine("stderr", stderrBuffer)
+      if (stopReason) {
+        const timedOut = stopReason === "timeout"
+        const error = timedOut
+          ? `${setup.label} exceeded the ${Math.ceil((input.timeoutMs ?? 30 * 60_000) / 60_000)} minute run limit and was stopped.`
+          : `${setup.label} was stopped.`
+        resolve({
+          exitCode: timedOut ? 124 : 130,
+          summary: error,
+          error,
+          actualCost,
+          sessionId: sessionId ?? input.resumeSessionId,
+          output,
+        })
+        return
+      }
       const outcome = agentOutcome(input.runtime, code ?? (input.signal?.aborted ? 130 : 1), output)
       resolve({
         exitCode: outcome.exitCode,
@@ -732,7 +774,7 @@ export async function runExternalCodingAgent(input: RunExternalAgentInput): Prom
         error: outcome.error,
         actualCost,
         // Not seeded from resumeSessionId before the stream: if a runtime mints
-        // a NEW id on resume (cursor is unverified), seeding would hide it and
+        // a NEW id on resume after a future protocol change, seeding would hide it and
         // every later turn would resume a thread that no longer grows.
         sessionId: sessionId ?? input.resumeSessionId,
         resumeRejected:

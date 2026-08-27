@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test"
-import { EXTERNAL_RUNTIMES, externalRuntimeSetup, isExternalRuntime, setupSteps } from "./external-runtimes"
+import {
+  EXTERNAL_RUNTIMES,
+  externalRuntimeReady,
+  externalRuntimeSetup,
+  isExternalRuntime,
+  setupSteps,
+} from "./external-runtimes"
 
 describe("external runtimes", () => {
   test("covers exactly the three runtimes Vector can drive", () => {
@@ -37,5 +43,13 @@ describe("external runtimes", () => {
     const steps = setupSteps("claude-code")
     expect(steps[0]!.label).toBe("Install")
     expect(steps.map((step) => step.label)).toContain("Sign in")
+  })
+
+  test("an installed but explicitly signed-out runtime is not ready", () => {
+    expect(externalRuntimeReady({ installed: true, signedIn: true })).toBe(true)
+    expect(externalRuntimeReady({ installed: true })).toBe(true)
+    expect(externalRuntimeReady({ installed: true, signedIn: false })).toBe(false)
+    expect(externalRuntimeReady({ installed: false, signedIn: true })).toBe(false)
+    expect(externalRuntimeReady(undefined)).toBe(false)
   })
 })

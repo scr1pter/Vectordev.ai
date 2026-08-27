@@ -26,6 +26,7 @@ export type ClientInfo = Schema.Schema.Type<typeof ClientInfo>
 export const Entry = Schema.Struct({
   tokens: Schema.mutableKey(Schema.optional(Tokens)),
   clientInfo: Schema.mutableKey(Schema.optional(ClientInfo)),
+  secrets: Schema.mutableKey(Schema.optional(Schema.Record(Schema.String, Schema.String))),
   codeVerifier: Schema.mutableKey(Schema.optional(Schema.String)),
   oauthState: Schema.mutableKey(Schema.optional(Schema.String)),
   serverUrl: Schema.mutableKey(Schema.optional(Schema.String)),
@@ -54,6 +55,7 @@ export interface Interface {
   readonly remove: (mcpName: string) => Effect.Effect<void>
   readonly updateTokens: (mcpName: string, tokens: Tokens, serverUrl?: string) => Effect.Effect<void>
   readonly updateClientInfo: (mcpName: string, clientInfo: ClientInfo, serverUrl?: string) => Effect.Effect<void>
+  readonly updateSecrets: (mcpName: string, secrets: Record<string, string>) => Effect.Effect<void>
   readonly updateCodeVerifier: (mcpName: string, codeVerifier: string) => Effect.Effect<void>
   readonly clearCodeVerifier: (mcpName: string) => Effect.Effect<void>
   readonly updateOAuthState: (mcpName: string, oauthState: string) => Effect.Effect<void>
@@ -143,6 +145,7 @@ const layer = Layer.effect(
 
     const updateTokens = updateField("tokens", "updateTokens")
     const updateClientInfo = updateField("clientInfo", "updateClientInfo")
+    const updateSecrets = updateField("secrets", "updateSecrets")
     const updateCodeVerifier = updateField("codeVerifier", "updateCodeVerifier")
     const updateOAuthState = updateField("oauthState", "updateOAuthState")
     const clearCodeVerifier = clearField("codeVerifier", "clearCodeVerifier")
@@ -161,6 +164,7 @@ const layer = Layer.effect(
       remove,
       updateTokens,
       updateClientInfo,
+      updateSecrets,
       updateCodeVerifier,
       clearCodeVerifier,
       updateOAuthState,

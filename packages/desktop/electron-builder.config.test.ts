@@ -24,6 +24,18 @@ for (const channel of channels) {
     expect(config.extraMetadata?.desktopName).toBe(`${channel.appId}.desktop`)
     expect(config.linux?.executableName).toBe(channel.appId)
     expect(config.linux?.desktop?.entry?.StartupWMClass).toBe(channel.appId)
+    if (channel.channel === "dev") {
+      expect(config.electronFuses).toBeUndefined()
+      return
+    }
+    expect(config.electronFuses).toEqual({
+      runAsNode: false,
+      enableNodeOptionsEnvironmentVariable: false,
+      enableNodeCliInspectArguments: false,
+      enableEmbeddedAsarIntegrityValidation: true,
+      onlyLoadAppFromAsar: true,
+      grantFileProtocolExtraPrivileges: false,
+    })
   })
 }
 

@@ -60,6 +60,15 @@ describe("getWorkspaceRouteSessionID", () => {
     const url = new URL("http://localhost/session")
     expect(getWorkspaceRouteSessionID(url)).toBeNull()
   })
+
+  test("an EventV2 id in a session-shaped path cannot defect workspace routing", () => {
+    const url = new URL("http://localhost/session/evt_03fc0908d002MS3jl97PqVqBBt/message")
+    expect(getWorkspaceRouteSessionID(url)).toBeNull()
+  })
+
+  test("returns null for any malformed session id", () => {
+    expect(getWorkspaceRouteSessionID(new URL("http://localhost/session/not-a-session/message"))).toBeNull()
+  })
 })
 
 describe("workspaceProxyURL", () => {

@@ -198,6 +198,7 @@ export function markDelivered(team: AgentTeam, workspaceId: string, messageIds: 
 const MAX_MESSAGES = 400
 
 export function appendMessage(team: AgentTeam, message: TeamMessage): AgentTeam {
+  if (team.messages.some((entry) => entry.id === message.id)) return team
   const all = [...team.messages, message]
   if (all.length <= MAX_MESSAGES) return { ...team, messages: all }
   // Settled means every recipient the graph still permits already has it.

@@ -33,7 +33,9 @@ describe("measureUsage", () => {
     expect(measureUsage([{ role: "user" }])).toBeUndefined()
     expect(measureUsage([])).toBeUndefined()
     expect(
-      measureUsage([{ role: "assistant", tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } } }]),
+      measureUsage([
+        { role: "assistant", tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } } },
+      ]),
     ).toBeUndefined()
   })
 
@@ -44,6 +46,18 @@ describe("measureUsage", () => {
     expect(measured!.usage.input).toBe(100)
     expect(measured!.usage.output).toBe(0)
     expect(measured!.costUsd).toBe(0)
+  })
+
+  test("clamps impossible negative provider usage and spend to zero", () => {
+    const measured = measureUsage([
+      {
+        role: "assistant",
+        cost: -1,
+        tokens: { input: 100, output: -10, reasoning: -20, cache: { read: -30, write: 5 } },
+      },
+    ])
+    expect(measured?.usage).toEqual({ input: 100, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 5 })
+    expect(measured?.costUsd).toBe(0)
   })
 
   test("reports the most recent model when a session switches mid-run", () => {

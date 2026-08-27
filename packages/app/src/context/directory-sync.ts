@@ -144,7 +144,9 @@ export const createDirSyncContext = (
       },
     },
     mcp: {
-      add: (name: string, config: McpLocalConfig | McpRemoteConfig) => serverSync.mcp.add(directory, name, config),
+      add: (name: string, config: McpLocalConfig | McpRemoteConfig, secrets?: Record<string, string>) =>
+        serverSync.mcp.add(directory, name, config, secrets),
+      remove: (name: string) => serverSync.mcp.remove(directory, name),
       refresh: () => serverSync.mcp.refresh(directory),
       toggle: (name: string) => serverSync.mcp.toggle(directory, name),
     },

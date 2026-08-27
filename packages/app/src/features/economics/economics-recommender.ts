@@ -28,13 +28,23 @@ function checkPassRateOf(outcomes: ModelOutcome[]): number | undefined {
 // reported cost must not sort ahead of one that did just because its absent
 // cost reads as cheaper.
 function medianCostOf(outcomes: ModelOutcome[]): number | undefined {
-  const costs = outcomes.map((o) => o.costUsd).filter((cost): cost is number => typeof cost === "number")
+  // The session engine uses 0 as its compatibility fallback when a model has
+  // no finite catalog price. Treating that sentinel as measured free spend
+  // would make an unpriced model outrank one whose provider reported a real
+  // charge. This matches the context ledger, which also renders non-positive
+  // spend as unknown rather than free.
+  const costs = outcomes
+    .map((o) => o.costUsd)
+    .filter((cost): cost is number => typeof cost === "number" && Number.isFinite(cost) && cost > 0)
   if (costs.length === 0) return undefined
   return median(costs)
 }
 
 function medianTokensOf(outcomes: ModelOutcome[]): number | undefined {
-  const counts = outcomes.map((o) => o.usage).filter((usage) => usage !== undefined).map(totalTokens)
+  const counts = outcomes
+    .map((o) => o.usage)
+    .filter((usage) => usage !== undefined)
+    .map(totalTokens)
   if (counts.length === 0) return undefined
   return median(counts)
 }
@@ -54,7 +64,9 @@ function evidenceFor(provider: string, model: string, category: TaskCategory, ou
     evidence.push(`median ${Math.round(tokens).toLocaleString()} tokens at $${cost.toFixed(4)} per run`)
   }
 
-  evidence.push(`${outcomes.length} recorded ${category} run${outcomes.length === 1 ? "" : "s"} for ${provider}/${model}`)
+  evidence.push(
+    `${outcomes.length} recorded ${category} run${outcomes.length === 1 ? "" : "s"} for ${provider}/${model}`,
+  )
   return evidence
 }
 

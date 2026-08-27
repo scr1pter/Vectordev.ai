@@ -51,6 +51,26 @@ export function resolveSubmissionAgent(input: {
   )
 }
 
+export function resolveExecutionAgent(input: {
+  planMode: boolean
+  quickRequested: boolean
+  difficulty: TaskDifficulty
+  current: string
+  judgeEnabled: boolean
+}) {
+  if (input.planMode) return input.current
+  if (!input.quickRequested && input.difficulty !== "trivial") {
+    return input.judgeEnabled && input.current === "quick" ? "build" : input.current
+  }
+  if (!input.judgeEnabled) return "quick"
+
+  // The quick agent has no tools, so it cannot launch the independent judge.
+  // An enabled verification contract takes precedence over either automatic
+  // trivial routing or the quick-mode shortcut instead of silently disabling
+  // the feature the user explicitly turned on.
+  return input.current === "quick" ? "build" : input.current
+}
+
 export { shouldUseCompletionJudge, VERIFIED_COMPLETION_POLICY }
 
 export type FollowupDraft = {
@@ -84,7 +104,13 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
   const text = draftText(input.draft.prompt)
   const images = draftImages(input.draft.prompt)
   const difficulty = input.draft.difficulty ?? classifyTaskDifficulty(text)
-  const agent = difficulty === "trivial" && input.draft.agent !== "plan" ? "quick" : input.draft.agent
+  const agent = resolveExecutionAgent({
+    planMode: input.draft.agent === "plan",
+    quickRequested: input.draft.agent === "quick",
+    difficulty,
+    current: input.draft.agent,
+    judgeEnabled: input.draft.llmJudge === true,
+  })
   const llmJudge = shouldUseCompletionJudge({ enabled: input.draft.llmJudge === true, agent })
   const setBusy = () => {
     if (!input.optimisticBusy) return
@@ -444,8 +470,14 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       current: currentAgent.name,
       available: local.agent.list(),
     })
-    const agent =
-      !isPlanMode && (requestedExecutionMode === "quick" || difficulty === "trivial") ? "quick" : resolvedAgent
+    const judgeEnabled = input.llmJudge?.() ?? false
+    const agent = resolveExecutionAgent({
+      planMode: isPlanMode,
+      quickRequested: requestedExecutionMode === "quick",
+      difficulty,
+      current: resolvedAgent,
+      judgeEnabled,
+    })
 
     if (!(await workspaceAvailable())) return
 
@@ -567,7 +599,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       variant,
       difficulty,
       executionMode,
-      llmJudge: input.llmJudge?.() ?? false,
+      llmJudge: judgeEnabled,
     }
 
     const clearInput = () => {

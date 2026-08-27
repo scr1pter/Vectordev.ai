@@ -5,6 +5,14 @@
 
 export type ExternalRuntime = "claude-code" | "codex" | "cursor"
 
+export type ExternalRuntimeStatus = {
+  installed: boolean
+  // Older desktop builds did not report authentication, so an omitted value
+  // remains compatible. An explicit false means every launch would stop at
+  // the sign-in wall and must never be presented as ready.
+  signedIn?: boolean
+}
+
 export type ExternalRuntimeSetup = {
   id: ExternalRuntime
   label: string
@@ -51,6 +59,10 @@ export function isExternalRuntime(value: string): value is ExternalRuntime {
 
 export function externalRuntimeSetup(runtime: string): ExternalRuntimeSetup | undefined {
   return isExternalRuntime(runtime) ? EXTERNAL_RUNTIMES[runtime] : undefined
+}
+
+export function externalRuntimeReady(status: ExternalRuntimeStatus | undefined) {
+  return Boolean(status?.installed && status.signedIn !== false)
 }
 
 // Every step a user must complete before the runtime can be selected, in order.
