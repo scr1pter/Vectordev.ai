@@ -18,10 +18,11 @@
     "build": "electron-vite build && bun ./scripts/verify-runtime.ts",
     "preview": "electron-vite preview",
     "package": "electron-builder --config electron-builder.config.ts",
-    "package:mac": "electron-builder --mac --config electron-builder.config.ts",
+    "package:mac": "electron-builder --mac --config electron-builder.config.ts && bun ./scripts/verify-package.ts",
     "package:win": "electron-builder --win --config electron-builder.config.ts",
     "package:linux": "electron-builder --linux --config electron-builder.config.ts",
-    "native:build": "bun install --cwd native"
+    "native:build": "bun install --cwd native",
+    "verify:package": "bun ./scripts/verify-package.ts"
   },
   "main": "./out/main/index.js",
   "dependencies": {

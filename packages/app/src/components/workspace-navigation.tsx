@@ -519,7 +519,17 @@ export function WorkspaceNavigation(props: {
       >
         <Show
           when={props.updaterState && props.updaterState.status !== "disabled"}
-          fallback={<div class="px-2 text-[11px] text-white/28">Updates unavailable</div>}
+          fallback={
+            // Says why. Automatic updates only run in a released build, and
+            // this read "Updates unavailable" with no reason, which is
+            // indistinguishable from the feature being broken.
+            <div
+              class="px-2 text-[11px] text-[color:var(--vx-text-muted)]"
+              title="Automatic updates run in released builds of Vector. This copy has no release channel to check."
+            >
+              Updates not available in this build
+            </div>
+          }
         >
           <button
             type="button"
@@ -546,7 +556,14 @@ export function WorkspaceNavigation(props: {
               />
             </svg>
             <span class="min-w-0 flex-1 truncate font-medium">Update Vector</span>
-            <span class="shrink-0 text-[9.5px] text-white/30 group-hover:text-white/48">{updateDetail()}</span>
+            {/* A failed check used to say only "Try again", which hides whether
+                retrying could possibly help. The reason goes in the tooltip. */}
+            <span
+              class="shrink-0 text-[9.5px] text-[color:var(--vx-text-muted)] group-hover:text-[color:var(--vx-text-subtle)]"
+              title={props.updaterState?.status === "error" ? props.updaterState.message : undefined}
+            >
+              {updateDetail()}
+            </span>
           </button>
         </Show>
         <button

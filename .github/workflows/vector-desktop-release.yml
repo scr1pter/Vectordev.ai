@@ -344,6 +344,12 @@ jobs:
             sleep $((attempt * 15))
           done
 
+      # 1.19.96 shipped without app-update.yml and every update check failed
+      # with ENOENT. Nothing in the pipeline noticed, because the app packaged,
+      # signed and launched fine — only the updater was dead.
+      - name: Verify packaged apps can reach the update feed
+        run: bun run --cwd packages/desktop verify:package
+
       - name: Verify app notarization and artifact signatures
         run: |
           set -euo pipefail
