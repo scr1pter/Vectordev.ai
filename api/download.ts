@@ -30,10 +30,12 @@ export default async function handler(request: ApiRequest, response: ApiResponse
     response.setHeader("content-disposition", `attachment; filename="${file}"`)
     response.setHeader("x-content-type-options", "nosniff")
     response.setHeader("etag", blob.blob.etag)
-    // Public and identical for everyone, so it can be cached hard. An installer
-    // is immutable for a given release; a new release replaces the object and
-    // changes the etag.
-    response.setHeader("cache-control", "public, max-age=3600, s-maxage=86400")
+    // Short on purpose. These objects are overwritten in place when a release
+    // ships, so a long s-maxage leaves the edge handing out the PREVIOUS build
+    // for as long as it lasts — an installer swap took a full day to appear,
+    // which is the opposite of what this endpoint is for. Five minutes keeps
+    // the CDN useful without making a release invisible.
+    response.setHeader("cache-control", "public, max-age=300, s-maxage=300, stale-while-revalidate=60")
 
     if (blob.statusCode === 304) {
       response.statusCode = 304
