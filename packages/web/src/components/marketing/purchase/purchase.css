@@ -360,3 +360,126 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* ---- free download ------------------------------------------------------
+   The installer is public. This sits above the licence panel because getting
+   the app is now the first thing you can do, not the thing that follows a
+   purchase. */
+.free-download {
+  width: min(720px, 100%);
+  margin: 0 auto 44px;
+  text-align: center;
+}
+
+.free-download-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  padding: 15px 30px;
+  color: #120d17;
+  background: linear-gradient(180deg, #f7f3ff, #cfb8ff);
+  border-radius: 14px;
+  box-shadow:
+    0 18px 40px -18px rgba(143, 82, 255, 0.75),
+    inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  text-decoration: none;
+  transition:
+    transform 200ms cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.free-download-cta:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 24px 52px -18px rgba(143, 82, 255, 0.85),
+    inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+.free-download-cta span {
+  display: grid;
+  gap: 2px;
+  text-align: left;
+}
+
+.free-download-cta strong {
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.free-download-cta small {
+  color: rgba(18, 13, 23, 0.66);
+  font-size: 11.5px;
+}
+
+.free-download-note {
+  margin: 14px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.free-download-more {
+  margin-top: 18px;
+}
+
+.free-download-more summary {
+  color: var(--muted-strong);
+  cursor: pointer;
+  font-size: 12.5px;
+  list-style: none;
+}
+
+.free-download-more summary::-webkit-details-marker {
+  display: none;
+}
+
+.free-download-more summary:hover {
+  color: var(--ink);
+}
+
+.free-download-grid {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+}
+
+.free-download-alt {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 12px 14px;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  text-align: left;
+  text-decoration: none;
+  transition:
+    border-color 180ms ease,
+    background 180ms ease;
+}
+
+.free-download-alt:hover {
+  border-color: var(--line-strong);
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.free-download-alt.is-current {
+  border-color: color-mix(in oklab, var(--accent, #aa8cff) 50%, var(--line));
+}
+
+.free-download-alt span {
+  display: grid;
+  gap: 1px;
+}
+
+.free-download-alt strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.free-download-alt small {
+  color: var(--muted);
+  font-size: 11px;
+}

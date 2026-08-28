@@ -1,5 +1,6 @@
 /** @jsxImportSource react */
 import { ArrowRight, Check, CreditCard, Download, Laptop, ShieldCheck } from "lucide-react"
+import { FreeDownload } from "./FreeDownload"
 import { type SubmitEventHandler, useEffect, useMemo, useState } from "react"
 import "./purchase.css"
 
@@ -73,6 +74,8 @@ export function PurchasePage() {
             and connected cloud services.
           </p>
         </header>
+
+        <FreeDownload />
 
         <section className="purchase-shell" aria-label="Purchase Vector">
           <div className="purchase-plans">
