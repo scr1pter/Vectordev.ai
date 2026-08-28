@@ -4,6 +4,7 @@ import { untrustedChildEnvironment } from "../src/child-environment"
 describe("untrustedChildEnvironment", () => {
   test("removes Vector and OpenCode control secrets while preserving provider credentials", () => {
     const environment = untrustedChildEnvironment({
+      BLOB_READ_WRITE_TOKEN: "release-store-secret",
       OPENCODE_AUTH_CONTENT: '{"provider":{"key":"aggregate-secret"}}',
       OPENCODE_CONSOLE_TOKEN: "console-secret",
       OPENCODE_SERVER_PASSWORD: "server-secret",

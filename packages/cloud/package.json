@@ -5,11 +5,11 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsgo --noEmit",
-    "test": "bun test src/shared.test.ts src/oauth.test.ts src/desktop-release-version.test.ts",
+    "test": "bun test src/shared.test.ts src/oauth.test.ts src/desktop-release-version.test.ts src/desktop-release-manifest.test.ts",
     "dev": "bun run dev-server.ts"
   },
   "dependencies": {
-    "@vercel/blob": "^0.27.0"
+    "@vercel/blob": "2.7.0"
   },
   "devDependencies": {
     "@tsconfig/node22": "catalog:",

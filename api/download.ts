@@ -1,8 +1,6 @@
-import { Readable } from "node:stream"
-import { get } from "@vercel/blob"
-import { installerBlobPath } from "./_lib/billing.js"
-import { contentTypeFor, installerFor, suggestedTarget } from "./_lib/downloads.js"
-import { ApiError, handleApiError, queryValue, requireMethod, type ApiRequest, type ApiResponse } from "./_lib/http.js"
+import { suggestedTarget } from "./_lib/downloads.js"
+import { handleApiError, queryValue, redirect, requireMethod, type ApiRequest, type ApiResponse } from "./_lib/http.js"
+import { currentInstaller } from "./_lib/release-downloads.js"
 
 export const maxDuration = 300
 
@@ -15,38 +13,24 @@ export const maxDuration = 300
 // the same reason. Vercel's own edge protection covers the abuse case, and the
 // files are large-but-static and CDN-cacheable.
 export default async function handler(request: ApiRequest, response: ApiResponse) {
+  await handleDownload(request, response, currentInstaller)
+}
+
+export async function handleDownload(
+  request: ApiRequest,
+  response: ApiResponse,
+  loadInstaller: typeof currentInstaller,
+) {
   try {
     requireMethod(request, "GET")
-    const target = queryValue(request, "target") ?? suggestedTarget(request.headers?.["user-agent"] as string)
-    const file = installerFor(target)
+    const userAgent = request.headers?.["user-agent"]
+    const target = queryValue(request, "target") ?? suggestedTarget(Array.isArray(userAgent) ? userAgent[0] : userAgent)
+    const release = await loadInstaller(target)
 
-    const blob = await get(installerBlobPath(file), {
-      access: "private",
-      token: process.env.VECTOR_INSTALLER_BLOB_TOKEN,
-      ifNoneMatch: request.headers["if-none-match"],
-    })
-    if (!blob) throw new ApiError(404, "DOWNLOAD_NOT_FOUND", "That Vector installer is not available yet.")
-
-    response.setHeader("content-disposition", `attachment; filename="${file}"`)
     response.setHeader("x-content-type-options", "nosniff")
-    response.setHeader("etag", blob.blob.etag)
-    // Short on purpose. These objects are overwritten in place when a release
-    // ships, so a long s-maxage leaves the edge handing out the PREVIOUS build
-    // for as long as it lasts — an installer swap took a full day to appear,
-    // which is the opposite of what this endpoint is for. Five minutes keeps
-    // the CDN useful without making a release invisible.
-    response.setHeader("cache-control", "public, max-age=300, s-maxage=300, stale-while-revalidate=60")
-
-    if (blob.statusCode === 304) {
-      response.statusCode = 304
-      response.end()
-      return
-    }
-
-    response.statusCode = 200
-    response.setHeader("content-type", blob.blob.contentType || contentTypeFor(file))
-    if (blob.blob.size) response.setHeader("content-length", `${blob.blob.size}`)
-    Readable.from(blob.stream as unknown as AsyncIterable<Uint8Array>).pipe(response)
+    response.setHeader("x-vector-release", release.manifest.version)
+    response.setHeader("x-vector-sha256", release.installer.sha256)
+    redirect(response, 307, release.installer.url)
   } catch (error) {
     handleApiError(response, error)
   }

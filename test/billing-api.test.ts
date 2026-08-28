@@ -14,6 +14,7 @@ const billingEnvironment = [
   "VECTOR_PURCHASE_EMAIL_FROM",
   "STRIPE_PRICE_MONTHLY",
   "STRIPE_PRICE_ANNUAL",
+  "BLOB_READ_WRITE_TOKEN",
   "VECTOR_INSTALLER_BLOB_TOKEN",
   "VECTOR_INSTALLER_BLOB_PRIVATE",
 ] as const
@@ -77,7 +78,7 @@ describe("Vector billing API", () => {
     })
   })
 
-  test("does not accept a placeholder as private installer storage", async () => {
+  test("does not accept a placeholder as release storage", async () => {
     process.env.STRIPE_SECRET_KEY = "sk_test_vector"
     process.env.STRIPE_WEBHOOK_SECRET = "whsec_vector"
     process.env.STRIPE_PRICE_MONTHLY = "price_monthly"
@@ -85,13 +86,29 @@ describe("Vector billing API", () => {
     process.env.VECTOR_LICENSE_SECRET = "v".repeat(32)
     process.env.RESEND_API_KEY = "re_vector"
     process.env.VECTOR_PURCHASE_EMAIL_FROM = "Vector <licenses@example.com>"
-    process.env.VECTOR_INSTALLER_BLOB_PRIVATE = "true"
-    process.env.VECTOR_INSTALLER_BLOB_TOKEN = "placeholder"
+    process.env.BLOB_READ_WRITE_TOKEN = "placeholder"
 
     const result = await invoke(config, { method: "GET" })
 
     expect(result.status).toBe(200)
     expect(result.body).toMatchObject({ available: false, downloads: false })
+  })
+
+  test("refuses checkout when configured storage has no verified release", async () => {
+    process.env.STRIPE_SECRET_KEY = "sk_test_vector"
+    process.env.STRIPE_WEBHOOK_SECRET = "whsec_vector"
+    process.env.STRIPE_PRICE_MONTHLY = "price_monthly"
+    process.env.STRIPE_PRICE_ANNUAL = "price_annual"
+    process.env.VECTOR_LICENSE_SECRET = "v".repeat(32)
+    process.env.RESEND_API_KEY = "re_vector"
+    process.env.VECTOR_PURCHASE_EMAIL_FROM = "Vector <licenses@example.com>"
+    process.env.BLOB_READ_WRITE_TOKEN = "vercel_blob_rw_vector"
+
+    await expect(
+      createCheckout("buyer@example.com", "annual", () =>
+        Promise.reject(new Error("The release manifest is unavailable.")),
+      ),
+    ).rejects.toThrow("release manifest is unavailable")
   })
 
   test("requires explicit agreement before opening Stripe Checkout", async () => {

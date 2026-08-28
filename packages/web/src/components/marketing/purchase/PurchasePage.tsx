@@ -6,6 +6,7 @@ import "./purchase.css"
 
 type BillingConfig = {
   available: boolean
+  releaseVersion?: string
   plans: Array<{ id: "monthly" | "annual"; priceUsd: number; interval: "month" | "year"; graceDays: number }>
 }
 
@@ -75,7 +76,7 @@ export function PurchasePage() {
           </p>
         </header>
 
-        <FreeDownload />
+        <FreeDownload version={config.releaseVersion} />
 
         <section className="purchase-shell" aria-label="Purchase Vector">
           <div className="purchase-plans">
@@ -146,7 +147,7 @@ export function PurchasePage() {
                 {!loading && <ArrowRight size={16} />}
               </button>
               <p className="purchase-note">
-                Stripe handles payment. Your license key and protected installer link are sent to this email.
+                Stripe handles payment. Your license key and verified installer link are sent to this email.
               </p>
             </form>
             <div className="platform-strip" aria-label="Supported platforms">
@@ -156,7 +157,7 @@ export function PurchasePage() {
               <span>Windows</span>
               <span>Linux</span>
               <span>
-                <ShieldCheck size={11} /> Protected installer
+                <ShieldCheck size={11} /> Verified installer
               </span>
               <span>
                 <Download size={11} /> Native app

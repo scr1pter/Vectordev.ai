@@ -85,7 +85,7 @@
     },
     {
       "source": "/download/checksums",
-      "destination": "https://42qryducihx01gl0.public.blob.vercel-storage.com/releases/vector-downloads/checksums.txt",
+      "destination": "/api/download-checksums",
       "permanent": false
     }
   ]

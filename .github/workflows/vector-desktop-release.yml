@@ -17,7 +17,7 @@ on:
         type: boolean
 
 concurrency:
-  group: vector-release-${{ inputs.tag || github.ref_name }}
+  group: vector-desktop-release-publisher
   cancel-in-progress: false
 
 permissions:
@@ -183,9 +183,9 @@ jobs:
           - name: sdk-next
             directory: packages/sdk-next
             command: bun run test
-          - name: hosted-abuse
+          - name: hosted-api
             directory: test
-            command: bun test --only-failures abuse-api.test.ts
+            command: bun test --only-failures
     steps:
       - name: Check out release source
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -287,7 +287,7 @@ jobs:
     name: macOS desktop apps
     needs: draft
     runs-on: macos-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     permissions:
       contents: write
     steps:
@@ -326,7 +326,7 @@ jobs:
           OPENCODE_CHANNEL: prod
         run: bun run --cwd packages/desktop build
 
-      - name: Package signed and notarized app
+      - name: Package signed and notarized arm64 app
         env:
           OPENCODE_CHANNEL: prod
           VECTOR_SIGN_MAC: true
@@ -338,11 +338,60 @@ jobs:
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
+          set -euo pipefail
           for attempt in 1 2 3; do
-            bun run --cwd packages/desktop package -- --mac dmg zip --arm64 --x64 --publish never && exit 0
+            if bun run --cwd packages/desktop package -- --mac dmg zip --arm64 --publish never; then break; fi
             if [ "$attempt" = "3" ]; then exit 1; fi
             sleep $((attempt * 15))
           done
+          metadata_dir="$RUNNER_TEMP/vector-latest-yml/latest-yml-aarch64-apple-darwin"
+          artifact_dir="$RUNNER_TEMP/vector-mac-arm64"
+          mkdir -p "$metadata_dir" "$artifact_dir"
+          cp packages/desktop/dist/latest-mac.yml "$metadata_dir/latest-mac.yml"
+          artifacts=(
+            vector-desktop-${VECTOR_VERSION}-mac-arm64.dmg
+            vector-desktop-${VECTOR_VERSION}-mac-arm64.dmg.blockmap
+            vector-desktop-${VECTOR_VERSION}-mac-arm64.zip
+            vector-desktop-${VECTOR_VERSION}-mac-arm64.zip.blockmap
+          )
+          for artifact in "${artifacts[@]}"; do
+            test -s "packages/desktop/dist/$artifact"
+            cp "packages/desktop/dist/$artifact" "$artifact_dir/$artifact"
+          done
+
+      - name: Package signed and notarized x64 app
+        env:
+          OPENCODE_CHANNEL: prod
+          VECTOR_SIGN_MAC: true
+          VECTOR_NOTARIZE: true
+          VECTOR_SIGN_DMG: true
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if bun run --cwd packages/desktop package -- --mac dmg zip --x64 --publish never; then break; fi
+            if [ "$attempt" = "3" ]; then exit 1; fi
+            sleep $((attempt * 15))
+          done
+          metadata_dir="$RUNNER_TEMP/vector-latest-yml/latest-yml-x86_64-apple-darwin"
+          mkdir -p "$metadata_dir"
+          cp packages/desktop/dist/latest-mac.yml "$metadata_dir/latest-mac.yml"
+          cp "$RUNNER_TEMP/vector-mac-arm64/"* packages/desktop/dist/
+
+      - name: Merge macOS updater metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          LATEST_YML_DIR: ${{ runner.temp }}/vector-latest-yml
+        run: |
+          set -euo pipefail
+          bun packages/desktop/scripts/finalize-latest-yml.ts
+          test -s "$RUNNER_TEMP/latest-mac.yml"
+          cp "$RUNNER_TEMP/latest-mac.yml" packages/desktop/dist/latest-mac.yml
 
       # 1.19.96 shipped without app-update.yml and every update check failed
       # with ENOENT. Nothing in the pipeline noticed, because the app packaged,
@@ -469,6 +518,7 @@ jobs:
         shell: pwsh
         run: |
           $files = @(
+            "packages/desktop/dist/vector-desktop-$env:VECTOR_VERSION-win.exe",
             "packages/desktop/dist/vector-desktop-$env:VECTOR_VERSION-win-x64.exe",
             "packages/desktop/dist/vector-desktop-$env:VECTOR_VERSION-win-arm64.exe"
           )
@@ -480,6 +530,9 @@ jobs:
             }
           }
           $metadata = Get-Content packages/desktop/dist/latest.yml -Raw
+          if (!$metadata.Contains("vector-desktop-$env:VECTOR_VERSION-win.exe")) {
+            throw "latest.yml does not reference the combined Windows installer"
+          }
           if (!$metadata.Contains("vector-desktop-$env:VECTOR_VERSION-win-x64.exe")) {
             throw "latest.yml does not reference the x64 installer"
           }
@@ -494,6 +547,8 @@ jobs:
           TAG: ${{ env.RELEASE_TAG }}
         run: |
           $assets = @(
+            "packages/desktop/dist/vector-desktop-$env:VECTOR_VERSION-win.exe",
+            "packages/desktop/dist/vector-desktop-$env:VECTOR_VERSION-win.exe.blockmap",
             "packages/desktop/dist/vector-desktop-$env:VECTOR_VERSION-win-x64.exe",
             "packages/desktop/dist/vector-desktop-$env:VECTOR_VERSION-win-x64.exe.blockmap",
             "packages/desktop/dist/vector-desktop-$env:VECTOR_VERSION-win-arm64.exe",
@@ -564,7 +619,7 @@ jobs:
       - windows
       - linux
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 90
     permissions:
       contents: write
     steps:
@@ -598,6 +653,8 @@ jobs:
             vector-desktop-${version}-mac-x64.dmg.blockmap
             vector-desktop-${version}-mac-x64.zip
             vector-desktop-${version}-mac-x64.zip.blockmap
+            vector-desktop-${version}-win.exe
+            vector-desktop-${version}-win.exe.blockmap
             vector-desktop-${version}-win-arm64.exe
             vector-desktop-${version}-win-arm64.exe.blockmap
             vector-desktop-${version}-win-x64.exe
@@ -634,7 +691,7 @@ jobs:
           TAG: ${{ env.RELEASE_TAG }}
         run: gh release upload "$TAG" release-assets/checksums.txt --clobber
 
-      - name: Publish Vector download and update feeds
+      - name: Stage Vector download and update artifacts
         env:
           BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
           TAG: ${{ env.RELEASE_TAG }}
@@ -650,7 +707,604 @@ jobs:
           VECTOR_RELEASE_DIR="$PWD/release-assets" \
           VECTOR_RELEASE_VERSION="${TAG#v}" \
           VECTOR_RELEASE_CHANNEL="$channel" \
+          VECTOR_RELEASE_PHASE=stage \
           bun packages/cloud/src/upload-desktop-release.ts
+
+      - name: Smoke-test immutable staged desktop release
+        env:
+          TAG: ${{ env.RELEASE_TAG }}
+          PRERELEASE: ${{ env.RELEASE_PRERELEASE }}
+          RELEASE_ORIGIN: https://42qryducihx01gl0.public.blob.vercel-storage.com
+        run: |
+          set -euo pipefail
+
+          version="${TAG#v}"
+          channel=latest
+          if [ "$PRERELEASE" = "true" ]; then channel=beta; fi
+          test "$TAG" = "v$version" || {
+            echo "Release tag $TAG does not match version $version"
+            exit 1
+          }
+
+          origin="${RELEASE_ORIGIN%/}"
+          audit_dir=$(mktemp -d)
+          trap 'rm -rf "$audit_dir"' EXIT
+          cache_buster="release-smoke=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          curl_args=(
+            --fail
+            --show-error
+            --silent
+            --location
+            --retry 5
+            --retry-all-errors
+            --connect-timeout 20
+            --max-time 900
+            --header "Cache-Control: no-cache"
+            --header "Pragma: no-cache"
+          )
+
+          manifest_url="$origin/releases/vector-v$version/downloads.json"
+          curl "${curl_args[@]}" "$manifest_url?$cache_buster" --output "$audit_dir/downloads.json"
+
+          jq -e \
+            --arg version "$version" \
+            --arg channel "$channel" \
+            --arg origin "$origin" \
+            '
+              def valid_target($name; $filename):
+                .targets[$name] as $target
+                | (
+                    (($target | type) == "object")
+                    and (($target | keys | sort) == ["filename", "pathname", "sha256", "size", "url", "verification"])
+                    and ($target.filename == $filename)
+                    and ($target.pathname == ("releases/vector-v" + $version + "/" + $filename))
+                    and ($target.url == ($origin + "/" + $target.pathname))
+                    and (($target.size | type) == "number")
+                    and ($target.size > 0)
+                    and (($target.size | floor) == $target.size)
+                    and (($target.sha256 | type) == "string")
+                    and ($target.sha256 | test("^[a-f0-9]{64}$"))
+                    and ($target.verification == "release-workflow")
+                  );
+
+              (type == "object")
+              and ((keys | sort) == ["channel", "publishedAt", "schemaVersion", "targets", "version"])
+              and (.schemaVersion == 1)
+              and (.version == $version)
+              and (.channel == $channel)
+              and ((.publishedAt | type) == "string")
+              and (.publishedAt | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$"))
+              and ((.targets | type) == "object")
+              and ((.targets | keys | sort) == ["linux-arm64", "linux-x64", "mac-arm64", "mac-x64", "windows-arm64", "windows-x64"])
+              and valid_target("mac-arm64"; "vector-desktop-mac-arm64.dmg")
+              and valid_target("mac-x64"; "vector-desktop-mac-x64.dmg")
+              and valid_target("windows-x64"; "vector-desktop-win-x64.exe")
+              and valid_target("windows-arm64"; "vector-desktop-win-arm64.exe")
+              and valid_target("linux-x64"; "vector-desktop-linux-x86_64.AppImage")
+              and valid_target("linux-arm64"; "vector-desktop-linux-arm64.AppImage")
+            ' "$audit_dir/downloads.json" >/dev/null || {
+              echo "Staged desktop manifest has an invalid schema or does not describe $TAG"
+              jq . "$audit_dir/downloads.json" || true
+              exit 1
+            }
+
+          while IFS=$'\t' read -r target filename url expected_size expected_sha256; do
+            output="$audit_dir/$filename"
+            curl "${curl_args[@]}" "$url?$cache_buster" --output "$output"
+
+            actual_size=$(stat --printf='%s' "$output")
+            test "$actual_size" = "$expected_size" || {
+              echo "$target size mismatch: expected $expected_size, downloaded $actual_size"
+              exit 1
+            }
+
+            actual_sha256=$(sha256sum "$output" | cut -d ' ' -f 1)
+            test "$actual_sha256" = "$expected_sha256" || {
+              echo "$target SHA-256 mismatch: expected $expected_sha256, downloaded $actual_sha256"
+              exit 1
+            }
+            echo "Verified $target: $filename ($actual_size bytes, $actual_sha256)"
+          done < <(
+            jq -r '
+              .targets
+              | to_entries
+              | sort_by(.key)[]
+              | [.key, .value.filename, .value.url, (.value.size | tostring), .value.sha256]
+              | @tsv
+            ' "$audit_dir/downloads.json"
+          )
+
+          update_assets=(
+            vector-desktop-${version}-mac-arm64.dmg
+            vector-desktop-${version}-mac-arm64.dmg.blockmap
+            vector-desktop-${version}-mac-arm64.zip
+            vector-desktop-${version}-mac-arm64.zip.blockmap
+            vector-desktop-${version}-mac-x64.dmg
+            vector-desktop-${version}-mac-x64.dmg.blockmap
+            vector-desktop-${version}-mac-x64.zip
+            vector-desktop-${version}-mac-x64.zip.blockmap
+            vector-desktop-${version}-win.exe
+            vector-desktop-${version}-win.exe.blockmap
+            vector-desktop-${version}-win-x64.exe
+            vector-desktop-${version}-win-x64.exe.blockmap
+            vector-desktop-${version}-win-arm64.exe
+            vector-desktop-${version}-win-arm64.exe.blockmap
+            vector-desktop-${version}-linux-x86_64.AppImage
+            vector-desktop-${version}-linux-arm64.AppImage
+          )
+          expected_update_assets=$(printf '%s\n' "${update_assets[@]}" | jq -Rsc 'split("\n") | map(select(length > 0)) | sort')
+          integrity_url="$origin/releases/vector-v$version/integrity.json"
+          curl "${curl_args[@]}" "$integrity_url?$cache_buster" --output "$audit_dir/integrity.json"
+          jq -e \
+            --arg version "$version" \
+            --arg channel "$channel" \
+            --arg origin "$origin" \
+            --argjson expected_assets "$expected_update_assets" \
+            '
+              (type == "object")
+              and ((keys | sort) == ["assets", "channel", "schemaVersion", "version"])
+              and (.schemaVersion == 1)
+              and (.version == $version)
+              and (.channel == $channel)
+              and ((.assets | type) == "object")
+              and ((.assets | keys | sort) == $expected_assets)
+              and all(
+                .assets | to_entries[];
+                (.key as $name
+                  | .value as $asset
+                  | (($asset | type) == "object")
+                    and (($asset | keys | sort) == ["pathname", "sha256", "sha512", "size", "url"])
+                    and ($asset.pathname == ("releases/vector-v" + $version + "/updater/" + $name))
+                    and ($asset.url == ($origin + "/" + $asset.pathname))
+                    and (($asset.size | type) == "number")
+                    and ($asset.size > 0)
+                    and (($asset.size | floor) == $asset.size)
+                    and (($asset.sha256 | type) == "string")
+                    and ($asset.sha256 | test("^[a-f0-9]{64}$"))
+                    and (($asset.sha512 | type) == "string")
+                    and ($asset.sha512 | test("^[A-Za-z0-9+/]{86}==$")))
+              )
+            ' "$audit_dir/integrity.json" >/dev/null || {
+              echo "Staged updater integrity manifest is invalid or incomplete for $TAG"
+              jq . "$audit_dir/integrity.json" || true
+              exit 1
+            }
+
+          feeds=(latest-mac.yml latest.yml latest-linux.yml latest-linux-arm64.yml)
+          for feed in "${feeds[@]}"; do
+            feed_path="$audit_dir/$feed"
+            curl "${curl_args[@]}" "$origin/releases/vector-v$version/updater/$feed?$cache_buster" --output "$feed_path"
+            cmp --silent "release-assets/$feed" "$feed_path" || {
+              echo "Staged $feed does not match the validated release metadata"
+              exit 1
+            }
+            advertised=$(sed -n 's/^version:[[:space:]]*//p' "$feed_path" | head -n 1 | tr -d "\"'[:space:]")
+            test "$advertised" = "$version" || {
+              echo "$feed advertises ${advertised:-no version}; expected $version"
+              exit 1
+            }
+            echo "Verified staged $feed advertises $version"
+          done
+
+          feed_entries() {
+            bun -e '
+              import { parseDesktopUpdaterMetadata } from "./packages/cloud/src/desktop-release-manifest.ts"
+              const file = Bun.argv[1]
+              if (!file) throw new Error("Updater metadata path is required")
+              const metadata = parseDesktopUpdaterMetadata(file, await Bun.file(file).text())
+              metadata.files.forEach((entry) => {
+                console.log([entry.url, entry.sha512, entry.size].join("\t"))
+              })
+            ' "$1"
+          }
+
+          expected_feed_payloads() {
+            case "$1" in
+              latest-mac.yml)
+                printf '%s\n' \
+                  "vector-desktop-${version}-mac-arm64.dmg" \
+                  "vector-desktop-${version}-mac-arm64.zip" \
+                  "vector-desktop-${version}-mac-x64.dmg" \
+                  "vector-desktop-${version}-mac-x64.zip"
+                ;;
+              latest.yml)
+                printf '%s\n' \
+                  "vector-desktop-${version}-win.exe" \
+                  "vector-desktop-${version}-win-arm64.exe" \
+                  "vector-desktop-${version}-win-x64.exe"
+                ;;
+              latest-linux.yml)
+                printf '%s\n' "vector-desktop-${version}-linux-x86_64.AppImage"
+                ;;
+              latest-linux-arm64.yml)
+                printf '%s\n' "vector-desktop-${version}-linux-arm64.AppImage"
+                ;;
+              *) return 1 ;;
+            esac
+          }
+
+          declare -A verified_payloads=()
+          declare -A verified_update_assets=()
+          for feed in "${feeds[@]}"; do
+            entries="$audit_dir/$feed.entries"
+            feed_entries "$audit_dir/$feed" > "$entries"
+            test -s "$entries" || {
+              echo "$feed has no updater payload entries"
+              exit 1
+            }
+            diff -u \
+              <(expected_feed_payloads "$feed" | sort) \
+              <(cut -f 1 "$entries" | sort) || {
+              echo "$feed does not reference the exact required updater payload set"
+              exit 1
+            }
+            while IFS=$'\t' read -r payload expected_sha512 expected_size; do
+              [ -n "$payload" ] && [ -n "$expected_sha512" ] && [ -n "$expected_size" ] || {
+                echo "$feed contains an incomplete updater payload entry"
+                exit 1
+              }
+              [[ "$payload" == vector-desktop-${version}-* ]] && \
+                [[ "$payload" != */* ]] && [[ "$payload" != *..* ]] || {
+                echo "$feed contains an unsafe or wrong-version payload: $payload"
+                exit 1
+              }
+              if [ -n "${verified_payloads[$payload]:-}" ]; then continue; fi
+              verified_payloads[$payload]=true
+
+              local_payload="release-assets/$payload"
+              test -s "$local_payload" || {
+                echo "$feed references missing release payload: $payload"
+                exit 1
+              }
+              actual_size=$(stat --printf='%s' "$local_payload")
+              test "$actual_size" = "$expected_size" || {
+                echo "$payload local size mismatch: expected $expected_size, got $actual_size"
+                exit 1
+              }
+              integrity_size=$(jq -er --arg payload "$payload" '.assets[$payload].size | tostring' "$audit_dir/integrity.json")
+              integrity_sha512=$(jq -er --arg payload "$payload" '.assets[$payload].sha512' "$audit_dir/integrity.json")
+              integrity_sha256=$(jq -er --arg payload "$payload" '.assets[$payload].sha256' "$audit_dir/integrity.json")
+              test "$expected_size" = "$integrity_size" && test "$expected_sha512" = "$integrity_sha512" || {
+                echo "$payload feed size or SHA-512 does not match integrity.json"
+                exit 1
+              }
+              actual_sha512=$(openssl dgst -sha512 -binary "$local_payload" | base64 -w 0)
+              test "$actual_sha512" = "$expected_sha512" || {
+                echo "$payload local SHA-512 does not match $feed"
+                exit 1
+              }
+              expected_sha256=$(awk -v payload="$payload" '$2 == payload { print $1 }' release-assets/checksums.txt)
+              [[ "$expected_sha256" =~ ^[a-f0-9]{64}$ ]] || {
+                echo "checksums.txt has no unique SHA-256 for $payload"
+                exit 1
+              }
+              actual_sha256=$(sha256sum "$local_payload" | cut -d ' ' -f 1)
+              test "$actual_sha256" = "$expected_sha256" && test "$actual_sha256" = "$integrity_sha256" || {
+                echo "$payload local SHA-256 does not match checksums.txt and integrity.json"
+                exit 1
+              }
+
+              staged_payload="$audit_dir/staged-$payload"
+              staged_url=$(jq -er --arg payload "$payload" '.assets[$payload].url' "$audit_dir/integrity.json")
+              curl "${curl_args[@]}" "$staged_url?$cache_buster" --output "$staged_payload"
+              cmp --silent "$local_payload" "$staged_payload" || {
+                echo "$payload staged content does not match the validated local payload"
+                exit 1
+              }
+              staged_size=$(stat --printf='%s' "$staged_payload")
+              staged_sha512=$(openssl dgst -sha512 -binary "$staged_payload" | base64 -w 0)
+              staged_sha256=$(sha256sum "$staged_payload" | cut -d ' ' -f 1)
+              test "$staged_size" = "$expected_size" && \
+                test "$staged_sha512" = "$expected_sha512" && \
+                test "$staged_sha256" = "$expected_sha256" || {
+                echo "$payload staged size or digest does not match its updater/checksum metadata"
+                exit 1
+              }
+              verified_update_assets[$payload]=true
+              echo "Verified updater payload $payload ($staged_size bytes)"
+            done < "$entries"
+          done
+
+          for payload in "${update_assets[@]}"; do
+            if [ -n "${verified_update_assets[$payload]:-}" ]; then continue; fi
+            local_payload="release-assets/$payload"
+            test -s "$local_payload" || {
+              echo "Missing updater asset: $payload"
+              exit 1
+            }
+            expected_sha256=$(awk -v payload="$payload" '$2 == payload { print $1 }' release-assets/checksums.txt)
+            [[ "$expected_sha256" =~ ^[a-f0-9]{64}$ ]] || {
+              echo "checksums.txt has no unique SHA-256 for updater asset $payload"
+              exit 1
+            }
+            expected_size=$(jq -er --arg payload "$payload" '.assets[$payload].size | tostring' "$audit_dir/integrity.json")
+            expected_sha512=$(jq -er --arg payload "$payload" '.assets[$payload].sha512' "$audit_dir/integrity.json")
+            integrity_sha256=$(jq -er --arg payload "$payload" '.assets[$payload].sha256' "$audit_dir/integrity.json")
+            actual_size=$(stat --printf='%s' "$local_payload")
+            actual_sha512=$(openssl dgst -sha512 -binary "$local_payload" | base64 -w 0)
+            actual_sha256=$(sha256sum "$local_payload" | cut -d ' ' -f 1)
+            test "$actual_size" = "$expected_size" && \
+              test "$actual_sha512" = "$expected_sha512" && \
+              test "$actual_sha256" = "$expected_sha256" && \
+              test "$actual_sha256" = "$integrity_sha256" || {
+              echo "$payload local size or digest does not match checksums.txt and integrity.json"
+              exit 1
+            }
+
+            staged_payload="$audit_dir/staged-$payload"
+            staged_url=$(jq -er --arg payload "$payload" '.assets[$payload].url' "$audit_dir/integrity.json")
+            curl "${curl_args[@]}" "$staged_url?$cache_buster" --output "$staged_payload"
+            staged_size=$(stat --printf='%s' "$staged_payload")
+            staged_sha512=$(openssl dgst -sha512 -binary "$staged_payload" | base64 -w 0)
+            staged_sha256=$(sha256sum "$staged_payload" | cut -d ' ' -f 1)
+            test "$staged_size" = "$expected_size" && \
+              test "$staged_sha512" = "$expected_sha512" && \
+              test "$staged_sha256" = "$expected_sha256" && \
+              cmp --silent "$local_payload" "$staged_payload" || {
+              echo "$payload staged content, size, SHA-256, or SHA-512 does not match its validated local asset"
+              exit 1
+            }
+            echo "Verified staged updater asset $payload ($staged_size bytes, $staged_sha256)"
+          done
+
+          curl "${curl_args[@]}" \
+            "$origin/releases/vector-v$version/checksums.txt?$cache_buster" \
+            --output "$audit_dir/checksums.txt"
+          cmp --silent release-assets/checksums.txt "$audit_dir/checksums.txt" || {
+            echo "Staged checksums.txt does not match the validated release checksums"
+            exit 1
+          }
+
+      - name: Prevent stable release downgrade
+        if: env.RELEASE_PRERELEASE != 'true'
+        env:
+          TAG: ${{ env.RELEASE_TAG }}
+          RELEASE_ORIGIN: https://42qryducihx01gl0.public.blob.vercel-storage.com
+        run: |
+          set -euo pipefail
+
+          version="${TAG#v}"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+            echo "Stable release version must be numeric MAJOR.MINOR.PATCH; received $version"
+            exit 1
+          }
+
+          current_manifest=$(mktemp)
+          trap 'rm -f "$current_manifest"' EXIT
+          current_url="${RELEASE_ORIGIN%/}/releases/vector-downloads/latest.json"
+          http_status=$(curl \
+            --show-error \
+            --silent \
+            --location \
+            --retry 5 \
+            --retry-all-errors \
+            --connect-timeout 20 \
+            --max-time 120 \
+            --header "Cache-Control: no-cache" \
+            --header "Pragma: no-cache" \
+            --output "$current_manifest" \
+            --write-out '%{http_code}' \
+            "$current_url?release-order=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}")
+
+          if [ "$http_status" = "404" ]; then
+            echo "No current stable desktop manifest exists; $TAG may become the first stable release."
+            exit 0
+          fi
+          test "$http_status" = "200" || {
+            echo "Could not verify the current stable desktop release: HTTP $http_status"
+            exit 1
+          }
+
+          current_version=$(jq -er '.version | select(type == "string")' "$current_manifest")
+          [[ "$current_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+            echo "Current stable manifest has a non-numeric version: $current_version"
+            exit 1
+          }
+
+          version_greater() {
+            local left_major left_minor left_patch right_major right_minor right_patch
+            IFS=. read -r left_major left_minor left_patch <<< "$1"
+            IFS=. read -r right_major right_minor right_patch <<< "$2"
+            if ((10#$left_major != 10#$right_major)); then
+              ((10#$left_major > 10#$right_major))
+              return
+            fi
+            if ((10#$left_minor != 10#$right_minor)); then
+              ((10#$left_minor > 10#$right_minor))
+              return
+            fi
+            ((10#$left_patch > 10#$right_patch))
+          }
+
+          if version_greater "$current_version" "$version"; then
+            echo "Refusing to replace stable Vector $current_version with older release $version."
+            exit 1
+          fi
+          echo "Stable release order verified: current=$current_version candidate=$version"
+
+      - name: Commit Vector download and update pointers
+        env:
+          BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
+          TAG: ${{ env.RELEASE_TAG }}
+          PRERELEASE: ${{ env.RELEASE_PRERELEASE }}
+        run: |
+          set -euo pipefail
+          test -n "$BLOB_READ_WRITE_TOKEN" || {
+            echo "BLOB_READ_WRITE_TOKEN is required to commit desktop downloads."
+            exit 1
+          }
+          channel=latest
+          if [ "$PRERELEASE" = "true" ]; then channel=beta; fi
+          VECTOR_RELEASE_VERSION="${TAG#v}" \
+          VECTOR_RELEASE_CHANNEL="$channel" \
+          VECTOR_RELEASE_PHASE=commit \
+          bun packages/cloud/src/upload-desktop-release.ts
+
+      - name: Verify committed release pointers and production downloads
+        env:
+          TAG: ${{ env.RELEASE_TAG }}
+          PRERELEASE: ${{ env.RELEASE_PRERELEASE }}
+          RELEASE_ORIGIN: https://42qryducihx01gl0.public.blob.vercel-storage.com
+          API_ORIGIN: https://vectordev.ai
+        run: |
+          set -euo pipefail
+
+          version="${TAG#v}"
+          origin="${RELEASE_ORIGIN%/}"
+          api_origin="${API_ORIGIN%/}"
+          audit_dir=$(mktemp -d)
+          trap 'rm -rf "$audit_dir"' EXIT
+          cache_buster="release-commit=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          curl_args=(
+            --fail
+            --show-error
+            --silent
+            --location
+            --retry 5
+            --retry-all-errors
+            --connect-timeout 20
+            --max-time 120
+            --header "Cache-Control: no-cache"
+            --header "Pragma: no-cache"
+          )
+
+          fetch_exact_copy() {
+            local source=$1
+            local url=$2
+            local destination=$3
+            local label=$4
+            local attempt
+            for attempt in $(seq 1 12); do
+              if curl "${curl_args[@]}" \
+                "$url?$cache_buster-$attempt" \
+                --output "$destination" && cmp --silent "$source" "$destination"; then
+                echo "Verified committed $label"
+                return 0
+              fi
+              if [ "$attempt" -lt 12 ]; then sleep 5; fi
+            done
+            echo "Committed $label does not match its immutable staged object"
+            return 1
+          }
+
+          updater_version() {
+            sed -n 's/^version:[[:space:]]*//p' "$1" | head -n 1 | tr -d "\"'[:space:]"
+          }
+
+          immutable_manifest="$audit_dir/downloads.json"
+          curl "${curl_args[@]}" \
+            "$origin/releases/vector-v$version/downloads.json?$cache_buster" \
+            --output "$immutable_manifest"
+
+          feeds=(latest-mac.yml latest.yml latest-linux.yml latest-linux-arm64.yml)
+          committed_prefix=releases/vector-updates
+          if [ "$PRERELEASE" = "true" ]; then committed_prefix=releases/vector-beta-updates; fi
+
+          if [ "$PRERELEASE" != "true" ]; then
+            fetch_exact_copy \
+              "$immutable_manifest" \
+              "$origin/releases/vector-downloads/latest.json" \
+              "$audit_dir/latest.json" \
+              "stable desktop manifest"
+          fi
+
+          for feed in "${feeds[@]}"; do
+            staged="$audit_dir/staged-$feed"
+            committed="$audit_dir/committed-$feed"
+            curl "${curl_args[@]}" \
+              "$origin/releases/vector-v$version/updater/$feed?$cache_buster" \
+              --output "$staged"
+            test "$(updater_version "$staged")" = "$version" || {
+              echo "Staged $feed does not advertise $version"
+              exit 1
+            }
+            fetch_exact_copy \
+              "$staged" \
+              "$origin/$committed_prefix/$feed" \
+              "$committed" \
+              "$committed_prefix/$feed"
+            test "$(updater_version "$committed")" = "$version" || {
+              echo "Committed $feed does not advertise $version"
+              exit 1
+            }
+          done
+
+          if [ "$PRERELEASE" = "true" ]; then
+            echo "Verified beta updater pointers without replacing stable download pointers."
+            exit 0
+          fi
+
+          header_value() {
+            local file=$1
+            local name=$2
+            awk -v name="$name" '
+              tolower($1) == tolower(name ":") {
+                $1 = ""
+                sub(/^[[:space:]]+/, "")
+                sub(/\r$/, "")
+                value = $0
+              }
+              END { print value }
+            ' "$file"
+          }
+
+          check_api_redirect() {
+            local label=$1
+            local url=$2
+            local expected_location=$3
+            local separator='?'
+            local attempt headers status release location curl_exit
+            if [[ "$url" == *\?* ]]; then separator='&'; fi
+
+            for attempt in $(seq 1 12); do
+              headers="$audit_dir/api-${label//[^a-zA-Z0-9]/-}.headers"
+              : > "$headers"
+              curl_exit=0
+              if status=$(curl \
+                --show-error \
+                --silent \
+                --request GET \
+                --max-redirs 0 \
+                --connect-timeout 10 \
+                --max-time 10 \
+                --max-filesize 1024 \
+                --limit-rate 16k \
+                --header "Cache-Control: no-cache" \
+                --header "Pragma: no-cache" \
+                --dump-header "$headers" \
+                --output /dev/null \
+                --write-out '%{http_code}' \
+                "$url${separator}release-smoke=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-$attempt"); then
+                curl_exit=0
+              else
+                curl_exit=$?
+              fi
+              release=$(header_value "$headers" x-vector-release)
+              location=$(header_value "$headers" location)
+              if [ "$curl_exit" = "0" ] && [ "$status" = "307" ] && \
+                [ "$release" = "$version" ] && [ "$location" = "$expected_location" ]; then
+                echo "Verified production API redirect for $label"
+                return 0
+              fi
+              echo "Waiting for $label: curl=$curl_exit status=${status:-none} release=${release:-none} location=${location:-none}"
+              if [ "$attempt" -lt 12 ]; then sleep 10; fi
+            done
+            echo "Production API redirect for $label did not converge on $version"
+            return 1
+          }
+
+          targets=(mac-arm64 mac-x64 windows-x64 windows-arm64 linux-x64 linux-arm64)
+          for target in "${targets[@]}"; do
+            expected_location=$(jq -er --arg target "$target" '.targets[$target].url' "$immutable_manifest")
+            check_api_redirect \
+              "$target" \
+              "$api_origin/api/download?target=$target" \
+              "$expected_location"
+          done
+          check_api_redirect \
+            checksums \
+            "$api_origin/api/download-checksums" \
+            "$origin/releases/vector-v$version/checksums.txt"
 
       - name: Publish GitHub release
         env:

@@ -222,6 +222,7 @@ describe("tool.shell", () => {
     Effect.acquireUseRelease(
       Effect.sync(() => {
         const values = {
+          BLOB_READ_WRITE_TOKEN: "release-store-secret",
           OPENCODE_AUTH_CONTENT: "aggregate-secret",
           OPENCODE_CONSOLE_TOKEN: "console-secret",
           OPENCODE_SERVER_PASSWORD: "server-secret",
@@ -240,6 +241,7 @@ describe("tool.shell", () => {
           projectRoot,
           Effect.gen(function* () {
             const code = `process.stdout.write(JSON.stringify({
+              blob: process.env.BLOB_READ_WRITE_TOKEN,
               aggregate: process.env.OPENCODE_AUTH_CONTENT,
               console: process.env.OPENCODE_CONSOLE_TOKEN,
               password: process.env.OPENCODE_SERVER_PASSWORD,
@@ -253,6 +255,7 @@ describe("tool.shell", () => {
             const result = yield* run({ command })
             expect(result.output).toContain('"provider":"provider-secret"')
             ;[
+              "release-store-secret",
               "aggregate-secret",
               "console-secret",
               "server-secret",

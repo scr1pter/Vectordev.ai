@@ -1,7 +1,9 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto"
 import { Resend } from "resend"
 import Stripe from "stripe"
+import { PUBLIC_DOWNLOAD_TARGETS } from "./downloads.js"
 import { ApiError } from "./http.js"
+import { currentDownloadManifest } from "./release-downloads.js"
 
 export type BillingPlan = "annual" | "monthly"
 
@@ -69,13 +71,13 @@ export function publicOrigin() {
 }
 
 export function billingConfiguration() {
-  const installerToken = process.env.VECTOR_INSTALLER_BLOB_TOKEN?.trim() ?? ""
+  const installerToken = process.env.BLOB_READ_WRITE_TOKEN?.trim() ?? ""
   const stripe = Boolean(process.env.STRIPE_SECRET_KEY)
   const webhook = Boolean(process.env.STRIPE_WEBHOOK_SECRET)
   const licenseSecret = (process.env.VECTOR_LICENSE_SECRET ?? "").length >= 32
   const email = Boolean(process.env.RESEND_API_KEY && process.env.VECTOR_PURCHASE_EMAIL_FROM)
   const prices = Object.values(BILLING_PLANS).every((plan) => Boolean(process.env[plan.priceEnvironment]?.trim()))
-  const downloads = installerToken.startsWith("vercel_blob_rw_") && process.env.VECTOR_INSTALLER_BLOB_PRIVATE === "true"
+  const downloads = installerToken.startsWith("vercel_blob_rw_")
   return {
     available: stripe && webhook && licenseSecret && email && prices && downloads,
     stripe,
@@ -393,7 +395,11 @@ async function sendPurchaseEmail(input: {
   if (result.error) throw new Error(result.error.message)
 }
 
-export async function createCheckout(email?: string, selectedPlan?: BillingPlan) {
+export async function createCheckout(
+  email?: string,
+  selectedPlan?: BillingPlan,
+  loadManifest: () => Promise<unknown> = currentDownloadManifest,
+) {
   const plan = requiredBillingPlan(selectedPlan)
   const normalizedEmail = requiredText(
     email,
@@ -406,6 +412,7 @@ export async function createCheckout(email?: string, selectedPlan?: BillingPlan)
   }
   const config = billingConfiguration()
   if (!config.available) throw new ApiError(503, "BILLING_NOT_CONFIGURED", "Vector purchases are not available yet.")
+  await loadManifest()
   const stripe = stripeClient()
   const bucket = Math.floor(Date.now() / (5 * 60 * 1_000))
   const session = await stripe.checkout.sessions.create(
@@ -686,19 +693,7 @@ export async function billingPortal(input: { activationToken: string; deviceId: 
   return session.url
 }
 
-export const downloadTargets: Record<string, string> = {
-  "mac-arm64": "vector-desktop-mac-arm64.dmg",
-  "mac-x64": "vector-desktop-mac-x64.dmg",
-  "windows-x64": "vector-desktop-win-x64.exe",
-  "windows-arm64": "vector-desktop-win-arm64.exe",
-  "linux-x64": "vector-desktop-linux-x86_64.AppImage",
-  "linux-arm64": "vector-desktop-linux-arm64.AppImage",
-}
-
-export function installerBlobPath(file: string) {
-  const prefix = (process.env.VECTOR_INSTALLER_BLOB_PREFIX || "releases/vector-downloads").replace(/^\/+|\/+$/g, "")
-  return `${prefix}/${file}`
-}
+export const downloadTargets = PUBLIC_DOWNLOAD_TARGETS
 
 export async function consumeDownload(token: string, target: string) {
   const file = downloadTargets[target]
@@ -712,9 +707,6 @@ export async function consumeDownload(token: string, target: string) {
   }
   return {
     file,
-    pathname: installerBlobPath(file),
-    customerId: customer.id,
-    recentDownloads: recentDownloadCount(customer),
   }
 }
 
@@ -732,43 +724,6 @@ function recentTransferCount(customer: Stripe.Customer) {
   if (!Number.isFinite(startedAt) || Date.now() - startedAt > DEVICE_TRANSFER_WINDOW_MS) return 0
   const count = Number(customer.metadata.vector_transfer_count ?? "0")
   return Number.isFinite(count) && count > 0 ? count : 0
-}
-
-const DOWNLOAD_WINDOW_MS = 24 * 60 * 60 * 1000
-const DOWNLOAD_LIMIT_PER_WINDOW = 10
-
-function recentDownloadCount(customer: Stripe.Customer) {
-  const startedAt = Date.parse(customer.metadata.vector_download_window_started_at ?? "")
-  if (!Number.isFinite(startedAt) || Date.now() - startedAt > DOWNLOAD_WINDOW_MS) return 0
-  const count = Number(customer.metadata.vector_download_count ?? "0")
-  return Number.isFinite(count) && count > 0 ? count : 0
-}
-
-export function assertDownloadAllowed(recentDownloads: number) {
-  if (recentDownloads >= DOWNLOAD_LIMIT_PER_WINDOW) {
-    throw new ApiError(
-      429,
-      "DOWNLOAD_RATE_LIMITED",
-      "This license has downloaded installers many times today. Try again tomorrow, or contact support.",
-    )
-  }
-}
-
-// Called once the bytes have actually reached the customer. Recording it before
-// the stream meant a transfer that failed halfway still counted.
-export async function completeDownload(input: { customerId: string; target: string }) {
-  const stripe = stripeClient()
-  const customer = await customerRecord(stripe, input.customerId)
-  const previous = recentDownloadCount(customer)
-  await updateCustomer(stripe, customer.id, {
-    metadata: {
-      vector_downloaded_at: new Date().toISOString(),
-      vector_download_target: input.target,
-      vector_download_count: `${previous + 1}`,
-      vector_download_window_started_at:
-        previous === 0 ? new Date().toISOString() : (customer.metadata.vector_download_window_started_at ?? new Date().toISOString()),
-    },
-  })
 }
 
 export async function syncSubscription(snapshot: StripeSubscription) {

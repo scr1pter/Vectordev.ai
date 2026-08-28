@@ -14,12 +14,12 @@ const aliases: Record<string, string> = {
 
 export const GET: APIRoute = ({ params, site }) => {
   if (params.target === "checksums") {
-    return Response.redirect(
-      "https://42qryducihx01gl0.public.blob.vercel-storage.com/releases/vector-downloads/checksums.txt",
-      302,
-    )
+    return Response.redirect(new URL("/api/download-checksums", site ?? "https://vectordev.ai"), 302)
   }
   const target = aliases[params.target || ""]
   if (!target) return new Response("Download not found", { status: 404 })
-  return Response.redirect(new URL(`/download?target=${encodeURIComponent(target)}`, site ?? "https://vectordev.ai"), 302)
+  return Response.redirect(
+    new URL(`/download?target=${encodeURIComponent(target)}`, site ?? "https://vectordev.ai"),
+    302,
+  )
 }

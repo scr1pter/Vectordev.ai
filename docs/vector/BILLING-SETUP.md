@@ -15,9 +15,7 @@ VECTOR_LICENSE_SECRET=
 RESEND_API_KEY=
 VECTOR_PURCHASE_EMAIL_FROM=Vector <licenses@vectordev.ai>
 VECTOR_PUBLIC_URL=https://vectordev.ai
-VECTOR_INSTALLER_BLOB_PREFIX=releases/vector-downloads
-VECTOR_INSTALLER_BLOB_PRIVATE=true
-VECTOR_INSTALLER_BLOB_TOKEN=
+BLOB_READ_WRITE_TOKEN=
 ```
 
 `VECTOR_LICENSE_SECRET` must be a stable random value of at least 32 characters. Losing or changing it invalidates existing license and download signatures.
@@ -30,14 +28,14 @@ Configure the webhook endpoint at `https://vectordev.ai/api/billing/webhook` for
 
 ## Installer storage
 
-Vector's automatic updater uses a public release feed so installed apps can retrieve updates. Initial purchase downloads use a separate private Vercel Blob store. `VECTOR_INSTALLER_BLOB_TOKEN` must be that private store's real `vercel_blob_rw_...` token; placeholders are rejected. Copy each platform installer into `VECTOR_INSTALLER_BLOB_PREFIX` in the private store before enabling checkout.
+Vector's updater, free downloads, and licensed downloads all resolve through the same public release store. `BLOB_READ_WRITE_TOKEN` must be that store's real `vercel_blob_rw_...` token; placeholders are rejected. The release workflow uploads immutable installers first and publishes `releases/vector-downloads/latest.json` last, so every download surface switches versions as one atomic release.
 
-The billing API creates a short-lived download token only after a paid checkout. The first completed installer download is recorded in Stripe customer metadata, while the desktop license still controls whether the installed application can be used.
+The billing API creates a short-lived download token after a paid checkout. The public installer bytes are intentionally shareable; the desktop license controls whether the installed application can be used.
 
 ## Release check
 
 1. Complete one monthly and one annual test checkout.
 2. Confirm the license email arrives and the purchase-complete page shows the same key.
-3. Download one installer and verify a second initial-download attempt is rejected.
+3. Download each relevant installer and confirm it matches the version and checksum in the release manifest.
 4. Activate the license on a clean computer and confirm a second device is rejected.
 5. Exercise cancellation, payment-failure email, the monthly grace window, and reactivation in Stripe test mode before enabling live mode.
