@@ -60,7 +60,13 @@ const APP_IDS = {
   prod: "ai.vector.app",
 } as const
 
-const getBase = (appId: string): Configuration => ({
+const EXECUTABLE_NAMES = {
+  dev: "vector-desktop-dev",
+  beta: "vector-desktop-beta",
+  prod: "vector-desktop",
+} as const
+
+const getBase = (appId: string, executableName: string): Configuration => ({
   // Updater artifacts are immutable by version. Publishing latest*.yml last can
   // then switch clients to a complete new set without invalidating the files
   // referenced by the previous release metadata.
@@ -138,7 +144,10 @@ const getBase = (appId: string): Configuration => ({
   linux: {
     icon: `resources/icons`,
     category: "Development",
-    executableName: appId,
+    // @electron/fuses treats any path containing ".app" as a macOS bundle.
+    // Keep the Linux binary distinct from the reverse-DNS application ID.
+    executableName,
+    syncDesktopName: true,
     desktop: {
       entry: {
         // Match the installed .desktop file and hicolor icon basename so
@@ -152,7 +161,7 @@ const getBase = (appId: string): Configuration => ({
 
 function getConfig() {
   const appId = APP_IDS[channel]
-  const base = getBase(appId)
+  const base = getBase(appId, EXECUTABLE_NAMES[channel])
 
   if (channel === "dev") {
     return {

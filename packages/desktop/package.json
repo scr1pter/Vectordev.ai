@@ -15,7 +15,7 @@
     "predev": "bun ./scripts/predev.ts",
     "dev": "electron-vite dev",
     "prebuild": "bun ./scripts/prebuild.ts",
-    "build": "node --max-old-space-size=6144 ./node_modules/electron-vite/bin/electron-vite.js build && bun ./scripts/verify-runtime.ts",
+    "build": "bun ./scripts/build-desktop.ts && bun ./scripts/verify-runtime.ts",
     "preview": "electron-vite preview",
     "package": "electron-builder --config electron-builder.config.ts",
     "package:mac": "electron-builder --mac --config electron-builder.config.ts && bun ./scripts/verify-package.ts",

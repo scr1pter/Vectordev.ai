@@ -343,7 +343,7 @@ jobs:
               echo "Release $TAG is already public; refusing to replace it."
               exit 1
             }
-            gh release edit "$TAG" --title "Vector ${TAG#v}" --notes-file release-notes.md
+            gh release edit "$TAG" --target "$GITHUB_SHA" --title "Vector ${TAG#v}" --notes-file release-notes.md
             exit 0
           fi
           gh release create "$TAG" \
@@ -421,6 +421,7 @@ jobs:
             export VECTOR_SIGN_MAC=false
             export VECTOR_NOTARIZE=false
             export VECTOR_SIGN_DMG=false
+            unset CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID
           fi
           for attempt in 1 2 3; do
             if bun run --cwd packages/desktop package -- --mac dmg zip --arm64 --publish never; then break; fi
@@ -460,6 +461,7 @@ jobs:
             export VECTOR_SIGN_MAC=false
             export VECTOR_NOTARIZE=false
             export VECTOR_SIGN_DMG=false
+            unset CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID
           fi
           for attempt in 1 2 3; do
             if bun run --cwd packages/desktop package -- --mac dmg zip --x64 --publish never; then break; fi

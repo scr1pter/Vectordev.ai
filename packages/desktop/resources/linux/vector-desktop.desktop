@@ -1,9 +1,9 @@
 [Desktop Entry]
 Name=Vector
-Exec=/opt/Vector/ai.vector.app %U
+Exec=/opt/Vector/vector-desktop %U
 Terminal=false
 Type=Application
-Icon=ai.vector.app
+Icon=vector-desktop
 StartupWMClass=ai.vector.app
 NoDisplay=true
 Comment=Free BYOK AI coding workspace

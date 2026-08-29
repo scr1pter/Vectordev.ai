@@ -4,9 +4,9 @@ import type { Configuration } from "electron-builder"
 const vectorDesktopEntry = "resources/linux/vector-desktop.desktop"
 
 const channels = [
-  { channel: "dev", appId: "ai.vector.app.dev" },
-  { channel: "beta", appId: "ai.vector.app.beta" },
-  { channel: "prod", appId: "ai.vector.app" },
+  { channel: "dev", appId: "ai.vector.app.dev", executableName: "vector-desktop-dev" },
+  { channel: "beta", appId: "ai.vector.app.beta", executableName: "vector-desktop-beta" },
+  { channel: "prod", appId: "ai.vector.app", executableName: "vector-desktop" },
 ] as const
 
 for (const channel of channels) {
@@ -22,7 +22,9 @@ for (const channel of channels) {
 
     expect(config.appId).toBe(channel.appId)
     expect(config.extraMetadata?.desktopName).toBe(`${channel.appId}.desktop`)
-    expect(config.linux?.executableName).toBe(channel.appId)
+    expect(config.linux?.executableName).toBe(channel.executableName)
+    expect(config.linux?.executableName).not.toContain(".app")
+    expect(config.linux?.syncDesktopName).toBe(true)
     expect(config.linux?.desktop?.entry?.StartupWMClass).toBe(channel.appId)
     if (channel.channel === "dev") {
       expect(config.electronFuses).toBeUndefined()
@@ -54,7 +56,8 @@ test("ships the branded Vector Linux launcher", async () => {
 
   const desktop = await Bun.file(vectorDesktopEntry).text()
   expect(desktop).toContain("Name=Vector")
-  expect(desktop).toContain("Icon=ai.vector.app")
+  expect(desktop).toContain("Exec=/opt/Vector/vector-desktop %U")
+  expect(desktop).toContain("Icon=vector-desktop")
   expect(desktop).toContain("StartupWMClass=ai.vector.app")
 })
 
