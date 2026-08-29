@@ -4,6 +4,7 @@ import {
   createDesktopDownloadManifest,
   createDesktopReleaseIntegrityManifest,
   desktopDownloadTargets,
+  desktopReleaseCommitScope,
   desktopReleasePhase,
   desktopUpdateAssetNames,
   desktopUpdaterMetadataFiles,
@@ -22,6 +23,7 @@ import { desktopReleaseVersion } from "./desktop-release-version"
 const version = desktopReleaseVersion(process.env.VECTOR_RELEASE_VERSION)
 const channel = process.env.VECTOR_RELEASE_CHANNEL === "beta" ? "beta" : "latest"
 const phase = desktopReleasePhase(process.env.VECTOR_RELEASE_PHASE)
+const commitScope = desktopReleaseCommitScope(process.env.VECTOR_RELEASE_COMMIT_SCOPE)
 const source = path.resolve(process.env.VECTOR_RELEASE_DIR ?? path.join(import.meta.dir, "../../desktop/dist"))
 const dryRun = process.env.VECTOR_RELEASE_DRY_RUN === "true"
 const blobToken = process.env.BLOB_READ_WRITE_TOKEN
@@ -42,6 +44,9 @@ const putOptions = {
 } as const
 
 if (!dryRun && !blobToken) throw new Error("BLOB_READ_WRITE_TOKEN is required")
+if (commitScope === "downloads" && channel !== "latest") {
+  throw new Error("Download-only desktop releases require the stable channel")
+}
 
 const asset = (name: string) => `vector-desktop-${version}-${name}`
 const downloads = new Map<string, string>([
@@ -121,8 +126,10 @@ async function commitRelease() {
     if (channel === "latest") {
       downloads.forEach((downloadName) => console.log(`validated releases/vector-downloads/${downloadName}`))
     }
-    updateAssets.forEach((name) => console.log(`validated ${updatePrefix}/${name}`))
-    updateMetadata.forEach((name) => console.log(`validated ${updatePrefix}/${name}`))
+    if (commitScope === "full") {
+      updateAssets.forEach((name) => console.log(`validated ${updatePrefix}/${name}`))
+      updateMetadata.forEach((name) => console.log(`validated ${updatePrefix}/${name}`))
+    }
     if (channel === "latest") console.log(`validated ${latestDesktopDownloadManifestPath}`)
     return
   }
@@ -142,19 +149,21 @@ async function commitRelease() {
     console.log("copied releases/vector-downloads/checksums.txt")
   }
 
-  for (const name of updateAssets) {
-    await copy(staged.integrity.assets[name].url, `${updatePrefix}/${name}`, {
-      ...mutableOptions,
-      cacheControlMaxAge: 31_536_000,
-    })
-    console.log(`copied ${updatePrefix}/${name}`)
-  }
-  for (const name of updateMetadata) {
-    await copy(stagedUrl(staged.manifest, versionedDesktopUpdaterPath(version, name)), `${updatePrefix}/${name}`, {
-      ...mutableOptions,
-      contentType: "text/yaml",
-    })
-    console.log(`copied ${updatePrefix}/${name}`)
+  if (commitScope === "full") {
+    for (const name of updateAssets) {
+      await copy(staged.integrity.assets[name].url, `${updatePrefix}/${name}`, {
+        ...mutableOptions,
+        cacheControlMaxAge: 31_536_000,
+      })
+      console.log(`copied ${updatePrefix}/${name}`)
+    }
+    for (const name of updateMetadata) {
+      await copy(stagedUrl(staged.manifest, versionedDesktopUpdaterPath(version, name)), `${updatePrefix}/${name}`, {
+        ...mutableOptions,
+        contentType: "text/yaml",
+      })
+      console.log(`copied ${updatePrefix}/${name}`)
+    }
   }
 
   // The public download manifest is the stable commit point and must remain the

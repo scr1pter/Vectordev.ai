@@ -40,7 +40,7 @@ export function FreeDownload({ version }: { version?: string }) {
 
       <p className="free-download-note">
         Free to download. No account, no email.{" "}
-        {version ? `Verified release v${version}.` : "macOS, Windows and Linux."}
+        {version ? `Checksum-verified release v${version}.` : "macOS, Windows and Linux."}
       </p>
 
       <details className="free-download-more">

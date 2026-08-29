@@ -15,6 +15,11 @@ on:
         required: true
         default: false
         type: boolean
+      allow_unsigned:
+        description: "Allow an explicitly approved unsigned release"
+        required: true
+        default: false
+        type: boolean
 
 concurrency:
   group: vector-desktop-release-publisher
@@ -34,6 +39,8 @@ jobs:
     name: Validate release metadata
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    outputs:
+      unsigned: ${{ steps.release-policy.outputs.unsigned }}
     steps:
       - name: Check out release source
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -82,8 +89,54 @@ jobs:
             exit 1
           fi
 
+      - name: Resolve the release signing policy
+        id: release-policy
+        env:
+          PRERELEASE: ${{ env.RELEASE_PRERELEASE }}
+          REQUESTED_UNSIGNED: ${{ inputs.allow_unsigned || false }}
+          TAG: ${{ env.RELEASE_TAG }}
+        run: |
+          set -euo pipefail
+          jq -e '
+            type == "object"
+            and ((keys | sort) == ["unsignedVersions"])
+            and (.unsignedVersions | type == "array")
+            and (.unsignedVersions | all(type == "string" and test("^[0-9]+\\.[0-9]+\\.[0-9]+$")))
+            and (.unsignedVersions | length == (unique | length))
+          ' packages/desktop/release-policy.json >/dev/null || {
+            echo "packages/desktop/release-policy.json is invalid"
+            exit 1
+          }
+
+          version="${TAG#v}"
+          allowlisted=false
+          if jq -e --arg version "$version" '.unsignedVersions | index($version) != null' packages/desktop/release-policy.json >/dev/null; then
+            allowlisted=true
+          fi
+          unsigned=false
+          if [ "$REQUESTED_UNSIGNED" = "true" ]; then
+            [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] || {
+              echo "Unsigned releases can only be requested through a manual workflow dispatch."
+              exit 1
+            }
+            [ "$allowlisted" = "true" ] || {
+              echo "Vector $version is not explicitly approved for an unsigned release."
+              exit 1
+            }
+            [ "$PRERELEASE" != "true" ] || {
+              echo "The download-only unsigned release path is only available for the stable channel."
+              exit 1
+            }
+            unsigned=true
+          fi
+          echo "unsigned=$unsigned" >> "$GITHUB_OUTPUT"
+          if [ "$unsigned" = "true" ]; then
+            echo "::warning::Vector $version will be published without Apple notarization or Windows Authenticode signing."
+            echo "### Unsigned release approved for Vector $version" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
   credentials:
-    name: Preflight production credentials
+    name: Preflight release credentials
     needs: prepare
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -101,25 +154,28 @@ jobs:
       AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
       VECTOR_WINDOWS_PUBLISHER_NAME: ${{ secrets.VECTOR_WINDOWS_PUBLISHER_NAME }}
       BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
+      RELEASE_UNSIGNED: ${{ needs.prepare.outputs.unsigned }}
     steps:
       - name: Require signing, notarization, and feed credentials
         run: |
           set -euo pipefail
-          required=(
-            CSC_LINK
-            CSC_KEY_PASSWORD
-            APPLE_ID
-            APPLE_APP_SPECIFIC_PASSWORD
-            APPLE_TEAM_ID
-            AZURE_TRUSTED_SIGNING_ENDPOINT
-            AZURE_TRUSTED_SIGNING_ACCOUNT_NAME
-            AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE
-            AZURE_CLIENT_ID
-            AZURE_TENANT_ID
-            AZURE_CLIENT_SECRET
-            VECTOR_WINDOWS_PUBLISHER_NAME
-            BLOB_READ_WRITE_TOKEN
-          )
+          required=(BLOB_READ_WRITE_TOKEN)
+          if [ "$RELEASE_UNSIGNED" != "true" ]; then
+            required+=(
+              CSC_LINK
+              CSC_KEY_PASSWORD
+              APPLE_ID
+              APPLE_APP_SPECIFIC_PASSWORD
+              APPLE_TEAM_ID
+              AZURE_TRUSTED_SIGNING_ENDPOINT
+              AZURE_TRUSTED_SIGNING_ACCOUNT_NAME
+              AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE
+              AZURE_CLIENT_ID
+              AZURE_TENANT_ID
+              AZURE_CLIENT_SECRET
+              VECTOR_WINDOWS_PUBLISHER_NAME
+            )
+          fi
           missing=()
           for name in "${required[@]}"; do
             if [ -z "${!name:-}" ]; then missing+=("$name"); fi
@@ -238,6 +294,7 @@ jobs:
     name: Prepare draft GitHub release
     needs:
       - credentials
+      - prepare
       - typecheck
       - test
       - build
@@ -251,6 +308,7 @@ jobs:
 
       - name: Create release notes from the shipped changelog
         env:
+          RELEASE_UNSIGNED: ${{ needs.prepare.outputs.unsigned }}
           TAG: ${{ env.RELEASE_TAG }}
         run: |
           set -euo pipefail
@@ -261,6 +319,17 @@ jobs:
             | "## \(.title)\n\n\(.description)\n"
           ' packages/web/public/changelog.json > release-notes.md
           test -s release-notes.md
+          if [ "$RELEASE_UNSIGNED" = "true" ]; then
+            unsigned_notes=$(mktemp)
+            {
+              echo "## Unsigned installer notice"
+              echo
+              echo "This interim Vector release is not Apple-notarized or Windows Authenticode-signed. Your operating system may show an unidentified-developer or unknown-publisher warning. Production signing is planned for a later release."
+              echo
+              cat release-notes.md
+            } > "$unsigned_notes"
+            mv "$unsigned_notes" release-notes.md
+          fi
 
       - name: Create or refresh draft release
         env:
@@ -285,11 +354,15 @@ jobs:
 
   mac:
     name: macOS desktop apps
-    needs: draft
+    needs:
+      - draft
+      - prepare
     runs-on: macos-latest
     timeout-minutes: 90
     permissions:
       contents: write
+    env:
+      RELEASE_UNSIGNED: ${{ needs.prepare.outputs.unsigned }}
     steps:
       - name: Check out release source
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -312,6 +385,10 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
+          if [ "$RELEASE_UNSIGNED" = "true" ]; then
+            echo "Skipping Apple signing and notarization for this explicitly approved unsigned release."
+            exit 0
+          fi
           missing=()
           for name in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
             if [ -z "${!name:-}" ]; then missing+=("$name"); fi
@@ -332,6 +409,7 @@ jobs:
           VECTOR_SIGN_MAC: true
           VECTOR_NOTARIZE: true
           VECTOR_SIGN_DMG: true
+          VECTOR_ALLOW_UNSIGNED_RELEASE: ${{ needs.prepare.outputs.unsigned }}
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
@@ -339,6 +417,11 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
+          if [ "$RELEASE_UNSIGNED" = "true" ]; then
+            export VECTOR_SIGN_MAC=false
+            export VECTOR_NOTARIZE=false
+            export VECTOR_SIGN_DMG=false
+          fi
           for attempt in 1 2 3; do
             if bun run --cwd packages/desktop package -- --mac dmg zip --arm64 --publish never; then break; fi
             if [ "$attempt" = "3" ]; then exit 1; fi
@@ -365,6 +448,7 @@ jobs:
           VECTOR_SIGN_MAC: true
           VECTOR_NOTARIZE: true
           VECTOR_SIGN_DMG: true
+          VECTOR_ALLOW_UNSIGNED_RELEASE: ${{ needs.prepare.outputs.unsigned }}
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
@@ -372,6 +456,11 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
+          if [ "$RELEASE_UNSIGNED" = "true" ]; then
+            export VECTOR_SIGN_MAC=false
+            export VECTOR_NOTARIZE=false
+            export VECTOR_SIGN_DMG=false
+          fi
           for attempt in 1 2 3; do
             if bun run --cwd packages/desktop package -- --mac dmg zip --x64 --publish never; then break; fi
             if [ "$attempt" = "3" ]; then exit 1; fi
@@ -410,8 +499,12 @@ jobs:
           }
           while IFS= read -r app; do
             codesign --verify --deep --strict --verbose=4 "$app"
-            spctl --assess --type execute --verbose=4 "$app"
-            xcrun stapler validate "$app"
+            if [ "$RELEASE_UNSIGNED" = "true" ]; then
+              codesign -dv --verbose=4 "$app" 2>&1 | grep -Fq "Signature=adhoc"
+            else
+              spctl --assess --type execute --verbose=4 "$app"
+              xcrun stapler validate "$app"
+            fi
           done < "$app_list"
 
           shopt -s nullglob
@@ -421,7 +514,11 @@ jobs:
             exit 1
           }
           for dmg in "${dmgs[@]}"; do
-            codesign --verify --verbose=4 "$dmg"
+            if [ "$RELEASE_UNSIGNED" = "true" ]; then
+              test -s "$dmg"
+            else
+              codesign --verify --verbose=4 "$dmg"
+            fi
           done
 
           grep -Fq "vector-desktop-${VECTOR_VERSION}-mac-arm64.zip" packages/desktop/dist/latest-mac.yml
@@ -446,11 +543,15 @@ jobs:
 
   windows:
     name: Windows desktop apps
-    needs: draft
+    needs:
+      - draft
+      - prepare
     runs-on: windows-latest
     timeout-minutes: 60
     permissions:
       contents: write
+    env:
+      RELEASE_UNSIGNED: ${{ needs.prepare.outputs.unsigned }}
     steps:
       - name: Check out release source
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -476,6 +577,10 @@ jobs:
           AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
           VECTOR_WINDOWS_PUBLISHER_NAME: ${{ secrets.VECTOR_WINDOWS_PUBLISHER_NAME }}
         run: |
+          if ($env:RELEASE_UNSIGNED -eq "true") {
+            Write-Host "Skipping Windows signing for this explicitly approved unsigned release."
+            exit 0
+          }
           $required = @(
             "AZURE_TRUSTED_SIGNING_ENDPOINT",
             "AZURE_TRUSTED_SIGNING_ACCOUNT_NAME",
@@ -499,6 +604,7 @@ jobs:
         env:
           OPENCODE_CHANNEL: prod
           VECTOR_REQUIRE_WINDOWS_SIGNING: true
+          VECTOR_ALLOW_UNSIGNED_RELEASE: ${{ needs.prepare.outputs.unsigned }}
           VECTOR_WINDOWS_PUBLISHER_NAME: ${{ secrets.VECTOR_WINDOWS_PUBLISHER_NAME }}
           AZURE_TRUSTED_SIGNING_ENDPOINT: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
           AZURE_TRUSTED_SIGNING_ACCOUNT_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME }}
@@ -507,6 +613,18 @@ jobs:
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
         run: |
+          if ($env:RELEASE_UNSIGNED -eq "true") {
+            $env:VECTOR_REQUIRE_WINDOWS_SIGNING = "false"
+            @(
+              "VECTOR_WINDOWS_PUBLISHER_NAME",
+              "AZURE_TRUSTED_SIGNING_ENDPOINT",
+              "AZURE_TRUSTED_SIGNING_ACCOUNT_NAME",
+              "AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE",
+              "AZURE_CLIENT_ID",
+              "AZURE_TENANT_ID",
+              "AZURE_CLIENT_SECRET"
+            ) | ForEach-Object { Remove-Item "Env:$_" -ErrorAction SilentlyContinue }
+          }
           for ($attempt = 1; $attempt -le 3; $attempt++) {
             bun run --cwd packages/desktop package -- --win nsis --x64 --arm64 --publish never
             if ($LASTEXITCODE -eq 0) { exit 0 }
@@ -525,7 +643,10 @@ jobs:
           foreach ($file in $files) {
             if (!(Test-Path $file)) { throw "Missing installer $file" }
             $signature = Get-AuthenticodeSignature $file
-            if ($signature.Status -ne "Valid") {
+            if ($env:RELEASE_UNSIGNED -eq "true" -and $signature.Status -ne "NotSigned") {
+              throw "$file should be unsigned for this release but has signature status: $($signature.Status)"
+            }
+            if ($env:RELEASE_UNSIGNED -ne "true" -and $signature.Status -ne "Valid") {
               throw "$file does not have a valid Authenticode signature: $($signature.Status) $($signature.StatusMessage)"
             }
           }
@@ -616,12 +737,15 @@ jobs:
     name: Publish release and update feeds
     needs:
       - mac
+      - prepare
       - windows
       - linux
     runs-on: ubuntu-latest
     timeout-minutes: 90
     permissions:
       contents: write
+    env:
+      RELEASE_UNSIGNED: ${{ needs.prepare.outputs.unsigned }}
     steps:
       - name: Check out release source
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -1122,6 +1246,32 @@ jobs:
           fi
           echo "Stable release order verified: current=$current_version candidate=$version"
 
+      - name: Preserve current automatic-update feeds for an unsigned release
+        if: env.RELEASE_UNSIGNED == 'true'
+        env:
+          RELEASE_ORIGIN: https://42qryducihx01gl0.public.blob.vercel-storage.com
+        run: |
+          set -euo pipefail
+          output="$RUNNER_TEMP/vector-updater-before"
+          mkdir -p "$output"
+          feeds=(latest-mac.yml latest.yml latest-linux.yml latest-linux-arm64.yml)
+          for feed in "${feeds[@]}"; do
+            curl \
+              --fail \
+              --show-error \
+              --silent \
+              --location \
+              --retry 5 \
+              --retry-all-errors \
+              --connect-timeout 20 \
+              --max-time 120 \
+              --header "Cache-Control: no-cache" \
+              --header "Pragma: no-cache" \
+              "${RELEASE_ORIGIN%/}/releases/vector-updates/$feed?before=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+              --output "$output/$feed"
+            test -s "$output/$feed"
+          done
+
       - name: Commit Vector download and update pointers
         env:
           BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
@@ -1135,9 +1285,12 @@ jobs:
           }
           channel=latest
           if [ "$PRERELEASE" = "true" ]; then channel=beta; fi
+          scope=full
+          if [ "$RELEASE_UNSIGNED" = "true" ]; then scope=downloads; fi
           VECTOR_RELEASE_VERSION="${TAG#v}" \
           VECTOR_RELEASE_CHANNEL="$channel" \
           VECTOR_RELEASE_PHASE=commit \
+          VECTOR_RELEASE_COMMIT_SCOPE="$scope" \
           bun packages/cloud/src/upload-desktop-release.ts
 
       - name: Verify committed release pointers and production downloads
@@ -1218,6 +1371,17 @@ jobs:
               echo "Staged $feed does not advertise $version"
               exit 1
             }
+            if [ "$RELEASE_UNSIGNED" = "true" ]; then
+              curl "${curl_args[@]}" \
+                "$origin/$committed_prefix/$feed?$cache_buster" \
+                --output "$committed"
+              cmp --silent "$RUNNER_TEMP/vector-updater-before/$feed" "$committed" || {
+                echo "Unsigned release changed automatic-update feed $feed"
+                exit 1
+              }
+              echo "Verified automatic-update feed $feed was preserved"
+              continue
+            fi
             fetch_exact_copy \
               "$staged" \
               "$origin/$committed_prefix/$feed" \

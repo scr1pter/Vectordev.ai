@@ -14,6 +14,12 @@ if ($env:GITHUB_ACTIONS -ne "true") {
   exit 0
 }
 
+$allowUnsignedRelease = $env:VECTOR_ALLOW_UNSIGNED_RELEASE -eq "true"
+if ($allowUnsignedRelease) {
+  Write-Warning "Publishing an explicitly approved unsigned Windows release"
+  exit 0
+}
+
 $required = $env:VECTOR_REQUIRE_WINDOWS_SIGNING -eq "true" -or $env:OPENCODE_CHANNEL -eq "prod"
 
 $vars = @{

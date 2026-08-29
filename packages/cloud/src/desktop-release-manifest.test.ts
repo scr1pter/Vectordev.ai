@@ -3,6 +3,7 @@ import {
   createDesktopDownloadManifest,
   createDesktopReleaseIntegrityManifest,
   desktopDownloadTargets,
+  desktopReleaseCommitScope,
   desktopReleasePhase,
   desktopUpdaterAssets,
   latestDesktopDownloadManifestPath,
@@ -406,6 +407,18 @@ describe("desktop release phase", () => {
 
   test("rejects an unknown phase", () => {
     expect(() => desktopReleasePhase("publish")).toThrow("must be stage, commit, or all")
+  })
+})
+
+describe("desktop release commit scope", () => {
+  test("defaults to a full release and accepts a download-only commit", () => {
+    expect(desktopReleaseCommitScope(undefined)).toBe("full")
+    expect(desktopReleaseCommitScope("full")).toBe("full")
+    expect(desktopReleaseCommitScope("downloads")).toBe("downloads")
+  })
+
+  test("rejects an unknown commit scope", () => {
+    expect(() => desktopReleaseCommitScope("updates")).toThrow("must be downloads or full")
   })
 })
 

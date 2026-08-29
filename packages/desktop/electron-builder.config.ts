@@ -14,6 +14,7 @@ const desktopEntryFpm = `${desktopEntry}=/usr/share/applications/vector-desktop.
 const signMac = process.env.VECTOR_SIGN_MAC === "true"
 const notarizeMac = process.env.VECTOR_NOTARIZE === "true"
 const signDmg = process.env.VECTOR_SIGN_DMG === "true"
+const allowUnsignedRelease = process.env.VECTOR_ALLOW_UNSIGNED_RELEASE === "true"
 const windowsPublisherName = process.env.VECTOR_WINDOWS_PUBLISHER_NAME?.trim()
 const updateBaseUrl = "https://42qryducihx01gl0.public.blob.vercel-storage.com/releases"
 const releaseElectronFuses = {
@@ -44,7 +45,7 @@ const channel = (() => {
   return "dev"
 })()
 
-if (process.env.GITHUB_ACTIONS === "true" && channel === "prod") {
+if (process.env.GITHUB_ACTIONS === "true" && channel === "prod" && !allowUnsignedRelease) {
   if (process.platform === "darwin" && (!signMac || !notarizeMac || !signDmg)) {
     throw new Error("Production macOS artifacts must be signed and notarized.")
   }
@@ -117,13 +118,16 @@ const getBase = (appId: string): Configuration => ({
   },
   win: {
     icon: `resources/icons/icon.ico`,
-    signtoolOptions: {
-      publisherName: windowsPublisherName ? [windowsPublisherName] : undefined,
-      sign: signWindows,
-      signingHashAlgorithms: ["sha256"],
-    },
+    signExecutable: !allowUnsignedRelease,
+    signtoolOptions: allowUnsignedRelease
+      ? undefined
+      : {
+          publisherName: windowsPublisherName ? [windowsPublisherName] : undefined,
+          sign: signWindows,
+          signingHashAlgorithms: ["sha256"],
+        },
     target: ["nsis"],
-    verifyUpdateCodeSignature: true,
+    verifyUpdateCodeSignature: !allowUnsignedRelease,
   },
   nsis: {
     oneClick: true,

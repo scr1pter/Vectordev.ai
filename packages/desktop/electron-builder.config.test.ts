@@ -57,3 +57,34 @@ test("ships the branded Vector Linux launcher", async () => {
   expect(desktop).toContain("Icon=ai.vector.app")
   expect(desktop).toContain("StartupWMClass=ai.vector.app")
 })
+
+test("allows only an explicit unsigned production package to skip platform verification", async () => {
+  const previous = {
+    allowUnsignedRelease: process.env.VECTOR_ALLOW_UNSIGNED_RELEASE,
+    channel: process.env.OPENCODE_CHANNEL,
+    githubActions: process.env.GITHUB_ACTIONS,
+    publisherName: process.env.VECTOR_WINDOWS_PUBLISHER_NAME,
+  }
+  process.env.VECTOR_ALLOW_UNSIGNED_RELEASE = "true"
+  process.env.OPENCODE_CHANNEL = "prod"
+  process.env.GITHUB_ACTIONS = "true"
+  delete process.env.VECTOR_WINDOWS_PUBLISHER_NAME
+
+  const module = await import("./electron-builder.config.ts?unsigned=prod")
+  const config = module.default as Configuration
+
+  if (previous.allowUnsignedRelease === undefined) delete process.env.VECTOR_ALLOW_UNSIGNED_RELEASE
+  else process.env.VECTOR_ALLOW_UNSIGNED_RELEASE = previous.allowUnsignedRelease
+  if (previous.channel === undefined) delete process.env.OPENCODE_CHANNEL
+  else process.env.OPENCODE_CHANNEL = previous.channel
+  if (previous.githubActions === undefined) delete process.env.GITHUB_ACTIONS
+  else process.env.GITHUB_ACTIONS = previous.githubActions
+  if (previous.publisherName === undefined) delete process.env.VECTOR_WINDOWS_PUBLISHER_NAME
+  else process.env.VECTOR_WINDOWS_PUBLISHER_NAME = previous.publisherName
+
+  expect(config.mac?.identity).toBe("-")
+  expect(config.mac?.notarize).toBe(false)
+  expect(config.win?.signExecutable).toBe(false)
+  expect(config.win?.verifyUpdateCodeSignature).toBe(false)
+  expect(config.win?.signtoolOptions).toBeUndefined()
+})

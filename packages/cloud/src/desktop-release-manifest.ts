@@ -84,6 +84,7 @@ export type DesktopUpdateAssetRecord = {
 
 export type DesktopReleaseChannel = "latest" | "beta"
 export type DesktopReleasePhase = "stage" | "commit" | "all"
+export type DesktopReleaseCommitScope = "downloads" | "full"
 
 export type DesktopDownloadManifest = {
   schemaVersion: 1
@@ -476,6 +477,12 @@ export function desktopReleasePhase(input: string | undefined): DesktopReleasePh
   if (!input) return "all"
   if (input === "stage" || input === "commit" || input === "all") return input
   throw new Error(`VECTOR_RELEASE_PHASE must be stage, commit, or all; got ${input}`)
+}
+
+export function desktopReleaseCommitScope(input: string | undefined): DesktopReleaseCommitScope {
+  if (!input || input === "full") return "full"
+  if (input === "downloads") return input
+  throw new Error(`VECTOR_RELEASE_COMMIT_SCOPE must be downloads or full; got ${input}`)
 }
 
 export function versionedDesktopDownloadManifestPath(version: string) {

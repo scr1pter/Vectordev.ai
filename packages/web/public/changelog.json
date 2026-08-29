@@ -1,6 +1,20 @@
 {
   "releases": [
     {
+      "tag": "v1.19.98",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "The download is the release",
+              "description": "Vector's download now points to one complete desktop release instead of whichever installer happened to be left behind. Mac, Windows and Linux — on both supported architectures — are described by the same versioned manifest, and the website, direct downloads and licensed download path all resolve through it. Explicit platform links keep the architecture the user chose, checksums are published beside the files, and every response says exactly which Vector version and checksum it is serving. The release pipeline stages every installer and updater payload first, verifies their names, sizes, hashes and update metadata, and only then changes the public download pointer; a failed or partial build can no longer leave one platform on a different version or cache an old installer as current. Vector can also be downloaded without creating an account or entering an email. Inside the product, the code editor now exposes language-server quick fixes and refactors through its lightbulb menu, including edits spanning files. The new operator console makes licence support concrete: it shows active and recently seen installations, searches the reduced customer record without exposing licence keys, and can release a lost device, extend grace, revoke or restore access. Packaged builds carry their update feed and fail packaging if it is missing, so Update Vector cannot silently ship disconnected from the release it is meant to find. This interim build is checksum-verified but not Apple-notarized or Windows Authenticode-signed, so the operating system may show an unidentified-developer or unknown-publisher warning."
+            }
+          ]
+        }
+      ]
+    },
+    {
       "tag": "v1.19.97",
       "highlights": [
         {
