@@ -1,6 +1,20 @@
 {
   "releases": [
     {
+      "tag": "v1.19.99",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Every agent gets the whole workspace",
+              "description": "Claude Code, Codex and Cursor Agent no longer open in a temporary side sheet. Each runtime now gets the same first-class, full-screen workspace as a Vector agent, with dedicated Chat, Files, Changes, Terminal, Browser and Activity views. You can search the repository, open files as tabs, follow the live transcript, inspect the resulting diff and validations, send another turn into the same conversation, stop a run, merge its work or open a pull request without leaving that workspace. Canvas launches those runtimes through the same canonical parallel-workspace path too, replacing its separate one-shot executor, so isolation, persisted history, status, review, cleanup and merge behavior stay consistent no matter where a run begins. Settings is now a persistent destination in the project navigation instead of a panel users have to rediscover. Together these changes make mixed-runtime work feel like one coordinated engineering system: independent agents and their files remain easy to distinguish, while the editor, browser, terminal and review controls stay in the same predictable places."
+            }
+          ]
+        }
+      ]
+    },
+    {
       "tag": "v1.19.98",
       "highlights": [
         {
