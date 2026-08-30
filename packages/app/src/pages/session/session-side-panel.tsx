@@ -3560,7 +3560,7 @@ type PublishPhase =
   | { phase: "done"; url: string; target: string }
   | { phase: "error"; error: string }
 
-function PreviewPanel(props: { sessionKey: string; contextId: string; directory?: string; onClose: () => void }) {
+export function PreviewPanel(props: { sessionKey: string; contextId: string; directory?: string; onClose: () => void }) {
   const command = useCommand()
   const storageKey = () => `${PREVIEW_URL_STORAGE_PREFIX}${props.sessionKey}`
   const readSavedUrl = () => {

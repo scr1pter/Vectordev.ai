@@ -86,6 +86,7 @@ export function WorkspaceNavigation(props: {
   onFind: () => void
   onReportBug: () => void
   onGettingStarted: () => void
+  onSettings: () => void
   onUpdate: () => void
 }) {
   const updateBusy = () => ["checking", "downloading", "installing"].includes(props.updaterState?.status ?? "")
@@ -515,7 +516,7 @@ export function WorkspaceNavigation(props: {
 
       <div
         data-vector-nav-footer
-        class="grid min-h-[58px] shrink-0 grid-cols-[1fr_auto_auto] items-center gap-1 border-t border-[color:var(--vx-line)] px-3 py-2"
+        class="grid min-h-[58px] shrink-0 grid-cols-[1fr_auto_auto_auto] items-center gap-1 border-t border-[color:var(--vx-line)] px-3 py-2"
       >
         <Show
           when={props.updaterState && props.updaterState.status !== "disabled"}
@@ -566,6 +567,25 @@ export function WorkspaceNavigation(props: {
             </span>
           </button>
         </Show>
+        <button
+          type="button"
+          data-vector-settings
+          class="grid size-8 place-items-center rounded-[5px] text-white/38 transition hover:bg-white/[0.05] hover:text-white"
+          onClick={props.onSettings}
+          title="Settings"
+          aria-label="Settings"
+        >
+          <svg viewBox="0 0 16 16" class="size-3.5" aria-hidden="true">
+            <path
+              d="M8 10.35A2.35 2.35 0 1 0 8 5.65a2.35 2.35 0 0 0 0 4.7Zm4.72-1.35a4.8 4.8 0 0 0 0-2l1.2-.92-1.2-2.08-1.42.58a5.1 5.1 0 0 0-1.72-1L9.4 2H6.6l-.18 1.58a5.1 5.1 0 0 0-1.72 1L3.28 4l-1.2 2.08 1.2.92a4.8 4.8 0 0 0 0 2l-1.2.92L3.28 12l1.42-.58a5.1 5.1 0 0 0 1.72 1L6.6 14h2.8l.18-1.58a5.1 5.1 0 0 0 1.72-1l1.42.58 1.2-2.08-1.2-.92Z"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.15"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+        </button>
         <button
           type="button"
           data-tour="nav-getting-started"

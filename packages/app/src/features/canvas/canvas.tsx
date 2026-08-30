@@ -30,6 +30,12 @@ import {
   type Dictation,
 } from "./voice-assistant"
 import { hasElectronStore, readCanvasLayout, readCanvasLayoutSync, writeCanvasLayout } from "./canvas-persist"
+import {
+  canvasExternalWorkspaceDraft,
+  reopenableCanvasExternalWorkspaces,
+  type CanvasExternalWorkspaceRecord,
+} from "./external-agent-workspace"
+import { externalRuntimeReady, externalRuntimeSetup, type ExternalRuntime } from "@/features/agents/external-runtimes"
 import "./canvas.css"
 
 // A compact stroke icon for each surface, matching the shell's sidebar set.
@@ -92,6 +98,8 @@ export function CanvasWorkspace(props: {
   models: CanvasModelOption[]
   resolveProjectPath: () => Promise<string>
   onManageProviders: () => void
+  onComposeAgentWorkspace: (input: { runtime: ExternalRuntime; taskPrompt: string; name: string }) => void
+  onOpenAgentWorkspace: (id: string) => void
   taskId?: () => string | undefined
   /** Scopes the persisted layout to a project. Defaults to a shared "global" layout. */
   projectId?: () => string
@@ -641,6 +649,8 @@ export function CanvasWorkspace(props: {
                   serverSDK={serverSDK}
                   resolveProjectPath={props.resolveProjectPath}
                   taskId={props.taskId}
+                  onComposeAgentWorkspace={props.onComposeAgentWorkspace}
+                  onOpenAgentWorkspace={props.onOpenAgentWorkspace}
                   onClose={() => closeWindow(win.id)}
                   onOpenWindow={openWindow}
                   patchState={(patch) =>
@@ -970,6 +980,8 @@ function CanvasWindowContent(props: {
   serverSDK: ReturnType<typeof useServerSDK>
   resolveProjectPath: () => Promise<string>
   taskId?: () => string | undefined
+  onComposeAgentWorkspace: (input: { runtime: ExternalRuntime; taskPrompt: string; name: string }) => void
+  onOpenAgentWorkspace: (id: string) => void
   onClose: () => void
   onOpenWindow: (kind: CanvasWindowKind) => CanvasWindow
   patchState: (patch: Record<string, unknown>) => void
@@ -990,7 +1002,9 @@ function CanvasWindowContent(props: {
       <ExternalAgentWindow
         kind={kind}
         resolveProjectPath={props.resolveProjectPath}
-        onOpenWindow={props.onOpenWindow}
+        taskId={props.taskId}
+        onComposeAgentWorkspace={props.onComposeAgentWorkspace}
+        onOpenAgentWorkspace={props.onOpenAgentWorkspace}
       />
     )
   return null
@@ -1586,7 +1600,9 @@ type CanvasParallelRecord = {
   id: string
   name: string
   taskPrompt: string
+  runtime: ExternalRuntime | "vector"
   status: string
+  lastActivityAt: string
   changedFilesCount: number
   mergeState: "none" | "merged" | "discarded"
   lastAction?: string
@@ -1738,124 +1754,55 @@ function ParallelAgentsWindow(props: {
 }
 
 // ---- External agent panes --------------------------------------------------
-// Real detection AND real execution: each pane spawns the installed coding
-// agent headless in an isolated workspace via the opencode-server PTY and mounts
-// the streaming <Terminal> on the returned pty id, so output lands live in-pane.
+// Canvas is a launcher into the canonical agent-workspace lifecycle. It does
+// not prepare a second worktree or spawn an untracked PTY of its own: creation,
+// execution, follow-up, review, merge/discard, and cleanup all remain owned by
+// parallelWorkspaces and the shell's maintained workspace UI.
 
-type ExternalAgentKind = "claude-code" | "codex" | "cursor"
-
-type ExternalAgentInfo = { id: string; name: string; installed: boolean; version?: string; cli: string; path?: string }
+type ExternalAgentInfo = {
+  id: string
+  name: string
+  installed: boolean
+  signedIn?: boolean
+  version?: string
+  cli: string
+  path?: string
+}
 
 type ExternalAgentsApi = {
   detect?: () => Promise<ExternalAgentInfo[]>
-  openInEditor?: (input: { app: string; path: string }) => Promise<{ ok: boolean; error?: string }>
-  prepareWorkspace?: (projectPath: string) => Promise<{ path: string; isolation: "git-worktree" | "copy" }>
 }
-
-// A prepared, isolated run: the headless command to spawn, the isolated cwd it
-// runs in, and the project directory (used to scope the SDK/PTY context).
-type AgentRun = { command: string; args: string[]; cwd: string; directory: string; title: string }
 
 function externalAgentsApi(): ExternalAgentsApi | undefined {
   return (globalThis.window?.api as { externalAgents?: ExternalAgentsApi } | undefined)?.externalAgents
 }
 
-const AGENT_CLI: Record<ExternalAgentKind, string> = {
-  "claude-code": "claude",
-  codex: "codex",
-  cursor: "cursor-agent",
-}
-
-const AGENT_RUN: Record<ExternalAgentKind, (prompt: string) => { command: string; args: string[] }> = {
-  "claude-code": (prompt) => ({
-    command: "claude",
-    args: ["-p", prompt, "--output-format", "stream-json", "--verbose", "--permission-mode", "acceptEdits"],
-  }),
-  codex: (prompt) => ({
-    command: "codex",
-    args: ["exec", "--json", "--sandbox", "workspace-write", "--skip-git-repo-check", prompt],
-  }),
-  cursor: (prompt) => ({
-    command: "cursor-agent",
-    args: ["-p", "--force", "--output-format", "stream-json", prompt],
-  }),
-}
-
-const AGENT_INSTALL_HINT: Record<ExternalAgentKind, string> = {
-  "claude-code": "Install with `npm install -g @anthropic-ai/claude-code`, then sign in by running `claude`.",
-  codex: "Install with `npm install -g @openai/codex`, then sign in by running `codex`.",
-  cursor: "Install Cursor Agent, sign in, and make sure `cursor-agent` is available to Vector.",
-}
-
-function displayCommand(kind: ExternalAgentKind, prompt: string) {
-  const invoke = AGENT_RUN[kind](prompt || "<task>")
-  return [invoke.command, ...invoke.args].map((part) => JSON.stringify(part)).join(" ")
-}
-
-// Creates the pty for a prepared run and streams it through <Terminal>. Rendered
-// inside an <SDKProvider> scoped to the project directory so both the pty
-// creation and the Terminal's attach use the same directory-scoped SDK context.
-function AgentTerminalRun(props: { run: AgentRun; onExit: (code: number) => void }) {
-  const sdk = useSDK()
-  const [pty, setPty] = createSignal<LocalPTY | undefined>()
-  const [error, setError] = createSignal("")
-
-  onMount(() => {
-    const client = sdk().client
-    const events = sdk().event
-    let ptyID: string | undefined
-    let exited = false
-
-    const off = events.on("pty.exited", (event) => {
-      if (!ptyID || event.properties.id !== ptyID) return
-      exited = true
-      props.onExit(event.properties.exitCode)
-    })
-    onCleanup(off)
-    // Abandoning or closing the pane must not orphan the headless process.
-    onCleanup(() => {
-      if (ptyID && !exited) void client.pty.remove({ ptyID }).catch(() => undefined)
-    })
-
-    void client.pty
-      .create({ command: props.run.command, args: props.run.args, cwd: props.run.cwd, title: props.run.title })
-      .then((result) => {
-        const id = result.data?.id
-        if (!id) {
-          setError("The agent process could not be started.")
-          return
-        }
-        ptyID = id
-        setPty({ id, title: props.run.title, titleNumber: 0 })
-      })
-      .catch((err) => setError(err instanceof Error ? err.message : "Couldn't start the agent."))
-  })
-
-  return (
-    <Show when={pty()} keyed fallback={<p class="vcanvas-extagent-hint">{error() || "Starting the agent…"}</p>}>
-      {(active) => <Terminal pty={active} autoFocus={false} />}
-    </Show>
-  )
-}
-
 function ExternalAgentWindow(props: {
-  kind: ExternalAgentKind
+  kind: ExternalRuntime
   resolveProjectPath: () => Promise<string>
-  onOpenWindow: (kind: CanvasWindowKind) => CanvasWindow
+  taskId?: () => string | undefined
+  onComposeAgentWorkspace: (input: { runtime: ExternalRuntime; taskPrompt: string; name: string }) => void
+  onOpenAgentWorkspace: (id: string) => void
 }) {
   const spec = canvasWindowSpec(props.kind)
   const [status, setStatus] = createSignal<"checking" | "no-api" | ExternalAgentInfo>("checking")
-  const [copied, setCopied] = createSignal(false)
-  const [openError, setOpenError] = createSignal("")
   const [prompt, setPrompt] = createSignal("")
-  const [preparing, setPreparing] = createSignal(false)
-  const [runError, setRunError] = createSignal("")
-  const [run, setRun] = createSignal<AgentRun | undefined>()
-  const [exitCode, setExitCode] = createSignal<number | undefined>()
+  const [records, setRecords] = createSignal<CanvasExternalWorkspaceRecord[]>([])
 
-  const runnable = () => true
+  const runnable = () => externalRuntimeReady(info())
+
+  const refresh = async () => {
+    const sourcePath = await props.resolveProjectPath().catch(() => "")
+    const api = globalThis.window?.api?.parallelWorkspaces as CanvasParallelApi | undefined
+    if (!sourcePath || !api) return
+    const next = await api.list({ sourcePath, parentSessionId: props.taskId?.() }).catch(() => undefined)
+    if (next) setRecords(next)
+  }
 
   onMount(() => {
+    void refresh()
+    const timer = globalThis.setInterval(() => void refresh(), 6_000)
+    onCleanup(() => globalThis.clearInterval(timer))
     const api = externalAgentsApi()
     if (!api?.detect) {
       setStatus("no-api")
@@ -1865,7 +1812,14 @@ function ExternalAgentWindow(props: {
       .detect()
       .then((list) => {
         const match = list.find((agent) => agent.id === props.kind)
-        setStatus(match ?? { id: props.kind, name: spec.label, cli: AGENT_CLI[props.kind], installed: false })
+        setStatus(
+          match ?? {
+            id: props.kind,
+            name: spec.label,
+            cli: externalRuntimeSetup(props.kind)?.cli ?? props.kind,
+            installed: false,
+          },
+        )
       })
       .catch(() => setStatus("no-api"))
   })
@@ -1875,61 +1829,14 @@ function ExternalAgentWindow(props: {
     return typeof current === "object" ? current : undefined
   })
 
-  const copyCommand = () => {
-    if (!runnable()) return
-    void globalThis.navigator?.clipboard
-      ?.writeText(displayCommand(props.kind, prompt().trim()))
-      .then(() => {
-        setCopied(true)
-        globalThis.setTimeout(() => setCopied(false), 1500)
-      })
-      .catch(() => undefined)
+  const compose = () => {
+    const draft = canvasExternalWorkspaceDraft(props.kind, prompt())
+    if (!draft || !runnable()) return
+    props.onComposeAgentWorkspace(draft)
   }
 
-  const startRun = async () => {
-    const task = prompt().trim()
-    if (!task || preparing() || !runnable()) return
-    setRunError("")
-    setExitCode(undefined)
-    setRun(undefined)
-    const directory = await props.resolveProjectPath().catch(() => "")
-    if (!directory) {
-      setRunError("Open a project first.")
-      return
-    }
-    setPreparing(true)
-    try {
-      const workspace = await externalAgentsApi()?.prepareWorkspace?.(directory)
-      const cwd = workspace?.path ?? directory
-      const invoke = AGENT_RUN[props.kind](task)
-      setRun({ command: info()?.path || invoke.command, args: invoke.args, cwd, directory, title: spec.label })
-    } catch (error) {
-      setRunError(error instanceof Error ? error.message : "Couldn't prepare an isolated workspace.")
-    } finally {
-      setPreparing(false)
-    }
-  }
-
-  const resetRun = () => {
-    setRun(undefined)
-    setExitCode(undefined)
-    setRunError("")
-  }
-
-  const reimportChanges = () => props.onOpenWindow("review")
-
-  const openInCursor = async () => {
-    const api = externalAgentsApi()
-    if (!api?.openInEditor) return
-    setOpenError("")
-    const directory = await props.resolveProjectPath().catch(() => "")
-    if (!directory) {
-      setOpenError("Open a project first.")
-      return
-    }
-    const result = await api.openInEditor({ app: "cursor", path: directory })
-    if (!result.ok) setOpenError(result.error ?? `Couldn't open ${spec.label}.`)
-  }
+  const activeRecords = createMemo(() => reopenableCanvasExternalWorkspaces(records(), props.kind))
+  const setup = () => externalRuntimeSetup(props.kind)
 
   return (
     <div class="vcanvas-extagent">
@@ -1946,102 +1853,73 @@ function ExternalAgentWindow(props: {
             fallback={
               <>
                 <p class="vcanvas-extagent-hint">Not detected — install the {spec.label} CLI.</p>
-                <p class="vcanvas-extagent-install">{AGENT_INSTALL_HINT[props.kind]}</p>
+                <p class="vcanvas-extagent-install">
+                  Install with <code>{setup()?.installCommand}</code>
+                  <Show when={setup()?.signInCommand}>
+                    {" "}
+                    and sign in with <code>{setup()?.signInCommand}</code>
+                  </Show>
+                  .
+                </p>
               </>
             }
           >
-            <Show
-              when={run()}
-              keyed
-              fallback={
-                <div class="vcanvas-extagent-card">
-                  <span class="vcanvas-extagent-badge">{agent.version ? `v${agent.version}` : "Installed"}</span>
-                  <Show
-                    when={runnable()}
-                    fallback={
-                      <>
-                        <p class="vcanvas-extagent-hint">
-                          Open your project in {spec.label}, work there, then re-import the changes into Vector.
-                        </p>
-                        <div class="vcanvas-extagent-actions">
-                          <Show when={externalAgentsApi()?.openInEditor}>
-                            <button type="button" onClick={() => void openInCursor()}>
-                              Open project in Cursor
-                            </button>
-                          </Show>
-                          <button type="button" onClick={reimportChanges}>
-                            Re-import changes
-                          </button>
-                        </div>
-                      </>
-                    }
-                  >
-                    <textarea
-                      class="vcanvas-extagent-prompt"
-                      value={prompt()}
-                      onInput={(e) => setPrompt(e.currentTarget.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                          e.preventDefault()
-                          void startRun()
-                        }
-                      }}
-                      placeholder={`Describe the task for ${spec.label}…`}
-                      rows={3}
-                    />
-                    <div class="vcanvas-extagent-actions">
-                      <button type="button" disabled={preparing() || !prompt().trim()} onClick={() => void startRun()}>
-                        {preparing() ? "Preparing…" : "Run"}
-                      </button>
-                      <button type="button" disabled={!prompt().trim()} onClick={copyCommand}>
-                        {copied() ? "Copied" : "Copy command"}
-                      </button>
-                    </div>
+            <div class="vcanvas-extagent-card">
+              <span class="vcanvas-extagent-badge">{agent.version ? `v${agent.version}` : "Installed"}</span>
+              <Show
+                when={runnable()}
+                fallback={
+                  <>
+                    <p class="vcanvas-extagent-hint">{spec.label} is installed but needs you to sign in.</p>
                     <p class="vcanvas-extagent-install">
-                      Runs headless in an isolated workspace — your project files stay untouched until you re-import.
+                      Run <code>{setup()?.signInCommand}</code>, then reopen this window.
                     </p>
-                  </Show>
+                  </>
+                }
+              >
+                <textarea
+                  class="vcanvas-extagent-prompt"
+                  value={prompt()}
+                  onInput={(event) => setPrompt(event.currentTarget.value)}
+                  onKeyDown={(event) => {
+                    if (event.key !== "Enter" || (!event.metaKey && !event.ctrlKey)) return
+                    event.preventDefault()
+                    compose()
+                  }}
+                  placeholder={`Describe the task for ${spec.label}…`}
+                  rows={3}
+                />
+                <div class="vcanvas-extagent-actions">
+                  <button type="button" disabled={!prompt().trim()} onClick={compose}>
+                    Continue in Agent Workspaces
+                  </button>
                 </div>
-              }
-            >
-              {(active) => (
-                <div class="vcanvas-extagent-run">
-                  <div class="vcanvas-extagent-terminal">
-                    <SDKProvider directory={active.directory}>
-                      <AgentTerminalRun run={active} onExit={(code) => setExitCode(code)} />
-                    </SDKProvider>
-                  </div>
-                  <div class="vcanvas-extagent-runbar">
-                    <span class="vcanvas-extagent-runstatus">
-                      <Show
-                        when={exitCode() !== undefined}
-                        fallback={`Running ${spec.label} in an isolated workspace…`}
-                      >
-                        Finished (exit {exitCode()})
-                      </Show>
-                    </span>
-                    <div class="vcanvas-extagent-actions">
-                      <Show when={exitCode() !== undefined}>
-                        <button type="button" onClick={reimportChanges}>
-                          Re-import changes
-                        </button>
-                      </Show>
-                      <button type="button" onClick={resetRun}>
-                        {exitCode() !== undefined ? "Run again" : "Stop"}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </Show>
+                <p class="vcanvas-extagent-install">
+                  Vector will create one tracked isolated workspace, then keep follow-up, review, merge, discard, and
+                  cleanup together.
+                </p>
+              </Show>
+            </div>
           </Show>
         )}
       </Show>
-      <Show when={runError()}>
-        <p class="vcanvas-extagent-error">{runError()}</p>
-      </Show>
-      <Show when={openError()}>
-        <p class="vcanvas-extagent-error">{openError()}</p>
+      <Show when={activeRecords().length}>
+        <div class="vcanvas-manager-list">
+          <For each={activeRecords()}>
+            {(record) => (
+              <article>
+                <div>
+                  <strong>{record.name}</strong>
+                  <small>{record.lastAction || record.taskPrompt}</small>
+                </div>
+                <span data-status={record.status}>{record.status}</span>
+                <button type="button" onClick={() => props.onOpenAgentWorkspace(record.id)}>
+                  Open
+                </button>
+              </article>
+            )}
+          </For>
+        </div>
       </Show>
     </div>
   )

@@ -4,6 +4,7 @@ import {
   createResource,
   createSignal,
   For,
+  lazy,
   onCleanup,
   onMount,
   Show,
@@ -91,7 +92,15 @@ import {
   shouldPersistCollaborationGraph,
   type TeamCollaborationGraph,
 } from "./layout-collaboration"
-import { materializeParallelWorkspaceParent, parallelWorkspaceComposerAvailable } from "./layout-workspace-launch"
+import {
+  materializeParallelWorkspaceParent,
+  parallelWorkspaceComposerAvailable,
+  parallelWorkspaceIDFromPath,
+  parallelWorkspaceNavigation,
+  parallelWorkspaceToolDirectory,
+  parallelWorkspaceView,
+  type ParallelWorkspaceView,
+} from "./layout-workspace-launch"
 
 const NAVIGATION_DEFAULT_WIDTH = 320
 const NAVIGATION_MINIMUM_WIDTH = 228
@@ -101,6 +110,10 @@ const LAST_ACTIVE_PROJECT_KEY = "vector.last-active-project-path.v1"
 const RETIRED_WORK_STATE_KEY = "vector.work.state.v1"
 const AGENT_TAB_ORDER_PREFIX = "vector.agent-tab-order.v1:"
 type ParallelAgentRuntime = AgentRuntime
+
+const ExternalAgentWorkspace = lazy(() =>
+  import("@/features/agents/external-agent-workspace").then((module) => ({ default: module.ExternalAgentWorkspace })),
+)
 
 function readNavigationWidth() {
   const raw = globalThis.localStorage?.getItem(NAVIGATION_WIDTH_KEY)
@@ -903,18 +916,24 @@ export default function NewLayout(props: ParentProps) {
     location.pathname === "/parallel-workspaces" || location.pathname.startsWith("/parallel-workspaces/")
   const cloudRoute = () => location.pathname === "/cloud"
   const canvasRoute = () => location.pathname === "/canvas"
-  const activeTaskScope = (): TaskScope => ({
-    projectPath: routeContextProjectPath() || activeProjectPath(),
-    taskId: activeTaskSessionID(),
-  })
+  const activeTaskScope = (): TaskScope => {
+    const routedWorkspace = parallelRecords().find(
+      (record) => record.id === parallelWorkspaceIDFromPath(location.pathname),
+    )
+    return {
+      projectPath: routeContextProjectPath() || routedWorkspace?.sourcePath || activeProjectPath(),
+      taskId: routeContextSessionID() || routedWorkspace?.parentSessionId || activeTaskSessionID(),
+    }
+  }
   const activeWorkspaceScope = () => ({
     sourcePath: activeTaskScope().projectPath,
     parentSessionId: activeTaskScope().taskId,
   })
   const parallelWorkspaceIDFromRoute = () => {
-    const parts = location.pathname.split("/").filter(Boolean)
-    return parts[0] === "parallel-workspaces" && parts[1] !== "swarm" ? parts[1] : undefined
+    return parallelWorkspaceIDFromPath(location.pathname)
   }
+  const parallelWorkspaceViewFromRoute = (): ParallelWorkspaceView =>
+    parallelWorkspaceView(new URLSearchParams(location.search).get("view"))
   const swarmRunIDFromRoute = () => {
     const parts = location.pathname.split("/").filter(Boolean)
     return parts[0] === "parallel-workspaces" && parts[1] === "swarm" ? parts[2] : undefined
@@ -1015,11 +1034,18 @@ export default function NewLayout(props: ParentProps) {
   const selectedParallelWorkspace = createMemo(() => {
     return parallelRecords().find((record) => record.id === parallelSelectedID()) ?? parallelRecords()[0]
   })
+  const routedParallelWorkspace = createMemo(() => {
+    const id = parallelWorkspaceIDFromRoute()
+    if (!id) return undefined
+    return parallelRecords().find((record) => record.id === id)
+  })
 
   const selectedSwarmRun = createMemo(() => swarmRuns().find((run) => run.id === swarmSelectedID()))
 
   const mainTaskSessionID = () => routeContextSessionID() || currentSessionID()
   const activeAgentWorkspace = createMemo(() => {
+    const routedWorkspace = routedParallelWorkspace()
+    if (routedWorkspace) return routedWorkspace
     const sessionWorkspace = parallelRecords().find((record) => record.agentSessionId === currentSessionID())
     if (sessionWorkspace) return sessionWorkspace
     if (!agentReviewOpen()) return undefined
@@ -1027,6 +1053,8 @@ export default function NewLayout(props: ParentProps) {
     return selected?.runtime === "vector" ? undefined : selected
   })
   const sidebarActiveAgentID = createMemo(() => {
+    const routedWorkspaceID = parallelWorkspaceIDFromRoute()
+    if (routedWorkspaceID) return routedWorkspaceID
     const sessionWorkspace = parallelRecords().find((record) => record.agentSessionId === currentSessionID())
     if (sessionWorkspace) return sessionWorkspace.id
     if (agentReviewOpen()) return parallelSelectedID()
@@ -1120,12 +1148,6 @@ export default function NewLayout(props: ParentProps) {
     const recordScope = scopeForParallelRecord(record)
     if (scope.sourcePath && pathKey(recordScope.projectPath) !== pathKey(scope.sourcePath)) return false
     return recordScope.taskId === scope.parentSessionId
-  }
-
-  const parallelWorkspaceSessionHref = (record: ParallelWorkspaceRecord) => {
-    const search = taskScopeSearch(scopeForParallelRecord(record))
-    if (!record.agentSessionId) return ""
-    return `${sessionHref(server.key, record.agentSessionId)}${search}`
   }
 
   createEffect(() => {
@@ -1718,14 +1740,20 @@ export default function NewLayout(props: ParentProps) {
       setParallelError(error instanceof Error ? error.message : String(error))
       return undefined
     })
-    if (!record || !parallelRecordMatchesScope(record, scope)) return
+    const routedRequest = parallelWorkspaceIDFromRoute() === id
+    if (!record || (!routedRequest && !parallelRecordMatchesScope(record, scope))) return
     const current = activeWorkspaceScope()
     if (
+      !routedRequest &&
       taskScopeId({ projectPath: current.sourcePath, taskId: current.parentSessionId }) !==
       taskScopeId({ projectPath: scope.sourcePath, taskId: scope.parentSessionId })
     )
       return
-    setParallelRecords((records) => records.map((item) => (item.id === id ? record : item)))
+    setParallelRecords((records) =>
+      records.some((item) => item.id === id)
+        ? records.map((item) => (item.id === id ? record : item))
+        : [record, ...records],
+    )
     recordEconomicsOutcomes([record])
   }
 
@@ -1924,7 +1952,7 @@ export default function NewLayout(props: ParentProps) {
     })
     setParallelSelectedID(records[0]!.id)
     if (records.length === 1 && records[0]!.runtime === "vector") setPendingAgentOpenID(records[0]!.id)
-    if (records.length === 1 && records[0]!.runtime !== "vector") setAgentReviewOpen(true)
+    if (records.length === 1 && records[0]!.runtime !== "vector") void openParallelWorkspace(records[0]!)
     setParallelDetailTab("session")
     setParallelName("")
     setParallelPrompt("")
@@ -2018,7 +2046,7 @@ export default function NewLayout(props: ParentProps) {
 
   const submitParallelLaunch = () => (parallelLaunchMode() === "swarm" ? createSwarm() : createParallelWorkspace())
 
-  const openParallelWorkspace = async (record: ParallelWorkspaceRecord) => {
+  const openParallelWorkspace = async (record: ParallelWorkspaceRecord, view: ParallelWorkspaceView = "chat") => {
     setToolsOpen(false)
     setSidePanelOpen(false)
     setBrowserAgentOpen(false)
@@ -2037,13 +2065,20 @@ export default function NewLayout(props: ParentProps) {
       await openMainAgent()
       return
     }
-    if (record.runtime !== "vector") {
-      setAgentReviewOpen(true)
+    const destination = parallelWorkspaceNavigation({
+      workspaceID: record.id,
+      runtime: record.runtime,
+      agentSessionID: record.agentSessionId,
+      server: server.key,
+      scope: scopeForParallelRecord(record),
+      view,
+    })
+    if (destination.mode === "external-workspace") {
+      navigate(destination.href)
       void refreshParallelWorkspace(record.id)
       return
     }
-    const href = parallelWorkspaceSessionHref(record)
-    if (href) {
+    if (destination.mode === "session") {
       const api = globalThis.window?.api as
         | (typeof globalThis.window.api & {
             pathExists?: (path: string) => Promise<boolean>
@@ -2071,7 +2106,7 @@ export default function NewLayout(props: ParentProps) {
         void refreshParallelWorkspace(record.id)
         return
       }
-      navigate(href)
+      navigate(destination.href)
       return
     }
     setPendingAgentOpenID(record.id)
@@ -2081,6 +2116,30 @@ export default function NewLayout(props: ParentProps) {
     })
     void refreshParallelWorkspace(record.id)
   }
+
+  let resolvingParallelWorkspaceRoute = ""
+  createEffect(() => {
+    const id = parallelWorkspaceIDFromRoute()
+    if (!id) {
+      resolvingParallelWorkspaceRoute = ""
+      return
+    }
+    setParallelSelectedID(id)
+    const record = routedParallelWorkspace()
+    if (record?.runtime === "vector") {
+      if (resolvingParallelWorkspaceRoute === id) return
+      resolvingParallelWorkspaceRoute = id
+      void openParallelWorkspace(record).finally(() => {
+        if (resolvingParallelWorkspaceRoute === id) resolvingParallelWorkspaceRoute = ""
+      })
+      return
+    }
+    if (record || resolvingParallelWorkspaceRoute === id) return
+    resolvingParallelWorkspaceRoute = id
+    void refreshParallelWorkspace(id).finally(() => {
+      if (resolvingParallelWorkspaceRoute === id) resolvingParallelWorkspaceRoute = ""
+    })
+  })
 
   const openSwarmRun = (run: SwarmRunRecord) => {
     setToolsOpen(false)
@@ -2127,6 +2186,10 @@ export default function NewLayout(props: ParentProps) {
   const openAgentReviewByID = (id: string) => {
     const record = parallelRecords().find((item) => item.id === id)
     if (!record) return
+    if (record.runtime !== "vector") {
+      void openParallelWorkspace(record, "changes")
+      return
+    }
     setParallelSelectedID(record.id)
     setSwarmSelectedID(undefined)
     setParallelComposerOpen(false)
@@ -3003,7 +3066,7 @@ export default function NewLayout(props: ParentProps) {
       navigate(fullscreenReturnPath() || "/")
       return
     }
-    if (parallelWorkspacesRoute()) {
+    if (parallelWorkspacesRoute() && !parallelWorkspaceIDFromRoute()) {
       setParallelOpen(false)
       setBrowserAgentOpen(false)
       const parentSessionID = routeContextSessionID()
@@ -3028,7 +3091,14 @@ export default function NewLayout(props: ParentProps) {
   })
 
   createEffect(() => {
-    if (!taskRoute() && !parallelComposerOpen() && !agentReviewOpen() && !orchestrationOpen()) return
+    if (
+      !taskRoute() &&
+      !parallelWorkspaceIDFromRoute() &&
+      !parallelComposerOpen() &&
+      !agentReviewOpen() &&
+      !orchestrationOpen()
+    )
+      return
     const timer = globalThis.setInterval(() => {
       void loadParallelWorkspaces()
     }, 1_500)
@@ -3126,6 +3196,266 @@ export default function NewLayout(props: ParentProps) {
     install: () => void platform.updater?.install(),
   }
 
+  const renderExternalAgentWorkspace = (recordAccessor: () => ParallelWorkspaceRecord) => {
+    const record = () => recordAccessor()
+    const stats = () => parallelDiffStats(record())
+    const copy = () =>
+      agentReviewCopy(record().runtime, {
+        running: isParallelWorkspaceRunning(record()),
+        resumable: Boolean(record().externalSessionId),
+      })
+    const activitySection = (title: string, lines: string[]) => (
+      <section class="overflow-hidden rounded-[12px] border border-[color:var(--vx-line)] bg-black/20">
+        <div class="flex items-center justify-between border-b border-[color:var(--vx-line)] px-4 py-3">
+          <h2 class="text-[11px] font-semibold text-white/72">{title}</h2>
+          <span class="text-[10px] tabular-nums text-white/30">{lines.length} events</span>
+        </div>
+        <Show
+          when={lines.length}
+          fallback={<div class="px-4 py-7 text-center text-[11.5px] text-white/32">No activity recorded yet.</div>}
+        >
+          <div class="max-h-[420px] overflow-auto px-4 py-3 font-mono text-[10.5px] leading-5 text-white/52">
+            <For each={lines}>
+              {(line) => (
+                <div class="whitespace-pre-wrap break-words border-b border-white/[0.03] py-1 last:border-0">
+                  {line}
+                </div>
+              )}
+            </For>
+          </div>
+        </Show>
+      </section>
+    )
+
+    return (
+      <ExternalAgentWorkspace
+        id={record().id}
+        directory={parallelWorkspaceToolDirectory(record())}
+        server={server.key}
+        name={record().name}
+        runtimeLabel={copy().label}
+        statusLabel={parallelStatusLabel(record().status)}
+        statusTone={parallelStatusTone(record().status)}
+        branchLabel={record().isolation === "git-worktree" ? record().gitBranch || "Git worktree" : "Managed copy"}
+        model={record().model}
+        cost={record().actualCost || record().estimatedCost}
+        running={isParallelWorkspaceRunning(record())}
+        changedFiles={record().changedFilesCount}
+        changedFilePaths={record().changedFiles}
+        added={stats().added}
+        removed={stats().removed}
+        risk={record().riskLevel}
+        initialView={parallelWorkspaceViewFromRoute()}
+        onBack={closeFullscreenWorkspace}
+        onRefresh={() => void refreshParallelWorkspace(record().id)}
+        onViewChange={(view) => {
+          const destination = parallelWorkspaceNavigation({
+            workspaceID: record().id,
+            runtime: record().runtime,
+            agentSessionID: record().agentSessionId,
+            server: server.key,
+            scope: scopeForParallelRecord(record()),
+            view,
+          })
+          if (destination.mode === "external-workspace") navigate(destination.href, { replace: true })
+        }}
+        chat={
+          <div class="space-y-4">
+            <Show when={parallelError()}>
+              <div class="rounded-[11px] border border-rose-400/25 bg-rose-400/[0.07] px-4 py-3 text-[12px] leading-5 text-rose-200">
+                {parallelError()}
+              </div>
+            </Show>
+            <Show when={record().error}>
+              <div class="rounded-[11px] border border-rose-400/25 bg-rose-400/[0.07] px-4 py-3 text-[12px] leading-5 text-rose-200">
+                {record().error}
+              </div>
+            </Show>
+            <Show when={record().finalSummary}>
+              <section class="rounded-[12px] border border-[color:var(--vx-line)] bg-white/[0.025] px-4 py-3">
+                <div class="text-[10px] font-semibold uppercase tracking-[0.08em] text-white/35">Agent summary</div>
+                <p class="mt-1.5 whitespace-pre-wrap text-[12.5px] leading-5 text-white/68">
+                  {record().finalSummary}
+                </p>
+              </section>
+            </Show>
+            <Show when={record().validationReport}>
+              {(validation) => (
+                <section class="rounded-[12px] border border-[color:var(--vx-line)] bg-white/[0.025] px-4 py-3">
+                  <div class="flex items-center justify-between">
+                    <span class="text-[11px] font-semibold text-white/72">Validation</span>
+                    <span
+                      class={validation().passed ? "text-[11px] text-emerald-300" : "text-[11px] text-rose-300"}
+                    >
+                      {validation().passed ? "Passed" : "Needs attention"}
+                    </span>
+                  </div>
+                  <div class="mt-2 space-y-1.5">
+                    <For each={validation().checks}>
+                      {(check) => (
+                        <div class="flex items-center gap-2 text-[11px]">
+                          <span
+                            class={
+                              check.status === "passed"
+                                ? "size-1.5 rounded-full bg-emerald-400"
+                                : check.status === "failed"
+                                  ? "size-1.5 rounded-full bg-rose-400"
+                                  : "size-1.5 rounded-full bg-white/25"
+                            }
+                          />
+                          <span class="min-w-0 flex-1 truncate text-white/55">{check.label}</span>
+                          <code class="truncate text-white/28">{check.command}</code>
+                        </div>
+                      )}
+                    </For>
+                  </div>
+                </section>
+              )}
+            </Show>
+            <Show
+              when={(record().turns?.length ?? 0) > 0}
+              fallback={
+                <div class="grid min-h-[260px] place-items-center rounded-[12px] border border-[color:var(--vx-line)] bg-white/[0.015] px-8 text-center">
+                  <div class="max-w-[440px]">
+                    <div class="mx-auto grid size-10 place-items-center rounded-[11px] bg-[color:var(--vx-purple-soft)] text-[color:var(--vx-purple-bright)]">
+                      <span class={isParallelWorkspaceRunning(record()) ? "size-2 animate-pulse rounded-full bg-current" : "text-sm"}>
+                        {isParallelWorkspaceRunning(record()) ? "" : "✓"}
+                      </span>
+                    </div>
+                    <h2 class="mt-3 text-[13px] font-semibold text-white/76">
+                      {isParallelWorkspaceRunning(record()) ? `${copy().label} is starting` : "No conversation yet"}
+                    </h2>
+                    <p class="mt-1.5 text-[11.5px] leading-5 text-white/40">
+                      {isParallelWorkspaceRunning(record())
+                        ? "Structured activity will appear here as the agent works in its isolated checkout."
+                        : "Run this workspace or send a message to begin a conversation."}
+                    </p>
+                  </div>
+                </div>
+              }
+            >
+              <ExternalAgentTranscript turns={record().turns ?? []} runtimeLabel={copy().label} />
+            </Show>
+          </div>
+        }
+        changes={renderDiffReview(record)}
+        activity={
+          <div class="space-y-4">
+            {activitySection(copy().activityLabel, record().logs)}
+            {activitySection("Terminal output", record().terminalOutput)}
+            <Show when={record().browserResults.length}>
+              {activitySection("Browser results", record().browserResults)}
+            </Show>
+          </div>
+        }
+        composer={
+          <Show when={record().mergeState === "none"}>
+            <form
+              class="shrink-0 border-t border-[color:var(--vx-line)] bg-[#19191c] px-5 py-3"
+              onSubmit={(event) => {
+                event.preventDefault()
+                void sendWorkspaceFollowUp(record().id)
+              }}
+            >
+              <div class="mx-auto flex max-w-[980px] items-end gap-2 rounded-[12px] border border-[color:var(--vx-line)] bg-black/20 p-2 focus-within:border-[color:var(--vx-purple)]/45">
+                <textarea
+                  class="min-h-[56px] min-w-0 flex-1 resize-none bg-transparent px-2 py-1.5 text-[12.5px] leading-5 text-white/85 outline-none disabled:opacity-40"
+                  placeholder={copy().followUpPlaceholder}
+                  aria-label={copy().followUpAriaLabel}
+                  value={externalAgentFollowUpDraft(followUpDrafts(), record().id)}
+                  disabled={isParallelWorkspaceRunning(record()) || followUpBusy()}
+                  onInput={(event) =>
+                    setFollowUpDrafts((drafts) =>
+                      withExternalAgentFollowUpDraft(drafts, record().id, event.currentTarget.value),
+                    )
+                  }
+                  onKeyDown={(event) => {
+                    if (event.key !== "Enter" || event.shiftKey) return
+                    event.preventDefault()
+                    void sendWorkspaceFollowUp(record().id)
+                  }}
+                />
+                <button
+                  type="submit"
+                  class="h-9 shrink-0 rounded-[9px] bg-[color:var(--vx-purple)] px-3.5 text-[11.5px] font-semibold text-white transition hover:brightness-110 disabled:opacity-40"
+                  aria-label={copy().sendFollowUpAriaLabel}
+                  disabled={
+                    !externalAgentFollowUpDraft(followUpDrafts(), record().id).trim() ||
+                    isParallelWorkspaceRunning(record()) ||
+                    followUpBusy()
+                  }
+                >
+                  {followUpBusy() ? "Sending…" : "Send"}
+                </button>
+              </div>
+              <div class="mx-auto mt-1.5 max-w-[980px] px-1 text-[10px] text-white/28">{copy().followUpHelp}</div>
+            </form>
+          </Show>
+        }
+        actions={
+          <>
+            <span class="text-[10.5px] text-white/34">
+              {record().isolation === "git-worktree" ? record().gitBranch : record().isolatedPath}
+            </span>
+            <Show when={isParallelWorkspaceRunning(record())}>
+              <button
+                type="button"
+                class="h-9 rounded-[9px] border border-rose-400/25 px-3 text-[11.5px] text-rose-200 transition hover:bg-rose-400/[0.08]"
+                aria-label={copy().stopLabel}
+                onClick={() => void stopParallelWorkspace(record().id)}
+              >
+                {copy().stopLabel}
+              </button>
+            </Show>
+            <Show when={record().pullRequestUrl}>
+              <a
+                href={record().pullRequestUrl}
+                target="_blank"
+                rel="noreferrer"
+                class="inline-flex h-9 items-center rounded-[9px] border border-[color:var(--vx-line)] px-3 text-[11.5px] text-white/65 transition hover:bg-white/[0.05] hover:text-white"
+              >
+                View PR
+              </a>
+            </Show>
+            <div class="flex-1" />
+            <Show when={record().mergeState === "none" && !isParallelWorkspaceRunning(record())}>
+              <Show when={record().isolation === "git-worktree" && !record().pullRequestUrl}>
+                <button
+                  type="button"
+                  class="h-9 rounded-[9px] border border-[color:var(--vx-line)] px-3 text-[11.5px] text-white/58 transition hover:bg-white/[0.05] hover:text-white disabled:opacity-40"
+                  disabled={!record().changedFilesCount || parallelBusy()}
+                  onClick={() => confirmTwice(`pr-${record().id}`, () => void openWorkspacePullRequest(record()))}
+                >
+                  {armedAction() === `pr-${record().id}` ? "Confirm GitHub PR" : "Open PR"}
+                </button>
+              </Show>
+              <button
+                type="button"
+                class="h-9 rounded-[9px] px-3 text-[11.5px] text-white/48 transition hover:bg-white/[0.05] hover:text-rose-200"
+                onClick={() => confirmTwice(`discard-${record().id}`, () => void discardParallelWorkspace(record()))}
+              >
+                {armedAction() === `discard-${record().id}` ? "Confirm discard" : "Discard"}
+              </button>
+              <button
+                data-vector-merge-action
+                type="button"
+                class="h-9 rounded-[9px] bg-emerald-300 px-4 text-[11.5px] font-semibold text-[#08110c] transition hover:bg-emerald-200 disabled:opacity-40"
+                disabled={!record().changedFilesCount || parallelBusy()}
+                onClick={() => confirmTwice(`merge-${record().id}`, () => void mergeParallelWorkspace(record()))}
+              >
+                {parallelBusy()
+                  ? "Merging…"
+                  : armedAction() === `merge-${record().id}`
+                    ? "Confirm merge"
+                    : "Merge all"}
+              </button>
+            </Show>
+          </>
+        }
+      />
+    )
+  }
+
   return (
     <div
       data-vector-shell
@@ -3148,8 +3478,59 @@ export default function NewLayout(props: ParentProps) {
         }}
       >
         <div class="min-h-0 w-full flex-1">
-          <Show when={!parallelWorkspacesRoute()}>
-            <Suspense>{props.children}</Suspense>
+          <Show when={parallelWorkspaceIDFromRoute()} fallback={<Suspense>{props.children}</Suspense>}>
+            {(workspaceID) => (
+              <Show
+                when={routedParallelWorkspace()}
+                fallback={
+                  <div
+                    data-vector-external-agent-workspace-loading
+                    data-workspace-id={workspaceID()}
+                    class="grid size-full place-items-center bg-[#171719] px-6 text-center"
+                  >
+                    <div class="max-w-[460px]">
+                      <img
+                        src="/vector-logo.png"
+                        alt=""
+                        class="mx-auto size-12 rounded-[13px] object-cover"
+                        draggable={false}
+                      />
+                      <h1 class="mt-4 text-[14px] font-semibold text-white/82">Opening isolated agent workspace</h1>
+                      <p class="mt-1.5 text-[11.5px] leading-5 text-white/40">
+                        {parallelError() || "Vector is reconnecting to this workspace and loading its latest activity."}
+                      </p>
+                      <div class="mt-4 flex justify-center gap-2">
+                        <button
+                          type="button"
+                          class="h-9 rounded-[9px] border border-[color:var(--vx-line)] px-3 text-[11.5px] text-white/58 transition hover:bg-white/[0.05] hover:text-white"
+                          onClick={closeFullscreenWorkspace}
+                        >
+                          Back
+                        </button>
+                        <button
+                          type="button"
+                          class="h-9 rounded-[9px] bg-[color:var(--vx-purple)] px-3 text-[11.5px] font-semibold text-white transition hover:brightness-110"
+                          onClick={() => void refreshParallelWorkspace(workspaceID())}
+                        >
+                          Retry
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                }
+              >
+                {(record) => (
+                  <Show
+                    when={record().runtime !== "vector"}
+                    fallback={<div class="grid size-full place-items-center bg-[#171719] text-[11.5px] text-white/38">Opening Vector session…</div>}
+                  >
+                    <Suspense fallback={<div class="grid size-full place-items-center bg-[#171719] text-[11.5px] text-white/38">Loading agent workspace…</div>}>
+                      {renderExternalAgentWorkspace(record)}
+                    </Suspense>
+                  </Show>
+                )}
+              </Show>
+            )}
           </Show>
         </div>
       </main>
@@ -3208,6 +3589,36 @@ export default function NewLayout(props: ParentProps) {
           models={parallelModelOptions()}
           resolveProjectPath={resolveActiveProjectPath}
           onManageProviders={openProviderSettings}
+          onComposeAgentWorkspace={(input) => {
+            setParallelRuntime(input.runtime)
+            setParallelCompareRuntimes(false)
+            setParallelTopology("isolated")
+            setParallelJoinTeamId("")
+            setParallelName(input.name)
+            setParallelPrompt(input.taskPrompt)
+            openParallelWorkspaces()
+          }}
+          onOpenAgentWorkspace={(id) => {
+            const api = parallelApi()
+            if (!api) {
+              reportDesktopOnlyParallel()
+              return
+            }
+            void api
+              .refresh(id)
+              .then((record) => {
+                setParallelRecords((records) => [record, ...records.filter((item) => item.id !== record.id)])
+                closeFullscreenWorkspace()
+                void openParallelWorkspace(record)
+              })
+              .catch((error: unknown) => {
+                showToast({
+                  variant: "error",
+                  title: "Could not open agent workspace",
+                  description: error instanceof Error ? error.message : String(error),
+                })
+              })
+          }}
           taskId={() => activeTaskScope().taskId}
           projectId={() => taskScopeId(activeTaskScope())}
         />
@@ -5914,6 +6325,7 @@ export default function NewLayout(props: ParentProps) {
         }}
         onReportBug={() => setReportBugOpen(true)}
         onGettingStarted={() => setHelpPanelOpen(true)}
+        onSettings={openSettings}
         onUpdate={() => void updaterAction.updateLatest()}
       />
 
