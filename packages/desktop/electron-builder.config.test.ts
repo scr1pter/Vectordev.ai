@@ -26,6 +26,10 @@ for (const channel of channels) {
     expect(config.linux?.executableName).not.toContain(".app")
     expect(config.linux?.syncDesktopName).toBe(true)
     expect(config.linux?.desktop?.entry?.StartupWMClass).toBe(channel.appId)
+    expect(config.extraResources).toContainEqual({
+      from: "out/vector-build.json",
+      to: "vector-build.json",
+    })
     if (channel.channel === "dev") {
       expect(config.electronFuses).toBeUndefined()
       return

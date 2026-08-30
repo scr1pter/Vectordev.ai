@@ -82,23 +82,21 @@ async function installSessionSwitchProbe(
         requestAnimationFrame(sample)
       }, 0)
     }
-    document.addEventListener(
-      "click",
-      (event) => {
-        const link = event.target instanceof Element ? event.target.closest("a") : undefined
-        if (link?.getAttribute("href") !== href) return
-        started = performance.now()
-        for (const [name, selector] of Object.entries(reviewLevels)) {
-          initialReviewNodes[name] = document.querySelector(selector)
-        }
-        requestAnimationFrame(sample)
-      },
-      { capture: true, once: true },
-    )
+    const start = () => {
+      if (`${location.pathname}${location.search}` !== href || started !== undefined) return
+      started = performance.now()
+      for (const [name, selector] of Object.entries(reviewLevels)) {
+        initialReviewNodes[name] = document.querySelector(selector)
+      }
+      window.removeEventListener("popstate", start, true)
+      requestAnimationFrame(sample)
+    }
+    window.addEventListener("popstate", start, { capture: true })
     ;(window as Window & { __sessionSwitchProbe?: SessionSwitchProbe }).__sessionSwitchProbe = {
       samples,
       stop: () => {
         running = false
+        window.removeEventListener("popstate", start, true)
       },
     }
   }, input)

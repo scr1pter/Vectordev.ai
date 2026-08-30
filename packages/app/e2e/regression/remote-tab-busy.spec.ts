@@ -1,12 +1,15 @@
 import { expect, test, type Page, type Route } from "@playwright/test"
 import { base64Encode } from "@opencode-ai/core/util/encode"
+import { expectSessionTitle } from "../utils/waits"
 
 const serverA = "http://127.0.0.1:4096"
 const serverB = "http://127.0.0.1:4097"
 const sessionA = session("ses_server_a", "C:/server-a", "Server A session")
 const sessionB = session("ses_server_b", "/home/server-b", "Server B session")
 
-test("tab busy indicator reflects the tab server's own session status", async ({ page }) => {
+// The redesigned workspace intentionally keeps session switching in the project sidebar
+// instead of rendering a second, global session tab strip above the active task.
+test.skip("tab busy indicator reflects the tab server's own session status", async ({ page }) => {
   await mockServers(page)
   await page.addInitScript(
     ({ serverA, serverB, sessionA, sessionB }) => {
@@ -26,7 +29,7 @@ test("tab busy indicator reflects the tab server's own session status", async ({
   const hrefA = `/server/${base64Encode(serverA)}/session/${sessionA.id}`
   const hrefB = `/server/${base64Encode(serverB)}/session/${sessionB.id}`
   await page.goto(hrefA)
-  await expect(page.getByText(sessionA.title).first()).toBeVisible()
+  await expectSessionTitle(page, sessionA.title)
 
   // Session B is busy on server B while server A stays the active server, so the
   // busy indicator must come from the tab server's status, not the active server's.

@@ -42,7 +42,8 @@ import { formatRulesForPrompt } from "./repo-rules-model"
 import {
   appendTurn,
   continuationPrompt,
-  extendStreamTail,
+  updateTurnChat,
+  type AgentChat,
   settleRunningTurns,
   settleTurn,
   type ParallelWorkspaceTurn,
@@ -1068,9 +1069,17 @@ function broadcastHandoff(record: ParallelWorkspaceRecord, summary: string) {
 }
 
 async function fallbackDiff(record: ParallelWorkspaceRecord) {
+  // A copy has no Git base to diff against. Until its immutable hash snapshot
+  // exists, treating every missing hash as a missing file makes the whole
+  // project appear newly added. Creation now records the snapshot before the
+  // workspace becomes visible, while this guard keeps older persisted records
+  // and interrupted migrations from ever exposing that false massive diff.
+  if (record.baselineHashes === undefined) return { changedFiles: [], diff: "" }
   const sourceFiles = await listProjectFiles(record.sourcePath)
   const isolatedFiles = await listProjectFiles(record.isolatedPath)
-  const allFiles = Array.from(new Set([...sourceFiles, ...isolatedFiles])).sort()
+  const allFiles = Array.from(new Set([...sourceFiles, ...isolatedFiles]))
+    .filter((file) => !isInternalWorkspaceFile(file))
+    .sort()
   const changedFiles: string[] = []
   const blocks: string[] = []
 
@@ -1391,6 +1400,14 @@ export async function createParallelWorkspace(input: CreateParallelWorkspaceInpu
     ).catch(() => undefined)
   }
 
+  // Copy workspaces have no commit to serve as their immutable comparison
+  // base. Persist the copied tree's hashes before publishing the record so a
+  // renderer refresh can never race the lazy run preparation and classify
+  // every file as newly added. Hash the isolated tree (not sourceRoot): the
+  // source can keep changing while provisioning, but this exact snapshot is
+  // what the agent receives and what merge conflict checks must compare.
+  const baselineHashes = isolation === "copy" ? await hashProject(isolatedPath) : undefined
+
   await mkdir(join(workspaceDir, "metadata"), { recursive: true })
   await writeFile(
     join(workspaceDir, "metadata", "task.md"),
@@ -1471,7 +1488,7 @@ export async function createParallelWorkspace(input: CreateParallelWorkspaceInpu
     browserResults: [],
     changedFiles: [],
     diff: "",
-    baselineHashes: undefined,
+    baselineHashes,
     taskDifficulty,
     retryLimit: taskDifficulty === "complex" ? 2 : taskDifficulty === "trivial" ? 0 : 1,
     repairAttempts: 0,
@@ -1490,7 +1507,7 @@ async function ensureParallelWorkspaceIsolation(record: ParallelWorkspaceRecord)
 
   await rm(dirname(record.isolatedPath), { recursive: true, force: true }).catch(() => undefined)
   await copyProject(record.sourcePath, record.isolatedPath)
-  const baselineHashes = await hashProject(record.sourcePath)
+  const baselineHashes = await hashProject(record.isolatedPath)
   const restored = updateRecord(record.id, (current) => ({
     ...current,
     isolation: "copy",
@@ -1574,23 +1591,26 @@ async function runExternalWorkspacePass(input: {
 }) {
   const pendingLogs: string[] = []
   const pendingOutput: string[] = []
+  let pendingChat: AgentChat | undefined
   let lastPersistedAt = 0
   let flushTimer: NodeJS.Timeout | undefined
   const flush = () => {
     if (flushTimer) clearTimeout(flushTimer)
     flushTimer = undefined
-    if (!pendingLogs.length && !pendingOutput.length) return
+    if (!pendingLogs.length && !pendingOutput.length && !pendingChat) return
     const logs = pendingLogs.splice(0)
     const output = pendingOutput.splice(0)
+    const chat = pendingChat
+    pendingChat = undefined
     const updated = updateRecord(input.id, (current) => ({
       ...current,
       status: "running commands",
       progress: 0,
-      lastAction: logs.at(-1) ?? current.lastAction,
+      lastAction: chat?.activity.at(-1)?.label ?? "Working on your request",
       lastActivityAt: now(),
       // Runs before the reversals below: `logs` is a live array and .reverse()
       // mutates in place, which would make the transcript read backwards.
-      turns: extendStreamTail(current.turns, input.turnId, logs),
+      turns: chat ? updateTurnChat(current.turns, input.turnId, chat) : current.turns,
       logs: [...[...logs].reverse(), ...current.logs].slice(0, 120),
       terminalOutput: [...[...output].reverse(), ...current.terminalOutput].slice(0, 240),
     }))
@@ -1622,6 +1642,10 @@ async function runExternalWorkspacePass(input: {
       if (event.stream !== "activity") pendingOutput.push(event.text)
       scheduleFlush()
     },
+    onChat: (chat) => {
+      pendingChat = chat
+      scheduleFlush()
+    },
   }).finally(flush)
   // A CLI that refused the resume FLAGS is not a failed task — the caller
   // retries without resume rather than reporting a broken agent.
@@ -1631,10 +1655,9 @@ async function runExternalWorkspacePass(input: {
     // in", "exited with code N" — and that sentence is the only part the user
     // can act on. Throwing the raw stream-json tail instead buried it, so a
     // signed-out CLI read as "Vector is broken" rather than "run `claude`".
-    const tail = result.output.slice(-12).join("\n").trim()
     throw new Error(
       result.error?.trim() ||
-        `${runtimeLabel(input.record.runtime)} exited with code ${result.exitCode}.\n${tail}`.trim(),
+        `${runtimeLabel(input.record.runtime)} could not complete this request. See diagnostics for details.`,
     )
   }
   return result
@@ -1688,7 +1711,10 @@ async function executeExternalParallelWorkspace(
   syncBackgroundTask(record, record.lastAction)
 
   const costs: number[] = []
-  const beforeDiff = record.diff
+  // Recompute rather than trusting the renderer's last persisted refresh. It
+  // closes the migration edge where an older app already stored a false
+  // all-files diff before the baseline became available.
+  const beforeDiff = (record.isolation === "git-worktree" ? await gitDiff(record) : await fallbackDiff(record)).diff
   // External CLIs have no send_teammate_message tool — a real `claude -p` run
   // exposes 28 tools and none of them is it — so they cannot send. They do take
   // a prompt, so they can still RECEIVE what teammates queued for them, which is
@@ -1757,36 +1783,41 @@ async function executeExternalParallelWorkspace(
     }),
   }))
 
-  // A follow-up is often a question, not an edit. Running the whole check suite
-  // to answer "which file did you touch?" would make the chat unusable, so the
-  // guardrails only run when the tree actually moved.
-  if (followUp) {
-    const answered = await refreshParallelWorkspace(id)
-    if (answered.diff === beforeDiff) {
-      const noopLedger = await spendLedger()
-      await noopLedger.recordRunCost({
-        projectPath: answered.sourcePath,
-        runId,
-        provider: answered.provider,
-        model: answered.model,
-        source: "parallel",
-        totalCostUsd: costs.length ? costs.reduce((sum, value) => sum + value, 0) : undefined,
-      })
-      const unchanged = updateRecord(id, (current) => ({
-        ...current,
-        status: current.changedFilesCount ? "needs review" : "complete",
-        progress: 100,
-        lastActivityAt: now(),
-        lastAction: `${runtimeLabel(current.runtime)} replied with no file changes`,
-        finalSummary: firstRun.summary,
-        logs: ["No files changed on this turn, so the deterministic checks were skipped.", ...current.logs].slice(
-          0,
-          120,
-        ),
-      }))
-      syncBackgroundTask(unchanged, unchanged.lastAction)
-      return
-    }
+  // External turns are allowed to inspect or answer without editing. The same
+  // rule applies to the first mission and to follow-ups: deterministic checks
+  // validate an edit, so running a whole repository suite after a read-only
+  // turn can manufacture an unrelated failure and even trigger a repair agent.
+  // Compare the complete review diff from immediately before and after this
+  // turn so an unchanged pre-existing follow-up diff is preserved as well.
+  const answered = await refreshParallelWorkspace(id)
+  if (answered.diff === beforeDiff) {
+    const measuredCosts = costs.filter(Number.isFinite)
+    const totalCost = measuredCosts.reduce((sum, value) => sum + value, 0)
+    const noopLedger = await spendLedger()
+    await noopLedger.recordRunCost({
+      projectPath: answered.sourcePath,
+      runId,
+      provider: answered.provider,
+      model: answered.model,
+      source: "parallel",
+      totalCostUsd: measuredCosts.length ? totalCost : undefined,
+    })
+    const unchanged = updateRecord(id, (current) => ({
+      ...current,
+      status: current.changedFilesCount ? "needs review" : "complete",
+      progress: 100,
+      actualCost: totalCost > 0 ? `$${totalCost.toFixed(4)}` : current.actualCost,
+      riskLevel: current.changedFilesCount ? riskFromDiff(current.diff, current.changedFiles) : "low",
+      lastActivityAt: now(),
+      lastAction: followUp
+        ? `${runtimeLabel(current.runtime)} replied with no file changes`
+        : `${runtimeLabel(current.runtime)} completed with no file changes`,
+      finalSummary: firstRun.summary,
+      error: undefined,
+      logs: ["No files changed on this turn, so the deterministic checks were skipped.", ...current.logs].slice(0, 120),
+    }))
+    syncBackgroundTask(unchanged, unchanged.lastAction)
+    return
   }
 
   record = updateRecord(id, (current) => ({
@@ -1923,7 +1954,7 @@ async function executeExternalParallelWorkspace(
     status: current.changedFilesCount ? "needs review" : "complete",
     progress: 100,
     actualCost: totalCost > 0 ? `$${totalCost.toFixed(4)}` : current.actualCost,
-    riskLevel: validation.passed ? current.riskLevel : "high",
+    riskLevel: current.changedFilesCount === 0 ? "low" : validation.passed ? current.riskLevel : "high",
     lastAction: current.changedFilesCount
       ? reviewAction(validation)
       : `${runtimeLabel(current.runtime)} completed with no file changes`,
@@ -2197,7 +2228,7 @@ async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEng
       ...current,
       status: current.changedFilesCount ? "needs review" : "complete",
       progress: 100,
-      riskLevel: validation.passed ? current.riskLevel : "high",
+      riskLevel: current.changedFilesCount === 0 ? "low" : validation.passed ? current.riskLevel : "high",
       lastAction: current.changedFilesCount ? reviewAction(validation) : "Agent completed with no file changes",
       lastActivityAt: now(),
       finalSummary,
@@ -2258,7 +2289,12 @@ async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEng
   }
 }
 
-export async function runParallelWorkspace(id: string, engine: ParallelWorkspaceEngine, concurrency?: number) {
+export async function runParallelWorkspace(
+  id: string,
+  engine: ParallelWorkspaceEngine,
+  concurrency?: number,
+  dependencies?: { runExternalCodingAgent?: (input: RunExternalAgentInput) => Promise<ExternalAgentRunResult> },
+) {
   const existingRun = activeRuns.get(id)
   if (existingRun || queuedRuns.has(id)) return readRecords().find((record) => record.id === id)
   const current = readRecords().find((record) => record.id === id)
@@ -2269,7 +2305,7 @@ export async function runParallelWorkspace(id: string, engine: ParallelWorkspace
   // undefined value must not stomp a swarm that is already draining.
   if (concurrency !== undefined) maxConcurrentRuns = normalizeConcurrency(concurrency)
   const controller = new AbortController()
-  queuedRuns.set(id, { controller, engine })
+  queuedRuns.set(id, { controller, engine, externalAgentRunner: dependencies?.runExternalCodingAgent })
   const queued = updateRecord(id, (record) => ({
     ...record,
     status: "queued",

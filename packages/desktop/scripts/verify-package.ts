@@ -1,4 +1,5 @@
-// Asserts a packaged desktop app can actually check for updates.
+// Asserts a packaged desktop app has one build identity from compilation
+// through bundle metadata and, for release channels, the trusted update feed.
 //
 // 1.19.96 shipped without Contents/Resources/app-update.yml and every update
 // check died with `ENOENT ... app-update.yml`, which the UI reported only as
@@ -8,8 +9,22 @@
 // clicks the button.
 import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
+import { BUILD_IDENTITY_FILE, parseBuildIdentity } from "./build-identity"
 
 export type PackageCheck = { ok: true } | { ok: false; problem: string }
+
+type PackagedAppInput = {
+  bundleID?: string
+  version?: string
+  buildIdentity: { present: boolean; contents?: string }
+  updaterMetadata: { present: boolean; contents?: string }
+}
+
+const channels = {
+  "ai.vector.app.dev": "dev",
+  "ai.vector.app.beta": "beta",
+  "ai.vector.app": "prod",
+} as const
 
 export function checkUpdaterMetadata(input: { present: boolean; contents?: string }): PackageCheck {
   if (!input.present) {
@@ -29,6 +44,55 @@ export function checkUpdaterMetadata(input: { present: boolean; contents?: strin
 
 export function updaterMetadataPath(appPath: string) {
   return join(appPath, "Contents", "Resources", "app-update.yml")
+}
+
+export function buildIdentityPath(appPath: string) {
+  return join(appPath, "Contents", "Resources", BUILD_IDENTITY_FILE)
+}
+
+export function checkPackagedApp(input: PackagedAppInput): PackageCheck {
+  if (!input.bundleID || !(input.bundleID in channels)) {
+    return { ok: false, problem: `Unrecognized Vector bundle id: ${input.bundleID || "missing"}.` }
+  }
+  if (!input.version) return { ok: false, problem: "The packaged app has no version." }
+  if (!input.buildIdentity.present) {
+    return {
+      ok: false,
+      problem: `${BUILD_IDENTITY_FILE} is missing. The app was packaged without running the channel-aware build.`,
+    }
+  }
+
+  const identity = parseBuildIdentity(input.buildIdentity.contents ?? "")
+  if (!identity) return { ok: false, problem: `${BUILD_IDENTITY_FILE} is malformed.` }
+  const channel = channels[input.bundleID as keyof typeof channels]
+  if (identity.channel !== channel) {
+    return {
+      ok: false,
+      problem: `Compiled channel ${identity.channel} does not match ${input.bundleID} (${channel}). Refusing a mixed-channel package.`,
+    }
+  }
+  if (identity.version !== input.version) {
+    return {
+      ok: false,
+      problem: `Compiled version ${identity.version} does not match packaged version ${input.version}.`,
+    }
+  }
+
+  if (channel === "dev") {
+    if (input.updaterMetadata.present) {
+      return { ok: false, problem: "A development build must not contain a production update feed." }
+    }
+    return { ok: true }
+  }
+
+  const metadata = checkUpdaterMetadata(input.updaterMetadata)
+  if (!metadata.ok) return metadata
+  const url = input.updaterMetadata.contents?.match(/^url:\s*(https:\/\/\S+)/m)?.[1]
+  const expected = channel === "prod" ? "/releases/vector-updates" : "/releases/vector-beta-updates"
+  if (!url?.replace(/\/$/, "").endsWith(expected)) {
+    return { ok: false, problem: `${channel} package points at the wrong update feed: ${url || "missing"}.` }
+  }
+  return { ok: true }
 }
 
 // Given no argument, check every .app the last package run produced. The arch
@@ -59,15 +123,29 @@ if (import.meta.main) {
 }
 
 function verify(appPath: string) {
-  const file = updaterMetadataPath(appPath)
-  const present = existsSync(file)
-  const result = checkUpdaterMetadata({
-    present,
-    contents: present ? readFileSync(file, "utf8") : undefined,
+  const metadata = updaterMetadataPath(appPath)
+  const identity = buildIdentityPath(appPath)
+  const result = checkPackagedApp({
+    bundleID: plistValue(join(appPath, "Contents", "Info.plist"), "CFBundleIdentifier"),
+    version: plistValue(join(appPath, "Contents", "Info.plist"), "CFBundleShortVersionString"),
+    buildIdentity: {
+      present: existsSync(identity),
+      contents: existsSync(identity) ? readFileSync(identity, "utf8") : undefined,
+    },
+    updaterMetadata: {
+      present: existsSync(metadata),
+      contents: existsSync(metadata) ? readFileSync(metadata, "utf8") : undefined,
+    },
   })
   if (!result.ok) {
-    console.error(`${appPath} cannot self-update: ${result.problem}`)
+    console.error(`${appPath} failed release verification: ${result.problem}`)
     process.exit(1)
   }
-  console.log(`verified ${appPath} can reach its update feed`)
+  console.log(`verified ${appPath} has one consistent compiled, bundle, and update channel`)
+}
+
+function plistValue(file: string, key: string) {
+  const result = Bun.spawnSync(["/usr/bin/plutil", "-extract", key, "raw", "-o", "-", file])
+  if (result.exitCode !== 0) return
+  return result.stdout.toString().trim()
 }

@@ -5,6 +5,7 @@ import { fixture, pageMessages } from "./session-timeline-stress.fixture"
 
 export async function installTimelineSettings(page: Page) {
   await page.addInitScript(() => {
+    localStorage.setItem("vector.onboarding.v1", JSON.stringify({ tour: true, dismissed: true }))
     localStorage.setItem(
       "settings.v3",
       JSON.stringify({
@@ -34,22 +35,23 @@ export function mockStressTimeline(
     pageMessages,
     onMessages: input?.onMessages,
     vcsDiff: input?.vcsDiff,
+    fileList: () => [],
   })
 }
 
-export async function installStressSessionTabs(page: Page, input?: { draftID?: string; sessionIDs?: string[] }) {
+export async function installStressTasks(page: Page, input?: { draftID?: string; sessionIDs?: string[] }) {
   const server = stressServer()
   await page.addInitScript(
     ({ directory, sessionIDs, dirBase64, server, draftID }) => {
       localStorage.setItem(
-        "opencode.global.dat:server",
+        "vector.global.dat:server",
         JSON.stringify({
           projects: { local: [{ worktree: directory, expanded: true }] },
           lastProject: { local: directory },
         }),
       )
       localStorage.setItem(
-        "opencode.window.browser.dat:tabs",
+        "vector.window.browser.dat:tabs",
         JSON.stringify([
           ...sessionIDs.map((sessionId) => ({
             type: "session",
@@ -77,6 +79,13 @@ export function stressSessionHref(sessionID: string) {
 
 export function stressDraftHref(draftID: string) {
   return `/new-session?draftId=${encodeURIComponent(draftID)}`
+}
+
+export async function navigateStressTask(page: Page, href: string) {
+  await page.evaluate((next) => {
+    history.pushState({}, "", next)
+    dispatchEvent(new PopStateEvent("popstate"))
+  }, href)
 }
 
 function stressServer() {

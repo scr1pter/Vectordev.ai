@@ -10,6 +10,7 @@ export async function measureFirstNavigation(
   page: Page,
   input: {
     href: string
+    trigger: "click" | "route"
     destinationPath: string
     sourceSelector: string
     destinationSelector: string
@@ -18,7 +19,7 @@ export async function measureFirstNavigation(
   },
 ) {
   await page.evaluate(
-    ({ href, destinationPath, sourceSelector, destinationSelector, contentSelector }) => {
+    ({ href, trigger, destinationPath, sourceSelector, destinationSelector, contentSelector }) => {
       const samples: FirstNavigationSample[] = []
       let started: number | undefined
       let running = true
@@ -45,25 +46,32 @@ export async function measureFirstNavigation(
           }, 0)
         })
       }
-      document.addEventListener(
-        "click",
-        (event) => {
-          const link = event.target instanceof Element ? event.target.closest("a") : undefined
-          if (link?.getAttribute("href") !== href) return
-          started = performance.now()
-          sample()
-        },
-        { capture: true, once: true },
-      )
+      const start = () => {
+        if (started !== undefined) return
+        started = performance.now()
+        sample()
+      }
+      const onClick = (event: MouseEvent) => {
+        const link = event.target instanceof Element ? event.target.closest("a") : undefined
+        if (link?.getAttribute("href") === href) start()
+      }
+      const onRoute = () => {
+        if (`${location.pathname}${location.search}` === destinationPath) start()
+      }
+      if (trigger === "click") document.addEventListener("click", onClick, { capture: true })
+      if (trigger === "route") window.addEventListener("popstate", onRoute, { capture: true })
       ;(window as Window & { __firstNavigationProbe?: FirstNavigationProbe }).__firstNavigationProbe = {
         samples,
         stop: () => {
           running = false
+          document.removeEventListener("click", onClick, { capture: true })
+          window.removeEventListener("popstate", onRoute, { capture: true })
         },
       }
     },
     {
       href: input.href,
+      trigger: input.trigger,
       destinationPath: input.destinationPath,
       sourceSelector: input.sourceSelector,
       destinationSelector: input.destinationSelector,

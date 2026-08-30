@@ -115,7 +115,42 @@ test.describe("smoke: session timeline", () => {
       .toBeLessThanOrEqual(1)
   })
 
-  test("paints cached session tabs at the latest message", async ({ page }) => {
+  test("loads older history when task navigation lands on a short initial page", async ({ page }) => {
+    const loaded: string[] = []
+    await mockOpenCodeServer(page, {
+      sessions: fixture.sessions,
+      provider: fixture.provider,
+      directory: fixture.directory,
+      project: fixture.project,
+      pageMessages: (sessionID, limit, before) =>
+        sessionID === fixture.targetID
+          ? { items: fixture.messages[fixture.targetID] }
+          : pageMessages(sessionID, limit, before),
+      onMessages: (input) => {
+        if (input.before && input.phase === "end") loaded.push(input.sessionID)
+      },
+    })
+    await configureSmokePage(page, fixture.directory)
+
+    await navigateToSession(page, fixture.directory, fixture.targetID, fixture.expected.targetTitle)
+    await waitForTimelineStable(page)
+    await switchSession(page, fixture.sourceID, fixture.expected.sourceTitle)
+
+    // The source's two-message first page is shorter than the viewport. It must
+    // not inherit the previous task's completed-history flag and stop there.
+    await expect.poll(() => loaded.includes(fixture.sourceID)).toBe(true)
+    await waitForTimelineStable(page)
+    await expect
+      .poll(() =>
+        timelineScroller(page).evaluate((element) => {
+          const spacer = element.querySelector<HTMLElement>('[data-timeline-row="bottom-spacer"]')
+          return Math.abs((spacer?.getBoundingClientRect().bottom ?? Infinity) - element.getBoundingClientRect().bottom)
+        }),
+      )
+      .toBeLessThanOrEqual(1)
+  })
+
+  test("paints cached sessions at the latest message when switching tasks", async ({ page }) => {
     await mockOpenCodeServer(page, {
       sessions: fixture.sessions,
       provider: fixture.provider,
@@ -124,26 +159,10 @@ test.describe("smoke: session timeline", () => {
       pageMessages: (sessionID) => ({ items: fixture.messages[sessionID as keyof typeof fixture.messages] ?? [] }),
     })
     await configureSmokePage(page, fixture.directory)
-    await page.addInitScript(
-      ({ dirBase64, sourceID, targetID }) => {
-        localStorage.setItem(
-          "opencode.window.browser.dat:tabs",
-          JSON.stringify(
-            [sourceID, targetID].map((sessionId) => ({
-              type: "session",
-              server: "http://127.0.0.1:4096",
-              dirBase64,
-              sessionId,
-            })),
-          ),
-        )
-      },
-      { dirBase64: base64Encode(fixture.directory), sourceID: fixture.sourceID, targetID: fixture.targetID },
-    )
 
     await page.goto(`/${base64Encode(fixture.directory)}/session/${fixture.targetID}`)
     await expectSessionTitle(page, fixture.expected.targetTitle)
-    await switchTitlebarSession(page, fixture.sourceID, fixture.expected.sourceTitle)
+    await switchSession(page, fixture.sourceID, fixture.expected.sourceTitle)
 
     const destination = fixture.messages[fixture.targetID].map((message) => message.info.id)
     const last = fixture.expected.targetMessageIDs.at(-1)!
@@ -202,9 +221,9 @@ test.describe("smoke: session timeline", () => {
         }
         ;(
           window as Window & {
-            __sessionTabPaint?: { samples: typeof samples; removed: () => number; stop: () => void }
+            __sessionTaskPaint?: { samples: typeof samples; removed: () => number; stop: () => void }
           }
-        ).__sessionTabPaint = {
+        ).__sessionTaskPaint = {
           samples,
           removed: () => removedFirstPaintNodes,
           stop: () => {
@@ -216,23 +235,23 @@ test.describe("smoke: session timeline", () => {
       { destination, last },
     )
 
-    await switchTitlebarSession(page, fixture.targetID, fixture.expected.targetTitle)
+    await switchSession(page, fixture.targetID, fixture.expected.targetTitle)
     await page.waitForFunction(() =>
       (
-        window as Window & { __sessionTabPaint?: { samples: Array<{ ids: string[] }> } }
-      ).__sessionTabPaint?.samples.some((sample) => sample.ids.length > 0),
+        window as Window & { __sessionTaskPaint?: { samples: Array<{ ids: string[] }> } }
+      ).__sessionTaskPaint?.samples.some((sample) => sample.ids.length > 0),
     )
     await page.waitForTimeout(200)
     const first = await page.evaluate(() => {
       const probe = (
         window as Window & {
-          __sessionTabPaint?: {
+          __sessionTaskPaint?: {
             samples: Array<{ ids: string[]; last: boolean; bottomError?: number }>
             removed: () => number
             stop: () => void
           }
         }
-      ).__sessionTabPaint!
+      ).__sessionTaskPaint!
       probe.stop()
       return { first: probe.samples.find((sample) => sample.ids.length > 0), removed: probe.removed() }
     })
@@ -241,7 +260,7 @@ test.describe("smoke: session timeline", () => {
     expect(first.removed).toBe(0)
   })
 
-  test("paints a cold session tab at the latest message", async ({ page }) => {
+  test("paints a cold session at the latest message when switching tasks", async ({ page }) => {
     await mockOpenCodeServer(page, {
       sessions: fixture.sessions,
       provider: fixture.provider,
@@ -250,22 +269,6 @@ test.describe("smoke: session timeline", () => {
       pageMessages: (sessionID) => ({ items: fixture.messages[sessionID as keyof typeof fixture.messages] ?? [] }),
     })
     await configureSmokePage(page, fixture.directory)
-    await page.addInitScript(
-      ({ dirBase64, sourceID, targetID }) => {
-        localStorage.setItem(
-          "opencode.window.browser.dat:tabs",
-          JSON.stringify(
-            [sourceID, targetID].map((sessionId) => ({
-              type: "session",
-              server: "http://127.0.0.1:4096",
-              dirBase64,
-              sessionId,
-            })),
-          ),
-        )
-      },
-      { dirBase64: base64Encode(fixture.directory), sourceID: fixture.sourceID, targetID: fixture.targetID },
-    )
     await page.goto(`/${base64Encode(fixture.directory)}/session/${fixture.sourceID}`)
     await expectSessionTitle(page, fixture.expected.sourceTitle)
     const last = fixture.expected.targetMessageIDs.at(-1)!
@@ -295,24 +298,24 @@ test.describe("smoke: session timeline", () => {
           }
           requestAnimationFrame(() => setTimeout(sample, 0))
         }
-        ;(window as Window & { __coldTabSamples?: typeof samples }).__coldTabSamples = samples
+        ;(window as Window & { __coldTaskSamples?: typeof samples }).__coldTaskSamples = samples
         requestAnimationFrame(() => setTimeout(sample, 0))
       },
       { destination, last },
     )
 
-    await switchTitlebarSession(page, fixture.targetID, fixture.expected.targetTitle)
+    await switchSession(page, fixture.targetID, fixture.expected.targetTitle)
     await page.waitForFunction(() =>
-      (window as Window & { __coldTabSamples?: Array<{ destination: boolean }> }).__coldTabSamples?.some(
+      (window as Window & { __coldTaskSamples?: Array<{ destination: boolean }> }).__coldTaskSamples?.some(
         (sample) => sample.destination,
       ),
     )
     const result = await page.evaluate(() => {
       const samples = (
         window as Window & {
-          __coldTabSamples?: Array<{ destination: boolean; last: boolean; bottomError?: number }>
+          __coldTaskSamples?: Array<{ destination: boolean; last: boolean; bottomError?: number }>
         }
-      ).__coldTabSamples!
+      ).__coldTaskSamples!
       return samples.find((sample) => sample.destination)!
     })
     expect(result.last).toBe(true)
@@ -355,6 +358,7 @@ test.describe("smoke: session timeline", () => {
 
 async function configureSmokePage(page: Page, directory: string) {
   await page.addInitScript(() => {
+    localStorage.setItem("vector.onboarding.v1", JSON.stringify({ tour: true, dismissed: true }))
     localStorage.setItem(
       "settings.v3",
       JSON.stringify({
@@ -369,7 +373,7 @@ async function configureSmokePage(page: Page, directory: string) {
 
   await page.addInitScript((directory) => {
     localStorage.setItem(
-      "opencode.global.dat:server",
+      "vector.global.dat:server",
       JSON.stringify({
         projects: {
           local: [{ worktree: directory, expanded: true }],
@@ -712,13 +716,13 @@ function expectCompleteScroll(
 
 async function selectHomeProject(page: Page, projectName: string) {
   await page.goto("/")
-  const row = page
-    .locator('[data-component="home-project-row"]')
+  const card = page
+    .locator(".vector-home-project-card")
     .filter({ hasText: new RegExp(projectName, "i") })
     .first()
-  await expectAppVisible(row)
-  await row.click()
-  await expect(row).toHaveAttribute("data-selected", "", { timeout: APP_READY_TIMEOUT })
+  await expectAppVisible(card)
+  await card.locator(".vector-home-project-card__main").click()
+  await expect(card).toHaveAttribute("data-selected", "true", { timeout: APP_READY_TIMEOUT })
   await expect(page).toHaveURL(/\/$/)
 }
 
@@ -727,11 +731,12 @@ async function navigateToSession(page: Page, directory: string, sessionId: strin
   await expectSessionTitle(page, expectedTitle)
 }
 
-async function switchTitlebarSession(page: Page, sessionID: string, title: string) {
+async function switchSession(page: Page, sessionID: string, title: string) {
   const href = `/server/${base64Encode(fixture.serverKey)}/session/${sessionID}`
-  const tab = page.locator(`[data-slot="titlebar-tabs"] a[href="${href}"]`).first()
-  await expect(tab).toBeVisible()
-  await tab.click()
+  await page.evaluate((next) => {
+    history.pushState({}, "", next)
+    dispatchEvent(new PopStateEvent("popstate"))
+  }, href)
   await expectSessionTitle(page, title)
 }
 

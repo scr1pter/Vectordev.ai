@@ -235,6 +235,7 @@ export function TabNavItem(props: {
             if (props.suppressNavigation?.()) return
             props.onNavigate()
           }}
+          aria-current={props.active ? "page" : undefined}
           class="flex h-full min-w-0 flex-1 flex-row items-center gap-1.5 text-[13px] font-medium text-v2-text-text-faint group-data-[active='true']:text-v2-text-text-base group-data-[editing='true']:text-v2-text-text-base [-webkit-user-drag:none]"
         >
           <Show when={props.session()}>
@@ -299,6 +300,7 @@ export function TabNavItem(props: {
           }}
           onClick={closeTab}
           icon={<IconV2 name="xmark-small" />}
+          aria-label={language.t("command.tab.close")}
         />
       </div>
     </div>
@@ -334,6 +336,7 @@ export function DraftTabItem(props: {
   pressed?: boolean
   hidden?: boolean
 }) {
+  const language = useLanguage()
   const closeTab = (event: MouseEvent) => {
     event.preventDefault()
     event.stopPropagation()
@@ -373,6 +376,7 @@ export function DraftTabItem(props: {
           if (props.suppressNavigation?.()) return
           props.onNavigate()
         }}
+        aria-current={props.active ? "page" : undefined}
         class="flex h-full min-w-0 flex-1 flex-row items-center gap-1.5 text-[13px] font-medium text-v2-text-text-faint group-data-[active='true']:text-v2-text-text-base [-webkit-user-drag:none]"
       >
         <span class="flex size-4 shrink-0 items-center justify-center">
@@ -400,7 +404,7 @@ export function DraftTabItem(props: {
           class="hover-reveal relative z-10 group-hover:opacity-100 group-data-[active=true]:opacity-100 group-data-[editing=true]:opacity-100"
           onClick={closeTab}
           icon={<IconV2 name="xmark-small" />}
-          aria-label="Close tab"
+          aria-label={language.t("command.tab.close")}
         />
       </div>
     </div>

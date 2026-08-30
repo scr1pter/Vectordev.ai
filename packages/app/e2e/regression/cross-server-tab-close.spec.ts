@@ -6,15 +6,15 @@ const serverB = "http://127.0.0.1:4097"
 const sessionA = session("ses_server_a", "C:/server-a", "Server A session")
 const sessionB = session("ses_server_b", "/home/server-b", "Server B session")
 
-test("closing the active server's last tab opens the remaining server tab", async ({ page }) => {
+test("closing the active task by keyboard opens the remaining server task", async ({ page }) => {
   const requests: string[] = []
   await mockServers(page, requests)
   await page.addInitScript(
     ({ serverB, sessionA, sessionB }) => {
       localStorage.setItem("settings.v3", JSON.stringify({ general: { newLayoutDesigns: true } }))
-      localStorage.setItem("opencode.global.dat:server", JSON.stringify({ list: [serverB] }))
+      localStorage.setItem("vector.global.dat:server", JSON.stringify({ list: [serverB] }))
       localStorage.setItem(
-        "opencode.window.browser.dat:tabs",
+        "vector.window.browser.dat:tabs",
         JSON.stringify([
           { type: "session", server: "http://127.0.0.1:4096", sessionId: sessionA },
           { type: "session", server: serverB, sessionId: sessionB },
@@ -29,8 +29,7 @@ test("closing the active server's last tab opens the remaining server tab", asyn
   await page.goto(hrefA)
   await expect(page.getByText(sessionA.title).first()).toBeVisible()
 
-  const tabA = page.locator(`[data-titlebar-tab-slot]:has(a[href="${hrefA}"])`)
-  await tabA.locator('[data-slot="tab-close"] button').click()
+  await page.keyboard.press(`${(await page.evaluate(() => /Mac/.test(navigator.platform))) ? "Meta" : "Control"}+w`)
 
   await expect(page).toHaveURL(new RegExp(`${hrefB.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`))
   await expect.poll(() => requests.some((url) => url.startsWith(`${serverB}/session/${sessionB.id}`))).toBe(true)
@@ -45,14 +44,14 @@ test("closing the active server's last tab opens the remaining server tab", asyn
   ).toBe(true)
 })
 
-test("legacy session routes preserve an existing tab's server", async ({ page }) => {
+test("legacy session routes preserve an existing task's server", async ({ page }) => {
   await mockServers(page, [])
   await page.addInitScript(
     ({ serverB, sessionB }) => {
       localStorage.setItem("settings.v3", JSON.stringify({ general: { newLayoutDesigns: true } }))
-      localStorage.setItem("opencode.global.dat:server", JSON.stringify({ list: [serverB] }))
+      localStorage.setItem("vector.global.dat:server", JSON.stringify({ list: [serverB] }))
       localStorage.setItem(
-        "opencode.window.browser.dat:tabs",
+        "vector.window.browser.dat:tabs",
         JSON.stringify([{ type: "session", server: serverB, sessionId: sessionB }]),
       )
     },

@@ -9,7 +9,7 @@ const parentID = "ses_subagent_parent"
 const childID = "ses_subagent_child"
 const parentTitle = "Parent session"
 const childTitle = "Subagent child session"
-// Child session pages derive their heading from the task part that spawned them.
+// The task card describes the work; the compact workspace header uses the child session title.
 const taskDescription = "Inspect child navigation"
 
 type EventPayload = { directory: string; payload: Record<string, unknown> }
@@ -20,18 +20,18 @@ test("navigates to a subagent child session missing from the session list", asyn
   await setup(page)
   await openChildFromParent(page)
 
-  await expectSessionTitle(page, taskDescription)
-  await expect(page.getByRole("heading", { name: parentTitle })).toHaveCount(0)
+  await expectSessionTitle(page, childTitle)
+  await expect(page.locator("[data-vector-session-title]").filter({ hasText: parentTitle })).toHaveCount(0)
 
-  const titlebarRight = page.locator("#opencode-titlebar-right")
-  await expect(titlebarRight.getByRole("button", { name: "Toggle review" })).toHaveCount(1)
+  const header = page.locator("[data-vector-session-header]")
+  await expect(header.getByRole("button", { name: "Toggle review", exact: true })).toBeVisible()
 })
 
 test("shows the not found fallback when the viewed session is deleted", async ({ page }) => {
   const events: EventPayload[] = []
   await setup(page, () => events.splice(0, 1))
   await openChildFromParent(page)
-  await expectSessionTitle(page, taskDescription)
+  await expectSessionTitle(page, childTitle)
 
   events.push({
     directory,
@@ -40,7 +40,7 @@ test("shows the not found fallback when the viewed session is deleted", async ({
 
   await expect(page.getByText("This session cannot be found")).toBeVisible()
   await expect(page.getByRole("button", { name: "Close Tab" })).toBeVisible()
-  await expect(page.getByRole("heading", { name: taskDescription })).toHaveCount(0)
+  await expect(page.locator("[data-vector-session-title]")).toHaveCount(0)
 })
 
 async function setup(page: Page, events?: () => EventPayload[]) {
@@ -182,13 +182,13 @@ async function configurePage(page: Page) {
     ({ directory, server, sessionId }) => {
       localStorage.setItem("settings.v3", JSON.stringify({ general: { newLayoutDesigns: true } }))
       localStorage.setItem(
-        "opencode.global.dat:server",
+        "vector.global.dat:server",
         JSON.stringify({
           projects: { local: [{ worktree: directory, expanded: true }] },
           lastProject: { local: directory },
         }),
       )
-      localStorage.setItem("opencode.window.browser.dat:tabs", JSON.stringify([{ type: "session", server, sessionId }]))
+      localStorage.setItem("vector.window.browser.dat:tabs", JSON.stringify([{ type: "session", server, sessionId }]))
     },
     { directory, server, sessionId: parentID },
   )

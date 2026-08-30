@@ -242,8 +242,8 @@ export const SettingsGeneralV2: Component<{
   const renderGeneral = () => (
     <Page
       eyebrow="General"
-      title="Local application data"
-      description="Manage the preferences and temporary data Vector stores on this device."
+      title="General"
+      description="Manage Vector's local behavior, memory, diagnostics, and verification defaults."
     >
       <div class="settings-v2-section-grid">
         <LocalMemoryPanel />

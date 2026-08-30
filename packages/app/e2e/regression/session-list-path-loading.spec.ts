@@ -23,8 +23,9 @@ test("shows loaded sessions before the directory path request resolves", async (
   })
 
   await page.addInitScript((directory) => {
+    localStorage.setItem("vector.onboarding.v1", JSON.stringify({ tour: true, dismissed: true }))
     localStorage.setItem(
-      "opencode.global.dat:server",
+      "vector.global.dat:server",
       JSON.stringify({
         projects: { local: [{ worktree: directory, expanded: true }] },
         lastProject: { local: directory },

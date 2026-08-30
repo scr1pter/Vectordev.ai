@@ -6,6 +6,10 @@
   outline: none;
 }
 
+[data-slot="titlebar-tab-item"]:has(> a:focus-visible) {
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--vx-purple) 65%, transparent);
+}
+
 [data-slot="titlebar-v2"]
   [data-component="icon-button-v2"][data-variant="ghost-muted"]:is(:focus-visible, [data-state="focus"]):not(
     :disabled

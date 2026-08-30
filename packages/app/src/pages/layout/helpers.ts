@@ -28,7 +28,7 @@ const isRootVisibleSession = (session: Session, directory: string) =>
   pathKey(session.directory) === pathKey(directory) &&
   !session.parentID &&
   !session.time?.archived &&
-  // Vector's own tool sessions (canvas assistant, browser agent planner, …)
+  // Vector's own tool sessions (browser agent planner, codespace architect, …)
   // are real engine sessions but must never surface in user-facing lists.
   !isInternalSession(session)
 

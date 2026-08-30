@@ -20,6 +20,7 @@ import { UserMessage } from "@opencode-ai/sdk/v2"
 import { useSessionLayout } from "@/pages/session/session-layout"
 import { useTabs } from "@/context/tabs"
 import { requireServerKey } from "@/utils/session-route"
+import { announceWorkspaceMode } from "@/utils/workspace-mode"
 import { createSessionOwnership } from "./session-ownership"
 
 export type SessionCommandContext = {
@@ -187,11 +188,27 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
     view().reviewPanel.open("other")
     void tabs().open("codespace")
     tabs().setActive("codespace")
+    announceWorkspaceMode("editor")
     if (alreadyOpen) return
     showToast({
       title: "Vector Codespace opened",
       description: "The synced editor is open. Pick a file in Codespace to inspect or review code.",
     })
+  }
+
+  const closeCodespace = () => {
+    view().reviewPanel.close()
+    layout.fileTree.close()
+    if (tabs().active() === "codespace") tabs().close("codespace")
+    announceWorkspaceMode("agent")
+  }
+
+  const closeWorkspacePanel = () => {
+    view().reviewPanel.close()
+    layout.fileTree.close()
+    if (tabs().active() === "codespace") tabs().close("codespace")
+    if (tabs().active() === "preview") tabs().close("preview")
+    announceWorkspaceMode("agent")
   }
 
   const openPreview = () => {
@@ -214,6 +231,18 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
       description: "Open the synced editor with files, review, and project context.",
       slash: "codespace",
       onSelect: openCodespace,
+    }),
+    viewCommand({
+      id: "vector.codespace.close",
+      title: "Return to Vector Agent",
+      description: "Close the full-screen editor and return to the current agent conversation.",
+      onSelect: closeCodespace,
+    }),
+    viewCommand({
+      id: "vector.workspace-panel.close",
+      title: "Close workspace panel",
+      description: "Close the active editor or browser panel before opening another full-screen workspace.",
+      onSelect: closeWorkspacePanel,
     }),
     viewCommand({
       id: "vector.preview.open",

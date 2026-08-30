@@ -270,13 +270,19 @@ const childMessages = Array.from({ length: 4 }, (_, index) => [
 
 function renderable(part: MessagePart) {
   if (part.type === "tool" && part.tool === "todowrite") return false
-  if (part.type === "text") return !!part.text.trim()
-  if (part.type === "reasoning") return !!part.text.trim()
+  if (part.type === "text") return !!part.text?.trim()
+  if (part.type === "reasoning") return !!part.text?.trim()
   return part.type !== "step-start" && part.type !== "step-finish" && part.type !== "patch"
 }
 
 function orderedParts(message: Message) {
   return message.parts.slice().sort((a, b) => a.id.localeCompare(b.id))
+}
+
+const messages: Record<string, Message[]> = {
+  [sourceID]: sourceMessages,
+  [targetID]: targetMessages,
+  [childID]: childMessages,
 }
 
 export const fixture = {
@@ -333,7 +339,7 @@ export const fixture = {
   sourceID,
   targetID,
   childID,
-  messages: { [sourceID]: sourceMessages, [targetID]: targetMessages, [childID]: childMessages },
+  messages,
   expected: {
     sourceTitle: "Uncommitted changes inquiry",
     targetTitle: "Example Game: sample jump movement & sample physics analysis",

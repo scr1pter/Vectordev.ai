@@ -1,5 +1,7 @@
 import { createEffect, createSignal, For, lazy, Show, Suspense, type JSX } from "solid-js"
 import { createStore } from "solid-js/store"
+import { createAutoScroll } from "@opencode-ai/ui/hooks"
+import { MenuV2 } from "@opencode-ai/ui/v2/menu-v2"
 import { Terminal } from "@/components/terminal"
 import { FileProvider } from "@/context/file"
 import type { ServerConnection } from "@/context/server"
@@ -7,6 +9,7 @@ import { SDKProvider } from "@/context/sdk"
 import { TerminalProvider, useTerminal } from "@/context/terminal"
 import { DirectoryDataProvider } from "@/pages/directory-layout"
 import { externalAgentWorkspaceTabs, type ExternalAgentWorkspaceView } from "./external-agent-workspace-model"
+import "./external-agent-chat.css"
 
 const CodespaceWorkbench = lazy(() =>
   import("@/pages/session/session-side-panel").then((module) => ({ default: module.CodespaceWorkbench })),
@@ -59,16 +62,10 @@ export function ExternalAgentWorkspace(props: {
               data-workspace-id={props.id}
               data-workspace-directory={props.directory}
               data-active-view={state.view}
-              class="flex size-full min-h-0 flex-col overflow-hidden bg-[#171719] text-white"
+              class="vector-agent-workspace"
             >
-              <header class="flex h-[68px] shrink-0 items-center gap-3 border-b border-[color:var(--vx-line)] bg-[#1b1b1e] px-4">
-                <button
-                  type="button"
-                  class="grid size-9 shrink-0 place-items-center rounded-[9px] text-white/50 transition hover:bg-white/[0.06] hover:text-white"
-                  aria-label="Back to main agent"
-                  title="Back to main agent"
-                  onClick={props.onBack}
-                >
+              <header class="vector-agent-workspace-header">
+                <button type="button" aria-label="Back to main agent" title="Back to main agent" onClick={props.onBack}>
                   <svg viewBox="0 0 16 16" class="size-4" aria-hidden="true">
                     <path
                       d="M9.75 3.75 5.5 8l4.25 4.25"
@@ -80,106 +77,93 @@ export function ExternalAgentWorkspace(props: {
                     />
                   </svg>
                 </button>
-                <img src="/vector-logo.png" alt="" class="size-8 rounded-[9px] object-cover" draggable={false} />
-                <div class="min-w-0 flex-1">
-                  <div class="flex min-w-0 items-center gap-2">
-                    <h1 class="truncate text-[14px] font-semibold text-white">{props.name}</h1>
-                    <span
-                      class={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium ${props.statusTone}`}
-                    >
-                      {props.statusLabel}
-                    </span>
-                    <Show when={props.running}>
-                      <span class="size-1.5 shrink-0 animate-pulse rounded-full bg-[color:var(--vx-purple-bright)]" />
-                    </Show>
-                  </div>
-                  <p class="mt-0.5 truncate text-[10.5px] text-white/38">
-                    {props.runtimeLabel} · {props.branchLabel} · {props.model}
-                  </p>
-                </div>
-                <div class="hidden shrink-0 items-center gap-4 text-right md:flex">
-                  <div>
-                    <div class="text-[9.5px] uppercase tracking-[0.08em] text-white/25">Spend</div>
-                    <div class="mt-0.5 text-[11px] tabular-nums text-white/60">{props.cost}</div>
-                  </div>
-                  <button
-                    type="button"
-                    class="grid size-8 place-items-center rounded-[8px] text-white/42 transition hover:bg-white/[0.06] hover:text-white"
-                    aria-label={`Refresh ${props.runtimeLabel} activity`}
-                    title="Refresh workspace"
-                    onClick={props.onRefresh}
-                  >
-                    <svg viewBox="0 0 16 16" class="size-3.5" aria-hidden="true">
-                      <path
-                        d="M12.65 6.2A4.9 4.9 0 1 0 12 10.8M12.65 6.2V2.9m0 3.3h-3.3"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="1.2"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                      />
-                    </svg>
+                <h1 class="vector-agent-workspace-title">{props.name}</h1>
+                <span class="vector-agent-workspace-status" data-running={props.running}>
+                  <span />
+                  {props.running ? "Working" : props.statusLabel}
+                </span>
+                <Show when={state.view !== "chat"}>
+                  <button type="button" onClick={() => openView("chat")} aria-label="Back to conversation">
+                    Chat
                   </button>
-                </div>
-              </header>
-
-              <div
-                role="tablist"
-                aria-label="Agent workspace views"
-                class="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-[color:var(--vx-line)] bg-[#19191c] px-4"
-              >
-                <For each={externalAgentWorkspaceTabs}>
-                  {(tab) => (
-                    <button
-                      type="button"
-                      role="tab"
-                      data-agent-workspace-tab={tab.value}
-                      class="relative h-10 shrink-0 px-3 text-[11.5px] font-medium transition"
-                      classList={{
-                        "text-white": state.view === tab.value,
-                        "text-white/38 hover:text-white/70": state.view !== tab.value,
-                      }}
-                      aria-selected={state.view === tab.value}
-                      onClick={() => openView(tab.value)}
-                    >
-                      {tab.label}
-                      <Show when={tab.value === "changes" && props.changedFiles > 0}>
-                        <span class="ml-1.5 rounded-full bg-[color:var(--vx-purple-soft)] px-1.5 py-0.5 text-[9px] tabular-nums text-[color:var(--vx-purple-bright)]">
-                          {props.changedFiles}
+                </Show>
+                <button
+                  type="button"
+                  aria-pressed={state.view === "files"}
+                  onClick={() => openView(state.view === "files" ? "chat" : "files")}
+                >
+                  <svg viewBox="0 0 16 16" aria-hidden="true">
+                    <path d="M5.5 2.5h5l3 3v8h-8zM10.5 2.5v3h3M2.5 5.5v8h3" />
+                  </svg>
+                  Files
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={state.view === "changes"}
+                  onClick={() => openView(state.view === "changes" ? "chat" : "changes")}
+                >
+                  <svg viewBox="0 0 16 16" aria-hidden="true">
+                    <path d="M3 2.5h10v11H3zM5.5 5.5h5M8 3.5v4M5.5 10.5h5" />
+                  </svg>
+                  Changes{" "}
+                  <Show when={props.changedFiles > 0}>
+                    <span class="vector-agent-header-count">{props.changedFiles}</span>
+                  </Show>
+                </button>
+                <MenuV2 placement="bottom-end" gutter={8}>
+                  <MenuV2.Trigger aria-label="More workspace tools" title="More workspace tools">
+                    <svg viewBox="0 0 16 16" aria-hidden="true">
+                      <circle cx="3" cy="8" r=".75" />
+                      <circle cx="8" cy="8" r=".75" />
+                      <circle cx="13" cy="8" r=".75" />
+                    </svg>
+                  </MenuV2.Trigger>
+                  <MenuV2.Portal>
+                    <MenuV2.Content class="vector-agent-workspace-menu">
+                      <For
+                        each={externalAgentWorkspaceTabs.filter((view) =>
+                          ["terminal", "browser", "activity"].includes(view.value),
+                        )}
+                      >
+                        {(view) => (
+                          <MenuV2.Item onSelect={() => openView(view.value)}>
+                            {view.value === "activity" ? "Run details" : view.label}
+                          </MenuV2.Item>
+                        )}
+                      </For>
+                      <MenuV2.Item onSelect={props.onRefresh}>Refresh activity</MenuV2.Item>
+                      <MenuV2.Separator />
+                      <div class="vector-agent-workspace-meta">
+                        <span>
+                          {props.runtimeLabel} · {props.model}
                         </span>
-                      </Show>
-                      <Show when={state.view === tab.value}>
-                        <span class="absolute inset-x-2 bottom-0 h-px bg-[color:var(--vx-purple-bright)]" />
-                      </Show>
-                    </button>
-                  )}
-                </For>
-                <div class="flex-1" />
-                <span class="hidden text-[10px] text-white/25 sm:inline">Isolated workspace</span>
-              </div>
-
-              <div class="grid shrink-0 grid-cols-4 border-b border-[color:var(--vx-line)] bg-[#18181a] sm:grid-cols-5">
-                <Stat label="Files" value={String(props.changedFiles)} />
-                <Stat label="Added" value={`+${props.added}`} tone="text-emerald-300" />
-                <Stat label="Removed" value={`-${props.removed}`} tone="text-rose-300" />
-                <Stat label="Risk" value={props.risk} />
-                <div class="hidden sm:block">
-                  <Stat label="Runtime" value={props.runtimeLabel} />
-                </div>
-              </div>
+                        <span>{props.branchLabel}</span>
+                        <span>{props.cost}</span>
+                      </div>
+                    </MenuV2.Content>
+                  </MenuV2.Portal>
+                </MenuV2>
+              </header>
 
               <div class="min-h-0 flex-1 overflow-hidden">
                 <Show when={state.view === "chat"}>
-                  <div class="flex size-full min-h-0 flex-col">
-                    <div class="min-h-0 flex-1 overflow-y-auto px-5 py-5">
-                      <div class="mx-auto w-full max-w-[980px]">{props.chat}</div>
-                    </div>
-                    {props.composer}
-                  </div>
+                  <ExternalAgentChatPane chat={props.chat} composer={props.composer}>
+                    <Show when={props.changedFiles > 0 && !props.running}>
+                      <button type="button" class="vector-agent-change-summary" onClick={() => openView("changes")}>
+                        Review {props.changedFiles} changed {props.changedFiles === 1 ? "file" : "files"}
+                        <span data-added>+{props.added}</span>
+                        <span data-removed>−{props.removed}</span>
+                      </button>
+                    </Show>
+                  </ExternalAgentChatPane>
                 </Show>
                 <Show when={state.view === "files"}>
                   <ExternalAgentFiles
                     changedFiles={() => props.changedFilePaths}
+                    runtimeLabel={props.runtimeLabel}
+                    running={props.running}
+                    chat={props.chat}
+                    composer={props.composer}
                     onClose={() => openView("chat")}
                     onReview={() => openView("changes")}
                   />
@@ -211,9 +195,9 @@ export function ExternalAgentWorkspace(props: {
                 </Show>
               </div>
 
-              <footer class="flex min-h-[58px] shrink-0 flex-wrap items-center gap-2 border-t border-[color:var(--vx-line)] bg-[#1b1b1e] px-4 py-2.5">
-                {props.actions}
-              </footer>
+              <Show when={state.view === "changes"}>
+                <footer class="vector-agent-review-actions">{props.actions}</footer>
+              </Show>
             </section>
           </FileProvider>
         </TerminalProvider>
@@ -222,19 +206,39 @@ export function ExternalAgentWorkspace(props: {
   )
 }
 
-function Stat(props: { label: string; value: string; tone?: string }) {
+function ExternalAgentChatPane(props: { chat: JSX.Element; composer: JSX.Element; children?: JSX.Element }) {
+  // Follow new text and late markdown layout until the reader scrolls away.
+  // This also covers reopening a completed conversation with cached messages.
+  const scroll = createAutoScroll({ working: () => true, overflowAnchor: "dynamic" })
   return (
-    <div class="min-w-0 border-r border-[color:var(--vx-line)] px-4 py-2.5 last:border-r-0">
-      <div class="text-[9px] uppercase tracking-[0.08em] text-white/25">{props.label}</div>
-      <div class={`mt-0.5 truncate text-[11.5px] font-medium capitalize ${props.tone ?? "text-white/70"}`}>
-        {props.value}
+    <div class="vector-agent-chat-pane">
+      <div
+        class="vector-agent-chat-scroll"
+        ref={scroll.scrollRef}
+        onScroll={scroll.handleScroll}
+        onPointerUp={scroll.handleInteraction}
+      >
+        <div class="vector-agent-chat-content" ref={scroll.contentRef}>
+          {props.chat}
+          {props.children}
+        </div>
       </div>
+      <Show when={scroll.userScrolled()}>
+        <button type="button" class="vector-agent-scroll-latest" onClick={scroll.resume}>
+          ↓ Latest message
+        </button>
+      </Show>
+      {props.composer}
     </div>
   )
 }
 
 function ExternalAgentFiles(props: {
   changedFiles: () => readonly string[]
+  runtimeLabel: string
+  running: boolean
+  chat: JSX.Element
+  composer: JSX.Element
   onClose: () => void
   onReview: () => void
 }) {
@@ -258,6 +262,11 @@ function ExternalAgentFiles(props: {
               onClose={props.onClose}
               embedded
               portalMount={mount()}
+              externalAgent={{
+                label: props.runtimeLabel,
+                running: props.running,
+                panel: <ExternalAgentChatPane chat={props.chat} composer={props.composer} />,
+              }}
             />
           </Suspense>
         )}

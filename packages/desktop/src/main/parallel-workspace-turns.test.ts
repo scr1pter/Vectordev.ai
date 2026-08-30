@@ -4,6 +4,7 @@ import {
   appendTurn,
   continuationPrompt,
   extendStreamTail,
+  updateTurnChat,
   settleRunningTurns,
   settleTurn,
   type ParallelWorkspaceTurn,
@@ -14,6 +15,19 @@ function turn(overrides: Partial<ParallelWorkspaceTurn> & { id: string }): Paral
 }
 
 describe("workspace turn transcript", () => {
+  test("structured chat replaces snapshots and survives settlement without duplicated final text", () => {
+    const initial = [turn({ id: "a", state: "running" })]
+    const chat = {
+      messages: [{ id: "m", text: "Hello" }],
+      activity: [{ id: "tool", label: "Reading project", kind: "tool" as const, state: "running" as const }],
+    }
+    const updated = updateTurnChat(updateTurnChat(initial, "a", chat), "a", chat)
+    const result = settleTurn(updated, "a", { text: "Hello", state: "done" })[0]!
+    expect(result.messages).toEqual(chat.messages)
+    expect(result.text).toBe("Hello")
+    expect(result.activity?.[0]?.state).toBe("done")
+    expect(settleRunningTurns(updated, { text: "Stopped", state: "stopped" })[0]?.activity?.[0]?.state).toBe("failed")
+  })
   test("appendTurn keeps the newest 120 in arrival order", () => {
     const many = Array.from({ length: 130 }, (_value, index) => turn({ id: `t${index}` }))
     const capped = many.reduce<ParallelWorkspaceTurn[]>((turns, next) => appendTurn(turns, next), [])

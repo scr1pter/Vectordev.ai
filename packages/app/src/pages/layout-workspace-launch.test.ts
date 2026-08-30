@@ -2,6 +2,7 @@ import { expect, test } from "bun:test"
 import { ServerConnection } from "@/context/server"
 import { sessionHref } from "@/utils/session-route"
 import {
+  editorWorkspacePreparation,
   materializeParallelWorkspaceParent,
   parallelWorkspaceComposerAvailable,
   parallelWorkspaceHref,
@@ -11,6 +12,17 @@ import {
   parallelWorkspaceToolDirectory,
   parallelWorkspaceView,
 } from "./layout-workspace-launch"
+
+test("the Editor switch materializes project drafts and waits for mounted sessions", () => {
+  expect(editorWorkspacePreparation({ commandReady: true, draftID: "draft-1", sourcePath: "/repo" })).toBe("open")
+  expect(editorWorkspacePreparation({ commandReady: false, draftID: "draft-1", sourcePath: "/repo" })).toBe(
+    "materialize",
+  )
+  expect(editorWorkspacePreparation({ commandReady: false, sourcePath: "/repo" })).toBe("wait")
+  expect(editorWorkspacePreparation({ commandReady: false, draftID: "draft-1", sourcePath: "" })).toBe(
+    "missing-project",
+  )
+})
 
 test("a project-backed Start building draft can open the workspace launcher", () => {
   expect(

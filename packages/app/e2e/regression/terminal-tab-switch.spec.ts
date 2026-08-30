@@ -16,10 +16,10 @@ const PROBE = "original"
 
 test.use({ viewport: { width: 1440, height: 900 } })
 
-// Terminals are workspace-scoped: switching between session tabs in the same
+// Terminals are workspace-scoped: switching between tasks in the same
 // workspace must keep the terminal mounted and its PTY connection open instead
 // of tearing it down and reconnecting.
-test("keeps the terminal session alive when switching session tabs in a workspace", async ({ page }) => {
+test("keeps the terminal session alive when switching tasks in a workspace", async ({ page }) => {
   const connections = await setup(page)
 
   await page.goto(sessionHref(sessionA))
@@ -31,13 +31,13 @@ test("keeps the terminal session alive when switching session tabs in a workspac
   await expect.poll(() => connections.length).toBe(1)
   await writeProbe(page)
 
-  await switchTab(page, titleB)
+  await switchTask(page, sessionB)
   await expectSessionTitle(page, titleB)
   await expect(terminal).toBeVisible()
   expect(await readProbe(page)).toBe(PROBE)
   expect(connections.length).toBe(1)
 
-  await switchTab(page, titleA)
+  await switchTask(page, sessionA)
   await expectSessionTitle(page, titleA)
   await expect(terminal).toBeVisible()
   expect(await readProbe(page)).toBe(PROBE)
@@ -46,8 +46,12 @@ test("keeps the terminal session alive when switching session tabs in a workspac
 
 type Probed = HTMLElement & { __e2eProbe?: string }
 
-async function switchTab(page: Page, title: string) {
-  await page.locator("[data-titlebar-tab-slot]", { hasText: title }).click()
+async function switchTask(page: Page, sessionID: string) {
+  const href = sessionHref(sessionID)
+  await page.evaluate((next) => {
+    history.pushState({}, "", next)
+    dispatchEvent(new PopStateEvent("popstate"))
+  }, href)
 }
 
 async function writeProbe(page: Page) {
@@ -112,14 +116,14 @@ async function setup(page: Page) {
     ({ directory, server, sessions }) => {
       localStorage.setItem("settings.v3", JSON.stringify({ general: { newLayoutDesigns: true } }))
       localStorage.setItem(
-        "opencode.global.dat:server",
+        "vector.global.dat:server",
         JSON.stringify({
           projects: { local: [{ worktree: directory, expanded: true }] },
           lastProject: { local: directory },
         }),
       )
       localStorage.setItem(
-        "opencode.window.browser.dat:tabs",
+        "vector.window.browser.dat:tabs",
         JSON.stringify(sessions.map((sessionId: string) => ({ type: "session", server, sessionId }))),
       )
     },

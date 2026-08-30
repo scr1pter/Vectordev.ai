@@ -24,9 +24,9 @@ const navigation = [
       ["Agent Dashboard", "agent-dashboard"],
       ["Claude Code, Codex, Cursor", "external-agents"],
       ["Automations", "automations"],
-      ["Codespace", "codespace"],
+      ["Agent and Editor", "agent-editor"],
       ["Browser", "browser"],
-      ["Terminal and Canvas", "terminal-canvas"],
+      ["Terminal and review", "terminal-review"],
     ],
   },
   {
@@ -66,7 +66,7 @@ const faqs = [
   {
     question: "Can I edit code myself?",
     answer:
-      "Yes. Open Codespace for a file explorer, code editor, diagnostics, search, and an editor agent. Vector is meant for both direct coding and delegated work.",
+      "Yes. Switch from Agent to Editor to search the project, open files in tabs, edit directly, use diagnostics, and keep the same session agent beside the code.",
   },
   {
     question: "Does the browser replace Chrome or Firefox?",
@@ -299,18 +299,18 @@ const faqs = [
           </p>
         </section>
 
-        <section id="codespace" class="doc-section">
+        <section id="agent-editor" class="doc-section">
           <p class="section-number">10</p>
-          <h2>Codespace</h2>
+          <h2>Agent and Editor</h2>
           <p>
-            Open Codespace when you want to work directly. It includes the project tree, editor tabs,
-            syntax-aware editing, file search, diagnostics, and an editor agent connected to the
-            active Vector session.
+            Agent and Editor are two modes over one Vector session. Switch to Editor when you want to work directly:
+            search the project, open files in tabs, edit with language support, or keep the same agent beside the
+            file and ask it to make the change.
           </p>
           <ul class="feature-list">
-            <li><strong>Find a file</strong><span>Use editor search to open project files without leaving Codespace.</span></li>
+            <li><strong>Find a file</strong><span>Use project search to open a file full-screen in a persistent tab.</span></li>
             <li><strong>Edit normally</strong><span>Your changes are written to the active repository or isolated workspace.</span></li>
-            <li><strong>Ask beside the code</strong><span>Use the editor agent for focused explanations and edits.</span></li>
+            <li><strong>Ask beside the code</strong><span>The session does not restart when you switch views, so the agent keeps the task and its history.</span></li>
           </ul>
         </section>
 
@@ -333,13 +333,13 @@ const faqs = [
           </div>
         </section>
 
-        <section id="terminal-canvas" class="doc-section">
+        <section id="terminal-review" class="doc-section">
           <p class="section-number">12</p>
-          <h2>Terminal and Canvas</h2>
+          <h2>Terminal and review</h2>
           <p>
-            The Terminal runs commands inside the active repository. Canvas lets you arrange project
-            tools together so the editor, terminal, browser, cloud view, and notes can stay visible
-            while several threads of work are in motion.
+            The Terminal runs commands inside the active repository or isolated workspace. Review keeps the files an
+            agent changed, validation results, risk signals and merge controls together, so you can inspect what will
+            land before it touches the primary checkout.
           </p>
         </section>
 

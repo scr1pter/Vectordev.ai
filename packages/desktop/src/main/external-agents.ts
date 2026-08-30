@@ -4,6 +4,8 @@ import { constants } from "node:fs"
 import { access, cp, mkdir, readdir, rm, stat } from "node:fs/promises"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
+import { StringDecoder } from "node:string_decoder"
+import type { AgentChat } from "./parallel-workspace-turns"
 import { untrustedChildEnvironment } from "@opencode-ai/core/child-environment"
 
 import { getUserShell, loadShellEnv } from "./shell-env"
@@ -466,6 +468,7 @@ export type RunExternalAgentInput = {
   resumeSessionId?: string
   signal?: AbortSignal
   onEvent?: (event: ExternalAgentEvent) => void
+  onChat?: (chat: AgentChat) => void
   // Fires at most once per run, the moment the id first appears on the stream.
   // A field on ExternalAgentEvent would arrive duplicated, because emitLine
   // fires onEvent twice per line — once raw, once as derived activity.
@@ -504,12 +507,22 @@ export function runtimeArguments(runtime: CodingAgentRuntime, cwd: string, promp
       "--output-format",
       "stream-json",
       "--verbose",
+      "--include-partial-messages",
       "--permission-mode",
       "acceptEdits",
     ]
   }
   if (runtime === "claude-code") {
-    return ["-p", prompt, "--output-format", "stream-json", "--verbose", "--permission-mode", "acceptEdits"]
+    return [
+      "-p",
+      prompt,
+      "--output-format",
+      "stream-json",
+      "--verbose",
+      "--include-partial-messages",
+      "--permission-mode",
+      "acceptEdits",
+    ]
   }
   if (runtime === "codex" && resumeSessionId) {
     // Options must precede SESSION_ID, and resume takes neither --sandbox nor
@@ -528,10 +541,139 @@ export function runtimeArguments(runtime: CodingAgentRuntime, cwd: string, promp
   if (runtime === "codex") {
     return ["exec", "--json", "--sandbox", "workspace-write", "--skip-git-repo-check", "-C", cwd, prompt]
   }
+  // Cursor's partial mode emits indistinguishable deltas AND aggregate text
+  // envelopes. Complete-block stream-json stays live at tool/retry boundaries
+  // without guessing whether repeated text is a delta or a duplicate aggregate.
   if (resumeSessionId) {
     return ["--resume", resumeSessionId, "-p", "--trust", "--force", "--output-format", "stream-json", prompt]
   }
   return ["-p", "--trust", "--force", "--output-format", "stream-json", prompt]
+}
+
+function object(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" ? (value as Record<string, unknown>) : {}
+}
+
+// Protocol allowlist: raw output, tool arguments, reasoning content and unknown
+// envelopes remain diagnostics. Only explicit assistant text becomes chat.
+export function createAgentChat(runtime: CodingAgentRuntime) {
+  const messages: AgentChat["messages"] = []
+  const activity: AgentChat["activity"] = []
+  let current = "assistant-0"
+  const streamedMessages = new Set<string>()
+  const assistantBlocks = new Set<string>()
+  const message = (id: string, text: string, append = false) => {
+    if (!text) return
+    const previous = messages.find((entry) => entry.id === id)
+    const value = redactAgentOutput((append ? (previous?.text ?? "") : "") + text).slice(-200_000)
+    if (previous) previous.text = value
+    if (!previous) messages.push({ id, text: value })
+    if (messages.length > 120) messages.shift()
+  }
+  const tool = (id: string, name: string, state: AgentChat["activity"][number]["state"]) => {
+    const kind = name === "reasoning" || name === "thinking" ? "thinking" : "tool"
+    const label =
+      kind === "thinking"
+        ? "Thinking"
+        : /read|search|grep|glob/i.test(name)
+          ? "Reading project"
+          : /edit|write|patch|file_change/i.test(name)
+            ? "Updating files"
+            : /shell|bash|command|exec/i.test(name)
+              ? "Running a command"
+              : "Using a tool"
+    const entry = { id, label, kind, state } as AgentChat["activity"][number]
+    const index = activity.findIndex((item) => item.id === id)
+    if (index < 0) activity.push(entry)
+    if (index >= 0) activity[index] = entry
+    if (activity.length > 60) activity.shift()
+  }
+  return (line: string): AgentChat => {
+    const event = parseAgentJson(line) ?? {}
+    const item = object(event.item)
+    if (runtime === "codex" && ["item.started", "item.updated", "item.completed"].includes(String(event.type))) {
+      const id = textAt(item, ["id"]) ?? current
+      if (item.type === "agent_message") message(id, textAt(item, ["text"]) ?? "")
+      if (
+        ["command_execution", "file_change", "mcp_tool_call", "web_search", "reasoning"].includes(String(item.type))
+      ) {
+        tool(
+          id,
+          String(item.type),
+          item.status === "failed" ? "failed" : event.type === "item.completed" ? "done" : "running",
+        )
+      }
+    }
+    if (runtime !== "codex") {
+      const stream = object(event.event)
+      if (event.type === "stream_event" && stream.type === "message_start")
+        current = textAt(object(stream.message), ["id"]) ?? `assistant-${messages.length}`
+      if (event.type === "stream_event" && stream.type === "content_block_delta") {
+        const delta = object(stream.delta)
+        if (delta.type === "text_delta" && typeof delta.text === "string") {
+          streamedMessages.add(current)
+          message(current, delta.text, true)
+        }
+      }
+      if (event.type === "stream_event" && stream.type === "content_block_start") {
+        const block = object(stream.content_block)
+        if (block.type === "text" && typeof block.text === "string" && block.text) {
+          streamedMessages.add(current)
+          message(current, block.text, true)
+        }
+        // Tool execution starts with the complete assistant tool_use below;
+        // content-block stop only means its arguments finished streaming.
+        if (block.type === "thinking") tool(`${current}-${stream.index}`, String(block.name ?? block.type), "running")
+      }
+      if (event.type === "stream_event" && stream.type === "content_block_stop") {
+        const entry = activity.find((entry) => entry.id === `${current}-${stream.index}`)
+        if (entry) entry.state = "done"
+      }
+      if (event.type === "assistant") {
+        const body = object(event.message)
+        const id = textAt(body, ["id"]) ?? current
+        const content = Array.isArray(body.content) ? body.content.map(object) : []
+        const text = content
+          .filter((block) => block.type === "text" && typeof block.text === "string")
+          .map((block) => block.text)
+          .join("")
+        // Claude emits one assistant envelope per completed content block,
+        // sharing message.id. Its partial events already accumulated that block.
+        const blockID = textAt(event, ["uuid"])
+        if (runtime !== "claude-code" || !streamedMessages.has(id)) {
+          if (!blockID || !assistantBlocks.has(blockID)) message(id, text, runtime === "cursor" || Boolean(blockID))
+        }
+        if (blockID) assistantBlocks.add(blockID)
+        content
+          .filter((block) => block.type === "tool_use")
+          .forEach((block) => tool(textAt(block, ["id"]) ?? `${id}-tool`, String(block.name), "running"))
+        current = id
+      }
+      if (event.type === "tool_call") {
+        tool(
+          textAt(event, ["call_id", "id"]) ?? "tool",
+          Object.keys(object(event.tool_call))[0] ?? "tool",
+          event.subtype === "completed" ? "done" : "running",
+        )
+      }
+      if (event.type === "user") {
+        const content = object(event.message).content
+        if (Array.isArray(content))
+          content
+            .map(object)
+            .filter((block) => block.type === "tool_result")
+            .forEach((block) => {
+              const entry = activity.find((entry) => entry.id === block.tool_use_id)
+              if (entry) entry.state = block.is_error === true ? "failed" : "done"
+            })
+      }
+      if (event.type === "result" && event.is_error !== true && typeof event.result === "string") {
+        // Result repeats the final assistant response, not a new message.
+        if (runtime === "cursor" || !messages.length) message(messages.at(-1)?.id ?? current, event.result)
+      }
+    }
+    return { messages: messages.map((entry) => ({ ...entry })), activity: activity.map((entry) => ({ ...entry })) }
+  }
 }
 
 function parseAgentJson(line: string) {
@@ -566,10 +708,10 @@ function activityFromAgentLine(line: string) {
 function summaryFromAgentLine(line: string) {
   const event = parseAgentJson(line)
   if (!event) return undefined
-  return (
-    textAt(event, ["result", "summary", "final_output"]) ??
-    (event.item && typeof event.item === "object" ? textAt(event.item, ["text", "message"]) : undefined)
-  )
+  if (event.type === "result") return textAt(event, ["result"])
+  if (event.type === "item.completed" && object(event.item).type === "agent_message")
+    return textAt(event.item, ["text"])
+  return undefined
 }
 
 // One rule covers all three runtimes: codex puts the id on thread.started as
@@ -685,6 +827,8 @@ export async function runExternalCodingAgent(input: RunExternalAgentInput): Prom
     })
     const output: string[] = []
     const summaries: string[] = []
+    const chat = createAgentChat(input.runtime)
+    const decoders = { stdout: new StringDecoder("utf8"), stderr: new StringDecoder("utf8") }
     let actualCost: string | undefined
     let sessionId: string | undefined
     let stdoutBuffer = ""
@@ -712,10 +856,11 @@ export async function runExternalCodingAgent(input: RunExternalAgentInput): Prom
       }
       input.onEvent?.({ stream, text })
       input.onEvent?.({ stream: "activity", text: activityFromAgentLine(text) })
+      if (stream === "stdout") input.onChat?.(chat(text))
     }
 
     const consume = (stream: "stdout" | "stderr", chunk: Buffer) => {
-      const combined = (stream === "stdout" ? stdoutBuffer : stderrBuffer) + chunk.toString("utf8")
+      const combined = (stream === "stdout" ? stdoutBuffer : stderrBuffer) + decoders[stream].write(chunk)
       const lines = combined.split(/\r?\n/)
       const remainder = lines.pop() ?? ""
       if (stream === "stdout") stdoutBuffer = remainder
@@ -750,8 +895,8 @@ export async function runExternalCodingAgent(input: RunExternalAgentInput): Prom
       clearTimeout(timeout)
       if (forceTimer) clearTimeout(forceTimer)
       input.signal?.removeEventListener("abort", abort)
-      emitLine("stdout", stdoutBuffer)
-      emitLine("stderr", stderrBuffer)
+      emitLine("stdout", stdoutBuffer + decoders.stdout.end())
+      emitLine("stderr", stderrBuffer + decoders.stderr.end())
       if (stopReason) {
         const timedOut = stopReason === "timeout"
         const error = timedOut

@@ -87,6 +87,14 @@ const getBase = (appId: string, executableName: string): Configuration => ({
   files: ["out/**/*", "resources/**/*"],
   extraResources: [
     {
+      // Written by the same build invocation that compiles CHANNEL into the
+      // main process. Package verification compares this marker with the
+      // bundle id and feed, preventing stale dev output from becoming a
+      // production-looking app with its updater silently disabled.
+      from: `out/vector-build.json`,
+      to: `vector-build.json`,
+    },
+    {
       from: "resources/icons/",
       to: "icons/",
       filter: ["**/*"],
@@ -105,7 +113,7 @@ const getBase = (appId: string, executableName: string): Configuration => ({
     icon: `resources/icons/icon.icns`,
     extendInfo: {
       NSMicrophoneUsageDescription:
-        "Vector uses microphone access only when you start voice dictation or a conversation with Vel.",
+        "Vector uses microphone access only when you start voice dictation or a voice-enabled agent session.",
     },
     hardenedRuntime: true,
     identity: signMac ? undefined : "-",

@@ -212,6 +212,26 @@ export function elapsedLabel(agent: DashboardAgentInput, now: number) {
   return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`
 }
 
+export type AgentCardDetails = {
+  activity: string
+  changes: string
+  cost?: string
+  runtime: string
+}
+
+// Board and list views carry the same compact operational context. Keeping the
+// wording here prevents the two presentations from drifting into different
+// interpretations of the same run.
+export function agentCardDetails(agent: DashboardAgentInput): AgentCardDetails {
+  const changedFiles = Math.max(agent.changedFilesCount, new Set(agent.changedFiles).size)
+  return {
+    activity: agent.error || agent.lastAction || agent.status,
+    changes: changedFiles === 1 ? "1 file changed" : `${changedFiles} files changed`,
+    cost: agent.actualCost || agent.estimatedCost || undefined,
+    runtime: [agent.runtime, agent.model].filter(Boolean).join(" · "),
+  }
+}
+
 // The board mirrors what a reviewer actually does with a run: watch it, act on
 // it, or leave it alone. "Needs you" deliberately merges failed with needs
 // review — both are stopped and waiting on a person, and splitting them puts
@@ -263,8 +283,9 @@ export function pullRequestStateFor(agent: DashboardAgentInput): "open" | "merge
 function matchesQuery(agent: DashboardAgentInput, query: string) {
   const needle = query.trim().toLowerCase()
   if (!needle) return true
-  return [agent.name, agent.taskPrompt, agent.lastAction, agent.runtime, agent.model]
-    .some((field) => field?.toLowerCase().includes(needle))
+  return [agent.name, agent.taskPrompt, agent.lastAction, agent.runtime, agent.model].some((field) =>
+    field?.toLowerCase().includes(needle),
+  )
 }
 
 function groupKeyFor(agent: DashboardAgentInput) {
@@ -274,10 +295,7 @@ function groupKeyFor(agent: DashboardAgentInput) {
 // Every filter is an OR within itself and an AND against the others, which is
 // what a chip row reads as: two statuses means either, a status and a runtime
 // means both.
-export function filterAgents(
-  agents: readonly DashboardAgentInput[],
-  filters: AgentFilters,
-): DashboardAgentInput[] {
+export function filterAgents(agents: readonly DashboardAgentInput[], filters: AgentFilters): DashboardAgentInput[] {
   return agents.filter((agent) => {
     if (!matchesQuery(agent, filters.query ?? "")) return false
     if (filters.statuses?.length && !filters.statuses.includes(agent.status)) return false

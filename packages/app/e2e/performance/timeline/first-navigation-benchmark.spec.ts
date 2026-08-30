@@ -3,9 +3,10 @@ import { benchmark, expect } from "../benchmark"
 import { measureFirstNavigation } from "./first-navigation-probe"
 import { fixture } from "./session-timeline-stress.fixture"
 import {
-  installStressSessionTabs,
+  installStressTasks,
   installTimelineSettings,
   mockStressTimeline,
+  navigateStressTask,
   stressDraftHref,
   stressSessionHref,
 } from "./timeline-test-helpers"
@@ -15,17 +16,18 @@ const contentSelector = '[data-message-id], [data-component="prompt-input"]'
 const draftID = "draft_first_navigation"
 
 benchmark.describe("performance: first navigation paint", () => {
-  benchmark("opens an unvisited session tab without a blank frame", async ({ page, report }) => {
+  benchmark("opens an unvisited task without a blank frame", async ({ page, report }) => {
     await setup(page)
     const href = stressSessionHref(fixture.targetID)
     const result = await measureFirstNavigation(page, {
       href,
+      trigger: "route",
       destinationPath: href,
       sourceSelector: messageSelector(fixture.expected.sourceMessageIDs.at(-1)!),
       destinationSelector: messageSelector(fixture.expected.targetMessageIDs.at(-1)!),
       contentSelector,
       navigate: async () => {
-        await page.locator(`[data-slot="titlebar-tabs"] a[href="${href}"]`).first().click()
+        await navigateStressTask(page, href)
         await expectSessionTitle(page, fixture.expected.targetTitle)
       },
     })
@@ -39,13 +41,16 @@ benchmark.describe("performance: first navigation paint", () => {
     const href = stressDraftHref(draftID)
     const result = await measureFirstNavigation(page, {
       href,
+      trigger: "route",
       destinationPath: href,
       sourceSelector: messageSelector(fixture.expected.sourceMessageIDs.at(-1)!),
-      destinationSelector: '[data-component="prompt-input"]',
+      destinationSelector: '[data-component="session-new-composer"]',
       contentSelector,
       navigate: async () => {
-        await page.locator(`[data-slot="titlebar-tabs"] a[href="${href}"]`).first().click()
-        await expect(page.locator('[data-component="prompt-input"]')).toBeVisible()
+        await navigateStressTask(page, href)
+        await expect(
+          page.locator('[data-component="session-new-composer"] [data-component="prompt-input"]'),
+        ).toBeVisible()
       },
     })
     report(result)
@@ -58,6 +63,7 @@ benchmark.describe("performance: first navigation paint", () => {
     const href = stressSessionHref(fixture.childID)
     const result = await measureFirstNavigation(page, {
       href,
+      trigger: "click",
       destinationPath: href,
       sourceSelector: messageSelector(fixture.expected.sourceMessageIDs.at(-1)!),
       destinationSelector: messageSelector(fixture.expected.childMessageIDs.at(-1)!),
@@ -76,7 +82,7 @@ benchmark.describe("performance: first navigation paint", () => {
 async function setup(page: Parameters<typeof mockStressTimeline>[0], draft?: string) {
   await mockStressTimeline(page)
   await installTimelineSettings(page)
-  await installStressSessionTabs(page, draft ? { draftID: draft } : undefined)
+  await installStressTasks(page, draft ? { draftID: draft } : undefined)
   await page.goto(stressSessionHref(fixture.sourceID))
   await expectSessionTitle(page, fixture.expected.sourceTitle)
   await waitForStableTimeline(page, fixture.expected.sourceMessageIDs.at(-1)!)

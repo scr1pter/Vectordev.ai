@@ -4,54 +4,52 @@ import { benchmark, expect, withBenchmarkPage } from "../benchmark"
 import { fixture } from "./session-timeline-stress.fixture"
 import {
   createReviewDiffs,
-  installStressSessionTabs,
+  installStressTasks,
   installTimelineSettings,
   mockStressTimeline,
+  navigateStressTask,
   stressSessionHref,
 } from "./timeline-test-helpers"
 import { measureSessionSwitch, waitForStableTimeline } from "./session-tab-switch-probe"
 
 type Result = Awaited<ReturnType<typeof measureSessionSwitch>>
 
-benchmark("benchmarks cold and hot session tab switching", async ({ browser, report }, testInfo) => {
+benchmark("benchmarks cold and hot task switching", async ({ browser, report }, testInfo) => {
   benchmark.setTimeout(180_000)
   const results = { cold: [] as Result[], hot: [] as Result[] }
   for (const mode of ["cold", "hot"] as const) {
     for (let run = 0; run < 5; run++) {
       results[mode].push(
-        await withBenchmarkPage(browser, `session-tab-switch-${mode}-${run}`, (page) => trial(page, mode), testInfo),
+        await withBenchmarkPage(browser, `session-task-switch-${mode}-${run}`, (page) => trial(page, mode), testInfo),
       )
     }
   }
   report({ results, summary: summarize(results) })
 })
 
-benchmark(
-  "benchmarks v2 session tab switching with and without the review pane",
-  async ({ browser, report }, testInfo) => {
-    benchmark.setTimeout(360_000)
-    const runs = Number(process.env.SESSION_TAB_SWITCH_RUNS ?? 5)
-    const results = {
-      closed: { cold: [] as Result[], hot: [] as Result[] },
-      open: { cold: [] as Result[], hot: [] as Result[] },
-    }
-    for (const reviewPane of ["closed", "open"] as const) {
-      for (const mode of ["cold", "hot"] as const) {
-        for (let run = 0; run < runs; run++) {
-          results[reviewPane][mode].push(
-            await withBenchmarkPage(
-              browser,
-              `session-tab-switch-v2-${reviewPane}-${mode}-${run}`,
-              (page) => trial(page, mode, { newLayoutDesigns: true, reviewPane }),
-              testInfo,
-            ),
-          )
-        }
+benchmark("benchmarks task switching with and without the review pane", async ({ browser, report }, testInfo) => {
+  benchmark.setTimeout(360_000)
+  const runs = Number(process.env.SESSION_TAB_SWITCH_RUNS ?? 5)
+  const results = {
+    closed: { cold: [] as Result[], hot: [] as Result[] },
+    open: { cold: [] as Result[], hot: [] as Result[] },
+  }
+  for (const reviewPane of ["closed", "open"] as const) {
+    for (const mode of ["cold", "hot"] as const) {
+      for (let run = 0; run < runs; run++) {
+        results[reviewPane][mode].push(
+          await withBenchmarkPage(
+            browser,
+            `session-task-switch-${reviewPane}-${mode}-${run}`,
+            (page) => trial(page, mode, { newLayoutDesigns: true, reviewPane }),
+            testInfo,
+          ),
+        )
       }
     }
-    report({ results, summary: summarizeReviewPane(results) }, { runs, reviewDiffs: createReviewDiffs().length })
-  },
-)
+  }
+  report({ results, summary: summarizeReviewPane(results) }, { runs, reviewDiffs: createReviewDiffs().length })
+})
 
 async function trial(
   page: Page,
@@ -61,7 +59,7 @@ async function trial(
   const reviewDiffs = options?.newLayoutDesigns ? createReviewDiffs() : undefined
   await mockStressTimeline(page, { vcsDiff: reviewDiffs })
   if (options?.newLayoutDesigns) await installTimelineSettings(page)
-  await installStressSessionTabs(page)
+  await installStressTasks(page)
   if (mode === "hot") {
     await page.goto(stressSessionHref(fixture.targetID))
     await expectSessionTitle(page, fixture.expected.targetTitle)
@@ -124,9 +122,7 @@ function summarizeReviewPane(results: Record<"closed" | "open", Record<"cold" | 
 
 async function switchSession(page: Page, sessionID: string, title: string) {
   const href = stressSessionHref(sessionID)
-  const tab = page.locator(`[data-slot="titlebar-tabs"] a[href="${href}"]`).first()
-  await expect(tab).toBeVisible()
-  await tab.click()
+  await navigateStressTask(page, href)
   await expectSessionTitle(page, title)
 }
 

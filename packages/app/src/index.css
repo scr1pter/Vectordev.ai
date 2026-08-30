@@ -1,3 +1,4 @@
+@import "@fontsource-variable/geist";
 @import "@opencode-ai/ui/styles/tailwind";
 @import "@opencode-ai/session-ui/styles";
 @import "@opencode-ai/ui/v2/styles/tailwind.css";
@@ -274,6 +275,16 @@
     outline-offset: 3px !important;
   }
 
+  /* The isolated-agent mission fields share one focus-within surface. Keep the
+     accessible halo on that surface instead of drawing a second bright box
+     around the individual input or textarea. */
+  html[data-vector-focus-indicators="true"]
+    [data-vector-agent-launcher]
+    :is(input.vx-launcher__name, textarea.vx-launcher__prompt):focus-visible {
+    outline: none !important;
+    outline-offset: 0 !important;
+  }
+
   /* Scoped motion: only interactive surfaces animate, and only paint-safe
      properties. A bare `*` duration would animate every layout change. */
   :is(button, [role="button"], a, summary, input, select, textarea) {
@@ -299,11 +310,6 @@
 }
 
 @layer components {
-  [data-vel-turn="true"] [data-component="user-message"],
-  [data-vel-turn="true"] [data-component="text-part"] [data-component="markdown"] {
-    font-style: italic !important;
-  }
-
   [data-vector-shell] {
     background: #1d1d1f !important;
     color: #f4f4f5;
@@ -860,7 +866,6 @@
   body {
     background: #1d1d1f;
   }
-
 
   [data-slot="titlebar-v2"] {
     min-height: 0 !important;
@@ -1718,5 +1723,64 @@
 
   [data-vector-shell] [data-action="prompt-submit"]:disabled {
     opacity: 0.45 !important;
+  }
+}
+
+/* Authoritative shell skin — intentionally last so retired experiments above
+   cannot restore the stark black-and-white workspace. */
+@layer theme {
+  :root,
+  html {
+    --vector-workspace-bg: var(--vx-canvas);
+    --vector-sidebar-bg: var(--vx-sidebar);
+    --vector-chat-bg: var(--vx-stage);
+    --v2-background-bg-base: var(--vx-canvas);
+    --v2-background-bg-deep: var(--vx-canvas);
+    --v2-background-bg-layer-01: var(--vx-stage);
+    --v2-background-bg-layer-02: var(--vx-surface);
+    --v2-background-bg-layer-03: var(--vx-surface-raised);
+    --v2-background-bg-layer-04: var(--vx-control-hover);
+    --v2-text-text-base: var(--vx-text);
+    --v2-text-text-muted: var(--vx-text-subtle);
+    --v2-text-text-faint: var(--vx-text-muted);
+    --v2-icon-icon-base: var(--vx-text);
+    --v2-icon-icon-muted: var(--vx-text-muted);
+  }
+}
+
+@layer components {
+  [data-vector-shell] {
+    background: var(--vx-canvas) !important;
+    color: var(--vx-text) !important;
+    font-family: var(--vx-font) !important;
+  }
+
+  html[data-vector-font="pixel"] [data-vector-shell],
+  html[data-vector-font="mono"] [data-vector-shell] {
+    font-family: var(--vx-font) !important;
+  }
+
+  [data-vector-shell] > main,
+  [data-component="session-new-design"] {
+    background-color: var(--vx-canvas) !important;
+  }
+
+  [data-component="sidebar-rail"],
+  [data-vector-navigation] {
+    border-color: var(--vx-line) !important;
+    background: color-mix(in oklab, var(--vx-sidebar) 97%, transparent) !important;
+  }
+
+  /* The Editor inherits the task's agent, model and execution policy. Keep its
+     companion composer focused on the file instead of repeating the full
+     workspace configuration toolbar. */
+  .vector-editor-agent-composer :is(
+    [data-component="prompt-agent-control"],
+    [data-component="prompt-model-control"],
+    [data-action="prompt-mode"],
+    [data-component="prompt-variant-control"],
+    [data-action="prompt-execution-mode"]
+  ) {
+    display: none !important;
   }
 }

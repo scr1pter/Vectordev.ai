@@ -1,3 +1,8 @@
+export type AgentChat = {
+  messages: { id: string; text: string }[]
+  activity: { id: string; label: string; kind: "tool" | "thinking"; state: "running" | "done" | "failed" }[]
+}
+
 export type ParallelWorkspaceTurn = {
   id: string
   // "vector" is Vector's own narration — repair notices, rebuild notices — and
@@ -10,6 +15,8 @@ export type ParallelWorkspaceTurn = {
   // resuming. The UI says so rather than pretending the agent remembers.
   resumed?: boolean
   cost?: string
+  messages?: AgentChat["messages"]
+  activity?: AgentChat["activity"]
   // Live output for the turn in flight, dropped when the turn settles so a
   // finished conversation does not carry its whole scrollback in the store.
   streamTail?: string[]
@@ -17,6 +24,20 @@ export type ParallelWorkspaceTurn = {
 
 const TURN_LIMIT = 120
 const STREAM_TAIL_LIMIT = 40
+
+export function updateTurnChat(turns: ParallelWorkspaceTurn[] | undefined, id: string, chat: AgentChat) {
+  return (turns ?? []).map((turn) =>
+    turn.id === id ? { ...turn, messages: chat.messages, activity: chat.activity } : turn,
+  )
+}
+
+function settledActivity(turn: ParallelWorkspaceTurn, state: ParallelWorkspaceTurn["state"]) {
+  return turn.activity?.map((entry) =>
+    entry.state === "running" && state !== "running"
+      ? { ...entry, state: state === "done" ? ("done" as const) : ("failed" as const) }
+      : entry,
+  )
+}
 
 export function appendTurn(turns: ParallelWorkspaceTurn[] | undefined, turn: ParallelWorkspaceTurn) {
   return [...(turns ?? []), turn].slice(-TURN_LIMIT)
@@ -34,7 +55,15 @@ export function settleTurn(
   patch: { text?: string; state: ParallelWorkspaceTurn["state"]; cost?: string },
 ) {
   return (turns ?? []).map((turn) =>
-    turn.id === id ? { ...turn, ...patch, text: patch.text ?? turn.text, streamTail: undefined } : turn,
+    turn.id === id
+      ? {
+          ...turn,
+          ...patch,
+          text: patch.text ?? turn.text,
+          activity: settledActivity(turn, patch.state),
+          streamTail: undefined,
+        }
+      : turn,
   )
 }
 
@@ -47,7 +76,13 @@ export function settleRunningTurns(
 ) {
   return (turns ?? []).map((turn) =>
     turn.state === "running"
-      ? { ...turn, state: patch.state, text: turn.text || patch.text, streamTail: undefined }
+      ? {
+          ...turn,
+          state: patch.state,
+          text: turn.text || patch.text,
+          activity: settledActivity(turn, patch.state),
+          streamTail: undefined,
+        }
       : turn,
   )
 }

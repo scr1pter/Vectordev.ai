@@ -35,13 +35,13 @@ type NavigationMilestoneProbe = {
 export async function measureNavigationMilestones(
   page: Page,
   input: {
-    triggerSelector: string
+    trigger: { type: "click"; selector: string } | { type: "keydown"; key: string; modifier: "Meta" | "Control" }
     milestones: Record<string, { selector: string; visible?: boolean }>
     navigate: () => Promise<void>
   },
 ) {
   await page.evaluate(
-    ({ triggerSelector, milestones }) => {
+    ({ trigger, milestones }) => {
       const samples: NavigationMilestoneSample[] = []
       const streaks = new Map<string, number>()
       const marked = new Set<string>()
@@ -93,24 +93,32 @@ export async function measureNavigationMilestones(
           }, 0)
         })
       }
-      document.addEventListener(
-        "click",
-        (event) => {
-          if (!(event.target instanceof Element) || !event.target.closest(triggerSelector)) return
-          started = performance.now()
-          performance.mark("opencode.navigation.click")
-          sample()
-        },
-        { capture: true, once: true },
-      )
+      const start = () => {
+        if (started !== undefined) return
+        started = performance.now()
+        performance.mark(`opencode.navigation.${trigger.type}`)
+        sample()
+      }
+      const onClick = (event: MouseEvent) => {
+        if (trigger.type !== "click" || !(event.target instanceof Element)) return
+        if (event.target.closest(trigger.selector)) start()
+      }
+      const onKeydown = (event: KeyboardEvent) => {
+        if (trigger.type !== "keydown" || event.key.toLowerCase() !== trigger.key.toLowerCase()) return
+        if (trigger.modifier === "Meta" ? event.metaKey : event.ctrlKey) start()
+      }
+      if (trigger.type === "click") document.addEventListener("click", onClick, { capture: true })
+      if (trigger.type === "keydown") document.addEventListener("keydown", onKeydown, { capture: true })
       ;(window as Window & { __navigationMilestones?: NavigationMilestoneProbe }).__navigationMilestones = {
         samples,
         stop: () => {
           running = false
+          document.removeEventListener("click", onClick, { capture: true })
+          document.removeEventListener("keydown", onKeydown, { capture: true })
         },
       }
     },
-    { triggerSelector: input.triggerSelector, milestones: input.milestones },
+    { trigger: input.trigger, milestones: input.milestones },
   )
   await input.navigate()
   await page.waitForFunction(() => {

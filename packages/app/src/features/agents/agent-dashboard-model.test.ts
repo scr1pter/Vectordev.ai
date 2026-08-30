@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  agentCardDetails,
   boardColumns,
   elapsedLabel,
   filterAgents,
@@ -110,7 +111,15 @@ describe("summarize", () => {
   })
 
   test("is all zeroes for no agents", () => {
-    expect(summarize([])).toEqual({ total: 0, running: 0, attention: 0, finished: 0, changedFiles: 0, clashes: 0, teams: 0 })
+    expect(summarize([])).toEqual({
+      total: 0,
+      running: 0,
+      attention: 0,
+      finished: 0,
+      changedFiles: 0,
+      clashes: 0,
+      teams: 0,
+    })
   })
 })
 
@@ -195,6 +204,41 @@ describe("elapsedLabel", () => {
   })
 })
 
+describe("agentCardDetails", () => {
+  test("keeps board and list metadata consistent", () => {
+    expect(
+      agentCardDetails(
+        agent({
+          runtime: "Claude Code",
+          model: "claude-sonnet-5",
+          lastAction: "Editing src/auth.ts",
+          changedFilesCount: 2,
+          changedFiles: ["src/auth.ts", "src/auth.test.ts"],
+          actualCost: "$0.08",
+          estimatedCost: "$0.10",
+        }),
+      ),
+    ).toEqual({
+      activity: "Editing src/auth.ts",
+      changes: "2 files changed",
+      cost: "$0.08",
+      runtime: "Claude Code · claude-sonnet-5",
+    })
+  })
+
+  test("uses a reported error as the most important activity", () => {
+    expect(agentCardDetails(agent({ error: "Typecheck failed", lastAction: "Running tests" })).activity).toBe(
+      "Typecheck failed",
+    )
+  })
+
+  test("counts distinct changed paths when the persisted count is stale", () => {
+    expect(
+      agentCardDetails(agent({ changedFilesCount: 0, changedFiles: ["src/a.ts", "src/a.ts", "src/b.ts"] })).changes,
+    ).toBe("2 files changed")
+  })
+})
+
 describe("team conversation", () => {
   const message = (id: string, createdAt: string, toWorkspaceId?: string) => ({
     id,
@@ -227,7 +271,9 @@ describe("team conversation", () => {
 
 describe("summarize teams", () => {
   test("counts distinct teams and ignores agents without one", () => {
-    expect(summarize([agent({ teamId: "t1" }), agent({ teamId: "t1" }), agent({ teamId: "t2" }), agent()]).teams).toBe(2)
+    expect(summarize([agent({ teamId: "t1" }), agent({ teamId: "t1" }), agent({ teamId: "t2" }), agent()]).teams).toBe(
+      2,
+    )
   })
 })
 

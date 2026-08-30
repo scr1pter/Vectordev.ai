@@ -23,7 +23,7 @@ type EventPayload = {
 
 test.use({ viewport: { width: 1440, height: 900 }, reducedMotion: "no-preference" })
 
-test("animates todo lifecycle without replaying it across session tabs", async ({ page }) => {
+test("animates todo lifecycle without replaying it across task switches", async ({ page }) => {
   test.setTimeout(90_000)
   const events: EventPayload[] = []
   const todos: Record<string, typeof activeTodos> = { [sourceID]: [], [otherID]: [] }
@@ -138,14 +138,14 @@ async function configurePage(page: Page) {
     ({ directory, dirBase64, server, sessionIDs }) => {
       localStorage.setItem("settings.v3", JSON.stringify({ general: { newLayoutDesigns: true } }))
       localStorage.setItem(
-        "opencode.global.dat:server",
+        "vector.global.dat:server",
         JSON.stringify({
           projects: { local: [{ worktree: directory, expanded: true }] },
           lastProject: { local: directory },
         }),
       )
       localStorage.setItem(
-        "opencode.window.browser.dat:tabs",
+        "vector.window.browser.dat:tabs",
         JSON.stringify(sessionIDs.map((sessionId) => ({ type: "session", server, dirBase64, sessionId }))),
       )
     },
@@ -160,9 +160,10 @@ function sessionHref(sessionID: string) {
 
 async function switchSession(page: Page, sessionID: string, title: string) {
   const href = sessionHref(sessionID)
-  const tab = page.locator(`[data-slot="titlebar-tabs"] a[href="${href}"]`).first()
-  await expect(tab).toBeVisible()
-  await tab.click()
+  await page.evaluate((next) => {
+    history.pushState({}, "", next)
+    dispatchEvent(new PopStateEvent("popstate"))
+  }, href)
   await expectSessionTitle(page, title)
 }
 

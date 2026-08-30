@@ -7,7 +7,7 @@ const directory = "C:/OpenCode/PromptThinkingLevelRegression"
 const projectID = "proj_prompt_thinking_level_regression"
 const sessionID = "ses_prompt_thinking_level_regression"
 
-test("shows the V2 thinking level control while relevant", async ({ page }) => {
+test("keeps the V2 thinking level control available in the Agent composer", async ({ page }) => {
   await mockOpenCodeServer(page, {
     directory,
     project: {
@@ -60,18 +60,22 @@ test("shows the V2 thinking level control while relevant", async ({ page }) => {
   await expectAppVisible(composer)
 
   await idleComposer(page)
-  await expect(control).toBeHidden()
+  await expect(control).toBeVisible()
 
   await composer.hover()
   await expect(control).toBeVisible()
 
   await control.locator('[data-action="prompt-model-variant"]').click()
-  const high = page.getByRole("menuitemradio", { name: "high" })
-  await expect(high).toBeVisible()
+  const effort = page.getByRole("slider", { name: "Model effort" })
+  await expect(effort).toBeVisible()
   await page.mouse.move(0, 0)
   await expect(control).toBeVisible()
-  await expect(high).toBeVisible()
-  await high.click()
+  await expect(effort).toBeVisible()
+  const max = await effort.getAttribute("max")
+  expect(max).not.toBeNull()
+  await effort.fill(max ?? "0")
+  await page.keyboard.press("Escape")
+  await expect(control.locator('[data-action="prompt-model-variant"]')).toHaveText("Extra")
 
   await idleComposer(page)
   await input.focus()

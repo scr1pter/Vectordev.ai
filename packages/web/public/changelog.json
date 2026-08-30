@@ -1,6 +1,20 @@
 {
   "releases": [
     {
+      "tag": "v1.99.1",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "One workspace, two ways to work",
+              "description": "Vector keeps the familiar project-first workspace with a calmer purple interface and no extra global session-tab strip. Agent and Editor are two views of the same session: search for a file, edit it directly, or ask the agent beside it to make the change. Claude Code, Codex and Cursor Agent now use readable conversations with formatted replies and expandable tool activity, not report cards or raw runtime output. Their file editor keeps the same agent, conversation and follow-up draft beside the code. You can draft while an agent works, stop it without losing your text, and recover a failed send without overwriting a new draft. Runtime streaming preserves repeated text and multi-paragraph answers, including interrupted turns. The Agent Dashboard has matching board and list views for Running, Needs you and Done. Full-screen settings bring searchable categories, consistent typography and Updates & about together; help, browser, terminal and review share the compact shell. Canvas and the Vel control are retired. Session navigation loads additional history correctly and no longer leaves deferred review panels stuck after navigation. Draft projects become real sessions before the editor opens, and isolated project copies establish their baseline before an agent runs so unchanged files are not reported as thousands of edits. Installer builds verify their version and channel; unsigned releases remain manual-download-only and cannot replace signed update feeds."
+            }
+          ]
+        }
+      ]
+    },
+    {
       "tag": "v1.19.99",
       "highlights": [
         {

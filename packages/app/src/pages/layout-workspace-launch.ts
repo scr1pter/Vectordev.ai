@@ -11,6 +11,17 @@ export function parallelWorkspaceComposerAvailable(input: {
   return input.taskOpen || input.draftOpen || input.returnTaskOpen
 }
 
+export function editorWorkspacePreparation(input: {
+  commandReady: boolean
+  draftID?: string
+  sourcePath: string
+}) {
+  if (input.commandReady) return "open" as const
+  if (!input.draftID) return "wait" as const
+  if (!input.sourcePath) return "missing-project" as const
+  return "materialize" as const
+}
+
 export type ParallelWorkspaceRuntime = "vector" | "claude-code" | "codex" | "cursor"
 export type ParallelWorkspaceView = "chat" | "files" | "changes" | "terminal" | "browser" | "activity"
 

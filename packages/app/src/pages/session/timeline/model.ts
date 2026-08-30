@@ -55,14 +55,16 @@ export function createTimelineModel(input: {
     emptyUserMessages,
     { equals: same },
   )
-  const more = createMemo(() => {
+  // Resolve history against the current route at the call site. A memoized
+  // boolean can retain the previous session's value across async navigation.
+  const more = () => {
     const id = input.sessionID()
     return id ? sync().session.history.more(id) : false
-  })
-  const loading = createMemo(() => {
+  }
+  const loading = () => {
     const id = input.sessionID()
     return id ? sync().session.history.loading(id) : false
-  })
+  }
   const loadOlder = async (options?: { before?: () => void; after?: (done: boolean) => void }) => {
     return loadOlderTimeline({
       sessionID: input.sessionID,

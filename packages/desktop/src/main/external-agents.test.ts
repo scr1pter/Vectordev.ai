@@ -6,6 +6,7 @@ import { afterAll, describe, expect, test } from "bun:test"
 
 import {
   agentCandidatePaths,
+  createAgentChat,
   agentEnvironment,
   agentOutcome,
   detectExternalAgents,
@@ -32,6 +33,206 @@ async function installFakeCli(directory: string, name: string) {
 }
 
 afterAll(() => rm(root, { recursive: true, force: true }))
+
+describe("structured external chat", () => {
+  test("Claude completed block envelopes never overwrite earlier streamed text in the same message", () => {
+    const parse = createAgentChat("claude-code")
+    parse(JSON.stringify({ type: "stream_event", event: { type: "message_start", message: { id: "msg" } } }))
+    for (const [index, text] of ["First paragraph. ", "Second paragraph."].entries()) {
+      parse(
+        JSON.stringify({
+          type: "stream_event",
+          event: { type: "content_block_delta", index, delta: { type: "text_delta", text } },
+        }),
+      )
+      parse(JSON.stringify({ type: "stream_event", event: { type: "content_block_stop", index } }))
+      parse(
+        JSON.stringify({
+          type: "assistant",
+          uuid: `block-${index}`,
+          message: { id: "msg", content: [{ type: "text", text }] },
+        }),
+      )
+    }
+    expect(parse('{"type":"result","result":"Second paragraph."}').messages).toEqual([
+      { id: "msg", text: "First paragraph. Second paragraph." },
+    ])
+    expect(parse('{"type":"result","is_error":true,"result":"failed"}').messages[0]?.text).toBe(
+      "First paragraph. Second paragraph.",
+    )
+  })
+
+  test("Claude non-partial block envelopes append once by UUID", () => {
+    const parse = createAgentChat("claude-code")
+    const first = JSON.stringify({
+      type: "assistant",
+      uuid: "first",
+      message: { id: "msg", content: [{ type: "text", text: "ha" }] },
+    })
+    parse(first)
+    parse(first)
+    expect(
+      parse(
+        JSON.stringify({
+          type: "assistant",
+          uuid: "second",
+          message: { id: "msg", content: [{ type: "text", text: "ha" }] },
+        }),
+      ).messages[0]?.text,
+    ).toBe("haha")
+  })
+  test("Cursor complete-block streaming preserves repeated text through retries, queries and error results", () => {
+    const parse = createAgentChat("cursor")
+    const block = (text: string) =>
+      parse(
+        JSON.stringify({
+          type: "assistant",
+          timestamp_ms: 1,
+          session_id: "fixture",
+          message: { role: "assistant", content: [{ type: "text", text }] },
+        }),
+      )
+    expect(block("ha").messages[0]?.text).toBe("ha")
+    parse(JSON.stringify({ type: "retry", subtype: "starting" }))
+    expect(block("ha").messages[0]?.text).toBe("haha")
+    parse(JSON.stringify({ type: "interaction_query", subtype: "request", query: { private: "PRIVATE" } }))
+    expect(block("!").messages[0]?.text).toBe("haha!")
+    const failed = parse(JSON.stringify({ type: "result", is_error: true, result: "PRIVATE runtime error" }))
+    expect(failed.messages[0]?.text).toBe("haha!")
+    expect(JSON.stringify(failed)).not.toContain("PRIVATE")
+    expect(parse(JSON.stringify({ type: "result", result: "haha!" })).messages).toEqual(failed.messages)
+    for (const session of [undefined, "resume-id"])
+      expect(runtimeArguments("cursor", "/w", "test", session)).not.toContain("--stream-partial-output")
+  })
+
+  test("Cursor result-only output still becomes chat", () => {
+    expect(createAgentChat("cursor")('{"type":"result","result":"Done"}').messages).toEqual([
+      { id: "assistant-0", text: "Done" },
+    ])
+  })
+
+  test("Cursor failed and stopped local processes preserve every emitted complete block", async () => {
+    for (const stopped of [false, true]) {
+      const directory = join(root, `cursor-${stopped ? "stopped" : "failed"}`)
+      await mkdir(directory, { recursive: true })
+      const path = join(directory, "cursor-agent")
+      const block = JSON.stringify({
+        type: "assistant",
+        timestamp_ms: 1,
+        message: { content: [{ type: "text", text: "ha" }] },
+      })
+      await writeFile(
+        path,
+        `#!/bin/sh\nprintf '%s\\n' '${block}' '{"type":"retry","subtype":"starting"}' '${block}'\n${stopped ? "sleep 30" : 'printf \'%s\\n\' \'{"type":"result","is_error":true,"result":"fixture failure"}\'; exit 1'}\n`,
+      )
+      await chmod(path, 0o755)
+      const controller = new AbortController()
+      const chats: ReturnType<ReturnType<typeof createAgentChat>>[] = []
+      const result = await runExternalCodingAgent({
+        runtime: "cursor",
+        cwd: root,
+        prompt: "fixture only",
+        signal: controller.signal,
+        killGraceMs: 10,
+        timeoutMs: 1000,
+        env: { HOME: root, PATH: `${directory}:/usr/bin:/bin` },
+        onChat: (chat) => {
+          chats.push(chat)
+          if (stopped && chat.messages[0]?.text === "haha") controller.abort()
+        },
+      })
+      expect(result.exitCode).toBe(stopped ? 130 : 1)
+      expect(chats.at(-1)?.messages[0]?.text).toBe("haha")
+    }
+  })
+  const fixtures = [
+    {
+      runtime: "codex" as const,
+      cli: "codex",
+      events: [
+        { type: "item.started", item: { id: "tool", type: "command_execution", command: "PRIVATE ARGUMENT" } },
+        {
+          type: "item.completed",
+          item: { id: "tool", type: "command_execution", status: "completed", aggregated_output: "PRIVATE OUTPUT" },
+        },
+        { type: "item.updated", item: { id: "answer", type: "agent_message", text: "Hello " } },
+        { type: "item.completed", item: { id: "answer", type: "agent_message", text: "Hello world" } },
+      ],
+    },
+    {
+      runtime: "claude-code" as const,
+      cli: "claude",
+      events: [
+        { type: "stream_event", event: { type: "message_start", message: { id: "answer" } } },
+        { type: "stream_event", event: { type: "content_block_delta", delta: { type: "text_delta", text: "Hello " } } },
+        {
+          type: "stream_event",
+          event: { type: "content_block_delta", delta: { type: "input_json_delta", partial_json: "PRIVATE ARGUMENT" } },
+        },
+        { type: "stream_event", event: { type: "content_block_delta", delta: { type: "text_delta", text: "world" } } },
+        { type: "assistant", message: { id: "answer", content: [{ type: "text", text: "Hello world" }] } },
+        { type: "result", result: "Hello world" },
+      ],
+    },
+    {
+      runtime: "cursor" as const,
+      cli: "cursor-agent",
+      events: [
+        { type: "assistant", timestamp_ms: 1, message: { content: [{ type: "text", text: "Hello " }] } },
+        { type: "assistant", timestamp_ms: 2, message: { content: [{ type: "text", text: "world" }] } },
+        {
+          type: "tool_call",
+          subtype: "started",
+          call_id: "tool",
+          tool_call: { shellToolCall: { args: "PRIVATE ARGUMENT" } },
+        },
+        {
+          type: "tool_call",
+          subtype: "completed",
+          call_id: "tool",
+          tool_call: { shellToolCall: { result: "PRIVATE OUTPUT" } },
+        },
+        { type: "result", result: "Hello world" },
+      ],
+    },
+  ]
+  for (const fixture of fixtures) {
+    test(`${fixture.runtime} normalizes streaming text without duplicate finals or protocol leakage`, () => {
+      const parse = createAgentChat(fixture.runtime)
+      const snapshots = fixture.events.map((event) => parse(JSON.stringify(event)))
+      const chat = snapshots.at(-1)!
+      expect(chat.messages.map((message) => message.text)).toEqual(["Hello world"])
+      expect(JSON.stringify(chat)).not.toContain("PRIVATE")
+      expect(snapshots.some((snapshot) => snapshot.messages.some((message) => message.text === "Hello "))).toBe(true)
+      for (const line of ['{"broken":', '{"type":"future","text":"PRIVATE"}', "CLI warning PRIVATE"]) {
+        expect(parse(line)).toEqual(chat)
+      }
+    })
+    test(`${fixture.runtime} streams a real local process into chat and retains raw diagnostics`, async () => {
+      const directory = join(root, `chat-${fixture.cli}`)
+      await mkdir(directory, { recursive: true })
+      const path = join(directory, fixture.cli)
+      const lines = fixture.events.map((event) => JSON.stringify(event)).concat('{"broken":', "CLI warning PRIVATE")
+      await writeFile(
+        path,
+        `#!/bin/sh\n${lines.map((line) => `printf '%s\\n' '${line.replaceAll("'", "'\\''")}'`).join("\n")}\n`,
+      )
+      await chmod(path, 0o755)
+      const chats: ReturnType<ReturnType<typeof createAgentChat>>[] = []
+      const result = await runExternalCodingAgent({
+        runtime: fixture.runtime,
+        cwd: root,
+        prompt: "fixture only",
+        env: { HOME: root, PATH: `${directory}:/usr/bin:/bin` },
+        onChat: (chat) => chats.push(chat),
+      })
+      expect(result.exitCode).toBe(0)
+      expect(chats.at(-1)?.messages.map((message) => message.text)).toEqual(["Hello world"])
+      expect(result.output.some((line) => line.includes("CLI warning PRIVATE"))).toBe(true)
+      expect(JSON.stringify(chats)).not.toContain("PRIVATE")
+    })
+  }
+})
 
 describe("external agent resolution", () => {
   test("a CLI invisible under the bare GUI PATH is found once its directory is on PATH", async () => {
@@ -290,6 +491,7 @@ describe("external agent resume argv", () => {
       "--output-format",
       "stream-json",
       "--verbose",
+      "--include-partial-messages",
       "--permission-mode",
       "acceptEdits",
     ])

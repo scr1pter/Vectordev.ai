@@ -16,19 +16,13 @@ import {
 } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Portal } from "solid-js/web"
-import {
-  agentColor,
-  changedLineRanges,
-  mergeAttribution,
-  type AgentAttribution,
-} from "@/components/editor-attribution"
+import { agentColor, changedLineRanges, mergeAttribution, type AgentAttribution } from "@/components/editor-attribution"
 import {
   MonacoCodeEditor,
   type InlineCompleteInput,
   type InlineEditSelection,
   type MonacoLanguageService,
 } from "@/components/monaco-code-editor"
-import { ModelSelectorPopoverV2 } from "@/components/dialog-select-model"
 import { setOnboardingFlag } from "@/features/onboarding/onboarding-progress"
 import { createMediaQuery } from "@solid-primitives/media"
 import {
@@ -123,11 +117,9 @@ import {
 import { INTERNAL_SESSION_TITLE_PREFIX } from "@/utils/internal-sessions"
 import { showToast } from "@/utils/toast"
 import { resolveBrowserAddress, selectUnambiguousPreviewUrl } from "@/utils/browser-address"
-import {
-  boundInlineCompletionContext,
-  sanitizeInlineCompletion,
-} from "@/utils/codespace-ai"
+import { boundInlineCompletionContext, sanitizeInlineCompletion } from "@/utils/codespace-ai"
 import { notifyWorkspaceFileSaved } from "@/utils/workspace-file-saved"
+import { announceWorkspaceMode } from "@/utils/workspace-mode"
 
 const DialogSelectFile = lazy(() =>
   import("@/components/dialog-select-file").then((module) => ({ default: module.DialogSelectFile })),
@@ -1897,6 +1889,7 @@ export function CodespaceWorkbench(props: {
   onClose: () => void
   embedded?: boolean
   portalMount?: Node
+  externalAgent?: { label: string; running: boolean; panel: JSX.Element }
 }) {
   const file = useFile()
   const sdk = useSDK()
@@ -1952,12 +1945,6 @@ export function CodespaceWorkbench(props: {
   }
   const activeBadge = createMemo(() => fileBadge(selectedPath()))
   const breakpointCount = createMemo(() => problems().filter((problem) => problem.severity === "error").length)
-  const activeModelLabel = createMemo(() => {
-    const model = local.model.current()
-    if (!model) return "No model selected"
-    const variant = local.model.variant.current()
-    return `${model.name}${variant ? ` · ${modelVariantLabel(variant)}` : ""}`
-  })
   const selectedModelPayload = createMemo(() => {
     const model = local.model.current()
     if (!model) return
@@ -1974,8 +1961,10 @@ export function CodespaceWorkbench(props: {
     if (!id) return "idle"
     return sync().data.session_status[id]?.type ?? "idle"
   })
-  const agentRunning = createMemo(() => editorSessionStatus() !== "idle")
+  const agentLabel = () => props.externalAgent?.label ?? "Vector Agent"
+  const agentRunning = createMemo(() => props.externalAgent?.running ?? editorSessionStatus() !== "idle")
   const agentStatus = createMemo(() => {
+    if (props.externalAgent) return props.externalAgent.running ? "Working" : "Ready"
     const status = editorSessionStatus()
     if (status === "idle") return "Ready"
     if (status === "busy") return "Working"
@@ -2266,7 +2255,13 @@ export function CodespaceWorkbench(props: {
   createEffect(
     on(
       () =>
-        [selectedPath(), draft(), contents(), Boolean(state()?.loaded), Boolean(externalConflicts[selectedPath() ?? ""])] as const,
+        [
+          selectedPath(),
+          draft(),
+          contents(),
+          Boolean(state()?.loaded),
+          Boolean(externalConflicts[selectedPath() ?? ""]),
+        ] as const,
       ([path, nextContent, baseContent, loaded, hasExternalConflict]) => {
         if (!path || !loaded || hasExternalConflict || nextContent === baseContent) return
         if (autosaveTimer) clearTimeout(autosaveTimer)
@@ -2331,6 +2326,7 @@ export function CodespaceWorkbench(props: {
   }
 
   const aiComplete = async (input: InlineCompleteInput) => {
+    if (props.externalAgent) return undefined
     if (!settings.editor.aiAutocomplete()) return undefined
     const model = selectedModelPayload()
     if (!model) return undefined
@@ -2380,6 +2376,7 @@ export function CodespaceWorkbench(props: {
   // the live file immediately. The separate workspace review surface remains
   // available for git-level review; the editor itself stays focused on coding.
   const runInlineEdit = async (instruction: string) => {
+    if (props.externalAgent) return
     const path = selectedPath()
     const trimmed = instruction.trim()
     if (!path || !trimmed || inlineEditRunning()) return
@@ -2538,10 +2535,7 @@ export function CodespaceWorkbench(props: {
     },
   }
 
-  const [outlineSymbols] = createResource(
-    selectedPath,
-    (path) => languageService.symbols(path).catch(() => []),
-  )
+  const [outlineSymbols] = createResource(selectedPath, (path) => languageService.symbols(path).catch(() => []))
 
   let agentTimelineRef: HTMLDivElement | undefined
   createEffect(() => {
@@ -2561,6 +2555,7 @@ export function CodespaceWorkbench(props: {
     <Portal mount={props.portalMount}>
       <div
         data-vector-codespace
+        data-embedded={props.embedded ? "true" : undefined}
         class={`${props.embedded ? "absolute inset-0 z-0" : "fixed inset-0 z-[140]"} flex min-h-0 flex-col overflow-hidden bg-[#101010] text-[#e8e8e8]`}
       >
         <header
@@ -2568,24 +2563,27 @@ export function CodespaceWorkbench(props: {
           class="relative flex h-12 shrink-0 items-center border-b border-[#292929] bg-[#101010] px-2 text-[#878787]"
         >
           <div class="shrink-0" style={{ width: props.embedded ? "4px" : "76px" }} />
-          <div class="flex shrink-0 items-center gap-0.5 [app-region:no-drag]">
+          <div
+            class="flex h-8 shrink-0 items-center rounded-[7px] border border-[#37343d] bg-[#19171d] p-0.5 [app-region:no-drag]"
+            aria-label="Workspace mode"
+          >
             <button
               type="button"
-              class="grid size-7 place-items-center rounded-[5px] transition-colors hover:bg-white/[0.06] hover:text-[#ddd]"
-              aria-label="Back to Vector Agent"
-              title="Back to Vector Agent"
+              class="h-7 rounded-[5px] px-3 text-[11px] font-medium text-[#8f8999] transition-colors hover:bg-white/[0.05] hover:text-[#ddd]"
+              aria-label={`Back to ${agentLabel()}`}
+              title={`Back to ${agentLabel()}`}
               onClick={props.onClose}
             >
-              <Icon name="arrow-left" size="small" />
+              Agent
             </button>
             <button
               type="button"
-              disabled
-              class="grid size-7 place-items-center rounded-[5px] text-[#3f3f3f]"
-              aria-label="Forward"
-              title="Forward"
+              aria-pressed="true"
+              class="h-7 rounded-[5px] bg-[color-mix(in_oklab,var(--vx-purple)_28%,#25222b)] px-3 text-[11px] font-medium text-[#f2eff8] shadow-sm"
+              aria-label="Editor"
+              title="Editor"
             >
-              <Icon name="arrow-right" size="small" />
+              Editor
             </button>
           </div>
           <button
@@ -2616,8 +2614,8 @@ export function CodespaceWorkbench(props: {
               type="button"
               class="grid size-7 place-items-center rounded-[5px] transition-colors hover:bg-white/[0.06] hover:text-[#ddd]"
               classList={{ "bg-white/[0.06] text-[#d8d8d8]": agentOpen() }}
-              aria-label={agentOpen() ? "Hide Vector Agent" : "Show Vector Agent"}
-              title={agentOpen() ? "Hide Vector Agent" : "Show Vector Agent"}
+              aria-label={`${agentOpen() ? "Hide" : "Show"} ${agentLabel()}`}
+              title={`${agentOpen() ? "Hide" : "Show"} ${agentLabel()}`}
               onClick={() => setAgentOpen((open) => !open)}
             >
               <Icon name="layout-right" size="small" />
@@ -2626,107 +2624,109 @@ export function CodespaceWorkbench(props: {
         </header>
         <main class="min-h-0 flex-1 flex">
           <Show when={explorerOpen()}>
-          <aside
-            class="relative flex shrink-0 flex-col border-r border-[#272727] bg-[#141414]"
-            style={{ width: `${explorerWidth()}px` }}
-          >
-            <ResizeHandle
-              direction="horizontal"
-              edge="end"
-              size={explorerWidth()}
-              min={190}
-              max={480}
-              onResize={setExplorerWidth}
-            />
-            <div class="flex h-10 items-center gap-1 border-b border-[#272727] px-2 text-[#8a8a8a]">
-              <button
-                class="grid size-7 place-items-center rounded-[4px] transition-colors hover:bg-white/[0.06] hover:text-[#ddd]"
-                classList={{ "bg-white/[0.055] text-[#ddd]": activeView() === "editor" }}
-                aria-label="Explorer"
-                title="Explorer"
-                onClick={() => setActiveView("editor")}
-              >
-                <Icon name="file-tree" size="small" />
-              </button>
-              <button
-                class="grid size-7 place-items-center rounded-[4px] transition-colors hover:bg-white/[0.06] hover:text-[#ddd]"
-                aria-label="Search files in Code Editor"
-                title="Search files in Code Editor"
-                onClick={openQuickFileSearch}
-              >
-                <Icon name="magnifying-glass" size="small" />
-              </button>
-              <button
-                class="relative grid size-7 place-items-center rounded-[4px] transition-colors hover:bg-white/[0.06] hover:text-[#ddd]"
-                classList={{ "bg-white/[0.055] text-[#ddd]": activeView() === "problems" }}
-                aria-label="Problems"
-                title="Problems"
-                onClick={() => setActiveView("problems")}
-              >
-                <Icon name="warning" size="small" />
-                <Show when={problems().length > 0}>
-                  <span class="absolute right-0.5 top-0.5 size-1.5 rounded-full bg-amber-400" />
-                </Show>
-              </button>
-              <div class="flex-1" />
-            </div>
-            <div class="flex h-8 items-center justify-between px-3">
-              <div class="min-w-0 truncate text-[10px] font-semibold uppercase tracking-[0.04em] text-[#9d9d9d]">
-                {fileBasename(sdk().directory) || "Workspace"}
-              </div>
-              <button
-                class="grid size-6 place-items-center rounded text-[#737373] hover:bg-white/[0.06] hover:text-[#d8d8d8]"
-                aria-label="Refresh explorer"
-                title="Refresh explorer"
-                onClick={() => void file.tree.refresh("")}
-              >
-                <Icon name="reset" size="small" />
-              </button>
-            </div>
-            <div class="min-h-0 flex-1 overflow-auto px-1 pb-2 group/filetree">
-              <Switch>
-                <Match when={file.tree.state("")?.loaded && file.tree.children("").length === 0}>{props.empty()}</Match>
-                <Match when={true}>
-                  <FileTree
-                    path=""
-                    class="py-1"
-                    modified={props.modified()}
-                    kinds={props.kinds()}
-                    markers={liveFileMarkers()}
-                    excludeDirectories={CODESPACE_EXCLUDED_DIRECTORIES}
-                    active={selectedPath()}
-                    onFileClick={(node) => openFile(node.path)}
-                  />
-                </Match>
-              </Switch>
-            </div>
-            <div class="max-h-[34%] min-h-[112px] shrink-0 border-t border-[#292929] bg-[#121212]">
-              <div class="flex h-8 items-center justify-between px-3 text-[10px] font-semibold uppercase text-[#969696]">
-                <span>Outline</span>
-                <span class="font-normal text-[#555]">{outlineSymbols()?.length ?? 0}</span>
-              </div>
-              <div class="max-h-[calc(100%-32px)] overflow-y-auto px-2 pb-2">
-                <For
-                  each={outlineSymbols() ?? []}
-                  fallback={
-                    <div class="px-2 py-2 text-[10px] leading-4 text-[#606060]">
-                      {selectedPath() ? "No symbols reported for this file." : "Open a file to see its outline."}
-                    </div>
-                  }
+            <aside
+              class="relative flex shrink-0 flex-col border-r border-[#272727] bg-[#141414]"
+              style={{ width: props.externalAgent ? `min(${explorerWidth()}px, 20%)` : `${explorerWidth()}px` }}
+            >
+              <ResizeHandle
+                direction="horizontal"
+                edge="end"
+                size={explorerWidth()}
+                min={190}
+                max={480}
+                onResize={setExplorerWidth}
+              />
+              <div class="flex h-10 items-center gap-1 border-b border-[#272727] px-2 text-[#8a8a8a]">
+                <button
+                  class="grid size-7 place-items-center rounded-[4px] transition-colors hover:bg-white/[0.06] hover:text-[#ddd]"
+                  classList={{ "bg-white/[0.055] text-[#ddd]": activeView() === "editor" }}
+                  aria-label="Explorer"
+                  title="Explorer"
+                  onClick={() => setActiveView("editor")}
                 >
-                  {(symbol) => (
-                    <div
-                      class="flex h-6 min-w-0 items-center gap-1.5 rounded-[4px] px-2 text-[10px] text-[#999] hover:bg-white/[0.045] hover:text-[#d2d2d2]"
-                      title={symbol.name}
-                    >
-                      <span class="size-1.5 shrink-0 rounded-full bg-[#b394ff]/65" />
-                      <span class="truncate">{symbol.name}</span>
-                    </div>
-                  )}
-                </For>
+                  <Icon name="file-tree" size="small" />
+                </button>
+                <button
+                  class="grid size-7 place-items-center rounded-[4px] transition-colors hover:bg-white/[0.06] hover:text-[#ddd]"
+                  aria-label="Search files in Code Editor"
+                  title="Search files in Code Editor"
+                  onClick={openQuickFileSearch}
+                >
+                  <Icon name="magnifying-glass" size="small" />
+                </button>
+                <button
+                  class="relative grid size-7 place-items-center rounded-[4px] transition-colors hover:bg-white/[0.06] hover:text-[#ddd]"
+                  classList={{ "bg-white/[0.055] text-[#ddd]": activeView() === "problems" }}
+                  aria-label="Problems"
+                  title="Problems"
+                  onClick={() => setActiveView("problems")}
+                >
+                  <Icon name="warning" size="small" />
+                  <Show when={problems().length > 0}>
+                    <span class="absolute right-0.5 top-0.5 size-1.5 rounded-full bg-amber-400" />
+                  </Show>
+                </button>
+                <div class="flex-1" />
               </div>
-            </div>
-          </aside>
+              <div class="flex h-8 items-center justify-between px-3">
+                <div class="min-w-0 truncate text-[10px] font-semibold uppercase tracking-[0.04em] text-[#9d9d9d]">
+                  {fileBasename(sdk().directory) || "Workspace"}
+                </div>
+                <button
+                  class="grid size-6 place-items-center rounded text-[#737373] hover:bg-white/[0.06] hover:text-[#d8d8d8]"
+                  aria-label="Refresh explorer"
+                  title="Refresh explorer"
+                  onClick={() => void file.tree.refresh("")}
+                >
+                  <Icon name="reset" size="small" />
+                </button>
+              </div>
+              <div class="min-h-0 flex-1 overflow-auto px-1 pb-2 group/filetree">
+                <Switch>
+                  <Match when={file.tree.state("")?.loaded && file.tree.children("").length === 0}>
+                    {props.empty()}
+                  </Match>
+                  <Match when={true}>
+                    <FileTree
+                      path=""
+                      class="py-1"
+                      modified={props.modified()}
+                      kinds={props.kinds()}
+                      markers={liveFileMarkers()}
+                      excludeDirectories={CODESPACE_EXCLUDED_DIRECTORIES}
+                      active={selectedPath()}
+                      onFileClick={(node) => openFile(node.path)}
+                    />
+                  </Match>
+                </Switch>
+              </div>
+              <div class="max-h-[34%] min-h-[112px] shrink-0 border-t border-[#292929] bg-[#121212]">
+                <div class="flex h-8 items-center justify-between px-3 text-[10px] font-semibold uppercase text-[#969696]">
+                  <span>Outline</span>
+                  <span class="font-normal text-[#555]">{outlineSymbols()?.length ?? 0}</span>
+                </div>
+                <div class="max-h-[calc(100%-32px)] overflow-y-auto px-2 pb-2">
+                  <For
+                    each={outlineSymbols() ?? []}
+                    fallback={
+                      <div class="px-2 py-2 text-[10px] leading-4 text-[#606060]">
+                        {selectedPath() ? "No symbols reported for this file." : "Open a file to see its outline."}
+                      </div>
+                    }
+                  >
+                    {(symbol) => (
+                      <div
+                        class="flex h-6 min-w-0 items-center gap-1.5 rounded-[4px] px-2 text-[10px] text-[#999] hover:bg-white/[0.045] hover:text-[#d2d2d2]"
+                        title={symbol.name}
+                      >
+                        <span class="size-1.5 shrink-0 rounded-full bg-[#b394ff]/65" />
+                        <span class="truncate">{symbol.name}</span>
+                      </div>
+                    )}
+                  </For>
+                </div>
+              </div>
+            </aside>
           </Show>
 
           <section class="min-w-0 flex-1 flex flex-col bg-[#151515]">
@@ -2942,29 +2942,6 @@ export function CodespaceWorkbench(props: {
                                         Lines {inlineEditSelection()!.startLine}-{inlineEditSelection()!.endLine}
                                       </span>
                                     </Show>
-                                    <ModelSelectorPopoverV2
-                                      triggerProps={{
-                                        class:
-                                          "flex cursor-pointer items-center gap-1.5 rounded-full border border-[color:var(--vx-line)] bg-white/[0.04] px-2 py-0.5 text-[#cbb8f5] transition-colors hover:bg-white/[0.08]",
-                                      }}
-                                    >
-                                      <span class="size-1.5 shrink-0 rounded-full bg-[#9374ec]" />
-                                      <span class="max-w-[170px] truncate">{activeModelLabel()}</span>
-                                      <svg
-                                        viewBox="0 0 12 12"
-                                        class="size-2.5 shrink-0 opacity-70"
-                                        fill="none"
-                                        aria-hidden="true"
-                                      >
-                                        <path
-                                          d="M3 4.5 6 7.5 9 4.5"
-                                          stroke="currentColor"
-                                          stroke-width="1.2"
-                                          stroke-linecap="round"
-                                          stroke-linejoin="round"
-                                        />
-                                      </svg>
-                                    </ModelSelectorPopoverV2>
                                     <span class="flex-1" />
                                     <span class="text-[#9a8bc1]">Explicit inline edits apply directly</span>
                                     <span class="text-[#6f6980]">esc</span>
@@ -2976,15 +2953,19 @@ export function CodespaceWorkbench(props: {
                                 value={draft()}
                                 attributions={attributions()}
                                 onChange={(next) => updateDraft(path(), next)}
-                                inlineComplete={aiComplete}
+                                inlineComplete={props.externalAgent ? undefined : aiComplete}
                                 languageService={languageService}
-                                onInlineEdit={(selection) => {
-                                  setInlineEditSelection(selection)
-                                  setInlineEditOpen(true)
-                                }}
+                                onInlineEdit={
+                                  props.externalAgent
+                                    ? undefined
+                                    : (selection) => {
+                                        setInlineEditSelection(selection)
+                                        setInlineEditOpen(true)
+                                      }
+                                }
                               />
                             </div>
-                            <Show when={agentOpen()}>
+                            <Show when={agentOpen() && !props.externalAgent}>
                               <aside
                                 class="vector-editor-agent-pane relative flex shrink-0 flex-col border-l border-[#272727] bg-[#121212]"
                                 style={{ width: `${agentWidth()}px` }}
@@ -3019,8 +3000,8 @@ export function CodespaceWorkbench(props: {
                                 >
                                   <Show when={editorMessages().length === 0}>
                                     <div class="pt-1 text-[11px] leading-5 text-[#707070]">
-                                      This is the same Vector agent and conversation as the main workspace. Ask a question,
-                                      attach context, switch modes, or request a file edit here.
+                                      This is the same Vector agent and conversation as the main workspace. Ask a
+                                      question, attach context, or request a file edit here.
                                     </div>
                                   </Show>
                                   <For each={editorMessages()}>
@@ -3060,7 +3041,6 @@ export function CodespaceWorkbench(props: {
                                   >
                                     <PromptInput
                                       controls={editorInputController()}
-                                      hideVel
                                       class="vector-editor-agent-composer !min-h-[104px] !rounded-[10px] !border-[#343434] !bg-[#181818] shadow-[0_8px_24px_rgba(0,0,0,0.2)]"
                                     />
                                   </Show>
@@ -3077,9 +3057,11 @@ export function CodespaceWorkbench(props: {
                               <span class="truncate">{path()}</span>
                             </div>
                             <div class="flex items-center gap-3">
-                              <span classList={{ "text-[#ad95f5]": settings.editor.aiAutocomplete() }}>
-                                Vector Tab {settings.editor.aiAutocomplete() ? "on" : "off"}
-                              </span>
+                              <Show when={!props.externalAgent}>
+                                <span classList={{ "text-[#ad95f5]": settings.editor.aiAutocomplete() }}>
+                                  Vector Tab {settings.editor.aiAutocomplete() ? "on" : "off"}
+                                </span>
+                              </Show>
                               <span>Ln {lineCount()}, Col 1</span>
                               <span>Spaces: 2</span>
                               <span>UTF-8</span>
@@ -3150,6 +3132,32 @@ export function CodespaceWorkbench(props: {
               )}
             </Show>
           </section>
+          <Show when={agentOpen() && props.externalAgent}>
+            {(agent) => (
+              <aside
+                class="vector-editor-agent-pane vector-external-editor-agent relative flex shrink-0 flex-col"
+                style={{ width: `min(${agentWidth()}px, 42%)` }}
+              >
+                <ResizeHandle
+                  direction="horizontal"
+                  edge="start"
+                  size={agentWidth()}
+                  min={360}
+                  max={typeof window === "undefined" ? 900 : Math.min(900, window.innerWidth * 0.72)}
+                  onResize={setAgentWidth}
+                />
+                <header class="vector-external-editor-agent-header">
+                  <Icon name="prompt" size="small" />
+                  <span>{agent().label}</span>
+                  <span class="vector-agent-workspace-status" data-running={agent().running}>
+                    <span />
+                    {agentStatus()}
+                  </span>
+                </header>
+                {agent().panel}
+              </aside>
+            )}
+          </Show>
         </main>
       </div>
     </Portal>
@@ -3560,7 +3568,12 @@ type PublishPhase =
   | { phase: "done"; url: string; target: string }
   | { phase: "error"; error: string }
 
-export function PreviewPanel(props: { sessionKey: string; contextId: string; directory?: string; onClose: () => void }) {
+export function PreviewPanel(props: {
+  sessionKey: string
+  contextId: string
+  directory?: string
+  onClose: () => void
+}) {
   const command = useCommand()
   const storageKey = () => `${PREVIEW_URL_STORAGE_PREFIX}${props.sessionKey}`
   const readSavedUrl = () => {
@@ -4186,9 +4199,7 @@ function CodeArchaeologyPanel(props: {
                     return (
                       <div class="vx-arch__item">
                         <div class="flex items-center gap-2">
-                          <span class="vx-arch__seq">
-                            {index() + 1}
-                          </span>
+                          <span class="vx-arch__seq">{index() + 1}</span>
                           <Show
                             when={renaming()}
                             fallback={
@@ -4932,6 +4943,7 @@ export function SessionSidePanel(props: {
     if (tabs().active() === "context") tabs().close("context")
     if (tabs().active() === "codespace") tabs().close("codespace")
     if (tabs().active() === "preview") tabs().close("preview")
+    announceWorkspaceMode("agent")
   }
 
   const openCodespaceTab = () => {
@@ -4939,6 +4951,7 @@ export function SessionSidePanel(props: {
     layout.fileTree.close()
     void tabs().open("codespace")
     tabs().setActive("codespace")
+    announceWorkspaceMode("editor")
   }
 
   const openPreviewTab = () => {
@@ -4946,6 +4959,7 @@ export function SessionSidePanel(props: {
     layout.fileTree.close()
     void tabs().open("preview")
     tabs().setActive("preview")
+    announceWorkspaceMode("agent")
   }
 
   const handleTabChange = (value: string) => {
@@ -4957,6 +4971,7 @@ export function SessionSidePanel(props: {
       openPreviewTab()
       return
     }
+    announceWorkspaceMode("agent")
     openTab(value)
   }
 

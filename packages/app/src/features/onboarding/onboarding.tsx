@@ -164,15 +164,9 @@ export const GUIDE_SECTIONS: GuideSection[] = [
     kicker: "Project tools",
     entries: [
       {
-        title: "Canvas",
-        where: "Project group in the sidebar.",
-        body: "A spatial surface where project tools run inside floating windows you can arrange, resize, minimize, and use together. Keep the editor, terminal, review, browser, scheduled work, MCP connections, and coding agents open at once without leaving Canvas. Drive it by voice — hold the mic and say “open the editor” or “tidy up” — or type the same commands into the bar at the bottom; both routes do exactly the same things.",
-        tip: "Voice needs speech recognition (desktop has it built in); the typed command bar works everywhere.",
-      },
-      {
         title: "Code editor",
-        where: "Project group in the sidebar — also called Codespace — inside an active task.",
-        body: "An embedded editor over your project's files, for when you'd rather change something by hand. A Problems list flags issues it detects in the open file, and AI Architect hands the current file — problems included — to the agent for a focused pass. Use Find in project to land on a file fast, edit it in place, and keep the session's context intact.",
+        where: "Switch from Agent to Editor at the top of the sidebar inside an active project.",
+        body: "A focused editor over your project's files, for when you'd rather change something by hand. Search for a file, open it in a tab, edit it in place, and ask the agent to work on that same file without losing the session's context.",
         tip: "For a one-line tweak, editing here is faster than prompting — save the agent for changes worth delegating.",
       },
       {
@@ -212,7 +206,7 @@ export const GUIDE_SECTIONS: GuideSection[] = [
       {
         title: "Dictation",
         where: "The mic button in the message composer.",
-        body: "Talk instead of typing. Tap the mic, speak your prompt, and the transcript lands in the composer ready to edit or send. On the desktop app, transcription runs entirely on your machine with a local Whisper model — audio never leaves your computer; in the browser, Vector uses the browser's built-in speech recognition, streaming interim text as you speak. The same engine powers the Canvas voice bar.",
+        body: "Talk instead of typing. Tap the mic, speak your prompt, and the transcript lands in the composer ready to edit or send. On the desktop app, transcription runs entirely on your machine with a local Whisper model — audio never leaves your computer; in the browser, Vector uses the browser's built-in speech recognition, streaming interim text as you speak.",
         tip: "Dictate the messy first version, tidy the words that matter, then hit Enter.",
       },
       {

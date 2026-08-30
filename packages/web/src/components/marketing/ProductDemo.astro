@@ -18,12 +18,12 @@ const navGroups = [
   {
     label: "Project tools",
     items: [
-      { id: "session", name: "Session" },
+      { id: "session", name: "Agent" },
       { id: "dashboard", name: "Agent Dashboard" },
       { id: "rules", name: "Project rules" },
-      { id: "editor", name: "Code editor" },
+      { id: "editor", name: "Editor" },
       { id: "browser", name: "Browser" },
-      { id: "canvas", name: "Canvas" },
+      { id: "review", name: "Review" },
     ],
   },
   {
@@ -102,6 +102,10 @@ const plugins = [
       </aside>
 
       <div class="demo-main">
+        <div class="demo-view-switch" role="tablist" aria-label="Workspace view">
+          <button type="button" class="is-on" role="tab" aria-selected="true" data-surface-nav="session">Agent</button>
+          <button type="button" role="tab" aria-selected="false" data-surface-nav="editor">Editor</button>
+        </div>
         <div class="demo-surface" data-surface="session">
           <div class="demo-thread">
             <div class="demo-msg is-user"><p>Add rate limiting to the public API. Key it on the API token, not the IP.</p></div>
@@ -261,14 +265,14 @@ const plugins = [
           <p class="demo-note">The desktop app embeds Chromium and will not type into password, one-time-code or card fields.</p>
         </div>
 
-        <div class="demo-surface" data-surface="canvas" hidden>
-          <div class="demo-canvas">
-            <div class="demo-canvas-tile"><span>Editor</span><i>middleware/limit.ts</i></div>
-            <div class="demo-canvas-tile"><span>Browser</span><i>localhost:3000</i></div>
-            <div class="demo-canvas-tile"><span>Terminal</span><i>bun test — 41 passed</i></div>
-            <div class="demo-canvas-tile"><span>Notes</span><i>Rate limit design</i></div>
+        <div class="demo-surface" data-surface="review" hidden>
+          <div class="demo-review">
+            <div class="demo-review-file"><span>middleware/limit.ts</span><i>+18 −0</i></div>
+            <div class="demo-review-file"><span>middleware/limit.test.ts</span><i>+41 −0</i></div>
+            <div class="demo-review-check"><span>Focused tests</span><i class="demo-tool-ok">41 passed</i></div>
+            <div class="demo-review-check"><span>Typecheck</span><i class="demo-tool-ok">passed</i></div>
           </div>
-          <p class="demo-note">Canvas puts the editor, the browser, the terminal and your notes on one surface.</p>
+          <p class="demo-note">Review keeps changed files, validations and merge decisions attached to the agent that produced them.</p>
         </div>
 
         <div class="demo-surface" data-surface="pulls" hidden>
@@ -318,7 +322,9 @@ const plugins = [
           surface.hidden = surface.dataset.surface !== target
         })
         root.querySelectorAll("[data-surface-nav]").forEach((other) => {
-          other.classList.toggle("is-on", other === button)
+          const on = other.dataset.surfaceNav === target
+          other.classList.toggle("is-on", on)
+          if (other.getAttribute("role") === "tab") other.setAttribute("aria-selected", String(on))
         })
       })
     })
@@ -540,7 +546,7 @@ const plugins = [
     width: min(1240px, calc(100% - 56px));
     margin-inline: auto;
     padding: clamp(40px, 6vw, 72px) 0 clamp(16px, 3vw, 28px);
-    font-family: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif;
+    font-family: var(--font-sans);
   }
 
   .demo.is-bare { width: 100%; padding: 0; }
@@ -580,6 +586,9 @@ const plugins = [
   .demo-nav-dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; opacity: 0.5; flex-shrink: 0; }
 
   .demo-main { display: flex; min-width: 0; flex-direction: column; padding: 14px 16px 16px; background: var(--c-canvas); }
+  .demo-view-switch { display: inline-flex; width: fit-content; gap: 2px; margin-bottom: 12px; padding: 3px; border: 1px solid var(--c-line); border-radius: 9px; background: var(--c-sidebar); }
+  .demo-view-switch button { min-width: 70px; padding: 5px 12px; border: 0; border-radius: 6px; background: transparent; color: var(--c-muted); font: inherit; font-size: 11.5px; cursor: pointer; }
+  .demo-view-switch button.is-on { background: var(--c-soft); color: var(--c-text); box-shadow: inset 0 0 0 1px rgba(146, 116, 236, 0.24); }
   .demo-surface { display: flex; min-height: 0; flex: 1; flex-direction: column; }
 
   /* The session is a reading column, not a full-bleed pane — the app does the
@@ -709,10 +718,10 @@ const plugins = [
   .demo-step.is-guard::before { background: var(--c-bright); }
   .demo-step.is-fail::before { background: var(--c-red); }
 
-  .demo-canvas { display: grid; gap: 8px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .demo-canvas-tile { padding: 14px; border: 1px solid var(--c-line); border-radius: 10px; background: var(--c-surface); }
-  .demo-canvas-tile span { display: block; font-size: 12.5px; color: var(--c-text); }
-  .demo-canvas-tile i { display: block; margin-top: 4px; font-style: normal; font-family: var(--c-mono); font-size: 11px; color: var(--c-muted); }
+  .demo-review { display: grid; gap: 8px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .demo-review-file, .demo-review-check { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 14px; border: 1px solid var(--c-line); border-radius: 10px; background: var(--c-surface); }
+  .demo-review-file span, .demo-review-check span { font-size: 12.5px; color: var(--c-text); }
+  .demo-review-file i, .demo-review-check i { font-style: normal; font-family: var(--c-mono); font-size: 11px; color: var(--c-muted); }
   .demo-grid { display: grid; gap: 8px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .demo-plugin { padding: 11px; border: 1px solid var(--c-line); border-radius: 9px; background: var(--c-surface); }
   .demo-plugin-name { display: block; font-size: 12.5px; color: var(--c-text); }
@@ -723,7 +732,7 @@ const plugins = [
   @media (max-width: 860px) {
     .demo-body { grid-template-columns: minmax(0, 1fr); }
     .demo-rail { display: none; }
-    .demo-board, .demo-code, .demo-canvas, .demo-grid { grid-template-columns: minmax(0, 1fr); }
+    .demo-board, .demo-code, .demo-review, .demo-grid { grid-template-columns: minmax(0, 1fr); }
     .demo-row-space, .demo-row-state { display: none; }
     .demo-msg.is-user { margin-left: 0; }
   }

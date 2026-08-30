@@ -158,8 +158,14 @@ test.describe("session timeline projection", () => {
 
     await expect(page.locator('[data-timeline-row="CommentStrip"]')).toBeVisible()
     await expect(page.getByText("Keep this stable", { exact: true })).toBeVisible()
-    await expect(page.locator('[data-timeline-row="DiffSummary"]')).toBeVisible()
-    await expect(page.getByText(/show all/i)).toBeVisible()
+    const summary = page.locator('[data-timeline-row="DiffSummary"]')
+    const files = summary.locator('[data-slot="session-turn-diff-trigger"]')
+    await expect(summary).toBeVisible()
+    await expect(files).toHaveCount(3)
+    await summary.getByRole("button", { name: "Show 8 more files", exact: true }).click()
+    await expect(files).toHaveCount(11)
+    await summary.getByRole("button", { name: "Show fewer files", exact: true }).click()
+    await expect(files).toHaveCount(3)
   })
 
   test("renders interruption independently when the turn is not compacted", async ({ page }) => {

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
-import { mkdir, mkdtemp, rm } from "node:fs/promises"
+import { createHash } from "node:crypto"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { ExternalAgentRunResult, RunExternalAgentInput } from "./external-agents"
@@ -39,8 +40,14 @@ mock.module("./store", () => ({
   },
   removeStoreFileIfEmpty: () => undefined,
 }))
-type StubRunInput = { runtime: string; prompt: string; resumeSessionId?: string }
-type StubRunResult = { exitCode: number; summary: string; output: string[]; resumeRejected?: boolean }
+type StubRunInput = Pick<RunExternalAgentInput, "runtime" | "prompt" | "resumeSessionId" | "onChat" | "onEvent">
+type StubRunResult = {
+  exitCode: number
+  summary: string
+  output: string[]
+  actualCost?: string
+  resumeRejected?: boolean
+}
 const runCalls: StubRunInput[] = []
 let runHandler = async (_input: StubRunInput, _index: number): Promise<StubRunResult> => ({
   exitCode: 0,
@@ -54,8 +61,14 @@ const dependencies = {
   },
 }
 
-const { followUpParallelWorkspace, listParallelWorkspaces, refreshParallelWorkspace, stopParallelWorkspace } =
-  await import("./parallel-workspaces")
+const {
+  createParallelWorkspace,
+  followUpParallelWorkspace,
+  listParallelWorkspaces,
+  refreshParallelWorkspace,
+  runParallelWorkspace,
+  stopParallelWorkspace,
+} = await import("./parallel-workspaces")
 
 const engine = { url: "http://127.0.0.1:0", directory: "" } as never
 
@@ -133,6 +146,28 @@ describe("sending a follow-up to an external workspace", () => {
     await expect(followUpParallelWorkspace(seeded.id, engine, "   ")).rejects.toThrow("Type a message")
   })
 
+  test("external chat is persisted separately from raw diagnostics and survives completion", async () => {
+    const seeded = await seed()
+    runHandler = async (input) => {
+      input.onEvent?.({ stream: "stdout", text: '{"type":"private_protocol"}' })
+      input.onEvent?.({ stream: "activity", text: "command_execution: PRIVATE COMMAND" })
+      input.onChat?.({
+        messages: [{ id: "answer", text: "I checked the project." }],
+        activity: [{ id: "tool", label: "Reading project", kind: "tool", state: "running" }],
+      })
+      return { exitCode: 0, summary: "I checked the project.", output: [] }
+    }
+    started.push(seeded.id)
+    await followUpParallelWorkspace(seeded.id, engine, "check it", dependencies)
+    const record = await settle(seeded.id)
+    const answer = record.turns?.findLast((turn) => turn.role === "agent")
+    expect(answer?.messages).toEqual([{ id: "answer", text: "I checked the project." }])
+    expect(answer?.activity?.[0]?.state).toBe("done")
+    expect(answer?.streamTail).toBeUndefined()
+    expect(JSON.stringify(answer)).not.toContain("PRIVATE")
+    expect(record.terminalOutput).toContain('{"type":"private_protocol"}')
+  })
+
   test("a missing workspace is refused", async () => {
     await seed()
     await expect(followUpParallelWorkspace("no-such-workspace", engine, "hi")).rejects.toThrow("was not found")
@@ -179,6 +214,93 @@ describe("sending a follow-up to an external workspace", () => {
     expect(listed.changedFiles).toEqual(["a.ts"])
     expect(listed.diff).toContain("diff --git")
     expect(listed.baselineHashes).toEqual({ "a.ts": "hash" })
+  })
+
+  test("a new copy workspace publishes its baseline before the renderer can refresh it", async () => {
+    const sourcePath = join(userDataPath, "project")
+    await mkdir(sourcePath, { recursive: true })
+    await writeFile(join(sourcePath, "README.md"), "# Read only\n", "utf8")
+
+    const created = await createParallelWorkspace({
+      name: "Read only",
+      taskPrompt: "Read README.md and report its title.",
+      runtime: "codex",
+      parentSessionId: "session-1",
+      sourcePath,
+    })
+
+    expect(created.isolation).toBe("copy")
+    expect(Object.keys(created.baselineHashes ?? {})).toContain("README.md")
+    const refreshed = await refreshParallelWorkspace(created.id)
+    expect(refreshed.changedFiles).toEqual([])
+    expect(refreshed.diff).toBe("")
+    expect(refreshed.riskLevel).toBe("low")
+  })
+
+  test("a legacy copy without a baseline never reports the whole tree as newly added", async () => {
+    const sourcePath = join(userDataPath, "source")
+    const isolatedPath = join(userDataPath, "legacy-copy")
+    await mkdir(sourcePath, { recursive: true })
+    await mkdir(isolatedPath, { recursive: true })
+    await writeFile(join(sourcePath, "README.md"), "# Same\n", "utf8")
+    await writeFile(join(isolatedPath, "README.md"), "# Same\n", "utf8")
+    const seeded = await seed({ sourcePath, isolatedPath, baselineHashes: undefined, changedFiles: [], diff: "" })
+
+    const refreshed = await refreshParallelWorkspace(seeded.id)
+    expect(refreshed.changedFiles).toEqual([])
+    expect(refreshed.diff).toBe("")
+    expect(refreshed.riskLevel).toBe("low")
+  })
+
+  test("a clean refresh clears a stale high-risk classification", async () => {
+    const sourcePath = join(userDataPath, "clean-source")
+    const isolatedPath = join(userDataPath, "clean-copy")
+    const contents = "# Unchanged\n"
+    await mkdir(sourcePath, { recursive: true })
+    await mkdir(isolatedPath, { recursive: true })
+    await writeFile(join(sourcePath, "README.md"), contents, "utf8")
+    await writeFile(join(isolatedPath, "README.md"), contents, "utf8")
+    const seeded = await seed({
+      sourcePath,
+      isolatedPath,
+      baselineHashes: { "README.md": createHash("sha256").update(contents).digest("hex") },
+      changedFiles: ["README.md"],
+      changedFilesCount: 1,
+      diff: "stale false diff",
+      riskLevel: "high",
+    })
+
+    const refreshed = await refreshParallelWorkspace(seeded.id)
+    expect(refreshed.changedFiles).toEqual([])
+    expect(refreshed.changedFilesCount).toBe(0)
+    expect(refreshed.diff).toBe("")
+    expect(refreshed.riskLevel).toBe("low")
+  })
+
+  test("a read-only initial external run skips guardrails and still records cost and outcome", async () => {
+    const sourcePath = join(userDataPath, "read-only-project")
+    await mkdir(sourcePath, { recursive: true })
+    await writeFile(join(sourcePath, "README.md"), "# Vector\n", "utf8")
+    runHandler = async () => ({ exitCode: 0, summary: "Document title: Vector", actualCost: "$0.0123", output: [] })
+    const created = await createParallelWorkspace({
+      name: "Read README",
+      taskPrompt: "Inspect README.md only and report its title. Do not edit files.",
+      runtime: "codex",
+      parentSessionId: "session-1",
+      sourcePath,
+    })
+    started.push(created.id)
+
+    await runParallelWorkspace(created.id, engine, undefined, dependencies)
+    const settled = await settle(created.id)
+
+    expect(settled.status).toBe("complete")
+    expect(settled.changedFilesCount).toBe(0)
+    expect(settled.riskLevel).toBe("low")
+    expect(settled.actualCost).toBe("$0.0123")
+    expect(settled.finalSummary).toBe("Document title: Vector")
+    expect(settled.validationReport).toBeUndefined()
+    expect(settled.logs[0]).toContain("deterministic checks were skipped")
   })
 
   test("a workspace whose isolated folder is gone is refused rather than silently rebuilt", async () => {

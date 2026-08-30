@@ -1,4 +1,4 @@
-// Shared dictation engine for every mic surface (chat prompt, canvas voice bar).
+// Shared dictation engine for every prompt surface.
 //
 // Engine choice is fixed per runtime:
 // - Desktop (window.api present): ALWAYS the native recorder + on-device Whisper

@@ -3,7 +3,7 @@ import { expectSessionTitle } from "../../utils/waits"
 import { measureNavigationMilestones } from "./navigation-milestones"
 import { fixture } from "./session-timeline-stress.fixture"
 import {
-  installStressSessionTabs,
+  installStressTasks,
   installTimelineSettings,
   mockStressTimeline,
   stressSessionHref,
@@ -13,18 +13,17 @@ import { waitForStableTimeline } from "./session-tab-switch-probe"
 const homeRow = '[data-component="home-session-row"]'
 const homeShell = '[data-component="home-session-search"]'
 
-benchmark.describe("performance: home and tab navigation", () => {
-  benchmark("opens a home session and paints its titlebar tab", async ({ page, report }) => {
+benchmark.describe("performance: home and task navigation", () => {
+  benchmark("opens a home session and paints its workspace title", async ({ page, report }) => {
     await setup(page, [])
     await page.goto("/")
     const row = page.locator(homeRow).filter({ hasText: fixture.expected.targetTitle }).first()
     await expect(row).toBeVisible()
-    const href = stressSessionHref(fixture.targetID)
     const result = await measureNavigationMilestones(page, {
-      triggerSelector: homeRow,
+      trigger: { type: "click", selector: homeRow },
       milestones: {
         content: { selector: messageSelector(fixture.expected.targetMessageIDs.at(-1)!) },
-        tab: { selector: `[data-slot="titlebar-tabs"] a[href="${href}"]` },
+        title: { selector: "[data-vector-session-title]" },
       },
       navigate: async () => {
         await row.click()
@@ -32,13 +31,17 @@ benchmark.describe("performance: home and tab navigation", () => {
       },
     })
     report(result)
-    await expect(page.locator(`[data-slot="titlebar-tabs"] a[href="${href}"]`)).toContainText(
-      fixture.expected.targetTitle,
-    )
+    await expect(page.locator("[data-vector-session-title]")).toHaveText(fixture.expected.targetTitle)
   })
 
   benchmark("stages the review body after cold session content", async ({ page, report }) => {
     await setup(page, [])
+    await page.addInitScript(() => {
+      localStorage.setItem(
+        "vector.global.dat:layout",
+        JSON.stringify({ review: { diffStyle: "split", panelOpened: true } }),
+      )
+    })
     await page.goto("/")
     const row = page.locator(homeRow).filter({ hasText: fixture.expected.targetTitle }).first()
     await expect(row).toBeVisible()
@@ -49,7 +52,7 @@ benchmark.describe("performance: home and tab navigation", () => {
           const sample = () => {
             samples++
             const content = !!document.querySelector(contentSelector)
-            const review = !!document.querySelector('[data-component="session-review"]')
+            const review = !!document.querySelector('[data-component="session-review-v2"]')
             if (content && !review) {
               resolve({ contentBeforeReview: true, samples })
               return
@@ -75,27 +78,25 @@ benchmark.describe("performance: home and tab navigation", () => {
     )
     report(result)
     expect(result.contentBeforeReview).toBe(true)
-    await expect(page.locator('[data-component="session-review"]')).toBeVisible()
+    await expect(page.locator('[data-component="session-review-v2"]')).toBeVisible()
   })
 
-  benchmark("closes the only session tab and paints home", async ({ page, report }) => {
+  benchmark("closes the only task and paints home", async ({ page, report }) => {
     await setup(page, [fixture.sourceID])
     const href = stressSessionHref(fixture.sourceID)
     await page.goto(href)
     await expectSessionTitle(page, fixture.expected.sourceTitle)
     await waitForStableTimeline(page, fixture.expected.sourceMessageIDs.at(-1)!)
-    const tab = page.locator(`[data-slot="titlebar-tabs"] a[href="${href}"]`).first()
-    const close = tab.locator("..").locator('[data-component="icon-button-v2"]')
-    await expect(close).toBeVisible()
+    const modifier = (await page.evaluate(() => /Mac/.test(navigator.platform))) ? "Meta" : "Control"
     const result = await measureNavigationMilestones(page, {
-      triggerSelector: '[data-slot="titlebar-tabs"] [data-component="icon-button-v2"]',
+      trigger: { type: "keydown", key: "w", modifier },
       milestones: {
         home: { selector: homeShell },
         row: { selector: homeRow },
-        tabRemoved: { selector: `[data-slot="titlebar-tabs"] a[href="${href}"]`, visible: false },
+        sessionRemoved: { selector: messageSelector(fixture.expected.sourceMessageIDs.at(-1)!), visible: false },
       },
       navigate: async () => {
-        await close.click()
+        await page.keyboard.press(`${modifier}+w`)
         await expect(page).toHaveURL("/")
       },
     })
@@ -106,7 +107,7 @@ benchmark.describe("performance: home and tab navigation", () => {
 async function setup(page: Parameters<typeof mockStressTimeline>[0], sessionIDs: string[]) {
   await mockStressTimeline(page)
   await installTimelineSettings(page)
-  await installStressSessionTabs(page, { sessionIDs })
+  await installStressTasks(page, { sessionIDs })
 }
 
 function messageSelector(id: string) {

@@ -1,18 +1,18 @@
 # Vector
 
-Vector is a local-first AI engineering workspace for directing, coordinating, reviewing, and shipping software with agents. Vector's native agent, Claude Code, Codex, and Cursor Agent each run in a first-class workspace that combines an integrated code editor, terminal, browser, repository context, review controls, and deployment connections in one desktop application.
+Vector is a local-first AI engineering workspace for directing, coordinating, reviewing, and shipping software with agents. Agent and Editor are two views of the same project session: Vector's native agent, Claude Code, Codex, and Cursor Agent can work beside file tabs, a terminal, a controlled browser, repository context, review controls, and deployment connections in one desktop application.
 
 [Website](https://vectordev.ai) · [Documentation](https://vectordev.ai/docs) · [Releases](https://vectordev.ai/releases) · [Security](SECURITY.md)
 
 ## What Vector is built for
 
 - **Parallel, isolated work.** Run agents in separate workspaces, follow their live status, compare output, inspect changes, and selectively merge the result you trust.
-- **First-class agent runtimes.** Use Vector's native agent or installed Claude Code, Codex, and Cursor Agent runtimes with the same full-screen Chat, Files, Changes, Terminal, Browser, and Activity workflow. Availability depends on the tools installed and authenticated on your computer.
+- **First-class agent conversations.** Use Vector's native agent or installed Claude Code, Codex, and Cursor Agent runtimes in a readable chat interface, with formatted replies, expandable tool activity, and follow-ups in the same conversation. The file editor keeps that same agent beside your code; raw runtime logs stay in diagnostics. Availability depends on the tools installed and authenticated on your computer.
 - **Shared agent coordination.** Keep independent conversations and files easy to distinguish while teams, subagents, review state, and follow-up turns remain visible from one project.
 - **Measured model economics.** Track provider-reported token usage and cost, set spend limits for unattended work, and compare models on both outcome and price.
 - **Verified completion.** An optional LLM-as-a-judge pass can check whether work meets the stated objective and request a focused repair when it does not.
 - **Local project memory.** Repository context, durable preferences, prior failure patterns, and checkpoints stay on your machine; selected context is sent only to the model provider you choose.
-- **One engineering surface.** Edit code, run commands, operate a browser, inspect pull requests and CI, connect cloud services, and schedule recurring work without stitching together separate agent windows.
+- **One persistent project context.** Switch between Agent and Editor, open project files in tabs, run commands, operate a browser, inspect pull requests and CI, connect cloud services, and schedule recurring work without stitching together separate agent windows.
 
 Vector is powerful software: agents can edit files, execute commands, use connected services, and send context to configured providers. Review [SECURITY.md](SECURITY.md) before running it on sensitive repositories.
 

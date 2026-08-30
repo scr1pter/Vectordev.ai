@@ -174,6 +174,7 @@ export function TitlebarTabStrip(props: {
   let scrollRef!: HTMLDivElement
   let listRef!: HTMLDivElement
   let resizeFrame: number | undefined
+  let activeScrollFrame: number | undefined
 
   const tabIds = () => props.tabs.map(tabKey)
 
@@ -199,6 +200,7 @@ export function TitlebarTabStrip(props: {
 
   onCleanup(() => {
     if (resizeFrame !== undefined) cancelAnimationFrame(resizeFrame)
+    if (activeScrollFrame !== undefined) cancelAnimationFrame(activeScrollFrame)
   })
 
   createEffect(() => {
@@ -207,8 +209,20 @@ export function TitlebarTabStrip(props: {
     refreshOverflow()
   })
 
+  createEffect(() => {
+    const tab = props.currentTab()
+    if (!tab) return
+    const key = tabKey(tab)
+    if (activeScrollFrame !== undefined) cancelAnimationFrame(activeScrollFrame)
+    activeScrollFrame = requestAnimationFrame(() => {
+      activeScrollFrame = undefined
+      const slot = Array.from(listRef?.children ?? []).find((element) => element.getAttribute("data-tab-key") === key)
+      slot?.scrollIntoView({ behavior: "auto", block: "nearest", inline: "nearest" })
+    })
+  })
+
   return (
-    <div data-slot="titlebar-tabs" class="relative min-w-0">
+    <div data-slot="titlebar-tabs" class="relative min-w-0" role="navigation" aria-label="Open tasks">
       <div
         data-slot="titlebar-tabs-scroll"
         class="flex min-w-0 flex-row items-center gap-1.5 overflow-x-auto no-scrollbar [app-region:no-drag]"
@@ -301,12 +315,12 @@ export function TitlebarTabStrip(props: {
       <div
         data-slot="titlebar-tabs-fade-left"
         aria-hidden="true"
-        class="pointer-events-none absolute inset-y-0 left-0 z-10 w-6 bg-[linear-gradient(to_right,var(--v2-background-bg-deep),transparent)]"
+        class="pointer-events-none absolute inset-y-0 left-0 z-10 w-6 bg-[linear-gradient(to_right,var(--vx-sidebar),transparent)]"
       />
       <div
         data-slot="titlebar-tabs-fade-right"
         aria-hidden="true"
-        class="pointer-events-none absolute inset-y-0 right-0 z-10 w-6 bg-[linear-gradient(to_left,var(--v2-background-bg-deep),transparent)]"
+        class="pointer-events-none absolute inset-y-0 right-0 z-10 w-6 bg-[linear-gradient(to_left,var(--vx-sidebar),transparent)]"
       />
     </div>
   )

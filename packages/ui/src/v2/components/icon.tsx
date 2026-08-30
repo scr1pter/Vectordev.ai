@@ -129,6 +129,14 @@ const icons = {
     viewBox: "0 0 16 16",
     body: `<path d="M13.5555 6.66656V2.44434H9.33326M13.5555 2.44434L7.99993 7.99989M13.5555 9.33324V13.5555C13.5555 13.5555 12.7599 13.5555 11.7777 13.5555H2.44438C2.44438 13.5555 2.44438 12.7599 2.44438 11.7777V4.22213C2.44438 3.2399 2.44434 2.44435 2.44434 2.44435H6.66661" stroke="currentColor"/>`,
   },
+  download: {
+    viewBox: "0 0 16 16",
+    body: `<path d="M8 2.5V10M4.75 6.75 8 10l3.25-3.25M2.5 10.5v3h11v-3" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/>`,
+  },
+  link: {
+    viewBox: "0 0 16 16",
+    body: `<path d="m6.5 9.5 3-3M6.25 5.25l1-1a3.182 3.182 0 0 1 4.5 4.5l-1 1M9.75 10.75l-1 1a3.182 3.182 0 0 1-4.5-4.5l1-1" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/>`,
+  },
   reset: {
     viewBox: "0 0 20 20",
     body: `<path d="M5.83333 4.16406L2.5 7.4974L5.83333 10.8307M3.33333 7.4974H17.9167V15.4141H10" stroke="currentColor" stroke-linecap="square"/>`,

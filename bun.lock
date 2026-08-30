@@ -48,6 +48,7 @@
         "@dnd-kit/dom": "0.5.0",
         "@dnd-kit/helpers": "0.5.0",
         "@dnd-kit/solid": "0.5.0",
+        "@fontsource-variable/geist": "5.2.6",
         "@huggingface/transformers": "4.2.0",
         "@kobalte/core": "catalog:",
         "@lezer/highlight": "1.2.3",
@@ -267,7 +268,7 @@
     },
     "packages/desktop": {
       "name": "vector-desktop",
-      "version": "1.19.99",
+      "version": "1.99.1",
       "dependencies": {
         "@lydell/node-pty": "catalog:",
         "@zip.js/zip.js": "2.7.62",

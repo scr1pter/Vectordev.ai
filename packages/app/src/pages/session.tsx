@@ -603,15 +603,20 @@ export default function Page() {
 
   createComputed((prev) => {
     const key = sessionKey()
-    if (key !== prev) {
-      setStore("deferRender", true)
+    if (key !== prev) setStore("deferRender", true)
+    return key
+  })
+
+  // Computeds run inside pending route transitions. Schedule the release after
+  // commit so its ownership is not invalidated by the still-current route.
+  createEffect(
+    on(sessionKey, () => {
       const owner = sessionOwnership.capture()
       requestAnimationFrame(() => {
         setTimeout(() => owner.run(() => setStore("deferRender", false)), 0)
       })
-    }
-    return key
-  })
+    }),
+  )
 
   let reviewFrame: number | undefined
   let todoFrame: number | undefined

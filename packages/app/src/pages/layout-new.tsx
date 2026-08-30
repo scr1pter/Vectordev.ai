@@ -23,6 +23,8 @@ import { decodeRouteSegment, projectPathFromWorkspaceRoute, sessionIDFromRouteVa
 import { taskScopeId, taskScopeSearch, type TaskScope } from "@/utils/task-scope"
 import { sessionIDFromEvent } from "@/utils/session-event"
 import { WORKSPACE_FILE_SAVED_EVENT, workspaceFileSavedDetail } from "@/utils/workspace-file-saved"
+import { WORKSPACE_MODE_CHANGED_EVENT, workspaceModeFromEvent, type WorkspaceMode } from "@/utils/workspace-mode"
+import { extractAssistantReply } from "@/utils/assistant-reply"
 import { setNavigate } from "@/utils/notification-click"
 import { setV2Toast, showToast, ToastRegion } from "@/utils/toast"
 import { useProviders } from "@/hooks/use-providers"
@@ -49,7 +51,6 @@ import {
   type ExternalRuntime,
 } from "@/features/agents/external-runtimes"
 import { PullRequests } from "@/features/pull-requests/pull-requests"
-import { extractVelReply } from "@/features/vel/vel-call"
 import {
   isInternalProjectPath,
   isManagedAgentWorkspacePath,
@@ -75,16 +76,15 @@ import {
 } from "@/features/onboarding/onboarding-progress"
 import { ParallelDiffReview } from "@/components/parallel-diff-review"
 import { WorkspaceNavigation, type WorkspaceNavigationItem } from "@/components/workspace-navigation"
-import { CanvasWorkspace } from "@/features/canvas/canvas"
 import { ExternalAgentTranscript, type ExternalAgentTurn } from "@/features/agents/external-agent-transcript"
+import { ExternalAgentComposer } from "@/features/agents/external-agent-composer"
 import {
   externalAgentFollowUpDraft,
+  externalAgentFollowUpSubmission,
+  restoreExternalAgentFollowUpDraft,
   withExternalAgentFollowUpDraft,
   type ExternalAgentFollowUpDrafts,
 } from "@/features/agents/external-agent-follow-up"
-import { useUpdaterAction } from "@/components/updater-action"
-import { VelCall } from "@/features/vel/vel-call"
-import { VEL_OPEN_EVENT } from "@/features/vel/vel-message"
 import {
   adoptCollaborationGraph,
   collaborationLinkKey,
@@ -93,6 +93,7 @@ import {
   type TeamCollaborationGraph,
 } from "./layout-collaboration"
 import {
+  editorWorkspacePreparation,
   materializeParallelWorkspaceParent,
   parallelWorkspaceComposerAvailable,
   parallelWorkspaceIDFromPath,
@@ -520,7 +521,6 @@ function DiffModeToggle(props: { mode: DiffViewMode; onMode: (mode: DiffViewMode
 
 export default function NewLayout(props: ParentProps) {
   const platform = usePlatform()
-  const updaterAction = useUpdaterAction()
   const planMode = usePlanMode()
   const command = useCommand()
   const dialog = useDialog()
@@ -574,8 +574,7 @@ export default function NewLayout(props: ParentProps) {
   const [navigationVisible, setNavigationVisible] = createSignal(true)
   const [navigationWidth, setNavigationWidth] = createSignal(readNavigationWidth())
   const [navigationResizing, setNavigationResizing] = createSignal(false)
-  const [velOpen, setVelOpen] = createSignal(false)
-  const [velScopeKey, setVelScopeKey] = createSignal("")
+  const [workspaceMode, setWorkspaceMode] = createSignal<WorkspaceMode>("agent")
   const [workspaceTreeOpen, setWorkspaceTreeOpen] = createSignal(true)
   const [browserAgentOpen, setBrowserAgentOpen] = createSignal(false)
   const [parallelOpen, setParallelOpen] = createSignal(false)
@@ -698,6 +697,9 @@ export default function NewLayout(props: ParentProps) {
   const [agentTabOrder, setAgentTabOrder] = createSignal<string[]>([])
   let chatSearchRef: HTMLInputElement | undefined
   let parallelPromptRef: HTMLTextAreaElement | undefined
+  let parallelLauncherRef: HTMLFormElement | undefined
+  let parallelLauncherReturnFocus: HTMLElement | undefined
+  let parallelLauncherWasOpen = false
   let stopNavigationResize: (() => void) | undefined
   setNavigate(navigate)
 
@@ -766,8 +768,14 @@ export default function NewLayout(props: ParentProps) {
   })
 
   createEffect(() => {
-    if (!parallelComposerOpen()) return
-    queueMicrotask(() => parallelPromptRef?.focus())
+    const open = parallelComposerOpen()
+    if (open && !parallelLauncherWasOpen) {
+      parallelLauncherReturnFocus =
+        globalThis.document?.activeElement instanceof HTMLElement ? globalThis.document.activeElement : undefined
+      queueMicrotask(() => parallelPromptRef?.focus())
+    }
+    if (!open && parallelLauncherWasOpen) queueMicrotask(() => parallelLauncherReturnFocus?.focus())
+    parallelLauncherWasOpen = open
   })
 
   const routeProjectPath = () => projectPathFromWorkspaceRoute(location.pathname)
@@ -915,7 +923,6 @@ export default function NewLayout(props: ParentProps) {
   const parallelWorkspacesRoute = () =>
     location.pathname === "/parallel-workspaces" || location.pathname.startsWith("/parallel-workspaces/")
   const cloudRoute = () => location.pathname === "/cloud"
-  const canvasRoute = () => location.pathname === "/canvas"
   const activeTaskScope = (): TaskScope => {
     const routedWorkspace = parallelRecords().find(
       (record) => record.id === parallelWorkspaceIDFromPath(location.pathname),
@@ -943,10 +950,10 @@ export default function NewLayout(props: ParentProps) {
 
   createEffect(() => {
     const path = location.pathname
-    // Fullscreen workspaces (cloud/canvas/parallel) must NOT be
+    // Fullscreen workspaces must NOT be
     // recorded as the return target, or their own "Back" button would navigate
     // to the page you're already on. Cloud was missing here — that was the bug.
-    if (browserAgentRoute() || parallelWorkspacesRoute() || canvasRoute() || cloudRoute()) return
+    if (browserAgentRoute() || parallelWorkspacesRoute() || cloudRoute()) return
     setFullscreenReturnPath(path + (location.search ?? ""))
   })
 
@@ -955,40 +962,6 @@ export default function NewLayout(props: ParentProps) {
     setParallelOpen(false)
     setParallelComposerOpen(false)
     navigate(fullscreenReturnPath() || "/")
-  }
-
-  // ---- Canvas ↔ shell bridge ----------------------------------------------
-  // Canvas hosts light surfaces itself; heavier ones (and voice actions) call
-  // back into the shell's real open/create flows.
-
-  // Terminal / Code editor / Review / Preview live inside a session view, which
-  // the fullscreen Canvas route unmounts. Launching one from Canvas used to hit
-  // the URL-based task gate and wrongly toast "Open a task first" even though a
-  // task was open (Canvas was reached FROM it). Instead, return to that task —
-  // fullscreenReturnPath holds the route Canvas was opened from — and fire the
-  // command once the session view has re-registered it.
-  const runInActiveTask = (feature: string, commandId: string) => {
-    const target = fullscreenReturnPath()
-    const targetIsTask = /\/session\/[^/?#]+/.test(target)
-    if (!taskRoute() && !targetIsTask) {
-      showToast({ title: "Open a project first", description: `${feature} runs inside an active Vector project.` })
-      return
-    }
-    setSidePanelOpen(false)
-    setToolsOpen(false)
-    setBrowserAgentOpen(false)
-    setParallelOpen(false)
-    if (!taskRoute() && targetIsTask) navigate(target)
-    let tries = 0
-    const fire = () => {
-      if (sessionCommandRegistered(commandId)) {
-        command.trigger(commandId)
-        return
-      }
-      if (tries++ > 40) return
-      setTimeout(fire, 50)
-    }
-    fire()
   }
 
   const eventTargetInsideFloatingSurface = (target: EventTarget | null) =>
@@ -1746,7 +1719,7 @@ export default function NewLayout(props: ParentProps) {
     if (
       !routedRequest &&
       taskScopeId({ projectPath: current.sourcePath, taskId: current.parentSessionId }) !==
-      taskScopeId({ projectPath: scope.sourcePath, taskId: scope.parentSessionId })
+        taskScopeId({ projectPath: scope.sourcePath, taskId: scope.parentSessionId })
     )
       return
     setParallelRecords((records) =>
@@ -2228,15 +2201,21 @@ export default function NewLayout(props: ParentProps) {
       reportDesktopOnlyParallel()
       return
     }
-    const text = externalAgentFollowUpDraft(followUpDrafts(), id).trim()
-    if (!text || followUpBusy()) return
+    const workspace = parallelRecords().find((record) => record.id === id)
+    if (!workspace) return
+    const text = externalAgentFollowUpSubmission({
+      draft: externalAgentFollowUpDraft(followUpDrafts(), id),
+      running: isParallelWorkspaceRunning(workspace),
+      sending: followUpBusy(),
+    })
+    if (!text) return
     setFollowUpBusy(true)
     setParallelError("")
     setFollowUpDrafts((drafts) => withExternalAgentFollowUpDraft(drafts, id, ""))
     const record = await api.followUp(id, text).catch((error: unknown) => {
       setParallelError(error instanceof Error ? error.message : String(error))
-      // The typed message is restored rather than lost when the send is refused.
-      setFollowUpDrafts((drafts) => withExternalAgentFollowUpDraft(drafts, id, text))
+      // Preserve both the refused message and anything drafted while awaiting it.
+      setFollowUpDrafts((drafts) => restoreExternalAgentFollowUpDraft(drafts, id, text))
       return undefined
     })
     setFollowUpBusy(false)
@@ -2604,13 +2583,109 @@ export default function NewLayout(props: ParentProps) {
     command.trigger("tab.new")
   }
 
+  const sessionCommandRegistered = (id: string) => command.options.some((option) => option.id === id)
+  const closeWorkspacePanel = () => {
+    if (sessionCommandRegistered("vector.workspace-panel.close")) command.trigger("vector.workspace-panel.close")
+  }
+  const [codespaceOpening, setCodespaceOpening] = createSignal(false)
+
+  const waitForSessionCommand = (id: string, timeout = 8_000) =>
+    new Promise<boolean>((resolve) => {
+      const deadline = Date.now() + timeout
+      const check = () => {
+        if (sessionCommandRegistered(id)) {
+          resolve(true)
+          return
+        }
+        if (Date.now() >= deadline) {
+          resolve(false)
+          return
+        }
+        globalThis.setTimeout(check, 50)
+      }
+      check()
+    })
+
+  const launchCodespace = async () => {
+    const commandID = "vector.codespace.open"
+    const draftID = activeDraftID()
+    const scope = activeWorkspaceScope()
+    const preparation = editorWorkspacePreparation({
+      commandReady: sessionCommandRegistered(commandID),
+      draftID,
+      sourcePath: scope.sourcePath,
+    })
+
+    if (preparation === "missing-project") {
+      setWorkspaceMode("agent")
+      showToast({
+        title: "Open a project first",
+        description: "Vector needs a project-backed task before its editor can open.",
+      })
+      return
+    }
+
+    if (preparation === "materialize" && draftID) {
+      const draft = tabs.store.find((tab) => tab.type === "draft" && tab.draftID === draftID)
+      if (!draft || draft.type !== "draft") {
+        setWorkspaceMode("agent")
+        showToast({
+          title: "Draft is no longer available",
+          description: "Open the project again, then choose Editor.",
+        })
+        return
+      }
+
+      const materialized = await ensureTaskWorkspaceParent(scope).catch((error: unknown) => {
+        showToast({
+          variant: "error",
+          title: "Editor couldn't start",
+          description: error instanceof Error ? error.message : String(error),
+        })
+        return undefined
+      })
+      if (!materialized?.parentSessionId || !codespaceOpening()) return
+
+      // Draft promotion navigates as one transition. Navigating explicitly as
+      // well makes the Editor action deterministic even when that transition
+      // is still being scheduled by Solid.
+      navigate(sessionHref(draft.server, materialized.parentSessionId), { replace: true })
+    }
+
+    const ready = sessionCommandRegistered(commandID) || (await waitForSessionCommand(commandID))
+    if (!codespaceOpening()) return
+    if (!ready) {
+      setWorkspaceMode("agent")
+      showToast({
+        variant: "error",
+        title: "Editor is still starting",
+        description: "Vector created the task, but its editor did not become ready. Try Editor again.",
+      })
+      return
+    }
+
+    command.trigger(commandID)
+    setWorkspaceMode("editor")
+  }
+
   const openCodespace = () => {
-    if (!requireSidePanelRoute("Code editor")) return
+    if (!requireSidePanelRoute("Code editor")) {
+      setWorkspaceMode("agent")
+      return
+    }
+    if (codespaceOpening()) return
     setSidePanelOpen(false)
     setToolsOpen(false)
     setBrowserAgentOpen(false)
     setParallelOpen(false)
-    command.trigger("vector.codespace.open")
+    setCodespaceOpening(true)
+    void launchCodespace().finally(() => setCodespaceOpening(false))
+  }
+
+  const openAgentMode = () => {
+    setCodespaceOpening(false)
+    setWorkspaceMode("agent")
+    if (sessionCommandRegistered("vector.codespace.close")) command.trigger("vector.codespace.close")
   }
 
   const openPreviewPanel = () => {
@@ -2719,27 +2794,16 @@ export default function NewLayout(props: ParentProps) {
   const taskRoute = () => /\/session\/[^/?#]+/.test(location.pathname)
   const taskDraftRoute = () => location.pathname === "/new-session" && Boolean(activeDraftID())
   const taskConversationRoute = () => taskRoute() || taskDraftRoute()
-  const activeVelScopeKey = () => {
-    const sessionID = activeTaskScope().taskId
-    if (sessionID) return `session:${sessionID}`
-    const draftID = activeDraftID()
-    return draftID ? `draft:${draftID}` : ""
+  const handleWorkspaceModeChanged = (event: Event) => {
+    const mode = workspaceModeFromEvent(event)
+    if (mode) setWorkspaceMode(mode)
   }
-  const openVelCall = () => {
-    const scope = activeVelScopeKey()
-    if (!taskConversationRoute() || !scope) {
-      showToast({
-        title: "Open a session first",
-        description: "Vel is available inside the chat for the selected Vector session.",
-      })
-      return
-    }
-    setVelScopeKey(scope)
-    setVelOpen(true)
-  }
-  const handleVelOpen = () => openVelCall()
-  globalThis.window?.addEventListener(VEL_OPEN_EVENT, handleVelOpen)
-  onCleanup(() => globalThis.window?.removeEventListener(VEL_OPEN_EVENT, handleVelOpen))
+  globalThis.window?.addEventListener(WORKSPACE_MODE_CHANGED_EVENT, handleWorkspaceModeChanged)
+  onCleanup(() => globalThis.window?.removeEventListener(WORKSPACE_MODE_CHANGED_EVENT, handleWorkspaceModeChanged))
+  createEffect(() => {
+    if (taskConversationRoute()) return
+    setWorkspaceMode("agent")
+  })
   const macDesktop = () => platform.platform === "desktop" && platform.os === "macos"
 
   // Landing-page-style ambient light: a soft purple halo trails the pointer.
@@ -2762,8 +2826,6 @@ export default function NewLayout(props: ParentProps) {
       globalThis.window?.removeEventListener("pointermove", move)
     })
   })
-
-  const sessionCommandRegistered = (id: string) => command.options.some((option) => option.id === id)
 
   const sidePanelAvailable = () =>
     typeof globalThis.window === "undefined" || globalThis.window.matchMedia("(min-width: 768px)").matches
@@ -2935,19 +2997,15 @@ export default function NewLayout(props: ParentProps) {
   }
 
   onMount(() => {
+    // A deep link should open the task, file, or tool the user asked for. The
+    // first-run checklist belongs on Home; opening it over an active session
+    // interrupted tab restoration, review links, and shared task URLs.
+    if (location.pathname !== "/") return
     const flags = readOnboardingFlags()
     if (flags.tour || flags.dismissed || flags.taskCompleted) return
     // Activation is short and dismissible. The exhaustive spotlight tour is
     // still available from Getting started, but never takes over first launch.
     setTimeout(() => setOnboardingOpen(true), 600)
-  })
-
-  createEffect(() => {
-    if (!velOpen()) return
-    const scope = activeVelScopeKey()
-    if (taskConversationRoute() && scope && scope === velScopeKey()) return
-    setVelOpen(false)
-    setVelScopeKey("")
   })
 
   const closeOnboarding = () => {
@@ -3011,12 +3069,14 @@ export default function NewLayout(props: ParentProps) {
   }
 
   const openProviderSettings = () => {
+    closeWorkspacePanel()
     void import("@/components/settings-v2/dialog-settings-v2").then((x) => {
       dialog.show(() => <x.DialogSettings section="providers" repositoryPath={activeWorkspaceScope().sourcePath} />)
     })
   }
 
   const openSettings = () => {
+    closeWorkspacePanel()
     void import("@/components/settings-v2/dialog-settings-v2").then((x) => {
       dialog.show(() => <x.DialogSettings repositoryPath={activeWorkspaceScope().sourcePath} />)
     })
@@ -3135,12 +3195,7 @@ export default function NewLayout(props: ParentProps) {
       return
     }
     const fullscreenWorkspaceOpen =
-      browserAgentOpen() ||
-      browserAgentRoute() ||
-      parallelOpen() ||
-      parallelWorkspacesRoute() ||
-      cloudRoute() ||
-      canvasRoute()
+      browserAgentOpen() || browserAgentRoute() || parallelOpen() || parallelWorkspacesRoute() || cloudRoute()
     if (event.key === "Escape" && (toolsOpen() || sidePanelOpen() || fullscreenWorkspaceOpen)) {
       // First Escape inside a form field only leaves the field so drafts
       // (mission text, browser prompts, URLs) survive; a second Escape closes.
@@ -3260,85 +3315,92 @@ export default function NewLayout(props: ParentProps) {
           if (destination.mode === "external-workspace") navigate(destination.href, { replace: true })
         }}
         chat={
-          <div class="space-y-4">
+          <div>
             <Show when={parallelError()}>
-              <div class="rounded-[11px] border border-rose-400/25 bg-rose-400/[0.07] px-4 py-3 text-[12px] leading-5 text-rose-200">
+              <div class="vector-agent-chat-error" role="alert">
                 {parallelError()}
               </div>
             </Show>
             <Show when={record().error}>
-              <div class="rounded-[11px] border border-rose-400/25 bg-rose-400/[0.07] px-4 py-3 text-[12px] leading-5 text-rose-200">
+              <div class="vector-agent-chat-error" role="alert">
                 {record().error}
               </div>
             </Show>
-            <Show when={record().finalSummary}>
-              <section class="rounded-[12px] border border-[color:var(--vx-line)] bg-white/[0.025] px-4 py-3">
-                <div class="text-[10px] font-semibold uppercase tracking-[0.08em] text-white/35">Agent summary</div>
-                <p class="mt-1.5 whitespace-pre-wrap text-[12.5px] leading-5 text-white/68">
-                  {record().finalSummary}
-                </p>
-              </section>
-            </Show>
-            <Show when={record().validationReport}>
-              {(validation) => (
-                <section class="rounded-[12px] border border-[color:var(--vx-line)] bg-white/[0.025] px-4 py-3">
-                  <div class="flex items-center justify-between">
-                    <span class="text-[11px] font-semibold text-white/72">Validation</span>
-                    <span
-                      class={validation().passed ? "text-[11px] text-emerald-300" : "text-[11px] text-rose-300"}
-                    >
-                      {validation().passed ? "Passed" : "Needs attention"}
-                    </span>
-                  </div>
-                  <div class="mt-2 space-y-1.5">
-                    <For each={validation().checks}>
-                      {(check) => (
-                        <div class="flex items-center gap-2 text-[11px]">
-                          <span
-                            class={
-                              check.status === "passed"
-                                ? "size-1.5 rounded-full bg-emerald-400"
-                                : check.status === "failed"
-                                  ? "size-1.5 rounded-full bg-rose-400"
-                                  : "size-1.5 rounded-full bg-white/25"
-                            }
-                          />
-                          <span class="min-w-0 flex-1 truncate text-white/55">{check.label}</span>
-                          <code class="truncate text-white/28">{check.command}</code>
-                        </div>
-                      )}
-                    </For>
-                  </div>
-                </section>
-              )}
-            </Show>
             <Show
-              when={(record().turns?.length ?? 0) > 0}
+              when={(record().turns?.length ?? 0) > 0 || record().finalSummary}
               fallback={
-                <div class="grid min-h-[260px] place-items-center rounded-[12px] border border-[color:var(--vx-line)] bg-white/[0.015] px-8 text-center">
-                  <div class="max-w-[440px]">
-                    <div class="mx-auto grid size-10 place-items-center rounded-[11px] bg-[color:var(--vx-purple-soft)] text-[color:var(--vx-purple-bright)]">
-                      <span class={isParallelWorkspaceRunning(record()) ? "size-2 animate-pulse rounded-full bg-current" : "text-sm"}>
-                        {isParallelWorkspaceRunning(record()) ? "" : "✓"}
-                      </span>
-                    </div>
-                    <h2 class="mt-3 text-[13px] font-semibold text-white/76">
-                      {isParallelWorkspaceRunning(record()) ? `${copy().label} is starting` : "No conversation yet"}
-                    </h2>
-                    <p class="mt-1.5 text-[11.5px] leading-5 text-white/40">
-                      {isParallelWorkspaceRunning(record())
-                        ? "Structured activity will appear here as the agent works in its isolated checkout."
-                        : "Run this workspace or send a message to begin a conversation."}
-                    </p>
-                  </div>
+                <div class="vector-agent-empty">
+                  <strong>
+                    {isParallelWorkspaceRunning(record())
+                      ? `${copy().label} is getting started…`
+                      : `What would you like ${copy().label} to work on?`}
+                  </strong>
+                  <p>Your conversation will appear here.</p>
                 </div>
               }
             >
-              <ExternalAgentTranscript turns={record().turns ?? []} runtimeLabel={copy().label} />
+              <ExternalAgentTranscript
+                turns={
+                  record().turns?.length
+                    ? record().turns!
+                    : [
+                        {
+                          id: `${record().id}:prompt`,
+                          role: "user",
+                          text: record().taskPrompt,
+                          at: record().createdAt,
+                          state: "done",
+                        },
+                        {
+                          id: `${record().id}:reply`,
+                          role: "agent",
+                          text: record().finalSummary,
+                          at: record().lastActivityAt,
+                          state: "done",
+                        },
+                      ]
+                }
+                runtimeLabel={copy().label}
+              />
             </Show>
           </div>
         }
-        changes={renderDiffReview(record)}
+        changes={
+          <div>
+            <Show when={record().validationReport}>
+              {(validation) => (
+                <details class="vector-agent-tool-activity">
+                  <summary>
+                    <svg viewBox="0 0 16 16" aria-hidden="true">
+                      <path d="m6 4 4 4-4 4" />
+                    </svg>
+                    Checks ·{" "}
+                    {validation().hadChecks
+                      ? validation().passed
+                        ? "Passed"
+                        : "Needs attention"
+                      : "No checks detected"}
+                  </summary>
+                  <ul>
+                    <For each={validation().checks}>
+                      {(check) => (
+                        <li>
+                          <span
+                            data-state={
+                              check.status === "passed" ? "done" : check.status === "failed" ? "failed" : "skipped"
+                            }
+                          />
+                          {check.label}
+                        </li>
+                      )}
+                    </For>
+                  </ul>
+                </details>
+              )}
+            </Show>
+            {renderDiffReview(record)}
+          </div>
+        }
         activity={
           <div class="space-y-4">
             {activitySection(copy().activityLabel, record().logs)}
@@ -3350,46 +3412,19 @@ export default function NewLayout(props: ParentProps) {
         }
         composer={
           <Show when={record().mergeState === "none"}>
-            <form
-              class="shrink-0 border-t border-[color:var(--vx-line)] bg-[#19191c] px-5 py-3"
-              onSubmit={(event) => {
-                event.preventDefault()
-                void sendWorkspaceFollowUp(record().id)
-              }}
-            >
-              <div class="mx-auto flex max-w-[980px] items-end gap-2 rounded-[12px] border border-[color:var(--vx-line)] bg-black/20 p-2 focus-within:border-[color:var(--vx-purple)]/45">
-                <textarea
-                  class="min-h-[56px] min-w-0 flex-1 resize-none bg-transparent px-2 py-1.5 text-[12.5px] leading-5 text-white/85 outline-none disabled:opacity-40"
-                  placeholder={copy().followUpPlaceholder}
-                  aria-label={copy().followUpAriaLabel}
-                  value={externalAgentFollowUpDraft(followUpDrafts(), record().id)}
-                  disabled={isParallelWorkspaceRunning(record()) || followUpBusy()}
-                  onInput={(event) =>
-                    setFollowUpDrafts((drafts) =>
-                      withExternalAgentFollowUpDraft(drafts, record().id, event.currentTarget.value),
-                    )
-                  }
-                  onKeyDown={(event) => {
-                    if (event.key !== "Enter" || event.shiftKey) return
-                    event.preventDefault()
-                    void sendWorkspaceFollowUp(record().id)
-                  }}
-                />
-                <button
-                  type="submit"
-                  class="h-9 shrink-0 rounded-[9px] bg-[color:var(--vx-purple)] px-3.5 text-[11.5px] font-semibold text-white transition hover:brightness-110 disabled:opacity-40"
-                  aria-label={copy().sendFollowUpAriaLabel}
-                  disabled={
-                    !externalAgentFollowUpDraft(followUpDrafts(), record().id).trim() ||
-                    isParallelWorkspaceRunning(record()) ||
-                    followUpBusy()
-                  }
-                >
-                  {followUpBusy() ? "Sending…" : "Send"}
-                </button>
-              </div>
-              <div class="mx-auto mt-1.5 max-w-[980px] px-1 text-[10px] text-white/28">{copy().followUpHelp}</div>
-            </form>
+            <ExternalAgentComposer
+              runtimeLabel={copy().label}
+              value={externalAgentFollowUpDraft(followUpDrafts(), record().id)}
+              running={isParallelWorkspaceRunning(record())}
+              sending={followUpBusy()}
+              resumable={Boolean(record().externalSessionId)}
+              hasConversation={Boolean(record().turns?.some((turn) => turn.role === "agent"))}
+              onInput={(value) =>
+                setFollowUpDrafts((drafts) => withExternalAgentFollowUpDraft(drafts, record().id, value))
+              }
+              onSend={() => void sendWorkspaceFollowUp(record().id)}
+              onStop={() => void stopParallelWorkspace(record().id)}
+            />
           </Show>
         }
         actions={
@@ -3443,11 +3478,7 @@ export default function NewLayout(props: ParentProps) {
                 disabled={!record().changedFilesCount || parallelBusy()}
                 onClick={() => confirmTwice(`merge-${record().id}`, () => void mergeParallelWorkspace(record()))}
               >
-                {parallelBusy()
-                  ? "Merging…"
-                  : armedAction() === `merge-${record().id}`
-                    ? "Confirm merge"
-                    : "Merge all"}
+                {parallelBusy() ? "Merging…" : armedAction() === `merge-${record().id}` ? "Confirm merge" : "Merge all"}
               </button>
             </Show>
           </>
@@ -3522,9 +3553,19 @@ export default function NewLayout(props: ParentProps) {
                 {(record) => (
                   <Show
                     when={record().runtime !== "vector"}
-                    fallback={<div class="grid size-full place-items-center bg-[#171719] text-[11.5px] text-white/38">Opening Vector session…</div>}
+                    fallback={
+                      <div class="grid size-full place-items-center bg-[#171719] text-[11.5px] text-white/38">
+                        Opening Vector session…
+                      </div>
+                    }
                   >
-                    <Suspense fallback={<div class="grid size-full place-items-center bg-[#171719] text-[11.5px] text-white/38">Loading agent workspace…</div>}>
+                    <Suspense
+                      fallback={
+                        <div class="grid size-full place-items-center bg-[#171719] text-[11.5px] text-white/38">
+                          Loading agent workspace…
+                        </div>
+                      }
+                    >
                       {renderExternalAgentWorkspace(record)}
                     </Suspense>
                   </Show>
@@ -3582,89 +3623,6 @@ export default function NewLayout(props: ParentProps) {
         </div>
       </Show>
 
-      <Show when={canvasRoute()}>
-        <CanvasWorkspace
-          onClose={closeFullscreenWorkspace}
-          macPad={macDesktop()}
-          models={parallelModelOptions()}
-          resolveProjectPath={resolveActiveProjectPath}
-          onManageProviders={openProviderSettings}
-          onComposeAgentWorkspace={(input) => {
-            setParallelRuntime(input.runtime)
-            setParallelCompareRuntimes(false)
-            setParallelTopology("isolated")
-            setParallelJoinTeamId("")
-            setParallelName(input.name)
-            setParallelPrompt(input.taskPrompt)
-            openParallelWorkspaces()
-          }}
-          onOpenAgentWorkspace={(id) => {
-            const api = parallelApi()
-            if (!api) {
-              reportDesktopOnlyParallel()
-              return
-            }
-            void api
-              .refresh(id)
-              .then((record) => {
-                setParallelRecords((records) => [record, ...records.filter((item) => item.id !== record.id)])
-                closeFullscreenWorkspace()
-                void openParallelWorkspace(record)
-              })
-              .catch((error: unknown) => {
-                showToast({
-                  variant: "error",
-                  title: "Could not open agent workspace",
-                  description: error instanceof Error ? error.message : String(error),
-                })
-              })
-          }}
-          taskId={() => activeTaskScope().taskId}
-          projectId={() => taskScopeId(activeTaskScope())}
-        />
-      </Show>
-
-      <Show when={taskConversationRoute() && (activeTaskScope().taskId || activeDraftID())}>
-        <VelCall
-          open={velOpen()}
-          onClose={() => {
-            setVelOpen(false)
-            setVelScopeKey("")
-          }}
-          directory={resolveActiveProjectPath}
-          sessionId={() => {
-            const sessionID = activeTaskScope().taskId
-            return sessionID && serverSync().session.get(sessionID) ? sessionID : undefined
-          }}
-          onSessionCreated={(created) => {
-            setVelScopeKey(`session:${created.id}`)
-            serverSync().session.remember(created)
-            const draftID = activeDraftID()
-            if (draftID) {
-              try {
-                const draft = tabs.draft(draftID)
-                tabs.promoteDraft(draftID, { server: draft.server, sessionId: created.id })
-                return
-              } catch {
-                // The draft may already have been promoted by a simultaneous typed send.
-              }
-            }
-            navigate(sessionHref(server.key, created.id), { replace: true })
-          }}
-          model={() => {
-            const active = serverSync().session.get(activeTaskScope().taskId ?? "")
-            if (active?.model?.providerID && active.model.id) {
-              return { providerID: active.model.providerID, modelID: active.model.id }
-            }
-            const providerID = parallelProvider()
-            const modelID = parallelModel()
-            return providerID && modelID ? { providerID, modelID } : undefined
-          }}
-          agent={() => serverSync().session.get(activeTaskScope().taskId ?? "")?.agent || "build"}
-          contextLabel={projectDisplayName}
-        />
-      </Show>
-
       <SpotlightTour
         open={tourOpen()}
         steps={spotlightSteps}
@@ -3682,21 +3640,53 @@ export default function NewLayout(props: ParentProps) {
 
       <Show when={parallelComposerOpen()}>
         <div
-          class="fixed inset-0 z-[165] flex items-center justify-center bg-black/55 p-5 backdrop-blur-[3px]"
+          data-vector-agent-launcher-overlay
+          class="fixed inset-0 z-[165] flex items-center justify-center p-5 backdrop-blur-[8px]"
           onPointerDown={(event) => {
             if (event.target !== event.currentTarget) return
             setParallelComposerOpen(false)
           }}
         >
           <form
-            class="w-full max-w-[560px] overflow-hidden rounded-[18px] border border-[color:var(--vx-line)] bg-[#242428] shadow-[0_32px_110px_rgba(0,0,0,0.62)]"
+            ref={parallelLauncherRef}
+            data-vector-agent-launcher
+            class="flex max-h-[calc(100vh-40px)] w-full max-w-[620px] flex-col overflow-hidden rounded-[24px]"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="vector-agent-launcher-title"
+            aria-describedby="vector-agent-launcher-description"
+            aria-busy={parallelBusy()}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.preventDefault()
+                setParallelComposerOpen(false)
+                return
+              }
+              if (event.key !== "Tab") return
+              const focusable = Array.from(
+                parallelLauncherRef?.querySelectorAll<HTMLElement>(
+                  'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
+                ) ?? [],
+              ).filter((item) => !item.hidden && item.getClientRects().length > 0)
+              const first = focusable[0]
+              const last = focusable.at(-1)
+              if (!first || !last) return
+              if (event.shiftKey && globalThis.document.activeElement === first) {
+                event.preventDefault()
+                last.focus()
+                return
+              }
+              if (event.shiftKey || globalThis.document.activeElement !== last) return
+              event.preventDefault()
+              first.focus()
+            }}
             onSubmit={(event) => {
               event.preventDefault()
               void submitParallelLaunch()
             }}
           >
-            <header class="flex items-start gap-3 border-b border-[color:var(--vx-line)] px-5 py-4">
-              <span class="mt-0.5 grid size-9 shrink-0 place-items-center rounded-[11px] bg-[color:var(--vx-purple-soft)] text-[color:var(--vx-purple-bright)]">
+            <header class="vx-launcher__header flex items-start gap-3.5 px-6 pb-4 pt-5">
+              <span class="vx-launcher__glyph mt-0.5 grid size-10 shrink-0 place-items-center rounded-[14px] text-[color:var(--vx-purple-bright)]">
                 <svg viewBox="0 0 16 16" class="size-4" aria-hidden="true">
                   <path
                     d="M4.1 5.15h7.8v6.2H4.1zM6 5.15V3.7h4v1.45M6.2 8h.01M9.8 8h.01M6.45 9.8h3.1"
@@ -3709,10 +3699,13 @@ export default function NewLayout(props: ParentProps) {
                 </svg>
               </span>
               <div class="min-w-0 flex-1">
-                <h2 class="text-[15px] font-semibold text-white">
+                <h2 id="vector-agent-launcher-title" class="text-[16px] font-semibold tracking-[-0.01em] text-white">
                   {parallelLaunchMode() === "swarm" ? "Coordinate agents" : "New isolated agent"}
                 </h2>
-                <p class="mt-1 text-[12px] leading-5 text-white/48">
+                <p
+                  id="vector-agent-launcher-description"
+                  class="mt-1 max-w-[470px] text-[12px] leading-5 text-white/48"
+                >
                   {parallelLaunchMode() === "swarm"
                     ? "Vector plans dependencies, assigns specialists, validates their work, and prepares one aggregate review."
                     : "A separate Vector session works in its own git worktree or managed project copy."}
@@ -3720,7 +3713,7 @@ export default function NewLayout(props: ParentProps) {
               </div>
               <button
                 type="button"
-                class="grid size-8 place-items-center rounded-[9px] text-white/42 transition hover:bg-white/[0.07] hover:text-white"
+                class="vx-launcher__close grid size-8 place-items-center rounded-full text-white/42 transition hover:text-white"
                 onClick={() => setParallelComposerOpen(false)}
                 aria-label="Close agent launcher"
                 title="Close"
@@ -3737,11 +3730,12 @@ export default function NewLayout(props: ParentProps) {
               </button>
             </header>
 
-            <div class="space-y-3 px-5 py-4">
-              <div class="grid grid-cols-2 rounded-[11px] border border-[color:var(--vx-line)] bg-black/20 p-1">
+            <div class="vx-launcher__body min-h-0 flex-1 space-y-4 overflow-y-auto px-6 pb-5 pt-2">
+              <div class="vx-launcher__mode grid grid-cols-2 rounded-full p-1">
                 <button
                   type="button"
-                  class="rounded-[8px] px-3 py-2 text-[12px] font-medium transition"
+                  class="rounded-full px-3 py-2 text-[12px] font-medium transition"
+                  aria-pressed={parallelLaunchMode() === "agent"}
                   classList={{
                     "bg-white/[0.09] text-white": parallelLaunchMode() === "agent",
                     "text-white/42 hover:text-white/72": parallelLaunchMode() !== "agent",
@@ -3752,7 +3746,8 @@ export default function NewLayout(props: ParentProps) {
                 </button>
                 <button
                   type="button"
-                  class="rounded-[8px] px-3 py-2 text-[12px] font-medium transition"
+                  class="rounded-full px-3 py-2 text-[12px] font-medium transition"
+                  aria-pressed={parallelLaunchMode() === "swarm"}
                   classList={{
                     "bg-[color:var(--vx-purple-soft)] text-[color:var(--vx-purple-bright)]":
                       parallelLaunchMode() === "swarm",
@@ -3768,17 +3763,18 @@ export default function NewLayout(props: ParentProps) {
               </div>
 
               <Show when={parallelLaunchMode() === "agent"}>
-                <div class="mb-3">
-                  <div class="mb-1.5 flex items-center justify-between px-1">
-                    <span class="text-[10px] font-semibold uppercase tracking-[0.09em] text-white/40">
+                <div class="mb-4">
+                  <div class="mb-2 flex items-center justify-between px-1">
+                    <span class="vx-launcher__section-label text-[11px] font-medium text-white/40">
                       Alone or together
                     </span>
-                    <span class="text-[10px] text-white/30">Alone is safest; together is faster</span>
+                    <span class="text-[10.5px] text-white/30">Alone is safest; together is faster</span>
                   </div>
-                  <div class="grid grid-cols-2 gap-1.5">
+                  <div class="vx-launcher__choice-grid grid grid-cols-2 gap-2">
                     <button
                       type="button"
-                      class="rounded-[10px] border px-2.5 py-2 text-left transition"
+                      class="vx-launcher__choice rounded-[14px] border px-3 py-2.5 text-left transition"
+                      aria-pressed={parallelTopology() === "isolated"}
                       classList={{
                         "border-[color:var(--vx-purple)]/55 bg-[color:var(--vx-purple-soft)] text-white":
                           parallelTopology() === "isolated",
@@ -3801,7 +3797,8 @@ export default function NewLayout(props: ParentProps) {
                     </button>
                     <button
                       type="button"
-                      class="rounded-[10px] border px-2.5 py-2 text-left transition disabled:cursor-not-allowed disabled:opacity-45"
+                      class="vx-launcher__choice rounded-[14px] border px-3 py-2.5 text-left transition disabled:cursor-not-allowed disabled:opacity-45"
+                      aria-pressed={parallelTopology() !== "isolated"}
                       classList={{
                         "border-[color:var(--vx-purple)]/55 bg-[color:var(--vx-purple-soft)] text-white":
                           parallelTopology() !== "isolated",
@@ -4103,8 +4100,8 @@ export default function NewLayout(props: ParentProps) {
                   </Show>
                 </div>
                 <div>
-                  <div class="mb-1.5 flex items-center justify-between px-1">
-                    <span class="vx-label">Agent runtime</span>
+                  <div class="mb-2 flex items-center justify-between px-1">
+                    <span class="vx-label">Choose a runtime</span>
                     <span class="text-[10px] text-[color:var(--vx-text-muted)]">
                       Uses the runtime already installed on this computer
                     </span>
@@ -4140,6 +4137,7 @@ export default function NewLayout(props: ParentProps) {
                           <button
                             type="button"
                             class="vx-pick"
+                            aria-pressed={parallelRuntime() === runtime}
                             classList={{
                               "is-on": parallelRuntime() === runtime,
                               "is-blocked": !ready(),
@@ -4218,6 +4216,7 @@ export default function NewLayout(props: ParentProps) {
                     type="button"
                     class="vx-pick mt-2 flex w-full items-center justify-between disabled:cursor-not-allowed disabled:opacity-45"
                     classList={{ "is-on": parallelCompareRuntimes() }}
+                    aria-pressed={parallelCompareRuntimes()}
                     disabled={readyComparisonRuntimes().length < 2}
                     onClick={() => {
                       setParallelCompareRuntimes((enabled) => !enabled)
@@ -4250,23 +4249,35 @@ export default function NewLayout(props: ParentProps) {
                 </div>
               </Show>
 
-              <input
-                class="vx-input-quiet h-10 w-full rounded-[11px] border px-3 text-[13px] text-white outline-none placeholder:text-[color:var(--vx-text-muted)]"
-                placeholder={parallelLaunchMode() === "swarm" ? "Run name (optional)" : "Workspace name"}
-                value={parallelName()}
-                onInput={(event) => setParallelName(event.currentTarget.value)}
-              />
-              <textarea
-                ref={parallelPromptRef}
-                class="vx-input-quiet min-h-[124px] w-full resize-none rounded-[12px] border px-3 py-3 text-[13px] leading-5 text-white outline-none placeholder:text-[color:var(--vx-text-muted)]"
-                placeholder={
-                  parallelLaunchMode() === "swarm"
-                    ? "Describe the complete outcome. Vector will split it into dependent specialist work."
-                    : "What should this agent build, fix, test, or investigate?"
-                }
-                value={parallelPrompt()}
-                onInput={(event) => setParallelPrompt(event.currentTarget.value)}
-              />
+              <div class="vx-launcher__mission">
+                <label
+                  class="vx-launcher__section-label block px-1 pb-2 text-[11px] font-medium"
+                  for="vector-agent-workspace-name"
+                >
+                  {parallelLaunchMode() === "swarm" ? "Run details" : "Agent mission"}
+                </label>
+                <input
+                  id="vector-agent-workspace-name"
+                  class="vx-launcher__name h-10 w-full px-3 text-[13px] outline-none placeholder:text-[color:var(--vx-text-muted)]"
+                  aria-label={parallelLaunchMode() === "swarm" ? "Run name" : "Workspace name"}
+                  placeholder={parallelLaunchMode() === "swarm" ? "Run name (optional)" : "Workspace name"}
+                  value={parallelName()}
+                  onInput={(event) => setParallelName(event.currentTarget.value)}
+                />
+                <textarea
+                  ref={parallelPromptRef}
+                  id="vector-agent-launcher-prompt"
+                  class="vx-launcher__prompt min-h-[132px] w-full resize-none px-3 pb-3 pt-2 text-[13px] leading-5 outline-none placeholder:text-[color:var(--vx-text-muted)]"
+                  aria-label="Agent instructions"
+                  placeholder={
+                    parallelLaunchMode() === "swarm"
+                      ? "Describe the complete outcome. Vector will split it into dependent specialist work."
+                      : "What should this agent build, fix, test, or investigate?"
+                  }
+                  value={parallelPrompt()}
+                  onInput={(event) => setParallelPrompt(event.currentTarget.value)}
+                />
+              </div>
 
               <Show
                 when={
@@ -4350,13 +4361,16 @@ export default function NewLayout(props: ParentProps) {
               </Show>
 
               <Show when={parallelError()}>
-                <div class="rounded-[10px] border border-rose-400/25 bg-rose-400/[0.08] px-3 py-2 text-[12px] leading-5 text-rose-200">
+                <div
+                  role="alert"
+                  class="rounded-[10px] border border-rose-400/25 bg-rose-400/[0.08] px-3 py-2 text-[12px] leading-5 text-rose-200"
+                >
                   {parallelError()}
                 </div>
               </Show>
             </div>
 
-            <footer class="flex items-center justify-between border-t border-[color:var(--vx-line)] px-5 py-3.5">
+            <footer class="vx-launcher__footer flex items-center justify-between px-6 py-4">
               <span class="text-[11px] text-white/38">
                 {parallelLaunchMode() === "swarm"
                   ? `Up to ${Math.min(16, swarmMaxAgents())} isolated specialists`
@@ -4365,14 +4379,14 @@ export default function NewLayout(props: ParentProps) {
               <div class="flex items-center gap-2">
                 <button
                   type="button"
-                  class="h-9 rounded-[10px] px-3 text-[12px] text-white/52 transition hover:bg-white/[0.06] hover:text-white"
+                  class="vx-launcher__cancel h-9 rounded-full px-3.5 text-[12px] text-white/52 transition hover:text-white"
                   onClick={() => setParallelComposerOpen(false)}
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  class="h-9 rounded-[10px] bg-[color:var(--vx-purple)] px-4 text-[12px] font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-45"
+                  class="vx-launcher__submit h-9 rounded-full px-4 text-[12px] font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-45"
                   disabled={
                     parallelBusy() ||
                     !parallelPrompt().trim() ||
@@ -6274,9 +6288,13 @@ export default function NewLayout(props: ParentProps) {
         mainActive={!sidebarActiveAgentID() && taskRoute()}
         treeOpen={workspaceTreeOpen()}
         items={workspaceNavigationItems()}
-        activeTool={canvasRoute() ? "canvas" : undefined}
+        mode={workspaceMode()}
         currentVersion={platform.version}
-        updaterState={platform.updater?.state()}
+        onModeChange={(mode) => {
+          if (mode === "agent") {
+            openAgentMode()
+          }
+        }}
         onResizeStart={beginNavigationResize}
         onResize={resizeNavigation}
         onResetWidth={() => {
@@ -6293,7 +6311,6 @@ export default function NewLayout(props: ParentProps) {
         onHide={() => setNavigationVisible(false)}
         onToggleTree={() => setWorkspaceTreeOpen((open) => !open)}
         onNewWorkspace={openParallelWorkspaces}
-        onOrchestrate={openOrchestration}
         onOpenMain={() => void openMainAgent()}
         onOpenWorkspace={openAgentByID}
         onReviewWorkspace={openAgentReviewByID}
@@ -6305,12 +6322,12 @@ export default function NewLayout(props: ParentProps) {
         onMoveWorkspace={moveAgentWorkspace}
         onCodeEditor={openCodespace}
         onAgentDashboard={() => {
+          closeWorkspacePanel()
           setAgentDashboardOpen(true)
           void refreshTeamConversations()
         }}
         onPullRequests={() => setPullRequestsOpen(true)}
         onBrowser={openPreviewPanel}
-        onCanvas={() => navigate(`/canvas${taskScopeSearch(activeTaskScope())}`)}
         onMcp={() => void openMcpDialog()}
         onPlugins={() => void openPluginsDialog()}
         onFind={() => {
@@ -6326,7 +6343,6 @@ export default function NewLayout(props: ParentProps) {
         onReportBug={() => setReportBugOpen(true)}
         onGettingStarted={() => setHelpPanelOpen(true)}
         onSettings={openSettings}
-        onUpdate={() => void updaterAction.updateLatest()}
       />
 
       <DialogReportBug open={reportBugOpen()} onClose={() => setReportBugOpen(false)} />
@@ -6348,7 +6364,7 @@ export default function NewLayout(props: ParentProps) {
             directory,
             parts: [{ type: "text", text: prompt }],
           })
-          return extractVelReply(outcome.data)
+          return extractAssistantReply(outcome.data)
         }}
       />
 
@@ -6566,34 +6582,6 @@ export default function NewLayout(props: ParentProps) {
           </div>
           <div data-vector-nav-group class="mt-5 flex flex-col gap-0.5 px-2">
             <div data-vector-nav-label>Project</div>
-            <button
-              type="button"
-              data-vector-nav-item
-              class="flex h-9 items-center gap-2.5 rounded-lg px-2.5 text-[13.5px] transition hover:bg-white/[0.06] hover:text-white"
-              classList={{ "bg-white/[0.08] text-white": canvasRoute() }}
-              onClick={() => navigate(`/canvas${taskScopeSearch(activeTaskScope())}`)}
-            >
-              <svg viewBox="0 0 16 16" class="size-4 shrink-0" aria-hidden="true">
-                <rect
-                  x="2.4"
-                  y="3.4"
-                  width="11.2"
-                  height="9.2"
-                  rx="1.6"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.2"
-                />
-                <path
-                  d="M5.5 6.2h3v2.4h-3zM9.2 6.2h1.9M9.2 8.1h1.9M5.5 10h5"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.05"
-                  stroke-linecap="round"
-                />
-              </svg>
-              Canvas
-            </button>
             <button
               type="button"
               data-vector-nav-item

@@ -1,5 +1,5 @@
-// Sessions Vector creates for its own tools (canvas voice assistant, browser
-// agent planner, codespace architect). They must stay OUT of every
+// Sessions Vector creates for its own tools (browser agent planner, codespace
+// architect). They must stay OUT of every
 // user-visible session list while remaining real engine sessions.
 export const INTERNAL_SESSION_TITLE_PREFIX = "Vector Tool · "
 

@@ -21,6 +21,7 @@ import { readSessionTabsRemovedDetail, SESSION_TABS_REMOVED_EVENT } from "@/comp
 import { useGlobal } from "@/context/global"
 import { ServerConnection, useServer } from "@/context/server"
 import { useTabs } from "@/context/tabs"
+import { NativeWindowChrome } from "./native-window-chrome"
 import "./titlebar.css"
 
 type TauriDesktopWindow = {
@@ -236,6 +237,14 @@ export function Titlebar(props: { update?: TitlebarUpdate }) {
       onMouseDown={drag}
       onDblClick={maximize}
     >
+      <NativeWindowChrome
+        enabled={useV2Titlebar()}
+        platform={platform.platform}
+        os={platform.os}
+        zoom={zoom()}
+        onMouseDown={drag}
+        onDblClick={maximize}
+      />
       <Switch>
         <Match when={useV2Titlebar()}>
           {(_) => {
@@ -267,16 +276,17 @@ export function Titlebar(props: { update?: TitlebarUpdate }) {
                 return tabsStore.find((item) => item.type === "draft" && item.draftID === route.draftID)
               }
               if (route.type === "session") {
+                const routeServer = route.server ?? server.key
                 const main = tabsStore.find(
                   (item) =>
-                    item.type === "session" && item.server === route.server && item.sessionId === route.sessionId,
+                    item.type === "session" && item.server === routeServer && item.sessionId === route.sessionId,
                 )
                 if (main) return main
                 const s = session()
                 if (s?.parentID) {
                   const parentID = s.parentID
                   const parent = tabsStore.find(
-                    (item) => item.type === "session" && item.server === route.server && item.sessionId === parentID,
+                    (item) => item.type === "session" && item.server === routeServer && item.sessionId === parentID,
                   )
                   if (parent) return parent
                 }

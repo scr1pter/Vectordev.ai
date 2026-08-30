@@ -1,6 +1,6 @@
 import { app, dialog } from "electron"
 import pkg from "electron-updater"
-import { UPDATER_ENABLED } from "./constants"
+import { UPDATER_DISABLED_REASON, UPDATER_ENABLED } from "./constants"
 import { createUpdaterController, type UpdaterReadyRecord } from "./updater-controller"
 import { getLogger } from "./logging"
 import { getStore } from "./store"
@@ -23,6 +23,8 @@ export function setupAutoUpdater(stop: () => Promise<void>) {
     allowPrerelease: autoUpdater.allowPrerelease,
     allowDowngrade: autoUpdater.allowDowngrade,
     currentVersion: app.getVersion(),
+    enabled: UPDATER_ENABLED,
+    disabledReason: UPDATER_DISABLED_REASON,
   })
 
   const store = getStore("vector.updater")

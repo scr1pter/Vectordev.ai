@@ -787,7 +787,7 @@ function Routes() {
         <Route path="/code" component={() => <Navigate href="/" />} />
         <Route path="/work" component={() => <Navigate href="/" />} />
         <Route path="/cloud" component={CloudHome} />
-        <Route path="/canvas" component={() => null} />
+        <Route path="/canvas" component={() => <Navigate href="/" />} />
         <Route path="/parallel-workspaces" component={() => null} />
         <Route path="/parallel-workspaces/swarm/:swarmId" component={() => null} />
         <Route path="/parallel-workspaces/:workspaceId" component={() => null} />

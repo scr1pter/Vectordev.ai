@@ -1,0 +1,47 @@
+[data-vector-native-window-chrome] {
+  position: fixed;
+  inset: 0 0 auto;
+  height: var(--vector-native-chrome-height);
+  z-index: 2147483647;
+  background: var(--vx-sidebar, #211e26);
+  pointer-events: none;
+  user-select: none;
+}
+
+[data-vector-native-window-drag] {
+  position: absolute;
+  inset-block: 0;
+  app-region: drag;
+  pointer-events: auto;
+}
+
+html[data-vector-native-chrome] [data-vector-shell] {
+  padding-top: max(var(--vector-native-chrome-height), env(safe-area-inset-top, 0px)) !important;
+}
+
+html[data-vector-native-chrome] [data-vector-navigation] {
+  top: var(--vector-native-chrome-height) !important;
+  padding-top: 0 !important;
+}
+
+html[data-vector-native-chrome] [data-vector-floating-sidebar-toggle] {
+  top: calc(var(--vector-native-chrome-height) + 11px) !important;
+}
+
+html[data-vector-native-chrome] [data-vector-codespace]:not([data-embedded="true"]),
+html[data-vector-native-chrome] [data-vector-agent-launcher-overlay],
+html[data-vector-native-chrome] [data-component="dialog-v2"],
+html[data-vector-native-chrome] [data-component="dialog-overlay"] {
+  top: var(--vector-native-chrome-height) !important;
+}
+
+html[data-vector-native-chrome] [data-vector-agent-launcher] {
+  max-height: calc(100dvh - var(--vector-native-chrome-height) - 40px) !important;
+}
+
+html[data-vector-native-chrome]
+  [data-component="dialog-v2"][data-variant="settings"]:has([data-slot="dialog-content"].settings-v2-dialog)
+  [data-slot="dialog-container"] {
+  height: calc(100dvh - var(--vector-native-chrome-height)) !important;
+  max-height: calc(100dvh - var(--vector-native-chrome-height)) !important;
+}

@@ -1,5 +1,5 @@
-import { For, Show, type JSX } from "solid-js"
-import type { UpdaterState } from "@/updater"
+import { createSignal, For, Show, type JSX } from "solid-js"
+import { usePlatform } from "@/context/platform"
 
 export type WorkspaceNavigationItem = {
   id: string
@@ -60,9 +60,10 @@ export function WorkspaceNavigation(props: {
   mainActive: boolean
   treeOpen: boolean
   items: WorkspaceNavigationItem[]
-  activeTool?: "browser" | "canvas"
+  mode?: "agent" | "editor"
+  onModeChange?: (mode: "agent" | "editor") => void
+  activeTool?: "browser"
   currentVersion?: string
-  updaterState?: UpdaterState
   onResizeStart: (event: PointerEvent) => void
   onResize: (width: number) => void
   onResetWidth: () => void
@@ -70,7 +71,6 @@ export function WorkspaceNavigation(props: {
   onHide: () => void
   onToggleTree: () => void
   onNewWorkspace: () => void
-  onOrchestrate: () => void
   onOpenMain: () => void
   onOpenWorkspace: (id: string) => void
   onReviewWorkspace: (id: string) => void
@@ -80,76 +80,63 @@ export function WorkspaceNavigation(props: {
   onAgentDashboard: () => void
   onPullRequests: () => void
   onBrowser: () => void
-  onCanvas: () => void
   onMcp: () => void
   onPlugins: () => void
   onFind: () => void
   onReportBug: () => void
   onGettingStarted: () => void
   onSettings: () => void
-  onUpdate: () => void
 }) {
-  const updateBusy = () => ["checking", "downloading", "installing"].includes(props.updaterState?.status ?? "")
-  const updateDetail = () => {
-    const state = props.updaterState
-    if (!state) return ""
-    if (state.status === "checking") return "Checking…"
-    if (state.status === "downloading") return `Downloading v${state.version}…`
-    if (state.status === "ready") return `v${state.version} available`
-    if (state.status === "installing") return "Restarting…"
-    if (state.status === "up-to-date") return props.currentVersion ? `v${props.currentVersion} · Latest` : "Latest"
-    if (state.status === "error") return "Try again"
-    return props.currentVersion ? `v${props.currentVersion} · Check` : "Check now"
+  const platform = usePlatform()
+  const [localMode, setLocalMode] = createSignal<"agent" | "editor">(props.mode ?? "agent")
+  const [helpOpen, setHelpOpen] = createSignal(false)
+  const mode = () => props.mode ?? localMode()
+
+  const selectMode = (next: "agent" | "editor") => {
+    setLocalMode(next)
+    props.onModeChange?.(next)
+    if (next === "editor") props.onCodeEditor()
+  }
+
+  const openLink = (href: string) => {
+    setHelpOpen(false)
+    platform.openLink(href)
   }
 
   return (
     <nav
       data-vector-navigation
-      class="fixed inset-y-0 left-0 z-50 flex flex-col text-white/70 transition-opacity duration-200"
+      class="fixed inset-y-0 left-0 z-50 flex flex-col text-white/70 transition-opacity duration-200 [font-family:var(--vx-font)]"
       style={{
         width: `${props.width}px`,
         "padding-top": props.macDesktop ? "48px" : "0px",
         display: props.visible ? undefined : "none",
       }}
     >
-      <div
-        data-vector-nav-top
-        class="flex h-[54px] shrink-0 items-center gap-2 border-b border-[color:var(--vx-line)] px-3"
-      >
-        <button
-          type="button"
-          data-vector-nav-home
-          class="flex h-8 min-w-0 flex-1 items-center gap-2.5 rounded-[5px] px-2 text-left text-[13px] font-medium text-white/72 transition hover:bg-white/[0.055] hover:text-white"
-          onClick={props.onHome}
+      <div data-vector-nav-top class="flex h-[48px] shrink-0 items-center gap-2 px-3">
+        <div
+          data-vector-mode-switch
+          class="flex h-8 min-w-0 flex-1 items-center rounded-[7px] bg-black/15 p-[2px] text-[12px] font-medium"
+          role="group"
+          aria-label="Workspace mode"
         >
-          <svg viewBox="0 0 16 16" class="size-4 shrink-0" aria-hidden="true">
-            <path
-              d="M3 7.15 8 3l5 4.15v5.6a.75.75 0 0 1-.75.75h-2.6V9.9h-3.3v3.6h-2.6A.75.75 0 0 1 3 12.75v-5.6Z"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.2"
-              stroke-linejoin="round"
-            />
-          </svg>
-          <span class="truncate">Home</span>
-        </button>
-        <button
-          type="button"
-          class="grid size-8 shrink-0 place-items-center rounded-[5px] text-white/38 transition hover:bg-white/[0.055] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(147,116,236,0.55)]"
-          onClick={props.onFind}
-          title="Find in project"
-          aria-label="Find in project"
-        >
-          <svg viewBox="0 0 16 16" class="size-3.5" aria-hidden="true">
-            <path
-              d="M7.1 12.1a5 5 0 1 1 0-10 5 5 0 0 1 0 10Zm3.55-1.45 3 3"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.2"
-              stroke-linecap="round"
-            />
-          </svg>
-        </button>
+          <For each={["agent", "editor"] as const}>
+            {(value) => (
+              <button
+                type="button"
+                class="h-7 min-w-0 flex-1 rounded-[5px] px-3 capitalize transition"
+                classList={{
+                  "bg-white/[0.075] text-white shadow-[inset_0_0_0_1px_rgba(182,159,247,0.24)]": mode() === value,
+                  "text-white/38 hover:text-white/72": mode() !== value,
+                }}
+                aria-pressed={mode() === value}
+                onClick={() => selectMode(value)}
+              >
+                {value}
+              </button>
+            )}
+          </For>
+        </div>
         <button
           type="button"
           class="grid size-8 shrink-0 place-items-center rounded-[5px] text-white/38 transition hover:bg-white/[0.055] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(147,116,236,0.55)]"
@@ -181,11 +168,54 @@ export function WorkspaceNavigation(props: {
       </div>
 
       <div data-vector-nav-scroll class="min-h-0 flex-1 overflow-y-auto">
+        <section data-vector-nav-primary class="space-y-px border-y border-[color:var(--vx-line)] px-2 py-2">
+          <button type="button" data-vector-nav-item data-vector-nav-home onClick={props.onHome}>
+            <svg viewBox="0 0 16 16" class="size-3.5 shrink-0" aria-hidden="true">
+              <path
+                d="M3 7.15 8 3l5 4.15v5.6a.75.75 0 0 1-.75.75h-2.6V9.9h-3.3v3.6h-2.6A.75.75 0 0 1 3 12.75v-5.6Z"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.2"
+                stroke-linejoin="round"
+              />
+            </svg>
+            <span>Home</span>
+          </button>
+          <button type="button" data-vector-nav-item onClick={props.onFind}>
+            <svg viewBox="0 0 16 16" class="size-3.5 shrink-0" aria-hidden="true">
+              <path
+                d="M7.1 12.1a5 5 0 1 1 0-10 5 5 0 0 1 0 10Zm3.55-1.45 3 3"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.2"
+                stroke-linecap="round"
+              />
+            </svg>
+            <span>Search</span>
+            <kbd class="ml-auto text-[10px] font-normal text-white/20">⌘P</kbd>
+          </button>
+        </section>
+
         <section data-vector-project-group>
+          <div class="flex h-9 items-center gap-2 px-3.5 text-[10.5px] font-medium text-white/30">
+            <span class="min-w-0 flex-1">Projects</span>
+            <button
+              type="button"
+              data-tour="nav-new-workspace"
+              class="grid size-6 place-items-center rounded-[5px] text-white/28 transition hover:bg-white/[0.045] hover:text-white/72"
+              title="New workspace"
+              aria-label="New workspace"
+              onClick={props.onNewWorkspace}
+            >
+              <svg viewBox="0 0 16 16" class="size-3.5" aria-hidden="true">
+                <path d="M8 3v10M3 8h10" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" />
+              </svg>
+            </button>
+          </div>
           <button
             type="button"
             data-vector-project-heading
-            class="flex h-10 w-full items-center gap-2 px-3.5 text-left text-[12px] font-semibold text-white/78 transition hover:bg-white/[0.025] hover:text-white"
+            class="mx-2 flex h-9 w-[calc(100%-1rem)] items-center gap-2 rounded-[5px] px-2 text-left text-[12px] font-medium text-white/72 transition hover:bg-white/[0.04] hover:text-white"
             onClick={props.onToggleTree}
             aria-expanded={props.treeOpen}
           >
@@ -204,49 +234,32 @@ export function WorkspaceNavigation(props: {
                 stroke-linejoin="round"
               />
             </svg>
+            <span class="grid size-[18px] shrink-0 place-items-center rounded-[5px] bg-[color:var(--vx-purple-soft)] text-[color:var(--vx-purple-bright)]">
+              <svg viewBox="0 0 16 16" class="size-3" aria-hidden="true">
+                <rect
+                  x="3"
+                  y="3"
+                  width="10"
+                  height="10"
+                  rx="2.2"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.1"
+                />
+                <path
+                  d="M5.5 8h5M8 5.5v5"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.05"
+                  stroke-linecap="round"
+                />
+              </svg>
+            </span>
             <span class="min-w-0 flex-1 truncate">{props.projectName}</span>
             <span class="shrink-0 text-[10px] font-normal tabular-nums text-white/30">{props.items.length + 1}</span>
           </button>
 
           <Show when={props.treeOpen}>
-            <div data-vector-workspace-actions class="flex items-center gap-1 px-2.5 pb-1.5">
-              <button
-                type="button"
-                data-tour="nav-new-workspace"
-                class="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-[5px] px-2 text-left text-[12px] text-white/52 transition hover:bg-white/[0.05] hover:text-white"
-                onClick={props.onNewWorkspace}
-              >
-                <svg viewBox="0 0 16 16" class="size-3.5 shrink-0" aria-hidden="true">
-                  <path
-                    d="M8 3.25v9.5M3.25 8h9.5"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="1.3"
-                    stroke-linecap="round"
-                  />
-                </svg>
-                <span class="truncate">New workspace</span>
-              </button>
-              <button
-                type="button"
-                class="grid size-8 shrink-0 place-items-center rounded-[5px] text-white/32 transition hover:bg-white/[0.05] hover:text-white"
-                onClick={props.onOrchestrate}
-                title="Coordinate agents"
-                aria-label="Coordinate agents"
-              >
-                <svg viewBox="0 0 16 16" class="size-3.5" aria-hidden="true">
-                  <path
-                    d="M3 4.15h3v3H3zM10 2.6h3v3h-3zM10 10.4h3v3h-3zM6 5.65h1.1A2.9 2.9 0 0 0 10 2.75M6 5.65h1.1A2.9 2.9 0 0 1 10 8.55v3.35"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="1.1"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                  />
-                </svg>
-              </button>
-            </div>
-
             <div data-vector-workspace-list class="space-y-px px-2 pb-3">
               <button
                 type="button"
@@ -396,25 +409,48 @@ export function WorkspaceNavigation(props: {
           <div data-vector-nav-label>Project tools</div>
           <button type="button" data-vector-nav-item data-tour="nav-agent-dashboard" onClick={props.onAgentDashboard}>
             <svg viewBox="0 0 16 16" class="size-3.5 shrink-0" aria-hidden="true">
-              <rect x="2.3" y="2.6" width="4.7" height="4.7" rx="1.1" fill="none" stroke="currentColor" stroke-width="1.15" />
-              <rect x="9" y="2.6" width="4.7" height="4.7" rx="1.1" fill="none" stroke="currentColor" stroke-width="1.15" />
-              <rect x="2.3" y="8.7" width="4.7" height="4.7" rx="1.1" fill="none" stroke="currentColor" stroke-width="1.15" />
-              <rect x="9" y="8.7" width="4.7" height="4.7" rx="1.1" fill="none" stroke="currentColor" stroke-width="1.15" />
-            </svg>
-            <span>Agent Dashboard</span>
-          </button>
-          <button type="button" data-vector-nav-item data-tour="nav-code-editor" onClick={props.onCodeEditor}>
-            <svg viewBox="0 0 16 16" class="size-3.5 shrink-0" aria-hidden="true">
-              <path
-                d="M5.25 5 2.75 8l2.5 3M10.75 5l2.5 3-2.5 3M9.15 3.75l-2.3 8.5"
+              <rect
+                x="2.3"
+                y="2.6"
+                width="4.7"
+                height="4.7"
+                rx="1.1"
                 fill="none"
                 stroke="currentColor"
-                stroke-width="1.25"
-                stroke-linecap="round"
-                stroke-linejoin="round"
+                stroke-width="1.15"
+              />
+              <rect
+                x="9"
+                y="2.6"
+                width="4.7"
+                height="4.7"
+                rx="1.1"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.15"
+              />
+              <rect
+                x="2.3"
+                y="8.7"
+                width="4.7"
+                height="4.7"
+                rx="1.1"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.15"
+              />
+              <rect
+                x="9"
+                y="8.7"
+                width="4.7"
+                height="4.7"
+                rx="1.1"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.15"
               />
             </svg>
-            <span>Code editor</span>
+            <span>Agent Dashboard</span>
           </button>
           <button
             type="button"
@@ -444,34 +480,6 @@ export function WorkspaceNavigation(props: {
             </svg>
             <span>Browser</span>
           </button>
-          <button
-            type="button"
-            data-vector-nav-item
-            data-tour="nav-canvas"
-            classList={{ active: props.activeTool === "canvas" }}
-            onClick={props.onCanvas}
-          >
-            <svg viewBox="0 0 16 16" class="size-3.5 shrink-0" aria-hidden="true">
-              <rect
-                x="2.4"
-                y="3.4"
-                width="11.2"
-                height="9.2"
-                rx="1.4"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.15"
-              />
-              <path
-                d="M5.4 6.2h3v2.4h-3zM9.2 6.2h1.9M9.2 8.1h1.9M5.4 10h5"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1"
-                stroke-linecap="round"
-              />
-            </svg>
-            <span>Canvas</span>
-          </button>
         </section>
 
         <section data-vector-nav-group class="border-t border-[color:var(--vx-line)] px-2 py-3">
@@ -481,7 +489,14 @@ export function WorkspaceNavigation(props: {
               <circle cx="4.2" cy="3.6" r="1.5" fill="none" stroke="currentColor" stroke-width="1.15" />
               <circle cx="4.2" cy="12.4" r="1.5" fill="none" stroke="currentColor" stroke-width="1.15" />
               <circle cx="11.8" cy="12.4" r="1.5" fill="none" stroke="currentColor" stroke-width="1.15" />
-              <path d="M4.2 5.1v5.8M11.8 10.9V6.4a2 2 0 0 0-2-2H7.4m0 0 1.6-1.5M7.4 4.4 9 5.9" fill="none" stroke="currentColor" stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round" />
+              <path
+                d="M4.2 5.1v5.8M11.8 10.9V6.4a2 2 0 0 0-2-2H7.4m0 0 1.6-1.5M7.4 4.4 9 5.9"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.15"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
             </svg>
             <span>Pull Requests</span>
           </button>
@@ -514,59 +529,169 @@ export function WorkspaceNavigation(props: {
         </section>
       </div>
 
-      <div
-        data-vector-nav-footer
-        class="grid min-h-[58px] shrink-0 grid-cols-[1fr_auto_auto_auto] items-center gap-1 border-t border-[color:var(--vx-line)] px-3 py-2"
-      >
-        <Show
-          when={props.updaterState && props.updaterState.status !== "disabled"}
-          fallback={
-            // Says why. Automatic updates only run in a released build, and
-            // this read "Updates unavailable" with no reason, which is
-            // indistinguishable from the feature being broken.
-            <div
-              class="px-2 text-[11px] text-[color:var(--vx-text-muted)]"
-              title="Automatic updates run in released builds of Vector. This copy has no release channel to check."
-            >
-              Updates not available in this build
-            </div>
-          }
+      <Show when={helpOpen()}>
+        <div
+          data-vector-help-menu
+          role="dialog"
+          aria-label="Vector help"
+          class="absolute bottom-[58px] left-3 right-3 z-40 overflow-hidden rounded-[10px] border border-white/[0.09] bg-[#2a272c] p-1.5 text-[12.5px] text-white/72 shadow-[0_22px_55px_rgba(0,0,0,0.42)]"
         >
           <button
             type="button"
-            data-vector-update-action
-            class="group flex h-9 min-w-0 items-center gap-2 rounded-[5px] px-2 text-left text-[12px] text-white/52 transition hover:bg-white/[0.05] hover:text-white disabled:cursor-wait disabled:opacity-65"
-            disabled={updateBusy()}
-            aria-busy={updateBusy()}
-            title="Check, download, install, and restart Vector"
-            onClick={props.onUpdate}
+            class="flex h-9 w-full items-center gap-2.5 rounded-[6px] bg-white/[0.055] px-2.5 text-left text-white/88 transition hover:bg-white/[0.085]"
+            onClick={() => {
+              setHelpOpen(false)
+              props.onSettings()
+            }}
           >
-            <svg
-              viewBox="0 0 16 16"
-              class="size-3.5 shrink-0 text-[color:var(--vx-purple-bright)]"
-              classList={{ "animate-spin": props.updaterState?.status === "checking" }}
-              aria-hidden="true"
-            >
-              <path
-                d="M8 2.4v7.2m0 0 2.45-2.45M8 9.6 5.55 7.15M3 12.65h10"
+            <svg viewBox="0 0 16 16" class="size-4 shrink-0 text-white/60" aria-hidden="true">
+              <rect
+                x="2.3"
+                y="3.2"
+                width="11.4"
+                height="8.6"
+                rx="1.5"
                 fill="none"
                 stroke="currentColor"
-                stroke-width="1.25"
+                stroke-width="1.05"
+              />
+              <path
+                d="M4.4 6h.01M6.1 6h.01M7.8 6h.01M9.5 6h.01M11.2 6h.01M4.9 8.7h6.2"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.15"
                 stroke-linecap="round"
+              />
+            </svg>
+            <span class="min-w-0 flex-1">Keyboard shortcuts</span>
+            <kbd class="text-[11px] text-white/34">⌘/</kbd>
+          </button>
+
+          <div class="my-1 h-px bg-white/[0.065]" />
+          <button type="button" class="vector-help-menu-item" onClick={() => openLink("https://vectordev.ai/docs")}>
+            <svg viewBox="0 0 16 16" class="size-4 shrink-0" aria-hidden="true">
+              <path
+                d="M2.8 3.1h3.1c1.2 0 2.1.55 2.1 1.5v8.2c0-.95-.9-1.5-2.1-1.5H2.8V3.1Zm10.4 0h-3.1c-1.2 0-2.1.55-2.1 1.5v8.2c0-.95.9-1.5 2.1-1.5h3.1V3.1Z"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.05"
                 stroke-linejoin="round"
               />
             </svg>
-            <span class="min-w-0 flex-1 truncate font-medium">Update Vector</span>
-            {/* A failed check used to say only "Try again", which hides whether
-                retrying could possibly help. The reason goes in the tooltip. */}
-            <span
-              class="shrink-0 text-[9.5px] text-[color:var(--vx-text-muted)] group-hover:text-[color:var(--vx-text-subtle)]"
-              title={props.updaterState?.status === "error" ? props.updaterState.message : undefined}
-            >
-              {updateDetail()}
+            <span class="min-w-0 flex-1">Docs</span>
+            <span aria-hidden="true" class="text-white/30">
+              ↗
             </span>
           </button>
-        </Show>
+          <button
+            type="button"
+            class="vector-help-menu-item pl-9"
+            onClick={() => openLink("https://vectordev.ai/docs")}
+          >
+            <span class="min-w-0 flex-1">Best practices</span>
+            <span aria-hidden="true" class="text-white/30">
+              ↗
+            </span>
+          </button>
+          <button
+            type="button"
+            class="vector-help-menu-item pl-9"
+            onClick={() => openLink("https://vectordev.ai/releases")}
+          >
+            <span class="min-w-0 flex-1">Changelog</span>
+            <span aria-hidden="true" class="text-white/30">
+              ↗
+            </span>
+          </button>
+
+          <div class="my-1 h-px bg-white/[0.065]" />
+          <button
+            type="button"
+            class="vector-help-menu-item"
+            onClick={() => {
+              setHelpOpen(false)
+              props.onReportBug()
+            }}
+          >
+            <svg viewBox="0 0 16 16" class="size-4 shrink-0" aria-hidden="true">
+              <path
+                d="M2.5 3.2h11v7.2H7l-3.2 2.4v-2.4H2.5V3.2Z"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.05"
+                stroke-linejoin="round"
+              />
+            </svg>
+            <span class="min-w-0 flex-1">Send feedback</span>
+          </button>
+          <button
+            type="button"
+            class="vector-help-menu-item"
+            onClick={() => {
+              setHelpOpen(false)
+              if (platform.exportDebugLogs) {
+                void platform.exportDebugLogs()
+                return
+              }
+              props.onGettingStarted()
+            }}
+          >
+            <svg viewBox="0 0 16 16" class="size-4 shrink-0" aria-hidden="true">
+              <path
+                d="M5.1 2.2v4.5a2.9 2.9 0 0 0 5.8 0V2.2M3.2 5.8v1a4.8 4.8 0 0 0 9.6 0v-1M8 11.6v2.2M5.7 13.8h4.6"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.05"
+                stroke-linecap="round"
+              />
+            </svg>
+            <span class="min-w-0 flex-1">Diagnostics</span>
+          </button>
+          <Show when={platform.platform === "desktop"}>
+            <button
+              type="button"
+              class="vector-help-menu-item pl-9"
+              onClick={() => {
+                setHelpOpen(false)
+                void platform.runDesktopMenuAction?.("view.toggleDevTools")
+              }}
+            >
+              <span class="min-w-0 flex-1">Open debug tools</span>
+            </button>
+          </Show>
+
+          <div class="-mx-1.5 -mb-1.5 mt-1.5 border-t border-white/[0.07] px-3 py-2 text-[10.5px] text-white/28">
+            Vector{props.currentVersion ? ` v${props.currentVersion}` : ""}
+          </div>
+        </div>
+      </Show>
+
+      <div
+        data-vector-nav-footer
+        class="grid min-h-[50px] shrink-0 grid-cols-[1fr_auto_auto] items-center gap-1 border-t border-[color:var(--vx-line)] px-3 py-2"
+      >
+        <span class="truncate px-1 text-[10.5px] text-white/24">Vector workspace</span>
+        <button
+          type="button"
+          data-tour="nav-getting-started"
+          class="grid size-8 place-items-center rounded-[5px] text-white/38 transition hover:bg-white/[0.05] hover:text-white"
+          onClick={() => setHelpOpen((open) => !open)}
+          title="Help"
+          aria-label="Help"
+          aria-expanded={helpOpen()}
+        >
+          <svg viewBox="0 0 16 16" class="size-3.5" aria-hidden="true">
+            <circle cx="8" cy="8" r="6.1" fill="none" stroke="currentColor" stroke-width="1.15" />
+            <path
+              d="M6.2 6.25a1.85 1.85 0 0 1 3.6.55c0 1.15-1.8 1.35-1.8 2.4"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.15"
+              stroke-linecap="round"
+            />
+            <circle cx="8" cy="11.35" r="0.7" fill="currentColor" />
+          </svg>
+        </button>
         <button
           type="button"
           data-vector-settings
@@ -583,45 +708,6 @@ export function WorkspaceNavigation(props: {
               stroke-width="1.15"
               stroke-linecap="round"
               stroke-linejoin="round"
-            />
-          </svg>
-        </button>
-        <button
-          type="button"
-          data-tour="nav-getting-started"
-          class="grid size-8 place-items-center rounded-[5px] text-white/38 transition hover:bg-white/[0.05] hover:text-white"
-          onClick={props.onGettingStarted}
-          title="Getting started"
-          aria-label="Getting started"
-        >
-          <svg viewBox="0 0 16 16" class="size-3.5" aria-hidden="true">
-            <circle cx="8" cy="8" r="6.1" fill="none" stroke="currentColor" stroke-width="1.15" />
-            <path
-              d="M6.2 6.25a1.85 1.85 0 0 1 3.6.55c0 1.15-1.8 1.35-1.8 2.4"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.15"
-              stroke-linecap="round"
-            />
-            <circle cx="8" cy="11.35" r="0.7" fill="currentColor" />
-          </svg>
-        </button>
-        <button
-          type="button"
-          data-vector-report-bug
-          class="grid size-8 place-items-center rounded-[5px] text-white/38 transition hover:bg-white/[0.05] hover:text-white"
-          onClick={props.onReportBug}
-          title="Report a bug"
-          aria-label="Report a bug"
-        >
-          <svg viewBox="0 0 16 16" class="size-3.5" aria-hidden="true">
-            <ellipse cx="8" cy="9.1" rx="3.15" ry="3.9" fill="none" stroke="currentColor" stroke-width="1.15" />
-            <path
-              d="M5.85 5.85a2.15 2.15 0 0 1 4.3 0M6.5 4.3 5.6 3.1m3.9 1.2.9-1.2M4.85 7.3 2.6 6.5m10.8 0-2.25.8M4.5 9.9H2.3m11.4 0h-2.2M4.85 12.5l-2 1.05m11.1-1.05-2-1.05M8 6.2v6.6"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.15"
-              stroke-linecap="round"
             />
           </svg>
         </button>

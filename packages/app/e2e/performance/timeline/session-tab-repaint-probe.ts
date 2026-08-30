@@ -84,6 +84,7 @@ export async function installCachedRepaintProbe(
       recordShifts(shiftObserver.takeRecords())
       recordMutations(mutationObserver.takeRecords())
       state.running = false
+      window.removeEventListener("popstate", start, true)
       shiftObserver.disconnect()
       mutationObserver.disconnect()
     }
@@ -151,17 +152,14 @@ export async function installCachedRepaintProbe(
         requestAnimationFrame(sample)
       }, 0)
     }
-    document.addEventListener(
-      "click",
-      (event) => {
-        const link = event.target instanceof Element ? event.target.closest("a") : undefined
-        if (link?.getAttribute("href") !== targetHref) return
-        state.startedAtPerformanceMs = performance.now()
-        state.running = true
-        requestAnimationFrame(sample)
-      },
-      { capture: true, once: true },
-    )
+    const start = () => {
+      if (`${location.pathname}${location.search}` !== targetHref || state.running) return
+      state.startedAtPerformanceMs = performance.now()
+      state.running = true
+      window.removeEventListener("popstate", start, true)
+      requestAnimationFrame(sample)
+    }
+    window.addEventListener("popstate", start, { capture: true })
     ;(window as Window & { __cachedFlash?: CachedRepaintTrace }).__cachedFlash = state
   }, input)
 }
