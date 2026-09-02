@@ -235,7 +235,7 @@ jobs:
             command: bun test --only-failures
           - name: opencode
             directory: packages/opencode
-            command: bun test --timeout 30000 --only-failures
+            command: bun test --timeout 30000 --only-failures --max-concurrency 4
           - name: sdk-next
             directory: packages/sdk-next
             command: bun run test
