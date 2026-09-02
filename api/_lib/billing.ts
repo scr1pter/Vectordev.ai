@@ -602,7 +602,8 @@ async function customerForAccount(stripe: Stripe, account: Pick<AccountUser, "id
       "More than one legacy purchase may use this email. Contact support to link the correct license.",
     )
   }
-  if (!matching.length) return undefined
+  const customer = matching.at(0)
+  if (!customer) return undefined
   if (matching.length > 1) {
     throw new ApiError(
       409,
@@ -610,7 +611,7 @@ async function customerForAccount(stripe: Stripe, account: Pick<AccountUser, "id
       "More than one legacy purchase uses this email. Contact support to link the correct license.",
     )
   }
-  return updateCustomer(stripe, matching[0].id, { metadata: { vector_supabase_user_id: account.id } })
+  return updateCustomer(stripe, customer.id, { metadata: { vector_supabase_user_id: account.id } })
 }
 
 export async function accountBilling(account: Pick<AccountUser, "id" | "email">) {
