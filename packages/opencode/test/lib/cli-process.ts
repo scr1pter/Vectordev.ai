@@ -522,6 +522,11 @@ function expectExit(result: RunResult, expected: number, label = "opencode") {
 // Body's R is `Scope.Scope | never` so tests can yield* scope-requiring
 // resources (e.g. `opencode.serve`) without an extra `Effect.scoped` wrapper —
 // `withCliFixture`'s outer scope is the natural lifetime.
+// A GitHub runner has too few cores for many cold CLI processes at once: they
+// can all spend the full process timeout contending on startup. Keep fast local
+// concurrency, but serialize subprocess tests on CI as we already do on Windows.
+const subprocessTest = process.platform === "win32" || process.env.CI === "true" ? test : test.concurrent
+
 export const cliIt = {
   live: <A, E>(
     name: string,
@@ -532,10 +537,5 @@ export const cliIt = {
     name: string,
     body: (input: CliFixture) => Effect.Effect<A, E, Scope.Scope | HttpClient.HttpClient>,
     opts?: number | TestOptions,
-  ) =>
-    (process.platform === "win32" ? test : test.concurrent)(
-      name,
-      () => Effect.runPromise(Effect.scoped(withCliFixture(body))),
-      opts,
-    ),
+  ) => subprocessTest(name, () => Effect.runPromise(Effect.scoped(withCliFixture(body))), opts),
 }
