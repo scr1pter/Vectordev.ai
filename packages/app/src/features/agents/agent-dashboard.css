@@ -1,0 +1,36 @@
+[data-vector-agent-dashboard] {
+  isolation: isolate;
+  font-family: var(
+    --vx-workspace-font,
+    -apple-system,
+    BlinkMacSystemFont,
+    "SF Pro Text",
+    "Segoe UI",
+    system-ui,
+    sans-serif
+  );
+}
+
+/* The native titlebar is a separate, opaque portal above the application.
+ * Fullscreen surfaces must begin below it or their title and close action are
+ * physically painted over. Web builds do not stamp this root attribute and
+ * therefore continue to occupy the full viewport. */
+html[data-vector-native-chrome] [data-vector-agent-dashboard] {
+  top: max(var(--vector-native-chrome-height, 40px), env(safe-area-inset-top, 0px));
+}
+
+[data-vector-agent-dashboard-header] {
+  min-height: 60px;
+}
+
+[data-vector-agent-dashboard-main] {
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+@media (max-height: 680px) {
+  [data-vector-agent-dashboard-header] {
+    height: 52px;
+    min-height: 52px;
+  }
+}

@@ -3,7 +3,7 @@ import { handleBillingDownload } from "../api/billing/download"
 import { handleDownloadChecksums } from "../api/download-checksums"
 import { installerFromManifest, parseDownloadManifest, PUBLIC_DOWNLOAD_TARGETS } from "../api/_lib/downloads"
 import { ApiError, type ApiRequest, type ApiResponse } from "../api/_lib/http"
-import { handleDownload } from "../api/download"
+import { handleDownload, requireDownloadAccess } from "../api/download"
 
 const version = "1.19.98"
 const manifest = parseDownloadManifest({
@@ -58,28 +58,51 @@ async function invoke(
 }
 
 describe("public installer handler", () => {
-  test("redirects to the exact immutable installer with release evidence", async () => {
-    const result = await invoke((request, response) => handleDownload(request, response, currentInstaller), {
-      method: "GET",
-      query: { target: "mac-arm64" },
-      headers: {},
-    })
+  const authenticate = () => Promise.resolve({ id: "9db2bb31-81d5-43cb-b4a1-f1d3d799c9cb", email: "user@example.com" })
 
-    expect(result.status).toBe(307)
+  test("returns the exact immutable installer with release evidence to a signed-in account", async () => {
+    const result = await invoke(
+      (request, response) => handleDownload(request, response, currentInstaller, authenticate),
+      {
+        method: "GET",
+        query: { target: "mac-arm64" },
+        headers: { accept: "application/json" },
+      },
+    )
+
+    expect(result.status).toBe(200)
     expect(result.headers).toMatchObject({
-      location: "https://vector.public.blob.vercel-storage.com/releases/vector-v1.19.98/vector-desktop-mac-arm64.dmg",
       "cache-control": "no-store",
       "x-vector-release": version,
       "x-vector-sha256": "a".repeat(64),
     })
+    expect(result.body).toMatchObject({
+      url: "https://vector.public.blob.vercel-storage.com/releases/vector-v1.19.98/vector-desktop-mac-arm64.dmg",
+      version,
+    })
+  })
+
+  test("requires a verified account before resolving an installer", async () => {
+    const result = await invoke(
+      (request, response) =>
+        handleDownload(request, response, currentInstaller, () =>
+          Promise.reject(new ApiError(401, "SIGN_IN_REQUIRED", "Sign in to continue.")),
+        ),
+      { method: "GET", headers: { accept: "application/json" } },
+    )
+    expect(result.status).toBe(401)
+    expect(result.body).toEqual({ error: { code: "SIGN_IN_REQUIRED", message: "Sign in to continue." } })
   })
 
   test("rejects an invalid target before returning a release", async () => {
-    const result = await invoke((request, response) => handleDownload(request, response, currentInstaller), {
-      method: "GET",
-      query: { target: "mac-m5" },
-      headers: {},
-    })
+    const result = await invoke(
+      (request, response) => handleDownload(request, response, currentInstaller, authenticate),
+      {
+        method: "GET",
+        query: { target: "mac-m5" },
+        headers: {},
+      },
+    )
 
     expect(result.status).toBe(404)
     expect(result.body).toMatchObject({ error: { code: "DOWNLOAD_NOT_FOUND" } })
@@ -88,14 +111,46 @@ describe("public installer handler", () => {
   test("fails closed when the release manifest cannot be loaded", async () => {
     const result = await invoke(
       (request, response) =>
-        handleDownload(request, response, () =>
-          Promise.reject(new ApiError(503, "DOWNLOAD_MANIFEST_MISSING", "No verified release.")),
+        handleDownload(
+          request,
+          response,
+          () => Promise.reject(new ApiError(503, "DOWNLOAD_MANIFEST_MISSING", "No verified release.")),
+          authenticate,
         ),
       { method: "GET", query: { target: "linux-x64" }, headers: {} },
     )
 
     expect(result.status).toBe(503)
     expect(result.body).toEqual({ error: { code: "DOWNLOAD_MANIFEST_MISSING", message: "No verified release." } })
+  })
+})
+
+describe("installer account entitlement", () => {
+  test("keeps every confirmed account eligible during free beta", async () => {
+    let checkedBilling = false
+    const account = await requireDownloadAccess(
+      { headers: {} },
+      () => Promise.resolve({ id: "9db2bb31-81d5-43cb-b4a1-f1d3d799c9cb", email: "user@example.com" }),
+      () => {
+        checkedBilling = true
+        return Promise.resolve(undefined)
+      },
+      () => ({ available: false, licenseRequired: false }),
+    )
+
+    expect(account.email).toBe("user@example.com")
+    expect(checkedBilling).toBe(false)
+  })
+
+  test("fails closed when paid access is selected without production billing", async () => {
+    await expect(
+      requireDownloadAccess(
+        { headers: {} },
+        () => Promise.resolve({ id: "9db2bb31-81d5-43cb-b4a1-f1d3d799c9cb", email: "user@example.com" }),
+        () => Promise.resolve(undefined),
+        () => ({ available: false, licenseRequired: true }),
+      ),
+    ).rejects.toMatchObject({ statusCode: 503, code: "PAID_ACCESS_NOT_CONFIGURED" })
   })
 })
 

@@ -1,18 +1,14 @@
 ---
-import { AccountPage } from "../components/marketing/account/AccountPage"
+import { AuthPage } from "../components/marketing/account/AuthPage"
 import MatrixRain from "../components/marketing/account/MatrixRain.astro"
 import MarketingLayout from "../components/marketing/MarketingLayout.astro"
 
 export const prerender = true
 ---
 
-<MarketingLayout
-  title="Download Vector"
-  description="Sign in to download Vector for macOS, Windows, or Linux and manage your license."
-  noindex
->
+<MarketingLayout title="Sign in to Vector" description="Sign in or create a Vector account to download the desktop app and manage billing." noindex>
   <div class="account-environment">
     <MatrixRain />
-    <AccountPage client:only="react" />
+    <AuthPage client:only="react" />
   </div>
 </MarketingLayout>

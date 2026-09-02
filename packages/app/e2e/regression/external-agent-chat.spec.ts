@@ -178,6 +178,24 @@ for (const runtime of runtimes) {
     await expect(conversation.locator("pre code")).toContainText("const accessible = true")
     await expect(conversation).not.toContainText("RAW_TRANSPORT_ONLY")
     await expect(conversation).not.toContainText("Legacy summary should not duplicate")
+
+    const typography = await workspace.evaluate((root) => {
+      const style = (selector: string) => getComputedStyle(root.querySelector(selector)!)
+      return {
+        family: getComputedStyle(root).fontFamily,
+        titleSize: style(".vector-agent-workspace-title").fontSize,
+        replySize: style(".vector-agent-reply").fontSize,
+        replyColor: style(".vector-agent-reply").color,
+        composerSize: style(".vector-agent-composer textarea").fontSize,
+      }
+    })
+    expect(typography.family).toContain("-apple-system")
+    expect(typography).toMatchObject({
+      titleSize: "14px",
+      replySize: "14px",
+      replyColor: "rgb(232, 232, 232)",
+      composerSize: "15px",
+    })
     await expect(workspace.getByText("Agent summary", { exact: true })).toHaveCount(0)
     for (const label of ["Added", "Removed", "Risk", "Spend"]) {
       await expect(workspace.getByText(label, { exact: true })).toHaveCount(0)

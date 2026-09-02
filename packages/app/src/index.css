@@ -1752,7 +1752,7 @@
   [data-vector-shell] {
     background: var(--vx-canvas) !important;
     color: var(--vx-text) !important;
-    font-family: var(--vx-font) !important;
+    font-family: var(--vx-workspace-font) !important;
   }
 
   html[data-vector-font="pixel"] [data-vector-shell],

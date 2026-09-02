@@ -45,5 +45,27 @@ test("the redesigned workspace never renders the retired global session strip", 
   await expectSessionTitle(page, "No global tabs regression")
   await expect(page.locator("[data-vector-shell]")).toBeVisible()
   await expect(page.locator('[data-slot="titlebar-tabs"], [data-titlebar-tab-slot]')).toHaveCount(0)
+
+  const typography = await page.locator("[data-vector-shell]").evaluate((shell) => {
+    const style = (selector: string) => getComputedStyle(shell.querySelector(selector)!)
+    return {
+      family: getComputedStyle(shell).fontFamily,
+      navSize: style("[data-vector-nav-item]").fontSize,
+      navColor: style("[data-vector-nav-item]").color,
+      titleSize: style("[data-vector-session-title]").fontSize,
+      titleWeight: style("[data-vector-session-title]").fontWeight,
+      titleColor: style("[data-vector-session-title]").color,
+      composerSize: style('[data-component="prompt-input"]').fontSize,
+    }
+  })
+  expect(typography.family).toContain("-apple-system")
+  expect(typography).toMatchObject({
+    navSize: "13px",
+    navColor: "rgb(168, 168, 168)",
+    titleSize: "14px",
+    titleWeight: "500",
+    titleColor: "rgb(232, 232, 232)",
+    composerSize: "15px",
+  })
   await page.screenshot({ path: testInfo.outputPath("workspace-without-global-tabs.png") })
 })

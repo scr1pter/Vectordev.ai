@@ -312,7 +312,7 @@ const workflow = [
 const licenseRows = [
   [
     "One key, minted per purchase",
-    "Stripe takes the payment; Vector never sees a card number. Your key is emailed and shown on the purchase-complete page. There is no website account to create — the key is the account.",
+    "Your verified Vector account owns the purchase. Stripe takes the payment; Vector never sees a card number. Your existing VEC1 license format is preserved, and the private key is emailed and available from your account.",
   ],
   [
     "Bound to a hash, not to your hardware",
@@ -519,7 +519,7 @@ const changelog = [
   ["August 2026", "Agents can actually reach each other", "Fixed the teammate message tool, which was registered where the engine never looked, so collaborating agents could not reach each other."],
   ["August 2026", "Agents that work together", "Shared workspaces where agents message each other, an Agent Dashboard with clash detection, per-agent edit attribution in the editor, and AI pull request review."],
   ["August 2026", "Licensing and disclosure", "HEIC conversion moved to the operating system, removing the last copyleft dependency, with expanded privacy and terms coverage."],
-  ["July 2026", "Vector desktop release and download refresh", "Signed installers for macOS, Windows, and Linux, served from the new download pipeline with automatic updates."],
+  ["July 2026", "Vector desktop release and download refresh", "Verified installers for macOS, Windows, and Linux, served from the new download pipeline. Signed builds continue through automatic updates; unsigned previews stay manual-download only."],
   ["July 2026", "Review tools and shell polish", "A refined review panel, window recovery fixes, and a cleaner desktop chrome across the workspace."],
   ["July 2026", "Models and settings controls", "Restored provider management, model pickers, and execution settings throughout the rebuilt shell."],
 ]
@@ -582,8 +582,8 @@ const changelog = [
             </div>
           </div>
 
-          <a class="hero-cta" href="/download">
-            <span>Get Vector</span>
+          <a class="hero-cta" href="/login">
+            <span>Login to Vector</span>
             <ArrowRight size={18} strokeWidth={2} aria-hidden="true" />
           </a>
 
@@ -657,8 +657,8 @@ const changelog = [
           )
         })}
       </div>
-      <a class="product-system-account" href="/download" data-reveal>
-        Choose monthly or annual access and download Vector for your platform <ArrowRight size={15} strokeWidth={2} aria-hidden="true" />
+      <a class="product-system-account" href="/login" data-reveal>
+        Create an account, download Vector, and manage billing in one place <ArrowRight size={15} strokeWidth={2} aria-hidden="true" />
       </a>
     </section>
 
@@ -1000,8 +1000,8 @@ const changelog = [
       </div>
       <h2 data-reveal class="reveal-blur">Keep the whole build in view.</h2>
       <p data-reveal style="--rd: 120ms">Open the repository. Write, delegate, verify, ship — without leaving it.</p>
-      <a class="closing-cta" href="/download" data-reveal style="--rd: 220ms">
-        <span>Get Vector</span>
+      <a class="closing-cta" href="/login" data-reveal style="--rd: 220ms">
+        <span>Login to Vector</span>
         <ArrowRight size={18} strokeWidth={2} aria-hidden="true" />
       </a>
     </section>

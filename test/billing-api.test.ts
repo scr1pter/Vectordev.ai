@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { createCheckout } from "../api/_lib/billing"
 import type { ApiRequest, ApiResponse } from "../api/_lib/http"
 import activate from "../api/billing/activate"
-import checkout from "../api/billing/checkout"
+import { handleCheckout } from "../api/billing/checkout"
 import config from "../api/billing/config"
 import status from "../api/billing/status"
 
@@ -113,7 +113,13 @@ describe("Vector billing API", () => {
 
   test("requires explicit agreement before opening Stripe Checkout", async () => {
     disableBilling()
-    const result = await invoke(checkout, { method: "POST", body: { email: "buyer@example.com" } })
+    const result = await invoke(
+      (request, response) =>
+        handleCheckout(request, response, () =>
+          Promise.resolve({ id: "9db2bb31-81d5-43cb-b4a1-f1d3d799c9cb", email: "buyer@example.com" }),
+        ),
+      { method: "POST", body: {} },
+    )
 
     expect(result.status).toBe(400)
     expect(result.body).toEqual({

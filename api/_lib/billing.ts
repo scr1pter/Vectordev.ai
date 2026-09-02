@@ -1,6 +1,7 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto"
 import { Resend } from "resend"
 import Stripe from "stripe"
+import type { AccountUser } from "./account.js"
 import { PUBLIC_DOWNLOAD_TARGETS } from "./downloads.js"
 import { ApiError } from "./http.js"
 import { currentDownloadManifest } from "./release-downloads.js"
@@ -51,7 +52,7 @@ type StripeSubscription = Stripe.Subscription
 
 export type PublicLicenseStatus = {
   access: boolean
-  state: "active" | "canceling" | "grace" | "expired" | "past_due"
+  state: "active" | "canceling" | "grace" | "expired" | "past_due" | "revoked"
   message?: string
   email: string
   expiresAt: string
@@ -78,6 +79,7 @@ export function billingConfiguration() {
   const email = Boolean(process.env.RESEND_API_KEY && process.env.VECTOR_PURCHASE_EMAIL_FROM)
   const prices = Object.values(BILLING_PLANS).every((plan) => Boolean(process.env[plan.priceEnvironment]?.trim()))
   const downloads = installerToken.startsWith("vercel_blob_rw_")
+  const accessMode = process.env.VECTOR_ACCESS_MODE === "paid" ? "paid" : "free"
   return {
     available: stripe && webhook && licenseSecret && email && prices && downloads,
     stripe,
@@ -86,6 +88,8 @@ export function billingConfiguration() {
     email,
     prices,
     downloads,
+    accessMode,
+    licenseRequired: accessMode === "paid",
     priceUsd: BILLING_PLANS.annual.priceUsdCents / 100,
     interval: BILLING_PLANS.annual.interval,
     plans: Object.values(BILLING_PLANS).map((plan) => ({
@@ -256,7 +260,7 @@ function activeCustomer(customer: Stripe.Customer | Stripe.DeletedCustomer): Str
   if ("deleted" in customer && customer.deleted) {
     throw new ApiError(401, "LICENSE_INVALID", "This Vector customer no longer exists.")
   }
-  return customer as Stripe.Customer
+  return customer
 }
 
 async function updateCustomer(stripe: Stripe, id: string, params: Stripe.CustomerUpdateParams) {
@@ -306,27 +310,32 @@ export function publicStatus(customer: StripeCustomer, subscription: StripeSubsc
   const failedAt = metadataTimestamp(customer.metadata.vector_payment_failed_at)
   const graceEnd = metadataTimestamp(customer.metadata.vector_payment_grace_ends_at)
   const paymentGrace = plan.id === "monthly" && failedAt && graceEnd ? graceEnd : undefined
+  const revoked = Boolean(customer.metadata.vector_revoked_at)
   // Stripe can deliver the failed-invoice event before the subscription
   // snapshot changes to past_due. The recorded renewal failure is the source
   // of truth for Vector's promised three-day grace period.
   const inPaymentGrace = Boolean(paymentGrace && paymentGrace > now)
-  const access = inPaymentGrace || (paid && end > now && !failedAt)
-  const state: PublicLicenseStatus["state"] = inPaymentGrace
-    ? "grace"
-    : failedAt && plan.id === "monthly" && paymentGrace && paymentGrace <= now
-      ? "expired"
-      : access
-        ? subscription.cancel_at_period_end
-          ? "canceling"
-          : "active"
-        : subscription.status === "past_due" || subscription.status === "unpaid"
-          ? "past_due"
-          : "expired"
-  const message = inPaymentGrace
-    ? `Your monthly renewal payment failed. Update your payment method by ${new Date(paymentGrace! * 1000).toLocaleDateString("en-US", { dateStyle: "long" })} to keep Vector active.`
-    : failedAt && plan.id === "monthly" && paymentGrace && paymentGrace <= now
-      ? "Your three-day payment grace period ended. Choose a Vector plan to reactivate this computer."
-      : undefined
+  const access = !revoked && (inPaymentGrace || (paid && end > now && !failedAt))
+  const state: PublicLicenseStatus["state"] = revoked
+    ? "revoked"
+    : inPaymentGrace
+      ? "grace"
+      : failedAt && plan.id === "monthly" && paymentGrace && paymentGrace <= now
+        ? "expired"
+        : access
+          ? subscription.cancel_at_period_end
+            ? "canceling"
+            : "active"
+          : subscription.status === "past_due" || subscription.status === "unpaid"
+            ? "past_due"
+            : "expired"
+  const message = revoked
+    ? "This Vector license has been revoked."
+    : inPaymentGrace
+      ? `Your monthly renewal payment failed. Update your payment method by ${new Date(paymentGrace! * 1000).toLocaleDateString("en-US", { dateStyle: "long" })} to keep Vector active.`
+      : failedAt && plan.id === "monthly" && paymentGrace && paymentGrace <= now
+        ? "Your three-day payment grace period ended. Choose a Vector plan to reactivate this computer."
+        : undefined
   return {
     access,
     state,
@@ -399,6 +408,7 @@ export async function createCheckout(
   email?: string,
   selectedPlan?: BillingPlan,
   loadManifest: () => Promise<unknown> = currentDownloadManifest,
+  account?: Pick<AccountUser, "id">,
 ) {
   const plan = requiredBillingPlan(selectedPlan)
   const normalizedEmail = requiredText(
@@ -418,6 +428,7 @@ export async function createCheckout(
   const session = await stripe.checkout.sessions.create(
     {
       mode: "subscription",
+      ...(account ? { client_reference_id: account.id } : {}),
       customer_email: normalizedEmail,
       billing_address_collection: "auto",
       allow_promotion_codes: false,
@@ -433,15 +444,21 @@ export async function createCheckout(
           vector_product: "desktop",
           vector_license_version: "1",
           vector_plan: plan.id,
+          ...(account ? { vector_supabase_user_id: account.id } : {}),
         },
       },
       metadata: {
         vector_product: "desktop",
         vector_license_version: "1",
         vector_plan: plan.id,
+        ...(account ? { vector_supabase_user_id: account.id } : {}),
       },
-      success_url: `${publicOrigin()}/license/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${publicOrigin()}/download?checkout=cancelled`,
+      success_url: account
+        ? `${publicOrigin()}/account?checkout=success&session_id={CHECKOUT_SESSION_ID}`
+        : `${publicOrigin()}/license/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: account
+        ? `${publicOrigin()}/account?checkout=cancelled`
+        : `${publicOrigin()}/download?checkout=cancelled`,
       custom_text: {
         submit: {
           message: `${plan.renewalText} One active computer per license.`,
@@ -488,6 +505,9 @@ export async function provisionCheckout(session: Stripe.Checkout.Session, option
     vector_subscription_id: subscription.id,
     vector_email: email,
     vector_period_end: `${Math.floor(new Date(status.expiresAt).getTime() / 1000)}`,
+    ...(session.metadata?.vector_supabase_user_id
+      ? { vector_supabase_user_id: session.metadata.vector_supabase_user_id }
+      : {}),
   }
   const updated = await updateCustomer(stripe, customer.id, { metadata })
   await stripe.subscriptions.update(subscription.id, {
@@ -520,18 +540,111 @@ export async function provisionCheckout(session: Stripe.Checkout.Session, option
   }
 }
 
-export async function claimCheckout(sessionID: string) {
+export async function claimCheckout(sessionID: string, account?: Pick<AccountUser, "id" | "email">) {
   if (!sessionID.startsWith("cs_")) throw new ApiError(400, "SESSION_INVALID", "The checkout session is not valid.")
   const session = await stripeClient().checkout.sessions.retrieve(sessionID, {
     expand: ["customer", "subscription"],
   })
+  if (account) {
+    const accountID = session.metadata?.vector_supabase_user_id
+    const checkoutEmail = session.customer_details?.email?.toLowerCase()
+    const owned = accountID ? accountID === account.id : checkoutEmail === account.email.toLowerCase()
+    if (!owned) {
+      throw new ApiError(403, "CHECKOUT_FORBIDDEN", "That checkout belongs to another Vector account.")
+    }
+  }
   return provisionCheckout(session, { sendEmail: false })
+}
+
+async function customerForAccount(stripe: Stripe, account: Pick<AccountUser, "id" | "email">) {
+  const owned = await stripe.customers.search({
+    query: `metadata['vector_supabase_user_id']:'${account.id}'`,
+    limit: 10,
+  })
+  const ownedCandidates = owned.data.filter((entry) =>
+    Boolean(
+      entry.metadata.vector_license_hash ||
+        entry.metadata.vector_subscription_id ||
+        entry.metadata.vector_checkout_session_id,
+    ),
+  )
+  if (ownedCandidates.length === 1 && !owned.has_more) return ownedCandidates[0]
+  if (ownedCandidates.length > 1 || owned.has_more) {
+    throw new ApiError(
+      409,
+      "ACCOUNT_LINK_AMBIGUOUS",
+      "More than one Vector purchase is linked to this account. Contact support to select the active license.",
+    )
+  }
+
+  const customers = await stripe.customers.list({ email: account.email, limit: 20 })
+  const matching = customers.data.filter((entry) => {
+    const owner = entry.metadata.vector_supabase_user_id
+    const vectorCustomer =
+      entry.metadata.vector_license_hash ||
+      entry.metadata.vector_subscription_id ||
+      entry.metadata.vector_checkout_session_id
+    return Boolean(vectorCustomer && (!owner || owner === account.id))
+  })
+  const listedOwnedCandidates = matching.filter((entry) => entry.metadata.vector_supabase_user_id === account.id)
+  if (listedOwnedCandidates.length === 1) return listedOwnedCandidates[0]
+  if (listedOwnedCandidates.length > 1) {
+    throw new ApiError(
+      409,
+      "ACCOUNT_LINK_AMBIGUOUS",
+      "More than one Vector purchase is linked to this account. Contact support to select the active license.",
+    )
+  }
+  if (customers.has_more) {
+    throw new ApiError(
+      409,
+      "ACCOUNT_LINK_AMBIGUOUS",
+      "More than one legacy purchase may use this email. Contact support to link the correct license.",
+    )
+  }
+  if (!matching.length) return undefined
+  if (matching.length > 1) {
+    throw new ApiError(
+      409,
+      "ACCOUNT_LINK_AMBIGUOUS",
+      "More than one legacy purchase uses this email. Contact support to link the correct license.",
+    )
+  }
+  return updateCustomer(stripe, matching[0].id, { metadata: { vector_supabase_user_id: account.id } })
+}
+
+export async function accountBilling(account: Pick<AccountUser, "id" | "email">) {
+  const configuration = billingConfiguration()
+  if (!configuration.stripe) return undefined
+  const stripe = stripeClient()
+  const customer = await customerForAccount(stripe, account)
+  if (!customer) return undefined
+  const subscription = await subscriptionForCustomer(stripe, customer)
+  const checkout = customer.metadata.vector_checkout_session_id
+  return {
+    status: publicStatus(customer, subscription),
+    licenseKey: checkout && configuration.licenseSecret ? licenseKeyFor(customer.id, checkout) : undefined,
+  }
+}
+
+export async function billingPortalForAccount(account: Pick<AccountUser, "id" | "email">) {
+  const stripe = stripeClient()
+  const customer = await customerForAccount(stripe, account)
+  if (!customer) throw new ApiError(404, "BILLING_NOT_FOUND", "This account does not have Vector billing yet.")
+  const session = await stripe.billingPortal.sessions.create({
+    customer: customer.id,
+    return_url: `${publicOrigin()}/account`,
+  })
+  return session.url
 }
 
 async function licensedCustomer(key: string) {
   const parsed = parseLicenseKey(key)
   const stripe = stripeClient()
   const customer = await customerRecord(stripe, parsed.customer)
+  if (customer.metadata.vector_revoked_at) {
+    throw new ApiError(403, "LICENSE_REVOKED", "This Vector license has been revoked.")
+  }
   const checkout = customer.metadata.vector_checkout_session_id
   if (!checkout) throw new ApiError(401, "LICENSE_INVALID", "That Vector license key is not valid.")
   const expected = licenseKeyFor(customer.id, checkout)
@@ -546,6 +659,9 @@ async function activatedCustomer(token: string) {
   const id = customerFromActivationToken(token)
   const stripe = stripeClient()
   const customer = await customerRecord(stripe, id)
+  if (customer.metadata.vector_revoked_at) {
+    throw new ApiError(403, "LICENSE_REVOKED", "This Vector license has been revoked.")
+  }
   if (
     !customer.metadata.vector_activation_hash ||
     !safeEqual(customer.metadata.vector_activation_hash, digest(token))

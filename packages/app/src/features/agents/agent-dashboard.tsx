@@ -1,5 +1,4 @@
 import { createEffect, createMemo, createSignal, For, onCleanup, Show } from "solid-js"
-import { usePlatform } from "@/context/platform"
 import { SubagentAvatar, subagentIdentity } from "@/features/agents/identities"
 import {
   agentCardDetails,
@@ -17,6 +16,7 @@ import {
   type DashboardAgentStatus,
   type TeamConversation,
 } from "./agent-dashboard-model"
+import "./agent-dashboard.css"
 
 function toggled<T>(values: readonly T[], value: T) {
   return values.includes(value) ? values.filter((item) => item !== value) : [...values, value]
@@ -317,7 +317,6 @@ export function AgentDashboard(props: {
   onClose: () => void
   onOpenAgent?: (id: string) => void
 }) {
-  const platform = usePlatform()
   let dialog: HTMLDivElement | undefined
   const [now, setNow] = createSignal(Date.now())
   const timer = setInterval(() => setNow(Date.now()), 1_000)
@@ -388,8 +387,8 @@ export function AgentDashboard(props: {
         }}
       >
         <header
+          data-vector-agent-dashboard-header
           class="flex h-[60px] shrink-0 items-center gap-3 border-b border-[color:var(--vx-line)] bg-[color:var(--vx-sidebar)] px-4 sm:px-6"
-          classList={{ "!pl-[84px]": platform.platform === "desktop" && platform.os === "macos" }}
         >
           <span
             class="grid size-8 shrink-0 place-items-center rounded-[9px] bg-[color:var(--vx-purple-soft)] text-[color:var(--vx-purple-bright)]"
@@ -432,7 +431,7 @@ export function AgentDashboard(props: {
           </button>
         </header>
 
-        <main class="min-h-0 flex-1 overflow-y-auto">
+        <main data-vector-agent-dashboard-main class="min-h-0 flex-1 overflow-y-auto">
           <div class="mx-auto w-full max-w-[1580px] px-4 py-5 sm:px-6 lg:px-8 lg:py-7">
             <section aria-label="Dashboard controls" class="mb-5">
               <div class="flex flex-col gap-3 xl:flex-row xl:items-center">

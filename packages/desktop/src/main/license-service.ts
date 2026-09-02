@@ -144,8 +144,8 @@ export function createLicenseService(input: {
     const stored = await readStored()
     if (!stored?.activationToken) {
       try {
-        const config = await request<{ available: boolean }>("config", { method: "GET" })
-        if (!config.available) {
+        const config = await request<{ available: boolean; licenseRequired?: boolean }>("config", { method: "GET" })
+        if (!(config.licenseRequired ?? config.available)) {
           return {
             access: true,
             state: "beta",

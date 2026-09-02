@@ -40,3 +40,6 @@ packages/web/public/downloads/
 .superdesign/tmp/
 # Supabase CLI local link metadata
 supabase/.temp/
+
+# Vector's local agent failure memory belongs to this checkout only
+.vector/failure-memory.json

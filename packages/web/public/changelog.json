@@ -1,6 +1,20 @@
 {
   "releases": [
     {
+      "tag": "v1.99.2",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Your account, your Vector",
+              "description": "Vector's download is now an account handoff rather than an anonymous file link. You can create an account with Google or with an email and password, then use one dedicated account page to download the desktop app, enter billing, and keep the unique license-key flow Vector already uses. Downloads remain free during this preview, while the same boundary is ready for paid access without rebuilding the customer journey. Supabase owns customer identity, Stripe owns billing, and the old website license-administration console is gone; Vector no longer duplicates those systems or exposes a second place to manage customers. The sign-in experience carries the landing page's ASCII matrix atmosphere through registration, email confirmation, and return-to-download flows, while protected download routes require a valid session. The desktop Agent Dashboard is visible again too: it now begins below the native macOS and Windows window chrome instead of underneath it, keeping its title, close control, filters, board, and agent cards readable and scrollable throughout the available window."
+            }
+          ]
+        }
+      ]
+    },
+    {
       "tag": "v1.99.1",
       "highlights": [
         {

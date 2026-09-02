@@ -1,14 +1,28 @@
 ---
 import MarketingLayout from "../../components/marketing/MarketingLayout.astro"
-import MarketingFooter from "../../components/marketing/MarketingFooter.astro"
-import MarketingNav from "../../components/marketing/MarketingNav.astro"
-import { PurchaseSuccess } from "../../components/marketing/purchase/PurchaseSuccess"
+import MatrixRain from "../../components/marketing/account/MatrixRain.astro"
+import "../../components/marketing/account/account.css"
 
 export const prerender = true
 ---
 
-<MarketingLayout title="Your Vector license" description="Verify your purchase, retrieve your license, and install Vector.">
-  <MarketingNav active="download" />
-  <PurchaseSuccess client:only="react" />
-  <MarketingFooter />
+<MarketingLayout title="Your Vector license" description="Open your Vector account to retrieve your license and installer." noindex>
+  <div class="account-environment">
+    <MatrixRain />
+    <main class="callback-page">
+      <section class="callback-card">
+        <h1>Opening your Vector account…</h1>
+        <p>Your license, installers, and billing controls now live together.</p>
+        <a href="/account">Continue to account</a>
+      </section>
+    </main>
+  </div>
 </MarketingLayout>
+
+<script>
+  const session = new URLSearchParams(location.search).get("session_id")
+  const destination = session
+    ? `/account?checkout=success&session_id=${encodeURIComponent(session)}`
+    : "/account"
+  location.replace(destination)
+</script>

@@ -361,10 +361,9 @@
   }
 }
 
-/* ---- free download ------------------------------------------------------
-   The installer is public. This sits above the licence panel because getting
-   the app is now the first thing you can do, not the thing that follows a
-   purchase. */
+/* ---- account download ---------------------------------------------------
+   The signed-in account resolves the installer before navigating to the large
+   release asset. Access is free during private beta. */
 .free-download {
   width: min(720px, 100%);
   margin: 0 auto 44px;
@@ -378,6 +377,9 @@
   padding: 15px 30px;
   color: #120d17;
   background: linear-gradient(180deg, #f7f3ff, #cfb8ff);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  cursor: pointer;
+  font-family: inherit;
   border-radius: 14px;
   box-shadow:
     0 18px 40px -18px rgba(143, 82, 255, 0.75),
@@ -455,6 +457,8 @@
   border-radius: 11px;
   text-align: left;
   text-decoration: none;
+  cursor: pointer;
+  font-family: inherit;
   transition:
     border-color 180ms ease,
     background 180ms ease;

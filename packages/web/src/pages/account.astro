@@ -6,11 +6,7 @@ import MarketingLayout from "../components/marketing/MarketingLayout.astro"
 export const prerender = true
 ---
 
-<MarketingLayout
-  title="Download Vector"
-  description="Sign in to download Vector for macOS, Windows, or Linux and manage your license."
-  noindex
->
+<MarketingLayout title="Your Vector account" description="Download Vector, view your license, and manage billing." noindex>
   <div class="account-environment">
     <MatrixRain />
     <AccountPage client:only="react" />

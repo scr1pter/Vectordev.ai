@@ -4,8 +4,3 @@ Allow: /
 # Disallow shared content pages
 Disallow: /s/
 Disallow: /share/
-
-# The operator console is NOT disallowed on purpose. It carries noindex, and a
-# Disallow would stop crawlers fetching the page and therefore reading that tag,
-# leaving a URL that can still be indexed as a bare link. The operator token is
-# what protects it; noindex is what keeps it out of results.

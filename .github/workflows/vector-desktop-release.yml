@@ -1274,6 +1274,53 @@ jobs:
             test -s "$output/$feed"
           done
 
+      - name: Verify production account gate before publishing
+        env:
+          API_ORIGIN: https://vectordev.ai
+        run: |
+          set -euo pipefail
+
+          api_origin="${API_ORIGIN%/}"
+          audit_dir=$(mktemp -d)
+          trap 'rm -rf "$audit_dir"' EXIT
+
+          config_status=$(curl \
+            --show-error \
+            --silent \
+            --connect-timeout 10 \
+            --max-time 20 \
+            --header "Accept: application/json" \
+            --header "Cache-Control: no-cache" \
+            --output "$audit_dir/account-config.json" \
+            --write-out '%{http_code}' \
+            "$api_origin/api/auth/config?release-preflight=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}")
+          test "$config_status" = "200" && jq -e \
+            '.available == true and (.url | type == "string" and length > 0) and (.publishableKey | type == "string" and length > 0)' \
+            "$audit_dir/account-config.json" >/dev/null || {
+            echo "Production Vector accounts are not configured. Deploy the website and Supabase configuration before publishing installers."
+            exit 1
+          }
+
+          targets=(mac-arm64 mac-x64 windows-x64 windows-arm64 linux-x64 linux-arm64)
+          for target in "${targets[@]}"; do
+            status=$(curl \
+              --show-error \
+              --silent \
+              --connect-timeout 10 \
+              --max-time 20 \
+              --header "Accept: application/json" \
+              --header "Cache-Control: no-cache" \
+              --output "$audit_dir/download-$target.json" \
+              --write-out '%{http_code}' \
+              "$api_origin/api/download?target=$target&release-preflight=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}")
+            test "$status" = "401" && jq -e '.error.code == "SIGN_IN_REQUIRED"' \
+              "$audit_dir/download-$target.json" >/dev/null || {
+              echo "Production download gate is not active for $target; refusing to publish release pointers."
+              exit 1
+            }
+          done
+          echo "Verified production account configuration and anonymous download gate."
+
       - name: Commit Vector download and update pointers
         env:
           BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
@@ -1459,13 +1506,47 @@ jobs:
             return 1
           }
 
+          check_api_auth_gate() {
+            local label=$1
+            local url=$2
+            local attempt body status curl_exit
+            for attempt in $(seq 1 12); do
+              body="$audit_dir/api-${label//[^a-zA-Z0-9]/-}.json"
+              curl_exit=0
+              if status=$(curl \
+                --show-error \
+                --silent \
+                --request GET \
+                --connect-timeout 10 \
+                --max-time 10 \
+                --max-filesize 4096 \
+                --limit-rate 16k \
+                --header "Accept: application/json" \
+                --header "Cache-Control: no-cache" \
+                --output "$body" \
+                --write-out '%{http_code}' \
+                "$url&release-smoke=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-$attempt"); then
+                curl_exit=0
+              else
+                curl_exit=$?
+              fi
+              if [ "$curl_exit" = "0" ] && [ "$status" = "401" ] && \
+                jq -e '.error.code == "SIGN_IN_REQUIRED"' "$body" >/dev/null; then
+                echo "Verified production account gate for $label"
+                return 0
+              fi
+              echo "Waiting for $label account gate: curl=$curl_exit status=${status:-none}"
+              if [ "$attempt" -lt 12 ]; then sleep 10; fi
+            done
+            echo "Production account gate for $label did not converge"
+            return 1
+          }
+
           targets=(mac-arm64 mac-x64 windows-x64 windows-arm64 linux-x64 linux-arm64)
           for target in "${targets[@]}"; do
-            expected_location=$(jq -er --arg target "$target" '.targets[$target].url' "$immutable_manifest")
-            check_api_redirect \
+            check_api_auth_gate \
               "$target" \
-              "$api_origin/api/download?target=$target" \
-              "$expected_location"
+              "$api_origin/api/download?target=$target"
           done
           check_api_redirect \
             checksums \

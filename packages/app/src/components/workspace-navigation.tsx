@@ -32,7 +32,9 @@ const statusTextTone = (status: string) => {
 }
 
 const Icon = (props: { children: JSX.Element }) => (
-  <span class="grid size-[18px] shrink-0 place-items-center text-white/42">{props.children}</span>
+  <span class="grid size-[18px] shrink-0 place-items-center text-[color:var(--vx-workspace-text-tertiary)]">
+    {props.children}
+  </span>
 )
 
 const BranchIcon = () => (
@@ -106,7 +108,7 @@ export function WorkspaceNavigation(props: {
   return (
     <nav
       data-vector-navigation
-      class="fixed inset-y-0 left-0 z-50 flex flex-col text-white/70 transition-opacity duration-200 [font-family:var(--vx-font)]"
+      class="fixed inset-y-0 left-0 z-50 flex flex-col text-[color:var(--vx-workspace-text-secondary)] transition-opacity duration-200 [font-family:var(--vx-workspace-font)]"
       style={{
         width: `${props.width}px`,
         "padding-top": props.macDesktop ? "48px" : "0px",
@@ -116,7 +118,7 @@ export function WorkspaceNavigation(props: {
       <div data-vector-nav-top class="flex h-[48px] shrink-0 items-center gap-2 px-3">
         <div
           data-vector-mode-switch
-          class="flex h-8 min-w-0 flex-1 items-center rounded-[7px] bg-black/15 p-[2px] text-[12px] font-medium"
+          class="flex h-8 min-w-0 flex-1 items-center rounded-[7px] bg-black/15 p-[2px] text-[13px] font-medium"
           role="group"
           aria-label="Workspace mode"
         >
@@ -126,8 +128,10 @@ export function WorkspaceNavigation(props: {
                 type="button"
                 class="h-7 min-w-0 flex-1 rounded-[5px] px-3 capitalize transition"
                 classList={{
-                  "bg-white/[0.075] text-white shadow-[inset_0_0_0_1px_rgba(182,159,247,0.24)]": mode() === value,
-                  "text-white/38 hover:text-white/72": mode() !== value,
+                  "bg-white/[0.075] text-[color:var(--vx-workspace-text-primary)] shadow-[inset_0_0_0_1px_rgba(182,159,247,0.24)]":
+                    mode() === value,
+                  "text-[color:var(--vx-workspace-text-tertiary)] hover:text-[color:var(--vx-workspace-text-primary)]":
+                    mode() !== value,
                 }}
                 aria-pressed={mode() === value}
                 onClick={() => selectMode(value)}
@@ -139,7 +143,7 @@ export function WorkspaceNavigation(props: {
         </div>
         <button
           type="button"
-          class="grid size-8 shrink-0 place-items-center rounded-[5px] text-white/38 transition hover:bg-white/[0.055] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(147,116,236,0.55)]"
+          class="grid size-8 shrink-0 place-items-center rounded-[5px] text-[color:var(--vx-workspace-text-tertiary)] transition hover:bg-white/[0.055] hover:text-[color:var(--vx-workspace-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(147,116,236,0.55)]"
           aria-label="Hide Vector sidebar"
           title="Hide Vector sidebar"
           onClick={props.onHide}
@@ -192,17 +196,17 @@ export function WorkspaceNavigation(props: {
               />
             </svg>
             <span>Search</span>
-            <kbd class="ml-auto text-[10px] font-normal text-white/20">⌘P</kbd>
+            <kbd class="ml-auto text-[11px] font-normal text-[color:var(--vx-workspace-text-tertiary)]">⌘P</kbd>
           </button>
         </section>
 
         <section data-vector-project-group>
-          <div class="flex h-9 items-center gap-2 px-3.5 text-[10.5px] font-medium text-white/30">
+          <div class="flex h-9 items-center gap-2 px-3.5 text-[12px] font-medium text-[color:var(--vx-workspace-text-tertiary)]">
             <span class="min-w-0 flex-1">Projects</span>
             <button
               type="button"
               data-tour="nav-new-workspace"
-              class="grid size-6 place-items-center rounded-[5px] text-white/28 transition hover:bg-white/[0.045] hover:text-white/72"
+              class="grid size-6 place-items-center rounded-[5px] text-[color:var(--vx-workspace-text-tertiary)] transition hover:bg-white/[0.045] hover:text-[color:var(--vx-workspace-text-primary)]"
               title="New workspace"
               aria-label="New workspace"
               onClick={props.onNewWorkspace}
@@ -215,13 +219,13 @@ export function WorkspaceNavigation(props: {
           <button
             type="button"
             data-vector-project-heading
-            class="mx-2 flex h-9 w-[calc(100%-1rem)] items-center gap-2 rounded-[5px] px-2 text-left text-[12px] font-medium text-white/72 transition hover:bg-white/[0.04] hover:text-white"
+            class="mx-2 flex h-9 w-[calc(100%-1rem)] items-center gap-2 rounded-[5px] px-2 text-left text-[13px] font-medium text-[color:var(--vx-workspace-text-primary)] transition hover:bg-white/[0.04]"
             onClick={props.onToggleTree}
             aria-expanded={props.treeOpen}
           >
             <svg
               viewBox="0 0 16 16"
-              class="size-3.5 shrink-0 text-white/35 transition-transform duration-150"
+              class="size-3.5 shrink-0 text-[color:var(--vx-workspace-text-tertiary)] transition-transform duration-150"
               classList={{ "-rotate-90": !props.treeOpen }}
               aria-hidden="true"
             >
@@ -256,7 +260,9 @@ export function WorkspaceNavigation(props: {
               </svg>
             </span>
             <span class="min-w-0 flex-1 truncate">{props.projectName}</span>
-            <span class="shrink-0 text-[10px] font-normal tabular-nums text-white/30">{props.items.length + 1}</span>
+            <span class="shrink-0 text-[11px] font-normal tabular-nums text-[color:var(--vx-workspace-text-tertiary)]">
+              {props.items.length + 1}
+            </span>
           </button>
 
           <Show when={props.treeOpen}>
@@ -267,8 +273,9 @@ export function WorkspaceNavigation(props: {
                 data-active={props.mainActive ? "true" : "false"}
                 class="group relative flex min-h-[50px] w-full items-center gap-2.5 rounded-[5px] px-2.5 py-1.5 text-left transition"
                 classList={{
-                  "bg-white/[0.075] text-white": props.mainActive,
-                  "text-white/62 hover:bg-white/[0.045] hover:text-white": !props.mainActive,
+                  "bg-white/[0.075] text-[color:var(--vx-workspace-text-primary)]": props.mainActive,
+                  "text-[color:var(--vx-workspace-text-secondary)] hover:bg-white/[0.045] hover:text-[color:var(--vx-workspace-text-primary)]":
+                    !props.mainActive,
                 }}
                 onClick={props.onOpenMain}
               >
@@ -276,13 +283,13 @@ export function WorkspaceNavigation(props: {
                   <BranchIcon />
                 </Icon>
                 <span class="min-w-0 flex-1">
-                  <span class="block truncate text-[12px] font-medium">{props.mainLabel}</span>
-                  <span class="mt-0.5 flex items-center gap-1.5 truncate text-[10px] text-white/34">
+                  <span class="block truncate text-[13px] font-medium">{props.mainLabel}</span>
+                  <span class="mt-0.5 flex items-center gap-1.5 truncate text-[12px] text-[color:var(--vx-workspace-text-secondary)]">
                     <span class="size-1.5 shrink-0 rounded-full bg-emerald-400" />
                     <span class="truncate">main · Ready</span>
                   </span>
                 </span>
-                <span class="shrink-0 rounded-[4px] border border-white/[0.08] px-1.5 py-0.5 text-[9.5px] text-white/32">
+                <span class="shrink-0 rounded-[4px] border border-white/[0.08] px-1.5 py-0.5 text-[11px] text-[color:var(--vx-workspace-text-tertiary)]">
                   main
                 </span>
               </button>
@@ -318,25 +325,27 @@ export function WorkspaceNavigation(props: {
                       onClick={() => props.onOpenWorkspace(item.id)}
                       title={`${item.name} · ${item.status}`}
                     >
-                      <span class="relative grid size-[18px] shrink-0 place-items-center text-white/42">
+                      <span class="relative grid size-[18px] shrink-0 place-items-center text-[color:var(--vx-workspace-text-tertiary)]">
                         <Show when={item.running}>
                           <span class="absolute size-4 animate-ping rounded-full bg-[color:var(--vx-purple-bright)]/12" />
                         </Show>
                         <BranchIcon />
                       </span>
                       <span class="min-w-0 flex-1">
-                        <span class="block truncate text-[12px] font-medium text-white/82">{item.name}</span>
-                        <span class="mt-0.5 flex min-w-0 items-center gap-1.5 text-[10px] text-white/34">
+                        <span class="block truncate text-[13px] font-medium text-[color:var(--vx-workspace-text-primary)]">
+                          {item.name}
+                        </span>
+                        <span class="mt-0.5 flex min-w-0 items-center gap-1.5 text-[12px] text-[color:var(--vx-workspace-text-secondary)]">
                           <span class={`size-1.5 shrink-0 rounded-full ${statusTone(item.status)}`} />
                           <span class={`truncate capitalize ${statusTextTone(item.status)}`}>{item.status}</span>
-                          <span class="shrink-0 text-white/18">·</span>
+                          <span class="shrink-0 text-[color:var(--vx-workspace-text-tertiary)]">·</span>
                           <span class="truncate">{item.runtime}</span>
                         </span>
                       </span>
                     </button>
 
                     <div class="absolute right-2 top-2 flex items-center gap-1">
-                      <span class="flex h-6 items-center gap-1 rounded-[4px] border border-white/[0.07] bg-black/10 px-1.5 text-[10px] tabular-nums opacity-100 transition group-hover:opacity-0">
+                      <span class="flex h-6 items-center gap-1 rounded-[4px] border border-white/[0.07] bg-black/10 px-1.5 text-[11px] tabular-nums opacity-100 transition group-hover:opacity-0">
                         <span class="text-emerald-400">+{item.added}</span>
                         <span class="text-rose-400">-{item.removed}</span>
                       </span>
@@ -389,7 +398,7 @@ export function WorkspaceNavigation(props: {
                         </Show>
                       </div>
                     </div>
-                    <span class="pointer-events-none absolute bottom-1.5 right-2 text-[9px] tabular-nums text-white/20 group-hover:opacity-0">
+                    <span class="pointer-events-none absolute bottom-1.5 right-2 text-[10px] tabular-nums text-[color:var(--vx-workspace-text-tertiary)] group-hover:opacity-0">
                       #{index() + 1}
                     </span>
                   </div>
@@ -397,7 +406,7 @@ export function WorkspaceNavigation(props: {
               </For>
 
               <Show when={!props.items.length}>
-                <div class="px-3 py-2 text-[10.5px] leading-4 text-white/28">
+                <div class="px-3 py-2 text-[12px] leading-[18px] text-[color:var(--vx-workspace-text-tertiary)]">
                   Launch an isolated workspace to run another agent without touching main.
                 </div>
               </Show>
@@ -534,11 +543,11 @@ export function WorkspaceNavigation(props: {
           data-vector-help-menu
           role="dialog"
           aria-label="Vector help"
-          class="absolute bottom-[58px] left-3 right-3 z-40 overflow-hidden rounded-[10px] border border-white/[0.09] bg-[#2a272c] p-1.5 text-[12.5px] text-white/72 shadow-[0_22px_55px_rgba(0,0,0,0.42)]"
+          class="absolute bottom-[58px] left-3 right-3 z-40 overflow-hidden rounded-[10px] border border-white/[0.09] bg-[#2a272c] p-1.5 text-[13px] text-[color:var(--vx-workspace-text-secondary)] shadow-[0_22px_55px_rgba(0,0,0,0.42)]"
         >
           <button
             type="button"
-            class="flex h-9 w-full items-center gap-2.5 rounded-[6px] bg-white/[0.055] px-2.5 text-left text-white/88 transition hover:bg-white/[0.085]"
+            class="flex h-9 w-full items-center gap-2.5 rounded-[6px] bg-white/[0.055] px-2.5 text-left text-[color:var(--vx-workspace-text-primary)] transition hover:bg-white/[0.085]"
             onClick={() => {
               setHelpOpen(false)
               props.onSettings()
@@ -564,7 +573,7 @@ export function WorkspaceNavigation(props: {
               />
             </svg>
             <span class="min-w-0 flex-1">Keyboard shortcuts</span>
-            <kbd class="text-[11px] text-white/34">⌘/</kbd>
+            <kbd class="text-[11px] text-[color:var(--vx-workspace-text-tertiary)]">⌘/</kbd>
           </button>
 
           <div class="my-1 h-px bg-white/[0.065]" />
@@ -660,7 +669,7 @@ export function WorkspaceNavigation(props: {
             </button>
           </Show>
 
-          <div class="-mx-1.5 -mb-1.5 mt-1.5 border-t border-white/[0.07] px-3 py-2 text-[10.5px] text-white/28">
+          <div class="-mx-1.5 -mb-1.5 mt-1.5 border-t border-white/[0.07] px-3 py-2 text-[11px] text-[color:var(--vx-workspace-text-tertiary)]">
             Vector{props.currentVersion ? ` v${props.currentVersion}` : ""}
           </div>
         </div>
@@ -670,7 +679,7 @@ export function WorkspaceNavigation(props: {
         data-vector-nav-footer
         class="grid min-h-[50px] shrink-0 grid-cols-[1fr_auto_auto] items-center gap-1 border-t border-[color:var(--vx-line)] px-3 py-2"
       >
-        <span class="truncate px-1 text-[10.5px] text-white/24">Vector workspace</span>
+        <span class="truncate px-1 text-[11px] text-[color:var(--vx-workspace-text-tertiary)]">Vector workspace</span>
         <button
           type="button"
           data-tour="nav-getting-started"

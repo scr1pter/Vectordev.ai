@@ -1,0 +1,14 @@
+---
+import { AuthCallback } from "../../components/marketing/account/AuthCallback"
+import MatrixRain from "../../components/marketing/account/MatrixRain.astro"
+import MarketingLayout from "../../components/marketing/MarketingLayout.astro"
+
+export const prerender = true
+---
+
+<MarketingLayout title="Opening Vector" description="Finishing your secure Vector sign-in." noindex>
+  <div class="account-environment">
+    <MatrixRain />
+    <AuthCallback client:only="react" />
+  </div>
+</MarketingLayout>

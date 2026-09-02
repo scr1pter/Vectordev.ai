@@ -106,4 +106,14 @@ describe("Vector license status", () => {
 
     expect(status).toMatchObject({ access: false, state: "past_due", plan: "annual" })
   })
+
+  test("never grants access to a revoked customer with an otherwise active subscription", () => {
+    const now = Math.floor(Date.now() / 1_000)
+    const status = publicStatus(
+      customer({ vector_revoked_at: new Date().toISOString() }),
+      subscription({ status: "active", plan: "annual", periodEnd: now + 86_400 }),
+    )
+
+    expect(status).toMatchObject({ access: false, state: "revoked", plan: "annual" })
+  })
 })

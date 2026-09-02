@@ -42,6 +42,10 @@
   --vx-font:
     "Geist Variable", Geist, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI",
     sans-serif;
+  --vx-workspace-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  --vx-workspace-text-primary: #e8e8e8;
+  --vx-workspace-text-secondary: #a8a8a8;
+  --vx-workspace-text-tertiary: #878787;
   --vx-mono: "SFMono-Regular", "Cascadia Code", "Roboto Mono", ui-monospace, monospace;
   --vx-shadow-float: 0 24px 70px rgba(0, 0, 0, 0.42);
   --vx-ease: cubic-bezier(0.22, 1, 0.36, 1);
@@ -73,6 +77,9 @@
   --vx-amber: #a97a1f;
   --vx-red: #cf4750;
   --vx-blue: #3f7fc4;
+  --vx-workspace-text-primary: #202024;
+  --vx-workspace-text-secondary: #55555b;
+  --vx-workspace-text-tertiary: #77777e;
   --vx-shadow-float: 0 24px 70px rgba(20, 16, 30, 0.14);
   /* index.css paints the shell from --vector-workspace-bg, with !important in
      several places, so overriding only the --vx-* ramp left a light sidebar
@@ -214,8 +221,8 @@ select,
   position: relative;
   overflow: hidden;
   background: var(--vx-canvas) !important;
-  color: var(--vx-text) !important;
-  font-family: var(--vx-font) !important;
+  color: var(--vx-workspace-text-primary) !important;
+  font-family: var(--vx-workspace-font) !important;
   font-size: 14px;
 }
 
@@ -1425,13 +1432,13 @@ html[data-vector-navigation-resizing] * {
 }
 
 [data-vector-shell] [data-component="prompt-input"] {
-  color: var(--vx-text) !important;
-  font-size: 14px !important;
-  line-height: 1.6 !important;
+  color: var(--vx-workspace-text-primary) !important;
+  font-size: 15px !important;
+  line-height: 1.58 !important;
 }
 
 [data-vector-shell] :is([data-component="session-composer-text"], [data-component="session-new-design-text"]) {
-  color: var(--vx-text-muted) !important;
+  color: var(--vx-workspace-text-tertiary) !important;
 }
 
 [data-vector-shell] :is([data-component="session-composer"], [data-component="session-new-composer"]) button {
@@ -1897,8 +1904,8 @@ html[data-vector-navigation-resizing] * {
 
 .vector-fullscreen-workspace {
   background: var(--vx-canvas) !important;
-  color: var(--vx-text) !important;
-  font-family: var(--vx-font);
+  color: var(--vx-workspace-text-primary) !important;
+  font-family: var(--vx-workspace-font);
 }
 
 .vector-workspace-header {
@@ -2221,14 +2228,8 @@ html[data-vector-navigation-resizing] * {
 [data-vector-navigation] {
   background: color-mix(in srgb, var(--vx-sidebar) 86%, #2b211f 14%) !important;
   box-shadow: none !important;
-  font-family:
-    Geist,
-    Inter,
-    -apple-system,
-    BlinkMacSystemFont,
-    "SF Pro Text",
-    "Segoe UI",
-    sans-serif;
+  color: var(--vx-workspace-text-secondary) !important;
+  font-family: var(--vx-workspace-font);
 }
 
 [data-vector-nav-top] {
@@ -2237,6 +2238,8 @@ html[data-vector-navigation-resizing] * {
 
 [data-vector-mode-switch] {
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.025);
+  font-size: 13px !important;
+  font-weight: 500 !important;
 }
 
 [data-vector-nav-primary] {
@@ -2245,6 +2248,9 @@ html[data-vector-navigation-resizing] * {
 
 [data-vector-project-heading] {
   border-bottom: 1px solid rgba(255, 255, 255, 0.018);
+  color: var(--vx-workspace-text-primary) !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
 }
 
 [data-vector-workspace-actions] {
@@ -2294,15 +2300,17 @@ html[data-vector-navigation-resizing] * {
 }
 
 [data-vector-nav-label] {
-  color: rgba(255, 255, 255, 0.31);
-  font-size: 9px;
-  font-weight: 650;
+  color: var(--vx-workspace-text-tertiary);
+  font-size: 11px;
+  font-weight: 500;
 }
 
 [data-vector-nav-item] {
-  min-height: 30px !important;
+  min-height: 34px !important;
   border-radius: 5px !important;
-  font-size: 12px !important;
+  color: var(--vx-workspace-text-secondary) !important;
+  font-size: 13px !important;
+  font-weight: 400 !important;
 }
 
 [data-vector-nav-item].active {
@@ -2322,7 +2330,9 @@ html[data-vector-navigation-resizing] * {
   gap: 10px;
   border-radius: 6px;
   padding: 0 10px;
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--vx-workspace-text-secondary);
+  font-size: 13px;
+  font-weight: 400;
   text-align: left;
   transition:
     color 120ms ease,
@@ -2331,7 +2341,7 @@ html[data-vector-navigation-resizing] * {
 
 .vector-help-menu-item:hover {
   background: rgba(255, 255, 255, 0.055);
-  color: rgba(255, 255, 255, 0.94);
+  color: var(--vx-workspace-text-primary);
 }
 
 .vector-help-menu-item.pl-9 {
@@ -2340,8 +2350,12 @@ html[data-vector-navigation-resizing] * {
 
 [data-vector-session-route] {
   --vector-workspace-bg: #16151b;
+  --v2-text-text-base: var(--vx-workspace-text-primary);
+  --v2-text-text-muted: var(--vx-workspace-text-secondary);
+  --v2-text-text-faint: var(--vx-workspace-text-tertiary);
   background: var(--vector-workspace-bg);
-  color: var(--vx-text);
+  color: var(--vx-workspace-text-primary);
+  font-family: var(--vx-workspace-font);
 }
 
 [data-vector-session-header] {
@@ -2370,7 +2384,7 @@ html[data-vector-navigation-resizing] * {
   height: 17px;
   flex: 0 0 17px;
   place-items: center;
-  color: rgba(255, 255, 255, 0.42);
+  color: var(--vx-workspace-text-tertiary);
 }
 
 [data-vector-session-branch-icon] svg {
@@ -2380,19 +2394,19 @@ html[data-vector-navigation-resizing] * {
 
 [data-vector-session-title] {
   overflow: hidden;
-  color: rgba(255, 255, 255, 0.9);
-  font-size: 13px;
-  font-weight: 610;
-  line-height: 1;
+  color: var(--vx-workspace-text-primary);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 [data-vector-session-path] {
   overflow: hidden;
-  color: rgba(255, 255, 255, 0.3);
-  font-size: 10.5px;
-  line-height: 1;
+  color: var(--vx-workspace-text-tertiary);
+  font-size: 11.5px;
+  line-height: 16px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2415,8 +2429,8 @@ html[data-vector-navigation-resizing] * {
   border-radius: 5px;
   background: rgba(255, 255, 255, 0.025);
   padding: 0 8px;
-  color: rgba(255, 255, 255, 0.48);
-  font-size: 10.5px;
+  color: var(--vx-workspace-text-secondary);
+  font-size: 11.5px;
   line-height: 1;
 }
 
@@ -2472,8 +2486,8 @@ html[data-vector-navigation-resizing] * {
   border-radius: 5px !important;
   background: transparent;
   padding: 0 8px;
-  color: rgba(255, 255, 255, 0.44);
-  font-size: 10.5px;
+  color: var(--vx-workspace-text-secondary);
+  font-size: 12px;
 }
 
 [data-vector-session-tool]:hover {
@@ -2499,7 +2513,7 @@ html[data-vector-navigation-resizing] * {
   background: rgba(255, 255, 255, 0.07);
   padding: 2px 4px;
   color: rgba(255, 255, 255, 0.64);
-  font: 600 9px/1 var(--vx-mono);
+  font: 600 10px/1 var(--vx-mono);
   text-align: center;
 }
 

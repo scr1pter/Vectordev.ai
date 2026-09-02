@@ -1,0 +1,105 @@
+<canvas class="account-matrix" data-account-matrix aria-hidden="true"></canvas>
+
+<script>
+  const bootMatrix = () => {
+    const canvas = document.querySelector<HTMLCanvasElement>("[data-account-matrix]")
+    const context = canvas?.getContext("2d")
+    if (!canvas || !context || canvas.dataset.ready === "true") return
+    canvas.dataset.ready = "true"
+
+    const glyphs = "01VECTOR{}[]<>/\\+=:*"
+    const reduced = globalThis.matchMedia("(prefers-reduced-motion: reduce)").matches
+    let width = 1
+    let height = 1
+    let fontSize = 10
+    let lastFrame = 0
+    let columns: Array<{ x: number; y: number; speed: number; trail: number; phase: number; opacity: number }> = []
+
+    const build = () => {
+      fontSize = width < 720 ? 9 : 10
+      const spacing = fontSize * 1.18
+      columns = Array.from({ length: Math.ceil(width / spacing) }, (_, index) => ({
+        x: index * spacing + spacing / 2,
+        y: Math.random() * height,
+        speed: 24 + Math.random() * 42,
+        trail: 10 + Math.floor(Math.random() * 22),
+        phase: Math.floor(Math.random() * glyphs.length),
+        opacity: 0.2 + Math.random() * 0.48,
+      }))
+    }
+
+    const render = (timestamp = performance.now()) => {
+      const elapsed = lastFrame ? timestamp - lastFrame : 34
+      if (!reduced && elapsed < 30) {
+        requestAnimationFrame(render)
+        return
+      }
+      const delta = Math.min(elapsed, 80) / 1000
+      lastFrame = timestamp
+      context.clearRect(0, 0, width, height)
+      context.font = `${fontSize}px ui-monospace, SFMono-Regular, Menlo, Monaco, monospace`
+      context.textAlign = "center"
+      context.textBaseline = "middle"
+      const lineHeight = fontSize * 1.22
+      const tick = Math.floor(timestamp / 180)
+
+      columns.forEach((column, columnIndex) => {
+        if (!reduced) column.y += column.speed * delta
+        for (let step = 0; step < column.trail; step += 1) {
+          const y = column.y - step * lineHeight
+          if (y < -lineHeight || y > height + lineHeight) continue
+          const fade = 1 - step / column.trail
+          const center = Math.exp(
+            -(Math.pow((column.x / Math.max(1, width) - 0.5) / 0.34, 2) + Math.pow((y / Math.max(1, height) - 0.47) / 0.32, 2)),
+          )
+          const alpha = Math.max(0.025, fade * fade * column.opacity * (1 - center * 0.72))
+          const index = Math.abs(column.phase + columnIndex * 3 + tick - step * 2) % glyphs.length
+          context.fillStyle =
+            step === 0
+              ? `rgba(231, 222, 255, ${Math.min(0.82, alpha + 0.24)})`
+              : `rgba(166, 125, 255, ${alpha})`
+          context.fillText(glyphs[index], column.x, y)
+        }
+        if (column.y - column.trail * lineHeight <= height + lineHeight) return
+        column.y = -Math.random() * height * 0.75 - lineHeight
+        column.speed = 24 + Math.random() * 42
+        column.trail = 10 + Math.floor(Math.random() * 22)
+        column.phase = Math.floor(Math.random() * glyphs.length)
+      })
+      if (!reduced && !document.hidden) requestAnimationFrame(render)
+    }
+
+    const resize = () => {
+      const rectangle = canvas.getBoundingClientRect()
+      const ratio = Math.min(globalThis.devicePixelRatio || 1, 2)
+      width = Math.max(1, rectangle.width)
+      height = Math.max(1, rectangle.height)
+      canvas.width = Math.round(width * ratio)
+      canvas.height = Math.round(height * ratio)
+      context.setTransform(ratio, 0, 0, ratio, 0, 0)
+      build()
+      if (reduced) render()
+    }
+
+    const observer = new ResizeObserver(resize)
+    observer.observe(canvas)
+    resize()
+    if (!reduced) requestAnimationFrame(render)
+  }
+
+  bootMatrix()
+  document.addEventListener("astro:page-load", bootMatrix)
+</script>
+
+<style>
+  .account-matrix {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    opacity: 0.92;
+    mask-image: linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.9) 72%, transparent 100%);
+  }
+</style>
