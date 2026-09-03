@@ -3093,8 +3093,19 @@ const changelog = [
     .cli-get { flex-direction: column; align-items: flex-start; }
   }
   /* ── Simplified layout ───────────────────────────────────────────── */
-  .simple-hero-section { min-height: 0; }
-  .simple-stage { position: relative; min-height: 0; height: auto; padding-bottom: clamp(24px, 4vw, 48px); }
+  /* The old scene system sizes every .scene-stage to the viewport; the
+     simplified hero is content-sized like a normal page. */
+  .simple-hero-section { min-height: 0 !important; height: auto !important; }
+  :global(html.va) .vector-marketing .simple-hero-section .scene-stage,
+  .simple-hero-section .scene-stage {
+    position: relative !important;
+    top: auto !important;
+    display: block !important;
+    height: auto !important;
+    min-height: 0 !important;
+    padding-top: clamp(40px, 6vw, 72px) !important;
+    padding-bottom: clamp(24px, 4vw, 48px) !important;
+  }
   .simple-hero { max-width: 760px; }
   .simple-deck { max-width: 560px; margin-top: 18px; font-size: 17px; line-height: 1.6; color: var(--ink-55); }
   .simple-actions { margin-top: 26px; display: flex; flex-wrap: wrap; align-items: center; gap: 18px; }
