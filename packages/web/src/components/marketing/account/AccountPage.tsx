@@ -40,13 +40,13 @@ const fallbackPlans: NonNullable<BillingConfig["plans"]> = [
   { id: "monthly", priceUsd: 10, interval: "month" },
 ]
 
-export function AccountPage() {
+export function AccountPage(props: { preview?: AccountState }) {
   const [token, setToken] = useState("")
-  const [account, setAccount] = useState<AccountState>()
+  const [account, setAccount] = useState<AccountState | undefined>(props.preview)
   const [configuration, setConfiguration] = useState<BillingConfig>({ plans: fallbackPlans })
   const [plan, setPlan] = useState<"annual" | "monthly">("annual")
   const [terms, setTerms] = useState(false)
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(!props.preview)
   const [action, setAction] = useState("")
   const [error, setError] = useState("")
   const [notice, setNotice] = useState("")
@@ -62,6 +62,8 @@ export function AccountPage() {
     })
 
   useEffect(() => {
+    // Design-preview mode (dev-only route) renders fixtures without auth.
+    if (props.preview) return
     let unsubscribe: (() => void) | undefined
     void vectorAccountClient()
       .then(async (client) => {
@@ -198,25 +200,33 @@ export function AccountPage() {
   return (
     <main className="account-page">
       <header className="account-topbar">
-        <a className="account-wordmark" href="/" aria-label="Vector home">
-          <img src="/vector-logo.png" alt="" />
-          <span>Vector</span>
-        </a>
-        <nav aria-label="Account navigation">
-          <a href="/docs">Docs</a>
-          <a href="/releases">Releases</a>
-          <button type="button" onClick={signOut} disabled={Boolean(action)}>
-            <LogOut size={15} /> Sign out
-          </button>
-        </nav>
+        <div className="account-topbar-inner">
+          <a className="account-wordmark" href="/" aria-label="Vector home">
+            <img src="/vector-logo.png" alt="" />
+            <span>Vector</span>
+          </a>
+          <nav aria-label="Account navigation">
+            <a href="/docs">Docs</a>
+            <a href="/releases">Releases</a>
+            <a href="#billing">Billing</a>
+            <button type="button" onClick={signOut} disabled={Boolean(action)}>
+              <LogOut size={15} /> Sign out
+            </button>
+          </nav>
+        </div>
       </header>
 
       <div className="account-content">
         <section className="account-welcome">
-          <div>
-            <p className="account-kicker">Vector account</p>
-            <h1>Welcome{account?.user.name ? `, ${account.user.name.split(" ")[0]}` : ""}.</h1>
-            <span>{account?.user.email}</span>
+          <div className="account-identity">
+            <span className="account-avatar" aria-hidden="true">
+              {(account?.user.name ?? account?.user.email ?? "V").slice(0, 1).toUpperCase()}
+            </span>
+            <div>
+              <p className="account-kicker">Vector account</p>
+              <h1>Welcome{account?.user.name ? `, ${account.user.name.split(" ")[0]}` : ""}.</h1>
+              <span>{account?.user.email}</span>
+            </div>
           </div>
           <div className="beta-badge">
             <Sparkles size={15} />
@@ -259,7 +269,7 @@ export function AccountPage() {
             <FreeDownload version={configuration.releaseVersion} accessToken={token} accessAllowed={downloadAllowed} />
           </article>
 
-          <article className="account-panel license-panel">
+          <article className="account-panel license-panel" id={account?.billing ? "billing" : undefined}>
             <div className="panel-heading">
               <span className="panel-icon">
                 <ShieldCheck size={18} />

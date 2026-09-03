@@ -2,7 +2,7 @@
   position: relative;
   min-height: 100vh;
   isolation: isolate;
-  overflow: hidden;
+  overflow: clip; /* not hidden: that would break the sticky topbar */
   background:
     radial-gradient(circle at 50% 42%, rgba(105, 66, 180, 0.12), transparent 36%),
     linear-gradient(120deg, rgba(81, 48, 143, 0.12), transparent 28%, transparent 72%, rgba(119, 74, 194, 0.08)),
@@ -16,10 +16,14 @@
   inset: 0;
   z-index: 0;
   pointer-events: none;
-  background: radial-gradient(circle at 50% 48%, rgba(8, 6, 13, 0.32), rgba(8, 6, 13, 0.78) 72%);
+  background: radial-gradient(circle at 50% 48%, rgba(8, 6, 13, 0.18), rgba(8, 6, 13, 0.55) 78%);
 }
 
-.account-environment > :not(.account-matrix) {
+/* astro-island renders with display: contents, so position/z-index on the
+   island itself is a no-op and the fixed scrim above painted over the page.
+   Lift the real content boxes instead. */
+.account-environment > :not(.account-matrix),
+.account-environment astro-island > * {
   position: relative;
   z-index: 1;
 }
@@ -250,17 +254,21 @@
 .account-loading { align-content: center; color: rgba(235, 227, 245, 0.58); font-size: 13px; }
 
 .account-page { min-height: 100vh; }
-.account-topbar { width: min(1200px, calc(100% - 40px)); min-height: 72px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; }
+
+.account-topbar { position: sticky; top: 0; z-index: 20; padding: 14px 0 10px; background: linear-gradient(180deg, rgba(8, 6, 13, 0.92), rgba(8, 6, 13, 0.55) 70%, transparent); }
+.account-topbar-inner { width: min(1120px, calc(100% - 40px)); min-height: 58px; margin: 0 auto; padding: 0 10px 0 18px; display: flex; align-items: center; justify-content: space-between; background: var(--glass-fill, rgba(20, 16, 28, 0.7)), rgba(20, 16, 28, 0.7); border: 1px solid rgba(230, 219, 255, 0.14); border-radius: 18px; box-shadow: 0 18px 50px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.12); backdrop-filter: blur(22px) saturate(140%); -webkit-backdrop-filter: blur(22px) saturate(140%); }
 .account-topbar nav { display: flex; align-items: center; gap: 4px; }
 .account-topbar nav a,
-.account-topbar nav button { min-height: 37px; padding: 0 12px; display: inline-flex; align-items: center; gap: 7px; color: rgba(234, 226, 243, 0.58); background: transparent; border: 0; border-radius: 10px; cursor: pointer; font-size: 12.5px; text-decoration: none; }
+.account-topbar nav button { min-height: 37px; padding: 0 12px; display: inline-flex; align-items: center; gap: 7px; color: rgba(234, 226, 243, 0.62); background: transparent; border: 0; border-radius: 11px; cursor: pointer; font-size: 12.5px; text-decoration: none; transition: color 140ms ease, background 140ms ease; }
 .account-topbar nav a:hover,
-.account-topbar nav button:hover { color: #f2ecf8; background: rgba(255, 255, 255, 0.045); }
+.account-topbar nav button:hover { color: #f2ecf8; background: rgba(255, 255, 255, 0.055); }
 
-.account-content { width: min(1120px, calc(100% - 40px)); margin: 0 auto; padding: 54px 0 100px; }
+.account-content { width: min(1120px, calc(100% - 40px)); margin: 0 auto; padding: 46px 0 100px; }
 .account-welcome { display: flex; align-items: flex-end; justify-content: space-between; gap: 30px; }
-.account-welcome h1 { margin: 8px 0 0; color: #f7f3fa; font-size: clamp(38px, 5vw, 58px); font-weight: 610; letter-spacing: -0.048em; line-height: 1; }
-.account-welcome > div:first-child > span { display: block; margin-top: 10px; color: rgba(228, 219, 238, 0.46); font-size: 13px; }
+.account-identity { display: flex; align-items: center; gap: 20px; }
+.account-avatar { width: 62px; height: 62px; display: grid; place-items: center; color: #efe7ff; font-size: 24px; font-weight: 620; background: linear-gradient(160deg, rgba(170, 140, 255, 0.32), rgba(107, 70, 190, 0.16)); border: 1px solid rgba(200, 172, 255, 0.32); border-radius: 19px; box-shadow: 0 14px 40px rgba(97, 58, 180, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.22); }
+.account-welcome h1 { margin: 6px 0 0; color: #f7f3fa; font-size: clamp(34px, 4.4vw, 50px); font-weight: 610; letter-spacing: -0.045em; line-height: 1.02; }
+.account-identity > div > span { display: block; margin-top: 8px; color: rgba(228, 219, 238, 0.52); font-size: 13px; }
 
 .beta-badge { padding: 11px 14px; display: flex; align-items: center; gap: 10px; color: #c8b5f6; background: rgba(143, 82, 255, 0.09); border: 1px solid rgba(188, 158, 255, 0.15); border-radius: 13px; }
 .beta-badge span { display: grid; color: rgba(229, 219, 240, 0.48); font-size: 10.5px; }
@@ -271,7 +279,9 @@
 .account-grid { margin-top: 36px; display: grid; grid-template-columns: 1.25fr 0.75fr; gap: 16px; }
 .account-panel,
 .purchase-account { background: linear-gradient(148deg, rgba(255, 255, 255, 0.072), rgba(177, 139, 255, 0.025) 38%, rgba(15, 12, 21, 0.68) 78%), rgba(20, 16, 28, 0.74); border: 1px solid rgba(230, 219, 255, 0.12); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 22px 70px rgba(0, 0, 0, 0.24); backdrop-filter: blur(26px); -webkit-backdrop-filter: blur(26px); }
-.account-panel { min-height: 390px; padding: 27px; border-radius: 21px; }
+.account-panel { min-height: 390px; padding: 27px; border-radius: 21px; scroll-margin-top: 100px; transition: border-color 160ms ease, transform 160ms ease; }
+.account-panel:hover { border-color: rgba(230, 219, 255, 0.2); }
+.purchase-account { scroll-margin-top: 100px; }
 .panel-heading { display: flex; align-items: center; gap: 12px; }
 .panel-icon { width: 39px; height: 39px; display: grid; place-items: center; color: #cbb6ff; background: rgba(143, 82, 255, 0.11); border: 1px solid rgba(195, 166, 255, 0.15); border-radius: 12px; }
 .panel-heading p { margin: 0; color: rgba(224, 214, 236, 0.44); font-size: 10px; letter-spacing: 0.09em; text-transform: uppercase; }
@@ -296,8 +306,11 @@
 .account-license-key > span { color: rgba(224, 214, 235, 0.43); font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; }
 .account-license-key code { overflow: hidden; color: #d6c6fa; font-size: 10.5px; text-overflow: ellipsis; }
 .account-license-key button,
-.account-secondary { width: fit-content; min-height: 35px; padding: 0 11px; display: inline-flex; align-items: center; gap: 7px; color: rgba(238, 231, 247, 0.7); background: rgba(255, 255, 255, 0.055); border: 1px solid rgba(232, 221, 255, 0.1); border-radius: 9px; cursor: pointer; font-size: 11.5px; }
-.account-secondary { margin-top: 14px; }
+.account-secondary { width: fit-content; min-height: 35px; padding: 0 11px; display: inline-flex; align-items: center; gap: 7px; color: rgba(238, 231, 247, 0.7); background: rgba(255, 255, 255, 0.055); border: 1px solid rgba(232, 221, 255, 0.1); border-radius: 9px; cursor: pointer; font-size: 11.5px; transition: background 140ms ease, border-color 140ms ease, transform 140ms ease; }
+.account-license-key button:hover,
+.account-secondary:hover { background: rgba(255, 255, 255, 0.09); border-color: rgba(232, 221, 255, 0.2); }
+.account-secondary { width: 100%; min-height: 44px; margin-top: 18px; justify-content: center; color: #f0e9fb; background: rgba(143, 82, 255, 0.14); border: 1px solid rgba(183, 149, 255, 0.32); border-radius: 12px; font-size: 12.5px; font-weight: 580; }
+.account-secondary:hover { background: rgba(143, 82, 255, 0.22); border-color: rgba(183, 149, 255, 0.48); transform: translateY(-1px); }
 
 .free-access { margin-top: 28px; }
 .free-access > strong { color: #e9e0f7; font-size: 15px; font-weight: 590; }
@@ -323,6 +336,21 @@
 .account-purchase:disabled { opacity: 0.45; cursor: not-allowed; }
 .account-stripe { margin: 0; align-self: center; color: rgba(225, 216, 235, 0.39); font-size: 10.5px; line-height: 1.5; }
 
+.cli-pair-page { min-height: 100vh; display: grid; place-items: center; padding: 40px 20px; }
+.cli-pair-card { width: min(560px, 100%); padding: 38px 34px; background: linear-gradient(150deg, rgba(255, 255, 255, 0.095), rgba(182, 146, 255, 0.04) 36%, rgba(19, 15, 27, 0.76) 78%), rgba(20, 16, 28, 0.86); border: 1px solid rgba(230, 219, 255, 0.16); border-radius: 25px; box-shadow: 0 38px 100px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.11); backdrop-filter: blur(30px) saturate(140%); -webkit-backdrop-filter: blur(30px) saturate(140%); }
+.cli-pair-card > .panel-icon { margin-bottom: 18px; }
+.cli-pair-card h1 { margin: 8px 0 0; color: #f7f4fa; font-size: 32px; font-weight: 610; letter-spacing: -0.035em; }
+.cli-pair-copy { margin: 12px 0 0; color: rgba(230, 222, 238, 0.6); font-size: 13.5px; line-height: 1.6; }
+.cli-pair-copy code, .cli-pair-steps code { padding: 1px 6px; color: #d6c6fa; background: rgba(143, 82, 255, 0.12); border: 1px solid rgba(183, 149, 255, 0.2); border-radius: 6px; font-size: 12px; }
+.cli-pair-token { margin-top: 22px; padding: 14px 16px; background: rgba(7, 5, 10, 0.55); border: 1px solid rgba(183, 149, 255, 0.28); border-radius: 13px; }
+.cli-pair-token code { display: block; overflow-wrap: anywhere; color: #d6c6fa; font-size: 11.5px; line-height: 1.6; }
+.cli-pair-actions { margin-top: 14px; display: flex; gap: 10px; }
+.cli-pair-copy-button { flex: 1; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; color: #171020; background: linear-gradient(180deg, #eee7ff, #c2a7f8); border: 1px solid rgba(255, 255, 255, 0.5); border-radius: 12px; cursor: pointer; font-size: 13px; font-weight: 600; }
+.cli-pair-copy-button:hover { transform: translateY(-1px); }
+.cli-pair-refresh { min-height: 44px; padding: 0 15px; display: inline-flex; align-items: center; gap: 8px; color: rgba(238, 231, 247, 0.7); background: rgba(255, 255, 255, 0.055); border: 1px solid rgba(232, 221, 255, 0.12); border-radius: 12px; cursor: pointer; font-size: 12.5px; }
+.cli-pair-refresh:hover { background: rgba(255, 255, 255, 0.09); }
+.cli-pair-steps { margin: 26px 0 0; padding: 18px 18px 18px 34px; display: grid; gap: 10px; color: rgba(233, 226, 241, 0.62); background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(230, 219, 255, 0.09); border-radius: 14px; font-size: 12.5px; line-height: 1.6; }
+
 @keyframes account-spin { to { transform: rotate(360deg); } }
 
 @media (max-width: 860px) {
@@ -338,7 +366,9 @@
 @media (max-width: 560px) {
   .auth-page,
   .account-content,
-  .account-topbar { width: calc(100% - 24px); }
+  .account-topbar-inner { width: calc(100% - 24px); }
+  .account-avatar { width: 50px; height: 50px; font-size: 20px; border-radius: 15px; }
+  .account-identity { gap: 14px; }
   .auth-card { padding: 24px 20px; border-radius: 20px; }
   .auth-story h1 { font-size: 38px; }
   .account-topbar nav a { display: none; }

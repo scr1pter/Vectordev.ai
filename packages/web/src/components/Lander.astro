@@ -587,6 +587,13 @@ const changelog = [
             <ArrowRight size={18} strokeWidth={2} aria-hidden="true" />
           </a>
 
+          <a class="hero-cli-chip" href="#ch-cli">
+            <span class="hero-cli-chip-new">New</span>
+            <Terminal size={14} strokeWidth={2} aria-hidden="true" />
+            <span><strong>Vector CLI</strong> — the same agent in your terminal. Free with an account.</span>
+            <ArrowRight size={13} strokeWidth={2} aria-hidden="true" />
+          </a>
+
           <p class="hero-note">Local-first. Free models included, or bring your own. Available for macOS, Windows, and Linux.</p>
           <p class="hero-ship">
             <span class="hero-ship-dot" aria-hidden="true"></span>
@@ -630,6 +637,77 @@ const changelog = [
               loading="lazy"
             />
           </figure>
+        </div>
+      </div>
+    </section>
+
+    <section id="ch-cli" data-chapter="CLI" class="cli-scene section-width" aria-labelledby="cli-title">
+      <div class="section-heading chapter-head" data-reveal>
+        <p class="section-kicker">New · Vector CLI</p>
+        <h2 id="cli-title">The whole agent, in your terminal.</h2>
+        <p>
+          Everything Vector's agent can do — plan, edit, run commands, use your connectors — as a single command in any
+          shell, on any repository. Built to stand next to the best terminal agents you've used, and it starts free.
+        </p>
+      </div>
+
+      <div class="cli-grid">
+        <figure class="cli-terminal" data-reveal aria-label="A Vector CLI session">
+          <div class="product-bar" aria-hidden="true">
+            <span class="traffic"><i></i><i></i><i></i></span>
+            <span class="product-title">vector — zsh</span>
+            <span class="product-status"><i></i> Big Pickle · $0.00</span>
+          </div>
+          <pre class="cli-screen"><code><span class="cli-prompt">$</span> vector
+<span class="cli-ok">◇ signed in as you@yourteam.dev · model: big pickle (free)</span>
+<span class="cli-prompt">&gt;</span> the checkout test started failing on main — find it, fix it
+
+<span class="cli-dim">● read tests/checkout.test.ts, git log -S couponExpiry</span>
+<span class="cli-dim">● the fixture clock froze before midnight UTC — expiry now
+  crosses a day boundary. patching the fixture, re-running.</span>
+<span class="cli-ok">✓ 14 passing · 1 fixed · commit staged · $0.00 spent</span></code></pre>
+        </figure>
+
+        <div class="cli-points" data-reveal>
+          <article>
+            <h3>Free, with a free account</h3>
+            <p>
+              Sign up once at vectordev.ai, run <code>vector login</code>, and you're in. No card, no trial clock — the
+              account is the whole price.
+            </p>
+          </article>
+          <article>
+            <h3>A frontier model included</h3>
+            <p>
+              Vector CLI defaults to Big Pickle — a fast, free, tool-calling model — so it works the moment it installs.
+              No API key required.
+            </p>
+          </article>
+          <article>
+            <h3>Or bring your own key</h3>
+            <p>
+              Prefer Claude, GPT-5, or Gemini? <code>vector auth login</code> connects your own provider keys and the CLI
+              switches instantly. Your keys stay on your machine.
+            </p>
+          </article>
+          <article>
+            <h3>Your workspace follows you</h3>
+            <p>
+              Same sessions, same memory, same project connectors as the Vector desktop app — the terminal is just
+              another door into the workspace.
+            </p>
+          </article>
+        </div>
+      </div>
+
+      <div class="cli-get" data-reveal>
+        <code class="cli-install"><span aria-hidden="true">$</span> npm install -g @vectordev/cli <span class="cli-install-tag">npm package rolling out</span></code>
+        <div class="cli-get-actions">
+          <a class="hero-cta cli-get-cta" href="/login">
+            <span>Create your free account</span>
+            <ArrowRight size={17} strokeWidth={2} aria-hidden="true" />
+          </a>
+          <a class="cli-get-token" href="/auth/cli">Already have one? Get your CLI token</a>
         </div>
       </div>
     </section>
@@ -1931,6 +2009,43 @@ const changelog = [
     transform: translateX(3px);
   }
 
+  .hero-cli-chip {
+    margin-top: 18px;
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    padding: 9px 16px 9px 9px;
+    color: var(--ink-70);
+    font-size: 12.5px;
+    text-decoration: none;
+    background: rgba(143, 82, 255, 0.09);
+    border: 1px solid rgba(183, 149, 255, 0.26);
+    border-radius: 999px;
+    transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+  }
+
+  .hero-cli-chip strong {
+    color: var(--lavender);
+    font-weight: 620;
+  }
+
+  .hero-cli-chip:hover {
+    background: rgba(143, 82, 255, 0.16);
+    border-color: rgba(183, 149, 255, 0.45);
+    transform: translateY(-1px);
+  }
+
+  .hero-cli-chip-new {
+    padding: 3px 9px;
+    color: #171020;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    background: linear-gradient(180deg, #eee7ff, #c2a7f8);
+    border-radius: 999px;
+  }
+
   .hero-note {
     margin: 18px 0 0;
     color: var(--ink-40);
@@ -3228,5 +3343,142 @@ const changelog = [
     .feature-card,
     .feature-card:hover { transform: none; }
     .product-window img { will-change: auto; }
+  }
+  /* ── Vector CLI section ─────────────────────────────────────────── */
+  .cli-scene {
+    padding: clamp(64px, 9vw, 120px) 0 clamp(48px, 7vw, 88px);
+    scroll-margin-top: 96px; /* clear the sticky glass nav on #ch-cli jumps */
+  }
+
+  .cli-grid {
+    margin-top: clamp(28px, 4vw, 46px);
+    display: grid;
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
+    gap: clamp(20px, 3vw, 36px);
+    align-items: start;
+  }
+
+  .cli-terminal {
+    margin: 0;
+    overflow: hidden;
+    background: rgba(10, 7, 16, 0.92);
+    border: 1px solid var(--hairline);
+    border-radius: 18px;
+    box-shadow: 0 30px 90px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  }
+
+  .cli-screen {
+    margin: 0;
+    padding: 22px 24px 26px;
+    overflow-x: auto;
+    color: var(--ink-70);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+    font-size: 12.5px;
+    line-height: 1.75;
+  }
+
+  .cli-prompt { color: var(--purple-soft); font-weight: 700; }
+  .cli-ok { color: #7fd8a4; }
+  .cli-dim { color: var(--ink-55); }
+
+  .cli-points {
+    display: grid;
+    gap: 14px;
+  }
+
+  .cli-points article {
+    padding: 18px 20px;
+    background: var(--glass-fill);
+    border: 1px solid var(--glass-line);
+    border-radius: var(--glass-radius-small);
+    box-shadow: var(--glass-shadow-soft);
+  }
+
+  .cli-points h3 {
+    margin: 0;
+    color: var(--lavender);
+    font-size: 14.5px;
+    font-weight: 620;
+    letter-spacing: -0.01em;
+  }
+
+  .cli-points p {
+    margin: 7px 0 0;
+    color: var(--ink-55);
+    font-size: 12.8px;
+    line-height: 1.65;
+  }
+
+  .cli-points code,
+  .cli-install {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+  }
+
+  .cli-points code {
+    padding: 1px 6px;
+    color: var(--purple-soft);
+    font-size: 11.5px;
+    background: rgba(143, 82, 255, 0.12);
+    border: 1px solid rgba(183, 149, 255, 0.22);
+    border-radius: 6px;
+  }
+
+  .cli-get {
+    margin-top: clamp(26px, 4vw, 40px);
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    padding: 20px 24px;
+    background: var(--glass-fill-strong);
+    border: 1px solid var(--glass-line);
+    border-radius: var(--glass-radius-small);
+    box-shadow: var(--glass-shadow-soft);
+  }
+
+  .cli-install {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--lavender);
+    font-size: 13px;
+  }
+
+  .cli-install > span[aria-hidden] { color: var(--purple-soft); }
+
+  .cli-install-tag {
+    padding: 3px 9px;
+    color: var(--purple-soft);
+    font-size: 10px;
+    font-weight: 620;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    background: rgba(143, 82, 255, 0.12);
+    border: 1px solid rgba(183, 149, 255, 0.28);
+    border-radius: 999px;
+  }
+
+  .cli-get-actions {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+  }
+
+  .cli-get-cta { margin: 0; }
+
+  .cli-get-token {
+    color: var(--ink-55);
+    font-size: 12.5px;
+    text-decoration: underline;
+    text-decoration-color: rgba(183, 149, 255, 0.4);
+    text-underline-offset: 3px;
+  }
+
+  .cli-get-token:hover { color: var(--lavender); }
+
+  @media (max-width: 960px) {
+    .cli-grid { grid-template-columns: 1fr; }
+    .cli-get { flex-direction: column; align-items: flex-start; }
   }
 </style>

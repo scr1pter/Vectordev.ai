@@ -1,0 +1,14 @@
+---
+import { CliTokenPage } from "../../components/marketing/account/CliTokenPage"
+import MatrixRain from "../../components/marketing/account/MatrixRain.astro"
+import MarketingLayout from "../../components/marketing/MarketingLayout.astro"
+
+export const prerender = true
+---
+
+<MarketingLayout title="Connect the Vector CLI" description="Link the Vector terminal agent to your free Vector account." noindex>
+  <div class="account-environment">
+    <MatrixRain />
+    <CliTokenPage client:only="react" />
+  </div>
+</MarketingLayout>

@@ -5,6 +5,9 @@ import { Git } from "@/git"
 import { InstanceRef } from "@/effect/instance-ref"
 import { Process } from "@/util/process"
 
+// Relaunch whichever brand is running (the vector distribution has no `opencode` on PATH).
+const selfBin = process.env.VECTOR_CLI === "1" ? "vector" : "opencode"
+
 export const PrCommand = effectCmd({
   command: "pr <number>",
   describe: "fetch and checkout a GitHub PR branch, then run opencode",
@@ -80,7 +83,7 @@ export const PrCommand = effectCmd({
           UI.println(`Importing session...`)
 
           const importResult = yield* Effect.promise(() =>
-            Process.text(["opencode", "import", sessionUrl], { nothrow: true, inheritInternalEnv: true }),
+            Process.text([selfBin, "import", sessionUrl], { nothrow: true, inheritInternalEnv: true }),
           )
           if (importResult.code === 0) {
             const sessionIdMatch = importResult.text.trim().match(/Imported session: ([a-zA-Z0-9_-]+)/)
@@ -101,7 +104,7 @@ export const PrCommand = effectCmd({
     const opencodeArgs = sessionId ? ["-s", sessionId] : []
     const code = yield* Effect.promise(
       () =>
-        Process.spawn(["opencode", ...opencodeArgs], {
+        Process.spawn([selfBin, ...opencodeArgs], {
           inheritInternalEnv: true,
           stdin: "inherit",
           stdout: "inherit",

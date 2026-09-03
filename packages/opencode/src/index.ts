@@ -28,13 +28,19 @@ import { SessionCommand } from "./cli/cmd/session"
 import { DbCommand } from "./cli/cmd/db"
 import { errorMessage } from "./util/error"
 import { PluginCommand } from "./cli/cmd/plug"
+import { VectorLoginCommand, VectorLogoutCommand, VectorWhoamiCommand } from "./cli/cmd/vector-login"
 import { Heap } from "./cli/heap"
 
 const args = hideBin(process.argv)
 
+// The published `vector` bin sets VECTOR_CLI=1: same agent, Vector branding,
+// and a free-account gate on agent commands (desktop sidecar is unaffected —
+// it embeds the server directly and never goes through this entrypoint).
+const isVectorCli = process.env.VECTOR_CLI === "1"
+
 function show(out: string) {
   const text = out.trimStart()
-  if (!text.startsWith("opencode ")) {
+  if (!text.startsWith("opencode ") && !text.startsWith("vector ")) {
     process.stderr.write(UI.logo() + EOL + EOL)
     process.stderr.write(text + EOL)
     return
@@ -42,9 +48,12 @@ function show(out: string) {
   process.stderr.write(out)
 }
 
+// Commands that must stay reachable without an account.
+const openCommands = new Set(["login", "logout", "whoami", "completion", "uninstall", "upgrade"])
+
 const cli = yargs(args)
   .parserConfiguration({ "populate--": true })
-  .scriptName("opencode")
+  .scriptName(isVectorCli ? "vector" : "opencode")
   .wrap(100)
   .help("help", "show help")
   .alias("help", "h")
@@ -75,6 +84,14 @@ const cli = yargs(args)
     process.env.AGENT = "1"
     process.env.OPENCODE = "1"
     process.env.OPENCODE_PID = String(process.pid)
+
+    if (isVectorCli && !opts.help && !opts.version) {
+      const command = String(opts._?.[0] ?? "")
+      if (!openCommands.has(command)) {
+        const { ensureVectorAccount } = await import("./cli/vector-account")
+        await ensureVectorAccount()
+      }
+    }
   })
   .usage("")
   .completion("completion", "generate shell completion script")
@@ -114,6 +131,10 @@ const cli = yargs(args)
     process.exit(1)
   })
   .strict()
+
+if (isVectorCli) {
+  cli.command(VectorLoginCommand).command(VectorLogoutCommand).command(VectorWhoamiCommand)
+}
 
 try {
   if (args.includes("-h") || args.includes("--help")) {

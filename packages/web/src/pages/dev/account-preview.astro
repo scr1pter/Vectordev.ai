@@ -1,0 +1,33 @@
+---
+import { AccountPage } from "../../components/marketing/account/AccountPage"
+import MatrixRain from "../../components/marketing/account/MatrixRain.astro"
+import MarketingLayout from "../../components/marketing/MarketingLayout.astro"
+
+// Dev-only design harness for the logged-in account page. Never built for prod.
+if (!import.meta.env.DEV) return Astro.redirect("/account")
+
+const variant = Astro.url.searchParams.get("variant")
+const preview =
+  variant === "licensed"
+    ? {
+        user: { id: "usr_preview", email: "krishna@vectordev.ai", name: "Krishna Bharadwaj" },
+        billing: {
+          status: { access: true, state: "active" as const, plan: "annual" as const, interval: "year" as const },
+          licenseKey: "VEC1-8F2A-PREV-IEW0-4C21-9DEM",
+        },
+        purchasesAvailable: true,
+        betaAccess: false,
+      }
+    : {
+        user: { id: "usr_preview", email: "krishna@vectordev.ai", name: "Krishna Bharadwaj" },
+        purchasesAvailable: true,
+        betaAccess: true,
+      }
+---
+
+<MarketingLayout title="Account preview (dev)" description="Design harness" noindex>
+  <div class="account-environment">
+    <MatrixRain />
+    <AccountPage client:only="react" preview={preview} />
+  </div>
+</MarketingLayout>
