@@ -45,6 +45,362 @@ const navigation = [
       ["FAQ", "faq"],
     ],
   },
+  {
+    label: "Why Vector",
+    links: [
+      ["Overview", "why-vector"],
+      ["One operating loop", "operating-loop"],
+      ["Local memory", "local-memory"],
+      ["Tokenomics engine", "tokenomics"],
+      ["HULK licensing", "hulk"],
+      ["Verified completion", "verified-completion"],
+      ["Controlled browser", "controlled-browser"],
+      ["Only in Vector", "only-in-vector"],
+      ["The conditions", "conditions"],
+      ["Subagents", "subagents"],
+      ["Comparison", "comparison"],
+      ["Vector Velocity model", "velocity"],
+      ["API platform", "api-platform"],
+      ["Changelog", "changelog"],
+    ],
+  },
+]
+
+const ecosystem = [
+  "Claude Code",
+  "Codex",
+  "Cursor Agent",
+  "Anthropic",
+  "OpenAI",
+  "Google",
+  "MCP",
+  "GitHub",
+  "GitLab",
+  "Linear",
+  "Sentry",
+  "Figma",
+  "Stripe",
+  "Vercel",
+  "Netlify",
+  "Supabase",
+  "AWS",
+  "Playwright",
+]
+
+// The nine parts of the workspace, in the order the page argues them. Each one
+// gets a card here and a full section below, so no single capability carries
+// the page on its own.
+const pillars = [
+  {
+    name: "The workspace",
+    eyebrow: "Editor, file search, diagnostics, terminal",
+    body: "Agent and Editor are two modes over the same local repository and session, with project-wide file search, diagnostics, a terminal, browser, review, and the same agent beside the file you opened.",
+  },
+  {
+    name: "Local memory",
+    eyebrow: "One file, on your machine",
+    body: "What you choose to save about how you work is stored in a Markdown file in Vector's local app config directory and deleted when you erase it. The file is not uploaded to Vector's servers; when it exists, Vector automatically includes it in built-in agent context sent to the model provider you chose.",
+  },
+  {
+    name: "Model economics",
+    eyebrow: "Provider-reported, or nothing",
+    body: "The tokens and cost a run spent, taken from what the provider itself reported. Nothing estimated. A run nothing reported is marked unmeasured rather than shown as free.",
+  },
+  {
+    name: "Controlled browser",
+    eyebrow: "Observe, repair, retest",
+    body: "A real browser view the agent drives against the running product — and one that refuses to type into password, one-time-code and card fields, handing the step to you instead.",
+  },
+  {
+    name: "Verified completion",
+    eyebrow: "Opt-in · not on plan or quick",
+    body: "Turn on LLM-as-a-judge and a separate subagent compares the finished work against your original request and the evidence, and sends it back for repair on a failed verdict.",
+  },
+  {
+    name: "Cloud Services",
+    eyebrow: "Your own accounts",
+    body: "Deployments, domains with real DNS checks, environment variables, databases and logs, run through the Vercel, Netlify, Supabase and AWS accounts that already belong to you.",
+  },
+  {
+    name: "MCP and plugins",
+    eyebrow: "118 ready to connect",
+    body: "GitHub, Linear, Sentry, Figma, Playwright, Postgres, Stripe, Slack and more, plus any MCP server you add — and Vector installs the runtime a plugin needs instead of sending you to a terminal.",
+  },
+  {
+    name: "Parallel agents",
+    eyebrow: "Up to 16 · isolated or shared",
+    body: "When one agent is not enough, run several in their own checkouts or together in one, watch them from a single dashboard, and merge only what you trust.",
+  },
+  {
+    name: "Automations",
+    eyebrow: "Desktop · runs with no window open",
+    body: "Recurring work across repositories on a repeat you set, each run a real session with a transcript waiting, still firing after the last window is closed.",
+  },
+]
+
+type FeatureKind = "editor" | "memory" | "browser" | "cloud" | "agents" | "automations" | "work" | "cost" | "terminal" | "diff"
+
+type Feature = {
+  title: string
+  body: string
+  tag: string
+  note: string
+  href: string
+  link: string
+  demo?: FeatureKind
+  proof?: string[][]
+}
+
+// Each pillar in full. `proof` stands in for an interactive demo on the
+// pillars the product does not show in a single frame.
+const conditions = [
+  [
+    "Worktrees need clean Git",
+    "An isolated agent gets a Git worktree on its own branch only when the project is a Git repository and the working tree is clean. Without one — no repository, uncommitted changes, or a worktree that cannot be created — Vector provisions an isolated copy instead and records which it used in the workspace log.",
+  ],
+  [
+    "Recommendations need evidence",
+    "Model economics suggests nothing until a model has at least three recorded runs for that kind of task. There is no cold-start guess, and a model whose spend was never reported never sorts ahead of one that reported a real cost.",
+  ],
+  [
+    "Unmeasured is not zero",
+    "Cost and tokens come from the provider's own report for that run. When a provider reports nothing, the run is stored and shown as unmeasured. Vector will not print a zero that reads as free.",
+  ],
+  [
+    "The judge is opt-in",
+    "LLM-as-a-judge is off until you switch it on, and it spends extra model calls on every prompt it covers. It cannot apply to the plan lane, which produces nothing to verify, or to the quick lane, which has no ability to spawn the judge at all.",
+  ],
+  [
+    "External runtimes are yours",
+    "Claude Code, Codex, and Cursor Agent run as workspace engines, but only where Vector detects that CLI installed on this computer, and the run is signed in by the subscription already in it. Vector never asks for a second key — and teammate messaging is carried by Vector's own agent, so an external runtime shares the checkout but not the message channel.",
+  ],
+  [
+    "Automations are a desktop feature",
+    "Scheduling lives in the Vector desktop app, so tasks fire while that app is running — including with every window closed, but not while the machine is off or Vector has been quit from the tray. A scheduled run uses Vector's own agent rather than an external CLI runtime.",
+  ],
+  [
+    "The shell sandbox is off by default",
+    "Commands an agent runs can be confined to their workspace by the operating system's own mechanism — a seatbelt profile on macOS, bubblewrap on Linux where it is installed — by setting OPENCODE_SHELL_SANDBOX. It is opt-in, off by default, and Windows ships no equivalent, so Vector says so and runs unconfined there rather than pretending.",
+  ],
+  [
+    "Cloud actions need your authorization",
+    "Vercel, Netlify, and Supabase work once you authorize them, and AWS reads a profile you already configured for the AWS CLI. Vector acts inside those accounts; it does not host your project itself and does not proxy your code.",
+  ],
+  [
+    "Dictation downloads once, then stays local",
+    "Speech is transcribed by a Whisper model that runs on your machine. The model file is fetched and cached the first time, after which nothing is sent to a cloud speech service.",
+  ],
+]
+const workflow = [
+  ["Open", "Attach the repository already on your computer."],
+  ["Work", "Open a file in Editor or hand the same session to an agent — one, or several in their own checkouts."],
+  ["Observe", "Follow plans, edits, commands, browser actions, and the tokens and cost the provider reported."],
+  ["Verify", "Run checks, inspect the product in the browser, review the diff, and optionally require an independent judge verdict."],
+  ["Ship", "Merge the hunks you trust and publish through your own connected accounts."],
+]
+
+// What actually happens when someone buys Vector and when a run spends money.
+// Every claim here is checked against the implementation: license-service.ts
+// for activation and the grace window, spend-limits.ts for the ledger.
+const licenseRows = [
+  [
+    "One key, minted per purchase",
+    "Your verified Vector account owns the purchase. Stripe takes the payment; Vector never sees a card number. Your existing VEC1 license format is preserved, and the private key is emailed and available from your account.",
+  ],
+  [
+    "Bound to a hash, not to your hardware",
+    "Activation reads a stable machine identifier — the platform UUID on macOS and Windows, /etc/machine-id on Linux — and immediately SHA-256 hashes it with a Vector-specific salt. Only that hash is ever sent. The raw identifier never leaves your computer, so the licence can tell two machines apart without ever learning anything about either.",
+  ],
+  [
+    "Stored where only you can read it",
+    "The activated licence lives in one file in Vector's own application data, written with 0600 permissions — owner read and write, nobody else — and replaced atomically, so an interrupted write can never leave a half-file behind.",
+  ],
+  [
+    "Seven days offline before it asks again",
+    "Vector re-checks in the background. If it cannot reach licensing — you are on a plane, the network is down, the service is having a bad day — it keeps working on the last good answer for seven days and tells you it is doing so. It does not fail closed the moment a request times out.",
+  ],
+]
+const spendRows = [
+  [
+    "Measured, never estimated",
+    "What a run cost comes from the numbers the provider itself reported — input, output, reasoning, cache reads and cache writes — alongside its own cost figure. Nothing is inferred from character counts.",
+  ],
+  [
+    "Unmeasured is not free",
+    "A run whose provider reported no usage is recorded as unmeasured rather than as zero, because a fabricated zero reads as free and quietly poisons every total built on top of it.",
+  ],
+  [
+    "The ledger is yours and it is local",
+    "Spend is kept in a file on your machine, with daily totals retained far longer than the raw events behind them. Vector reads it to enforce the caps you set and to stop a run before it goes past them.",
+  ],
+  [
+    "Your keys, your bill",
+    "Bring your own provider keys and the model spend is between you and that provider. Vector's own price is the licence — it does not resell tokens or add a margin to them.",
+  ],
+]
+const systemRows = [
+  [
+    "Memory that is one file you can delete",
+    "Local memory is a single MEMORY.md in your own config directory, read in every repository. Settings shows its path, size, last change, and full contents, and erasing removes the file rather than emptying it.",
+  ],
+  [
+    "Spend that is measured, not modelled",
+    "Tokens and cost come from what the provider reported for that run — input, output, reasoning, cache read and cache write. A run nothing reported is marked unmeasured, and an unmeasured model never outranks one that reported a real cost.",
+  ],
+  [
+    "A judge that can fail the work",
+    "Optional LLM-as-a-judge hands the original request, the success criteria, the changed files and the captured test output to a separate subagent. A FAIL names the specific repair and the agent goes back to work, up to three rounds.",
+  ],
+  [
+    "A browser that refuses credentials",
+    "The browser agent will not type into a password, one-time-code, or card field. It pauses and hands the live browser to you, then resumes with what it can see.",
+  ],
+  [
+    "Plugin runtimes that install themselves",
+    "A catalog plugin that needs uvx no longer becomes a terminal errand. Vector resolves the runner, installs it through Astral's own installer when it is missing, and rewrites the command to an absolute path so it spawns without a login shell.",
+  ],
+  [
+    "Publishing on accounts that stay yours",
+    "Deploy through your own Vercel, Netlify, or Supabase authorization, manage domains, environment variables, and databases, and verify a domain with a real CNAME lookup — from a workspace that never proxies your repository.",
+  ],
+  [
+    "See who edited what",
+    "The editor attributes each live edit to the agent that made it. When two agents hold the same file, Vector names the file and both agents before either merges.",
+  ],
+  [
+    "Start with no key at all",
+    "Curated free models are included, so there is a capable model available before you have connected a provider or paid anyone.",
+  ],
+  [
+    "Dictation that stays on device",
+    "Speech is transcribed by a Whisper model running on your machine. Nothing is sent to a cloud speech service.",
+  ],
+  [
+    "Merge the hunks you trust",
+    "Review an agent's diff and merge selected hunks or files rather than accepting the whole change, with secret scanning and a restorable checkpoint before anything lands on main.",
+  ],
+  [
+    "Run the other agents too",
+    "Claude Code, Codex, and Cursor Agent run as engines inside Vector, on the CLIs and subscriptions you already have — alongside Vector's own agent, the browser, the editor, scheduling, and cloud delivery in the same workspace.",
+  ],
+  [
+    "Agents wired the way you want",
+    "A team can be everyone-to-everyone, a coordinator broadcasting down to workers, or any pairing you set yourself. A message to a teammate you have not linked is refused and told so, rather than dropped where the sender never finds out.",
+  ],
+]
+const connectionGroups = [
+  ["Models", "Included free models, then Anthropic, OpenAI, Google, and other BYOK providers"],
+  ["Agent runtimes", "Local Claude Code, Codex, and Cursor tools when Vector detects them installed"],
+  ["Protocols and source", "118 catalog connectors, your own MCP servers, GitHub, and GitLab"],
+  ["Cloud and validation", "Vercel, Netlify, Supabase, AWS through its CLI, and Playwright"],
+]
+const comparison = [
+  ["Editor, file search, diagnostics, terminal", "Built in", "Terminal-first", "Terminal-first", "IDE-native", "Managed editor"],
+  ["Memory file the app shows and can erase", "One MEMORY.md, with path, size and one-click erase", "—", "—", "—", "—"],
+  ["Provider-reported spend recorded per run", "Ledger, plus model ranking", "Session cost readout", "—", "Usage dashboard", "—"],
+  ["Independent judge before “done”", "Opt-in judge subagent", "—", "—", "—", "—"],
+  ["Connector catalog", "118 connectors, plus your own MCP", "Via MCP", "Via MCP", "Via MCP", "—"],
+  ["Browser the agent drives", "Built in, refuses credentials", "Via tools", "Browser + CDP", "Via tools", "Preview-centric"],
+  ["Deploys on accounts you own", "Vercel, Netlify, Supabase, AWS", "Via tools", "Via tools", "Via MCP", "Native hosting"],
+  ["Parallel isolated agents", "Up to 16", "Subagents", "Worktrees", "Background agents", "—"],
+  ["Recurring work with no window open", "Desktop tray", "—", "—", "—", "—"],
+]
+
+// The engine's nine subagents (packages/opencode/src/agent/agent.ts) and the
+// display identities painted over them. Roles restate the engine descriptions
+// and the labels mirror the real permission sets — review and security cannot
+// write, the judge cannot edit files and only runs under verified completion —
+// so no card promises more than its agent is allowed to do.
+const crew = [
+  {
+    label: "explore",
+    name: "Explore",
+    summary: "Finds code fast",
+    hue: 25,
+    readOnly: false,
+    role: "Finds files by pattern, searches code for keywords, and answers questions about how the codebase works.",
+  },
+  {
+    label: "general",
+    name: "General",
+    summary: "Multi-step work",
+    hue: 150,
+    readOnly: false,
+    role: "Researches open-ended questions and carries multi-step tasks through to a result.",
+  },
+  {
+    label: "judge",
+    name: "Judge",
+    summary: "Verifies completion",
+    hue: 265,
+    readOnly: true,
+    role: "Scores finished work against the original request and returns PASS, FAIL or INCONCLUSIVE. Runs only when verified completion is on.",
+  },
+  {
+    label: "debug",
+    name: "Debug",
+    summary: "Finds root causes",
+    hue: 95,
+    readOnly: false,
+    role: "Reproduces a failure, isolates the cause, applies a focused repair and re-checks that it holds.",
+  },
+  {
+    label: "migration",
+    name: "Migration",
+    summary: "Upgrades safely",
+    hue: 200,
+    readOnly: false,
+    role: "Plans and stages framework, dependency, API, schema and configuration upgrades across compatibility boundaries.",
+  },
+  {
+    label: "performance",
+    name: "Performance",
+    summary: "Makes it faster",
+    hue: 45,
+    readOnly: false,
+    role: "Measures a baseline, then optimises slow runtime paths, builds, bundles, queries and rendering against it.",
+  },
+  {
+    label: "review",
+    name: "Review",
+    summary: "Reads the diff",
+    hue: 320,
+    readOnly: true,
+    role: "Inspects a change for correctness, regressions, missing tests and maintainability, with file and line. Never edits.",
+  },
+  {
+    label: "security",
+    name: "Security",
+    summary: "Checks the boundaries",
+    hue: 220,
+    readOnly: true,
+    role: "Reviews trust boundaries, authentication, secrets, injection risk and unsafe data flow. Never edits.",
+  },
+  {
+    label: "test",
+    name: "Test",
+    summary: "Writes coverage",
+    hue: 175,
+    readOnly: false,
+    role: "Designs focused coverage, writes or repairs tests, runs the suite and reports failures with evidence.",
+  },
+]
+const changelog = [
+  [
+    "August 2026",
+    "One workspace, two ways to work",
+    "Agent and Editor now share one session, files open in persistent full-screen tabs, Settings is a searchable full-screen destination, and the Agent Dashboard, browser, terminal and review use one calmer purple project shell.",
+  ],
+  ["August 2026", "Scheduled work that runs while you are away", "Vector keeps a tray presence and stays resident after the last window closes, so a recurring task still fires with no window open. The tray shows what is armed and when it next runs, can run or pause everything from there, and notifies you when a run finishes."],
+  ["August 2026", "Economics that actually learn", "Every session now feeds measured token and cost evidence into model recommendations, so the ranking is built from what providers actually reported rather than from list prices."],
+  ["August 2026", "Plugins that install themselves", "Vector fetches whatever runtime a plugin needs, so Computer Use and other tools connect without a terminal detour."],
+  ["August 2026", "Measured spend and in-app help", "Model economics now records real provider-reported tokens and cost per run, plus a Help AI Assistant and one-click bug reporting inside the workspace."],
+  ["August 2026", "Agents can actually reach each other", "Fixed the teammate message tool, which was registered where the engine never looked, so collaborating agents could not reach each other."],
+  ["August 2026", "Agents that work together", "Shared workspaces where agents message each other, an Agent Dashboard with clash detection, per-agent edit attribution in the editor, and AI pull request review."],
+  ["August 2026", "Licensing and disclosure", "HEIC conversion moved to the operating system, removing the last copyleft dependency, with expanded privacy and terms coverage."],
+  ["July 2026", "Vector desktop release and download refresh", "Verified installers for macOS, Windows, and Linux, served from the new download pipeline. Signed builds continue through automatic updates; unsigned previews stay manual-download only."],
+  ["July 2026", "Review tools and shell polish", "A refined review panel, window recovery fixes, and a cleaner desktop chrome across the workspace."],
+  ["July 2026", "Models and settings controls", "Restored provider management, model pickers, and execution settings throughout the rebuilt shell."],
 ]
 
 const faqs = [
@@ -415,6 +771,239 @@ const faqs = [
               </details>
             ))}
           </div>
+        </section>
+        <section id="why-vector" class="doc-section">
+          <p class="section-number">19</p>
+          <h2>Why Vector</h2>
+          <p>
+            Most tools write the code. The hard part was never the writing. Vector is a workspace, not a wrapper
+            around one trick: the editor, the memory, the measured spend, the verification, the connectors, the
+            browser, the cloud accounts, the parallel agents and the schedule all sit in one place, over the
+            repository already on your disk. No single feature is the reason to use it — the combination is.
+          </p>
+          <div class="doc-tally">
+            <div><strong>118</strong><span>connectors ready to turn on</span></div>
+            <div><strong>16</strong><span>agents you can run at once</span></div>
+            <div><strong>4</strong><span>runtimes — Vector's and three others</span></div>
+            <div><strong>0</strong><span>lines of your code uploaded to Vector by default</span></div>
+          </div>
+          <h3>Nine parts, one workspace</h3>
+          <div class="doc-grid">
+            {pillars.map((pillar) => (
+              <article class="doc-card">
+                <small>{pillar.eyebrow}</small>
+                <h4>{pillar.name}</h4>
+                <p>{pillar.body}</p>
+              </article>
+            ))}
+          </div>
+          <p class="note">
+            Works alongside what you already use: {ecosystem.join(", ")}. Free and BYOK — bring the agents, models,
+            and services you already trust.
+          </p>
+        </section>
+
+        <section id="operating-loop" class="doc-section">
+          <p class="section-number">20</p>
+          <h2>One operating loop</h2>
+          <p>
+            From a brief to verified, shipped work. Vector keeps the request, repository context, your own edits,
+            agent activity, files, terminal, browser, measured usage, review, and release in one place.
+          </p>
+          <ol class="steps">
+            {workflow.map(([title, body], index) => (
+              <li><span>{index + 1}</span><div><strong>{title}</strong><p>{body}</p></div></li>
+            ))}
+          </ol>
+          <div class="doc-grid doc-grid-4">
+            <article class="doc-card"><h4>Editor, file search, terminal</h4><p>A real editor over your own files, with project-wide search, language diagnostics, a terminal, and an editor agent beside them.</p></article>
+            <article class="doc-card"><h4>Memory and measured spend</h4><p>Local memory in one file you can inspect, edit, or erase. Model economics records the tokens and cost the provider reported.</p></article>
+            <article class="doc-card"><h4>Review before main</h4><p>Inspect diffs, focused checks, pull-request findings, risk signals, checkpoints, and an optional independent judge verdict before work reaches the primary files.</p></article>
+            <article class="doc-card"><h4>MCP, providers, and Cloud</h4><p>Bring your own model provider, connect approved tools through MCP and the plugin catalog, and publish through infrastructure accounts that already belong to you.</p></article>
+          </div>
+        </section>
+
+        <section id="local-memory" class="doc-section">
+          <p class="section-number">21</p>
+          <h2>Local memory</h2>
+          <p>
+            Vector lets you save durable facts about how you work — your stack, your conventions, the corrections you
+            would otherwise repeat — in one <code>MEMORY.md</code> file inside Vector's local app config directory. It
+            is read in every repository and automatically included in the context Vector sends to the model provider
+            you choose. Settings shows its path, size, last change, and full contents; erasing removes the file rather
+            than emptying it.
+          </p>
+          <p class="note">The file is never uploaded to Vector's servers. Memory is yours to inspect, edit, or delete.</p>
+        </section>
+
+        <section id="tokenomics" class="doc-section">
+          <p class="section-number">22</p>
+          <h2>Tokenomics engine</h2>
+          <p>
+            The number is the provider's, not ours. Vector records what a run really spent by reading what the
+            provider reported on the assistant messages — input, output, reasoning, cache reads and cache writes —
+            along with the provider's own cost figure. Nothing is inferred from character counts. That ledger is then
+            held against the limits you set: per day, per run, per project.
+          </p>
+          <dl class="doc-rows">
+            {spendRows.map(([term, detail]) => (<div><dt>{term}</dt><dd>{detail}</dd></div>))}
+          </dl>
+          <p class="note">
+            Economics that learn: every session feeds measured token and cost evidence into model recommendations, so
+            the ranking is built from what providers actually reported rather than from list prices. A model gets no
+            recommendation until it has at least three recorded runs for that kind of task, and an unmeasured model
+            never outranks one that reported a real cost.
+          </p>
+        </section>
+
+        <section id="hulk" class="doc-section">
+          <p class="section-number">23</p>
+          <h2>HULK — hidden unique licence keys</h2>
+          <p>
+            Every copy has its own key. No shared serial, no keygen-shaped pattern, nothing embedded in the installer.
+            Each purchase mints a key that exists only for that buyer, and activation ties it to the machines it runs
+            on. Vector's licence is a fixed price you pay us; model usage is metered by whichever provider you brought.
+          </p>
+          <dl class="doc-rows">
+            {licenseRows.map(([term, detail]) => (<div><dt>{term}</dt><dd>{detail}</dd></div>))}
+          </dl>
+          <p class="note">
+            HULK is designed to make casual key-sharing not work and to keep your hardware private while doing it. It
+            is not — and no licence system is — a guarantee against a determined attacker with your machine in hand.
+          </p>
+        </section>
+
+        <section id="verified-completion" class="doc-section">
+          <p class="section-number">24</p>
+          <h2>Verified completion</h2>
+          <p>
+            Completion you can check, instead of a confident summary. Turn on LLM-as-a-judge and finishing stops
+            being the agent's own opinion. Before it starts, the agent writes down the observable success criteria
+            your request implies. After implementing, it has to exercise the work rather than describe it. Then a
+            separate Judge subagent compares the original request, the criteria, the changed files and the captured
+            test output — and a FAIL names the specific repair and sends the agent back to work, up to three rounds.
+          </p>
+          <p class="note">Opt-in, and it spends extra model calls on every prompt it covers. It does not apply to the plan lane or the quick lane.</p>
+        </section>
+
+        <section id="controlled-browser" class="doc-section">
+          <p class="section-number">25</p>
+          <h2>Controlled browser</h2>
+          <p>
+            The browser is a real Chromium view embedded in the Vector window, not a screenshot service. The agent
+            opens the running product, clicks and types, reads console and network failures, captures what it saw,
+            repairs the code, and retests. It refuses to type into password, one-time-code and card fields — it pauses
+            and hands the live browser to you, then resumes with what it can see.
+          </p>
+        </section>
+
+        <section id="only-in-vector" class="doc-section">
+          <p class="section-number">26</p>
+          <h2>Only in Vector</h2>
+          <p>
+            Things that are rarely true in one place. The difficult part is not generating text. It is keeping what
+            you know, knowing what it cost, proving the work holds, and leaving you in control of what lands.
+          </p>
+          <dl class="doc-rows">
+            {systemRows.map(([term, detail]) => (<div><dt>{term}</dt><dd>{detail}</dd></div>))}
+          </dl>
+        </section>
+
+        <section id="conditions" class="doc-section">
+          <p class="section-number">27</p>
+          <h2>The conditions, stated</h2>
+          <p>
+            Where a capability has a catch, here it is. Rather than leaving these in footnotes, every one of them is
+            written out in one place.
+          </p>
+          <dl class="doc-rows">
+            {conditions.map(([term, detail]) => (<div><dt>{term}</dt><dd>{detail}</dd></div>))}
+          </dl>
+          <p class="note">
+            The sandbox flag: operating-system confinement is enabled with the <code>OPENCODE_SHELL_SANDBOX</code>
+            environment variable. It is opt-in and off by default, uses a seatbelt profile on macOS and bwrap on Linux
+            where installed, and has no Windows equivalent — so on Windows Vector reports that it is running
+            unconfined instead of implying protection it cannot provide.
+          </p>
+        </section>
+
+        <section id="subagents" class="doc-section">
+          <p class="section-number">28</p>
+          <h2>Subagents</h2>
+          <p>
+            Vector's agent does not do everything itself. When a task calls for a specialist, it hands the work to one
+            of nine subagents, each with its own focus and its own permission set. Review and Security can read but
+            never write. Judge cannot edit files at all, and only runs when verified completion is on.
+          </p>
+          <div class="doc-grid doc-grid-3">
+            {crew.map((member) => (
+              <article class="doc-card">
+                <small>{member.summary}{member.readOnly ? " · read-only" : ""}</small>
+                <h4>{member.name}</h4>
+                <p>{member.role}</p>
+              </article>
+            ))}
+          </div>
+          <p class="note">
+            Teams can be wired everyone-to-everyone, coordinator-to-workers, or any pairing you set. A message to a
+            teammate you have not linked is refused and told so, rather than dropped where the sender never finds out.
+          </p>
+        </section>
+
+        <section id="comparison" class="doc-section">
+          <p class="section-number">29</p>
+          <h2>How Vector compares</h2>
+          <p>
+            Vector combines capabilities commonly split across an agent, an editor, a browser, a Git client, and a
+            deployment dashboard. Capabilities change quickly, so verify current vendor documentation. A dash means
+            Vector makes no claim.
+          </p>
+          <div class="doc-table-wrap">
+            <table class="doc-table">
+              <thead><tr><th>Capability</th><th>Vector</th><th>Claude Code</th><th>Codex</th><th>Cursor</th><th>App builders</th></tr></thead>
+              <tbody>
+                {comparison.map((row) => (<tr>{row.map((cell, index) => index === 0 ? <th scope="row">{cell}</th> : <td>{cell}</td>)}</tr>))}
+              </tbody>
+            </table>
+          </div>
+          <dl class="doc-rows">
+            {connectionGroups.map(([term, detail]) => (<div><dt>{term}</dt><dd>{detail}</dd></div>))}
+          </dl>
+        </section>
+
+        <section id="velocity" class="doc-section">
+          <p class="section-number">30</p>
+          <h2>Vector Velocity model <span class="doc-soon">Coming soon</span></h2>
+          <p>
+            Vector Velocity is Vector's own model, tuned for the loop Vector actually runs — planning, tool calls,
+            edits, checks, and verification — rather than for open-ended chat. It will be included with Vector
+            accounts alongside the free models, selectable like any other provider in the desktop app and the CLI, and
+            measured by the same Tokenomics engine as everything else.
+          </p>
+          <p class="note">
+            Until Velocity ships, Big Pickle is the included default in the desktop app and the CLI, and bring-your-own
+            keys cover Claude, GPT, Gemini and the other supported providers.
+          </p>
+        </section>
+
+        <section id="api-platform" class="doc-section">
+          <p class="section-number">31</p>
+          <h2>API platform <span class="doc-soon">Coming soon</span></h2>
+          <p>
+            Programmatic access to the same workspace: start sessions, run tasks, read transcripts and measured spend,
+            manage connections, and trigger automations from your own systems and CI. Vector accounts and CLI tokens
+            are the credential, so the free-account model carries over unchanged.
+          </p>
+          <p class="note">The API platform is in development. The CLI is the first programmable surface today — <code>vector run "…"</code> works in scripts and CI with a <code>VECTOR_CLI_TOKEN</code>.</p>
+        </section>
+
+        <section id="changelog" class="doc-section">
+          <p class="section-number">32</p>
+          <h2>Changelog</h2>
+          <p>Keep the whole build in view. Recent releases, newest first.</p>
+          <dl class="doc-rows">
+            {changelog.map(([date, title, blurb]) => (<div><dt>{title}<small>{date}</small></dt><dd>{blurb}</dd></div>))}
+          </dl>
         </section>
       </main>
     </div>
@@ -910,5 +1499,38 @@ const faqs = [
       gap: 2px;
     }
 
+  }
+  /* Why Vector */
+  .doc-section h3 { margin: 40px 0 0; font-size: 22px; font-weight: 650; letter-spacing: -0.01em; }
+  .doc-section h2 .doc-soon { display: inline-block; margin-left: 12px; padding: 4px 11px; vertical-align: middle; color: var(--accent-strong); font-size: 12px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; background: var(--accent-soft); border: 1px solid var(--glass-line); border-radius: 999px; }
+  .doc-tally { margin-top: 30px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+  .doc-tally div { padding: 18px; background: var(--glass-fill); border: 1px solid var(--glass-line); border-radius: 14px; }
+  .doc-tally strong { display: block; font-size: 30px; font-weight: 680; line-height: 1; color: var(--accent-strong); }
+  .doc-tally span { display: block; margin-top: 8px; color: var(--muted-strong); font-size: 13px; }
+  .doc-grid { margin-top: 20px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+  .doc-grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 26px; }
+  .doc-card { padding: 20px; background: var(--glass-fill); border: 1px solid var(--glass-line); border-radius: 14px; }
+  .doc-card small { display: block; color: var(--accent-strong); font-size: 11px; font-weight: 650; letter-spacing: 0.08em; text-transform: uppercase; }
+  .doc-card h4 { margin: 8px 0 0; font-size: 16px; font-weight: 650; }
+  .doc-card p { margin: 8px 0 0; color: var(--muted-strong); font-size: 13.5px; line-height: 1.6; }
+  .doc-rows { margin: 30px 0 0; padding: 0; border-top: 1px solid var(--line); }
+  .doc-rows > div { padding: 18px 0; display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.6fr); gap: 16px 32px; border-bottom: 1px solid var(--line); }
+  .doc-rows dt { margin: 0; font-size: 15px; font-weight: 650; }
+  .doc-rows dt small { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; font-weight: 500; }
+  .doc-rows dd { margin: 0; color: var(--muted-strong); font-size: 14.5px; line-height: 1.65; }
+  .doc-table-wrap { margin-top: 30px; overflow-x: auto; border: 1px solid var(--glass-line); border-radius: 14px; }
+  .doc-table { width: 100%; min-width: 760px; border-collapse: collapse; font-size: 13.5px; }
+  .doc-table th, .doc-table td { padding: 12px 14px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); }
+  .doc-table thead th { color: var(--accent-strong); font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; background: var(--glass-fill); }
+  .doc-table tbody th { color: var(--ink); font-weight: 600; }
+  .doc-table td { color: var(--muted-strong); }
+  .doc-table td:first-of-type { color: var(--ink); }
+  .doc-section code { padding: 1px 6px; color: var(--accent-strong); background: var(--accent-soft); border: 1px solid var(--glass-line); border-radius: 6px; font-size: 0.9em; }
+  @media (max-width: 860px) {
+    .doc-tally, .doc-grid, .doc-grid-4 { grid-template-columns: 1fr 1fr; }
+    .doc-rows > div { grid-template-columns: 1fr; gap: 6px; }
+  }
+  @media (max-width: 560px) {
+    .doc-tally, .doc-grid, .doc-grid-4 { grid-template-columns: 1fr; }
   }
 </style>

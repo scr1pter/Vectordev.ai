@@ -574,15 +574,20 @@ const changelog = [
           <p class="hero-note">Free to start. macOS, Windows, and Linux.</p>
         </div>
 
-        <figure class="simple-shot" data-reveal>
-          <img
-            src={sessionScreenshot.src}
-            width={sessionScreenshot.width}
-            height={sessionScreenshot.height}
-            alt="Vector running a session: the agent fixes a deploy, reopens the site in Vector's browser, and checks the result"
-            loading="eager"
-          />
-        </figure>
+        <div class="showcase simple-showcase" aria-label="Interactive preview of the Vector interface">
+          <figure class="product-window">
+            <div class="product-bar" aria-hidden="true">
+              <span class="traffic"><i></i><i></i><i></i></span>
+              <span class="product-title">Vector — Workspace</span>
+              <span class="product-status"><i></i> Ready</span>
+            </div>
+            <ProductDemo bare />
+          </figure>
+          <p class="showcase-note">
+            An interactive preview — move around the rail, filter the board, open a file. The desktop app connects
+            these surfaces to your real repository and agents.
+          </p>
+        </div>
       </div>
     </section>
 
@@ -3114,6 +3119,17 @@ const changelog = [
   :global(.vector-marketing .chapters) { display: none !important; }
   .simple-secondary { color: var(--ink-70); font-size: 14px; text-decoration: none; border-bottom: 1px solid rgba(224, 211, 255, 0.3); padding-bottom: 1px; }
   .simple-secondary:hover { color: var(--lavender); border-color: var(--purple-soft); }
+  /* The old scene system animated .showcase in by scroll progress; the
+     simplified hero shows it plainly. */
+  :global(html.va) .vector-marketing .scene-hero .simple-showcase,
+  .simple-showcase {
+    grid-area: auto !important;
+    margin-top: clamp(36px, 5vw, 64px) !important;
+    opacity: 1 !important;
+    transform: none !important;
+    filter: none !important;
+    pointer-events: auto !important;
+  }
   .simple-shot { width: var(--measure-wide); margin: clamp(36px, 5vw, 64px) auto 0; padding: clamp(10px, 1.6vw, 18px); background: rgba(255, 255, 255, 0.04); border: 1px solid var(--hairline); border-radius: 22px; box-shadow: 0 40px 120px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.08); }
   .simple-shot img { display: block; width: 100%; height: auto; border-radius: 12px; }
   .simple-section { padding: clamp(56px, 8vw, 110px) 0 0; }
