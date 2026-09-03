@@ -5,14 +5,20 @@ import { currentUser, login, signOut } from "../vector-account"
 export const VectorLoginCommand = cmd({
   command: "login",
   describe: "sign in to your free Vector account",
-  handler: async () => {
+  builder: (yargs) =>
+    yargs.option("token", {
+      type: "string",
+      describe: "CLI token from vectordev.ai/auth/cli (skips the interactive prompt)",
+    }),
+  handler: async (args) => {
     const existing = await currentUser()
-    if (existing) {
+    if (existing && !args.token) {
       UI.println(UI.Style.TEXT_SUCCESS_BOLD + "✓ " + UI.Style.TEXT_NORMAL + "Already signed in as " + existing.email)
       UI.println(UI.Style.TEXT_DIM + 'Run "vector logout" first to switch accounts.')
       return
     }
-    const user = await login()
+    if (existing && args.token) await signOut()
+    const user = await login(args.token)
     if (!user) process.exit(1)
   },
 })

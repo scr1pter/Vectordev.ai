@@ -82,18 +82,21 @@ function ask(prompt: string): Promise<string> {
   return new Promise((resolve) => rl.question(prompt, (answer: string) => (rl.close(), resolve(answer.trim()))))
 }
 
-export async function login(): Promise<CliUser | undefined> {
+export async function login(provided?: string): Promise<CliUser | undefined> {
   const url = `${SITE}/auth/cli`
-  UI.empty()
-  UI.println(UI.Style.TEXT_NORMAL_BOLD + "Sign in to Vector")
-  UI.println(UI.Style.TEXT_DIM + "The Vector agent is free — it just needs a Vector account.")
-  UI.empty()
-  UI.println("1. Your browser is opening " + UI.Style.TEXT_INFO_BOLD + url + UI.Style.TEXT_NORMAL)
-  UI.println("2. Sign in (or create a free account) and copy your CLI token")
-  UI.println("3. Paste it below")
-  UI.empty()
-  await open(url).catch(() => undefined)
-  const token = (await ask("CLI token: ")).trim()
+  let token = provided?.trim() ?? ""
+  if (!token) {
+    UI.empty()
+    UI.println(UI.Style.TEXT_NORMAL_BOLD + "Sign in to Vector")
+    UI.println(UI.Style.TEXT_DIM + "The Vector agent is free — it just needs a Vector account.")
+    UI.empty()
+    UI.println("1. Your browser is opening " + UI.Style.TEXT_INFO_BOLD + url + UI.Style.TEXT_NORMAL)
+    UI.println("2. Sign in (or create a free account) and copy the command it shows you")
+    UI.println("3. Run that command — or paste just the token below")
+    UI.empty()
+    await open(url).catch(() => undefined)
+    token = (await ask("CLI token: ")).trim()
+  }
   if (!token) {
     UI.error("No token entered.")
     return undefined

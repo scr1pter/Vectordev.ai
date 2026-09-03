@@ -46,9 +46,13 @@ export function CliTokenPage() {
       .finally(() => setLoading(false))
   }, [])
 
+  // Hand out a complete command: pasting a bare token into a shell runs it
+  // as a program ("command not found: vct_…"), a full command just works.
+  const command = token ? `vector login --token ${token}` : ""
+
   const copy = () => {
-    if (!token) return
-    void navigator.clipboard.writeText(token).then(() => setCopied(true))
+    if (!command) return
+    void navigator.clipboard.writeText(command).then(() => setCopied(true))
   }
 
   if (loading) {
@@ -74,22 +78,24 @@ export function CliTokenPage() {
               Signed in as <strong>{email}</strong>.{" "}
             </>
           ) : null}
-          Paste this token into the <code>vector login</code> prompt. It links the CLI to your free Vector account and
-          expires in 90 days.
+          Run this command in your terminal. It links the Vector CLI to your free account and expires in 90 days.
         </p>
 
         {error && <p className="account-error">{error}</p>}
 
-        {token && (
+        {command && (
           <div className="cli-pair-token">
-            <code>{token}</code>
+            <code>
+              <span className="cli-pair-prompt" aria-hidden="true">$ </span>
+              {command}
+            </code>
           </div>
         )}
         <div className="cli-pair-actions">
           {token && (
             <button type="button" className="cli-pair-copy-button" onClick={copy}>
               {copied ? <Check size={15} /> : <Copy size={15} />}
-              {copied ? "Copied" : "Copy token"}
+              {copied ? "Copied" : "Copy command"}
             </button>
           )}
           <button type="button" className="cli-pair-refresh" onClick={() => void mint().catch(fail)}>
@@ -99,9 +105,12 @@ export function CliTokenPage() {
 
         <ol className="cli-pair-steps">
           <li>
+            Install once: <code>npm install -g @vectordev/cli</code>
+          </li>
+          <li>Run the command above — it signs the CLI in</li>
+          <li>
             <code>vector</code> — start the agent in any repository
           </li>
-          <li>Paste the token when prompted (or run <code>vector login</code>)</li>
           <li>
             That's it. Big Pickle is included free; add your own keys with <code>vector auth login</code>
           </li>

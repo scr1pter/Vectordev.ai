@@ -133,7 +133,15 @@ const targets = singleFlag
 
       return true
     })
-  : allTargets
+  : allTargets.filter((item) => {
+      // OPENCODE_TARGETS="darwin-arm64,linux-x64" restricts the matrix (used by publish-vector.ts).
+      const only = process.env.OPENCODE_TARGETS?.split(",").map((t) => t.trim()).filter(Boolean)
+      if (!only?.length) return true
+      const key = [item.os === "win32" ? "windows" : item.os, item.arch, item.avx2 === false ? "baseline" : undefined, item.abi]
+        .filter(Boolean)
+        .join("-")
+      return only.includes(key)
+    })
 
 await $`rm -rf dist`
 
