@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Publishes the Vector CLI to npm as `@vectordev/cli`.
+ * Publishes the Vector CLI to npm as `@vectordevai/cli`.
  *
  *   bun run script/publish-vector.ts            # build + publish
  *   bun run script/publish-vector.ts --dry-run  # build + pack, no publish
@@ -11,7 +11,7 @@
  *   VECTOR_CLI_TARGETS   comma list, default darwin-arm64,darwin-x64,linux-x64,linux-arm64,windows-x64
  *
  * Layout mirrors how opencode ships: one thin umbrella package whose `vector`
- * bin resolves a platform package (@vectordev/cli-<os>-<arch>) that carries the
+ * bin resolves a platform package (@vectordevai/cli-<os>-<arch>) that carries the
  * compiled binary. npm only installs the optionalDependency matching the host.
  */
 import { $ } from "bun"
@@ -22,7 +22,7 @@ import desktop from "../../desktop/package.json"
 const dir = fileURLToPath(new URL("..", import.meta.url))
 process.chdir(dir)
 
-const SCOPE = "@vectordev"
+const SCOPE = "@vectordevai"
 const UMBRELLA = `${SCOPE}/cli`
 const version = process.env.VECTOR_CLI_VERSION ?? desktop.version
 const targets = (process.env.VECTOR_CLI_TARGETS ?? "darwin-arm64,darwin-x64,linux-x64,linux-arm64,windows-x64")
@@ -40,7 +40,7 @@ if (!skipBuild) {
   })
 }
 
-// 1. Rename platform packages: opencode-<suffix> -> @vectordev/cli-<suffix>
+// 1. Rename platform packages: opencode-<suffix> -> @vectordevai/cli-<suffix>
 const platformPackages: Record<string, string> = {}
 for (const suffix of targets) {
   const src = `dist/opencode-${suffix}`
@@ -64,7 +64,7 @@ await Bun.file(`${out}/README.md`).write(
     "The Vector agent in your terminal. Free with a Vector account.",
     "",
     "```sh",
-    "npm install -g @vectordev/cli",
+    "npm install -g @vectordevai/cli",
     "vector login        # opens vectordev.ai/auth/cli",
     "vector              # start the agent in the current repository",
     "vector auth login   # bring your own model keys (optional)",
@@ -143,7 +143,9 @@ async function publish(pkgDir: string, name: string) {
     await $`npm pack --dry-run`.cwd(pkgDir)
     return
   }
-  await $`npm publish --access public`.cwd(pkgDir)
+  // Inherit the terminal so npm can prompt for 2FA (OTP or browser confirmation).
+  const proc = Bun.spawn(["npm", "publish", "--access", "public"], { cwd: pkgDir, stdio: ["inherit", "inherit", "inherit"] })
+  if ((await proc.exited) !== 0) throw new Error(`npm publish failed for ${name}`)
   console.log(`published ${name}@${version}`)
 }
 

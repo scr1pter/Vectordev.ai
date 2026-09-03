@@ -105,7 +105,7 @@ export function CliTokenPage() {
 
         <ol className="cli-pair-steps">
           <li>
-            Install once: <code>npm install -g @vectordev/cli</code>
+            Install once: <code>npm install -g @vectordevai/cli</code>
           </li>
           <li>Run the command above — it signs the CLI in</li>
           <li>
