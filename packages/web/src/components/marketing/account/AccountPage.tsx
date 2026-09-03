@@ -13,6 +13,7 @@ import {
 import { useEffect, useState } from "react"
 import { readAccountApiResponse, takeAccountReturnPath, vectorAccountClient } from "../../../lib/account-client"
 import { FreeDownload } from "../purchase/FreeDownload"
+import { CliLaunchPanel } from "./CliLaunchPanel"
 import "../purchase/purchase.css"
 import "./account.css"
 
@@ -268,6 +269,8 @@ export function AccountPage(props: { preview?: AccountState }) {
             </p>
             <FreeDownload version={configuration.releaseVersion} accessToken={token} accessAllowed={downloadAllowed} />
           </article>
+
+          <CliLaunchPanel accessToken={token} />
 
           <article className="account-panel license-panel" id={account?.billing ? "billing" : undefined}>
             <div className="panel-heading">

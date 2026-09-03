@@ -352,6 +352,18 @@
 .cli-pair-refresh:hover { background: rgba(255, 255, 255, 0.09); }
 .cli-pair-steps { margin: 26px 0 0; padding: 18px 18px 18px 34px; display: grid; gap: 10px; color: rgba(233, 226, 241, 0.62); background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(230, 219, 255, 0.09); border-radius: 14px; font-size: 12.5px; line-height: 1.6; }
 
+.cli-launch-panel { grid-column: 1 / -1; min-height: 0; }
+.cli-launch-desktop { margin-top: 4px; min-height: 44px; display: inline-flex; align-items: center; gap: 9px; padding: 0 16px; color: #171020; background: linear-gradient(180deg, #eee7ff, #c2a7f8); border: 1px solid rgba(255, 255, 255, 0.5); border-radius: 12px; font-size: 13px; font-weight: 600; text-decoration: none; }
+.cli-launch-desktop:hover { transform: translateY(-1px); }
+.cli-launch-step { margin-top: 18px; display: grid; grid-template-columns: 1fr auto; gap: 8px 10px; align-items: center; }
+.cli-launch-step > span { grid-column: 1 / -1; color: rgba(224, 214, 235, 0.55); font-size: 11.5px; }
+.cli-launch-step code { min-width: 0; padding: 11px 14px; overflow-wrap: anywhere; color: #d6c6fa; background: rgba(7, 5, 10, 0.5); border: 1px solid rgba(183, 149, 255, 0.22); border-radius: 11px; font-size: 12px; line-height: 1.5; }
+.cli-launch-step code.cli-launch-pending { grid-column: 1 / -1; color: rgba(214, 198, 250, 0.55); }
+.cli-launch-step button { min-height: 40px; padding: 0 13px; display: inline-flex; align-items: center; gap: 7px; color: rgba(238, 231, 247, 0.75); background: rgba(255, 255, 255, 0.055); border: 1px solid rgba(232, 221, 255, 0.12); border-radius: 10px; cursor: pointer; font-size: 12px; }
+.cli-launch-step button:hover { background: rgba(255, 255, 255, 0.09); }
+.cli-launch-note { margin: 18px 0 0; color: rgba(225, 216, 235, 0.5); font-size: 12px; line-height: 1.6; }
+.cli-launch-note code { padding: 1px 6px; color: #d6c6fa; background: rgba(143, 82, 255, 0.12); border: 1px solid rgba(183, 149, 255, 0.2); border-radius: 6px; font-size: 11.5px; }
+
 @keyframes account-spin { to { transform: rotate(360deg); } }
 
 @media (max-width: 860px) {

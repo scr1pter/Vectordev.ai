@@ -532,13 +532,13 @@ const changelog = [
   <MarketingNav active="product" />
 
   <main>
-    <section id="ch-start" data-chapter="Start" class="scene scene-hero" data-scene style="--scene-span: 2.3" aria-labelledby="hero-title">
-      <div class="scene-stage">
+    <section id="ch-start" data-chapter="Start" class="scene scene-hero simple-hero-section" aria-labelledby="hero-title">
+      <div class="scene-stage simple-stage">
         <div class="sky" aria-hidden="true">
           <i class="sky-aurora"></i>
           <i class="sky-stars"></i>
         </div>
-        <div class="hero">
+        <div class="hero simple-hero">
           <h1 class="wordmark" id="hero-title">
             <span class="sr-only">Vector</span>
             <svg
@@ -559,515 +559,126 @@ const changelog = [
             <span class="sr-only">An engineering workspace that remembers how you work, records what a run really cost, verifies its work before calling it done, drives a real browser, ships from your own cloud accounts, and runs a team of agents on the days you want one.</span>
           </p>
 
-          <p class="hero-deck">
-            Vector opens a repository already on your computer and puts an editor, file search, diagnostics and a
-            terminal beside an agent that can plan, edit, run commands, and drive a real browser. What it learns about
-            you stays in a file on your machine. What a run cost is the number your provider reported. And on the days
-            one agent is not enough, you can run up to sixteen.
+          <p class="hero-deck simple-deck">
+            Open a repository on your computer. Plan, edit, run, and ship with an agent beside your editor — on your
+            desktop, in your terminal, or from the cloud.
           </p>
 
-          <div class="hero-loop" aria-label="How work moves through Vector">
-            <div class="hero-loop-progress" aria-hidden="true"><i data-hero-progress></i></div>
-            <div class="hero-loop-stage is-active" data-hero-stage="0">
-              <span class="hero-loop-icon"><Code2 size={16} strokeWidth={1.8} aria-hidden="true" /></span>
-              <span><strong>Build</strong><small>Editor and agent</small></span>
-            </div>
-            <div class="hero-loop-stage" data-hero-stage="1">
-              <span class="hero-loop-icon"><BadgeCheck size={16} strokeWidth={1.8} aria-hidden="true" /></span>
-              <span><strong>Verify</strong><small>Checks and browser</small></span>
-            </div>
-            <div class="hero-loop-stage" data-hero-stage="2">
-              <span class="hero-loop-icon"><CloudUpload size={16} strokeWidth={1.8} aria-hidden="true" /></span>
-              <span><strong>Ship</strong><small>Your own accounts</small></span>
-            </div>
+          <div class="simple-actions">
+            <a class="hero-cta simple-cta" href="/login">
+              <span>Get Vector</span>
+              <ArrowRight size={18} strokeWidth={2} aria-hidden="true" />
+            </a>
+            <a class="simple-secondary" href="#ch-cli">Install the CLI</a>
           </div>
-
-          <a class="hero-cta" href="/login">
-            <span>Login to Vector</span>
-            <ArrowRight size={18} strokeWidth={2} aria-hidden="true" />
-          </a>
-
-          <a class="hero-cli-chip" href="#ch-cli">
-            <span class="hero-cli-chip-new">New</span>
-            <Terminal size={14} strokeWidth={2} aria-hidden="true" />
-            <span><strong>Vector CLI</strong> — the same agent in your terminal. Free with an account.</span>
-            <ArrowRight size={13} strokeWidth={2} aria-hidden="true" />
-          </a>
-
-          <p class="hero-note">Local-first. Free models included, or bring your own. Available for macOS, Windows, and Linux.</p>
-          <p class="hero-ship">
-            <span class="hero-ship-dot" aria-hidden="true"></span>
-            <span>v{currentVersion} — {currentRelease?.title}</span>
-            <span class="hero-ship-sep" aria-hidden="true">·</span>
-            <span>static-first, with JavaScript used for interaction</span>
-          </p>
+          <p class="hero-note">Free to start. macOS, Windows, and Linux.</p>
         </div>
 
-        <div class="showcase" aria-label="Interactive preview of the Vector interface">
-          <figure class="product-window">
-            <div class="product-bar" aria-hidden="true">
-              <span class="traffic"><i></i><i></i><i></i></span>
-              <span class="product-title">Vector — Workspace</span>
-              <span class="product-status"><i></i> Ready</span>
-            </div>
-            <ProductDemo bare />
-          </figure>
-          <p class="showcase-note">
-            An interactive, fixture-driven preview of Vector's interface — move around the rail, filter the board, and
-            open a file. The desktop app connects these surfaces to your real repository and agents.
-          </p>
-        </div>
-
-        <div class="proof-shot section-width" data-reveal>
-          <div class="proof-shot-copy">
-            <p class="section-kicker">A real run</p>
-            <h2>And this is one that already happened.</h2>
-            <p>
-              A session shipping a site: the agent hit a Vercel CLI failure caused by spaces in the folder name, worked
-              out why, redeployed under a valid project name, then opened the deployed URL in Vector's own browser and
-              read the console and network output back to check it. Not a mock-up of a workflow — a screenshot of one.
-            </p>
-          </div>
-          <figure class="proof-shot-frame">
-            <img
-              src={sessionScreenshot.src}
-              width={sessionScreenshot.width}
-              height={sessionScreenshot.height}
-              alt="A Vector session deploying a site: the agent diagnoses a Vercel CLI failure caused by spaces in the folder name, redeploys with a valid project name, then opens the deployed URL in Vector's browser and reads the console and network output"
-              loading="lazy"
-            />
-          </figure>
-        </div>
+        <figure class="simple-shot" data-reveal>
+          <img
+            src={sessionScreenshot.src}
+            width={sessionScreenshot.width}
+            height={sessionScreenshot.height}
+            alt="Vector running a session: the agent fixes a deploy, reopens the site in Vector's browser, and checks the result"
+            loading="eager"
+          />
+        </figure>
       </div>
     </section>
 
-    <section id="ch-cli" data-chapter="CLI" class="cli-scene section-width" aria-labelledby="cli-title">
-      <div class="section-heading chapter-head" data-reveal>
-        <p class="section-kicker">New · Vector CLI</p>
-        <h2 id="cli-title">The whole agent, in your terminal.</h2>
-        <p>
-          Everything Vector's agent can do — plan, edit, run commands, use your connectors — as a single command in any
-          shell, on any repository. Built to stand next to the best terminal agents you've used, and it starts free.
-        </p>
+    <section id="workspace" class="simple-section section-width" aria-labelledby="surfaces-title">
+      <div class="section-heading simple-heading" data-reveal>
+        <p class="section-kicker">Everywhere you work</p>
+        <h2 id="surfaces-title">One agent, every surface.</h2>
       </div>
+      <div class="simple-grid">
+        <article class="simple-card" data-reveal>
+          <p class="section-kicker">Desktop</p>
+          <h3>An editor with the agent built in.</h3>
+          <p>Files, search, diagnostics, a terminal, and a real browser — beside an agent that can use all of them.</p>
+          <a href="/login">Download →</a>
+        </article>
+        <article class="simple-card" data-reveal style="--rd: 60ms">
+          <p class="section-kicker">CLI</p>
+          <h3>The same agent in any terminal.</h3>
+          <p>Run it in any repository, in any shell. Free with an account, and a free model is included.</p>
+          <a href="#ch-cli">Install →</a>
+        </article>
+        <article class="simple-card" data-reveal style="--rd: 120ms">
+          <p class="section-kicker">Cloud</p>
+          <h3>Ship from your own accounts.</h3>
+          <p>Connect Vercel, Netlify, or Supabase and deploy from inside the workspace. Your keys stay yours.</p>
+          <a href="/docs">Learn more →</a>
+        </article>
+        <article class="simple-card" data-reveal style="--rd: 180ms">
+          <p class="section-kicker">Connections</p>
+          <h3>Plug in the tools you already use.</h3>
+          <p>GitHub, Linear, Sentry, Notion, Figma, Stripe, and more — turned on with one click.</p>
+          <a href="/docs">See the list →</a>
+        </article>
+      </div>
+    </section>
 
-      <div class="cli-grid">
+    <section id="ch-cli" data-chapter="CLI" class="simple-section section-width" aria-labelledby="cli-title">
+      <div class="section-heading simple-heading" data-reveal>
+        <p class="section-kicker">Vector CLI</p>
+        <h2 id="cli-title">The whole agent, in your terminal.</h2>
+        <p>Install once, sign in once, and start working in any repository.</p>
+      </div>
+      <div class="simple-cli">
         <figure class="cli-terminal" data-reveal aria-label="A Vector CLI session">
           <div class="product-bar" aria-hidden="true">
             <span class="traffic"><i></i><i></i><i></i></span>
             <span class="product-title">vector — zsh</span>
             <span class="product-status"><i></i> Big Pickle · $0.00</span>
           </div>
-          <pre class="cli-screen"><code><span class="cli-prompt">$</span> vector
+          <pre class="cli-screen"><code><span class="cli-prompt">$</span> npm install -g @vectordevai/cli
+<span class="cli-prompt">$</span> vector
 <span class="cli-ok">◇ signed in as you@yourteam.dev · model: big pickle (free)</span>
 <span class="cli-prompt">&gt;</span> the checkout test started failing on main — find it, fix it
 
 <span class="cli-dim">● read tests/checkout.test.ts, git log -S couponExpiry</span>
-<span class="cli-dim">● the fixture clock froze before midnight UTC — expiry now
-  crosses a day boundary. patching the fixture, re-running.</span>
+<span class="cli-dim">● the fixture clock froze before midnight UTC. patching, re-running.</span>
 <span class="cli-ok">✓ 14 passing · 1 fixed · commit staged · $0.00 spent</span></code></pre>
         </figure>
-
-        <div class="cli-points" data-reveal>
-          <article>
-            <h3>Free, with a free account</h3>
-            <p>
-              Sign up once at vectordev.ai, run <code>vector login</code>, and you're in. No card, no trial clock — the
-              account is the whole price.
-            </p>
-          </article>
-          <article>
-            <h3>A frontier model included</h3>
-            <p>
-              Vector CLI defaults to Big Pickle — a fast, free, tool-calling model — so it works the moment it installs.
-              No API key required.
-            </p>
-          </article>
-          <article>
-            <h3>Or bring your own key</h3>
-            <p>
-              Prefer Claude, GPT-5, or Gemini? <code>vector auth login</code> connects your own provider keys and the CLI
-              switches instantly. Your keys stay on your machine.
-            </p>
-          </article>
-          <article>
-            <h3>Your workspace follows you</h3>
-            <p>
-              Same sessions, same memory, same project connectors as the Vector desktop app — the terminal is just
-              another door into the workspace.
-            </p>
-          </article>
-        </div>
-      </div>
-
-      <div class="cli-get" data-reveal>
-        <code class="cli-install"><span aria-hidden="true">$</span> npm install -g @vectordevai/cli</code>
-        <div class="cli-get-actions">
-          <a class="hero-cta cli-get-cta" href="/login">
-            <span>Create your free account</span>
-            <ArrowRight size={17} strokeWidth={2} aria-hidden="true" />
-          </a>
-          <a class="cli-get-token" href="/auth/cli">Already have one? Get your CLI token</a>
-        </div>
-      </div>
-    </section>
-
-    <section id="workspace" class="product-system section-width" aria-labelledby="product-system-title">
-      <div class="section-heading chapter-head" data-reveal>
-        <p class="section-kicker">Nine parts, one workspace</p>
-        <h2 id="product-system-title">No single feature is the reason to use it.</h2>
-        <p>
-          Vector is a workspace, not a wrapper around one trick. The editor, the memory, the measured spend, the
-          verification, the connectors, the browser, the cloud accounts, the parallel agents and the schedule all sit in
-          the same place, over the repository already on your disk.
-        </p>
-      </div>
-      <div class="product-system-grid">
-        {pillars.map((pillar) => {
-          const Icon = pillar.icon
-          return (
-            <article data-reveal>
-              <span class="product-system-icon"><Icon size={18} strokeWidth={1.7} aria-hidden="true" /></span>
-              <small>{pillar.eyebrow}</small>
-              <h3>{pillar.name}</h3>
-              <p>{pillar.body}</p>
-            </article>
-          )
-        })}
-      </div>
-      <a class="product-system-account" href="/login" data-reveal>
-        Create an account, download Vector, and manage billing in one place <ArrowRight size={15} strokeWidth={2} aria-hidden="true" />
-      </a>
-    </section>
-
-    <section class="tally section-width" aria-label="Vector by the numbers" data-reveal>
-      <div><strong>118</strong><span>connectors ready to turn on</span></div>
-      <div><strong>16</strong><span>agents you can run at once</span></div>
-      <div><strong>4</strong><span>runtimes, Vector's and three others</span></div>
-      <div><strong>0</strong><span>lines of your code uploaded to Vector by default</span></div>
-    </section>
-
-    <figure class="pullquote section-width" data-reveal>
-      <blockquote>Most tools write the code. The hard part was never the writing.</blockquote>
-    </figure>
-
-    <div id="ch-features" data-chapter="What it does" class="features">
-      {features.map((feature) => (
-        <section class="feature">
-          <div class="feature-copy" data-reveal>
-            <p class="feature-tag">{feature.tag}</p>
-            <h2>{feature.title}</h2>
-            <p class="feature-body">{feature.body}</p>
-            <a class="feature-link" href={feature.href}>
-              <span>{feature.link}</span>
-              <ArrowRight size={15} strokeWidth={2} aria-hidden="true" />
-            </a>
-          </div>
-          {feature.demo ? (
-            <div class="feature-card feature-live reveal-zoom" data-reveal style="--rd: 90ms">
-              <FeatureDemo kind={feature.demo} tag={feature.tag} note={feature.note} />
-            </div>
-          ) : (
-            <div class="feature-card feature-proof reveal-zoom" data-reveal style="--rd: 90ms">
-              <div class="card-topline" aria-hidden="true">
-                <span>{feature.tag}</span>
-                <span>{feature.note}</span>
-              </div>
-              <dl>
-                {feature.proof?.map(([term, detail]) => (
-                  <div>
-                    <dt>{term}</dt>
-                    <dd>{detail}</dd>
-                  </div>
-                ))}
-              </dl>
-            </div>
-          )}
-        </section>
-      ))}
-    </div>
-
-    <section class="scene scene-suite" data-scene style="--scene-span: 3.1" aria-labelledby="suite-title">
-      <div class="scene-stage">
-        <div class="suite section-width">
-          <div class="section-heading chapter-head">
-            <p class="section-kicker">One Vector</p>
-            <h2 id="suite-title">One place to write, direct, verify, and ship.</h2>
-            <p>Type the code yourself or hand it over, and the repository, the tools, the evidence, and the release destination stay connected either way.</p>
-          </div>
-          <div class="suite-grid">
-            <article style="--i: 0">
-              <span class="suite-icon"><Terminal size={19} strokeWidth={1.7} aria-hidden="true" /></span>
-              <small>Hands on the code</small>
-              <h3>Editor, file search, terminal</h3>
-              <p>A real editor over your own files, with file search across the project, language diagnostics, a terminal, and an editor agent in the panel beside them.</p>
-            </article>
-            <article style="--i: 1">
-              <span class="suite-icon"><Brain size={19} strokeWidth={1.7} aria-hidden="true" /></span>
-              <small>What Vector keeps</small>
-              <h3>Memory and measured spend</h3>
-              <p>Local memory is stored in one file you can inspect, edit, or erase. When that file exists, Vector automatically includes it in built-in agent context sent to the model provider you choose. Model economics records the tokens and cost the provider reported, and marks the rest unmeasured.</p>
-            </article>
-            <article style="--i: 2">
-              <span class="suite-icon"><ShieldCheck size={19} strokeWidth={1.7} aria-hidden="true" /></span>
-              <small>Human control</small>
-              <h3>Review before main</h3>
-              <p>Inspect diffs, focused checks, GitHub pull-request findings, risk signals, checkpoints, and an optional independent judge verdict before work reaches the primary repository files.</p>
-            </article>
-            <article style="--i: 3">
-              <span class="suite-icon"><CloudUpload size={19} strokeWidth={1.7} aria-hidden="true" /></span>
-              <small>Connect and ship</small>
-              <h3>MCP, providers, and Cloud</h3>
-              <p>Bring your own model provider, connect approved tools through MCP and the plugin catalog, and publish through the infrastructure accounts that already belong to you.</p>
-            </article>
-          </div>
-          <div class="scene-rail" aria-hidden="true"><i></i></div>
-        </div>
-      </div>
-    </section>
-
-    <section class="belt" aria-label="Agents, models, and services Vector works with">
-      <p>Free and BYOK — bring the agents, models, and services you already use</p>
-      <div class="marquee">
-        <div class="marquee-track" aria-hidden="true">
-          {[...ecosystem, ...ecosystem].map((name) => <span>{name}</span>)}
-        </div>
-        <ul class="marquee-static">
-          {ecosystem.map((name) => <li>{name}</li>)}
+        <ul class="simple-list" data-reveal>
+          <li><strong>Free with a free account.</strong> No card, no trial clock.</li>
+          <li><strong>A free model included.</strong> Big Pickle works the moment it installs — no API key.</li>
+          <li><strong>Or bring your own key.</strong> Claude, GPT, or Gemini with <code>vector auth login</code>.</li>
         </ul>
       </div>
     </section>
 
-    <section class="scene scene-workflow" data-scene style="--scene-span: 2.8" aria-labelledby="workflow-title">
-      <div class="scene-stage">
-        <div class="workflow section-width">
-          <div class="section-heading chapter-head">
-            <p class="section-kicker">One operating loop</p>
-            <h2 id="workflow-title">From a brief to verified, shipped work.</h2>
-            <p>
-              Vector keeps the request, repository context, your own edits, agent activity, files, terminal, browser,
-              measured usage, review, and release in one place. Enable verified completion when you want a rubric-based
-              judge to require evidence before the task can be called done; it uses additional model calls and tokens.
-            </p>
-          </div>
-          <ol class="workflow-list">
-            {workflow.map(([title, body], index) => (
-              <li style={`--i: ${index}`}>
-                <span>0{index + 1}</span>
-                <strong>{title}</strong>
-                <p>{body}</p>
-              </li>
-            ))}
-          </ol>
-          <div class="workflow-rail" aria-hidden="true"><i></i></div>
-        </div>
+    <section id="ch-features" data-chapter="What it does" class="simple-section section-width" aria-labelledby="features-title">
+      <div class="section-heading simple-heading" data-reveal>
+        <p class="section-kicker">Built for real work</p>
+        <h2 id="features-title">Knows your project. Shows its work.</h2>
       </div>
-    </section>
-
-    <section id="conditions" class="automation section-width" aria-labelledby="conditions-title">
-      <div class="section-heading chapter-head" data-reveal>
-        <p class="section-kicker">The conditions, stated</p>
-        <h2 id="conditions-title">Where a capability has a catch, here it is.</h2>
-        <p>
-          Some of what is on this page only holds under a condition. Rather than leaving those in the footnotes of nine
-          different sections, every one of them is written out here.
-        </p>
-      </div>
-      <div class="runtime-list">
-        {conditions.map(([title, body], index) => (
-          <article data-reveal>
-            <span>0{index + 1}</span>
-            <h3>{title}</h3>
-            <p>{body}</p>
-          </article>
-        ))}
-      </div>
-      <p class="automation-note" data-reveal>
-        <strong>The sandbox flag.</strong> The operating system confinement above is enabled with the
-        <code>OPENCODE_SHELL_SANDBOX</code> environment variable. It is opt-in and off by default, uses a seatbelt
-        profile on macOS and <code>bwrap</code> on Linux where it is installed, and has no Windows equivalent — so on
-        Windows Vector reports that it is running unconfined instead of implying protection it cannot provide.
-      </p>
-    </section>
-
-    <section id="ch-only" data-chapter="Only in Vector" class="runtime section-width" aria-labelledby="runtime-title">
-      <div class="runtime-intro chapter-head" data-reveal>
-        <p class="section-kicker">Only in Vector</p>
-        <h2 id="runtime-title">Things that are rarely true in one place.</h2>
-        <p>
-          The difficult part is not generating text. It is keeping what you know, knowing what it cost, proving the work
-          holds, and leaving you in control of what lands.
-        </p>
-      </div>
-      <div class="runtime-list">
-        {systemRows.map(([title, body], index) => (
-          <article data-reveal>
-            <span>0{index + 1}</span>
-            <h3>{title}</h3>
-            <p>{body}</p>
-          </article>
-        ))}
-      </div>
-    </section>
-
-    <section id="ch-pricing" data-chapter="Licensing" class="licensing section-width" aria-labelledby="licensing-title">
-      <div class="section-heading chapter-head" data-reveal>
-        <p class="section-kicker">Licensing and spend</p>
-        <h2 id="licensing-title">What you pay for, and what it costs to run.</h2>
-        <p>
-          Two separate things, deliberately. Vector's licence is a fixed price you pay us. Model usage is metered by
-          whichever provider you brought, and Vector's job there is to measure it honestly and stop it going past the
-          cap you set.
-        </p>
-      </div>
-
-      <div class="licensing-grid">
-        <article class="licensing-card" data-reveal>
-          <p class="licensing-tag">HULK · hidden unique licence keys</p>
-          <h3>Every copy has its own key.</h3>
-          <p class="licensing-lead">
-            No shared serial, no keygen-shaped pattern, nothing embedded in the installer. Each purchase mints a key
-            that exists only for that buyer, and activation ties it to the machines it runs on.
-          </p>
-          <dl>
-            {licenseRows.map(([term, detail]) => (
-              <div>
-                <dt>{term}</dt>
-                <dd>{detail}</dd>
-              </div>
-            ))}
-          </dl>
-          <p class="licensing-note">
-            This is designed to make casual key-sharing not work and to keep your hardware private while doing it. It
-            is not, and no licence system is, a guarantee against a determined attacker with your machine in hand.
-          </p>
+      <div class="simple-rows">
+        <article class="simple-row" data-reveal>
+          <h3>Remembers how you work</h3>
+          <p>What Vector learns about you stays in a file on your machine and follows you between sessions.</p>
         </article>
-
-        <article class="licensing-card" data-reveal style="--rd: 90ms">
-          <p class="licensing-tag">Tokenomics engine</p>
-          <h3>The number is the provider's, not ours.</h3>
-          <p class="licensing-lead">
-            Vector records what a run really spent by reading what the provider reported, then holds that against the
-            limits you set — per day, per run, per project.
-          </p>
-          <dl>
-            {spendRows.map(([term, detail]) => (
-              <div>
-                <dt>{term}</dt>
-                <dd>{detail}</dd>
-              </div>
-            ))}
-          </dl>
-          <p class="licensing-note">
-            Free models are included so you can work without connecting anything. Connect your own keys when you want
-            a specific model, and that spend is yours.
-          </p>
+        <article class="simple-row" data-reveal style="--rd: 60ms">
+          <h3>Records what a run cost</h3>
+          <p>The number is the one your provider reported. Set limits per day, per run, per project.</p>
+        </article>
+        <article class="simple-row" data-reveal style="--rd: 120ms">
+          <h3>Verifies before it's done</h3>
+          <p>Runs the checks, opens the result in a real browser, and reads the console back before it calls it finished.</p>
+        </article>
+        <article class="simple-row" data-reveal style="--rd: 180ms">
+          <h3>Runs a team when you need one</h3>
+          <p>Up to sixteen agents in parallel, each in its own workspace, merged when you say so.</p>
         </article>
       </div>
     </section>
 
-    <section id="ch-connect" data-chapter="Connections" class="connections section-width" aria-labelledby="connections-title">
-      <div class="section-heading chapter-head" data-reveal>
-        <p class="section-kicker">Bring your stack</p>
-        <h2 id="connections-title">One workspace for the tools you already trust.</h2>
-        <p>
-          Use Vector's provider system, connect MCP servers and source control, call supported local
-          agent runtimes when installed, then validate and publish through your own services.
-        </p>
-      </div>
-      <div class="connection-grid">
-        {connectionGroups.map(([title, body]) => (
-          <article data-reveal>
-            <h3>{title}</h3>
-            <p>{body}</p>
-          </article>
-        ))}
-      </div>
-    </section>
-
-    <section id="ch-compare" data-chapter="Comparison" class="comparison-section section-width" aria-labelledby="comparison-title">
-      <div class="section-heading chapter-head" data-reveal>
-        <p class="section-kicker">A wider product boundary</p>
-        <h2 id="comparison-title">Fewer disconnected surfaces between request and release.</h2>
-        <p>
-          Vector combines capabilities commonly split across an agent, editor, browser, Git client, and deployment
-          dashboard. Capabilities change quickly, so verify current vendor documentation. A dash means Vector makes no
-          claim either way.
-        </p>
-      </div>
-      <details class="comparison" data-reveal>
-        <summary>
-          <span>View the detailed product comparison</span>
-          <ChevronDown size={18} strokeWidth={1.7} aria-hidden="true" />
-        </summary>
-        <div class="comparison-scroll">
-          <table>
-            <thead>
-              <tr><th>Capability</th><th>Vector</th><th>Claude Code</th><th>Codex</th><th>Cursor</th><th>App builders</th></tr>
-            </thead>
-            <tbody>
-              {comparison.map((row, rowIndex) => (
-                <tr style={`--row: ${rowIndex}`}>
-                  {row.map((cell, index) => (index === 0 ? <th>{cell}</th> : <td>{cell}</td>))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </details>
-    </section>
-
-    <section class="crew section-width" aria-labelledby="crew-title">
-      <div class="section-heading chapter-head" data-reveal>
-        <p class="section-kicker">Subagents</p>
-        <h2 id="crew-title">The specialists it delegates to.</h2>
-        <p>
-          Vector's agent does not do everything itself. When a task calls for a specialist, it hands the work to one of
-          nine subagents, each with its own focus and its own permission set. Review and Security can read but never
-          write. Judge cannot edit files at all, and only runs when you turn verified completion on.
-        </p>
-      </div>
-      <div class="crew-grid">
-        {crew.map((member) => (
-          <article data-reveal style={`--crew-hue: ${member.hue}`}>
-            <span class="crew-mark" aria-hidden="true">
-              <svg
-                viewBox="0 0 44 44"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                set:html={member.mark}
-              />
-            </span>
-            <small>{member.label}</small>
-            <h3>{member.name}<span class="crew-species">{member.readOnly ? " · read-only" : ""}</span></h3>
-            <p class="crew-tagline">{member.summary}</p>
-            <p class="crew-role">{member.role}</p>
-          </article>
-        ))}
-      </div>
-    </section>
-
-    <section class="changelog" aria-labelledby="changelog-title">
-      <div class="changelog-inner">
-        <h2 id="changelog-title">Changelog</h2>
-        <ol>
-          {changelog.map(([date, title, blurb]) => (
-            <li data-reveal>
-              <span class="changelog-date">{date}</span>
-              <div>
-                <strong>{title}</strong>
-                <p>{blurb}</p>
-              </div>
-            </li>
-          ))}
-        </ol>
-        <a class="changelog-link" href="/releases">
-          <span>View all releases</span>
-          <ArrowRight size={15} strokeWidth={2} aria-hidden="true" />
-        </a>
+    <section id="ch-pricing" data-chapter="Pricing" class="simple-section section-width" aria-labelledby="pricing-title">
+      <div class="section-heading simple-heading" data-reveal>
+        <p class="section-kicker">Pricing</p>
+        <h2 id="pricing-title">Free during beta.</h2>
+        <p>Create an account and download Vector today. When public pricing begins, it's $10 a month or $99 a year — model usage is billed by whichever provider you bring, and free models are always included.</p>
       </div>
     </section>
 
@@ -1076,10 +687,10 @@ const changelog = [
         <i class="sky-aurora"></i>
         <i class="sky-stars"></i>
       </div>
-      <h2 data-reveal class="reveal-blur">Keep the whole build in view.</h2>
-      <p data-reveal style="--rd: 120ms">Open the repository. Write, delegate, verify, ship — without leaving it.</p>
+      <h2 data-reveal class="reveal-blur">Start building.</h2>
+      <p data-reveal style="--rd: 120ms">Open a repository. Write, delegate, verify, ship — without leaving it.</p>
       <a class="closing-cta" href="/login" data-reveal style="--rd: 220ms">
-        <span>Login to Vector</span>
+        <span>Get Vector</span>
         <ArrowRight size={18} strokeWidth={2} aria-hidden="true" />
       </a>
     </section>
@@ -3480,5 +3091,40 @@ const changelog = [
   @media (max-width: 960px) {
     .cli-grid { grid-template-columns: 1fr; }
     .cli-get { flex-direction: column; align-items: flex-start; }
+  }
+  /* ── Simplified layout ───────────────────────────────────────────── */
+  .simple-hero-section { min-height: 0; }
+  .simple-stage { position: relative; min-height: 0; height: auto; padding-bottom: clamp(24px, 4vw, 48px); }
+  .simple-hero { max-width: 760px; }
+  .simple-deck { max-width: 560px; margin-top: 18px; font-size: 17px; line-height: 1.6; color: var(--ink-55); }
+  .simple-actions { margin-top: 26px; display: flex; flex-wrap: wrap; align-items: center; gap: 18px; }
+  .simple-cta { width: auto; min-width: 0; margin: 0; padding-inline: 26px; }
+  /* Simpler page: no floating chapter rail. */
+  :global(.vector-marketing .chapters) { display: none !important; }
+  .simple-secondary { color: var(--ink-70); font-size: 14px; text-decoration: none; border-bottom: 1px solid rgba(224, 211, 255, 0.3); padding-bottom: 1px; }
+  .simple-secondary:hover { color: var(--lavender); border-color: var(--purple-soft); }
+  .simple-shot { width: var(--measure-wide); margin: clamp(36px, 5vw, 64px) auto 0; padding: clamp(10px, 1.6vw, 18px); background: rgba(255, 255, 255, 0.04); border: 1px solid var(--hairline); border-radius: 22px; box-shadow: 0 40px 120px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.08); }
+  .simple-shot img { display: block; width: 100%; height: auto; border-radius: 12px; }
+  .simple-section { padding: clamp(56px, 8vw, 110px) 0 0; }
+  .simple-heading { max-width: 640px; margin-bottom: clamp(24px, 3.5vw, 40px); }
+  .simple-heading h2 { margin: 10px 0 0; font-size: clamp(28px, 4vw, 44px); font-weight: 600; letter-spacing: -0.03em; line-height: 1.08; color: var(--lavender); }
+  .simple-heading > p:last-child { margin: 14px 0 0; font-size: 16px; line-height: 1.6; color: var(--ink-55); }
+  .simple-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+  .simple-card { padding: 26px 26px 24px; background: rgba(255, 255, 255, 0.035); border: 1px solid var(--hairline); border-radius: 18px; }
+  .simple-card h3 { margin: 10px 0 0; font-size: 19px; font-weight: 600; letter-spacing: -0.02em; color: var(--lavender); }
+  .simple-card p:not(.section-kicker) { margin: 10px 0 0; font-size: 14.5px; line-height: 1.6; color: var(--ink-55); }
+  .simple-card a { display: inline-block; margin-top: 16px; color: var(--purple-soft); font-size: 14px; text-decoration: none; }
+  .simple-card a:hover { color: var(--lavender); }
+  .simple-cli { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.75fr); gap: clamp(20px, 3vw, 36px); align-items: start; }
+  .simple-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 16px; }
+  .simple-list li { font-size: 15px; line-height: 1.6; color: var(--ink-55); }
+  .simple-list strong { display: block; color: var(--lavender); font-weight: 600; }
+  .simple-list code { padding: 1px 6px; color: var(--purple-soft); font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace; font-size: 12.5px; background: rgba(143, 82, 255, 0.12); border: 1px solid rgba(183, 149, 255, 0.22); border-radius: 6px; }
+  .simple-rows { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 40px; border-top: 1px solid var(--hairline); }
+  .simple-row { padding: 26px 0; border-bottom: 1px solid var(--hairline); }
+  .simple-row h3 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -0.015em; color: var(--lavender); }
+  .simple-row p { margin: 8px 0 0; font-size: 14.5px; line-height: 1.6; color: var(--ink-55); }
+  @media (max-width: 900px) {
+    .simple-grid, .simple-cli, .simple-rows { grid-template-columns: 1fr; }
   }
 </style>
