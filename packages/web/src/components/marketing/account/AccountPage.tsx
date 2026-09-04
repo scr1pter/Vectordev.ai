@@ -237,7 +237,10 @@ export function AccountPage(props: { preview?: AccountState }) {
           <FreeDownload version={configuration.releaseVersion} accessToken={token} accessAllowed={downloadAllowed} />
         </section>
 
-        <CliLaunchPanel accessToken={token} />
+        <CliLaunchPanel
+          accessToken={token}
+          previewToken={props.preview ? "vct_eyJ2IjoxLCJzdWIiOiJwcmV2aWV3IiwiZXhwIjoxfQ.previewsignature0000000000000000000000" : undefined}
+        />
 
         <section className="acct-section" id="billing">
           <h2>Plan &amp; billing</h2>

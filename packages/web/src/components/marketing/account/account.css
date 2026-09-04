@@ -239,7 +239,7 @@
 .acct-standing[data-ok="false"] { color: #e9b3a3; }
 .acct-body > .account-notice,
 .acct-body > .account-error { margin-top: 20px; }
-.acct-section { margin-top: 24px; padding: 22px 24px 24px; background: rgba(255, 255, 255, 0.025); border: 1px solid rgba(230, 219, 255, 0.1); border-radius: 12px; }
+.acct-section { min-width: 0; overflow: hidden; margin-top: 24px; padding: 22px 24px 24px; background: rgba(255, 255, 255, 0.025); border: 1px solid rgba(230, 219, 255, 0.1); border-radius: 12px; }
 .acct-section h2 { margin: 0; font-size: 16px; font-weight: 620; }
 .acct-section > p { margin: 8px 0 0; color: rgba(229, 221, 238, 0.6); font-size: 14px; line-height: 1.6; }
 .acct-section code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace; }
@@ -247,22 +247,25 @@
 .acct-fine code { padding: 1px 5px; color: #d6c6fa; background: rgba(143, 82, 255, 0.12); border-radius: 5px; font-size: 12.5px; }
 .acct-fine { margin: 12px 0 0 !important; color: rgba(225, 216, 235, 0.45) !important; font-size: 12.5px !important; }
 .acct-rows { margin: 16px 0 0; padding: 0; border-top: 1px solid rgba(230, 219, 255, 0.08); }
-.acct-rows > div { padding: 12px 0; display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 12px; align-items: center; border-bottom: 1px solid rgba(230, 219, 255, 0.08); }
+.acct-rows > div { min-width: 0; padding: 12px 0; display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 12px; align-items: center; border-bottom: 1px solid rgba(230, 219, 255, 0.08); }
 .acct-rows dt { margin: 0; color: rgba(228, 219, 238, 0.55); font-size: 13px; }
-.acct-rows dd { margin: 0; display: flex; align-items: center; gap: 8px; font-size: 14px; text-transform: capitalize; }
+.acct-rows dd { min-width: 0; margin: 0; display: flex; align-items: center; gap: 8px; font-size: 14px; text-transform: capitalize; }
 .acct-dot { width: 8px; height: 8px; background: #6fd19c; border-radius: 50%; }
 .acct-dot[data-state="expired"],
 .acct-dot[data-state="past_due"],
 .acct-dot[data-state="revoked"] { background: #d68a7d; }
-.acct-code-row { display: flex; align-items: center; gap: 8px; text-transform: none; }
-.acct-code-row code { min-width: 0; flex: 1; overflow: hidden; padding: 9px 11px; color: #d6c6fa; background: rgba(5, 4, 8, 0.55); border: 1px solid rgba(230, 219, 255, 0.1); border-radius: 8px; font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
+.acct-code-row { min-width: 0; display: flex; align-items: center; gap: 8px; text-transform: none; }
+.acct-code-row code { min-width: 0; flex: 1 1 0; overflow: hidden; padding: 10px 12px; color: #dcd0fb; background: rgba(5, 4, 8, 0.6); border: 1px solid rgba(230, 219, 255, 0.1); border-radius: 8px; font-size: 13px; letter-spacing: 0.01em; text-overflow: ellipsis; white-space: nowrap; }
 .acct-code-pending code { color: rgba(214, 198, 250, 0.55); }
-.acct-code-row button { min-height: 34px; padding: 0 11px; display: inline-flex; align-items: center; gap: 6px; color: rgba(238, 231, 247, 0.8); background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(232, 221, 255, 0.12); border-radius: 8px; cursor: pointer; font-size: 12.5px; }
+.acct-code-row button { flex: 0 0 auto; min-height: 36px; padding: 0 12px; display: inline-flex; align-items: center; gap: 6px; color: rgba(238, 231, 247, 0.85); background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(232, 221, 255, 0.12); border-radius: 8px; cursor: pointer; font-size: 12.5px; white-space: nowrap; }
+.acct-code-row .acct-icon-button { width: 36px; padding: 0; justify-content: center; }
 .acct-code-row button:hover { background: rgba(255, 255, 255, 0.09); }
 .acct-steps { margin: 16px 0 0; padding: 0; list-style: none; display: grid; gap: 14px; counter-reset: step; }
-.acct-steps li { display: grid; gap: 6px; }
+.acct-steps li { min-width: 0; display: grid; gap: 7px; }
 .acct-steps li > span { color: rgba(228, 219, 238, 0.62); font-size: 13px; }
 .acct-steps li > span::before { counter-increment: step; content: counter(step) ". "; color: rgba(228, 219, 238, 0.4); }
+.acct-actions { margin-top: 18px; display: flex; flex-wrap: wrap; gap: 10px; }
+.acct-actions .acct-button { margin-top: 0; }
 .acct-button { margin-top: 16px; min-height: 40px; padding: 0 16px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; color: #171020; background: #e6dcff; border: 1px solid #e6dcff; border-radius: 9px; cursor: pointer; font-size: 13.5px; font-weight: 600; text-decoration: none; }
 .acct-button:hover { background: #f1eaff; }
 .acct-button:disabled { opacity: 0.45; cursor: not-allowed; }
