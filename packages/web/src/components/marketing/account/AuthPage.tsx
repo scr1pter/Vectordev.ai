@@ -1,5 +1,5 @@
 /** @jsxImportSource react */
-import { ArrowRight, Check, Eye, EyeOff, LockKeyhole, Mail } from "lucide-react"
+import { Eye, EyeOff } from "lucide-react"
 import { type SubmitEventHandler, useEffect, useMemo, useState } from "react"
 import {
   rememberAccountReturnPath,
@@ -34,6 +34,10 @@ function GoogleMark() {
   )
 }
 
+/**
+ * /login — one centered card. Google first, email second, nothing else on the
+ * page: no marketing column, no tabs, no feature list.
+ */
 export function AuthPage() {
   const [mode, setMode] = useState<Mode>("signin")
   const [name, setName] = useState("")
@@ -115,103 +119,68 @@ export function AuthPage() {
       })
   }
 
+  const switchMode = () => {
+    setError("")
+    setNotice("")
+    setMode(mode === "signin" ? "register" : "signin")
+  }
+
   return (
     <main className="auth-page">
-      <section className="auth-story" aria-label="About Vector accounts">
-        <a className="account-wordmark" href="/" aria-label="Vector home">
-          <img src="/vector-logo.png" alt="" />
-          <span>Vector</span>
-        </a>
-        <div>
-          <p className="account-kicker">One account. Every Vector build.</p>
-          <h1>Your workspace is ready when you are.</h1>
-          <p className="auth-deck">
-            Sign in once to download Vector, manage billing, and recover your license. Your repositories, model keys,
-            memory, and agent work stay on your computer.
-          </p>
-          <ul className="auth-proof">
-            <li>
-              <Check size={16} /> Free desktop access during private beta
-            </li>
-            <li>
-              <Check size={16} /> macOS, Windows, and Linux installers
-            </li>
-            <li>
-              <Check size={16} /> Stripe billing and your existing private license key
-            </li>
-          </ul>
-        </div>
-        <p className="auth-local-note">Local-first by design · Account data secured by Supabase</p>
-      </section>
+      <a className="auth-brand" href="/" aria-label="Vector home">
+        <img src="/vector-logo.png" alt="" />
+        <span>Vector</span>
+      </a>
 
       <section className="auth-card" aria-labelledby="auth-title">
-        <div className="auth-card-head">
-          <p>{mode === "signin" ? "Welcome back" : "Join the private beta"}</p>
-          <h2 id="auth-title">{mode === "signin" ? "Sign in to Vector" : "Create your Vector account"}</h2>
-          <span>
-            {mode === "signin"
-              ? "Download, billing, and license access in one place."
-              : "Vector is free during private beta."}
-          </span>
-        </div>
-
-        <div className="auth-switch" role="tablist" aria-label="Account action">
-          <button type="button" role="tab" aria-selected={mode === "signin"} onClick={() => setMode("signin")}>
-            Sign in
-          </button>
-          <button type="button" role="tab" aria-selected={mode === "register"} onClick={() => setMode("register")}>
-            Create account
-          </button>
-        </div>
+        <h1 id="auth-title">{mode === "signin" ? "Sign in to Vector" : "Create your account"}</h1>
+        <p className="auth-sub">{mode === "signin" ? "Welcome back." : "Free. No card needed."}</p>
 
         <button className="google-button" type="button" onClick={google} disabled={loading}>
           <GoogleMark /> Continue with Google
         </button>
 
         <div className="auth-divider">
-          <span>or continue with email</span>
+          <span>or</span>
         </div>
 
         <form className="auth-form" onSubmit={submit}>
           {mode === "register" && (
             <label>
               <span>Name</span>
-              <div className="auth-input">
-                <input
-                  value={name}
-                  onInput={(event) => setName(event.currentTarget.value)}
-                  autoComplete="name"
-                  placeholder="Your name"
-                  required
-                />
-              </div>
+              <input
+                className="auth-field"
+                value={name}
+                onInput={(event) => setName(event.currentTarget.value)}
+                autoComplete="name"
+                placeholder="Your name"
+                required
+              />
             </label>
           )}
           <label>
             <span>Email</span>
-            <div className="auth-input">
-              <Mail size={16} />
-              <input
-                type="email"
-                value={email}
-                onInput={(event) => setEmail(event.currentTarget.value)}
-                autoComplete="email"
-                placeholder="you@example.com"
-                required
-              />
-            </div>
+            <input
+              className="auth-field"
+              type="email"
+              value={email}
+              onInput={(event) => setEmail(event.currentTarget.value)}
+              autoComplete="email"
+              placeholder="you@example.com"
+              required
+            />
           </label>
           <label>
             <span>Password</span>
-            <div className="auth-input">
-              <LockKeyhole size={16} />
+            <div className="auth-password">
               <input
+                className="auth-field"
                 type={visible ? "text" : "password"}
                 value={password}
                 onInput={(event) => setPassword(event.currentTarget.value)}
                 autoComplete={mode === "signin" ? "current-password" : "new-password"}
                 minLength={8}
-                placeholder="At least 8 characters"
+                placeholder={mode === "signin" ? "Your password" : "At least 8 characters"}
                 required
               />
               <button
@@ -228,16 +197,21 @@ export function AuthPage() {
           {error && <p className="auth-error">{error}</p>}
 
           <button className="auth-submit" disabled={loading}>
-            {loading ? "Please wait…" : mode === "signin" ? "Sign in" : "Create free account"}
-            {!loading && <ArrowRight size={17} />}
+            {loading ? "Please wait…" : mode === "signin" ? "Sign in" : "Create account"}
           </button>
         </form>
 
-        <p className="auth-legal">
-          By continuing, you agree to Vector's <a href="/legal/terms">Terms</a> and{" "}
-          <a href="/legal/privacy">Privacy Policy</a>.
+        <p className="auth-switch-line">
+          {mode === "signin" ? "New to Vector?" : "Already have an account?"}{" "}
+          <button type="button" onClick={switchMode}>
+            {mode === "signin" ? "Create an account" : "Sign in"}
+          </button>
         </p>
       </section>
+
+      <p className="auth-legal">
+        By continuing you agree to the <a href="/legal/terms">Terms</a> and <a href="/legal/privacy">Privacy Policy</a>.
+      </p>
     </main>
   )
 }
