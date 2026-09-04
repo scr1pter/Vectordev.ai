@@ -1,12 +1,12 @@
 /** @jsxImportSource react */
-import { Check, Copy, MonitorPlay, TerminalSquare } from "lucide-react"
+import { Check, Copy } from "lucide-react"
 import { useEffect, useState } from "react"
 import { readAccountApiResponse } from "../../../lib/account-client"
 
 /**
- * Account-page panel: launch the desktop app (vector:// deep link) or pair the
- * CLI. The pairing command is minted from the signed-in session, so there is
- * no second login and no password — the account is already proven.
+ * Account-page section: launch the desktop app (vector:// deep link) or pair
+ * the CLI. The pairing command is minted from the signed-in session, so there
+ * is no second login and no password.
  */
 export function CliLaunchPanel(props: { accessToken: string }) {
   const [token, setToken] = useState("")
@@ -34,50 +34,43 @@ export function CliLaunchPanel(props: { accessToken: string }) {
   }
 
   return (
-    <article className="account-panel cli-launch-panel">
-      <div className="panel-heading">
-        <span className="panel-icon">
-          <TerminalSquare size={18} />
-        </span>
-        <div>
-          <p>Launch</p>
-          <h2>Open Vector, or use the CLI</h2>
-        </div>
-      </div>
-      <p className="panel-copy">You're signed in, so nothing here asks for a password.</p>
+    <section className="acct-section">
+      <h2>Vector CLI</h2>
+      <p>The same agent in your terminal. Two commands, then type <code>vector</code> inside any repository.</p>
 
-      <a className="cli-launch-desktop" href="vector://open">
-        <MonitorPlay size={16} /> Launch Vector on this computer
-      </a>
-
-      <div className="cli-launch-step">
-        <span>1. Install the CLI once</span>
-        <code>{install}</code>
-        <button type="button" onClick={() => copy("install", install)}>
-          {copied === "install" ? <Check size={14} /> : <Copy size={14} />}
-          {copied === "install" ? "Copied" : "Copy"}
-        </button>
-      </div>
-
-      <div className="cli-launch-step">
-        <span>2. Sign the CLI in — run this in your terminal</span>
-        {login ? (
-          <>
-            <code>{login}</code>
-            <button type="button" onClick={() => copy("login", login)}>
-              {copied === "login" ? <Check size={14} /> : <Copy size={14} />}
-              {copied === "login" ? "Copied" : "Copy"}
+      <ol className="acct-steps">
+        <li>
+          <span>Install once</span>
+          <div className="acct-code-row">
+            <code>{install}</code>
+            <button type="button" onClick={() => copy("install", install)}>
+              {copied === "install" ? <Check size={14} /> : <Copy size={14} />}
+              {copied === "install" ? "Copied" : "Copy"}
             </button>
-          </>
-        ) : (
-          <code className="cli-launch-pending">{error || "Preparing your sign-in command…"}</code>
-        )}
-      </div>
+          </div>
+        </li>
+        <li>
+          <span>Sign the CLI in — this command is already tied to your account</span>
+          {login ? (
+            <div className="acct-code-row">
+              <code>{login}</code>
+              <button type="button" onClick={() => copy("login", login)}>
+                {copied === "login" ? <Check size={14} /> : <Copy size={14} />}
+                {copied === "login" ? "Copied" : "Copy"}
+              </button>
+            </div>
+          ) : (
+            <div className="acct-code-row acct-code-pending">
+              <code>{error || "Preparing your sign-in command…"}</code>
+            </div>
+          )}
+        </li>
+      </ol>
 
-      <p className="cli-launch-note">
-        3. Type <code>vector</code> in any repository. Free model included; add your own keys with{" "}
-        <code>vector auth login</code>.
-      </p>
-    </article>
+      <a className="acct-button acct-button-secondary" href="vector://open">
+        Open Vector on this computer
+      </a>
+      <p className="acct-fine">Free model included. Add your own keys any time with <code>vector auth login</code>.</p>
+    </section>
   )
 }

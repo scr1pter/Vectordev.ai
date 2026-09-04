@@ -1,6 +1,5 @@
 ---
 import { AccountPage } from "../components/marketing/account/AccountPage"
-import MatrixRain from "../components/marketing/account/MatrixRain.astro"
 import MarketingLayout from "../components/marketing/MarketingLayout.astro"
 
 export const prerender = true
@@ -8,7 +7,6 @@ export const prerender = true
 
 <MarketingLayout title="Your Vector account" description="Download Vector, view your license, and manage billing." noindex>
   <div class="account-environment">
-    <MatrixRain />
     <AccountPage client:only="react" />
   </div>
 </MarketingLayout>

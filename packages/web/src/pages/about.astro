@@ -1,0 +1,134 @@
+---
+import MarketingFooter from "../components/marketing/MarketingFooter.astro"
+import MarketingLayout from "../components/marketing/MarketingLayout.astro"
+import MarketingNav from "../components/marketing/MarketingNav.astro"
+
+export const prerender = true
+
+const layers = [
+  {
+    name: "The workspace",
+    body:
+      "An editor, file search, diagnostics, a terminal, and a real browser, over the repository already on your disk. Memory that lives in a file you can read. Spend recorded from what the provider reported. Nothing uploaded by default.",
+  },
+  {
+    name: "The agents",
+    body:
+      "One agent that plans, edits, runs commands, drives the browser, and hands specialist work to subagents — review, security, testing, migration, performance, and a judge that can fail the work. Up to sixteen at once, each in its own checkout, merged only when you say so. On the desktop, in the terminal, or from the cloud.",
+  },
+  {
+    name: "The models",
+    body:
+      "Free models included so it works before you connect anything. Your own keys for Claude, GPT, Gemini and the rest, with the bill between you and that provider. And soon, a model of our own.",
+  },
+]
+
+const principles = [
+  ["Local-first", "Your repositories, keys, memory, and agent work stay on your computer. Vector does not proxy your code."],
+  ["Measured, not modelled", "What a run cost is the number the provider reported. A run nothing reported is marked unmeasured, never shown as free."],
+  ["Verified before done", "Finishing is not the agent's opinion. Checks run, the browser opens the result, and an independent judge can send the work back."],
+  ["You decide what lands", "Agents work in isolated checkouts. What comes back is a diff you review and merge hunk by hunk."],
+]
+---
+
+<MarketingLayout
+  title="About Vector"
+  description="Vector is AI infrastructure for autonomous software engineering: the workspace, the agents, and the models beneath them."
+>
+  <div class="about-page">
+    <MarketingNav active="about" />
+    <main>
+      <header class="about-hero">
+        <p class="eyebrow">About Vector</p>
+        <h1>AI infrastructure for autonomous software engineering.</h1>
+        <p>
+          Vector is three layers that were built to work as one: the workspace where software gets made, the agents
+          that do the work inside it, and the models beneath them. Most tools ship one of these. The hard part of
+          autonomous engineering is what happens between them.
+        </p>
+      </header>
+
+      <section class="about-layers" aria-label="The three layers">
+        {layers.map((layer, index) => (
+          <article>
+            <span>0{index + 1}</span>
+            <h2>{layer.name}</h2>
+            <p>{layer.body}</p>
+          </article>
+        ))}
+      </section>
+
+      <section class="about-velocity" aria-labelledby="velocity-title">
+        <p class="eyebrow">Coming soon</p>
+        <h2 id="velocity-title">Vector Velocity</h2>
+        <p class="about-velocity-lead">
+          Our own model, with over 300 billion parameters, tuned for the loop Vector actually runs — planning, tool
+          calls, edits, checks, and verification — rather than for chat.
+        </p>
+        <p>
+          Velocity will be included with Vector accounts alongside the free models, selectable like any other provider
+          in the desktop app and the CLI, and measured by the same Tokenomics engine as everything else. Until it ships,
+          Big Pickle is the included default and your own keys cover the rest.
+        </p>
+        <a href="/docs#velocity">Read more in the docs →</a>
+      </section>
+
+      <section class="about-principles" aria-label="What we believe">
+        <h2>What we hold to</h2>
+        <dl>
+          {principles.map(([term, detail]) => (
+            <div><dt>{term}</dt><dd>{detail}</dd></div>
+          ))}
+        </dl>
+      </section>
+
+      <section class="about-cta">
+        <h2>Start building.</h2>
+        <p>Free during beta. macOS, Windows, and Linux — and <code>npm install -g @vectordevai/cli</code> for the terminal.</p>
+        <a class="about-button" href="/login">Get Vector</a>
+        <a class="about-link" href="/docs#why-vector">Why Vector, in detail</a>
+      </section>
+    </main>
+    <MarketingFooter />
+  </div>
+</MarketingLayout>
+
+<style is:global>
+  .about-page { min-height: 100vh; background: rgba(8, 6, 13, 0.62); }
+  .about-page main { width: min(900px, calc(100% - 44px)); margin: 0 auto; padding: 86px 0 110px; }
+  .about-page .eyebrow { margin: 0 0 16px; color: var(--accent-strong); font-size: 11px; font-weight: 670; letter-spacing: 0.1em; text-transform: uppercase; }
+  .about-hero { padding: 20px 0 56px; border-bottom: 1px solid var(--line); }
+  .about-hero h1 { max-width: 780px; margin: 0; color: var(--ink); font-size: clamp(40px, 6.4vw, 66px); font-weight: 560; line-height: 1.04; letter-spacing: -0.02em; }
+  .about-hero > p:not(.eyebrow) { max-width: 660px; margin: 24px 0 0; color: var(--muted-strong); font-size: 17px; line-height: 1.65; }
+  .about-layers { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; border-bottom: 1px solid var(--line); }
+  .about-layers article { padding: 44px 28px 44px 0; }
+  .about-layers article + article { padding-left: 28px; border-left: 1px solid var(--line); }
+  .about-layers span { color: var(--accent-strong); font-size: 12px; font-weight: 650; letter-spacing: 0.08em; }
+  .about-layers h2 { margin: 12px 0 0; color: var(--ink); font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
+  .about-layers p { margin: 12px 0 0; color: var(--muted-strong); font-size: 14.5px; line-height: 1.65; }
+  .about-velocity { padding: 64px 0; border-bottom: 1px solid var(--line); }
+  .about-velocity h2 { margin: 0; color: var(--ink); font-size: clamp(30px, 4.4vw, 44px); font-weight: 600; letter-spacing: -0.02em; }
+  .about-velocity-lead { max-width: 700px; margin: 18px 0 0; color: var(--ink); font-size: 19px; line-height: 1.5; }
+  .about-velocity > p:not(.eyebrow, .about-velocity-lead) { max-width: 700px; margin: 16px 0 0; color: var(--muted-strong); font-size: 15px; line-height: 1.65; }
+  .about-velocity a { display: inline-block; margin-top: 22px; color: var(--accent-strong); font-size: 14px; text-decoration: none; }
+  .about-principles { padding: 64px 0; border-bottom: 1px solid var(--line); }
+  .about-principles h2 { margin: 0 0 8px; color: var(--ink); font-size: 26px; font-weight: 600; letter-spacing: -0.01em; }
+  .about-principles dl { margin: 0; padding: 0; }
+  .about-principles dl > div { padding: 22px 0; display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.8fr); gap: 12px 32px; border-bottom: 1px solid var(--line); }
+  .about-principles dl > div:last-child { border-bottom: 0; }
+  .about-principles dt { margin: 0; color: var(--ink); font-size: 15px; font-weight: 620; }
+  .about-principles dd { margin: 0; color: var(--muted-strong); font-size: 14.5px; line-height: 1.65; }
+  .about-cta { padding: 72px 0 0; text-align: left; }
+  .about-cta h2 { margin: 0; color: var(--ink); font-size: clamp(30px, 4.4vw, 44px); font-weight: 600; letter-spacing: -0.02em; }
+  .about-cta > p { max-width: 640px; margin: 14px 0 26px; color: var(--muted-strong); font-size: 15px; line-height: 1.65; }
+  .about-cta code { padding: 2px 6px; color: #dbcfff; background: rgba(155, 108, 255, 0.1); border-radius: 6px; font-size: 13px; }
+  .about-button { display: inline-flex; align-items: center; min-height: 44px; padding: 0 22px; color: #171020; background: linear-gradient(180deg, #eee7ff, #c2a7f8); border: 1px solid rgba(255, 255, 255, 0.5); border-radius: 11px; font-size: 14px; font-weight: 600; text-decoration: none; }
+  .about-link { margin-left: 18px; color: var(--muted-strong); font-size: 14px; text-decoration: underline; text-decoration-color: rgba(183, 149, 255, 0.4); text-underline-offset: 3px; }
+  .about-link:hover { color: var(--ink); }
+  @media (max-width: 800px) {
+    .about-layers { grid-template-columns: 1fr; }
+    .about-layers article { padding: 30px 0; }
+    .about-layers article + article { padding-left: 0; border-left: 0; border-top: 1px solid var(--line); }
+    .about-principles dl > div { grid-template-columns: 1fr; gap: 6px; }
+  }
+</style>

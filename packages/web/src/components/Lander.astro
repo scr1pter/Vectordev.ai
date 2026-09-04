@@ -676,6 +676,10 @@ const changelog = [
           <h3>Runs a team when you need one</h3>
           <p>Up to sixteen agents in parallel, each in its own workspace, merged when you say so.</p>
         </article>
+        <article class="simple-row simple-row-wide" data-reveal style="--rd: 240ms">
+          <h3>Vector Velocity <span class="simple-soon">Coming soon</span></h3>
+          <p>Our own model, over 300 billion parameters, tuned for the agent loop rather than for chat. Included with Vector accounts. <a href="/about">Read about it →</a></p>
+        </article>
       </div>
     </section>
 
@@ -3151,6 +3155,9 @@ const changelog = [
   .simple-row { padding: 26px 0; border-bottom: 1px solid var(--hairline); }
   .simple-row h3 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -0.015em; color: var(--lavender); }
   .simple-row p { margin: 8px 0 0; font-size: 14.5px; line-height: 1.6; color: var(--ink-55); }
+  .simple-row p a { color: var(--purple-soft); text-decoration: none; }
+  .simple-row-wide { grid-column: 1 / -1; }
+  .simple-soon { display: inline-block; margin-left: 10px; padding: 3px 9px; vertical-align: middle; color: var(--purple-soft); font-size: 10px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; background: rgba(143, 82, 255, 0.12); border: 1px solid rgba(183, 149, 255, 0.28); border-radius: 999px; }
   @media (max-width: 900px) {
     .simple-grid, .simple-cli, .simple-rows { grid-template-columns: 1fr; }
   }

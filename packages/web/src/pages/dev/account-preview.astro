@@ -1,6 +1,5 @@
 ---
 import { AccountPage } from "../../components/marketing/account/AccountPage"
-import MatrixRain from "../../components/marketing/account/MatrixRain.astro"
 import MarketingLayout from "../../components/marketing/MarketingLayout.astro"
 
 // Dev-only design harness for the logged-in account page. Never built for prod.
@@ -27,7 +26,6 @@ const preview =
 
 <MarketingLayout title="Account preview (dev)" description="Design harness" noindex>
   <div class="account-environment">
-    <MatrixRain />
     <AccountPage client:only="react" preview={preview} />
   </div>
 </MarketingLayout>

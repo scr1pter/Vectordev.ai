@@ -1,6 +1,6 @@
 ---
 interface Props {
-  active?: "product" | "docs" | "releases" | "login"
+  active?: "product" | "docs" | "releases" | "login" | "about"
 }
 
 const { active = "product" } = Astro.props
@@ -16,6 +16,7 @@ const { active = "product" } = Astro.props
       <a class:list={{ active: active === "product" }} href="/#workspace">Product</a>
       <a class:list={{ active: active === "docs" }} href="/docs">Docs</a>
       <a class:list={{ active: active === "releases" }} href="/releases">Releases</a>
+      <a class:list={{ active: active === "about" }} href="/about">About</a>
       <a class:list={["download-link", { active: active === "login" }]} href="/login"><span>Login</span></a>
     </nav>
   </div>
@@ -49,6 +50,7 @@ const { active = "product" } = Astro.props
             <a href="/" aria-current={active === "product" ? "page" : undefined} class:list={{ current: active === "product" }}>Product</a>
             <a href="/docs" aria-current={active === "docs" ? "page" : undefined} class:list={{ current: active === "docs" }}>Documentation</a>
             <a href="/releases" aria-current={active === "releases" ? "page" : undefined} class:list={{ current: active === "releases" }}>Releases</a>
+            <a href="/about" aria-current={active === "about" ? "page" : undefined} class:list={{ current: active === "about" }}>About</a>
             <a href="/login" aria-current={active === "login" ? "page" : undefined} class:list={{ current: active === "login" }}>Login</a>
           </nav>
           <p class="mobile-nav-foot">Vector is available for macOS, Windows, and Linux.</p>
