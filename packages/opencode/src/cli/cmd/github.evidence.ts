@@ -57,6 +57,11 @@ export const CHECK_TAIL_LINES = 40
 const CHECK_MAX_CHARS = 6000
 const CHECK_MAX_COUNT = 12
 const CHANGES_MAX_ROWS = 50
+// GitHub rejects PR bodies and comments over 65,536 characters. Stay well
+// under so the request that follows the push never fails on size.
+export const BODY_MAX_CHARS = 60_000
+const CHECK_COMPACT_CHARS = 1_500
+const CHECK_COMPACT_COUNT = 3
 
 // Commands whose outcome is evidence: anything that looks like a test,
 // typecheck, lint or build. `\bcheck\b` deliberately does not match
@@ -165,14 +170,30 @@ export function judgeTextFromMessages(messages: readonly SessionV1.WithParts[]):
 }
 
 export function buildEvidenceBody(input: EvidenceInput): string {
+  const checks = collectChecks(input.messages)
+  const full = assemble(input, input.response.trim(), formatChecks(checks))
+  if (full.length <= BODY_MAX_CHARS) return full
+  // Too long: first shrink the check output (the usual culprit), then trim the
+  // agent's response. The evidence sections and "Closes #N" always survive.
+  const compact = assemble(input, input.response.trim(), formatChecks(checks, true))
+  if (compact.length <= BODY_MAX_CHARS) return compact
+  const marker = "\n\n_… response truncated; the full transcript is in the run log._"
+  const without = assemble(input, "", formatChecks(checks, true))
+  // A present response also costs its separator lines; measure that exactly.
+  const overhead = assemble(input, "x", formatChecks(checks, true)).length - without.length - 1
+  const room = BODY_MAX_CHARS - without.length - overhead - marker.length
+  const response = room > 0 ? input.response.trim().slice(0, room) + marker : marker.trim()
+  return assemble(input, response, formatChecks(checks, true))
+}
+
+function assemble(input: EvidenceInput, response: string, checks: string[]): string {
   const lines: string[] = []
-  const response = input.response.trim()
   if (response) lines.push(response, "")
   if (input.trigger) lines.push(input.trigger, "")
 
   lines.push("## Vector evidence", "")
   lines.push("### Changes", "", ...formatChanges(input.changes), "")
-  lines.push("### Checks", "", ...formatChecks(collectChecks(input.messages)), "")
+  lines.push("### Checks", "", ...checks, "")
   lines.push(formatCost(measureCost(input.messages)))
   lines.push(formatJudge(input.judge))
   lines.push("")
@@ -197,21 +218,25 @@ function formatChanges(changes: EvidenceChange[]): string[] {
   return out
 }
 
-function formatChecks(checks: EvidenceCheck[]): string[] {
+function formatChecks(checks: EvidenceCheck[], compact = false): string[] {
   if (!checks.length) return ["_No test, typecheck, lint or build commands were run._"]
-  const shown = checks.slice(-CHECK_MAX_COUNT)
+  const shown = checks.slice(-(compact ? CHECK_COMPACT_COUNT : CHECK_MAX_COUNT))
   const out: string[] = []
   if (checks.length > shown.length) out.push(`_Showing the last ${shown.length} of ${checks.length} checks._`, "")
   for (const check of shown) {
     const icon = check.exit === 0 ? "✅" : check.exit === null ? "⚠️" : "❌"
     const status = check.exit === "error" ? "tool error" : check.exit === null ? "exit unknown" : `exit ${check.exit}`
-    const fence = fenceFor(check.output)
+    const output =
+      compact && check.output.length > CHECK_COMPACT_CHARS
+        ? "…" + check.output.slice(-CHECK_COMPACT_CHARS)
+        : check.output
+    const fence = fenceFor(output)
     out.push(
       "<details>",
       `<summary>${icon} <code>${escapeHtml(check.command)}</code> (${status})</summary>`,
       "",
       `${fence}text`,
-      check.output || "(no output)",
+      output || "(no output)",
       fence,
       "",
       "</details>",

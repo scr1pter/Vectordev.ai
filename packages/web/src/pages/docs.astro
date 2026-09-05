@@ -1039,8 +1039,11 @@ const faqs = [
           </p>
           <p class="note">
             The free model runs the workflow with nothing but the account token. Add a provider key as a second secret to
-            use Claude, GPT, or Gemini in CI. Pull requests opened with the built-in GitHub token do not trigger the
-            repository's other workflows; use a personal access token if you need CI to run on them.
+            use Claude, GPT, or Gemini in CI. One repository setting is required: under Settings → Actions → General →
+            Workflow permissions, tick "Allow GitHub Actions to create and approve pull requests" (GitHub leaves it off
+            by default; without it the branch is pushed and Vector comments a compare link instead). Pull requests opened
+            with the built-in GitHub token do not trigger the repository's other workflows; use a personal access token
+            if you need CI to run on them.
           </p>
         </section>
 

@@ -90,6 +90,21 @@ export function createLicenseService(input: {
     return devicePromise
   }
 
+  // What the last successful config probe said. A machine that has seen
+  // "license required" once stays walled while licensing is unreachable,
+  // instead of getting the never-activated beta pass-through.
+  const memoFile = join(input.userDataPath, "vector-license-config.json")
+  const readMemo = async () => {
+    try {
+      return JSON.parse(await readFile(memoFile, "utf8")) as { licenseRequired?: boolean }
+    } catch {
+      return undefined
+    }
+  }
+  const writeMemo = async (value: { licenseRequired: boolean }) => {
+    await writeFile(memoFile, `${JSON.stringify(value)}\n`, { mode: 0o600 }).catch(() => undefined)
+  }
+
   const readStored = async () => {
     try {
       return JSON.parse(await readFile(file, "utf8")) as StoredLicense
@@ -154,7 +169,9 @@ export function createLicenseService(input: {
           { method: "GET" },
           CONFIG_PROBE_TIMEOUT_MS,
         )
-        if (!(config.licenseRequired ?? config.available)) {
+        const licenseRequired = Boolean(config.licenseRequired ?? config.available)
+        await writeMemo({ licenseRequired })
+        if (!licenseRequired) {
           return {
             access: true,
             state: "beta",
@@ -167,11 +184,24 @@ export function createLicenseService(input: {
           message: "Enter the license key from your Vector purchase email.",
         }
       } catch (error) {
-        // Never activated on this computer. This status deliberately carries no
-        // lastValidatedAt/email: the renderer's LicenseGate reads their absence
-        // as "no activation to enforce" and lets the beta through, while an
-        // offline status built from a stored activation below keeps them and
-        // stays walled.
+        // Never activated on this computer. Only a transport failure (no
+        // answer at all: captive portal, blocked network, timeout) on a machine
+        // that has never seen "license required" gets the beta pass-through:
+        // the status then carries no lastValidatedAt/email and no `enforced`,
+        // which is what the renderer's LicenseGate looks for. A server that
+        // answered with an error, or a remembered paid mode, keeps the wall.
+        const answered = typeof (error as { status?: number }).status === "number"
+        const remembered = (await readMemo())?.licenseRequired === true
+        if (answered || remembered) {
+          return {
+            access: false,
+            state: "offline",
+            enforced: true,
+            message: answered
+              ? `Vector licensing returned an error: ${normalizeError(error)}. Try again in a moment.`
+              : "Connect to the internet so Vector can verify licensing on this computer.",
+          }
+        }
         return {
           access: false,
           state: "offline",

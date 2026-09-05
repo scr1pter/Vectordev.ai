@@ -26,7 +26,14 @@ const unreachableStatus = (cause: unknown): VectorLicenseStatus => ({
 // off a brand-new user. A device that once held a token keeps the wall until
 // the service can say whether that token is still good.
 export function offlineWithoutActivation(status: VectorLicenseStatus | undefined) {
-  return Boolean(status && status.state === "offline" && !status.access && !status.lastValidatedAt && !status.email)
+  return Boolean(
+    status &&
+      status.state === "offline" &&
+      !status.access &&
+      !status.enforced &&
+      !status.lastValidatedAt &&
+      !status.email,
+  )
 }
 
 export function LicenseGate(props: ParentProps) {

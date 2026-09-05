@@ -25,6 +25,10 @@ export type VectorLicenseStatus = {
   lastFour?: string
   offlineGraceDays?: number
   lastValidatedAt?: string
+  // Set on an "offline" status when the wall must hold even without a stored
+  // activation: licensing answered with an error, or this machine has already
+  // seen that a license is required.
+  enforced?: boolean
 }
 export type VectorLicensePlatform = {
   status(): Promise<VectorLicenseStatus>

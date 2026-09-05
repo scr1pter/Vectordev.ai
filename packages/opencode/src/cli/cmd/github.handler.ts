@@ -220,6 +220,8 @@ export const githubInstall = Effect.fn("Cli.github.install")(function* () {
             `    2. Add the repository secret VECTOR_CLI_TOKEN (${app.owner}/${app.repo} → Settings → Secrets and variables → Actions)`,
             `       Create the token at ${VECTOR_SITE}/auth/cli`,
             ...providerStep,
+            `    ${providerStep.length ? 4 : 3}. Let Actions open pull requests: Settings → Actions → General → Workflow permissions →`,
+            `       tick "Allow GitHub Actions to create and approve pull requests" (GitHub leaves it off by default)`,
             "",
             "    Then comment `/vector <task>` on an issue — Vector opens a PR with the diff, checks, cost and judge verdict.",
           ].join("\n"),
@@ -478,6 +480,9 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: { event?: 
     let octoGraph: typeof graphql
     let gitConfig: string
     let session: { id: SessionID; title: string; version: string }
+    // Set when GitHub refused to open the pull request because the repository
+    // does not let Actions create PRs; the follow-up comment carries it.
+    let prBlocked: string | undefined
     let exitCode = 0
     type PromptFiles = Awaited<ReturnType<typeof getUserPrompt>>["promptFiles"]
     const triggerCommentId = isCommentEvent
@@ -593,7 +598,7 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: { event?: 
           if (pr) {
             console.log(`Created PR #${pr}`)
           } else {
-            console.log("Skipped PR creation (no new commits)")
+            console.log(prBlocked ?? "Skipped PR creation (no new commits)")
           }
         } else {
           console.log("Response:", response)
@@ -663,7 +668,7 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: { event?: 
           if (pr) {
             await createComment(`Created PR #${pr}${footer()}`)
           } else {
-            await createComment(await evidence(response, head))
+            await createComment(await evidence(response, head, { trigger: prBlocked }))
           }
           await removeReaction(commentType)
         } else {
@@ -1372,6 +1377,19 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: { event?: 
         // relative to the base (e.g. shallow clone edge cases).
         if (e instanceof Error && e.message.includes("No commits between")) {
           console.log(`GitHub rejected PR: ${e.message}`)
+          return null
+        }
+        // GitHub ships repositories with "Allow GitHub Actions to create and
+        // approve pull requests" switched off, and GITHUB_TOKEN then gets a 403
+        // here. The branch is already pushed, so hand back a compare link and
+        // the setting to flip instead of failing the run.
+        if (e instanceof Error && /not permitted to create or approve pull requests/i.test(e.message)) {
+          console.log(`GitHub blocked PR creation: ${e.message}`)
+          const compare = `https://github.com/${owner}/${repo}/compare/${encodeURIComponent(base)}...${encodeURIComponent(branch)}?expand=1`
+          prBlocked = [
+            `> Vector pushed \`${branch}\`, but this repository does not let GitHub Actions open pull requests.`,
+            `> Enable **Settings → Actions → General → Workflow permissions → "Allow GitHub Actions to create and approve pull requests"**, then comment again — or [open the pull request from the branch](${compare}) now.`,
+          ].join("\n")
           return null
         }
         throw e

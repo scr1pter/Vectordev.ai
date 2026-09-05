@@ -1,6 +1,7 @@
 import { test, expect, describe } from "bun:test"
 import type { SessionV1 } from "@opencode-ai/core/v1/session"
 import {
+  BODY_MAX_CHARS,
   buildEvidenceBody,
   collectChecks,
   fmtTokens,
@@ -244,6 +245,23 @@ describe("buildEvidenceBody", () => {
     // The upstream share link and social card must not come back.
     expect(body).not.toContain("opencode.ai")
     expect(body).not.toContain("social-cards")
+  })
+
+  test("stays under GitHub's body limit, keeping the evidence and Closes line", () => {
+    const body = buildEvidenceBody({
+      response: "word ".repeat(20_000),
+      changes: [{ file: "src/a.ts", additions: 1, deletions: 0 }],
+      messages: [],
+      judge: undefined,
+      runUrl: "https://github.com/o/r/actions/runs/1",
+      closes: 7,
+    })
+    expect(body.length).toBeLessThanOrEqual(BODY_MAX_CHARS)
+    expect(body).toContain("response truncated")
+    expect(body).toContain("## Vector evidence")
+    expect(body).toContain("`src/a.ts`")
+    expect(body).toContain("Closes #7")
+    expect(body.endsWith("[Vector run](https://github.com/o/r/actions/runs/1)")).toBe(true)
   })
 
   test("degrades cleanly when nothing was measured or run", () => {
