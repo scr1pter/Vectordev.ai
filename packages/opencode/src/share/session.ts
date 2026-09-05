@@ -26,7 +26,10 @@ const layer = Layer.effect(
     const share = Effect.fn("SessionShare.share")(function* (sessionID: SessionID) {
       const conf = yield* cfg.get()
       const reason = ShareNext.disabledReason(conf.share)
-      if (reason) throw new Error(reason)
+      // A typed failure, not a thrown defect: callers (the CLI's `--share`,
+      // the HTTP route) can then report why sharing is off instead of
+      // surfacing an unexpected-crash stack trace.
+      if (reason) return yield* Effect.fail(new Error(reason))
       const result = yield* shareNext.create(sessionID)
       yield* session.setShare({ sessionID, share: { url: result.url } })
       return result

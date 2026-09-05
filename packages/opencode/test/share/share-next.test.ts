@@ -97,7 +97,7 @@ describe("ShareNext", () => {
             expect(req.headers).toEqual({})
           }),
         ).pipe(Effect.provide(requestLayer(none))),
-      { config: { enterprise: { url: "https://legacy-share.example.com" } } },
+      { config: { share: "manual", enterprise: { url: "https://legacy-share.example.com" } } },
     ),
   )
 
@@ -171,7 +171,7 @@ describe("ShareNext", () => {
           expect(createRequests[0].url).toBe("https://legacy-share.example.com/api/share")
         }).pipe(Effect.provide(integrationLayer(client)))
       },
-      { config: { enterprise: { url: "https://legacy-share.example.com" } } },
+      { config: { share: "manual", enterprise: { url: "https://legacy-share.example.com" } } },
     ),
   )
 
@@ -206,13 +206,34 @@ describe("ShareNext", () => {
           ])
         }).pipe(Effect.provide(integrationLayer(client)))
       },
-      { config: { enterprise: { url: "https://legacy-share.example.com" } } },
+      { config: { share: "manual", enterprise: { url: "https://legacy-share.example.com" } } },
     ),
   )
 
   it.live("create fails on a non-ok response and does not persist a share", () =>
+    provideTmpdirInstance(
+      () => {
+        const client = HttpClient.make((req) => Effect.succeed(json(req, { error: "bad" }, 500)))
+        return Effect.gen(function* () {
+          const session = yield* (yield* Session.Service).create({ title: "test" })
+
+          const exit = yield* ShareNext.Service.use((svc) => Effect.exit(svc.create(session.id)))
+
+          expect(Exit.isFailure(exit)).toBe(true)
+          expect(yield* share(session.id)).toBeUndefined()
+        }).pipe(Effect.provide(integrationLayer(client)))
+      },
+      { config: { share: "manual" } },
+    ),
+  )
+
+  it.live("create refuses to share when the config has not opted in", () =>
     provideTmpdirInstance(() => {
-      const client = HttpClient.make((req) => Effect.succeed(json(req, { error: "bad" }, 500)))
+      const seen: HttpClientRequest.HttpClientRequest[] = []
+      const client = HttpClient.make((req) => {
+        seen.push(req)
+        return Effect.succeed(json(req, { ok: true }))
+      })
       return Effect.gen(function* () {
         const session = yield* (yield* Session.Service).create({ title: "test" })
 
@@ -220,8 +241,46 @@ describe("ShareNext", () => {
 
         expect(Exit.isFailure(exit)).toBe(true)
         expect(yield* share(session.id)).toBeUndefined()
+        expect(seen).toHaveLength(0)
       }).pipe(Effect.provide(integrationLayer(client)))
     }),
+  )
+
+  // Turning sharing off must not strand a share that already exists: the
+  // unshare has to reach the service and drop the row, or the transcript stays
+  // readable at its public URL while every surface calls the session private.
+  it.live("remove deletes an existing share even when sharing is not enabled", () =>
+    provideTmpdirInstance(
+      () => {
+        const seen: HttpClientRequest.HttpClientRequest[] = []
+        const client = HttpClient.make((req) => {
+          seen.push(req)
+          return Effect.succeed(HttpClientResponse.fromWeb(req, new Response(null, { status: 200 })))
+        })
+        return Effect.gen(function* () {
+          const session = yield* (yield* Session.Service).create({ title: "test" })
+          const { db } = yield* Database.Service
+          yield* db
+            .insert(SessionShareTable)
+            .values({
+              session_id: session.id,
+              id: "shr_abc",
+              url: "https://legacy-share.example.com/share/abc",
+              secret: "sec_123",
+            })
+            .run()
+            .pipe(Effect.orDie)
+
+          yield* (yield* ShareNext.Service).remove(session.id)
+
+          expect(yield* share(session.id)).toBeUndefined()
+          expect(seen.map((req) => [req.method, req.url])).toEqual([
+            ["DELETE", "https://legacy-share.example.com/api/share/shr_abc"],
+          ])
+        }).pipe(Effect.provide(integrationLayer(client)))
+      },
+      { config: { enterprise: { url: "https://legacy-share.example.com" } } },
+    ),
   )
 
   it.live("ShareNext coalesces rapid diff events into one delayed sync with latest data", () =>
@@ -318,7 +377,7 @@ describe("ShareNext", () => {
           ])
         }).pipe(Effect.provide(integrationLayer(client)))
       },
-      { config: { enterprise: { url: "https://legacy-share.example.com" } } },
+      { config: { share: "manual", enterprise: { url: "https://legacy-share.example.com" } } },
     ),
   )
 })

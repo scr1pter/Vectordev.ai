@@ -137,9 +137,12 @@ const layer = Layer.effect(
     const provider = yield* Provider.Service
     const session = yield* Session.Service
 
+    const offReason = Effect.fnUntraced(function* () {
+      return disabledReason((yield* cfg.get()).share)
+    })
+
     const off = Effect.fnUntraced(function* () {
-      if (disabled) return true
-      return !enabled((yield* cfg.get()).share)
+      return (yield* offReason()) !== undefined
     })
 
     function sync(sessionID: SessionID, data: Data[]) {
@@ -329,7 +332,10 @@ const layer = Layer.effect(
     })
 
     const create = Effect.fn("ShareNext.create")(function* (sessionID: SessionID) {
-      if (yield* off()) return { id: "", url: "", secret: "" }
+      // Fail rather than hand back an empty share: a caller that skipped the
+      // config check would otherwise store "" as the session's share URL.
+      const reason = yield* offReason()
+      if (reason) return yield* Effect.fail(new Error(reason))
       yield* Effect.logInfo("creating share", { sessionID: sessionID })
       const req = yield* request()
       const result = yield* HttpClientRequest.post(`${req.baseUrl}${req.api.create}`).pipe(
@@ -356,8 +362,12 @@ const layer = Layer.effect(
       return result
     })
 
+    // Deliberately not gated on the `share` setting. Turning sharing off, or
+    // never turning it on, must not strand a share that already exists: an
+    // unshare that silently did nothing would leave the transcript readable at
+    // its public URL while every surface reported the session as private. The
+    // request carries only the share secret, never session data.
     const remove = Effect.fn("ShareNext.remove")(function* (sessionID: SessionID) {
-      if (yield* off()) return
       yield* Effect.logInfo("removing share", { sessionID: sessionID })
       const s = yield* InstanceState.get(state)
       const share = yield* getCached(sessionID)
