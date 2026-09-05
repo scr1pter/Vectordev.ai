@@ -1,0 +1,277 @@
+// Builds the markdown "evidence bundle" that `vector github run` attaches to
+// the PR it opens (and to the comment it leaves on an existing PR). Everything
+// here is pure: the handler gathers session messages, the git numstat and the
+// judge's final text, and this module only formats them. That keeps the body
+// unit-testable with fixture parts and lets the layout change without touching
+// the GitHub plumbing.
+//
+// TODO(screenshots): browser/computer tool parts carry image attachments; once
+// there is an asset store to upload them to, add a "Screenshots" section here.
+import type { SessionV1 } from "@opencode-ai/core/v1/session"
+import { parseJudgeScores, parseJudgeVerdict } from "@/session/judge-verdict"
+
+export type EvidenceChange = {
+  file: string
+  additions: number
+  deletions: number
+}
+
+export type EvidenceCheck = {
+  command: string
+  /** Process exit code; `null` when unknown, `"error"` when the tool itself failed. */
+  exit: number | null | "error"
+  /** Tail of the command output, already trimmed to `CHECK_TAIL_LINES`. */
+  output: string
+}
+
+export type MeasuredCost = {
+  costUsd: number
+  input: number
+  output: number
+  reasoning: number
+  cacheRead: number
+  cacheWrite: number
+  provider?: string
+  model?: string
+  /** Assistant messages that reported usage. */
+  turns: number
+}
+
+export type EvidenceInput = {
+  /** The agent's final response, rendered verbatim above the evidence. */
+  response: string
+  changes: EvidenceChange[]
+  /** Messages from the run's session plus any subagent sessions. */
+  messages: readonly SessionV1.WithParts[]
+  /** Final text of the judge subagent when it ran; omit when it did not. */
+  judge?: string
+  /** Absolute URL of the GitHub Actions run. */
+  runUrl: string
+  /** Issue number the PR closes. */
+  closes?: number
+  /** Extra line under the response, e.g. "Triggered by workflow_dispatch". */
+  trigger?: string
+}
+
+export const CHECK_TAIL_LINES = 40
+const CHECK_MAX_CHARS = 6000
+const CHECK_MAX_COUNT = 12
+const CHANGES_MAX_ROWS = 50
+
+// Commands whose outcome is evidence: anything that looks like a test,
+// typecheck, lint or build. `\bcheck\b` deliberately does not match
+// `checkout`; the shell builtin `test -f ...` is excluded separately.
+const CHECK_COMMAND =
+  /\b(test|tests|typecheck|tsc|lint|eslint|oxlint|biome|build|vitest|jest|pytest|mocha|check|clippy|vet)\b/i
+const SHELL_TEST_BUILTIN = /^\s*(test|\[)\s/
+
+export function isCheckCommand(command: string): boolean {
+  if (SHELL_TEST_BUILTIN.test(command)) return false
+  return CHECK_COMMAND.test(command)
+}
+
+/** Parses `git diff --numstat` output. Binary files report `-` and count as 0. */
+export function parseNumstat(text: string): EvidenceChange[] {
+  const out: EvidenceChange[] = []
+  for (const line of text.split("\n")) {
+    if (!line.trim()) continue
+    const [add, del, ...rest] = line.split("\t")
+    const file = rest.join("\t").trim()
+    if (!file) continue
+    out.push({ file, additions: toCount(add), deletions: toCount(del) })
+  }
+  return out
+}
+
+function toCount(value: string | undefined): number {
+  const n = Number.parseInt(value ?? "", 10)
+  return Number.isFinite(n) && n > 0 ? n : 0
+}
+
+const finite = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? Math.max(0, value) : 0)
+
+// Same reducer approach as the app's token-usage.ts measureUsage: sum only the
+// assistant messages that reported usage, and return undefined rather than a
+// fabricated zero when none did. Provider/model come from the latest such
+// message, since a run can switch models midway.
+export function measureCost(messages: readonly SessionV1.WithParts[]): MeasuredCost | undefined {
+  const measured: SessionV1.Assistant[] = []
+  for (const { info } of messages) {
+    if (info.role !== "assistant") continue
+    const t = info.tokens
+    if (finite(t?.input) > 0 || finite(t?.output) > 0 || finite(t?.reasoning) > 0 || finite(t?.cache?.read) > 0) {
+      measured.push(info)
+    }
+  }
+  if (!measured.length) return undefined
+  const last = measured[measured.length - 1]
+  return {
+    costUsd: measured.reduce((sum, m) => sum + finite(m.cost), 0),
+    input: measured.reduce((sum, m) => sum + finite(m.tokens?.input), 0),
+    output: measured.reduce((sum, m) => sum + finite(m.tokens?.output), 0),
+    reasoning: measured.reduce((sum, m) => sum + finite(m.tokens?.reasoning), 0),
+    cacheRead: measured.reduce((sum, m) => sum + finite(m.tokens?.cache?.read), 0),
+    cacheWrite: measured.reduce((sum, m) => sum + finite(m.tokens?.cache?.write), 0),
+    provider: last.providerID,
+    model: last.modelID,
+    turns: measured.length,
+  }
+}
+
+/** Every bash tool call that looks like a check, in execution order. */
+export function collectChecks(messages: readonly SessionV1.WithParts[]): EvidenceCheck[] {
+  const checks: EvidenceCheck[] = []
+  for (const { parts } of messages) {
+    for (const part of parts) {
+      if (part.type !== "tool" || part.tool !== "bash") continue
+      const state = part.state
+      if (state.status !== "completed" && state.status !== "error") continue
+      const input = state.input as Record<string, unknown>
+      const command =
+        typeof input.command === "string" && input.command.trim()
+          ? input.command.trim()
+          : state.status === "completed"
+            ? state.title.trim()
+            : ""
+      if (!command || !isCheckCommand(command)) continue
+      if (state.status === "error") {
+        checks.push({ command, exit: "error", output: tail(state.error) })
+        continue
+      }
+      const exit = state.metadata?.exit
+      checks.push({
+        command,
+        exit: typeof exit === "number" && Number.isFinite(exit) ? exit : null,
+        output: tail(stripShellMetadata(state.output)),
+      })
+    }
+  }
+  return checks
+}
+
+/**
+ * Last text the assistant wrote in a (judge) session, or undefined. The
+ * verdict block is the final thing the judge prompt asks for, so it is in the
+ * last text part of the last assistant message.
+ */
+export function judgeTextFromMessages(messages: readonly SessionV1.WithParts[]): string | undefined {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const { info, parts } = messages[i]
+    if (info.role !== "assistant") continue
+    const text = parts.findLast((p) => p.type === "text")
+    if (text && text.text.trim()) return text.text
+  }
+  return undefined
+}
+
+export function buildEvidenceBody(input: EvidenceInput): string {
+  const lines: string[] = []
+  const response = input.response.trim()
+  if (response) lines.push(response, "")
+  if (input.trigger) lines.push(input.trigger, "")
+
+  lines.push("## Vector evidence", "")
+  lines.push("### Changes", "", ...formatChanges(input.changes), "")
+  lines.push("### Checks", "", ...formatChecks(collectChecks(input.messages)), "")
+  lines.push(formatCost(measureCost(input.messages)))
+  lines.push(formatJudge(input.judge))
+  lines.push("")
+  if (input.closes !== undefined) lines.push(`Closes #${input.closes}`, "")
+  lines.push("---", `[Vector run](${input.runUrl})`)
+  return lines.join("\n")
+}
+
+function formatChanges(changes: EvidenceChange[]): string[] {
+  if (!changes.length) return ["_No file changes._"]
+  const rows = changes.slice(0, CHANGES_MAX_ROWS)
+  const additions = changes.reduce((sum, c) => sum + c.additions, 0)
+  const deletions = changes.reduce((sum, c) => sum + c.deletions, 0)
+  const out = [
+    "| File | + | − |",
+    "| --- | ---: | ---: |",
+    ...rows.map((c) => `| \`${escapeCell(c.file)}\` | ${c.additions} | ${c.deletions} |`),
+  ]
+  if (changes.length > rows.length) out.push(`| _… and ${changes.length - rows.length} more_ | | |`)
+  const noun = changes.length === 1 ? "file" : "files"
+  out.push("", `_${changes.length} ${noun} changed, +${additions} −${deletions}_`)
+  return out
+}
+
+function formatChecks(checks: EvidenceCheck[]): string[] {
+  if (!checks.length) return ["_No test, typecheck, lint or build commands were run._"]
+  const shown = checks.slice(-CHECK_MAX_COUNT)
+  const out: string[] = []
+  if (checks.length > shown.length) out.push(`_Showing the last ${shown.length} of ${checks.length} checks._`, "")
+  for (const check of shown) {
+    const icon = check.exit === 0 ? "✅" : check.exit === null ? "⚠️" : "❌"
+    const status = check.exit === "error" ? "tool error" : check.exit === null ? "exit unknown" : `exit ${check.exit}`
+    const fence = fenceFor(check.output)
+    out.push(
+      "<details>",
+      `<summary>${icon} <code>${escapeHtml(check.command)}</code> (${status})</summary>`,
+      "",
+      `${fence}text`,
+      check.output || "(no output)",
+      fence,
+      "",
+      "</details>",
+    )
+  }
+  return out
+}
+
+function formatCost(cost: MeasuredCost | undefined): string {
+  if (!cost) return "**Cost:** not measured"
+  const parts = [
+    `$${cost.costUsd.toFixed(cost.costUsd > 0 && cost.costUsd < 0.01 ? 4 : 2)}`,
+    `${fmtTokens(cost.input)} in / ${fmtTokens(cost.output)} out`,
+  ]
+  if (cost.reasoning > 0) parts.push(`${fmtTokens(cost.reasoning)} reasoning`)
+  if (cost.cacheRead > 0) parts.push(`${fmtTokens(cost.cacheRead)} cache read`)
+  if (cost.provider && cost.model) parts.push(`${cost.provider}/${cost.model}`)
+  parts.push(`${cost.turns} ${cost.turns === 1 ? "turn" : "turns"}`)
+  return `**Cost:** ${parts.join(" · ")}`
+}
+
+function formatJudge(text: string | undefined): string {
+  if (text === undefined) return "**Judge:** not run"
+  const verdict = parseJudgeVerdict(text)
+  if (!verdict) return "**Judge:** ran, but wrote no verdict line"
+  const icon = verdict === "PASS" ? "✅" : verdict === "FAIL" ? "❌" : "⚠️"
+  const scores = parseJudgeScores(text)
+  return `**Judge:** ${icon} ${verdict}${scores ? ` — ${scores}` : ""}`
+}
+
+export function fmtTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`
+  return String(Math.round(n))
+}
+
+function tail(text: string): string {
+  const lines = text.replace(/\r\n/g, "\n").trimEnd().split("\n")
+  let out = lines.slice(-CHECK_TAIL_LINES).join("\n")
+  if (out.length > CHECK_MAX_CHARS) out = "…" + out.slice(-CHECK_MAX_CHARS)
+  return out
+}
+
+// The shell tool appends a <shell_metadata> block (exit code, timeout notes)
+// for the model's benefit; the summary line already carries the exit code.
+function stripShellMetadata(output: string): string {
+  return output.replace(/\n*<shell_metadata>[\s\S]*?<\/shell_metadata>\s*$/, "")
+}
+
+// A code fence must be longer than any backtick run inside it.
+function fenceFor(text: string): string {
+  let longest = 0
+  for (const run of text.matchAll(/`+/g)) longest = Math.max(longest, run[0].length)
+  return "`".repeat(Math.max(3, longest + 1))
+}
+
+function escapeCell(text: string): string {
+  return text.replace(/\|/g, "\\|").replace(/`/g, "'")
+}
+
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+}

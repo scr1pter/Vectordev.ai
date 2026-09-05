@@ -4,7 +4,7 @@ import { mkdirSync } from "node:fs"
 import { app, utilityProcess } from "electron"
 import type { Details } from "electron"
 import { getLogger } from "./logging"
-import { getUserShell, loadShellEnv } from "./shell-env"
+import { fallbackBinDirectories, getUserShell, loadShellEnv, pathDelimiter, unionPath } from "./shell-env"
 import { getStore } from "./store"
 import { DEFAULT_SERVER_URL_KEY } from "./store-keys"
 import { VECTOR_AGENT_RUNTIME_ENV } from "./agent-runtime"
@@ -53,8 +53,19 @@ export function preferAppEnv(userDataPath: string) {
   for (const dir of [configDir, dataHome, xdgConfigHome, cacheHome, stateHome]) {
     mkdirSync(dir, { recursive: true })
   }
+  const logger = getLogger()
+  const loaded = shell ? loadShellEnv(shell, logger) : null
+  // The login shell's PATH first, then whatever Electron was launched with,
+  // then the directories package and version managers install into. The
+  // sidecar and every MCP child it spawns inherit this, so node/npx/bun stay
+  // findable even when the probe failed and Finder handed us /usr/bin:/bin.
+  const path = unionPath([loaded?.PATH, process.env.PATH, ...fallbackBinDirectories({ ...process.env, ...loaded })])
+  logger.log(
+    `[server] PATH for child processes has ${path.split(pathDelimiter()).length} entries (shell probe ${loaded ? "loaded" : "unavailable"})`,
+  )
   Object.assign(process.env, {
-    ...(shell ? loadShellEnv(shell, getLogger()) : null),
+    ...loaded,
+    PATH: path,
     ...VECTOR_AGENT_RUNTIME_ENV,
     OPENCODE_EXPERIMENTAL_ICON_DISCOVERY: "true",
     OPENCODE_EXPERIMENTAL_FILEWATCHER: "true",

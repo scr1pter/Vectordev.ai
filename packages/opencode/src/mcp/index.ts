@@ -1,5 +1,6 @@
 import path from "node:path"
 import { pathToFileURL } from "node:url"
+import type { Stream as NodeStream } from "node:stream"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { untrustedChildEnvironment } from "@opencode-ai/core/child-environment"
 import { type Tool } from "ai"
@@ -11,9 +12,11 @@ import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js"
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js"
 import {
+  ErrorCode,
   ListRootsRequestSchema,
   type LoggingMessageNotification,
   LoggingMessageNotificationSchema,
+  McpError,
   type Tool as MCPToolDef,
   ToolListChangedNotificationSchema,
 } from "@modelcontextprotocol/sdk/types.js"
@@ -38,6 +41,53 @@ import { McpCatalog } from "./catalog"
 import { McpEvent } from "@opencode-ai/schema/mcp-event"
 
 const DEFAULT_TIMEOUT = 30_000
+// Longest single stderr chunk that is written to the log.
+const STDERR_CHUNK_LIMIT = 2_048
+// Total stderr logged per server process; anything beyond is drained silently.
+const STDERR_TOTAL_LIMIT = 64 * 1024
+// Consecutive request timeouts before a live-but-unresponsive server is dropped.
+const TIMEOUT_STRIKES = 2
+
+/**
+ * Keep a local server's stderr flowing. The SDK pipes the child's stderr into a
+ * PassThrough that nobody reads; once it fills the OS pipe backs up and the
+ * server blocks on write(2). It then never answers another request, every call
+ * times out, and because the process is still alive onclose never fires. The
+ * drain is what matters; logging is bounded so a chatty server cannot flood
+ * the log.
+ */
+export function drainStderr(stream: NodeStream | null | undefined, log: (text: string) => void) {
+  if (!stream) return
+  let logged = 0
+  stream.on("error", () => {})
+  stream.on("data", (chunk: Buffer | string) => {
+    if (logged > STDERR_TOTAL_LIMIT) return
+    const text = (typeof chunk === "string" ? chunk : chunk.toString("utf8")).trim()
+    if (!text) return
+    logged += text.length
+    if (logged > STDERR_TOTAL_LIMIT) {
+      log(`stderr output exceeded ${STDERR_TOTAL_LIMIT} bytes; further output is discarded`)
+      return
+    }
+    log(
+      text.length > STDERR_CHUNK_LIMIT
+        ? `${text.slice(0, STDERR_CHUNK_LIMIT)}… (${text.length - STDERR_CHUNK_LIMIT} more bytes)`
+        : text,
+    )
+  })
+}
+
+/**
+ * True when a request failed because the server did not answer in time. The SDK
+ * also reports an aborted request as a RequestTimeout McpError, so a cancelled
+ * tool call is excluded through its abort signal.
+ */
+export function isRequestTimeout(error: unknown, signal?: AbortSignal) {
+  if (signal?.aborted) return false
+  return (
+    error instanceof McpError && error.code === ErrorCode.RequestTimeout && /timed out|timeout/i.test(error.message)
+  )
+}
 const CLIENT_OPTIONS = {
   capabilities: {
     // https://github.com/anomalyco/opencode/issues/11948
@@ -201,6 +251,8 @@ interface State {
   defs: Record<string, MCPToolDef[]>
   instructions: Record<string, string>
   removed: Set<string>
+  // Consecutive request timeouts per server; reset by any answered request.
+  timeouts: Record<string, number>
 }
 
 export interface ServerInstructions {
@@ -409,6 +461,7 @@ const layer = Layer.effect(
             ]),
           )
         : undefined
+      const bridge = yield* EffectBridge.make()
       const transport = new StdioClientTransport({
         stderr: "pipe",
         command: cmd,
@@ -416,6 +469,9 @@ const layer = Layer.effect(
         cwd,
         env: untrustedChildEnvironment(process.env, cmd === "opencode" ? { BUN_BE_BUN: "1" } : undefined, environment),
       })
+      drainStderr(transport.stderr, (output) =>
+        bridge.fork(Effect.logWarning("MCP server stderr", { server: key, output }).pipe(Effect.ignore)),
+      )
 
       const connectTimeout = mcp.timeout ?? DEFAULT_TIMEOUT
       return yield* connectTransport(transport, connectTimeout).pipe(
@@ -561,6 +617,7 @@ const layer = Layer.effect(
           defs: {},
           instructions: {},
           removed: new Set(),
+          timeouts: {},
         }
 
         yield* Effect.forEach(
@@ -629,9 +686,37 @@ const layer = Layer.effect(
       delete s.clients[name]
       delete s.defs[name]
       delete s.instructions[name]
+      delete s.timeouts[name]
       if (!client) return Effect.void
       return Effect.tryPromise(() => client.close()).pipe(Effect.ignore)
     }
+
+    /**
+     * Record the outcome of a request to a server. Two consecutive timeouts mean
+     * the server is wedged: alive, so onclose never fires, but not answering.
+     * Drop the client and mark the server failed so the UI offers Connect again
+     * instead of caching a dead client until restart.
+     */
+    const settle = Effect.fnUntraced(function* (
+      s: State,
+      name: string,
+      client: MCPClient,
+      error?: unknown,
+      signal?: AbortSignal,
+    ) {
+      if (s.clients[name] !== client) return
+      if (!isRequestTimeout(error, signal)) {
+        delete s.timeouts[name]
+        return
+      }
+      const strikes = (s.timeouts[name] ?? 0) + 1
+      s.timeouts[name] = strikes
+      if (strikes < TIMEOUT_STRIKES) return
+      yield* Effect.logWarning("MCP server stopped responding", { server: name, timeouts: strikes })
+      yield* closeClient(s, name)
+      s.status[name] = { status: "failed", error: "Server stopped responding; reconnect it" }
+      yield* events.publish(ToolsChanged, { server: name }).pipe(Effect.ignore)
+    })
 
     const storeClient = Effect.fnUntraced(function* (
       s: State,
@@ -645,6 +730,7 @@ const layer = Layer.effect(
       const previous = s.clients[name]
       s.status[name] = { status: "connected" }
       s.clients[name] = client
+      delete s.timeouts[name]
       s.defs[name] = listed
       if (instructions) s.instructions[name] = instructions
       else delete s.instructions[name]
@@ -841,6 +927,7 @@ const layer = Layer.effect(
       const cfg = yield* cfgSvc.get()
       const config = cfg.mcp ?? {}
       const defaultTimeout = cfg.experimental?.mcp_timeout
+      const bridge = yield* EffectBridge.make()
 
       for (const [clientName, client] of Object.entries(s.clients)) {
         if (s.status[clientName]?.status !== "connected") continue
@@ -853,7 +940,9 @@ const layer = Layer.effect(
         const timeout = requestTimeout(s, clientName, mcpConfig, defaultTimeout)
         for (const mcpTool of listed) {
           const key = McpCatalog.toolName(clientName, mcpTool.name)
-          result[key] = McpCatalog.convertTool(mcpTool, client, timeout)
+          result[key] = McpCatalog.convertTool(mcpTool, client, timeout, {
+            onSettled: (error, signal) => bridge.promise(settle(s, clientName, client, error, signal)),
+          })
         }
       }
       return result
@@ -926,12 +1015,13 @@ const layer = Layer.effect(
         try: () => fn(client, requestTimeout(s, clientName, cfg.mcp?.[clientName], cfg.experimental?.mcp_timeout)),
         catch: (error) => error,
       }).pipe(
+        Effect.tap(() => settle(s, clientName, client)),
         Effect.tapError((error) =>
           Effect.logError(`failed to ${label}`, {
             clientName,
             ...meta,
             error: error instanceof Error ? error.message : String(error),
-          }),
+          }).pipe(Effect.andThen(settle(s, clientName, client, error))),
         ),
         Effect.orElseSucceed(() => undefined),
       )

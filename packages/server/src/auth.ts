@@ -12,9 +12,16 @@ export type DecodedCredentials = {
   readonly password: Redacted.Redacted
 }
 
+/** Which configured credential pair a request matched. */
+export type Identity = "owner" | "guest"
+
+// Guest fields are optional so owner-only configs (and the opencode package's
+// twin of this service, which shares the key id) stay mutually assignable.
 export type Info = {
   readonly password: Option.Option<string>
   readonly username: string
+  readonly guestPassword?: Option.Option<string>
+  readonly guestUsername?: string
 }
 
 export class Config extends Context.Service<Config, Info>()("@opencode/ServerAuthConfig") {
@@ -30,6 +37,10 @@ export class Config extends Context.Service<Config, Info>()("@opencode/ServerAut
           yield* EffectConfig.all({
             password: EffectConfig.string("OPENCODE_SERVER_PASSWORD").pipe(EffectConfig.option),
             username: EffectConfig.string("OPENCODE_SERVER_USERNAME").pipe(EffectConfig.withDefault("vector")),
+            guestPassword: EffectConfig.string("OPENCODE_SERVER_GUEST_PASSWORD").pipe(EffectConfig.option),
+            guestUsername: EffectConfig.string("OPENCODE_SERVER_GUEST_USERNAME").pipe(
+              EffectConfig.withDefault("guest"),
+            ),
           }),
         )
       }),
@@ -41,12 +52,26 @@ export function required(config: Info) {
   return Option.isSome(config.password) && config.password.value !== ""
 }
 
-export function authorized(credentials: DecodedCredentials, config: Info) {
-  return (
-    Option.isSome(config.password) &&
-    credentials.username === config.username &&
-    Redacted.value(credentials.password) === config.password.value
+/** The identity a credential pair matches, or undefined when it matches neither. */
+export function identity(credentials: DecodedCredentials, config: Info): Identity | undefined {
+  const password = Redacted.value(credentials.password)
+  if (Option.isSome(config.password) && credentials.username === config.username && password === config.password.value)
+    return "owner"
+  const guestPassword = config.guestPassword ?? Option.none<string>()
+  if (
+    Option.isSome(guestPassword) &&
+    guestPassword.value !== "" &&
+    credentials.username === (config.guestUsername ?? "guest") &&
+    password === guestPassword.value
   )
+    return "guest"
+  return undefined
+}
+
+// A guest invited through `vector invite` uses the same API surface as the
+// owner, so the v2 routes accept either pair.
+export function authorized(credentials: DecodedCredentials, config: Info) {
+  return identity(credentials, config) !== undefined
 }
 
 export function header(credentials?: Credentials) {

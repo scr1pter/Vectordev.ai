@@ -35,6 +35,7 @@ import { Process } from "@/util/process"
 import { parseGitHubRemote } from "@/util/repository"
 import { Effect } from "effect"
 import { extractResponseText, formatPromptTooLargeError } from "./github.shared"
+import { buildEvidenceBody, judgeTextFromMessages, parseNumstat, type EvidenceChange } from "./github.evidence"
 
 type GitHubAuthor = {
   login: string
@@ -139,9 +140,23 @@ type IssueQueryResponse = {
   }
 }
 
-const AGENT_USERNAME = "opencode-agent[bot]"
+// The published `vector` bin sets VECTOR_CLI=1 (see src/index.ts). Under it
+// there is no GitHub App to exchange a token with, so the agent runs on the
+// repo's own GITHUB_TOKEN unless the workflow says otherwise.
+const isVector = process.env["VECTOR_CLI"] === "1"
+// Git identity when a GitHub App token is in play (legacy path).
+const AGENT_USERNAME = "vector-agent[bot]"
+// Reactions and commits made with GITHUB_TOKEN show up as this login.
+const ACTIONS_BOT = "github-actions[bot]"
+const ACTIONS_BOT_EMAIL = "41898282+github-actions[bot]@users.noreply.github.com"
 const AGENT_REACTION = "eyes"
-const WORKFLOW_FILE = ".github/workflows/opencode.yml"
+const WORKFLOW_FILE = ".github/workflows/vector.yml"
+const VECTOR_SITE = "https://vectordev.ai"
+const VECTOR_CLI_PACKAGE = "@vectordevai/cli"
+// The free default model: runs with no provider key at all.
+const VECTOR_DEFAULT_MODEL = "opencode/big-pickle"
+const DEFAULT_MENTIONS = "/vector,/vx,/oc"
+const BRANCH_PREFIX = "vector"
 
 // Event categories for routing
 // USER_EVENTS: triggered by user actions, have actor/issueId, support reactions/comments
@@ -164,7 +179,11 @@ export const githubInstall = Effect.fn("Cli.github.install")(function* () {
       UI.empty()
       prompts.intro("Install GitHub agent")
       const app = await getAppInfo()
-      await installGitHubApp()
+      // Upstream installs its GitHub App here and later exchanges an OIDC
+      // token at api.opencode.ai. Vector runs on the repo's own GITHUB_TOKEN;
+      // the App path is only reachable when a custom App URL is supplied.
+      const appUrl = process.env["VECTOR_GITHUB_APP_URL"]
+      if (appUrl) await installGitHubApp(appUrl)
 
       const providers = await Effect.runPromise(modelsDev.get()).then((p) => {
         // TODO: add guide for copilot, for now just hide it
@@ -180,28 +199,29 @@ export const githubInstall = Effect.fn("Cli.github.install")(function* () {
       printNextSteps()
 
       function printNextSteps() {
-        let step2
-        if (provider === "amazon-bedrock") {
-          step2 =
-            "Configure OIDC in AWS - https://docs.github.com/en/actions/how-tos/security-for-github-actions/security-hardening-your-deployments/configuring-openid-connect-in-amazon-web-services"
-        } else {
-          step2 = [
-            `    2. Add the following secrets in org or repo (${app.owner}/${app.repo}) settings`,
-            "",
-            ...providers[provider].env.map((e) => `       - ${e}`),
-          ].join("\n")
-        }
+        const keys = provider === "amazon-bedrock" ? [] : providers[provider].env
+        const providerStep =
+          provider === "amazon-bedrock"
+            ? [
+                "    3. Configure OIDC in AWS - https://docs.github.com/en/actions/how-tos/security-for-github-actions/security-hardening-your-deployments/configuring-openid-connect-in-amazon-web-services",
+              ]
+            : keys.length
+              ? [
+                  `    3. (optional) Add the provider secret${keys.length > 1 ? "s" : ""} for ${provider}/${model}:`,
+                  ...keys.map((e) => `       - ${e}`),
+                ]
+              : []
 
         prompts.outro(
           [
             "Next steps:",
             "",
-            `    1. Commit the \`${WORKFLOW_FILE}\` file and push`,
-            step2,
+            `    1. Commit \`${WORKFLOW_FILE}\` and push`,
+            `    2. Add the repository secret VECTOR_CLI_TOKEN (${app.owner}/${app.repo} → Settings → Secrets and variables → Actions)`,
+            `       Create the token at ${VECTOR_SITE}/auth/cli`,
+            ...providerStep,
             "",
-            "    3. Go to a GitHub issue and comment `/oc summarize` to see the agent in action",
-            "",
-            "   Learn more about the GitHub agent - https://opencode.ai/docs/github/#usage-examples",
+            "    Then comment `/vector <task>` on an issue — Vector opens a PR with the diff, checks, cost and judge verdict.",
           ].join("\n"),
         )
       }
@@ -276,7 +296,9 @@ export const githubInstall = Effect.fn("Cli.github.install")(function* () {
         return model
       }
 
-      async function installGitHubApp() {
+      // Legacy path: only used when VECTOR_GITHUB_APP_URL points at a GitHub
+      // App whose installation api.opencode.ai can report on.
+      async function installGitHubApp(url: string) {
         const s = prompts.spinner()
         s.start("Installing GitHub app")
 
@@ -285,7 +307,6 @@ export const githubInstall = Effect.fn("Cli.github.install")(function* () {
         if (installation) return s.stop("GitHub app already installed")
 
         // Open browser
-        const url = "https://github.com/apps/opencode-agent"
         const command =
           process.platform === "darwin"
             ? `open "${url}"`
@@ -328,14 +349,22 @@ export const githubInstall = Effect.fn("Cli.github.install")(function* () {
       }
 
       async function addWorkflowFiles() {
-        const envStr =
-          provider === "amazon-bedrock"
-            ? ""
-            : `\n        env:${providers[provider].env.map((e) => `\n          ${e}: \${{ secrets.${e} }}`).join("")}`
+        const keys = provider === "amazon-bedrock" ? [] : providers[provider].env
+        // The free default needs no key, so its passthrough stays commented
+        // out; a paid provider's keys are wired to same-named repo secrets.
+        const optional = provider === "opencode"
+        const passthrough = keys.map((e) => `          ${optional ? "# " : ""}${e}: \${{ secrets.${e} }}`)
+        const hints = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY"]
+          .filter((e) => !keys.includes(e))
+          .map((e) => `          # ${e}: \${{ secrets.${e} }}`)
 
+        // No composite action: the published CLI is installed from npm and
+        // run directly, on the repo's GITHUB_TOKEN. actions/checkout keeps
+        // that token in the git extraheader so the push works; fetch-depth 0
+        // so the base branch is present for the PR diff.
         await Filesystem.write(
           path.join(app.root, WORKFLOW_FILE),
-          `name: opencode
+          `name: vector
 
 on:
   issue_comment:
@@ -344,28 +373,42 @@ on:
     types: [created]
 
 jobs:
-  opencode:
+  vector:
     if: |
-      contains(github.event.comment.body, ' /oc') ||
-      startsWith(github.event.comment.body, '/oc') ||
-      contains(github.event.comment.body, ' /opencode') ||
-      startsWith(github.event.comment.body, '/opencode')
+      contains(github.event.comment.body, ' /vector') ||
+      startsWith(github.event.comment.body, '/vector') ||
+      contains(github.event.comment.body, ' /vx') ||
+      startsWith(github.event.comment.body, '/vx')
     runs-on: ubuntu-latest
     permissions:
+      contents: write
+      pull-requests: write
+      issues: write
       id-token: write
-      contents: read
-      pull-requests: read
-      issues: read
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
         with:
-          persist-credentials: false
+          fetch-depth: 0
 
-      - name: Run opencode
-        uses: anomalyco/opencode/github@latest${envStr}
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
-          model: ${provider}/${model}`,
+          node-version: 20
+
+      - name: Install Vector
+        run: npm install -g ${VECTOR_CLI_PACKAGE}
+
+      - name: Run Vector
+        run: vector github run
+        env:
+          GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
+          VECTOR_CLI_TOKEN: \${{ secrets.VECTOR_CLI_TOKEN }}
+          USE_GITHUB_TOKEN: "true"
+          MODEL: ${provider}/${model}
+          # Provider keys are only needed for models that are not free.
+${[...passthrough, ...hints].join("\n")}
+`,
         )
 
         prompts.log.success(`Added workflow file: "${WORKFLOW_FILE}"`)
@@ -381,6 +424,7 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: { event?: 
   const sessionSvc = yield* Session.Service
   const sessionShare = yield* SessionShare.Service
   const sessionPrompt = yield* SessionPrompt.Service
+  const providerSvc = yield* Provider.Service
   const events = yield* EventV2Bridge.Service
   const runLocalEffect = <A, E>(effect: Effect.Effect<A, E>) =>
     Effect.runPromise(effect.pipe(Effect.provideService(InstanceRef, ctx)))
@@ -403,7 +447,7 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: { event?: 
     const isScheduleEvent = context.eventName === "schedule"
     const isWorkflowDispatchEvent = context.eventName === "workflow_dispatch"
 
-    const { providerID, modelID } = normalizeModel()
+    const { providerID, modelID } = await normalizeModel()
     const variant = process.env["VARIANT"] || undefined
     const runId = normalizeRunId()
     const share = normalizeShare()
@@ -426,21 +470,22 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: { event?: 
       : context.eventName === "issue_comment" || context.eventName === "issues"
         ? (payload as IssueCommentEvent | IssuesEvent).issue.number
         : (payload as PullRequestEvent | PullRequestReviewCommentEvent).pull_request.number
-    const runUrl = `/${owner}/${repo}/actions/runs/${runId}`
-    const shareBaseUrl = isMock ? "https://dev.opencode.ai" : "https://opencode.ai"
+    const serverUrl = (process.env["GITHUB_SERVER_URL"] || "https://github.com").replace(/\/+$/, "")
+    const runUrl = `${serverUrl}/${owner}/${repo}/actions/runs/${runId}`
 
     let appToken: string
     let octoRest: Octokit
     let octoGraph: typeof graphql
     let gitConfig: string
     let session: { id: SessionID; title: string; version: string }
-    let shareId: string | undefined
     let exitCode = 0
     type PromptFiles = Awaited<ReturnType<typeof getUserPrompt>>["promptFiles"]
     const triggerCommentId = isCommentEvent
       ? (payload as IssueCommentEvent | PullRequestReviewCommentEvent).comment.id
       : undefined
     const useGithubToken = normalizeUseGithubToken()
+    // Whose reactions to clean up: GITHUB_TOKEN acts as the Actions bot.
+    const botLogin = useGithubToken ? ACTIONS_BOT : AGENT_USERNAME
     const commentType = isCommentEvent
       ? context.eventName === "pull_request_review_comment"
         ? "pr_review"
@@ -488,6 +533,8 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: { event?: 
       const { userPrompt, promptFiles } = await getUserPrompt()
       if (!useGithubToken) {
         await configureGit(appToken)
+      } else {
+        await configureGitIdentity()
       }
       // Skip permission check and reactions for repo events (no actor to check, no issue to react to)
       if (isUserEvent) {
@@ -509,13 +556,10 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: { event?: 
         }),
       )
       await subscribeSessionEvents()
-      shareId = await (async () => {
-        if (share === false) return
-        if (!share && repoData.data.private) return
-        await runLocalEffect(sessionShare.share(session.id))
-        return session.id.slice(-8)
-      })()
-      console.log("opencode session", session.id)
+      // Sharing publishes the transcript to opencode.ai. Vector PRs link the
+      // GitHub run instead, so only share when the workflow asks for it.
+      if (share === true) await runLocalEffect(sessionShare.share(session.id))
+      console.log("vector session", session.id)
 
       // Handle event types:
       // REPO_EVENTS (schedule, workflow_dispatch): no issue/PR context, output to logs/PR only
@@ -544,7 +588,7 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: { event?: 
             repoData.data.default_branch,
             branch,
             summary,
-            `${response}\n\nTriggered by ${triggerType}${footer({ image: true })}`,
+            await evidence(response, head, { trigger: `Triggered by ${triggerType}` }),
           )
           if (pr) {
             console.log(`Created PR #${pr}`)
@@ -573,8 +617,7 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: { event?: 
             const summary = await summarize(response)
             await pushToLocalBranch(summary, uncommittedChanges)
           }
-          const hasShared = prData.comments.nodes.some((c) => c.body.includes(`${shareBaseUrl}/s/${shareId}`))
-          await createComment(`${response}${footer({ image: !hasShared })}`)
+          await createComment(await evidence(response, head))
           await removeReaction(commentType)
         }
         // Fork PR
@@ -591,8 +634,7 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: { event?: 
             const summary = await summarize(response)
             await pushToForkBranch(summary, prData, uncommittedChanges)
           }
-          const hasShared = prData.comments.nodes.some((c) => c.body.includes(`${shareBaseUrl}/s/${shareId}`))
-          await createComment(`${response}${footer({ image: !hasShared })}`)
+          await createComment(await evidence(response, head))
           await removeReaction(commentType)
         }
       }
@@ -607,7 +649,7 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: { event?: 
         if (switched) {
           // Agent switched branches (likely created its own branch/PR).
           // Don't push the stale infrastructure branch — just comment.
-          await createComment(`${response}${footer({ image: true })}`)
+          await createComment(`${response}${footer()}`)
           await removeReaction(commentType)
         } else if (dirty) {
           const summary = await summarize(response)
@@ -616,16 +658,16 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: { event?: 
             repoData.data.default_branch,
             branch,
             summary,
-            `${response}\n\nCloses #${issueId}${footer({ image: true })}`,
+            await evidence(response, head, { closes: issueId }),
           )
           if (pr) {
-            await createComment(`Created PR #${pr}${footer({ image: true })}`)
+            await createComment(`Created PR #${pr}${footer()}`)
           } else {
-            await createComment(`${response}${footer({ image: true })}`)
+            await createComment(await evidence(response, head))
           }
           await removeReaction(commentType)
         } else {
-          await createComment(`${response}${footer({ image: true })}`)
+          await createComment(`${response}${footer()}`)
           await removeReaction(commentType)
         }
       }
@@ -653,15 +695,20 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: { event?: 
     }
     process.exit(exitCode)
 
-    function normalizeModel() {
+    async function normalizeModel() {
       const value = process.env["MODEL"]
-      if (!value) throw new Error(`Environment variable "MODEL" is not set`)
-
-      const { providerID, modelID } = Provider.parseModel(value)
-
-      if (!providerID.length || !modelID.length)
-        throw new Error(`Invalid model ${value}. Model must be in the format "provider/model".`)
-      return { providerID, modelID }
+      if (value) {
+        const { providerID, modelID } = Provider.parseModel(value)
+        if (!providerID.length || !modelID.length)
+          throw new Error(`Invalid model ${value}. Model must be in the format "provider/model".`)
+        return { providerID, modelID }
+      }
+      // No MODEL in the workflow: honour the repo's configured default, else
+      // the free model so a repo with only VECTOR_CLI_TOKEN still runs.
+      const configured = await runLocalEffect(providerSvc.defaultModel()).catch(() => undefined)
+      if (configured) return configured
+      console.log(`MODEL not set, using ${VECTOR_DEFAULT_MODEL}`)
+      return Provider.parseModel(VECTOR_DEFAULT_MODEL)
     }
 
     function normalizeRunId() {
@@ -680,7 +727,8 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: { event?: 
 
     function normalizeUseGithubToken() {
       const value = process.env["USE_GITHUB_TOKEN"]
-      if (!value) return false
+      // The published CLI has no App to exchange with: GITHUB_TOKEN by default.
+      if (!value) return isVector
       if (value === "true") return true
       if (value === "false") return false
       throw new Error(`Invalid use_github_token value: ${value}. Must be a boolean.`)
@@ -737,7 +785,7 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: { event?: 
       }
 
       const reviewContext = getReviewCommentContext()
-      const mentions = (process.env["MENTIONS"] || "/opencode,/oc")
+      const mentions = (process.env["MENTIONS"] || DEFAULT_MENTIONS)
         .split(",")
         .map((m) => m.trim().toLowerCase())
         .filter(Boolean)
@@ -888,7 +936,7 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: { event?: 
     }
 
     async function chat(message: string, files: PromptFiles = []) {
-      console.log("Sending message to opencode...")
+      console.log("Sending message to Vector...")
 
       return runLocalEffect(
         Effect.gen(function* () {
@@ -1077,9 +1125,9 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: { event?: 
         .join("")
       if (type === "schedule" || type === "dispatch") {
         const hex = crypto.randomUUID().slice(0, 6)
-        return `opencode/${type}-${hex}-${timestamp}`
+        return `${BRANCH_PREFIX}/${type}-${hex}-${timestamp}`
       }
-      return `opencode/${type}${issueId}-${timestamp}`
+      return `${BRANCH_PREFIX}/${type}${issueId}-${timestamp}`
     }
 
     async function pushToNewBranch(summary: string, branch: string, commit: boolean, isSchedule: boolean) {
@@ -1215,7 +1263,7 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: { event?: 
             content: AGENT_REACTION,
           })
 
-          const eyesReaction = reactions.data.find((r) => r.user?.login === AGENT_USERNAME)
+          const eyesReaction = reactions.data.find((r) => r.user?.login === botLogin)
           if (!eyesReaction) return
 
           return await octoRest.rest.reactions.deleteForPullRequestComment({
@@ -1233,7 +1281,7 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: { event?: 
           content: AGENT_REACTION,
         })
 
-        const eyesReaction = reactions.data.find((r) => r.user?.login === AGENT_USERNAME)
+        const eyesReaction = reactions.data.find((r) => r.user?.login === botLogin)
         if (!eyesReaction) return
 
         return await octoRest.rest.reactions.deleteForIssueComment({
@@ -1251,7 +1299,7 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: { event?: 
         content: AGENT_REACTION,
       })
 
-      const eyesReaction = reactions.data.find((r) => r.user?.login === AGENT_USERNAME)
+      const eyesReaction = reactions.data.find((r) => r.user?.login === botLogin)
       if (!eyesReaction) return
 
       await octoRest.rest.reactions.deleteForIssue({
@@ -1343,18 +1391,65 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: { event?: 
       }
     }
 
-    function footer(opts?: { image?: boolean }) {
-      const image = (() => {
-        if (!shareId) return ""
-        if (!opts?.image) return ""
+    function footer() {
+      return `\n\n---\n[Vector run](${runUrl})`
+    }
 
-        const titleAlt = encodeURIComponent(session.title.substring(0, 50))
-        const title64 = Buffer.from(session.title.substring(0, 700), "utf8").toString("base64")
+    // The evidence bundle for PR bodies and PR comments: the agent's response,
+    // then what changed since `head` (the commit checked out before the agent
+    // ran), the checks it ran, what the run cost and the judge's verdict.
+    // Gathering is best-effort — a failed lookup reads as "not measured" /
+    // "not run" rather than sinking the PR.
+    async function evidence(response: string, head: string, opts: { closes?: number; trigger?: string } = {}) {
+      const [changes, { messages, judge }] = await Promise.all([collectChanges(head), collectSessionEvidence()])
+      return buildEvidenceBody({
+        response,
+        changes,
+        messages,
+        judge,
+        runUrl,
+        closes: opts.closes,
+        trigger: opts.trigger,
+      })
+    }
 
-        return `<a href="${shareBaseUrl}/s/${shareId}"><img width="200" alt="${titleAlt}" src="https://social-cards.sst.dev/opencode-share/${title64}.png?model=${providerID}/${modelID}&version=${session.version}&id=${shareId}" /></a>\n`
-      })()
-      const shareUrl = shareId ? `[opencode session](${shareBaseUrl}/s/${shareId})&nbsp;&nbsp;|&nbsp;&nbsp;` : ""
-      return `\n\n${image}${shareUrl}[github run](${runUrl})`
+    async function collectChanges(head: string): Promise<EvidenceChange[]> {
+      // Everything committed or pending since the agent started, independent
+      // of how shallow the checkout is.
+      try {
+        return parseNumstat(await gitText(["diff", "--numstat", head]))
+      } catch (e) {
+        console.log(`git diff --numstat failed (${e instanceof Error ? e.message : e}), using session diff`)
+        const diffs = await runLocalEffect(sessionSvc.diff(session.id)).catch(() => [])
+        return diffs.flatMap((d) => (d.file ? [{ file: d.file, additions: d.additions, deletions: d.deletions }] : []))
+      }
+    }
+
+    // Messages from the run's session and every subagent it spawned (their
+    // checks and cost count too), plus the judge subagent's final text.
+    async function collectSessionEvidence() {
+      const kids = await runLocalEffect(sessionSvc.children(session.id)).catch(() => [])
+      const ids = [session.id, ...kids.map((k) => k.id)]
+      const all = await Promise.all(
+        ids.map((sessionID) => runLocalEffect(sessionSvc.messages({ sessionID })).catch(() => [])),
+      )
+      const judgeSession = kids
+        .filter((k) => k.agent === "judge")
+        .sort((a, b) => a.time.created - b.time.created)
+        .at(-1)
+      const judge = judgeSession ? judgeTextFromMessages(all[ids.indexOf(judgeSession.id)] ?? []) : undefined
+      return { messages: all.flat(), judge }
+    }
+
+    async function configureGitIdentity() {
+      // Do not change git config when running locally
+      if (isMock) return
+      // actions/checkout keeps GITHUB_TOKEN in the extraheader for push but
+      // sets no committer; without one `git commit` refuses to run.
+      const name = await gitStatus(["config", "--get", "user.name"])
+      if (name.exitCode === 0 && name.stdout.toString().trim()) return
+      await gitRun(["config", "--global", "user.name", ACTIONS_BOT])
+      await gitRun(["config", "--global", "user.email", ACTIONS_BOT_EMAIL])
     }
 
     async function fetchRepo() {
@@ -1414,7 +1509,7 @@ query($owner: String!, $repo: String!, $number: Int!) {
       return [
         "<github_action_context>",
         "You are running as a GitHub Action. Important:",
-        "- Git push and PR creation are handled AUTOMATICALLY by the opencode infrastructure after your response",
+        "- Git push and PR creation are handled AUTOMATICALLY by the Vector infrastructure after your response",
         "- Do NOT include warnings or disclaimers about GitHub tokens, workflow permissions, or PR creation capabilities",
         "- Do NOT suggest manual steps for creating PRs or pushing code - this happens automatically",
         "- Focus only on the code changes and your analysis/response",
@@ -1552,7 +1647,7 @@ query($owner: String!, $repo: String!, $number: Int!) {
       return [
         "<github_action_context>",
         "You are running as a GitHub Action. Important:",
-        "- Git push and PR creation are handled AUTOMATICALLY by the opencode infrastructure after your response",
+        "- Git push and PR creation are handled AUTOMATICALLY by the Vector infrastructure after your response",
         "- Do NOT include warnings or disclaimers about GitHub tokens, workflow permissions, or PR creation capabilities",
         "- Do NOT suggest manual steps for creating PRs or pushing code - this happens automatically",
         "- Focus only on the code changes and your analysis/response",

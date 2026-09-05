@@ -1,13 +1,33 @@
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { InstanceState } from "@/effect/instance-state"
 import { GlobalBus } from "@/bus/global"
+import { ServerAuth } from "@/server/auth"
 import { EventV2 } from "@opencode-ai/core/event"
-import { Effect, Queue } from "effect"
+import { AbsolutePath } from "@opencode-ai/core/schema"
+import { ServerEvent } from "@opencode-ai/schema/server-event"
+import { Deferred, Effect, Encoding, Queue, Redacted, Result } from "effect"
 import * as Stream from "effect/Stream"
-import { HttpServerResponse } from "effect/unstable/http"
+import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import * as Sse from "effect/unstable/encoding/Sse"
 import { EventApi } from "../groups/event"
+import { IncomingMessage } from "node:http"
+
+const AUTH_TOKEN_QUERY = "auth_token"
+
+type Presence = EventV2.Data<typeof ServerEvent.ClientJoined>
+
+// Who is connected to each directory's event stream, keyed by directory. Lives
+// for the process so a newcomer can be told about peers that arrived earlier.
+const rosters = new Map<string, Map<string, Presence>>()
+
+function roster(directory: string) {
+  const existing = rosters.get(directory)
+  if (existing) return existing
+  const created = new Map<string, Presence>()
+  rosters.set(directory, created)
+  return created
+}
 
 function eventData(data: unknown): Sse.Event {
   return {
@@ -22,20 +42,96 @@ function eventID() {
   return EventV2.ID.create()
 }
 
-function eventResponse(events: EventV2.Interface) {
+function emptyCredential(): ServerAuth.DecodedCredentials {
+  return { username: "", password: Redacted.make("") }
+}
+
+// Read-only mirror of the authorization middleware's credential parsing: the
+// auth_token query wins over the Basic header. Auth itself already happened.
+function decodeCredential(input: string): ServerAuth.DecodedCredentials {
+  const decoded = Encoding.decodeBase64String(input)
+  if (!Result.isSuccess(decoded)) return emptyCredential()
+  const separator = decoded.success.indexOf(":")
+  if (separator === -1) return emptyCredential()
+  return {
+    username: decoded.success.slice(0, separator),
+    password: Redacted.make(decoded.success.slice(separator + 1)),
+  }
+}
+
+function credentialFromRequest(request: HttpServerRequest.HttpServerRequest) {
+  const token = new URL(request.url, "http://localhost").searchParams.get(AUTH_TOKEN_QUERY)
+  if (token) return decodeCredential(token)
+  const match = /^Basic\s+(.+)$/i.exec(request.headers.authorization ?? "")
+  if (match) return decodeCredential(match[1])
+  return emptyCredential()
+}
+
+function usernameFromRequest(request: HttpServerRequest.HttpServerRequest, config: ServerAuth.Info) {
+  const credential = credentialFromRequest(request)
+  const identity = ServerAuth.identity(credential, config)
+  if (identity === "owner") return config.username
+  if (identity === "guest") return config.guestUsername ?? "guest"
+  // Unsecured server: nobody had to authenticate, so everyone is the owner.
+  return credential.username || config.username
+}
+
+// Effect's Node server only interrupts a request when the *response* emits
+// "close", which Bun's node:http never does for an aborted streaming response.
+// The request does emit it, so watch that ourselves; otherwise a departed
+// client would keep its presence (and its listener) until the process exits.
+function onHangup(request: HttpServerRequest.HttpServerRequest, callback: () => void) {
+  const source: unknown = request.source
+  if (!(source instanceof IncomingMessage)) return () => {}
+  source.once("close", callback)
+  return () => {
+    source.off("close", callback)
+  }
+}
+
+function isOwnJoin(event: EventV2.Payload, clientID: string) {
+  if (event.type !== ServerEvent.ClientJoined.type) return false
+  const data: unknown = event.data
+  return typeof data === "object" && data !== null && "clientID" in data && data.clientID === clientID
+}
+
+function eventResponse(events: EventV2.Interface, request: HttpServerRequest.HttpServerRequest, self: Presence) {
   return Effect.gen(function* () {
     const instance = yield* InstanceState.context
     const workspaceID = yield* InstanceState.workspaceID
+    const hangup = yield* Deferred.make<void>()
+    const unwatch = onHangup(request, () => {
+      Deferred.doneUnsafe(hangup, Effect.void)
+    })
+    yield* Effect.addFinalizer(() => Effect.sync(unwatch))
     // Listener registration is eager, so events published after this point cannot
     // be lost while the HTTP body fiber is starting or emitting server.connected.
     const queue = yield* Queue.unbounded<EventV2.Payload>()
     const unsubscribe = yield* events.listen((event) => Effect.sync(() => Queue.offerUnsafe(queue, event)))
     yield* Effect.addFinalizer(() => unsubscribe)
+
+    // Presence is per directory (every workspace of it): snapshot the peers that
+    // are already here, announce ourselves to them, and say goodbye on disconnect.
+    // The explicit location keeps the finalizer's publish routed even when the
+    // request context is gone.
+    const location = { directory: AbsolutePath.make(instance.directory) }
+    const peers = [...roster(instance.directory).values()]
+    roster(instance.directory).set(self.clientID, self)
+    yield* events.publish(ServerEvent.ClientJoined, self, { location })
+    yield* Effect.addFinalizer(() =>
+      Effect.gen(function* () {
+        roster(instance.directory).delete(self.clientID)
+        yield* events.publish(ServerEvent.ClientLeft, { ...self, at: Date.now() }, { location })
+      }).pipe(Effect.ignoreCause),
+    )
+
     const stream = Stream.fromQueue(queue).pipe(
       Stream.filter(
         (event) =>
           event.location?.directory === instance.directory &&
-          (event.location.workspaceID === undefined || event.location.workspaceID === workspaceID),
+          (event.location.workspaceID === undefined || event.location.workspaceID === workspaceID) &&
+          // We already know we are here; the roster snapshot below covers everyone else.
+          !isOwnJoin(event, self.clientID),
       ),
       Stream.map((event) => ({ id: event.id, type: event.type, properties: event.data })),
     )
@@ -59,15 +155,21 @@ function eventResponse(events: EventV2.Interface) {
     const output = stream.pipe(
       Stream.merge(disposed, { haltStrategy: "left" }),
       Stream.takeUntil((event) => event.type === "server.instance.disposed"),
+      // interruptWhen (not haltWhen): the pending pull on an idle queue must be cut short.
+      Stream.interruptWhen(Deferred.await(hangup)),
     )
     const heartbeat = Stream.tick("10 seconds").pipe(
       Stream.drop(1),
       Stream.map(() => ({ id: eventID(), type: "server.heartbeat", properties: {} })),
     )
+    const opening = Stream.fromIterable([
+      { id: eventID(), type: "server.connected", properties: {} },
+      ...peers.map((peer) => ({ id: eventID(), type: ServerEvent.ClientJoined.type, properties: peer })),
+    ])
 
     yield* Effect.logInfo("event connected")
     return HttpServerResponse.stream(
-      Stream.make({ id: eventID(), type: "server.connected", properties: {} }).pipe(
+      opening.pipe(
         Stream.concat(output.pipe(Stream.merge(heartbeat, { haltStrategy: "left" }))),
         Stream.map(eventData),
         Stream.pipeThroughChannel(Sse.encode()),
@@ -89,11 +191,19 @@ function eventResponse(events: EventV2.Interface) {
 export const eventHandlers = HttpApiBuilder.group(EventApi, "event", (handlers) =>
   Effect.gen(function* () {
     const events = yield* EventV2Bridge.Service
+    // The auth middleware keeps its config to itself; read our own copy so we can
+    // name the connecting identity without touching the middleware.
+    const auth = yield* ServerAuth.Config
     return handlers.handleRaw(
       "subscribe",
       Effect.fn("EventHttpApi.subscribe")(function* () {
-        return yield* eventResponse(events)
+        const request = yield* HttpServerRequest.HttpServerRequest
+        return yield* eventResponse(events, request, {
+          username: usernameFromRequest(request, auth),
+          clientID: `cli_${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`,
+          at: Date.now(),
+        })
       }),
     )
-  }),
+  }).pipe(Effect.provide(ServerAuth.Config.layer)),
 )

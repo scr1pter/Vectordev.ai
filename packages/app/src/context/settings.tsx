@@ -84,6 +84,7 @@ export interface Settings {
     highlightActiveLine: boolean
     renderWhitespace: boolean
     aiAutocomplete: boolean
+    followAgent: boolean
   }
   chat: {
     chatWidth: VectorChatWidthPreference
@@ -211,6 +212,7 @@ const defaultSettings: Settings = {
     highlightActiveLine: true,
     renderWhitespace: false,
     aiAutocomplete: true,
+    followAgent: true,
   },
   chat: {
     chatWidth: "focused",
@@ -599,6 +601,10 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         aiAutocomplete: withFallback(() => store.editor?.aiAutocomplete, defaultSettings.editor.aiAutocomplete),
         setAiAutocomplete(value: boolean) {
           setStore("editor", "aiAutocomplete", value)
+        },
+        followAgent: withFallback(() => store.editor?.followAgent, defaultSettings.editor.followAgent),
+        setFollowAgent(value: boolean) {
+          setStore("editor", "followAgent", value)
         },
       },
       chat: {

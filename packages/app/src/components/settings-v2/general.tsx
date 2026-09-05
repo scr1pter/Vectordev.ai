@@ -473,6 +473,12 @@ export const SettingsGeneralV2: Component<{
             checked={settings.editor.aiAutocomplete()}
             onChange={settings.editor.setAiAutocomplete}
           />
+          <ToggleRow
+            title="Follow the agent in the editor"
+            description="Open the file an agent is editing and scroll to the lines it changes, live. Turn off to keep the editor where you left it."
+            checked={settings.editor.followAgent()}
+            onChange={settings.editor.setFollowAgent}
+          />
         </Card>
       </div>
     </Page>

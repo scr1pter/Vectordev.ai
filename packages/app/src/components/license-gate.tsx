@@ -9,17 +9,52 @@ const fallbackStatus: VectorLicenseStatus = {
   message: "Licensing is unavailable on this platform.",
 }
 
+// Re-check this often while the app runs unverified, so the real answer (beta,
+// or activation required) lands as soon as the network comes back instead of
+// at the next quarter-hour poll.
+const OFFLINE_RETRY_MS = 60 * 1_000
+
+const unreachableStatus = (cause: unknown): VectorLicenseStatus => ({
+  access: false,
+  state: "offline",
+  message: `Vector could not check licensing: ${cause instanceof Error ? cause.message : String(cause)}`,
+})
+
+// The license service only carries lastValidatedAt/email on a status derived
+// from a stored activation. An offline status without them means this computer
+// was never activated, and a captive portal or blocked network must not wall
+// off a brand-new user. A device that once held a token keeps the wall until
+// the service can say whether that token is still good.
+export function offlineWithoutActivation(status: VectorLicenseStatus | undefined) {
+  return Boolean(status && status.state === "offline" && !status.access && !status.lastValidatedAt && !status.email)
+}
+
 export function LicenseGate(props: ParentProps) {
   const platform = usePlatform()
   const license = platform.license
   const [key, setKey] = createSignal("")
   const [error, setError] = createSignal("")
   const [busy, setBusy] = createSignal(false)
-  const [status, actions] = createResource(async () => (license ? license.status() : fallbackStatus))
+  // A bridge failure must not strand a new user on the loading screen, so a
+  // thrown status is treated like an unreachable licensing service.
+  const [status, actions] = createResource(async () =>
+    license ? license.status().catch((cause: unknown) => unreachableStatus(cause)) : fallbackStatus,
+  )
+  const passThrough = () => offlineWithoutActivation(status())
+  const allowed = () => Boolean(status()?.access) || passThrough()
+  // "refreshing" still has the previous value: a background refetch must not
+  // unmount the app behind the gate.
+  const settled = () => status.state === "ready" || status.state === "refreshing"
 
   onMount(() => {
     const timer = window.setInterval(() => void actions.refetch(), 15 * 60 * 1_000)
     onCleanup(() => window.clearInterval(timer))
+  })
+
+  createEffect(() => {
+    if (!passThrough()) return
+    const timer = window.setTimeout(() => void actions.refetch(), OFFLINE_RETRY_MS)
+    onCleanup(() => window.clearTimeout(timer))
   })
 
   createEffect(() => {
@@ -68,7 +103,7 @@ export function LicenseGate(props: ParentProps) {
 
   return (
     <Show
-      when={status.state === "ready"}
+      when={settled()}
       fallback={
         <div class="vector-license-loading">
           <img src="/vector-logo.png" alt="" />
@@ -77,7 +112,7 @@ export function LicenseGate(props: ParentProps) {
       }
     >
       <Show
-        when={status()?.access}
+        when={allowed()}
         fallback={
           <main class="vector-license-gate">
             <div class="vector-license-glow" aria-hidden="true" />

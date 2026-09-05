@@ -16,7 +16,16 @@ import {
 } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Portal } from "solid-js/web"
-import { agentColor, changedLineRanges, mergeAttribution, type AgentAttribution } from "@/components/editor-attribution"
+import {
+  agentColor,
+  agentCursorLine,
+  changedLineRanges,
+  inferredLineRanges,
+  mergeAttribution,
+  resolveAgentColor,
+  type AgentAttribution,
+  type AgentReveal,
+} from "@/components/editor-attribution"
 import {
   MonacoCodeEditor,
   type InlineCompleteInput,
@@ -2108,50 +2117,149 @@ export function CodespaceWorkbench(props: {
     void file.load(path)
   }
 
-  const stopEditorFileFollow = sdk().event.listen((event) => {
-    if (!agentRunning()) return
-    if (event.details.type !== "file.watcher.updated") return
-    const properties =
-      typeof event.details.properties === "object" && event.details.properties
-        ? (event.details.properties as Record<string, unknown>)
-        : undefined
-    const changed = typeof properties?.file === "string" ? normalizedWorkspacePath(properties.file) : undefined
-    if (!changed || changed.startsWith(".git/")) return
-    openFile(changed)
-    void file.load(changed, { force: true })
-  })
-  onCleanup(stopEditorFileFollow)
-
-  // Attribution for live agent edits. file.edited carries the agent but no line
-  // ranges, so the ranges come from comparing the buffer before and after the
-  // reload the event triggers.
+  // Live agent edits. The server publishes file.edited (which names the agent)
+  // before the watcher event for the same write, so one handler both follows
+  // the agent into the file and attributes the lines it changed. Attribution
+  // needs the buffer from before the write, so it is captured before the
+  // reload; a file that was never loaded falls back to the tool call's input.
   const [attributions, setAttributions] = createSignal<AgentAttribution[]>([])
-  const stopEditAttribution = sdk().event.listen((event) => {
-    if (event.details.type !== "file.edited") return
+  const [reveal, setReveal] = createSignal<AgentReveal>()
+  const [following, setFollowing] = createSignal<{ name: string; color: string }>()
+  const followAgent = settings.editor.followAgent
+  const followingAgent = createMemo(() => {
+    if (props.externalAgent) return { name: props.externalAgent.label, color: agentColor(props.externalAgent.label) }
+    const last = following()
+    if (last) return last
+    const name = activeAgentName()
+    return { name, color: resolveAgentColor(name, sync().data.agent, editorSessionID() ?? name) }
+  })
+  createEffect(() => {
+    if (!agentRunning()) setFollowing(undefined)
+  })
+
+  // Reveal and agent cursor only apply to the file on screen; a reveal for a
+  // tab the user has since switched away from must not scroll the new one.
+  const editorReveal = createMemo(() => {
+    const target = reveal()
+    if (!target || target.path !== selectedPath()) return
+    return { line: target.line, endLine: target.endLine, token: target.token }
+  })
+  const editorCursor = createMemo(() => {
+    const target = reveal()
+    if (!target || target.path !== selectedPath()) return
+    return {
+      agentId: target.agentId,
+      agentName: target.agentName,
+      color: target.color,
+      line: agentCursorLine({ start: target.line, end: target.endLine }),
+    }
+  })
+
+  const eventFile = (event: { details: { properties?: unknown } }) => {
     const properties =
       typeof event.details.properties === "object" && event.details.properties
         ? (event.details.properties as Record<string, unknown>)
         : undefined
-    const changed = typeof properties?.file === "string" ? normalizedWorkspacePath(properties.file) : undefined
-    const sessionID = typeof properties?.sessionID === "string" ? properties.sessionID : undefined
-    if (!changed || !sessionID || changed !== selectedPath()) return
+    if (!properties || typeof properties.file !== "string") return
+    const changed = file.normalize(normalizedWorkspacePath(properties.file))
+    const top = changed.split("/")[0] ?? ""
+    if (!changed || (CODESPACE_EXCLUDED_DIRECTORIES as readonly string[]).includes(top)) return
+    return { changed, properties }
+  }
 
-    const before = drafts[changed] ?? state()?.content?.content ?? ""
-    const agentName = typeof properties?.agent === "string" ? properties.agent : "Agent"
-    void file.load(changed, { force: true }).then(() => {
-      const after = state()?.content?.content ?? ""
-      const ranges = changedLineRanges(before, after)
-      if (!ranges.length) return
-      setAttributions((current) =>
-        mergeAttribution(
-          current,
-          { agentId: sessionID, agentName, color: agentColor(sessionID), ranges, at: Date.now() },
-          Date.now(),
-        ),
-      )
+  // The tool call behind an edit, for files with no loaded "before" to diff.
+  const editingCall = (messageID: string | undefined) => {
+    if (!messageID) return
+    const parts = sync().data.part[messageID] ?? []
+    for (let i = parts.length - 1; i >= 0; i -= 1) {
+      const part = parts[i]
+      if (part?.type !== "tool" || part.state.status === "pending") continue
+      return { tool: part.tool, input: part.state.input as Record<string, unknown> }
+    }
+  }
+
+  const attributeAgentEdit = async (input: {
+    changed: string
+    agentId: string
+    agentName: string
+    color: string
+    messageID?: string
+    follow: boolean
+  }) => {
+    const { changed } = input
+    const before: string | undefined = drafts[changed] ?? file.get(changed)?.content?.content
+    if (input.follow) openFile(changed)
+    await file.load(changed, { force: true })
+    const after = file.get(changed)?.content?.content
+    if (after === undefined) return
+    const ranges =
+      before !== undefined ? changedLineRanges(before, after) : inferredLineRanges(after, editingCall(input.messageID))
+    if (!ranges.length) return
+    const now = Date.now()
+    setAttributions((current) =>
+      mergeAttribution(
+        current,
+        { agentId: input.agentId, agentName: input.agentName, color: input.color, ranges, at: now },
+        now,
+      ),
+    )
+    if (!input.follow) return
+    const first = ranges[0]!
+    setReveal({
+      path: changed,
+      line: first.start,
+      endLine: first.end,
+      agentId: input.agentId,
+      agentName: input.agentName,
+      color: input.color,
+      token: now,
+    })
+  }
+
+  const stopAgentEditFollow = sdk().event.listen((event) => {
+    if (event.details.type !== "file.edited") return
+    const hit = eventFile(event)
+    if (!hit) return
+    const { changed, properties } = hit
+    const sessionID = typeof properties.sessionID === "string" ? properties.sessionID : undefined
+    if (!sessionID) return
+    const follow = followAgent()
+    // Not following: keep the editor where it is and only attribute what is
+    // already on screen.
+    if (!follow && changed !== selectedPath()) return
+    const agent = typeof properties.agent === "string" ? properties.agent : undefined
+    const agentName = agent ?? "Agent"
+    const color = resolveAgentColor(agent, sync().data.agent, sessionID)
+    if (follow) setFollowing({ name: agentName, color })
+    void attributeAgentEdit({
+      changed,
+      agentId: sessionID,
+      agentName,
+      color,
+      messageID: typeof properties.messageID === "string" ? properties.messageID : undefined,
+      follow,
     })
   })
-  onCleanup(stopEditAttribution)
+  onCleanup(stopAgentEditFollow)
+
+  // External agents (Claude Code, Codex, ...) write files without publishing
+  // file.edited, so the watcher is the only signal for them. Ignore the user's
+  // own saves and the file already on screen so it never steals the editor.
+  const stopExternalAgentFollow = sdk().event.listen((event) => {
+    if (!props.externalAgent || event.details.type !== "file.watcher.updated") return
+    if (!agentRunning() || !followAgent() || saving()) return
+    const hit = eventFile(event)
+    if (!hit || hit.changed === selectedPath()) return
+    const name = props.externalAgent.label
+    void attributeAgentEdit({
+      changed: hit.changed,
+      agentId: name,
+      agentName: name,
+      color: agentColor(name),
+      follow: true,
+    })
+  })
+  onCleanup(stopExternalAgentFollow)
 
   const openQuickFileSearch = () => {
     dialog.show(() => (
@@ -2600,6 +2708,33 @@ export function CodespaceWorkbench(props: {
             </span>
           </button>
           <div class="ml-auto flex shrink-0 items-center gap-0.5 [app-region:no-drag]">
+            <Show when={followAgent() && agentRunning()}>
+              <span
+                class="mr-1 flex h-6 max-w-[180px] items-center gap-1.5 rounded-full border border-[#343434] bg-[#1a1a1a] px-2 text-[10px] font-medium text-[#bdbdbd]"
+                title={`Following ${followingAgent().name}: the editor opens and scrolls to what it edits`}
+              >
+                <span
+                  class="size-1.5 shrink-0 animate-pulse rounded-full"
+                  style={{ background: followingAgent().color }}
+                />
+                <span class="truncate">Following {followingAgent().name}</span>
+              </span>
+            </Show>
+            <button
+              type="button"
+              class="grid size-7 place-items-center rounded-[5px] transition-colors hover:bg-white/[0.06] hover:text-[#ddd]"
+              classList={{ "bg-white/[0.06] text-[#d8d8d8]": followAgent() }}
+              aria-pressed={followAgent()}
+              aria-label={followAgent() ? "Stop following the agent" : "Follow the agent"}
+              title={
+                followAgent()
+                  ? "Following the agent: the editor opens and scrolls to what it edits. Click to stop."
+                  : "Follow the agent in the editor"
+              }
+              onClick={() => settings.editor.setFollowAgent(!followAgent())}
+            >
+              <Icon name="eye" size="small" />
+            </button>
             <button
               type="button"
               class="grid size-7 place-items-center rounded-[5px] transition-colors hover:bg-white/[0.06] hover:text-[#ddd]"
@@ -2952,6 +3087,8 @@ export function CodespaceWorkbench(props: {
                                 path={workspaceAbsolutePath(path())}
                                 value={draft()}
                                 attributions={attributions()}
+                                reveal={editorReveal()}
+                                cursor={editorCursor()}
                                 onChange={(next) => updateDraft(path(), next)}
                                 inlineComplete={props.externalAgent ? undefined : aiComplete}
                                 languageService={languageService}

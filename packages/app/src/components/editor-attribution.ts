@@ -81,3 +81,85 @@ export function mergeAttribution(
 ): AgentAttribution[] {
   return [...activeAttributions(all, now).filter((entry) => entry.agentId !== next.agentId), next]
 }
+
+// Where the editor should scroll to (and label) after an agent edit. The token
+// changes on every edit so the same lines edited twice still trigger a reveal.
+export type AgentReveal = {
+  path: string
+  line: number
+  endLine: number
+  agentId: string
+  agentName: string
+  color: string
+  token: number
+}
+
+const HEX_COLOR = /^#[0-9a-f]{6}$/i
+
+// Prefer the colour the agent was configured with so the editor matches the
+// chat, but only when it is a plain hex value: Monaco's overview ruler and the
+// injected line tint both need a colour they can append alpha to.
+export function resolveAgentColor(
+  agentName: string | undefined,
+  agents: readonly { name: string; color?: string }[],
+  fallbackId: string,
+) {
+  const custom = agentName ? agents.find((agent) => agent.name === agentName)?.color : undefined
+  if (custom && HEX_COLOR.test(custom)) return custom
+  return agentColor(fallbackId)
+}
+
+function lineAt(text: string, offset: number) {
+  let line = 1
+  let index = text.indexOf("\n")
+  while (index !== -1 && index < offset) {
+    line += 1
+    index = text.indexOf("\n", index + 1)
+  }
+  return line
+}
+
+// When the file was not loaded before the agent touched it there is no
+// "before" to diff against. The edit tool's own input still says what text it
+// inserted, so find that in the fresh buffer instead of washing the whole
+// file. Formatters may reflow the inserted text, so fall back to its first
+// non-blank line when the exact snippet is gone.
+export function locateInsertedText(after: string, snippet: string): LineRange | undefined {
+  const body = snippet.replace(/\r\n/g, "\n").replace(/\n+$/, "")
+  if (!body.trim()) return
+  const exact = after.indexOf(body)
+  if (exact >= 0) return { start: lineAt(after, exact), end: lineAt(after, exact + body.length - 1) }
+
+  const lines = body.split("\n")
+  const probe = lines.find((line) => line.trim())?.trim()
+  if (!probe) return
+  const loose = after.indexOf(probe)
+  if (loose < 0) return
+  const start = lineAt(after, loose)
+  const total = after.split("\n").length
+  return { start, end: Math.min(start + lines.length - 1, total) }
+}
+
+// Ranges for an edit whose "before" is unknown, derived from the tool call that
+// produced it: a write replaces the whole file, an edit inserts its newString.
+export function inferredLineRanges(
+  after: string,
+  call: { tool: string; input: Record<string, unknown> } | undefined,
+): LineRange[] {
+  if (!call) return []
+  if (call.tool === "write") return changedLineRanges("", after)
+  if (call.tool === "edit" && typeof call.input.newString === "string") {
+    const range = locateInsertedText(after, call.input.newString)
+    return range ? [range] : []
+  }
+  return []
+}
+
+// The agent "cursor" sits where it stopped typing: the end of a short block,
+// or the start of one too tall to fit on screen so the label stays visible
+// after the reveal.
+export const CURSOR_TAIL_MAX_LINES = 30
+
+export function agentCursorLine(range: LineRange) {
+  return range.end - range.start > CURSOR_TAIL_MAX_LINES ? range.start : range.end
+}

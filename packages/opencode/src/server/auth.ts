@@ -1,8 +1,7 @@
 export * as ServerAuth from "./auth"
 
-import { ConfigService } from "@/effect/config-service"
 import { Flag } from "@opencode-ai/core/flag/flag"
-import { Config as EffectConfig, Context, Option, Redacted } from "effect"
+import { Config as EffectConfig, Context, Effect, Layer, Option, Redacted } from "effect"
 
 export type Credentials = {
   password?: string
@@ -14,23 +13,66 @@ export type DecodedCredentials = {
   readonly password: Redacted.Redacted
 }
 
-export class Config extends ConfigService.Service<Config>()("@opencode/ServerAuthConfig", {
-  password: EffectConfig.string("OPENCODE_SERVER_PASSWORD").pipe(EffectConfig.option),
-  username: EffectConfig.string("OPENCODE_SERVER_USERNAME").pipe(EffectConfig.withDefault("opencode")),
-}) {}
+/** Which configured credential pair a request matched. */
+export type Identity = "owner" | "guest"
 
-export type Info = Context.Service.Shape<typeof Config>
+// Guest fields are optional: owner-only configs (existing call sites, tests,
+// and `@opencode-ai/server`'s twin of this service) stay assignable.
+export type Info = {
+  readonly password: Option.Option<string>
+  readonly username: string
+  readonly guestPassword?: Option.Option<string>
+  readonly guestUsername?: string
+}
+
+export class Config extends Context.Service<Config, Info>()("@opencode/ServerAuthConfig") {
+  /** Provide already-parsed config, useful in tests. */
+  static configLayer(input: Info) {
+    return Layer.succeed(this, this.of(input))
+  }
+
+  /** Parse config once from the active Effect ConfigProvider and provide the service. */
+  static get layer() {
+    return Layer.effect(
+      this,
+      Effect.gen(function* () {
+        return Config.of(
+          yield* EffectConfig.all({
+            password: EffectConfig.string("OPENCODE_SERVER_PASSWORD").pipe(EffectConfig.option),
+            username: EffectConfig.string("OPENCODE_SERVER_USERNAME").pipe(EffectConfig.withDefault("opencode")),
+            guestPassword: EffectConfig.string("OPENCODE_SERVER_GUEST_PASSWORD").pipe(EffectConfig.option),
+            guestUsername: EffectConfig.string("OPENCODE_SERVER_GUEST_USERNAME").pipe(
+              EffectConfig.withDefault("guest"),
+            ),
+          }),
+        )
+      }),
+    )
+  }
+}
 
 export function required(config: Info) {
   return Option.isSome(config.password) && config.password.value !== ""
 }
 
-export function authorized(credentials: DecodedCredentials, config: Info) {
-  return (
-    Option.isSome(config.password) &&
-    credentials.username === config.username &&
-    Redacted.value(credentials.password) === config.password.value
+/** The identity a credential pair matches, or undefined when it matches neither. */
+export function identity(credentials: DecodedCredentials, config: Info): Identity | undefined {
+  const password = Redacted.value(credentials.password)
+  if (Option.isSome(config.password) && credentials.username === config.username && password === config.password.value)
+    return "owner"
+  const guestPassword = config.guestPassword ?? Option.none<string>()
+  if (
+    Option.isSome(guestPassword) &&
+    guestPassword.value !== "" &&
+    credentials.username === (config.guestUsername ?? "guest") &&
+    password === guestPassword.value
   )
+    return "guest"
+  return undefined
+}
+
+export function authorized(credentials: DecodedCredentials, config: Info) {
+  return identity(credentials, config) !== undefined
 }
 
 export function header(credentials?: Credentials) {

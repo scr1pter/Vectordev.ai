@@ -27,6 +27,7 @@ import { decode64 } from "@/utils/base64"
 import { Persist, persisted } from "@/utils/persist"
 import { hasActiveVerification } from "@/utils/session-activity"
 import { StatusPopover } from "../status-popover"
+import { PresenceBanner } from "../presence-banner"
 
 const OPEN_APPS = [
   "vscode",
@@ -313,6 +314,7 @@ export function SessionHeader() {
           </div>
 
           <div data-vector-session-controls>
+            <PresenceBanner />
             <span data-vector-session-branch>{branch()}</span>
             <span
               data-vector-session-status
@@ -514,6 +516,7 @@ export function SessionHeader() {
                 </div>
               </Show>
               <div class="flex items-center gap-1">
+                <PresenceBanner />
                 <Show when={status()}>
                   <Tooltip placement="bottom" value={language.t("status.popover.trigger")}>
                     <StatusPopover />

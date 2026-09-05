@@ -1,14 +1,21 @@
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import { constants } from "node:fs"
-import { access, cp, mkdir, readdir, rm, stat } from "node:fs/promises"
+import { access, cp, mkdir, rm, stat } from "node:fs/promises"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 import { StringDecoder } from "node:string_decoder"
 import type { AgentChat } from "./parallel-workspace-turns"
 import { untrustedChildEnvironment } from "@opencode-ai/core/child-environment"
 
-import { getUserShell, loadShellEnv } from "./shell-env"
+import {
+  fallbackBinDirectories,
+  getUserShell,
+  loadShellEnv,
+  toolBinDirectories,
+  unionPath,
+  versionManagerBinDirectories,
+} from "./shell-env"
 
 // Detection + handoff plumbing for external coding agents/editors Vector can
 // host or hand a task off to. Read-only probing (no shell:true, fixed
@@ -72,13 +79,13 @@ export function agentEnvironment(): AgentEnvironment {
   // loadShellEnv spawns the login shell synchronously, so this must happen once
   // per process rather than once per detection or per run.
   const loaded = process.platform === "win32" ? null : loadShellEnv(getUserShell(), console)
-  const separator = pathSeparator(process.platform)
   environment = untrustedChildEnvironment(process.env, loaded ?? undefined, {
     // Union rather than replacement: the login shell knows where the user's
-    // tools live, the app environment knows what Electron's own helpers need.
-    PATH: [...new Set([...(loaded?.PATH ?? "").split(separator), ...(process.env.PATH ?? "").split(separator)])]
-      .filter(Boolean)
-      .join(separator),
+    // tools live, the app environment knows what Electron's own helpers need,
+    // and the install directories cover a probe that came back empty. A CLI
+    // found under ~/.nvm is a `#!/usr/bin/env node` shim, so the directory it
+    // lives in has to be on the PATH it is spawned with, not just searched.
+    PATH: unionPath([loaded?.PATH, process.env.PATH, ...fallbackBinDirectories({ ...process.env, ...loaded })]),
   })
   return environment
 }
@@ -103,8 +110,9 @@ export async function agentCandidatePaths(
 ) {
   const directories = new Set([
     ...(env.PATH ?? "").split(pathSeparator(platform)).filter(Boolean),
-    ...installDirectories(cli, env, platform),
-    ...(await versionDirectories(env, platform)),
+    ...toolBinDirectories(env, platform),
+    ...editorBundleDirectories(cli, env, platform),
+    ...versionManagerBinDirectories(env, platform),
   ])
   return [...directories].flatMap((directory) => executableNames(cli, platform).map((name) => join(directory, name)))
 }
@@ -135,57 +143,21 @@ export async function resolveAgentPath(
   return found.find((path): path is string => Boolean(path))
 }
 
-function installDirectories(cli: string, env: AgentEnvironment, platform: NodeJS.Platform) {
+// Editors ship their shell command inside the bundle, and the ChatGPT app
+// ships codex. The generic package-manager directories live in shell-env.ts so
+// the engine sidecar's PATH and this detection agree on where tools install.
+function editorBundleDirectories(cli: string, env: AgentEnvironment, platform: NodeJS.Platform) {
   const home = env.HOME || env.USERPROFILE || homedir()
   if (platform === "win32") {
-    const appData = env.APPDATA || join(home, "AppData", "Roaming")
     const localAppData = env.LOCALAPPDATA || join(home, "AppData", "Local")
     return [
-      join(appData, "npm"),
-      // npm's Windows prefix holds the shims directly, every other manager uses bin/.
-      env.npm_config_prefix,
-      env.PNPM_HOME,
-      join(localAppData, "pnpm"),
-      join(env.VOLTA_HOME || join(localAppData, "Volta"), "bin"),
-      join(env.BUN_INSTALL || join(home, ".bun"), "bin"),
-      join(home, ".local", "bin"),
-      join(home, ".deno", "bin"),
-      join(home, ".cargo", "bin"),
       join(home, ".cursor", "bin"),
       ...cursorBundleDirectories(cli, [join(localAppData, "Programs", "cursor", "resources", "app", "bin")]),
       join(localAppData, "Programs", "Microsoft VS Code", "bin"),
-    ].filter((directory): directory is string => Boolean(directory))
+    ]
   }
   return [
-    join(home, ".local", "bin"),
-    join(home, "bin"),
-    env.NVM_BIN,
-    join(env.BUN_INSTALL || join(home, ".bun"), "bin"),
-    join(env.VOLTA_HOME || join(home, ".volta"), "bin"),
-    env.PNPM_HOME,
-    join(home, "Library", "pnpm"),
-    join(home, ".local", "share", "pnpm"),
-    env.npm_config_prefix ? join(env.npm_config_prefix, "bin") : undefined,
-    join(home, ".npm-global", "bin"),
-    join(home, ".npm-packages", "bin"),
-    join(home, ".yarn", "bin"),
-    join(home, ".config", "yarn", "global", "node_modules", ".bin"),
-    // mise and asdf put a shim for every installed tool in one directory, which
-    // is cheaper to find than walking their per-version installs.
-    join(env.MISE_DATA_DIR || join(home, ".local", "share", "mise"), "shims"),
-    join(env.ASDF_DATA_DIR || join(home, ".asdf"), "shims"),
-    join(home, ".deno", "bin"),
-    join(home, ".cargo", "bin"),
     join(home, ".cursor", "bin"),
-    "/opt/homebrew/bin",
-    "/usr/local/bin",
-    "/usr/bin",
-    "/bin",
-    "/opt/local/bin",
-    "/snap/bin",
-    "/home/linuxbrew/.linuxbrew/bin",
-    // Editors ship their shell command inside the bundle, and the ChatGPT app
-    // ships codex.
     ...(platform === "darwin"
       ? [
           "/Applications/Visual Studio Code.app/Contents/Resources/app/bin",
@@ -193,7 +165,7 @@ function installDirectories(cli: string, env: AgentEnvironment, platform: NodeJS
           "/Applications/ChatGPT.app/Contents/Resources",
         ]
       : []),
-  ].filter((directory): directory is string => Boolean(directory))
+  ]
 }
 
 // Cursor's bundle ships its own `code` command alongside `cursor`. Searching the
@@ -204,38 +176,6 @@ function installDirectories(cli: string, env: AgentEnvironment, platform: NodeJS
 // installed onto PATH still wins, because PATH is searched first.
 function cursorBundleDirectories(cli: string, directories: string[]) {
   return cli === "code" ? [] : directories
-}
-
-// Version managers install one bin directory per runtime version, so the roots
-// are listed once (one readdir each, in parallel) instead of guessing versions.
-async function versionDirectories(env: AgentEnvironment, platform: NodeJS.Platform) {
-  const home = env.HOME || env.USERPROFILE || homedir()
-  const roots =
-    platform === "win32"
-      ? [
-          {
-            root: join(env.APPDATA || join(home, "AppData", "Roaming"), "fnm", "node-versions"),
-            leaf: ["installation"],
-          },
-          {
-            root: join(env.LOCALAPPDATA || join(home, "AppData", "Local"), "fnm", "node-versions"),
-            leaf: ["installation"],
-          },
-        ]
-      : [
-          { root: join(env.NVM_DIR || join(home, ".nvm"), "versions", "node"), leaf: ["bin"] },
-          { root: join(env.FNM_DIR || join(home, ".fnm"), "node-versions"), leaf: ["installation", "bin"] },
-          { root: join(home, ".local", "share", "fnm", "node-versions"), leaf: ["installation", "bin"] },
-          { root: join(env.MISE_DATA_DIR || join(home, ".local", "share", "mise"), "installs", "node"), leaf: ["bin"] },
-          { root: join(env.ASDF_DATA_DIR || join(home, ".asdf"), "installs", "nodejs"), leaf: ["bin"] },
-        ]
-  return (
-    await Promise.all(
-      roots.map(async (entry) =>
-        (await readdir(entry.root).catch(() => [])).map((version) => join(entry.root, version, ...entry.leaf)),
-      ),
-    )
-  ).flat()
 }
 
 type RunResult = { stdout: string; stderr: string; failed: boolean }

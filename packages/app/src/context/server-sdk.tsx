@@ -1,4 +1,6 @@
 import type { Event } from "@opencode-ai/sdk/v2/client"
+import type { Event as SchemaEvent } from "@opencode-ai/schema/event"
+import type { ServerEvent } from "@opencode-ai/schema/server-event"
 import { createSimpleContext } from "@opencode-ai/ui/context"
 import { createGlobalEmitter } from "@solid-primitives/event-bus"
 import { makeEventListener } from "@solid-primitives/event-listener"
@@ -308,8 +310,15 @@ export const { use: useServerSDK, provider: ServerSDKProvider } = createSimpleCo
   },
 })
 
+// Presence events are connection-scoped (like server.heartbeat) and not part of
+// the SDK's generated Event union, so they are typed straight from the schema.
+type PresenceEvent<D extends SchemaEvent.Definition> = { type: D["type"]; properties: SchemaEvent.Data<D> }
+
 type SDKEventMap = {
   [key in Event["type"]]: Extract<Event, { type: key }>
+} & {
+  "client.joined": PresenceEvent<typeof ServerEvent.ClientJoined>
+  "client.left": PresenceEvent<typeof ServerEvent.ClientLeft>
 }
 
 function createDirSdkContext(directory: string, serverSDK: ServerSDKBase) {

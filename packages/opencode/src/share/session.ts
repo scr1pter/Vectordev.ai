@@ -25,7 +25,8 @@ const layer = Layer.effect(
 
     const share = Effect.fn("SessionShare.share")(function* (sessionID: SessionID) {
       const conf = yield* cfg.get()
-      if (conf.share === "disabled") throw new Error("Sharing is disabled in configuration")
+      const reason = ShareNext.disabledReason(conf.share)
+      if (reason) throw new Error(reason)
       const result = yield* shareNext.create(sessionID)
       yield* session.setShare({ sessionID, share: { url: result.url } })
       return result
@@ -40,6 +41,7 @@ const layer = Layer.effect(
       const result = yield* session.create(input)
       if (result.parentID) return result
       const conf = yield* cfg.get()
+      if (!ShareNext.enabled(conf.share)) return result
       if (!(flags.autoShare || conf.share === "auto")) return result
       yield* share(result.id).pipe(Effect.ignore, Effect.forkIn(scope))
       return result

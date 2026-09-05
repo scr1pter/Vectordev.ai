@@ -2,9 +2,14 @@ import { describe, expect, test } from "bun:test"
 import {
   activeAttributions,
   agentColor,
+  agentCursorLine,
   ATTRIBUTION_TTL_MS,
   changedLineRanges,
+  CURSOR_TAIL_MAX_LINES,
+  inferredLineRanges,
+  locateInsertedText,
   mergeAttribution,
+  resolveAgentColor,
   type AgentAttribution,
 } from "./editor-attribution"
 
@@ -102,5 +107,80 @@ describe("attribution lifetime", () => {
     const now = 1_000_000
     const merged = mergeAttribution([entry("a", now - 100), entry("b", now - 100)], entry("a", now), now)
     expect(merged.map((item) => item.agentId).sort()).toEqual(["a", "b"])
+  })
+})
+
+describe("resolveAgentColor", () => {
+  const agents = [
+    { name: "build", color: "#00ff00" },
+    { name: "plan", color: "var(--icon-agent-plan-base)" },
+    { name: "docs" },
+  ]
+
+  test("uses the agent's configured hex colour", () => {
+    expect(resolveAgentColor("build", agents, "session-1")).toBe("#00ff00")
+  })
+
+  test("falls back to the stable palette when the colour is not plain hex", () => {
+    expect(resolveAgentColor("plan", agents, "session-1")).toBe(agentColor("session-1"))
+  })
+
+  test("falls back when the agent has no colour or is unknown", () => {
+    expect(resolveAgentColor("docs", agents, "session-1")).toBe(agentColor("session-1"))
+    expect(resolveAgentColor("ghost", agents, "session-1")).toBe(agentColor("session-1"))
+    expect(resolveAgentColor(undefined, agents, "session-1")).toBe(agentColor("session-1"))
+  })
+})
+
+describe("locateInsertedText", () => {
+  const after = "import a\n\nfunction one() {\n  return 1\n}\n\nfunction two() {\n  return 2\n}\n"
+
+  test("finds an exact multi-line snippet, 1-based", () => {
+    expect(locateInsertedText(after, "function two() {\n  return 2\n}")).toEqual({ start: 7, end: 9 })
+  })
+
+  test("ignores a trailing newline on the snippet", () => {
+    expect(locateInsertedText(after, "function one() {\n  return 1\n}\n")).toEqual({ start: 3, end: 5 })
+  })
+
+  test("falls back to the first non-blank line when a formatter reflowed the rest", () => {
+    expect(locateInsertedText(after, "function two() {\n    return   2\n}")).toEqual({ start: 7, end: 9 })
+  })
+
+  test("clamps the loose match to the end of the file", () => {
+    expect(locateInsertedText("a\nb", "b\nc\nd\ne")).toEqual({ start: 2, end: 2 })
+  })
+
+  test("returns nothing for blank or missing text", () => {
+    expect(locateInsertedText(after, "   \n\n")).toBeUndefined()
+    expect(locateInsertedText(after, "function three()")).toBeUndefined()
+  })
+})
+
+describe("inferredLineRanges", () => {
+  test("attributes the whole file to a write", () => {
+    expect(inferredLineRanges("a\nb\nc", { tool: "write", input: { content: "a\nb\nc" } })).toEqual([
+      { start: 1, end: 3 },
+    ])
+  })
+
+  test("locates an edit's newString", () => {
+    expect(inferredLineRanges("a\nb\nc", { tool: "edit", input: { newString: "b" } })).toEqual([{ start: 2, end: 2 }])
+  })
+
+  test("is empty for unknown tools, missing input, or no call", () => {
+    expect(inferredLineRanges("a", { tool: "apply_patch", input: { patch: "x" } })).toEqual([])
+    expect(inferredLineRanges("a", { tool: "edit", input: {} })).toEqual([])
+    expect(inferredLineRanges("a", undefined)).toEqual([])
+  })
+})
+
+describe("agentCursorLine", () => {
+  test("sits at the end of a short block", () => {
+    expect(agentCursorLine({ start: 4, end: 9 })).toBe(9)
+  })
+
+  test("sits at the start of a block too tall for the viewport", () => {
+    expect(agentCursorLine({ start: 1, end: 1 + CURSOR_TAIL_MAX_LINES + 1 })).toBe(1)
   })
 })

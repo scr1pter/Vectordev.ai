@@ -22,6 +22,22 @@ import { EventV2 } from "@opencode-ai/core/event"
 
 const disabled = process.env["OPENCODE_DISABLE_SHARE"] === "true" || process.env["OPENCODE_DISABLE_SHARE"] === "1"
 
+/**
+ * Why sharing is off, or undefined when it is allowed. Vector never posts
+ * session data to the share service unless the user opted in through config:
+ * a missing `share` setting counts as "disabled". OPENCODE_DISABLE_SHARE
+ * still wins over any config.
+ */
+export function disabledReason(share: string | undefined) {
+  if (disabled) return "Sharing is disabled by OPENCODE_DISABLE_SHARE"
+  if (share !== "manual" && share !== "auto")
+    return 'Sharing is disabled; set "share" to "manual" or "auto" in your Vector config to enable it'
+}
+
+export function enabled(share: string | undefined) {
+  return disabledReason(share) === undefined
+}
+
 export type Api = {
   create: string
   sync: (shareID: string) => string
@@ -121,9 +137,14 @@ const layer = Layer.effect(
     const provider = yield* Provider.Service
     const session = yield* Session.Service
 
+    const off = Effect.fnUntraced(function* () {
+      if (disabled) return true
+      return !enabled((yield* cfg.get()).share)
+    })
+
     function sync(sessionID: SessionID, data: Data[]) {
       return Effect.gen(function* () {
-        if (disabled) return
+        if (yield* off()) return
         const share = yield* getCached(sessionID)
         if (!share) return
 
@@ -245,7 +266,7 @@ const layer = Layer.effect(
     })
 
     const flush = Effect.fn("ShareNext.flush")(function* (sessionID: SessionID) {
-      if (disabled) return
+      if (yield* off()) return
       const s = yield* InstanceState.get(state)
       const queued = s.queue.get(sessionID)
       if (!queued) return
@@ -299,7 +320,7 @@ const layer = Layer.effect(
     })
 
     const init = Effect.fn("ShareNext.init")(function* () {
-      if (disabled) return
+      if (yield* off()) return
       yield* InstanceState.get(state)
     })
 
@@ -308,7 +329,7 @@ const layer = Layer.effect(
     })
 
     const create = Effect.fn("ShareNext.create")(function* (sessionID: SessionID) {
-      if (disabled) return { id: "", url: "", secret: "" }
+      if (yield* off()) return { id: "", url: "", secret: "" }
       yield* Effect.logInfo("creating share", { sessionID: sessionID })
       const req = yield* request()
       const result = yield* HttpClientRequest.post(`${req.baseUrl}${req.api.create}`).pipe(
@@ -336,7 +357,7 @@ const layer = Layer.effect(
     })
 
     const remove = Effect.fn("ShareNext.remove")(function* (sessionID: SessionID) {
-      if (disabled) return
+      if (yield* off()) return
       yield* Effect.logInfo("removing share", { sessionID: sessionID })
       const s = yield* InstanceState.get(state)
       const share = yield* getCached(sessionID)

@@ -39,7 +39,12 @@ export function defs(client: Client, timeout?: number) {
   return listTools(client, timeout ?? DEFAULT_TIMEOUT).pipe(Effect.catch(() => Effect.void))
 }
 
-export function convertTool(mcpTool: MCPToolDef, client: Client, timeout?: number): Tool {
+export interface ToolHooks {
+  /** Runs after every call; `error` is set when the call failed. The signal is the call's abort signal. */
+  onSettled?: (error: unknown, signal?: AbortSignal) => Promise<void> | void
+}
+
+export function convertTool(mcpTool: MCPToolDef, client: Client, timeout?: number, hooks?: ToolHooks): Tool {
   const inputSchema: JSONSchema7 = {
     ...(mcpTool.inputSchema as JSONSchema7),
     type: "object",
@@ -51,20 +56,31 @@ export function convertTool(mcpTool: MCPToolDef, client: Client, timeout?: numbe
     description: mcpTool.description ?? "",
     inputSchema: jsonSchema(inputSchema),
     execute: async (args: unknown, options) => {
-      const result = await client.callTool(
-        {
-          name: mcpTool.name,
-          arguments: (args || {}) as Record<string, unknown>,
-        },
-        CallToolResultSchema,
-        {
-          resetTimeoutOnProgress: true,
-          signal: options.abortSignal,
-          timeout,
-          // The MCP SDK only sends a progress token when this hook is present, enabling timeout resets.
-          onprogress: () => {},
-        },
-      )
+      const result = await client
+        .callTool(
+          {
+            name: mcpTool.name,
+            arguments: (args || {}) as Record<string, unknown>,
+          },
+          CallToolResultSchema,
+          {
+            resetTimeoutOnProgress: true,
+            signal: options.abortSignal,
+            timeout,
+            // The MCP SDK only sends a progress token when this hook is present, enabling timeout resets.
+            onprogress: () => {},
+          },
+        )
+        .then(
+          async (result) => {
+            await hooks?.onSettled?.(undefined, options.abortSignal)
+            return result
+          },
+          async (error: unknown) => {
+            await hooks?.onSettled?.(error, options.abortSignal)
+            throw error
+          },
+        )
       if (result.isError)
         throw new Error(
           result.content

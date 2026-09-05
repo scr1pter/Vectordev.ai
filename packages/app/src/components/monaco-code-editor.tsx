@@ -1,6 +1,6 @@
-import { createEffect, onCleanup, onMount } from "solid-js"
+import { createEffect, onCleanup, onMount, untrack } from "solid-js"
 import * as monaco from "monaco-editor"
-import { activeAttributions, type AgentAttribution } from "./editor-attribution"
+import { activeAttributions, ATTRIBUTION_TTL_MS, type AgentAttribution } from "./editor-attribution"
 import { useSettings } from "@/context/settings"
 import editorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker"
 import cssWorker from "monaco-editor/esm/vs/language/css/css.worker?worker"
@@ -452,11 +452,50 @@ function attributionStyles(entries: readonly AgentAttribution[]) {
     .join("")
 }
 
+export type MonacoReveal = {
+  line: number
+  endLine?: number
+  /** Date.now() at the reveal: a change key so the same lines can be revealed
+      twice in a row, and the clock the agent cursor fades on. */
+  token: number
+}
+
+export type MonacoAgentCursor = {
+  agentId: string
+  agentName: string
+  color: string
+  line: number
+}
+
+// The agent cursor is a collaborator-style marker: a tinted line with a
+// blinking caret and the agent's name after the text, in the agent's colour.
+let cursorStyleEl: HTMLStyleElement | undefined
+function cursorStyles(cursor: MonacoAgentCursor) {
+  cursorStyleEl ??= (() => {
+    const el = document.createElement("style")
+    el.dataset.vectorAgentCursor = "true"
+    document.head.appendChild(el)
+    return el
+  })()
+  const id = cssId(cursor.agentId)
+  cursorStyleEl.textContent = [
+    "@keyframes vector-agent-caret{0%,49%{opacity:1}50%,100%{opacity:.15}}",
+    ".vector-agent-cursor-label{display:inline-block;margin-left:14px;padding:0 6px;border-radius:4px;font-size:10px;font-weight:600;line-height:1.5;letter-spacing:.02em;font-family:ui-sans-serif,system-ui,sans-serif;font-style:normal;vertical-align:middle;white-space:nowrap;pointer-events:none;user-select:none}",
+    '.vector-agent-cursor-label::before{content:"";display:inline-block;width:2px;height:1.1em;margin-right:6px;vertical-align:text-bottom;border-radius:1px;background:currentColor;animation:vector-agent-caret 1s steps(1) infinite}',
+    `.vector-agent-cursor-line.vector-agent-cursor-${id}{box-shadow:inset 2px 0 0 ${cursor.color}}`,
+    `.vector-agent-cursor-label.vector-agent-cursor-${id}{color:${cursor.color};background:${cursor.color}22}`,
+  ].join("")
+}
+
 export function MonacoCodeEditor(props: {
   path: string
   value: string
   /** Agents whose recent edits should be attributed in the gutter and margin. */
   attributions?: AgentAttribution[]
+  /** Scroll the given lines into view (only when this editor shows the matching model). */
+  reveal?: MonacoReveal
+  /** Where an agent last typed; drawn as a named caret that clears after ATTRIBUTION_TTL_MS. */
+  cursor?: MonacoAgentCursor
   onChange: (next: string) => void
   onSave?: (value: string) => void
   /** Cursor-style ghost-text completion source. When provided (and enabled by the
@@ -470,6 +509,9 @@ export function MonacoCodeEditor(props: {
   const editorSettings = useSettings().editor
   let host: HTMLDivElement | undefined
   let attributionCollection: ReturnType<monaco.editor.IStandaloneCodeEditor["createDecorationsCollection"]> | undefined
+  let cursorCollection: ReturnType<monaco.editor.IStandaloneCodeEditor["createDecorationsCollection"]> | undefined
+  let cursorTimer: ReturnType<typeof setTimeout> | undefined
+  let revealedToken: number | undefined
   let editor: monaco.editor.IStandaloneCodeEditor | undefined
   let applyingExternal = false
   let registeredUri: string | undefined
@@ -590,9 +632,24 @@ export function MonacoCodeEditor(props: {
       if (registeredUri) completionRegistry.delete(registeredUri)
       if (registeredUri) languageServiceRegistry.delete(registeredUri)
       if (diagnosticsTimer) clearTimeout(diagnosticsTimer)
+      if (cursorTimer) clearTimeout(cursorTimer)
       editor?.dispose()
     })
   })
+
+  // Sync an external value in without setValue: setValue discards decorations
+  // and the undo stack, so per-agent attribution would vanish on the very
+  // update that produced it.
+  const applyExternal = (model: monaco.editor.ITextModel, value: string) => {
+    if (!editor || model.getValue() === value) return
+    applyingExternal = true
+    model.pushEditOperations(
+      editor.getSelections(),
+      [{ range: model.getFullModelRange(), text: value, forceMoveMarkers: true }],
+      () => null,
+    )
+    applyingExternal = false
+  }
 
   // Keep the completion route pointed at the current model / callback.
   createEffect(() => {
@@ -652,18 +709,65 @@ export function MonacoCodeEditor(props: {
 
     // External updates (agent edits the open file) sync in without clobbering
     // the cursor during the user's own typing.
-    if (current && current.getValue() !== value && !editor.hasTextFocus()) {
-      applyingExternal = true
-      // Replace the range rather than setValue: setValue discards decorations
-      // and the undo stack, so per-agent attribution would vanish on the very
-      // update that produced it.
-      current.pushEditOperations(
-        editor.getSelections(),
-        [{ range: current.getFullModelRange(), text: value, forceMoveMarkers: true }],
-        () => null,
-      )
-      applyingExternal = false
+    if (current && !editor.hasTextFocus()) applyExternal(current, value)
+  })
+
+  // Follow-the-agent reveal. Keyed on the token so a repeat edit to the same
+  // lines still scrolls. The user opted into following, so this reveals even
+  // while the editor has focus, and first syncs the agent's text in (the
+  // focus guard above would otherwise leave the buffer stale).
+  createEffect(() => {
+    const reveal = props.reveal
+    if (!reveal || !editor || reveal.token === revealedToken) return
+    const model = editor.getModel()
+    if (!model || model.uri.toString() !== monaco.Uri.file(props.path || "untitled.txt").toString()) return
+    revealedToken = reveal.token
+    // Untracked: a reveal is a one-shot on its token, not a reaction to typing.
+    applyExternal(
+      model,
+      untrack(() => props.value),
+    )
+    const total = model.getLineCount()
+    const line = Math.min(Math.max(1, reveal.line), total)
+    const endLine = Math.min(Math.max(line, reveal.endLine ?? line), total)
+    editor.revealRangeInCenterIfOutsideViewport(new monaco.Range(line, 1, endLine, 1), monaco.editor.ScrollType.Smooth)
+  })
+
+  // The agent's cursor: a tinted line plus a caret-and-name label injected
+  // after the text. It fades on the same clock as the line attributions.
+  createEffect(() => {
+    const cursor = props.cursor
+    const token = props.reveal?.token
+    if (!editor) return
+    if (cursorTimer) clearTimeout(cursorTimer)
+    cursorCollection ??= editor.createDecorationsCollection()
+    const model = editor.getModel()
+    const remaining = token === undefined ? ATTRIBUTION_TTL_MS : ATTRIBUTION_TTL_MS - (Date.now() - token)
+    if (
+      !cursor ||
+      !model ||
+      remaining <= 0 ||
+      model.uri.toString() !== monaco.Uri.file(props.path || "untitled.txt").toString()
+    ) {
+      cursorCollection.clear()
+      return
     }
+    cursorStyles(cursor)
+    const line = Math.min(Math.max(1, cursor.line), model.getLineCount())
+    const column = model.getLineMaxColumn(line)
+    const id = cssId(cursor.agentId)
+    cursorCollection.set([
+      {
+        range: new monaco.Range(line, column, line, column),
+        options: {
+          isWholeLine: true,
+          className: `vector-agent-cursor-line vector-agent-cursor-${id}`,
+          after: { content: cursor.agentName, inlineClassName: `vector-agent-cursor-label vector-agent-cursor-${id}` },
+          stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
+        },
+      },
+    ])
+    cursorTimer = setTimeout(() => cursorCollection?.clear(), remaining)
   })
 
   return <div ref={host} class="vector-neon-editor relative h-full min-h-0 w-full overflow-hidden" />

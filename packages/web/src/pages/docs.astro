@@ -36,6 +36,9 @@ const navigation = [
       ["Models and BYOK", "models"],
       ["MCP and connections", "connections"],
       ["Review and recovery", "review"],
+      ["Multiplayer", "multiplayer"],
+      ["GitHub automation", "github"],
+      ["Follow mode", "follow"],
     ],
   },
   {
@@ -386,6 +389,11 @@ const crew = [
   },
 ]
 const changelog = [
+  [
+    "September 2026",
+    "Multiplayer, Follow mode, and GitHub that ships PRs",
+    "vector invite shares a live workspace with teammates over one link; the editor now follows the agent as it types, line by line; /vector on a GitHub issue opens a pull request with a Changes table, check output, measured cost, and the judge's verdict; and MCP servers that stop answering are recovered instead of wedging the app.",
+  ],
   [
     "August 2026",
     "One workspace, two ways to work",
@@ -997,8 +1005,62 @@ const faqs = [
           <p class="note">The API platform is in development. The CLI is the first programmable surface today — <code>vector run "…"</code> works in scripts and CI with a <code>VECTOR_CLI_TOKEN</code>.</p>
         </section>
 
-        <section id="changelog" class="doc-section">
+        <section id="multiplayer" class="doc-section">
           <p class="section-number">32</p>
+          <h2>Multiplayer</h2>
+          <p>
+            One workspace, several people. <code>vector invite</code> starts your workspace as a shared server and prints
+            two links: your own, and an invite link for teammates. Anyone who opens the invite lands in the same Vector
+            UI, on the same sessions, files, and agents, as a guest. The header shows who is present, and a short
+            "joined" or "left" notice when someone comes or goes.
+          </p>
+          <dl class="doc-rows">
+            <div><dt>How the link works</dt><dd>The invite carries a guest password that is generated fresh each time you run <code>vector invite</code>. Guests are a separate credential from you, so revoking access is as simple as ending the session with Ctrl+C.</dd></div>
+            <div><dt>Where it works</dt><dd>Anywhere on your network out of the box. From elsewhere, expose the port through a tunnel you already trust — <code>tailscale serve &lt;port&gt;</code> or <code>cloudflared tunnel --url http://localhost:&lt;port&gt;</code> — and share that host instead.</dd></div>
+            <div><dt>What guests can do</dt><dd>Everything you can in that workspace: read and steer sessions, open files, run the agent. Share the link only with people you would hand your keyboard to.</dd></div>
+          </dl>
+        </section>
+
+        <section id="github" class="doc-section">
+          <p class="section-number">33</p>
+          <h2>GitHub automation</h2>
+          <p>
+            Task in, pull request out. Run <code>vector github install</code> once inside a repository: it writes a
+            workflow that installs the CLI from npm on every <code>/vector</code> comment, then add the
+            <code>VECTOR_CLI_TOKEN</code> secret from your account page. From then on, commenting
+            <code>/vector fix the flaky auth test</code> on an issue opens a branch and a pull request; commenting on an
+            existing pull request replies on that branch.
+          </p>
+          <p>
+            Every pull request carries its evidence, not just a diff: a Changes table with line counts per file, the
+            output of any test, typecheck, lint, or build command the agent ran with its exit code, the measured token
+            cost of the run, the judge's PASS or FAIL verdict when a judge pass ran, and a link back to the workflow run.
+            Reviewers see what was checked before they read a line.
+          </p>
+          <p class="note">
+            The free model runs the workflow with nothing but the account token. Add a provider key as a second secret to
+            use Claude, GPT, or Gemini in CI. Pull requests opened with the built-in GitHub token do not trigger the
+            repository's other workflows; use a personal access token if you need CI to run on them.
+          </p>
+        </section>
+
+        <section id="follow" class="doc-section">
+          <p class="section-number">34</p>
+          <h2>Follow mode</h2>
+          <p>
+            Watch the agent type. With Follow mode on, the editor opens whatever file the agent is editing, scrolls to
+            the lines it changed, tints them in that agent's colour, and places a labelled caret at the end of the
+            edit. Every edit is attributed to the agent that made it, so a session with several agents reads like a
+            shared document with named cursors.
+          </p>
+          <dl class="doc-rows">
+            <div><dt>Turn it off when you are typing</dt><dd>The eye button in the Codespace toolbar, or Settings → General → "Follow the agent in the editor". Off, the agent's edits to the file you have open are still highlighted; other files stay closed until you open them.</dd></div>
+            <div><dt>What it never does</dt><dd>Your own saves, build output, and formatter runs do not move the editor. Only edits published by an agent do.</dd></div>
+          </dl>
+        </section>
+
+        <section id="changelog" class="doc-section">
+          <p class="section-number">35</p>
           <h2>Changelog</h2>
           <p>Keep the whole build in view. Recent releases, newest first.</p>
           <dl class="doc-rows">

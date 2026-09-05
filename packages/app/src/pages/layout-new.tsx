@@ -2869,16 +2869,22 @@ export default function NewLayout(props: ParentProps) {
   globalThis.window?.addEventListener(ONBOARDING_UPDATED_EVENT, refreshOnboardingFlags)
   onCleanup(() => globalThis.window?.removeEventListener(ONBOARDING_UPDATED_EVENT, refreshOnboardingFlags))
 
-  const onboardingProviderDone = () => Boolean(onboardingFlags().providerVerified)
+  // Any usable model — a key the user just added, or the free starter model —
+  // completes the step on its own. A finished session turn (recorded on
+  // session.idle above) still marks it verified end to end, and only changes
+  // the wording here.
+  const onboardingProviderConnected = () => parallelModelOptions().length > 0
+  const onboardingProviderVerified = () => Boolean(onboardingFlags().providerVerified)
+  const onboardingProviderDone = () => onboardingProviderVerified() || onboardingProviderConnected()
   const onboardingProjectDone = () => Boolean(activeProjectPath())
   const onboardingSteps = () => [
     {
       id: "provider",
       title: "Verify a model provider",
-      detail: onboardingProviderDone()
+      detail: onboardingProviderVerified()
         ? "Vector completed a real model response with your selected provider."
-        : parallelModelOptions().length > 0
-          ? "Connected. Complete the safe first task below to verify the model end to end."
+        : onboardingProviderConnected()
+          ? "Connected. Run the safe first task below to see the model answer end to end."
           : "Bring your own key — OpenAI, Anthropic, Google, or the free starter model.",
       done: onboardingProviderDone(),
       cta: "Connect",

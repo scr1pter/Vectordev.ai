@@ -6,7 +6,7 @@ import { Flag } from "@opencode-ai/core/flag/flag"
 import open from "open"
 import { networkInterfaces } from "os"
 
-function getNetworkIPs() {
+export function getNetworkIPs() {
   const nets = networkInterfaces()
   const results: string[] = []
 

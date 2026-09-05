@@ -8,6 +8,11 @@ import type { VectorLicenseStatus } from "@opencode-ai/app/license"
 
 const execFileAsync = promisify(execFile)
 const OFFLINE_GRACE_MS = 7 * 24 * 60 * 60 * 1000
+const REQUEST_TIMEOUT_MS = 15_000
+// The unauthenticated config probe is the first thing a new install waits on.
+// On a captive or blocked network it cannot succeed, and the renderer shows a
+// blank "checking license" screen until it gives up, so it gets a short budget.
+const CONFIG_PROBE_TIMEOUT_MS = 6_000
 
 type StoredLicense = {
   activationToken: string
@@ -103,9 +108,9 @@ export function createLicenseService(input: {
     await rm(file, { force: true }).catch(() => undefined)
   }
 
-  const request = async <T>(path: string, init?: RequestInit) => {
+  const request = async <T>(path: string, init?: RequestInit, timeoutMs = REQUEST_TIMEOUT_MS) => {
     const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), 15_000)
+    const timer = setTimeout(() => controller.abort(), timeoutMs)
     try {
       const headers = new Headers(init?.headers)
       headers.set("content-type", "application/json")
@@ -144,7 +149,11 @@ export function createLicenseService(input: {
     const stored = await readStored()
     if (!stored?.activationToken) {
       try {
-        const config = await request<{ available: boolean; licenseRequired?: boolean }>("config", { method: "GET" })
+        const config = await request<{ available: boolean; licenseRequired?: boolean }>(
+          "config",
+          { method: "GET" },
+          CONFIG_PROBE_TIMEOUT_MS,
+        )
         if (!(config.licenseRequired ?? config.available)) {
           return {
             access: true,
@@ -158,10 +167,15 @@ export function createLicenseService(input: {
           message: "Enter the license key from your Vector purchase email.",
         }
       } catch (error) {
+        // Never activated on this computer. This status deliberately carries no
+        // lastValidatedAt/email: the renderer's LicenseGate reads their absence
+        // as "no activation to enforce" and lets the beta through, while an
+        // offline status built from a stored activation below keeps them and
+        // stays walled.
         return {
           access: false,
           state: "offline",
-          message: `Vector could not verify licensing: ${normalizeError(error)}`,
+          message: `Vector could not reach licensing: ${normalizeError(error)}`,
         }
       }
     }
