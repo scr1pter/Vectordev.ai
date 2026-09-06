@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import {
   activeAttributions,
+  attributionsForPath,
   agentColor,
   agentCursorLine,
   ATTRIBUTION_TTL_MS,
@@ -82,7 +83,8 @@ describe("agentColor", () => {
 })
 
 describe("attribution lifetime", () => {
-  const entry = (agentId: string, at: number): AgentAttribution => ({
+  const entry = (agentId: string, at: number, path = "src/a.ts"): AgentAttribution => ({
+    path,
     agentId,
     agentName: agentId,
     color: "#fff",
@@ -107,6 +109,19 @@ describe("attribution lifetime", () => {
     const now = 1_000_000
     const merged = mergeAttribution([entry("a", now - 100), entry("b", now - 100)], entry("a", now), now)
     expect(merged.map((item) => item.agentId).sort()).toEqual(["a", "b"])
+  })
+
+  test("one agent editing two files keeps a highlight in each", () => {
+    const now = 1_000_000
+    const merged = mergeAttribution([entry("a", now - 100, "src/a.ts")], entry("a", now, "src/b.ts"), now)
+    expect(merged.map((item) => item.path).sort()).toEqual(["src/a.ts", "src/b.ts"])
+  })
+
+  test("attributionsForPath keeps only the ranges belonging to the open file", () => {
+    const now = 1_000_000
+    const all = [entry("a", now, "src/a.ts"), entry("b", now, "src/b.ts")]
+    expect(attributionsForPath(all, "src/b.ts").map((item) => item.agentId)).toEqual(["b"])
+    expect(attributionsForPath(all, "src/c.ts")).toEqual([])
   })
 })
 

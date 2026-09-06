@@ -6,6 +6,8 @@
 export type LineRange = { start: number; end: number }
 
 export type AgentAttribution = {
+  /** Workspace-relative file the ranges belong to. */
+  path: string
   agentId: string
   agentName: string
   color: string
@@ -73,13 +75,23 @@ export function activeAttributions(all: readonly AgentAttribution[], now: number
 }
 
 // Newer attributions win a contested line: two agents editing the same region
-// should show whoever touched it last, not an arbitrary one.
+// should show whoever touched it last, not an arbitrary one. Keyed by file as
+// well as agent, so an agent working across several files keeps a highlight in
+// each of them rather than only the one it touched last.
 export function mergeAttribution(
   all: readonly AgentAttribution[],
   next: AgentAttribution,
   now: number,
 ): AgentAttribution[] {
-  return [...activeAttributions(all, now).filter((entry) => entry.agentId !== next.agentId), next]
+  return [
+    ...activeAttributions(all, now).filter((entry) => entry.agentId !== next.agentId || entry.path !== next.path),
+    next,
+  ]
+}
+
+/** The entries that belong to one file — ranges are meaningless in any other. */
+export function attributionsForPath(all: readonly AgentAttribution[], path: string) {
+  return all.filter((entry) => entry.path === path)
 }
 
 // Where the editor should scroll to (and label) after an agent edit. The token

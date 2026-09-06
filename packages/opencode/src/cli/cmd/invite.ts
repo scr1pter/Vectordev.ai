@@ -57,7 +57,10 @@ export const InviteCommand = effectCmd({
     const opts = hasArg("--hostname") ? resolved : { ...resolved, hostname: "0.0.0.0" }
     const server = yield* Effect.promise(() => Server.listen(opts))
 
-    const ownerUrl = link("localhost", server.port, owner.username, owner.password)
+    // localhost only when the server is bound to every interface; an explicit
+    // --hostname binds that address alone, so localhost would not answer.
+    const ownerHost = opts.hostname === "0.0.0.0" || opts.hostname === "::" ? "localhost" : opts.hostname
+    const ownerUrl = link(ownerHost, server.port, owner.username, owner.password)
     const hosts = opts.hostname === "0.0.0.0" ? getNetworkIPs() : [opts.hostname]
 
     UI.empty()

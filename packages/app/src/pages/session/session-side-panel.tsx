@@ -19,6 +19,7 @@ import { Portal } from "solid-js/web"
 import {
   agentColor,
   agentCursorLine,
+  attributionsForPath,
   changedLineRanges,
   inferredLineRanges,
   mergeAttribution,
@@ -2161,9 +2162,21 @@ export function CodespaceWorkbench(props: {
         ? (event.details.properties as Record<string, unknown>)
         : undefined
     if (!properties || typeof properties.file !== "string") return
-    const changed = file.normalize(normalizedWorkspacePath(properties.file))
-    const top = changed.split("/")[0] ?? ""
-    if (!changed || (CODESPACE_EXCLUDED_DIRECTORIES as readonly string[]).includes(top)) return
+    // file.normalize strips the workspace root from the absolute path the
+    // server publishes. Trimming the leading slash first would defeat that
+    // prefix match and leave an absolute path that matches no open tab.
+    const changed = file.normalize(properties.file)
+    if (!changed) return
+    // Build output is excluded at any depth: packages/app/dist counts, not just
+    // a dist directory at the root.
+    const excluded = CODESPACE_EXCLUDED_DIRECTORIES as readonly string[]
+    if (
+      changed
+        .split("/")
+        .slice(0, -1)
+        .some((segment) => excluded.includes(segment))
+    )
+      return
     return { changed, properties }
   }
 
@@ -2199,7 +2212,7 @@ export function CodespaceWorkbench(props: {
     setAttributions((current) =>
       mergeAttribution(
         current,
-        { agentId: input.agentId, agentName: input.agentName, color: input.color, ranges, at: now },
+        { path: changed, agentId: input.agentId, agentName: input.agentName, color: input.color, ranges, at: now },
         now,
       ),
     )
@@ -3086,7 +3099,7 @@ export function CodespaceWorkbench(props: {
                               <MonacoCodeEditor
                                 path={workspaceAbsolutePath(path())}
                                 value={draft()}
-                                attributions={attributions()}
+                                attributions={attributionsForPath(attributions(), path())}
                                 reveal={editorReveal()}
                                 cursor={editorCursor()}
                                 onChange={(next) => updateDraft(path(), next)}

@@ -122,12 +122,7 @@ function languageRange(range: monaco.IRange): LanguageRange {
 }
 
 function monacoRange(range: LanguageRange) {
-  return new monaco.Range(
-    range.start.line + 1,
-    range.start.character + 1,
-    range.end.line + 1,
-    range.end.character + 1,
-  )
+  return new monaco.Range(range.start.line + 1, range.start.character + 1, range.end.line + 1, range.end.character + 1)
 }
 
 function locationUri(uri: string) {
@@ -152,8 +147,7 @@ async function applyRenameEdits(service: MonacoLanguageService, edits: MonacoLan
     edits.map(async (file) => {
       const uri = locationUri(file.uri)
       const model =
-        monaco.editor.getModel(uri) ??
-        monaco.editor.createModel(await service.readFile(uri.fsPath), undefined, uri)
+        monaco.editor.getModel(uri) ?? monaco.editor.createModel(await service.readFile(uri.fsPath), undefined, uri)
       model.pushEditOperations(
         [],
         file.edits.map((edit) => ({
@@ -196,9 +190,7 @@ function ensureLanguageProviders() {
       provideDefinition: async (model, position) => {
         const service = languageServiceRegistry.get(model.uri.toString())
         if (!service) return []
-        const locations = await service
-          .definition(model.uri.fsPath, languagePosition(position))
-          .catch(() => [])
+        const locations = await service.definition(model.uri.fsPath, languagePosition(position)).catch(() => [])
         return Promise.all(locations.map((location) => loadLocation(service, location)))
       },
     },
@@ -210,9 +202,7 @@ function ensureLanguageProviders() {
       provideReferences: async (model, position) => {
         const service = languageServiceRegistry.get(model.uri.toString())
         if (!service) return []
-        const locations = await service
-          .references(model.uri.fsPath, languagePosition(position))
-          .catch(() => [])
+        const locations = await service.references(model.uri.fsPath, languagePosition(position)).catch(() => [])
         return Promise.all(locations.map((location) => loadLocation(service, location)))
       },
     },
@@ -426,7 +416,6 @@ function modelFor(path: string, value: string) {
   }
   return monaco.editor.createModel(value, undefined, uri)
 }
-
 
 const cssId = (value: string) => value.replace(/[^a-z0-9_-]/gi, "")
 
@@ -683,10 +672,19 @@ export function MonacoCodeEditor(props: {
       scheduleDiagnostics(0)
       return
     }
-    // Paint one gutter stripe and line highlight per agent that recently edited
-    // this file, so several agents working at once are visually distinguishable.
+    // Sync the agent's text in BEFORE painting: applyExternal replaces the whole
+    // model range, which drags every decoration inside it to the end of the
+    // edit. Painting first would collapse the stripes onto one line.
+    if (current && !editor.hasTextFocus()) applyExternal(current, value)
+    if (current) paintAttributions(current)
+  })
+
+  // Paint one gutter stripe and line highlight per agent that recently edited
+  // this file, so several agents working at once are visually distinguishable.
+  const paintAttributions = (current: monaco.editor.ITextModel) => {
+    if (!editor) return
     const attributions = activeAttributions(props.attributions ?? [], Date.now())
-    if (current) {
+    {
       attributionStyles(attributions)
       attributionCollection ??= editor.createDecorationsCollection()
       attributionCollection.set(
@@ -706,11 +704,7 @@ export function MonacoCodeEditor(props: {
         ),
       )
     }
-
-    // External updates (agent edits the open file) sync in without clobbering
-    // the cursor during the user's own typing.
-    if (current && !editor.hasTextFocus()) applyExternal(current, value)
-  })
+  }
 
   // Follow-the-agent reveal. Keyed on the token so a repeat edit to the same
   // lines still scrolls. The user opted into following, so this reveals even
@@ -719,6 +713,10 @@ export function MonacoCodeEditor(props: {
   createEffect(() => {
     const reveal = props.reveal
     if (!reveal || !editor || reveal.token === revealedToken) return
+    // The token is the edit's timestamp. On a remount revealedToken starts
+    // empty again, so without this an edit from minutes ago would scroll the
+    // editor the moment the user reopens that tab.
+    if (Date.now() - reveal.token >= ATTRIBUTION_TTL_MS) return
     const model = editor.getModel()
     if (!model || model.uri.toString() !== monaco.Uri.file(props.path || "untitled.txt").toString()) return
     revealedToken = reveal.token
@@ -727,6 +725,8 @@ export function MonacoCodeEditor(props: {
       model,
       untrack(() => props.value),
     )
+    // That replace moved the decorations painted above, so put them back.
+    paintAttributions(model)
     const total = model.getLineCount()
     const line = Math.min(Math.max(1, reveal.line), total)
     const endLine = Math.min(Math.max(line, reveal.endLine ?? line), total)

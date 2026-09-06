@@ -48,8 +48,13 @@ export class Config extends Context.Service<Config, Info>()("@opencode/ServerAut
   }
 }
 
+// Any configured credential turns authentication on. Reading only the owner
+// password would leave a server started with just a guest password wide open —
+// the opposite of what configuring a password means.
 export function required(config: Info) {
-  return Option.isSome(config.password) && config.password.value !== ""
+  const set = (value: Option.Option<string> | undefined) =>
+    Option.isSome(value ?? Option.none()) && (value as Option.Some<string>).value !== ""
+  return set(config.password) || set(config.guestPassword)
 }
 
 /** The identity a credential pair matches, or undefined when it matches neither. */

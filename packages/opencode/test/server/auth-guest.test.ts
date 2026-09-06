@@ -48,9 +48,16 @@ describe("ServerAuth guest credentials", () => {
     expect(ServerAuth.identity(credential("pair", "guest-secret"), { ...config, guestUsername: "pair" })).toBe("guest")
   })
 
-  test("a guest password alone does not make auth required", () => {
-    expect(ServerAuth.required({ ...config, password: Option.none() })).toBe(false)
+  test("a guest password alone still enforces authentication, admitting guests only", () => {
+    const guestOnly = { ...config, password: Option.none() }
+    // Configuring any password must switch authentication on. Treating a
+    // guest-only server as unauthenticated would serve the workspace to anyone.
+    expect(ServerAuth.required(guestOnly)).toBe(true)
+    expect(ServerAuth.identity(credential("guest", "guest-secret"), guestOnly)).toBe("guest")
+    expect(ServerAuth.identity(credential("opencode", "owner-secret"), guestOnly)).toBeUndefined()
     expect(ServerAuth.required(config)).toBe(true)
+    expect(ServerAuth.required({ ...config, password: Option.none(), guestPassword: Option.none() })).toBe(false)
+    expect(ServerAuth.required({ ...config, password: Option.none(), guestPassword: Option.some("") })).toBe(false)
   })
 })
 
