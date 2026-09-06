@@ -705,6 +705,10 @@ const layer = Layer.effect(
       signal?: AbortSignal,
     ) {
       if (s.clients[name] !== client) return
+      // A cancelled call is not evidence either way: the server never got the
+      // chance to answer, so leave the strike count where it was rather than
+      // letting a cancel between two timeouts hide a wedged server forever.
+      if (signal?.aborted) return
       if (!isRequestTimeout(error, signal)) {
         delete s.timeouts[name]
         return
@@ -714,6 +718,10 @@ const layer = Layer.effect(
       if (strikes < TIMEOUT_STRIKES) return
       yield* Effect.logWarning("MCP server stopped responding", { server: name, timeouts: strikes })
       yield* closeClient(s, name)
+      // Closing waits on the child process, which can take seconds. If the user
+      // reconnected in that window, the entry now holds a fresh, healthy client
+      // and marking the server failed would wrongly disable it.
+      if (s.clients[name]) return
       s.status[name] = { status: "failed", error: "Server stopped responding; reconnect it" }
       yield* events.publish(ToolsChanged, { server: name }).pipe(Effect.ignore)
     })
