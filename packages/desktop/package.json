@@ -2,7 +2,7 @@
   "name": "vector-desktop",
   "productName": "Vector",
   "private": true,
-  "version": "1.99.2",
+  "version": "1.99.5",
   "type": "module",
   "license": "SEE LICENSE IN ../../LICENSE",
   "homepage": "https://vectordev.ai",
@@ -21,7 +21,7 @@
     "package:mac": "bun ./scripts/package-desktop.ts --target=mac",
     "package:win": "bun ./scripts/package-desktop.ts --target=win",
     "package:linux": "bun ./scripts/package-desktop.ts --target=linux",
-    "native:build": "bun install --cwd native",
+    "native:build": "bun ./scripts/build-computer-use-helper.ts",
     "verify:package": "bun ./scripts/verify-package.ts"
   },
   "main": "./out/main/index.js",

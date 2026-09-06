@@ -1,6 +1,20 @@
 {
   "releases": [
     {
+      "tag": "v1.99.5",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Multiplayer, and an editor that follows the agent",
+              "description": "Vector becomes a workspace you can share. `vector invite` serves your live workspace over one link: a teammate opens it and lands in the same sessions, files, and agents you are looking at, as a guest with their own credential, and the header shows who is present as people come and go. It works across your network out of the box, or anywhere through a tunnel you already trust. The editor now follows the agent as it types: the file an agent edits opens on its own, scrolls to the lines it changed, tints them in that agent's colour, and carries a labelled cursor, so several agents working at once read like named cursors in a shared document. Your own saves and build output never steal the view, and the whole behaviour is one toggle in the Codespace toolbar. Work can now start from GitHub and come back as a pull request: comment /vector on an issue and Vector opens a branch and a PR whose body carries its own evidence, a table of every file changed, the test, typecheck, lint and build commands it ran with their exit codes and output, what the run cost, and the judge's verdict, with a link back to the run. Underneath, the engine got quieter and more honest. A chatty MCP server can no longer wedge the app by filling its error pipe, and a server that stops answering is dropped and offered for reconnect instead of being cached dead until restart. Sessions are never posted to the public share service unless you opt in, and unsharing always reaches the service, so a session marked private is private. The desktop app finds node and npx again when it was launched from the Dock, and licensing that cannot be reached no longer walls a new install out."
+            }
+          ]
+        }
+      ]
+    },
+    {
       "tag": "v1.99.2",
       "highlights": [
         {
