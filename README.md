@@ -26,6 +26,10 @@ The desktop app is a free download at [vectordev.ai](https://vectordev.ai). The 
 
 **Multiplayer.** `vector invite` serves your live workspace over one link. A teammate opens it and lands in the same sessions, files, and agents, as a guest with their own credential. The header shows who is present.
 
+**Harness the agents you already use.** Claude Code, Codex, and Cursor Agent run inside Vector beside its own agents, in readable conversations rather than raw terminal output. Subagents work in parallel, each in its own git worktree, so several tasks run at once without trampling each other.
+
+**Cloud work in the loop.** The agent sets up a database, syncs environment values, publishes to your own Vercel or Netlify account, then loads the deployed URL in a real browser and reports what it found. When a deploy misbehaves it reads the logs, and it applies the migrations in your repository to the linked database. Everything that creates, changes, or spends asks first.
+
 **Task in, pull request out.** Comment `/vector fix the flaky auth test` on a GitHub issue and Vector opens a branch and a pull request. Every PR carries its evidence: the files changed, the checks it ran with their exit codes and output, what the run cost, and the judge's verdict.
 
 **Agents that verify their own work.** A judge reviews finished work against what was asked before it reaches you, so "done" means checked rather than claimed.

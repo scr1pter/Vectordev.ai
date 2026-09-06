@@ -1,6 +1,20 @@
 {
   "releases": [
     {
+      "tag": "v1.99.6",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Cloud that closes the loop",
+              "description": "Cloud work becomes part of the task instead of a detour. Vector's agent already drove the cloud through one permission-gated tool, checking your connected providers, detecting build settings, preparing a Supabase-backed database or authentication, syncing environment values to the linked host, publishing, and listing deployments. Two things were missing, and both are here. When a deploy misbehaves, the agent reads the recent deployment logs itself and diagnoses from the real build or runtime error, rather than asking you to open a dashboard and paste it back. And the database schema now belongs in your repository: the agent applies the .sql migrations it finds there to your linked database, in filename order, recording which ones already ran so re-running is safe, stopping at the first failure and telling you exactly which file broke and why. A dry run reports the plan without touching anything, and applying a migration asks permission first, because it changes a real database. Publishing already ends with a real browser load of the deployed URL that reports the page and console errors it found, so a deploy is verified rather than assumed. Everything runs on your own Vercel, Netlify, Supabase and AWS accounts. Vector does not host your app, and log tails are truncated and stripped of environment values before the agent ever sees them."
+            }
+          ]
+        }
+      ]
+    },
+    {
       "tag": "v1.99.5",
       "highlights": [
         {

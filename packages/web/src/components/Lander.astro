@@ -555,8 +555,8 @@ const changelog = [
 
           <p class="headline">
             <span class="headline-lead">An engineering workspace that</span>{" "}
-            <span class="headline-rotate" data-scramble aria-hidden="true">remembers how you work.</span>
-            <span class="sr-only">An engineering workspace that remembers how you work, records what a run really cost, verifies its work before calling it done, drives a real browser, ships from your own cloud accounts, and runs a team of agents on the days you want one.</span>
+            <span class="headline-rotate" data-scramble aria-hidden="true">harnesses Claude, Codex, and Cursor.</span>
+            <span class="sr-only">An engineering workspace that harnesses Claude, Codex and Cursor beside its own agents, orchestrates subagents in parallel, sets up your database and deploys it, invites your team into the session, runs in your terminal too, verifies its work before calling it done, records what a run really cost, and has its own 300 billion parameter model coming.</span>
           </p>
 
           <p class="hero-deck simple-deck">
@@ -743,12 +743,14 @@ const changelog = [
     // Each phrase completes the same opening clause, so the headline always
     // reads as one sentence rather than a label with a caption.
     const phrases = [
-      "remembers how you work.",
-      "records what a run cost.",
+      "harnesses Claude, Codex, and Cursor.",
+      "orchestrates subagents in parallel.",
+      "sets up your database and deploys.",
+      "invites your team into the session.",
+      "runs in your terminal too.",
       "verifies before it says done.",
-      "drives a real browser.",
-      "ships from your own accounts.",
-      "runs sixteen agents when you want.",
+      "records what a run cost.",
+      "has a 300B model coming.",
     ]
     const stages = Array.from(document.querySelectorAll<HTMLElement>("[data-hero-stage]"))
     const progress = document.querySelector<HTMLElement>("[data-hero-progress]")

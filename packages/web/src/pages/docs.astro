@@ -390,6 +390,11 @@ const crew = [
 ]
 const changelog = [
   [
+    "September 2026 · 1.99.6",
+    "Cloud that closes the loop",
+    "The agent reads your deployment logs to diagnose a failing deploy, and applies the .sql migrations in your repository to the linked database, tracking which already ran so re-running is safe. Publishing still ends with a real browser check of the deployed URL.",
+  ],
+  [
     "September 2026 · 1.99.5",
     "Multiplayer, Follow mode, and GitHub that ships PRs",
     "vector invite shares a live workspace with teammates over one link; the editor now follows the agent as it types, line by line; /vector on a GitHub issue opens a pull request with a Changes table, check output, measured cost, and the judge's verdict; and MCP servers that stop answering are recovered instead of wedging the app.",
@@ -711,16 +716,21 @@ const faqs = [
           <p class="section-number">13</p>
           <h2>Cloud Services</h2>
           <p>
-            Cloud Services keeps publishing controls with the repository. Connect a supported hosting
-            account, review the detected build settings, add environment values, and publish when the
-            project is ready.
+            Cloud work is part of the task, not a panel you operate afterwards. The agent drives it through one
+            permission-gated tool: it checks which providers are connected, detects the project's build settings,
+            prepares a Supabase-backed database or authentication, syncs environment values to the linked host,
+            publishes, and lists recent deployments. Every action that creates, changes, or spends asks you first.
           </p>
           <ul class="feature-list">
-            <li><strong>Deployments</strong><span>Create and inspect project deployments from Vector.</span></li>
-            <li><strong>Domains</strong><span>Open and copy the project URL from the deployment view.</span></li>
-            <li><strong>Environment</strong><span>Keep deployment configuration separate from source files.</span></li>
-            <li><strong>Data</strong><span>Attach supported database workflows to the current project.</span></li>
+            <li><strong>A publish that is checked</strong><span>Publishing ends with a real browser load of the deployed URL, and the agent reports the page it found and the console errors it saw rather than assuming the deploy worked.</span></li>
+            <li><strong>Failures come with logs</strong><span>The agent reads recent deployment logs from the host, so a broken deploy is diagnosed from the actual build or runtime error.</span></li>
+            <li><strong>Migrations it can apply</strong><span>The <code>.sql</code> migrations in your repository can be applied to the linked database, with a record of which ones already ran, so running again is safe.</span></li>
+            <li><strong>Your own accounts</strong><span>Vercel, Netlify, Supabase, and AWS connect with your credentials, and the resources stay in them. Vector does not host your app.</span></li>
           </ul>
+          <p class="note">
+            These cloud actions run in the Vector desktop app, where the provider connections live. The terminal CLI
+            runs the same agent, but tells it that this tool is unavailable there rather than half-performing the work.
+          </p>
         </section>
 
         <section id="models" class="doc-section">

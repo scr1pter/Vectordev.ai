@@ -9,6 +9,8 @@ import {
   syncCloudProviderEnvironment,
 } from "./cloud-connections"
 import { getCloudAwsStatus, listCloudAwsResources } from "./cloud-aws"
+import { fetchCloudLogs } from "./cloud-logs"
+import { applyCloudMigrations } from "./cloud-migrations"
 import { publishProject } from "./publish"
 
 const MAX_BODY_BYTES = 64 * 1024
@@ -26,6 +28,8 @@ type CloudCommand =
   | "aws_resources"
   | "publish"
   | "list_deployments"
+  | "logs"
+  | "apply_migrations"
 
 type CloudCommandInput = {
   command: CloudCommand
@@ -34,6 +38,9 @@ type CloudCommandInput = {
   production?: boolean
   target?: "vector-cloud" | "vercel" | "netlify"
   provider?: "vercel" | "netlify"
+  deploymentId?: string
+  limit?: number
+  dryRun?: boolean
 }
 
 let bridgeServer: Server | undefined
@@ -109,6 +116,9 @@ function parseCloudCommandInput(value: unknown): CloudCommandInput {
   const production = Reflect.get(value, "production")
   const target = Reflect.get(value, "target")
   const provider = Reflect.get(value, "provider")
+  const deploymentId = Reflect.get(value, "deploymentId")
+  const limit = Reflect.get(value, "limit")
+  const dryRun = Reflect.get(value, "dryRun")
   if (
     command !== "status" &&
     command !== "detect_build" &&
@@ -121,7 +131,9 @@ function parseCloudCommandInput(value: unknown): CloudCommandInput {
     command !== "aws_status" &&
     command !== "aws_resources" &&
     command !== "publish" &&
-    command !== "list_deployments"
+    command !== "list_deployments" &&
+    command !== "logs" &&
+    command !== "apply_migrations"
   ) {
     throw new Error("Unsupported Vector Cloud command.")
   }
@@ -135,7 +147,12 @@ function parseCloudCommandInput(value: unknown): CloudCommandInput {
   if (provider !== undefined && provider !== "vercel" && provider !== "netlify") {
     throw new Error("Invalid cloud provider.")
   }
-  return { command, projectPath, taskId, production, target, provider }
+  if (deploymentId !== undefined && typeof deploymentId !== "string") throw new Error("Invalid deployment.")
+  if (limit !== undefined && (typeof limit !== "number" || !Number.isFinite(limit))) {
+    throw new Error("Invalid log line limit.")
+  }
+  if (dryRun !== undefined && typeof dryRun !== "boolean") throw new Error("Invalid migration mode.")
+  return { command, projectPath, taskId, production, target, provider, deploymentId, limit, dryRun }
 }
 
 async function runCloudCommand(input: CloudCommandInput) {
@@ -207,6 +224,21 @@ async function runCloudCommand(input: CloudCommandInput) {
   if (input.command === "aws_resources") return { ok: true, aws: await listCloudAwsResources() }
   if (input.command === "list_deployments") {
     return { ok: true, deployments: deploymentSummaries(input) }
+  }
+  if (input.command === "logs") {
+    return fetchCloudLogs({
+      projectPath: input.projectPath,
+      taskId: input.taskId,
+      deploymentId: input.deploymentId,
+      limit: input.limit,
+    })
+  }
+  if (input.command === "apply_migrations") {
+    return applyCloudMigrations({
+      projectPath: input.projectPath,
+      taskId: input.taskId,
+      dryRun: input.dryRun === true,
+    })
   }
   return publishProject({
     projectPath: input.projectPath,
