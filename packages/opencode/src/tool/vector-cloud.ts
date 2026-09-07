@@ -104,9 +104,13 @@ function bridgeRequest(input: Record<string, unknown>, signal: AbortSignal) {
     body: JSON.stringify(input),
     signal,
   }).then(async (response) => {
-    const report = (await response.json()) as CloudReport
-    if (!response.ok && !report.needsSetup) {
-      throw new Error(report.error || `Vector Cloud command failed (${response.status})`)
+    const report = (await response.json().catch(() => undefined)) as CloudReport | undefined
+    // A structured report is an answer, not a crash. "No account is connected
+    // yet" is the most common one, and the model can only relay it to the user
+    // if it arrives as tool output rather than as a thrown tool error. Only a
+    // bridge that answered with nothing usable is a real failure.
+    if (!report || typeof report !== "object") {
+      throw new Error(`Vector Cloud command failed (${response.status})`)
     }
     return report
   })
@@ -127,7 +131,18 @@ function nameList(values?: string[]) {
   return values?.length ? values.join(", ") : "none"
 }
 
+// What the user has to do before this action can work. Cloud actions depend on
+// an account Vector cannot connect on the user's behalf, so an unfinished setup
+// has to read as an instruction rather than as a failed run.
+const SETUP_HINT = "Connect an account in Vector Cloud > Connections (Vercel, Netlify, or Supabase), then try again."
+
 function formatReport(action: Schema.Schema.Type<typeof Action>, report: CloudReport) {
+  if (report.ok === false) {
+    return lines(
+      `Vector Cloud could not run ${action}: ${report.error ?? "the action did not complete."}`,
+      report.nextStep ?? SETUP_HINT,
+    )
+  }
   if (action === "logs") {
     if (!report.logs) return lines(report.error, report.nextStep) || "No deployment logs are available."
     const logs = report.logs
