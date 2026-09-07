@@ -16,7 +16,9 @@ vector login
 vector
 ```
 
-The desktop app is a free download at [vectordev.ai](https://vectordev.ai). The terminal agent is free too, and both need nothing but a Vector account: a capable model is included, and you can bring your own key for Claude, GPT, or Gemini whenever you want.
+The desktop app is a free download at [vectordev.ai](https://vectordev.ai). The terminal agent is free too, and both need nothing but a Vector account. Thirty-one models are included at no cost, all of them able to call tools, from Nemotron 3 Ultra and Muse Spark at a million tokens of context down to the Big Pickle default a new install starts on. Bring your own key for Claude, GPT, or Gemini whenever you want.
+
+Vector has an agent of its own. Its own session engine, its own tools behind one permission gate, its own memory of the project, its own verification pass, and its own model on the way. Claude Code, Codex, and Cursor Agent can run inside it too, on subscriptions you already have. They share the checkout. The workspace, the memory, the verification, and the channel your teammates talk on stay Vector's.
 
 ## What Vector does
 
@@ -28,7 +30,7 @@ The desktop app is a free download at [vectordev.ai](https://vectordev.ai). The 
 
 **Harness the agents you already use.** Claude Code, Codex, and Cursor Agent run inside Vector beside its own agents, in readable conversations rather than raw terminal output. Subagents work in parallel, each in its own git worktree, so several tasks run at once without trampling each other.
 
-**Cloud work in the loop.** The agent sets up a database, syncs environment values, publishes to your own Vercel or Netlify account, then loads the deployed URL in a real browser and reports what it found. When a deploy misbehaves it reads the logs, and it applies the migrations in your repository to the linked database. Everything that creates, changes, or spends asks first.
+**Cloud work in the loop.** The agent creates a real Supabase project on your own account, writes the keys into your repository, applies the migrations you keep there, syncs environment values, and publishes to your own Vercel or Netlify account. Then it loads the deployed URL in a real browser and reports what it found, and reads the logs when a deploy misbehaves. Everything that creates, changes, or spends asks first.
 
 **Task in, pull request out.** Comment `/vector fix the flaky auth test` on a GitHub issue and Vector opens a branch and a pull request. Every PR carries its evidence: the files changed, the checks it ran with their exit codes and output, what the run cost, and the judge's verdict.
 

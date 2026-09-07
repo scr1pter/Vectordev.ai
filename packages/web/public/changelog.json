@@ -1,6 +1,20 @@
 {
   "releases": [
     {
+      "tag": "v1.99.7",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "A database it can create for you",
+              "description": "Vector can now create your database, not just connect to one you already made. Ask for signup or accounts and the agent offers to create a real Supabase project on your own connected account: it reuses a project you already linked, asks which organization when you belong to several rather than deciding who gets billed, names the project after your repository, generates the database password and stores it encrypted without ever showing it, waits until the project is healthy, then writes the keys and the client into your repository. The result is identical to a project you linked by hand, so status checks, services and migrations all work on it afterwards. The project is recorded before the wait begins, so a run you interrupt resumes the same project instead of creating a second one you pay for, and quota or payment limits are reported in Supabase's own words. Cloud actions also stopped failing when they were only unfinished: an account you have not connected yet now reads as an instruction saying what to connect, rather than as a crashed tool call, which is what it looked like before. Together with the deployment logs and repository migrations added in the last release, the whole cloud loop now runs from inside a task: create the database, write the schema, apply it, publish, check the deployed page in a real browser, and read the logs when something is wrong."
+            }
+          ]
+        }
+      ]
+    },
+    {
       "tag": "v1.99.6",
       "highlights": [
         {
