@@ -555,13 +555,13 @@ const changelog = [
 
           <p class="headline">
             <span class="headline-lead">An engineering workspace that</span>{" "}
-            <span class="headline-rotate" data-scramble aria-hidden="true">harnesses Claude, Codex, and Cursor.</span>
-            <span class="sr-only">An engineering workspace that harnesses Claude, Codex and Cursor beside its own agents, orchestrates subagents in parallel, sets up your database and deploys it, invites your team into the session, runs in your terminal too, verifies its work before calling it done, records what a run really cost, and has its own 300 billion parameter model coming.</span>
+            <span class="headline-rotate" data-scramble aria-hidden="true">has an agent of its own.</span>
+            <span class="sr-only">An engineering workspace that has an agent of its own, verifies its work before calling it done, sets up your database and deploys it, orchestrates subagents in parallel, invites your team into the session, runs in your terminal too, records what a run really cost, hosts Claude, Codex and Cursor alongside its own agent, and has its own 300 billion parameter model coming.</span>
           </p>
 
           <p class="hero-deck simple-deck">
-            Open a repository on your computer. Plan, edit, run, and ship with an agent beside your editor — on your
-            desktop, in your terminal, or from the cloud.
+            Open a repository on your computer. Plan, edit, run, and ship with Vector's own agent beside your editor —
+            on your desktop, in your terminal, or from the cloud.
           </p>
 
           <div class="simple-actions">
@@ -622,6 +622,32 @@ const changelog = [
           <a href="/docs">See the list →</a>
         </article>
       </div>
+    </section>
+
+    <section id="ch-engine" data-chapter="The engine" class="simple-section section-width" aria-labelledby="engine-title">
+      <div class="section-heading simple-heading" data-reveal>
+        <p class="section-kicker">Under the workspace</p>
+        <h2 id="engine-title">An engine of its own.</h2>
+        <p>
+          Vector's agent is Vector's. It runs on your machine with its own session engine, its own tools, and its own
+          memory of the project — the same agent in the desktop app, in your terminal, and on a pull request.
+        </p>
+      </div>
+      <ul class="simple-models" data-reveal>
+        <li><strong>Its own agent</strong><span>Plans, edits, runs commands, and calls tools in one loop</span></li>
+        <li><strong>Its own session engine</strong><span>Sessions, history, and file state persist on your machine</span></li>
+        <li><strong>Its own tools</strong><span>Read, edit, shell, browser, and cloud, behind one permission gate</span></li>
+        <li><strong>Its own memory</strong><span>What it learns lives in your repository, committed and reviewable</span></li>
+        <li><strong>Its own verification</strong><span>A judge reads the finished work before you do</span></li>
+        <li><strong>Its own accounting</strong><span>Every run measured against what the provider reported</span></li>
+        <li><strong>Its own terminal agent</strong><span>The same engine, with no desktop app required</span></li>
+        <li><strong>Its own model, soon</strong><span>Vector Velocity, over 300 billion parameters</span></li>
+      </ul>
+      <p class="simple-note" data-reveal>
+        Claude Code, Codex, and Cursor Agent can run inside Vector too, on the subscriptions you already have. They
+        share the checkout. The workspace, the memory, the verification, and the channel your teammates talk on stay
+        Vector's own.
+      </p>
     </section>
 
     <section id="ch-cli" data-chapter="CLI" class="simple-section section-width" aria-labelledby="cli-title">
@@ -792,13 +818,14 @@ const changelog = [
     // Each phrase completes the same opening clause, so the headline always
     // reads as one sentence rather than a label with a caption.
     const phrases = [
-      "harnesses Claude, Codex, and Cursor.",
-      "orchestrates subagents in parallel.",
+      "has an agent of its own.",
+      "verifies before it says done.",
       "sets up your database and deploys.",
+      "orchestrates subagents in parallel.",
       "invites your team into the session.",
       "runs in your terminal too.",
-      "verifies before it says done.",
       "records what a run cost.",
+      "hosts Claude, Codex, and Cursor too.",
       "has a 300B model coming.",
     ]
     const stages = Array.from(document.querySelectorAll<HTMLElement>("[data-hero-stage]"))
