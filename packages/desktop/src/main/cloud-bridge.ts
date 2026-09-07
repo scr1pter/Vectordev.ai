@@ -11,6 +11,7 @@ import {
 import { getCloudAwsStatus, listCloudAwsResources } from "./cloud-aws"
 import { fetchCloudLogs } from "./cloud-logs"
 import { applyCloudMigrations } from "./cloud-migrations"
+import { createCloudDatabase } from "./cloud-provision"
 import { publishProject } from "./publish"
 
 const MAX_BODY_BYTES = 64 * 1024
@@ -19,6 +20,7 @@ type CloudCommand =
   | "status"
   | "detect_build"
   | "database_status"
+  | "create_database"
   | "prepare_database"
   | "prepare_auth"
   | "cloud_connections"
@@ -41,6 +43,9 @@ type CloudCommandInput = {
   deploymentId?: string
   limit?: number
   dryRun?: boolean
+  organizationId?: string
+  region?: string
+  force?: boolean
 }
 
 let bridgeServer: Server | undefined
@@ -119,10 +124,14 @@ function parseCloudCommandInput(value: unknown): CloudCommandInput {
   const deploymentId = Reflect.get(value, "deploymentId")
   const limit = Reflect.get(value, "limit")
   const dryRun = Reflect.get(value, "dryRun")
+  const organizationId = Reflect.get(value, "organizationId")
+  const region = Reflect.get(value, "region")
+  const force = Reflect.get(value, "force")
   if (
     command !== "status" &&
     command !== "detect_build" &&
     command !== "database_status" &&
+    command !== "create_database" &&
     command !== "prepare_database" &&
     command !== "prepare_auth" &&
     command !== "cloud_connections" &&
@@ -152,7 +161,27 @@ function parseCloudCommandInput(value: unknown): CloudCommandInput {
     throw new Error("Invalid log line limit.")
   }
   if (dryRun !== undefined && typeof dryRun !== "boolean") throw new Error("Invalid migration mode.")
-  return { command, projectPath, taskId, production, target, provider, deploymentId, limit, dryRun }
+  if (organizationId !== undefined && (typeof organizationId !== "string" || !organizationId.trim())) {
+    throw new Error("Invalid Supabase organization.")
+  }
+  if (region !== undefined && (typeof region !== "string" || !region.trim())) {
+    throw new Error("Invalid database region.")
+  }
+  if (force !== undefined && typeof force !== "boolean") throw new Error("Invalid database creation mode.")
+  return {
+    command,
+    projectPath,
+    taskId,
+    production,
+    target,
+    provider,
+    deploymentId,
+    limit,
+    dryRun,
+    organizationId,
+    region,
+    force,
+  }
 }
 
 async function runCloudCommand(input: CloudCommandInput) {
@@ -185,15 +214,26 @@ async function runCloudCommand(input: CloudCommandInput) {
         : { connected: false },
       nextStep: database
         ? "The project database is ready through Vector Cloud."
-        : "Ask the user to connect a database in Vector Cloud > Database before implementing persistent auth or data.",
+        : "No database is connected. Offer to create one with create_database, which creates a real Supabase project on the user's connected Supabase account; if the user already has a Supabase project for this app, ask them to link it in Vector Cloud > Database instead.",
     }
+  }
+  if (input.command === "create_database") {
+    return createCloudDatabase({
+      projectPath: input.projectPath,
+      taskId: input.taskId,
+      organizationId: input.organizationId,
+      region: input.region,
+      force: input.force,
+    })
   }
   if (input.command === "prepare_database" || input.command === "prepare_auth") {
     if (!database) {
       return {
         ok: false,
         needsSetup: true,
-        error: "No Vector Cloud database is connected. Ask the user to open Vector Cloud > Database and connect it.",
+        error: "No Vector Cloud database is connected.",
+        nextStep:
+          "Run create_database to create one on the user's connected Supabase account, or ask them to link an existing project in Vector Cloud > Database.",
       }
     }
     return {

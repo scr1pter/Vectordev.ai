@@ -656,6 +656,55 @@ const changelog = [
       </div>
     </section>
 
+    <section id="ch-models" data-chapter="Free models" class="simple-section section-width" aria-labelledby="models-title">
+      <div class="section-heading simple-heading" data-reveal>
+        <p class="section-kicker">Free models</p>
+        <h2 id="models-title">Thirty-one models, included free.</h2>
+        <p>
+          A free Vector account includes 31 zero-cost models — no API key, no card. Every one of them supports tool
+          calling, so it can read the repository, run the checks, and edit files rather than only describe them.
+        </p>
+      </div>
+      <ul class="simple-models" data-reveal>
+        <li><strong>Big Pickle</strong><span>The default a new install starts on</span></li>
+        <li><strong>Nemotron 3 Ultra</strong><span>1M context</span></li>
+        <li><strong>Nemotron 3.5 Lightning</strong><span>262k context</span></li>
+        <li><strong>Muse Spark 1.2 and 1.3</strong><span>1M context</span></li>
+        <li><strong>Grok Code Fast 1</strong><span>256k context</span></li>
+        <li><strong>DeepSeek V4 Flash</strong><span>200k context</span></li>
+        <li><strong>Kimi K2.5</strong><span>262k context</span></li>
+        <li><strong>GLM-5</strong><span>205k context</span></li>
+        <li><strong>MiniMax-M3</strong><span>200k context</span></li>
+        <li><strong>LongCat 2.0</strong><span>1M context</span></li>
+      </ul>
+      <p class="simple-note" data-reveal>
+        That is eleven of the thirty-one. The roster changes as new models land, so treat it as today's list rather than
+        a fixed one — and a key of your own still works beside them.
+      </p>
+    </section>
+
+    <section id="ch-evidence" data-chapter="Evidence" class="simple-section section-width" aria-labelledby="evidence-title">
+      <div class="section-heading simple-heading" data-reveal>
+        <p class="section-kicker">Measured, not implied</p>
+        <h2 id="evidence-title">One repair task, reported in full.</h2>
+        <p>
+          In a July 2026 scheduler-repair benchmark, Vector Balanced completed the task in 149 seconds and reported
+          roughly 67% fewer tokens than Codex CLI. Both passed all five public tests. Codex passed more hidden tests, so
+          this is evidence from one reproducible run, not a universal claim.
+        </p>
+      </div>
+      <dl class="simple-stats" data-reveal>
+        <div><dt>Vector Balanced</dt><dd>149s<span>Completion time</span></dd></div>
+        <div><dt>Codex CLI</dt><dd>284s<span>Completion time</span></dd></div>
+        <div><dt>Reported tokens</dt><dd>67%<span>Fewer for Vector</span></dd></div>
+        <div><dt>Public tests</dt><dd>5 / 5<span>Passed by both</span></dd></div>
+      </dl>
+      <p class="simple-note" data-reveal>
+        284 seconds against 149 is roughly 1.9× faster on this one task. The hidden tests went the other way, and that
+        stays on the page: a benchmark that hides its loss is worth nothing.
+      </p>
+    </section>
+
     <section id="ch-features" data-chapter="What it does" class="simple-section section-width" aria-labelledby="features-title">
       <div class="section-heading simple-heading" data-reveal>
         <p class="section-kicker">Built for real work</p>
@@ -680,7 +729,7 @@ const changelog = [
         </article>
         <article class="simple-row simple-row-wide" data-reveal style="--rd: 240ms">
           <h3>Vector Velocity <span class="simple-soon">Coming soon</span></h3>
-          <p>Our own model, over 300 billion parameters, tuned for the agent loop rather than for chat. Included with Vector accounts. <a href="/about">Read about it →</a></p>
+          <p>Our own model, over 300 billion parameters, tuned for the loop Vector actually runs rather than for chat: planning a change, calling tools, editing several files at once and keeping them consistent, then checking its own work. It is not shipped yet — when it is, it comes with Vector accounts. <a href="/about">Read about it →</a></p>
         </article>
       </div>
     </section>
@@ -3162,7 +3211,23 @@ const changelog = [
   .simple-row p a { color: var(--purple-soft); text-decoration: none; }
   .simple-row-wide { grid-column: 1 / -1; }
   .simple-soon { display: inline-block; margin-left: 10px; padding: 3px 9px; vertical-align: middle; color: var(--purple-soft); font-size: 10px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; background: rgba(143, 82, 255, 0.12); border: 1px solid rgba(183, 149, 255, 0.28); border-radius: 999px; }
+  /* The model roster reads as a price list, not as cards: name on the left, the
+     one fact that decides whether you can use it on the right. */
+  .simple-models { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 40px; border-top: 1px solid var(--hairline); }
+  .simple-models li { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 16px; padding: 14px 0; border-bottom: 1px solid var(--hairline); }
+  .simple-models strong { font-size: 15px; font-weight: 600; letter-spacing: -0.015em; color: var(--lavender); }
+  .simple-models span { font-size: 13px; color: var(--ink-40); }
+  .simple-stats { margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+  .simple-stats > div { padding: 22px 22px 20px; background: rgba(255, 255, 255, 0.035); border: 1px solid var(--hairline); border-radius: 18px; }
+  .simple-stats dt { font-size: 11.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-55); }
+  .simple-stats dd { margin: 12px 0 0; font-size: clamp(26px, 3.2vw, 34px); font-weight: 600; letter-spacing: -0.03em; line-height: 1; color: var(--lavender); }
+  .simple-stats dd span { display: block; margin-top: 8px; font-size: 13px; font-weight: 400; letter-spacing: 0; color: var(--ink-40); }
+  .simple-note { max-width: 640px; margin: 20px 0 0; font-size: 14px; line-height: 1.6; color: var(--ink-40); }
   @media (max-width: 900px) {
-    .simple-grid, .simple-cli, .simple-rows { grid-template-columns: 1fr; }
+    .simple-grid, .simple-cli, .simple-rows, .simple-models { grid-template-columns: 1fr; }
+    .simple-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @media (max-width: 640px) {
+    .simple-stats { grid-template-columns: 1fr; }
   }
 </style>

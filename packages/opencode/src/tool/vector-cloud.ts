@@ -7,6 +7,7 @@ const Action = Schema.Literals([
   "status",
   "detect_build",
   "database_status",
+  "create_database",
   "prepare_database",
   "prepare_auth",
   "cloud_connections",
@@ -40,16 +41,32 @@ export const Parameters = Schema.Struct({
   dryRun: Schema.optional(Schema.Boolean).annotate({
     description: "For apply_migrations, list the migrations that would run without applying anything.",
   }),
+  organizationId: Schema.optional(Schema.String).annotate({
+    description:
+      "For create_database, the Supabase organization to create the project in. Required only when the account has more than one; create_database reports the choices when it needs this.",
+  }),
+  region: Schema.optional(Schema.String).annotate({
+    description:
+      "For create_database, the Supabase region for the new project, for example us-east-1 or eu-west-2. Defaults to us-east-1; ask the user before choosing something else.",
+  }),
+  force: Schema.optional(Schema.Boolean).annotate({
+    description:
+      "For create_database, create a new Supabase project even though this project already has a database connected. Defaults to false.",
+  }),
 })
 
 type CloudReport = {
   ok: boolean
   error?: string
   needsSetup?: boolean
+  needsChoice?: boolean
+  createdNow?: boolean
   configured?: boolean
   nextStep?: string
   build?: unknown
   database?: unknown
+  organizations?: { id?: string; name?: string; plan?: string }[]
+  waitedMs?: number
   applied?: unknown
   deployments?: unknown[]
   connections?: unknown[]
@@ -120,6 +137,7 @@ function toolTitle(action: Schema.Schema.Type<typeof Action>) {
   if (action === "publish") return "Publish with Vector Cloud"
   if (action === "logs") return "Read deployment logs"
   if (action === "apply_migrations") return "Apply database migrations"
+  if (action === "create_database") return "Create a database"
   return "Vector Cloud"
 }
 
@@ -137,6 +155,36 @@ function nameList(values?: string[]) {
 const SETUP_HINT = "Connect an account in Vector Cloud > Connections (Vercel, Netlify, or Supabase), then try again."
 
 function formatReport(action: Schema.Schema.Type<typeof Action>, report: CloudReport) {
+  // Handled before the generic failure branch: a create_database that stopped to
+  // ask which organization to bill is not a failed run, and the answer the user
+  // has to give is the list of organizations, which the generic branch drops.
+  if (action === "create_database") {
+    if (report.needsChoice) {
+      return lines(
+        report.error ?? "Vector needs to know which Supabase organization the new project belongs to.",
+        `Organizations: ${
+          report.organizations
+            ?.map((item) => `${item.name} (organizationId ${item.id}${item.plan ? `, ${item.plan} plan` : ""})`)
+            .join("; ") || "none"
+        }`,
+        report.nextStep,
+      )
+    }
+    if (report.ok === false) {
+      return lines(
+        `Vector Cloud did not create a database: ${report.error ?? "the action did not complete."}`,
+        report.nextStep ?? SETUP_HINT,
+      )
+    }
+    return lines(
+      report.createdNow
+        ? "Created a new Supabase project and connected it to this project."
+        : "No database was created; this project already has one connected.",
+      `Database: ${JSON.stringify(report.database ?? { connected: false })}`,
+      report.applied ? `Project environment prepared: ${JSON.stringify(report.applied)}` : undefined,
+      report.nextStep,
+    )
+  }
   if (report.ok === false) {
     return lines(
       `Vector Cloud could not run ${action}: ${report.error ?? "the action did not complete."}`,
@@ -228,7 +276,7 @@ export const VectorCloudTool = Tool.define<typeof Parameters, Metadata, never>(
   "vector_cloud",
   Effect.succeed({
     description:
-      "Controls Vector Cloud for the active project. Use it before building authentication, accounts, databases, persistence, environment-backed features, AWS-backed systems, or publishing. Inspect cloud_connections before provider work; use database_status plus prepare_database or prepare_auth before implementing Supabase-backed code; use supabase_services to inspect storage and Edge Functions; and use aws_status or aws_resources before AWS work. For publish requests, choose the named target or default to Vector Cloud. When a published app errors, 500s, renders blank, or otherwise misbehaves, read its logs with the logs action before guessing at a cause or asking the user to paste an error. After writing or changing a .sql migration file, apply it with apply_migrations so the connected database actually has the schema the code expects; call it with dryRun first when you want to see the pending files. Never claim a resource was created unless this tool reports it.",
+      "Controls Vector Cloud for the active project. Use it before building authentication, accounts, databases, persistence, environment-backed features, AWS-backed systems, or publishing. Inspect cloud_connections before provider work; use database_status plus prepare_database or prepare_auth before implementing Supabase-backed code; use supabase_services to inspect storage and Edge Functions; and use aws_status or aws_resources before AWS work. When a feature needs a database and database_status reports none, do not stop and send the user to a dashboard: offer create_database, which creates a real Supabase project on their connected Supabase account and wires it in so prepare_database, supabase_services and apply_migrations work straight afterwards. Prefer an existing database over creating one — if the user already has a Supabase project for this app, ask them to link it in Vector Cloud > Database, and never create a second project for a project that already has one unless the user asks. create_database creates something the user's account is billed for, so if it reports several organizations, ask the user which one and call it again with that organizationId rather than picking one, and if it reports a plan or quota limit, relay Supabase's own words instead of retrying. For publish requests, choose the named target or default to Vector Cloud. When a published app errors, 500s, renders blank, or otherwise misbehaves, read its logs with the logs action before guessing at a cause or asking the user to paste an error. After writing or changing a .sql migration file, apply it with apply_migrations so the connected database actually has the schema the code expects; call it with dryRun first when you want to see the pending files. Never claim a resource was created unless this tool reports it.",
     parameters: Parameters,
     execute: (params, ctx) =>
       Effect.gen(function* () {
@@ -247,6 +295,22 @@ export const VectorCloudTool = Tool.define<typeof Parameters, Metadata, never>(
             patterns: [instance.directory],
             always: [instance.directory],
             metadata: { projectPath: instance.directory },
+          })
+        }
+        // Creating a database is a real resource on the user's own Supabase
+        // account, billed to one of their organizations, so it asks first under
+        // the same permission the rest of the database actions use.
+        if (params.action === "create_database") {
+          yield* ctx.ask({
+            permission: "vector_cloud_database",
+            patterns: [instance.directory],
+            always: [instance.directory],
+            metadata: {
+              projectPath: instance.directory,
+              organizationId: params.organizationId,
+              region: params.region,
+              force: params.force === true,
+            },
           })
         }
         // Writing schema to the user's real database is destructive, so it asks
@@ -280,6 +344,9 @@ export const VectorCloudTool = Tool.define<typeof Parameters, Metadata, never>(
               deploymentId: params.deploymentId,
               limit: params.limit,
               dryRun: params.dryRun,
+              organizationId: params.organizationId,
+              region: params.region,
+              force: params.force,
             },
             ctx.abort,
           ),
