@@ -16,7 +16,7 @@ vector login
 vector
 ```
 
-The desktop app is a free download at [vectordev.ai](https://vectordev.ai). The terminal agent is free too, and both need nothing but a Vector account. Thirty-one models are included at no cost, all of them able to call tools, from Nemotron 3 Ultra and Muse Spark at a million tokens of context down to the Big Pickle default a new install starts on. Bring your own key for Claude, GPT, or Gemini whenever you want.
+The desktop app is a free download at [vectordev.ai](https://vectordev.ai). The terminal agent is free too, and both need nothing but a Vector account. A roster of free models is included, all able to call tools: Nemotron 3 Ultra and Muse Spark with a million tokens of context, Nemotron 3.5 Lightning, MiMo V2.5, Ling 3.0 Flash, and the Big Pickle default a new install starts on. Bring your own key for Claude, GPT, or Gemini whenever you want.
 
 Vector has an agent of its own. Its own session engine, its own tools behind one permission gate, its own memory of the project, its own verification pass, and its own model on the way. Claude Code, Codex, and Cursor Agent can run inside it too, on subscriptions you already have. They share the checkout. The workspace, the memory, the verification, and the channel your teammates talk on stay Vector's.
 
