@@ -99,6 +99,32 @@ export function FreeDownload({
       </p>
       {error && <p className="purchase-error">{error}</p>}
 
+      {/* Preview builds are unsigned, so the operating system blocks the first
+          launch. Without this, a working download reads as a broken one. */}
+      <details className="free-download-firstrun" open>
+        <summary>Opening Vector for the first time</summary>
+        {target.os === "macOS" ? (
+          <p>
+            This preview build is not yet notarized by Apple, so macOS blocks it on first launch. Try to open Vector
+            once, then go to System Settings → {"Privacy & Security"} and choose <strong>Open Anyway</strong>. You only
+            need to do this once.
+          </p>
+        ) : target.os === "Windows" ? (
+          <p>
+            This preview installer is not yet code-signed, so Windows shows a SmartScreen warning. Choose{" "}
+            <strong>More info</strong>, then <strong>Run anyway</strong>.
+          </p>
+        ) : (
+          <p>
+            Make the AppImage executable with <code>chmod +x</code>, then run it.
+          </p>
+        )}
+        <p>
+          Preview builds do not update themselves yet, so come back here for new versions.{" "}
+          <a href="/docs#troubleshooting">More help</a>
+        </p>
+      </details>
+
       <details className="free-download-more">
         <summary>Other platforms</summary>
         <div className="free-download-grid">

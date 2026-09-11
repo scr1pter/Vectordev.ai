@@ -291,6 +291,10 @@
 .acct .free-download-alt { color: rgba(238, 231, 247, 0.8); background: transparent; border: 1px solid rgba(230, 219, 255, 0.14); border-radius: 8px; cursor: pointer; font-family: inherit; font-size: 12.5px; }
 .acct .free-download-cta:disabled,
 .acct .free-download-alt:disabled { opacity: 0.55; cursor: wait; }
+.acct .free-download-firstrun { margin-top: 12px; border-color: rgba(230, 219, 255, 0.14); }
+.acct .free-download-firstrun summary { color: rgba(238, 231, 247, 0.8); }
+.acct .free-download-firstrun p { color: rgba(225, 216, 235, 0.6); font-size: 12.5px; }
+.acct .free-download-firstrun a { color: #e6dcff; }
 
 @media (max-width: 560px) {
   .acct-header-inner,

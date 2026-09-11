@@ -439,6 +439,32 @@
   color: var(--ink);
 }
 
+.free-download-firstrun {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  text-align: left;
+}
+
+.free-download-firstrun summary {
+  color: var(--muted-strong);
+  cursor: pointer;
+  font-size: 12.5px;
+  list-style: none;
+}
+
+.free-download-firstrun summary::-webkit-details-marker {
+  display: none;
+}
+
+.free-download-firstrun p {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
 .free-download-grid {
   display: grid;
   gap: 10px;

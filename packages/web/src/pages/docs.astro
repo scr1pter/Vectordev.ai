@@ -780,6 +780,10 @@ const faqs = [
             <article><strong>The browser cannot open the app</strong><p>Start the development server in Terminal and use the local URL printed by the project.</p></article>
             <article><strong>A workspace cannot be created</strong><p>Open a repository first and confirm the folder is writable. Git repositories provide the cleanest isolated-workspace flow.</p></article>
             <article><strong>A deployment fails</strong><p>Open the deployment log, verify the build command and output directory, and check required environment values.</p></article>
+            <article><strong>macOS says Vector cannot be opened</strong><p>Preview builds are not yet notarized by Apple, so macOS blocks them on first launch. Try to open Vector once, then go to System Settings → Privacy &amp; Security, find the message about Vector, and choose Open Anyway. Or run <code>xattr -dr com.apple.quarantine /Applications/Vector.app</code> in Terminal. You only need to do this once.</p></article>
+            <article><strong>Windows shows a SmartScreen warning</strong><p>Preview installers are not yet code-signed. Choose More info, then Run anyway.</p></article>
+            <article><strong>The Linux AppImage does not start</strong><p>Make the file executable first with <code>chmod +x</code> on the downloaded AppImage, then run it.</p></article>
+            <article><strong>Vector never offers an update</strong><p>Preview builds are unsigned, and unsigned builds cannot update themselves. Download the latest version from your account page to upgrade; your projects and settings stay where they are.</p></article>
           </div>
         </section>
 
