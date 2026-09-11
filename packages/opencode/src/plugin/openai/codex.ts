@@ -285,8 +285,16 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
             .filter(([, model]) => {
               if (ALLOWED_MODELS.has(model.api.id)) return true
               if (DISALLOWED_MODELS.has(model.api.id)) return false
-              const match = model.api.id.match(/^gpt-(\d+\.\d+)/)
-              return match ? parseFloat(match[1]) > 5.4 : false
+              // Pro tiers are not served through a ChatGPT sign-in.
+              if (model.api.id.endsWith("-pro")) return false
+              if (model.api.id === "gpt-5.6") return false
+              // The minor version is optional. Requiring one ("gpt-5.5") filtered
+              // out every GPT-6 model, because "gpt-6-astra" has no minor number.
+              const match = model.api.id.match(/^gpt-(\d+)(?:\.(\d+))?/)
+              if (!match) return false
+              const major = Number(match[1])
+              const minor = Number(match[2] ?? 0)
+              return major > 5 || (major === 5 && minor > 4)
             })
             .map(([modelID, model]) => [
               modelID,
@@ -297,13 +305,14 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
                   output: 0,
                   cache: { read: 0, write: 0 },
                 },
-                limit: model.id.includes("gpt-5.5")
-                  ? {
-                      context: 400_000,
-                      input: 272_000,
-                      output: 128_000,
-                    }
-                  : model.limit,
+                limit:
+                  model.id.includes("gpt-5.5") || model.id.includes("gpt-5.6")
+                    ? {
+                        context: 400_000,
+                        input: 272_000,
+                        output: 128_000,
+                      }
+                    : model.limit,
               },
             ]),
         )

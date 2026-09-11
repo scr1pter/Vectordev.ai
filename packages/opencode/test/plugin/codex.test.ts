@@ -245,6 +245,33 @@ describe("plugin.codex", () => {
       { authorization: "Bearer access-new", accountId: "acc-123" },
     ])
   })
+
+  test("a ChatGPT sign-in keeps current GPT models, including GPT-6, and drops the rest", async () => {
+    const plugin = await CodexAuthPlugin({} as never)
+    const model = (id: string) => ({ id, api: { id }, limit: { context: 1, output: 1 }, cost: { input: 1, output: 1 } })
+    const ids = [
+      "gpt-6-astra",
+      "gpt-6-astra-pro",
+      "gpt-5.10",
+      "gpt-5.6",
+      "gpt-5.5",
+      "gpt-5.5-pro",
+      "gpt-5.4",
+      "gpt-5.3",
+      "gpt-4o",
+      "o3",
+    ]
+    const provider = { models: Object.fromEntries(ids.map((id) => [id, model(id)])) }
+
+    const signedIn = await plugin.provider!.models!(provider as never, { auth: { type: "oauth" } } as never)
+    // "gpt-6-astra" has no minor version; the old filter required one and hid every GPT-6 model.
+    expect(Object.keys(signedIn).sort()).toEqual(["gpt-5.10", "gpt-5.4", "gpt-5.5", "gpt-6-astra"])
+    expect(signedIn["gpt-6-astra"]?.cost).toEqual({ input: 0, output: 0, cache: { read: 0, write: 0 } })
+
+    const withKey = await plugin.provider!.models!(provider as never, { auth: { type: "api" } } as never)
+    expect(Object.keys(withKey)).toHaveLength(ids.length)
+    await plugin.dispose?.()
+  })
 })
 
 async function waitFor(predicate: () => boolean) {
