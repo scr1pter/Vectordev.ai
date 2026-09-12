@@ -11,6 +11,7 @@ import { Plugin } from "../plugin"
 import { serviceUse } from "@opencode-ai/core/effect/service-use"
 import { type LanguageModelV3 } from "@ai-sdk/provider"
 import { ModelsDev } from "@opencode-ai/core/models-dev"
+import { OAUTH_DUMMY_KEY } from "@/auth"
 import { Auth } from "../auth"
 import { Env } from "../env"
 import { InstallationVersion } from "@opencode-ai/core/installation/version"
@@ -1070,6 +1071,40 @@ export function toPublicInfo(provider: Info): Info {
       return value
     }),
   )
+}
+
+// Values of options.apiKey a client may see. They are markers, not secrets: the
+// free gateway runs on the literal "public", a subscription sign-in sets
+// OAUTH_DUMMY_KEY, and the Copilot sign-in leaves it empty. Clients compare
+// against them to tell a plan from a key. Every other string is a real key.
+const CLIENT_VISIBLE_API_KEYS = new Set<string>(["", "public", OAUTH_DUMMY_KEY])
+// Matched against the end of a field name, so "sessionToken" and "api_key" go
+// while "maxTokens" stays.
+const SECRET_FIELD = /(key|secret|token|password|passphrase|credentials?|authorization|cookie|accesskeyid)$/i
+
+function withoutSecrets(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(withoutSecrets)
+  if (!value || typeof value !== "object") return value
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([name]) => !SECRET_FIELD.test(name))
+      .map(([name, inner]) => [name, withoutSecrets(inner)]),
+  )
+}
+
+/**
+ * The provider record as a client may see it. The provider list and config
+ * endpoints used to send toPublicInfo(), which still carries `key`, the user's
+ * stored API key, to every client of the server, including guests invited with
+ * `vector invite`. Clients need to know how a provider is connected, never the
+ * credential itself.
+ */
+export function toClientInfo(provider: Info): Info {
+  const { key: _key, ...info } = toPublicInfo(provider)
+  const apiKey = info.options?.apiKey
+  const options = withoutSecrets(info.options ?? {}) as Info["options"]
+  if (typeof apiKey === "string" && CLIENT_VISIBLE_API_KEYS.has(apiKey)) options.apiKey = apiKey
+  return { ...info, options }
 }
 
 export function defaultModelIDs<T extends { models: Record<string, { id: string }> }>(providers: Record<string, T>) {
