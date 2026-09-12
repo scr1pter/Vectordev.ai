@@ -59,11 +59,11 @@ const free = (id: string, name: string, extra: Partial<PickerModel> = {}) =>
   model(gateway, id, name, { cost: { input: 0 }, ...extra })
 
 describe("modelAccess", () => {
-  test("a zero-cost model from Vector's gateway is free", () => {
+  test("a zero-cost model from the OpenCode Zen gateway is free", () => {
     const access = modelAccess(free("big-pickle", "Big Pickle"))
     expect(access.kind).toBe("free")
     expect(access.label).toBe("Free")
-    expect(access.title).toBe("Included with Vector at no cost")
+    expect(access.title).toBe("Free on OpenCode Zen")
     expect(modelAccess(model({ ...gateway, id: "opencode-zen" }, "x", "X", { cost: { input: 0 } })).label).toBe("Free")
   })
 
@@ -261,7 +261,7 @@ describe("row text", () => {
     })
     expect(modelAriaLabel(astra, NOW)).toBe("GPT-6 Astra, OpenAI, 1M context, reasoning, new, uses your ChatGPT plan")
     expect(modelAriaLabel(free("big-pickle", "Big Pickle"), NOW)).toBe(
-      "Big Pickle, 200K context, reasoning, free, included with Vector",
+      "Big Pickle, 200K context, reasoning, free, on OpenCode Zen",
     )
   })
 
@@ -280,7 +280,7 @@ describe("row text", () => {
       capabilities: { reasoning: false },
     })
     expect(modelTitle(lightning)).toBe(
-      "Nemotron 3.5 Lightning Free\n262,144-token context window\nReleased Aug 11, 2026\nIncluded with Vector at no cost",
+      "Nemotron 3.5 Lightning Free\n262,144-token context window\nReleased Aug 11, 2026\nFree on OpenCode Zen",
     )
     const bare = model(local, "llama", "Llama", { capabilities: undefined, limit: undefined, release_date: "" })
     expect(modelTitle(bare)).toBe("Llama\nOllama")
@@ -354,7 +354,7 @@ describe("buildModelSections", () => {
     expect(pickerKeys(sections)[0]).toBe("openai:gpt-6-astra")
     expect(keysOf(sections[0].items)).toEqual(["openai:gpt-6-astra", "opencode:big-pickle"])
     expect(sections[0].label).toBe("Recently used")
-    expect(sections.at(-1)?.label).toBe("Included with Vector")
+    expect(sections.at(-1)?.label).toBe("OpenCode Zen")
     expect(sections.at(-1)?.access?.label).toBe("Free")
   })
 
@@ -456,7 +456,7 @@ describe("buildModelSections", () => {
       "provider:anthropic",
     ])
     expect(pickerKeys(sections)[0]).toBe("openai:nova-pro")
-    // "Included with Vector" leads when it holds the best match.
+    // "OpenCode Zen" leads when it holds the best match.
     const bigwig = model(anthropicKey, "claude-bigwig", "Claude Bigwig")
     expect(
       buildModelSections({ models: [bigwig, pickle], term: "big", now: NOW, popular }).map((section) => section.id),

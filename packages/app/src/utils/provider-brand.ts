@@ -28,7 +28,7 @@ export function brandProviderDescription(id: string): string | undefined {
    the renderer, and the picker must not surface them. The only option read is
    provider.options.apiKey, compared against the known markers below. */
 
-/** Vector's own gateway. Its zero-cost catalogue models are free for every user. */
+/** The OpenCode Zen gateway. Its zero-cost catalogue models are free for every user. */
 const VECTOR_GATEWAY_IDS: ReadonlySet<string> = new Set(["opencode", "opencode-zen"])
 export const isVectorGateway = (providerID: string) => VECTOR_GATEWAY_IDS.has(providerID)
 
@@ -116,8 +116,8 @@ export type ModelAccess = {
 const FREE_ACCESS: ModelAccess = {
   kind: "free",
   label: "Free",
-  title: "Included with Vector at no cost",
-  spoken: "free, included with Vector",
+  title: "Free on OpenCode Zen",
+  spoken: "free, on OpenCode Zen",
 }
 
 const NO_ACCESS: ModelAccess = { kind: "none", label: "", title: "", spoken: "" }
@@ -197,9 +197,9 @@ export function modelAccess(model: PickerModel): ModelAccess {
   return NO_ACCESS
 }
 
-/** The section Vector's free models share, in the picker and in Manage models. */
-export const INCLUDED_WITH_VECTOR = "Included with Vector"
-export const isIncludedWithVector = (model: PickerModel) => modelAccess(model).kind === "free"
+/** The section OpenCode Zen's free models share, in the picker and in Manage models. */
+export const OPENCODE_ZEN_SECTION = "OpenCode Zen"
+export const isFreeOnZen = (model: PickerModel) => modelAccess(model).kind === "free"
 
 /** Row captions only earn their place where rows are paid for in more than one way. A
     section of nothing but free models doesn't need "Free" on every row. */
@@ -368,15 +368,15 @@ function pickerSection<T extends PickerModel>(section: Omit<PickerSection<T>, "r
     keys are unique and the flattened keys are exactly the order rows are drawn in. Models
     that can't hold a coding conversation (isCodingModel) are left out everywhere.
     - No search: the top section (the current model, then up to two recent ones), one
-      section per provider with its newest models first, and last "Included with Vector"
-      (the gateway's free models). The top section reads "Recently used" once one of its
+      section per provider with its newest models first, and last "OpenCode Zen" (the
+      gateway's free models). The top section reads "Recently used" once one of its
       rows comes from recent history, "Current model" before that: a new user's current
       model is a default they never picked, and Parallel Workspaces passes no history.
-    - Searching: only the provider sections and "Included with Vector", rows by match rank
+    - Searching: only the provider sections and "OpenCode Zen", rows by match rank
       then release date, and sections by their best match, so the first row (the one Enter
       picks) is the best match in the list.
-    Provider sections follow `popular` (Vector's own gateway ids excluded), then the rest
-    A to Z, then "Included with Vector"; while searching, that order breaks ties. Empty
+    Provider sections follow `popular` (the OpenCode gateway ids excluded), then the rest
+    A to Z, then "OpenCode Zen"; while searching, that order breaks ties. Empty
     sections are dropped. */
 export function buildModelSections<T extends PickerModel>(input: {
   models: readonly T[]
@@ -424,7 +424,7 @@ export function buildModelSections<T extends PickerModel>(input: {
     if (rank === undefined) continue
     taken.add(key)
     ranks.set(model, rank)
-    if (isIncludedWithVector(model)) {
+    if (isFreeOnZen(model)) {
       included.push(model)
       continue
     }
@@ -460,7 +460,7 @@ export function buildModelSections<T extends PickerModel>(input: {
       pickerSection({
         id: "included",
         kind: "included",
-        label: INCLUDED_WITH_VECTOR,
+        label: OPENCODE_ZEN_SECTION,
         access: FREE_ACCESS,
         items: included.sort(order),
       }),

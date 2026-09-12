@@ -83,9 +83,6 @@ export const DialogSelectProvider: Component<{ directory?: Accessor<string | und
             <Show when={i.id === CUSTOM_ID}>
               <Tag>{language.t("settings.providers.tag.custom")}</Tag>
             </Show>
-            <Show when={isOpenCodeProvider(i.id)}>
-              <Tag>{language.t("dialog.provider.tag.recommended")}</Tag>
-            </Show>
             <Show when={!isOpenCodeProvider(i.id) && note(i.id)}>
               {(value) => <div class="text-14-regular text-text-weak">{value()}</div>}
             </Show>

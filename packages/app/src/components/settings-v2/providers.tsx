@@ -29,10 +29,7 @@ const PROVIDER_NOTES = [
 ] as const
 
 const PROVIDER_ICON_SIZE = 16
-const OPENCODE_PROVIDER_IDS = new Set(["opencode", "opencode-go", "opencode-zen"])
 const HIDDEN_PROVIDER_IDS = new Set<string>()
-
-const isOpenCodeProvider = (id: string) => OPENCODE_PROVIDER_IDS.has(id)
 
 const providerDisplayName = (id: string, name: string) => brandProviderName(id, name)
 
@@ -218,9 +215,6 @@ export const SettingsProvidersV2: Component = () => {
                       <div class="settings-v2-provider-copy">
                         <div class="settings-v2-provider-main">
                           <span class="settings-v2-provider-name">{providerDisplayName(item.id, item.name)}</span>
-                          <Show when={isOpenCodeProvider(item.id)}>
-                            <Tag>{language.t("dialog.provider.tag.recommended")}</Tag>
-                          </Show>
                       </div>
                       <Show when={description(item.id)}>
                         {(text) => <p class="settings-v2-provider-description">{text()}</p>}

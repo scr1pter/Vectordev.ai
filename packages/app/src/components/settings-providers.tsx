@@ -28,10 +28,7 @@ const PROVIDER_NOTES = [
   { match: (id: string) => id === "vercel", key: "dialog.provider.vercel.note" },
 ] as const
 
-const OPENCODE_PROVIDER_IDS = new Set(["opencode", "opencode-go", "opencode-zen"])
 const HIDDEN_PROVIDER_IDS = new Set<string>()
-
-const isOpenCodeProvider = (id: string) => OPENCODE_PROVIDER_IDS.has(id)
 
 const providerDisplayName = (id: string, name: string) => brandProviderName(id, name)
 
@@ -205,7 +202,7 @@ const SettingsProvidersContent: Component = () => {
         </div>
 
         <div class="flex flex-col gap-1">
-          <h3 class="text-14-medium text-text-strong pb-2">Models provided by Vector:</h3>
+          <h3 class="text-14-medium text-text-strong pb-2">Popular providers:</h3>
           <SettingsList>
             <For each={popular()}>
               {(item) => (
@@ -214,9 +211,6 @@ const SettingsProvidersContent: Component = () => {
                     <div class="flex items-center gap-x-3">
                       <ProviderIcon id={item.id} class="size-5 shrink-0 icon-strong-base" />
                       <span class="text-14-medium text-text-strong">{providerDisplayName(item.id, item.name)}</span>
-                      <Show when={isOpenCodeProvider(item.id)}>
-                        <Tag>{language.t("dialog.provider.tag.recommended")}</Tag>
-                      </Show>
                     </div>
                     <Show when={description(item.id)}>
                       {(text) => <span class="text-12-regular text-text-weak pl-8">{text()}</span>}

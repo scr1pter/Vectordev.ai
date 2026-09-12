@@ -448,7 +448,7 @@ export function DialogConnectProvider(props: { provider: string; directory?: Acc
           <div class="flex items-start gap-3 rounded-xl border border-border-weak-base bg-surface-base px-4 py-3">
             <ProviderIcon id="opencode" class="mt-0.5 size-6 shrink-0 icon-strong-base" />
             <div class="flex flex-col gap-1">
-              <div class="text-14-medium text-text-strong">Vector's free models are already included.</div>
+              <div class="text-14-medium text-text-strong">OpenCode Zen's free models are already included.</div>
               <div class="text-14-regular text-text-weak">
                 No API key is required for the free starter model catalog. Add Anthropic, OpenAI, Google,
                 OpenRouter, or a custom provider when you want stronger models.

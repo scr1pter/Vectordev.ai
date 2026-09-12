@@ -89,24 +89,6 @@ function createPointerGuard() {
   }
 }
 
-/** Vector's chip mark as a flat one-colour glyph, so it sits evenly beside the provider
-    logos. The app icon PNG is a full-colour tile and turns to mush at 14px. Manage models
-    marks its "Included with Vector" group with it too. */
-export function VectorGlyph() {
-  return (
-    <svg data-slot="model-vector-glyph" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <rect x="3.75" y="3.75" width="8.5" height="8.5" rx="1.75" stroke="currentColor" stroke-width="1.5" />
-      <rect x="6.5" y="6.5" width="3" height="3" rx="0.5" fill="currentColor" />
-      <path
-        d="M6.25 1.5v2.25M9.75 1.5v2.25M6.25 12.25v2.25M9.75 12.25v2.25M1.5 6.25h2.25M1.5 9.75h2.25M12.25 6.25h2.25M12.25 9.75h2.25"
-        stroke="currentColor"
-        stroke-width="1.5"
-        stroke-linecap="round"
-      />
-    </svg>
-  )
-}
-
 /** Label row: mark gutter, section name, and how the whole section is paid for. */
 function SectionHeading(props: { section: ModelSection }) {
   const language = useLanguage()
@@ -114,7 +96,7 @@ function SectionHeading(props: { section: ModelSection }) {
     <>
       <span data-slot="model-row-icon" aria-hidden="true">
         <Show when={props.section.kind === "included"}>
-          <VectorGlyph />
+          <ProviderIcon id="opencode" width={14} height={14} />
         </Show>
         <Show when={props.section.kind === "provider" && props.section.providerID}>
           {(id) => <ProviderIcon id={iconID(id())} width={14} height={14} />}
@@ -158,7 +140,7 @@ function ModelRow(props: { item: ModelItem; section: ModelSection; now: number }
     <>
       <span data-slot="model-row-icon" aria-hidden="true">
         <Show when={mixed()}>
-          <Show when={access().kind !== "free"} fallback={<VectorGlyph />}>
+          <Show when={access().kind !== "free"} fallback={<ProviderIcon id="opencode" width={14} height={14} />}>
             <ProviderIcon id={iconID(props.item.provider.id)} width={14} height={14} />
           </Show>
         </Show>
