@@ -211,8 +211,6 @@
   }
 
   [data-action="prompt-submit"] {
-    right: 12px !important;
-    margin-right: 10px !important;
     border-radius: 999px !important;
   }
 
@@ -268,6 +266,11 @@
 
   html[data-vector-larger-targets="true"] :is(button, [role="button"], input, textarea, select) {
     min-height: 42px;
+  }
+
+  /* Keep the send button round when larger targets stretch its height. */
+  html[data-vector-larger-targets="true"] [data-action="prompt-submit"] {
+    min-width: 42px;
   }
 
   html[data-vector-focus-indicators="true"] :is(button, [role="button"], input, textarea, select):focus-visible {
@@ -693,10 +696,6 @@
   [data-vector-shell] [data-component="session-composer"]::after {
     content: none !important;
     display: none !important;
-  }
-
-  [data-vector-shell] [data-action="prompt-submit"] {
-    margin-right: 8px !important;
   }
 
   html[data-vector-density="compact"] [data-vector-shell] [data-component="session-prompt-dock"] {

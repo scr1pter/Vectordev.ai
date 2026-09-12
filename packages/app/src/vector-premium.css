@@ -1772,13 +1772,14 @@ html[data-vector-navigation-resizing] * {
   container-type: inline-size;
 }
 
+/* Right and bottom padding come from the row's matching pr-2/pb-2, which keep
+   the send button equally inset from both edges; a fixed height would break that. */
 [data-vector-codespace] .vector-editor-agent-composer > div:last-child {
-  height: 44px !important;
-  min-height: 44px;
   flex-wrap: nowrap;
   align-content: center;
   row-gap: 0;
-  padding: 6px 8px !important;
+  padding-top: 6px !important;
+  padding-left: 8px !important;
 }
 
 [data-vector-codespace] .vector-editor-agent-composer > div:last-child > div:first-child {

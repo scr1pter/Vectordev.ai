@@ -1813,7 +1813,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
               data-component={newSession() ? "session-new-composer" : "session-composer"}
               onSubmit={handleSubmit}
               classList={{
-                "group/prompt-input min-h-[96px] w-full rounded-[34px]": true,
+                "group/prompt-input flex min-h-[96px] w-full flex-col rounded-[34px]": true,
                 "border-icon-info-active border-dashed": store.draggingType !== null,
                 [props.class ?? ""]: !!props.class,
               }}
@@ -1892,7 +1892,8 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                   </div>
                 </div>
               </div>
-              <div class="flex h-12 min-w-0 items-center gap-1 px-3 pr-4">
+              {/* pr-2 and pb-2 must match, and the send button is self-end, so its gap to the box's right and bottom edges stays equal even when a neighbour is taller. */}
+              <div class="mt-auto flex min-w-0 items-center gap-1 pr-2 pb-2 pl-3">
                 <div
                   class="flex min-w-0 items-center gap-1"
                   classList={{
@@ -2159,7 +2160,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                     />
                   </svg>
                 </button>
-                <TooltipV2 placement="top" inactive={!working() && blank()} value={tip()}>
+                <TooltipV2 class="self-end" placement="top" inactive={!working() && blank()} value={tip()}>
                   <IconButton
                     data-action="prompt-submit"
                     type="submit"
@@ -2167,7 +2168,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                     tabIndex={store.mode === "normal" ? undefined : -1}
                     icon={stopping() ? "stop" : store.mode === "shell" ? "arrow-undo-down" : "arrow-up"}
                     variant="primary"
-                    class="ml-1 mr-2 size-9 shrink-0 rounded-full p-[8px] text-v2-icon-icon-muted shadow-[var(--v2-elevation-button-contrast)] disabled:opacity-50"
+                    class="ml-1 size-9 shrink-0 self-end rounded-full p-[8px] text-v2-icon-icon-muted shadow-[var(--v2-elevation-button-contrast)] disabled:opacity-50"
                     style={{
                       "background-image":
                         "linear-gradient(180deg,var(--v2-alpha-light-20) 0%,var(--v2-alpha-light-0) 100%),linear-gradient(90deg,var(--v2-background-bg-contrast) 0%,var(--v2-background-bg-contrast) 100%)",
