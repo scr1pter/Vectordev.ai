@@ -7,6 +7,8 @@ let userDataPath = ""
 let encryptionAvailable = true
 let encryptFailure: Error | undefined
 let decryptFailure: Error | undefined
+const platform = Object.getOwnPropertyDescriptor(process, "platform")
+const setPlatform = (value: NodeJS.Platform) => Object.defineProperty(process, "platform", { ...platform, value })
 const electronMock = {
   app: {
     isPackaged: true,
@@ -45,6 +47,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await rm(userDataPath, { recursive: true, force: true })
+  if (platform) Object.defineProperty(process, "platform", platform)
   if (previousCredentialKey === undefined) delete process.env.VECTOR_CREDENTIAL_KEY
   else process.env.VECTOR_CREDENTIAL_KEY = previousCredentialKey
   if (previousMcpKey === undefined) delete process.env.VECTOR_MCP_AUTH_KEY
@@ -76,9 +79,22 @@ test("migrates the legacy file key into OS-backed encrypted storage", async () =
 })
 
 test("fails closed in packaged builds without OS-backed secure storage", async () => {
+  setPlatform("linux")
   encryptionAvailable = false
 
   await expect(setupSecureRuntimeSecrets()).rejects.toThrow("no OS-backed secure storage")
+  expect(process.env.VECTOR_CREDENTIAL_KEY).toBeUndefined()
+  expect(process.env.VECTOR_MCP_AUTH_KEY).toBeUndefined()
+})
+
+test("tells macOS users to allow Keychain access instead of blaming the system", async () => {
+  setPlatform("darwin")
+  encryptionAvailable = false
+
+  const error = await setupSecureRuntimeSecrets().catch((cause) => cause)
+
+  expect(error.message).toContain("Always Allow")
+  expect(error.message).not.toContain("no OS-backed secure storage")
   expect(process.env.VECTOR_CREDENTIAL_KEY).toBeUndefined()
   expect(process.env.VECTOR_MCP_AUTH_KEY).toBeUndefined()
 })

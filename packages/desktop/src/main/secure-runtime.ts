@@ -22,9 +22,14 @@ export async function setupSecureRuntimeSecrets() {
   const secure = secureStorageAvailable()
 
   if (!secure && app.isPackaged) {
+    // On macOS this means the Keychain prompt was declined or dismissed, not
+    // that the Mac lacks a secure store.
     throw new Error(
-      "Vector cannot open its credential vault because this system has no OS-backed secure storage. " +
-        "Enable Keychain, Credential Manager, libsecret, or KWallet and restart Vector.",
+      process.platform === "darwin"
+        ? "Vector could not open its credential vault because macOS did not allow access to “Vector Safe Storage”. " +
+          "Quit and reopen Vector, then choose Always Allow when macOS asks."
+        : "Vector cannot open its credential vault because this system has no OS-backed secure storage. " +
+          "Enable Credential Manager, libsecret, or KWallet and restart Vector.",
     )
   }
 
