@@ -246,7 +246,7 @@ describe("plugin.codex", () => {
     ])
   })
 
-  test("a ChatGPT sign-in keeps current GPT models, including GPT-6, and drops the rest", async () => {
+  test("a ChatGPT sign-in keeps every GPT-5 and GPT-6 model, pro tiers included, and drops older ones", async () => {
     const plugin = await CodexAuthPlugin({} as never)
     const model = (id: string) => ({ id, api: { id }, limit: { context: 1, output: 1 }, cost: { input: 1, output: 1 } })
     const ids = [
@@ -264,8 +264,17 @@ describe("plugin.codex", () => {
     const provider = { models: Object.fromEntries(ids.map((id) => [id, model(id)])) }
 
     const signedIn = await plugin.provider!.models!(provider as never, { auth: { type: "oauth" } } as never)
-    // "gpt-6-astra" has no minor version; the old filter required one and hid every GPT-6 model.
-    expect(Object.keys(signedIn).sort()).toEqual(["gpt-5.10", "gpt-5.4", "gpt-5.5", "gpt-6-astra"])
+    // Point releases, pro tiers and GPT-6 (no minor version) all stay; gpt-4o and o3 are not served through Codex.
+    expect(Object.keys(signedIn).sort()).toEqual([
+      "gpt-5.10",
+      "gpt-5.3",
+      "gpt-5.4",
+      "gpt-5.5",
+      "gpt-5.5-pro",
+      "gpt-5.6",
+      "gpt-6-astra",
+      "gpt-6-astra-pro",
+    ])
     expect(signedIn["gpt-6-astra"]?.cost).toEqual({ input: 0, output: 0, cache: { read: 0, write: 0 } })
 
     const withKey = await plugin.provider!.models!(provider as never, { auth: { type: "api" } } as never)

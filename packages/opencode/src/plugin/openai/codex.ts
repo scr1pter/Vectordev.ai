@@ -12,8 +12,6 @@ const ISSUER = "https://auth.openai.com"
 const CODEX_API_ENDPOINT = "https://chatgpt.com/backend-api/codex/responses"
 const OAUTH_PORT = 1455
 const OAUTH_POLLING_SAFETY_MARGIN_MS = 3000
-const ALLOWED_MODELS = new Set(["gpt-5.5", "gpt-5.3-codex-spark", "gpt-5.4", "gpt-5.4-mini"])
-const DISALLOWED_MODELS = new Set(["gpt-5.5-pro"])
 
 interface PkceCodes {
   verifier: string
@@ -283,18 +281,13 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
         return Object.fromEntries(
           Object.entries(provider.models)
             .filter(([, model]) => {
-              if (ALLOWED_MODELS.has(model.api.id)) return true
-              if (DISALLOWED_MODELS.has(model.api.id)) return false
-              // Pro tiers are not served through a ChatGPT sign-in.
-              if (model.api.id.endsWith("-pro")) return false
-              if (model.api.id === "gpt-5.6") return false
-              // The minor version is optional. Requiring one ("gpt-5.5") filtered
-              // out every GPT-6 model, because "gpt-6-astra" has no minor number.
-              const match = model.api.id.match(/^gpt-(\d+)(?:\.(\d+))?/)
-              if (!match) return false
-              const major = Number(match[1])
-              const minor = Number(match[2] ?? 0)
-              return major > 5 || (major === 5 && minor > 4)
+              // A ChatGPT sign-in reaches OpenAI through the Codex backend, which serves the
+              // GPT-5 generation onward: every point release and every tier (mini, fast, pro).
+              // "gpt-6-astra" has no minor number, so only the major version is read.
+              // Older models (gpt-4o, o3) are not served there.
+              if (model.api.id.startsWith("codex-")) return true
+              const match = model.api.id.match(/^gpt-(\d+)/)
+              return match !== null && Number(match[1]) >= 5
             })
             .map(([modelID, model]) => [
               modelID,

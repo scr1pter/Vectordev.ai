@@ -1309,14 +1309,9 @@ export function fromModelsDevProvider(provider: ModelsDev.Provider): Info {
   }
 }
 
-function modelSuggestions(provider: Info | undefined, modelID: ModelV2.ID, enableExperimentalModels: boolean) {
+function modelSuggestions(provider: Info | undefined, modelID: ModelV2.ID) {
   const available = provider
-    ? Object.keys(provider.models).filter((id) => {
-        const model = provider.models[id]
-        if (model.status === "deprecated") return false
-        if (model.status === "alpha" && !enableExperimentalModels) return false
-        return true
-      })
+    ? Object.keys(provider.models).filter((id) => provider.models[id].status !== "deprecated")
     : []
   const fuzzy = fuzzysort.go(modelID, available, { limit: 3, threshold: -10000 }).map((m) => m.target)
   if (fuzzy.length) return fuzzy
@@ -1634,7 +1629,7 @@ const layer = Layer.effect(
               (providerID === ProviderV2.ID.openrouter && modelID === "openai/gpt-5-chat")
             )
               delete provider.models[modelID]
-            if (model.status === "alpha" && !runtimeFlags.enableExperimentalModels) delete provider.models[modelID]
+            // Every catalogue model is listed, alpha and beta included; only retired ones go.
             if (model.status === "deprecated") delete provider.models[modelID]
             if (
               (configProvider?.blacklist && configProvider.blacklist.includes(modelID)) ||
@@ -1819,7 +1814,7 @@ const layer = Layer.effect(
       if (!provider) {
         const catalogProvider = s.catalog[providerID]
         const suggestions = catalogProvider
-          ? modelSuggestions(catalogProvider, modelID, runtimeFlags.enableExperimentalModels)
+          ? modelSuggestions(catalogProvider, modelID)
           : fuzzysort
               .go(providerID, Object.keys({ ...s.catalog, ...s.providers }), { limit: 3, threshold: -10000 })
               .map((m) => m.target)
@@ -1828,10 +1823,8 @@ const layer = Layer.effect(
 
       const info = provider.models[modelID]
       if (!info) {
-        const current = modelSuggestions(provider, modelID, runtimeFlags.enableExperimentalModels)
-        const suggestions = current.length
-          ? current
-          : modelSuggestions(s.catalog[providerID], modelID, runtimeFlags.enableExperimentalModels)
+        const current = modelSuggestions(provider, modelID)
+        const suggestions = current.length ? current : modelSuggestions(s.catalog[providerID], modelID)
         return yield* new ModelNotFoundError({ providerID, modelID, suggestions })
       }
       return info
