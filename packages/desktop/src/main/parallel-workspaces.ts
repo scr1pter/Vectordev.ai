@@ -193,10 +193,15 @@ type ActiveParallelRun = {
 
 const activeRuns = new Map<string, ActiveParallelRun>()
 const queuedRuns = new Map<string, ActiveParallelRun>()
-// No cap: every launch the user asks for starts. A swarm passes its own
-// maxConcurrency and throttles itself (swarm-orchestrator.ts `slots`), so the
-// shared pool only narrows when a caller explicitly asks it to.
+// No cap: every launch the user asks for starts. A swarm throttles itself with
+// its scheduler's `slots` check (swarm-orchestrator.ts) and passes no
+// concurrency here, so the shared pool only narrows when a caller explicitly
+// asks it to.
 let maxConcurrentRuns = Number.POSITIVE_INFINITY
+
+// The statuses in which an agent is doing work and competing for the CPU.
+// "queued" is waiting for a slot and "needs review" has finished.
+const RUNNING_STATUSES: ParallelWorkspaceStatus[] = ["planning", "editing", "running commands", "testing"]
 
 function normalizeConcurrency(value?: number) {
   if (value === undefined || Number.isNaN(value)) return maxConcurrentRuns
@@ -1296,7 +1301,7 @@ export function listParallelWorkspaces(scope?: { sourcePath?: string; parentSess
   const records = readRecords()
   let changed = false
   const next = records.map((record) => {
-    const wasRunning = ["planning", "editing", "running commands", "testing"].includes(record.status)
+    const wasRunning = RUNNING_STATUSES.includes(record.status)
     if (!wasRunning || activeRuns.has(record.id) || queuedRuns.has(record.id)) return record
     changed = true
     const interrupted: ParallelWorkspaceRecord = {
@@ -1365,10 +1370,15 @@ export async function createParallelWorkspace(input: CreateParallelWorkspaceInpu
   let gitBranch: string | undefined
   let baseCommit: string | undefined
   const logs: string[] = []
+  // Working and queued agents compete for the CPU (a comparison creates every
+  // record before it runs any of them); results waiting for review don't.
+  // activeInScope still names the new agent above.
   const cores = availableParallelism()
-  if (activeInScope.length + 1 > cores) {
+  const working =
+    activeInScope.filter((record) => record.status === "queued" || RUNNING_STATUSES.includes(record.status)).length + 1
+  if (working > cores) {
     logs.push(
-      `${activeInScope.length + 1} agents are active in this task on a ${cores}-core machine; builds and tests may wait for CPU.`,
+      `${working} agents are working in this task on a ${cores}-core machine; builds and tests may wait for CPU.`,
     )
   }
 
@@ -1633,7 +1643,15 @@ async function runExternalWorkspacePass(input: {
       ...current,
       status: "running commands",
       progress: 0,
-      lastAction: chat?.activity.at(-1)?.label ?? "Working on your request",
+      // Name the step in progress ("Thinking" as soon as codex starts a turn),
+      // else the last tool step; a finished "Thinking" never lingers as the label.
+      // A flush that carries only stderr keeps the current label instead of
+      // flickering to the generic one.
+      lastAction: chat
+        ? (chat.activity.findLast((entry) => entry.state === "running")?.label ??
+          chat.activity.findLast((entry) => entry.kind === "tool")?.label ??
+          "Working on your request")
+        : current.lastAction,
       lastActivityAt: now(),
       // Runs before the reversals below: `logs` is a live array and .reverse()
       // mutates in place, which would make the transcript read backwards.

@@ -1,6 +1,14 @@
 export type AgentChat = {
   messages: { id: string; text: string }[]
-  activity: { id: string; label: string; kind: "tool" | "thinking"; state: "running" | "done" | "failed" }[]
+  activity: {
+    id: string
+    label: string
+    kind: "tool" | "thinking"
+    state: "running" | "done" | "failed"
+    // Paths relative to the workspace that an edit or write call names, so the
+    // renderer can follow the file being changed. Never file contents.
+    files?: string[]
+  }[]
 }
 
 export type ParallelWorkspaceTurn = {

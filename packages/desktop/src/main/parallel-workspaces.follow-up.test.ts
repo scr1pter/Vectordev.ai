@@ -40,7 +40,10 @@ mock.module("./store", () => ({
   },
   removeStoreFileIfEmpty: () => undefined,
 }))
-type StubRunInput = Pick<RunExternalAgentInput, "runtime" | "prompt" | "resumeSessionId" | "onChat" | "onEvent">
+type StubRunInput = Pick<
+  RunExternalAgentInput,
+  "runtime" | "prompt" | "resumeSessionId" | "onChat" | "onEvent" | "signal"
+>
 type StubRunResult = {
   exitCode: number
   summary: string
@@ -254,6 +257,93 @@ describe("sending a follow-up to an external workspace", () => {
       )
     }
     expect(created).toHaveLength(17)
+  })
+
+  test("seventeen runs on an open pool all start at once instead of queueing", async () => {
+    const sourcePath = join(userDataPath, "project")
+    await mkdir(sourcePath, { recursive: true })
+    await writeFile(join(sourcePath, "README.md"), "# Many\n", "utf8")
+    // Never finishes by itself, so every run still holds its slot when the
+    // records are read. Resolving on abort lets the teardown's stop release it.
+    runHandler = (input) =>
+      new Promise((resolve) =>
+        input.signal?.addEventListener("abort", () => resolve({ exitCode: 130, summary: "Stopped.", output: [] }), {
+          once: true,
+        }),
+      )
+    const ids: string[] = []
+    for (let index = 0; index < 17; index++) {
+      const created = await createParallelWorkspace({
+        name: `Agent ${index + 1}`,
+        taskPrompt: "Read README.md.",
+        runtime: "codex",
+        parentSessionId: "session-pool",
+        sourcePath,
+      })
+      ids.push(created.id)
+      started.push(created.id)
+    }
+    // No concurrency argument: the path swarms and follow-ups take, so this checks
+    // the default pool rather than one sized for the test.
+    for (const id of ids) await runParallelWorkspace(id, engine, undefined, dependencies)
+    for (let attempt = 0; attempt < 500 && runCalls.length < ids.length; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    }
+
+    const records = listParallelWorkspaces().filter((record) => ids.includes(record.id))
+    expect(records).toHaveLength(17)
+    expect(
+      records.filter((record) => record.lastAction === "Queued for an agent slot").map((record) => record.name),
+    ).toEqual([])
+    expect(
+      records
+        .filter((record) => !["planning", "editing", "running commands", "testing"].includes(record.status))
+        .map((record) => `${record.name}: ${record.status}`),
+    ).toEqual([])
+    // Every runner was called and none has returned: all seventeen at once.
+    expect(runCalls).toHaveLength(17)
+  }, 60_000)
+
+  test("an external turn shows its chat while it runs and keeps it when it settles", async () => {
+    const seeded = await seed()
+    started.push(seeded.id)
+    let release = () => {}
+    const released = new Promise<void>((resolve) => (release = resolve))
+    const chat = {
+      messages: [{ id: "answer", text: "Editing a.ts now." }],
+      activity: [
+        { id: "codex-turn", label: "Thinking", kind: "thinking" as const, state: "done" as const },
+        { id: "patch", label: "Updating files", kind: "tool" as const, state: "running" as const, files: ["src/a.ts"] },
+      ],
+    }
+    runHandler = async (input) => {
+      input.onChat?.(chat)
+      await released
+      return { exitCode: 0, summary: "Editing a.ts now.", output: [] }
+    }
+    await followUpParallelWorkspace(seeded.id, engine, "edit a.ts", dependencies)
+
+    let live: ReturnType<typeof listParallelWorkspaces>[number] | undefined
+    for (let attempt = 0; attempt < 100 && !live; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      const record = listParallelWorkspaces().find((item) => item.id === seeded.id)
+      if (record?.turns?.findLast((turn) => turn.role === "agent")?.messages?.length) live = record
+    }
+    const running = live?.turns?.findLast((turn) => turn.role === "agent")
+    expect(running?.state).toBe("running")
+    expect(running?.messages).toEqual(chat.messages)
+    // The workspace list is what the renderer receives over IPC, so the edited
+    // path has to be on the persisted record, not only in the runner's chat.
+    expect(running?.activity?.[1]?.files).toEqual(["src/a.ts"])
+    // The header names the step in progress, not the thinking that ended.
+    expect(live?.lastAction).toBe("Updating files")
+
+    release()
+    const settled = await settle(seeded.id)
+    const done = settled.turns?.findLast((turn) => turn.role === "agent")
+    expect(done?.state).toBe("done")
+    expect(done?.messages).toEqual(chat.messages)
+    expect(done?.activity?.[1]).toMatchObject({ state: "done", files: ["src/a.ts"] })
   })
 
   test("a legacy copy without a baseline never reports the whole tree as newly added", async () => {

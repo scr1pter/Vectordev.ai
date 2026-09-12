@@ -1746,25 +1746,28 @@ export default function NewLayout(props: ParentProps) {
     onCleanup(() => globalThis.window?.removeEventListener(WORKSPACE_FILE_SAVED_EVENT, listener))
   })
 
-  // Only live work counts: running/queued agents and results that still need
-  // review. Merged, discarded, failed, stopped, and no-change records are history.
-  const activeWorkspaceCount = () =>
+  // Only agents that are working or about to start count. A result waiting for
+  // review is in TERMINAL_WORKSPACE_STATUSES with the other finished states: it
+  // uses no CPU, so it neither counts toward the core warning nor reads as running.
+  const liveWorkspaceCount = () =>
     parallelRecords().filter(
       (record) =>
         record.swarmRole !== "coordinator" &&
         record.mergeState === "none" &&
-        !["failed", "stopped", "complete"].includes(record.status),
+        !TERMINAL_WORKSPACE_STATUSES.includes(record.status),
     ).length
   // Vector sets no cap. Past one live agent per core, the builds, tests and type
   // checks they run queue for CPU, so the launcher warns and never refuses.
   const machineCores = () => globalThis.navigator?.hardwareConcurrency || 0
+  // A swarm runs at most its concurrency at once, and never more workers than
+  // it has work items.
   const launchCount = () =>
     parallelLaunchMode() === "swarm"
-      ? swarmConcurrency()
+      ? Math.min(swarmConcurrency(), swarmMaxAgents())
       : parallelCompareRuntimes()
         ? readyComparisonRuntimes().length
         : 1
-  const launchTotal = () => activeWorkspaceCount() + launchCount()
+  const launchTotal = () => liveWorkspaceCount() + launchCount()
   const pastMachineCores = () => machineCores() > 0 && launchTotal() > machineCores()
   const wholeAtLeast = (value: string, min: number) => {
     const parsed = Math.floor(Number(value))
@@ -3157,6 +3160,14 @@ export default function NewLayout(props: ParentProps) {
     setChatSearchOpen(false)
   })
 
+  // A live Codex, Claude Code or Cursor turn reaches the screen only through this
+  // poll (desktop has no push channel for it), so poll faster while the routed
+  // agent is one of them and still running. The memo re-arms the timer only when
+  // that flips, not on every poll.
+  const routedExternalRunning = createMemo(() => {
+    const record = routedParallelWorkspace()
+    return Boolean(record && record.runtime !== "vector" && isParallelWorkspaceRunning(record))
+  })
   createEffect(() => {
     if (
       !taskRoute() &&
@@ -3166,9 +3177,18 @@ export default function NewLayout(props: ParentProps) {
       !orchestrationOpen()
     )
       return
-    const timer = globalThis.setInterval(() => {
-      void loadParallelWorkspaces()
-    }, 1_500)
+    // A load can outlast a 500 ms tick, so ticks never stack.
+    let loading = false
+    const timer = globalThis.setInterval(
+      () => {
+        if (loading) return
+        loading = true
+        void loadParallelWorkspaces().finally(() => {
+          loading = false
+        })
+      },
+      routedExternalRunning() ? 500 : 1_500,
+    )
     onCleanup(() => globalThis.clearInterval(timer))
   })
 
@@ -4383,7 +4403,7 @@ export default function NewLayout(props: ParentProps) {
               <span class="text-[11px] text-white/38">
                 {parallelLaunchMode() === "swarm"
                   ? `Up to ${swarmMaxAgents()} isolated specialists`
-                  : `${activeWorkspaceCount()} running · no agent limit`}
+                  : `${liveWorkspaceCount()} running · no agent limit`}
               </span>
               <div class="flex items-center gap-2">
                 <button

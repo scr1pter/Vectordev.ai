@@ -9,6 +9,7 @@ import {
   createAgentChat,
   agentEnvironment,
   agentOutcome,
+  agentTurnFinished,
   detectExternalAgents,
   executableNames,
   resolveAgentPath,
@@ -134,7 +135,10 @@ describe("structured external chat", () => {
         prompt: "fixture only",
         signal: controller.signal,
         killGraceMs: 10,
-        timeoutMs: 1000,
+        // A safety net for a regression only: the stopped case ends on abort.
+        // A 1 s limit here raced a slow first exec of the fresh script on CI,
+        // which resolved as a timeout (124) and skipped every packaging job.
+        timeoutMs: 15_000,
         env: { HOME: root, PATH: `${directory}:/usr/bin:/bin` },
         onChat: (chat) => {
           chats.push(chat)
@@ -144,7 +148,7 @@ describe("structured external chat", () => {
       expect(result.exitCode).toBe(stopped ? 130 : 1)
       expect(chats.at(-1)?.messages[0]?.text).toBe("haha")
     }
-  })
+  }, 40_000)
   const fixtures = [
     {
       runtime: "codex" as const,
@@ -232,6 +236,449 @@ describe("structured external chat", () => {
       expect(JSON.stringify(chats)).not.toContain("PRIVATE")
     })
   }
+})
+
+// Real event shapes, captured 2026-09-12 from the installed CLIs run with the
+// exact argv runtimeArguments builds: codex-cli 0.154.0-alpha.6.2 (the one the
+// ChatGPT app ships), cursor-agent 2026.09.02-c22c1a3, and Claude Code 2.1.215
+// signed out. Long envelopes are trimmed, but every type, subtype and key is real.
+const sessionId = "f1f41862-f9cb-448e-9734-ca84962c5db8"
+const captured = {
+  codex: [
+    { type: "thread.started", thread_id: "01a09712-e58b-73a1-b808-3287c1c0ab54" },
+    { type: "turn.started" },
+    { type: "item.completed", item: { id: "item_0", type: "agent_message", text: "OK" } },
+    {
+      type: "turn.completed",
+      usage: {
+        input_tokens: 16492,
+        cached_input_tokens: 12928,
+        cache_write_input_tokens: 0,
+        output_tokens: 5,
+        reasoning_output_tokens: 0,
+      },
+    },
+  ],
+  cursor: [
+    {
+      type: "system",
+      subtype: "init",
+      apiKeySource: "login",
+      cwd: "/private/var/folders/fixture",
+      session_id: sessionId,
+      model: "Auto",
+      permissionMode: "default",
+    },
+    {
+      type: "user",
+      message: {
+        role: "user",
+        content: [{ type: "text", text: "Reply with the single word OK. Do not use any tools." }],
+      },
+      session_id: sessionId,
+    },
+    ...["The user requested a", " single-word response", ' of "OK" without using', " any tools."].map(
+      (text, index) => ({
+        type: "thinking",
+        subtype: "delta",
+        text,
+        session_id: sessionId,
+        timestamp_ms: 1789240998983 + index,
+      }),
+    ),
+    { type: "thinking", subtype: "completed", session_id: sessionId, timestamp_ms: 1789240998987 },
+    {
+      type: "assistant",
+      message: { role: "assistant", content: [{ type: "text", text: "OK" }] },
+      session_id: sessionId,
+    },
+    {
+      type: "result",
+      subtype: "success",
+      duration_ms: 4177,
+      duration_api_ms: 4177,
+      is_error: false,
+      result: "OK",
+      session_id: sessionId,
+      request_id: "8526a6f6-5672-47f3-adf9-26ad9fab8557",
+      usage: { inputTokens: 4691, outputTokens: 33, cacheReadTokens: 9728, cacheWriteTokens: 0 },
+    },
+  ],
+  claudeSignedOut: [
+    {
+      type: "system",
+      subtype: "init",
+      cwd: "/private/var/folders/fixture",
+      session_id: "4235e1e7-0234-49f4-83e0-9c8cc827c840",
+      tools: ["Task", "Bash", "Edit", "Read", "Write"],
+      mcp_servers: [],
+      model: "claude-opus-4-8[1m]",
+      permissionMode: "acceptEdits",
+      apiKeySource: "none",
+      claude_code_version: "2.1.215",
+      uuid: "bf5d108c-9dbc-4cc0-a3d2-1eda25d7c5ab",
+    },
+    {
+      type: "system",
+      subtype: "status",
+      status: "requesting",
+      uuid: "b99dfb72-7a20-4fc8-b304-29e20c16972b",
+      session_id: "4235e1e7-0234-49f4-83e0-9c8cc827c840",
+    },
+    {
+      type: "assistant",
+      message: {
+        id: "a614bfbd-f087-4961-ba49-cfac37f06c2c",
+        model: "<synthetic>",
+        role: "assistant",
+        stop_reason: "stop_sequence",
+        type: "message",
+        content: [{ type: "text", text: "Not logged in · Please run /login" }],
+      },
+      parent_tool_use_id: null,
+      session_id: "4235e1e7-0234-49f4-83e0-9c8cc827c840",
+      uuid: "3a2d3514-92d2-4b6a-aad1-6607c463eee3",
+      error: "authentication_failed",
+    },
+    {
+      type: "result",
+      subtype: "success",
+      is_error: true,
+      api_error_status: null,
+      duration_ms: 42,
+      num_turns: 1,
+      result: "Not logged in · Please run /login",
+      stop_reason: "stop_sequence",
+      session_id: "4235e1e7-0234-49f4-83e0-9c8cc827c840",
+      total_cost_usd: 0,
+      terminal_reason: "api_error",
+      uuid: "18161e21-f58a-4ab8-92e4-a7463f330fb7",
+    },
+  ],
+}
+const jsonLines = (events: object[]) => events.map((event) => JSON.stringify(event))
+const printLines = (events: object[]) =>
+  jsonLines(events)
+    .map((line) => `printf '%s\\n' '${line.replaceAll("'", "'\\''")}'`)
+    .join("\n")
+
+describe("the event shapes the installed CLIs print today", () => {
+  test("codex shows it is thinking from turn.started, long before its first complete item", () => {
+    const parse = createAgentChat("codex")
+    const snapshots = jsonLines(captured.codex).map((line) => parse(line))
+    expect(snapshots[1]?.messages).toEqual([])
+    expect(snapshots[1]?.activity).toEqual([
+      { id: "codex-turn", label: "Thinking", kind: "thinking", state: "running" },
+    ])
+    expect(snapshots.at(-1)?.messages).toEqual([{ id: "item_0", text: "OK" }])
+    expect(snapshots.at(-1)?.activity.map((entry) => entry.state)).toEqual(["done"])
+    expect(jsonLines(captured.codex).map((line) => agentTurnFinished("codex", line))).toEqual([
+      undefined,
+      undefined,
+      undefined,
+      "success",
+    ])
+  })
+
+  test("cursor shows one thinking phase before its text and never the reasoning itself", () => {
+    const parse = createAgentChat("cursor")
+    const snapshots = jsonLines(captured.cursor).map((line) => parse(line))
+    const firstText = snapshots.findIndex((chat) => chat.messages.length > 0)
+    expect(
+      snapshots
+        .slice(0, firstText)
+        .some((chat) => chat.activity.some((entry) => entry.kind === "thinking" && entry.state === "running")),
+    ).toBe(true)
+    expect(snapshots.at(-1)).toEqual({
+      messages: [{ id: "assistant-0", text: "OK" }],
+      activity: [{ id: "assistant-0-thinking-0", label: "Thinking", kind: "thinking", state: "done" }],
+    })
+    for (const privateText of ["requested", "single-word", "Reply with the single word"]) {
+      expect(JSON.stringify(snapshots)).not.toContain(privateText)
+    }
+    expect(
+      jsonLines(captured.cursor)
+        .map((line) => agentTurnFinished("cursor", line))
+        .filter(Boolean),
+    ).toEqual(["success"])
+  })
+
+  test("a signed-out Claude Code turn ends on its error result and names the sign-in command", () => {
+    const lines = jsonLines(captured.claudeSignedOut)
+    const parse = createAgentChat("claude-code")
+    expect(
+      lines
+        .map((line) => parse(line))
+        .at(-1)
+        ?.messages.map((message) => message.text),
+    ).toEqual(["Not logged in · Please run /login"])
+    expect(lines.map((line) => agentTurnFinished("claude-code", line)).filter(Boolean)).toEqual(["failure"])
+    const outcome = agentOutcome(
+      "claude-code",
+      1,
+      lines.map((line) => `[stdout] ${line}`),
+    )
+    expect(outcome.exitCode).toBe(1)
+    expect(outcome.error).toContain("not signed in")
+    expect(outcome.error).toContain("`claude`")
+  })
+
+  test("only each protocol's own final event ends a turn", () => {
+    // Codex also prints top-level errors it recovers from, such as a reconnect
+    // notice, so only turn.completed and turn.failed end its turn.
+    expect(agentTurnFinished("codex", '{"type":"error","message":"Reconnecting... 1/5"}')).toBeUndefined()
+    expect(agentTurnFinished("codex", '{"type":"turn.failed","error":{"message":"boom"}}')).toBe("failure")
+    expect(agentTurnFinished("codex", '{"type":"result","result":"not codex"}')).toBeUndefined()
+    expect(agentTurnFinished("cursor", '{"type":"result","is_error":true,"result":"x"}')).toBe("failure")
+    expect(agentTurnFinished("cursor", '{"type":"turn.completed"}')).toBeUndefined()
+    expect(agentTurnFinished("claude-code", '[stdout] {"type":"result","result":"x"}')).toBe("success")
+    expect(agentTurnFinished("claude-code", "result")).toBeUndefined()
+  })
+
+  test("a codex turn.failed reports codex's own message", () => {
+    const outcome = agentOutcome("codex", 1, [
+      '[stdout] {"type":"turn.failed","error":{"message":"stream disconnected before completion"}}',
+    ])
+    expect(outcome).toEqual({ exitCode: 1, error: "stream disconnected before completion" })
+  })
+
+  test("edit calls name the workspace file they change, never its contents", () => {
+    const workspace = join(root, "follow-workspace")
+    const claude = createAgentChat("claude-code", [workspace])
+    const claudeChat = claude(
+      JSON.stringify({
+        type: "assistant",
+        uuid: "edit-block",
+        message: {
+          id: "msg",
+          content: [
+            {
+              type: "tool_use",
+              id: "edit",
+              name: "Edit",
+              input: {
+                file_path: join(workspace, "src", "a.ts"),
+                old_string: "PRIVATE OLD",
+                new_string: "PRIVATE NEW",
+              },
+            },
+            {
+              type: "tool_use",
+              id: "notebook",
+              name: "NotebookEdit",
+              input: { notebook_path: join(workspace, "n.ipynb"), new_source: "PRIVATE" },
+            },
+            { type: "tool_use", id: "outside", name: "Write", input: { file_path: "/etc/hosts", content: "PRIVATE" } },
+            { type: "tool_use", id: "read", name: "Read", input: { file_path: join(workspace, "README.md") } },
+          ],
+        },
+      }),
+    )
+    expect(claudeChat.activity.map((entry) => [entry.id, entry.files])).toEqual([
+      ["edit", ["src/a.ts"]],
+      ["notebook", ["n.ipynb"]],
+      ["outside", undefined],
+      ["read", undefined],
+    ])
+
+    const codex = createAgentChat("codex", [workspace])
+    const change = (path: string) => ({ path, kind: "update" })
+    codex(
+      JSON.stringify({
+        type: "item.started",
+        item: {
+          id: "patch",
+          type: "file_change",
+          changes: [change(join(workspace, "src", "b.ts"))],
+          status: "in_progress",
+        },
+      }),
+    )
+    const codexChat = codex(
+      JSON.stringify({
+        type: "item.completed",
+        item: {
+          id: "patch",
+          type: "file_change",
+          changes: [change(join(workspace, "src", "b.ts")), change(join(workspace, "..", "escape.ts"))],
+          status: "completed",
+        },
+      }),
+    )
+    expect(codexChat.activity).toEqual([
+      { id: "patch", label: "Updating files", kind: "tool", state: "done", files: ["src/b.ts"] },
+    ])
+
+    const cursor = createAgentChat("cursor", [workspace])
+    const call = (id: string, subtype: string, tool_call: object) =>
+      cursor(JSON.stringify({ type: "tool_call", subtype, call_id: id, tool_call, session_id: sessionId }))
+    call("write", "started", { writeToolCall: { args: { path: "summary.txt", fileText: "PRIVATE" } } })
+    call("edit", "started", {
+      editToolCall: { args: { path: join(workspace, "src", "c.ts"), streamContent: "PRIVATE" } },
+    })
+    call("generic", "started", {
+      function: { name: "edit_file", arguments: JSON.stringify({ target_file: "../outside.ts", code: "PRIVATE" }) },
+    })
+    call("read", "started", { readToolCall: { args: { path: "README.md" } } })
+    const cursorChat = call("write", "completed", {
+      writeToolCall: {
+        args: { path: "summary.txt" },
+        result: { success: { path: join(workspace, "summary.txt"), linesCreated: 1 } },
+      },
+    })
+    expect(cursorChat.activity.map((entry) => [entry.id, entry.state, entry.files])).toEqual([
+      ["write", "done", ["summary.txt"]],
+      ["edit", "running", ["src/c.ts"]],
+      ["generic", "running", undefined],
+      ["read", "running", undefined],
+    ])
+    expect(JSON.stringify([claudeChat, codexChat, cursorChat])).not.toContain("PRIVATE")
+  })
+})
+
+describe("finishing a turn on the protocol's final event", () => {
+  async function fakeCli(name: string, cli: string, body: string) {
+    const directory = join(root, "finish", name)
+    await mkdir(directory, { recursive: true })
+    await writeFile(join(directory, cli), `#!/bin/sh\n${body}\n`)
+    await chmod(join(directory, cli), 0o755)
+    return { directory, env: { HOME: root, PATH: `${directory}:/usr/bin:/bin` } }
+  }
+
+  // Measured from the final event, not from spawn: the first exec of a fresh
+  // script can be slow on CI, which is what made the Cursor test above flaky.
+  // `sleep 30` would hold the run for 30 s if it still waited for the exit.
+  const finalEventClock = () => {
+    let at = 0
+    return {
+      onEvent: (event: { stream: string; text: string }) => {
+        if (at || event.stream !== "stdout") return
+        if (/"type":"(?:turn\.completed|turn\.failed|result)"/.test(event.text)) at = Date.now()
+      },
+      sinceFinal: () => (at ? Date.now() - at : Number.POSITIVE_INFINITY),
+    }
+  }
+
+  test("a codex turn that lingers after turn.completed resolves on the event, and the CLI is gone", async () => {
+    const { directory, env } = await fakeCli(
+      "codex-linger",
+      "codex",
+      `echo $$ > pid\n${printLines(captured.codex)}\nsleep 30`,
+    )
+    const clock = finalEventClock()
+    const chats: ReturnType<ReturnType<typeof createAgentChat>>[] = []
+    const result = await runExternalCodingAgent({
+      runtime: "codex",
+      cwd: directory,
+      prompt: "fixture only",
+      env,
+      finishGraceMs: 50,
+      killGraceMs: 50,
+      onEvent: clock.onEvent,
+      onChat: (chat) => chats.push(chat),
+    })
+    expect(clock.sinceFinal()).toBeLessThan(5_000)
+    expect(result.exitCode).toBe(0)
+    expect(result.error).toBeUndefined()
+    expect(result.summary).toBe("OK")
+    expect(result.sessionId).toBe("01a09712-e58b-73a1-b808-3287c1c0ab54")
+    expect(chats.at(-1)?.messages).toEqual([{ id: "item_0", text: "OK" }])
+    const firstText = chats.findIndex((chat) => chat.messages.length > 0)
+    expect(
+      chats
+        .slice(0, firstText)
+        .some((chat) => chat.activity.some((entry) => entry.label === "Thinking" && entry.state === "running")),
+    ).toBe(true)
+    // The run resolves only on close, after Node has reaped the CLI.
+    const pid = Number((await Bun.file(join(directory, "pid")).text()).trim())
+    expect(() => process.kill(pid, 0)).toThrow()
+  }, 20_000)
+
+  test("a codex turn.failed ends the run as a failure with codex's own message", async () => {
+    const { env } = await fakeCli(
+      "codex-failed",
+      "codex",
+      `${printLines([
+        { type: "thread.started", thread_id: "t-failed" },
+        { type: "turn.started" },
+        { type: "turn.failed", error: { message: "stream disconnected before completion: fixture outage" } },
+      ])}\nsleep 30`,
+    )
+    const clock = finalEventClock()
+    const result = await runExternalCodingAgent({
+      runtime: "codex",
+      cwd: root,
+      prompt: "fixture only",
+      env,
+      finishGraceMs: 50,
+      killGraceMs: 50,
+      onEvent: clock.onEvent,
+    })
+    expect(clock.sinceFinal()).toBeLessThan(5_000)
+    expect(result.exitCode).toBe(1)
+    expect(result.error).toBe("stream disconnected before completion: fixture outage")
+  }, 20_000)
+
+  test("a cursor error result ends the run as a failure with its message", async () => {
+    const { env } = await fakeCli(
+      "cursor-failed",
+      "cursor-agent",
+      `${printLines([
+        { type: "system", subtype: "init", session_id: sessionId },
+        { type: "result", subtype: "error", is_error: true, result: "fixture quota exceeded", session_id: sessionId },
+      ])}\nsleep 30`,
+    )
+    const clock = finalEventClock()
+    const result = await runExternalCodingAgent({
+      runtime: "cursor",
+      cwd: root,
+      prompt: "fixture only",
+      env,
+      finishGraceMs: 50,
+      killGraceMs: 50,
+      onEvent: clock.onEvent,
+    })
+    expect(clock.sinceFinal()).toBeLessThan(5_000)
+    expect(result.exitCode).toBe(1)
+    expect(result.error).toBe("fixture quota exceeded")
+  }, 20_000)
+
+  test("output the CLI prints while it is being stopped is still drained, and that stop is not a failure", async () => {
+    // The TERM trap writes only after Vector signals the finished CLI, so this
+    // line exists only if stdout and stderr are read until close. It also exits
+    // 143, which must not turn a successful turn into a failed one.
+    const { env } = await fakeCli(
+      "claude-drain",
+      "claude",
+      [
+        `trap 'printf "%s\\n" "late diagnostics" >&2; exit 143' TERM`,
+        printLines([
+          { type: "system", subtype: "init", session_id: "c1" },
+          { type: "result", subtype: "success", is_error: false, result: "Done", session_id: "c1" },
+        ]),
+        "sleep 30",
+      ].join("\n"),
+    )
+    const result = await runExternalCodingAgent({
+      runtime: "claude-code",
+      cwd: root,
+      prompt: "fixture only",
+      env,
+      finishGraceMs: 50,
+      killGraceMs: 5_000,
+    })
+    expect(result.exitCode).toBe(0)
+    expect(result.summary).toBe("Done")
+    expect(result.output).toContain("[stderr] late diagnostics")
+  }, 20_000)
+
+  test("the captured signed-out Claude Code run fails with sign-in guidance", async () => {
+    const { env } = await fakeCli("claude-signed-out", "claude", `${printLines(captured.claudeSignedOut)}\nexit 1`)
+    const result = await runExternalCodingAgent({ runtime: "claude-code", cwd: root, prompt: "fixture only", env })
+    expect(result.exitCode).toBe(1)
+    expect(result.error).toContain("Claude Code is installed but not signed in")
+    expect(result.sessionId).toBe("4235e1e7-0234-49f4-83e0-9c8cc827c840")
+  }, 20_000)
 })
 
 describe("external agent resolution", () => {

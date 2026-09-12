@@ -1,9 +1,9 @@
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
 import { randomUUID } from "node:crypto"
-import { constants } from "node:fs"
+import { constants, realpathSync } from "node:fs"
 import { access, cp, mkdir, rm, stat } from "node:fs/promises"
 import { homedir } from "node:os"
-import { dirname, join } from "node:path"
+import { dirname, isAbsolute, join, normalize, relative, sep } from "node:path"
 import { StringDecoder } from "node:string_decoder"
 import type { AgentChat } from "./parallel-workspace-turns"
 import { untrustedChildEnvironment } from "@opencode-ai/core/child-environment"
@@ -422,6 +422,11 @@ export type RunExternalAgentInput = {
   // process-lifecycle regression test; production keeps the five-second grace.
   timeoutMs?: number
   killGraceMs?: number
+  // How long a CLI that already printed its turn's final event may keep
+  // running before Vector stops it: codex-cli 0.154 lingers about 11 s after
+  // turn.completed. The grace lets a CLI that exits by itself finish saving its
+  // session. Tests shorten it.
+  finishGraceMs?: number
 }
 
 const SECRET_VALUE_PATTERN =
@@ -494,12 +499,78 @@ function object(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : {}
 }
 
+const CODEX_TURN_ACTIVITY = "codex-turn"
+const MAX_ACTIVITY_FILES = 20
+const CLAUDE_EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"])
+
+// A path an edit tool named, relative to the workspace with "/" separators.
+// Undefined for anything that is not a string or would leave the workspace, so
+// no path outside it ever reaches the renderer.
+function workspaceFile(raw: unknown, roots: string[]) {
+  if (typeof raw !== "string") return undefined
+  const value = raw.trim()
+  if (!value || value.length > 4_096 || value.includes("\0")) return undefined
+  const candidates = isAbsolute(value) ? roots.map((root) => relative(root, value)) : [normalize(value)]
+  for (const candidate of candidates) {
+    if (isAbsolute(candidate)) continue
+    const parts = candidate.split(sep).filter(Boolean)
+    if (!parts.length || parts[0] === ".." || parts.every((part) => part === ".")) continue
+    return parts.join("/")
+  }
+  return undefined
+}
+
+// The CLI may report paths under the canonical spelling of its cwd (macOS's
+// /var is /private/var), so both spellings count as the workspace.
+function workspaceRoots(cwd: string) {
+  try {
+    const real = realpathSync.native(cwd)
+    return real === cwd ? [cwd] : [cwd, real]
+  } catch {
+    return [cwd]
+  }
+}
+
+function claudeEditedPaths(block: Record<string, unknown>) {
+  if (!CLAUDE_EDIT_TOOLS.has(String(block.name))) return []
+  const input = object(block.input)
+  return [input.file_path, input.notebook_path]
+}
+
+// Cursor keys a call by its tool, e.g. {"editToolCall": {"args": {"path"}}} or
+// {"writeToolCall": ...}. A generic call is {"function": {"name", "arguments"}}
+// with JSON-encoded arguments. Only edit and write calls name a changed file.
+function cursorEditedPaths(call: Record<string, unknown>) {
+  return Object.entries(call).flatMap(([key, value]) => {
+    const body = object(value)
+    const generic = key === "function"
+    if (!/edit|write/i.test(generic ? String(body.name ?? "") : key)) return []
+    const args = generic ? jsonObject(body.arguments) : object(body.args)
+    return ["path", "file_path", "filePath", "target_file", "targetFile"].map((name) => args[name])
+  })
+}
+
+function jsonObject(value: unknown) {
+  if (typeof value !== "string") return object(value)
+  try {
+    return object(JSON.parse(value))
+  } catch {
+    return {}
+  }
+}
+
 // Protocol allowlist: raw output, tool arguments, reasoning content and unknown
-// envelopes remain diagnostics. Only explicit assistant text becomes chat.
-export function createAgentChat(runtime: CodingAgentRuntime) {
+// envelopes remain diagnostics. Only explicit assistant text becomes chat. The
+// one argument that crosses is the path an edit or write call names, relative
+// to the workspace (`roots`), so the renderer can follow the file being
+// changed. File contents and paths outside the workspace never cross.
+export function createAgentChat(runtime: CodingAgentRuntime, roots: string[] = []) {
   const messages: AgentChat["messages"] = []
   const activity: AgentChat["activity"] = []
   let current = "assistant-0"
+  // Cursor thinks in phases: a burst of deltas, then one "completed". One entry
+  // per phase keeps a burst from pushing real tool calls out of the 60-entry cap.
+  let thinkingRound = 0
   const streamedMessages = new Set<string>()
   const assistantBlocks = new Set<string>()
   const message = (id: string, text: string, append = false) => {
@@ -510,7 +581,7 @@ export function createAgentChat(runtime: CodingAgentRuntime) {
     if (!previous) messages.push({ id, text: value })
     if (messages.length > 120) messages.shift()
   }
-  const tool = (id: string, name: string, state: AgentChat["activity"][number]["state"]) => {
+  const tool = (id: string, name: string, state: AgentChat["activity"][number]["state"], files: unknown[] = []) => {
     const kind = name === "reasoning" || name === "thinking" ? "thinking" : "tool"
     const label =
       kind === "thinking"
@@ -522,8 +593,16 @@ export function createAgentChat(runtime: CodingAgentRuntime) {
             : /shell|bash|command|exec/i.test(name)
               ? "Running a command"
               : "Using a tool"
-    const entry = { id, label, kind, state } as AgentChat["activity"][number]
     const index = activity.findIndex((item) => item.id === id)
+    // A later event for the same call (codex item.completed, cursor "completed")
+    // keeps the paths an earlier one named. New arrays only: snapshots share them.
+    const known = [
+      ...new Set([
+        ...(activity[index]?.files ?? []),
+        ...files.map((file) => workspaceFile(file, roots)).filter((file): file is string => Boolean(file)),
+      ]),
+    ].slice(0, MAX_ACTIVITY_FILES)
+    const entry = { id, label, kind, state, ...(known.length ? { files: known } : {}) } as AgentChat["activity"][number]
     if (index < 0) activity.push(entry)
     if (index >= 0) activity[index] = entry
     if (activity.length > 60) activity.shift()
@@ -531,6 +610,22 @@ export function createAgentChat(runtime: CodingAgentRuntime) {
   return (line: string): AgentChat => {
     const event = parseAgentJson(line) ?? {}
     const item = object(event.item)
+    if (runtime === "codex") {
+      // codex exec --json sends no text deltas: its first complete item came
+      // 6.6 s in (codex-cli 0.154), while thread.started and turn.started land at
+      // about 3 s and are the earliest real sign that the model is working.
+      const turn = activity.find((entry) => entry.id === CODEX_TURN_ACTIVITY)
+      if (event.type === "thread.started" || event.type === "turn.started") {
+        tool(CODEX_TURN_ACTIVITY, "thinking", "running")
+      } else if (turn && event.type === "turn.failed") {
+        turn.state = "failed"
+      } else if (
+        turn?.state === "running" &&
+        (String(event.type).startsWith("item.") || event.type === "turn.completed")
+      ) {
+        turn.state = "done"
+      }
+    }
     if (runtime === "codex" && ["item.started", "item.updated", "item.completed"].includes(String(event.type))) {
       const id = textAt(item, ["id"]) ?? current
       if (item.type === "agent_message") message(id, textAt(item, ["text"]) ?? "")
@@ -541,6 +636,10 @@ export function createAgentChat(runtime: CodingAgentRuntime) {
           id,
           String(item.type),
           item.status === "failed" ? "failed" : event.type === "item.completed" ? "done" : "running",
+          // Codex's file_change item lists every path its patch touches.
+          item.type === "file_change" && Array.isArray(item.changes)
+            ? item.changes.map((change) => object(change).path)
+            : [],
         )
       }
     }
@@ -586,14 +685,24 @@ export function createAgentChat(runtime: CodingAgentRuntime) {
         if (blockID) assistantBlocks.add(blockID)
         content
           .filter((block) => block.type === "tool_use")
-          .forEach((block) => tool(textAt(block, ["id"]) ?? `${id}-tool`, String(block.name), "running"))
+          .forEach((block) =>
+            tool(textAt(block, ["id"]) ?? `${id}-tool`, String(block.name), "running", claudeEditedPaths(block)),
+          )
         current = id
       }
+      // Cursor's top-level thinking events. The reasoning text never becomes
+      // chat; only the fact that a phase is open does.
+      if (event.type === "thinking") {
+        tool(`${current}-thinking-${thinkingRound}`, "thinking", event.subtype === "completed" ? "done" : "running")
+        if (event.subtype === "completed") thinkingRound += 1
+      }
       if (event.type === "tool_call") {
+        const call = object(event.tool_call)
         tool(
           textAt(event, ["call_id", "id"]) ?? "tool",
-          Object.keys(object(event.tool_call))[0] ?? "tool",
+          Object.keys(call)[0] ?? "tool",
           event.subtype === "completed" ? "done" : "running",
+          cursorEditedPaths(call),
         )
       }
       if (event.type === "user") {
@@ -684,6 +793,24 @@ const SIGNED_OUT_PATTERN =
 
 export type AgentOutcome = { exitCode: number; error?: string }
 
+export type AgentTurnFinish = "success" | "failure"
+
+// The protocol's own end-of-turn event, which can come long before the process
+// exits: codex-cli 0.154 prints turn.completed and keeps running for about 11 s.
+// Codex's top-level {"type":"error"} is not an end. Codex also prints errors it
+// recovers from, such as a reconnect notice, and a fatal one is still followed
+// by turn.failed or an exit. Claude Code and Cursor end on `result`.
+export function agentTurnFinished(runtime: CodingAgentRuntime, line: string): AgentTurnFinish | undefined {
+  const event = parseAgentJson(line)
+  if (!event) return undefined
+  if (runtime === "codex") {
+    if (event.type === "turn.completed") return "success"
+    return event.type === "turn.failed" ? "failure" : undefined
+  }
+  if (event.type !== "result") return undefined
+  return event.is_error === true ? "failure" : "success"
+}
+
 // The exit code alone does not decide whether a run worked: Claude Code exits 0
 // while reporting {"type":"result","subtype":"success","is_error":true,
 // "result":"Not logged in · Please run /login"}, which used to be recorded as a
@@ -693,7 +820,12 @@ export function agentOutcome(runtime: CodingAgentRuntime, exitCode: number, outp
   const reported = output
     .map((line) => {
       const event = parseAgentJson(line)
-      if (!event || event.is_error !== true) return undefined
+      if (!event) return undefined
+      // Codex has no is_error: a failed turn carries its reason on error.message.
+      if (runtime === "codex" && event.type === "turn.failed") {
+        return textAt(object(event.error), ["message"]) ?? `${setup.label} reported an error.`
+      }
+      if (event.is_error !== true) return undefined
       return textAt(event, ["result", "error", "message", "summary"]) ?? `${setup.label} reported an error.`
     })
     .find((text): text is string => Boolean(text))
@@ -746,6 +878,21 @@ function stopAgentProcess(child: ChildProcessWithoutNullStreams, graceMs: number
   return force
 }
 
+// Every CLI that is still running. They are spawned detached (their own process
+// group) so a stop can reach their children, which also means they would outlive
+// Vector; the first run installs one exit hook that stops whatever is left.
+const liveAgents = new Set<ChildProcessWithoutNullStreams>()
+let exitHookInstalled = false
+
+function trackAgent(child: ChildProcessWithoutNullStreams) {
+  liveAgents.add(child)
+  if (exitHookInstalled) return
+  exitHookInstalled = true
+  process.once("exit", () => {
+    for (const agent of liveAgents) signalAgentProcess(agent, "SIGTERM")
+  })
+}
+
 export async function runExternalCodingAgent(input: RunExternalAgentInput): Promise<ExternalAgentRunResult> {
   const setup = RUNTIME_SETUP[input.runtime]
   const env = input.env ?? agentEnvironment()
@@ -765,17 +912,22 @@ export async function runExternalCodingAgent(input: RunExternalAgentInput): Prom
       stdio: ["pipe", "pipe", "pipe"],
       windowsVerbatimArguments: launch.windowsVerbatimArguments,
     })
+    trackAgent(child)
     const output: string[] = []
     const summaries: string[] = []
-    const chat = createAgentChat(input.runtime)
+    const chat = createAgentChat(input.runtime, workspaceRoots(input.cwd))
     const decoders = { stdout: new StringDecoder("utf8"), stderr: new StringDecoder("utf8") }
     let actualCost: string | undefined
     let sessionId: string | undefined
     let stdoutBuffer = ""
     let stderrBuffer = ""
     let settled = false
-    let stopReason: "aborted" | "timeout" | undefined
+    let stopReason: "aborted" | "timeout" | "finished" | undefined
     let forceTimer: NodeJS.Timeout | undefined
+    // Set by the protocol's final event. The turn is over then, even while the
+    // process lingers, so the run stops waiting for the CLI to exit by itself.
+    let finishedWith: AgentTurnFinish | undefined
+    let finishTimer: NodeJS.Timeout | undefined
 
     const emitLine = (stream: "stdout" | "stderr", raw: string) => {
       const text = redactAgentOutput(raw.trim())
@@ -796,7 +948,16 @@ export async function runExternalCodingAgent(input: RunExternalAgentInput): Prom
       }
       input.onEvent?.({ stream, text })
       input.onEvent?.({ stream: "activity", text: activityFromAgentLine(text) })
-      if (stream === "stdout") input.onChat?.(chat(text))
+      if (stream !== "stdout") return
+      input.onChat?.(chat(text))
+      // The CLI gets a short grace to exit by itself (and finish saving its
+      // session) before it is stopped. Both pipes keep draining until close
+      // either way, so nothing printed after the final event is lost.
+      if (finishedWith || settled || stopReason) return
+      finishedWith = agentTurnFinished(input.runtime, text)
+      if (!finishedWith) return
+      finishTimer = setTimeout(() => stop("finished"), Math.max(0, input.finishGraceMs ?? 3_000))
+      finishTimer.unref?.()
     }
 
     const consume = (stream: "stdout" | "stderr", chunk: Buffer) => {
@@ -808,12 +969,17 @@ export async function runExternalCodingAgent(input: RunExternalAgentInput): Prom
       lines.forEach((line) => emitLine(stream, line))
     }
 
-    const stop = (reason: "aborted" | "timeout") => {
+    // One path for every stop: SIGTERM to the CLI's process group, SIGKILL after
+    // the kill grace. The run still settles only on close, after Node has reaped
+    // the CLI and both pipes have ended.
+    const stop = (reason: "aborted" | "timeout" | "finished") => {
       if (stopReason) return
       stopReason = reason
       forceTimer = stopAgentProcess(child, Math.max(0, input.killGraceMs ?? 5_000))
     }
-    const abort = () => stop("aborted")
+    // Once the protocol has reported the turn, Stop only ends the grace early: the
+    // answer the CLI already gave is kept instead of being thrown away as stopped.
+    const abort = () => stop(finishedWith ? "finished" : "aborted")
     const timeout = setTimeout(() => stop("timeout"), Math.max(1, input.timeoutMs ?? 30 * 60_000))
     timeout.unref?.()
     input.signal?.addEventListener("abort", abort, { once: true })
@@ -821,23 +987,27 @@ export async function runExternalCodingAgent(input: RunExternalAgentInput): Prom
     if (input.signal?.aborted) abort()
     child.stdout.on("data", (chunk: Buffer) => consume("stdout", chunk))
     child.stderr.on("data", (chunk: Buffer) => consume("stderr", chunk))
-    child.once("error", (error) => {
-      if (settled) return
-      settled = true
+    const clearTimers = () => {
       clearTimeout(timeout)
       if (forceTimer) clearTimeout(forceTimer)
+      if (finishTimer) clearTimeout(finishTimer)
       input.signal?.removeEventListener("abort", abort)
+    }
+    child.once("error", (error) => {
+      liveAgents.delete(child)
+      if (settled) return
+      settled = true
+      clearTimers()
       reject(error)
     })
     child.once("close", (code) => {
+      liveAgents.delete(child)
       if (settled) return
       settled = true
-      clearTimeout(timeout)
-      if (forceTimer) clearTimeout(forceTimer)
-      input.signal?.removeEventListener("abort", abort)
+      clearTimers()
       emitLine("stdout", stdoutBuffer + decoders.stdout.end())
       emitLine("stderr", stderrBuffer + decoders.stderr.end())
-      if (stopReason) {
+      if (stopReason === "aborted" || stopReason === "timeout") {
         const timedOut = stopReason === "timeout"
         const error = timedOut
           ? `${setup.label} exceeded the ${Math.ceil((input.timeoutMs ?? 30 * 60_000) / 60_000)} minute run limit and was stopped.`
@@ -852,7 +1022,11 @@ export async function runExternalCodingAgent(input: RunExternalAgentInput): Prom
         })
         return
       }
-      const outcome = agentOutcome(input.runtime, code ?? (input.signal?.aborted ? 130 : 1), output)
+      // Stopped after its own final event, the CLI's exit status (143 from
+      // SIGTERM) says nothing about the turn; the protocol already reported it.
+      const exitCode =
+        stopReason === "finished" ? (finishedWith === "failure" ? 1 : 0) : (code ?? (input.signal?.aborted ? 130 : 1))
+      const outcome = agentOutcome(input.runtime, exitCode, output)
       resolve({
         exitCode: outcome.exitCode,
         summary: outcome.error ?? summaries.at(-1) ?? `${setup.label} completed the isolated task.`,

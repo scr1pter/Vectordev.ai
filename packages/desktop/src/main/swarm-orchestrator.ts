@@ -602,7 +602,10 @@ async function executeSwarmTask(id: string, taskID: string, engine: ParallelWork
     lastAction: "Queued on the isolated agent pool",
   }))
   appendLog(id, `${task.title} assigned to ${task.provider}/${task.model}.`)
-  await runParallelWorkspace(workspace.id, engine, run.maxConcurrency)
+  // No concurrency argument: the run pool is shared by every agent on the
+  // machine, so passing this swarm's maxConcurrency would shrink it for launches
+  // outside the swarm. The scheduler's `slots` check already bounds this swarm.
+  await runParallelWorkspace(workspace.id, engine)
   const settled = await waitForWorkspace(workspace.id, id, taskID, signal)
   if (settled.status === "failed" || settled.status === "stopped") {
     throw new Error(settled.error || settled.finalSummary || `${task.title} did not complete.`)

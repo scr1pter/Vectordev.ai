@@ -34,7 +34,6 @@ type BrowserContext = {
 let attaching: Promise<void> | undefined
 const contexts = new Map<string, BrowserContext>()
 const contextStorage = new AsyncLocalStorage<BrowserContext>()
-const MAX_BROWSER_CONTEXTS = 17
 
 function currentContext() {
   const context = contextStorage.getStore()
@@ -61,13 +60,14 @@ function getContext(id: string, create = true) {
   return context
 }
 
+// Vector sets no cap on browser tasks. A new context only retires the oldest
+// dead one, whose view is gone (window closed or page crashed); a context with
+// a live view is never closed to make room, and none is refused.
 function pruneContexts() {
-  if (contexts.size < MAX_BROWSER_CONTEXTS) return
   const oldest = Array.from(contexts.values())
     .filter((context) => !context.view || context.view.webContents.isDestroyed())
     .toSorted((a, b) => a.lastUsedAt - b.lastUsedAt)[0]
-  if (!oldest) throw new Error(`Vector already has ${MAX_BROWSER_CONTEXTS} active browser tasks.`)
-  destroyContext(oldest)
+  if (oldest) destroyContext(oldest)
 }
 
 function now() {

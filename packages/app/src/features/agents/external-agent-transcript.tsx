@@ -1,13 +1,34 @@
-import { createMemo, For, Show } from "solid-js"
+import { createEffect, createMemo, createSignal, For, onCleanup, Show } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Markdown } from "@opencode-ai/session-ui/markdown"
 import { showToast } from "@/utils/toast"
 import "./external-agent-chat.css"
-import { externalAgentMessages, restartedConversation, type ExternalAgentTurn } from "./external-agent-transcript-model"
-export { externalAgentMessages, restartedConversation, type ExternalAgentTurn } from "./external-agent-transcript-model"
+import {
+  elapsedLabel,
+  externalAgentMessages,
+  externalAgentProgress,
+  restartedConversation,
+  type ExternalAgentTurn,
+} from "./external-agent-transcript-model"
+export {
+  externalAgentMessages,
+  restartedConversation,
+  type ExternalAgentActivity,
+  type ExternalAgentTurn,
+} from "./external-agent-transcript-model"
 
 export function ExternalAgentTranscript(props: { turns: ExternalAgentTurn[]; runtimeLabel: string }) {
   const [state, setState] = createStore({ copied: "" })
+  // One clock for the whole transcript. It ticks only while a turn is running,
+  // so a finished conversation holds no timer.
+  const [now, setNow] = createSignal(Date.now())
+  const running = createMemo(() => props.turns.some((turn) => turn.state === "running"))
+  createEffect(() => {
+    if (!running()) return
+    setNow(Date.now())
+    const timer = setInterval(() => setNow(Date.now()), 1_000)
+    onCleanup(() => clearInterval(timer))
+  })
 
   return (
     <div
@@ -23,43 +44,47 @@ export function ExternalAgentTranscript(props: { turns: ExternalAgentTurn[]; run
           const turn = createMemo(() => props.turns.find((turn) => turn.id === id)!)
           const messages = createMemo(() => externalAgentMessages(turn()))
           const tools = createMemo(() => turn().activity?.filter((item) => item.kind === "tool") ?? [])
+          const progress = createMemo(() => externalAgentProgress(turn()))
           const working = () => turn().state === "running"
           return (
             <article data-agent-turn={turn().role} data-turn-id={id} class="vector-agent-turn">
-              <Show when={turn().role === "agent" && (tools().length || working())}>
-                <Show
-                  when={tools().length}
-                  fallback={
-                    <div class="vector-agent-working" role="status">
-                      <span />
-                      {props.runtimeLabel} is working…
-                    </div>
-                  }
-                >
-                  <details data-agent-tool-activity class="vector-agent-tool-activity">
-                    <summary>
-                      <svg viewBox="0 0 16 16" aria-hidden="true">
-                        <path d="m6 4 4 4-4 4" />
-                      </svg>
-                      <span>
-                        {tools().length} tool {tools().length === 1 ? "call" : "calls"}
-                      </span>
-                      <Show when={working()}>
-                        <span class="vector-agent-working-dot" />
-                      </Show>
-                    </summary>
-                    <ul>
-                      <For each={tools()}>
-                        {(tool) => (
-                          <li>
-                            <span data-state={tool.state} />
-                            {tool.label}
-                          </li>
-                        )}
-                      </For>
-                    </ul>
-                  </details>
-                </Show>
+              <Show when={turn().role === "agent" && tools().length}>
+                <details data-agent-tool-activity class="vector-agent-tool-activity">
+                  <summary>
+                    <svg viewBox="0 0 16 16" aria-hidden="true">
+                      <path d="m6 4 4 4-4 4" />
+                    </svg>
+                    <span>
+                      {tools().length} tool {tools().length === 1 ? "call" : "calls"}
+                    </span>
+                    <Show when={working()}>
+                      <span class="vector-agent-working-dot" />
+                    </Show>
+                  </summary>
+                  <ul>
+                    <For each={tools()}>
+                      {(tool) => (
+                        <li>
+                          <span data-state={tool.state} />
+                          {tool.label}
+                        </li>
+                      )}
+                    </For>
+                  </ul>
+                </details>
+              </Show>
+              {/* Codex and Cursor print no text until a whole block is done, which
+                  can take ten seconds or more, so a running turn always shows a
+                  ticking sign of life. The counter is hidden from screen readers,
+                  which would otherwise announce it every second. */}
+              <Show when={turn().role === "agent" && working()}>
+                <div class="vector-agent-working" role="status">
+                  <span />
+                  {props.runtimeLabel} {progress().thinking ? "is thinking" : "is working"}…
+                  <span class="vector-agent-working-elapsed" aria-hidden="true">
+                    {elapsedLabel(turn().at, now())}
+                  </span>
+                </div>
               </Show>
               <Show when={restartedConversation(props.turns, index())}>
                 <p class="vector-agent-chat-notice">
