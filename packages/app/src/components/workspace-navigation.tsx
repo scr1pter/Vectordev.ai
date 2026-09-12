@@ -543,17 +543,17 @@ export function WorkspaceNavigation(props: {
           data-vector-help-menu
           role="dialog"
           aria-label="Vector help"
-          class="absolute bottom-[58px] left-3 right-3 z-40 overflow-hidden rounded-[10px] border border-white/[0.09] bg-[#2a272c] p-1.5 text-[13px] text-[color:var(--vx-workspace-text-secondary)] shadow-[0_22px_55px_rgba(0,0,0,0.42)]"
+          class="absolute bottom-[58px] left-3 right-3 z-40"
         >
           <button
             type="button"
-            class="flex h-9 w-full items-center gap-2.5 rounded-[6px] bg-white/[0.055] px-2.5 text-left text-[color:var(--vx-workspace-text-primary)] transition hover:bg-white/[0.085]"
+            class="vector-help-menu-item"
             onClick={() => {
               setHelpOpen(false)
               props.onSettings()
             }}
           >
-            <svg viewBox="0 0 16 16" class="size-4 shrink-0 text-white/60" aria-hidden="true">
+            <svg viewBox="0 0 16 16" class="size-4 shrink-0" aria-hidden="true">
               <rect
                 x="2.3"
                 y="3.2"
@@ -573,105 +573,108 @@ export function WorkspaceNavigation(props: {
               />
             </svg>
             <span class="min-w-0 flex-1">Keyboard shortcuts</span>
-            <kbd class="text-[11px] text-[color:var(--vx-workspace-text-tertiary)]">⌘/</kbd>
+            <kbd>⌘/</kbd>
           </button>
 
-          <div class="my-1 h-px bg-white/[0.065]" />
-          <button type="button" class="vector-help-menu-item" onClick={() => openLink("https://vectordev.ai/docs")}>
-            <svg viewBox="0 0 16 16" class="size-4 shrink-0" aria-hidden="true">
-              <path
-                d="M2.8 3.1h3.1c1.2 0 2.1.55 2.1 1.5v8.2c0-.95-.9-1.5-2.1-1.5H2.8V3.1Zm10.4 0h-3.1c-1.2 0-2.1.55-2.1 1.5v8.2c0-.95.9-1.5 2.1-1.5h3.1V3.1Z"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.05"
-                stroke-linejoin="round"
-              />
-            </svg>
-            <span class="min-w-0 flex-1">Docs</span>
-            <span aria-hidden="true" class="text-white/30">
-              ↗
-            </span>
-          </button>
-          <button
-            type="button"
-            class="vector-help-menu-item pl-9"
-            onClick={() => openLink("https://vectordev.ai/docs")}
-          >
-            <span class="min-w-0 flex-1">Best practices</span>
-            <span aria-hidden="true" class="text-white/30">
-              ↗
-            </span>
-          </button>
-          <button
-            type="button"
-            class="vector-help-menu-item pl-9"
-            onClick={() => openLink("https://vectordev.ai/releases")}
-          >
-            <span class="min-w-0 flex-1">Changelog</span>
-            <span aria-hidden="true" class="text-white/30">
-              ↗
-            </span>
-          </button>
-
-          <div class="my-1 h-px bg-white/[0.065]" />
-          <button
-            type="button"
-            class="vector-help-menu-item"
-            onClick={() => {
-              setHelpOpen(false)
-              props.onReportBug()
-            }}
-          >
-            <svg viewBox="0 0 16 16" class="size-4 shrink-0" aria-hidden="true">
-              <path
-                d="M2.5 3.2h11v7.2H7l-3.2 2.4v-2.4H2.5V3.2Z"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.05"
-                stroke-linejoin="round"
-              />
-            </svg>
-            <span class="min-w-0 flex-1">Send feedback</span>
-          </button>
-          <button
-            type="button"
-            class="vector-help-menu-item"
-            onClick={() => {
-              setHelpOpen(false)
-              if (platform.exportDebugLogs) {
-                void platform.exportDebugLogs()
-                return
-              }
-              props.onGettingStarted()
-            }}
-          >
-            <svg viewBox="0 0 16 16" class="size-4 shrink-0" aria-hidden="true">
-              <path
-                d="M5.1 2.2v4.5a2.9 2.9 0 0 0 5.8 0V2.2M3.2 5.8v1a4.8 4.8 0 0 0 9.6 0v-1M8 11.6v2.2M5.7 13.8h4.6"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.05"
-                stroke-linecap="round"
-              />
-            </svg>
-            <span class="min-w-0 flex-1">Diagnostics</span>
-          </button>
-          <Show when={platform.platform === "desktop"}>
+          <div data-help-menu-group role="group" aria-label="Resources">
+            <button type="button" class="vector-help-menu-item" onClick={() => openLink("https://vectordev.ai/docs")}>
+              <svg viewBox="0 0 16 16" class="size-4 shrink-0" aria-hidden="true">
+                <path
+                  d="M2.8 3.1h3.1c1.2 0 2.1.55 2.1 1.5v8.2c0-.95-.9-1.5-2.1-1.5H2.8V3.1Zm10.4 0h-3.1c-1.2 0-2.1.55-2.1 1.5v8.2c0-.95.9-1.5 2.1-1.5h3.1V3.1Z"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.05"
+                  stroke-linejoin="round"
+                />
+              </svg>
+              <span class="min-w-0 flex-1">Docs</span>
+              <span aria-hidden="true" data-help-menu-external>
+                ↗
+              </span>
+            </button>
             <button
               type="button"
-              class="vector-help-menu-item pl-9"
+              class="vector-help-menu-item"
+              data-help-menu-sub
+              onClick={() => openLink("https://vectordev.ai/docs")}
+            >
+              <span class="min-w-0 flex-1">Best practices</span>
+              <span aria-hidden="true" data-help-menu-external>
+                ↗
+              </span>
+            </button>
+            <button
+              type="button"
+              class="vector-help-menu-item"
+              data-help-menu-sub
+              onClick={() => openLink("https://vectordev.ai/releases")}
+            >
+              <span class="min-w-0 flex-1">Changelog</span>
+              <span aria-hidden="true" data-help-menu-external>
+                ↗
+              </span>
+            </button>
+          </div>
+
+          <div data-help-menu-group role="group" aria-label="Support">
+            <button
+              type="button"
+              class="vector-help-menu-item"
               onClick={() => {
                 setHelpOpen(false)
-                void platform.runDesktopMenuAction?.("view.toggleDevTools")
+                props.onReportBug()
               }}
             >
-              <span class="min-w-0 flex-1">Open debug tools</span>
+              <svg viewBox="0 0 16 16" class="size-4 shrink-0" aria-hidden="true">
+                <path
+                  d="M2.5 3.2h11v7.2H7l-3.2 2.4v-2.4H2.5V3.2Z"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.05"
+                  stroke-linejoin="round"
+                />
+              </svg>
+              <span class="min-w-0 flex-1">Send feedback</span>
             </button>
-          </Show>
-
-          <div class="-mx-1.5 -mb-1.5 mt-1.5 border-t border-white/[0.07] px-3 py-2 text-[11px] text-[color:var(--vx-workspace-text-tertiary)]">
-            Vector{props.currentVersion ? ` v${props.currentVersion}` : ""}
+            <button
+              type="button"
+              class="vector-help-menu-item"
+              onClick={() => {
+                setHelpOpen(false)
+                if (platform.exportDebugLogs) {
+                  void platform.exportDebugLogs()
+                  return
+                }
+                props.onGettingStarted()
+              }}
+            >
+              <svg viewBox="0 0 16 16" class="size-4 shrink-0" aria-hidden="true">
+                <path
+                  d="M5.1 2.2v4.5a2.9 2.9 0 0 0 5.8 0V2.2M3.2 5.8v1a4.8 4.8 0 0 0 9.6 0v-1M8 11.6v2.2M5.7 13.8h4.6"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.05"
+                  stroke-linecap="round"
+                />
+              </svg>
+              <span class="min-w-0 flex-1">Diagnostics</span>
+            </button>
+            <Show when={platform.platform === "desktop"}>
+              <button
+                type="button"
+                class="vector-help-menu-item"
+                data-help-menu-sub
+                onClick={() => {
+                  setHelpOpen(false)
+                  void platform.runDesktopMenuAction?.("view.toggleDevTools")
+                }}
+              >
+                <span class="min-w-0 flex-1">Open debug tools</span>
+              </button>
+            </Show>
           </div>
+
+          <div data-help-menu-footer>Vector{props.currentVersion ? ` v${props.currentVersion}` : ""}</div>
         </div>
       </Show>
 

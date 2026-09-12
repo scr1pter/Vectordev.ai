@@ -2433,30 +2433,185 @@ html[data-vector-navigation-resizing] * {
   background: rgba(20, 17, 20, 0.3) !important;
 }
 
-.vector-help-menu-item {
+/* ---- Sidebar help menu -----------------------------------------------------
+   The Help popover in the sidebar footer (workspace-navigation.tsx,
+   [data-vector-help-menu]), drawn as one of Vector's menus:
+   - Surface: the composer's glass ([data-dock-surface="shell"] above) on
+     --vx-surface-raised. The panel floats over the sidebar, not the stage; on
+     --vx-surface it would sit darker than the sidebar and read as a hole. Like
+     the composer, it goes solid when the glassmorphism appearance setting is
+     off (html[data-vector-glass="false"], index.css).
+   - Edge: the model popover's 12px radius and --vx-line-strong border, with
+     --vx-shadow-float (no 0.5px white ring, unlike --v2-elevation-floating).
+   - Rows: the Select model dialog's 32px height, 0 10px padding and 8px
+     corners; 8px is concentric with the 12px panel across its 4px padding.
+   - No dividers or border lines: groups are separated by 8px of space and are
+     named for assistive tech with role="group". Sub-items indent to the
+     parent label's text edge.
+   - One neutral fill (the picker's 6% active row) marks the pointer or
+     keyboard row. Nothing is lit at rest; the only purple is the focus ring.
+   This file is unlayered, so these rules beat Tailwind utilities on the same
+   elements: keep surface, spacing and type here, not in classes. */
+
+[data-vector-help-menu] {
+  padding: 4px;
+  border: 1px solid var(--vx-line-strong);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--vx-surface-raised) 82%, transparent);
+  -webkit-backdrop-filter: blur(18px) saturate(1.2);
+  backdrop-filter: blur(18px) saturate(1.2);
+  box-shadow: var(--vx-shadow-float);
+  color: var(--vx-text);
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  /* Grow out of the Help button: 10.5px footer inset + 28px Settings + 3.5px
+     gap + 14px (half of Help), less the panel's own 10.5px inset. */
+  transform-origin: calc(100% - 46px) 100%;
+  animation: menu-v2-in 120ms ease-out;
+}
+
+[data-vector-help-menu] [data-help-menu-group] {
+  margin-top: 8px;
+}
+
+[data-vector-help-menu] .vector-help-menu-item {
   display: flex;
   width: 100%;
-  min-height: 34px;
+  min-height: 32px;
   align-items: center;
   gap: 10px;
-  border-radius: 6px;
+  border: 0;
+  border-radius: 8px;
   padding: 0 10px;
-  color: var(--vx-workspace-text-secondary);
+  background: transparent;
+  color: var(--vx-text);
   font-size: 13px;
-  font-weight: 400;
+  font-weight: 440;
+  line-height: 18px;
   text-align: left;
   transition:
     color 120ms ease,
-    background-color 120ms ease;
+    background-color 120ms ease,
+    transform 160ms var(--vx-ease);
 }
 
-.vector-help-menu-item:hover {
-  background: rgba(255, 255, 255, 0.055);
-  color: var(--vx-workspace-text-primary);
+/* Sub-items: the label starts where the parent's does (10px pad + 14px icon
+   + 10px gap), one step quieter until hovered. Must precede :hover. */
+[data-vector-help-menu] .vector-help-menu-item[data-help-menu-sub] {
+  min-height: 30px;
+  padding-left: 34px;
+  color: var(--vx-text-subtle);
 }
 
-.vector-help-menu-item.pl-9 {
-  padding-left: 36px;
+/* The larger-targets setting (index.css) sets min-height: 42px inside a
+   layer, which the unlayered min-heights above would otherwise beat. */
+html[data-vector-larger-targets="true"] [data-vector-help-menu] .vector-help-menu-item {
+  min-height: 42px;
+}
+
+[data-vector-help-menu] .vector-help-menu-item:is(:hover, :focus-visible) {
+  background: color-mix(in srgb, var(--vx-text) 6%, transparent);
+  color: var(--vx-text);
+}
+
+/* Pressed: the 10% step of --v2-overlay-simple-overlay-pressed, from the
+   theme's text colour so it flips with light mode. The shell's press scale
+   ([data-vector-shell] button:active) still applies. */
+[data-vector-help-menu] .vector-help-menu-item:active {
+  background: color-mix(in srgb, var(--vx-text) 10%, transparent);
+}
+
+/* The app-wide focus ring, drawn inside the row. Inside [data-vector-shell]
+   the layered !important rule in index.css supplies the colour (from
+   --vector-accent) and the inset offset here still applies. With the focus
+   indicators setting on, index.css pushes the ring 3px outward; the panel
+   has no overflow clip, so it is never cut off. */
+[data-vector-help-menu] .vector-help-menu-item:focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--vx-purple) 76%, white 6%);
+  outline-offset: -2px;
+}
+
+/* Light theme: that shell ring is the accent mixed toward white, about 2:1 on
+   a light row, and its !important colour cannot be overridden from here. Add
+   the theme purple as an inset ring and move the pale outline just outside. */
+:root[data-vector-theme="light"] [data-vector-help-menu] .vector-help-menu-item:focus-visible {
+  outline-offset: 0;
+  box-shadow: inset 0 0 0 2px var(--vx-purple);
+}
+
+/* Pinned to 14px rather than size-4 (1rem, which follows the UI font size
+   setting) so the 34px sub-item indent stays exact. */
+[data-vector-help-menu] .vector-help-menu-item > svg {
+  width: 14px;
+  height: 14px;
+  color: var(--vx-text-muted);
+  transition: color 120ms ease;
+}
+
+[data-vector-help-menu] .vector-help-menu-item:is(:hover, :focus-visible) > svg {
+  color: var(--vx-text-subtle);
+}
+
+/* MenuV2's shortcut type, in the sidebar's font (kbd defaults to monospace). */
+[data-vector-help-menu] .vector-help-menu-item > kbd {
+  flex: none;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 530;
+  line-height: 1;
+  letter-spacing: 0.05px;
+  color: var(--vx-workspace-text-secondary);
+  white-space: nowrap;
+}
+
+[data-vector-help-menu] [data-help-menu-external] {
+  flex: none;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--vx-text-muted);
+  transition:
+    color 120ms ease,
+    transform 160ms var(--vx-ease);
+}
+
+[data-vector-help-menu] .vector-help-menu-item:is(:hover, :focus-visible) [data-help-menu-external] {
+  color: var(--vx-text-subtle);
+  transform: translate(1px, -1px);
+}
+
+/* Version: a quiet caption set off by space, not a border line. */
+[data-vector-help-menu] [data-help-menu-footer] {
+  margin-top: 4px;
+  padding: 4px 10px;
+  color: var(--vx-workspace-text-secondary);
+  font-size: 11px;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+}
+
+html[data-vector-glass="false"] [data-vector-help-menu] {
+  background: var(--vx-surface-raised);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  [data-vector-help-menu] {
+    background: var(--vx-surface-raised);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-vector-help-menu] {
+    animation: none;
+  }
+
+  [data-vector-help-menu] .vector-help-menu-item:is(:hover, :focus-visible) [data-help-menu-external] {
+    transform: none;
+  }
 }
 
 [data-vector-session-route] {
