@@ -32,6 +32,15 @@ export const useComposerCommands = () => {
     })
   }
 
+  // The model picker's footer connects providers, so showing and hiding models lives here.
+  const manageModels = async () => {
+    const owner = sessionOwnership.capture()
+    const { DialogManageModelsV2 } = await import("@/components/dialog-manage-models")
+    owner.run(() => {
+      void dialog.show(() => <DialogManageModelsV2 />)
+    })
+  }
+
   command.register("composer", () => [
     modelCommand({
       id: "model.choose",
@@ -40,6 +49,11 @@ export const useComposerCommands = () => {
       keybind: "mod+'",
       slash: "model",
       onSelect: chooseModel,
+    }),
+    modelCommand({
+      id: "model.manage",
+      title: language.t("dialog.model.manage"),
+      onSelect: manageModels,
     }),
     modelCommand({
       id: "model.variant.cycle",

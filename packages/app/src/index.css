@@ -278,6 +278,13 @@
     outline-offset: 3px !important;
   }
 
+  /* The model picker focuses its search the moment it opens and the caret shows it; an
+     outline there reads as a stray box around the field. */
+  :is(.vector-select-model-dialog, .vector-model-popover) input:focus-visible,
+  html[data-vector-focus-indicators] :is(.vector-select-model-dialog, .vector-model-popover) input:focus-visible {
+    outline: none !important;
+  }
+
   /* The isolated-agent mission fields share one focus-within surface. Keep the
      accessible halo on that surface instead of drawing a second bright box
      around the individual input or textarea. */

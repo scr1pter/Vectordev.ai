@@ -2180,6 +2180,7 @@ html[data-vector-navigation-resizing] * {
 .vector-select-model-dialog [data-component="text-input-v2"]:focus-within {
   border-color: var(--vx-line);
   box-shadow: none;
+  outline-color: transparent;
 }
 
 /* Section label rows: the only divider between sections. */

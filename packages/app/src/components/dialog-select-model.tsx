@@ -8,7 +8,6 @@ import { ScrollView } from "@opencode-ai/ui/scroll-view"
 import { ProviderIcon } from "@opencode-ai/ui/provider-icon"
 import { Icon } from "@opencode-ai/ui/v2/icon"
 import { MenuV2 } from "@opencode-ai/ui/v2/menu-v2"
-import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
 import { TextInputV2 } from "@opencode-ai/ui/v2/text-input-v2"
 import { Dialog as DialogV2, DialogBody, DialogHeader, DialogTitle } from "@opencode-ai/ui/v2/dialog-v2"
 import { useLanguage } from "@/context/language"
@@ -35,7 +34,7 @@ export type ModelSelectorModelState = Pick<ModelState, "list" | "visible" | "cur
 type ModelItem = ReturnType<ModelState["list"]>[number]
 type ModelSection = PickerSection<ModelItem>
 
-const manageKey = "action:manage"
+const connectKey = "action:connect-provider"
 const HIDDEN_PROVIDER_IDS = new Set<string>()
 /** The sprite has no "opencode-zen" entry; a paid Zen group shares OpenCode's mark. */
 const iconID = (providerID: string) => (providerID === "opencode-zen" ? "opencode" : providerID)
@@ -196,7 +195,7 @@ function PickerEmpty(props: { term: string }) {
       fallback={
         <div data-slot="model-picker-empty">
           <span>No models to show</span>
-          <span>Show more in Manage models, or connect a provider.</span>
+          <span>Connect a provider below to see more.</span>
         </div>
       }
     >
@@ -234,8 +233,8 @@ export function ModelSelectorPopoverV2(props: {
     now: () => store.now,
   })
   const sections = picker.sections
-  // Navigation order is render order: every row from sections(), then Manage models.
-  const keys = createMemo(() => [...pickerKeys(sections()), manageKey])
+  // Navigation order is render order: every row from sections(), then Connect provider.
+  const keys = createMemo(() => [...pickerKeys(sections()), connectKey])
   // A stale highlight (the list changed under it) falls back to the current model, then the first row.
   const active = createMemo(() => {
     const options = keys()
@@ -286,12 +285,12 @@ export function ModelSelectorPopoverV2(props: {
     setOpen(false)
     afterClose(() => select(item))
   }
-  const manage = () => {
+  const connectProvider = () => {
     restoreTrigger = false
     setOpen(false)
     afterClose(() => {
-      void import("./dialog-manage-models").then((x) => {
-        dialog.show(() => <x.DialogManageModelsV2 />)
+      void import("./dialog-select-provider").then((x) => {
+        dialog.show(() => <x.DialogSelectProvider />)
       })
     })
   }
@@ -304,7 +303,7 @@ export function ModelSelectorPopoverV2(props: {
       selectModel(item)
       return
     }
-    if (key === manageKey) manage()
+    if (key === connectKey) connectProvider()
   }
   const moveActive = (delta: number) => {
     const options = keys()
@@ -316,8 +315,8 @@ export function ModelSelectorPopoverV2(props: {
   }
   const setSearch = (value: string) => {
     setStore("search", value)
-    // The first rendered row becomes active on every keystroke; with no match, Manage models.
-    setStore("active", keys()[0] ?? manageKey)
+    // The first rendered row becomes active on every keystroke; with no match, Connect provider.
+    setStore("active", keys()[0] ?? connectKey)
     queueMicrotask(() => activeItem()?.scrollIntoView({ block: "nearest" }))
   }
 
@@ -429,13 +428,13 @@ export function ModelSelectorPopoverV2(props: {
           <div class="h-px bg-[color:var(--vx-line)]" />
           <div class="flex flex-col p-0.5">
             <MenuV2.Item
-              data-option-key={manageKey}
-              data-active={active() === manageKey ? "" : undefined}
-              onMouseMove={(event: MouseEvent) => hover(event, manageKey)}
-              onSelect={manage}
+              data-option-key={connectKey}
+              data-active={active() === connectKey ? "" : undefined}
+              onMouseMove={(event: MouseEvent) => hover(event, connectKey)}
+              onSelect={connectProvider}
             >
-              <Icon name="outline-sliders" size="small" />
-              <span class="min-w-0 flex-1 truncate text-sm leading-5">{language.t("dialog.model.manage")}</span>
+              <Icon name="plus" size="small" />
+              <span class="min-w-0 flex-1 truncate text-sm leading-5">{language.t("command.provider.connect")}</span>
             </MenuV2.Item>
           </div>
         </MenuV2.Content>
@@ -462,8 +461,8 @@ export const DialogSelectModelV2: Component<{ provider?: string; model?: ModelSt
 
   const picker = createModelSections({ model, provider: () => props.provider, search, now: () => now })
   const sections = picker.sections
-  // Navigation order is render order, as in the popover: every row, then Manage models.
-  const keys = createMemo(() => [...pickerKeys(sections()), manageKey])
+  // Navigation order is render order, as in the popover: every row, then Connect provider.
+  const keys = createMemo(() => [...pickerKeys(sections()), connectKey])
   // Unset or stale (providers still syncing at mount, or a search that removed the row):
   // fall back to the current model, which is the first row, then to the first row.
   const active = createMemo(() => {
@@ -481,10 +480,10 @@ export const DialogSelectModelV2: Component<{ provider?: string; model?: ModelSt
         ?.scrollIntoView({ block: "nearest" })
     })
   // Typing and clearing both land here, so the highlight is always the first row shown;
-  // with no match, Manage models.
+  // with no match, Connect provider.
   const updateSearch = (value: string) => {
     setSearch(value)
-    setPicked(keys()[0] ?? manageKey)
+    setPicked(keys()[0] ?? connectKey)
     scrollToActive()
   }
 
@@ -509,16 +508,11 @@ export const DialogSelectModelV2: Component<{ provider?: string; model?: ModelSt
       select(item)
       return
     }
-    if (key === manageKey) manage()
+    if (key === connectKey) connectProvider()
   }
   const connectProvider = () => {
     void import("./dialog-select-provider").then((x) => {
       dialog.show(() => <x.DialogSelectProvider directory={directory} />)
-    })
-  }
-  const manage = () => {
-    void import("./dialog-manage-models").then((x) => {
-      dialog.show(() => <x.DialogManageModelsV2 />)
     })
   }
 
@@ -526,9 +520,6 @@ export const DialogSelectModelV2: Component<{ provider?: string; model?: ModelSt
     <DialogV2 size="large" class="vector-select-model-dialog">
       <DialogHeader closeLabel={language.t("common.close")}>
         <DialogTitle>{language.t("dialog.model.select.title")}</DialogTitle>
-        <ButtonV2 variant="neutral" icon="plus" onClick={connectProvider}>
-          {language.t("command.provider.connect")}
-        </ButtonV2>
       </DialogHeader>
       <DialogBody class="flex min-h-0 flex-1 flex-col">
         <div class="px-4 pt-px pb-3">
@@ -617,16 +608,16 @@ export const DialogSelectModelV2: Component<{ provider?: string; model?: ModelSt
           <button
             type="button"
             data-component="menu-v2-item"
-            data-option-key={manageKey}
-            data-active={active() === manageKey ? "" : undefined}
+            data-option-key={connectKey}
+            data-active={active() === connectKey ? "" : undefined}
             onMouseMove={(event) => {
-              if (pointerMoved(event)) setPicked(manageKey)
+              if (pointerMoved(event)) setPicked(connectKey)
             }}
-            onClick={manage}
+            onClick={connectProvider}
           >
-            <Icon name="outline-sliders" size="small" />
+            <Icon name="plus" size="small" />
             <span data-slot="menu-v2-item-content" class="min-w-0 flex-1 truncate text-sm">
-              {language.t("dialog.model.manage")}
+              {language.t("command.provider.connect")}
             </span>
           </button>
         </div>
