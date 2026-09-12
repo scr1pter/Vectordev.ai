@@ -16,17 +16,19 @@ import {
 } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Portal } from "solid-js/web"
+import { agentColor, ATTRIBUTION_TTL_MS, resolveAgentColor } from "@/components/editor-attribution"
 import {
-  agentColor,
-  agentCursorLine,
-  attributionsForPath,
-  changedLineRanges,
-  inferredLineRanges,
-  mergeAttribution,
-  resolveAgentColor,
-  type AgentAttribution,
-  type AgentReveal,
-} from "@/components/editor-attribution"
+  createAgentFollow,
+  directoryFollowSource,
+  eventFiles,
+  fileFollowSource,
+  messageAgent,
+  messageTurn,
+  workspaceRelativePath,
+  type AgentFollow,
+  type ExternalActivityEntry,
+  type FollowSource,
+} from "@/pages/session/agent-follow"
 import {
   MonacoCodeEditor,
   type InlineCompleteInput,
@@ -101,6 +103,7 @@ import { useLocal } from "@/context/local"
 import { modelVariantLabel } from "@/context/model-variant"
 import { usePrompt } from "@/context/prompt"
 import { useServerSync } from "@/context/server-sync"
+import { useServerSDK } from "@/context/server-sdk"
 import { useSDK } from "@/context/sdk"
 import { useSettings } from "@/context/settings"
 import { useSync } from "@/context/sync"
@@ -1899,10 +1902,19 @@ export function CodespaceWorkbench(props: {
   onClose: () => void
   embedded?: boolean
   portalMount?: Node
-  externalAgent?: { label: string; running: boolean; panel: JSX.Element }
+  externalAgent?: {
+    label: string
+    running: boolean
+    panel: JSX.Element
+    /** The runner's activity. Steps that report files are followed before the watcher fires. */
+    activity?: () => readonly ExternalActivityEntry[]
+  }
+  /** The session panel's follow store, which outlives this editor. */
+  follow?: AgentFollow
 }) {
   const file = useFile()
   const sdk = useSDK()
+  const serverSDK = useServerSDK()
   const sync = useSync()
   const serverSync = useServerSync()
   const local = useLocal()
@@ -1927,6 +1939,21 @@ export function CodespaceWorkbench(props: {
   const [ignoredProblems, setIgnoredProblems] = createSignal<Set<string>>(new Set())
   const [liveWorkspaces, setLiveWorkspaces] = createSignal<CodespaceLiveWorkspace[]>([])
   const [liveWorkspaceError, setLiveWorkspaceError] = createSignal("")
+  // Parallel workspaces that run in another directory: the files their events
+  // named (marked before the next poll), their files' text as read from that
+  // directory, and the copy the user is watching.
+  const [workspaceTouches, setWorkspaceTouches] = createStore<Record<string, string[]>>({})
+  const [workspaceTexts, setWorkspaceTexts] = createStore<Record<string, string>>({})
+  const [workspaceView, setWorkspaceView] = createSignal<{
+    id: string
+    name: string
+    color: string
+    directory: string
+    relative: string
+    key: string
+    error?: string
+  }>()
+  const [followedWorkspace, setFollowedWorkspace] = createSignal<string>()
 
   const state = createMemo(() => {
     const path = selectedPath()
@@ -2020,7 +2047,7 @@ export function CodespaceWorkbench(props: {
         color: workspaceColor(workspace.id),
         label: `${workspace.name}: ${workspace.lastAction}`,
       }
-      for (const changedFile of workspace.changedFiles) {
+      for (const changedFile of [...workspace.changedFiles, ...(workspaceTouches[workspace.id] ?? [])]) {
         const path = normalizedWorkspacePath(changedFile)
         const parts = path.split("/").filter(Boolean)
         for (const [index] of parts.entries()) {
@@ -2112,167 +2139,200 @@ export function CodespaceWorkbench(props: {
   }
 
   const openFile = (path: string) => {
+    // Opening one of the user's own files ends watching a workspace's copy.
+    setFollowedWorkspace(undefined)
+    setWorkspaceView(undefined)
     setSelectedPath(path)
     setOpenFiles((items) => (items.includes(path) ? items : [...items, path]))
     setActiveView("editor")
     void file.load(path)
   }
 
-  // Live agent edits. The server publishes file.edited (which names the agent)
-  // before the watcher event for the same write, so one handler both follows
-  // the agent into the file and attributes the lines it changed. Attribution
-  // needs the buffer from before the write, so it is captured before the
-  // reload; a file that was never loaded falls back to the tool call's input.
-  const [attributions, setAttributions] = createSignal<AgentAttribution[]>([])
-  const [reveal, setReveal] = createSignal<AgentReveal>()
-  const [following, setFollowing] = createSignal<{ name: string; color: string }>()
+  // Live agent edits. The follow store (agent-follow.ts) reads the raw server
+  // events: it opens the file an agent's running edit tool names, marks where
+  // the change will land, and attributes the changed lines once file.edited
+  // lands. The session panel owns the store, so following survives this editor
+  // closing and reopening. The external-agent mount has no session panel, so
+  // it makes its own, which also follows the watcher and the files the runner
+  // reports.
   const followAgent = settings.editor.followAgent
+  const follow =
+    props.follow ??
+    createAgentFollow({
+      listen: (fn) => sdk().event.listen(fn),
+      source: fileFollowSource(file, CODESPACE_EXCLUDED_DIRECTORIES),
+      followAgent,
+      agents: () => sync().data.agent,
+      agentFor: (sessionID, messageID) => messageAgent(sync().data.message[sessionID], messageID),
+      external: () => props.externalAgent,
+      saving,
+    })
+  // Unsaved drafts are what the editor shows, so they are the "before".
+  follow.setBuffer((path) => drafts[path])
+  onCleanup(() => follow.setBuffer(undefined))
+
   const followingAgent = createMemo(() => {
-    if (props.externalAgent) return { name: props.externalAgent.label, color: agentColor(props.externalAgent.label) }
-    const last = following()
+    const last = follow.following()
     if (last) return last
+    if (props.externalAgent) return { name: props.externalAgent.label, color: agentColor(props.externalAgent.label) }
     const name = activeAgentName()
     return { name, color: resolveAgentColor(name, sync().data.agent, editorSessionID() ?? name) }
   })
   createEffect(() => {
-    if (!agentRunning()) setFollowing(undefined)
+    if (!agentRunning()) follow.clearFollowing()
+  })
+  const followStatus = createMemo(() => {
+    const agent = followingAgent()
+    if ("state" in agent && agent.state === "waiting") return `Following ${agent.name}: waiting for approval`
+    if ("state" in agent && agent.state === "editing") {
+      return `Following ${agent.name}: editing ${fileBasename(agent.path)}`
+    }
+    return `Following ${agent.name}`
   })
 
-  // Reveal and agent cursor only apply to the file on screen; a reveal for a
-  // tab the user has since switched away from must not scroll the new one.
+  // The editor goes where the agent is. This also runs on mount, so opening
+  // the Codespace mid-edit lands on the file being edited. It never takes the
+  // editor during the user's own save, or while they watch a workspace's copy.
+  createEffect(
+    on(follow.target, (target) => {
+      if (!target || !followAgent() || saving() || followedWorkspace()) return
+      if (Date.now() - target.token >= ATTRIBUTION_TTL_MS) {
+        // An agent still editing, or waiting for approval, is followed however
+        // long ago its call started: re-issue its target so the editor reveals it.
+        const live = follow
+          .cursorsFor(target.path)
+          .some((cursor) => cursor.agentId === target.agentId && cursor.state !== "landed")
+        if (live) follow.refreshTarget()
+        return
+      }
+      if (selectedPath() === target.path && activeView() === "editor") return
+      openFile(target.path)
+    }),
+  )
+
+  // Reveal, cursors and typing only apply to the file on screen; a reveal for
+  // a tab the user has since switched away from must not scroll the new one.
   const editorReveal = createMemo(() => {
-    const target = reveal()
+    const target = follow.target()
     if (!target || target.path !== selectedPath()) return
     return { line: target.line, endLine: target.endLine, token: target.token }
   })
-  const editorCursor = createMemo(() => {
-    const target = reveal()
-    if (!target || target.path !== selectedPath()) return
-    return {
-      agentId: target.agentId,
-      agentName: target.agentName,
-      color: target.color,
-      line: agentCursorLine({ start: target.line, end: target.endLine }),
-    }
-  })
 
-  const eventFile = (event: { details: { properties?: unknown } }) => {
-    const properties =
-      typeof event.details.properties === "object" && event.details.properties
-        ? (event.details.properties as Record<string, unknown>)
-        : undefined
-    if (!properties || typeof properties.file !== "string") return
-    // file.normalize strips the workspace root from the absolute path the
-    // server publishes. Trimming the leading slash first would defeat that
-    // prefix match and leave an absolute path that matches no open tab.
-    const changed = file.normalize(properties.file)
-    if (!changed) return
-    // Build output is excluded at any depth: packages/app/dist counts, not just
-    // a dist directory at the root.
-    const excluded = CODESPACE_EXCLUDED_DIRECTORIES as readonly string[]
-    if (
-      changed
-        .split("/")
-        .slice(0, -1)
-        .some((segment) => excluded.includes(segment))
+  // Parallel workspaces run in their own directory, so this editor's event
+  // stream never sees their edits. Listen on the server-wide stream for those
+  // directories instead: mark the file tree the moment an event names a file
+  // (rather than on the next one-second poll), and feed the same follow store,
+  // so the workspace's copy shows its agent's cursor, colour and typing while
+  // the user watches it.
+  const sameDirectory = (a: string, b: string | undefined) =>
+    b !== undefined && a.replace(/\\/g, "/").replace(/\/+$/, "") === b.replace(/\\/g, "/").replace(/\/+$/, "")
+  const isForeignWorkspace = (workspace: CodespaceLiveWorkspace) =>
+    !sameDirectory(workspace.isolatedPath, sdk().directory)
+  const foreignWorkspaces = createMemo(() => editorWorkspaces().filter(isForeignWorkspace))
+  const workspaceSources = new Map<string, { directory: string; source: FollowSource }>()
+  const workspaceSource = (workspace: CodespaceLiveWorkspace) => {
+    const cached = workspaceSources.get(workspace.id)
+    if (cached?.directory === workspace.isolatedPath) return cached.source
+    const client = serverSDK().createClient({ directory: workspace.isolatedPath, throwOnError: true })
+    const source = directoryFollowSource({
+      directory: workspace.isolatedPath,
+      excluded: CODESPACE_EXCLUDED_DIRECTORIES,
+      peek: (key) => workspaceTexts[key],
+      read: async (relative, key) => {
+        const result = await client.file.read({ path: relative }).catch(() => undefined)
+        const text = result?.data?.content
+        if (typeof text !== "string") return
+        setWorkspaceTexts(key, text)
+        return text
+      },
+    })
+    workspaceSources.set(workspace.id, { directory: workspace.isolatedPath, source })
+    return source
+  }
+
+  createEffect(
+    on(
+      () => foreignWorkspaces().length > 0,
+      (active) => {
+        if (!active) return
+        const stop = serverSDK().event.listen((event) => {
+          const workspace = untrack(foreignWorkspaces).find((item) => sameDirectory(item.isolatedPath, event.name))
+          if (!workspace) return
+          const details = event.details
+          const source = workspaceSource(workspace)
+          const touched = eventFiles(details).flatMap((path) => {
+            const key = source.key(path)
+            const relative = key ? workspaceRelativePath(workspace.isolatedPath, key) : undefined
+            return relative ? [relative] : []
+          })
+          if (touched.length) {
+            setWorkspaceTouches(workspace.id, (current) => [...new Set([...(current ?? []), ...touched])])
+          }
+          follow.handle(details, {
+            source,
+            identity: { id: `workspace:${workspace.id}`, name: workspace.name, color: workspaceColor(workspace.id) },
+            // Nothing but the external runner writes an external agent's copy.
+            watcherEdits: workspace.runtime !== "vector",
+          })
+        })
+        onCleanup(stop)
+      },
+    ),
+  )
+
+  const openWorkspaceFile = async (workspace: CodespaceLiveWorkspace, relative: string) => {
+    const source = workspaceSource(workspace)
+    const key = source.key(relative)
+    if (!key) return
+    setWorkspaceView({
+      id: workspace.id,
+      name: workspace.name,
+      color: workspaceColor(workspace.id),
+      directory: workspace.isolatedPath,
+      relative,
+      key,
+    })
+    setActiveView("editor")
+    if ((await source.read(key)) !== undefined) return
+    setWorkspaceView((view) =>
+      view?.key === key ? { ...view, error: "Vector could not read this file from the agent's workspace." } : view,
     )
-      return
-    return { changed, properties }
+  }
+  const watchWorkspace = (workspace: CodespaceLiveWorkspace, relative: string) => {
+    setFollowedWorkspace(workspace.id)
+    void openWorkspaceFile(workspace, relative)
+  }
+  const stopWatchingWorkspace = () => {
+    setFollowedWorkspace(undefined)
+    setWorkspaceView(undefined)
   }
 
-  // The tool call behind an edit, for files with no loaded "before" to diff.
-  const editingCall = (messageID: string | undefined) => {
-    if (!messageID) return
-    const parts = sync().data.part[messageID] ?? []
-    for (let i = parts.length - 1; i >= 0; i -= 1) {
-      const part = parts[i]
-      if (part?.type !== "tool" || part.state.status === "pending") continue
-      return { tool: part.tool, input: part.state.input as Record<string, unknown> }
-    }
-  }
-
-  const attributeAgentEdit = async (input: {
-    changed: string
-    agentId: string
-    agentName: string
-    color: string
-    messageID?: string
-    follow: boolean
-  }) => {
-    const { changed } = input
-    const before: string | undefined = drafts[changed] ?? file.get(changed)?.content?.content
-    if (input.follow) openFile(changed)
-    await file.load(changed, { force: true })
-    const after = file.get(changed)?.content?.content
-    if (after === undefined) return
-    const ranges =
-      before !== undefined ? changedLineRanges(before, after) : inferredLineRanges(after, editingCall(input.messageID))
-    if (!ranges.length) return
-    const now = Date.now()
-    setAttributions((current) =>
-      mergeAttribution(
-        current,
-        { path: changed, agentId: input.agentId, agentName: input.agentName, color: input.color, ranges, at: now },
-        now,
-      ),
-    )
-    if (!input.follow) return
-    const first = ranges[0]!
-    setReveal({
-      path: changed,
-      line: first.start,
-      endLine: first.end,
-      agentId: input.agentId,
-      agentName: input.agentName,
-      color: input.color,
-      token: now,
-    })
-  }
-
-  const stopAgentEditFollow = sdk().event.listen((event) => {
-    if (event.details.type !== "file.edited") return
-    const hit = eventFile(event)
-    if (!hit) return
-    const { changed, properties } = hit
-    const sessionID = typeof properties.sessionID === "string" ? properties.sessionID : undefined
-    if (!sessionID) return
-    const follow = followAgent()
-    // Not following: keep the editor where it is and only attribute what is
-    // already on screen.
-    if (!follow && changed !== selectedPath()) return
-    const agent = typeof properties.agent === "string" ? properties.agent : undefined
-    const agentName = agent ?? "Agent"
-    const color = resolveAgentColor(agent, sync().data.agent, sessionID)
-    if (follow) setFollowing({ name: agentName, color })
-    void attributeAgentEdit({
-      changed,
-      agentId: sessionID,
-      agentName,
-      color,
-      messageID: typeof properties.messageID === "string" ? properties.messageID : undefined,
-      follow,
-    })
+  // While the user watches a workspace, follow its agent from file to file.
+  createEffect(
+    on(
+      () => {
+        const id = followedWorkspace()
+        const workspace = id ? untrack(foreignWorkspaces).find((item) => item.id === id) : undefined
+        return workspace ? follow.targetFor(workspace.isolatedPath) : undefined
+      },
+      (target) => {
+        const id = followedWorkspace()
+        const workspace = id ? foreignWorkspaces().find((item) => item.id === id) : undefined
+        if (!target || !workspace || !followAgent()) return
+        if (Date.now() - target.token >= ATTRIBUTION_TTL_MS) return
+        if (workspaceView()?.key === target.path) return
+        const relative = workspaceRelativePath(workspace.isolatedPath, target.path)
+        if (relative) void openWorkspaceFile(workspace, relative)
+      },
+    ),
+  )
+  const workspaceReveal = createMemo(() => {
+    const view = workspaceView()
+    if (!view) return
+    const target = follow.targetFor(view.directory)
+    if (!target || target.path !== view.key) return
+    return { line: target.line, endLine: target.endLine, token: target.token }
   })
-  onCleanup(stopAgentEditFollow)
-
-  // External agents (Claude Code, Codex, ...) write files without publishing
-  // file.edited, so the watcher is the only signal for them. Ignore the user's
-  // own saves and the file already on screen so it never steals the editor.
-  const stopExternalAgentFollow = sdk().event.listen((event) => {
-    if (!props.externalAgent || event.details.type !== "file.watcher.updated") return
-    if (!agentRunning() || !followAgent() || saving()) return
-    const hit = eventFile(event)
-    if (!hit || hit.changed === selectedPath()) return
-    const name = props.externalAgent.label
-    void attributeAgentEdit({
-      changed: hit.changed,
-      agentId: name,
-      agentName: name,
-      color: agentColor(name),
-      follow: true,
-    })
-  })
-  onCleanup(stopExternalAgentFollow)
 
   const openQuickFileSearch = () => {
     dialog.show(() => (
@@ -2723,14 +2783,15 @@ export function CodespaceWorkbench(props: {
           <div class="ml-auto flex shrink-0 items-center gap-0.5 [app-region:no-drag]">
             <Show when={followAgent() && agentRunning()}>
               <span
-                class="mr-1 flex h-6 max-w-[180px] items-center gap-1.5 rounded-full border border-[#343434] bg-[#1a1a1a] px-2 text-[10px] font-medium text-[#bdbdbd]"
-                title={`Following ${followingAgent().name}: the editor opens and scrolls to what it edits`}
+                class="mr-1 flex h-6 max-w-[280px] items-center gap-1.5 rounded-full border border-[#343434] bg-[#1a1a1a] px-2 text-[10px] font-medium text-[#bdbdbd]"
+                title={`${followStatus()}. The editor opens and scrolls to what it edits.`}
+                aria-live="polite"
               >
                 <span
                   class="size-1.5 shrink-0 animate-pulse rounded-full"
                   style={{ background: followingAgent().color }}
                 />
-                <span class="truncate">Following {followingAgent().name}</span>
+                <span class="truncate">{followStatus()}</span>
               </span>
             </Show>
             <button
@@ -2877,7 +2938,62 @@ export function CodespaceWorkbench(props: {
             </aside>
           </Show>
 
-          <section class="min-w-0 flex-1 flex flex-col bg-[#151515]">
+          <section class="relative min-w-0 flex-1 flex flex-col bg-[#151515]">
+            <Show when={workspaceView()}>
+              {(view) => (
+                <div data-vector-workspace-copy class="absolute inset-0 z-20 flex flex-col bg-[#151515]">
+                  <div class="flex h-10 shrink-0 items-center gap-2 border-b border-[#272727] bg-[#121212] px-3 text-[12px]">
+                    <span class="size-2 shrink-0 rounded-full" style={{ background: view().color }} />
+                    <span class="max-w-[160px] shrink-0 truncate font-medium text-[#e4e4e4]">{view().name}</span>
+                    <span class="text-[#55515e]">·</span>
+                    <span class="min-w-0 truncate font-mono text-[11px] text-[#9a96a3]" title={view().relative}>
+                      {view().relative}
+                    </span>
+                    <span class="shrink-0 rounded border border-[#343434] px-1.5 py-0.5 text-[9px] uppercase tracking-[0.06em] text-[#7d7986]">
+                      Agent's copy · read-only
+                    </span>
+                    <span class="flex-1" />
+                    <button
+                      type="button"
+                      class="h-7 shrink-0 rounded-[5px] px-2 text-[11px] text-[#aaa] transition-colors hover:bg-[#222] hover:text-[#ddd]"
+                      onClick={() => openFile(view().relative)}
+                    >
+                      Open your version
+                    </button>
+                    <button
+                      type="button"
+                      class="grid size-7 shrink-0 place-items-center rounded-[5px] text-[#aaa] transition-colors hover:bg-[#222] hover:text-[#ddd]"
+                      aria-label={`Stop watching ${view().name}`}
+                      title={`Stop watching ${view().name}`}
+                      onClick={stopWatchingWorkspace}
+                    >
+                      <Icon name="close-small" size="small" />
+                    </button>
+                  </div>
+                  <div class="relative min-h-0 flex-1 overflow-hidden bg-[#111111]">
+                    <Show
+                      when={workspaceTexts[view().key] !== undefined}
+                      fallback={
+                        <div class="grid h-full place-items-center px-8 text-center text-[12px] text-[#8f8f8f]">
+                          {view().error ?? "Loading the agent's copy…"}
+                        </div>
+                      }
+                    >
+                      <MonacoCodeEditor
+                        path={view().key}
+                        value={workspaceTexts[view().key] ?? ""}
+                        readOnly
+                        attributions={follow.attributionsFor(view().key)}
+                        reveal={workspaceReveal()}
+                        cursors={follow.cursorsFor(view().key)}
+                        typing={followAgent() ? follow.typingFor(view().key) : undefined}
+                        onChange={() => undefined}
+                      />
+                    </Show>
+                  </div>
+                </div>
+              )}
+            </Show>
             <Show
               when={selectedPath()}
               fallback={
@@ -3011,15 +3127,25 @@ export function CodespaceWorkbench(props: {
                                 <For each={editorWorkspaces()}>
                                   {(workspace) => {
                                     const color = workspaceColor(workspace.id)
-                                    const latestFile = () => workspace.changedFiles.at(-1)
+                                    // The newest file its events named, else the newest the poll found.
+                                    const latestFile = () =>
+                                      workspaceTouches[workspace.id]?.at(-1) ?? workspace.changedFiles.at(-1)
                                     return (
                                       <button
                                         type="button"
                                         class="flex h-5.5 max-w-[310px] shrink-0 items-center gap-1.5 rounded-[5px] border border-white/[0.07] bg-white/[0.035] px-2 text-left text-[10px] text-[#aaa5b2] transition-colors hover:border-white/[0.12] hover:bg-white/[0.06] hover:text-[#ddd]"
+                                        classList={{
+                                          "border-[color:var(--vx-purple)]": followedWorkspace() === workspace.id,
+                                        }}
                                         title={`${workspace.taskPrompt}\n${workspace.lastAction}\n${workspace.gitBranch ?? workspace.isolatedPath}`}
+                                        aria-pressed={followedWorkspace() === workspace.id}
                                         onClick={() => {
                                           const filePath = latestFile()
-                                          if (filePath) openFile(normalizedWorkspacePath(filePath))
+                                          if (!filePath) return
+                                          const relative = normalizedWorkspacePath(filePath)
+                                          // Another directory: show that agent's copy, not the untouched source file.
+                                          if (isForeignWorkspace(workspace)) watchWorkspace(workspace, relative)
+                                          else openFile(relative)
                                         }}
                                       >
                                         <span
@@ -3099,9 +3225,10 @@ export function CodespaceWorkbench(props: {
                               <MonacoCodeEditor
                                 path={workspaceAbsolutePath(path())}
                                 value={draft()}
-                                attributions={attributionsForPath(attributions(), path())}
+                                attributions={follow.attributionsFor(path())}
                                 reveal={editorReveal()}
-                                cursor={editorCursor()}
+                                cursors={follow.cursorsFor(path())}
+                                typing={followAgent() ? follow.typingFor(path()) : undefined}
                                 onChange={(next) => updateDraft(path(), next)}
                                 inlineComplete={props.externalAgent ? undefined : aiComplete}
                                 languageService={languageService}
@@ -4473,6 +4600,17 @@ export function SessionSidePanel(props: {
   const local = useLocal()
   const { sessionKey, tabs, view, params } = useSessionLayout()
 
+  // Agent following lives here rather than in the Codespace. This panel stays
+  // mounted for the whole session, so an edit made while the chat is showing
+  // is not lost, and opening the editor lands on the file being edited.
+  const agentFollow = createAgentFollow({
+    listen: (fn) => sdk().event.listen(fn),
+    source: fileFollowSource(file, CODESPACE_EXCLUDED_DIRECTORIES),
+    followAgent: settings.editor.followAgent,
+    agents: () => sync().data.agent,
+    agentFor: (sessionID, messageID) => messageAgent(sync().data.message[sessionID], messageID),
+  })
+
   const isDesktop = createMediaQuery("(min-width: 768px)")
   const shown = settings.visibility.fileTree
 
@@ -5104,6 +5242,33 @@ export function SessionSidePanel(props: {
     announceWorkspaceMode("editor")
   }
 
+  // With the Codespace closed, say once per agent turn what the agent is
+  // editing, with a way to watch it. Following stays opt-in, and nothing
+  // takes over the chat by itself.
+  const followToasts = new Map<string, { turn: string; at: number }>()
+  createEffect(
+    on(
+      agentFollow.target,
+      (target) => {
+        // The Codespace only opens at desktop widths, so there is nothing to watch below them.
+        if (!target || !settings.editor.followAgent() || !isDesktop() || codespaceOpen()) return
+        if (Date.now() - target.token > 5_000) return
+        const sessionID = target.sessionID ?? target.agentId
+        const turn = target.messageID ? messageTurn(sync().data.message[sessionID], target.messageID) : undefined
+        const last = followToasts.get(sessionID)
+        // A subagent's messages may not be loaded; then one toast a minute at most.
+        if (last && (turn ? last.turn === turn : Date.now() - last.at < 60_000)) return
+        followToasts.set(sessionID, { turn: turn ?? "", at: Date.now() })
+        showToast({
+          title: `${target.agentName} is editing ${fileBasename(target.path)}`,
+          description: target.path,
+          actions: [{ label: "Watch", onClick: openCodespaceTab }],
+        })
+      },
+      { defer: true },
+    ),
+  )
+
   const openPreviewTab = () => {
     view().reviewPanel.open("other")
     layout.fileTree.close()
@@ -5411,6 +5576,7 @@ export function SessionSidePanel(props: {
                             focusReviewDiff={props.focusReviewDiff}
                             sessionId={() => params.id}
                             onClose={closePanel}
+                            follow={agentFollow}
                           />
                         </Show>
                       </Tabs.Content>

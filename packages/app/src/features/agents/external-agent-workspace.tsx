@@ -1,4 +1,4 @@
-import { createEffect, createSignal, For, lazy, Show, Suspense, type JSX } from "solid-js"
+import { createEffect, createSignal, For, lazy, onCleanup, Show, Suspense, type JSX } from "solid-js"
 import { createStore } from "solid-js/store"
 import { createAutoScroll } from "@opencode-ai/ui/hooks"
 import { MenuV2 } from "@opencode-ai/ui/v2/menu-v2"
@@ -8,6 +8,7 @@ import type { ServerConnection } from "@/context/server"
 import { SDKProvider } from "@/context/sdk"
 import { TerminalProvider, useTerminal } from "@/context/terminal"
 import { DirectoryDataProvider } from "@/pages/directory-layout"
+import { externalActivityEntries, type ExternalActivityEntry } from "@/pages/session/agent-follow"
 import { externalAgentWorkspaceTabs, type ExternalAgentWorkspaceView } from "./external-agent-workspace-model"
 import "./external-agent-chat.css"
 
@@ -44,6 +45,8 @@ export function ExternalAgentWorkspace(props: {
   onBack: () => void
   onRefresh: () => void
   onViewChange: (view: ExternalAgentWorkspaceView) => void
+  /** The runner's activity steps. Without them, the files view reads them from the desktop bridge. */
+  activityEntries?: () => readonly ExternalActivityEntry[]
 }) {
   const [state, setState] = createStore({ view: props.initialView })
   createEffect(() => setState("view", props.initialView))
@@ -159,6 +162,8 @@ export function ExternalAgentWorkspace(props: {
                 </Show>
                 <Show when={state.view === "files"}>
                   <ExternalAgentFiles
+                    workspaceId={props.id}
+                    activityEntries={props.activityEntries}
                     changedFiles={() => props.changedFilePaths}
                     runtimeLabel={props.runtimeLabel}
                     running={props.running}
@@ -234,6 +239,8 @@ function ExternalAgentChatPane(props: { chat: JSX.Element; composer: JSX.Element
 }
 
 function ExternalAgentFiles(props: {
+  workspaceId: string
+  activityEntries?: () => readonly ExternalActivityEntry[]
   changedFiles: () => readonly string[]
   runtimeLabel: string
   running: boolean
@@ -243,6 +250,41 @@ function ExternalAgentFiles(props: {
   onReview: () => void
 }) {
   const [portalMount, setPortalMount] = createSignal<HTMLDivElement>()
+  // Created once. Inside the externalAgent literal below it would be rebuilt
+  // every time the editor reads that prop.
+  const panel = <ExternalAgentChatPane chat={props.chat} composer={props.composer} />
+
+  // The runner reports which files a step touches, so the editor can open the
+  // file with the agent's cursor before the write reaches the watcher. Nothing
+  // passes the record in yet, so read it from the desktop bridge while this
+  // view is open. Runners that predate the field report no files, and nothing
+  // is followed from them.
+  const [polled, setPolled] = createSignal<readonly ExternalActivityEntry[]>([])
+  createEffect(() => {
+    if (props.activityEntries) return
+    const running = props.running
+    const api = globalThis.window?.api?.parallelWorkspaces
+    if (!api) return
+    let alive = true
+    const read = () =>
+      void api
+        .list()
+        .then((records) => {
+          if (!alive) return
+          const record = records.find((item) => item.id === props.workspaceId)
+          setPolled(externalActivityEntries((record as Record<string, unknown> | undefined)?.turns))
+        })
+        .catch(() => undefined)
+    read()
+    onCleanup(() => {
+      alive = false
+    })
+    // A stopped run is read once more, which catches its final step.
+    if (!running) return
+    const timer = setInterval(read, 1_000)
+    onCleanup(() => clearInterval(timer))
+  })
+  const activity = () => props.activityEntries?.() ?? polled()
 
   return (
     <div
@@ -265,7 +307,8 @@ function ExternalAgentFiles(props: {
               externalAgent={{
                 label: props.runtimeLabel,
                 running: props.running,
-                panel: <ExternalAgentChatPane chat={props.chat} composer={props.composer} />,
+                panel,
+                activity,
               }}
             />
           </Suspense>

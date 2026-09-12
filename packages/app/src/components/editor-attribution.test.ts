@@ -7,8 +7,11 @@ import {
   ATTRIBUTION_TTL_MS,
   changedLineRanges,
   CURSOR_TAIL_MAX_LINES,
+  DIFF_LINE_RANGES_MAX_CHARS,
+  diffLineRanges,
   inferredLineRanges,
   locateInsertedText,
+  locateInsertedTextNear,
   mergeAttribution,
   resolveAgentColor,
   type AgentAttribution,
@@ -197,5 +200,138 @@ describe("agentCursorLine", () => {
 
   test("sits at the start of a block too tall for the viewport", () => {
     expect(agentCursorLine({ start: 1, end: 1 + CURSOR_TAIL_MAX_LINES + 1 })).toBe(1)
+  })
+})
+
+describe("diffLineRanges", () => {
+  test("is empty when nothing changed", () => {
+    expect(diffLineRanges("a\nb", "a\nb")).toEqual([])
+  })
+
+  test("gives one range per separate hunk instead of tinting everything between", () => {
+    expect(diffLineRanges("a\nb\nc\nd\ne\nf\ng", "a\nB\nc\nd\ne\nF\ng")).toEqual([
+      { start: 2, end: 2 },
+      { start: 6, end: 6 },
+    ])
+  })
+
+  test("covers an inserted block", () => {
+    expect(diffLineRanges("a\nd", "a\nb\nc\nd")).toEqual([{ start: 2, end: 3 }])
+  })
+
+  test("marks the seam on a pure deletion", () => {
+    expect(diffLineRanges("a\nb\nc", "a\nc")).toEqual([{ start: 2, end: 2 }])
+  })
+
+  test("does not count a new final newline as a change to the old last line", () => {
+    expect(diffLineRanges("a\nb", "a\nb\nc")).toEqual([{ start: 3, end: 3 }])
+  })
+
+  test("never returns a range Monaco would reject", () => {
+    const samples: [string, string][] = [
+      ["", "a"],
+      ["a", ""],
+      ["a\nb\nc", "c"],
+      ["x", "x\ny"],
+      ["a\nb", ""],
+      ["a\nb\nc\nd", "d\nc\nb\na"],
+    ]
+    for (const [before, after] of samples) {
+      const total = after.split("\n").length
+      for (const range of diffLineRanges(before, after)) {
+        expect(range.start).toBeGreaterThanOrEqual(1)
+        expect(range.end).toBeGreaterThanOrEqual(range.start)
+        expect(range.end).toBeLessThanOrEqual(total)
+      }
+    }
+  })
+
+  test("falls back to one prefix/suffix range above the size cap", () => {
+    const filler = "x\n".repeat(Math.ceil(DIFF_LINE_RANGES_MAX_CHARS / 4) + 1)
+    const before = `a\n${filler}b\n`
+    const after = `A\n${filler}B\n`
+    expect(diffLineRanges(before, after)).toEqual(changedLineRanges(before, after))
+  })
+})
+
+describe("locateInsertedTextNear", () => {
+  const after = "x\nfoo\ny\nfoo\nz"
+
+  test("prefers the match closest to where the change was expected", () => {
+    expect(locateInsertedTextNear(after, "foo", 4)).toEqual({ start: 4, end: 4 })
+    expect(locateInsertedTextNear(after, "foo", 1)).toEqual({ start: 2, end: 2 })
+  })
+
+  test("behaves like locateInsertedText without a hint", () => {
+    expect(locateInsertedTextNear(after, "foo")).toEqual(locateInsertedText(after, "foo"))
+  })
+
+  test("spans a multi-line snippet", () => {
+    expect(locateInsertedTextNear("a\nb\nc\na\nb\nc", "a\nb", 5)).toEqual({ start: 4, end: 5 })
+  })
+
+  test("falls back to the loose match when the exact text is gone", () => {
+    expect(locateInsertedTextNear("function two() {\n  return 2\n}", "function two() {\n    return   2\n}", 3)).toEqual(
+      { start: 1, end: 3 },
+    )
+  })
+})
+
+describe("inferredLineRanges for apply_patch", () => {
+  const patchText = [
+    "*** Begin Patch",
+    "*** Update File: src/a.ts",
+    "@@",
+    " one",
+    "-two",
+    "+TWO",
+    " three",
+    "@@",
+    " five",
+    "+six",
+    " seven",
+    "*** End Patch",
+  ].join("\n")
+  const after = "zero\none\nTWO\nthree\nfour\nfive\nsix\nseven\n"
+
+  test("attributes only the lines each chunk changed", () => {
+    expect(inferredLineRanges(after, { tool: "apply_patch", input: { patchText } }, { path: "src/a.ts" })).toEqual([
+      { start: 3, end: 3 },
+      { start: 7, end: 7 },
+    ])
+  })
+
+  test("uses the only hunk when no path is given", () => {
+    expect(inferredLineRanges(after, { tool: "apply_patch", input: { patchText } })).toEqual([
+      { start: 3, end: 3 },
+      { start: 7, end: 7 },
+    ])
+  })
+
+  test("matches an absolute patch path through normalize", () => {
+    const absolute = patchText.replace("*** Update File: src/a.ts", "*** Update File: /repo/src/a.ts")
+    const normalize = (file: string) => file.replace(/^\/repo\//, "")
+    expect(
+      inferredLineRanges(
+        after,
+        { tool: "apply_patch", input: { patchText: absolute } },
+        { path: "src/a.ts", normalize },
+      ),
+    ).toEqual([
+      { start: 3, end: 3 },
+      { start: 7, end: 7 },
+    ])
+  })
+
+  test("attributes the whole file to an added file", () => {
+    const added = "*** Begin Patch\n*** Add File: src/new.ts\n+a\n+b\n*** End Patch"
+    expect(
+      inferredLineRanges("a\nb", { tool: "apply_patch", input: { patchText: added } }, { path: "src/new.ts" }),
+    ).toEqual([{ start: 1, end: 2 }])
+  })
+
+  test("is empty for a file the patch does not touch or a malformed patch", () => {
+    expect(inferredLineRanges(after, { tool: "apply_patch", input: { patchText } }, { path: "src/b.ts" })).toEqual([])
+    expect(inferredLineRanges(after, { tool: "apply_patch", input: { patchText: "garbage" } })).toEqual([])
   })
 })

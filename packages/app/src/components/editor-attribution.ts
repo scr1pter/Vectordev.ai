@@ -3,6 +3,9 @@
 // the agent but carries no line ranges, so the ranges come from comparing the
 // buffer before and after the external update.
 
+import { parse as parsePatch } from "@opencode-ai/core/patch"
+import { diffLines } from "diff"
+
 export type LineRange = { start: number; end: number }
 
 export type AgentAttribution = {
@@ -152,17 +155,142 @@ export function locateInsertedText(after: string, snippet: string): LineRange | 
   return { start, end: Math.min(start + lines.length - 1, total) }
 }
 
-// Ranges for an edit whose "before" is unknown, derived from the tool call that
-// produced it: a write replaces the whole file, an edit inserts its newString.
+function countNewlines(text: string, from: number, to: number) {
+  let count = 0
+  for (let index = text.indexOf("\n", from); index !== -1 && index < to; index = text.indexOf("\n", index + 1)) {
+    count += 1
+  }
+  return count
+}
+
+function mergeRanges(ranges: readonly LineRange[]) {
+  const out: LineRange[] = []
+  for (const range of [...ranges].sort((a, b) => a.start - b.start)) {
+    const last = out.at(-1)
+    if (last && range.start <= last.end + 1) {
+      last.end = Math.max(last.end, range.end)
+      continue
+    }
+    out.push({ start: range.start, end: Math.max(range.start, range.end) })
+  }
+  return out
+}
+
+// Above this the line diff costs more than a live edit is worth, so the single
+// prefix/suffix range is used instead.
+export const DIFF_LINE_RANGES_MAX_CHARS = 300_000
+
+// One range per changed block, so an edit that touches two separate functions
+// tints those two blocks rather than everything between them. A deletion
+// leaves no line to tint, so it marks the seam where the text was, as
+// changedLineRanges does.
+export function diffLineRanges(before: string, after: string): LineRange[] {
+  if (before === after) return []
+  if (before.length + after.length > DIFF_LINE_RANGES_MAX_CHARS) return changedLineRanges(before, after)
+  const total = after.split("\n").length
+  const ranges: LineRange[] = []
+  let line = 1
+  for (const change of diffLines(before, after, { ignoreNewlineAtEof: true })) {
+    if (change.removed) {
+      const seam = Math.max(1, Math.min(line, total))
+      ranges.push({ start: seam, end: seam })
+      continue
+    }
+    if (change.added && change.count > 0) ranges.push({ start: line, end: Math.min(line + change.count - 1, total) })
+    line += change.count
+  }
+  return mergeRanges(ranges)
+}
+
+// locateInsertedText, but when the snippet appears more than once the match
+// closest to where the change was expected to land wins, so a repeated line
+// is attributed where the agent actually wrote it.
+export function locateInsertedTextNear(after: string, snippet: string, nearLine?: number): LineRange | undefined {
+  if (nearLine === undefined) return locateInsertedText(after, snippet)
+  const body = snippet.replace(/\r\n/g, "\n").replace(/\n+$/, "")
+  if (!body.trim()) return
+  const height = body.split("\n").length - 1
+  let best: LineRange | undefined
+  let line = 1
+  let scanned = 0
+  let index = after.indexOf(body)
+  for (let seen = 0; index !== -1 && seen < 200; seen += 1) {
+    line += countNewlines(after, scanned, index)
+    scanned = index
+    if (!best || Math.abs(line - nearLine) < Math.abs(best.start - nearLine)) best = { start: line, end: line + height }
+    index = after.indexOf(body, index + 1)
+  }
+  return best ?? locateInsertedText(after, snippet)
+}
+
+export type InferredRangeOptions = {
+  /** Where the change was expected to land; the nearest match wins when the inserted text repeats. */
+  nearLine?: number
+  /** apply_patch: the file `after` belongs to, compared after normalize. */
+  path?: string
+  normalize?: (file: string) => string | undefined
+}
+
+// An apply_patch update chunk carries its context lines on both sides, so the
+// chunk's new lines are found in the file and only the lines that differ from
+// the chunk's old lines are attributed. Chunks are in file order, so each one
+// is searched for after the previous.
+function patchLineRanges(after: string, patchText: string, options: InferredRangeOptions): LineRange[] {
+  let hunks: ReturnType<typeof parsePatch>
+  try {
+    hunks = parsePatch(patchText)
+  } catch {
+    return []
+  }
+  const normalize = options.normalize ?? ((file: string) => file)
+  const hunk =
+    options.path === undefined
+      ? hunks.length === 1
+        ? hunks[0]
+        : undefined
+      : hunks.find(
+          (item) => normalize(item.type === "update" && item.movePath ? item.movePath : item.path) === options.path,
+        )
+  if (!hunk || hunk.type === "delete") return []
+  if (hunk.type === "add") return changedLineRanges("", after)
+  const ranges: LineRange[] = []
+  let from = 0
+  for (const chunk of hunk.chunks) {
+    const block = chunk.newLines.join("\n")
+    if (!block.trim()) continue
+    const index = after.indexOf(block, from)
+    if (index === -1) {
+      // A formatter reflowed the chunk; attribute the whole block it became.
+      const loose = locateInsertedText(after, block)
+      if (loose) ranges.push(loose)
+      continue
+    }
+    const blockStart = 1 + countNewlines(after, 0, index)
+    for (const range of diffLineRanges(chunk.oldLines.join("\n"), block)) {
+      ranges.push({ start: blockStart + range.start - 1, end: blockStart + range.end - 1 })
+    }
+    from = index + block.length
+  }
+  return mergeRanges(ranges)
+}
+
+// Ranges for an edit whose "before" is unknown (or already equals the new
+// text), derived from the tool call that produced it: a write replaces the
+// whole file, an edit inserts its newString, and an apply_patch update
+// inserts each chunk's new lines.
 export function inferredLineRanges(
   after: string,
   call: { tool: string; input: Record<string, unknown> } | undefined,
+  options: InferredRangeOptions = {},
 ): LineRange[] {
   if (!call) return []
   if (call.tool === "write") return changedLineRanges("", after)
   if (call.tool === "edit" && typeof call.input.newString === "string") {
-    const range = locateInsertedText(after, call.input.newString)
+    const range = locateInsertedTextNear(after, call.input.newString, options.nearLine)
     return range ? [range] : []
+  }
+  if (call.tool === "apply_patch" && typeof call.input.patchText === "string") {
+    return patchLineRanges(after, call.input.patchText, options)
   }
   return []
 }

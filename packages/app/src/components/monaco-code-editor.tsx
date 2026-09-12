@@ -1,6 +1,7 @@
 import { createEffect, onCleanup, onMount, untrack } from "solid-js"
 import * as monaco from "monaco-editor"
-import { activeAttributions, ATTRIBUTION_TTL_MS, type AgentAttribution } from "./editor-attribution"
+import { TYPING_ARM_MS, typingPlan, typingSteps } from "./agent-edit-intent"
+import { activeAttributions, ATTRIBUTION_TTL_MS, type AgentAttribution, type LineRange } from "./editor-attribution"
 import { useSettings } from "@/context/settings"
 import editorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker"
 import cssWorker from "monaco-editor/esm/vs/language/css/css.worker?worker"
@@ -420,25 +421,30 @@ function modelFor(path: string, value: string) {
 const cssId = (value: string) => value.replace(/[^a-z0-9_-]/gi, "")
 
 // Monaco decorations take class names, not inline colours, so each agent's
-// colour is injected as a rule once and reused.
+// colour is injected as a rule once and reused. Rules accumulate per agent, so
+// two editors (or two agents) never drop each other's colours.
+const attributionRules = new Map<string, string>()
 let attributionStyleEl: HTMLStyleElement | undefined
 function attributionStyles(entries: readonly AgentAttribution[]) {
-  if (!entries.length) return
+  let changed = false
+  for (const entry of entries) {
+    const id = cssId(entry.agentId)
+    const rules = [
+      `.vector-agent-gutter.vector-agent-${id}{border-left:2px solid ${entry.color};margin-left:2px}`,
+      `.vector-agent-line.vector-agent-${id}{background:${entry.color}14}`,
+    ].join("")
+    if (attributionRules.get(id) === rules) continue
+    attributionRules.set(id, rules)
+    changed = true
+  }
+  if (!changed) return
   attributionStyleEl ??= (() => {
     const el = document.createElement("style")
     el.dataset.vectorAgentAttribution = "true"
     document.head.appendChild(el)
     return el
   })()
-  attributionStyleEl.textContent = entries
-    .map((entry) => {
-      const id = cssId(entry.agentId)
-      return [
-        `.vector-agent-gutter.vector-agent-${id}{border-left:2px solid ${entry.color};margin-left:2px}`,
-        `.vector-agent-line.vector-agent-${id}{background:${entry.color}14}`,
-      ].join("")
-    })
-    .join("")
+  attributionStyleEl.textContent = [...attributionRules.values()].join("")
 }
 
 export type MonacoReveal = {
@@ -454,26 +460,72 @@ export type MonacoAgentCursor = {
   agentName: string
   color: string
   line: number
+  /** editing: the call is running. waiting: it needs approval. landed (the default): the edit is on disk. */
+  state?: "editing" | "waiting" | "landed"
+  /** Where an editing or waiting agent's change will land. */
+  pending?: LineRange
+  /** When the cursor last moved. A landed cursor clears ATTRIBUTION_TTL_MS after it. */
+  token?: number
+}
+
+/** Replay the next change to the value as typing, in this agent's colour. */
+export type MonacoTyping = {
+  /** Date.now() when armed. Each token plays at most once, and only while fresh. */
+  token: number
+  agentId?: string
+  agentName?: string
+  color?: string
 }
 
 // The agent cursor is a collaborator-style marker: a tinted line with a
 // blinking caret and the agent's name after the text, in the agent's colour.
+// A call still running or waiting for approval also tints, dashed, the lines
+// its change will land on.
+const CURSOR_BASE_RULES = [
+  "@keyframes vector-agent-caret{0%,49%{opacity:1}50%,100%{opacity:.15}}",
+  ".vector-agent-cursor-label{display:inline-block;margin-left:14px;padding:0 6px;border-radius:4px;font-size:10px;font-weight:600;line-height:1.5;letter-spacing:.02em;font-family:ui-sans-serif,system-ui,sans-serif;font-style:normal;vertical-align:middle;white-space:nowrap;pointer-events:none;user-select:none}",
+  '.vector-agent-cursor-label::before{content:"";display:inline-block;width:2px;height:1.1em;margin-right:6px;vertical-align:text-bottom;border-radius:1px;background:currentColor;animation:vector-agent-caret 1s steps(1) infinite}',
+  ".vector-agent-cursor-waiting{font-style:italic}",
+  ".vector-agent-cursor-waiting::before{animation:none;opacity:.55}",
+].join("")
+
+const cursorRules = new Map<string, string>()
 let cursorStyleEl: HTMLStyleElement | undefined
-function cursorStyles(cursor: MonacoAgentCursor) {
+function cursorStyles(cursors: readonly Pick<MonacoAgentCursor, "agentId" | "color">[]) {
+  if (!cursors.length) return
+  let changed = !cursorStyleEl
+  for (const cursor of cursors) {
+    const id = cssId(cursor.agentId)
+    const rules = [
+      `.vector-agent-cursor-line.vector-agent-cursor-${id}{box-shadow:inset 2px 0 0 ${cursor.color}}`,
+      `.vector-agent-cursor-label.vector-agent-cursor-${id}{color:${cursor.color};background:${cursor.color}22}`,
+      `.vector-agent-pending.vector-agent-pending-${id}{background:${cursor.color}0d}`,
+      `.vector-agent-pending-gutter.vector-agent-pending-${id}{border-left:2px dashed ${cursor.color};margin-left:2px}`,
+    ].join("")
+    if (cursorRules.get(id) === rules) continue
+    cursorRules.set(id, rules)
+    changed = true
+  }
+  if (!changed) return
   cursorStyleEl ??= (() => {
     const el = document.createElement("style")
     el.dataset.vectorAgentCursor = "true"
     document.head.appendChild(el)
     return el
   })()
-  const id = cssId(cursor.agentId)
-  cursorStyleEl.textContent = [
-    "@keyframes vector-agent-caret{0%,49%{opacity:1}50%,100%{opacity:.15}}",
-    ".vector-agent-cursor-label{display:inline-block;margin-left:14px;padding:0 6px;border-radius:4px;font-size:10px;font-weight:600;line-height:1.5;letter-spacing:.02em;font-family:ui-sans-serif,system-ui,sans-serif;font-style:normal;vertical-align:middle;white-space:nowrap;pointer-events:none;user-select:none}",
-    '.vector-agent-cursor-label::before{content:"";display:inline-block;width:2px;height:1.1em;margin-right:6px;vertical-align:text-bottom;border-radius:1px;background:currentColor;animation:vector-agent-caret 1s steps(1) infinite}',
-    `.vector-agent-cursor-line.vector-agent-cursor-${id}{box-shadow:inset 2px 0 0 ${cursor.color}}`,
-    `.vector-agent-cursor-label.vector-agent-cursor-${id}{color:${cursor.color};background:${cursor.color}22}`,
-  ].join("")
+  cursorStyleEl.textContent = CURSOR_BASE_RULES + [...cursorRules.values()].join("")
+}
+
+// Time between typed chunks: at most TYPING_MAX_STEPS of these, so a replay
+// stays well under a second.
+const TYPING_FRAME_MS = 24
+
+function prefersReducedMotion() {
+  try {
+    return globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true
+  } catch {
+    return false
+  }
 }
 
 export function MonacoCodeEditor(props: {
@@ -485,6 +537,11 @@ export function MonacoCodeEditor(props: {
   reveal?: MonacoReveal
   /** Where an agent last typed; drawn as a named caret that clears after ATTRIBUTION_TTL_MS. */
   cursor?: MonacoAgentCursor
+  /** Every agent's cursor on this file. Takes precedence over `cursor`. */
+  cursors?: MonacoAgentCursor[]
+  /** Replay the next external change to `value` as the agent typing it. */
+  typing?: MonacoTyping
+  readOnly?: boolean
   onChange: (next: string) => void
   onSave?: (value: string) => void
   /** Cursor-style ghost-text completion source. When provided (and enabled by the
@@ -505,6 +562,10 @@ export function MonacoCodeEditor(props: {
   let applyingExternal = false
   let registeredUri: string | undefined
   let diagnosticsTimer: ReturnType<typeof setTimeout> | undefined
+  // An agent edit being replayed as typing (see playTyping).
+  let animation: { model: monaco.editor.ITextModel; target: string; token: number; finish: () => void } | undefined
+  let consumedTyping: number | undefined
+  let typingCaret: { agentId: string; agentName: string; color: string; line: number } | undefined
 
   // Route this editor's model to props.inlineComplete (read lazily so it stays current).
   const syncCompletion = () => {
@@ -594,7 +655,10 @@ export function MonacoCodeEditor(props: {
       autoClosingBrackets: "always",
       autoClosingQuotes: "always",
       autoIndent: "full",
+      readOnly: Boolean(props.readOnly),
     })
+    // The user took the editor: land the rest of a replay at once.
+    editor.onDidFocusEditorText(() => animation?.finish())
     editor.onDidChangeModelContent(() => {
       if (applyingExternal) return
       props.onChange(editor!.getValue())
@@ -622,6 +686,8 @@ export function MonacoCodeEditor(props: {
       if (registeredUri) languageServiceRegistry.delete(registeredUri)
       if (diagnosticsTimer) clearTimeout(diagnosticsTimer)
       if (cursorTimer) clearTimeout(cursorTimer)
+      // Models outlive the editor, so never leave one half-typed.
+      animation?.finish()
       editor?.dispose()
     })
   })
@@ -640,6 +706,77 @@ export function MonacoCodeEditor(props: {
     applyingExternal = false
   }
 
+  // Replays an agent's landed edit as typing. The replaced span goes at once,
+  // then the new text arrives over at most TYPING_MAX_STEPS frames with the
+  // agent's caret at its end. The model's own text is the "before", so nothing
+  // else needs plumbing. Every step is an external edit (no drafts, no
+  // language-server churn), and the whole replay is one undo step.
+  const playTyping = (model: monaco.editor.ITextModel, after: string, typing: MonacoTyping) => {
+    if (!editor) return false
+    const plan = typingPlan(model.getValue(), after)
+    const steps = plan ? typingSteps(plan.insert) : []
+    if (!plan || !steps.length) return false
+    const selections = editor.getSelections()
+    const at = (offset: number) => model.getPositionAt(offset)
+    const edit = (range: monaco.IRange, text: string) => {
+      applyingExternal = true
+      model.pushEditOperations(selections, [{ range, text, forceMoveMarkers: true }], () => null)
+      applyingExternal = false
+    }
+    const agent = {
+      agentId: typing.agentId ?? "agent",
+      agentName: typing.agentName ?? "Agent",
+      color: typing.color ?? "#9374ec",
+    }
+    let typed = 0
+    let index = 0
+    let frame = 0
+    let last = 0
+    const insert = (text: string) => {
+      const position = at(plan.offset + typed)
+      edit(monaco.Range.fromPositions(position, position), text)
+      typed += text.length
+    }
+    const finish = () => {
+      if (animation?.finish !== finish) return
+      if (frame) cancelAnimationFrame(frame)
+      frame = 0
+      // Land whatever is left in one edit, so the model always ends on the agent's text.
+      if (typed < plan.insert.length) insert(plan.insert.slice(typed))
+      model.pushStackElement()
+      animation = undefined
+      typingCaret = undefined
+      if (editor?.getModel() === model) paintAttributions(model)
+      paintCursors()
+    }
+    const tick = (time: number) => {
+      frame = 0
+      if (animation?.finish !== finish) return
+      if (editor?.getModel() !== model) return finish()
+      if (last && time - last < TYPING_FRAME_MS) {
+        frame = requestAnimationFrame(tick)
+        return
+      }
+      last = time
+      insert(steps[index]!)
+      index += 1
+      const end = at(plan.offset + typed)
+      typingCaret = { ...agent, line: end.lineNumber }
+      paintCursors()
+      editor.revealLineInCenterIfOutsideViewport(end.lineNumber, monaco.editor.ScrollType.Smooth)
+      if (index >= steps.length) return finish()
+      frame = requestAnimationFrame(tick)
+    }
+    model.pushStackElement()
+    if (plan.deleteLength) edit(monaco.Range.fromPositions(at(plan.offset), at(plan.offset + plan.deleteLength)), "")
+    animation = { model, target: after, token: typing.token, finish }
+    typingCaret = { ...agent, line: at(plan.offset).lineNumber }
+    paintCursors()
+    editor.revealLineInCenterIfOutsideViewport(typingCaret.line, monaco.editor.ScrollType.Smooth)
+    frame = requestAnimationFrame(tick)
+    return true
+  }
+
   // Keep the completion route pointed at the current model / callback.
   createEffect(() => {
     props.inlineComplete
@@ -655,16 +792,19 @@ export function MonacoCodeEditor(props: {
       lineNumbers: editorSettings.showLineNumbers() ? "on" : "off",
       renderLineHighlight: editorSettings.highlightActiveLine() ? "all" : "none",
       renderWhitespace: editorSettings.renderWhitespace() ? "all" : "selection",
+      readOnly: Boolean(props.readOnly),
     })
   })
 
   createEffect(() => {
     const path = props.path
     const value = props.value
+    const typing = props.typing
     if (!editor) return
     const current = editor.getModel()
     const nextUri = monaco.Uri.file(path || "untitled.txt")
     if (current?.uri.toString() !== nextUri.toString()) {
+      animation?.finish()
       applyingExternal = true
       editor.setModel(modelFor(path, value))
       applyingExternal = false
@@ -672,11 +812,31 @@ export function MonacoCodeEditor(props: {
       scheduleDiagnostics(0)
       return
     }
+    if (!current) return
+    if (animation) {
+      // Still typing towards this text: the replay paints when it ends. A newer
+      // value or a newer agent edit lands the rest at once instead.
+      if (animation.model === current && animation.target === value && (!typing || typing.token === animation.token))
+        return
+      animation.finish()
+    }
     // Sync the agent's text in BEFORE painting: applyExternal replaces the whole
     // model range, which drags every decoration inside it to the end of the
     // edit. Painting first would collapse the stripes onto one line.
-    if (current && !editor.hasTextFocus()) applyExternal(current, value)
-    if (current) paintAttributions(current)
+    if (!editor.hasTextFocus()) {
+      const replay =
+        typing !== undefined &&
+        typing.token !== consumedTyping &&
+        Date.now() - typing.token < TYPING_ARM_MS &&
+        current.getValue() !== value &&
+        !prefersReducedMotion()
+      if (replay) {
+        consumedTyping = typing.token
+        if (playTyping(current, value, typing)) return
+      }
+      applyExternal(current, value)
+    }
+    paintAttributions(current)
   })
 
   // Paint one gutter stripe and line highlight per agent that recently edited
@@ -720,6 +880,8 @@ export function MonacoCodeEditor(props: {
     const model = editor.getModel()
     if (!model || model.uri.toString() !== monaco.Uri.file(props.path || "untitled.txt").toString()) return
     revealedToken = reveal.token
+    // A replay in progress scrolls with its own caret and paints when it ends.
+    if (animation?.model === model) return
     // Untracked: a reveal is a one-shot on its token, not a reaction to typing.
     applyExternal(
       model,
@@ -733,41 +895,97 @@ export function MonacoCodeEditor(props: {
     editor.revealRangeInCenterIfOutsideViewport(new monaco.Range(line, 1, endLine, 1), monaco.editor.ScrollType.Smooth)
   })
 
-  // The agent's cursor: a tinted line plus a caret-and-name label injected
-  // after the text. It fades on the same clock as the line attributions.
-  createEffect(() => {
-    const cursor = props.cursor
-    const token = props.reveal?.token
+  const cursorList = (): MonacoAgentCursor[] => {
+    if (props.cursors) return props.cursors
+    return props.cursor ? [{ ...props.cursor, token: props.cursor.token ?? props.reveal?.token }] : []
+  }
+
+  // The agents' cursors: a tinted line plus a caret-and-name label injected
+  // after the text, one per agent, so subagents, parallel agents and external
+  // agents stay distinguishable on one file. A landed cursor fades on the same
+  // clock as the line attributions; a running or waiting one stays until its
+  // call resolves. During a replay the typing agent's caret follows the text.
+  const paintCursors = () => {
     if (!editor) return
     if (cursorTimer) clearTimeout(cursorTimer)
+    cursorTimer = undefined
     cursorCollection ??= editor.createDecorationsCollection()
     const model = editor.getModel()
-    const remaining = token === undefined ? ATTRIBUTION_TTL_MS : ATTRIBUTION_TTL_MS - (Date.now() - token)
-    if (
-      !cursor ||
-      !model ||
-      remaining <= 0 ||
-      model.uri.toString() !== monaco.Uri.file(props.path || "untitled.txt").toString()
-    ) {
+    if (!model || model.uri.toString() !== monaco.Uri.file(untrack(() => props.path) || "untitled.txt").toString()) {
       cursorCollection.clear()
       return
     }
-    cursorStyles(cursor)
-    const line = Math.min(Math.max(1, cursor.line), model.getLineCount())
-    const column = model.getLineMaxColumn(line)
-    const id = cssId(cursor.agentId)
-    cursorCollection.set([
-      {
-        range: new monaco.Range(line, column, line, column),
-        options: {
-          isWholeLine: true,
-          className: `vector-agent-cursor-line vector-agent-cursor-${id}`,
-          after: { content: cursor.agentName, inlineClassName: `vector-agent-cursor-label vector-agent-cursor-${id}` },
-          stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
-        },
-      },
-    ])
-    cursorTimer = setTimeout(() => cursorCollection?.clear(), remaining)
+    const now = Date.now()
+    let expires = Infinity
+    const list = untrack(cursorList).filter((cursor) => {
+      if (cursor.state === "editing" || cursor.state === "waiting" || cursor.token === undefined) return true
+      const remaining = ATTRIBUTION_TTL_MS - (now - cursor.token)
+      if (remaining <= 0) return false
+      expires = Math.min(expires, remaining)
+      return true
+    })
+    const caret = typingCaret
+    const shown: MonacoAgentCursor[] =
+      caret && !list.some((cursor) => cursor.agentId === caret.agentId)
+        ? [...list, { agentId: caret.agentId, agentName: caret.agentName, color: caret.color, line: caret.line }]
+        : list
+    cursorStyles(shown)
+    const total = model.getLineCount()
+    const clamp = (line: number) => Math.min(Math.max(1, line), total)
+    cursorCollection.set(
+      shown.flatMap((cursor) => {
+        const id = cssId(cursor.agentId)
+        const typingHere = caret !== undefined && caret.agentId === cursor.agentId
+        const line = clamp(typingHere && caret ? caret.line : cursor.line)
+        const column = model.getLineMaxColumn(line)
+        const waiting = cursor.state === "waiting" && !typingHere
+        const label = waiting
+          ? `${cursor.agentName} · waiting for approval`
+          : typingHere || cursor.state === "editing"
+            ? `${cursor.agentName} · editing`
+            : cursor.agentName
+        const decorations: monaco.editor.IModelDeltaDecoration[] = [
+          {
+            range: new monaco.Range(line, column, line, column),
+            options: {
+              isWholeLine: true,
+              className: `vector-agent-cursor-line vector-agent-cursor-${id}`,
+              after: {
+                content: label,
+                inlineClassName: `vector-agent-cursor-label vector-agent-cursor-${id}${waiting ? " vector-agent-cursor-waiting" : ""}`,
+              },
+              stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
+            },
+          },
+        ]
+        const pending = cursor.pending
+        if (pending && !typingHere && (cursor.state === "editing" || cursor.state === "waiting")) {
+          const start = clamp(pending.start)
+          decorations.push({
+            range: new monaco.Range(start, 1, clamp(Math.max(start, pending.end)), 1),
+            options: {
+              isWholeLine: true,
+              className: `vector-agent-pending vector-agent-pending-${id}`,
+              linesDecorationsClassName: `vector-agent-pending-gutter vector-agent-pending-${id}`,
+              hoverMessage: {
+                value: waiting
+                  ? `${cursor.agentName} is waiting for approval to change these lines`
+                  : `${cursor.agentName} is about to change these lines`,
+              },
+              overviewRuler: { color: cursor.color, position: monaco.editor.OverviewRulerLane.Left },
+            },
+          })
+        }
+        return decorations
+      }),
+    )
+    if (expires < Infinity) cursorTimer = setTimeout(paintCursors, expires)
+  }
+
+  createEffect(() => {
+    cursorList()
+    props.path
+    paintCursors()
   })
 
   return <div ref={host} class="vector-neon-editor relative h-full min-h-0 w-full overflow-hidden" />
