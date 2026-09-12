@@ -203,8 +203,10 @@ export async function createSwarmRun(input: CreateSwarmRunInput, engine: Paralle
   ]
   const strategy = input.strategy ?? "balanced"
   const planner = selectSwarmPlannerModel(modelPool, strategy)
-  const maxAgents = Math.max(2, Math.min(16, Math.floor(input.maxAgents ?? 8)))
-  const maxConcurrency = Math.max(1, Math.min(16, maxAgents, Math.floor(input.maxConcurrency ?? 4)))
+  const requestedAgents = Number.isFinite(input.maxAgents) ? Math.floor(input.maxAgents!) : 8
+  const requestedConcurrency = Number.isFinite(input.maxConcurrency) ? Math.floor(input.maxConcurrency!) : 4
+  const maxAgents = Math.max(2, requestedAgents)
+  const maxConcurrency = Math.max(1, Math.min(maxAgents, requestedConcurrency))
   const createdAt = now()
   const id = randomUUID()
   const record: SwarmRunRecord = {

@@ -47,4 +47,13 @@ describe("swarm plan", () => {
     expect(routed.find((task) => task.id === "map-project")?.model).toBe("gemini-flash")
     expect(routed.find((task) => task.id === "implement-objective")?.model).toBe("claude-opus")
   })
+
+  test("keeps every task the planner returns, past the old cap of 32", () => {
+    const tasks = Array.from({ length: 40 }, (_, index) => ({
+      id: `t${index}`,
+      prompt: `Task ${index}`,
+      dependsOn: [],
+    }))
+    expect(parseSwarmPlan(JSON.stringify({ tasks }), "Objective", 40).tasks).toHaveLength(40)
+  })
 })

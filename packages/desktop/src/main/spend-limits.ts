@@ -141,7 +141,7 @@ export function createSpendLedger(input: { userDataPath: string }) {
 
   const load = () => (cached ??= readLedger(file))
 
-  // Every mutation runs through one chain. Up to sixteen parallel agents record
+  // Every mutation runs through one chain. Any number of parallel agents record
   // spend concurrently, and interleaved read-modify-write would drop events —
   // precisely the events a cap exists to count.
   const update = (change: (state: SpendLedgerState) => SpendLedgerState) => {
@@ -497,7 +497,7 @@ function prune(state: SpendLedgerState, at: Date): SpendLedgerState {
   return {
     ...state,
     // Folding completed days cannot bound a day that is still going, and a
-    // swarm polling sixteen runs crosses the ceiling inside one afternoon.
+    // swarm polling a dozen or more runs crosses the ceiling inside one afternoon.
     // Collapsing the survivors instead keeps the file proportional to the
     // number of runs rather than the number of polls.
     events: overCeiling ? collapse(kept) : kept,

@@ -237,6 +237,25 @@ describe("sending a follow-up to an external workspace", () => {
     expect(refreshed.riskLevel).toBe("low")
   })
 
+  test("a task can hold more than sixteen active agents", async () => {
+    const sourcePath = join(userDataPath, "project")
+    await mkdir(sourcePath, { recursive: true })
+    await writeFile(join(sourcePath, "README.md"), "# Many\n", "utf8")
+    const created = []
+    for (let index = 0; index < 17; index++) {
+      created.push(
+        await createParallelWorkspace({
+          name: `Agent ${index + 1}`,
+          taskPrompt: "Read README.md.",
+          runtime: "codex",
+          parentSessionId: "session-many",
+          sourcePath,
+        }),
+      )
+    }
+    expect(created).toHaveLength(17)
+  })
+
   test("a legacy copy without a baseline never reports the whole tree as newly added", async () => {
     const sourcePath = join(userDataPath, "source")
     const isolatedPath = join(userDataPath, "legacy-copy")

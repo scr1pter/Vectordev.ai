@@ -424,7 +424,7 @@ function evictExcess(records: FailureSignatureRecord[]) {
 }
 
 // Every parallel workspace for a project writes back to the same file when its
-// guardrails finish, and sixteen of them can finish at once. Chaining the
+// guardrails finish, and any number of them can finish at once. Chaining the
 // read-modify-write per project is what stops one run's record from silently
 // overwriting another's.
 const writeChains = new Map<string, Promise<unknown>>()

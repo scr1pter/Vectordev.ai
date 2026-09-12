@@ -99,7 +99,7 @@ const pillars = [
   },
   {
     name: "Parallel agents",
-    eyebrow: "Up to 16 · isolated or shared",
+    eyebrow: "No agent cap · isolated or shared",
     body: "When one agent is not enough, run several in their own checkouts or together in one, watch them from a single dashboard, and merge only what you trust.",
     icon: Users,
   },
@@ -239,8 +239,8 @@ const features: Feature[] = [
     link: "How review works",
   },
   {
-    title: "And when one agent is not enough, run sixteen.",
-    body: "A single task can hold up to sixteen active agents. Each gets its own checkout: a Git worktree on its own branch cut from HEAD when the project is a Git repository with a clean working tree, and an isolated copy of the project otherwise — Vector records which one it used rather than failing quietly. Or put them in one shared checkout, where they see each other's edits as they happen and message a named teammate or the whole team; you choose who may reach whom, and a message to someone you have not linked is refused with a reason rather than dropped. The dashboard shows status, model, files touched, cost so far, elapsed time, and both agents whenever two are holding the same file.",
+    title: "And when one agent is not enough, run as many as the work needs.",
+    body: "A single task can hold as many active agents as you start. Vector sets no cap — your computer and your provider's rate limits do, and the launcher tells you when a launch outruns your cores. Each gets its own checkout: a Git worktree on its own branch cut from HEAD when the project is a Git repository with a clean working tree, and an isolated copy of the project otherwise — Vector records which one it used rather than failing quietly. Or put them in one shared checkout, where they see each other's edits as they happen and message a named teammate or the whole team; you choose who may reach whom, and a message to someone you have not linked is refused with a reason rather than dropped. The dashboard shows status, model, files touched, cost so far, elapsed time, and both agents whenever two are holding the same file.",
     tag: "Parallel agents",
     note: "Isolated by default",
     demo: "agents",
@@ -413,7 +413,7 @@ const comparison = [
   ["Connector catalog", "118 connectors, plus your own MCP", "Via MCP", "Via MCP", "Via MCP", "—"],
   ["Browser the agent drives", "Built in, refuses credentials", "Via tools", "Browser + CDP", "Via tools", "Preview-centric"],
   ["Deploys on accounts you own", "Vercel, Netlify, Supabase, AWS", "Via tools", "Via tools", "Via MCP", "Native hosting"],
-  ["Parallel isolated agents", "Up to 16", "Subagents", "Worktrees", "Background agents", "—"],
+  ["Parallel isolated agents", "No cap", "Subagents", "Worktrees", "Background agents", "—"],
   ["Recurring work with no window open", "Desktop tray", "—", "—", "—", "—"],
 ]
 
@@ -748,7 +748,7 @@ const changelog = [
         </article>
         <article class="simple-row" data-reveal style="--rd: 180ms">
           <h3>Runs a team when you need one</h3>
-          <p>Up to sixteen agents in parallel, each in its own workspace, merged when you say so.</p>
+          <p>As many agents in parallel as your machine can run, each in its own workspace, merged when you say so.</p>
         </article>
         <article class="simple-row simple-row-wide" data-reveal style="--rd: 240ms">
           <h3>Vector Velocity <span class="simple-soon">Coming soon</span></h3>

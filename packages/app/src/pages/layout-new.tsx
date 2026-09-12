@@ -1746,17 +1746,29 @@ export default function NewLayout(props: ParentProps) {
     onCleanup(() => globalThis.window?.removeEventListener(WORKSPACE_FILE_SAVED_EVENT, listener))
   })
 
-  // Only live work occupies launch slots: running/queued agents and results
-  // that still need review. Merged, discarded, failed, stopped, and
-  // no-change records are history and can be removed from the list.
-  const availableWorkspaceSlots = () => {
-    const existingWorkspaceCount = parallelRecords().filter(
+  // Only live work counts: running/queued agents and results that still need
+  // review. Merged, discarded, failed, stopped, and no-change records are history.
+  const activeWorkspaceCount = () =>
+    parallelRecords().filter(
       (record) =>
         record.swarmRole !== "coordinator" &&
         record.mergeState === "none" &&
         !["failed", "stopped", "complete"].includes(record.status),
     ).length
-    return Math.max(0, 16 - existingWorkspaceCount)
+  // Vector sets no cap. Past one live agent per core, the builds, tests and type
+  // checks they run queue for CPU, so the launcher warns and never refuses.
+  const machineCores = () => globalThis.navigator?.hardwareConcurrency || 0
+  const launchCount = () =>
+    parallelLaunchMode() === "swarm"
+      ? swarmConcurrency()
+      : parallelCompareRuntimes()
+        ? readyComparisonRuntimes().length
+        : 1
+  const launchTotal = () => activeWorkspaceCount() + launchCount()
+  const pastMachineCores = () => machineCores() > 0 && launchTotal() > machineCores()
+  const wholeAtLeast = (value: string, min: number) => {
+    const parsed = Math.floor(Number(value))
+    return Number.isFinite(parsed) ? Math.max(min, parsed) : min
   }
 
   const createParallelWorkspace = async () => {
@@ -1764,7 +1776,6 @@ export default function NewLayout(props: ParentProps) {
     const unresolvedScope = await resolveTaskWorkspace()
     const sourcePath = unresolvedScope.sourcePath
     const taskPrompt = parallelPrompt().trim()
-    const availableSlots = availableWorkspaceSlots()
     if (!api) {
       reportDesktopOnlyParallel()
       return
@@ -1779,12 +1790,6 @@ export default function NewLayout(props: ParentProps) {
       setParallelError("No active project path is loaded. Open a project first, then launch an isolated agent.")
       return
     }
-    if (availableSlots === 0) {
-      setParallelError(
-        "Vector can run up to 16 active isolated agents. Merge, discard, or remove a finished workspace before launching another.",
-      )
-      return
-    }
     if (!taskPrompt) {
       setParallelError("Describe the project work this isolated agent should handle.")
       return
@@ -1792,10 +1797,6 @@ export default function NewLayout(props: ParentProps) {
     const runtimes = parallelCompareRuntimes() ? readyComparisonRuntimes() : [parallelRuntime()]
     if (parallelCompareRuntimes() && runtimes.length < 2) {
       setParallelError("Connect Vector or install at least two coding-agent runtimes before starting a comparison.")
-      return
-    }
-    if (runtimes.length > availableSlots) {
-      setParallelError(`This comparison needs ${runtimes.length} agent slots, but only ${availableSlots} remain.`)
       return
     }
     if (runtimes.includes("vector") && parallelModelOptions().length === 0) {
@@ -2185,7 +2186,7 @@ export default function NewLayout(props: ParentProps) {
       reportDesktopOnlyParallel()
       return
     }
-    const record = await api.run(id, 16).catch((error: unknown) => {
+    const record = await api.run(id, Number.POSITIVE_INFINITY).catch((error: unknown) => {
       setParallelError(error instanceof Error ? error.message : String(error))
       return undefined
     })
@@ -4338,12 +4339,9 @@ export default function NewLayout(props: ParentProps) {
                     <input
                       type="number"
                       min="2"
-                      max="16"
                       class="mt-1 w-full bg-transparent text-[12px] text-white/78 outline-none"
-                      value={Math.min(16, swarmMaxAgents())}
-                      onInput={(event) =>
-                        setSwarmMaxAgents(Math.max(2, Math.min(16, Number(event.currentTarget.value) || 2)))
-                      }
+                      value={swarmMaxAgents()}
+                      onInput={(event) => setSwarmMaxAgents(wholeAtLeast(event.currentTarget.value, 2))}
                     />
                   </label>
                   <label class="rounded-[10px] border border-[color:var(--vx-line)] bg-white/[0.025] px-3 py-2">
@@ -4351,18 +4349,23 @@ export default function NewLayout(props: ParentProps) {
                     <input
                       type="number"
                       min="1"
-                      max="16"
+                      max={swarmMaxAgents()}
                       class="mt-1 w-full bg-transparent text-[12px] text-white/78 outline-none"
-                      value={Math.min(16, swarmConcurrency())}
-                      onInput={(event) =>
-                        setSwarmConcurrency(Math.max(1, Math.min(16, Number(event.currentTarget.value) || 1)))
-                      }
+                      value={Math.min(swarmConcurrency(), swarmMaxAgents())}
+                      onInput={(event) => setSwarmConcurrency(wholeAtLeast(event.currentTarget.value, 1))}
                     />
                   </label>
                 </div>
                 <p class="rounded-[10px] border border-amber-300/15 bg-amber-300/[0.045] px-3 py-2 text-[11px] leading-5 text-amber-100/68">
                   Concurrent agents share your configured provider keys and can multiply usage. Your main project
                   remains untouched until you approve the final diff.
+                </p>
+              </Show>
+
+              <Show when={pastMachineCores()}>
+                <p class="rounded-[10px] border border-[color:var(--vx-amber)]/25 bg-[color:var(--vx-amber)]/[0.06] px-3 py-2 text-[11px] leading-5 text-[color:var(--vx-amber)]">
+                  This puts {launchTotal()} agents on a {machineCores()}-core computer. Vector will start them all;
+                  builds and tests will wait their turn for CPU, and every agent spends on your own provider keys.
                 </p>
               </Show>
 
@@ -4379,8 +4382,8 @@ export default function NewLayout(props: ParentProps) {
             <footer class="vx-launcher__footer flex items-center justify-between px-6 py-4">
               <span class="text-[11px] text-white/38">
                 {parallelLaunchMode() === "swarm"
-                  ? `Up to ${Math.min(16, swarmMaxAgents())} isolated specialists`
-                  : `${availableWorkspaceSlots()} of 16 agent slots available`}
+                  ? `Up to ${swarmMaxAgents()} isolated specialists`
+                  : `${activeWorkspaceCount()} running · no agent limit`}
               </span>
               <div class="flex items-center gap-2">
                 <button
@@ -5257,12 +5260,9 @@ export default function NewLayout(props: ParentProps) {
                           <input
                             type="number"
                             min="2"
-                            max="32"
                             class="mt-1 w-full bg-transparent text-[12.5px] text-white/78 outline-none"
                             value={swarmMaxAgents()}
-                            onInput={(event) =>
-                              setSwarmMaxAgents(Math.max(2, Math.min(32, Number(event.currentTarget.value) || 2)))
-                            }
+                            onInput={(event) => setSwarmMaxAgents(wholeAtLeast(event.currentTarget.value, 2))}
                           />
                         </label>
                         <label class="col-span-2 rounded-[10px] border border-[color:var(--vx-line)] bg-white/[0.025] px-3 py-2">
@@ -5273,12 +5273,10 @@ export default function NewLayout(props: ParentProps) {
                           <input
                             type="range"
                             min="1"
-                            max={Math.min(16, swarmMaxAgents())}
+                            max={swarmMaxAgents()}
                             class="mt-2 w-full accent-[color:var(--vx-purple)]"
                             value={Math.min(swarmConcurrency(), swarmMaxAgents())}
-                            onInput={(event) =>
-                              setSwarmConcurrency(Math.max(1, Math.min(16, Number(event.currentTarget.value) || 1)))
-                            }
+                            onInput={(event) => setSwarmConcurrency(wholeAtLeast(event.currentTarget.value, 1))}
                           />
                         </label>
                       </div>

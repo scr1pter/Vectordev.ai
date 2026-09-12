@@ -990,6 +990,44 @@ describe("tool.task", () => {
     }),
   )
 
+  background.instance("launches a seventeenth background subagent and says how many are running", () =>
+    Effect.gen(function* () {
+      const { chat, assistant } = yield* seed()
+      const tool = yield* TaskTool
+      const def = yield* tool.init()
+      const launch = (index: number) =>
+        def.execute(
+          {
+            description: `inspect ${index}`,
+            prompt: `look at area ${index}`,
+            subagent_type: "general",
+            background: true,
+          },
+          {
+            sessionID: chat.id,
+            messageID: assistant.id,
+            agent: "build",
+            abort: new AbortController().signal,
+            extra: {
+              promptOps: {
+                ...stubOps(),
+                prompt: () => Effect.never,
+              } satisfies TaskPromptOps,
+            },
+            messages: [],
+            metadata: () => Effect.void,
+            ask: () => Effect.void,
+          },
+        )
+
+      for (let index = 1; index < 17; index++) yield* launch(index)
+      const result = yield* launch(17)
+
+      expect(result.output).toContain(`state="running"`)
+      expect(result.output).toContain("17 subagents are now running")
+    }),
+  )
+
   background.instance("background task completion waits for running updates", () =>
     Effect.gen(function* () {
       const jobs = yield* BackgroundJob.Service

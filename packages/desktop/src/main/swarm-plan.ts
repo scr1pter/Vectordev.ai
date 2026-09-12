@@ -53,7 +53,7 @@ export function parseSwarmPlan(value: string, objective: string, maxTasks = 12):
   const root = parsed
   if (!Array.isArray(root.tasks)) throw new Error("The planning agent returned no task list.")
 
-  const limit = Math.max(2, Math.min(32, Math.floor(maxTasks)))
+  const limit = Math.max(2, Number.isFinite(maxTasks) ? Math.floor(maxTasks) : 12)
   const raw = root.tasks
     .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
     .slice(0, limit)

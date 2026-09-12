@@ -40,8 +40,9 @@ const BACKGROUND_UPDATED = [
   "DO NOT sleep, poll for progress, ask the task for status, or duplicate this task's work — avoid working with the same files or topics it is using.",
   "Work on non-overlapping tasks, or briefly tell the user what you sent and end your response.",
 ].join("\n")
-const MAX_ACTIVE_SUBAGENTS = 16
-const MAX_ACTIVE_SUBAGENTS_PER_SESSION = 6
+// Not a cap: past this many running siblings the launch result tells the model,
+// so it can tell the user, because each subagent spends on their keys.
+const BUSY_SUBAGENTS_PER_SESSION = 6
 const MAX_SUBAGENT_DEPTH = 2
 
 function normalizedPath(value: string) {
@@ -252,21 +253,11 @@ export const TaskTool = Tool.define(
           new Error(`Subagent depth is limited to ${MAX_SUBAGENT_DEPTH} so delegated work cannot recursively fan out forever.`),
         )
       }
+      let runningSiblings = 0
       if (!params.task_id) {
-        const active = (yield* background.list()).filter((job) => job.type === id && job.status === "running")
-        if (active.length >= MAX_ACTIVE_SUBAGENTS) {
-          return yield* Effect.fail(
-            new Error(`Vector already has ${MAX_ACTIVE_SUBAGENTS} active subagents. Wait for or stop one before launching another.`),
-          )
-        }
-        const activeForParent = active.filter((job) => job.metadata?.parentSessionId === ctx.sessionID)
-        if (activeForParent.length >= MAX_ACTIVE_SUBAGENTS_PER_SESSION) {
-          return yield* Effect.fail(
-            new Error(
-              `This task already has ${MAX_ACTIVE_SUBAGENTS_PER_SESSION} active subagents. Reuse an existing task or wait for one to finish.`,
-            ),
-          )
-        }
+        runningSiblings = (yield* background.list()).filter(
+          (job) => job.type === id && job.status === "running" && job.metadata?.parentSessionId === ctx.sessionID,
+        ).length
       }
 
       if (!ctx.extra?.bypassAgentCheck) {
@@ -469,7 +460,10 @@ export const TaskTool = Tool.define(
             sessionID: nextSession.id,
             state: "running",
             summary: "Background task started",
-            text: BACKGROUND_STARTED,
+            text:
+              runningSiblings + 1 > BUSY_SUBAGENTS_PER_SESSION
+                ? `${BACKGROUND_STARTED}\n${runningSiblings + 1} subagents are now running for this task. Vector sets no limit, but each one spends on the user's provider keys, so tell the user how many are running.`
+                : BACKGROUND_STARTED,
           }),
         }
       }

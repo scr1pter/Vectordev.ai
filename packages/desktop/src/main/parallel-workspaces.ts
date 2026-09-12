@@ -1,7 +1,8 @@
 import { execFile } from "node:child_process"
 import { createHash, randomUUID } from "node:crypto"
 import { createReadStream } from "node:fs"
-import { cp, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises"
+import { cp, mkdir, readFile, readdir, rename, rm, stat, statfs, writeFile } from "node:fs/promises"
+import { availableParallelism } from "node:os"
 import { basename, dirname, join, relative } from "node:path"
 import { app } from "electron"
 import { VERIFIED_COMPLETION_POLICY } from "@opencode-ai/app/judge"
@@ -192,11 +193,15 @@ type ActiveParallelRun = {
 
 const activeRuns = new Map<string, ActiveParallelRun>()
 const queuedRuns = new Map<string, ActiveParallelRun>()
-let maxConcurrentRuns = 16
+// No cap: every launch the user asks for starts. A swarm passes its own
+// maxConcurrency and throttles itself (swarm-orchestrator.ts `slots`), so the
+// shared pool only narrows when a caller explicitly asks it to.
+let maxConcurrentRuns = Number.POSITIVE_INFINITY
 
 function normalizeConcurrency(value?: number) {
-  if (!Number.isFinite(value)) return maxConcurrentRuns
-  return Math.max(1, Math.min(16, Math.floor(value!)))
+  if (value === undefined || Number.isNaN(value)) return maxConcurrentRuns
+  if (value === Number.POSITIVE_INFINITY) return value
+  return Math.max(1, Math.floor(value))
 }
 
 function drainParallelRunQueue() {
@@ -788,6 +793,25 @@ async function copyProject(sourcePath: string, targetPath: string) {
   })
 }
 
+// Vector sets no agent cap, and a copy workspace duplicates the whole project,
+// so many agents on an uncommitted tree can fill the disk. Warn only, never
+// block: statfs fails on some filesystems, and the copy goes ahead either way.
+const LOW_DISK_BYTES = 5 * 1024 ** 3
+
+async function noteLowDisk(directory: string, logs: string[]) {
+  try {
+    const disk = await statfs(directory)
+    const free = disk.bavail * disk.bsize
+    if (free < LOW_DISK_BYTES) {
+      logs.push(
+        `Only ${(free / 1024 ** 3).toFixed(1)} GB of disk space is free; copying the project for this agent may fill the disk.`,
+      )
+    }
+  } catch {
+    // This filesystem cannot report free space, so there is nothing to warn about.
+  }
+}
+
 function estimateCost(taskPrompt: string, hashes: Record<string, string>, contextTokens?: number) {
   const fileCount = Object.keys(hashes).length
   const roughTokens = Math.ceil(taskPrompt.length / 4 + (contextTokens ?? Math.min(fileCount * 120, 120_000)))
@@ -1321,11 +1345,6 @@ export async function createParallelWorkspace(input: CreateParallelWorkspaceInpu
       record.mergeState === "none" &&
       !["failed", "stopped", "complete"].includes(record.status),
   )
-  if (activeInScope.length >= 16) {
-    throw new Error(
-      "This task already has 16 active parallel agents. Merge, discard, or remove one before creating another.",
-    )
-  }
   const root = workspaceRoot()
   const workspaceDir = join(root, id)
   let isolatedPath = join(workspaceDir, "workspace")
@@ -1346,6 +1365,12 @@ export async function createParallelWorkspace(input: CreateParallelWorkspaceInpu
   let gitBranch: string | undefined
   let baseCommit: string | undefined
   const logs: string[] = []
+  const cores = availableParallelism()
+  if (activeInScope.length + 1 > cores) {
+    logs.push(
+      `${activeInScope.length + 1} agents are active in this task on a ${cores}-core machine; builds and tests may wait for CPU.`,
+    )
+  }
 
   // A collaborative member joins an existing tree rather than getting its own,
   // which is the point of the topology: teammates see each other's edits as
@@ -1373,6 +1398,7 @@ export async function createParallelWorkspace(input: CreateParallelWorkspaceInpu
       logs.push(`Created git worktree on ${gitBranch}.`)
     } catch (error) {
       logs.push(`Git worktree failed, using isolated copy: ${error instanceof Error ? error.message : String(error)}`)
+      await noteLowDisk(workspaceDir, logs)
       await copyProject(sourceRoot, isolatedPath)
     }
   } else {
@@ -1381,6 +1407,7 @@ export async function createParallelWorkspace(input: CreateParallelWorkspaceInpu
         ? "Main project has uncommitted changes, using isolated copy to preserve current state."
         : "No git repository found, using isolated copy.",
     )
+    await noteLowDisk(workspaceDir, logs)
     await copyProject(sourceRoot, isolatedPath)
   }
 
