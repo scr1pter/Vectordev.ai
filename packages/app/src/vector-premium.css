@@ -2146,71 +2146,180 @@ html[data-vector-navigation-resizing] * {
 }
 
 /* ---- Model pickers ---------------------------------------------------------
-   Distinct Vector look for both the floating popover and the full "Select model"
-   dialog: a curved rectangular glass surface with a gradient hairline, monospace
-   provider labels, and rounded pill rows with a distinct Vector treatment.
-   Provider names remain accurate to their upstream services. */
+   The "Select model" dialog (composer model button, mod+') and the popover
+   (Parallel Workspaces) share one row anatomy: a 16px mark gutter, the model
+   name, an optional "New", and a quiet right-aligned spec line: the context
+   size, after "Free" or "<Plan> plan" where a section mixes ways of paying
+   ("ChatGPT plan · 400K"). The rest is in the row's tooltip. Theme tokens and
+   hairlines only. One neutral fill marks the keyboard/pointer row, Manage
+   models included (data-active); the current model gets a purple check and a
+   heavier name, never a fill of its own. */
 
-/* --- floating popover (composer chip) --- */
 .vector-model-popover {
-  border-radius: 16px;
-  border-color: rgba(147, 116, 236, 0.3);
-  box-shadow:
-    0 28px 90px rgba(0, 0, 0, 0.55),
-    inset 0 1px 0 rgba(255, 255, 255, 0.05),
-    inset 0 0 0 1px rgba(147, 116, 236, 0.12);
+  border-radius: 12px;
+  border-color: var(--vx-line-strong);
 }
 
-/* Group labels: quiet and minimal — a soft caption, not a loud mono banner */
-.vector-model-popover [data-slot="menu-v2-group-label"],
-.vector-select-model-dialog [data-slot="menu-v2-group-label"] {
-  color: rgba(255, 255, 255, 0.36);
-  text-transform: none;
-  letter-spacing: 0;
-  font-size: 11px;
-  font-weight: 500;
-  padding: 10px 12px 4px;
-}
-
-/* --- Select model dialog. IMPORTANT: the overall size comes from the component's
-   size="large" prop, which sizes [data-slot="dialog-container"]. Do NOT set a width
-   on the content (.vector-select-model-dialog is on [data-slot="dialog-content"]) —
-   the container has overflow:hidden, so a wider content just gets clipped (that was
-   the bug that cut off the "Connect provider" button). We only recolor + round the
-   already-sized container here. --- */
+/* The dialog's size comes from DialogV2 size="large", which sizes
+   [data-slot="dialog-container"]. Do NOT set a width on .vector-select-model-dialog
+   (it is [data-slot="dialog-content"], inside a container with overflow:hidden):
+   wider content just gets clipped, which is the bug that cut off "Connect
+   provider". Border colour and shadow come from the shared dialog-v2 rule. */
 [data-slot="dialog-container"]:has(.vector-select-model-dialog) {
-  border-radius: 18px !important;
-  border: 1px solid var(--vx-line);
-  background: #17171c !important;
-  box-shadow: 0 32px 90px rgba(0, 0, 0, 0.55);
+  border: 1px solid var(--vx-line-strong);
+  border-radius: 16px !important;
+  background: var(--vx-canvas) !important;
 }
 
-.vector-select-model-dialog [data-slot="dialog-title"] {
-  font-weight: 600;
-  letter-spacing: -0.01em;
-}
-
-/* Search: clean rounded field, neutral focus */
 .vector-select-model-dialog [data-component="text-input-v2"] {
   border-radius: 12px;
   border-color: var(--vx-line);
-  background: rgba(255, 255, 255, 0.03);
+  background: color-mix(in srgb, var(--vx-text) 3%, transparent);
 }
 .vector-select-model-dialog [data-component="text-input-v2"]:focus-within {
   border-color: var(--vx-line);
   box-shadow: none;
 }
 
-/* Rows: clean and rounded, subtle neutral hover / selection */
-.vector-select-model-dialog [data-component="menu-v2-item"] {
-  border-radius: 10px;
-  padding-block: 10px;
-  transition: background 120ms ease;
+/* Section label rows: the only divider between sections. */
+:is(.vector-model-popover, .vector-select-model-dialog) [data-slot="menu-v2-group-label"] {
+  gap: 8px;
+  height: 28px;
+  padding: 0 12px;
+  color: var(--vx-text-muted);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
 }
-.vector-select-model-dialog [data-component="menu-v2-item"]:hover,
-.vector-select-model-dialog [data-component="menu-v2-item"][data-checked] {
-  background: rgba(255, 255, 255, 0.055);
-  box-shadow: none;
+.vector-select-model-dialog [data-slot="menu-v2-group-label"] {
+  padding: 0 10px;
+}
+:is(.vector-model-popover, .vector-select-model-dialog) [data-model-section] + [data-model-section] {
+  margin-top: 4px;
+}
+
+/* Rows. Kobalte's pointer highlight is neutralised (--menu-v2-hover) so data-active
+   is the only fill, and the check (--menu-v2-accent) is the only purple besides "New". */
+:is(.vector-model-popover, .vector-select-model-dialog) [data-component="menu-v2-item"] {
+  --menu-v2-hover: transparent;
+  --menu-v2-accent: var(--vx-purple-bright);
+  scroll-margin-block: 28px;
+  transition: background-color 120ms ease;
+}
+.vector-model-popover [data-component="menu-v2-item"] {
+  border-radius: 6px;
+}
+.vector-select-model-dialog [data-component="menu-v2-item"] {
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 8px;
+}
+:is(.vector-model-popover, .vector-select-model-dialog) [data-component="menu-v2-item"][data-active] {
+  background: color-mix(in srgb, var(--vx-text) 6%, transparent);
+}
+:is(.vector-model-popover, .vector-select-model-dialog)
+  [data-component="menu-v2-item"][data-checked]
+  [data-slot="menu-v2-item-content"] {
+  font-weight: 440;
+  color: var(--vx-text);
+}
+
+:is(.vector-model-popover, .vector-select-model-dialog) [data-slot="model-row-icon"] {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: var(--vx-text-muted);
+}
+:is(.vector-model-popover, .vector-select-model-dialog) [data-slot="model-row-icon"] > svg {
+  width: 14px;
+  height: 14px;
+}
+:is(.vector-model-popover, .vector-select-model-dialog) [data-slot="model-row-name"] {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 440;
+  color: var(--vx-text);
+}
+:is(.vector-model-popover, .vector-select-model-dialog) [data-checked] [data-slot="model-row-name"] {
+  font-weight: 530;
+}
+:is(.vector-model-popover, .vector-select-model-dialog) [data-slot="model-row-new"] {
+  flex: none;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--vx-purple-bright);
+}
+:is(.vector-model-popover, .vector-select-model-dialog) [data-slot="model-row-spec"] {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--vx-text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+:is(.vector-model-popover, .vector-select-model-dialog) [data-slot="model-row-sep"] {
+  padding: 0 5px;
+  opacity: 0.6;
+}
+:is(.vector-model-popover, .vector-select-model-dialog) [data-slot="model-row-context"] {
+  min-width: 34px;
+  text-align: right;
+}
+.vector-select-model-dialog [data-slot="model-row-check"] {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: var(--vx-purple-bright);
+  visibility: hidden;
+}
+.vector-select-model-dialog [data-checked] > [data-slot="model-row-check"] {
+  visibility: visible;
+}
+:is(.vector-model-popover, .vector-select-model-dialog) [data-slot="model-section-name"] {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Ends on the rows' spec-line edge: 16px check slot + 8px gap. */
+:is(.vector-model-popover, .vector-select-model-dialog) [data-slot="model-section-access"] {
+  flex: none;
+  margin-left: auto;
+  margin-right: 24px;
+  font-weight: 400;
+  color: var(--vx-text-muted);
+  white-space: nowrap;
+}
+:is(.vector-model-popover, .vector-select-model-dialog) [data-slot="model-picker-empty"] {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  min-height: 48px;
+  padding: 0 12px;
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--vx-text-muted);
+}
+.vector-select-model-dialog [data-slot="model-picker-empty"] {
+  padding: 0 10px;
+}
+:is(.vector-model-popover, .vector-select-model-dialog) [data-slot="model-picker-empty"] > span + span {
+  font-size: 12px;
 }
 
 /* "Connect provider" button: quiet neutral pill */

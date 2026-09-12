@@ -5,6 +5,7 @@ import { useLocal } from "@/context/local"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { popularProviders } from "@/hooks/use-providers"
 import { ScrollView } from "@opencode-ai/ui/scroll-view"
+import { ProviderIcon } from "@opencode-ai/ui/provider-icon"
 import { Icon } from "@opencode-ai/ui/v2/icon"
 import { MenuV2 } from "@opencode-ai/ui/v2/menu-v2"
 import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
@@ -12,52 +13,198 @@ import { TextInputV2 } from "@opencode-ai/ui/v2/text-input-v2"
 import { Dialog as DialogV2, DialogBody, DialogHeader, DialogTitle } from "@opencode-ai/ui/v2/dialog-v2"
 import { useLanguage } from "@/context/language"
 import { decode64 } from "@/utils/base64"
-import { brandProviderName } from "@/utils/provider-brand"
-
-const costInput = (cost: unknown): number | undefined => {
-  if (Array.isArray(cost)) {
-    const values = cost.map((item) => costInput(item)).filter((value): value is number => value !== undefined)
-    return values.length > 0 ? Math.max(0, ...values) : undefined
-  }
-  if (!cost || typeof cost !== "object" || !("input" in cost)) return undefined
-  const value = (cost as { input?: unknown }).input
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined
-}
-
-const isFree = (_provider: string, cost: unknown) => costInput(cost) === 0
+import {
+  buildModelSections,
+  contextLabel,
+  isNewRelease,
+  modelAccess,
+  modelAriaLabel,
+  modelDisplayName,
+  modelTitle,
+  pickerKeys,
+  pickerModelKey,
+  type PickerSection,
+} from "@/utils/provider-brand"
 
 type ModelState = ReturnType<typeof useLocal>["model"]
 /** Minimal surface the selector popover needs — lets other screens (e.g.
-    Parallel Workspaces) host the exact same picker with their own selection. */
-export type ModelSelectorModelState = Pick<ModelState, "list" | "visible" | "current" | "set">
+    Parallel Workspaces) host the exact same picker with their own selection.
+    Without `recent`, the top section is just the current model, under "Current model". */
+export type ModelSelectorModelState = Pick<ModelState, "list" | "visible" | "current" | "set"> &
+  Partial<Pick<ModelState, "recent">>
 type ModelItem = ReturnType<ModelState["list"]>[number]
+type ModelSection = PickerSection<ModelItem>
 
-const modelKey = (model: ModelItem) => `${model.provider.id}:${model.id}`
 const manageKey = "action:manage"
 const HIDDEN_PROVIDER_IDS = new Set<string>()
+/** The sprite has no "opencode-zen" entry; a paid Zen group shares OpenCode's mark. */
+const iconID = (providerID: string) => (providerID === "opencode-zen" ? "opencode" : providerID)
 
-const providerDisplayName = (id: string, name: string) => brandProviderName(id, name)
+/** The models a picker can show, and the ordered sections both views render. Rows and
+    keyboard order both come from sections(), so they can't drift apart, and
+    buildModelSections leaves out models that can't hold a coding conversation for both
+    views and search alike. The picker never renders or logs provider.key or
+    provider.options. */
+function createModelSections(input: {
+  model: ModelSelectorModelState
+  provider: () => string | undefined
+  search: () => string
+  now: () => number
+}) {
+  const models = createMemo(() => {
+    const provider = input.provider()
+    return input.model
+      .list()
+      .filter((item) => !HIDDEN_PROVIDER_IDS.has(item.provider.id))
+      .filter((item) => input.model.visible({ modelID: item.id, providerID: item.provider.id }))
+      .filter((item) => (provider ? item.provider.id === provider : true))
+  })
+  const current = () => {
+    const value = input.model.current()
+    return value ? pickerModelKey(value) : undefined
+  }
+  const sections = createMemo(() =>
+    buildModelSections({
+      models: models(),
+      term: input.search(),
+      currentKey: current(),
+      recentKeys: input.model.recent?.().flatMap((item) => (item ? [pickerModelKey(item)] : [])),
+      now: input.now(),
+      popular: popularProviders,
+    }),
+  )
+  return { current, sections }
+}
 
-const sortModelGroups = (a: { category: string; items: ModelItem[] }, b: { category: string; items: ModelItem[] }) => {
-  const aIndex = popularProviders.indexOf(a.category)
-  const bIndex = popularProviders.indexOf(b.category)
-  const aPopular = aIndex >= 0
-  const bPopular = bIndex >= 0
+/** Pointer highlight that follows real movement only. Rows render under a resting
+    pointer (when the picker opens, on every keystroke, while the arrow keys scroll the
+    list), and the browser then reports the pointer again at the same spot. Acting on
+    that would steal the keyboard highlight. */
+function createPointerGuard() {
+  let last: string | undefined
+  return (event: MouseEvent) => {
+    const at = `${event.clientX},${event.clientY}`
+    const moved = last !== undefined && last !== at
+    last = at
+    return moved
+  }
+}
 
-  if (aPopular && !bPopular) return -1
-  if (!aPopular && bPopular) return 1
-  if (aPopular && bPopular) return aIndex - bIndex
-  return providerDisplayName(a.category, a.items[0].provider.name).localeCompare(
-    providerDisplayName(b.category, b.items[0].provider.name),
+/** Vector's chip mark as a flat one-colour glyph, so it sits evenly beside the provider
+    logos. The app icon PNG is a full-colour tile and turns to mush at 14px. Manage models
+    marks its "Included with Vector" group with it too. */
+export function VectorGlyph() {
+  return (
+    <svg data-slot="model-vector-glyph" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <rect x="3.75" y="3.75" width="8.5" height="8.5" rx="1.75" stroke="currentColor" stroke-width="1.5" />
+      <rect x="6.5" y="6.5" width="3" height="3" rx="0.5" fill="currentColor" />
+      <path
+        d="M6.25 1.5v2.25M9.75 1.5v2.25M6.25 12.25v2.25M9.75 12.25v2.25M1.5 6.25h2.25M1.5 9.75h2.25M12.25 6.25h2.25M12.25 9.75h2.25"
+        stroke="currentColor"
+        stroke-width="1.5"
+        stroke-linecap="round"
+      />
+    </svg>
   )
 }
 
-const groupModels = (list: ModelItem[]) => {
-  const byProvider = new Map<string, ModelItem[]>()
-  for (const item of list) {
-    byProvider.set(item.provider.id, [...(byProvider.get(item.provider.id) ?? []), item])
-  }
-  return Array.from(byProvider, ([category, items]) => ({ category, items })).sort(sortModelGroups)
+/** Label row: mark gutter, section name, and how the whole section is paid for. */
+function SectionHeading(props: { section: ModelSection }) {
+  const language = useLanguage()
+  return (
+    <>
+      <span data-slot="model-row-icon" aria-hidden="true">
+        <Show when={props.section.kind === "included"}>
+          <VectorGlyph />
+        </Show>
+        <Show when={props.section.kind === "provider" && props.section.providerID}>
+          {(id) => <ProviderIcon id={iconID(id())} width={14} height={14} />}
+        </Show>
+      </span>
+      <span data-slot="model-section-name">{props.section.label}</span>
+      <Show when={props.section.access}>
+        {(access) => (
+          <span data-slot="model-section-access" title={access().title}>
+            {access().kind === "free" ? language.t("model.tag.free") : access().label}
+          </span>
+        )}
+      </Show>
+    </>
+  )
+}
+
+/** One model row, shared by both views: mark gutter, name, "New", and a quiet spec line
+    with the context size ("ChatGPT plan · 400K" where the section mixes ways of paying).
+    Everything else is in the row's tooltip (modelTitle), which the caller sets. */
+function ModelRow(props: { item: ModelItem; section: ModelSection; now: number }) {
+  const language = useLanguage()
+  const access = createMemo(() => modelAccess(props.item))
+  // The top section mixes providers, so its rows carry their own mark; provider sections
+  // carry it once, on the label.
+  const mixed = () => props.section.kind === "recent"
+  const spec = createMemo(() => {
+    const parts: { slot: string; text: string }[] = []
+    const value = access()
+    // Only "Free" and "<Plan> plan" go on rows; "API key" stays on section labels and in the tooltip.
+    if (props.section.rowAccess && (value.kind === "free" || value.kind === "plan"))
+      parts.push({
+        slot: "model-row-access",
+        text: value.kind === "free" ? language.t("model.tag.free") : value.label,
+      })
+    const context = contextLabel(props.item.limit?.context)
+    if (context) parts.push({ slot: "model-row-context", text: context })
+    return parts
+  })
+  return (
+    <>
+      <span data-slot="model-row-icon" aria-hidden="true">
+        <Show when={mixed()}>
+          <Show when={access().kind !== "free"} fallback={<VectorGlyph />}>
+            <ProviderIcon id={iconID(props.item.provider.id)} width={14} height={14} />
+          </Show>
+        </Show>
+      </span>
+      <span data-slot="model-row-name">{modelDisplayName(props.item)}</span>
+      <Show when={isNewRelease(props.item, props.now)}>
+        <span data-slot="model-row-new">New</span>
+      </Show>
+      <Show when={spec().length > 0}>
+        <span data-slot="model-row-spec">
+          <For each={spec()}>
+            {(part, index) => (
+              <>
+                <Show when={index() > 0}>
+                  <span data-slot="model-row-sep" aria-hidden="true">
+                    ·
+                  </span>
+                </Show>
+                <span data-slot={part.slot}>{part.text}</span>
+              </>
+            )}
+          </For>
+        </span>
+      </Show>
+    </>
+  )
+}
+
+function PickerEmpty(props: { term: string }) {
+  const language = useLanguage()
+  return (
+    <Show
+      when={props.term.trim()}
+      fallback={
+        <div data-slot="model-picker-empty">
+          <span>No models to show</span>
+          <span>Show more in Manage models, or connect a provider.</span>
+        </div>
+      }
+    >
+      <div data-slot="model-picker-empty">
+        <span>{language.t("dialog.model.empty")}</span>
+      </div>
+    </Show>
+  )
 }
 
 type ModelSelectorTriggerProps = Omit<ComponentProps<typeof Kobalte.Trigger>, "as" | "ref">
@@ -73,48 +220,33 @@ export function ModelSelectorPopoverV2(props: {
   const model = props.model ?? useLocal().model
   const language = useLanguage()
   const dialog = useDialog()
-  const [store, setStore] = createStore({ open: false, search: "", active: "" })
+  // `now` is captured when the popover opens, so "New" can't change while it's showing.
+  const [store, setStore] = createStore({ open: false, search: "", active: "", now: Date.now() })
   let searchRef: HTMLInputElement | undefined
   let contentRef: HTMLDivElement | undefined
   let restoreTrigger = true
+  let pointerMoved = createPointerGuard()
 
-  const allModels = createMemo(() =>
-    model
-      .list()
-      .filter((item) => !HIDDEN_PROVIDER_IDS.has(item.provider.id))
-      .filter((item) => model.visible({ modelID: item.id, providerID: item.provider.id }))
-      .filter((item) => (props.provider ? item.provider.id === props.provider : true)),
-  )
-  const models = createMemo(() => {
-    const search = store.search.trim().toLowerCase()
-    const filtered = search
-      ? allModels().filter(
-          (item) =>
-            item.name.toLowerCase().includes(search) ||
-            item.id.toLowerCase().includes(search) ||
-            providerDisplayName(item.provider.id, item.provider.name).toLowerCase().includes(search),
-        )
-      : allModels()
-
-    return [...filtered].sort((a, b) => a.name.localeCompare(b.name))
+  const picker = createModelSections({
+    model,
+    provider: () => props.provider,
+    search: () => store.search,
+    now: () => store.now,
   })
-  const groups = createMemo(() => groupModels(models()))
-  // Navigation order must match render order (grouped by provider, popular
-  // providers first) rather than the flat alphabetical `models()` list, or
-  // arrow keys visibly jump between provider groups instead of adjacent rows.
-  const keys = () => [...groups().flatMap((group) => group.items.map(modelKey)), manageKey]
-  const current = () => {
-    const value = model.current()
-    return value ? `${value.provider.id}:${value.id}` : undefined
-  }
-  const initialActive = () => {
-    const selected = current()
+  const sections = picker.sections
+  // Navigation order is render order: every row from sections(), then Manage models.
+  const keys = createMemo(() => [...pickerKeys(sections()), manageKey])
+  // A stale highlight (the list changed under it) falls back to the current model, then the first row.
+  const active = createMemo(() => {
     const options = keys()
-    if (selected && options.includes(selected)) return selected
-    return options[0] ?? ""
+    if (options.includes(store.active)) return store.active
+    const selected = picker.current()
+    return selected && options.includes(selected) ? selected : (options[0] ?? "")
+  })
+  const activeItem = () => {
+    const key = active()
+    return key ? contentRef?.querySelector<HTMLElement>(`[data-option-key="${CSS.escape(key)}"]`) : undefined
   }
-  const activeItem = () =>
-    store.active ? contentRef?.querySelector<HTMLElement>(`[data-option-key="${CSS.escape(store.active)}"]`) : undefined
   const afterClose = (callback: () => void) => {
     const complete = () => {
       if (contentRef?.isConnected) {
@@ -128,7 +260,8 @@ export function ModelSelectorPopoverV2(props: {
   const setOpen = (open: boolean) => {
     if (open) {
       restoreTrigger = true
-      setStore({ open: true, active: initialActive() })
+      pointerMoved = createPointerGuard()
+      setStore({ open: true, now: Date.now(), active: picker.current() ?? "" })
       setTimeout(() =>
         requestAnimationFrame(() => {
           searchRef?.focus()
@@ -138,6 +271,11 @@ export function ModelSelectorPopoverV2(props: {
       return
     }
     setStore({ open: false, search: "", active: "" })
+  }
+  // Kobalte focuses the menu item under the pointer; keep typing and the arrow keys in search.
+  const hover = (event: MouseEvent, key: string) => {
+    if (pointerMoved(event)) setStore("active", key)
+    if (document.activeElement !== searchRef) setTimeout(() => searchRef?.focus())
   }
   const select = (item: ModelItem) => {
     model.set({ modelID: item.id, providerID: item.provider.id }, { recent: true })
@@ -158,35 +296,28 @@ export function ModelSelectorPopoverV2(props: {
     })
   }
   const selectActive = () => {
-    const item = models().find((item) => modelKey(item) === store.active)
+    const key = active()
+    const item = sections()
+      .flatMap((section) => section.items)
+      .find((item) => pickerModelKey(item) === key)
     if (item) {
       selectModel(item)
       return
     }
-    if (store.active === manageKey) manage()
+    if (key === manageKey) manage()
   }
   const moveActive = (delta: number) => {
     const options = keys()
     if (options.length === 0) return
-    const index = options.indexOf(store.active)
+    const index = options.indexOf(active())
     const start = index === -1 ? 0 : index
     setStore("active", options[(start + delta + options.length) % options.length])
     queueMicrotask(() => activeItem()?.scrollIntoView({ block: "nearest" }))
   }
   const setSearch = (value: string) => {
-    const search = value.trim().toLowerCase()
-    const filtered = allModels().filter(
-      (item) =>
-        !search ||
-        item.name.toLowerCase().includes(search) ||
-        item.id.toLowerCase().includes(search) ||
-        providerDisplayName(item.provider.id, item.provider.name).toLowerCase().includes(search),
-    )
-    const sorted = [...filtered].sort((a, b) => a.name.localeCompare(b.name))
-    // Pick the first item in render order (grouped by provider), not the
-    // alphabetically-first match, so the active row is the one visibly on top.
-    const first = groupModels(sorted)[0]?.items[0]
-    setStore({ search: value, active: first ? modelKey(first) : manageKey })
+    setStore("search", value)
+    // The first rendered row becomes active on every keystroke; with no match, Manage models.
+    setStore("active", keys()[0] ?? manageKey)
     queueMicrotask(() => activeItem()?.scrollIntoView({ block: "nearest" }))
   }
 
@@ -198,7 +329,7 @@ export function ModelSelectorPopoverV2(props: {
       <MenuV2.Portal>
         <MenuV2.Content
           ref={(el: HTMLDivElement) => (contentRef = el)}
-          class="vector-model-popover w-[420px] overflow-hidden rounded-xl border border-[color:var(--vx-line)] bg-v2-background-bg-layer-01 !p-0 shadow-[var(--v2-elevation-floating)] focus:outline-none"
+          class="vector-model-popover w-[420px] overflow-hidden rounded-xl border border-[color:var(--vx-line-strong)] bg-v2-background-bg-layer-01 !p-0 shadow-[var(--v2-elevation-floating)] focus:outline-none"
           onPointerDownOutside={() => (restoreTrigger = false)}
           onFocusOutside={() => (restoreTrigger = false)}
           onCloseAutoFocus={(event) => {
@@ -258,46 +389,35 @@ export function ModelSelectorPopoverV2(props: {
               </Show>
             </div>
           </div>
-          <div class="h-px bg-v2-border-border-muted" />
+          <div class="h-px bg-[color:var(--vx-line)]" />
           <ScrollView data-slot="model-selector-scroll" class="max-h-[440px] min-h-0">
             <div class="flex flex-col p-1 pt-0.5">
-              <Show
-                when={models().length > 0}
-                fallback={
-                  <div class="flex h-12 items-center px-3 text-sm font-normal leading-5 text-v2-text-text-faint">
-                    {language.t("dialog.model.empty")}
-                  </div>
-                }
-              >
-                <For each={groups()}>
-                  {(group) => (
-                    <MenuV2.Group>
-                      <MenuV2.GroupLabel class="gap-2 px-3">
-                        <span class="min-w-0 truncate">
-                          {providerDisplayName(group.category, group.items[0].provider.name)}
-                        </span>
+              <Show when={sections().length > 0} fallback={<PickerEmpty term={store.search} />}>
+                <For each={sections()}>
+                  {(section) => (
+                    <MenuV2.Group data-model-section={section.kind}>
+                      <MenuV2.GroupLabel>
+                        <SectionHeading section={section} />
                       </MenuV2.GroupLabel>
-                      <MenuV2.RadioGroup value={current()}>
-                        <For each={group.items}>
-                          {(item) => (
-                            <MenuV2.RadioItem
-                              value={modelKey(item)}
-                              data-option-key={modelKey(item)}
-                              data-selected-model={current() === modelKey(item) ? true : undefined}
-                              class="scroll-my-6"
-                              classList={{ "!bg-v2-overlay-simple-overlay-hover": store.active === modelKey(item) }}
-                              onMouseEnter={() => {
-                                setStore("active", modelKey(item))
-                                setTimeout(() => searchRef?.focus())
-                              }}
-                              onSelect={() => selectModel(item)}
-                            >
-                              <span class="min-w-0 flex-1 truncate text-sm">{item.name}</span>
-                              <Show when={isFree(item.provider.id, item.cost)}>
-                                <span class="shrink-0 text-xs text-v2-text-text-faint">{language.t("model.tag.free")}</span>
-                              </Show>
-                            </MenuV2.RadioItem>
-                          )}
+                      <MenuV2.RadioGroup value={picker.current()}>
+                        <For each={section.items}>
+                          {(item) => {
+                            const key = pickerModelKey(item)
+                            return (
+                              <MenuV2.RadioItem
+                                value={key}
+                                data-option-key={key}
+                                data-active={active() === key ? "" : undefined}
+                                data-selected-model={picker.current() === key ? true : undefined}
+                                aria-label={modelAriaLabel(item, store.now)}
+                                title={modelTitle(item)}
+                                onMouseMove={(event: MouseEvent) => hover(event, key)}
+                                onSelect={() => selectModel(item)}
+                              >
+                                <ModelRow item={item} section={section} now={store.now} />
+                              </MenuV2.RadioItem>
+                            )
+                          }}
                         </For>
                       </MenuV2.RadioGroup>
                     </MenuV2.Group>
@@ -306,15 +426,12 @@ export function ModelSelectorPopoverV2(props: {
               </Show>
             </div>
           </ScrollView>
-          <div class="h-px bg-v2-border-border-muted" />
+          <div class="h-px bg-[color:var(--vx-line)]" />
           <div class="flex flex-col p-0.5">
             <MenuV2.Item
               data-option-key={manageKey}
-              classList={{ "!bg-v2-overlay-simple-overlay-hover": store.active === manageKey }}
-              onMouseEnter={() => {
-                setStore("active", manageKey)
-                setTimeout(() => searchRef?.focus())
-              }}
+              data-active={active() === manageKey ? "" : undefined}
+              onMouseMove={(event: MouseEvent) => hover(event, manageKey)}
               onSelect={manage}
             >
               <Icon name="outline-sliders" size="small" />
@@ -327,10 +444,9 @@ export function ModelSelectorPopoverV2(props: {
   )
 }
 
-/** Dialog-chrome counterpart to {@link ModelSelectorPopoverV2} for entry points (keybinds,
-    slash commands) that have no trigger element to anchor a popover to. Reuses the same
-    grouping/filtering helpers and v2 building blocks (DialogV2, TextInputV2, TagV2) rather
-    than introducing a new visual language. */
+/** Dialog-chrome counterpart to {@link ModelSelectorPopoverV2}, and the main surface: the
+    composer's model button and mod+' open it through the model.choose command. Same
+    sections, rows and keyboard order as the popover. */
 export const DialogSelectModelV2: Component<{ provider?: string; model?: ModelState }> = (props) => {
   const local = useLocal()
   const model = props.model ?? local.model
@@ -338,35 +454,39 @@ export const DialogSelectModelV2: Component<{ provider?: string; model?: ModelSt
   const dialog = useDialog()
   const directory = () => decode64(local.slug())
   const [search, setSearch] = createSignal("")
+  const [picked, setPicked] = createSignal("")
+  // Captured once, so "New" can't change while the dialog is open.
+  const now = Date.now()
+  const pointerMoved = createPointerGuard()
+  let listRef: HTMLDivElement | undefined
 
-  const allModels = createMemo(() =>
-    model
-      .list()
-      .filter((item) => !HIDDEN_PROVIDER_IDS.has(item.provider.id))
-      .filter((item) => model.visible({ modelID: item.id, providerID: item.provider.id }))
-      .filter((item) => (props.provider ? item.provider.id === props.provider : true)),
-  )
-  const models = createMemo(() => {
-    const term = search().trim().toLowerCase()
-    const filtered = term
-      ? allModels().filter(
-          (item) =>
-            item.name.toLowerCase().includes(term) ||
-            item.id.toLowerCase().includes(term) ||
-            providerDisplayName(item.provider.id, item.provider.name).toLowerCase().includes(term),
-        )
-      : allModels()
-    return [...filtered].sort((a, b) => a.name.localeCompare(b.name))
+  const picker = createModelSections({ model, provider: () => props.provider, search, now: () => now })
+  const sections = picker.sections
+  // Navigation order is render order, as in the popover: every row, then Manage models.
+  const keys = createMemo(() => [...pickerKeys(sections()), manageKey])
+  // Unset or stale (providers still syncing at mount, or a search that removed the row):
+  // fall back to the current model, which is the first row, then to the first row.
+  const active = createMemo(() => {
+    const options = keys()
+    if (options.includes(picked())) return picked()
+    const selected = picker.current()
+    return selected && options.includes(selected) ? selected : (options[0] ?? "")
   })
-  const groups = createMemo(() => groupModels(models()))
-  const keys = createMemo(() => groups().flatMap((group) => group.items.map(modelKey)))
-  const current = () => {
-    const value = model.current()
-    return value ? `${value.provider.id}:${value.id}` : undefined
+  const scrollToActive = () =>
+    queueMicrotask(() => {
+      const key = active()
+      if (!key) return
+      listRef
+        ?.querySelector<HTMLElement>(`[data-option-key="${CSS.escape(key)}"]`)
+        ?.scrollIntoView({ block: "nearest" })
+    })
+  // Typing and clearing both land here, so the highlight is always the first row shown;
+  // with no match, Manage models.
+  const updateSearch = (value: string) => {
+    setSearch(value)
+    setPicked(keys()[0] ?? manageKey)
+    scrollToActive()
   }
-
-  // Seed the keyboard-nav highlight on the current model, falling back to the first result.
-  const [active, setActive] = createSignal(current() && keys().includes(current()!) ? current()! : (keys()[0] ?? ""))
 
   const select = (item: ModelItem) => {
     model.set({ modelID: item.id, providerID: item.provider.id }, { recent: true })
@@ -377,11 +497,19 @@ export const DialogSelectModelV2: Component<{ provider?: string; model?: ModelSt
     if (options.length === 0) return
     const index = options.indexOf(active())
     const start = index === -1 ? 0 : index
-    setActive(options[(start + delta + options.length) % options.length])
+    setPicked(options[(start + delta + options.length) % options.length])
+    scrollToActive()
   }
   const selectActive = () => {
-    const item = models().find((item) => modelKey(item) === active())
-    if (item) select(item)
+    const key = active()
+    const item = sections()
+      .flatMap((section) => section.items)
+      .find((item) => pickerModelKey(item) === key)
+    if (item) {
+      select(item)
+      return
+    }
+    if (key === manageKey) manage()
   }
   const connectProvider = () => {
     void import("./dialog-select-provider").then((x) => {
@@ -405,11 +533,15 @@ export const DialogSelectModelV2: Component<{ provider?: string; model?: ModelSt
       <DialogBody class="flex min-h-0 flex-1 flex-col">
         <div class="px-4 pt-px pb-3">
           <TextInputV2
+            // `autofocus` is ignored on an input inserted after page load, and the composer
+            // keeps focus when its model button opens this dialog. Focus search once it's
+            // in the DOM, so typing filters and the arrow keys drive the list.
+            ref={(el: HTMLInputElement) => requestAnimationFrame(() => el.focus())}
             type="search"
             appearance="base"
             class="!w-full self-stretch"
             value={search()}
-            onInput={(event) => setSearch(event.currentTarget.value)}
+            onInput={(event) => updateSearch(event.currentTarget.value)}
             onKeyDown={(event) => {
               if (event.key === "ArrowDown") {
                 event.preventDefault()
@@ -433,54 +565,65 @@ export const DialogSelectModelV2: Component<{ provider?: string; model?: ModelSt
             autocapitalize="off"
             autofocus
             showClearButton={!!search()}
-            onClearClick={() => setSearch("")}
+            onClearClick={() => updateSearch("")}
             aria-label={language.t("dialog.model.search.placeholder")}
           />
         </div>
         <ScrollView data-slot="select-model-scroll" class="min-h-0 flex-1 px-2 pb-2">
-          <Show
-            when={models().length > 0}
-            fallback={
-              <div class="flex h-12 items-center px-3 text-sm font-normal leading-5 text-v2-text-text-faint">
-                {language.t("dialog.model.empty")}
-              </div>
-            }
-          >
-            <For each={groups()}>
-              {(group) => (
-                <div class="flex flex-col p-0.5">
-                  <div data-slot="menu-v2-group-label">
-                    {providerDisplayName(group.category, group.items[0].provider.name)}
+          <div ref={listRef} class="flex flex-col">
+            <Show when={sections().length > 0} fallback={<PickerEmpty term={search()} />}>
+              <For each={sections()}>
+                {(section) => (
+                  <div data-model-section={section.kind} class="flex flex-col">
+                    <div data-slot="menu-v2-group-label">
+                      <SectionHeading section={section} />
+                    </div>
+                    <For each={section.items}>
+                      {(item) => {
+                        const key = pickerModelKey(item)
+                        const checked = () => picker.current() === key
+                        return (
+                          <button
+                            type="button"
+                            data-component="menu-v2-item"
+                            data-option-key={key}
+                            data-active={active() === key ? "" : undefined}
+                            data-checked={checked() ? "" : undefined}
+                            aria-current={checked() ? "true" : undefined}
+                            aria-label={modelAriaLabel(item, now)}
+                            title={modelTitle(item)}
+                            onMouseMove={(event) => {
+                              if (pointerMoved(event)) setPicked(key)
+                            }}
+                            onClick={() => select(item)}
+                          >
+                            <span data-slot="menu-v2-item-content">
+                              <ModelRow item={item} section={section} now={now} />
+                            </span>
+                            <span data-slot="model-row-check" aria-hidden="true">
+                              <Icon name="check" size="small" />
+                            </span>
+                          </button>
+                        )
+                      }}
+                    </For>
                   </div>
-                  <For each={group.items}>
-                    {(item) => (
-                      <button
-                        type="button"
-                        data-component="menu-v2-item"
-                        data-checked={current() === modelKey(item) ? "" : undefined}
-                        classList={{ "!bg-v2-overlay-simple-overlay-hover": active() === modelKey(item) }}
-                        onMouseEnter={() => setActive(modelKey(item))}
-                        onClick={() => select(item)}
-                      >
-                        <span data-slot="menu-v2-item-content" class="min-w-0 flex-1 truncate text-sm">
-                          {item.name}
-                        </span>
-                        <Show when={isFree(item.provider.id, item.cost)}>
-                          <span class="shrink-0 text-xs text-v2-text-text-faint">{language.t("model.tag.free")}</span>
-                        </Show>
-                        <Show when={current() === modelKey(item)}>
-                          <Icon name="check" size="small" class="shrink-0 text-v2-text-text-accent" />
-                        </Show>
-                      </button>
-                    )}
-                  </For>
-                </div>
-              )}
-            </For>
-          </Show>
+                )}
+              </For>
+            </Show>
+          </div>
         </ScrollView>
-        <div class="flex flex-col border-t border-v2-border-border-muted p-2">
-          <button type="button" data-component="menu-v2-item" onClick={manage}>
+        <div class="flex flex-col border-t border-[color:var(--vx-line)] p-2">
+          <button
+            type="button"
+            data-component="menu-v2-item"
+            data-option-key={manageKey}
+            data-active={active() === manageKey ? "" : undefined}
+            onMouseMove={(event) => {
+              if (pointerMoved(event)) setPicked(manageKey)
+            }}
+            onClick={manage}
+          >
             <Icon name="outline-sliders" size="small" />
             <span data-slot="menu-v2-item-content" class="min-w-0 flex-1 truncate text-sm">
               {language.t("dialog.model.manage")}

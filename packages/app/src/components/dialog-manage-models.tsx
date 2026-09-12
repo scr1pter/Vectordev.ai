@@ -13,8 +13,9 @@ import { popularProviders } from "@/hooks/use-providers"
 import { useLanguage } from "@/context/language"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { DialogSelectProvider } from "./dialog-select-provider"
+import { VectorGlyph } from "./dialog-select-model"
 import { decode64 } from "@/utils/base64"
-import { brandProviderName } from "@/utils/provider-brand"
+import { brandProviderName, INCLUDED_WITH_VECTOR, isIncludedWithVector } from "@/utils/provider-brand"
 import { SettingsListV2 } from "./settings-v2/parts/list"
 import { SettingsRowV2 } from "./settings-v2/parts/row"
 import "./settings-v2/settings-v2.css"
@@ -23,7 +24,12 @@ type ModelItem = ReturnType<ReturnType<typeof useLocal>["model"]["list"]>[number
 
 const HIDDEN_PROVIDER_IDS = new Set<string>()
 
-const providerDisplayName = (id: string, name: string) => brandProviderName(id, name)
+/** Vector's free models form their own group, as in the model picker, and everything else
+    groups by provider. Priced gateway models (a Zen key) stay under the provider's name. */
+const INCLUDED_GROUP = "vector:included"
+const groupOf = (item: ModelItem) => (isIncludedWithVector(item) ? INCLUDED_GROUP : item.provider.id)
+const groupName = (category: string, item: ModelItem) =>
+  category === INCLUDED_GROUP ? INCLUDED_WITH_VECTOR : brandProviderName(item.provider.id, item.provider.name)
 
 export const DialogManageModelsV2: Component = () => {
   // Works both inside a project (chat) and at the shell level (e.g. Parallel
@@ -44,11 +50,11 @@ export const DialogManageModelsV2: Component = () => {
     dialog.show(() => <DialogSelectProvider directory={directory} />)
   }
   const visibleModels = () => models.list().filter((x) => !HIDDEN_PROVIDER_IDS.has(x.provider.id))
-  const providerList = (providerID: string) => visibleModels().filter((x) => x.provider.id === providerID)
-  const providerVisible = (providerID: string) =>
-    providerList(providerID).every((x) => models.visible({ modelID: x.id, providerID: x.provider.id }))
-  const setProviderVisibility = (providerID: string, checked: boolean) => {
-    providerList(providerID).forEach((x) => {
+  const groupList = (category: string) => visibleModels().filter((x) => groupOf(x) === category)
+  const groupVisible = (category: string) =>
+    groupList(category).every((x) => models.visible({ modelID: x.id, providerID: x.provider.id }))
+  const setGroupVisibility = (category: string, checked: boolean) => {
+    groupList(category).forEach((x) => {
       models.setVisibility({ modelID: x.id, providerID: x.provider.id }, checked)
     })
   }
@@ -60,8 +66,11 @@ export const DialogManageModelsV2: Component = () => {
     key: (x) => `${x.provider.id}:${x.id}`,
     filterKeys: ["provider.name", "name", "id"],
     sortBy: (a, b) => a.name.localeCompare(b.name),
-    groupBy: (x) => x.provider.id,
+    groupBy: groupOf,
     sortGroupsBy: (a, b) => {
+      // "Included with Vector" comes last, as in the model picker.
+      const included = Number(a.category === INCLUDED_GROUP) - Number(b.category === INCLUDED_GROUP)
+      if (included !== 0) return included
       const aRank = popularProviders.indexOf(a.category)
       const bRank = popularProviders.indexOf(b.category)
       const aPopular = aRank >= 0
@@ -140,19 +149,24 @@ export const DialogManageModelsV2: Component = () => {
                     <div class="settings-v2-section" data-component="settings-models-provider">
                       <div class="settings-v2-models-group-header justify-between">
                         <div class="flex min-w-0 items-center gap-2">
-                          <ProviderIcon id={group.category} width={16} height={16} class="ml-4 shrink-0" />
-                          <h3 class="settings-v2-section-title">
-                            {providerDisplayName(group.items[0].provider.id, group.items[0].provider.name)}
-                          </h3>
+                          <Show
+                            when={group.category === INCLUDED_GROUP}
+                            fallback={<ProviderIcon id={group.category} width={16} height={16} class="ml-4 shrink-0" />}
+                          >
+                            <span class="ml-4 flex size-4 shrink-0 items-center justify-center" aria-hidden="true">
+                              <VectorGlyph />
+                            </span>
+                          </Show>
+                          <h3 class="settings-v2-section-title">{groupName(group.category, group.items[0])}</h3>
                         </div>
                         <div>
                           <SwitchV2
                             class="mr-6"
-                            checked={providerVisible(group.category)}
-                            onChange={(checked) => setProviderVisibility(group.category, checked)}
+                            checked={groupVisible(group.category)}
+                            onChange={(checked) => setGroupVisibility(group.category, checked)}
                             hideLabel
                           >
-                            {providerDisplayName(group.items[0].provider.id, group.items[0].provider.name)}
+                            {groupName(group.category, group.items[0])}
                           </SwitchV2>
                         </div>
                       </div>
