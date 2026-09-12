@@ -36,6 +36,39 @@ async function installFakeCli(directory: string, name: string) {
 afterAll(() => rm(root, { recursive: true, force: true }))
 
 describe("structured external chat", () => {
+  // Captured from a real cursor-agent 2026.09.02 run that created one file; only
+  // the temp folder and ids were replaced.
+  test("a real Cursor edit reports the workspace file it changed", () => {
+    const workspace = "/tmp/vector-edit-fixture"
+    const call = "call-9845249b-5284-42fc-9750-b52ca19c12bf-0\nfc_b37b40b1-8f25-90f5-bb75-d7e148aa9824_0"
+    const editToolCall = { args: { path: `${workspace}/hello.txt`, streamContent: "hi\n" } }
+    const parse = createAgentChat("cursor", [workspace])
+    parse(
+      JSON.stringify({
+        type: "tool_call",
+        subtype: "started",
+        call_id: call,
+        tool_call: { editToolCall, hookAdditionalContexts: [], toolCallId: call },
+      }),
+    )
+    const chat = parse(
+      JSON.stringify({
+        type: "tool_call",
+        subtype: "completed",
+        call_id: call,
+        tool_call: {
+          editToolCall: {
+            ...editToolCall,
+            result: { success: { path: `${workspace}/hello.txt`, linesAdded: 1, linesRemoved: 0 } },
+          },
+          hookAdditionalContexts: [],
+          toolCallId: call,
+        },
+      }),
+    )
+    expect(chat.activity.find((entry) => entry.kind === "tool")).toMatchObject({ state: "done", files: ["hello.txt"] })
+  })
+
   test("Claude completed block envelopes never overwrite earlier streamed text in the same message", () => {
     const parse = createAgentChat("claude-code")
     parse(JSON.stringify({ type: "stream_event", event: { type: "message_start", message: { id: "msg" } } }))
