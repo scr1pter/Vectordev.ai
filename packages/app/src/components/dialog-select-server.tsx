@@ -5,13 +5,19 @@ import { DropdownMenu } from "@opencode-ai/ui/dropdown-menu"
 import { Icon } from "@opencode-ai/ui/icon"
 import { IconButton } from "@opencode-ai/ui/icon-button"
 import { List } from "@opencode-ai/ui/list"
-import { TextField } from "@opencode-ai/ui/text-field"
 import { useMutation } from "@tanstack/solid-query"
 import { showToast } from "@/utils/toast"
 import { useNavigate } from "@solidjs/router"
-import { createEffect, createMemo, createResource, Show } from "solid-js"
+import { createEffect, createMemo, createResource, onCleanup, Show } from "solid-js"
 import { createStore } from "solid-js/store"
 import { ServerHealthIndicator, ServerRow } from "@/components/server/server-row"
+import { ServerFormActions, ServerFormFields } from "@/components/server/server-form"
+import {
+  createPreviewScheduler,
+  DEFAULT_SERVER_USERNAME,
+  looksLikeServerAddress,
+  SERVER_PREVIEW_DELAY_MS,
+} from "@/components/server/server-form-model"
 import { useGlobal } from "@/context/global"
 import { useLanguage } from "@/context/language"
 import { usePlatform } from "@/context/platform"
@@ -19,25 +25,6 @@ import { normalizeServerUrl, ServerConnection, useServer } from "@/context/serve
 import { type ServerHealth, useCheckServerHealth } from "@/utils/server-health"
 import { useSettings } from "@/context/settings"
 import { useTabs } from "@/context/tabs"
-
-const DEFAULT_USERNAME = "vector"
-
-interface ServerFormProps {
-  value: string
-  name: string
-  username: string
-  password: string
-  placeholder: string
-  busy: boolean
-  error: string
-  status: boolean | undefined
-  onChange: (value: string) => void
-  onNameChange: (value: string) => void
-  onUsernameChange: (value: string) => void
-  onPasswordChange: (value: string) => void
-  onSubmit: () => void
-  onBack: () => void
-}
 
 function showRequestError(language: ReturnType<typeof useLanguage>, err: unknown) {
   showToast({
@@ -79,99 +66,34 @@ function useDefaultServer() {
 
 function useServerPreview() {
   const checkServerHealth = useCheckServerHealth()
+  // One scheduler per controller (only one form is open at a time): a newer keystroke, a submit or a reset
+  // supersedes any check still waiting or in flight, so a slow old result never overwrites a newer one.
+  const scheduler = createPreviewScheduler({ delayMs: SERVER_PREVIEW_DELAY_MS })
+  onCleanup(scheduler.cancel)
 
-  const looksComplete = (value: string) => {
-    const normalized = normalizeServerUrl(value)
-    if (!normalized) return false
-    const host = normalized.replace(/^https?:\/\//, "").split("/")[0]
-    if (!host) return false
-    if (host.includes("localhost") || host.startsWith("127.0.0.1")) return true
-    return host.includes(".") || host.includes(":")
-  }
-
-  const previewStatus = async (
+  const previewStatus = (
     value: string,
     username: string,
     password: string,
-    setStatus: (value: boolean | undefined) => void,
+    update: (next: { status: boolean | undefined; checking: boolean }) => void,
   ) => {
-    setStatus(undefined)
-    if (!looksComplete(value)) return
-    const normalized = normalizeServerUrl(value)
-    if (!normalized) return
+    scheduler.cancel()
+    const normalized = looksLikeServerAddress(value) ? normalizeServerUrl(value) : undefined
+    if (!normalized) {
+      update({ status: undefined, checking: false })
+      return
+    }
     const http: ServerConnection.HttpBase = { url: normalized }
     if (username) http.username = username
     if (password) http.password = password
-    const result = await checkServerHealth(http)
-    setStatus(result.healthy)
+    update({ status: undefined, checking: true })
+    scheduler.schedule(
+      () => checkServerHealth(http).then((result) => result.healthy, () => false),
+      (healthy) => update({ status: healthy, checking: false }),
+    )
   }
 
-  return { previewStatus }
-}
-
-function ServerForm(props: ServerFormProps) {
-  const language = useLanguage()
-  const keyDown = (event: KeyboardEvent) => {
-    event.stopPropagation()
-    if (event.key === "Escape") {
-      event.preventDefault()
-      props.onBack()
-      return
-    }
-    if (event.key !== "Enter" || event.isComposing) return
-    event.preventDefault()
-    props.onSubmit()
-  }
-
-  return (
-    <div>
-      <div class="bg-surface-base rounded-md p-5 flex flex-col gap-3">
-        <div class="flex-1 min-w-0 [&_[data-slot=input-wrapper]]:relative">
-          <TextField
-            type="text"
-            label={language.t("dialog.server.add.url")}
-            placeholder={props.placeholder}
-            value={props.value}
-            autofocus
-            validationState={props.error ? "invalid" : "valid"}
-            error={props.error}
-            disabled={props.busy}
-            onChange={props.onChange}
-            onKeyDown={keyDown}
-          />
-        </div>
-        <TextField
-          type="text"
-          label={language.t("dialog.server.add.name")}
-          placeholder={language.t("dialog.server.add.namePlaceholder")}
-          value={props.name}
-          disabled={props.busy}
-          onChange={props.onNameChange}
-          onKeyDown={keyDown}
-        />
-        <div class="grid grid-cols-2 gap-2 min-w-0">
-          <TextField
-            type="text"
-            label={language.t("dialog.server.add.username")}
-            placeholder={language.t("dialog.server.add.usernamePlaceholder")}
-            value={props.username}
-            disabled={props.busy}
-            onChange={props.onUsernameChange}
-            onKeyDown={keyDown}
-          />
-          <TextField
-            type="password"
-            label={language.t("dialog.server.add.password")}
-            placeholder={language.t("dialog.server.add.passwordPlaceholder")}
-            value={props.password}
-            disabled={props.busy}
-            onChange={props.onPasswordChange}
-            onKeyDown={keyDown}
-          />
-        </div>
-      </div>
-    </div>
-  )
+  return { previewStatus, cancelPreview: scheduler.cancel }
 }
 
 export function DialogSelectServer() {
@@ -197,17 +119,18 @@ export function useServerManagementController(options: { onSelect?: () => void; 
   const platform = usePlatform()
   const language = useLanguage()
   const { defaultKey, canDefault, setDefault } = useDefaultServer()
-  const { previewStatus } = useServerPreview()
+  const { previewStatus, cancelPreview } = useServerPreview()
   const checkServerHealth = useCheckServerHealth()
   const [store, setStore] = createStore({
     addServer: {
       url: "",
       name: "",
-      username: DEFAULT_USERNAME,
+      username: DEFAULT_SERVER_USERNAME,
       password: "",
       error: "",
       showForm: false,
       status: undefined as boolean | undefined,
+      checking: false,
     },
     editServer: {
       id: undefined as string | undefined,
@@ -217,21 +140,25 @@ export function useServerManagementController(options: { onSelect?: () => void; 
       password: "",
       error: "",
       status: undefined as boolean | undefined,
+      checking: false,
     },
   })
 
   const resetAdd = () => {
+    cancelPreview()
     setStore("addServer", {
       url: "",
       name: "",
-      username: DEFAULT_USERNAME,
+      username: DEFAULT_SERVER_USERNAME,
       password: "",
       error: "",
       showForm: false,
       status: undefined,
+      checking: false,
     })
   }
   const resetEdit = () => {
+    cancelPreview()
     setStore("editServer", {
       id: undefined,
       value: "",
@@ -240,6 +167,7 @@ export function useServerManagementController(options: { onSelect?: () => void; 
       password: "",
       error: "",
       status: undefined,
+      checking: false,
     })
   }
 
@@ -379,7 +307,7 @@ export function useServerManagementController(options: { onSelect?: () => void; 
     if (addMutation.isPending) return
     setStore("addServer", { url: value, error: "" })
     void previewStatus(value, store.addServer.username, store.addServer.password, (next) =>
-      setStore("addServer", { status: next }),
+      setStore("addServer", next),
     )
   }
 
@@ -392,7 +320,7 @@ export function useServerManagementController(options: { onSelect?: () => void; 
     if (addMutation.isPending) return
     setStore("addServer", { username: value, error: "" })
     void previewStatus(store.addServer.url, value, store.addServer.password, (next) =>
-      setStore("addServer", { status: next }),
+      setStore("addServer", next),
     )
   }
 
@@ -400,7 +328,7 @@ export function useServerManagementController(options: { onSelect?: () => void; 
     if (addMutation.isPending) return
     setStore("addServer", { password: value, error: "" })
     void previewStatus(store.addServer.url, store.addServer.username, value, (next) =>
-      setStore("addServer", { status: next }),
+      setStore("addServer", next),
     )
   }
 
@@ -408,7 +336,7 @@ export function useServerManagementController(options: { onSelect?: () => void; 
     if (editMutation.isPending) return
     setStore("editServer", { value, error: "" })
     void previewStatus(value, store.editServer.username, store.editServer.password, (next) =>
-      setStore("editServer", { status: next }),
+      setStore("editServer", next),
     )
   }
 
@@ -421,7 +349,7 @@ export function useServerManagementController(options: { onSelect?: () => void; 
     if (editMutation.isPending) return
     setStore("editServer", { username: value, error: "" })
     void previewStatus(store.editServer.value, value, store.editServer.password, (next) =>
-      setStore("editServer", { status: next }),
+      setStore("editServer", next),
     )
   }
 
@@ -429,7 +357,7 @@ export function useServerManagementController(options: { onSelect?: () => void; 
     if (editMutation.isPending) return
     setStore("editServer", { password: value, error: "" })
     void previewStatus(store.editServer.value, store.editServer.username, value, (next) =>
-      setStore("editServer", { status: next }),
+      setStore("editServer", next),
     )
   }
 
@@ -455,10 +383,11 @@ export function useServerManagementController(options: { onSelect?: () => void; 
       showForm: true,
       url: "",
       name: "",
-      username: DEFAULT_USERNAME,
+      username: DEFAULT_SERVER_USERNAME,
       password: "",
       error: "",
       status: undefined,
+      checking: false,
     })
   }
 
@@ -472,20 +401,23 @@ export function useServerManagementController(options: { onSelect?: () => void; 
       password: conn.http.password ?? "",
       error: "",
       status: global.servers.health[ServerConnection.key(conn)]?.healthy,
+      checking: false,
     })
   }
 
   const submitForm = () => {
     if (mode() === "add") {
       if (addMutation.isPending) return
-      setStore("addServer", { error: "" })
+      cancelPreview()
+      setStore("addServer", { error: "", checking: false })
       addMutation.mutate(store.addServer.url)
       return
     }
     const original = editing()
     if (!original) return
     if (editMutation.isPending) return
-    setStore("editServer", { error: "" })
+    cancelPreview()
+    setStore("editServer", { error: "", checking: false })
     editMutation.mutate({ original, value: store.editServer.value })
   }
 
@@ -538,6 +470,7 @@ export function useServerManagementController(options: { onSelect?: () => void; 
     formPassword: () => (isAddMode() ? store.addServer.password : store.editServer.password),
     formError: () => (isAddMode() ? store.addServer.error : store.editServer.error),
     formStatus: () => (isAddMode() ? store.addServer.status : store.editServer.status),
+    formChecking: () => (isAddMode() ? store.addServer.checking : store.editServer.checking),
     select,
     setDefault,
     startAdd,
@@ -653,6 +586,7 @@ export function ServerConnectionList(props: { controller: ReturnType<typeof useS
           variant="secondary"
           icon="plus-small"
           size="large"
+          data-action="server-list-add"
           onClick={props.controller.startAdd}
           class="py-1.5 pl-1.5 pr-3 flex items-center gap-1.5"
         >
@@ -664,41 +598,35 @@ export function ServerConnectionList(props: { controller: ReturnType<typeof useS
 }
 
 export function ServerConnectionForm(props: { controller: ReturnType<typeof useServerManagementController> }) {
-  const language = useLanguage()
+  let root: HTMLDivElement | undefined
+
+  // Leaving the form (Cancel, the back arrow, a saved edit) unmounts whatever had focus, which would leave it on the
+  // page body. Hand it to the list's Add server button, rendered in the form's place: under the form's parent in the
+  // picker, or a level up in the old Settings page, whose wrapper goes with the form.
+  onCleanup(() => {
+    const ancestors: HTMLElement[] = []
+    for (let el = root?.parentElement; el; el = el.parentElement) ancestors.push(el)
+    requestAnimationFrame(() => {
+      const host = ancestors.find((el) => el.isConnected)
+      if (!host || host === document.body || host === document.documentElement) return
+      const active = document.activeElement
+      if (active && active !== document.body) return
+      host.querySelector<HTMLElement>('[data-action="server-list-add"]')?.focus()
+    })
+  })
+
+  // Keys stay inside the form so the picker's own handlers do not see them; Enter is left to the fields.
+  const keyDown = (event: KeyboardEvent) => {
+    event.stopPropagation()
+    if (event.key !== "Escape") return
+    event.preventDefault()
+    props.controller.resetForm()
+  }
 
   return (
-    <div class="flex flex-1 min-h-0 flex-col gap-4">
-      <ServerForm
-        value={props.controller.formValue()}
-        name={props.controller.formName()}
-        username={props.controller.formUsername()}
-        password={props.controller.formPassword()}
-        placeholder={language.t("dialog.server.add.placeholder")}
-        busy={props.controller.formBusy()}
-        error={props.controller.formError()}
-        status={props.controller.formStatus()}
-        onChange={props.controller.handleFormChange()}
-        onNameChange={props.controller.handleFormNameChange()}
-        onUsernameChange={props.controller.handleFormUsernameChange()}
-        onPasswordChange={props.controller.handleFormPasswordChange()}
-        onSubmit={props.controller.submitForm}
-        onBack={props.controller.resetForm}
-      />
-      <div class="shrink-0 pb-5">
-        <Button
-          variant="primary"
-          size="large"
-          onClick={props.controller.submitForm}
-          disabled={props.controller.formBusy()}
-          class="px-3 py-1.5"
-        >
-          {props.controller.formBusy()
-            ? language.t("dialog.server.add.checking")
-            : props.controller.isAddMode()
-              ? language.t("dialog.server.add.button")
-              : language.t("common.save")}
-        </Button>
-      </div>
+    <div ref={root} class="flex flex-1 min-h-0 flex-col gap-5 pb-5">
+      <ServerFormFields controller={props.controller} autofocus onKeyDown={keyDown} />
+      <ServerFormActions controller={props.controller} onCancel={props.controller.resetForm} />
     </div>
   )
 }

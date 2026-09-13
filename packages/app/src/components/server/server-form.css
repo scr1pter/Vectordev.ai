@@ -1,0 +1,602 @@
+/* Server connection form, shared by the Add/Edit server dialog (settings-v2/dialog-server-v2.tsx) and the legacy
+   server picker's form (dialog-select-server.tsx). Every selector is scoped to .vx-server-form,
+   .vx-server-form-actions or .vx-server-dialog, so nothing outside these surfaces changes.
+   Vector's radius scale: dialog 16, grouped card 12, controls 9. Tokens flip with :root[data-vector-theme]. */
+
+/* Dialog chrome ----------------------------------------------------------- */
+
+/* Anchored to the top rather than centred: opening Authentication grows the dialog downward, so the row just clicked
+   stays under the pointer. */
+[data-component="dialog-v2"]:has(.vx-server-dialog) {
+  align-items: flex-start;
+  padding-top: max(12vh, 48px);
+}
+
+/* DialogV2 puts `class` on [data-slot="dialog-content"], so the container is reached through :has(). The
+   specificity beats dialog-v2.css's nested defaults (480x368, radius 6) without !important. */
+[data-component="dialog-v2"] [data-slot="dialog-container"]:has(> [data-slot="dialog-content"].vx-server-dialog) {
+  width: 452px;
+  max-width: calc(100vw - 32px);
+  height: auto;
+  max-height: calc(100dvh - max(12vh, 48px) - 16px);
+  align-items: stretch;
+  border: 1px solid var(--vx-line-strong);
+  border-radius: 16px;
+  /* A faint top light mixed from white: it lifts the dark surface and disappears on the light one. */
+  background:
+    linear-gradient(180deg, color-mix(in srgb, white 3%, transparent), transparent 104px),
+    var(--vx-surface);
+  box-shadow: var(--vx-shadow-float);
+}
+
+/* Geist, like the Settings page this dialog opens over (settings-workspace.css). */
+[data-component="dialog-v2"] [data-slot="dialog-container"] [data-slot="dialog-content"].vx-server-dialog {
+  align-items: stretch;
+  color: var(--vx-text);
+  font-family: var(--vx-font);
+}
+
+[data-component="dialog-v2"]
+  [data-slot="dialog-container"]
+  [data-slot="dialog-content"].vx-server-dialog
+  [data-slot="dialog-header"] {
+  align-items: flex-start;
+  padding: 20px 20px 0;
+}
+
+.vx-server-dialog__head {
+  display: flex;
+  flex: 1;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0;
+}
+
+/* Same tile as the checkpoint glyphs (.vx-arch__glyph): soft purple, one quiet ring. */
+.vx-server-dialog__glyph {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  color: var(--vx-purple-bright);
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--vx-purple-bright) 22%, transparent),
+    color-mix(in oklab, var(--vx-purple-bright) 8%, transparent)
+  );
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--vx-purple) 26%, transparent);
+}
+
+[data-component="dialog-v2"]
+  [data-slot="dialog-container"]
+  [data-slot="dialog-content"].vx-server-dialog
+  [data-slot="dialog-header"]
+  [data-slot="dialog-title-group"] {
+  gap: 2px;
+  padding-top: 1px;
+}
+
+/* Vector's dialog title: 15/530, as DialogTitleGroup sets it. */
+[data-component="dialog-v2"]
+  [data-slot="dialog-container"]
+  [data-slot="dialog-content"].vx-server-dialog
+  [data-slot="dialog-header"]
+  [data-slot="dialog-title"] {
+  font-size: 15px;
+  font-weight: 530;
+  line-height: 20px;
+  letter-spacing: -0.13px;
+  color: var(--vx-text);
+}
+
+[data-component="dialog-v2"]
+  [data-slot="dialog-container"]
+  [data-slot="dialog-content"].vx-server-dialog
+  [data-slot="dialog-header"]
+  [data-slot="dialog-description"] {
+  font-size: 13px;
+  font-weight: 440;
+  line-height: 18px;
+  color: var(--vx-text-muted);
+}
+
+[data-component="dialog-v2"]
+  [data-slot="dialog-container"]
+  [data-slot="dialog-content"].vx-server-dialog
+  [data-slot="dialog-body"] {
+  padding: 20px 20px 4px;
+  overflow: visible;
+}
+
+[data-component="dialog-v2"]
+  [data-slot="dialog-container"]
+  [data-slot="dialog-content"].vx-server-dialog
+  [data-slot="dialog-footer"] {
+  align-items: center;
+  padding: 16px 20px 18px;
+}
+
+/* Fields ------------------------------------------------------------------ */
+
+.vx-server-form {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+  min-width: 0;
+}
+
+.vx-server-form__group {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.vx-server-form [data-component="field-v2"] {
+  gap: 7px;
+}
+
+.vx-server-form [data-component="field-v2"] [data-slot="field-v2-label"] {
+  min-height: 16px;
+  font-size: 13px;
+  font-weight: 530;
+  line-height: 16px;
+  color: var(--vx-text);
+}
+
+/* Inside the Authentication card the fields sit a step below the group's own 13/530 title. */
+.vx-server-form__auth-body [data-component="field-v2"] [data-slot="field-v2-label"] {
+  font-size: 12px;
+  color: var(--vx-text-subtle);
+}
+
+.vx-server-form [data-component="field-v2"] [data-slot="field-v2-label-text"] {
+  gap: 6px;
+}
+
+.vx-server-form__optional {
+  font-size: 12px;
+  font-weight: 440;
+  line-height: 16px;
+  color: var(--vx-text-muted);
+}
+
+/* 32px tall: text-input-v2's large height, the same as the footer buttons. */
+.vx-server-form [data-component="text-input-v2"] {
+  width: 100%;
+  padding-right: 4px;
+  border-radius: 9px;
+  outline: none;
+  background: color-mix(in srgb, var(--vx-text) 3.5%, transparent);
+  box-shadow: inset 0 0 0 1px var(--vx-line-strong);
+  transition:
+    background-color 120ms var(--vx-ease),
+    box-shadow 120ms var(--vx-ease);
+}
+
+.vx-server-form [data-component="text-input-v2"]:hover:not([data-disabled]):not(:focus-within) {
+  background: color-mix(in srgb, var(--vx-text) 5.5%, transparent);
+}
+
+/* Focus is one edge and one halo on the shell, never a ring around a ring. */
+.vx-server-form [data-component="text-input-v2"]:focus-within:not([data-disabled]) {
+  background: color-mix(in srgb, var(--vx-text) 2.5%, transparent);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklab, var(--vx-purple) 72%, transparent),
+    0 0 0 3px var(--vx-purple-soft);
+}
+
+/* The focus-indicators setting (on by default) asks for a stronger mark: the same edge and halo, bolder, rather than
+   a second outline outside them. */
+html[data-vector-focus-indicators="true"]
+  .vx-server-form
+  [data-component="text-input-v2"]:focus-within:not([data-disabled], [data-invalid]) {
+  box-shadow:
+    inset 0 0 0 1px var(--vx-purple),
+    0 0 0 3px color-mix(in oklab, var(--vx-purple) 40%, transparent);
+}
+
+.vx-server-form [data-component="text-input-v2"][data-invalid]:not([data-disabled]) {
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklab, var(--vx-red) 78%, transparent),
+    0 0 0 3px color-mix(in oklab, var(--vx-red) 14%, transparent);
+}
+
+/* A focused invalid field stays red, in either focus mode: the error is the point, and the bolder halo shows focus. */
+.vx-server-form [data-component="text-input-v2"][data-invalid]:focus-within:not([data-disabled]) {
+  box-shadow:
+    inset 0 0 0 1px var(--vx-red),
+    0 0 0 3px color-mix(in oklab, var(--vx-red) 28%, transparent);
+}
+
+.vx-server-form [data-component="text-input-v2"][data-disabled] {
+  opacity: 0.55;
+}
+
+.vx-server-form [data-component="text-input-v2"] [data-slot="text-input-v2-input"] {
+  padding-left: 11px;
+  font-size: 13px;
+  font-weight: 440;
+  letter-spacing: -0.04px;
+  color: var(--vx-text);
+}
+
+.vx-server-form [data-component="text-input-v2"] [data-slot="text-input-v2-input"]::placeholder {
+  color: var(--vx-text-muted);
+  opacity: 1;
+}
+
+/* The red edge and the message carry an error; the value itself stays readable. */
+.vx-server-form [data-component="text-input-v2"][data-invalid]:not([data-disabled]) [data-slot="text-input-v2-input"] {
+  color: var(--vx-text);
+  caret-color: var(--vx-red);
+}
+
+.vx-server-form
+  [data-component="text-input-v2"][data-invalid]:not([data-disabled])
+  [data-slot="text-input-v2-input"]::placeholder {
+  color: var(--vx-text-muted);
+}
+
+/* The shell draws focus; a second ring on the inner input reads as a stray box. */
+.vx-server-form [data-slot="text-input-v2-input"]:focus-visible {
+  outline: none;
+}
+
+@layer components {
+  /* index.css rings every focused input and pushes every focused button's ring 3px out, as layered !important
+     rules that only a layered !important can answer. The field shell already shows focus; the disclosure row and
+     the reveal button draw their rings inside themselves; the footer buttons keep a 2px gap. */
+  html[data-vector-focus-indicators] .vx-server-form [data-slot="text-input-v2-input"]:focus-visible {
+    outline: none !important;
+  }
+
+  html[data-vector-focus-indicators]
+    .vx-server-form
+    :is(.vx-server-form__disclosure, .vx-server-form__reveal):focus-visible {
+    outline-offset: -2px !important;
+  }
+
+  html[data-vector-focus-indicators] .vx-server-form-actions [data-component="button-v2"]:focus-visible {
+    outline-offset: 2px !important;
+  }
+}
+
+html[data-vector-larger-targets="true"] .vx-server-form [data-component="text-input-v2"] {
+  height: 42px;
+}
+
+/* Live status under the address --------------------------------------------- */
+
+.vx-server-form [data-component="field-v2"] [data-slot="field-v2-suffix"].vx-server-form__status {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 16px;
+  font-size: 12px;
+  font-weight: 440;
+  line-height: 16px;
+  letter-spacing: 0;
+  color: var(--vx-text-muted);
+  user-select: text;
+}
+
+.vx-server-form__status-mark {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 12px;
+  height: 12px;
+}
+
+.vx-server-form__status[data-server-status="idle"] .vx-server-form__status-mark {
+  display: none;
+}
+
+.vx-server-form__status [data-component="loader-v2"] {
+  color: var(--vx-text-muted);
+}
+
+.vx-server-form__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--vx-text-muted);
+}
+
+.vx-server-form
+  [data-component="field-v2"]
+  [data-slot="field-v2-suffix"].vx-server-form__status:is(
+    [data-server-status="reachable"],
+    [data-server-status="unreachable"],
+    [data-server-status="required"]
+  ) {
+  color: var(--vx-text-subtle);
+}
+
+.vx-server-form__status[data-server-status="reachable"] .vx-server-form__dot {
+  background: var(--vx-green);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--vx-green) 18%, transparent);
+}
+
+.vx-server-form__status:is([data-server-status="unreachable"], [data-server-status="error"]) .vx-server-form__dot {
+  background: var(--vx-red);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--vx-red) 16%, transparent);
+}
+
+/* Enter on an empty address: a nudge, not an error. */
+.vx-server-form__status[data-server-status="required"] .vx-server-form__dot {
+  background: var(--vx-amber);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--vx-amber) 18%, transparent);
+}
+
+.vx-server-form [data-component="field-v2"] [data-slot="field-v2-suffix"].vx-server-form__status[data-server-status="error"] {
+  color: var(--vx-red);
+}
+
+/* Authentication ------------------------------------------------------------ */
+
+.vx-server-form__auth {
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--vx-text) 1.5%, transparent);
+  box-shadow: inset 0 0 0 1px var(--vx-line);
+}
+
+/* The row keeps its full radius when open, so its hover and inset focus ring are one rounded shape inside the card
+   instead of a band with a flat edge across it. */
+.vx-server-form__disclosure {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 40px;
+  padding: 0 12px 0 10px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--vx-text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 530;
+  line-height: 16px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.vx-server-form__disclosure:hover {
+  background: color-mix(in srgb, var(--vx-text) 4%, transparent);
+}
+
+.vx-server-form__disclosure:focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--vx-purple) 76%, white 6%);
+  outline-offset: -2px;
+}
+
+.vx-server-form__disclosure-title,
+.vx-server-form__disclosure .vx-server-form__optional {
+  flex: none;
+}
+
+.vx-server-form__chevron {
+  flex: none;
+  color: var(--vx-text-muted);
+  transition: transform 160ms var(--vx-ease);
+}
+
+.vx-server-form__auth[data-open] .vx-server-form__chevron {
+  transform: rotate(90deg);
+}
+
+/* A long username is cut short; the password state after it always shows. */
+.vx-server-form__summary {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 440;
+  color: var(--vx-text-muted);
+  white-space: nowrap;
+}
+
+.vx-server-form__summary-user {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.vx-server-form__summary-sep,
+.vx-server-form__summary-state {
+  flex: none;
+}
+
+.vx-server-form__auth-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 12px 12px;
+}
+
+.vx-server-form__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.vx-server-form__hint {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 440;
+  line-height: 17px;
+  color: var(--vx-text-muted);
+}
+
+.vx-server-form__code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--vx-text) 6%, transparent);
+  color: var(--vx-text-subtle);
+  font-family: var(--vx-mono);
+  font-size: 11px;
+}
+
+.vx-server-form__secret {
+  position: relative;
+  width: 100%;
+}
+
+.vx-server-form__secret [data-component="text-input-v2"] [data-slot="text-input-v2-input"] {
+  padding-right: 34px;
+}
+
+.vx-server-form__reveal {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--vx-text-muted);
+  cursor: pointer;
+  transform: translateY(-50%);
+}
+
+.vx-server-form__reveal:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--vx-text) 7%, transparent);
+  color: var(--vx-text-subtle);
+}
+
+.vx-server-form__reveal[aria-pressed="true"] {
+  color: var(--vx-text-subtle);
+}
+
+.vx-server-form__reveal:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.vx-server-form__reveal:focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--vx-purple) 76%, white 6%);
+  outline-offset: -2px;
+}
+
+/* Present for assistive tech, invisible on screen. */
+:is(.vx-server-form, .vx-server-form-actions) .vx-server-form__sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Actions ------------------------------------------------------------------ */
+
+.vx-server-form-actions {
+  /* The primary is the launcher's purple CTA (.vx-launcher__submit in vector-premium.css), written once here. These
+     values belong in shared --vx-cta-* tokens in vector-premium.css, used by both buttons. */
+  --vx-server-cta-gradient: linear-gradient(135deg, #7554b5, #9370ce 58%, #a183d8);
+  --vx-server-cta-text: #f7f2fb;
+  --vx-server-cta-text-shadow: 0 1px 1px rgba(40, 18, 72, 0.28);
+  --vx-server-cta-shadow: inset 0 1px rgba(246, 237, 252, 0.18), 0 6px 18px rgba(92, 56, 147, 0.24);
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+
+.vx-server-form-actions [data-component="button-v2"][data-variant] {
+  height: 32px;
+  padding: 0 14px;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 530;
+}
+
+.vx-server-form-actions [data-component="button-v2"][data-variant]:focus-visible:not(:disabled) {
+  outline: 2px solid color-mix(in oklab, var(--vx-purple) 76%, white 6%);
+  outline-offset: 2px;
+}
+
+.vx-server-form-actions [data-component="button-v2"].vx-server-form-actions__cancel {
+  background: transparent;
+  color: var(--vx-text-subtle);
+}
+
+.vx-server-form-actions [data-component="button-v2"].vx-server-form-actions__cancel:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--vx-text) 6%, transparent);
+  color: var(--vx-text);
+}
+
+.vx-server-form-actions [data-component="button-v2"].vx-server-form-actions__cancel:disabled {
+  opacity: 0.5;
+}
+
+.vx-server-form-actions [data-component="button-v2"].vx-server-form-actions__submit {
+  min-width: 104px;
+}
+
+/* Every enabled state, and the busy one, in one rule specific enough to outrank ButtonV2 contrast's hover and
+   pressed backgrounds, so the gradient is set once; hover and press only change brightness. */
+.vx-server-form-actions
+  [data-component="button-v2"][data-variant].vx-server-form-actions__submit:is(:not(:disabled), [data-busy]) {
+  color: var(--vx-server-cta-text);
+  background-color: transparent;
+  background-image: var(--vx-server-cta-gradient);
+  text-shadow: var(--vx-server-cta-text-shadow);
+  box-shadow: var(--vx-server-cta-shadow);
+}
+
+.vx-server-form-actions [data-component="button-v2"].vx-server-form-actions__submit:hover:not(:disabled) {
+  filter: brightness(1.07);
+}
+
+.vx-server-form-actions [data-component="button-v2"].vx-server-form-actions__submit:active:not(:disabled) {
+  filter: brightness(0.96);
+}
+
+.vx-server-form-actions
+  [data-component="button-v2"][data-variant].vx-server-form-actions__submit:disabled:not([data-busy]) {
+  opacity: 1;
+  color: color-mix(in srgb, var(--vx-text) 42%, transparent);
+  background-color: color-mix(in oklab, var(--vx-purple) 16%, transparent);
+  background-image: none;
+  text-shadow: none;
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+.vx-server-form-actions [data-component="button-v2"].vx-server-form-actions__submit[data-busy] {
+  opacity: 0.82;
+  cursor: progress;
+}
+
+.vx-server-form-actions [data-component="button-v2"] [data-component="loader-v2"] {
+  color: currentColor;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vx-server-form__chevron,
+  .vx-server-form [data-component="text-input-v2"] {
+    transition: none;
+  }
+}
+
+html[data-vector-reduce-animations="true"] :is(.vx-server-form__chevron, .vx-server-form [data-component="text-input-v2"]) {
+  transition: none;
+}

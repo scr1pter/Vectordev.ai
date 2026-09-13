@@ -29,6 +29,8 @@ type Active = {
   owner: Owner
   onClose?: () => void
   setClosing: (closing: boolean) => void
+  /** What had focus in the dialog below when this one was pushed; it gets focus back on close. */
+  restoreFocus?: HTMLElement
 }
 
 const Context = createContext<ReturnType<typeof init>>()
@@ -63,6 +65,17 @@ function init() {
       current.dispose()
       setStack((items) => items.filter((item) => item.id !== closed))
       lock.value = false
+      // Kobalte restores focus only to a trigger, and pushed dialogs are opened without one, so focus would be
+      // left on the page body. Its own restore is a timer queued by dispose above; step in after it, and only if
+      // nothing took focus.
+      const restore = current.restoreFocus
+      if (!restore) return
+      setTimeout(() => {
+        if (!restore.isConnected) return
+        const active = document.activeElement
+        if (active && active !== document.body) return
+        restore.focus({ preventScroll: true })
+      }, 0)
     }, 100)
   }
 
@@ -79,7 +92,13 @@ function init() {
     makeEventListener(window, "keydown", onKeyDown, { capture: true })
   })
 
-  const mount = (element: DialogElement, owner: Owner, onClose: (() => void) | undefined, layer: number) => {
+  const mount = (
+    element: DialogElement,
+    owner: Owner,
+    onClose: (() => void) | undefined,
+    layer: number,
+    restoreFocus?: HTMLElement,
+  ) => {
     const id = Math.random().toString(36).slice(2)
     const zIndex = DIALOG_BASE_Z_INDEX + layer * 10
     let dispose: (() => void) | undefined
@@ -90,6 +109,15 @@ function init() {
         dispose = d
         const [closing, setClosingSignal] = createSignal(false)
         setClosing = setClosingSignal
+        // A layer with a dialog pushed on top of it is inert until that dialog is gone. Its Kobalte focus trap is
+        // not paused by the push (measured: Settings kept its trap listeners and sentinels under Add server), so it
+        // kept pulling focus back and nothing in the top dialog could be typed into. Focus cannot land on an inert
+        // element, so the covered trap's refocus becomes a no-op; single dialogs never have a layer above them.
+        const covered = () => {
+          const items = stack()
+          const index = items.findIndex((item) => item.id === id)
+          return index !== -1 && index < items.length - 1
+        }
         return (
           <Kobalte
             modal
@@ -107,6 +135,7 @@ function init() {
               />
               <div
                 data-dialog-layer={layer}
+                inert={covered() || undefined}
                 style={{
                   position: "fixed",
                   inset: "0",
@@ -127,7 +156,7 @@ function init() {
 
     if (!dispose || !setClosing) return
 
-    const active: Active = { id, node, dispose, owner, onClose, setClosing }
+    const active: Active = { id, node, dispose, owner, onClose, setClosing, restoreFocus }
     setStack((items) => [...items, active])
   }
 
@@ -137,7 +166,8 @@ function init() {
       timer.current = undefined
     }
     lock.value = false
-    mount(element, owner, onClose, stack().length)
+    const focused = typeof document === "undefined" ? null : document.activeElement
+    mount(element, owner, onClose, stack().length, focused instanceof HTMLElement ? focused : undefined)
   }
 
   const show = (element: DialogElement, owner: Owner, onClose?: () => void) => {
