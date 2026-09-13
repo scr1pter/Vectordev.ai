@@ -137,12 +137,23 @@ export function createLicenseService(input: {
       })
       const body = (await response.json().catch(() => ({}))) as T & RemoteError
       if (!response.ok) {
-        const error = new Error(body.error?.message || `Vector licensing returned ${response.status}.`) as Error & {
+        // The licensing API answers every error with JSON { error: { code } }.
+        // Anything else (a CDN or firewall page such as Vercel's Security
+        // Checkpoint, a captive portal, a proxy) never reached licensing, so it
+        // carries no status and counts as unreachable, like a network failure.
+        const fromApi = typeof body.error?.code === "string"
+        const error = new Error(
+          fromApi
+            ? body.error?.message || `Vector licensing returned ${response.status}.`
+            : `Vector licensing could not be reached (HTTP ${response.status} from the network).`,
+        ) as Error & {
           code?: string
           status?: number
         }
-        error.code = body.error?.code
-        error.status = response.status
+        if (fromApi) {
+          error.code = body.error?.code
+          error.status = response.status
+        }
         throw error
       }
       return body as T
@@ -184,15 +195,19 @@ export function createLicenseService(input: {
           message: "Enter the license key from your Vector purchase email.",
         }
       } catch (error) {
-        // Never activated on this computer. Only a transport failure (no
-        // answer at all: captive portal, blocked network, timeout) on a machine
-        // that has never seen "license required" gets the beta pass-through:
-        // the status then carries no lastValidatedAt/email and no `enforced`,
-        // which is what the renderer's LicenseGate looks for. A server that
-        // answered with an error, or a remembered paid mode, keeps the wall.
+        // Never activated on this computer. A machine that has never seen
+        // "license required" gets the beta pass-through when licensing could
+        // not be reached (captive portal, blocked network, timeout, or a CDN or
+        // firewall page instead of the API), and also when the API errored but
+        // this machine last heard "free public beta": the status then carries
+        // no lastValidatedAt/email and no `enforced`, which is what the
+        // renderer's LicenseGate looks for, and it is re-checked every minute.
+        // A remembered paid mode, or an API error with no remembered free mode,
+        // keeps the wall.
         const answered = typeof (error as { status?: number }).status === "number"
-        const remembered = (await readMemo())?.licenseRequired === true
-        if (answered || remembered) {
+        const memo = await readMemo()
+        const remembered = memo?.licenseRequired === true
+        if (remembered || (answered && memo?.licenseRequired !== false)) {
           return {
             access: false,
             state: "offline",

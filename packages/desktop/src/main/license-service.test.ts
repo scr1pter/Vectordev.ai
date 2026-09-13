@@ -19,9 +19,16 @@ async function temporaryRoot() {
   return root
 }
 
-async function licensingServer(input: { available: boolean; fail?: boolean }) {
+async function licensingServer(input: { available: boolean; fail?: boolean; edge?: boolean }) {
   const server = createServer(async (request, response) => {
     response.setHeader("content-type", "application/json")
+    // A CDN or firewall answering instead of the API, like Vercel's Security Checkpoint.
+    if (input.edge) {
+      response.statusCode = 403
+      response.setHeader("content-type", "text/html; charset=utf-8")
+      response.end("<!doctype html><title>Vercel Security Checkpoint</title>")
+      return
+    }
     if (input.fail) {
       response.statusCode = 503
       response.end(JSON.stringify({ error: { code: "OFFLINE", message: "Licensing unavailable." } }))
@@ -132,5 +139,64 @@ describe("desktop license service", () => {
 
     expect(await service.deactivate()).toMatchObject({ access: false, state: "activation_required" })
     expect(await stat(file).catch(() => undefined)).toBeUndefined()
+  })
+
+  test("treats a CDN or firewall page as unreachable, so a new computer is not walled", async () => {
+    const service = createLicenseService({
+      userDataPath: await temporaryRoot(),
+      version: "1.99.8",
+      packaged: true,
+      channel: "prod",
+      apiUrl: await licensingServer({ available: true, edge: true }),
+    })
+
+    const status = await service.status()
+    expect(status).toMatchObject({ access: false, state: "offline" })
+    expect(status.enforced).toBeUndefined()
+    expect(status.message).toContain("could not reach licensing")
+  })
+
+  test("does not wall a computer that last heard free public beta when the API errors", async () => {
+    const root = await temporaryRoot()
+    const free = createLicenseService({
+      userDataPath: root,
+      version: "1.99.8",
+      packaged: true,
+      channel: "prod",
+      apiUrl: await licensingServer({ available: false }),
+    })
+    expect(await free.status()).toMatchObject({ access: true, state: "beta" })
+
+    const failing = createLicenseService({
+      userDataPath: root,
+      version: "1.99.8",
+      packaged: true,
+      channel: "prod",
+      apiUrl: await licensingServer({ available: true, fail: true }),
+    })
+    const status = await failing.status()
+    expect(status).toMatchObject({ access: false, state: "offline" })
+    expect(status.enforced).toBeUndefined()
+  })
+
+  test("an activated computer behind a firewall page keeps its offline grace instead of asking to activate", async () => {
+    const root = await temporaryRoot()
+    const online = createLicenseService({
+      userDataPath: root,
+      version: "1.99.8",
+      packaged: true,
+      channel: "prod",
+      apiUrl: await licensingServer({ available: true }),
+    })
+    await online.activate("VEC1.test.ABCD")
+
+    const blocked = createLicenseService({
+      userDataPath: root,
+      version: "1.99.8",
+      packaged: true,
+      channel: "prod",
+      apiUrl: await licensingServer({ available: true, edge: true }),
+    })
+    expect(await blocked.status()).toMatchObject({ access: true, state: "grace" })
   })
 })
