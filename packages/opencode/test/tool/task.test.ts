@@ -371,6 +371,75 @@ describe("tool.task", () => {
     }),
   )
 
+  it.instance("a run whose child ended on an error is reported to the model as an error", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const { chat, assistant } = yield* seed()
+      const tool = yield* TaskTool
+      const def = yield* tool.init()
+      // The child's loop stores a provider error on its last message and returns normally.
+      const promptOps: TaskPromptOps = {
+        ...stubOps(),
+        prompt: (input) =>
+          sessions
+            .updateMessage({
+              id: MessageID.ascending(),
+              role: "assistant",
+              parentID: MessageID.ascending(),
+              sessionID: input.sessionID,
+              mode: "general",
+              agent: "general",
+              cost: 0,
+              path: { cwd: "/tmp", root: "/tmp" },
+              tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+              modelID: ref.modelID,
+              providerID: ref.providerID,
+              time: { created: Date.now() },
+              error: { name: "UnknownError", data: { message: "rate limited" } },
+            } as SessionV1.Assistant)
+            .pipe(Effect.as(reply(input, "partial notes"))),
+      }
+
+      const result = yield* def.execute(
+        { description: "inspect bug", prompt: "look into the cache key path" },
+        taskContext({ sessionID: chat.id, messageID: assistant.id, promptOps }),
+      )
+
+      expect(result.output).toContain(`state="error"`)
+      expect(result.output).toContain("<task_error>")
+      expect(result.output).toContain("rate limited")
+      expect(result.metadata).toMatchObject({ status: "error", error: "rate limited" })
+    }),
+  )
+
+  it.instance("stopping a foreground subagent returns the cancelled note", () =>
+    Effect.gen(function* () {
+      const jobs = yield* BackgroundJob.Service
+      const { chat, assistant } = yield* seed()
+      const tool = yield* TaskTool
+      const def = yield* tool.init()
+      const started = yield* Deferred.make<string>()
+      const promptOps: TaskPromptOps = {
+        ...stubOps(),
+        prompt: (input) => Deferred.succeed(started, input.sessionID).pipe(Effect.andThen(Effect.never)),
+      }
+
+      const fiber = yield* def
+        .execute(
+          { description: "inspect bug", prompt: "look into the cache key path" },
+          taskContext({ sessionID: chat.id, messageID: assistant.id, promptOps }),
+        )
+        .pipe(Effect.forkChild)
+      const child = yield* Deferred.await(started)
+      yield* jobs.cancel(child)
+
+      const result = yield* Fiber.join(fiber)
+      expect(result.output).toContain(`state="cancelled"`)
+      expect(result.output).toContain("stopped before it finished")
+      expect(result.metadata).toMatchObject({ status: "cancelled" })
+    }),
+  )
+
   it.instance(
     "execute with no subagent_type names the permitted types when general is denied",
     () =>

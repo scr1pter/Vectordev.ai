@@ -20,7 +20,7 @@ import {
 import { SubagentLifecycle } from "./subagent-lifecycle"
 import type { SessionPrompt } from "../session/prompt"
 import { Config } from "@/config/config"
-import { Effect, Exit, Schema, Scope } from "effect"
+import { Effect, Exit, Schema, Scope, Semaphore } from "effect"
 import { EffectBridge } from "@/effect/bridge"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Database } from "@opencode-ai/core/database/database"
@@ -309,7 +309,8 @@ export const TaskTool = Tool.define(
         const caller = yield* agent.get(ctx.agent)
         const denied = (name: string) =>
           Permission.evaluate(id, name, caller?.permission ?? [], parent.permission ?? []).action === "deny"
-        if (denied(GENERAL_SUBAGENT)) {
+        // A disabled general is missing from the agent list altogether.
+        if (!known.has(GENERAL_SUBAGENT) || denied(GENERAL_SUBAGENT)) {
           const permitted = agents
             .filter((item) => item.mode !== "primary" && !denied(item.name))
             .map((item) => item.name)
@@ -353,7 +354,9 @@ export const TaskTool = Tool.define(
         providerID: msg.info.providerID,
       }
       const childVariant = next.model ? undefined : variant
-      const modelRef = { ...model, ...(childVariant ? { variant: childVariant } : {}) }
+      // An agent with its own model runs with its own variant, so the record names that one.
+      const recordedVariant = childVariant ?? (next.model ? next.variant : undefined)
+      const modelRef = { ...model, ...(recordedVariant ? { variant: recordedVariant } : {}) }
       const { kind, custom } = subagentKind(next)
       // tools.ts resets the part's time.start on every metadata write, so the launch time travels as startedAt.
       const startedAt = Date.now()
@@ -443,19 +446,32 @@ export const TaskTool = Tool.define(
       const ops = ctx.extra?.promptOps as TaskPromptOps
       if (!ops) return yield* Effect.fail(new Error("TaskTool requires promptOps in ctx.extra"))
 
-      const persistPart = (patch: object) =>
+      // Patches of the settled part run one at a time, and each writes the
+      // lifecycle as it stands when it lands, so a patch that waited on the
+      // part can never put an earlier status back over a later one.
+      const partLock = Semaphore.makeUnsafe(1)
+      const persistPart = (extra: object = {}) =>
         ctx.callID
-          ? SubagentLifecycle.patchPart({ sessions, messageID: ctx.messageID, callID: ctx.callID, patch }).pipe(
-              Effect.provideService(Database.Service, database),
-              Effect.forkIn(scope, { startImmediately: true }),
-              Effect.asVoid,
-            )
+          ? partLock
+              .withPermits(1)(
+                SubagentLifecycle.patchPart({
+                  sessions,
+                  messageID: ctx.messageID,
+                  callID: ctx.callID,
+                  patch: () => ({ ...partMetadata(), ...extra }),
+                }),
+              )
+              .pipe(
+                Effect.provideService(Database.Service, database),
+                Effect.forkIn(scope, { startImmediately: true }),
+                Effect.asVoid,
+              )
           : Effect.void
 
       const transition = Effect.fn("TaskTool.transition")(function* (patch: SubagentLifecycle.Outcome) {
         Object.assign(outcome, SubagentLifecycle.defined(patch))
         yield* SubagentLifecycle.update(sessions, nextSession.id, patch)
-        if (detached) return yield* persistPart(partMetadata())
+        if (detached) return yield* persistPart()
         yield* ctx.metadata({ title, metadata: partMetadata() })
       })
 
@@ -466,7 +482,7 @@ export const TaskTool = Tool.define(
       ) {
         const settled = yield* SubagentLifecycle.settle(sessions, nextSession.id, { status, error })
         Object.assign(outcome, SubagentLifecycle.defined(settled))
-        if (persist) yield* persistPart(partMetadata())
+        if (persist) yield* persistPart()
       })
 
       const runTask = Effect.fn("TaskTool.runTask")(function* () {
@@ -543,8 +559,10 @@ export const TaskTool = Tool.define(
               const info = result.info
               if (!info || info.status === "running") return
               yield* finish(info.status, info.error, true)
-              if (info.status === "completed") return yield* inject("completed", info.output ?? "")
-              if (info.status === "error") return yield* inject("error", info.error ?? "")
+              // The settled outcome, not the job's status: a job that returned
+              // normally can still have failed or been stopped inside the child.
+              if (outcome.status === "completed") return yield* inject("completed", info.output ?? "")
+              if (outcome.status === "error") return yield* inject("error", outcome.error ?? info.error ?? "")
               return yield* inject("cancelled", BACKGROUND_CANCELLED)
             }),
           ),
@@ -564,7 +582,7 @@ export const TaskTool = Tool.define(
                 }).pipe(
                   Effect.flatMap((value) => {
                     Object.assign(outcome, SubagentLifecycle.defined(value))
-                    return persistPart({ ...partMetadata(), background: true, jobId: nextSession.id })
+                    return persistPart({ background: true, jobId: nextSession.id })
                   }),
                 )
               : Effect.void,
@@ -661,20 +679,26 @@ export const TaskTool = Tool.define(
               yield* finish("error", result.error, true)
               return yield* Effect.fail(new Error(result.error ?? "Task failed"))
             }
-            if (result?.status === "cancelled") {
-              yield* finish("cancelled", undefined, true)
-              return yield* Effect.fail(new Error("Task cancelled"))
-            }
-            // The returned metadata carries the outcome, so the part needs no later patch.
-            yield* finish(ctx.abort.aborted ? "cancelled" : "completed", undefined, false)
+            // The returned metadata carries the outcome, so the part needs no later
+            // patch. A stopped subagent returns the cancelled note instead of failing.
+            yield* finish(result?.status === "cancelled" || ctx.abort.aborted ? "cancelled" : "completed", undefined, false)
+            // The settled outcome, not the job's status: a run that returned
+            // normally can still have failed or been stopped inside the child.
+            const state = outcome.status === "error" || outcome.status === "cancelled" ? outcome.status : "completed"
+            const text =
+              state === "cancelled"
+                ? BACKGROUND_CANCELLED
+                : state === "error"
+                  ? [outcome.error, result?.output].filter(Boolean).join("\n\n")
+                  : (result?.output ?? "")
             return {
               title,
               metadata: partMetadata(),
               output: renderOutput({
                 sessionID: nextSession.id,
-                state: "completed",
+                state,
                 ...(busy ? { summary: busyNote(runningSiblings + 1, "launch") } : {}),
-                text: result?.output ?? "",
+                text,
               }),
             }
           }),

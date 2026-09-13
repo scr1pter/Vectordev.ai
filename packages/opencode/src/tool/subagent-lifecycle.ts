@@ -144,18 +144,25 @@ export function settle(
  * message and call id, and publishes message.part.updated. The processor
  * writes the tool's returned metadata when it settles the call, so a part
  * that is still pending or running is retried briefly instead of patched. A
- * part that does not exist (a caller without a processor) is skipped.
+ * part that does not exist (a caller without a processor) is skipped. A
+ * function `patch` is read when the write lands, so it carries the latest state.
  */
-export function patchPart(input: { sessions: Session.Interface; messageID: MessageID; callID: string; patch: object }) {
+export function patchPart(input: {
+  sessions: Session.Interface
+  messageID: MessageID
+  callID: string
+  patch: object | (() => object)
+}) {
   const attempt = Effect.gen(function* () {
     const part = (yield* MessageV2.parts(input.messageID)).find(
       (item): item is SessionV1.ToolPart => item.type === "tool" && item.callID === input.callID,
     )
     if (!part) return "missing" as const
     if (part.state.status !== "completed" && part.state.status !== "error") return "pending" as const
+    const patch = typeof input.patch === "function" ? input.patch() : input.patch
     yield* input.sessions.updatePart({
       ...part,
-      state: { ...part.state, metadata: merge(part.state.metadata, input.patch) },
+      state: { ...part.state, metadata: merge(part.state.metadata, patch) },
     })
     return "done" as const
   })
