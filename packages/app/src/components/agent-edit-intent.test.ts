@@ -4,6 +4,7 @@ import {
   editTargets,
   intentRange,
   landingPath,
+  predatesEdit,
   TYPING_MAX_CHARS,
   typingPlan,
   typingSteps,
@@ -115,6 +116,50 @@ describe("intentRange", () => {
 
   test("has no landing zone for a deleted file", () => {
     expect(intentRange(buffer, { file: "a", kind: "delete" })).toBeUndefined()
+  })
+})
+
+describe("predatesEdit", () => {
+  test("an edit's before still holds the text it replaces", () => {
+    const target = { file: "a", kind: "edit" as const, oldText: "two", newText: "TWO" }
+    expect(predatesEdit("one\ntwo\n", target)).toBe(true)
+    expect(predatesEdit("one\nTWO\n", target)).toBe(false)
+  })
+
+  test("an insertion anchored on the replaced text has landed once the whole replacement is there", () => {
+    const target = { file: "a", kind: "edit" as const, oldText: "foo()", newText: "foo()\nbar()" }
+    expect(predatesEdit("x\nfoo()\ny\n", target)).toBe(true)
+    expect(predatesEdit("x\nfoo()\nbar()\ny\n", target)).toBe(false)
+  })
+
+  test("a write, an added file or a file-creating edit has landed once the file is the new text", () => {
+    expect(predatesEdit("old\n", { file: "a", kind: "write", newText: "new" })).toBe(true)
+    expect(predatesEdit("new\n", { file: "a", kind: "write", newText: "new" })).toBe(false)
+    expect(predatesEdit("new", { file: "a", kind: "add", newText: "new\n" })).toBe(false)
+    expect(predatesEdit("new", { file: "a", kind: "edit", oldText: "", newText: "new" })).toBe(false)
+  })
+
+  test("a patch update's before holds its first chunk's old lines", () => {
+    const chunks = [{ oldLines: ["one", "two"], newLines: ["one", "TWO"] }]
+    expect(predatesEdit("one\ntwo\nthree\n", { file: "a", kind: "update", chunks })).toBe(true)
+    expect(predatesEdit("one\nTWO\nthree\n", { file: "a", kind: "update", chunks })).toBe(false)
+  })
+
+  test("text missing the old string is taken as it is unless the replacement is already there", () => {
+    const edit = { file: "a", kind: "edit" as const, oldText: "two", newText: "TWO" }
+    expect(predatesEdit("one\nsomething else\n", edit)).toBe(true)
+    expect(predatesEdit("one\n", { file: "a", kind: "edit", oldText: "two\n", newText: "" })).toBe(true)
+    const chunks = [{ oldLines: ["one", "two"], newLines: ["one", "TWO"] }]
+    expect(predatesEdit("zero\n", { file: "a", kind: "update", chunks })).toBe(true)
+  })
+
+  test("reads CRLF text, and takes the text as it is when the target cannot tell", () => {
+    expect(predatesEdit("one\r\ntwo\r\n", { file: "a", kind: "edit", oldText: "one\ntwo", newText: "x" })).toBe(true)
+    expect(predatesEdit("anything", { file: "a", kind: "update" })).toBe(true)
+    expect(predatesEdit("anything", { file: "a", kind: "update", chunks: [{ oldLines: [], newLines: ["x"] }] })).toBe(
+      true,
+    )
+    expect(predatesEdit("anything", { file: "a", kind: "delete" })).toBe(true)
   })
 })
 

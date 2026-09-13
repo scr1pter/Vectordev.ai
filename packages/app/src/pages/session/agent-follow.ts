@@ -11,12 +11,13 @@
 // External agents (Claude Code, Codex, Cursor) publish no tool calls. They are
 // followed from the files their runner reports and from the file watcher.
 
-import { createEffect, createSignal, getOwner, onCleanup, untrack } from "solid-js"
+import { createEffect, createSignal, getOwner, onCleanup, untrack, type Signal } from "solid-js"
 import {
   EDIT_TOOLS,
   editTargets,
   intentRange,
   landingPath,
+  predatesEdit,
   TYPING_ARM_MS,
   type EditTarget,
 } from "@/components/agent-edit-intent"
@@ -101,7 +102,8 @@ export type ExternalActivityEntry = {
 export type FollowExternal = {
   label: string
   running: boolean
-  activity?: () => readonly ExternalActivityEntry[]
+  /** The runner's steps. Undefined until they have been read: the first snapshot read is history. */
+  activity?: () => readonly ExternalActivityEntry[] | undefined
 }
 
 export type FollowIdentity = { id: string; name: string; color: string }
@@ -184,6 +186,8 @@ type ToolPartInfo = {
   status: string
   input: Record<string, unknown>
   end?: number
+  /** The part already carries the tool's diff: the edit tool republishes it once the file is written. */
+  written: boolean
 }
 
 function toolPart(value: unknown): ToolPartInfo | undefined {
@@ -198,6 +202,7 @@ function toolPart(value: unknown): ToolPartInfo | undefined {
   const messageID = str(part.messageID)
   if (!state || !status || !callID || !sessionID || !messageID) return
   const end = record(state.time)?.end
+  const metadata = record(state.metadata)
   return {
     callID,
     sessionID,
@@ -206,6 +211,7 @@ function toolPart(value: unknown): ToolPartInfo | undefined {
     status,
     input: record(state.input) ?? {},
     end: typeof end === "number" ? end : undefined,
+    written: metadata?.diff !== undefined || metadata?.filediff !== undefined,
   }
 }
 
@@ -351,21 +357,52 @@ export function messageAgent(messages: readonly unknown[] | undefined, messageID
   return str(findMessage(messages, messageID)?.agent)
 }
 
-/** The user message an assistant message answers: one agent turn. */
-export function messageTurn(messages: readonly unknown[] | undefined, messageID: string) {
-  const message = findMessage(messages, messageID)
-  if (!message) return
-  return message.role === "assistant" ? (str(message.parentID) ?? messageID) : messageID
+/** A session, then its parent, and so on up to its root. Guarded against a cycle. */
+export function sessionLineage(sessionID: string, parentOf: (sessionID: string) => string | undefined) {
+  const out = [sessionID]
+  for (
+    let current = parentOf(sessionID);
+    current && !out.includes(current) && out.length < 100;
+    current = parentOf(current)
+  ) {
+    out.push(current)
+  }
+  return out
+}
+
+/** A session's current turn: its latest user message, when its messages are loaded. */
+export function latestTurn(messages: readonly unknown[] | undefined) {
+  for (let index = (messages?.length ?? 0) - 1; index >= 0; index -= 1) {
+    const message = record(messages?.[index])
+    if (message?.role === "user") return str(message.id)
+  }
+}
+
+/**
+ * Whether the "agent is editing" toast is due for a root session's turn.
+ * `last` is the turn the previous toast was for (undefined when that turn was
+ * not known). Without a way to tell turns apart, one toast stands until the
+ * session goes idle, which is when the caller forgets it.
+ */
+export function followToastDue(seen: boolean, last: string | undefined, turn: string | undefined) {
+  if (!seen) return true
+  return last !== undefined && turn !== undefined && last !== turn
 }
 
 export function createAgentFollow(deps: AgentFollowDeps) {
   const [attributions, setAttributions] = createSignal<AgentAttribution[]>([])
   const [cursors, setCursors] = createSignal<FollowCursor[]>([])
-  const [targets, setTargets] = createSignal<Record<string, FollowTarget>>({})
   const [typing, setTyping] = createSignal<Record<string, FollowTyping>>({})
   const [followed, setFollowed] = createSignal<{ agentId: string; name: string; color: string; path: string }>()
 
   const intents = new Map<string, Intent>()
+  // Calls that are over: every file landed, or the call failed, was rejected
+  // or expired. The edit tool republishes its running part (with its metadata)
+  // after file.edited, and that must not reopen the call it just landed.
+  const closed = new Set<string>()
+  // One target signal per directory, so an event in a parallel workspace never
+  // re-runs what watches the main directory's target, or another workspace's.
+  const targetSignals = new Map<string, Signal<FollowTarget | undefined>>()
   const waiting = new Set<string>()
   const requests = new Map<string, string>()
   const agentNames = new Map<string, string>()
@@ -388,6 +425,22 @@ export function createAgentFollow(deps: AgentFollowDeps) {
     timers.add(timer)
     return timer
   }
+
+  const close = (id: string) => {
+    closed.delete(id)
+    closed.add(id)
+    cap(closed, 500)
+  }
+  const targetSignal = (scope: string | undefined) => {
+    const key = scope ?? ""
+    let signal = targetSignals.get(key)
+    if (!signal) {
+      signal = createSignal<FollowTarget>()
+      targetSignals.set(key, signal)
+    }
+    return signal
+  }
+  const targetOf = (scope: string | undefined) => targetSignal(scope)[0]()
 
   // Unsaved drafts win over the loaded file: they are what the editor shows.
   const peekText = (source: FollowSource, key: string) =>
@@ -422,7 +475,11 @@ export function createAgentFollow(deps: AgentFollowDeps) {
       for (const key of stale) delete next[key]
       return next
     })
-    for (const [id, intent] of intents) if (now - intent.at > OPEN_INTENT_MAX_MS) intents.delete(id)
+    for (const [id, intent] of intents) {
+      if (now - intent.at <= OPEN_INTENT_MAX_MS) continue
+      intents.delete(id)
+      close(id)
+    }
     for (const [key, at] of echoes) if (now - at > INTENT_ECHO_MS) echoes.delete(key)
     for (const [key, at] of recentLands) if (now - at > RECENT_LAND_MS) recentLands.delete(key)
     const idle =
@@ -455,7 +512,7 @@ export function createAgentFollow(deps: AgentFollowDeps) {
     setCursors((list) => (list.some(match) ? list.map((cursor) => (match(cursor) ? update(cursor) : cursor)) : list))
 
   const aim = (target: FollowTarget) => {
-    setTargets((all) => ({ ...all, [target.scope ?? ""]: target }))
+    targetSignal(target.scope)[1](target)
     if (!target.scope) {
       setFollowed({ agentId: target.agentId, name: target.agentName, color: target.color, path: target.path })
     }
@@ -506,6 +563,10 @@ export function createAgentFollow(deps: AgentFollowDeps) {
   const fillBefore = async (intent: Intent, file: IntentFile) => {
     const text = await intent.source.read(file.key).catch(() => undefined)
     if (disposed || text === undefined || file.before !== undefined || file.landed || file.landing) return
+    // The write beat this read, so it already holds the agent's text (perhaps
+    // not yet formatted). That is no "before": the landing falls back to the
+    // call's own input instead.
+    if (!predatesEdit(text, file.target)) return
     file.before = text
     file.pending = intentRange(text, file.target)
     const pending = file.pending
@@ -514,7 +575,7 @@ export function createAgentFollow(deps: AgentFollowDeps) {
       (cursor) => cursor.intent === intent.id && cursor.path === file.key && cursor.state !== "landed",
       (cursor) => ({ ...cursor, line: pending.start, pending }),
     )
-    const current = targets()[intent.source.scope ?? ""]
+    const current = targetOf(intent.source.scope)
     if (current?.path === file.key && current.agentId === intent.agent.id) {
       aim({ ...current, line: pending.start, endLine: pending.end, token: Date.now() })
     }
@@ -541,9 +602,11 @@ export function createAgentFollow(deps: AgentFollowDeps) {
       if (!key || files.some((file) => file.key === key)) continue
       // A move reads its "before" from where the file was.
       const from = target.movePath ? input.source.key(target.file) : key
-      const before = from ? peekText(input.source, from) : undefined
+      const shown = from ? peekText(input.source, from) : undefined
       // Not following: never load a file only to attribute it, exactly as before.
-      if (!follow && before === undefined) continue
+      if (!follow && shown === undefined) continue
+      // A call first seen completed can find its own write already on screen.
+      const before = shown !== undefined && predatesEdit(shown, target) ? shown : undefined
       files.push({ key, target, before, pending: intentRange(before, target), landed: false, landing: false })
     }
     if (!files.length) return
@@ -578,6 +641,7 @@ export function createAgentFollow(deps: AgentFollowDeps) {
     const intent = intents.get(id)
     intents.delete(id)
     waiting.delete(id)
+    close(id)
     removeCursors((cursor) => cursor.intent === id && cursor.state !== "landed")
     if (intent) for (const file of intent.files) disarm(file.key, intent.at)
   }
@@ -668,13 +732,19 @@ export function createAgentFollow(deps: AgentFollowDeps) {
     // A long permission wait outlives the arm set at call time.
     const armed = typing()[file.key]
     if (follow && (!armed || Date.now() - armed.token > TYPING_ARM_MS / 2)) arm(file.key, intent.agent, Date.now())
-    const before = file.before ?? peekText(intent.source, file.key)
+    // What is on screen counts as the "before" only while the change has not
+    // reached it (see fillBefore).
+    const shown = file.before === undefined ? peekText(intent.source, file.key) : undefined
+    const before = file.before ?? (shown !== undefined && predatesEdit(shown, file.target) ? shown : undefined)
     const after = await intent.source.read(file.key).catch(() => undefined)
     file.landing = false
     file.landed = true
     if (!intent.external) echoes.set(file.key, Date.now())
     recentLands.set(`${intent.messageID ?? ""}\n${file.key}`, Date.now())
-    if (intents.get(intent.id) === intent && intent.files.every((item) => item.landed)) intents.delete(intent.id)
+    if (intents.get(intent.id) === intent && intent.files.every((item) => item.landed)) {
+      intents.delete(intent.id)
+      close(intent.id)
+    }
     if (disposed) return
     if (after === undefined) {
       removeCursors((cursor) => cursor.intent === intent.id && cursor.path === file.key)
@@ -765,6 +835,8 @@ export function createAgentFollow(deps: AgentFollowDeps) {
     const part = toolPart(properties.part)
     if (!part) return
     const id = `${part.sessionID}\n${part.callID}`
+    // A call that is over stays over, whatever its tool republishes.
+    if (closed.has(id)) return
     const existing = intents.get(id)
     const start = (targets: readonly EditTarget[]) =>
       openIntent({
@@ -780,7 +852,10 @@ export function createAgentFollow(deps: AgentFollowDeps) {
         external: false,
       })
     if (part.status === "running") {
-      if (!existing) start(editTargets(part.tool, part.input))
+      // A running part that already carries the diff is the edit tool's
+      // republish after its write: the file holds the new text, so there is no
+      // before left to open a call on. The completed part lands it instead.
+      if (!existing && !part.written) start(editTargets(part.tool, part.input))
       return
     }
     if (part.status === "error") {
@@ -919,15 +994,17 @@ export function createAgentFollow(deps: AgentFollowDeps) {
   // the file with the agent's cursor before the write reaches the watcher; a
   // finished one lands even where the watcher is off (web dev, WSL).
   const ingestActivity = (
-    entries: readonly ExternalActivityEntry[],
+    /** Undefined while the runner's record has not been read, which is not "nothing has run". */
+    entries: readonly ExternalActivityEntry[] | undefined,
     options?: { source?: FollowSource; identity?: FollowIdentity },
   ) => {
-    if (disposed) return
+    if (disposed || !entries) return
     const source = options?.source ?? deps.source
     const external = deps.external?.()
     const agent = options?.identity ?? (external ? externalIdentity(external) : undefined)
     if (!agent) return
-    // What is already there when the store starts is history, not live.
+    // The first snapshot read is history, not live: those steps ran before
+    // the store started.
     const primed = activityPrimed
     activityPrimed = true
     for (const entry of entries) {
@@ -987,10 +1064,10 @@ export function createAgentFollow(deps: AgentFollowDeps) {
   return {
     attributions,
     cursors,
-    /** Where the editor should be for the main directory. */
-    target: () => targets()[""],
+    /** Where the editor should be for the main directory. Other directories' targets never notify it. */
+    target: () => targetOf(undefined),
     /** Where the editor should be for another directory (a parallel workspace). */
-    targetFor: (scope: string | undefined) => targets()[scope ?? ""],
+    targetFor: (scope: string | undefined) => targetOf(scope),
     /** The agent being followed in the main directory, and what it is doing. */
     following: () => {
       const current = followed()
@@ -1009,7 +1086,8 @@ export function createAgentFollow(deps: AgentFollowDeps) {
     ingestActivity,
     /** Re-issue a target with a fresh token, so an editor opened late still reveals it. */
     refreshTarget: (scope?: string) => {
-      const current = targets()[scope ?? ""]
+      // Untracked: a caller inside a computation must not re-run on the target it sets.
+      const current = untrack(() => targetOf(scope))
       if (current) aim({ ...current, token: Date.now() })
     },
     clearFollowing: () => setFollowed(undefined),

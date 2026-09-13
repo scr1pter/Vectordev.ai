@@ -258,8 +258,10 @@ function ExternalAgentFiles(props: {
   // file with the agent's cursor before the write reaches the watcher. Nothing
   // passes the record in yet, so read it from the desktop bridge while this
   // view is open. Runners that predate the field report no files, and nothing
-  // is followed from them.
-  const [polled, setPolled] = createSignal<readonly ExternalActivityEntry[]>([])
+  // is followed from them. Undefined until the first read: the follow store
+  // takes the first real snapshot as history, so nothing may stand in for it
+  // (an empty placeholder would make every step already finished look live).
+  const [polled, setPolled] = createSignal<readonly ExternalActivityEntry[]>()
   createEffect(() => {
     if (props.activityEntries) return
     const running = props.running
@@ -272,7 +274,9 @@ function ExternalAgentFiles(props: {
         .then((records) => {
           if (!alive) return
           const record = records.find((item) => item.id === props.workspaceId)
-          setPolled(externalActivityEntries((record as Record<string, unknown> | undefined)?.turns))
+          // Not listed yet is not "no activity": wait for the record.
+          if (!record) return
+          setPolled(externalActivityEntries((record as Record<string, unknown>).turns))
         })
         .catch(() => undefined)
     read()

@@ -121,6 +121,41 @@ export function intentRange(buffer: string | undefined, target: EditTarget): Lin
   return
 }
 
+const lf = (value: string) => value.replace(/\r\n/g, "\n")
+const sameText = (a: string, b: string) => lf(a).replace(/\n+$/, "") === lf(b).replace(/\n+$/, "")
+
+// Whether a file's text can still be what it was before this change. A read
+// that lands after the tool's write, but before its formatter, already holds
+// the agent's own text: diffing the formatted file against it would attribute
+// the formatter's lines rather than the agent's. Such a read is no "before".
+// When the target does not say enough to tell, the text is taken as it is.
+export function predatesEdit(buffer: string, target: EditTarget): boolean {
+  const current = lf(buffer)
+  if (target.kind === "write" || target.kind === "add") {
+    return target.newText === undefined || !sameText(current, target.newText)
+  }
+  if (target.kind === "edit") {
+    const old = target.oldText === undefined ? undefined : lf(target.oldText)
+    const next = target.newText === undefined ? undefined : lf(target.newText)
+    // An empty oldString writes the whole file.
+    if (!old) return next === undefined || !sameText(current, next)
+    // Text that no longer holds the old string is no proof on its own: only
+    // the replacement already being there says the write landed.
+    if (!current.includes(old)) return !(next && current.includes(next))
+    // An insertion anchored on the text it replaces keeps that text, so only
+    // the whole replacement already being there says the write landed.
+    return !(next && next.includes(old) && current.includes(next))
+  }
+  if (target.kind === "update") {
+    const chunk = target.chunks?.[0]
+    const old = chunk?.oldLines.join("\n")
+    if (!old?.trim() || current.includes(old)) return true
+    const next = chunk?.newLines.join("\n")
+    return !(next?.trim() && current.includes(next))
+  }
+  return true
+}
+
 // Replaying a landed edit as typing. The server writes the whole change at
 // once, so the editor replays the difference in the agent's colour. Above this
 // size the replay would be a blur, so the change is applied instantly instead.

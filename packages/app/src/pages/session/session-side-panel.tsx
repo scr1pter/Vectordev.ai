@@ -14,7 +14,7 @@ import {
   untrack,
   type JSX,
 } from "solid-js"
-import { createStore } from "solid-js/store"
+import { createStore, produce } from "solid-js/store"
 import { Portal } from "solid-js/web"
 import { agentColor, ATTRIBUTION_TTL_MS, resolveAgentColor } from "@/components/editor-attribution"
 import {
@@ -22,8 +22,10 @@ import {
   directoryFollowSource,
   eventFiles,
   fileFollowSource,
+  followToastDue,
+  latestTurn,
   messageAgent,
-  messageTurn,
+  sessionLineage,
   workspaceRelativePath,
   type AgentFollow,
   type ExternalActivityEntry,
@@ -1906,8 +1908,11 @@ export function CodespaceWorkbench(props: {
     label: string
     running: boolean
     panel: JSX.Element
-    /** The runner's activity. Steps that report files are followed before the watcher fires. */
-    activity?: () => readonly ExternalActivityEntry[]
+    /**
+     * The runner's activity. Steps that report files are followed before the
+     * watcher fires. Undefined until it has been read: the first snapshot is history.
+     */
+    activity?: () => readonly ExternalActivityEntry[] | undefined
   }
   /** The session panel's follow store, which outlives this editor. */
   follow?: AgentFollow
@@ -1939,9 +1944,9 @@ export function CodespaceWorkbench(props: {
   const [ignoredProblems, setIgnoredProblems] = createSignal<Set<string>>(new Set())
   const [liveWorkspaces, setLiveWorkspaces] = createSignal<CodespaceLiveWorkspace[]>([])
   const [liveWorkspaceError, setLiveWorkspaceError] = createSignal("")
-  // Parallel workspaces that run in another directory: the files their events
-  // named (marked before the next poll), their files' text as read from that
-  // directory, and the copy the user is watching.
+  // Parallel workspaces that run in another directory: the files their writes
+  // named (marked before the next poll), the watched copy's text as read from
+  // that directory, and the copy the user is watching.
   const [workspaceTouches, setWorkspaceTouches] = createStore<Record<string, string[]>>({})
   const [workspaceTexts, setWorkspaceTexts] = createStore<Record<string, string>>({})
   const [workspaceView, setWorkspaceView] = createSignal<{
@@ -2220,10 +2225,10 @@ export function CodespaceWorkbench(props: {
 
   // Parallel workspaces run in their own directory, so this editor's event
   // stream never sees their edits. Listen on the server-wide stream for those
-  // directories instead: mark the file tree the moment an event names a file
-  // (rather than on the next one-second poll), and feed the same follow store,
-  // so the workspace's copy shows its agent's cursor, colour and typing while
-  // the user watches it.
+  // directories instead: mark the file tree the moment a write lands (rather
+  // than on the next one-second poll), and feed the workspace being watched to
+  // the same follow store, so its copy shows its agent's cursor, colour and
+  // typing.
   const sameDirectory = (a: string, b: string | undefined) =>
     b !== undefined && a.replace(/\\/g, "/").replace(/\/+$/, "") === b.replace(/\\/g, "/").replace(/\/+$/, "")
   const isForeignWorkspace = (workspace: CodespaceLiveWorkspace) =>
@@ -2239,9 +2244,12 @@ export function CodespaceWorkbench(props: {
       excluded: CODESPACE_EXCLUDED_DIRECTORIES,
       peek: (key) => workspaceTexts[key],
       read: async (relative, key) => {
+        // Only the copy being watched is read: nothing else shows it.
+        if (untrack(followedWorkspace) !== workspace.id) return
         const result = await client.file.read({ path: relative }).catch(() => undefined)
         const text = result?.data?.content
-        if (typeof text !== "string") return
+        // Watching may have stopped while the read was in flight.
+        if (typeof text !== "string" || untrack(followedWorkspace) !== workspace.id) return
         setWorkspaceTexts(key, text)
         return text
       },
@@ -2250,34 +2258,44 @@ export function CodespaceWorkbench(props: {
     return source
   }
 
+  // A memo, so the one-second poll (a new list every time) does not tear the
+  // subscription down and open it again.
+  const hasForeignWorkspaces = createMemo(() => foreignWorkspaces().length > 0)
   createEffect(
-    on(
-      () => foreignWorkspaces().length > 0,
-      (active) => {
-        if (!active) return
-        const stop = serverSDK().event.listen((event) => {
-          const workspace = untrack(foreignWorkspaces).find((item) => sameDirectory(item.isolatedPath, event.name))
-          if (!workspace) return
-          const details = event.details
-          const source = workspaceSource(workspace)
-          const touched = eventFiles(details).flatMap((path) => {
-            const key = source.key(path)
-            const relative = key ? workspaceRelativePath(workspace.isolatedPath, key) : undefined
-            return relative ? [relative] : []
-          })
-          if (touched.length) {
-            setWorkspaceTouches(workspace.id, (current) => [...new Set([...(current ?? []), ...touched])])
-          }
-          follow.handle(details, {
-            source,
-            identity: { id: `workspace:${workspace.id}`, name: workspace.name, color: workspaceColor(workspace.id) },
-            // Nothing but the external runner writes an external agent's copy.
-            watcherEdits: workspace.runtime !== "vector",
-          })
+    on(hasForeignWorkspaces, (active) => {
+      if (!active) return
+      const stop = serverSDK().event.listen((event) => {
+        const workspace = untrack(foreignWorkspaces).find((item) => sameDirectory(item.isolatedPath, event.name))
+        if (!workspace) return
+        const details = event.details
+        const source = workspaceSource(workspace)
+        // Only a write marks the tree. A running call can still be rejected or
+        // fail, and its mark would then name a file the agent never changed.
+        const wrote = details.type === "file.edited" || details.type === "file.watcher.updated"
+        const touched = (wrote ? eventFiles(details) : []).flatMap((path) => {
+          const key = source.key(path)
+          const relative = key ? workspaceRelativePath(workspace.isolatedPath, key) : undefined
+          return relative ? [relative] : []
         })
-        onCleanup(stop)
-      },
-    ),
+        if (touched.length) {
+          // Newest last, so the chip opens the file the agent wrote most recently.
+          setWorkspaceTouches(workspace.id, (current) => [
+            ...(current ?? []).filter((path) => !touched.includes(path)),
+            ...touched,
+          ])
+        }
+        // Only the workspace being watched is followed: following reads the
+        // agent's files over HTTP and keeps their text in memory.
+        if (untrack(followedWorkspace) !== workspace.id) return
+        follow.handle(details, {
+          source,
+          identity: { id: `workspace:${workspace.id}`, name: workspace.name, color: workspaceColor(workspace.id) },
+          // Nothing but the external runner writes an external agent's copy.
+          watcherEdits: workspace.runtime !== "vector",
+        })
+      })
+      onCleanup(stop)
+    }),
   )
 
   const openWorkspaceFile = async (workspace: CodespaceLiveWorkspace, relative: string) => {
@@ -2306,6 +2324,24 @@ export function CodespaceWorkbench(props: {
     setFollowedWorkspace(undefined)
     setWorkspaceView(undefined)
   }
+  // Watching stopped, or moved to another workspace: that copy's text is no
+  // longer shown or followed, so it is not kept.
+  createEffect(
+    on(
+      followedWorkspace,
+      (id, previous) => {
+        const directory = previous && previous !== id ? workspaceSources.get(previous)?.directory : undefined
+        if (!directory) return
+        const root = `${directory.replace(/\\/g, "/").replace(/\/+$/, "")}/`
+        setWorkspaceTexts(
+          produce((texts) => {
+            for (const key of Object.keys(texts)) if (key.startsWith(root)) delete texts[key]
+          }),
+        )
+      },
+      { defer: true },
+    ),
+  )
 
   // While the user watches a workspace, follow its agent from file to file.
   createEffect(
@@ -2939,7 +2975,8 @@ export function CodespaceWorkbench(props: {
           </Show>
 
           <section class="relative min-w-0 flex-1 flex flex-col bg-[#151515]">
-            <Show when={workspaceView()}>
+            {/* Over the editor only, so the Problems view stays usable while a workspace is watched. */}
+            <Show when={activeView() === "editor" ? workspaceView() : undefined}>
               {(view) => (
                 <div data-vector-workspace-copy class="absolute inset-0 z-20 flex flex-col bg-[#151515]">
                   <div class="flex h-10 shrink-0 items-center gap-2 border-b border-[#272727] bg-[#121212] px-3 text-[12px]">
@@ -5244,8 +5281,19 @@ export function SessionSidePanel(props: {
 
   // With the Codespace closed, say once per agent turn what the agent is
   // editing, with a way to watch it. Following stays opt-in, and nothing
-  // takes over the chat by itself.
-  const followToasts = new Map<string, { turn: string; at: number }>()
+  // takes over the chat by itself. A turn is the root session's latest user
+  // message, so a subagent's edits belong to the turn that started it.
+  // Root session → the turn last toasted; undefined when it was not known.
+  const followToasts = new Map<string, string | undefined>()
+  const sessionParent = (sessionID: string) => sync().session.get(sessionID)?.parentID
+  // A toast whose turn was not known stands until the session goes idle.
+  createEffect(() => {
+    const page = params.id
+    if (!page) return
+    const root = sessionLineage(page, sessionParent).at(-1)!
+    if ((sync().data.session_status[root]?.type ?? "idle") !== "idle") return
+    if (followToasts.has(root) && followToasts.get(root) === undefined) followToasts.delete(root)
+  })
   createEffect(
     on(
       agentFollow.target,
@@ -5253,12 +5301,22 @@ export function SessionSidePanel(props: {
         // The Codespace only opens at desktop widths, so there is nothing to watch below them.
         if (!target || !settings.editor.followAgent() || !isDesktop() || codespaceOpen()) return
         if (Date.now() - target.token > 5_000) return
-        const sessionID = target.sessionID ?? target.agentId
-        const turn = target.messageID ? messageTurn(sync().data.message[sessionID], target.messageID) : undefined
-        const last = followToasts.get(sessionID)
-        // A subagent's messages may not be loaded; then one toast a minute at most.
-        if (last && (turn ? last.turn === turn : Date.now() - last.at < 60_000)) return
-        followToasts.set(sessionID, { turn: turn ?? "", at: Date.now() })
+        // Only this chat's session and its subagents. Another tab's session,
+        // or a multiplayer guest's, in the same directory is not this chat's.
+        const page = params.id
+        if (!page) return
+        const lineage = sessionLineage(target.sessionID ?? target.agentId, sessionParent)
+        if (!lineage.includes(page)) return
+        const root = lineage.at(-1)!
+        const turn = latestTurn(sync().data.message[root])
+        const seen = followToasts.has(root)
+        const last = followToasts.get(root)
+        if (!followToastDue(seen, last, turn)) {
+          // The turn became known after its toast: keep it, so the next turn still toasts.
+          if (seen && last === undefined && turn !== undefined) followToasts.set(root, turn)
+          return
+        }
+        followToasts.set(root, turn)
         showToast({
           title: `${target.agentName} is editing ${fileBasename(target.path)}`,
           description: target.path,

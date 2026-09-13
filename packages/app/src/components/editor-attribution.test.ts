@@ -8,6 +8,7 @@ import {
   changedLineRanges,
   CURSOR_TAIL_MAX_LINES,
   DIFF_LINE_RANGES_MAX_CHARS,
+  DIFF_LINE_RANGES_TIMEOUT_MS,
   diffLineRanges,
   inferredLineRanges,
   locateInsertedText,
@@ -251,6 +252,20 @@ describe("diffLineRanges", () => {
     const before = `a\n${filler}b\n`
     const after = `A\n${filler}B\n`
     expect(diffLineRanges(before, after)).toEqual(changedLineRanges(before, after))
+  })
+
+  test("gives up on a rewrite too slow to diff and uses the prefix/suffix range", () => {
+    // Every line differs but one in the middle. A full diff would split the
+    // file around that line, but at this size it takes seconds.
+    const lines = 6000
+    const file = (prefix: string) =>
+      Array.from({ length: lines }, (_, i) => (i === lines / 2 ? "same" : `${prefix}${i}`)).join("\n")
+    const before = file("a")
+    const after = file("b")
+    expect(before.length + after.length).toBeLessThan(DIFF_LINE_RANGES_MAX_CHARS)
+    const started = performance.now()
+    expect(diffLineRanges(before, after)).toEqual([{ start: 1, end: lines }])
+    expect(performance.now() - started).toBeLessThan(DIFF_LINE_RANGES_TIMEOUT_MS * 20)
   })
 })
 

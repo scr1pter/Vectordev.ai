@@ -420,21 +420,28 @@ function modelFor(path: string, value: string) {
 
 const cssId = (value: string) => value.replace(/[^a-z0-9_-]/gi, "")
 
-// Monaco decorations take class names, not inline colours, so each agent's
-// colour is injected as a rule once and reused. Rules accumulate per agent, so
-// two editors (or two agents) never drop each other's colours.
+// Monaco decorations take class names, not inline colours, so each colour is
+// injected as a rule once and reused. The rules carry nothing but the colour,
+// so they are keyed by it rather than by agent: the colours are bounded by the
+// palette and the configured agent colours, while agent ids (one per session)
+// are not, and the stylesheet would otherwise grow and be rewritten for each.
+// Rules accumulate, so two editors never drop each other's colours.
+const colorClass = (color: string) => `c-${cssId(color.toLowerCase())}`
+
 const attributionRules = new Map<string, string>()
 let attributionStyleEl: HTMLStyleElement | undefined
-function attributionStyles(entries: readonly AgentAttribution[]) {
+function attributionStyles(entries: readonly Pick<AgentAttribution, "color">[]) {
   let changed = false
   for (const entry of entries) {
-    const id = cssId(entry.agentId)
-    const rules = [
-      `.vector-agent-gutter.vector-agent-${id}{border-left:2px solid ${entry.color};margin-left:2px}`,
-      `.vector-agent-line.vector-agent-${id}{background:${entry.color}14}`,
-    ].join("")
-    if (attributionRules.get(id) === rules) continue
-    attributionRules.set(id, rules)
+    const id = colorClass(entry.color)
+    if (attributionRules.has(id)) continue
+    attributionRules.set(
+      id,
+      [
+        `.vector-agent-gutter.vector-agent-${id}{border-left:2px solid ${entry.color};margin-left:2px}`,
+        `.vector-agent-line.vector-agent-${id}{background:${entry.color}14}`,
+      ].join(""),
+    )
     changed = true
   }
   if (!changed) return
@@ -491,19 +498,21 @@ const CURSOR_BASE_RULES = [
 
 const cursorRules = new Map<string, string>()
 let cursorStyleEl: HTMLStyleElement | undefined
-function cursorStyles(cursors: readonly Pick<MonacoAgentCursor, "agentId" | "color">[]) {
+function cursorStyles(cursors: readonly Pick<MonacoAgentCursor, "color">[]) {
   if (!cursors.length) return
   let changed = !cursorStyleEl
   for (const cursor of cursors) {
-    const id = cssId(cursor.agentId)
-    const rules = [
-      `.vector-agent-cursor-line.vector-agent-cursor-${id}{box-shadow:inset 2px 0 0 ${cursor.color}}`,
-      `.vector-agent-cursor-label.vector-agent-cursor-${id}{color:${cursor.color};background:${cursor.color}22}`,
-      `.vector-agent-pending.vector-agent-pending-${id}{background:${cursor.color}0d}`,
-      `.vector-agent-pending-gutter.vector-agent-pending-${id}{border-left:2px dashed ${cursor.color};margin-left:2px}`,
-    ].join("")
-    if (cursorRules.get(id) === rules) continue
-    cursorRules.set(id, rules)
+    const id = colorClass(cursor.color)
+    if (cursorRules.has(id)) continue
+    cursorRules.set(
+      id,
+      [
+        `.vector-agent-cursor-line.vector-agent-cursor-${id}{box-shadow:inset 2px 0 0 ${cursor.color}}`,
+        `.vector-agent-cursor-label.vector-agent-cursor-${id}{color:${cursor.color};background:${cursor.color}22}`,
+        `.vector-agent-pending.vector-agent-pending-${id}{background:${cursor.color}0d}`,
+        `.vector-agent-pending-gutter.vector-agent-pending-${id}{border-left:2px dashed ${cursor.color};margin-left:2px}`,
+      ].join(""),
+    )
     changed = true
   }
   if (!changed) return
@@ -855,8 +864,8 @@ export function MonacoCodeEditor(props: {
               range: new monaco.Range(range.start, 1, Math.min(range.end, current.getLineCount()), 1),
               options: {
                 isWholeLine: true,
-                className: `vector-agent-line vector-agent-${cssId(entry.agentId)}`,
-                linesDecorationsClassName: `vector-agent-gutter vector-agent-${cssId(entry.agentId)}`,
+                className: `vector-agent-line vector-agent-${colorClass(entry.color)}`,
+                linesDecorationsClassName: `vector-agent-gutter vector-agent-${colorClass(entry.color)}`,
                 hoverMessage: { value: `Edited by ${entry.agentName}` },
                 overviewRuler: { color: entry.color, position: monaco.editor.OverviewRulerLane.Left },
               },
@@ -934,7 +943,7 @@ export function MonacoCodeEditor(props: {
     const clamp = (line: number) => Math.min(Math.max(1, line), total)
     cursorCollection.set(
       shown.flatMap((cursor) => {
-        const id = cssId(cursor.agentId)
+        const id = colorClass(cursor.color)
         const typingHere = caret !== undefined && caret.agentId === cursor.agentId
         const line = clamp(typingHere && caret ? caret.line : cursor.line)
         const column = model.getLineMaxColumn(line)

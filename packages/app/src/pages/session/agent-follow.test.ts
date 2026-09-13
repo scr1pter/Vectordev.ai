@@ -6,8 +6,10 @@ import {
   directoryFollowSource,
   eventFiles,
   externalActivityEntries,
+  followToastDue,
+  latestTurn,
   messageAgent,
-  messageTurn,
+  sessionLineage,
   WATCHER_DEBOUNCE_MS,
   workspaceRelativePath,
   type AgentFollow,
@@ -78,6 +80,7 @@ function part(input: {
   messageID?: string
   input?: Record<string, unknown>
   end?: number
+  metadata?: Record<string, unknown>
 }) {
   const sessionID = input.sessionID ?? "ses_main"
   return {
@@ -92,6 +95,7 @@ function part(input: {
       state: {
         status: input.status,
         input: input.input ?? {},
+        ...(input.metadata ? { metadata: input.metadata } : {}),
         time: { start: Date.now(), ...(input.end === undefined ? {} : { end: input.end }) },
       },
     },
@@ -229,6 +233,76 @@ describe("landing an edit", () => {
     expect(h.store.cursorsFor("src/a.ts")[0]).toMatchObject({ state: "landed", line: 2 })
     expect(h.store.cursorsFor("src/a.ts")[0]?.pending).toBeUndefined()
     expect(h.store.target()).toMatchObject({ path: "src/a.ts", line: 2, endLine: 2 })
+  })
+
+  test("the edit tool's own metadata update after landing does not reopen the call", async () => {
+    const before = "a\nb\nc\nd\ne\nf\ng\n"
+    const h = harness({ loaded: { "src/a.ts": before }, disk: { "src/a.ts": before } })
+    h.emit("message.part.updated", editCall("c1", "src/a.ts", "g", "G"))
+    h.disk["src/a.ts"] = "a\nb\nc\nd\ne\nf\nG\n"
+    h.emit("file.edited", edited("src/a.ts"))
+    await wait(5)
+    expect(h.store.cursorsFor("src/a.ts")).toEqual([expect.objectContaining({ state: "landed", line: 7 })])
+
+    // The edit tool publishes file.edited, then its metadata, which
+    // republishes the same running part with the same input.
+    h.emit("message.part.updated", editCall("c1", "src/a.ts", "g", "G"))
+    expect(h.store.cursorsFor("src/a.ts")).toEqual([expect.objectContaining({ state: "landed", line: 7 })])
+    expect(h.store.target()).toMatchObject({ path: "src/a.ts", line: 7 })
+
+    // Nor does its completed part land it a second time.
+    h.emit(
+      "message.part.updated",
+      part({
+        callID: "c1",
+        status: "completed",
+        input: { filePath: `${ROOT}/src/a.ts`, oldString: "g", newString: "G" },
+        end: Date.now(),
+      }),
+    )
+    await wait(10)
+    expect(h.store.cursorsFor("src/a.ts")).toEqual([expect.objectContaining({ state: "landed", line: 7 })])
+    expect(h.reads).toEqual(["src/a.ts"])
+  })
+
+  test("the edit tool's post-write republish opens no call when its first running part was missed", async () => {
+    const after = "a\nb\nC\n"
+    const h = harness({ loaded: { "src/a.ts": after }, disk: { "src/a.ts": after } })
+    // The first running update was coalesced away, so the store first sees the
+    // part the edit tool republishes with its diff once the file is written.
+    h.emit("message.part.updated", editCall("c1", "src/a.ts", "c", "C", { metadata: { diff: "@@", filediff: {} } }))
+    expect(h.store.cursorsFor("src/a.ts")).toEqual([])
+    expect(h.reads).toEqual([])
+
+    // The completed part still lands it.
+    h.emit(
+      "message.part.updated",
+      part({
+        callID: "c1",
+        status: "completed",
+        input: { filePath: `${ROOT}/src/a.ts`, oldString: "c", newString: "C" },
+        end: Date.now(),
+      }),
+    )
+    await wait(10)
+    expect(h.store.cursorsFor("src/a.ts")).toEqual([expect.objectContaining({ state: "landed", line: 3 })])
+  })
+
+  test("a read that lands after the write, before the formatter, is not taken as the before", async () => {
+    // The file was not open, and the auto-approved write reached the disk
+    // before the store's read did: that read holds the agent's unformatted text.
+    const h = harness({ disk: { "src/a.ts": "import b\nimport a\n\nconst delta = 1\n" } })
+    h.emit("message.part.updated", editCall("c1", "src/a.ts", "const gamma = 1", "const delta = 1"))
+    await wait(5)
+    expect(h.reads).toEqual(["src/a.ts"])
+    expect(h.store.cursorsFor("src/a.ts")[0]?.pending).toBeUndefined()
+
+    // The formatter then sorts the imports and leaves the agent's line alone.
+    h.disk["src/a.ts"] = "import a\nimport b\n\nconst delta = 1\n"
+    h.emit("file.edited", edited("src/a.ts"))
+    await wait(5)
+    expect(h.store.attributionsFor("src/a.ts")[0]?.ranges).toEqual([{ start: 4, end: 4 }])
+    expect(h.store.cursorsFor("src/a.ts")[0]).toMatchObject({ state: "landed", line: 4 })
   })
 
   test("falls back to the tool input when the saved text was already the new text", async () => {
@@ -380,6 +454,28 @@ describe("several agents", () => {
       ranges: [{ start: 2, end: 2 }],
     })
   })
+
+  test("a parallel workspace's target leaves the main directory's target as it was", () => {
+    const h = harness({ loaded: { "src/a.ts": "one\ntwo\n" } })
+    h.emit("message.part.updated", editCall("c1", "src/a.ts", "two", "TWO"))
+    const main = h.store.target()
+    const source = directoryFollowSource({ directory: "/w/iso", peek: () => "x\ny\n", read: async () => "x\ny\n" })
+    h.store.handle(
+      {
+        type: "message.part.updated",
+        properties: part({
+          callID: "w1",
+          status: "running",
+          sessionID: "ses_w",
+          input: { filePath: "/w/iso/src/b.ts", oldString: "y", newString: "Y" },
+        }),
+      },
+      { source, identity: { id: "workspace:w1", name: "Refactor", color: "#a78bfa" } },
+    )
+    h.store.refreshTarget("/w/iso")
+    expect(h.store.targetFor("/w/iso")).toMatchObject({ path: "/w/iso/src/b.ts", line: 2 })
+    expect(h.store.target()).toBe(main!)
+  })
 })
 
 describe("following off", () => {
@@ -470,8 +566,23 @@ describe("external agents", () => {
     expect(h.store.cursorsFor("src/a.ts")[0]).toMatchObject({ state: "landed", line: 2 })
   })
 
+  test("activity not read yet is not history: the first snapshot read is", async () => {
+    const h = harness({ disk: { "src/old.ts": "old\n" }, external: { label: "Codex", running: true } })
+    // The files view has not read the runner's record yet.
+    h.store.ingestActivity(undefined)
+    // Its first snapshot holds steps that finished before the view opened.
+    h.store.ingestActivity([{ id: "old", state: "done", files: ["src/old.ts"] }])
+    await wait(700)
+    expect(h.store.cursors()).toEqual([])
+    expect(h.store.attributions()).toEqual([])
+    expect(h.store.target()).toBeUndefined()
+    expect(h.reads).toEqual([])
+  })
+
   test("a failed activity step clears its cursor", () => {
     const h = harness({ loaded: { "src/a.ts": "one\n" }, external: { label: "Codex", running: true } })
+    // A snapshot that was read and is empty: the runner has done nothing yet,
+    // so every step after it is live. (Not read yet would be undefined.)
     h.store.ingestActivity([])
     h.store.ingestActivity([{ id: "t1", state: "running", files: ["src/a.ts"] }])
     expect(h.store.cursors()).toHaveLength(1)
@@ -551,15 +662,35 @@ describe("helpers", () => {
     expect(reads).toEqual(["src/a.ts"])
   })
 
-  test("messageAgent and messageTurn read a loaded message", () => {
+  test("messageAgent reads a loaded message, and latestTurn a session's current turn", () => {
     const messages = [
-      { id: "msg_user", role: "user", agent: "build" },
-      { id: "msg_1", role: "assistant", agent: "plan", parentID: "msg_user" },
+      { id: "msg_a", role: "user", agent: "build" },
+      { id: "msg_b", role: "assistant", agent: "plan", parentID: "msg_a" },
+      { id: "msg_c", role: "user", agent: "build" },
+      { id: "msg_d", role: "assistant", agent: "build", parentID: "msg_c" },
     ]
-    expect(messageAgent(messages, "msg_1")).toBe("plan")
-    expect(messageTurn(messages, "msg_1")).toBe("msg_user")
-    expect(messageTurn(messages, "msg_user")).toBe("msg_user")
+    expect(messageAgent(messages, "msg_b")).toBe("plan")
     expect(messageAgent(messages, "missing")).toBeUndefined()
-    expect(messageTurn(undefined, "msg_1")).toBeUndefined()
+    expect(latestTurn(messages)).toBe("msg_c")
+    expect(latestTurn([])).toBeUndefined()
+    expect(latestTurn(undefined)).toBeUndefined()
+  })
+
+  test("sessionLineage walks up to the root and survives a cycle", () => {
+    const parents: Record<string, string> = { ses_grandchild: "ses_child", ses_child: "ses_root" }
+    expect(sessionLineage("ses_grandchild", (id) => parents[id])).toEqual(["ses_grandchild", "ses_child", "ses_root"])
+    expect(sessionLineage("ses_root", (id) => parents[id])).toEqual(["ses_root"])
+    const loop: Record<string, string> = { a: "b", b: "a" }
+    expect(sessionLineage("a", (id) => loop[id])).toEqual(["a", "b"])
+  })
+
+  test("followToastDue allows one toast per turn, and one per busy stretch when turns are unknown", () => {
+    expect(followToastDue(false, undefined, undefined)).toBe(true)
+    expect(followToastDue(false, undefined, "msg_1")).toBe(true)
+    expect(followToastDue(true, "msg_1", "msg_1")).toBe(false)
+    expect(followToastDue(true, "msg_1", "msg_2")).toBe(true)
+    expect(followToastDue(true, undefined, undefined)).toBe(false)
+    expect(followToastDue(true, undefined, "msg_2")).toBe(false)
+    expect(followToastDue(true, "msg_1", undefined)).toBe(false)
   })
 })

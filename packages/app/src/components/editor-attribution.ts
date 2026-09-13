@@ -180,6 +180,12 @@ function mergeRanges(ranges: readonly LineRange[]) {
 // prefix/suffix range is used instead.
 export const DIFF_LINE_RANGES_MAX_CHARS = 300_000
 
+// The line diff's cost grows with the square of the lines that differ: a
+// whole-file rewrite of a few thousand lines takes seconds on the main thread,
+// well under the size cap. Past this budget it gives up, and the single
+// prefix/suffix range is used instead.
+export const DIFF_LINE_RANGES_TIMEOUT_MS = 50
+
 // One range per changed block, so an edit that touches two separate functions
 // tints those two blocks rather than everything between them. A deletion
 // leaves no line to tint, so it marks the seam where the text was, as
@@ -187,10 +193,12 @@ export const DIFF_LINE_RANGES_MAX_CHARS = 300_000
 export function diffLineRanges(before: string, after: string): LineRange[] {
   if (before === after) return []
   if (before.length + after.length > DIFF_LINE_RANGES_MAX_CHARS) return changedLineRanges(before, after)
+  const changes = diffLines(before, after, { ignoreNewlineAtEof: true, timeout: DIFF_LINE_RANGES_TIMEOUT_MS })
+  if (!changes) return changedLineRanges(before, after)
   const total = after.split("\n").length
   const ranges: LineRange[] = []
   let line = 1
-  for (const change of diffLines(before, after, { ignoreNewlineAtEof: true })) {
+  for (const change of changes) {
     if (change.removed) {
       const seam = Math.max(1, Math.min(line, total))
       ranges.push({ start: seam, end: seam })
