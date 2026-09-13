@@ -71,6 +71,8 @@ import { scheduleConnectedMeasure } from "./measure"
 import { createTimelineProjection } from "./projection"
 import { MessageComment, SummaryDiff, TimelineRow, TimelineRowMap } from "./rows"
 import { filterVirtualIndexes } from "./virtual-items"
+import { SubagentTaskChip } from "@/features/background-tasks/subagent-task-chip"
+import { useBackgroundTasks } from "@/features/background-tasks/use-background-tasks"
 
 const emptyMessages: MessageType[] = []
 const emptyParts: PartType[] = []
@@ -88,6 +90,8 @@ const taskDescription = (part: PartType, sessionID: string) => {
   if (part.type !== "tool" || part.tool !== "task") return
   const metadata = "metadata" in part.state ? part.state.metadata : undefined
   if (metadata?.sessionId !== sessionID) return
+  // The engine's lifecycle title, which also covers calls that gave no description.
+  if (typeof metadata?.title === "string" && metadata.title) return metadata.title
   const value = part.state.input?.description
   if (typeof value === "string" && value) return value
 }
@@ -318,6 +322,14 @@ export function MessageTimeline(props: {
   const tabs = useTabs()
   const dialog = useDialog()
   const language = useLanguage()
+  const backgroundTasks = useBackgroundTasks()
+  // Task parts render as Background tasks chips: one per phase, drawn at its
+  // first task part, so the phase's other task parts render nothing. Running,
+  // completed and errored calls alike; parts outside the model fall back.
+  const taskChip = (part: PartType | undefined) => {
+    if (!backgroundTasks || part?.type !== "tool" || part.tool !== "task") return
+    return backgroundTasks.locate(part.id)
+  }
   const { params, sessionKey } = useSessionKey()
   const ownerSessionKey = sessionKey()
   const cached = timelineCache.get(ownerSessionKey)
@@ -1022,25 +1034,37 @@ export function MessageTimeline(props: {
       if (!item) return
       return partDefaultOpen(item, settings.general.shellToolPartsExpanded(), settings.general.editToolPartsExpanded())
     })
+    const chip = createMemo(() => taskChip(part()))
 
     return (
       <Show when={message()}>
         {(message) => (
           <Show when={part()}>
             {(part) => (
-              <MessagePart
-                part={part()}
-                message={message()}
-                showAssistantCopyPartID={assistantCopyPartID(row().userMessageID)}
-                turnDurationMs={turnDurationMs(row().userMessageID)}
-                useV2Actions={settings.general.newLayoutDesigns()}
-                defaultOpen={defaultOpen()}
-                toolOpen={toolOpen[part().id] ?? defaultOpen()}
-                onToolOpenChange={(open) => setToolOpen(part().id, open)}
-                deferToolContent
-                virtualizeDiff={false}
-                onContentRendered={onSizeChange}
-              />
+              <Show
+                when={chip()}
+                fallback={
+                  <MessagePart
+                    part={part()}
+                    message={message()}
+                    showAssistantCopyPartID={assistantCopyPartID(row().userMessageID)}
+                    turnDurationMs={turnDurationMs(row().userMessageID)}
+                    useV2Actions={settings.general.newLayoutDesigns()}
+                    defaultOpen={defaultOpen()}
+                    toolOpen={toolOpen[part().id] ?? defaultOpen()}
+                    onToolOpenChange={(open) => setToolOpen(part().id, open)}
+                    deferToolContent
+                    virtualizeDiff={false}
+                    onContentRendered={onSizeChange}
+                  />
+                }
+              >
+                {(location) => (
+                  <Show when={location().first}>
+                    <SubagentTaskChip location={location} onSizeChange={onSizeChange} />
+                  </Show>
+                )}
+              </Show>
             )}
           </Show>
         )}
@@ -1057,6 +1081,13 @@ export function MessageTimeline(props: {
       const row = input.row()
       return row._tag === "AssistantPart" && row.previousAssistantPart
     }
+    // A task part folded into its phase's chip renders nothing, so it must not add a gap either.
+    const absorbedTask = () => {
+      const row = input.row()
+      if (row._tag !== "AssistantPart" || row.group.type !== "part") return false
+      const location = backgroundTasks?.locate(row.group.ref.partID)
+      return !!location && !location.first
+    }
     return (
       <div
         id={anchor() ? props.anchor(input.row().userMessageID) : undefined}
@@ -1066,7 +1097,7 @@ export function MessageTimeline(props: {
           "min-w-0 w-full max-w-full": true,
           "md:max-w-200 2xl:max-w-[1000px]": props.centered,
           "md:mx-auto": props.centered,
-          "pt-3": previousAssistantPart(),
+          "pt-3": previousAssistantPart() && !absorbedTask(),
         }}
       >
         <div data-component="session-turn" class="min-w-0 w-full relative" style={{ height: "auto" }}>

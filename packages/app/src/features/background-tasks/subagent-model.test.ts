@@ -1,0 +1,978 @@
+import { describe, expect, test } from "bun:test"
+import type { AssistantMessage, Message, Part, Session, SessionStatus, ToolPart } from "@opencode-ai/sdk/v2"
+import {
+  agentLabel,
+  agentStatus,
+  aggregateStatus,
+  buildTaskCards,
+  childRecord,
+  countAgents,
+  elapsedMs,
+  formatAgentCount,
+  formatDuration,
+  formatTokens,
+  isDismissed,
+  kindLabel,
+  liveAgentCount,
+  locateTaskPart,
+  modelShortName,
+  phaseName,
+  readLifecycle,
+  resolveAgent,
+  runningAgentCount,
+  statusSummary,
+  statusWord,
+  stripSubagentSuffix,
+  subagentKind,
+  subagentTitle,
+  type TaskSource,
+} from "./subagent-model"
+
+const ROOT = "ses_root"
+
+type Fixture = {
+  messages: Record<string, Message[]>
+  parts: Record<string, Part[]>
+  sessions: Record<string, Session>
+  status: Record<string, SessionStatus>
+  waiting: Set<string>
+}
+
+function fixture(): Fixture {
+  return { messages: {}, parts: {}, sessions: {}, status: {}, waiting: new Set() }
+}
+
+function source(data: Fixture, children?: Session[]): TaskSource {
+  return {
+    rootID: ROOT,
+    messages: (id) => data.messages[id],
+    parts: (id) => data.parts[id],
+    session: (id) => data.sessions[id],
+    children: children ?? Object.values(data.sessions),
+    status: (id) => data.status[id],
+    waiting: (id) => data.waiting.has(id),
+    modelName: (providerID, modelID) =>
+      providerID === "anthropic" && modelID === "claude-opus-5" ? "Claude Opus 5" : undefined,
+  }
+}
+
+function addUser(data: Fixture, id: string, text: string, sessionID = ROOT) {
+  const message = { id, sessionID, role: "user", time: { created: 1 } } as unknown as Message
+  data.messages[sessionID] = [...(data.messages[sessionID] ?? []), message]
+  data.parts[id] = [{ id: `${id}_text`, sessionID, messageID: id, type: "text", text } as Part]
+}
+
+function addAssistant(
+  data: Fixture,
+  id: string,
+  parentID: string,
+  parts: Part[],
+  extra: Partial<AssistantMessage> = {},
+  sessionID = ROOT,
+) {
+  const message = {
+    id,
+    sessionID,
+    role: "assistant",
+    parentID,
+    time: { created: 10 },
+    modelID: "claude-opus-5",
+    providerID: "anthropic",
+    mode: "build",
+    agent: "build",
+    path: { cwd: "/", root: "/" },
+    cost: 0,
+    tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    ...extra,
+  } as AssistantMessage
+  data.messages[sessionID] = [...(data.messages[sessionID] ?? []), message]
+  data.parts[id] = parts.map((part) => ({ ...part, messageID: id, sessionID }) as Part)
+}
+
+function taskPart(input: {
+  id: string
+  callID?: string
+  status?: "pending" | "running" | "completed" | "error"
+  input?: Record<string, unknown>
+  metadata?: Record<string, unknown>
+  error?: string
+  start?: number
+  end?: number
+}): ToolPart {
+  const status = input.status ?? "completed"
+  const base = {
+    id: input.id,
+    sessionID: ROOT,
+    messageID: "",
+    type: "tool" as const,
+    callID: input.callID ?? `call_${input.id}`,
+    tool: "task",
+  }
+  const args = input.input ?? {}
+  if (status === "pending") return { ...base, state: { status, input: args, raw: "" } }
+  if (status === "running")
+    return { ...base, state: { status, input: args, metadata: input.metadata, time: { start: input.start ?? 100 } } }
+  if (status === "error")
+    return {
+      ...base,
+      state: {
+        status,
+        input: args,
+        error: input.error ?? "boom",
+        metadata: input.metadata,
+        time: { start: input.start ?? 100, end: input.end ?? 200 },
+      },
+    }
+  return {
+    ...base,
+    state: {
+      status,
+      input: args,
+      output: "",
+      title: "",
+      metadata: input.metadata ?? {},
+      time: { start: input.start ?? 100, end: input.end ?? 200 },
+    },
+  }
+}
+
+function child(id: string, extra: Partial<Session> = {}): Session {
+  return {
+    id,
+    slug: id,
+    projectID: "p",
+    directory: "/",
+    parentID: ROOT,
+    title: "Child",
+    version: "1",
+    time: { created: 50, updated: 60 },
+    ...extra,
+  }
+}
+
+function usage(total: number, toolUses = 3) {
+  return {
+    cost: 0.1,
+    tokens: { input: total, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    total,
+    toolUses,
+    steps: 2,
+  }
+}
+
+function lifecycle(extra: Record<string, unknown> = {}) {
+  return {
+    parentSessionId: ROOT,
+    projectId: "p",
+    directory: "/",
+    model: { providerID: "anthropic", modelID: "claude-opus-5" },
+    kind: "specialist",
+    agent: "explore",
+    custom: false,
+    title: "Map the auth flow",
+    startedAt: 1_000,
+    status: "completed",
+    completedAt: 61_000,
+    usage: usage(12_000),
+    ...extra,
+  }
+}
+
+// ---------------------------------------------------------------------------
+
+describe("formatting", () => {
+  test("tokens read like the reference: 228.6k, 1.23M", () => {
+    expect(formatTokens(0)).toBe("0")
+    expect(formatTokens(950)).toBe("950")
+    expect(formatTokens(1000)).toBe("1.0k")
+    expect(formatTokens(228_600)).toBe("228.6k")
+    expect(formatTokens(999_949)).toBe("999.9k")
+    expect(formatTokens(999_950)).toBe("1.00M")
+    expect(formatTokens(1_234_567)).toBe("1.23M")
+  })
+
+  test("unknown tokens show a dash, never undefined or NaN", () => {
+    expect(formatTokens(undefined)).toBe("—")
+    expect(formatTokens(Number.NaN)).toBe("—")
+    expect(formatTokens(-5)).toBe("—")
+  })
+
+  test("durations read 42s, 1m 04s, 26m 14s, 1h 04m", () => {
+    expect(formatDuration(0)).toBe("0s")
+    expect(formatDuration(42_000)).toBe("42s")
+    expect(formatDuration(59_999)).toBe("59s")
+    expect(formatDuration(60_000)).toBe("1m 00s")
+    expect(formatDuration(64_000)).toBe("1m 04s")
+    expect(formatDuration(1_574_000)).toBe("26m 14s")
+    expect(formatDuration(3_840_000)).toBe("1h 04m")
+    expect(formatDuration(-100)).toBe("0s")
+    expect(formatDuration(undefined)).toBe("—")
+  })
+
+  test("agent counts are singular or plural", () => {
+    expect(formatAgentCount(1)).toBe("1 agent")
+    expect(formatAgentCount(3)).toBe("3 agents")
+  })
+
+  test("elapsed runs to now while live and to the end once finished", () => {
+    expect(elapsedMs({ startedAt: 1_000, status: "running" }, 5_000)).toBe(4_000)
+    expect(elapsedMs({ startedAt: 1_000, endedAt: 3_000, status: "done" }, 9_000)).toBe(2_000)
+    expect(elapsedMs({ startedAt: 1_000, status: "done" }, 9_000)).toBeUndefined()
+    expect(elapsedMs({ status: "running" }, 9_000)).toBeUndefined()
+  })
+
+  test("model names drop a leading Claude", () => {
+    expect(modelShortName("Claude Opus 5")).toBe("Opus 5")
+    expect(modelShortName("GPT-6 Astra")).toBe("GPT-6 Astra")
+  })
+
+  test("status words", () => {
+    expect(statusWord("done")).toBe("Done")
+    expect(statusWord("failed")).toBe("Failed")
+    expect(statusWord("stopped")).toBe("Stopped")
+    expect(statusWord("waiting")).toBe("Needs you")
+  })
+})
+
+describe("kinds and names", () => {
+  test("the resolved metadata agent wins over the requested type", () => {
+    expect(resolveAgent({ metadata: "review", requested: "explore" })).toBe("review")
+    expect(resolveAgent({ record: "debug", child: "test" })).toBe("debug")
+    expect(resolveAgent({ child: "test", requested: "explore" })).toBe("test")
+  })
+
+  test("an omitted subagent_type means the general Subagent", () => {
+    expect(resolveAgent({})).toBe("general")
+    expect(resolveAgent({ requested: "  " })).toBe("general")
+  })
+
+  test("the requested type maps the general aliases models emit", () => {
+    expect(resolveAgent({ requested: "general-purpose" })).toBe("general")
+    expect(resolveAgent({ requested: "Subagent" })).toBe("general")
+    expect(resolveAgent({ requested: "docs-writer" })).toBe("docs-writer")
+  })
+
+  test("the child title suffix is the last resort", () => {
+    expect(resolveAgent({ title: "Find the bug (@debug subagent)" })).toBe("debug")
+  })
+
+  test("general is a Subagent; every other agent, custom ones included, is a specialist", () => {
+    expect(subagentKind("general")).toBe("subagent")
+    expect(subagentKind("explore")).toBe("specialist")
+    expect(subagentKind("docs-writer")).toBe("specialist")
+    expect(subagentKind("explore", "subagent")).toBe("subagent")
+    expect(subagentKind("general", "nonsense")).toBe("subagent")
+  })
+
+  test("labels come from the identities, custom agents keep their id", () => {
+    expect(agentLabel("general")).toBe("Subagent")
+    expect(agentLabel("explore")).toBe("Explore")
+    expect(agentLabel("docs-writer")).toBe("docs-writer")
+  })
+
+  test("card kind labels", () => {
+    const general = { agent: "general", kind: "subagent" as const }
+    const explore = { agent: "explore", kind: "specialist" as const }
+    const review = { agent: "review", kind: "specialist" as const }
+    const custom = { agent: "docs-writer", kind: "specialist" as const }
+    expect(kindLabel([])).toBe("Subagent")
+    expect(kindLabel([general])).toBe("Subagent")
+    expect(kindLabel([general, general])).toBe("Subagents")
+    expect(kindLabel([explore])).toBe("Specialist · Explore")
+    expect(kindLabel([explore, explore])).toBe("Specialist · Explore")
+    expect(kindLabel([explore, review])).toBe("Specialists")
+    expect(kindLabel([general, review])).toBe("Subagents & specialists")
+    expect(kindLabel([custom])).toBe("Specialist · docs-writer")
+  })
+
+  test("phase names append the specialist only when every agent in it is that specialist", () => {
+    const general = { agent: "general", kind: "subagent" as const }
+    const review = { agent: "review", kind: "specialist" as const }
+    const explore = { agent: "explore", kind: "specialist" as const }
+    expect(phaseName(1, [general, general])).toBe("Phase 1")
+    expect(phaseName(2, [review, review])).toBe("Phase 2 · Review")
+    expect(phaseName(3, [review, explore])).toBe("Phase 3")
+    expect(phaseName(1, [review, general])).toBe("Phase 1")
+    expect(phaseName(4, [])).toBe("Phase 4")
+  })
+
+  test("the engine's child-title suffix is stripped", () => {
+    expect(stripSubagentSuffix("Map the auth flow (@explore subagent)")).toBe("Map the auth flow")
+    expect(stripSubagentSuffix("Map the auth flow")).toBe("Map the auth flow")
+    expect(stripSubagentSuffix(undefined)).toBe("")
+  })
+
+  test("titles mirror the engine: description, else the prompt's first six words, capped", () => {
+    expect(subagentTitle("  Map   the auth flow ", "ignored")).toBe("Map the auth flow")
+    expect(subagentTitle("", "Look through the billing module and list every entry point")).toBe(
+      "Look through the billing module and",
+    )
+    expect(subagentTitle(undefined, undefined)).toBe("")
+    const long = subagentTitle("word ".repeat(30), "")
+    expect(long.length).toBeLessThanOrEqual(60)
+    expect(long.endsWith("…")).toBe(true)
+  })
+})
+
+describe("status", () => {
+  test("a reported final status is trusted", () => {
+    expect(agentStatus({ reported: "completed", part: "completed" })).toBe("done")
+    expect(agentStatus({ reported: "error", part: "error" })).toBe("failed")
+    expect(agentStatus({ reported: "cancelled", part: "error" })).toBe("stopped")
+  })
+
+  test("a live record follows the child: busy or retrying is running, waiting on a permission is waiting", () => {
+    expect(agentStatus({ reported: "running", part: "running", child: "busy" })).toBe("running")
+    expect(agentStatus({ reported: "running", part: "running", child: "retry" })).toBe("running")
+    expect(agentStatus({ reported: "running", part: "running", child: "busy", waiting: true })).toBe("waiting")
+    expect(agentStatus({ reported: "queued", part: "running" })).toBe("pending")
+    expect(agentStatus({ reported: "queued", part: "running", child: "busy" })).toBe("running")
+  })
+
+  test("a foreground error before the lifecycle merge maps its text", () => {
+    expect(agentStatus({ reported: "running", part: "error", partError: "boom" })).toBe("failed")
+    expect(agentStatus({ reported: "running", part: "error", partError: "Tool execution aborted" })).toBe("stopped")
+  })
+
+  test("a background part completes at launch but stays running while the child works", () => {
+    expect(agentStatus({ reported: "running", part: "completed", background: true, child: "busy" })).toBe("running")
+    expect(agentStatus({ reported: "running", part: "completed", background: true })).toBe("running")
+  })
+
+  test("a stale live record after an engine restart settles from the child's last reply of this run", () => {
+    const base = { reported: "running" as const, part: "completed" as const, background: true, startedAt: 100 }
+    expect(agentStatus({ ...base, child: "idle", last: { created: 150, completed: 900 } })).toBe("done")
+    expect(agentStatus({ ...base, last: { created: 150, completed: 900 } })).toBe("done")
+    expect(agentStatus({ ...base, last: { created: 150, completed: 900, error: "MessageAbortedError" } })).toBe(
+      "stopped",
+    )
+    expect(agentStatus({ ...base, last: { created: 150, completed: 900, error: "APIError" } })).toBe("failed")
+  })
+
+  test("a reply from an earlier run does not settle a resumed task", () => {
+    expect(
+      agentStatus({ reported: "running", part: "completed", startedAt: 1_000, last: { created: 10, completed: 20 } }),
+    ).toBe("running")
+    expect(agentStatus({ reported: "running", part: "running", last: { created: 10 } })).toBe("running")
+  })
+
+  test("sessions from before the lifecycle record fall back to the part and the child", () => {
+    expect(agentStatus({ part: "pending" })).toBe("pending")
+    expect(agentStatus({ part: "running" })).toBe("running")
+    expect(agentStatus({ part: "error", partError: "Task cancelled" })).toBe("stopped")
+    expect(agentStatus({ part: "error", partError: "Provider exploded" })).toBe("failed")
+    expect(agentStatus({ part: "completed" })).toBe("done")
+    expect(agentStatus({ part: "completed", background: true, child: "busy" })).toBe("running")
+    expect(agentStatus({ part: "completed", last: { error: "MessageAbortedError" } })).toBe("stopped")
+    expect(agentStatus({ part: "completed", last: { error: "APIError" } })).toBe("failed")
+    expect(agentStatus({})).toBe("done")
+  })
+
+  test("a row of squares is spoken as counts per status", () => {
+    expect(statusSummary(["running", "pending"])).toBe("1 running, 1 not started")
+    expect(statusSummary(["done", "failed", "done", "waiting"])).toBe("1 waiting on you, 2 done, 1 failed")
+    expect(statusSummary([])).toBe("")
+  })
+
+  test("aggregate: running, then waiting, pending, failed, stopped, done", () => {
+    expect(aggregateStatus(["done", "running", "waiting"])).toBe("running")
+    expect(aggregateStatus(["done", "waiting", "pending"])).toBe("waiting")
+    expect(aggregateStatus(["done", "pending", "failed"])).toBe("pending")
+    expect(aggregateStatus(["done", "stopped", "failed"])).toBe("failed")
+    expect(aggregateStatus(["done", "stopped"])).toBe("stopped")
+    expect(aggregateStatus(["done"])).toBe("done")
+    expect(aggregateStatus([])).toBe("done")
+  })
+})
+
+describe("lifecycle fields", () => {
+  test("part metadata spells parentMessageId, the record parentMessageID; both read the same", () => {
+    expect(readLifecycle({ parentMessageId: "m1" }).parentMessageID).toBe("m1")
+    expect(readLifecycle({ parentMessageID: "m2" }).parentMessageID).toBe("m2")
+  })
+
+  test("invalid values are dropped rather than trusted", () => {
+    const value = readLifecycle({ status: "exploded", kind: "robot", startedAt: "yesterday", model: { modelID: "x" } })
+    expect(value.status).toBeUndefined()
+    expect(value.kind).toBeUndefined()
+    expect(value.startedAt).toBeUndefined()
+    expect(value.model).toBeUndefined()
+    expect(readLifecycle(null)).toEqual({})
+    expect(readLifecycle("nope")).toEqual({})
+  })
+
+  test("usage totals are summed from the token breakdown when total is missing", () => {
+    const value = readLifecycle({
+      usage: { tokens: { input: 10, output: 5, reasoning: 1, cache: { read: 3, write: 1 } }, toolUses: 2 },
+    })
+    expect(value.usage).toEqual({ total: 20, toolUses: 2 })
+  })
+
+  test("a child record is only read from an object at metadata.subagent", () => {
+    expect(childRecord(undefined)).toBeUndefined()
+    expect(childRecord(child("c", { metadata: { subagent: "x" } }))).toBeUndefined()
+    expect(childRecord(child("c", { metadata: { subagent: { agent: "debug" } } }))?.agent).toBe("debug")
+  })
+})
+
+describe("buildTaskCards", () => {
+  test("one turn with two parallel explores: one card, one phase, lifecycle fields throughout", () => {
+    const data = fixture()
+    addUser(data, "msg_u1", "\n  Find every place we check auth  \nand summarise")
+    addAssistant(data, "msg_a1", "msg_u1", [
+      taskPart({
+        id: "prt_1",
+        metadata: lifecycle({ sessionId: "ses_c1", title: "Map the auth flow", completedAt: 61_000 }),
+      }),
+      taskPart({
+        id: "prt_2",
+        metadata: lifecycle({
+          sessionId: "ses_c2",
+          title: "Find token checks",
+          startedAt: 2_000,
+          completedAt: 91_000,
+          usage: usage(216_600, 7),
+        }),
+      }),
+    ])
+    const cards = buildTaskCards(source(data))
+    expect(cards).toHaveLength(1)
+    const card = cards[0]!
+    expect(card.key).toBe("msg_u1")
+    expect(card.title).toBe("Find every place we check auth")
+    expect(card.description).toBe("Map the auth flow, Find token checks")
+    expect(card.kindLabel).toBe("Specialist · Explore")
+    expect(card.status).toBe("done")
+    expect(card.live).toBe(false)
+    expect(card.tokens).toBe(228_600)
+    expect(formatTokens(card.tokens)).toBe("228.6k")
+    expect(card.startedAt).toBe(1_000)
+    expect(card.endedAt).toBe(91_000)
+    expect(card.phases).toHaveLength(1)
+    expect(card.phases[0]!.name).toBe("Phase 1 · Explore")
+    expect(card.phases[0]!.done).toBe(2)
+    expect(card.phases[0]!.total).toBe(2)
+    const agent = card.agents[0]!
+    expect(agent.sessionID).toBe("ses_c1")
+    expect(agent.kind).toBe("specialist")
+    expect(agent.label).toBe("Explore")
+    expect(agent.model?.name).toBe("Claude Opus 5")
+    expect(agent.model?.short).toBe("Opus 5")
+    expect(agent.toolUses).toBe(3)
+  })
+
+  test("two assistant messages in one turn are two phases; a running agent makes the card live", () => {
+    const data = fixture()
+    addUser(data, "msg_u1", "Refactor the billing module")
+    addAssistant(data, "msg_a1", "msg_u1", [
+      taskPart({ id: "prt_1", metadata: lifecycle({ sessionId: "ses_c1", agent: "general", kind: "subagent" }) }),
+      taskPart({ id: "prt_2", metadata: lifecycle({ sessionId: "ses_c2", agent: "general", kind: "subagent" }) }),
+    ])
+    addAssistant(data, "msg_a2", "msg_u1", [
+      taskPart({
+        id: "prt_3",
+        status: "running",
+        metadata: lifecycle({
+          sessionId: "ses_c3",
+          agent: "review",
+          status: "running",
+          completedAt: undefined,
+          usage: undefined,
+        }),
+      }),
+    ])
+    data.status.ses_c3 = { type: "busy" }
+    const card = buildTaskCards(source(data))[0]!
+    expect(card.phases.map((phase) => phase.name)).toEqual(["Phase 1", "Phase 2 · Review"])
+    expect(card.kindLabel).toBe("Subagents & specialists")
+    expect(card.status).toBe("running")
+    expect(card.live).toBe(true)
+    expect(card.endedAt).toBeUndefined()
+    expect(card.phases[0]!.status).toBe("done")
+    expect(card.phases[1]!.status).toBe("running")
+    expect(card.phases[1]!.done).toBe(0)
+    expect(card.agents[2]!.endedAt).toBeUndefined()
+  })
+
+  test("an old session without lifecycle fields falls back to the part, the child and its messages", () => {
+    const data = fixture()
+    addUser(data, "msg_u1", "Where is auth?")
+    addAssistant(data, "msg_a1", "msg_u1", [
+      taskPart({
+        id: "prt_1",
+        input: { description: "Find auth code", prompt: "Look for auth", subagent_type: "explore" },
+        metadata: { sessionId: "ses_c1", model: { providerID: "openai", modelID: "gpt-6-astra" } },
+        start: 5_000,
+        end: 65_000,
+      }),
+    ])
+    data.sessions.ses_c1 = child("ses_c1", { title: "Find auth code (@explore subagent)", agent: "explore" })
+    addAssistant(
+      data,
+      "msg_c1a",
+      "msg_c1u",
+      [
+        { id: "p1", type: "tool", tool: "grep" } as Part,
+        { id: "p2", type: "tool", tool: "read" } as Part,
+        {
+          id: "p3",
+          type: "step-finish",
+          reason: "stop",
+          cost: 0,
+          tokens: { input: 1_000, output: 200, reasoning: 0, cache: { read: 300, write: 0 } },
+        } as Part,
+        {
+          id: "p4",
+          type: "step-finish",
+          reason: "stop",
+          cost: 0,
+          tokens: { input: 500, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        } as Part,
+      ],
+      { time: { created: 6_000, completed: 64_000 } },
+      "ses_c1",
+    )
+    const card = buildTaskCards(source(data))[0]!
+    const agent = card.agents[0]!
+    expect(agent.title).toBe("Find auth code")
+    expect(agent.agent).toBe("explore")
+    expect(agent.kind).toBe("specialist")
+    expect(agent.status).toBe("done")
+    expect(agent.startedAt).toBe(5_000)
+    expect(agent.endedAt).toBe(65_000)
+    expect(agent.tokens).toBe(2_000)
+    expect(agent.toolUses).toBe(2)
+    expect(agent.model?.name).toBe("gpt-6-astra")
+    expect(agent.prompt).toBe("Look for auth")
+    expect(card.description).toBe("Look for auth")
+    expect(card.title).toBe("Find auth code")
+  })
+
+  test("an omitted subagent_type is the general Subagent", () => {
+    const data = fixture()
+    addUser(data, "msg_u1", "Do three things")
+    addAssistant(data, "msg_a1", "msg_u1", [
+      taskPart({ id: "prt_1", status: "running", input: { description: "Thing one", prompt: "one" } }),
+    ])
+    const agent = buildTaskCards(source(data))[0]!.agents[0]!
+    expect(agent.agent).toBe("general")
+    expect(agent.kind).toBe("subagent")
+    expect(agent.label).toBe("Subagent")
+    expect(agent.status).toBe("running")
+  })
+
+  test("a part still streaming its input shows safe defaults and never undefined", () => {
+    const data = fixture()
+    addUser(data, "msg_u1", "go")
+    addAssistant(data, "msg_a1", "msg_u1", [taskPart({ id: "prt_1", status: "pending" })])
+    const card = buildTaskCards(source(data))[0]!
+    const agent = card.agents[0]!
+    expect(agent.title).toBe("Subagent task")
+    expect(agent.status).toBe("pending")
+    expect(agent.sessionID).toBeUndefined()
+    expect(agent.tokens).toBeUndefined()
+    expect(agent.model).toBeUndefined()
+    expect(formatTokens(agent.tokens)).toBe("—")
+    expect(card.live).toBe(true)
+    expect(card.kindLabel).toBe("Subagent")
+  })
+
+  test("an errored call that lost its metadata finds its child by call id and is not duplicated", () => {
+    const data = fixture()
+    addUser(data, "msg_u1", "go")
+    addAssistant(data, "msg_a1", "msg_u1", [
+      taskPart({ id: "prt_1", callID: "call_9", status: "error", error: "Tool execution aborted" }),
+    ])
+    data.sessions.ses_c1 = child("ses_c1", {
+      title: "Hunt the flake",
+      metadata: {
+        subagent: { kind: "specialist", agent: "debug", title: "Hunt the flake", callID: "call_9", status: "running" },
+      },
+    })
+    const cards = buildTaskCards(source(data))
+    expect(cards).toHaveLength(1)
+    const agent = cards[0]!.agents[0]!
+    expect(agent.sessionID).toBe("ses_c1")
+    expect(agent.agent).toBe("debug")
+    expect(agent.status).toBe("stopped")
+  })
+
+  test("a failed agent carries its error; others do not", () => {
+    const data = fixture()
+    addUser(data, "msg_u1", "go")
+    addAssistant(data, "msg_a1", "msg_u1", [
+      taskPart({
+        id: "prt_1",
+        status: "error",
+        error: "Provider exploded",
+        metadata: lifecycle({ sessionId: "ses_c1", status: "error", error: "Rate limited" }),
+      }),
+      taskPart({ id: "prt_2", metadata: lifecycle({ sessionId: "ses_c2" }) }),
+    ])
+    const card = buildTaskCards(source(data))[0]!
+    expect(card.agents[0]!.status).toBe("failed")
+    expect(card.agents[0]!.error).toBe("Rate limited")
+    expect(card.agents[1]!.error).toBeUndefined()
+    expect(card.status).toBe("failed")
+  })
+
+  test("children with no part in the loaded history still appear, grouped by their launching message", () => {
+    const data = fixture()
+    data.sessions.ses_c1 = child("ses_c1", {
+      metadata: {
+        subagent: {
+          kind: "subagent",
+          agent: "general",
+          title: "Old job one",
+          parentMessageID: "msg_old",
+          status: "completed",
+          startedAt: 100,
+          completedAt: 400,
+          usage: usage(900),
+        },
+      },
+    })
+    data.sessions.ses_c2 = child("ses_c2", {
+      metadata: {
+        subagent: {
+          kind: "subagent",
+          agent: "general",
+          title: "Old job two",
+          parentMessageID: "msg_old",
+          status: "cancelled",
+          startedAt: 150,
+          completedAt: 300,
+        },
+      },
+    })
+    data.sessions.ses_c3 = child("ses_c3", { title: "Legacy lookup (@explore subagent)", agent: "explore" })
+    data.sessions.ses_fork = child("ses_fork", { title: "A plain child session" })
+    data.sessions.ses_other = child("ses_other", { parentID: "ses_elsewhere", title: "Other (@debug subagent)" })
+    const cards = buildTaskCards(source(data))
+    expect(cards).toHaveLength(2)
+    const grouped = cards.find((card) => card.key === "orphan:msg_old")!
+    expect(grouped.agents.map((agent) => agent.title)).toEqual(["Old job one", "Old job two"])
+    expect(grouped.status).toBe("stopped")
+    expect(grouped.title).toBe("Old job one and 1 more")
+    expect(grouped.tokens).toBe(900)
+    const legacy = cards.find((card) => card.key === "orphan:session:ses_c3")!
+    expect(legacy.agents[0]!.agent).toBe("explore")
+    expect(legacy.agents[0]!.title).toBe("Legacy lookup")
+    expect(legacy.agents[0]!.status).toBe("done")
+    expect(legacy.agents[0]!.endedAt).toBe(60)
+  })
+
+  test("a task_id resume: the old part keeps its outcome, the new part follows the rewritten record", () => {
+    const data = fixture()
+    addUser(data, "msg_u1", "go")
+    addAssistant(data, "msg_a1", "msg_u1", [
+      taskPart({
+        id: "prt_old",
+        callID: "call_1",
+        metadata: lifecycle({ sessionId: "ses_c1", callID: "call_1", status: "completed" }),
+      }),
+    ])
+    addUser(data, "msg_u2", "keep going")
+    addAssistant(data, "msg_a2", "msg_u2", [
+      taskPart({ id: "prt_new", callID: "call_2", status: "running", metadata: { sessionId: "ses_c1" } }),
+    ])
+    data.sessions.ses_c1 = child("ses_c1", {
+      metadata: {
+        subagent: { agent: "explore", kind: "specialist", callID: "call_2", status: "running", startedAt: 5_000 },
+      },
+    })
+    data.status.ses_c1 = { type: "busy" }
+    const cards = buildTaskCards(source(data))
+    const older = cards.find((card) => card.key === "msg_u1")!
+    const newer = cards.find((card) => card.key === "msg_u2")!
+    expect(older.agents[0]!.status).toBe("done")
+    expect(newer.agents[0]!.status).toBe("running")
+    expect(newer.agents[0]!.startedAt).toBe(5_000)
+  })
+
+  test("lifecycle usage beats live sums; assistant tokens stand in when no step parts are loaded", () => {
+    const data = fixture()
+    addUser(data, "msg_u1", "go")
+    addAssistant(data, "msg_a1", "msg_u1", [
+      taskPart({ id: "prt_1", metadata: { sessionId: "ses_c1" } }),
+      taskPart({ id: "prt_2", metadata: { sessionId: "ses_c2" } }),
+      taskPart({ id: "prt_3", metadata: { sessionId: "ses_c3" } }),
+    ])
+    data.sessions.ses_c1 = child("ses_c1", { metadata: { subagent: { usage: usage(5) } } })
+    data.sessions.ses_c2 = child("ses_c2")
+    data.messages.ses_c2 = [
+      {
+        id: "m2",
+        sessionID: "ses_c2",
+        role: "assistant",
+        parentID: "u",
+        time: { created: 1, completed: 2 },
+        tokens: { input: 40, output: 2, reasoning: 0, cache: { read: 0, write: 0 } },
+      } as unknown as Message,
+    ]
+    const agents = buildTaskCards(source(data))[0]!.agents
+    expect(agents[0]!.tokens).toBe(5)
+    expect(agents[1]!.tokens).toBe(42)
+    expect(agents[2]!.tokens).toBeUndefined()
+  })
+
+  test("a child waiting on a permission reads as waiting; running still wins the card", () => {
+    const data = fixture()
+    addUser(data, "msg_u1", "go")
+    addAssistant(data, "msg_a1", "msg_u1", [
+      taskPart({ id: "prt_1", status: "running", metadata: lifecycle({ sessionId: "ses_c1", status: "running" }) }),
+      taskPart({ id: "prt_2", status: "running", metadata: lifecycle({ sessionId: "ses_c2", status: "running" }) }),
+    ])
+    data.status.ses_c1 = { type: "busy" }
+    data.status.ses_c2 = { type: "busy" }
+    data.waiting.add("ses_c2")
+    const card = buildTaskCards(source(data))[0]!
+    expect(card.agents.map((agent) => agent.status)).toEqual(["running", "waiting"])
+    expect(card.status).toBe("running")
+    data.status.ses_c1 = { type: "idle" }
+    data.messages.ses_c1 = []
+    const settled = buildTaskCards(source(data))[0]!
+    expect(settled.status).toBe("running")
+  })
+
+  test("live cards sort first, newest first; finished cards by most recent end", () => {
+    const data = fixture()
+    addUser(data, "msg_u1", "first")
+    addAssistant(data, "msg_a1", "msg_u1", [
+      taskPart({ id: "prt_1", metadata: lifecycle({ sessionId: "c1", startedAt: 100, completedAt: 900 }) }),
+    ])
+    addUser(data, "msg_u2", "second")
+    addAssistant(data, "msg_a2", "msg_u2", [
+      taskPart({ id: "prt_2", metadata: lifecycle({ sessionId: "c2", startedAt: 200, completedAt: 500 }) }),
+    ])
+    addUser(data, "msg_u3", "third")
+    addAssistant(data, "msg_a3", "msg_u3", [
+      taskPart({
+        id: "prt_3",
+        status: "running",
+        metadata: lifecycle({ sessionId: "c3", startedAt: 300, status: "running" }),
+      }),
+    ])
+    const cards = buildTaskCards(source(data))
+    expect(cards.map((card) => card.key)).toEqual(["msg_u3", "msg_u1", "msg_u2"])
+  })
+
+  test("malformed parts from any engine version never throw", () => {
+    const data = fixture()
+    addUser(data, "msg_u1", "go")
+    data.parts.msg_u1!.push({ id: "bad_text", type: "text" } as unknown as Part)
+    addAssistant(data, "msg_a1", "msg_u1", [
+      { id: "prt_bad", type: "tool", tool: "task", callID: "c" } as unknown as Part,
+      taskPart({ id: "prt_odd", metadata: { sessionId: 42, status: "exploded", usage: "lots", model: "big" } }),
+    ])
+    const cards = buildTaskCards(source(data))
+    expect(cards).toHaveLength(1)
+    const [bad, odd] = cards[0]!.agents
+    expect(bad!.title).toBe("Subagent task")
+    expect(bad!.agent).toBe("general")
+    expect(odd!.sessionID).toBeUndefined()
+    expect(odd!.tokens).toBeUndefined()
+    expect(odd!.model).toBeUndefined()
+    expect(odd!.status).toBe("done")
+  })
+
+  test("a root with no task parts and no children has no cards", () => {
+    const data = fixture()
+    addUser(data, "msg_u1", "hello")
+    addAssistant(data, "msg_a1", "msg_u1", [{ id: "t", type: "text", text: "hi" } as Part])
+    expect(buildTaskCards(source(data))).toEqual([])
+    expect(
+      buildTaskCards({ rootID: ROOT, messages: () => undefined, parts: () => undefined, session: () => undefined }),
+    ).toEqual([])
+  })
+
+  test("a stale running record with no status entry settles once the child's messages load", () => {
+    const data = fixture()
+    addUser(data, "msg_u1", "go")
+    const running = (id: string) =>
+      lifecycle({ sessionId: id, status: "running", background: true, completedAt: undefined, usage: undefined })
+    addAssistant(data, "msg_a1", "msg_u1", [
+      taskPart({ id: "prt_1", metadata: running("ses_c1") }),
+      taskPart({ id: "prt_2", metadata: running("ses_c2") }),
+      taskPart({ id: "prt_3", metadata: running("ses_c3") }),
+    ])
+    for (const id of ["1", "2", "3"]) {
+      data.sessions[`ses_c${id}`] = child(`ses_c${id}`, {
+        metadata: { subagent: { agent: "explore", callID: `call_prt_${id}`, status: "running", startedAt: 1_000 } },
+      })
+    }
+    // After a reload an idle child has no session_status entry and no messages.
+    const stale = buildTaskCards(source(data))[0]!
+    expect(stale.agents.map((agent) => agent.status)).toEqual(["running", "running", "running"])
+    expect(stale.live).toBe(true)
+
+    const reply = (sessionID: string, error?: string) =>
+      addAssistant(
+        data,
+        `msg_${sessionID}_a`,
+        `msg_${sessionID}_u`,
+        [],
+        {
+          time: { created: 2_000, completed: 9_000 },
+          ...(error ? { error: { name: error, data: {} } } : {}),
+        } as unknown as Partial<AssistantMessage>,
+        sessionID,
+      )
+    reply("ses_c1")
+    reply("ses_c2", "APIError")
+    reply("ses_c3", "MessageAbortedError")
+    const settled = buildTaskCards(source(data))[0]!
+    expect(settled.agents.map((agent) => agent.status)).toEqual(["done", "failed", "stopped"])
+    expect(settled.live).toBe(false)
+    expect(settled.agents[0]!.endedAt).toBe(9_000)
+    expect(settled.agents[1]!.error).toBe("APIError")
+  })
+
+  test("a task_id call on a running job folds into it: one row and square, tokens counted once", () => {
+    const build = (settled: boolean) => {
+      const data = fixture()
+      addUser(data, "msg_u1", "go")
+      const outcome = settled
+        ? { status: "completed", completedAt: 30_000, usage: usage(40_000) }
+        : { status: "running", completedAt: undefined, usage: undefined }
+      addAssistant(data, "msg_a1", "msg_u1", [
+        taskPart({
+          id: "prt_launch",
+          callID: "call_1",
+          metadata: lifecycle({
+            sessionId: "ses_c1",
+            callID: "call_1",
+            background: true,
+            startedAt: 1_000,
+            ...outcome,
+          }),
+        }),
+      ])
+      // The engine's "Background task updated" part: the same child, its own call id.
+      addAssistant(data, "msg_a2", "msg_u1", [
+        taskPart({
+          id: "prt_extend",
+          callID: "call_2",
+          metadata: lifecycle({
+            sessionId: "ses_c1",
+            callID: "call_2",
+            background: true,
+            startedAt: 12_000,
+            ...outcome,
+          }),
+        }),
+      ])
+      // An extend leaves the child's record on the launching call.
+      data.sessions.ses_c1 = child("ses_c1", {
+        metadata: { subagent: { agent: "explore", callID: "call_1", startedAt: 1_000, background: true, ...outcome } },
+      })
+      if (!settled) data.status.ses_c1 = { type: "busy" }
+      return buildTaskCards(source(data))
+    }
+
+    const live = build(false)
+    expect(live).toHaveLength(1)
+    expect(live[0]!.agents.map((agent) => agent.partID)).toEqual(["prt_launch"])
+    expect(live[0]!.phases).toHaveLength(1)
+    expect(live[0]!.status).toBe("running")
+    expect(liveAgentCount(live)).toBe(1)
+    expect(locateTaskPart(live, "prt_extend")?.agent.partID).toBe("prt_launch")
+    expect(locateTaskPart(live, "prt_extend")?.first).toBe(false)
+
+    // Once the run settles the engine patches both parts with the same usage.
+    const done = build(true)
+    expect(done[0]!.agents.map((agent) => agent.partID)).toEqual(["prt_launch"])
+    expect(done[0]!.status).toBe("done")
+    expect(done[0]!.tokens).toBe(40_000)
+    expect(formatAgentCount(countAgents(done[0]!.agents))).toBe("1 agent")
+    expect(locateTaskPart(done, "prt_extend")?.first).toBe(false)
+  })
+
+  test("a child resumed in the same turn keeps both runs but counts once, at its newest cumulative usage", () => {
+    const data = fixture()
+    addUser(data, "msg_u1", "go")
+    addAssistant(data, "msg_a1", "msg_u1", [
+      taskPart({
+        id: "prt_first",
+        callID: "call_1",
+        metadata: lifecycle({ sessionId: "ses_c1", callID: "call_1", startedAt: 1_000, completedAt: 9_000 }),
+      }),
+    ])
+    addAssistant(data, "msg_a2", "msg_u1", [
+      taskPart({
+        id: "prt_resume",
+        callID: "call_2",
+        metadata: lifecycle({
+          sessionId: "ses_c1",
+          callID: "call_2",
+          startedAt: 20_000,
+          completedAt: 30_000,
+          usage: usage(25_000),
+        }),
+      }),
+    ])
+    // The resume rewrote the child's record; its usage includes the first run's 12k.
+    data.sessions.ses_c1 = child("ses_c1", {
+      metadata: {
+        subagent: { agent: "explore", callID: "call_2", status: "completed", startedAt: 20_000, usage: usage(25_000) },
+      },
+    })
+    const card = buildTaskCards(source(data))[0]!
+    expect(card.agents.map((agent) => agent.partID)).toEqual(["prt_first", "prt_resume"])
+    expect(card.phases).toHaveLength(2)
+    expect(card.agents.map((agent) => agent.tokens)).toEqual([12_000, 25_000])
+    expect(card.tokens).toBe(25_000)
+    expect(countAgents(card.agents)).toBe(1)
+    expect(card.kindLabel).toBe("Specialist · Explore")
+  })
+})
+
+describe("chips, counts and dismissal", () => {
+  function twoPhaseCards() {
+    const data = fixture()
+    addUser(data, "msg_u1", "go")
+    addAssistant(data, "msg_a1", "msg_u1", [
+      taskPart({ id: "prt_1", status: "running", metadata: lifecycle({ sessionId: "c1", status: "running" }) }),
+      taskPart({ id: "prt_2", status: "running", metadata: lifecycle({ sessionId: "c2", status: "queued" }) }),
+    ])
+    addAssistant(data, "msg_a2", "msg_u1", [taskPart({ id: "prt_3", metadata: lifecycle({ sessionId: "c3" }) })])
+    return buildTaskCards(source(data))
+  }
+
+  test("only the first task part of each phase carries the chip", () => {
+    const cards = twoPhaseCards()
+    expect(locateTaskPart(cards, "prt_1")?.first).toBe(true)
+    expect(locateTaskPart(cards, "prt_2")?.first).toBe(false)
+    expect(locateTaskPart(cards, "prt_3")?.first).toBe(true)
+    expect(locateTaskPart(cards, "prt_3")?.phase.index).toBe(2)
+    expect(locateTaskPart(cards, "missing")).toBeUndefined()
+  })
+
+  test("the live count is running, waiting and queued agents; the header badge leaves out queued ones", () => {
+    expect(liveAgentCount(twoPhaseCards())).toBe(2)
+    expect(liveAgentCount([])).toBe(0)
+    expect(runningAgentCount(twoPhaseCards())).toBe(1)
+    expect(runningAgentCount([])).toBe(0)
+  })
+
+  test("counts are per child session: two parts driving one child are one agent", () => {
+    const agents = [
+      { key: "a", sessionID: "s1", status: "running" as const },
+      { key: "b", sessionID: "s1", status: "waiting" as const },
+      { key: "c", sessionID: "s2", status: "pending" as const },
+      { key: "d", status: "pending" as const },
+      { key: "e", sessionID: "s3", status: "done" as const },
+    ]
+    expect(countAgents(agents)).toBe(4)
+    expect(liveAgentCount([{ agents }])).toBe(3)
+    expect(runningAgentCount([{ agents }])).toBe(1)
+  })
+
+  test("the trash hides a finished card until it finishes again", () => {
+    expect(isDismissed({ live: false, endedAt: 500 }, 600)).toBe(true)
+    expect(isDismissed({ live: false, endedAt: 700 }, 600)).toBe(false)
+    expect(isDismissed({ live: false }, 600)).toBe(true)
+    expect(isDismissed({ live: true, endedAt: 100 }, 600)).toBe(false)
+    expect(isDismissed({ live: false, endedAt: 500 }, undefined)).toBe(false)
+  })
+})

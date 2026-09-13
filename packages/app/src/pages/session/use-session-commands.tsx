@@ -22,6 +22,7 @@ import { useTabs } from "@/context/tabs"
 import { requireServerKey } from "@/utils/session-route"
 import { announceWorkspaceMode } from "@/utils/workspace-mode"
 import { createSessionOwnership } from "./session-ownership"
+import { BACKGROUND_TASKS_COMMAND, backgroundTasksPane } from "@/features/background-tasks/background-tasks-state"
 
 export type SessionCommandContext = {
   navigateMessageByOffset: (offset: number) => void
@@ -489,6 +490,14 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
         view().reviewPanel.open()
         tabs().setActive("review")
       },
+    }),
+    viewCommand({
+      id: BACKGROUND_TASKS_COMMAND,
+      title: "Toggle background tasks",
+      description: "Show the subagents and subagent specialists working for this session.",
+      keybind: "mod+shift+b",
+      disabled: !params.id,
+      onSelect: () => backgroundTasksPane.toggle(),
     }),
     ...(shown()
       ? [

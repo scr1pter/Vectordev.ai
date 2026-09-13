@@ -1,0 +1,1067 @@
+/*
+ * Background tasks panel (.vector-bg-tasks-*) and the inline task chip
+ * (.vector-task-chip-*). A copy of Claude Code desktop's Background tasks
+ * layout, type scale, spacing and radii in Vector's purple. Only --vx-* tokens:
+ * Tailwind's white/black utilities render nothing in this app. Unlayered, like
+ * vector-premium.css, so it beats Tailwind. Status colours are fixed tokens,
+ * not --vector-accent, which the element themes turn orange or yellow.
+ */
+
+/* tokens: the 1:1 scale, with a compact-density step-down */
+:is(.vector-bg-tasks, .vector-task-chip, .vector-bg-tasks-legend) {
+  --bgt-pane: var(--vx-surface);
+  --bgt-card: var(--vx-surface-raised);
+  --bgt-well: var(--vx-stage);
+  --bgt-control: var(--vx-canvas);
+  --bgt-title: var(--vx-workspace-text-primary);
+  --bgt-name: var(--vx-text);
+  --bgt-text-2: var(--vx-workspace-text-secondary);
+  --bgt-text-3: color-mix(in srgb, var(--vx-workspace-text-tertiary) 60%, var(--vx-workspace-text-secondary));
+  --bgt-run: var(--vx-purple);
+  --bgt-run-text: var(--vx-purple-bright);
+  --bgt-wait: var(--vx-amber);
+  --bgt-done: var(--vx-green);
+  --bgt-fail: var(--vx-red);
+  --bgt-stop: var(--vx-text-muted);
+  --bgt-pending: var(--vx-workspace-text-tertiary);
+  --bgt-hover: color-mix(in srgb, var(--vx-text) 6%, transparent);
+  --bgt-press: color-mix(in srgb, var(--vx-text) 10%, transparent);
+  --bgt-ring: color-mix(in oklab, var(--vx-purple) 76%, white 6%);
+  --bgt-fs-title: 20px;
+  --bgt-lh-title: 28px;
+  --bgt-fs-meta: 17px;
+  --bgt-lh-meta: 24px;
+  --bgt-fs-body: 16px;
+  --bgt-lh-body: 24px;
+  --bgt-fs-count: 15px;
+  --bgt-lh-count: 20px;
+  --bgt-fs-table: 13px;
+  --bgt-lh-table: 18px;
+  font-family: var(--vx-workspace-font);
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+:root[data-vector-theme="light"] :is(.vector-bg-tasks, .vector-task-chip, .vector-bg-tasks-legend) {
+  --bgt-pane: var(--vx-canvas);
+  --bgt-card: var(--vx-surface);
+  --bgt-well: var(--vx-canvas);
+  --bgt-control: var(--vx-control);
+  --bgt-ring: var(--vx-purple);
+}
+
+html[data-vector-density="compact"] :is(.vector-bg-tasks, .vector-task-chip, .vector-bg-tasks-legend) {
+  --bgt-fs-title: 16px;
+  --bgt-lh-title: 22px;
+  --bgt-fs-meta: 14px;
+  --bgt-lh-meta: 20px;
+  --bgt-fs-body: 13px;
+  --bgt-lh-body: 19px;
+  --bgt-fs-count: 12px;
+  --bgt-lh-count: 16px;
+  --bgt-fs-table: 12px;
+  --bgt-lh-table: 16px;
+}
+
+/* pane */
+.vector-bg-tasks {
+  box-sizing: border-box;
+  position: relative;
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  width: 330px;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--vx-line);
+  border-radius: 14px;
+  background: var(--bgt-pane);
+  color: var(--bgt-name);
+  transition: width 240ms var(--vx-ease);
+}
+
+.vector-bg-tasks *,
+.vector-bg-tasks *::before,
+.vector-bg-tasks *::after {
+  box-sizing: border-box;
+}
+
+:where(.vector-bg-tasks) :is(h2, h3, h4, p, ul, ol) {
+  margin: 0;
+  padding: 0;
+}
+
+:where(.vector-bg-tasks) button {
+  font: inherit;
+  color: inherit;
+}
+
+/* Docked: the last column of the session split row, 8px from everything.
+   session.tsx reserves the same 346px (or the expanded clamp + 16px). */
+.vector-bg-tasks[data-docked] {
+  align-self: stretch;
+  height: auto;
+  margin: 8px;
+}
+
+.vector-bg-tasks[data-expanded] {
+  width: clamp(330px, 46vw, 720px);
+}
+
+/* Pop out: an in-app floating panel. Like the narrow sheet below, it is
+   portalled to the body, where z-index 40 clears the sidebar and stays under
+   dialogs and toasts. */
+.vector-bg-tasks[data-floating] {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 40;
+  height: min(680px, calc(100vh - 96px));
+  border-color: var(--vx-line-strong);
+  background: color-mix(in srgb, var(--bgt-pane) 88%, transparent);
+  -webkit-backdrop-filter: blur(18px) saturate(1.2);
+  backdrop-filter: blur(18px) saturate(1.2);
+  box-shadow: var(--vx-shadow-float);
+  transform-origin: 100% 100%;
+  animation: vector-bg-tasks-pop 160ms ease-out;
+}
+
+html[data-vector-glass="false"] .vector-bg-tasks[data-floating] {
+  background: var(--bgt-pane);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .vector-bg-tasks[data-floating] {
+    background: var(--bgt-pane);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+@keyframes vector-bg-tasks-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+
+/* Below the desktop breakpoint the split row stacks, so the pane becomes a
+   sheet over the bottom of the window instead of a column. */
+@media (max-width: 767.98px) {
+  .vector-bg-tasks,
+  .vector-bg-tasks[data-docked],
+  .vector-bg-tasks[data-floating],
+  .vector-bg-tasks[data-expanded] {
+    position: fixed;
+    top: auto;
+    right: 8px;
+    bottom: 8px;
+    left: 8px;
+    z-index: 40;
+    width: auto;
+    height: min(72vh, 600px);
+    margin: 0;
+    box-shadow: var(--vx-shadow-float);
+  }
+}
+
+/* header */
+.vector-bg-tasks-header {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+  height: 56px;
+  padding: 0 12px 0 20px;
+  border-bottom: 1px solid transparent;
+  transition: border-color 160ms var(--vx-ease);
+}
+
+.vector-bg-tasks[data-scrolled] .vector-bg-tasks-header {
+  border-bottom-color: var(--vx-line);
+}
+
+.vector-bg-tasks-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--bgt-title);
+  font-size: var(--bgt-fs-title);
+  font-weight: 400;
+  line-height: var(--bgt-lh-title);
+}
+
+.vector-bg-tasks-icon-btn {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--bgt-text-2);
+  cursor: pointer;
+  transition:
+    color 120ms ease,
+    background-color 120ms ease;
+}
+
+.vector-bg-tasks-icon-btn > svg {
+  width: 18px;
+  height: 18px;
+}
+
+.vector-bg-tasks-icon-btn:hover {
+  background: var(--bgt-hover);
+  color: var(--bgt-name);
+}
+
+.vector-bg-tasks-icon-btn:active {
+  background: var(--bgt-press);
+}
+
+.vector-bg-tasks-icon-btn:disabled {
+  background: transparent;
+  color: var(--bgt-text-3);
+  opacity: 0.45;
+  cursor: default;
+}
+
+html[data-vector-larger-targets="true"] .vector-bg-tasks-icon-btn {
+  width: 40px;
+  height: 40px;
+}
+
+/* list */
+.vector-bg-tasks-list {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  padding: 4px 10px 10px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  list-style: none;
+}
+
+.vector-bg-tasks-list > li {
+  display: contents;
+}
+
+/* card */
+.vector-bg-tasks-card {
+  flex: none;
+  padding: 16px;
+  border-radius: 14px;
+  background: var(--bgt-card);
+  scroll-margin-block: 10px;
+}
+
+.vector-bg-tasks-card:focus {
+  outline: none;
+}
+
+/* A card that arrives while the pane is open eases in; the pane's first cards do not. */
+.vector-bg-tasks-card[data-new] {
+  animation: vector-bg-tasks-in 180ms var(--vx-ease);
+}
+
+@keyframes vector-bg-tasks-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+.vector-bg-tasks-card-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 36px;
+}
+
+.vector-bg-tasks-card-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--bgt-name);
+  font-size: var(--bgt-fs-title);
+  font-weight: 500;
+  line-height: var(--bgt-lh-title);
+}
+
+.vector-bg-tasks-card-heading {
+  flex: 1;
+  min-width: 0;
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+.vector-bg-tasks-stop {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: var(--bgt-control);
+  color: var(--bgt-text-2);
+  cursor: pointer;
+  transition:
+    color 120ms ease,
+    background-color 120ms ease;
+}
+
+.vector-bg-tasks-stop > svg {
+  width: 14px;
+  height: 14px;
+}
+
+.vector-bg-tasks-stop:hover {
+  background: color-mix(in srgb, var(--vx-text) 8%, var(--bgt-control));
+  color: var(--bgt-name);
+}
+
+.vector-bg-tasks-stop:active {
+  background: color-mix(in srgb, var(--vx-text) 12%, var(--bgt-control));
+}
+
+.vector-bg-tasks-stop:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.vector-bg-tasks-stop[aria-busy="true"] {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.vector-bg-tasks-card-status {
+  flex: none;
+  font-size: var(--bgt-fs-count);
+  line-height: var(--bgt-lh-count);
+}
+
+.vector-bg-tasks-card-status[data-status="done"] {
+  color: var(--bgt-done);
+}
+
+.vector-bg-tasks-card-status[data-status="failed"] {
+  color: var(--bgt-fail);
+}
+
+.vector-bg-tasks-card-status[data-status="stopped"] {
+  color: var(--bgt-text-3);
+}
+
+.vector-bg-tasks-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+  color: var(--bgt-text-2);
+  font-size: var(--bgt-fs-meta);
+  line-height: var(--bgt-lh-meta);
+  white-space: nowrap;
+}
+
+.vector-bg-tasks-card-head + .vector-bg-tasks-meta {
+  margin-top: 2px;
+}
+
+.vector-bg-tasks-meta > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.vector-bg-tasks-meta > :is(.vector-bg-tasks-dim, .vector-bg-tasks-attention) {
+  flex: none;
+}
+
+.vector-bg-tasks-dim {
+  color: var(--bgt-text-3);
+}
+
+.vector-bg-tasks-attention {
+  color: var(--bgt-wait);
+}
+
+.vector-bg-tasks-desc {
+  display: -webkit-box;
+  margin-top: 10px;
+  overflow: hidden;
+  color: var(--bgt-text-2);
+  font-size: var(--bgt-fs-body);
+  line-height: var(--bgt-lh-body);
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+/* phases */
+.vector-bg-tasks-phases-label {
+  margin: 16px 0 8px;
+  color: var(--bgt-title);
+  font-size: var(--bgt-fs-meta);
+  font-weight: 400;
+  line-height: var(--bgt-lh-meta);
+}
+
+.vector-bg-tasks-phases {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  list-style: none;
+}
+
+.vector-bg-tasks-phase {
+  border-radius: 10px;
+  background: var(--bgt-well);
+}
+
+.vector-bg-tasks-phase-toggle {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto 16px;
+  align-items: center;
+  column-gap: 10px;
+  row-gap: 6px;
+  width: 100%;
+  padding: 10px 12px 12px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+
+.vector-bg-tasks-phase-toggle:hover {
+  background: var(--bgt-hover);
+}
+
+.vector-bg-tasks-phase-name {
+  grid-row: 1;
+  grid-column: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--bgt-name);
+  font-size: var(--bgt-fs-meta);
+  line-height: var(--bgt-lh-meta);
+}
+
+.vector-bg-tasks-phase[data-state="running"] .vector-bg-tasks-phase-name {
+  color: var(--bgt-run-text);
+}
+
+.vector-bg-tasks-phase-count {
+  grid-row: 1;
+  grid-column: 2;
+  color: var(--bgt-text-3);
+  font-size: var(--bgt-fs-count);
+  line-height: var(--bgt-lh-count);
+}
+
+.vector-bg-tasks-phase-chevron {
+  grid-row: 1;
+  grid-column: 3;
+  width: 16px;
+  height: 16px;
+  color: var(--bgt-text-3);
+  transition: transform 160ms var(--vx-ease);
+}
+
+.vector-bg-tasks-phase-toggle[aria-expanded="true"] .vector-bg-tasks-phase-chevron {
+  transform: rotate(90deg);
+}
+
+.vector-bg-tasks-phase-toggle > .vector-bg-tasks-squares {
+  grid-row: 2;
+  grid-column: 1 / -1;
+}
+
+.vector-bg-tasks-phase-body {
+  padding: 0 12px 10px;
+}
+
+.vector-bg-tasks-phase-body[hidden] {
+  display: none;
+}
+
+/* squares: 8px, 2px radius; specialists are circles */
+:is(.vector-bg-tasks-squares, .vector-task-chip-squares) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  list-style: none;
+}
+
+:is(.vector-bg-tasks-square, .vector-task-chip-square) {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--bgt-pending);
+}
+
+:is(.vector-bg-tasks-square, .vector-task-chip-square)[data-kind="specialist"] {
+  border-radius: 50%;
+}
+
+:is(.vector-bg-tasks-square, .vector-task-chip-square):not([data-status="pending"]) {
+  box-shadow: none;
+}
+
+:is(.vector-bg-tasks-square, .vector-task-chip-square)[data-status="running"] {
+  background: var(--bgt-run);
+  animation: vector-bg-tasks-breathe 1.6s ease-in-out infinite;
+}
+
+:is(.vector-bg-tasks-square, .vector-task-chip-square)[data-status="waiting"] {
+  background: var(--bgt-wait);
+}
+
+:is(.vector-bg-tasks-square, .vector-task-chip-square)[data-status="done"] {
+  background: var(--bgt-done);
+}
+
+:is(.vector-bg-tasks-square, .vector-task-chip-square)[data-status="failed"] {
+  background: var(--bgt-fail);
+}
+
+:is(.vector-bg-tasks-square, .vector-task-chip-square)[data-status="stopped"] {
+  background: var(--bgt-stop);
+}
+
+@keyframes vector-bg-tasks-breathe {
+  50% {
+    opacity: 0.5;
+  }
+}
+
+/* agent table: 13px; 252px wide in a 330px pane, leaving 72px for the name */
+.vector-bg-tasks-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.vector-bg-tasks-col-model {
+  width: 64px;
+}
+
+.vector-bg-tasks-col-tokens {
+  width: 52px;
+}
+
+.vector-bg-tasks-col-time {
+  width: 64px;
+}
+
+.vector-bg-tasks-table :is(th, td) {
+  padding: 4px 0 4px 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--bgt-fs-table);
+  font-weight: 400;
+  line-height: var(--bgt-lh-table);
+  text-align: left;
+}
+
+.vector-bg-tasks-table :is(th, td):first-child {
+  padding-left: 0;
+}
+
+.vector-bg-tasks-table :is(th, td):nth-child(n + 3) {
+  text-align: right;
+}
+
+.vector-bg-tasks-table th {
+  color: var(--bgt-text-3);
+}
+
+.vector-bg-tasks-table td {
+  color: var(--bgt-text-2);
+}
+
+.vector-bg-tasks-agent {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--bgt-title);
+  text-align: left;
+  cursor: pointer;
+}
+
+.vector-bg-tasks-agent > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vector-bg-tasks-agent > svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
+}
+
+.vector-bg-tasks-agent:hover:not(:disabled) {
+  color: var(--bgt-name);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.vector-bg-tasks-agent:disabled {
+  cursor: default;
+}
+
+.vector-bg-tasks-row[data-status="failed"] .vector-bg-tasks-agent {
+  color: var(--bgt-fail);
+}
+
+.vector-bg-tasks-row[data-status="waiting"] .vector-bg-tasks-agent {
+  color: var(--bgt-wait);
+}
+
+.vector-bg-tasks-row:is([data-status="pending"], [data-status="stopped"]) :is(td, .vector-bg-tasks-agent) {
+  color: var(--bgt-text-3);
+}
+
+.vector-bg-tasks-more {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  color: var(--bgt-text-3);
+  font-size: var(--bgt-fs-table);
+  text-align: left;
+  cursor: pointer;
+}
+
+/* finished, idle, empty */
+.vector-bg-tasks-finished {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  list-style: none;
+}
+
+.vector-bg-tasks-finished-label {
+  padding: 6px 6px 0;
+  color: var(--bgt-text-3);
+  font-size: var(--bgt-fs-body);
+  line-height: var(--bgt-lh-body);
+}
+
+.vector-bg-tasks-card[data-finished] {
+  padding-block: 12px 14px;
+}
+
+.vector-bg-tasks-card-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: calc(100% + 16px);
+  min-width: 0;
+  min-height: 36px;
+  margin: 0 -8px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  font-size: var(--bgt-fs-title);
+  font-weight: 500;
+  line-height: var(--bgt-lh-title);
+  text-align: left;
+  cursor: pointer;
+}
+
+.vector-bg-tasks-card-toggle > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vector-bg-tasks-card-toggle:hover {
+  background: var(--bgt-hover);
+}
+
+.vector-bg-tasks-card-toggle > svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  color: var(--bgt-text-3);
+  transition: transform 160ms var(--vx-ease);
+}
+
+.vector-bg-tasks-card-toggle[aria-expanded="true"] > svg {
+  transform: rotate(90deg);
+}
+
+.vector-bg-tasks-card > .vector-bg-tasks-squares {
+  margin-top: 10px;
+}
+
+.vector-bg-tasks-idle {
+  padding: 12px 10px 4px;
+  color: var(--bgt-text-3);
+  font-size: var(--bgt-fs-body);
+  line-height: var(--bgt-lh-body);
+  text-align: center;
+}
+
+.vector-bg-tasks-empty {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 0;
+  padding: 24px 32px 56px;
+  text-align: center;
+}
+
+.vector-bg-tasks-empty-title {
+  color: var(--bgt-title);
+  font-size: var(--bgt-fs-meta);
+  line-height: var(--bgt-lh-meta);
+}
+
+.vector-bg-tasks-empty-body {
+  max-width: 250px;
+  color: var(--bgt-text-3);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+/* footer */
+.vector-bg-tasks-footer {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  height: 52px;
+  padding: 0 12px;
+  border-top: 1px solid transparent;
+  transition: border-color 160ms var(--vx-ease);
+}
+
+.vector-bg-tasks[data-more-below] .vector-bg-tasks-footer {
+  border-top-color: var(--vx-line);
+}
+
+.vector-bg-tasks-finished-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--bgt-text-2);
+  font-size: var(--bgt-fs-body);
+  line-height: var(--bgt-lh-body);
+  cursor: pointer;
+}
+
+.vector-bg-tasks-finished-toggle:hover {
+  background: var(--bgt-hover);
+  color: var(--bgt-name);
+}
+
+.vector-bg-tasks-finished-toggle > svg {
+  width: 14px;
+  height: 14px;
+  color: var(--bgt-text-3);
+  transition: transform 160ms var(--vx-ease);
+}
+
+.vector-bg-tasks-finished-toggle[aria-expanded="true"] > svg {
+  transform: rotate(90deg);
+}
+
+.vector-bg-tasks-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* inline chip */
+.vector-task-chip {
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  width: 100%;
+  max-width: 630px;
+  margin: 4px 0;
+  padding: 14px 16px 16px 18px;
+  border: 1px solid var(--vx-line);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--bgt-name);
+  font: inherit;
+  font-family: var(--vx-workspace-font);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+
+:root[data-vector-theme="light"] .vector-task-chip {
+  background: var(--vx-surface);
+}
+
+.vector-task-chip:hover {
+  border-color: var(--vx-line-strong);
+  background: color-mix(in srgb, var(--vx-text) 3%, transparent);
+}
+
+[data-vector-shell] button.vector-task-chip:active:not(:disabled) {
+  transform: none;
+  background: color-mix(in srgb, var(--vx-text) 5%, transparent);
+}
+
+.vector-task-chip-title {
+  grid-row: 1;
+  grid-column: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--bgt-fs-title);
+  font-weight: 500;
+  line-height: var(--bgt-lh-title);
+}
+
+.vector-task-chip-chevron {
+  grid-row: 1;
+  grid-column: 2;
+  align-self: center;
+  width: 18px;
+  height: 18px;
+  margin-left: 12px;
+  color: var(--bgt-text-3);
+  transition:
+    transform 160ms var(--vx-ease),
+    color 120ms ease;
+}
+
+.vector-task-chip:hover .vector-task-chip-chevron {
+  color: var(--bgt-text-2);
+  transform: translateX(2px);
+}
+
+.vector-task-chip-meta {
+  display: flex;
+  grid-column: 1 / -1;
+  gap: 12px;
+  min-width: 0;
+  margin-top: 2px;
+  overflow: hidden;
+  color: var(--bgt-text-2);
+  font-size: var(--bgt-fs-meta);
+  line-height: var(--bgt-lh-meta);
+  white-space: nowrap;
+}
+
+.vector-task-chip-meta > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.vector-task-chip-meta > :is(.vector-task-chip-dim, .vector-task-chip-status) {
+  flex: none;
+}
+
+.vector-task-chip-dim {
+  color: var(--bgt-text-3);
+}
+
+.vector-task-chip-status[data-status="waiting"] {
+  color: var(--bgt-wait);
+}
+
+.vector-task-chip-status[data-status="done"] {
+  color: var(--bgt-done);
+}
+
+.vector-task-chip-status[data-status="failed"] {
+  color: var(--bgt-fail);
+}
+
+.vector-task-chip-status[data-status="stopped"] {
+  color: var(--bgt-text-3);
+}
+
+.vector-task-chip-squares {
+  grid-column: 1 / -1;
+  margin-top: 10px;
+}
+
+/* header launcher: the session tool button with a purple running count */
+[data-vector-session-tool].vector-bg-tasks-launch [data-vector-session-count][data-running="true"],
+.vector-bg-tasks-launch-count {
+  background: var(--vx-purple-soft);
+  color: var(--vx-purple-bright);
+}
+
+.vector-bg-tasks-launch-count {
+  min-width: 14px;
+  border-radius: 4px;
+  padding: 2px 3px;
+  font: 600 10px/1 var(--vx-mono);
+  text-align: center;
+}
+
+/* [data-vector-session-tool]:focus-visible drops every ring with !important
+   (vector-premium.css), which would leave this toggle with none. */
+[data-vector-session-tool].vector-bg-tasks-launch:focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--vx-purple) 76%, white 6%) !important;
+  outline-offset: 2px !important;
+}
+
+/* settings legend */
+.vector-bg-tasks-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.vector-bg-tasks-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--bgt-text-2);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+/* focus */
+:is(
+  .vector-bg-tasks-icon-btn,
+  .vector-bg-tasks-stop,
+  .vector-bg-tasks-finished-toggle,
+  .vector-task-chip
+):focus-visible {
+  outline: 2px solid var(--bgt-ring);
+  outline-offset: 2px;
+}
+
+:is(
+  .vector-bg-tasks-phase-toggle,
+  .vector-bg-tasks-card-toggle,
+  .vector-bg-tasks-agent,
+  .vector-bg-tasks-more
+):focus-visible {
+  outline: 2px solid var(--bgt-ring);
+  outline-offset: -2px;
+}
+
+:root[data-vector-theme="light"]
+  :is(.vector-bg-tasks-phase-toggle, .vector-bg-tasks-card-toggle, .vector-bg-tasks-agent):focus-visible {
+  outline-offset: 0;
+  box-shadow: inset 0 0 0 2px var(--vx-purple);
+}
+
+/* reduced motion: the OS setting and Vector's own */
+@media (prefers-reduced-motion: reduce) {
+  .vector-bg-tasks,
+  .vector-bg-tasks[data-floating],
+  .vector-bg-tasks-card[data-new],
+  :is(.vector-bg-tasks-square, .vector-task-chip-square)[data-status="running"] {
+    animation: none;
+    transition: none;
+  }
+
+  .vector-bg-tasks-phase-chevron,
+  .vector-bg-tasks-card-toggle > svg,
+  .vector-bg-tasks-finished-toggle > svg,
+  .vector-task-chip-chevron {
+    transition: none;
+  }
+
+  .vector-task-chip:hover .vector-task-chip-chevron {
+    transform: none;
+  }
+}
+
+html:is([data-vector-reduce-animations="true"], [data-vector-animation-speed="off"])
+  :is(
+    .vector-bg-tasks,
+    .vector-bg-tasks-card,
+    .vector-bg-tasks-square,
+    .vector-task-chip-square,
+    .vector-bg-tasks-phase-chevron,
+    .vector-task-chip-chevron
+  ) {
+  animation: none;
+  transition: none;
+}
+
+/* forced colours */
+@media (forced-colors: active) {
+  :is(.vector-bg-tasks-square, .vector-task-chip-square) {
+    forced-color-adjust: none;
+    box-shadow: inset 0 0 0 1px CanvasText;
+  }
+
+  :is(.vector-bg-tasks-square, .vector-task-chip-square):is(
+    [data-status="done"],
+    [data-status="failed"],
+    [data-status="stopped"],
+    [data-status="waiting"]
+  ) {
+    background: CanvasText;
+  }
+
+  :is(.vector-bg-tasks-square, .vector-task-chip-square)[data-status="running"] {
+    background: Highlight;
+    box-shadow: none;
+  }
+
+  .vector-bg-tasks-card,
+  .vector-bg-tasks-phase {
+    border: 1px solid CanvasText;
+  }
+}

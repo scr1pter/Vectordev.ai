@@ -28,6 +28,7 @@ import { Persist, persisted } from "@/utils/persist"
 import { hasActiveVerification } from "@/utils/session-activity"
 import { StatusPopover } from "../status-popover"
 import { PresenceBanner } from "../presence-banner"
+import { BackgroundTasksButton } from "@/features/background-tasks/background-tasks-button"
 
 const OPEN_APPS = [
   "vscode",
@@ -328,6 +329,7 @@ export function SessionHeader() {
                 <StatusPopover />
               </Tooltip>
             </Show>
+            <BackgroundTasksButton variant="v2" />
             <TooltipKeybind
               title={language.t("command.review.toggle")}
               keybind={command.keybind("review.toggle")}
@@ -522,6 +524,7 @@ export function SessionHeader() {
                     <StatusPopover />
                   </Tooltip>
                 </Show>
+                <BackgroundTasksButton variant="legacy" />
                 <TooltipKeybind
                   title={language.t("command.terminal.toggle")}
                   keybind={command.keybind("terminal.toggle")}

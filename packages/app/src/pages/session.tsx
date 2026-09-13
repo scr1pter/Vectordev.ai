@@ -80,6 +80,9 @@ import { type DiffStyle, SessionReviewTab, type SessionReviewTabProps } from "@/
 import { useSessionLayout } from "@/pages/session/session-layout"
 import { syncSessionModel } from "@/pages/session/session-model-helpers"
 import { SessionSidePanel } from "@/pages/session/session-side-panel"
+import { BackgroundTasksPane } from "@/features/background-tasks/background-tasks-pane"
+import { backgroundTasksPane } from "@/features/background-tasks/background-tasks-state"
+import { BackgroundTasksProvider } from "@/features/background-tasks/use-background-tasks"
 import { SessionReviewEmptyChangesV2 } from "@opencode-ai/session-ui/v2/session-review-empty-changes-v2"
 import { SessionReviewEmptyNoGitV2 } from "@opencode-ai/session-ui/v2/session-review-empty-no-git-v2"
 import { ReviewPanelV2 } from "@/pages/session/v2/review-panel-v2"
@@ -494,14 +497,23 @@ export default function Page() {
   )
   const desktopSidePanelOpen = createMemo(() => desktopReviewOpen() || desktopFileTreeOpen())
   const desktopCodespaceOpen = createMemo(() => desktopReviewOpen() && tabs().active() === "codespace")
+  // The docked Background tasks pane is the split row's last column, mounted
+  // here rather than as a side-panel tab, so it never touches the side panel's
+  // own tabs. The conversation gives up its width; the review panel is flex-1
+  // and absorbs the rest on its own.
+  const tasksPaneReserve = createMemo(() =>
+    isDesktop() && params.id ? backgroundTasksPane.dockedReserve() : undefined,
+  )
   const sessionPanelWidth = createMemo(() => {
+    const reserve = tasksPaneReserve()
+    const less = reserve ? ` - ${reserve}` : ""
     // Codespace (the editor) takes the whole surface: collapse the session chat pane.
     if (desktopCodespaceOpen()) return "0px"
-    if (!desktopSidePanelOpen()) return "100%"
+    if (!desktopSidePanelOpen()) return reserve ? `calc(100%${less})` : "100%"
     if (desktopReviewOpen()) {
-      return `min(${layout.session.width()}px, max(280px, calc(100% - ${MIN_REVIEW_PANEL_WIDTH}px)))`
+      return `min(${layout.session.width()}px, max(280px, calc(100% - ${MIN_REVIEW_PANEL_WIDTH}px${less})))`
     }
-    return `calc(100% - ${layout.fileTree.width()}px)`
+    return `calc(100% - ${layout.fileTree.width()}px${less})`
   })
   const centered = createMemo(() => isDesktop() && !desktopReviewOpen())
 
@@ -2221,71 +2233,75 @@ export default function Page() {
   )
 
   return (
-    <SessionRouteFrame>
-      <SessionHeader />
-      <div data-vector-session-split class="flex-1 min-h-0 flex flex-col md:flex-row">
-        <Show when={!isDesktop() && !!params.id && !settings.general.newLayoutDesigns()}>{mobileTabs()}</Show>
+    <BackgroundTasksProvider sessionID={() => params.id}>
+      <SessionRouteFrame>
+        <SessionHeader />
+        <div data-vector-session-split class="flex-1 min-h-0 flex flex-col md:flex-row">
+          <Show when={!isDesktop() && !!params.id && !settings.general.newLayoutDesigns()}>{mobileTabs()}</Show>
 
-        <div
-          data-vector-session-conversation
-          classList={{
-            "@container relative shrink-0 flex flex-col min-h-0 h-full flex-1 md:flex-none transition-[width]": true,
-            "duration-[240ms] ease-[cubic-bezier(0.22,1,0.36,1)] will-change-[width] motion-reduce:transition-none":
-              !size.active() && !ui.reviewSnap,
-          }}
-          style={{
-            width: sessionPanelWidth(),
-          }}
-        >
-          {settings.general.newLayoutDesigns() ? (
-            <Show when={sessionPanelKey()} keyed>
-              {(_) => (
-                <SessionPanelFrame newLayout raised={!!params.id}>
-                  <ErrorBoundary fallback={sessionErrorFallback}>{sessionPanelContent()}</ErrorBoundary>
-                </SessionPanelFrame>
-              )}
+          <div
+            data-vector-session-conversation
+            classList={{
+              "@container relative shrink-0 flex flex-col min-h-0 h-full flex-1 md:flex-none transition-[width]": true,
+              "duration-[240ms] ease-[cubic-bezier(0.22,1,0.36,1)] will-change-[width] motion-reduce:transition-none":
+                !size.active() && !ui.reviewSnap,
+            }}
+            style={{
+              width: sessionPanelWidth(),
+            }}
+          >
+            {settings.general.newLayoutDesigns() ? (
+              <Show when={sessionPanelKey()} keyed>
+                {(_) => (
+                  <SessionPanelFrame newLayout raised={!!params.id}>
+                    <ErrorBoundary fallback={sessionErrorFallback}>{sessionPanelContent()}</ErrorBoundary>
+                  </SessionPanelFrame>
+                )}
+              </Show>
+            ) : (
+              <SessionPanelFrame newLayout={false} raised={!!params.id}>
+                {sessionPanelContent()}
+              </SessionPanelFrame>
+            )}
+
+            <Show when={desktopReviewOpen() && !desktopCodespaceOpen()}>
+              <div onPointerDown={() => size.start()}>
+                <ResizeHandle
+                  classList={{
+                    "-right-1": settings.general.newLayoutDesigns(),
+                  }}
+                  direction="horizontal"
+                  size={layout.session.width()}
+                  min={280}
+                  max={typeof window === "undefined" ? 1200 : Math.max(520, window.innerWidth - MIN_REVIEW_PANEL_WIDTH)}
+                  onResize={(width) => {
+                    size.touch()
+                    layout.session.resize(width)
+                  }}
+                />
+              </div>
             </Show>
-          ) : (
-            <SessionPanelFrame newLayout={false} raised={!!params.id}>
-              {sessionPanelContent()}
-            </SessionPanelFrame>
-          )}
+          </div>
 
-          <Show when={desktopReviewOpen() && !desktopCodespaceOpen()}>
-            <div onPointerDown={() => size.start()}>
-              <ResizeHandle
-                classList={{
-                  "-right-1": settings.general.newLayoutDesigns(),
-                }}
-                direction="horizontal"
-                size={layout.session.width()}
-                min={280}
-                max={typeof window === "undefined" ? 1200 : Math.max(520, window.innerWidth - MIN_REVIEW_PANEL_WIDTH)}
-                onResize={(width) => {
-                  size.touch()
-                  layout.session.resize(width)
-                }}
-              />
-            </div>
-          </Show>
+          <SessionSidePanel
+            canReview={canReview}
+            diffs={reviewDiffs}
+            diffsReady={reviewReady}
+            empty={reviewEmptyText}
+            hasReview={hasReview}
+            reviewCount={reviewCount}
+            reviewPanel={() => (newSessionDesign() ? reviewPanelV2() : reviewPanel())}
+            activeDiff={tree.activeDiff}
+            focusReviewDiff={focusReviewDiff}
+            reviewSnap={ui.reviewSnap}
+            size={size}
+          />
+
+          <BackgroundTasksPane />
         </div>
 
-        <SessionSidePanel
-          canReview={canReview}
-          diffs={reviewDiffs}
-          diffsReady={reviewReady}
-          empty={reviewEmptyText}
-          hasReview={hasReview}
-          reviewCount={reviewCount}
-          reviewPanel={() => (newSessionDesign() ? reviewPanelV2() : reviewPanel())}
-          activeDiff={tree.activeDiff}
-          focusReviewDiff={focusReviewDiff}
-          reviewSnap={ui.reviewSnap}
-          size={size}
-        />
-      </div>
-
-      <TerminalPanel />
-    </SessionRouteFrame>
+        <TerminalPanel />
+      </SessionRouteFrame>
+    </BackgroundTasksProvider>
   )
 }

@@ -5,6 +5,17 @@ import { Show, type Component } from "solid-js"
 // change — the model routes delegation off those. This is a presentation layer
 // keyed by engine id, so a user-defined agent has no identity here and renders
 // exactly as it did before.
+//
+// Vector has two kinds of subagent. `general` is the engine's general-purpose
+// agent, shown as a plain "Subagent": the main agent starts as many as a task
+// needs, in parallel. Every other entry, and any user-defined agent, is a
+// "Subagent specialist" with one focus.
+export const GENERAL_SUBAGENT_ID = "general"
+
+export function isSpecialist(id: string | undefined): boolean {
+  return !!id && id !== GENERAL_SUBAGENT_ID
+}
+
 export type SubagentIdentity = {
   id: string
   name: string
@@ -19,14 +30,17 @@ export const SUBAGENT_IDENTITIES: Record<string, SubagentIdentity> = {
     id: "explore",
     name: "Explore",
     summary: "Finds code fast",
-    detail: "Searches the repository by pattern or keyword and maps how it fits together before the work starts.",
+    detail:
+      "Searches the repository by pattern or keyword and maps how it fits together before the work starts. Never edits.",
     hue: 25,
+    readOnly: true,
   },
   general: {
     id: "general",
-    name: "General",
-    summary: "Multi-step work",
-    detail: "Researches open-ended questions and carries multi-step tasks through to a result.",
+    name: "Subagent",
+    summary: "General purpose",
+    detail:
+      "Takes whatever part of a task the main agent hands it, works alongside other subagents, and reports back when it is done.",
     hue: 150,
   },
   judge: {
@@ -34,7 +48,7 @@ export const SUBAGENT_IDENTITIES: Record<string, SubagentIdentity> = {
     name: "Judge",
     summary: "Verifies completion",
     detail:
-      "Scores the finished work against the original request — coverage, correctness, regression safety, evidence — and returns PASS, FAIL or INCONCLUSIVE. Runs only when verified completion is enabled.",
+      "Scores the finished work against the original request (coverage, correctness, regression safety, evidence) and returns PASS, FAIL or INCONCLUSIVE. Vector must get its verdict when LLM-as-a-judge is on, and can call it for an independent check at other times. Never edits.",
     hue: 265,
     readOnly: true,
   },

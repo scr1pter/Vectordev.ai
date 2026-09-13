@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { SUBAGENT_IDENTITIES, subagentIdentity } from "./subagent-identity"
+import { GENERAL_SUBAGENT_ID, isSpecialist, SUBAGENT_IDENTITIES, subagentIdentity } from "./subagent-identity"
 
 // The engine's built-in subagents (packages/opencode/src/agent/agent.ts).
 // A new engine subagent without an identity would render nameless, so this
@@ -26,13 +26,35 @@ describe("subagent identities", () => {
     expect(new Set(names).size).toBe(names.length)
   })
 
-  // review, security and judge cannot edit files; saying so in the UI is only
-  // honest if the flag matches the engine's own permissions.
+  // explore, review, security and judge cannot edit files (the engine denies
+  // them every write, packages/opencode/src/agent/agent.ts); saying so in the
+  // UI is only honest if the flag matches the engine's own permissions.
   test("the read-only agents are marked read-only", () => {
+    expect(SUBAGENT_IDENTITIES.explore!.readOnly).toBe(true)
     expect(SUBAGENT_IDENTITIES.review!.readOnly).toBe(true)
     expect(SUBAGENT_IDENTITIES.security!.readOnly).toBe(true)
     expect(SUBAGENT_IDENTITIES.judge!.readOnly).toBe(true)
-    expect(SUBAGENT_IDENTITIES.explore!.readOnly).toBeUndefined()
+    for (const id of ["general", "debug", "migration", "performance", "test"]) {
+      expect(SUBAGENT_IDENTITIES[id]!.readOnly).toBeUndefined()
+    }
+  })
+
+  // Two kinds: `general` is the plain general-purpose Subagent, everything
+  // else (built in or user-defined) is a Subagent specialist.
+  test("the general agent is the plain Subagent, not a specialist", () => {
+    expect(GENERAL_SUBAGENT_ID).toBe("general")
+    expect(SUBAGENT_IDENTITIES[GENERAL_SUBAGENT_ID]!.name).toBe("Subagent")
+    expect(isSpecialist(GENERAL_SUBAGENT_ID)).toBe(false)
+  })
+
+  test("every other agent, a user-defined one included, is a specialist", () => {
+    for (const id of ENGINE_SUBAGENTS.filter((id) => id !== GENERAL_SUBAGENT_ID)) expect(isSpecialist(id)).toBe(true)
+    expect(isSpecialist("my-custom-agent")).toBe(true)
+  })
+
+  test("a missing agent id is neither kind", () => {
+    expect(isSpecialist(undefined)).toBe(false)
+    expect(isSpecialist("")).toBe(false)
   })
 
   test("each identity's key matches its own id", () => {
