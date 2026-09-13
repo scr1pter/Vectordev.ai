@@ -8,7 +8,7 @@
 
 </div>
 
-Vector opens a repository on your computer and puts an agent beside your editor. It plans, edits, runs commands, and checks its own work — on your desktop, in your terminal, or from a GitHub issue. Your code stays on your machine.
+Vector opens a repository on your computer and puts an agent beside your editor. It plans, edits, runs commands, splits large jobs across subagents working in parallel, and checks its own work before it calls it done. It runs on your desktop, in your terminal, or from a GitHub issue, and your code stays on your machine.
 
 ```bash
 npm install -g @vectordevai/cli
@@ -16,29 +16,43 @@ vector login
 vector
 ```
 
-The desktop app is a free download at [vectordev.ai](https://vectordev.ai). The terminal agent is free too, and both need nothing but a Vector account. A roster of free models is included, all able to call tools: Nemotron 3 Ultra and Muse Spark with a million tokens of context, Nemotron 3.5 Lightning, MiMo V2.5, Ling 3.0 Flash, and the Big Pickle default a new install starts on. Bring your own key for Claude, GPT, or Gemini whenever you want.
+The desktop app is a free download for macOS, Windows and Linux at [vectordev.ai](https://vectordev.ai), and the terminal agent is free too. Both need only a Vector account. OpenCode Zen's free models are included, so Vector works before you connect anything, and you can bring your own key for Claude, GPT, Gemini and the rest whenever you want.
 
-Vector has an agent of its own. Its own session engine, its own tools behind one permission gate, its own memory of the project, its own verification pass, and its own model on the way. Claude Code, Codex, and Cursor Agent can run inside it too, on subscriptions you already have. They share the checkout. The workspace, the memory, the verification, and the channel your teammates talk on stay Vector's.
+**New in 1.99.8:** Subagents that work in parallel, every agent's edits typed live in the editor, no agent limit, every model in the picker, and a glass launch screen. [Release notes →](https://vectordev.ai/releases)
 
-## What Vector does
+## Features
 
-**One workspace, two ways to work.** Agent and Editor are two views of the same session. Search for a file and change it yourself, or ask the agent beside it to make the change. Files open in persistent tabs, and the terminal, browser, and review all live in the same shell.
+### Agents
 
-**Follow the agent as it types.** The file an agent edits opens on its own, scrolls to the lines it changed, and tints them in that agent's colour with a labelled cursor. Several agents at once read like named cursors in a shared document. Your own saves never steal the view.
+**Subagents and Subagent specialists.** When a request has independent parts, the main agent hands them to Subagents: general-purpose workers that each take one piece, work through it in their own context, and report back once. It starts as many as the work needs, in parallel, without being asked. Eight Subagent specialists — Explore, Review, Judge, Debug, Test, Security, Performance and Migration — have a fixed focus and their own permissions, and the agent picks one when the work matches. Each batch of subagents shows as a card in the conversation and in the Background tasks panel, where you can watch them work or stop them.
 
-**Multiplayer.** `vector invite` serves your live workspace over one link. A teammate opens it and lands in the same sessions, files, and agents, as a guest with their own credential. The header shows who is present.
+**No agent limit.** For separate lines of work, run as many agents at once as your machine can handle, each in its own checkout or sharing yours, merged only when you say so. Vector tells you when a large run will strain your processor or disk.
 
-**Harness the agents you already use.** Claude Code, Codex, and Cursor Agent run inside Vector beside its own agents, in readable conversations rather than raw terminal output. Subagents work in parallel, each in its own git worktree, so several tasks run at once without trampling each other.
+**The agents you already use.** Claude Code, Codex and Cursor Agent run inside Vector on subscriptions you already have, in readable conversations that answer like any other chat.
 
-**Cloud work in the loop.** The agent creates a real Supabase project on your own account, writes the keys into your repository, applies the migrations you keep there, syncs environment values, and publishes to your own Vercel or Netlify account. Then it loads the deployed URL in a real browser and reports what it found, and reads the logs when a deploy misbehaves. Everything that creates, changes, or spends asks first.
+**Verified before done.** A judge reviews finished work against what was asked before it reaches you, so "done" means checked rather than claimed.
 
-**Task in, pull request out.** Comment `/vector fix the flaky auth test` on a GitHub issue and Vector opens a branch and a pull request. Every PR carries its evidence: the files changed, the checks it ran with their exit codes and output, what the run cost, and the judge's verdict.
+### Workspace
 
-**Agents that verify their own work.** A judge reviews finished work against what was asked before it reaches you, so "done" means checked rather than claimed.
+**Watch every agent edit live.** The file an agent edits opens on its own, and the change types itself in that agent's colour behind a labelled cursor — Vector's own agent, its subagents, and Claude Code, Codex and Cursor Agent alike. Several agents at once read like named cursors in a shared document, and your own saves never steal the view.
+
+**One workspace, two ways to work.** Agent and Editor are two views of the same session. Search for a file and change it yourself, or ask the agent beside it to make the change. Files open in persistent tabs, and the terminal, browser and review all live in the same shell.
+
+**Multiplayer.** `vector invite` serves your live workspace over one link. A teammate opens it and lands in the same sessions, files and agents, as a guest with their own credential. The header shows who is present.
+
+**Connections.** Model Context Protocol servers, plugins and cloud connections plug into the same session, so the agent can reach GitHub, your database, your deploy target and your browser without leaving the workspace.
+
+### Models
+
+**Every model in one picker.** The model picker lists every model your connected providers offer, new releases included, beside OpenCode Zen's free models.
 
 **Economics you can see.** The Tokenomics engine measures what every session actually spent, per model and per task, and turns that into model recommendations built from real usage rather than list prices.
 
-**Connections.** Model Context Protocol servers, plugins, and cloud connections plug into the same session, so the agent can reach GitHub, your database, your deploy target, and your browser without leaving the workspace.
+### Cloud and GitHub
+
+**Cloud work in the loop.** The agent can create a real Supabase project on your own account, write the keys into your repository, apply the migrations you keep there, sync environment values, and publish to your own Vercel or Netlify account. Then it loads the deployed URL in a real browser and reports what it found, and reads the logs when a deploy misbehaves. Everything that creates, changes or spends asks first.
+
+**Task in, pull request out.** Comment `/vector fix the flaky auth test` on a GitHub issue and Vector opens a branch and a pull request. Every PR carries its evidence: the files changed, the checks it ran with their exit codes and output, what the run cost, and the judge's verdict.
 
 ## Install
 

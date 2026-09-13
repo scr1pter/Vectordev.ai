@@ -60,7 +60,7 @@ const navigation = [
       ["Controlled browser", "controlled-browser"],
       ["Only in Vector", "only-in-vector"],
       ["The conditions", "conditions"],
-      ["Subagents", "subagents"],
+      ["Subagents and specialists", "subagents"],
       ["Comparison", "comparison"],
       ["Vector Velocity model", "velocity"],
       ["API platform", "api-platform"],
@@ -117,7 +117,7 @@ const pillars = [
   {
     name: "Verified completion",
     eyebrow: "Opt-in · not on plan or quick",
-    body: "Turn on LLM-as-a-judge and a separate subagent compares the finished work against your original request and the evidence, and sends it back for repair on a failed verdict.",
+    body: "Turn on LLM-as-a-judge and the Judge, a read-only subagent specialist, compares the finished work against your original request and the evidence, and sends it back for repair on a failed verdict.",
   },
   {
     name: "Cloud Services",
@@ -132,7 +132,7 @@ const pillars = [
   {
     name: "Parallel agents",
     eyebrow: "No agent cap · isolated or shared",
-    body: "When one agent is not enough, run several in their own checkouts or together in one, watch them from a single dashboard, and merge only what you trust.",
+    body: "Vector's agent starts subagents on its own and runs them together. When you want separate lines of work, run agents in their own checkouts or together in one, watch them from a single dashboard, and merge only what you trust.",
   },
   {
     name: "Automations",
@@ -172,6 +172,10 @@ const conditions = [
   [
     "The judge is opt-in",
     "LLM-as-a-judge is off until you switch it on, and it spends extra model calls on every prompt it covers. It cannot apply to the plan lane, which produces nothing to verify, or to the quick lane, which has no ability to spawn the judge at all.",
+  ],
+  [
+    "Subagents share your checkout",
+    "Subagents and subagent specialists work in your session's own checkout, not a separate worktree, and by default they cannot start subagents of their own. For work that should not touch your files until you merge it, use an agent workspace instead.",
   ],
   [
     "External runtimes are yours",
@@ -252,7 +256,7 @@ const systemRows = [
   ],
   [
     "A judge that can fail the work",
-    "Optional LLM-as-a-judge hands the original request, the success criteria, the changed files and the captured test output to a separate subagent. A FAIL names the specific repair and the agent goes back to work, up to three rounds.",
+    "Optional LLM-as-a-judge hands the original request, the success criteria, the changed files and the captured test output to the Judge, a separate read-only subagent specialist. A FAIL names the specific repair and the agent goes back to work, up to three rounds.",
   ],
   [
     "A browser that refuses credentials",
@@ -301,7 +305,7 @@ const comparison = [
   ["Editor, file search, diagnostics, terminal", "Built in", "Terminal-first", "Terminal-first", "IDE-native", "Managed editor"],
   ["Memory file the app shows and can erase", "One MEMORY.md, with path, size and one-click erase", "—", "—", "—", "—"],
   ["Provider-reported spend recorded per run", "Ledger, plus model ranking", "Session cost readout", "—", "Usage dashboard", "—"],
-  ["Independent judge before “done”", "Opt-in judge subagent", "—", "—", "—", "—"],
+  ["Independent judge before “done”", "Opt-in Judge subagent specialist", "—", "—", "—", "—"],
   ["Connector catalog", "118 connectors, plus your own MCP", "Via MCP", "Via MCP", "Via MCP", "—"],
   ["Browser the agent drives", "Built in, refuses credentials", "Via tools", "Browser + CDP", "Via tools", "Preview-centric"],
   ["Deploys on accounts you own", "Vercel, Netlify, Supabase, AWS", "Via tools", "Via tools", "Via MCP", "Native hosting"],
@@ -309,10 +313,11 @@ const comparison = [
   ["Recurring work with no window open", "Desktop tray", "—", "—", "—", "—"],
 ]
 
-// The engine's nine subagents (packages/opencode/src/agent/agent.ts) and the
-// display identities painted over them. Roles restate the engine descriptions
-// and the labels mirror the real permission sets — review and security cannot
-// write, the judge cannot edit files and only runs under verified completion —
+// The engine's eight subagent specialists (packages/opencode/src/agent/agent.ts)
+// and the display identities painted over them. `general` is not listed: it is
+// the general-purpose Subagent described in `subagentKinds` below. Roles restate
+// the engine descriptions and the labels mirror the real permission sets.
+// Explore, review, security and judge cannot write (readonlySpecialistBoundary),
 // so no card promises more than its agent is allowed to do.
 const crew = [
   {
@@ -320,16 +325,8 @@ const crew = [
     name: "Explore",
     summary: "Finds code fast",
     hue: 25,
-    readOnly: false,
-    role: "Finds files by pattern, searches code for keywords, and answers questions about how the codebase works.",
-  },
-  {
-    label: "general",
-    name: "General",
-    summary: "Multi-step work",
-    hue: 150,
-    readOnly: false,
-    role: "Researches open-ended questions and carries multi-step tasks through to a result.",
+    readOnly: true,
+    role: "Finds files by pattern, searches code for keywords, and answers questions about how the codebase works. Never edits.",
   },
   {
     label: "judge",
@@ -337,7 +334,7 @@ const crew = [
     summary: "Verifies completion",
     hue: 265,
     readOnly: true,
-    role: "Scores finished work against the original request and returns PASS, FAIL or INCONCLUSIVE. Runs only when verified completion is on.",
+    role: "Scores finished work against the original request and returns PASS, FAIL or INCONCLUSIVE. Verified completion relies on it, and Vector can also call it for an independent check. Never edits.",
   },
   {
     label: "debug",
@@ -388,7 +385,55 @@ const crew = [
     role: "Designs focused coverage, writes or repairs tests, runs the suite and reports failures with evidence.",
   },
 ]
+
+// The two kinds of agent Vector's agent hands work to. "Subagents" are the
+// engine's `general` agent; "Subagent specialists" are the agents in `crew`
+// above plus any agent a user defines. Checked against
+// packages/opencode/src/agent/subagent-kind.ts and src/tool/task.txt.
+const subagentKinds = [
+  [
+    "What they take on",
+    "A subagent takes any self-contained piece of the task. A subagent specialist takes only the kind of work it is named for.",
+  ],
+  [
+    "When Vector uses them",
+    "Vector's agent decides on its own. It starts subagents when a task splits into pieces that do not depend on each other, such as searching several areas of the code or changing unrelated files, and launches them in one message so they run at the same time. It calls a specialist when part of the task fits that specialist's focus. You do not have to ask for either.",
+  ],
+  [
+    "How many",
+    "As many as the task needs. Vector sets no cap on either kind. Your computer and your provider's rate limits are the practical limits, and each one spends its own tokens.",
+  ],
+  [
+    "While they run",
+    "By default the main agent waits for their results, then carries on with what they found. In the desktop app it can also leave one running in the background while it does other work, and picks up the result when that one finishes.",
+  ],
+  [
+    "Who they answer to",
+    "The main agent. Each one works in its own context and reports back to it once, when it finishes. They cannot ask you questions, though they still ask for permission the way the main agent does, and the main agent tells you what they found.",
+  ],
+  [
+    "What they can change",
+    "A subagent can read, edit and run commands like the main agent. Explore, Review, Judge and Security can read your project and run checks, but they cannot edit it. Debug, Test, Performance and Migration can edit.",
+  ],
+  [
+    "Where they work",
+    "In your session's checkout, not a separate worktree. Vector refuses to start one whose assigned paths overlap another running subagent's.",
+  ],
+  [
+    "How deep",
+    "One level. By default, subagents cannot start subagents of their own.",
+  ],
+  [
+    "In Plan mode",
+    "Vector does not start subagents, and of the built-in specialists it uses only Explore, Review and Security, which cannot edit.",
+  ],
+]
 const changelog = [
+  [
+    "September 2026 · 1.99.8",
+    "Subagents that work in parallel",
+    "The main agent launches general-purpose Subagents on its own, in parallel, beside eight Subagent specialists, and they show as cards in the chat and in the Background tasks panel. The editor follows every agent live, the main agent included; Claude Code, Codex and Cursor chats answer like any other; the 16-agent limit is gone; and every model your providers offer is listed.",
+  ],
   [
     "September 2026 · 1.99.7",
     "A database it can create for you",
@@ -435,7 +480,17 @@ const faqs = [
   {
     question: "Can several agents work on one repository?",
     answer:
-      "Yes. Create isolated workspaces for separate responsibilities. Each workspace works on its own copy or Git worktree, and you decide which changes are reviewed and merged.",
+      "Yes, in two ways. Inside one session, Vector's agent starts subagents on its own and runs them in the same checkout. For separate responsibilities, create agent workspaces: each works on its own copy or Git worktree, and you decide which changes are reviewed and merged.",
+  },
+  {
+    question: "What is the difference between a subagent and a subagent specialist?",
+    answer:
+      "A subagent is general purpose: it takes whatever self-contained piece of the task Vector's agent hands it, and Vector starts as many as the task needs. A subagent specialist is one of eight named agents, such as Review or Debug, with a fixed focus and its own permissions. Agents you define yourself count as custom specialists. Vector uses both on its own, and both appear in the chat and in Background tasks.",
+  },
+  {
+    question: "Is there a limit on how many subagents Vector runs?",
+    answer:
+      "No. Vector sets no cap. Your computer and your provider's rate limits are the practical limits, and each subagent spends its own tokens. By default, subagents cannot start subagents of their own.",
   },
   {
     question: "Can I edit code myself?",
@@ -564,6 +619,11 @@ const faqs = [
             and report a reviewable result. Use Plan mode when you want analysis without edits, and
             switch back to an editing mode when the plan is approved.
           </p>
+          <p>
+            When a task splits into pieces that do not depend on each other, the agent hands them to subagents that
+            run at the same time, and it calls a subagent specialist when part of the work fits one. See
+            <a href="#subagents">Subagents and subagent specialists</a>.
+          </p>
           <div class="definition-grid">
             <article><strong>Quick</strong><p>Short answers and lightweight requests with a smaller context budget.</p></article>
             <article><strong>Normal</strong><p>The default balance of speed, context, and execution depth.</p></article>
@@ -588,6 +648,10 @@ const faqs = [
           <p class="note">
             Two agents should not intentionally edit the same lines at the same time. Split work by
             responsibility to reduce conflicts and make review easier.
+          </p>
+          <p class="note">
+            Teams can be wired everyone-to-everyone, coordinator-to-workers, or any pairing you set. A message to a
+            teammate you have not linked is refused and told so, rather than dropped where the sender never finds out.
           </p>
         </section>
 
@@ -810,7 +874,7 @@ const faqs = [
           </p>
           <div class="doc-tally">
             <div><strong>118</strong><span>connectors ready to turn on</span></div>
-            <div><strong>No cap</strong><span>on agents running at once</span></div>
+            <div><strong>No cap</strong><span>on agents and subagents running at once</span></div>
             <div><strong>4</strong><span>runtimes — Vector's and three others</span></div>
             <div><strong>0</strong><span>lines of your code uploaded to Vector by default</span></div>
           </div>
@@ -906,9 +970,10 @@ const faqs = [
           <p>
             Completion you can check, instead of a confident summary. Turn on LLM-as-a-judge and finishing stops
             being the agent's own opinion. Before it starts, the agent writes down the observable success criteria
-            your request implies. After implementing, it has to exercise the work rather than describe it. Then a
-            separate Judge subagent compares the original request, the criteria, the changed files and the captured
-            test output — and a FAIL names the specific repair and sends the agent back to work, up to three rounds.
+            your request implies. After implementing, it has to exercise the work rather than describe it. Then the
+            Judge, a read-only subagent specialist, compares the original request, the criteria, the changed files and
+            the captured test output. A FAIL names the specific repair and sends the agent back to work, up to three
+            rounds.
           </p>
           <p class="note">Opt-in, and it spends extra model calls on every prompt it covers. It does not apply to the plan lane or the quick lane.</p>
         </section>
@@ -956,11 +1021,33 @@ const faqs = [
 
         <section id="subagents" class="doc-section">
           <p class="section-number">28</p>
-          <h2>Subagents</h2>
+          <h2>Subagents and subagent specialists</h2>
           <p>
-            Vector's agent does not do everything itself. When a task calls for a specialist, it hands the work to one
-            of nine subagents, each with its own focus and its own permission set. Review and Security can read but
-            never write. Judge cannot edit files at all, and only runs when verified completion is on.
+            Vector's agent does not have to do every part of a task itself. It can hand self-contained pieces of the
+            work to other agents, which run at the same time. There are two kinds, and Vector uses the same two names in
+            the chat, in Background tasks, and in Settings → Agents.
+          </p>
+          <div class="doc-grid doc-grid-4">
+            <article class="doc-card">
+              <small>General purpose · no cap</small>
+              <h4>Subagents</h4>
+              <p>A subagent takes whatever piece of the task the main agent hands it: answer a question about the code, change a group of files, find out why a check fails. Vector decides when to use them, starts as many as the task needs, and launches them together so they run at the same time.</p>
+            </article>
+            <article class="doc-card">
+              <small>Named · one focus each</small>
+              <h4>Subagent specialists</h4>
+              <p>A subagent specialist is a named agent with a fixed focus and its own permissions. Vector calls one when part of the task fits that focus, such as reviewing a diff or finding the cause of a failure. Agents you define yourself count as custom specialists.</p>
+            </article>
+          </div>
+          <h3>How they differ</h3>
+          <dl class="doc-rows">
+            {subagentKinds.map(([term, detail]) => (<div><dt>{term}</dt><dd>{detail}</dd></div>))}
+          </dl>
+          <h3>The eight subagent specialists</h3>
+          <p>
+            Explore, Review, Judge and Security can read your project and run checks, but they cannot edit it. Debug,
+            Test, Performance and Migration can edit. To ask for one yourself, type <code>@</code> and its name in the
+            composer.
           </p>
           <div class="doc-grid doc-grid-3">
             {crew.map((member) => (
@@ -971,9 +1058,16 @@ const faqs = [
               </article>
             ))}
           </div>
+          <h3>Where you see them</h3>
+          <ul class="feature-list">
+            <li><strong>In the chat</strong><span>Each batch of delegated work appears as a card in the conversation, with its title, kind, how many agents are working, their status and the time so far, and one square per agent. Click it to open that work in Background tasks.</span></li>
+            <li><strong>In Background tasks</strong><span>Open the panel with the Tasks button in the session header, or with Cmd+Shift+B (Ctrl+Shift+B on Windows and Linux). Each card shows the kind, the elapsed time, how many agents and their tokens, and one row per agent with its model, tokens and time. A running card has a Stop button, running work is shown in purple, and finished tasks collect under Finished.</span></li>
+            <li><strong>In Settings</strong><span>Settings → Agents explains both kinds.</span></li>
+          </ul>
           <p class="note">
-            Teams can be wired everyone-to-everyone, coordinator-to-workers, or any pairing you set. A message to a
-            teammate you have not linked is refused and told so, rather than dropped where the sender never finds out.
+            Subagents are not agent workspaces. A subagent works inside your session and your checkout and reports to the
+            main agent. An agent workspace is a separate session in its own worktree or copy that you start, watch in the
+            Agent Dashboard, and merge yourself. See <a href="#agent-workspaces">Agent workspaces</a>.
           </p>
         </section>
 
@@ -1343,6 +1437,13 @@ const faqs = [
     color: var(--accent-strong);
     font-weight: 650;
     text-decoration: none;
+  }
+
+  .doc-section p a {
+    color: var(--accent-strong);
+    text-decoration: underline;
+    text-decoration-color: rgba(183, 149, 255, 0.4);
+    text-underline-offset: 3px;
   }
 
   .steps {

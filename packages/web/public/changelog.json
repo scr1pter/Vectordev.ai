@@ -1,6 +1,20 @@
 {
   "releases": [
     {
+      "tag": "v1.99.8",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Subagents that work in parallel",
+              "description": "Vector's agent now splits its own work the way Claude Code does. When a request has independent parts, the main agent hands each one to a Subagent, a general-purpose worker that takes a single self-contained piece, works through it in its own context and reports back once, and it can start as many as the work needs, in parallel, without being asked. The eight focused agents Vector already had, Explore, Review, Judge, Debug, Test, Security, Performance and Migration, are now Subagent specialists: the main agent chooses one when the work clearly matches it and a Subagent otherwise. Subagents appear as cards in the conversation and in a Background tasks panel that shows what each one is doing, how long it has run and what it has used, and whether it finished, failed or was stopped, and running work can be stopped from there. The editor now follows every agent as it edits, Vector's main agent included, alongside its subagents and Claude Code, Codex and Cursor Agent: the file opens, the change types itself in that agent's colour, and each agent keeps its own labelled cursor. Conversations with Claude Code, Codex and Cursor Agent answer like any other chat, showing whether the agent is thinking or working and for how long, instead of stalling on a working indicator that never ended. The 16-agent limit is gone: Vector runs as many agents as your machine can and says when a large run will strain its processor or disk. The model picker lists every model your connected providers offer, new releases such as GPT-6 Astra included, OpenCode Zen's free models are labelled as OpenCode Zen, and no provider is marked Recommended. Vector now opens on a glass launch screen while the workspace loads. This interim build is checksum-verified but not Apple-notarized or Windows Authenticode-signed, so the operating system may show an unidentified-developer or unknown-publisher warning; existing installs get it by downloading it from vectordev.ai rather than through Update Vector."
+            }
+          ]
+        }
+      ]
+    },
+    {
       "tag": "v1.99.7",
       "highlights": [
         {

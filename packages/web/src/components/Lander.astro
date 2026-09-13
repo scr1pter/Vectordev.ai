@@ -428,18 +428,9 @@ const crew = [
     name: "Explore",
     summary: "Finds code fast",
     hue: 25,
-    readOnly: false,
-    role: "Finds files by pattern, searches code for keywords, and answers questions about how the codebase works.",
+    readOnly: true,
+    role: "Finds files by pattern, searches code for keywords, and answers questions about how the codebase works. Never edits.",
     mark: `<circle cx="19" cy="19" r="8"/><path d="M25 25l7 7"/>`,
-  },
-  {
-    label: "general",
-    name: "General",
-    summary: "Multi-step work",
-    hue: 150,
-    readOnly: false,
-    role: "Researches open-ended questions and carries multi-step tasks through to a result.",
-    mark: `<path d="M12 15h20M12 22h20M12 29h13"/>`,
   },
   {
     label: "judge",
@@ -447,7 +438,7 @@ const crew = [
     summary: "Verifies completion",
     hue: 265,
     readOnly: true,
-    role: "Scores finished work against the original request and returns PASS, FAIL or INCONCLUSIVE. Runs only when verified completion is on.",
+    role: "Scores finished work against the original request and returns PASS, FAIL or INCONCLUSIVE. Verified completion relies on it, and Vector can also call it for an independent check.",
     mark: `<path d="M22 11v22M14 16h16M16.5 16l-3.5 7h7zM27.5 16l-3.5 7h7z"/>`,
   },
   {
@@ -556,7 +547,7 @@ const changelog = [
           <p class="headline">
             <span class="headline-lead">An engineering workspace that</span>{" "}
             <span class="headline-rotate" data-scramble aria-hidden="true">has an agent of its own.</span>
-            <span class="sr-only">An engineering workspace that has an agent of its own, verifies its work before calling it done, sets up your database and deploys it, orchestrates subagents in parallel, invites your team into the session, runs in your terminal too, records what a run really cost, hosts Claude, Codex and Cursor alongside its own agent, and has its own 300 billion parameter model coming.</span>
+            <span class="sr-only">An engineering workspace that has an agent of its own, verifies its work before calling it done, sets up your database and deploys it, runs subagents in parallel with no cap, invites your team into the session, runs in your terminal too, records what a run really cost, hosts Claude, Codex and Cursor alongside its own agent, and has its own 300 billion parameter model coming.</span>
           </p>
 
           <p class="hero-deck simple-deck">
@@ -634,7 +625,7 @@ const changelog = [
         </p>
       </div>
       <ul class="simple-models" data-reveal>
-        <li><strong>Its own agent</strong><span>Plans, edits, runs commands, and calls tools in one loop</span></li>
+        <li><strong>Its own agent</strong><span>Plans, edits, runs commands, and splits work across subagents</span></li>
         <li><strong>Its own session engine</strong><span>Sessions, history, and file state persist on your machine</span></li>
         <li><strong>Its own tools</strong><span>Read, edit, shell, browser, and cloud, behind one permission gate</span></li>
         <li><strong>Its own memory</strong><span>What it learns lives in your repository, committed and reviewable</span></li>
@@ -747,8 +738,8 @@ const changelog = [
           <p>Runs the checks, opens the result in a real browser, and reads the console back before it calls it finished.</p>
         </article>
         <article class="simple-row" data-reveal style="--rd: 180ms">
-          <h3>Runs a team when you need one</h3>
-          <p>As many agents in parallel as your machine can run, each in its own workspace, merged when you say so.</p>
+          <h3>Splits the work when it helps</h3>
+          <p>Vector's agent hands pieces of a task to subagents on its own and runs them together. For separate lines of work, start as many agents as your machine can run, each in its own workspace, merged when you say so.</p>
         </article>
         <article class="simple-row simple-row-wide" data-reveal style="--rd: 240ms">
           <h3>Vector Velocity <span class="simple-soon">Coming soon</span></h3>
@@ -818,7 +809,7 @@ const changelog = [
       "has an agent of its own.",
       "verifies before it says done.",
       "sets up your database and deploys.",
-      "orchestrates subagents in parallel.",
+      "runs subagents in parallel, no cap.",
       "invites your team into the session.",
       "runs in your terminal too.",
       "records what a run cost.",

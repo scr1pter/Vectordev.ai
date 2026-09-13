@@ -149,7 +149,7 @@ export const GUIDE_SECTIONS: GuideSection[] = [
       {
         title: "Agent tabs",
         where: "Inside every active project.",
-        body: "Launch a specialist into its own isolated git worktree or managed project copy. Every agent is a complete Vector session with its own model, conversation, tools, terminal activity, and file changes. Coordination can split one objective into dependent workstreams and schedule specialists automatically. Results pass guardrail checks and remain isolated until you review the diff and merge all or only approved hunks.",
+        body: "Launch an agent into its own isolated git worktree or managed project copy. Every agent is a complete Vector session with its own model, conversation, tools, terminal activity, and file changes. Coordination can split one objective into dependent workstreams and assign an agent to each automatically. Results pass guardrail checks and remain isolated until you review the diff and merge all or only approved hunks.",
         tip: "Give auth, frontend, backend, and testing to separate agents, then merge only the verified results.",
       },
       {
