@@ -83,7 +83,7 @@ const plugins = [
     <div class="demo-titlebar">
       <span class="demo-lights" aria-hidden="true"><i></i><i></i><i></i></span>
       <span class="demo-titlebar-name">vectordev.ai — main</span>
-      <span class="demo-titlebar-right" aria-hidden="true"><i class="demo-chip">Opus 5</i></span>
+      <span class="demo-titlebar-right" aria-hidden="true"><i class="demo-chip">GPT-6 Astra</i></span>
     </div>
 
     <div class="demo-body">
@@ -121,7 +121,7 @@ const plugins = [
           <div class="demo-composer" aria-label="Prompt composer (static preview)">
             <p class="demo-composer-text">Ask Vector to build, fix, or explain something…</p>
             <div class="demo-composer-row">
-              <span class="demo-control">Opus 5</span>
+              <span class="demo-control">GPT-6 Astra</span>
               <span class="demo-control demo-effort-control">
                 <span
                   class="demo-effort"
@@ -606,10 +606,14 @@ const plugins = [
   .demo-composer { margin-top: 10px; padding: 12px 14px; border: 1px solid var(--c-line); border-radius: 14px; background: var(--c-surface); }
   .demo-composer-text { margin: 0 0 12px; font-size: 13.5px; color: var(--c-muted); }
   .demo-composer-row { display: flex; align-items: center; gap: 8px; }
-  .demo-control { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border: 1px solid var(--c-line); border-radius: 9px; background: var(--c-control); font-size: 11.5px; color: var(--c-subtle); }
+  .demo-control { display: inline-flex; flex-shrink: 0; align-items: center; gap: 6px; padding: 4px 10px; border: 1px solid var(--c-line); border-radius: 9px; background: var(--c-control); font-size: 11.5px; color: var(--c-subtle); white-space: nowrap; }
   .demo-mode-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--c-bright); }
   .demo-spacer { flex: 1; }
-  .demo-send { display: grid; width: 30px; height: 30px; place-items: center; border-radius: 9px; background: var(--c-purple); color: #fff; }
+  .demo-send { display: grid; flex-shrink: 0; width: 30px; height: 30px; place-items: center; border-radius: 9px; background: var(--c-purple); color: #fff; }
+  /* On phones the controls wrap to a second line instead of squeezing. */
+  @media (max-width: 480px) {
+    .demo-composer-row { flex-wrap: wrap; row-gap: 8px; }
+  }
   .demo-send svg { width: 15px; height: 15px; }
   .demo-composer-note { margin: 9px 0 0; font-size: 10.5px; color: rgba(255, 255, 255, 0.3); }
 
