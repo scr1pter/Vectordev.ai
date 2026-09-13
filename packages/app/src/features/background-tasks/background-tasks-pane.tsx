@@ -3,13 +3,21 @@ import { createEffect, createMemo, createSignal, For, on, onCleanup, Show } from
 import { createStore } from "solid-js/store"
 import { Portal } from "solid-js/web"
 import { createMediaQuery } from "@solid-primitives/media"
-import { SubagentAvatar, subagentIdentity } from "@opencode-ai/session-ui/subagent-identity"
 import { backgroundTasksPane } from "./background-tasks-state"
-import { ChevronIcon, CloseIcon, CollapseIcon, DockIcon, ExpandIcon, PopOutIcon, StopIcon, TrashIcon } from "./icons"
+import {
+  CheckIcon,
+  ChevronIcon,
+  CloseIcon,
+  CollapseIcon,
+  DockIcon,
+  ExpandIcon,
+  PopOutIcon,
+  StopIcon,
+  TrashIcon,
+} from "./icons"
 import {
   countAgents,
   elapsedMs,
-  formatAgentCount,
   formatDuration,
   formatTokens,
   isLive,
@@ -51,35 +59,12 @@ function Pane(props: { tasks: BackgroundTasks }) {
   const tasks = props.tasks
   const pane = backgroundTasksPane
   const [finishedOpen, setFinishedOpen] = createSignal(false)
-  const [scrolled, setScrolled] = createSignal(false)
-  const [moreBelow, setMoreBelow] = createSignal(false)
   const [announcement, setAnnouncement] = createSignal("")
   const [cardOpen, setCardOpen] = createStore<Record<string, boolean>>({})
   const [phaseOpen, setPhaseOpen] = createStore<Record<string, boolean>>({})
-  const [list, setList] = createSignal<HTMLUListElement>()
   let aside: HTMLElement | undefined
 
   const total = () => tasks.live().length + tasks.finished().length
-
-  const measure = () => {
-    const element = list()
-    if (!element) return
-    setScrolled(element.scrollTop > 0)
-    setMoreBelow(element.scrollTop + element.clientHeight < element.scrollHeight - 1)
-  }
-  // Opening a phase, a table filling in and the pane resizing all move the
-  // edges without a scroll, so the list and every box in it are observed.
-  createEffect(
-    on([list, () => tasks.live().length, () => tasks.finished().length, finishedOpen], ([element]) => {
-      queueMicrotask(measure)
-      if (!element || typeof ResizeObserver === "undefined") return
-      const observer = new ResizeObserver(measure)
-      observer.observe(element)
-      // The list items are display: contents, so their children are the boxes.
-      for (const child of element.querySelectorAll(":scope > li > *")) observer.observe(child)
-      onCleanup(() => observer.disconnect())
-    }),
-  )
 
   // Cards already listed when the pane opens are simply there; one that
   // arrives later eases in. For maps a new card before this effect records
@@ -98,8 +83,8 @@ function Pane(props: { tasks: BackgroundTasks }) {
   const wide = createMediaQuery("(min-width: 768px)")
   const detached = createMemo(() => pane.floating() || !wide())
   const [portaled, setPortaled] = createSignal(detached())
-  // The move detaches the pane for a moment, which drops focus and resets the
-  // list's scroll: hand focus back if nothing else took it, and measure again.
+  // The move detaches the pane for a moment, which drops focus: hand it back
+  // if nothing else took it.
   createEffect(
     on(
       detached,
@@ -108,7 +93,6 @@ function Pane(props: { tasks: BackgroundTasks }) {
         const focused = active instanceof HTMLElement && aside?.contains(active) ? active : undefined
         setPortaled(next)
         requestAnimationFrame(() => {
-          measure()
           const current = document.activeElement
           if (focused?.isConnected && (!current || current === document.body)) focused.focus({ preventScroll: true })
         })
@@ -116,6 +100,41 @@ function Pane(props: { tasks: BackgroundTasks }) {
       { defer: true },
     ),
   )
+
+  // Popped out, the pane hangs from the session header's bottom edge, clear of
+  // the composer's send and stop button at the bottom of the window. The edge
+  // is measured, not assumed, and measured again when it moves without the
+  // window resizing: density changes the header's height, and the legacy 40px
+  // titlebar pushes it down by shrinking the stage that holds it, so both are
+  // watched. Another root session can mount a new header, so it is looked up
+  // again then (rootID is always set while the pane is shown).
+  const [floatTop, setFloatTop] = createSignal<number>()
+  createEffect(() => {
+    if (!pane.floating() || !tasks.rootID()) return
+    const find = () => document.querySelector<HTMLElement>("[data-vector-session-header]")
+    const place = () => {
+      const header = find()
+      setFloatTop(header ? Math.round(header.getBoundingClientRect().bottom) : undefined)
+    }
+    let observer: ResizeObserver | undefined
+    // A frame later, once a new session's header has rendered.
+    const frame = requestAnimationFrame(() => {
+      place()
+      const header = find()
+      if (!header || typeof ResizeObserver === "undefined") return
+      observer = new ResizeObserver(place)
+      observer.observe(header)
+      const stage = header.closest<HTMLElement>("[data-vector-main-stage]")
+      if (stage) observer.observe(stage)
+    })
+    place()
+    window.addEventListener("resize", place)
+    onCleanup(() => {
+      cancelAnimationFrame(frame)
+      observer?.disconnect()
+      window.removeEventListener("resize", place)
+    })
+  })
 
   const close = () => {
     pane.close()
@@ -187,6 +206,18 @@ function Pane(props: { tasks: BackgroundTasks }) {
     )
   }
 
+  // Clearing takes the Finished row, and the Clear button that had focus,
+  // with it; the pane's title takes focus instead of the page.
+  const clearFinished = () => {
+    tasks.clearFinished()
+    setFinishedOpen(false)
+    requestAnimationFrame(() => {
+      const current = document.activeElement
+      if (!current || current === document.body)
+        document.getElementById("vector-bg-tasks-title")?.focus({ preventScroll: true })
+    })
+  }
+
   const phaseState = (card: TaskCard, phase: TaskPhase) => {
     const key = `${card.key}\n${phase.key}`
     return {
@@ -210,7 +241,7 @@ function Pane(props: { tasks: BackgroundTasks }) {
   )
 
   // Built once and moved between the split row and the portal, so open
-  // cards, phases and the scroll measuring survive a pop-out or a resize.
+  // cards, phases and the scroll position survive a pop-out or a resize.
   const view = (
     <aside
       ref={(element) => {
@@ -221,13 +252,12 @@ function Pane(props: { tasks: BackgroundTasks }) {
       data-docked={pane.floating() ? undefined : ""}
       data-floating={pane.floating() ? "" : undefined}
       data-expanded={pane.expanded() ? "" : undefined}
-      data-scrolled={scrolled() ? "" : undefined}
-      data-more-below={moreBelow() ? "" : undefined}
+      style={{ "--bgt-float-top": floatTop() === undefined ? undefined : `${floatTop()}px` }}
       aria-labelledby="vector-bg-tasks-title"
       onKeyDown={onKeyDown}
     >
       <header class="vector-bg-tasks-header">
-        <h2 id="vector-bg-tasks-title" class="vector-bg-tasks-title">
+        <h2 id="vector-bg-tasks-title" class="vector-bg-tasks-title" tabIndex={-1}>
           Background tasks
         </h2>
         <button
@@ -274,53 +304,59 @@ function Pane(props: { tasks: BackgroundTasks }) {
           </div>
         }
       >
-        <ul
-          ref={(element) => setList(element)}
-          class="vector-bg-tasks-list"
-          aria-label="Running tasks"
-          onScroll={measure}
-        >
-          <For each={tasks.live()}>{(item) => card(item, false)}</For>
-          <Show when={tasks.live().length === 0}>
-            <li>
-              <p class="vector-bg-tasks-idle">Nothing running right now</p>
-            </li>
-          </Show>
-          <Show when={finishedOpen() && tasks.finished().length > 0}>
-            <li>
-              <p class="vector-bg-tasks-finished-label">Finished</p>
-              <ul id="vector-bg-tasks-finished" class="vector-bg-tasks-finished" aria-label="Finished tasks">
-                <For each={tasks.finished()}>{(item) => card(item, true)}</For>
+        {/* Two sections under quiet labels, as in the reference: Running, then
+            Finished, whose label is its toggle and carries the Clear button. */}
+        <div class="vector-bg-tasks-list">
+          <section class="vector-bg-tasks-section" aria-labelledby="vector-bg-tasks-running">
+            <h3 id="vector-bg-tasks-running" class="vector-bg-tasks-section-label">
+              Running
+            </h3>
+            <Show
+              when={tasks.live().length > 0}
+              fallback={<p class="vector-bg-tasks-idle">Nothing running right now</p>}
+            >
+              <ul class="vector-bg-tasks-cards" aria-label="Running tasks">
+                <For each={tasks.live()}>{(item) => card(item, false)}</For>
               </ul>
-            </li>
+            </Show>
+          </section>
+          <Show when={tasks.finished().length > 0}>
+            <section class="vector-bg-tasks-section" aria-labelledby="vector-bg-tasks-finished-label">
+              <div class="vector-bg-tasks-section-head">
+                <h3 id="vector-bg-tasks-finished-label" class="vector-bg-tasks-section-label">
+                  <button
+                    type="button"
+                    class="vector-bg-tasks-finished-toggle"
+                    aria-expanded={finishedOpen()}
+                    aria-controls="vector-bg-tasks-finished"
+                    aria-label={`Finished ${tasks.finished().length}`}
+                    onClick={toggleFinished}
+                  >
+                    <span>Finished</span>
+                    <span class="vector-bg-tasks-count" aria-hidden="true">
+                      {tasks.finished().length}
+                    </span>
+                    <ChevronIcon />
+                  </button>
+                </h3>
+                <button
+                  type="button"
+                  class="vector-bg-tasks-icon-btn"
+                  aria-label="Clear finished tasks"
+                  title="Clear finished tasks"
+                  onClick={clearFinished}
+                >
+                  <TrashIcon />
+                </button>
+              </div>
+              <Show when={finishedOpen()}>
+                <ul id="vector-bg-tasks-finished" class="vector-bg-tasks-cards" aria-label="Finished tasks">
+                  <For each={tasks.finished()}>{(item) => card(item, true)}</For>
+                </ul>
+              </Show>
+            </section>
           </Show>
-        </ul>
-        <footer class="vector-bg-tasks-footer">
-          <button
-            type="button"
-            class="vector-bg-tasks-finished-toggle"
-            aria-expanded={finishedOpen()}
-            aria-controls="vector-bg-tasks-finished"
-            disabled={tasks.finished().length === 0}
-            onClick={toggleFinished}
-          >
-            Finished {tasks.finished().length}
-            <ChevronIcon />
-          </button>
-          <button
-            type="button"
-            class="vector-bg-tasks-icon-btn"
-            aria-label="Clear finished tasks"
-            title="Clear finished tasks"
-            disabled={tasks.finished().length === 0}
-            onClick={() => {
-              tasks.clearFinished()
-              setFinishedOpen(false)
-            }}
-          >
-            <TrashIcon />
-          </button>
-        </footer>
+        </div>
       </Show>
 
       <div class="vector-bg-tasks-sr" aria-live="polite">
@@ -352,6 +388,8 @@ function CardView(props: {
   const [entering, setEntering] = createSignal(props.fresh)
   const expanded = () => !props.finished || props.open
   const canStop = () => props.card.agents.some((agent) => isLive(agent.status) && !!agent.sessionID)
+  const mixed = () => new Set(props.card.agents.map((agent) => agent.status)).size > 1
+  const agentCount = () => countAgents(props.card.agents)
 
   const stop = async () => {
     if (stopping()) return
@@ -365,7 +403,6 @@ function CardView(props: {
       id={id()}
       tabIndex={-1}
       data-status={props.card.status}
-      data-finished={props.finished ? "" : undefined}
       data-new={entering() ? "" : undefined}
       aria-labelledby={`${id()}-title`}
       onAnimationEnd={(event) => {
@@ -376,12 +413,12 @@ function CardView(props: {
         <Show
           when={props.finished}
           fallback={
-            <h3 id={`${id()}-title`} class="vector-bg-tasks-card-title" title={props.card.title}>
+            <h4 id={`${id()}-title`} class="vector-bg-tasks-card-title" title={props.card.title}>
               {props.card.title}
-            </h3>
+            </h4>
           }
         >
-          <h3 id={`${id()}-title`} class="vector-bg-tasks-card-heading">
+          <h4 id={`${id()}-title`} class="vector-bg-tasks-card-heading">
             <button
               type="button"
               class="vector-bg-tasks-card-toggle"
@@ -392,7 +429,7 @@ function CardView(props: {
               <span>{props.card.title}</span>
               <ChevronIcon />
             </button>
-          </h3>
+          </h4>
         </Show>
         <Show
           when={props.card.live}
@@ -415,38 +452,51 @@ function CardView(props: {
           </button>
         </Show>
       </div>
+      {/* What it is and how long it has run, then how big it is: the counts
+          read a step brighter than the words after them. */}
       <p class="vector-bg-tasks-meta">
-        <span>{props.card.kindLabel}</span>
+        <span class="vector-bg-tasks-kind">{props.card.kindLabel}</span>
         <Show when={props.card.status === "waiting"}>
           <span class="vector-bg-tasks-attention">Needs you</span>
         </Show>
-        <span class="vector-bg-tasks-dim">
-          <time>{formatDuration(elapsedMs(props.card, props.tasks.now()))}</time>
-        </span>
+        <time class="vector-bg-tasks-time">{formatDuration(elapsedMs(props.card, props.tasks.now()))}</time>
       </p>
-      <p class="vector-bg-tasks-meta">
-        <span>{formatAgentCount(countAgents(props.card.agents))}</span>
+      <p class="vector-bg-tasks-meta vector-bg-tasks-counts">
+        <span>
+          <span class="vector-bg-tasks-num">{agentCount()}</span> {agentCount() === 1 ? "agent" : "agents"}
+        </span>
         <Show when={props.card.tokens !== undefined}>
-          <span class="vector-bg-tasks-dim">{formatTokens(props.card.tokens)} tokens</span>
+          <span>
+            <span class="vector-bg-tasks-num">{formatTokens(props.card.tokens)}</span> tokens
+          </span>
         </Show>
       </p>
+      {/* Collapsed, a finished card is its head and facts: the status says
+          how it ended. Only when its agents ended differently ("Failed" with two
+          done) do the marks show which, read out as "2 done, 1 failed". */}
       <Show
         when={expanded()}
         fallback={
-          <TaskSquares
-            agents={props.card.agents}
-            class="vector-bg-tasks-squares"
-            squareClass="vector-bg-tasks-square"
-            labelled
-          />
+          <Show when={mixed()}>
+            <TaskSquares
+              agents={props.card.agents}
+              class="vector-bg-tasks-squares"
+              squareClass="vector-bg-tasks-square"
+              labelled
+            />
+          </Show>
         }
       >
+        {/* Clamped to four lines; the whole of it is the tooltip, and a
+            screen reader reads all of it anyway. */}
         <Show when={props.card.description}>
-          <p class="vector-bg-tasks-desc">{props.card.description}</p>
+          <p class="vector-bg-tasks-desc" title={props.card.description}>
+            {props.card.description}
+          </p>
         </Show>
-        <h4 id={`${id()}-phases`} class="vector-bg-tasks-phases-label">
+        <h5 id={`${id()}-phases`} class="vector-bg-tasks-phases-label">
           Phases
-        </h4>
+        </h5>
         <ol class="vector-bg-tasks-phases" aria-labelledby={`${id()}-phases`}>
           <For each={props.card.phases}>
             {(phase) => {
@@ -496,7 +546,7 @@ function PhaseView(props: {
             {props.phase.done} of {props.phase.total} done
           </span>
         </span>
-        <ChevronIcon class="vector-bg-tasks-phase-chevron" />
+        <ChevronIcon />
         <TaskSquares
           agents={props.phase.agents}
           class="vector-bg-tasks-squares"
@@ -524,6 +574,18 @@ function modelTooltip(agent: TaskAgent) {
   return agent.model.variant ? `${agent.model.name} · ${agent.model.variant}` : agent.model.name
 }
 
+/**
+ * The docked table leaves an agent's name about 77px, so a cut name loses its
+ * middle, not its end: the last word stays ("Time t… build", "Time t… tests"),
+ * and siblings that share a start stay apart. A one-word name, or a last word
+ * too long to keep whole (over 8 letters), cuts at the end as usual.
+ */
+function nameParts(title: string) {
+  const at = title.lastIndexOf(" ")
+  if (at <= 0 || title.length - at > 9) return { head: title, tail: "" }
+  return { head: title.slice(0, at), tail: title.slice(at) }
+}
+
 function PhaseTable(props: { phase: TaskPhase; tasks: BackgroundTasks }) {
   props.tasks.hold(() => props.phase.agents)
   const [all, setAll] = createSignal(false)
@@ -549,30 +611,47 @@ function PhaseTable(props: { phase: TaskPhase; tasks: BackgroundTasks }) {
         </thead>
         <tbody>
           <For each={rows()}>
-            {(agent) => (
-              <tr class="vector-bg-tasks-row" data-status={agent.status}>
-                <td>
-                  <button
-                    type="button"
-                    class="vector-bg-tasks-agent"
-                    title={agentTooltip(agent)}
-                    aria-label={`Open ${agent.title} (${KIND_LABEL[agent.kind]}, ${statusWord(agent.status)})`}
-                    disabled={!agent.sessionID}
-                    onClick={() => props.tasks.openAgent(agent)}
-                  >
-                    <Show when={agent.kind === "specialist" && subagentIdentity(agent.agent)}>
-                      <SubagentAvatar id={agent.agent} size={14} />
-                    </Show>
-                    <span>{agent.title}</span>
-                  </button>
-                </td>
-                <td title={modelTooltip(agent)}>{agent.model?.short ?? "—"}</td>
-                <td>{formatTokens(agent.tokens)}</td>
-                <td>
-                  <time>{formatDuration(elapsedMs(agent, props.tasks.now()))}</time>
-                </td>
-              </tr>
-            )}
+            {(agent) => {
+              const name = () => nameParts(agent.title)
+              return (
+                <tr class="vector-bg-tasks-row" data-status={agent.status}>
+                  <td>
+                    <button
+                      type="button"
+                      class="vector-bg-tasks-agent"
+                      title={agentTooltip(agent)}
+                      aria-label={`Open ${agent.title} (${KIND_LABEL[agent.kind]}, ${statusWord(agent.status)})`}
+                      disabled={!agent.sessionID}
+                      onClick={() => props.tasks.openAgent(agent)}
+                    >
+                      {/* A check once done; before that the agent's square (a dot
+                        for a specialist) in its status colour. */}
+                      <span
+                        class="vector-bg-tasks-agent-state"
+                        data-status={agent.status}
+                        data-kind={agent.kind}
+                        aria-hidden="true"
+                      >
+                        <Show when={agent.status === "done"}>
+                          <CheckIcon />
+                        </Show>
+                      </span>
+                      <span class="vector-bg-tasks-agent-name">
+                        <span class="vector-bg-tasks-agent-head">{name().head}</span>
+                        <Show when={name().tail}>
+                          <span class="vector-bg-tasks-agent-tail">{name().tail}</span>
+                        </Show>
+                      </span>
+                    </button>
+                  </td>
+                  <td title={modelTooltip(agent)}>{agent.model?.short ?? "—"}</td>
+                  <td>{formatTokens(agent.tokens)}</td>
+                  <td>
+                    <time>{formatDuration(elapsedMs(agent, props.tasks.now()))}</time>
+                  </td>
+                </tr>
+              )
+            }}
           </For>
         </tbody>
       </table>

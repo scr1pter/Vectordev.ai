@@ -6,6 +6,7 @@ import { SessionFollowupDock } from "@/pages/session/composer/session-followup-d
 import { SessionRevertDock } from "@/pages/session/composer/session-revert-dock"
 import { SessionWorkingStatus } from "@/pages/session/composer/session-working-status"
 import { SessionTodoDock } from "@/pages/session/composer/session-todo-dock"
+import { useBackgroundTasks } from "@/features/background-tasks/use-background-tasks"
 import type { SessionComposerRegionController } from "./session-composer-region-controller"
 
 export function SessionComposerRegion(props: {
@@ -14,6 +15,9 @@ export function SessionComposerRegion(props: {
 }) {
   const language = useLanguage()
   const controller = props.controller
+  // The same count as the header's Tasks button, so the two never disagree.
+  const backgroundTasks = useBackgroundTasks()
+  const runningTasks = () => backgroundTasks?.runningCount() ?? controller.runningTasks()
   const rolled = () => {
     const revert = controller.revert()
     return revert?.items.length ? revert : undefined
@@ -39,7 +43,7 @@ export function SessionComposerRegion(props: {
           working={controller.working}
           startedAt={controller.startedAt}
           tokens={controller.tokens}
-          runningTasks={controller.runningTasks}
+          runningTasks={runningTasks}
           phrase={controller.phrase}
         />
 

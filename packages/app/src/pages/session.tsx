@@ -511,7 +511,10 @@ export default function Page() {
     if (desktopCodespaceOpen()) return "0px"
     if (!desktopSidePanelOpen()) return reserve ? `calc(100%${less})` : "100%"
     if (desktopReviewOpen()) {
-      return `min(${layout.session.width()}px, max(280px, calc(100% - ${MIN_REVIEW_PANEL_WIDTH}px${less})))`
+      // With Background tasks docked beside it, the review keeps a usable width
+      // and the conversation gives up the difference instead.
+      const floor = reserve ? Math.max(MIN_REVIEW_PANEL_WIDTH, 360) : MIN_REVIEW_PANEL_WIDTH
+      return `min(${layout.session.width()}px, max(280px, calc(100% - ${floor}px${less})))`
     }
     return `calc(100% - ${layout.fileTree.width()}px${less})`
   })

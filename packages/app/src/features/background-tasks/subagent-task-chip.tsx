@@ -71,7 +71,7 @@ export function SubagentTaskChip(props: { location: Accessor<TaskLocation>; onSi
         onClick={open}
       >
         <span class="vector-task-chip-title">{title()}</span>
-        <ChevronIcon class="vector-task-chip-chevron" />
+        <ChevronIcon />
         <span class="vector-task-chip-meta">
           <span>{kind()}</span>
           <Show when={phase().index > 1}>

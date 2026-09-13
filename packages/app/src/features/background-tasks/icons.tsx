@@ -1,88 +1,26 @@
-// Round-cap outline glyphs for the Background tasks panel. The shared
-// @opencode-ai/ui icon set has no stop, trash, expand or pop-out glyph and
-// draws square caps, so the panel ships its own.
+import { Icon } from "@opencode-ai/ui/icon"
 
-type Props = { class?: string }
+// The panel draws with Vector's shared icon set, the one the session header's
+// Tasks, Changes and Terminal buttons use: square caps and a 1-unit stroke,
+// about 0.8px at 16px. Each is a 16px [data-component="icon"] box that takes
+// its colour from the control around it (see background-tasks.css).
 
-function Glyph(props: Props & { children: unknown }) {
-  return (
-    <svg
-      class={props.class}
-      viewBox="0 0 20 20"
-      fill="none"
-      stroke="currentColor"
-      stroke-width="1.5"
-      stroke-linecap="round"
-      stroke-linejoin="round"
-      aria-hidden="true"
-    >
-      {props.children as never}
-    </svg>
-  )
-}
+export const PopOutIcon = () => <Icon size="small" name="square-arrow-top-right" />
 
-export function PopOutIcon() {
-  return (
-    <Glyph>
-      <rect x="3.5" y="6.5" width="10" height="10" rx="2" />
-      <path d="M6.5 6.5v-1a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2h-1" />
-    </Glyph>
-  )
-}
+/** A right-hand panel, where Dock puts the pane back; the side panel's own toggle draws it the same way. */
+export const DockIcon = () => <Icon size="small" name="layout-right" />
 
-export function DockIcon() {
-  return (
-    <Glyph>
-      <rect x="3" y="4" width="14" height="12" rx="2" />
-      <path d="M12 4v12" />
-    </Glyph>
-  )
-}
+export const ExpandIcon = () => <Icon size="small" name="expand" />
 
-export function ExpandIcon() {
-  return (
-    <Glyph>
-      <path d="M11.5 3.5h5v5M16.5 3.5l-5 5M8.5 16.5h-5v-5M3.5 16.5l5-5" />
-    </Glyph>
-  )
-}
+export const CollapseIcon = () => <Icon size="small" name="collapse" />
 
-export function CollapseIcon() {
-  return (
-    <Glyph>
-      <path d="M15.5 8.5h-4v-4M11.5 8.5l5-5M4.5 11.5h4v4M8.5 11.5l-5 5" />
-    </Glyph>
-  )
-}
+export const CloseIcon = () => <Icon size="small" name="close" />
 
-export function CloseIcon() {
-  return (
-    <Glyph>
-      <path d="M5 5l10 10M15 5L5 15" />
-    </Glyph>
-  )
-}
+export const ChevronIcon = () => <Icon size="small" name="chevron-right" />
 
-export function ChevronIcon(props: Props) {
-  return (
-    <Glyph class={props.class}>
-      <path d="M8 5l5 5-5 5" />
-    </Glyph>
-  )
-}
+export const TrashIcon = () => <Icon size="small" name="trash" />
 
-export function TrashIcon() {
-  return (
-    <Glyph>
-      <path d="M3.5 5.5h13M8 5.5V4a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v1.5M5 5.5l.8 10.1a1.5 1.5 0 0 0 1.5 1.4h5.4a1.5 1.5 0 0 0 1.5-1.4L15 5.5M8.5 9v5M11.5 9v5" />
-    </Glyph>
-  )
-}
+export const StopIcon = () => <Icon size="small" name="stop" />
 
-export function StopIcon() {
-  return (
-    <svg viewBox="0 0 16 16" aria-hidden="true">
-      <rect x="3.5" y="3.5" width="9" height="9" rx="2" fill="currentColor" />
-    </svg>
-  )
-}
+/** The done mark at the start of an agent row. */
+export const CheckIcon = () => <Icon size="small" name="check-small" />

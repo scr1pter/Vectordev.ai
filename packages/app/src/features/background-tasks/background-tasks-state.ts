@@ -14,9 +14,9 @@ const LAYOUT_KEY = "vector.backgroundTasks.pane.v1"
 const DISMISSED_KEY = "vector.backgroundTasks.dismissed.v1:"
 const DISMISSED_LIMIT = 200
 
-/** Docked pane: 330px wide plus an 8px gap on each side (see background-tasks.css). */
-const DOCKED_RESERVE = "346px"
-const EXPANDED_RESERVE = "(clamp(330px, 46vw, 720px) + 16px)"
+/** Docked pane: a flush 320px column like the Changes panel, with no gap (see background-tasks.css). */
+const DOCKED_RESERVE = "320px"
+const EXPANDED_RESERVE = "clamp(320px, 46vw, 720px)"
 
 type Layout = { open: boolean; floating: boolean; expanded: boolean }
 

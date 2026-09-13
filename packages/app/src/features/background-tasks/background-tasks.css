@@ -1,84 +1,122 @@
 /*
  * Background tasks panel (.vector-bg-tasks-*) and the inline task chip
- * (.vector-task-chip-*). A copy of Claude Code desktop's Background tasks
- * layout, type scale, spacing and radii in Vector's purple. Only --vx-* tokens:
- * Tailwind's white/black utilities render nothing in this app. Unlayered, like
- * vector-premium.css, so it beats Tailwind. Status colours are fixed tokens,
- * not --vector-accent, which the element themes turn orange or yellow.
+ * (.vector-task-chip-*), drawn to the user's reference layout in Vector's
+ * purples: a deep purple-black pane holding flat 12px cards one step lighter,
+ * and inside each card phase blocks one more step lighter, each with its
+ * agent table below it. Nothing inside the pane has a border or a shadow; the
+ * surfaces step apart instead.
+ *
+ * The type is the chat transcript's own. The transcript sets
+ * var(--font-family-sans) on its markdown and user messages and inherits the
+ * body's weight (440 under the new layout, app.tsx), so the panel names the
+ * same family and inherits the same weight, docked or portalled to the body.
+ * Titles sit at the chat body size (--font-size-base, 14px), meta and
+ * descriptions a step below (--font-size-small, 13px, the chat's small text),
+ * the agent table a step below that (12px). Chat prose runs at 160% (14px on
+ * 22.4px), so the one prose block here, the description, does too; titles,
+ * meta and the table sit at 150%, like the chat's tool titles (14px on 21px).
+ *
+ * Only --vx-* tokens: Tailwind's white/black utilities render nothing in this
+ * app. Unlayered, like vector-premium.css, so it beats Tailwind. Status
+ * colours are fixed tokens, not --vector-accent, which the element themes
+ * turn orange or yellow.
  */
 
-/* tokens: the 1:1 scale, with a compact-density step-down */
+/* tokens */
 :is(.vector-bg-tasks, .vector-task-chip, .vector-bg-tasks-legend) {
-  --bgt-pane: var(--vx-surface);
-  --bgt-card: var(--vx-surface-raised);
-  --bgt-well: var(--vx-stage);
-  --bgt-control: var(--vx-canvas);
-  --bgt-title: var(--vx-workspace-text-primary);
-  --bgt-name: var(--vx-text);
-  --bgt-text-2: var(--vx-workspace-text-secondary);
-  --bgt-text-3: color-mix(in srgb, var(--vx-workspace-text-tertiary) 60%, var(--vx-workspace-text-secondary));
-  --bgt-run: var(--vx-purple);
-  --bgt-run-text: var(--vx-purple-bright);
+  /* Surfaces: the reference's three steps (pane, card, phase block) on
+     Vector's own ramp, the same surfaces as the main area, cards and raised
+     controls around it. Purple is kept for running work only: its squares,
+     its phase name and a light wash on the running phase's block. */
+  --bgt-pane: var(--vx-canvas);
+  --bgt-card: var(--vx-surface);
+  --bgt-card-hover: var(--vx-surface-raised);
+  --bgt-well: var(--vx-surface-raised);
+  --bgt-well-hover: var(--vx-control-hover);
+  --bgt-well-run: color-mix(in srgb, var(--vx-purple) 10%, var(--vx-surface-raised));
+  --bgt-well-run-hover: color-mix(in srgb, var(--vx-purple) 14%, var(--vx-surface-raised));
+  /* Text: Vector's ramp at the reference's three levels. The bare muted
+     token is too dim for small text on a raised surface, so tertiary is
+     pulled toward secondary (about 6:1 on a phase block); secondary keeps a
+     clear step above it. */
+  --bgt-text-1: var(--vx-text);
+  --bgt-text-2: color-mix(in srgb, var(--vx-text-subtle) 70%, var(--vx-text));
+  --bgt-text-3: color-mix(in srgb, var(--vx-text-muted) 30%, var(--vx-text-subtle));
+  --bgt-run: color-mix(in srgb, var(--vx-purple) 40%, var(--vx-purple-bright));
+  /* The running phase's name: lavender, 5:1 or better on its block and hover. */
+  --bgt-run-text: color-mix(in srgb, var(--vx-purple-bright) 60%, var(--vx-text));
   --bgt-wait: var(--vx-amber);
-  --bgt-done: var(--vx-green);
   --bgt-fail: var(--vx-red);
-  --bgt-stop: var(--vx-text-muted);
-  --bgt-pending: var(--vx-workspace-text-tertiary);
-  --bgt-hover: color-mix(in srgb, var(--vx-text) 6%, transparent);
-  --bgt-press: color-mix(in srgb, var(--vx-text) 10%, transparent);
+  /* Status colours set as words; the light theme darkens these only. */
+  --bgt-wait-text: var(--bgt-wait);
+  --bgt-fail-text: var(--bgt-fail);
+  /* Done is a calm grey fill and not started a grey outline. Stopped is an
+     outline with a dash across it: a shape of its own rather than a second
+     grey beside done, in secondary so it clears 3:1 on every phase block and
+     its hover (5.4:1 or better). */
+  --bgt-done: var(--bgt-text-3);
+  --bgt-stop: var(--bgt-text-2);
+  --bgt-pending: var(--bgt-text-3);
   --bgt-ring: color-mix(in oklab, var(--vx-purple) 76%, white 6%);
-  --bgt-fs-title: 20px;
-  --bgt-lh-title: 28px;
-  --bgt-fs-meta: 17px;
-  --bgt-lh-meta: 24px;
-  --bgt-fs-body: 16px;
-  --bgt-lh-body: 24px;
-  --bgt-fs-count: 15px;
-  --bgt-lh-count: 20px;
-  --bgt-fs-table: 13px;
-  --bgt-lh-table: 18px;
-  font-family: var(--vx-workspace-font);
-  font-variant-numeric: tabular-nums;
+  --bgt-fs-title: var(--font-size-base, 14px);
+  --bgt-fs-meta: var(--font-size-small, 13px);
+  --bgt-fs-table: 12px;
+  --bgt-lh: 1.5;
+  --bgt-card-pad: 16px;
+  --bgt-gap: 8px;
+  --bgt-phase-pad: 10px 12px 12px;
+  /* The agent table's side inset: the phase block's own, so it lines up. */
+  --bgt-inset: 12px;
+  font-family: var(--font-family-sans);
+  letter-spacing: normal;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Light: Vector's own light ramp; purple only for running work. */
 :root[data-vector-theme="light"] :is(.vector-bg-tasks, .vector-task-chip, .vector-bg-tasks-legend) {
   --bgt-pane: var(--vx-canvas);
   --bgt-card: var(--vx-surface);
-  --bgt-well: var(--vx-canvas);
-  --bgt-control: var(--vx-control);
+  --bgt-card-hover: color-mix(in srgb, var(--vx-text) 3%, var(--vx-surface));
+  --bgt-well: color-mix(in srgb, var(--vx-text) 4%, var(--vx-canvas));
+  --bgt-well-hover: color-mix(in srgb, var(--vx-text) 7%, var(--vx-canvas));
+  --bgt-well-run: color-mix(in srgb, var(--vx-purple) 8%, var(--vx-surface));
+  --bgt-well-run-hover: color-mix(in srgb, var(--vx-purple) 12%, var(--vx-surface));
+  --bgt-run: var(--vx-purple);
   --bgt-ring: var(--vx-purple);
+  /* Amber and red text miss 4.5:1 on the light surfaces, so words get a
+     darker mix; squares and dots keep the tokens. */
+  --bgt-wait-text: color-mix(in srgb, var(--vx-amber) 70%, black);
+  --bgt-fail-text: color-mix(in srgb, var(--vx-red) 85%, black);
 }
 
+/* Nothing else in Vector changes type size with density (the session title,
+   header tools and transcript keep theirs), so compact only tightens spacing
+   and the text stays on the chat's scale. */
 html[data-vector-density="compact"] :is(.vector-bg-tasks, .vector-task-chip, .vector-bg-tasks-legend) {
-  --bgt-fs-title: 16px;
-  --bgt-lh-title: 22px;
-  --bgt-fs-meta: 14px;
-  --bgt-lh-meta: 20px;
-  --bgt-fs-body: 13px;
-  --bgt-lh-body: 19px;
-  --bgt-fs-count: 12px;
-  --bgt-lh-count: 16px;
-  --bgt-fs-table: 12px;
-  --bgt-lh-table: 16px;
+  --bgt-card-pad: 12px;
+  --bgt-gap: 6px;
+  --bgt-phase-pad: 8px 10px 10px;
+  --bgt-inset: 10px;
 }
 
-/* pane */
+/* pane: the floating and sheet frame; docked overrides it below */
 .vector-bg-tasks {
   box-sizing: border-box;
   position: relative;
   display: flex;
   flex: none;
   flex-direction: column;
-  width: 330px;
+  width: 320px;
   height: 100%;
   min-height: 0;
   overflow: hidden;
-  border: 1px solid var(--vx-line);
-  border-radius: 14px;
+  border: 1px solid var(--vx-line-strong);
+  border-radius: 12px;
   background: var(--bgt-pane);
-  color: var(--bgt-name);
+  color: var(--bgt-text-1);
+  font-size: var(--bgt-fs-meta);
+  line-height: var(--bgt-lh);
   transition: width 240ms var(--vx-ease);
 }
 
@@ -88,9 +126,15 @@ html[data-vector-density="compact"] :is(.vector-bg-tasks, .vector-task-chip, .ve
   box-sizing: border-box;
 }
 
-:where(.vector-bg-tasks) :is(h2, h3, h4, p, ul, ol) {
+:where(.vector-bg-tasks) :is(h2, h3, h4, h5, p, ul, ol) {
   margin: 0;
   padding: 0;
+}
+
+/* Headings and table heads keep the transcript's weight, not the UA's bold. */
+:where(.vector-bg-tasks) :is(h2, h3, h4, h5, th) {
+  font-size: inherit;
+  font-weight: inherit;
 }
 
 :where(.vector-bg-tasks) button {
@@ -98,33 +142,41 @@ html[data-vector-density="compact"] :is(.vector-bg-tasks, .vector-task-chip, .ve
   color: inherit;
 }
 
-/* Docked: the last column of the session split row, 8px from everything.
-   session.tsx reserves the same 346px (or the expanded clamp + 16px). */
+/* Docked: the last column of the session split row, flush, set off from the
+   chat by a hairline. session.tsx reserves the same 320px (or the expanded
+   clamp). */
 .vector-bg-tasks[data-docked] {
   align-self: stretch;
   height: auto;
-  margin: 8px;
+  margin: 0;
+  border-width: 0 0 0 1px;
+  border-color: var(--vx-line);
+  border-radius: 0;
 }
 
 .vector-bg-tasks[data-expanded] {
-  width: clamp(330px, 46vw, 720px);
+  width: clamp(320px, 46vw, 720px);
 }
 
-/* Pop out: an in-app floating panel. Like the narrow sheet below, it is
-   portalled to the body, where z-index 40 clears the sidebar and stays under
-   dialogs and toasts. */
+/* Pop out: an in-app floating panel hung 10px under the session header (the
+   pane measures the header's bottom edge into --bgt-float-top) and ending
+   above the composer, whose top sits about 157px over the window bottom, so
+   send and stop stay reachable. In a window too short for both it keeps
+   220px and overlaps the composer rather than vanish. Like the narrow sheet
+   below, it is portalled to the body, where z-index 40 clears the sidebar
+   and stays under dialogs and toasts. Only this floating frame casts a
+   shadow. */
 .vector-bg-tasks[data-floating] {
   position: fixed;
+  top: calc(var(--bgt-float-top, 50px) + 10px);
   right: 16px;
-  bottom: 16px;
   z-index: 40;
-  height: min(680px, calc(100vh - 96px));
-  border-color: var(--vx-line-strong);
-  background: color-mix(in srgb, var(--bgt-pane) 88%, transparent);
+  height: clamp(220px, calc(100vh - var(--bgt-float-top, 50px) - 190px), 640px);
+  background: color-mix(in srgb, var(--bgt-pane) 92%, transparent);
   -webkit-backdrop-filter: blur(18px) saturate(1.2);
   backdrop-filter: blur(18px) saturate(1.2);
   box-shadow: var(--vx-shadow-float);
-  transform-origin: 100% 100%;
+  transform-origin: 100% 0;
   animation: vector-bg-tasks-pop 160ms ease-out;
 }
 
@@ -165,24 +217,23 @@ html[data-vector-glass="false"] .vector-bg-tasks[data-floating] {
     width: auto;
     height: min(72vh, 600px);
     margin: 0;
+    border: 1px solid var(--vx-line-strong);
+    border-radius: 12px;
     box-shadow: var(--vx-shadow-float);
   }
 }
 
-/* header */
+/* header: the title in the transcript's regular weight and the three tools,
+   on the pane's own ground with no divider */
 .vector-bg-tasks-header {
   display: flex;
   flex: none;
   align-items: center;
   gap: 2px;
-  height: 56px;
-  padding: 0 12px 0 20px;
-  border-bottom: 1px solid transparent;
-  transition: border-color 160ms var(--vx-ease);
-}
-
-.vector-bg-tasks[data-scrolled] .vector-bg-tasks-header {
-  border-bottom-color: var(--vx-line);
+  height: 48px;
+  /* The title starts on the edge every other line in the column shares:
+     the list's 8px inset plus the card padding (24px, compact 20px). */
+  padding: 0 10px 0 calc(8px + var(--bgt-card-pad));
 }
 
 .vector-bg-tasks-title {
@@ -191,21 +242,33 @@ html[data-vector-glass="false"] .vector-bg-tasks[data-floating] {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--bgt-title);
+  color: var(--bgt-text-1);
   font-size: var(--bgt-fs-title);
-  font-weight: 400;
-  line-height: var(--bgt-lh-title);
+  line-height: var(--bgt-lh);
 }
 
+/* Focus lands here only after Clear removes the button that had it: no ring
+   after a click, a ring when Clear was pressed from the keyboard. */
+.vector-bg-tasks-title:focus {
+  outline: none;
+}
+
+.vector-bg-tasks-title:focus-visible {
+  outline: 2px solid var(--bgt-ring);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* icon buttons: 28px, 6px radius, 16px line glyphs; hover lifts to the card */
 .vector-bg-tasks-icon-btn {
   display: inline-grid;
   flex: none;
   place-items: center;
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   padding: 0;
   border: 0;
-  border-radius: 8px;
+  border-radius: 6px;
   background: transparent;
   color: var(--bgt-text-2);
   cursor: pointer;
@@ -214,56 +277,152 @@ html[data-vector-glass="false"] .vector-bg-tasks[data-floating] {
     background-color 120ms ease;
 }
 
-.vector-bg-tasks-icon-btn > svg {
-  width: 18px;
-  height: 18px;
+/* The shared icons (16px [data-component="icon"] boxes) paint their own grey
+   (--icon-base); here they follow the control, so hover and the pressed tint
+   reach the glyph. */
+:is(.vector-bg-tasks, .vector-task-chip) [data-component="icon"] {
+  color: inherit;
 }
 
 .vector-bg-tasks-icon-btn:hover {
-  background: var(--bgt-hover);
-  color: var(--bgt-name);
+  background: var(--bgt-card);
+  color: var(--bgt-text-1);
 }
 
 .vector-bg-tasks-icon-btn:active {
-  background: var(--bgt-press);
+  background: var(--bgt-well);
 }
 
-.vector-bg-tasks-icon-btn:disabled {
-  background: transparent;
-  color: var(--bgt-text-3);
-  opacity: 0.45;
-  cursor: default;
+/* Pop out and expand while on: Vector's soft purple tint. */
+.vector-bg-tasks-icon-btn[aria-pressed="true"] {
+  background: var(--vx-purple-soft);
+  color: var(--vx-purple-bright);
 }
 
-html[data-vector-larger-targets="true"] .vector-bg-tasks-icon-btn {
-  width: 40px;
-  height: 40px;
+/* Same specificity as :hover and :active above and later, so without these
+   a pressed button would show no hover or press feedback. Each step mixes a
+   little more of the bright purple into the soft tint. */
+.vector-bg-tasks-icon-btn[aria-pressed="true"]:hover {
+  background: color-mix(in srgb, var(--vx-purple-soft), var(--vx-purple-bright) 8%);
 }
 
-/* list */
+.vector-bg-tasks-icon-btn[aria-pressed="true"]:active {
+  background: color-mix(in srgb, var(--vx-purple-soft), var(--vx-purple-bright) 14%);
+}
+
+html[data-vector-larger-targets="true"] :is(.vector-bg-tasks-icon-btn, .vector-bg-tasks-stop) {
+  width: 42px;
+  height: 42px;
+}
+
+/* The card toggle's own unlayered 24px floor would beat index.css's layered
+   42px larger-targets rule, leaving a finished card's only control short. */
+html[data-vector-larger-targets="true"] .vector-bg-tasks-card-toggle {
+  min-height: 42px;
+}
+
+/* list: the scroller. Cards sit 8px in from the pane's edges, so card text
+   (and the section labels on it) starts 24px in. */
 .vector-bg-tasks-list {
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 10px;
+  gap: 16px;
   min-height: 0;
-  padding: 4px 10px 10px;
+  padding: 0 8px 12px;
   overflow-y: auto;
   overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--bgt-well) transparent;
+}
+
+.vector-bg-tasks-section {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+}
+
+/* "Running" and "Finished": small, regular, muted, on the cards' text. */
+.vector-bg-tasks-section-label {
+  padding: 4px var(--bgt-card-pad) 8px;
+  color: var(--bgt-text-3);
+  font-size: var(--bgt-fs-meta);
+  line-height: var(--bgt-lh);
+}
+
+/* The Finished row: its label is the toggle; Clear lines up with Stop. */
+.vector-bg-tasks-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 calc(var(--bgt-card-pad) - 4px) 0 calc(var(--bgt-card-pad) - 6px);
+}
+
+.vector-bg-tasks-section-head > .vector-bg-tasks-section-label {
+  min-width: 0;
+  padding: 0;
+}
+
+.vector-bg-tasks-finished-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--bgt-text-3);
+  font-size: var(--bgt-fs-meta);
+  line-height: var(--bgt-lh);
+  cursor: pointer;
+  transition:
+    color 120ms ease,
+    background-color 120ms ease;
+}
+
+.vector-bg-tasks-finished-toggle:hover {
+  background: var(--bgt-card);
+  color: var(--bgt-text-2);
+}
+
+.vector-bg-tasks-count {
+  color: var(--bgt-text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.vector-bg-tasks-finished-toggle > [data-component="icon"] {
+  transition: transform 160ms var(--vx-ease);
+}
+
+.vector-bg-tasks-finished-toggle[aria-expanded="true"] > [data-component="icon"] {
+  transform: rotate(90deg);
+}
+
+.vector-bg-tasks-cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bgt-gap);
   list-style: none;
 }
 
-.vector-bg-tasks-list > li {
+.vector-bg-tasks-section-head + .vector-bg-tasks-cards {
+  margin-top: 4px;
+}
+
+.vector-bg-tasks-cards > li {
   display: contents;
 }
 
-/* card */
+/* card: flat, 12px radius, one step lighter than the pane */
 .vector-bg-tasks-card {
   flex: none;
-  padding: 16px;
-  border-radius: 14px;
+  padding: var(--bgt-card-pad);
+  border-radius: 12px;
   background: var(--bgt-card);
-  scroll-margin-block: 10px;
+  scroll-margin-block: 8px;
 }
 
 .vector-bg-tasks-card:focus {
@@ -284,59 +443,62 @@ html[data-vector-larger-targets="true"] .vector-bg-tasks-icon-btn {
 
 .vector-bg-tasks-card-head {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 12px;
-  min-height: 36px;
 }
 
+/* Long titles wrap to two lines, then ellipsize (the full title is the tooltip). */
 .vector-bg-tasks-card-title {
+  display: -webkit-box;
   flex: 1;
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--bgt-name);
+  color: var(--bgt-text-1);
   font-size: var(--bgt-fs-title);
-  font-weight: 500;
-  line-height: var(--bgt-lh-title);
+  line-height: var(--bgt-lh);
+  overflow-wrap: break-word;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
 }
 
 .vector-bg-tasks-card-heading {
   flex: 1;
   min-width: 0;
-  font-size: inherit;
-  font-weight: inherit;
 }
 
+/* Stop: a 28px square filled one step lighter than the card, its box
+   centred on the title's first line. Neutral, never red. */
 .vector-bg-tasks-stop {
   display: inline-grid;
   flex: none;
   place-items: center;
-  width: 36px;
-  height: 36px;
+  width: 28px;
+  height: 28px;
+  margin: -4px -4px 0 0;
   padding: 0;
   border: 0;
-  border-radius: 10px;
-  background: var(--bgt-control);
-  color: var(--bgt-text-2);
+  border-radius: 6px;
+  background: var(--bgt-well);
+  color: var(--bgt-text-1);
   cursor: pointer;
   transition:
     color 120ms ease,
     background-color 120ms ease;
 }
 
-.vector-bg-tasks-stop > svg {
+/* The shared "stop" square, 7px at this size, as in the composer's stop. */
+.vector-bg-tasks-stop > [data-component="icon"] {
   width: 14px;
   height: 14px;
 }
 
-.vector-bg-tasks-stop:hover {
-  background: color-mix(in srgb, var(--vx-text) 8%, var(--bgt-control));
-  color: var(--bgt-name);
+.vector-bg-tasks-stop:hover:not(:disabled) {
+  background: var(--bgt-well-hover);
 }
 
-.vector-bg-tasks-stop:active {
-  background: color-mix(in srgb, var(--vx-text) 12%, var(--bgt-control));
+.vector-bg-tasks-stop:active:not(:disabled) {
+  background: var(--bgt-well-run-hover);
 }
 
 .vector-bg-tasks-stop:disabled {
@@ -349,77 +511,126 @@ html[data-vector-larger-targets="true"] .vector-bg-tasks-icon-btn {
   cursor: progress;
 }
 
+/* How a finished card ended, where Stop was: a 6px dot and a word. The word
+   stays neutral except where it needs you to look. */
 .vector-bg-tasks-card-status {
+  display: inline-flex;
   flex: none;
-  font-size: var(--bgt-fs-count);
-  line-height: var(--bgt-lh-count);
+  align-items: center;
+  gap: 6px;
+  margin-top: 1px;
+  color: var(--bgt-text-2);
+  font-size: var(--bgt-fs-meta);
+  line-height: var(--bgt-lh);
+  white-space: nowrap;
 }
 
-.vector-bg-tasks-card-status[data-status="done"] {
-  color: var(--bgt-done);
+.vector-bg-tasks-card-status::before,
+.vector-task-chip-status::before {
+  content: "";
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--bgt-dot, var(--bgt-pending));
 }
 
-.vector-bg-tasks-card-status[data-status="failed"] {
-  color: var(--bgt-fail);
+:is(.vector-bg-tasks-card-status, .vector-task-chip-status)[data-status="done"] {
+  --bgt-dot: var(--bgt-done);
 }
 
-.vector-bg-tasks-card-status[data-status="stopped"] {
+:is(.vector-bg-tasks-card-status, .vector-task-chip-status)[data-status="failed"] {
+  --bgt-dot: var(--bgt-fail);
+  color: var(--bgt-fail-text);
+}
+
+:is(.vector-bg-tasks-card-status, .vector-task-chip-status)[data-status="stopped"] {
+  --bgt-dot: var(--bgt-stop);
   color: var(--bgt-text-3);
 }
 
+/* Stopped is an outline wherever it shows; beside its word, a ring. */
+:is(.vector-bg-tasks-card-status, .vector-task-chip-status)[data-status="stopped"]::before {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--bgt-dot);
+}
+
+:is(.vector-bg-tasks-card-status, .vector-task-chip-status)[data-status="waiting"] {
+  --bgt-dot: var(--bgt-wait);
+  color: var(--bgt-wait-text);
+}
+
+/* facts: the kind in secondary and the clock in tertiary, then the counts a
+   step brighter than their words; spaced, not dotted, as in the reference */
 .vector-bg-tasks-meta {
   display: flex;
   align-items: baseline;
-  gap: 12px;
+  column-gap: 10px;
   min-width: 0;
   color: var(--bgt-text-2);
   font-size: var(--bgt-fs-meta);
-  line-height: var(--bgt-lh-meta);
+  line-height: var(--bgt-lh);
   white-space: nowrap;
 }
 
 .vector-bg-tasks-card-head + .vector-bg-tasks-meta {
-  margin-top: 2px;
+  margin-top: 4px;
 }
 
-.vector-bg-tasks-meta > span {
+.vector-bg-tasks-meta > * {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.vector-bg-tasks-meta > :is(.vector-bg-tasks-dim, .vector-bg-tasks-attention) {
+.vector-bg-tasks-meta > :is(time, .vector-bg-tasks-attention) {
   flex: none;
 }
 
-.vector-bg-tasks-dim {
+.vector-bg-tasks-time {
   color: var(--bgt-text-3);
+  font-variant-numeric: tabular-nums;
 }
 
 .vector-bg-tasks-attention {
-  color: var(--bgt-wait);
+  color: var(--bgt-wait-text);
+}
+
+.vector-bg-tasks-counts {
+  column-gap: 12px;
+  color: var(--bgt-text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.vector-bg-tasks-num {
+  color: var(--bgt-text-2);
 }
 
 .vector-bg-tasks-desc {
   display: -webkit-box;
   margin-top: 10px;
   overflow: hidden;
-  color: var(--bgt-text-2);
-  font-size: var(--bgt-fs-body);
-  line-height: var(--bgt-lh-body);
-  overflow-wrap: anywhere;
+  color: var(--bgt-text-3);
+  font-size: var(--bgt-fs-meta);
+  /* Prose, so the chat's prose leading rather than the rows' 150%. */
+  line-height: 1.6;
+  overflow-wrap: break-word;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
+  -webkit-line-clamp: 4;
+  line-clamp: 4;
 }
 
-/* phases */
+/* A collapsed finished card shows its marks only when its agents ended differently. */
+.vector-bg-tasks-card > .vector-bg-tasks-squares {
+  margin-top: 10px;
+}
+
+/* phases: a small primary heading over one rounded block per phase */
 .vector-bg-tasks-phases-label {
-  margin: 16px 0 8px;
-  color: var(--bgt-title);
+  margin: 14px 0 8px;
+  color: var(--bgt-text-1);
   font-size: var(--bgt-fs-meta);
-  font-weight: 400;
-  line-height: var(--bgt-lh-meta);
+  line-height: var(--bgt-lh);
 }
 
 .vector-bg-tasks-phases {
@@ -429,29 +640,33 @@ html[data-vector-larger-targets="true"] .vector-bg-tasks-icon-btn {
   list-style: none;
 }
 
-.vector-bg-tasks-phase {
-  border-radius: 10px;
-  background: var(--bgt-well);
-}
-
+/* The block is the toggle itself; the agent table opens below it, on the card. */
 .vector-bg-tasks-phase-toggle {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto 16px;
   align-items: center;
-  column-gap: 10px;
-  row-gap: 6px;
+  column-gap: 8px;
+  row-gap: 8px;
   width: 100%;
-  padding: 10px 12px 12px;
+  padding: var(--bgt-phase-pad);
   border: 0;
-  border-radius: 10px;
-  background: transparent;
+  border-radius: 8px;
+  background: var(--bgt-well);
   text-align: left;
   cursor: pointer;
   transition: background-color 120ms ease;
 }
 
 .vector-bg-tasks-phase-toggle:hover {
-  background: var(--bgt-hover);
+  background: var(--bgt-well-hover);
+}
+
+.vector-bg-tasks-phase[data-state="running"] > .vector-bg-tasks-phase-toggle {
+  background: var(--bgt-well-run);
+}
+
+.vector-bg-tasks-phase[data-state="running"] > .vector-bg-tasks-phase-toggle:hover {
+  background: var(--bgt-well-run-hover);
 }
 
 .vector-bg-tasks-phase-name {
@@ -461,9 +676,9 @@ html[data-vector-larger-targets="true"] .vector-bg-tasks-icon-btn {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--bgt-name);
+  color: var(--bgt-text-1);
   font-size: var(--bgt-fs-meta);
-  line-height: var(--bgt-lh-meta);
+  line-height: var(--bgt-lh);
 }
 
 .vector-bg-tasks-phase[data-state="running"] .vector-bg-tasks-phase-name {
@@ -473,21 +688,20 @@ html[data-vector-larger-targets="true"] .vector-bg-tasks-icon-btn {
 .vector-bg-tasks-phase-count {
   grid-row: 1;
   grid-column: 2;
-  color: var(--bgt-text-3);
-  font-size: var(--bgt-fs-count);
-  line-height: var(--bgt-lh-count);
+  color: var(--bgt-text-2);
+  font-size: var(--bgt-fs-table);
+  line-height: var(--bgt-lh);
+  font-variant-numeric: tabular-nums;
 }
 
-.vector-bg-tasks-phase-chevron {
+.vector-bg-tasks-phase-toggle > [data-component="icon"] {
   grid-row: 1;
   grid-column: 3;
-  width: 16px;
-  height: 16px;
-  color: var(--bgt-text-3);
+  color: var(--bgt-text-2);
   transition: transform 160ms var(--vx-ease);
 }
 
-.vector-bg-tasks-phase-toggle[aria-expanded="true"] .vector-bg-tasks-phase-chevron {
+.vector-bg-tasks-phase-toggle[aria-expanded="true"] > [data-component="icon"] {
   transform: rotate(90deg);
 }
 
@@ -496,15 +710,18 @@ html[data-vector-larger-targets="true"] .vector-bg-tasks-icon-btn {
   grid-column: 1 / -1;
 }
 
+/* Inset by the block's own padding, so "Agent" sits under the phase name and
+   "Time" ends under the chevron. */
 .vector-bg-tasks-phase-body {
-  padding: 0 12px 10px;
+  padding: 6px var(--bgt-inset) 4px;
 }
 
 .vector-bg-tasks-phase-body[hidden] {
   display: none;
 }
 
-/* squares: 8px, 2px radius; specialists are circles */
+/* squares: one 8px mark per agent, 2px radius; specialists are dots. The
+   agent table's row marks draw the same shape from --bgt-mark. */
 :is(.vector-bg-tasks-squares, .vector-task-chip-squares) {
   display: flex;
   flex-wrap: wrap;
@@ -512,42 +729,55 @@ html[data-vector-larger-targets="true"] .vector-bg-tasks-icon-btn {
   list-style: none;
 }
 
-:is(.vector-bg-tasks-square, .vector-task-chip-square) {
+:is(.vector-bg-tasks-square, .vector-task-chip-square),
+.vector-bg-tasks-agent-state:not([data-status="done"])::before {
+  box-sizing: border-box;
   flex: none;
   width: 8px;
   height: 8px;
+  border: 1px solid var(--bgt-mark, var(--bgt-pending));
   border-radius: 2px;
-  background: transparent;
-  box-shadow: inset 0 0 0 1px var(--bgt-pending);
+  background: var(--bgt-mark, transparent);
 }
 
-:is(.vector-bg-tasks-square, .vector-task-chip-square)[data-kind="specialist"] {
+.vector-bg-tasks-agent-state:not([data-status="done"])::before {
+  content: "";
+}
+
+:is(.vector-bg-tasks-square, .vector-task-chip-square)[data-kind="specialist"],
+.vector-bg-tasks-agent-state[data-kind="specialist"]::before {
   border-radius: 50%;
 }
 
-:is(.vector-bg-tasks-square, .vector-task-chip-square):not([data-status="pending"]) {
-  box-shadow: none;
+:is(.vector-bg-tasks-square, .vector-task-chip-square, .vector-bg-tasks-agent-state)[data-status="running"] {
+  --bgt-mark: var(--bgt-run);
 }
 
-:is(.vector-bg-tasks-square, .vector-task-chip-square)[data-status="running"] {
-  background: var(--bgt-run);
+:is(.vector-bg-tasks-square, .vector-task-chip-square, .vector-bg-tasks-agent-state)[data-status="waiting"] {
+  --bgt-mark: var(--bgt-wait);
+}
+
+:is(.vector-bg-tasks-square, .vector-task-chip-square, .vector-bg-tasks-agent-state)[data-status="done"] {
+  --bgt-mark: var(--bgt-done);
+}
+
+:is(.vector-bg-tasks-square, .vector-task-chip-square, .vector-bg-tasks-agent-state)[data-status="failed"] {
+  --bgt-mark: var(--bgt-fail);
+}
+
+:is(.vector-bg-tasks-square, .vector-task-chip-square, .vector-bg-tasks-agent-state)[data-status="stopped"] {
+  --bgt-mark: var(--bgt-stop);
+}
+
+/* Stopped: the outline with a dash across it instead of a fill. */
+:is(.vector-bg-tasks-square, .vector-task-chip-square)[data-status="stopped"],
+.vector-bg-tasks-agent-state[data-status="stopped"]::before {
+  background: linear-gradient(var(--bgt-mark) 0 0) center / 4px 1px no-repeat;
+}
+
+:is(.vector-bg-tasks-square, .vector-task-chip-square)[data-status="running"],
+.vector-bg-tasks-agent-state[data-status="running"]::before {
   animation: vector-bg-tasks-breathe 1.6s ease-in-out infinite;
-}
-
-:is(.vector-bg-tasks-square, .vector-task-chip-square)[data-status="waiting"] {
-  background: var(--bgt-wait);
-}
-
-:is(.vector-bg-tasks-square, .vector-task-chip-square)[data-status="done"] {
-  background: var(--bgt-done);
-}
-
-:is(.vector-bg-tasks-square, .vector-task-chip-square)[data-status="failed"] {
-  background: var(--bgt-fail);
-}
-
-:is(.vector-bg-tasks-square, .vector-task-chip-square)[data-status="stopped"] {
-  background: var(--bgt-stop);
 }
 
 @keyframes vector-bg-tasks-breathe {
@@ -556,7 +786,13 @@ html[data-vector-larger-targets="true"] .vector-bg-tasks-icon-btn {
   }
 }
 
-/* agent table: 13px; 252px wide in a 330px pane, leaving 72px for the name */
+/* agent table: 12px, tertiary and secondary. Docked at 320px it is about
+   247px wide. Each fixed column is its 6px gap plus its longest usual value
+   measured at 12px, with about a pixel to spare ("59m 59s" 50.7px, "23h 59m"
+   51.5px, "999.9k" 40.8px, "Opus 5" 40.9px; longer model names ellipsize
+   with the full name in a tooltip). Narrower columns would cut real times
+   and token counts, so the agent column (about 93px) is what gives, and a
+   cut name keeps its last word so siblings with one start stay apart. */
 .vector-bg-tasks-table {
   width: 100%;
   border-collapse: collapse;
@@ -564,25 +800,26 @@ html[data-vector-larger-targets="true"] .vector-bg-tasks-icon-btn {
 }
 
 .vector-bg-tasks-col-model {
-  width: 64px;
+  width: 48px;
 }
 
 .vector-bg-tasks-col-tokens {
-  width: 52px;
+  width: 48px;
 }
 
 .vector-bg-tasks-col-time {
-  width: 64px;
+  width: 58px;
 }
 
+/* 3px above and below keeps rows 24px apart (WCAG 2.5.8). */
 .vector-bg-tasks-table :is(th, td) {
-  padding: 4px 0 4px 8px;
+  padding: 3px 0 3px 6px;
+  vertical-align: middle;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: var(--bgt-fs-table);
-  font-weight: 400;
-  line-height: var(--bgt-lh-table);
+  line-height: var(--bgt-lh);
   text-align: left;
 }
 
@@ -594,43 +831,71 @@ html[data-vector-larger-targets="true"] .vector-bg-tasks-icon-btn {
   text-align: right;
 }
 
-.vector-bg-tasks-table th {
+.vector-bg-tasks-table :is(th, td) {
   color: var(--bgt-text-3);
 }
 
 .vector-bg-tasks-table td {
-  color: var(--bgt-text-2);
+  font-variant-numeric: tabular-nums;
 }
 
 .vector-bg-tasks-agent {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   max-width: 100%;
   padding: 0;
   border: 0;
   border-radius: 4px;
   background: transparent;
-  color: var(--bgt-title);
+  color: var(--bgt-text-2);
   text-align: left;
   cursor: pointer;
 }
 
-.vector-bg-tasks-agent > span {
+/* A cut name loses the middle: the start ellipsizes and the last word stays
+   (nameParts in the pane). A one-word name cuts at its end. */
+.vector-bg-tasks-agent-name {
+  display: flex;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.vector-bg-tasks-agent-head {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.vector-bg-tasks-agent > svg {
+/* Keeps its leading space; ellipsizes only if it alone is too wide. */
+.vector-bg-tasks-agent-tail {
   flex: none;
-  width: 14px;
-  height: 14px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: pre;
+}
+
+/* The row's mark: the shared check once done, else the agent's square. 12px
+   holds the 8px square; the 16px check box overhangs it by 2px a side, which
+   its 5.6px glyph never reaches. */
+.vector-bg-tasks-agent-state {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 12px;
+  height: 18px;
+  color: var(--bgt-text-3);
+}
+
+.vector-bg-tasks-agent-state > [data-component="icon"] {
+  margin: 0 -2px;
 }
 
 .vector-bg-tasks-agent:hover:not(:disabled) {
-  color: var(--bgt-name);
+  color: var(--bgt-text-1);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
@@ -640,101 +905,90 @@ html[data-vector-larger-targets="true"] .vector-bg-tasks-icon-btn {
 }
 
 .vector-bg-tasks-row[data-status="failed"] .vector-bg-tasks-agent {
-  color: var(--bgt-fail);
+  color: var(--bgt-fail-text);
 }
 
 .vector-bg-tasks-row[data-status="waiting"] .vector-bg-tasks-agent {
-  color: var(--bgt-wait);
+  color: var(--bgt-wait-text);
 }
 
-.vector-bg-tasks-row:is([data-status="pending"], [data-status="stopped"]) :is(td, .vector-bg-tasks-agent) {
+.vector-bg-tasks-row:is([data-status="pending"], [data-status="stopped"]) .vector-bg-tasks-agent {
   color: var(--bgt-text-3);
 }
 
 .vector-bg-tasks-more {
   display: block;
   width: 100%;
-  margin-top: 4px;
-  padding: 4px 0;
+  margin-top: 2px;
+  padding: 3px 0;
   border: 0;
+  border-radius: 4px;
   background: transparent;
   color: var(--bgt-text-3);
   font-size: var(--bgt-fs-table);
+  line-height: var(--bgt-lh);
   text-align: left;
   cursor: pointer;
 }
 
-/* finished, idle, empty */
-.vector-bg-tasks-finished {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  list-style: none;
+.vector-bg-tasks-more:hover {
+  color: var(--bgt-text-2);
 }
 
-.vector-bg-tasks-finished-label {
-  padding: 6px 6px 0;
-  color: var(--bgt-text-3);
-  font-size: var(--bgt-fs-body);
-  line-height: var(--bgt-lh-body);
-}
-
-.vector-bg-tasks-card[data-finished] {
-  padding-block: 12px 14px;
-}
-
+/* A finished card's title is its toggle: two lines, then the chevron. */
 .vector-bg-tasks-card-toggle {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  width: calc(100% + 16px);
+  align-items: flex-start;
+  gap: 6px;
+  width: calc(100% + 12px);
   min-width: 0;
-  min-height: 36px;
-  margin: 0 -8px;
-  padding: 4px 8px;
+  min-height: 24px;
+  margin: -4px -6px;
+  padding: 4px 6px;
   border: 0;
-  border-radius: 10px;
+  border-radius: 6px;
   background: transparent;
+  color: var(--bgt-text-1);
   font-size: var(--bgt-fs-title);
-  font-weight: 500;
-  line-height: var(--bgt-lh-title);
+  line-height: var(--bgt-lh);
   text-align: left;
   cursor: pointer;
+  transition: background-color 120ms ease;
 }
 
 .vector-bg-tasks-card-toggle > span {
+  display: -webkit-box;
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: break-word;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
 }
 
 .vector-bg-tasks-card-toggle:hover {
-  background: var(--bgt-hover);
+  background: var(--bgt-card-hover);
 }
 
-.vector-bg-tasks-card-toggle > svg {
+/* At the toggle's far end, beside the status, centred on the title's first line. */
+.vector-bg-tasks-card-toggle > [data-component="icon"] {
   flex: none;
-  width: 16px;
-  height: 16px;
+  margin-top: calc((var(--bgt-fs-title) * var(--bgt-lh) - 16px) / 2);
+  margin-left: auto;
   color: var(--bgt-text-3);
   transition: transform 160ms var(--vx-ease);
 }
 
-.vector-bg-tasks-card-toggle[aria-expanded="true"] > svg {
+.vector-bg-tasks-card-toggle[aria-expanded="true"] > [data-component="icon"] {
   transform: rotate(90deg);
 }
 
-.vector-bg-tasks-card > .vector-bg-tasks-squares {
-  margin-top: 10px;
-}
-
+/* Nothing running: a muted line under the Running label, on the cards' text */
 .vector-bg-tasks-idle {
-  padding: 12px 10px 4px;
+  padding: 0 var(--bgt-card-pad);
   color: var(--bgt-text-3);
-  font-size: var(--bgt-fs-body);
-  line-height: var(--bgt-lh-body);
-  text-align: center;
+  font-size: var(--bgt-fs-meta);
+  line-height: var(--bgt-lh);
 }
 
 .vector-bg-tasks-empty {
@@ -743,70 +997,23 @@ html[data-vector-larger-targets="true"] .vector-bg-tasks-icon-btn {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 4px;
   min-height: 0;
-  padding: 24px 32px 56px;
+  padding: 24px 28px 48px;
   text-align: center;
 }
 
 .vector-bg-tasks-empty-title {
-  color: var(--bgt-title);
-  font-size: var(--bgt-fs-meta);
-  line-height: var(--bgt-lh-meta);
+  color: var(--bgt-text-1);
+  font-size: var(--bgt-fs-title);
+  line-height: var(--bgt-lh);
 }
 
 .vector-bg-tasks-empty-body {
-  max-width: 250px;
+  max-width: 240px;
   color: var(--bgt-text-3);
-  font-size: 14px;
-  line-height: 20px;
-}
-
-/* footer */
-.vector-bg-tasks-footer {
-  display: flex;
-  flex: none;
-  align-items: center;
-  justify-content: space-between;
-  height: 52px;
-  padding: 0 12px;
-  border-top: 1px solid transparent;
-  transition: border-color 160ms var(--vx-ease);
-}
-
-.vector-bg-tasks[data-more-below] .vector-bg-tasks-footer {
-  border-top-color: var(--vx-line);
-}
-
-.vector-bg-tasks-finished-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 32px;
-  padding: 0 8px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--bgt-text-2);
-  font-size: var(--bgt-fs-body);
-  line-height: var(--bgt-lh-body);
-  cursor: pointer;
-}
-
-.vector-bg-tasks-finished-toggle:hover {
-  background: var(--bgt-hover);
-  color: var(--bgt-name);
-}
-
-.vector-bg-tasks-finished-toggle > svg {
-  width: 14px;
-  height: 14px;
-  color: var(--bgt-text-3);
-  transition: transform 160ms var(--vx-ease);
-}
-
-.vector-bg-tasks-finished-toggle[aria-expanded="true"] > svg {
-  transform: rotate(90deg);
+  font-size: var(--bgt-fs-meta);
+  line-height: var(--bgt-lh);
 }
 
 .vector-bg-tasks-sr {
@@ -822,60 +1029,61 @@ html[data-vector-larger-targets="true"] .vector-bg-tasks-icon-btn {
   border: 0;
 }
 
-/* inline chip */
+/* inline chip: the panel's card in the transcript, full width, flat, 12px
+   radius, the transcript's family and weight with a chat-size title */
 .vector-task-chip {
   box-sizing: border-box;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
   width: 100%;
+  /* A card, not a banner: at the wide and full chat widths it stops short of
+     the transcript column, as it did before this restyle. */
   max-width: 630px;
-  margin: 4px 0;
-  padding: 14px 16px 16px 18px;
-  border: 1px solid var(--vx-line);
+  margin: 2px 0;
+  padding: 12px var(--bgt-card-pad) 14px;
+  border: 0;
   border-radius: 12px;
-  background: transparent;
-  color: var(--bgt-name);
+  background: var(--bgt-card);
+  color: var(--bgt-text-1);
   font: inherit;
-  font-family: var(--vx-workspace-font);
+  font-family: var(--font-family-sans);
+  font-size: var(--bgt-fs-meta);
+  line-height: var(--bgt-lh);
   text-align: left;
   cursor: pointer;
-  transition:
-    background-color 120ms ease,
-    border-color 120ms ease;
-}
-
-:root[data-vector-theme="light"] .vector-task-chip {
-  background: var(--vx-surface);
+  transition: background-color 120ms ease;
 }
 
 .vector-task-chip:hover {
-  border-color: var(--vx-line-strong);
-  background: color-mix(in srgb, var(--vx-text) 3%, transparent);
+  background: var(--bgt-card-hover);
 }
 
 [data-vector-shell] button.vector-task-chip:active:not(:disabled) {
   transform: none;
-  background: color-mix(in srgb, var(--vx-text) 5%, transparent);
+  background: var(--bgt-well);
 }
 
+/* Like a panel card's title: two lines, then an ellipsis. */
 .vector-task-chip-title {
+  display: -webkit-box;
   grid-row: 1;
   grid-column: 1;
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: break-word;
   font-size: var(--bgt-fs-title);
-  font-weight: 500;
-  line-height: var(--bgt-lh-title);
+  line-height: var(--bgt-lh);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
 }
 
-.vector-task-chip-chevron {
+/* Centred on the title's first line. */
+.vector-task-chip > [data-component="icon"] {
   grid-row: 1;
   grid-column: 2;
-  align-self: center;
-  width: 18px;
-  height: 18px;
+  margin-top: calc((var(--bgt-fs-title) * var(--bgt-lh) - 16px) / 2);
   margin-left: 12px;
   color: var(--bgt-text-3);
   transition:
@@ -883,21 +1091,24 @@ html[data-vector-larger-targets="true"] .vector-bg-tasks-icon-btn {
     color 120ms ease;
 }
 
-.vector-task-chip:hover .vector-task-chip-chevron {
+.vector-task-chip:hover > [data-component="icon"] {
   color: var(--bgt-text-2);
   transform: translateX(2px);
 }
 
+/* Wraps between its facts rather than cutting the kind short. */
 .vector-task-chip-meta {
   display: flex;
+  flex-wrap: wrap;
   grid-column: 1 / -1;
-  gap: 12px;
+  column-gap: 10px;
+  row-gap: 2px;
   min-width: 0;
-  margin-top: 2px;
+  margin-top: 4px;
   overflow: hidden;
   color: var(--bgt-text-2);
   font-size: var(--bgt-fs-meta);
-  line-height: var(--bgt-lh-meta);
+  line-height: var(--bgt-lh);
   white-space: nowrap;
 }
 
@@ -913,22 +1124,13 @@ html[data-vector-larger-targets="true"] .vector-bg-tasks-icon-btn {
 
 .vector-task-chip-dim {
   color: var(--bgt-text-3);
+  font-variant-numeric: tabular-nums;
 }
 
-.vector-task-chip-status[data-status="waiting"] {
-  color: var(--bgt-wait);
-}
-
-.vector-task-chip-status[data-status="done"] {
-  color: var(--bgt-done);
-}
-
-.vector-task-chip-status[data-status="failed"] {
-  color: var(--bgt-fail);
-}
-
-.vector-task-chip-status[data-status="stopped"] {
-  color: var(--bgt-text-3);
+.vector-task-chip-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .vector-task-chip-squares {
@@ -982,24 +1184,20 @@ html[data-vector-larger-targets="true"] .vector-bg-tasks-icon-btn {
   .vector-bg-tasks-icon-btn,
   .vector-bg-tasks-stop,
   .vector-bg-tasks-finished-toggle,
+  .vector-bg-tasks-phase-toggle,
   .vector-task-chip
 ):focus-visible {
   outline: 2px solid var(--bgt-ring);
   outline-offset: 2px;
 }
 
-:is(
-  .vector-bg-tasks-phase-toggle,
-  .vector-bg-tasks-card-toggle,
-  .vector-bg-tasks-agent,
-  .vector-bg-tasks-more
-):focus-visible {
+/* Inside a table cell or a card head, where an outside ring would be clipped. */
+:is(.vector-bg-tasks-card-toggle, .vector-bg-tasks-agent, .vector-bg-tasks-more):focus-visible {
   outline: 2px solid var(--bgt-ring);
   outline-offset: -2px;
 }
 
-:root[data-vector-theme="light"]
-  :is(.vector-bg-tasks-phase-toggle, .vector-bg-tasks-card-toggle, .vector-bg-tasks-agent):focus-visible {
+:root[data-vector-theme="light"] :is(.vector-bg-tasks-card-toggle, .vector-bg-tasks-agent):focus-visible {
   outline-offset: 0;
   box-shadow: inset 0 0 0 2px var(--vx-purple);
 }
@@ -1008,20 +1206,25 @@ html[data-vector-larger-targets="true"] .vector-bg-tasks-icon-btn {
 @media (prefers-reduced-motion: reduce) {
   .vector-bg-tasks,
   .vector-bg-tasks[data-floating],
+  .vector-bg-tasks-card,
   .vector-bg-tasks-card[data-new],
-  :is(.vector-bg-tasks-square, .vector-task-chip-square)[data-status="running"] {
+  :is(.vector-bg-tasks-square, .vector-task-chip-square)[data-status="running"],
+  .vector-bg-tasks-agent-state[data-status="running"]::before {
     animation: none;
     transition: none;
   }
 
-  .vector-bg-tasks-phase-chevron,
-  .vector-bg-tasks-card-toggle > svg,
-  .vector-bg-tasks-finished-toggle > svg,
-  .vector-task-chip-chevron {
+  :is(
+      .vector-bg-tasks-phase-toggle,
+      .vector-bg-tasks-card-toggle,
+      .vector-bg-tasks-finished-toggle,
+      .vector-task-chip
+    )
+    > [data-component="icon"] {
     transition: none;
   }
 
-  .vector-task-chip:hover .vector-task-chip-chevron {
+  .vector-task-chip:hover > [data-component="icon"] {
     transform: none;
   }
 }
@@ -1032,36 +1235,65 @@ html:is([data-vector-reduce-animations="true"], [data-vector-animation-speed="of
     .vector-bg-tasks-card,
     .vector-bg-tasks-square,
     .vector-task-chip-square,
-    .vector-bg-tasks-phase-chevron,
-    .vector-task-chip-chevron
-  ) {
+    .vector-bg-tasks [data-component="icon"],
+    .vector-task-chip > [data-component="icon"]
+  ),
+html:is([data-vector-reduce-animations="true"], [data-vector-animation-speed="off"])
+  .vector-bg-tasks-agent-state::before {
   animation: none;
   transition: none;
 }
 
-/* forced colours */
+/* forced colours: the surfaces drop out, so the boxes get borders back */
 @media (forced-colors: active) {
-  :is(.vector-bg-tasks-square, .vector-task-chip-square) {
+  :is(.vector-bg-tasks-square, .vector-task-chip-square),
+  .vector-bg-tasks-agent-state:not([data-status="done"])::before {
     forced-color-adjust: none;
-    box-shadow: inset 0 0 0 1px CanvasText;
+    border-color: CanvasText;
+    background: transparent;
   }
 
   :is(.vector-bg-tasks-square, .vector-task-chip-square):is(
-    [data-status="done"],
-    [data-status="failed"],
-    [data-status="stopped"],
-    [data-status="waiting"]
-  ) {
+      [data-status="done"],
+      [data-status="failed"],
+      [data-status="waiting"]
+    ),
+  .vector-bg-tasks-agent-state:is([data-status="failed"], [data-status="waiting"])::before {
     background: CanvasText;
   }
 
-  :is(.vector-bg-tasks-square, .vector-task-chip-square)[data-status="running"] {
+  /* Stopped keeps its dash and ring, so it still differs from done by shape. */
+  :is(.vector-bg-tasks-square, .vector-task-chip-square)[data-status="stopped"],
+  .vector-bg-tasks-agent-state[data-status="stopped"]::before {
+    background: linear-gradient(CanvasText 0 0) center / 4px 1px no-repeat;
+  }
+
+  :is(.vector-bg-tasks-square, .vector-task-chip-square)[data-status="running"],
+  .vector-bg-tasks-agent-state[data-status="running"]::before {
+    border-color: Highlight;
     background: Highlight;
-    box-shadow: none;
+  }
+
+  .vector-bg-tasks-card-status::before,
+  .vector-task-chip-status::before {
+    forced-color-adjust: none;
+    background: CanvasText;
+  }
+
+  :is(.vector-bg-tasks-card-status, .vector-task-chip-status)[data-status="stopped"]::before {
+    background: transparent;
+    box-shadow: inset 0 0 0 1px CanvasText;
   }
 
   .vector-bg-tasks-card,
-  .vector-bg-tasks-phase {
+  .vector-bg-tasks-phase-toggle,
+  .vector-bg-tasks-stop,
+  .vector-task-chip {
     border: 1px solid CanvasText;
+  }
+
+  /* The purple pressed tint is colour only; forced colours keep a border. */
+  .vector-bg-tasks-icon-btn[aria-pressed="true"] {
+    border: 1px solid Highlight;
   }
 }
