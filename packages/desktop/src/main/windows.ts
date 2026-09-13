@@ -139,6 +139,14 @@ export function getLastFocusedWindow() {
 }
 
 export function restoreMainWindows() {
+  // macOS emits "activate" for a Dock click while Vector is still starting,
+  // before "ready". A window created then throws (electron-window-state reads
+  // the screen module), so startup's own restore opens the windows instead.
+  if (!app.isReady()) return []
+  // A restore that runs while main windows already exist (a Dock click during
+  // the engine wait, then startup's restore) must not open a second set.
+  const open = BrowserWindow.getAllWindows().filter((win) => !win.isDestroyed() && windowIDs.has(win))
+  if (open.length) return open
   const ids = registry.persisted()
   return (ids.length ? ids : [randomUUID()]).map((id) => createMainWindow(id))
 }
