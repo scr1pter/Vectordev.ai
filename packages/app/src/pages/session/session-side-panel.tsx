@@ -135,6 +135,7 @@ import { resolveBrowserAddress, selectUnambiguousPreviewUrl } from "@/utils/brow
 import { boundInlineCompletionContext, sanitizeInlineCompletion } from "@/utils/codespace-ai"
 import { notifyWorkspaceFileSaved } from "@/utils/workspace-file-saved"
 import { announceWorkspaceMode } from "@/utils/workspace-mode"
+import { saveCheckpoints } from "./ai-change-checkpoints"
 
 const DialogSelectFile = lazy(() =>
   import("@/components/dialog-select-file").then((module) => ({ default: module.DialogSelectFile })),
@@ -4968,7 +4969,7 @@ export function SessionSidePanel(props: {
             documentation: createAiCheckpointDocumentation(files),
             snapshots,
           } satisfies AiChangeCheckpoint
-          localStorage.setItem(AI_CHANGE_CHECKPOINTS_KEY, JSON.stringify([checkpoint, ...existing].slice(0, 80)))
+          saveCheckpoints(localStorage, AI_CHANGE_CHECKPOINTS_KEY, [checkpoint, ...existing])
           logEngineeringEvent(session, {
             id: `checkpoint:${checkpoint.id}`,
             timestamp: checkpoint.createdAt,
@@ -5124,7 +5125,7 @@ export function SessionSidePanel(props: {
       showToast({
         variant: "error",
         title: "Checkpoint cannot be restored",
-        description: "This checkpoint was created before Vector started storing restore snapshots.",
+        description: "Vector has no saved file contents for this checkpoint, so there is nothing to restore.",
       })
       return
     }
