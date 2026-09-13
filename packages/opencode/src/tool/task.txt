@@ -1,21 +1,38 @@
-Launch a new agent to handle complex, multistep tasks autonomously.
+Launch a subagent: an autonomous child agent that takes one sub-task, works through it in its own context, and reports back to you once.
 
-When using the Task tool, you must specify a subagent_type parameter to select which agent type to use.
+Two kinds of subagent run through this tool:
+- Subagent: subagent_type "general". When general is in the list below, omitting subagent_type also gives you one. A general-purpose worker for any self-contained sub-task: broad research, multi-file search, implementation, refactors, or running and repairing checks.
+- Subagent specialists: every other type in the list below. Each has a fixed focus and its own permissions. Choose one only when the work clearly matches its description, and use it proactively when its description says to.
 
-When NOT to use the Task tool:
-- If you want to read a specific file path, use the Read or Glob tool instead of the Task tool, to find the match more quickly
-- If you are searching for a specific class definition like "class Foo", use the Grep tool instead, to find the match more quickly
-- If you are searching for code within a specific file or set of 2-3 files, use the Read tool instead of the Task tool, to find the match more quickly
-- If no available agent is a good fit for the task, use other tools directly
+Delegate on your own initiative, without waiting to be asked, when:
+- the request splits into independent pieces (separate areas of the codebase, separate features, separate questions): launch one subagent per piece;
+- an answer needs wide searching or reading that would flood your context;
+- a piece of work is large and self-contained enough to describe completely;
+- you want an independent check that does not share your assumptions.
 
+Do not delegate:
+- reading a file whose path you know, or finding one symbol or definition (use Read, Glob or Grep instead);
+- a question about two or three known files;
+- an edit that is faster to make than to describe;
+- anything that needs back-and-forth with the user.
 
 Usage notes:
-1. Launch multiple agents concurrently whenever possible, to maximize performance; to do that, use a single message with multiple tool uses
-2. Once you have delegated work to an agent, do not duplicate that work yourself. Continue with non-overlapping tasks, or wait for the result. For background tasks, you will be notified automatically when the result is ready.
-3. When the agent is done, it will return a single message back to you. The result returned by the agent is not visible to the user. To show the user the result, you should send a text message back to the user with a concise summary of the result. The output includes a task_id you can reuse later to continue the same subagent session.
-4. Each agent invocation starts with a fresh context unless you provide task_id to resume the same subagent session (which continues with its previous messages and tool outputs). When starting fresh, your prompt should contain a highly detailed task description for the agent to perform autonomously and you should specify exactly what information the agent should return back to you in its final and only message to you.
-5. The agent's outputs should generally be trusted
-6. Clearly tell the agent whether you expect it to write code or just to do research (search, file reads, web fetches, etc.), since it is not aware of the user's intent. Tell it how to verify its work if possible (e.g., relevant test commands).
-7. If the agent description mentions that it should be used proactively, then you should try your best to use it without the user having to ask for it first. Use your judgement.
-8. For coordinated implementation, assign non-overlapping owned_paths and explicit success_criteria. Use depends_on with returned task IDs when one subagent's work must finish before another begins. Vector rejects overlapping active ownership instead of letting agents silently overwrite one another.
-9. Treat completion as evidence-based: inspect each result, run the integration checks in the parent session, and use the judge agent when an independent rubric-based verdict is required.
+1. Launch in parallel. Put every independent task call in ONE message: they run at the same time and their results come back together. Vector sets no limit, so launch as many as the work genuinely splits into. When that is more than a few, tell the user how many you launched, because each one spends on their provider keys.
+2. Write a brief that stands alone. A subagent sees none of your conversation, so brief it as you would a capable engineer who is new to the task: the goal and why it matters, the relevant files and constraints, what you already know or have ruled out, whether to change code or only research, how to verify, and exactly what its final message must contain. Tell a subagent that edits code to stay inside its owned_paths and never revert changes it did not make.
+3. description is the 3-5 word title the user sees on the subagent's card. Make each one specific and distinct from its siblings.
+4. For parallel implementation, give each subagent non-overlapping owned_paths and concrete success_criteria. Use depends_on with earlier task IDs when one subagent's work must finish before another starts. Vector rejects overlapping ownership among active sibling subagents instead of letting them overwrite each other.
+5. Once you delegate a piece, do not also do it yourself, and never sleep, poll, or ask a running subagent for status. Continue with non-overlapping work, or wait for the results.
+6. The result comes back only to you; the user does not see it. Read it, integrate it, run the integration checks yourself, and summarize the outcome for the user. A subagent's report is evidence, not proof; use the judge specialist when you need an independent rubric-based verdict.
+7. Each call starts a fresh subagent unless you pass task_id from an earlier result, which continues that same subagent session with its previous messages and tool outputs.
+
+<example>
+user: Remove every place we log user emails.
+assistant: [sends ONE message with three task calls and no subagent_type: "Strip email logs: api" with owned_paths packages/api, "Strip email logs: worker" with owned_paths packages/worker, and "Strip email logs: web" with owned_paths packages/web. Each brief names the logger calls to look for, says to redact the email rather than delete the log line, and asks for the files changed plus the test command it ran and its result.]
+<commentary>Three independent packages, so three Subagents launched together with non-overlapping ownership.</commentary>
+</example>
+
+<example>
+user: The footer in src/components/footer.tsx shows yesterday's date.
+assistant: [reads src/components/footer.tsx, fixes the date and runs its test directly, with no subagent]
+<commentary>One known file and a small fix: describing it to a subagent would take longer than doing it.</commentary>
+</example>

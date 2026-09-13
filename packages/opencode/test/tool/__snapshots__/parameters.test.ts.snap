@@ -317,7 +317,7 @@ exports[`tool parameters JSON Schema (wire shape) task 1`] = `
       "type": "array",
     },
     "description": {
-      "description": "A short (3-5 words) description of the task",
+      "description": "A short (3-5 words) title for this subagent, shown to the user on its card, e.g. "Map auth middleware". Make it specific and distinct from sibling subagents",
       "type": "string",
     },
     "owned_paths": {
@@ -328,11 +328,11 @@ exports[`tool parameters JSON Schema (wire shape) task 1`] = `
       "type": "array",
     },
     "prompt": {
-      "description": "The task for the agent to perform",
+      "description": "The task for the subagent: a complete brief that stands on its own, because the subagent sees none of your conversation",
       "type": "string",
     },
     "subagent_type": {
-      "description": "The type of specialized agent to use for this task",
+      "description": "Agent to use. Omit it for a general-purpose Subagent; name a Subagent specialist only when the work matches its description",
       "type": "string",
     },
     "success_criteria": {
@@ -350,7 +350,6 @@ exports[`tool parameters JSON Schema (wire shape) task 1`] = `
   "required": [
     "description",
     "prompt",
-    "subagent_type",
   ],
   "type": "object",
 }
