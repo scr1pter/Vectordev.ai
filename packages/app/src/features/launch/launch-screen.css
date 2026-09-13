@@ -1,8 +1,10 @@
 /* Vector launch screen.
    Painted on the very first frame (vite.js inlines it into index.html before
    any app CSS), so every value here is literal: the --vx-* tokens in
-   vector-premium.css do not exist yet. Values mirror those tokens. The mark is
-   brand purple, never the user's accent.
+   vector-premium.css do not exist yet. Values mirror those tokens. The emblem
+   is Vector's macOS app icon made of glass: the icon's own glyph
+   (launch-glyph.webp, inlined by launch-inject.js as a data: URI) on a
+   see-through body in the icon's colours, never the user's accent.
 
    Layer stack, bottom to top (all inside #vector-launch):
      0 ground   opaque workspace colour: nothing white ever shows
@@ -12,10 +14,9 @@
      3 glass    the frosted sheet: tint, glare, vignette, inner glow, 1px
                 specular top edge, grain; backdrop blur + saturate only
                 while revealing
-     4 stage    emblem (halo + glass tile + silver mark + sheen), hint,
-                failure
+     4 stage    emblem (halo, glass body, sheen, glyph), hint, failure
    Only layer 4 animates, and only transform/opacity inside a ~270px box.
-   That does not make a full-window backdrop-filter cheap: the tile's loops
+   That does not make a full-window backdrop-filter cheap: the emblem's loops
    and anything animating under the ground invalidate it, so Chromium
    re-rasterised all of it on every frame of the launch (about a whole GPU
    core at 51fps, against 0.18 core at 120fps without it). So while veiled,
@@ -62,28 +63,33 @@
   --vector-launch-leak-indigo: rgba(88, 86, 232, 0.42);
   --vector-launch-leak-lavender: rgba(192, 172, 249, 0.26);
   --vector-launch-leak-blue: rgba(107, 166, 221, 0.14);
-  /* tile + mark */
+  /* emblem: Vector's macOS app icon made of glass. The Dock icon's outline,
+     colours and glyph, but a see-through body: the icon's own gradient
+     (fitted to its art, in sRGB: lavender (194, 171, 242) at the top left,
+     purple (128, 125, 224) at the foot) at partial opacity, with a
+     lavender-white rim and a top light in the icon's own pale lavender
+     (white would turn the icon's rosy top grey), so the halo's glow and the
+     ghost show through it. Much less alpha and the icon dims into a grey
+     slab over the dark ground. Plain alpha, never a backdrop-filter, so it
+     costs nothing per frame. The glyph on it is the icon's own pixels, opaque
+     (launch-glyph.webp).
+     The outline is Tahoe's continuous-corner squircle (measured against an
+     NSWorkspace render): a 26.2% circular radius strays about 0.5px from it
+     at 112px, and where corner-shape exists a superellipse (below) stays
+     within 0.18px. The body, its shadow, the sheen's clip and the contrast
+     ring all follow it. */
   --vector-launch-tile-size: 112px;
-  --vector-launch-tile-radius: 28px;
-  --vector-launch-tile-fill: rgba(38, 34, 46, 0.46);
-  --vector-launch-tile-gloss: linear-gradient(
-    155deg,
-    rgba(255, 255, 255, 0.17) 0%,
-    rgba(255, 255, 255, 0.05) 44%,
-    rgba(182, 159, 247, 0.09) 100%
-  );
-  --vector-launch-tile-rim: rgba(255, 255, 255, 0.09);
-  --vector-launch-tile-top: rgba(255, 255, 255, 0.36);
-  --vector-launch-tile-under: rgba(146, 116, 236, 0.3);
-  --vector-launch-tile-drop: rgba(8, 5, 20, 0.64);
-  --vector-launch-halo: rgba(146, 116, 236, 0.3);
-  --vector-launch-mark-size: 64px;
-  --vector-launch-mark-1: #ffffff;
-  --vector-launch-mark-2: #e3dfec;
-  --vector-launch-mark-3: #c8bdf3;
-  --vector-launch-mark-4: #a38cf0;
-  --vector-launch-mark-shadow: rgba(10, 6, 26, 0.62);
-  --vector-launch-mark-spec: rgba(255, 255, 255, 0.9);
+  --vector-launch-icon-radius: 26.2%;
+  --vector-launch-body-alpha: 0.74;
+  --vector-launch-body-light: rgba(224, 208, 255, 0.26);
+  --vector-launch-body-rim: rgba(240, 232, 255, 0.5);
+  --vector-launch-body-rim-low: rgba(240, 232, 255, 0.2);
+  --vector-launch-body-edge: rgba(236, 228, 255, 0.16);
+  --vector-launch-body-glow: rgba(236, 228, 255, 0.3);
+  --vector-launch-halo: rgba(160, 144, 232, 0.34);
+  --vector-launch-icon-contact: rgba(12, 8, 30, 0.3);
+  --vector-launch-icon-lift: rgba(104, 94, 214, 0.5);
+  --vector-launch-icon-ring: transparent;
   /* type */
   --vector-launch-text: #ebe7ee;
   --vector-launch-text-muted: #8f8896;
@@ -315,7 +321,7 @@ html:is([data-vector-launch="veiled"], [data-vector-launch="slow"]) .vector-laun
   opacity: var(--vector-launch-grain);
 }
 
-/* 4 stage: emblem (halo, tile, mark, sheen), hint, failure ------------------ */
+/* 4 stage: emblem (halo, glass body, sheen, glyph), hint, failure ----------- */
 
 .vector-launch-stage {
   position: relative;
@@ -347,72 +353,98 @@ html:is([data-vector-launch="veiled"], [data-vector-launch="slow"]) .vector-laun
   animation: vector-launch-halo 3.6s ease-in-out 480ms infinite backwards;
 }
 
+/* The icon's body, in glass: the icon's gradient at partial opacity. Its
+   edge is drawn the way macOS 26 draws glass: a soft lavender-white glow all
+   round the inside of the rim, a bright lip where the light catches the top
+   left and a softer one at the bottom right, over a hairline. Outside it is
+   the shadow macOS gives an app icon (a light contact shadow and a soft lift
+   in the icon's purple; outer shadows stop at the edge, so none shows
+   through the glass). All static box-shadows, painted once. The tile never
+   scales while it waits: a scaling layer resamples the glyph on every frame
+   and visibly softens it, so the halo carries the pulse and the glyph stays
+   as sharp as a still image. */
 .vector-launch-tile {
   position: relative;
-  display: grid;
-  place-items: center;
+  /* The top light and the sheen blend with the icon and nothing else, in
+     every phase. */
+  isolation: isolate;
   width: var(--vector-launch-tile-size);
   height: var(--vector-launch-tile-size);
-  overflow: hidden;
-  border-radius: var(--vector-launch-tile-radius);
-  background: var(--vector-launch-tile-gloss), var(--vector-launch-tile-fill);
+  border-radius: var(--vector-launch-icon-radius);
+  background: linear-gradient(
+    164deg,
+    rgb(194 171 242 / var(--vector-launch-body-alpha)),
+    rgb(153 139 227 / var(--vector-launch-body-alpha)) 50%,
+    rgb(128 125 224 / var(--vector-launch-body-alpha))
+  );
   box-shadow:
-    inset 0 1px 0 var(--vector-launch-tile-top),
-    inset 0 0 0 1px var(--vector-launch-tile-rim),
-    inset 0 22px 28px -22px rgba(255, 255, 255, 0.22),
-    inset 0 -14px 24px -18px var(--vector-launch-tile-under),
-    0 0 0 0.5px rgba(0, 0, 0, 0.35),
-    0 2px 4px rgba(0, 0, 0, 0.22),
-    0 26px 56px -22px var(--vector-launch-tile-drop);
-  animation: vector-launch-breathe 3.6s ease-in-out 480ms infinite;
+    0 0 0 1px var(--vector-launch-icon-ring),
+    inset 0.75px 1px 0 var(--vector-launch-body-rim),
+    inset -0.75px -1px 0 var(--vector-launch-body-rim-low),
+    inset 0 0 0 1px var(--vector-launch-body-edge),
+    inset 0 0 2.5px 0.6px var(--vector-launch-body-glow),
+    0 1px 2px var(--vector-launch-icon-contact),
+    0 18px 34px -14px var(--vector-launch-icon-lift);
 }
 
-.vector-launch-mark {
+/* Top light: the glass is brighter where it faces the light, in the icon's
+   pale lavender so its rosy top stays rosy. Under the glyph (z-index -1
+   inside the tile's stacking context), which has its own gloss. */
+.vector-launch-tile::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: radial-gradient(110% 70% at 26% -4%, var(--vector-launch-body-light), transparent 64%);
+  pointer-events: none;
+}
+
+/* The glyph: the icon's own pixels and its tight contact shadow, over
+   transparency. Never clipped or tinted; only the failed state mutes the
+   emblem, below. The icon's soft drop shadow is drawn here rather than
+   baked into the bitmap, where it would double its size: the same indigo,
+   offset and blur, fitted to the art. A static filter, rasterised once.
+   It is positioned and comes after the gloss in the markup, so it paints
+   over the sheen: the glint crosses the glass, never the solid chip. */
+.vector-launch-glyph {
   position: relative;
-  z-index: 1;
-  width: var(--vector-launch-mark-size);
-  height: var(--vector-launch-mark-size);
-  overflow: visible;
-  filter: drop-shadow(0 7px 9px var(--vector-launch-mark-shadow));
+  display: block;
+  width: 100%;
+  height: 100%;
+  filter: drop-shadow(0 2.2px 5.9px rgb(0 0 122 / 0.26));
+  -webkit-user-drag: none;
 }
 
-.vector-launch-mark .vector-launch-stop-1 {
-  stop-color: var(--vector-launch-mark-1);
+/* The sheen's clip: the icon's squircle, holding still while the band inside
+   moves. No z-index, so no stacking context: the band still blends with the
+   glass underneath. It comes before the glyph in the markup, so the chip
+   covers it. */
+.vector-launch-gloss {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  pointer-events: none;
 }
 
-.vector-launch-mark .vector-launch-stop-2 {
-  stop-color: var(--vector-launch-mark-2);
-}
-
-.vector-launch-mark .vector-launch-stop-3 {
-  stop-color: var(--vector-launch-mark-3);
-}
-
-.vector-launch-mark .vector-launch-stop-4 {
-  stop-color: var(--vector-launch-mark-4);
-}
-
-.vector-launch-mark .vector-launch-spec-stop {
-  stop-color: var(--vector-launch-mark-spec);
-}
-
-/* Specular sweep: one skewed band crosses the tile, then rests. Same
-   park-sweep-park rhythm as vx-home-scan (vector-premium.css). */
+/* Specular sweep: one skewed band crosses the glass under the chip, then
+   rests. Same park-sweep-park rhythm as vx-home-scan (vector-premium.css).
+   Additive, and the same in both themes: gentle enough that the lavender
+   glass brightens without burning out to white. */
 .vector-launch-sheen {
   position: absolute;
-  z-index: 2;
   inset: -30% auto -30% 0;
   width: 42%;
   background: linear-gradient(
     90deg,
     rgba(255, 255, 255, 0) 0%,
-    rgba(255, 255, 255, 0.16) 38%,
-    rgba(246, 242, 255, 0.42) 50%,
-    rgba(255, 255, 255, 0.16) 62%,
+    rgba(255, 255, 255, 0.08) 38%,
+    rgba(246, 242, 255, 0.26) 50%,
+    rgba(255, 255, 255, 0.08) 62%,
     rgba(255, 255, 255, 0) 100%
   );
   mix-blend-mode: plus-lighter;
-  pointer-events: none;
   transform: translateX(-170%) skewX(-18deg);
   animation: vector-launch-sheen 4.8s var(--vector-launch-ease) 900ms infinite;
 }
@@ -512,13 +544,20 @@ html:is([data-vector-launch="veiled"], [data-vector-launch="slow"]) .vector-laun
   border: 0;
 }
 
-/* Failed: the mark stops breathing and dims, the halo cools toward red. */
-.vector-launch[data-state="failed"] :is(.vector-launch-tile, .vector-launch-halo, .vector-launch-sheen) {
+/* Failed: everything stops and the icon is muted, glass and glyph together,
+   rather than dimmed: less colour, a little darker (a little lighter on the
+   pale ground), the glyph still solid. The halo cools toward red. Nothing
+   animates in this state, so the filter rasterises once. */
+.vector-launch[data-state="failed"] :is(.vector-launch-halo, .vector-launch-sheen) {
   animation: none;
 }
 
-.vector-launch[data-state="failed"] .vector-launch-mark {
-  opacity: 0.5;
+.vector-launch[data-state="failed"] .vector-launch-tile {
+  filter: saturate(0.35) brightness(0.8);
+}
+
+html[data-color-scheme="light"] .vector-launch[data-state="failed"] .vector-launch-tile {
+  filter: saturate(0.35) brightness(1.04);
 }
 
 .vector-launch[data-state="failed"] .vector-launch-sheen {
@@ -625,24 +664,14 @@ html[data-color-scheme="light"] .vector-launch {
   --vector-launch-leak-indigo: rgba(79, 70, 229, 0.22);
   --vector-launch-leak-lavender: rgba(182, 159, 247, 0.34);
   --vector-launch-leak-blue: rgba(63, 127, 196, 0.12);
-  --vector-launch-tile-fill: rgba(255, 255, 255, 0.5);
-  --vector-launch-tile-gloss: linear-gradient(
-    155deg,
-    rgba(255, 255, 255, 0.95) 0%,
-    rgba(255, 255, 255, 0.5) 48%,
-    rgba(182, 159, 247, 0.2) 100%
-  );
-  --vector-launch-tile-rim: rgba(20, 16, 30, 0.07);
-  --vector-launch-tile-top: #ffffff;
-  --vector-launch-tile-under: rgba(124, 79, 224, 0.16);
-  --vector-launch-tile-drop: rgba(60, 40, 120, 0.3);
-  --vector-launch-halo: rgba(124, 79, 224, 0.2);
-  --vector-launch-mark-1: #5d5769;
-  --vector-launch-mark-2: #433d4f;
-  --vector-launch-mark-3: #5b43c4;
-  --vector-launch-mark-4: #7c4fe0;
-  --vector-launch-mark-shadow: rgba(60, 40, 120, 0.28);
-  --vector-launch-mark-spec: rgba(255, 255, 255, 0.75);
+  --vector-launch-halo: rgba(136, 129, 224, 0.26);
+  --vector-launch-body-alpha: 0.8;
+  --vector-launch-body-light: rgba(230, 218, 255, 0.22);
+  --vector-launch-body-rim: rgba(240, 232, 255, 0.85);
+  --vector-launch-body-rim-low: rgba(240, 232, 255, 0.45);
+  --vector-launch-body-edge: rgba(92, 72, 180, 0.16);
+  --vector-launch-icon-contact: rgba(52, 36, 110, 0.16);
+  --vector-launch-icon-lift: rgba(104, 94, 214, 0.36);
   --vector-launch-text: #19171d;
   --vector-launch-text-muted: #6b6774;
   --vector-launch-danger: #cf4750;
@@ -654,11 +683,6 @@ html[data-color-scheme="light"] .vector-launch-button {
   box-shadow:
     inset 0 1px 0 #ffffff,
     0 6px 18px -10px rgba(60, 40, 120, 0.35);
-}
-
-html[data-color-scheme="light"] .vector-launch-sheen {
-  mix-blend-mode: normal;
-  opacity: 0.7;
 }
 
 /* Glass setting off, or the OS asks for less transparency: the glass goes
@@ -701,10 +725,10 @@ html[data-vector-launch-tier="lite"] .vector-launch-sheen {
 }
 
 /* Reduced motion (OS setting or Vector's Reduce animations, stamped by
-   launch-host.ts): nothing loops. The sheen parks as a static glint so the
-   tile still looks glossy; the exit becomes a 200ms fade. */
-html[data-vector-launch-motion="reduced"]
-  :is(.vector-launch-emblem, .vector-launch-halo, .vector-launch-tile, .vector-launch-sheen) {
+   launch-host.ts): nothing loops. The sheen goes too: parked on the icon it
+   would read as a streak across the artwork, not a glint. The exit becomes a
+   200ms fade. */
+html[data-vector-launch-motion="reduced"] :is(.vector-launch-emblem, .vector-launch-halo) {
   animation: none;
 }
 
@@ -714,8 +738,7 @@ html[data-vector-launch-motion="reduced"] .vector-launch[data-state="failed"] .v
 }
 
 html[data-vector-launch-motion="reduced"] .vector-launch-sheen {
-  opacity: 0.55;
-  transform: translateX(70%) skewX(-18deg);
+  display: none;
 }
 
 /* The fades are !important because, with the OS setting on, vector-premium.css
@@ -742,10 +765,51 @@ html[data-vector-launch-motion="reduced"]
   transition: opacity 200ms linear !important;
 }
 
+/* More contrast: muted text goes full strength, the glass thickens so the
+   glyph sits on nearly the icon's own colour, and a hairline sits on the
+   icon's edge to set it off from the ground. The light theme's tokens
+   out-rank a bare .vector-launch, so it restates them. */
 @media (prefers-contrast: more) {
   .vector-launch {
     --vector-launch-text-muted: var(--vector-launch-text);
-    --vector-launch-tile-rim: rgba(255, 255, 255, 0.3);
+    --vector-launch-icon-ring: rgba(255, 255, 255, 0.42);
+    --vector-launch-body-alpha: 0.9;
+  }
+
+  html[data-color-scheme="light"] .vector-launch {
+    --vector-launch-text-muted: var(--vector-launch-text);
+    --vector-launch-icon-ring: rgba(20, 16, 30, 0.5);
+    --vector-launch-body-alpha: 0.9;
+  }
+}
+
+/* Glass off, or the OS asks for less transparency: the icon's body goes
+   solid and loses the glass's top light, the icon as the Dock draws it.
+   After the contrast rules, which it out-ranks by order. */
+html[data-vector-launch-glass="off"] .vector-launch,
+html[data-vector-glass="false"] .vector-launch {
+  --vector-launch-body-alpha: 1;
+}
+
+html[data-vector-launch-glass="off"] .vector-launch-tile::before,
+html[data-vector-glass="false"] .vector-launch-tile::before {
+  display: none;
+}
+
+/* Where corner-shape exists (Chromium 139 and later, so every desktop
+   build), a superellipse traces Tahoe's squircle to within 0.18px at 112px,
+   against about 0.5px for the circular radius it replaces (fitted to an
+   NSWorkspace render, checked on Chromium's own raster). The top light and
+   the sheen's clip follow it; box-shadows do on their own. */
+@supports (corner-shape: superellipse(2)) {
+  .vector-launch {
+    --vector-launch-icon-radius: 33.4%;
+  }
+
+  .vector-launch-tile,
+  .vector-launch-tile::before,
+  .vector-launch-gloss {
+    corner-shape: superellipse(1.43);
   }
 }
 
@@ -759,12 +823,20 @@ html[data-vector-launch-motion="reduced"]
   .vector-launch-ghost,
   .vector-launch-aurora,
   .vector-launch-halo,
-  .vector-launch-sheen {
+  .vector-launch-sheen,
+  .vector-launch-tile::before {
     display: none;
   }
 
+  /* The glyph is an image, so forced colours leave it as drawn: dark. Its
+     body goes solid in the icon's colours so the glyph stays visible on any
+     Canvas, and an outline marks the edge in place of the shadows forced
+     colours would drop anyway. */
   .vector-launch-tile {
-    border: 1px solid CanvasText;
+    forced-color-adjust: none;
+    --vector-launch-body-alpha: 1;
+    box-shadow: none;
+    outline: 1px solid CanvasText;
   }
 }
 
@@ -778,16 +850,6 @@ html[data-vector-launch-motion="reduced"]
   from {
     opacity: 0;
     transform: translateY(6px) scale(0.955);
-  }
-}
-
-@keyframes vector-launch-breathe {
-  0%,
-  100% {
-    transform: scale(1);
-  }
-  50% {
-    transform: scale(1.028);
   }
 }
 
