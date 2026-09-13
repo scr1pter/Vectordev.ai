@@ -56,6 +56,8 @@ import LegacyLayout from "@/pages/layout"
 import NewLayout from "@/pages/layout-new"
 import { ErrorPage } from "./pages/error"
 import { LicenseGate } from "./components/license-gate"
+import { LaunchAttach, LaunchReadyProbe, LaunchSettingsMirror } from "@/features/launch/launch-handoff"
+import { LaunchYield, yieldLaunchScreen } from "@/features/launch/launch-yield"
 import { useCheckServerHealth } from "./utils/server-health"
 import { legacySessionServer, requireServerKey, sessionHref } from "./utils/session-route"
 
@@ -515,6 +517,7 @@ function NewAppLayout(props: ParentProps) {
     <SelectedServerProviders>
       <ServerScopedProviders>
         <NewLayout>{props.children}</NewLayout>
+        <LaunchReadyProbe />
       </ServerScopedProviders>
     </SelectedServerProviders>
   )
@@ -564,8 +567,12 @@ export function AppBaseProviders(props: ParentProps<{ locale?: Locale }>) {
       >
         <LanguageProvider locale={props.locale}>
           <UiI18nBridge>
+            <LaunchAttach />
             <ErrorBoundary
               fallback={(error) => {
+                // Hand the window to the error page first, so the launch glass
+                // can never cover it, even if rendering the page throws.
+                yieldLaunchScreen("error")
                 Sentry.captureException(error)
                 return <ErrorPage error={error} />
               }}
@@ -660,6 +667,7 @@ function ConnectionError(props: { onRetry?: () => void; onServerSelected?: (key:
 
   return (
     <div class="h-dvh w-screen flex flex-col items-center justify-center bg-background-base gap-6 p-6">
+      <LaunchYield reason="unreachable" />
       <div class="flex flex-col items-center max-w-md text-center">
         <Splash class="w-12 h-15 mb-4" />
         <p class="text-14-regular text-text-base">
@@ -743,6 +751,7 @@ export function AppInterface(props: {
       <GlobalProvider>
         <SettingsProvider>
           <VectorThemeSync />
+          <LaunchSettingsMirror />
           <LicenseGate>
             <ConnectionGate disableHealthCheck={props.disableHealthCheck}>
               <Show when={useSettings().general.newLayoutDesigns().toString()} keyed>

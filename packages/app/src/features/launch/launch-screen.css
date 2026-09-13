@@ -1,0 +1,826 @@
+/* Vector launch screen.
+   Painted on the very first frame (vite.js inlines it into index.html before
+   any app CSS), so every value here is literal: the --vx-* tokens in
+   vector-premium.css do not exist yet. Values mirror those tokens. The mark is
+   brand purple, never the user's accent.
+
+   Layer stack, bottom to top (all inside #vector-launch):
+     0 ground   opaque workspace colour: nothing white ever shows
+     1 ghost    a hard-edged skeleton of Vector's shell; only ever seen
+                through the 44px frost, so it reads as soft blobs
+     2 aurora   static purple / indigo / lavender light leaks
+     3 glass    the frosted sheet: tint, glare, vignette, inner glow, 1px
+                specular top edge, grain; backdrop blur + saturate only
+                while revealing
+     4 stage    emblem (halo + glass tile + silver mark + sheen), hint,
+                failure
+   Only layer 4 animates, and only transform/opacity inside a ~270px box.
+   That does not make a full-window backdrop-filter cheap: the tile's loops
+   and anything animating under the ground invalidate it, so Chromium
+   re-rasterised all of it on every frame of the launch (about a whole GPU
+   core at 51fps, against 0.18 core at 120fps without it). So while veiled,
+   slow or failed, when the opaque ground hides the app anyway, the frost is
+   baked: the ghost and aurora carry the glass's blur and saturate as a
+   static filter and the glass has no backdrop-filter. Only revealing turns
+   the live frost on, for the 600ms it has the real app to blur.
+
+   The entrance animation lives on .vector-launch-emblem and the exit
+   transition on .vector-launch-stage: Chromium skips a transition on an
+   element whose CSS animation on the same property is still current, so
+   sharing one element made the tile pop out instead of scaling.
+
+   Never put opacity, filter, mask, clip-path, mix-blend-mode or will-change on
+   .vector-launch itself: that makes it the Backdrop Root and the glass could
+   no longer see the real app underneath during the exit crossfade.
+
+   Phases come from launch-host.ts on html[data-vector-launch] and on the
+   node's data-state: veiled, slow, failed, revealing (then the node is
+   removed and html says "done"). */
+
+.vector-launch {
+  --vector-launch-ease: var(--vx-ease, cubic-bezier(0.22, 1, 0.36, 1));
+  /* ground + ghost (dark). Slightly more contrast than the real shell,
+     because the ghost is only ever seen through 44px of frost. */
+  --vector-launch-ground: #1d1d1f;
+  --vector-launch-ghost-nav: #2d2933;
+  --vector-launch-ghost-stage: #1e1d22;
+  --vector-launch-ghost-panel: #26232b;
+  --vector-launch-ghost-card: #3a3543;
+  --vector-launch-ghost-row: rgba(235, 231, 238, 0.13);
+  --vector-launch-ghost-line: rgba(226, 213, 237, 0.12);
+  /* glass */
+  --vector-launch-blur: 44px;
+  --vector-launch-saturate: 1.6;
+  --vector-launch-tint: rgba(16, 14, 21, 0.34);
+  --vector-launch-glare: rgba(255, 255, 255, 0.06);
+  --vector-launch-vignette: rgba(6, 4, 12, 0.38);
+  --vector-launch-edge: rgba(255, 255, 255, 0.2);
+  --vector-launch-edge-peak: rgba(236, 228, 255, 0.46);
+  --vector-launch-grain: 0.05;
+  /* light leaks */
+  --vector-launch-leak-purple: rgba(146, 116, 236, 0.5);
+  --vector-launch-leak-indigo: rgba(88, 86, 232, 0.42);
+  --vector-launch-leak-lavender: rgba(192, 172, 249, 0.26);
+  --vector-launch-leak-blue: rgba(107, 166, 221, 0.14);
+  /* tile + mark */
+  --vector-launch-tile-size: 112px;
+  --vector-launch-tile-radius: 28px;
+  --vector-launch-tile-fill: rgba(38, 34, 46, 0.46);
+  --vector-launch-tile-gloss: linear-gradient(
+    155deg,
+    rgba(255, 255, 255, 0.17) 0%,
+    rgba(255, 255, 255, 0.05) 44%,
+    rgba(182, 159, 247, 0.09) 100%
+  );
+  --vector-launch-tile-rim: rgba(255, 255, 255, 0.09);
+  --vector-launch-tile-top: rgba(255, 255, 255, 0.36);
+  --vector-launch-tile-under: rgba(146, 116, 236, 0.3);
+  --vector-launch-tile-drop: rgba(8, 5, 20, 0.64);
+  --vector-launch-halo: rgba(146, 116, 236, 0.3);
+  --vector-launch-mark-size: 64px;
+  --vector-launch-mark-1: #ffffff;
+  --vector-launch-mark-2: #e3dfec;
+  --vector-launch-mark-3: #c8bdf3;
+  --vector-launch-mark-4: #a38cf0;
+  --vector-launch-mark-shadow: rgba(10, 6, 26, 0.62);
+  --vector-launch-mark-spec: rgba(255, 255, 255, 0.9);
+  /* type */
+  --vector-launch-text: #ebe7ee;
+  --vector-launch-text-muted: #8f8896;
+  --vector-launch-danger: #e6787d;
+
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;
+  /* Hidden unless the host script is alive and names a live phase (below):
+     if the script never ran, the app shows exactly as it would without us. */
+  display: none;
+  place-items: center;
+  overflow: hidden;
+  contain: strict;
+  color: var(--vector-launch-text);
+  font:
+    500 12.5px/1.45 -apple-system,
+    BlinkMacSystemFont,
+    "SF Pro Text",
+    "Segoe UI",
+    system-ui,
+    sans-serif;
+  letter-spacing: 0.005em;
+  -webkit-font-smoothing: antialiased;
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: default;
+  /* The window has no titlebar (windows.ts titleBarStyle hidden): keep it
+     draggable while the launch screen covers it. */
+  -webkit-app-region: drag;
+}
+
+html:is(
+    [data-vector-launch="veiled"],
+    [data-vector-launch="slow"],
+    [data-vector-launch="failed"],
+    [data-vector-launch="revealing"]
+  )
+  .vector-launch {
+  display: grid;
+}
+
+/* Last resort if the host script died while veiled: after 90s the overlay
+   stops painting and hit-testing. A live host always leaves veiled/slow by
+   the 60s hard cap, which removes this animation before it can fire. */
+html:is([data-vector-launch="veiled"], [data-vector-launch="slow"]) .vector-launch {
+  animation: vector-launch-failsafe 1ms linear 90s forwards;
+}
+
+.vector-launch [hidden] {
+  display: none !important;
+}
+
+.vector-launch-ground,
+.vector-launch-ghost,
+.vector-launch-aurora,
+.vector-launch-glass {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* 0 ground ---------------------------------------------------------------- */
+
+.vector-launch-ground {
+  z-index: 0;
+  background: var(--vector-launch-ground);
+}
+
+/* 1 ghost: Vector's shell, blurred into blobs by the glass ----------------- */
+
+.vector-launch-ghost {
+  z-index: 1;
+  display: grid;
+  grid-template-columns: var(--vector-launch-nav, 320px) minmax(0, 1fr) clamp(240px, 27vw, 440px);
+}
+
+.vector-launch-ghost-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 54px 18px 18px;
+  background: var(--vector-launch-ghost-nav);
+}
+
+.vector-launch-ghost-nav > span {
+  display: block;
+  height: 12px;
+  border-radius: 6px;
+  background: var(--vector-launch-ghost-row);
+}
+
+.vector-launch-ghost-nav > span:nth-child(1) {
+  height: 30px;
+  margin-bottom: 14px;
+  border-radius: 10px;
+  background: var(--vector-launch-ghost-card);
+}
+
+.vector-launch-ghost-nav > span:nth-child(2) {
+  width: 72%;
+}
+
+.vector-launch-ghost-nav > span:nth-child(3) {
+  width: 58%;
+}
+
+.vector-launch-ghost-nav > span:nth-child(4) {
+  width: 80%;
+}
+
+.vector-launch-ghost-nav > span:nth-child(5) {
+  width: 46%;
+}
+
+.vector-launch-ghost-nav > span:nth-child(6) {
+  width: 64%;
+}
+
+.vector-launch-ghost-stage {
+  position: relative;
+  background: var(--vector-launch-ghost-stage);
+}
+
+.vector-launch-ghost-stage > span {
+  position: absolute;
+  left: 50%;
+  display: block;
+  border-radius: 14px;
+  background: var(--vector-launch-ghost-row);
+  transform: translateX(-50%);
+}
+
+.vector-launch-ghost-stage > span:nth-child(1) {
+  top: 18%;
+  width: min(560px, 70%);
+  height: 58px;
+}
+
+.vector-launch-ghost-stage > span:nth-child(2) {
+  top: calc(18% + 86px);
+  width: min(420px, 52%);
+  height: 40px;
+}
+
+/* Same footprint as the real composer: 116px tall, 20px radius, lifted
+   clamp(42px, 4.5vh, 58px) off the bottom (vector-premium.css). */
+.vector-launch-ghost-stage > .vector-launch-ghost-composer {
+  bottom: clamp(42px, 4.5vh, 58px);
+  width: min(720px, calc(100% - 96px));
+  height: 116px;
+  border-radius: 20px;
+  background: var(--vector-launch-ghost-card);
+  box-shadow: inset 0 0 0 1px var(--vector-launch-ghost-line);
+}
+
+.vector-launch-ghost-panel {
+  background: var(--vector-launch-ghost-panel);
+  box-shadow: inset 1px 0 0 var(--vector-launch-ghost-line);
+}
+
+@media (max-width: 960px) {
+  .vector-launch-ghost {
+    grid-template-columns: var(--vector-launch-nav, 320px) minmax(0, 1fr) 0;
+  }
+}
+
+/* 2 aurora: Vector's hues where Cursor has red and green ------------------- */
+
+.vector-launch-aurora {
+  z-index: 2;
+  inset: -8%;
+  background:
+    radial-gradient(40% 36% at 86% 8%, var(--vector-launch-leak-purple), transparent 72%),
+    radial-gradient(24% 22% at 66% 0%, var(--vector-launch-leak-lavender), transparent 70%),
+    radial-gradient(40% 36% at 8% 94%, var(--vector-launch-leak-indigo), transparent 72%),
+    radial-gradient(26% 24% at 26% 88%, var(--vector-launch-leak-lavender), transparent 70%),
+    radial-gradient(32% 28% at 60% 104%, var(--vector-launch-leak-blue), transparent 70%);
+}
+
+/* 3 glass: the frosted sheet ---------------------------------------------- */
+
+/* The frost, baked: the glass's blur and saturate, put on the ghost and
+   aurora instead of seen through the glass. The ground under them is flat and
+   near-grey, so blurring and saturating it would change nothing, and this
+   matches the backdrop blur of all three (the ghost just falls off a little
+   softer at the window edges, under the vignette). Revealing swaps it for the
+   live backdrop-filter. */
+.vector-launch-ghost,
+.vector-launch-aurora {
+  filter: blur(var(--vector-launch-blur)) saturate(var(--vector-launch-saturate));
+}
+
+.vector-launch-glass {
+  z-index: 3;
+  background:
+    radial-gradient(120% 70% at 18% -18%, var(--vector-launch-glare), transparent 58%),
+    radial-gradient(150% 115% at 50% 42%, transparent 58%, var(--vector-launch-vignette) 100%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent 26%), var(--vector-launch-tint);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.035),
+    inset 0 0 180px rgba(182, 159, 247, 0.05);
+}
+
+/* Specular top edge: light catching the lip of the pane. */
+.vector-launch-glass::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent 2%,
+    var(--vector-launch-edge) 26%,
+    var(--vector-launch-edge-peak) 50%,
+    var(--vector-launch-edge) 74%,
+    transparent 98%
+  );
+}
+
+/* Grain: grey fractal noise at 5%. Dithers the deep blur so the dark
+   gradients never band. Rasterised once as a 160px tile. */
+.vector-launch-glass::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 160px 160px;
+  opacity: var(--vector-launch-grain);
+}
+
+/* 4 stage: emblem (halo, tile, mark, sheen), hint, failure ------------------ */
+
+.vector-launch-stage {
+  position: relative;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+}
+
+.vector-launch-emblem {
+  display: grid;
+  place-items: center;
+  animation: vector-launch-emblem-in 420ms var(--vector-launch-ease) 60ms backwards;
+}
+
+.vector-launch-halo,
+.vector-launch-tile {
+  grid-area: 1 / 1;
+}
+
+.vector-launch-halo {
+  width: calc(var(--vector-launch-tile-size) * 2.4);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, var(--vector-launch-halo), transparent);
+  opacity: 0.6;
+  /* backwards: the loop's first frame holds through the delay, so the halo
+     flows out of the entrance instead of popping at 480ms. The resting 0.6
+     only shows with the loop off. */
+  animation: vector-launch-halo 3.6s ease-in-out 480ms infinite backwards;
+}
+
+.vector-launch-tile {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: var(--vector-launch-tile-size);
+  height: var(--vector-launch-tile-size);
+  overflow: hidden;
+  border-radius: var(--vector-launch-tile-radius);
+  background: var(--vector-launch-tile-gloss), var(--vector-launch-tile-fill);
+  box-shadow:
+    inset 0 1px 0 var(--vector-launch-tile-top),
+    inset 0 0 0 1px var(--vector-launch-tile-rim),
+    inset 0 22px 28px -22px rgba(255, 255, 255, 0.22),
+    inset 0 -14px 24px -18px var(--vector-launch-tile-under),
+    0 0 0 0.5px rgba(0, 0, 0, 0.35),
+    0 2px 4px rgba(0, 0, 0, 0.22),
+    0 26px 56px -22px var(--vector-launch-tile-drop);
+  animation: vector-launch-breathe 3.6s ease-in-out 480ms infinite;
+}
+
+.vector-launch-mark {
+  position: relative;
+  z-index: 1;
+  width: var(--vector-launch-mark-size);
+  height: var(--vector-launch-mark-size);
+  overflow: visible;
+  filter: drop-shadow(0 7px 9px var(--vector-launch-mark-shadow));
+}
+
+.vector-launch-mark .vector-launch-stop-1 {
+  stop-color: var(--vector-launch-mark-1);
+}
+
+.vector-launch-mark .vector-launch-stop-2 {
+  stop-color: var(--vector-launch-mark-2);
+}
+
+.vector-launch-mark .vector-launch-stop-3 {
+  stop-color: var(--vector-launch-mark-3);
+}
+
+.vector-launch-mark .vector-launch-stop-4 {
+  stop-color: var(--vector-launch-mark-4);
+}
+
+.vector-launch-mark .vector-launch-spec-stop {
+  stop-color: var(--vector-launch-mark-spec);
+}
+
+/* Specular sweep: one skewed band crosses the tile, then rests. Same
+   park-sweep-park rhythm as vx-home-scan (vector-premium.css). */
+.vector-launch-sheen {
+  position: absolute;
+  z-index: 2;
+  inset: -30% auto -30% 0;
+  width: 42%;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.16) 38%,
+    rgba(246, 242, 255, 0.42) 50%,
+    rgba(255, 255, 255, 0.16) 62%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  mix-blend-mode: plus-lighter;
+  pointer-events: none;
+  transform: translateX(-170%) skewX(-18deg);
+  animation: vector-launch-sheen 4.8s var(--vector-launch-ease) 900ms infinite;
+}
+
+/* Slow-start hint and failure line sit under the tile without moving it. */
+.vector-launch-hint,
+.vector-launch-failure {
+  position: absolute;
+  top: calc(50% + var(--vector-launch-tile-size) / 2 + 26px);
+  left: 50%;
+  width: max-content;
+  max-width: min(520px, calc(100vw - 48px));
+  margin: 0;
+  text-align: center;
+  text-wrap: balance;
+}
+
+.vector-launch-hint {
+  color: var(--vector-launch-text-muted);
+  opacity: 0;
+  transform: translate(-50%, 4px);
+  transition:
+    opacity 420ms var(--vector-launch-ease),
+    transform 420ms var(--vector-launch-ease);
+}
+
+.vector-launch[data-state="slow"] .vector-launch-hint {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+.vector-launch-failure {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  transform: translateX(-50%);
+  -webkit-app-region: no-drag;
+}
+
+.vector-launch-failure > p {
+  margin: 0;
+  color: var(--vector-launch-text);
+  font-size: 13px;
+}
+
+.vector-launch-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.vector-launch-button {
+  display: inline-flex;
+  align-items: center;
+  height: 30px;
+  padding: 0 14px;
+  border: 1px solid rgba(226, 213, 237, 0.16);
+  border-radius: 9px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.04));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 6px 18px -8px rgba(0, 0, 0, 0.6);
+  color: var(--vector-launch-text);
+  font: inherit;
+  font-weight: 560;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+  transition: background 160ms var(--vector-launch-ease);
+}
+
+.vector-launch-button:hover {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.06));
+}
+
+/* Same ring as vector-premium.css :focus-visible. */
+.vector-launch-button:focus-visible {
+  outline: 2px solid color-mix(in oklab, #9274ec 76%, white 6%);
+  outline-offset: 2px;
+}
+
+.vector-launch-button[data-variant="quiet"] {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  color: var(--vector-launch-text-muted);
+}
+
+.vector-launch-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Failed: the mark stops breathing and dims, the halo cools toward red. */
+.vector-launch[data-state="failed"] :is(.vector-launch-tile, .vector-launch-halo, .vector-launch-sheen) {
+  animation: none;
+}
+
+.vector-launch[data-state="failed"] .vector-launch-mark {
+  opacity: 0.5;
+}
+
+.vector-launch[data-state="failed"] .vector-launch-sheen {
+  opacity: 0;
+}
+
+.vector-launch[data-state="failed"] .vector-launch-halo {
+  opacity: 0.4;
+  background: radial-gradient(
+    closest-side,
+    color-mix(in srgb, var(--vector-launch-danger) 24%, transparent),
+    transparent
+  );
+}
+
+.vector-launch[data-state="failed"] .vector-launch-hint {
+  display: none;
+}
+
+.vector-launch[data-state="failed"] .vector-launch-failure {
+  display: flex;
+  animation: vector-launch-rise 420ms var(--vector-launch-ease) both;
+}
+
+/* Revealing (600ms): nothing here takes input any more, including the window
+   drag region, which Electron computes regardless of pointer-events. The
+   ground and ghost drop out first so the glass is frosting the REAL app; the
+   glass holds 120ms, then fades, so a blurred copy dissolves off a sharp
+   original (perceived blur 44px to 0) without animating backdrop-filter. The
+   emblem lifts and fades in parallel. */
+.vector-launch[data-state="revealing"],
+.vector-launch[data-state="revealing"] * {
+  pointer-events: none !important;
+  -webkit-app-region: no-drag !important;
+}
+
+/* The live frost, the launch screen's only backdrop-filter: now there is a
+   real app under the glass to blur. The ghost and aurora drop their baked
+   filter on the same frame, so the first revealing frame matches the last
+   veiled one. Glass off and the lite tier stay baked to the end, and forced
+   colours never frost. */
+@media (forced-colors: none) {
+  html:not([data-vector-launch-glass="off"], [data-vector-glass="false"], [data-vector-launch-tier="lite"])
+    .vector-launch[data-state="revealing"]
+    .vector-launch-glass {
+    -webkit-backdrop-filter: blur(var(--vector-launch-blur)) saturate(var(--vector-launch-saturate));
+    backdrop-filter: blur(var(--vector-launch-blur)) saturate(var(--vector-launch-saturate));
+  }
+
+  html:not([data-vector-launch-glass="off"], [data-vector-glass="false"], [data-vector-launch-tier="lite"])
+    .vector-launch[data-state="revealing"]
+    :is(.vector-launch-ghost, .vector-launch-aurora) {
+    filter: none;
+  }
+}
+
+.vector-launch[data-state="revealing"] :is(.vector-launch-ground, .vector-launch-ghost) {
+  opacity: 0;
+  transition: opacity 160ms ease-out;
+}
+
+.vector-launch[data-state="revealing"] .vector-launch-aurora {
+  opacity: 0;
+  transition: opacity 420ms var(--vector-launch-ease);
+}
+
+.vector-launch[data-state="revealing"] .vector-launch-glass {
+  opacity: 0;
+  transition: opacity 480ms var(--vector-launch-ease) 120ms;
+}
+
+.vector-launch[data-state="revealing"] .vector-launch-stage {
+  opacity: 0;
+  transform: scale(1.08);
+  transition:
+    opacity 360ms var(--vector-launch-ease),
+    transform 460ms var(--vector-launch-ease);
+}
+
+.vector-launch[data-state="revealing"] :is(.vector-launch-hint, .vector-launch-failure) {
+  opacity: 0;
+  transition: opacity 200ms ease-out;
+}
+
+/* Light theme. data-color-scheme is stamped before first paint by
+   oc-theme-preload.js from the saved scheme, which the Vector theme setting
+   writes (VectorThemeSync), and settings keep it current afterwards. */
+html[data-color-scheme="light"] .vector-launch {
+  --vector-launch-ground: #f3f2f6;
+  --vector-launch-ghost-nav: #dcdae4;
+  --vector-launch-ghost-stage: #f2f1f6;
+  --vector-launch-ghost-panel: #e4e2ea;
+  --vector-launch-ghost-card: #ffffff;
+  --vector-launch-ghost-row: rgba(20, 16, 30, 0.1);
+  --vector-launch-ghost-line: rgba(20, 16, 30, 0.12);
+  --vector-launch-saturate: 1.35;
+  --vector-launch-tint: rgba(250, 249, 253, 0.36);
+  --vector-launch-glare: rgba(255, 255, 255, 0.6);
+  --vector-launch-vignette: rgba(60, 44, 110, 0.1);
+  --vector-launch-edge: rgba(255, 255, 255, 0.85);
+  --vector-launch-edge-peak: #ffffff;
+  --vector-launch-grain: 0.035;
+  --vector-launch-leak-purple: rgba(124, 79, 224, 0.3);
+  --vector-launch-leak-indigo: rgba(79, 70, 229, 0.22);
+  --vector-launch-leak-lavender: rgba(182, 159, 247, 0.34);
+  --vector-launch-leak-blue: rgba(63, 127, 196, 0.12);
+  --vector-launch-tile-fill: rgba(255, 255, 255, 0.5);
+  --vector-launch-tile-gloss: linear-gradient(
+    155deg,
+    rgba(255, 255, 255, 0.95) 0%,
+    rgba(255, 255, 255, 0.5) 48%,
+    rgba(182, 159, 247, 0.2) 100%
+  );
+  --vector-launch-tile-rim: rgba(20, 16, 30, 0.07);
+  --vector-launch-tile-top: #ffffff;
+  --vector-launch-tile-under: rgba(124, 79, 224, 0.16);
+  --vector-launch-tile-drop: rgba(60, 40, 120, 0.3);
+  --vector-launch-halo: rgba(124, 79, 224, 0.2);
+  --vector-launch-mark-1: #5d5769;
+  --vector-launch-mark-2: #433d4f;
+  --vector-launch-mark-3: #5b43c4;
+  --vector-launch-mark-4: #7c4fe0;
+  --vector-launch-mark-shadow: rgba(60, 40, 120, 0.28);
+  --vector-launch-mark-spec: rgba(255, 255, 255, 0.75);
+  --vector-launch-text: #19171d;
+  --vector-launch-text-muted: #6b6774;
+  --vector-launch-danger: #cf4750;
+}
+
+html[data-color-scheme="light"] .vector-launch-button {
+  border-color: rgba(20, 16, 30, 0.12);
+  background: linear-gradient(180deg, #ffffff, rgba(255, 255, 255, 0.7));
+  box-shadow:
+    inset 0 1px 0 #ffffff,
+    0 6px 18px -10px rgba(60, 40, 120, 0.35);
+}
+
+html[data-color-scheme="light"] .vector-launch-sheen {
+  mix-blend-mode: normal;
+  opacity: 0.7;
+}
+
+/* Glass setting off, or the OS asks for less transparency: the glass goes
+   nearly solid (like the composer and help menu) and never frosts live, not
+   even while revealing. The ghost is pre-softened less and the aurora not at
+   all, so it still reads as soft focus, just less of it. */
+html[data-vector-launch-glass="off"] .vector-launch-glass,
+html[data-vector-glass="false"] .vector-launch-glass {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  background:
+    radial-gradient(120% 70% at 18% -18%, var(--vector-launch-glare), transparent 58%),
+    radial-gradient(150% 115% at 50% 42%, transparent 58%, var(--vector-launch-vignette) 100%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent 26%),
+    color-mix(in srgb, var(--vector-launch-ground) 58%, transparent);
+}
+
+html[data-vector-launch-glass="off"] .vector-launch-ghost,
+html[data-vector-glass="false"] .vector-launch-ghost {
+  opacity: 0.7;
+  filter: blur(18px);
+}
+
+html[data-vector-launch-glass="off"] .vector-launch-aurora,
+html[data-vector-glass="false"] .vector-launch-aurora {
+  filter: none;
+}
+
+/* Low-end hint from launch-host.ts (<= 4 cores or <= 4GB): a lighter frost,
+   and baked for the whole launch, revealing included (the live-frost rule
+   skips this tier), so no phase runs a backdrop-filter. The exit then fades
+   the tint off a sharp app. */
+html[data-vector-launch-tier="lite"] .vector-launch {
+  --vector-launch-blur: 28px;
+  --vector-launch-saturate: 1.35;
+}
+
+html[data-vector-launch-tier="lite"] .vector-launch-sheen {
+  display: none;
+}
+
+/* Reduced motion (OS setting or Vector's Reduce animations, stamped by
+   launch-host.ts): nothing loops. The sheen parks as a static glint so the
+   tile still looks glossy; the exit becomes a 200ms fade. */
+html[data-vector-launch-motion="reduced"]
+  :is(.vector-launch-emblem, .vector-launch-halo, .vector-launch-tile, .vector-launch-sheen) {
+  animation: none;
+}
+
+/* The failure card's rise is set at failed-state specificity. */
+html[data-vector-launch-motion="reduced"] .vector-launch[data-state="failed"] .vector-launch-failure {
+  animation: none;
+}
+
+html[data-vector-launch-motion="reduced"] .vector-launch-sheen {
+  opacity: 0.55;
+  transform: translateX(70%) skewX(-18deg);
+}
+
+/* The fades are !important because, with the OS setting on, vector-premium.css
+   and settings-v2.css force every transition to ~0ms with unlayered `*`
+   !important rules; among !important rules these selectors are the more
+   specific. (Vector's own Reduce animations forces 0ms from an index.css
+   layer, which no unlayered rule beats; the host's removal timer covers it.) */
+html[data-vector-launch-motion="reduced"] .vector-launch-hint {
+  transition: opacity 200ms linear !important;
+}
+
+html[data-vector-launch-motion="reduced"]
+  .vector-launch[data-state="revealing"]
+  :is(
+    .vector-launch-ground,
+    .vector-launch-ghost,
+    .vector-launch-aurora,
+    .vector-launch-glass,
+    .vector-launch-stage,
+    .vector-launch-hint,
+    .vector-launch-failure
+  ) {
+  transform: none;
+  transition: opacity 200ms linear !important;
+}
+
+@media (prefers-contrast: more) {
+  .vector-launch {
+    --vector-launch-text-muted: var(--vector-launch-text);
+    --vector-launch-tile-rim: rgba(255, 255, 255, 0.3);
+  }
+}
+
+@media (forced-colors: active) {
+  .vector-launch-glass {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    background: Canvas;
+  }
+
+  .vector-launch-ghost,
+  .vector-launch-aurora,
+  .vector-launch-halo,
+  .vector-launch-sheen {
+    display: none;
+  }
+
+  .vector-launch-tile {
+    border: 1px solid CanvasText;
+  }
+}
+
+@keyframes vector-launch-failsafe {
+  to {
+    visibility: hidden;
+  }
+}
+
+@keyframes vector-launch-emblem-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.955);
+  }
+}
+
+@keyframes vector-launch-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.028);
+  }
+}
+
+@keyframes vector-launch-halo {
+  0%,
+  100% {
+    opacity: 0.5;
+    transform: scale(0.94);
+  }
+  50% {
+    opacity: 0.92;
+    transform: scale(1.05);
+  }
+}
+
+@keyframes vector-launch-sheen {
+  0%,
+  60% {
+    transform: translateX(-170%) skewX(-18deg);
+  }
+  86%,
+  100% {
+    transform: translateX(360%) skewX(-18deg);
+  }
+}
+
+@keyframes vector-launch-rise {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 4px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}

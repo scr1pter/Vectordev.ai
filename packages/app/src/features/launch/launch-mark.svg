@@ -1,0 +1,27 @@
+<svg class="vector-launch-mark" viewBox="56 56 400 400" fill="none" focusable="false" aria-hidden="true">
+  <defs>
+    <linearGradient id="vector-launch-silver" x1="120" y1="80" x2="400" y2="440" gradientUnits="userSpaceOnUse">
+      <stop class="vector-launch-stop-1" offset="0" />
+      <stop class="vector-launch-stop-2" offset="0.38" />
+      <stop class="vector-launch-stop-3" offset="0.72" />
+      <stop class="vector-launch-stop-4" offset="1" />
+    </linearGradient>
+    <linearGradient id="vector-launch-spec" x1="0" y1="78" x2="0" y2="434" gradientUnits="userSpaceOnUse">
+      <stop class="vector-launch-spec-stop" offset="0" stop-opacity="1" />
+      <stop class="vector-launch-spec-stop" offset="0.55" stop-opacity="0" />
+    </linearGradient>
+  </defs>
+  <!-- Chip glyph from packages/identity/mark.svg (its purple squircle is left
+       out: the glass tile replaces it). Stops are coloured from CSS. -->
+  <g stroke="url(#vector-launch-silver)" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="139" y="130" width="234" height="242" rx="52" stroke-width="30" />
+    <rect x="213" y="210" width="86" height="86" rx="14" stroke-width="24" />
+    <path d="M190 86v58M256 78v54M322 86v58M190 368v58M256 380v54M322 368v58M86 190h58M80 256h52M86 322h58M368 190h58M380 256h54M368 322h58" stroke-width="30" />
+  </g>
+  <!-- Specular: a thin top-lit line riding each tube. -->
+  <g stroke="url(#vector-launch-spec)" stroke-linecap="round" stroke-linejoin="round" transform="translate(0 -7)" opacity="0.75">
+    <rect x="139" y="130" width="234" height="242" rx="52" stroke-width="6" />
+    <rect x="213" y="210" width="86" height="86" rx="14" stroke-width="5" />
+    <path d="M190 86v58M256 78v54M322 86v58M190 368v58M256 380v54M322 368v58M86 190h58M80 256h52M86 322h58M368 190h58M380 256h54M368 322h58" stroke-width="6" />
+  </g>
+</svg>

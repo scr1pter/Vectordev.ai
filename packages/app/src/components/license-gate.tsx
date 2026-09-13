@@ -1,6 +1,7 @@
 import { type ParentProps, Show, createEffect, createResource, createSignal, onCleanup, onMount } from "solid-js"
 import { usePlatform } from "@/context/platform"
 import type { VectorLicenseStatus } from "@/license"
+import { LaunchYield } from "@/features/launch/launch-yield"
 import "./license-gate.css"
 
 const fallbackStatus: VectorLicenseStatus = {
@@ -122,6 +123,7 @@ export function LicenseGate(props: ParentProps) {
         when={allowed()}
         fallback={
           <main class="vector-license-gate">
+            <LaunchYield reason="license" />
             <div class="vector-license-glow" aria-hidden="true" />
             <section class="vector-license-panel" aria-labelledby="vector-license-title">
               <img class="vector-license-mark" src="/vector-logo.png" alt="" />
