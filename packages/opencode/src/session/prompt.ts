@@ -1271,7 +1271,24 @@ const layer = Layer.effect(
             const quick = agent.name === "quick"
             const [skills, env, instructions, mcpInstructions, modelMsgs] = yield* Effect.all([
               quick ? Effect.succeed(undefined) : sys.skills(agent),
-              quick ? Effect.succeed([]) : sys.environment(model),
+              quick
+                ? Effect.succeed([])
+                : agents.list().pipe(
+                    // The subagent policy follows what this agent may launch here: a disabled general is
+                    // missing from the list, Plan mode or a child session denies it by permission, and a
+                    // subagent's own session is told not to start general Subagents of its own.
+                    Effect.flatMap((list) =>
+                      sys.environment(model, {
+                        subagents: SystemPrompt.subagentAvailability({
+                          agents: list,
+                          permission: agent.permission,
+                          session: session.permission,
+                          agent: agent.name,
+                          nested: session.parentID !== undefined,
+                        }),
+                      }),
+                    ),
+                  ),
               quick ? Effect.succeed([]) : instruction.system().pipe(Effect.orDie),
               quick ? Effect.succeed(undefined) : sys.mcp(agent, session.permission),
               MessageV2.toModelMessagesEffect(msgs, model),

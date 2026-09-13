@@ -369,13 +369,13 @@ const succeedVoid = (deferred: Deferred.Deferred<void>) => {
   Effect.runSync(Deferred.succeed(deferred, void 0).pipe(Effect.ignore))
 }
 
-const user = Effect.fn("test.user")(function* (sessionID: SessionID, text: string) {
+const user = Effect.fn("test.user")(function* (sessionID: SessionID, text: string, agent = "build") {
   const session = yield* Session.Service
   const msg = yield* session.updateMessage({
     id: MessageID.ascending(),
     role: "user",
     sessionID,
-    agent: "build",
+    agent,
     model: ref,
     time: { created: Date.now() },
   })
@@ -537,6 +537,91 @@ withMcpInstructions.instance(
       expect(body).toContain('<server name=\\"guide-server\\">')
       expect(body).toContain("Use lookup before mutate.")
       yield* Fiber.interrupt(fiber)
+    }),
+  15_000,
+)
+
+// Runs one turn as `agent` and returns the first model request body, which carries the system prompt.
+const firstRequestBody = Effect.fn("test.firstRequestBody")(function* (input: {
+  agent?: string
+  config?: Partial<ConfigV1.Info>
+  /** Run the turn in a child session whose own rules still allow the task tool. */
+  nested?: boolean
+}) {
+  const { llm } = yield* useServerConfig((url) => ({ ...providerCfg(url), ...input.config }))
+  const prompt = yield* SessionPrompt.Service
+  const sessions = yield* Session.Service
+  const parent = input.nested ? yield* sessions.create({ title: "Parent" }) : undefined
+  const chat = yield* sessions.create({
+    title: "Pinned",
+    ...(parent
+      ? { parentID: parent.id, permission: [{ permission: "task", pattern: "*", action: "allow" as const }] }
+      : {}),
+  })
+  yield* llm.hang
+  yield* user(chat.id, "hello", input.agent)
+
+  const fiber = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.forkChild)
+  yield* awaitWithTimeout(llm.wait(1), "timed out waiting for the first model request", "10 seconds")
+  const body = JSON.stringify((yield* llm.hits)[0]?.body)
+  yield* Fiber.interrupt(fiber)
+  return body
+})
+
+it.instance(
+  "loop tells the model to launch general Subagents on big tasks by default",
+  () =>
+    Effect.gen(function* () {
+      const body = yield* firstRequestBody({})
+      expect(body).toContain("you MUST launch general Subagents with the task tool (omit subagent_type)")
+      expect(body).toContain("three or more files that fall into two or more independent parts")
+      expect(body).toContain("Do small tasks yourself")
+      expect(body).toContain("the default when you omit subagent_type")
+      expect(body).not.toContain("General Subagents are turned off")
+      expect(body).not.toContain("You are a Subagent working on a brief")
+    }),
+  15_000,
+)
+
+it.instance(
+  "loop tells the model general Subagents are off when config disables general",
+  () =>
+    Effect.gen(function* () {
+      const body = yield* firstRequestBody({ config: { agent: { general: { disable: true } } } })
+      expect(body).toContain("General Subagents are turned off in Vector settings (agent.general.disable).")
+      expect(body).toContain("explore for read-only discovery")
+      expect(body).not.toContain("the default when you omit subagent_type")
+      // task.txt, also in the body, gives the big-task rule only "when general is in the list".
+      expect(body).not.toContain("MUST launch general Subagents with the task tool (omit subagent_type)")
+    }),
+  15_000,
+)
+
+it.instance(
+  "loop tells Plan mode that its agent cannot launch general Subagents, and names only its specialists",
+  () =>
+    Effect.gen(function* () {
+      const body = yield* firstRequestBody({ agent: "plan" })
+      expect(body).toContain("The plan agent cannot launch general Subagents in this session.")
+      expect(body).toContain("explore for read-only discovery; review for code review; security for security analysis.")
+      expect(body).not.toContain("debug for reproducing and repairing failures")
+      expect(body).not.toContain("Vector settings (agent.general.disable)")
+      expect(body).not.toContain("the default when you omit subagent_type")
+      // task.txt, also in the body, gives the big-task rule only "when general is in the list".
+      expect(body).not.toContain("MUST launch general Subagents with the task tool (omit subagent_type)")
+    }),
+  15_000,
+)
+
+it.instance(
+  "loop tells a subagent's own session not to launch general Subagents",
+  () =>
+    Effect.gen(function* () {
+      const body = yield* firstRequestBody({ agent: "general", nested: true })
+      expect(body).toContain("You are a Subagent working on a brief from a parent agent")
+      expect(body).not.toContain("the default when you omit subagent_type")
+      // task.txt, also in the body, gives the big-task rule only "when general is in the list".
+      expect(body).not.toContain("MUST launch general Subagents with the task tool (omit subagent_type)")
     }),
   15_000,
 )

@@ -14,6 +14,7 @@ import PROMPT_CODEX from "./prompt/codex.txt"
 import PROMPT_TRINITY from "./prompt/trinity.txt"
 import type { Provider } from "@/provider/provider"
 import type { Agent } from "@/agent/agent"
+import { GENERAL_SUBAGENT } from "@/agent/subagent-kind"
 import { Permission } from "@/permission"
 import { Skill } from "@/skill"
 import { AbsolutePath } from "@opencode-ai/core/schema"
@@ -39,23 +40,151 @@ export function provider(model: Provider.Model) {
   return [PROMPT_DEFAULT]
 }
 
-export const SUBAGENT_POLICY = [
-  "<subagent_policy>",
-  "You can delegate work to real child agents with the task tool when it is available.",
-  "There are two kinds. A Subagent (general, the default when you omit subagent_type) is a general-purpose worker for any self-contained sub-task. Subagent specialists have a fixed focus and their own permissions.",
-  "Delegate proactively and in parallel. When a request contains independent pieces of work, launch one subagent per piece in a single message instead of doing them one after another yourself. Use subagents for broad research and multi-file investigation so raw search output stays out of your context.",
-  "Task calls in one message run concurrently even in the foreground, so use background mode only when you can continue useful work without waiting.",
-  "When the work matches a Subagent specialist, choose the narrowest one: explore for read-only discovery; review for code review; judge for independent rubric-based completion evaluation; security for security analysis; debug for reproducing and repairing failures; test for focused test design and execution; performance for measured optimization; migration for upgrades. Otherwise use the Subagent (general for other self-contained implementation or research).",
+/** What the current agent may launch through the task tool in this session. */
+export type SubagentAvailability = {
+  /** The general Subagent: present in agent.list() (agent.general.disable removes it), not denied by task permission, and not requested from inside a subagent. */
+  general: boolean
+  /** Any Subagent specialist: another non-primary agent that task permission does not deny. */
+  specialists: boolean
+  /** Why general is unavailable: turned off in config, denied to this agent by permission, or this session is itself a subagent. */
+  reason?: "disabled" | "denied" | "nested"
+  /** The current agent's name, used to explain a permission denial. */
+  agent?: string
+  /** The specialists this agent may launch. When set, the policy names only these. */
+  permitted?: readonly string[]
+}
+
+export const ALL_SUBAGENTS: SubagentAvailability = { general: true, specialists: true }
+
+/**
+ * The task tool's own test (task.ts): a disabled general is missing from
+ * agent.list(), and a denied one fails Permission.evaluate over the agent's
+ * rules followed by the session's. That covers Plan mode (task.general deny)
+ * and child sessions (task "*" deny) as well as the Settings switch. A child
+ * session whose rules still allow the task tool (a task rule in the user's
+ * permission config reaches general's) is told not to launch general
+ * Subagents of its own, so delegation does not fan out.
+ */
+export function subagentAvailability(input: {
+  agents: readonly Pick<Agent.Info, "name" | "mode">[]
+  permission: PermissionV1.Ruleset
+  session?: PermissionV1.Ruleset
+  /** The current agent's name. */
+  agent?: string
+  /** True in a subagent's own session, that is, one with a parent session. */
+  nested?: boolean
+}): SubagentAvailability {
+  const denied = (name: string) =>
+    Permission.evaluate("task", name, input.permission, input.session ?? []).action === "deny"
+  const permitted = input.agents
+    .filter((agent) => agent.mode !== "primary" && agent.name !== GENERAL_SUBAGENT && !denied(agent.name))
+    .map((agent) => agent.name)
+    .toSorted()
+  const reason = !input.agents.some((agent) => agent.name === GENERAL_SUBAGENT)
+    ? ("disabled" as const)
+    : denied(GENERAL_SUBAGENT)
+      ? ("denied" as const)
+      : input.nested
+        ? ("nested" as const)
+        : undefined
+  return {
+    general: reason === undefined,
+    specialists: permitted.length > 0,
+    ...(reason === undefined ? {} : { reason }),
+    ...(input.agent === undefined ? {} : { agent: input.agent }),
+    permitted,
+  }
+}
+
+const SUBAGENT_INTRO = "You can delegate work to real child agents with the task tool when it is available."
+/** The built-in Subagent specialists and their focus. Custom specialists appear only in the task tool's list. */
+const SUBAGENT_FOCUS: ReadonlyArray<readonly [name: string, focus: string]> = [
+  ["explore", "read-only discovery"],
+  ["review", "code review"],
+  ["judge", "independent rubric-based completion evaluation"],
+  ["security", "security analysis"],
+  ["debug", "reproducing and repairing failures"],
+  ["test", "focused test design and execution"],
+  ["performance", "measured optimization"],
+  ["migration", "upgrades"],
+]
+
+/** ": explore for …; review for …" naming only the permitted built-in specialists, or "" when none of them is. */
+function specialistFocus(permitted?: readonly string[]) {
+  const listed = SUBAGENT_FOCUS.filter(([name]) => permitted === undefined || permitted.includes(name))
+  if (listed.length === 0) return ""
+  return `: ${listed.map(([name, focus]) => `${name} for ${focus}`).join("; ")}`
+}
+const SUBAGENT_BACKGROUND =
+  "Task calls in one message run concurrently even in the foreground, so use background mode only when you can continue useful work without waiting."
+const SUBAGENT_ORCHESTRATION = [
   "Treat orchestration as a dependency graph rather than a swarm: assign repository-relative owned_paths, list observable success_criteria, and pass depends_on task IDs when downstream work requires an upstream result.",
   "Never give active sibling agents overlapping path ownership. Vector enforces declared overlaps, but you remain responsible for assigning clear boundaries and integrating cross-cutting changes in the parent session.",
   "Subagents inherit the current provider and model unless an agent is explicitly configured with another model.",
   "Write each brief so it stands alone, because a subagent sees none of your conversation: give it a complete objective, the relevant files and constraints, whether to edit or only research, the expected output, and verification instructions. Tell subagents that edit code never to revert changes they did not make. Do not duplicate delegated work.",
+]
+const SUBAGENT_TEAMMATES = [
   "Task-tool sibling subagents are separate child sessions; they are not automatically members of a Parallel Workspace team. Require send_teammate_message only when a workspace team is actually configured.",
   "If send_teammate_message reports that no team is configured, stop that coordination attempt. Do not search outside the workspace for team state, inspect Vector application data, logs, or packaged resources, or create a team marker. Continue independently and report the unavailable exchange to the parent.",
-  "Keep ownership of the user's request: inspect subagent results, integrate them, run final verification, and explain the completed outcome to the user. A subagent summary is not proof of completion.",
-  "Do not launch a subagent for a trivial lookup or a small edit that is faster and clearer to handle directly.",
-  "</subagent_policy>",
-].join("\n")
+]
+const SUBAGENT_OWNERSHIP =
+  "Keep ownership of the user's request: inspect subagent results, integrate them, run final verification, and explain the completed outcome to the user. A subagent summary is not proof of completion."
+
+/** Why general Subagents are off, so a permission rule is never reported to the user as the Settings switch. */
+function generalOffLine(input: SubagentAvailability) {
+  switch (input.reason) {
+    case "disabled":
+      return "General Subagents are turned off in Vector settings (agent.general.disable)."
+    case "denied":
+      return `The ${input.agent ?? "current"} agent cannot launch general Subagents in this session.`
+    case "nested":
+      return "You are a Subagent working on a brief from a parent agent, so do not launch general Subagents of your own."
+    default:
+      return "General Subagents are not available in this session."
+  }
+}
+
+function subagentPolicyLines(input: SubagentAvailability): string[] {
+  const focus = specialistFocus(input.permitted)
+  if (input.general)
+    return [
+      SUBAGENT_INTRO,
+      "There are two kinds. A Subagent (general, the default when you omit subagent_type) is a general-purpose worker for any self-contained sub-task. Subagent specialists have a fixed focus and their own permissions.",
+      "Size the task before you start: count the files you will create or change, and the parts of the work that do not depend on each other (separate modules, packages, features or questions). The task is big when it touches three or more files that fall into two or more independent parts, or when it needs broad research across the codebase as well as changes. The counts decide, not the size of each file: several quick files in independent modules still make a big task.",
+      "For a big task you MUST launch general Subagents with the task tool (omit subagent_type) before you write those files yourself: one per independent part, all in ONE message so they run in parallel, each with non-overlapping owned_paths. Keep integration and final verification yourself. Launching them is part of doing the task the user asked for, so do not wait to be asked. In a big task, also use Subagents for broad research and multi-file investigation so raw search output stays out of your context.",
+      "A task is small when it is a single-file change, a quick fix, one lookup, or a short answer or explanation, or when its two or three files are closely coupled parts of one unit (for example a type, its serializer and its test). Do small tasks yourself and do not launch a general Subagent for them.",
+      SUBAGENT_BACKGROUND,
+      input.specialists
+        ? `When part of the work clearly matches a Subagent specialist, choose the narrowest one${focus}. Otherwise, for the independent parts of a big task, use the Subagent (general for other self-contained implementation or research).`
+        : "No Subagent specialists are available to you, so use the Subagent (general for other self-contained implementation or research) for the independent parts of a big task.",
+      ...SUBAGENT_ORCHESTRATION,
+      ...SUBAGENT_TEAMMATES,
+      SUBAGENT_OWNERSHIP,
+    ]
+  if (input.specialists)
+    return [
+      SUBAGENT_INTRO,
+      `${generalOffLine(input)} Every task call must set subagent_type to a Subagent specialist from the task tool's list; never request general.`,
+      "Do the work that no specialist covers yourself, big tasks included, and keep integration and final verification yourself.",
+      SUBAGENT_BACKGROUND,
+      `Use a Subagent specialist only when part of the work clearly matches its focus, and choose the narrowest one in the task tool's list${focus}. Otherwise do that part yourself.`,
+      ...SUBAGENT_ORCHESTRATION,
+      ...SUBAGENT_TEAMMATES,
+      SUBAGENT_OWNERSHIP,
+    ]
+  // Child sessions and read-only specialists cannot delegate, but teammate guidance still applies to them.
+  return [
+    "No subagents are available in this session; do the work yourself and do not call the task tool.",
+    ...SUBAGENT_TEAMMATES,
+  ]
+}
+
+/** The delegation policy for what the current agent may launch; it advises general Subagents only where they exist. */
+export function subagentPolicy(input: SubagentAvailability = ALL_SUBAGENTS) {
+  return ["<subagent_policy>", ...subagentPolicyLines(input), "</subagent_policy>"].join("\n")
+}
+
+export const SUBAGENT_POLICY = subagentPolicy(ALL_SUBAGENTS)
 
 export const COMPLETION_POLICY = [
   "<completion_policy>",
@@ -77,8 +206,13 @@ export const LOCAL_MEMORY_POLICY = [
   "</vector_local_memory>",
 ].join("\n")
 
+export type EnvironmentOptions = {
+  /** What the current agent may launch through the task tool; selects the subagent policy. Defaults to everything. */
+  subagents?: SubagentAvailability
+}
+
 export interface Interface {
-  readonly environment: (model: Provider.Model) => Effect.Effect<string[]>
+  readonly environment: (model: Provider.Model, options?: EnvironmentOptions) => Effect.Effect<string[]>
   readonly skills: (agent: Agent.Info) => Effect.Effect<string | undefined>
   readonly mcp: (agent: Agent.Info, permission?: PermissionV1.Ruleset) => Effect.Effect<string | undefined>
 }
@@ -93,7 +227,10 @@ const layer = Layer.effect(
     const locations = yield* LocationServiceMap.Service
 
     return Service.of({
-      environment: Effect.fn("SystemPrompt.environment")(function* (model: Provider.Model) {
+      environment: Effect.fn("SystemPrompt.environment")(function* (
+        model: Provider.Model,
+        options?: EnvironmentOptions,
+      ) {
         const ctx = yield* InstanceState.context
         const references = yield* Effect.gen(function* () {
           return (yield* (yield* Reference.Service).list()).filter((reference) => reference.description !== undefined)
@@ -130,7 +267,7 @@ const layer = Layer.effect(
                   ]),
                 "</available_references>",
               ].join("\n"),
-          SUBAGENT_POLICY,
+          subagentPolicy(options?.subagents ?? ALL_SUBAGENTS),
           COMPLETION_POLICY,
           [
             "<browser_engineering_policy>",

@@ -1,19 +1,21 @@
 Launch a subagent: an autonomous child agent that takes one sub-task, works through it in its own context, and reports back to you once.
 
 Two kinds of subagent run through this tool:
-- Subagent: subagent_type "general". When general is in the list below, omitting subagent_type also gives you one. A general-purpose worker for any self-contained sub-task: broad research, multi-file search, implementation, refactors, or running and repairing checks.
-- Subagent specialists: every other type in the list below. Each has a fixed focus and its own permissions. Choose one only when the work clearly matches its description, and use it proactively when its description says to.
+- Subagent: subagent_type "general", available only when general is in the list below; there, omitting subagent_type also gives you one. A general-purpose worker for any self-contained sub-task: broad research, multi-file search, implementation, refactors, or running and repairing checks.
+- Subagent specialists: every other type in the list below. Each has a fixed focus and its own permissions. Choose one only when part of the work clearly matches its description, and use it proactively when its description says to.
 
-Delegate on your own initiative, without waiting to be asked, when:
-- the request splits into independent pieces (separate areas of the codebase, separate features, separate questions): launch one subagent per piece;
-- an answer needs wide searching or reading that would flood your context;
-- a piece of work is large and self-contained enough to describe completely;
-- you want an independent check that does not share your assumptions.
+When general is in the list, size the task before you start: count the files you will create or change, and the parts of the work that do not depend on each other. The task is big when it touches three or more files that fall into two or more independent parts, or when it needs broad research across the codebase as well as changes. The counts decide, not the size of each file: several quick files in independent modules still make a big task. For a big task you MUST launch general Subagents before you write those files yourself, without waiting to be asked:
+- one per independent part (separate modules, packages, features or questions), all in ONE message, each with non-overlapping owned_paths;
+- one for research that needs wide searching or reading that would flood your context;
+then keep integration and final verification yourself.
 
-Do not delegate:
-- reading a file whose path you know, or finding one symbol or definition (use Read, Glob or Grep instead);
-- a question about two or three known files;
-- an edit that is faster to make than to describe;
+When general is not in the list, or you are yourself a Subagent working on a brief, do not request general. Always set subagent_type to a listed specialist, use one only when part of the work clearly matches its focus, and do the rest yourself, big tasks included.
+
+Do not launch a general Subagent for a small task; do it yourself:
+- a single-file change or a quick fix, including a single-file edit that is faster to make than to describe;
+- two or three closely coupled files that are parts of one unit, for example a type, its serializer and its test;
+- one lookup: reading a file whose path you know, or finding one symbol or definition (use Read, Glob or Grep instead);
+- a short answer or explanation, or a question about two or three known files;
 - anything that needs back-and-forth with the user.
 
 Usage notes:
@@ -27,12 +29,24 @@ Usage notes:
 
 <example>
 user: Remove every place we log user emails.
-assistant: [sends ONE message with three task calls and no subagent_type: "Strip email logs: api" with owned_paths packages/api, "Strip email logs: worker" with owned_paths packages/worker, and "Strip email logs: web" with owned_paths packages/web. Each brief names the logger calls to look for, says to redact the email rather than delete the log line, and asks for the files changed plus the test command it ran and its result.]
-<commentary>Three independent packages, so three Subagents launched together with non-overlapping ownership.</commentary>
+assistant: [general is in the list and the work spans three packages, so it sends ONE message with three task calls and no subagent_type: "Strip email logs: api" with owned_paths packages/api, "Strip email logs: worker" with owned_paths packages/worker, and "Strip email logs: web" with owned_paths packages/web. Each brief names the logger calls to look for, says to redact the email rather than delete the log line, and asks for the files changed plus the test command it ran and its result.]
+<commentary>A big task that splits into three independent packages, so three Subagents launched together with non-overlapping ownership.</commentary>
+</example>
+
+<example>
+user: Add slugify, formatMoney and retry helpers in src/utils, each with its own test file, and document them in the README.
+assistant: [general is in the list. The request needs six new files in three independent modules plus a README section, so it is big. Before writing any of them it sends ONE message with three task calls and no subagent_type: "Add slugify helper" owning src/utils/slugify.ts and test/slugify.test.ts, "Add formatMoney helper" owning src/utils/money.ts and test/money.test.ts, and "Add retry helper" owning src/utils/retry.ts and test/retry.test.ts. Each brief gives the function signature, the edge cases to cover and the test command to run. When all three report back, it writes the README section from their results and runs the whole test suite itself.]
+<commentary>Each file is quick on its own, but three independent modules with tests make a big task: one Subagent per module, launched together. The README depends on all three, so it waits for their results and stays with you, along with final verification.</commentary>
 </example>
 
 <example>
 user: The footer in src/components/footer.tsx shows yesterday's date.
 assistant: [reads src/components/footer.tsx, fixes the date and runs its test directly, with no subagent]
-<commentary>One known file and a small fix: describing it to a subagent would take longer than doing it.</commentary>
+<commentary>A small task: one known file and a quick fix, so describing it to a subagent would take longer than doing it.</commentary>
+</example>
+
+<example>
+user: Map how session tokens flow through the API and fix the expiry check.
+assistant: [general is not in the list, so it sends one task call with subagent_type "explore" to map the token flow, then fixes the expiry check and runs its test itself]
+<commentary>General Subagents are off, so only the read-only discovery part goes to a specialist and the fix stays with you.</commentary>
 </example>

@@ -332,7 +332,7 @@ exports[`tool parameters JSON Schema (wire shape) task 1`] = `
       "type": "string",
     },
     "subagent_type": {
-      "description": "Agent to use. Omit it for a general-purpose Subagent; name a Subagent specialist only when the work matches its description",
+      "description": "Agent to use. Name a Subagent specialist from the available agent types when the work matches its description. Omit it for the general-purpose Subagent only when general is in that list",
       "type": "string",
     },
     "success_criteria": {

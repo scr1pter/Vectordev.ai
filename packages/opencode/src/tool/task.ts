@@ -109,7 +109,7 @@ const BaseParameterFields = {
   }),
   subagent_type: Schema.optional(Schema.String).annotate({
     description:
-      "Agent to use. Omit it for a general-purpose Subagent; name a Subagent specialist only when the work matches its description",
+      "Agent to use. Name a Subagent specialist from the available agent types when the work matches its description. Omit it for the general-purpose Subagent only when general is in that list",
   }),
   depends_on: Schema.optional(Schema.Array(Schema.String)).annotate({
     description:
@@ -304,22 +304,29 @@ export const TaskTool = Tool.define(
         params.subagent_type?.trim() || (session ? (SubagentLifecycle.read(session)?.agent ?? session.agent) : undefined)
       const subagentType = resolveSubagentType(requested, (name) => known.has(name))
 
-      if (!requested && !ctx.extra?.bypassAgentCheck) {
+      // A disabled general (agent.general.disable) is missing from the agent list altogether, so
+      // fail before any permission prompt whether it was omitted, named, aliased or resumed.
+      const generalOff = subagentType === GENERAL_SUBAGENT && !known.has(GENERAL_SUBAGENT)
+      if (generalOff || (!requested && !ctx.extra?.bypassAgentCheck)) {
         // An omitted type means the general Subagent only where the caller may launch it.
         const caller = yield* agent.get(ctx.agent)
         const denied = (name: string) =>
           Permission.evaluate(id, name, caller?.permission ?? [], parent.permission ?? []).action === "deny"
-        // A disabled general is missing from the agent list altogether.
-        if (!known.has(GENERAL_SUBAGENT) || denied(GENERAL_SUBAGENT)) {
+        if (generalOff || denied(GENERAL_SUBAGENT)) {
           const permitted = agents
             .filter((item) => item.mode !== "primary" && !denied(item.name))
             .map((item) => item.name)
             .toSorted()
+          const reason = generalOff
+            ? "The general Subagent is turned off in Vector settings (agent.general.disable)."
+            : `The general Subagent is not available to the ${ctx.agent} agent.`
           return yield* Effect.fail(
             new Error(
               permitted.length > 0
-                ? `The general Subagent is not available to the ${ctx.agent} agent. Set subagent_type to one of: ${permitted.join(", ")}.`
-                : `No subagent is available to the ${ctx.agent} agent.`,
+                ? `${reason} Set subagent_type to one of: ${permitted.join(", ")}.`
+                : generalOff
+                  ? `${reason} No Subagent specialist is available to the ${ctx.agent} agent either.`
+                  : `No subagent is available to the ${ctx.agent} agent.`,
             ),
           )
         }

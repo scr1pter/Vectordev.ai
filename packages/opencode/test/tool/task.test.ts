@@ -488,6 +488,65 @@ describe("tool.task", () => {
     },
   )
 
+  it.instance(
+    "execute fails before any permission prompt when general is turned off",
+    () =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const { chat, assistant } = yield* seed()
+        const tool = yield* TaskTool
+        const def = yield* tool.init()
+        let asked = 0
+        const cases: { subagent_type?: string }[] = [{}, { subagent_type: "general" }, { subagent_type: "general-purpose" }]
+        for (const params of cases) {
+          const exit = yield* Effect.exit(
+            def.execute(
+              { description: "look around", prompt: "map the auth middleware", ...params },
+              {
+                sessionID: chat.id,
+                messageID: assistant.id,
+                agent: "build",
+                abort: new AbortController().signal,
+                extra: { promptOps: stubOps({}) },
+                messages: [],
+                metadata: () => Effect.void,
+                ask: () =>
+                  Effect.sync(() => {
+                    asked += 1
+                  }),
+              },
+            ),
+          )
+          expect(Exit.isFailure(exit)).toBe(true)
+          if (Exit.isFailure(exit)) {
+            const message = Cause.pretty(exit.cause)
+            expect(message).toContain("The general Subagent is turned off")
+            expect(message).toContain("explore")
+            expect(message).not.toMatch(/one of: [^\n]*\bgeneral\b/)
+          }
+        }
+        expect(asked).toBe(0)
+        expect(yield* sessions.children(chat.id)).toHaveLength(0)
+      }),
+    { config: { agent: { general: { disable: true } } } },
+  )
+
+  it.instance(
+    "description lists specialists but not general when general is turned off",
+    () =>
+      Effect.gen(function* () {
+        const agent = yield* Agent.Service
+        const build = yield* agent.get("build")
+        const registry = yield* ToolRegistry.Service
+        const tools = yield* registry.tools({ ...ref, agent: build })
+        const description = tools.find((tool) => tool.id === TaskTool.id)?.description ?? ""
+        expect(description).toContain("- explore:")
+        expect(description).not.toContain("- general:")
+        expect(description).toContain("When general is not in the list")
+      }),
+    { config: { agent: { general: { disable: true } } } },
+  )
+
   it.instance("inherits the parent BYOK model and variant in a child session", () =>
     Effect.gen(function* () {
       const { chat, assistant } = yield* seed()

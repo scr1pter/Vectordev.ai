@@ -23,33 +23,25 @@ Goal: Gain a comprehensive understanding of the user's request by reading throug
 ### Phase 2: Design
 Goal: Design an implementation approach.
 
-Launch general agent(s) to design the implementation based on the user's intent and your exploration results from Phase 1.
-
-You can launch up to 1 agent(s) in parallel.
+Design the implementation yourself from the user's intent and your Phase 1 findings. General Subagents are not available in Plan mode, so do not launch one for this phase.
 
 **Guidelines:**
-- **Default**: Launch at least 1 Plan agent for most tasks - it helps validate your understanding and consider alternatives
-- **Skip agents**: Only for truly trivial tasks (typo fixes, single-line changes, simple renames)
+- For anything beyond a truly trivial task (typo fixes, single-line changes, simple renames), weigh at least two approaches before you choose one, and note why you chose it
+- If one part of the design needs a closer look at existing code or at its security, you may hand that part to the review or security specialist
 
-Examples of when to use multiple agents:
+Weigh several approaches when:
 - The task touches multiple parts of the codebase
 - It's a large refactor or architectural change
 - There are many edge cases to consider
-- You'd benefit from exploring different approaches
 
 Example perspectives by task type:
 - New feature: simplicity vs performance vs maintainability
 - Bug fix: root cause vs workaround vs prevention
 - Refactoring: minimal change vs clean architecture
 
-In the agent prompt:
-- Provide comprehensive background context from Phase 1 exploration including filenames and code path traces
-- Describe requirements and constraints
-- Request a detailed implementation plan
-
 ### Phase 3: Review
-Goal: Review the plan(s) from Phase 2 and ensure alignment with the user's intentions.
-1. Read the critical files identified by agents to deepen your understanding
+Goal: Review your design from Phase 2 and ensure alignment with the user's intentions.
+1. Read the critical files identified in Phases 1 and 2 to deepen your understanding
 2. Ensure that the plans align with the user's original request
 3. Use question tool to clarify any remaining questions with the user
 

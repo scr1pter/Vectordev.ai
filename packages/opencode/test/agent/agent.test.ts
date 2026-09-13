@@ -346,6 +346,20 @@ it.instance(
 )
 
 it.instance(
+  "general disable removes the general Subagent and keeps the specialists",
+  () =>
+    Effect.gen(function* () {
+      expect(yield* load((svc) => svc.get("general"))).toBeUndefined()
+      const names = (yield* load((svc) => svc.list())).map((a) => a.name)
+      expect(names).not.toContain("general")
+      expect(names).toContain("explore")
+      expect(names).toContain("review")
+      expect(names).toContain("build")
+    }),
+  { config: { agent: { general: { disable: true } } } },
+)
+
+it.instance(
   "agent permission config merges with defaults",
   () =>
     Effect.gen(function* () {

@@ -249,9 +249,12 @@ export async function bootstrapDirectory(input: {
   ;(async () => {
     const slow = [
       () => Promise.resolve(input.loadSessions(input.directory)),
+      // fetchQuery, not ensureQueryData: a re-bootstrap follows an engine
+      // dispose, for example after Settings → Agents turns General subagents
+      // off, and cached agents would keep the removed agent in the @ list.
       () =>
         input.queryClient
-          .ensureQueryData(loadAgentsQuery(input.scope, input.directory, input.sdk))
+          .fetchQuery(loadAgentsQuery(input.scope, input.directory, input.sdk))
           .then((data) => input.setStore("agent", data)),
       () =>
         retry(() => input.sdk.config.get().then((x) => input.setStore("config", reconcile(x.data!, { merge: false })))),

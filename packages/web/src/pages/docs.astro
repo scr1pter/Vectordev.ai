@@ -132,7 +132,7 @@ const pillars = [
   {
     name: "Parallel agents",
     eyebrow: "No agent cap · isolated or shared",
-    body: "Vector's agent starts subagents on its own and runs them together. When you want separate lines of work, run agents in their own checkouts or together in one, watch them from a single dashboard, and merge only what you trust.",
+    body: "Vector's agent starts subagents on its own for big tasks and runs them together. When you want separate lines of work, run agents in their own checkouts or together in one, watch them from a single dashboard, and merge only what you trust.",
   },
   {
     name: "Automations",
@@ -397,11 +397,11 @@ const subagentKinds = [
   ],
   [
     "When Vector uses them",
-    "Vector's agent decides on its own. It starts subagents when a task splits into pieces that do not depend on each other, such as searching several areas of the code or changing unrelated files, and launches them in one message so they run at the same time. It calls a specialist when part of the task fits that specialist's focus. You do not have to ask for either.",
+    "Vector's agent decides on its own. For a big task, one that touches three or more files split across parts that do not depend on each other, or needs broad research as well as changes, it starts one subagent per independent part and launches them together so they run at the same time, while it keeps the integration and the final checks. A small task, such as a single-file change, a quick fix, one lookup, a short answer, or two or three closely linked files, it does itself, without a subagent. It calls a specialist when part of the task fits that specialist's focus. You do not have to ask for either.",
   ],
   [
     "How many",
-    "As many as the task needs. Vector sets no cap on either kind. Your computer and your provider's rate limits are the practical limits, and each one spends its own tokens.",
+    "A small task gets no subagents; a big one gets one per independent part. Vector sets no cap on either kind. Your computer and your provider's rate limits are the practical limits, and each one spends its own tokens.",
   ],
   [
     "While they run",
@@ -427,12 +427,16 @@ const subagentKinds = [
     "In Plan mode",
     "Vector does not start subagents, and of the built-in specialists it uses only Explore, Review and Security, which cannot edit.",
   ],
+  [
+    "Turning them off",
+    "Subagents are on by default, and you can turn them off in Settings → Agents or in Vector's config file. Subagent specialists are not affected and keep working.",
+  ],
 ]
 const changelog = [
   [
     "September 2026 · 1.99.8",
     "Subagents that work in parallel",
-    "The main agent launches general-purpose Subagents on its own, in parallel, beside eight Subagent specialists, and they show as cards in the chat and in the Background tasks panel. The editor follows every agent live, the main agent included; Claude Code, Codex and Cursor chats answer like any other; the 16-agent limit is gone; and every model your providers offer is listed.",
+    "For big tasks the main agent launches general-purpose Subagents on its own, one per independent part and in parallel, and does small tasks itself; eight Subagent specialists keep their focus, and Settings → Agents can turn Subagents off. They show as cards in the chat and in the Background tasks panel. The editor follows every agent live, the main agent included; Claude Code, Codex and Cursor chats answer like any other; the 16-agent limit is gone; and every model your providers offer is listed.",
   ],
   [
     "September 2026 · 1.99.7",
@@ -480,17 +484,22 @@ const faqs = [
   {
     question: "Can several agents work on one repository?",
     answer:
-      "Yes, in two ways. Inside one session, Vector's agent starts subagents on its own and runs them in the same checkout. For separate responsibilities, create agent workspaces: each works on its own copy or Git worktree, and you decide which changes are reviewed and merged.",
+      "Yes, in two ways. Inside one session, Vector's agent starts subagents on its own for big tasks and runs them in the same checkout. For separate responsibilities, create agent workspaces: each works on its own copy or Git worktree, and you decide which changes are reviewed and merged.",
   },
   {
     question: "What is the difference between a subagent and a subagent specialist?",
     answer:
-      "A subagent is general purpose: it takes whatever self-contained piece of the task Vector's agent hands it, and Vector starts as many as the task needs. A subagent specialist is one of eight named agents, such as Review or Debug, with a fixed focus and its own permissions. Agents you define yourself count as custom specialists. Vector uses both on its own, and both appear in the chat and in Background tasks.",
+      "A subagent is general purpose: it takes whatever self-contained piece of the task Vector's agent hands it. Vector starts them for big tasks, one per independent part, and does small tasks itself. A subagent specialist is one of eight named agents, such as Review or Debug, with a fixed focus and its own permissions. Agents you define yourself count as custom specialists. Vector uses both on its own, and both appear in the chat and in Background tasks.",
   },
   {
     question: "Is there a limit on how many subagents Vector runs?",
     answer:
-      "No. Vector sets no cap. Your computer and your provider's rate limits are the practical limits, and each subagent spends its own tokens. By default, subagents cannot start subagents of their own.",
+      "No. Vector sets no cap, though it starts subagents only for big tasks. Your computer and your provider's rate limits are the practical limits, and each subagent spends its own tokens. By default, subagents cannot start subagents of their own.",
+  },
+  {
+    question: "Can I stop Vector from using subagents?",
+    answer:
+      "Yes. In the desktop app, switch off General subagents in Settings → Agents. In the terminal, set agent.general.disable to true in ~/.config/vector/opencode.json, or in a project's opencode.json for that project only. In the terminal it takes effect the next time you start Vector there. Vector's agent then does the work itself, except parts that fit a subagent specialist, which it can still hand to one. You can also still call a specialist yourself with @ and its name.",
   },
   {
     question: "Can I edit code myself?",
@@ -620,8 +629,9 @@ const faqs = [
             switch back to an editing mode when the plan is approved.
           </p>
           <p>
-            When a task splits into pieces that do not depend on each other, the agent hands them to subagents that
-            run at the same time, and it calls a subagent specialist when part of the work fits one. See
+            When a big task splits into pieces that do not depend on each other, the agent hands them to subagents
+            that run at the same time; a small task it does itself. It calls a subagent specialist when part of the
+            work fits one. See
             <a href="#subagents">Subagents and subagent specialists</a>.
           </p>
           <div class="definition-grid">
@@ -1029,9 +1039,9 @@ const faqs = [
           </p>
           <div class="doc-grid doc-grid-4">
             <article class="doc-card">
-              <small>General purpose · no cap</small>
+              <small>General purpose · for big tasks</small>
               <h4>Subagents</h4>
-              <p>A subagent takes whatever piece of the task the main agent hands it: answer a question about the code, change a group of files, find out why a check fails. Vector decides when to use them, starts as many as the task needs, and launches them together so they run at the same time.</p>
+              <p>A subagent takes whatever piece of the task the main agent hands it: answer a question about the code, change a group of files, find out why a check fails. Vector uses them for big tasks, one per independent part, launched together so they run at the same time, and does small tasks itself. You can turn them off in Settings → Agents.</p>
             </article>
             <article class="doc-card">
               <small>Named · one focus each</small>
@@ -1062,7 +1072,18 @@ const faqs = [
           <ul class="feature-list">
             <li><strong>In the chat</strong><span>Each batch of delegated work appears as a card in the conversation, with its title, kind, how many agents are working, their status and the time so far, and one square per agent. Click it to open that work in Background tasks.</span></li>
             <li><strong>In Background tasks</strong><span>Open the panel with the Tasks button in the session header, or with Cmd+Shift+B (Ctrl+Shift+B on Windows and Linux). Each card shows the kind, the elapsed time, how many agents and their tokens, and one row per agent with its model, tokens and time. A running card has a Stop button, running work is shown in purple, and finished tasks collect under Finished.</span></li>
-            <li><strong>In Settings</strong><span>Settings → Agents explains both kinds.</span></li>
+            <li><strong>In Settings</strong><span>Settings → Agents explains both kinds and has the General subagents switch, which turns subagents off. Subagent specialists keep working when it is off.</span></li>
+          </ul>
+          <h3>Turning subagents off</h3>
+          <p>
+            Subagents are on by default. With them off, Vector's agent does the work itself, except parts that fit a
+            subagent specialist, which it can still hand to one. You can also still ask for a specialist yourself with
+            <code>@</code> and its name.
+          </p>
+          <ul class="feature-list">
+            <li><strong>In the desktop app</strong><span>Switch off General subagents in Settings → Agents. Changing it stops any work in progress, and the new setting applies from your next message.</span></li>
+            <li><strong>In the terminal</strong><span>The terminal reads its own config file, so the desktop switch does not change it. Add <code>{'"agent": { "general": { "disable": true } }'}</code> to <code>~/.config/vector/opencode.json</code> (<code>%USERPROFILE%\.config\vector\opencode.json</code> on Windows). It takes effect the next time you start Vector in the terminal.</span></li>
+            <li><strong>For one project</strong><span>Put the same setting in the project's <code>opencode.json</code>. It turns subagents off for that project in the terminal and the desktop app alike, whatever the switch says.</span></li>
           </ul>
           <p class="note">
             Subagents are not agent workspaces. A subagent works inside your session and your checkout and reports to the
