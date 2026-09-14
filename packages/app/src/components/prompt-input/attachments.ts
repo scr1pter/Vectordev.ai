@@ -7,7 +7,7 @@ import { uuid } from "@/utils/uuid"
 import { getCursorPosition } from "./editor-dom"
 import { attachmentMime } from "./files"
 import { prepareImageForModel } from "./image-processing"
-import { normalizePaste, pasteMode } from "./paste"
+import { normalizePaste, pasteCaption, pasteMode } from "./paste"
 
 function dataUrl(file: Blob, mime: string) {
   return new Promise<string>((resolve) => {
@@ -59,7 +59,8 @@ export function createPromptAttachmentsCore(input: PromptAttachmentsCoreInput) {
     return { prompt, cursor: prompt.cursor() ?? getCursorPosition(editor) }
   }
 
-  const add = async (file: File, toast = true, target = capture()) => {
+  // `seen` holds the prepared data URLs already attached by the same paste.
+  const add = async (file: File, toast = true, target = capture(), seen?: Set<string>) => {
     if (!target) return false
     const mime = await attachmentMime(file)
     if (!mime) {
@@ -75,6 +76,8 @@ export function createPromptAttachmentsCore(input: PromptAttachmentsCoreInput) {
 
     const url = await dataUrl(prepared.blob, prepared.mime)
     if (!url) return false
+    if (seen?.has(url)) return true
+    seen?.add(url)
 
     const attachment: ImageAttachmentPart = {
       type: "image",
@@ -90,11 +93,11 @@ export function createPromptAttachmentsCore(input: PromptAttachmentsCoreInput) {
 
   const addAttachment = (file: File) => add(file)
 
-  const addAttachments = async (files: File[], toast = true, target = capture()) => {
+  const addAttachments = async (files: File[], toast = true, target = capture(), seen?: Set<string>) => {
     let found = false
 
     for (const file of files) {
-      const ok = await add(file, false, target)
+      const ok = await add(file, false, target, seen)
       if (ok) found = true
     }
 
@@ -129,13 +132,18 @@ export function createPromptAttachmentsCore(input: PromptAttachmentsCoreInput) {
       const file = item.getAsFile()
       return file ? [file] : []
     })
+    const plainText = clipboardData.getData("text/plain") ?? ""
 
     if (files.length > 0) {
-      await addAttachments(files, true, target)
+      // Text copied together with a picture (a caption, a chart's title) goes in too, unless it only
+      // names the pasted files. It goes in first, at the caret, and the attachments follow it.
+      const caption = pasteCaption(plainText, files, Array.from(clipboardData.types ?? []))
+      if (caption) insertText(caption)
+      // One paste can carry the same picture twice, for example in two formats: attach it once.
+      // Pasting it again later still adds another copy.
+      await addAttachments(files, true, capture() ?? target, new Set())
       return
     }
-
-    const plainText = clipboardData.getData("text/plain") ?? ""
 
     // Desktop: Browser clipboard has no images and no text, try platform's native clipboard for images
     if (input.readClipboardImage && !plainText) {
@@ -143,7 +151,10 @@ export function createPromptAttachmentsCore(input: PromptAttachmentsCoreInput) {
     }
 
     if (!plainText) return
+    insertText(plainText)
+  }
 
+  const insertText = (plainText: string) => {
     const text = normalizePaste(plainText)
 
     const put = () => {

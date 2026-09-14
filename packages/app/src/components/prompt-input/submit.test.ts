@@ -499,6 +499,102 @@ describe("prompt submit worktree selection", () => {
   })
 })
 
+describe("follow-up optimistic echo", () => {
+  type SendInput = Parameters<typeof import("./submit").sendFollowupDraft>[0]
+  type SentPart = { id: string; type: string; synthetic?: boolean }
+  type Step = { kind: "echo" | "request"; parts: SentPart[] }
+
+  const text = "describe the colors in this picture and explain what the square could represent"
+  const pasted = {
+    type: "image" as const,
+    id: "pasted-image",
+    filename: "image.png",
+    mime: "image/png",
+    dataUrl: "data:image/png;base64,iVBORw0KGgo=",
+  }
+
+  const withDesktopContext = async <T>(run: () => Promise<T>) => {
+    Object.assign(window, {
+      api: { prepareAgentTask: async () => ({ instruction: "Context note from the desktop bridge." }) },
+    })
+    try {
+      return await run()
+    } finally {
+      delete (window as { api?: unknown }).api
+    }
+  }
+
+  const send = async (draft: Partial<import("./submit").FollowupDraft> = {}) => {
+    const { sendFollowupDraft } = await import("./submit")
+    // One ordered log, so a test also sees when the echo happens relative to the request.
+    const steps: Step[] = []
+    await sendFollowupDraft({
+      client: {
+        session: {
+          promptAsync: async (input: { parts: SentPart[] }) => {
+            steps.push({ kind: "request", parts: input.parts })
+            return { data: undefined }
+          },
+        },
+      } as unknown as SendInput["client"],
+      serverSync: { session: { set: () => undefined } } as unknown as SendInput["serverSync"],
+      sync: {
+        data: { command: [] },
+        session: {
+          optimistic: {
+            add: (value: { parts: SentPart[] }) => void steps.push({ kind: "echo", parts: value.parts }),
+            remove: () => undefined,
+          },
+        },
+      } as unknown as SendInput["sync"],
+      draft: {
+        sessionID: "session-1",
+        sessionDirectory: "/repo/main",
+        prompt: [{ type: "text", content: text, start: 0, end: text.length }, pasted],
+        context: [],
+        agent: "build",
+        model: { providerID: "opencode", modelID: "big-pickle" },
+        ...draft,
+      },
+    })
+    return steps
+  }
+
+  const ids = (parts: SentPart[]) => parts.map((part) => part.id)
+  const files = (parts: SentPart[]) => parts.filter((part) => part.type === "file")
+
+  // The engine stores parts under the ids the request carries, and the timeline drops an optimistic
+  // part only when a stored part with the same id arrives. An echo on any other id stays beside the
+  // stored copy, so a pasted image shows twice. A second echo sent after the request could also land
+  // on top of parts the server already stored, so there is exactly one, and it comes first.
+  const expectOneEchoBeforeRequest = (steps: Step[], instructions: number) => {
+    expect(steps.map((step) => step.kind)).toEqual(["echo", "request"])
+    const [echo, request] = steps.map((step) => step.parts)
+    expect(ids(echo)).toEqual(ids(request.filter((part) => !part.synthetic)))
+    expect(request.filter((part) => part.synthetic)).toHaveLength(instructions)
+    expect(files(echo)).toHaveLength(1)
+    expect(files(request)).toHaveLength(1)
+    // Stored parts are ordered by id, so the hidden instructions have to sort before the image.
+    expect(ids(request)).toEqual([...ids(request)].sort())
+  }
+
+  test("keeps the echoed ids when the desktop adds task context", async () => {
+    expectOneEchoBeforeRequest(await withDesktopContext(() => send()), 1)
+  })
+
+  test("keeps the echoed ids when verified completion adds its policy", async () => {
+    expectOneEchoBeforeRequest(await send({ llmJudge: true }), 1)
+  })
+
+  test("keeps the echoed ids when both instructions are added", async () => {
+    expectOneEchoBeforeRequest(await withDesktopContext(() => send({ llmJudge: true })), 2)
+  })
+
+  test("sends exactly the echoed parts when nothing is added", async () => {
+    expectOneEchoBeforeRequest(await send(), 0)
+  })
+})
+
 describe("submission agent selection", () => {
   test("uses the plan agent only while Plan Mode is enabled", () => {
     const available = [

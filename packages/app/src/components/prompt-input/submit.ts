@@ -17,7 +17,7 @@ import { useSDK, type DirectorySDK } from "@/context/sdk"
 import { useSync, type DirectorySync } from "@/context/sync"
 import { Identifier } from "@/utils/id"
 import { Worktree as WorktreeState } from "@/utils/worktree"
-import { buildRequestParts } from "./build-request-parts"
+import { buildRequestParts, withSyntheticText } from "./build-request-parts"
 import { emitDatabaseIntent } from "@/features/cloud/db-intent"
 import { setCursorPosition } from "./editor-dom"
 import { formatServerError } from "@/utils/server-errors"
@@ -100,6 +100,9 @@ const draftText = (prompt: Prompt) => prompt.map((part) => ("content" in part ? 
 
 const draftImages = (prompt: Prompt) => prompt.filter((part): part is ImageAttachmentPart => part.type === "image")
 
+// Task preparation and verified completion can each add one hidden instruction after the typed text.
+const SYNTHETIC_SLOTS = 2
+
 export async function sendFollowupDraft(input: FollowupSendInput) {
   const text = draftText(input.draft.prompt)
   const images = draftImages(input.draft.prompt)
@@ -170,6 +173,7 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
     sessionID: input.draft.sessionID,
     messageID,
     sessionDirectory: input.draft.sessionDirectory,
+    syntheticSlots: SYNTHETIC_SLOTS,
   })
 
   const message: Message = {
@@ -219,25 +223,14 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
       ...(preparation?.instruction ? [preparation.instruction] : []),
       ...(llmJudge ? [VERIFIED_COMPLETION_POLICY] : []),
     ]
-    const requestParts = syntheticText.length
-      ? buildRequestParts({
-          prompt: input.draft.prompt,
-          context: input.draft.context,
-          images,
-          text,
-          sessionID: input.draft.sessionID,
-          messageID,
-          sessionDirectory: input.draft.sessionDirectory,
-          syntheticText,
-        }).requestParts
-      : baseParts.requestParts
-
     await input.client.session.promptAsync({
       sessionID: input.draft.sessionID,
       agent,
       model: input.draft.model,
       messageID,
-      parts: requestParts,
+      // The echo above is already on screen under these part ids. The instructions take the ids
+      // held for them, so the parts the engine stores confirm the echo instead of sitting beside it.
+      parts: withSyntheticText(baseParts, syntheticText),
       variant: input.draft.variant,
       executionMode: input.draft.executionMode,
     })

@@ -27,7 +27,8 @@ type BuildRequestPartsInput = {
   messageID: string
   sessionID: string
   sessionDirectory: string
-  syntheticText?: string[]
+  /** How many ids to hold right after the typed text for hidden instructions added later by `withSyntheticText`. */
+  syntheticSlots?: number
 }
 
 const absolute = (directory: string, path: string) => {
@@ -97,21 +98,8 @@ export function buildRequestParts(input: BuildRequestPartsInput) {
       text: input.text,
     },
   ]
-
-  requestParts.push(
-    ...(input.syntheticText ?? []).flatMap((text) =>
-      text.trim()
-        ? [
-            {
-              id: Identifier.ascending("part"),
-              type: "text" as const,
-              text,
-              synthetic: true,
-            } satisfies PromptRequestPart,
-          ]
-        : [],
-    ),
-  )
+  // Minted now, so the instructions sort between the typed text and the attachments.
+  const syntheticIDs = Array.from({ length: input.syntheticSlots ?? 0 }, () => Identifier.ascending("part"))
 
   const files = input.prompt.filter(isFileAttachment).map((attachment) => {
     const path = absolute(input.sessionDirectory, attachment.path)
@@ -223,5 +211,33 @@ export function buildRequestParts(input: BuildRequestPartsInput) {
   return {
     requestParts,
     optimisticParts: requestParts.map((part) => toOptimisticPart(part, input.sessionID, input.messageID)),
+    syntheticIDs,
   }
+}
+
+/**
+ * Adds hidden instructions right after the typed text of a request that may already be on screen.
+ * Every other part keeps its id: the engine stores parts under the ids the request carries, and the
+ * timeline drops its optimistic copy of a part only when a stored part with the same id arrives, so
+ * a new id would leave a pasted image showing twice.
+ */
+export function withSyntheticText(
+  built: { requestParts: PromptRequestPart[]; syntheticIDs: string[] },
+  syntheticText: string[],
+): PromptRequestPart[] {
+  const added = syntheticText
+    .filter((text) => text.trim())
+    .map(
+      (text, index) =>
+        ({
+          // Past the held ids an instruction is still sent; it only sorts after the attachments.
+          id: built.syntheticIDs[index] ?? Identifier.ascending("part"),
+          type: "text",
+          text,
+          synthetic: true,
+        }) satisfies PromptRequestPart,
+    )
+  if (added.length === 0) return built.requestParts
+  const [typed, ...rest] = built.requestParts
+  return [typed, ...added, ...rest]
 }

@@ -2185,6 +2185,37 @@ noLLMServer.instance(
 )
 
 noLLMServer.instance(
+  "keeps the client's file part and id when the Read tool fails",
+  () =>
+    Effect.gen(function* () {
+      const { directory: dir } = yield* TestInstance
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({})
+
+      const missing = path.join(dir, "gone.ts")
+      const id = PartID.ascending()
+      const msg = yield* prompt.prompt({
+        sessionID: session.id,
+        agent: "build",
+        noReply: true,
+        parts: [
+          { type: "text", text: "please review @gone.ts" },
+          { id, type: "file", mime: "text/plain", url: `file://${missing}`, filename: "gone.ts" },
+        ],
+      })
+
+      if (msg.info.role !== "user") throw new Error("expected user message")
+      // A client that shows the part while sending drops its copy only when a stored part with this id arrives.
+      const stored = yield* MessageV2.get({ sessionID: session.id, messageID: msg.info.id })
+      expect(stored.parts.filter((part) => part.type === "file").map((part) => part.id)).toEqual([id])
+
+      yield* sessions.remove(session.id)
+    }),
+  { config: cfg },
+)
+
+noLLMServer.instance(
   "keeps stored part order stable when file resolution is async",
   () =>
     Effect.gen(function* () {

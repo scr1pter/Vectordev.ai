@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { attachmentMime, pickAttachmentFiles } from "./files"
-import { pasteMode } from "./paste"
+import { pasteCaption, pasteMode } from "./paste"
 
 describe("attachmentMime", () => {
   test("keeps PDFs when the browser reports the mime", async () => {
@@ -121,5 +121,24 @@ describe("pasteMode", () => {
 
   test("uses manual paste for large text", () => {
     expect(pasteMode("x".repeat(8000))).toBe("manual")
+  })
+})
+
+describe("pasteCaption", () => {
+  const shot = [{ name: "Screenshot 2026-09-14 at 10.00.00.png" }]
+
+  test("keeps text copied together with a picture", () => {
+    expect(pasteCaption("look at this chart", [{ name: "image.png" }])).toBe("look at this chart")
+    expect(pasteCaption("a.png\nwhat changed here?", [{ name: "a.png" }])).toBe("a.png\nwhat changed here?")
+  })
+
+  test("drops text that only names, locates or links the pasted files", () => {
+    expect(pasteCaption("Screenshot 2026-09-14 at 10.00.00.png", shot)).toBe("")
+    expect(pasteCaption("/Users/k/Desktop/Screenshot 2026-09-14 at 10.00.00.png", shot)).toBe("")
+    expect(pasteCaption("C:\\Users\\k\\Screenshot 2026-09-14 at 10.00.00.png", shot)).toBe("")
+    expect(pasteCaption("file:///Users/k/Desktop/shot.png", shot)).toBe("")
+    expect(pasteCaption("a.png\r\nb.png\n", [{ name: "a.png" }, { name: "b.png" }])).toBe("")
+    expect(pasteCaption("anything", shot, ["Files", "text/uri-list"])).toBe("")
+    expect(pasteCaption("  ", shot)).toBe("")
   })
 })

@@ -890,6 +890,39 @@ describe("server session", () => {
     expect(store.data.part_text_accum_delta[optimistic.id]).toBeUndefined()
   })
 
+  test("keeps one copy of an attachment once a re-echoed message is stored", async () => {
+    const message = userMessage("message")
+    const image = (id: string): Extract<Part, { type: "file" }> => ({
+      id,
+      sessionID: "child",
+      messageID: message.id,
+      type: "file",
+      mime: "image/png",
+      filename: "image.png",
+      url: "data:image/png;base64,AAAA",
+    })
+    const first = [textPart(message.id, { id: "a-text" }), image("a-image")]
+    const second = [textPart(message.id, { id: "b-text" }), image("b-image")]
+    const stored = [second[1], textPart(message.id, { id: "b-note", text: "hidden", synthetic: true }), second[0]]
+    const store = createServerSession(messageClient(response([{ info: message, parts: stored }])))
+    const shown = () => store.data.part[message.id] ?? []
+
+    // Echoing a message again replaces its earlier echo; it does not add to it.
+    store.optimistic.add({ sessionID: "child", message, parts: first })
+    store.optimistic.add({ sessionID: "child", message, parts: second })
+    store.apply({ type: "message.updated", properties: { sessionID: "child", info: message } })
+    for (const part of stored) {
+      store.apply({ type: "message.part.updated", properties: { sessionID: "child", part, time: 2 } })
+    }
+    expect(shown().map((part) => part.id)).toEqual(["b-image", "b-note", "b-text"])
+
+    // Every echoed part is confirmed, so a reload restores nothing and a rollback removes nothing.
+    await store.sync("child")
+    store.optimistic.remove({ sessionID: "child", messageID: message.id })
+    expect(shown().map((part) => part.id)).toEqual(["b-image", "b-note", "b-text"])
+    expect(shown().filter((part) => part.type === "file")).toHaveLength(1)
+  })
+
   test("preserves removals during history prepend", async () => {
     const pending = deferredResponse()
     const latest = userMessage("message-2", { time: { created: 2 } })

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { Prompt } from "@/context/prompt"
-import { buildRequestParts } from "./build-request-parts"
+import { buildRequestParts, withSyntheticText } from "./build-request-parts"
 
 describe("buildRequestParts", () => {
   test("builds typed request and optimistic parts without cast path", () => {
@@ -395,22 +395,55 @@ describe("buildRequestParts", () => {
   })
 
   test("adds hidden task intelligence without changing visible prompt text", () => {
-    const result = buildRequestParts({
+    const built = buildRequestParts({
       prompt: [{ type: "text", content: "Fix the login", start: 0, end: 13 }],
       context: [],
       images: [],
       text: "Fix the login",
-      syntheticText: ["<vector_task_intelligence>Inspect auth.ts first.</vector_task_intelligence>"],
+      syntheticSlots: 1,
       messageID: "msg_intelligence",
       sessionID: "ses_intelligence",
       sessionDirectory: "/repo",
     })
+    const result = withSyntheticText(built, [
+      "<vector_task_intelligence>Inspect auth.ts first.</vector_task_intelligence>",
+    ])
 
-    expect(result.requestParts[0]).toMatchObject({ type: "text", text: "Fix the login" })
-    expect(result.requestParts[1]).toMatchObject({
+    expect(result[0]).toMatchObject({ type: "text", text: "Fix the login" })
+    expect(result[1]).toMatchObject({
       type: "text",
       synthetic: true,
       text: "<vector_task_intelligence>Inspect auth.ts first.</vector_task_intelligence>",
     })
+  })
+
+  test("adds instructions after the build without changing the ids already shown", () => {
+    const built = buildRequestParts({
+      prompt: [{ type: "text", content: "what is this", start: 0, end: 12 }],
+      context: [],
+      images: [
+        { type: "image", id: "img_1", filename: "image.png", mime: "image/png", dataUrl: "data:image/png;base64,AAA" },
+      ],
+      text: "what is this",
+      syntheticSlots: 2,
+      messageID: "msg_slots",
+      sessionID: "ses_slots",
+      sessionDirectory: "/repo",
+    })
+    const shown = built.optimisticParts.map((part) => part.id)
+
+    const sent = withSyntheticText(built, ["first note", "  ", "second note"])
+
+    expect(sent.filter((part) => !(part.type === "text" && part.synthetic)).map((part) => part.id)).toEqual(shown)
+    expect(sent.map((part) => (part.type === "text" && part.synthetic ? part.text : part.type))).toEqual([
+      "text",
+      "first note",
+      "second note",
+      "file",
+    ])
+    // Stored parts are ordered by id, so the notes have to sort between the text and the image.
+    const ids = sent.map((part) => part.id)
+    expect(ids).toEqual([...ids].sort())
+    expect(withSyntheticText(built, [])).toBe(built.requestParts)
   })
 })

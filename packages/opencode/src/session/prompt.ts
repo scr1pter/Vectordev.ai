@@ -911,6 +911,10 @@ const layer = Layer.effect(
                     synthetic: true,
                     text: `Read tool failed to read ${filepath} with the following error: ${message}`,
                   })
+                  // Keep the client's part, and its id, as a successful read does: a client that
+                  // shows the part while sending drops its copy only when a stored part with that id
+                  // arrives. The model never sees text/plain file parts either way.
+                  pieces.push({ ...part, mime, messageID: info.id, sessionID: input.sessionID })
                 }
                 return pieces
               }
@@ -934,6 +938,8 @@ const layer = Layer.effect(
                       synthetic: true,
                       text: `Read tool failed to read ${filepath} with the following error: ${message}`,
                     },
+                    // Kept for the same reason as a failed file read above.
+                    { ...part, mime, messageID: info.id, sessionID: input.sessionID },
                   ]
                 }
                 return [
