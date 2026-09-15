@@ -45,10 +45,10 @@ export const dict = {
   "ui.sessionTurn.error.freeUsageExceeded": "無料使用制限に達しました",
   "ui.sessionTurn.error.addCredits": "クレジットを追加",
 
-  "dialog.usageExceeded.freeTier.title": "無料制限に達しました",
+  "dialog.usageExceeded.freeTier.title": "Vector に含まれるモデルの上限に達しました",
   "dialog.usageExceeded.freeTier.description":
-    "The selected free Vector-hosted model is temporarily out of quota. Choose another free model, connect your own provider key, or try again later.",
-  "dialog.usageExceeded.freeTier.actionLabel": "サブスクライブ",
+    "Vector に含まれるこのモデルは、一時的に利用枠を使い切りました。Vector に含まれる別のモデルを選ぶか、ご自身のプロバイダーキーを接続するか、しばらくしてからもう一度お試しください。",
+  "dialog.usageExceeded.freeTier.actionLabel": "モデルを選択",
   "dialog.usageExceeded.accountRateLimit.title": "Go の制限に達しました",
   "dialog.usageExceeded.accountRateLimit.description":
     "使用制限に達しました。今すぐこのモデルを使い続けるには、利用可能な残高からの使用を有効にしてください",

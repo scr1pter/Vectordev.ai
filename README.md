@@ -16,7 +16,7 @@ vector login
 vector
 ```
 
-The desktop app is a free download for macOS, Windows and Linux at [vectordev.ai](https://vectordev.ai), and the terminal agent is free too. Both need only a Vector account. OpenCode Zen's free models are included, so Vector works before you connect anything, and you can bring your own key for Claude, GPT, Gemini and the rest whenever you want.
+**No API key needed.** Vector comes with models included, today among them NVIDIA's Nemotron and Meta's Muse Spark, so it works before you connect anything, and you can bring your own key for Claude, GPT, Gemini and the rest whenever you want. The desktop app is a free download for macOS, Windows and Linux at [vectordev.ai](https://vectordev.ai), and the terminal agent is free too. Both need only a Vector account. The desktop app is free to use during the beta; when public pricing begins, it is $10 a month or $99 a year, and the subscription comes with the included models.
 
 **New in 1.99.8:** Subagents that work in parallel, every agent's edits typed live in the editor, no agent limit, every model in the picker, and a glass launch screen. [Release notes →](https://vectordev.ai/releases)
 
@@ -44,7 +44,9 @@ The desktop app is a free download for macOS, Windows and Linux at [vectordev.ai
 
 ### Models
 
-**Every model in one picker.** The model picker lists every model your connected providers offer, new releases included, beside OpenCode Zen's free models.
+**Models included with Vector.** You do not need an API key. Vector comes with models included, today among them NVIDIA's Nemotron and Meta's Muse Spark, and a new install starts on Big Pickle. The lineup changes as providers add and retire models. Included models are served by outside providers, and some may use your prompts to improve their models, so use your own provider key for confidential code.
+
+**Every model in one picker.** The model picker lists every model your connected providers offer, new releases included, beside the models included with Vector.
 
 **Economics you can see.** The Tokenomics engine measures what every session actually spent, per model and per task, and turns that into model recommendations built from real usage rather than list prices.
 

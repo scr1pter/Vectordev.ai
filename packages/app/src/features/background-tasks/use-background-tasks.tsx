@@ -17,6 +17,7 @@ import { useSDK } from "@/context/sdk"
 import { useServerSync } from "@/context/server-sync"
 import { useSync } from "@/context/sync"
 import { showToast } from "@/utils/toast"
+import { modelDisplayName } from "@/utils/provider-brand"
 import { legacySessionHref, requireServerKey, sessionHref } from "@/utils/session-route"
 import { loadDismissed, saveDismissed } from "./background-tasks-state"
 import {
@@ -127,7 +128,12 @@ export function BackgroundTasksProvider(props: ParentProps<{ sessionID: Accessor
     children: children(),
     status: (id) => sync().data.session_status[id],
     waiting: (id) => (sync().data.permission[id]?.length ?? 0) > 0 || (sync().data.question[id]?.length ?? 0) > 0,
-    modelName: (providerID, modelID) => sync().data.provider?.all?.get(providerID)?.models?.[modelID]?.name,
+    // Named as the model picker names it: an included model drops its catalogue name's "Free".
+    modelName: (providerID, modelID) => {
+      const provider = sync().data.provider?.all?.get(providerID)
+      const model = provider?.models?.[modelID]
+      return provider && model ? modelDisplayName({ ...model, provider }) : undefined
+    },
   })
 
   // Reconciled by key so cards, phases and agents keep their identity across

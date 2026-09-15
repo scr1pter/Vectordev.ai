@@ -8,6 +8,13 @@ import { DialogVariant } from "./dialog-variant"
 import * as fuzzysort from "fuzzysort"
 import { useConnected } from "./use-connected"
 import { useSync } from "../context/sync"
+import { includedModelName, isIncluded } from "../util/included-model"
+
+export { includedModelName, isIncluded } from "../util/included-model"
+
+/** Models included with Vector (isIncluded) share one section, as in the desktop app. */
+const INCLUDED_CATEGORY = "Models included with Vector"
+const INCLUDED_FOOTER = "Included"
 
 export function DialogModel(props: { providerID?: string }) {
   const local = useLocal()
@@ -33,15 +40,18 @@ export function DialogModel(props: { providerID?: string }) {
         if (!provider) return []
         const model = provider.models[item.modelID]
         if (!model) return []
+        const included = isIncluded(provider, model)
+        const title = model.name ?? item.modelID
         return [
           {
             key: item,
             value: { providerID: provider.id, modelID: model.id },
-            title: model.name ?? item.modelID,
-            description: provider.name,
+            title: included ? includedModelName(title) : title,
+            // The footer already says where an included model comes from.
+            description: included ? undefined : provider.name,
             category,
             disabled: provider.id === "opencode" && model.id.includes("-nano"),
-            footer: model.cost?.input === 0 && provider.id === "opencode" ? "Free" : undefined,
+            footer: included ? INCLUDED_FOOTER : undefined,
             onSelect: () => {
               onSelect(provider.id, model.id)
             },
@@ -70,20 +80,29 @@ export function DialogModel(props: { providerID?: string }) {
           entries(),
           filter(([_, info]) => info.status !== "deprecated"),
           filter(([_, info]) => (props.providerID ? info.providerID === props.providerID : true)),
-          map(([model, info]) => ({
-            value: { providerID: provider.id, modelID: model },
-            title: info.name ?? model,
-            releaseDate: info.release_date,
-            description: favorites.some((item) => item.providerID === provider.id && item.modelID === model)
-              ? "(Favorite)"
-              : undefined,
-            category: connected() ? provider.name : undefined,
-            disabled: provider.id === "opencode" && model.includes("-nano"),
-            footer: info.cost?.input === 0 && provider.id === "opencode" ? "Free" : undefined,
-            onSelect() {
-              onSelect(provider.id, model)
-            },
-          })),
+          map(([model, info]) => {
+            const included = isIncluded(provider, info)
+            const title = info.name ?? model
+            return {
+              value: { providerID: provider.id, modelID: model },
+              title: included ? includedModelName(title) : title,
+              releaseDate: info.release_date,
+              description: favorites.some((item) => item.providerID === provider.id && item.modelID === model)
+                ? "(Favorite)"
+                : undefined,
+              // Users with no key get the heading too: they're who it's for.
+              category: included ? INCLUDED_CATEGORY : connected() ? provider.name : undefined,
+              // What search reads (searchModelOptions): the catalogue name and, once a provider
+              // is connected, its name. Never the heading.
+              searchName: title,
+              searchProvider: connected() ? provider.name : undefined,
+              disabled: provider.id === "opencode" && model.includes("-nano"),
+              footer: included ? INCLUDED_FOOTER : undefined,
+              onSelect() {
+                onSelect(provider.id, model)
+              },
+            }
+          }),
           filter((option) => {
             if (!showSections) return true
             if (
@@ -118,10 +137,7 @@ export function DialogModel(props: { providerID?: string }) {
 
     if (needle) {
       return [
-        ...sortModelOptions(
-          fuzzysort.go(needle, providerOptions, { keys: ["title", "category"] }).map((x) => x.obj),
-          false,
-        ),
+        ...searchModelOptions(needle, providerOptions),
         ...fuzzysort.go(needle, popularProviders, { keys: ["title"] }).map((x) => x.obj),
       ]
     }
@@ -183,6 +199,25 @@ export function DialogModel(props: { providerID?: string }) {
   )
 }
 
+/** Search finds a row by its catalogue name, so "free" still finds the included models, and,
+    once a provider is connected, by the provider's name. Never by the section heading: its
+    letters would pull in rows that don't match, and the cursor lands on the first row. Included
+    rows come first, as when browsing. */
+export function searchModelOptions<
+  T extends {
+    searchName: string
+    searchProvider?: string
+    footer?: string
+    releaseDate: string | number
+    title: string
+  },
+>(needle: string, options: T[]) {
+  return sortModelOptions(
+    fuzzysort.go(needle, options, { keys: ["searchName", "searchProvider"] }).map((x) => x.obj),
+    false,
+  )
+}
+
 export function sortModelOptions<T extends { footer?: string; releaseDate: string | number; title: string }>(
   options: T[],
   newestFirst: boolean,
@@ -190,7 +225,7 @@ export function sortModelOptions<T extends { footer?: string; releaseDate: strin
   if (newestFirst) return sortBy(options, [(option) => option.releaseDate, "desc"], (option) => option.title)
   return sortBy(
     options,
-    (option) => option.footer !== "Free",
+    (option) => option.footer !== INCLUDED_FOOTER,
     [(option) => option.releaseDate, "desc"],
     (option) => option.title,
   )

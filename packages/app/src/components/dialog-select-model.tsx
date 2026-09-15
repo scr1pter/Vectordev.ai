@@ -15,6 +15,7 @@ import { decode64 } from "@/utils/base64"
 import {
   buildModelSections,
   contextLabel,
+  INCLUDED_ICON,
   isNewRelease,
   modelAccess,
   modelAriaLabel,
@@ -91,12 +92,11 @@ function createPointerGuard() {
 
 /** Label row: mark gutter, section name, and how the whole section is paid for. */
 function SectionHeading(props: { section: ModelSection }) {
-  const language = useLanguage()
   return (
     <>
       <span data-slot="model-row-icon" aria-hidden="true">
         <Show when={props.section.kind === "included"}>
-          <ProviderIcon id="opencode" width={14} height={14} />
+          <ProviderIcon id={INCLUDED_ICON} width={14} height={14} />
         </Show>
         <Show when={props.section.kind === "provider" && props.section.providerID}>
           {(id) => <ProviderIcon id={iconID(id())} width={14} height={14} />}
@@ -106,7 +106,7 @@ function SectionHeading(props: { section: ModelSection }) {
       <Show when={props.section.access}>
         {(access) => (
           <span data-slot="model-section-access" title={access().title}>
-            {access().kind === "free" ? language.t("model.tag.free") : access().label}
+            {access().label}
           </span>
         )}
       </Show>
@@ -118,7 +118,6 @@ function SectionHeading(props: { section: ModelSection }) {
     with the context size ("ChatGPT plan · 400K" where the section mixes ways of paying).
     Everything else is in the row's tooltip (modelTitle), which the caller sets. */
 function ModelRow(props: { item: ModelItem; section: ModelSection; now: number }) {
-  const language = useLanguage()
   const access = createMemo(() => modelAccess(props.item))
   // The top section mixes providers, so its rows carry their own mark; provider sections
   // carry it once, on the label.
@@ -126,12 +125,9 @@ function ModelRow(props: { item: ModelItem; section: ModelSection; now: number }
   const spec = createMemo(() => {
     const parts: { slot: string; text: string }[] = []
     const value = access()
-    // Only "Free" and "<Plan> plan" go on rows; "API key" stays on section labels and in the tooltip.
-    if (props.section.rowAccess && (value.kind === "free" || value.kind === "plan"))
-      parts.push({
-        slot: "model-row-access",
-        text: value.kind === "free" ? language.t("model.tag.free") : value.label,
-      })
+    // Only "Included" and "<Plan> plan" go on rows; "API key" stays on section labels and in the tooltip.
+    if (props.section.rowAccess && (value.kind === "included" || value.kind === "plan"))
+      parts.push({ slot: "model-row-access", text: value.label })
     const context = contextLabel(props.item.limit?.context)
     if (context) parts.push({ slot: "model-row-context", text: context })
     return parts
@@ -140,7 +136,10 @@ function ModelRow(props: { item: ModelItem; section: ModelSection; now: number }
     <>
       <span data-slot="model-row-icon" aria-hidden="true">
         <Show when={mixed()}>
-          <Show when={access().kind !== "free"} fallback={<ProviderIcon id="opencode" width={14} height={14} />}>
+          <Show
+            when={access().kind !== "included"}
+            fallback={<ProviderIcon id={INCLUDED_ICON} width={14} height={14} />}
+          >
             <ProviderIcon id={iconID(props.item.provider.id)} width={14} height={14} />
           </Show>
         </Show>

@@ -46,10 +46,10 @@ export const dict = {
   "ui.sessionTurn.error.freeUsageExceeded": "무료 사용량 초과",
   "ui.sessionTurn.error.addCredits": "크레딧 추가",
 
-  "dialog.usageExceeded.freeTier.title": "무료 한도에 도달했습니다",
+  "dialog.usageExceeded.freeTier.title": "Vector 포함 모델 한도에 도달했습니다",
   "dialog.usageExceeded.freeTier.description":
-    "The selected free Vector-hosted model is temporarily out of quota. Choose another free model, connect your own provider key, or try again later.",
-  "dialog.usageExceeded.freeTier.actionLabel": "구독",
+    "Vector에 포함된 이 모델의 할당량이 일시적으로 소진되었습니다. 포함된 다른 모델을 선택하거나, 자신의 공급자 키를 연결하거나, 나중에 다시 시도하세요.",
+  "dialog.usageExceeded.freeTier.actionLabel": "모델 선택",
   "dialog.usageExceeded.accountRateLimit.title": "Go 한도에 도달했습니다",
   "dialog.usageExceeded.accountRateLimit.description":
     "사용량 한도에 도달했습니다. 지금 이 모델을 계속 사용하려면 사용 가능한 잔액에서 사용을 활성화하세요",

@@ -1,6 +1,7 @@
 import * as Locale from "@/util/locale"
 import type { SessionMessages } from "./session.shared"
 import type { RunProvider, StreamCommit } from "./types"
+import { modelInfo } from "./variant.shared"
 
 export function turnSummaryCommit(input: {
   agent: string
@@ -36,11 +37,12 @@ export function messageTurnSummaryCommit(
     return
   }
 
-  const model = providers?.find((item) => item.id === info.providerID)?.models[info.modelID]?.name
+  // Named as the live summary names it: an included model drops its catalogue name's "Free".
+  const model = modelInfo(providers, { providerID: info.providerID, modelID: info.modelID }).model
 
   return turnSummaryCommit({
     agent: Locale.titlecase(info.agent),
-    model: model ?? info.modelID,
+    model,
     duration: Locale.duration(completed - info.time.created),
     messageID: info.id,
   })

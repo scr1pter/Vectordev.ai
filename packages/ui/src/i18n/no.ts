@@ -49,10 +49,10 @@ export const dict: Record<Keys, string> = {
   "ui.sessionTurn.error.freeUsageExceeded": "Gratis bruk overskredet",
   "ui.sessionTurn.error.addCredits": "Legg til kreditt",
 
-  "dialog.usageExceeded.freeTier.title": "Gratis grense nådd",
+  "dialog.usageExceeded.freeTier.title": "Grense for inkludert modell nådd",
   "dialog.usageExceeded.freeTier.description":
-    "The selected free Vector-hosted model is temporarily out of quota. Choose another free model, connect your own provider key, or try again later.",
-  "dialog.usageExceeded.freeTier.actionLabel": "Abonner",
+    "Denne modellen, som er inkludert i Vector, har midlertidig brukt opp kvoten sin. Velg en annen inkludert modell, koble til din egen leverandørnøkkel, eller prøv igjen senere.",
+  "dialog.usageExceeded.freeTier.actionLabel": "Velg modell",
   "dialog.usageExceeded.accountRateLimit.title": "Go-grense nådd",
   "dialog.usageExceeded.accountRateLimit.description":
     "Bruksgrense nådd. For å fortsette å bruke denne modellen nå, aktiver bruk fra din tilgjengelige saldo",

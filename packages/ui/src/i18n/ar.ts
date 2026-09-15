@@ -46,10 +46,10 @@ export const dict = {
   "ui.sessionTurn.error.freeUsageExceeded": "تم تجاوز حد الاستخدام المجاني",
   "ui.sessionTurn.error.addCredits": "إضافة رصيد",
 
-  "dialog.usageExceeded.freeTier.title": "تم الوصول إلى الحد المجاني",
+  "dialog.usageExceeded.freeTier.title": "تم الوصول إلى حد النموذج المضمَّن في Vector",
   "dialog.usageExceeded.freeTier.description":
-    "The selected free Vector-hosted model is temporarily out of quota. Choose another free model, connect your own provider key, or try again later.",
-  "dialog.usageExceeded.freeTier.actionLabel": "اشترك",
+    "نفدت حصة هذا النموذج المضمَّن في Vector مؤقتًا. اختر نموذجًا مضمَّنًا آخر، أو اربط مفتاح الموفر الخاص بك، أو حاول مرة أخرى لاحقًا.",
+  "dialog.usageExceeded.freeTier.actionLabel": "اختر نموذجًا",
   "dialog.usageExceeded.accountRateLimit.title": "تم الوصول إلى حد Go",
   "dialog.usageExceeded.accountRateLimit.description":
     "تم الوصول إلى حد الاستخدام. لمتابعة استخدام هذا النموذج الآن، قم بتفعيل الاستخدام من رصيدك المتاح",

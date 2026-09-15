@@ -45,10 +45,10 @@ export const dict = {
   "ui.sessionTurn.error.freeUsageExceeded": "Gratis forbrug overskredet",
   "ui.sessionTurn.error.addCredits": "Tilføj kreditter",
 
-  "dialog.usageExceeded.freeTier.title": "Gratis grænse nået",
+  "dialog.usageExceeded.freeTier.title": "Grænse for inkluderet model nået",
   "dialog.usageExceeded.freeTier.description":
-    "The selected free Vector-hosted model is temporarily out of quota. Choose another free model, connect your own provider key, or try again later.",
-  "dialog.usageExceeded.freeTier.actionLabel": "Abonnér",
+    "Denne model, der er inkluderet i Vector, har midlertidigt opbrugt sin kvote. Vælg en anden inkluderet model, forbind din egen udbydernøgle, eller prøv igen senere.",
+  "dialog.usageExceeded.freeTier.actionLabel": "Vælg model",
   "dialog.usageExceeded.accountRateLimit.title": "Go-grænse nået",
   "dialog.usageExceeded.accountRateLimit.description":
     "Forbrugsgrænse nået. For at fortsætte med at bruge denne model nu, aktivér forbrug fra din tilgængelige saldo",

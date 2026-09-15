@@ -93,7 +93,8 @@ export function CliLaunchPanel(props: { accessToken: string; previewToken?: stri
       </div>
       <p className="acct-fine">
         The token is your personal CLI credential — it expires in 90 days, and you can generate a fresh one at any time
-        from this page. Free model included; add your own keys with <code>vector auth login</code>.
+        from this page. No API key needed: models are included with Vector. Add your own keys with{" "}
+        <code>vector auth login</code>.
       </p>
     </section>
   )

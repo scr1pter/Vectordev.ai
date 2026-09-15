@@ -3,6 +3,7 @@ import {
   buildModelSections,
   contextLabel,
   contextTitle,
+  includedModelName,
   isCodingModel,
   isNewRelease,
   matchRank,
@@ -55,28 +56,31 @@ function model(provider: Provider, id: string, name: string, extra: Partial<Pick
   }
 }
 
-const free = (id: string, name: string, extra: Partial<PickerModel> = {}) =>
+const included = (id: string, name: string, extra: Partial<PickerModel> = {}) =>
   model(gateway, id, name, { cost: { input: 0 }, ...extra })
 
 describe("modelAccess", () => {
-  test("a zero-cost model from the OpenCode Zen gateway is free", () => {
-    const access = modelAccess(free("big-pickle", "Big Pickle"))
-    expect(access.kind).toBe("free")
-    expect(access.label).toBe("Free")
-    expect(access.title).toBe("Free on OpenCode Zen")
-    expect(modelAccess(model({ ...gateway, id: "opencode-zen" }, "x", "X", { cost: { input: 0 } })).label).toBe("Free")
+  test("a zero-cost model from OpenCode Zen is included with Vector", () => {
+    const access = modelAccess(included("big-pickle", "Big Pickle"))
+    expect(access.kind).toBe("included")
+    expect(access.label).toBe("Included")
+    expect(access.title).toBe("Included with Vector")
+    expect(access.spoken).toBe("included with Vector")
+    expect(modelAccess(model({ ...gateway, id: "opencode-zen" }, "x", "X", { cost: { input: 0 } })).label).toBe(
+      "Included",
+    )
   })
 
-  test("zero cost from the gateway is free only for catalogue models or when it runs keyless", () => {
+  test("zero cost from Zen is included only for catalogue models or when it runs keyless", () => {
     // Defined only in config: no release date, cost defaults to zero, and a Zen key pays for it.
     const configOnly = model(zenKey, "my-model", "My model Free", { cost: { input: 0 }, release_date: "" })
     expect(modelAccess(configOnly).kind).toBe("none")
     expect(modelDisplayName(configOnly)).toBe("My model Free")
     expect(modelAccess({ ...configOnly, release_date: undefined }).kind).toBe("none")
-    // A catalogue model stays free on a Zen key; keyless, the gateway only loads free models.
-    expect(modelAccess(model(zenKey, "big-pickle", "Big Pickle", { cost: { input: 0 } })).kind).toBe("free")
+    // A catalogue model stays included on a Zen key; keyless, Zen only loads zero-cost models.
+    expect(modelAccess(model(zenKey, "big-pickle", "Big Pickle", { cost: { input: 0 } })).kind).toBe("included")
     expect(modelAccess(model(gateway, "my-model", "My model", { cost: { input: 0 }, release_date: "" })).kind).toBe(
-      "free",
+      "included",
     )
   })
 
@@ -91,7 +95,7 @@ describe("modelAccess", () => {
     )
   })
 
-  test("a priced model never reads as free", () => {
+  test("a priced model never reads as included", () => {
     const priced = [
       model(gateway, "muse-spark-1.3", "Muse Spark 1.3", { cost: { input: 1.25 } }),
       model(zenKey, "muse-spark-1.3", "Muse Spark 1.3", { cost: { input: 1.25 } }),
@@ -100,7 +104,7 @@ describe("modelAccess", () => {
       model(snowflake, "claude", "Claude", { cost: { input: 3 } }),
       model(local, "llama", "Llama", { cost: [{ input: 0 }, { input: 2 }] }),
     ]
-    for (const item of priced) expect(modelAccess(item).kind).not.toBe("free")
+    for (const item of priced) expect(modelAccess(item).kind).not.toBe("included")
   })
 
   test("known sign-in plans win over price, and the plan name is never invented", () => {
@@ -111,7 +115,7 @@ describe("modelAccess", () => {
     // xAI's sign-in proves no plan and keeps per-token prices, so it claims nothing.
     expect(modelAccess(model(supergrok, "grok-4.6", "Grok 4.6", { cost: { input: 2 } })).kind).toBe("none")
     expect(modelAccess(model(xaiKey, "grok-4.6", "Grok 4.6", { cost: { input: 2 } })).label).toBe("API key")
-    // Snowflake Cortex sets the same marker but bills credits: no plan, no "Free".
+    // Snowflake Cortex sets the same marker but bills credits: no plan, no "Included".
     expect(modelAccess(model(snowflake, "claude", "Claude", { cost: { input: 0 } })).kind).toBe("none")
   })
 
@@ -147,8 +151,8 @@ describe("modelAccess", () => {
   })
 
   test("row captions show only when rows are paid for in more than one way", () => {
-    expect(showRowAccess([free("a", "A"), free("b", "B")])).toBe(false)
-    expect(showRowAccess([free("a", "A"), model(chatgpt, "gpt-5.5", "GPT-5.5", { cost: { input: 0 } })])).toBe(true)
+    expect(showRowAccess([included("a", "A"), included("b", "B")])).toBe(false)
+    expect(showRowAccess([included("a", "A"), model(chatgpt, "gpt-5.5", "GPT-5.5", { cost: { input: 0 } })])).toBe(true)
   })
 })
 
@@ -243,14 +247,24 @@ describe("row text", () => {
     expect(releaseTitle({ release_date: "" })).toBe("")
   })
 
-  test("a free model drops the trailing Free its caption already carries", () => {
-    expect(modelDisplayName(free("n", "Nemotron 3.5 Lightning Free"))).toBe("Nemotron 3.5 Lightning")
-    expect(modelDisplayName(free("m", "Muse Spark 1.3 (Free)"))).toBe("Muse Spark 1.3")
-    expect(modelDisplayName(free("b", "Big Pickle"))).toBe("Big Pickle")
-    expect(modelDisplayName(free("o", "Ox Alpha Free (Unlimited)"))).toBe("Ox Alpha Free (Unlimited)")
+  test("an included model drops the trailing Free from its name", () => {
+    expect(modelDisplayName(included("n", "Nemotron 3.5 Lightning Free"))).toBe("Nemotron 3.5 Lightning")
+    expect(modelDisplayName(included("m", "Muse Spark 1.3 (Free)"))).toBe("Muse Spark 1.3")
+    expect(modelDisplayName(included("b", "Big Pickle"))).toBe("Big Pickle")
+    expect(modelDisplayName(included("o", "Ox Alpha Free (Unlimited)"))).toBe("Ox Alpha Free (Unlimited)")
+    // A paid model keeps its name as the catalogue writes it.
     expect(modelDisplayName(model(zenKey, "m", "Muse Spark 1.3 Free", { cost: { input: 1 } }))).toBe(
       "Muse Spark 1.3 Free",
     )
+  })
+
+  test("includedModelName drops a trailing Free or (Free) in any case", () => {
+    expect(includedModelName("Muse Spark 1.3 Free")).toBe("Muse Spark 1.3")
+    expect(includedModelName("Muse Spark 1.3 (free)")).toBe("Muse Spark 1.3")
+    expect(includedModelName("Nemotron 3 Ultra FREE")).toBe("Nemotron 3 Ultra")
+    expect(includedModelName("Ox Alpha Free (Unlimited)")).toBe("Ox Alpha Free (Unlimited)")
+    expect(includedModelName("Carefree")).toBe("Carefree")
+    expect(includedModelName("Free")).toBe("Free")
   })
 
   test("aria-label reads the whole row", () => {
@@ -260,8 +274,8 @@ describe("row text", () => {
       limit: { context: 1_050_000 },
     })
     expect(modelAriaLabel(astra, NOW)).toBe("GPT-6 Astra, OpenAI, 1M context, reasoning, new, uses your ChatGPT plan")
-    expect(modelAriaLabel(free("big-pickle", "Big Pickle"), NOW)).toBe(
-      "Big Pickle, 200K context, reasoning, free, on OpenCode Zen",
+    expect(modelAriaLabel(included("big-pickle", "Big Pickle"), NOW)).toBe(
+      "Big Pickle, 200K context, reasoning, included with Vector",
     )
   })
 
@@ -274,13 +288,13 @@ describe("row text", () => {
     expect(modelTitle(astra)).toBe(
       "GPT-6 Astra\nOpenAI · Reasoning\n1,050,000-token context window\nReleased Sep 4, 2026\nUses your ChatGPT plan",
     )
-    const lightning = free("nemotron-3.5-lightning-free", "Nemotron 3.5 Lightning Free", {
+    const lightning = included("nemotron-3.5-lightning-free", "Nemotron 3.5 Lightning Free", {
       release_date: "2026-08-11",
       limit: { context: 262_144 },
       capabilities: { reasoning: false },
     })
     expect(modelTitle(lightning)).toBe(
-      "Nemotron 3.5 Lightning Free\n262,144-token context window\nReleased Aug 11, 2026\nFree on OpenCode Zen",
+      "Nemotron 3.5 Lightning\n262,144-token context window\nReleased Aug 11, 2026\nIncluded with Vector",
     )
     const bare = model(local, "llama", "Llama", { capabilities: undefined, limit: undefined, release_date: "" })
     expect(modelTitle(bare)).toBe("Llama\nOllama")
@@ -312,23 +326,23 @@ describe("buildModelSections", () => {
     release_date: "2026-06-30",
     cost: { input: 2 },
   })
-  const pickle = free("big-pickle", "Big Pickle", { release_date: "2025-10-17" })
-  const muse = free("muse-spark-1.3-free", "Muse Spark 1.3 Free", {
+  const pickle = included("big-pickle", "Big Pickle", { release_date: "2025-10-17" })
+  const muse = included("muse-spark-1.3-free", "Muse Spark 1.3 Free", {
     release_date: "2026-09-02",
     limit: { context: 1_048_576 },
   })
-  const lightning = free("nemotron-3.5-lightning-free", "Nemotron 3.5 Lightning Free", {
+  const lightning = included("nemotron-3.5-lightning-free", "Nemotron 3.5 Lightning Free", {
     release_date: "2026-08-11",
     limit: { context: 262_144 },
     capabilities: { reasoning: false },
   })
-  const ultra = free("nemotron-3-ultra-free", "Nemotron 3 Ultra Free", {
+  const ultra = included("nemotron-3-ultra-free", "Nemotron 3 Ultra Free", {
     release_date: "2026-03-11",
     limit: { context: 1_000_000 },
   })
-  const mimo = free("mimo-v2.5-free", "MiMo V2.5 Free", { release_date: "2026-05-20" })
+  const mimo = included("mimo-v2.5-free", "MiMo V2.5 Free", { release_date: "2026-05-20" })
 
-  // Deliberately in no useful order: the free roster first, the frontier model last.
+  // Deliberately in no useful order: the included roster first, the frontier model last.
   const models = [pickle, muse, lightning, ultra, mimo, gpt55, sol, sonnet, opus, astra]
   const popular = ["opencode", "opencode-go", "opencode-zen", "anthropic", "github-copilot", "openai", "google"]
   const build = (term = "", extra: { currentKey?: string; recentKeys?: string[] } = {}) =>
@@ -354,8 +368,17 @@ describe("buildModelSections", () => {
     expect(pickerKeys(sections)[0]).toBe("openai:gpt-6-astra")
     expect(keysOf(sections[0].items)).toEqual(["openai:gpt-6-astra", "opencode:big-pickle"])
     expect(sections[0].label).toBe("Recently used")
-    expect(sections.at(-1)?.label).toBe("OpenCode Zen")
-    expect(sections.at(-1)?.access?.label).toBe("Free")
+    expect(sections.at(-1)?.label).toBe("Models included with Vector")
+    // Its rows drop the catalogue's "Free".
+    expect(sections.at(-1)?.items.map((item) => modelDisplayName(item))).toEqual([
+      "Muse Spark 1.3",
+      "Nemotron 3.5 Lightning",
+      "MiMo V2.5",
+      "Nemotron 3 Ultra",
+    ])
+    // The label already says how its rows are paid for: no caption on it, none on its rows.
+    expect(sections.at(-1)?.access).toBeUndefined()
+    expect(sections.at(-1)?.rowAccess).toBe(false)
   })
 
   test("new models stay in their own section, newest first; there is no separate new-releases section", () => {
@@ -381,7 +404,7 @@ describe("buildModelSections", () => {
 
   test("rows carry an access caption only where their section mixes ways of paying", () => {
     const sections = build()
-    // GPT-6 Astra (ChatGPT plan) and Big Pickle (Free) share the top section.
+    // GPT-6 Astra (ChatGPT plan) and Big Pickle (Included) share the top section.
     expect(sections[0].rowAccess).toBe(true)
     expect(sections.slice(1).some((section) => section.rowAccess)).toBe(false)
     // Two ChatGPT plan rows: nothing to tell apart.
@@ -437,7 +460,7 @@ describe("buildModelSections", () => {
     const novaPro = model(openaiKey, "nova-pro", "Nova Pro")
     const novaMini = model(zed, "nova-mini", "Nova Mini")
     const novaMax = model(beta, "nova-max", "Nova Max")
-    const novaLite = free("nova-lite-free", "Nova Lite Free")
+    const novaLite = included("nova-lite-free", "Nova Lite Free")
     const items = [supernova, novaPro, novaMini, novaMax, novaLite]
     expect(matchRank(supernova, "nova", NOW)).toBe(2)
     expect(buildModelSections({ models: items, now: NOW, popular }).map((section) => section.id)).toEqual([
@@ -456,7 +479,7 @@ describe("buildModelSections", () => {
       "provider:anthropic",
     ])
     expect(pickerKeys(sections)[0]).toBe("openai:nova-pro")
-    // "OpenCode Zen" leads when it holds the best match.
+    // The included section leads when it holds the best match.
     const bigwig = model(anthropicKey, "claude-bigwig", "Claude Bigwig")
     expect(
       buildModelSections({ models: [bigwig, pickle], term: "big", now: NOW, popular }).map((section) => section.id),
@@ -466,10 +489,29 @@ describe("buildModelSections", () => {
   test("searching by spec: context, access and capability words", () => {
     expect(new Set(pickerKeys(build("1m")))).toEqual(new Set(keysOf([astra, opus, muse, ultra])))
     expect(new Set(pickerKeys(build("chatgpt")))).toEqual(new Set(keysOf([astra, sol, gpt55])))
-    const freeOnly = build("free")
-    expect(freeOnly.map((section) => section.id)).toEqual(["included"])
-    expect(new Set(pickerKeys(freeOnly))).toEqual(new Set(keysOf([pickle, muse, lightning, ultra, mimo])))
+    // "free" stays a search word for the included models, though no row shows it.
+    for (const term of ["included", "vector", "free"]) {
+      const includedOnly = build(term)
+      expect(includedOnly.map((section) => section.id)).toEqual(["included"])
+      expect(new Set(pickerKeys(includedOnly))).toEqual(new Set(keysOf([pickle, muse, lightning, ultra, mimo])))
+    }
     expect(pickerKeys(build("zzz"))).toEqual([])
+  })
+
+  test("an included model is still found by its catalogue name, Free and all", () => {
+    // normalizeProviderList stores an included model's name without its "Free", so the name a
+    // user knew it by has to match on the rest, whether the name is stored cleaned or not.
+    const stored = { ...ultra, name: includedModelName(ultra.name) }
+    const others = models.filter((item) => item !== ultra)
+    for (const listed of [ultra, stored]) {
+      for (const term of ["nemotron 3 ultra free", "ultra free", "Nemotron 3 Ultra Free"]) {
+        const sections = buildModelSections({ models: [...others, listed], term, now: NOW, popular })
+        expect(pickerKeys(sections)[0]).toBe(pickerModelKey(ultra))
+      }
+    }
+    // Only an included model loses the word: a priced model isn't found by "ultra free".
+    const priced = model(anthropicKey, "claude-ultra", "Claude Ultra")
+    expect(matchRank(priced, "ultra free", NOW)).toBeUndefined()
   })
 
   test("match rank beats release date inside a section", () => {

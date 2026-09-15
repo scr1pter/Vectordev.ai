@@ -47,10 +47,10 @@ export const dict = {
   "ui.sessionTurn.error.freeUsageExceeded": "เกินขีดจำกัดการใช้งานฟรี",
   "ui.sessionTurn.error.addCredits": "เพิ่มเครดิต",
 
-  "dialog.usageExceeded.freeTier.title": "ถึงขีดจำกัดฟรีแล้ว",
+  "dialog.usageExceeded.freeTier.title": "ถึงขีดจำกัดของโมเดลที่รวมมากับ Vector แล้ว",
   "dialog.usageExceeded.freeTier.description":
-    "The selected free Vector-hosted model is temporarily out of quota. Choose another free model, connect your own provider key, or try again later.",
-  "dialog.usageExceeded.freeTier.actionLabel": "สมัครสมาชิก",
+    "โมเดลนี้ที่รวมมากับ Vector ใช้โควตาหมดชั่วคราว เลือกโมเดลอื่นที่รวมมากับ Vector เชื่อมต่อคีย์ผู้ให้บริการของคุณเอง หรือลองอีกครั้งภายหลัง",
+  "dialog.usageExceeded.freeTier.actionLabel": "เลือกโมเดล",
   "dialog.usageExceeded.accountRateLimit.title": "ถึงขีดจำกัดของ Go แล้ว",
   "dialog.usageExceeded.accountRateLimit.description":
     "ถึงขีดจำกัดการใช้งานแล้ว หากต้องการใช้โมเดลนี้ต่อในตอนนี้ ให้เปิดใช้งานจากยอดคงเหลือที่มี",

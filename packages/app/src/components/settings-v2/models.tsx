@@ -10,7 +10,13 @@ import { useModels } from "@/context/models"
 import { popularProviders } from "@/hooks/use-providers"
 import { SettingsListV2 } from "./parts/list"
 import { SettingsRowV2 } from "./parts/row"
-import { brandProviderName } from "@/utils/provider-brand"
+import {
+  brandProviderName,
+  INCLUDED_ICON,
+  INCLUDED_SECTION,
+  isIncludedModel,
+  modelDisplayName,
+} from "@/utils/provider-brand"
 import "./settings-v2.css"
 
 type ModelItem = ReturnType<ReturnType<typeof useModels>["list"]>[number]
@@ -18,7 +24,13 @@ type ModelItem = ReturnType<ReturnType<typeof useModels>["list"]>[number]
 const PROVIDER_ICON_SIZE = 16
 const HIDDEN_PROVIDER_IDS = new Set<string>()
 
-const providerDisplayName = (id: string, name: string) => brandProviderName(id, name)
+/** Models included with Vector form their own group, as in the model picker and Manage
+    models, and everything else groups by provider. Priced Zen models (a Zen key) stay under
+    the provider's name. */
+const INCLUDED_GROUP = "vector:included"
+const groupOf = (item: ModelItem) => (isIncludedModel(item) ? INCLUDED_GROUP : item.provider.id)
+const groupName = (category: string, item: ModelItem) =>
+  category === INCLUDED_GROUP ? INCLUDED_SECTION : brandProviderName(item.provider.id, item.provider.name)
 
 export const SettingsModelsV2: Component = () => {
   const language = useLanguage()
@@ -29,8 +41,12 @@ export const SettingsModelsV2: Component = () => {
     key: (x) => `${x.provider.id}:${x.id}`,
     filterKeys: ["provider.name", "name", "id"],
     sortBy: (a, b) => a.name.localeCompare(b.name),
-    groupBy: (x) => x.provider.id,
+    groupBy: groupOf,
     sortGroupsBy: (a, b) => {
+      // Models included with Vector come last, as in the model picker.
+      const included = Number(a.category === INCLUDED_GROUP) - Number(b.category === INCLUDED_GROUP)
+      if (included !== 0) return included
+
       const aIndex = popularProviders.indexOf(a.category)
       const bIndex = popularProviders.indexOf(b.category)
       const aPopular = aIndex >= 0
@@ -40,9 +56,7 @@ export const SettingsModelsV2: Component = () => {
       if (!aPopular && bPopular) return 1
       if (aPopular && bPopular) return aIndex - bIndex
 
-      const aName = providerDisplayName(a.category, a.items[0].provider.name)
-      const bName = providerDisplayName(b.category, b.items[0].provider.name)
-      return aName.localeCompare(bName)
+      return groupName(a.category, a.items[0]).localeCompare(groupName(b.category, b.items[0]))
     },
   })
 
@@ -112,21 +126,19 @@ export const SettingsModelsV2: Component = () => {
                 <div class="settings-v2-section" data-component="settings-models-provider">
                   <div class="settings-v2-models-group-header">
                     <ProviderIcon
-                      id={group.category}
+                      id={group.category === INCLUDED_GROUP ? INCLUDED_ICON : group.category}
                       width={PROVIDER_ICON_SIZE}
                       height={PROVIDER_ICON_SIZE}
                       class="settings-v2-models-provider-icon shrink-0"
                     />
-                    <h3 class="settings-v2-section-title">
-                      {providerDisplayName(group.category, group.items[0].provider.name)}
-                    </h3>
+                    <h3 class="settings-v2-section-title">{groupName(group.category, group.items[0])}</h3>
                   </div>
                   <SettingsListV2>
                     <For each={group.items}>
                       {(item) => {
                         const key = { providerID: item.provider.id, modelID: item.id }
                         return (
-                          <SettingsRowV2 title={item.name} description="">
+                          <SettingsRowV2 title={modelDisplayName(item)} description="">
                             <div>
                               <Switch
                                 checked={models.visible(key)}
@@ -135,7 +147,7 @@ export const SettingsModelsV2: Component = () => {
                                 }}
                                 hideLabel
                               >
-                                {item.name}
+                                {modelDisplayName(item)}
                               </Switch>
                             </div>
                           </SettingsRowV2>

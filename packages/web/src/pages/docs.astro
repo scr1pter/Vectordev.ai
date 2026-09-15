@@ -242,7 +242,7 @@ const spendRows = [
   ],
   [
     "Your keys, your bill",
-    "Bring your own provider keys and the model spend is between you and that provider. Vector's own price is the licence — it does not resell tokens or add a margin to them.",
+    "The models included with Vector come with your Vector account and need no key. Bring your own provider keys and that model spend is between you and that provider — Vector does not resell tokens or add a margin to them.",
   ],
 ]
 const systemRows = [
@@ -276,7 +276,7 @@ const systemRows = [
   ],
   [
     "Start with no key at all",
-    "Curated free models are included, so there is a capable model available before you have connected a provider or paid anyone.",
+    "Models are included with Vector, among them NVIDIA's Nemotron and Meta's Muse Spark, so a capable model is ready before you have connected a provider or added an API key.",
   ],
   [
     "Dictation that stays on device",
@@ -296,7 +296,7 @@ const systemRows = [
   ],
 ]
 const connectionGroups = [
-  ["Models", "Included free models, then Anthropic, OpenAI, Google, and other BYOK providers"],
+  ["Models", "Models included with Vector, then Anthropic, OpenAI, Google, and other BYOK providers"],
   ["Agent runtimes", "Local Claude Code, Codex, and Cursor tools when Vector detects them installed"],
   ["Protocols and source", "118 catalog connectors, your own MCP servers, GitHub, and GitLab"],
   ["Cloud and validation", "Vercel, Netlify, Supabase, AWS through its CLI, and Playwright"],
@@ -512,14 +512,14 @@ const faqs = [
       "No. It is a controlled project browser for previewing, testing, and completing approved web workflows alongside the active agent session.",
   },
   {
-    question: "Do I need a paid Vector model plan?",
+    question: "Do I need an API key?",
     answer:
-      "No. Vector supports bring-your-own-key providers. Availability and billing depend on the model provider you connect.",
+      "No. Vector comes with models included, among them NVIDIA's Nemotron and Meta's Muse Spark, so you can work without connecting a provider. You can also bring your own key for Claude, GPT, Gemini and the rest; availability and billing for those depend on the provider you connect. Included models are served by outside providers, and some may use your prompts to improve their models, so use your own provider key for confidential code.",
   },
   {
     question: "How do I buy and activate Vector?",
     answer:
-      "Create a Vector account with Google or email, then open Account. Desktop access is free during private beta; an optional monthly or annual Stripe purchase adds your private VEC1 license key and billing controls. Enter that key when the desktop app asks for activation.",
+      "Create a Vector account with Google or email, then open Account. Desktop access is free during private beta; an optional Stripe purchase, $10 a month or $99 a year, adds your private VEC1 license key and billing controls. Enter that key when the desktop app asks for activation. Either way, models are included with Vector, so you need no API key.",
   },
 ]
 ---
@@ -590,7 +590,7 @@ const faqs = [
           <ol class="steps">
             <li><span>1</span><div><strong>Open repository</strong><p>Select the folder containing the project you want to build.</p></div></li>
             <li><span>2</span><div><strong>Create a session</strong><p>Start with one clear outcome rather than a list of unrelated ideas.</p></div></li>
-            <li><span>3</span><div><strong>Choose a model</strong><p>Use the provider and model already connected in Vector.</p></div></li>
+            <li><span>3</span><div><strong>Choose a model</strong><p>Pick one of the models included with Vector, no API key needed, or one from a provider you connected.</p></div></li>
           </ol>
         </section>
 
@@ -815,10 +815,23 @@ const faqs = [
         <section id="models" class="doc-section">
           <p class="section-number">14</p>
           <h2>Models and BYOK</h2>
+          <h3>Models included with Vector</h3>
           <p>
-            Connect a provider in Settings, then select a model in the session composer. Model
-            availability, context limits, pricing, and rate limits come from the provider. Vector's
-            usage view tracks the information returned by those sessions.
+            You do not need an API key. Vector comes with models included, today among them NVIDIA's
+            Nemotron and Meta's Muse Spark, in the desktop app and the CLI alike. A new install starts
+            on Big Pickle, so the first session works before you connect anything. The lineup changes
+            as providers add and retire models.
+          </p>
+          <p class="note">
+            Included models are served by outside providers, and some may use your prompts to improve
+            their models. For confidential code, use your own provider key.
+          </p>
+          <h3>Bring your own key</h3>
+          <p>
+            Connect a provider in Settings, or run <code>vector auth login</code> in the terminal, then
+            select a model in the session composer. Model availability, context limits, pricing, and
+            rate limits come from the provider. Vector's usage view tracks the information returned by
+            those sessions.
           </p>
         </section>
 
@@ -899,8 +912,8 @@ const faqs = [
             ))}
           </div>
           <p class="note">
-            Works alongside what you already use: {ecosystem.join(", ")}. Free and BYOK — bring the agents, models,
-            and services you already trust.
+            Works alongside what you already use: {ecosystem.join(", ")}. Models come included, and BYOK works
+            too — bring the agents, models, and services you already trust.
           </p>
         </section>
 
@@ -1118,13 +1131,13 @@ const faqs = [
           <h2>Vector Velocity model <span class="doc-soon">Coming soon</span></h2>
           <p>
             Vector Velocity is Vector's own model — over 300 billion parameters — tuned for the loop Vector actually runs — planning, tool calls,
-            edits, checks, and verification — rather than for open-ended chat. It will be included with Vector
-            accounts alongside the free models, selectable like any other provider in the desktop app and the CLI, and
-            measured by the same Tokenomics engine as everything else.
+            edits, checks, and verification — rather than for open-ended chat. It will join the models included with
+            Vector, selectable like any other provider in the desktop app and the CLI, and measured by the same
+            Tokenomics engine as everything else.
           </p>
           <p class="note">
-            Until Velocity ships, Big Pickle is the included default in the desktop app and the CLI, and bring-your-own
-            keys cover Claude, GPT, Gemini and the other supported providers.
+            Until Velocity ships, Big Pickle is the default model included with Vector in the desktop app and the CLI,
+            and bring-your-own keys cover Claude, GPT, Gemini and the other supported providers.
           </p>
         </section>
 
@@ -1134,7 +1147,7 @@ const faqs = [
           <p>
             Programmatic access to the same workspace: start sessions, run tasks, read transcripts and measured spend,
             manage connections, and trigger automations from your own systems and CI. Vector accounts and CLI tokens
-            are the credential, so the free-account model carries over unchanged.
+            are the credential, so the account you already have is all the API needs.
           </p>
           <p class="note">The API platform is in development. The CLI is the first programmable surface today — <code>vector run "…"</code> works in scripts and CI with a <code>VECTOR_CLI_TOKEN</code>.</p>
         </section>
@@ -1172,7 +1185,7 @@ const faqs = [
             Reviewers see what was checked before they read a line.
           </p>
           <p class="note">
-            The free model runs the workflow with nothing but the account token. Add a provider key as a second secret to
+            A model included with Vector runs the workflow with nothing but the account token, no API key needed. Add a provider key as a second secret to
             use Claude, GPT, or Gemini in CI. One repository setting is required: under Settings → Actions → General →
             Workflow permissions, tick "Allow GitHub Actions to create and approve pull requests" (GitHub leaves it off
             by default; without it the branch is pushed and Vector comments a compare link instead). Pull requests opened

@@ -50,10 +50,10 @@ export const dict = {
   "ui.sessionTurn.error.freeUsageExceeded": "Besplatna upotreba premašena",
   "ui.sessionTurn.error.addCredits": "Dodaj kredite",
 
-  "dialog.usageExceeded.freeTier.title": "Dostignut besplatan limit",
+  "dialog.usageExceeded.freeTier.title": "Dostignut limit uključenog modela",
   "dialog.usageExceeded.freeTier.description":
-    "The selected free Vector-hosted model is temporarily out of quota. Choose another free model, connect your own provider key, or try again later.",
-  "dialog.usageExceeded.freeTier.actionLabel": "Pretplati se",
+    "Ovaj model uključen u Vector je privremeno potrošio kvotu. Odaberite drugi uključeni model, povežite vlastiti ključ provajdera ili pokušajte ponovo kasnije.",
+  "dialog.usageExceeded.freeTier.actionLabel": "Odaberi model",
   "dialog.usageExceeded.accountRateLimit.title": "Dostignut Go limit",
   "dialog.usageExceeded.accountRateLimit.description":
     "Dostignut je limit korištenja. Da nastavite koristiti ovaj model sada, omogućite korištenje iz vašeg dostupnog stanja",

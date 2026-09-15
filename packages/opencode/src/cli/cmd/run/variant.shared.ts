@@ -40,11 +40,41 @@ function variantKey(model: NonNullable<RunInput["model"]>): string {
   return modelKey(model.providerID, model.modelID)
 }
 
+// Models included with Vector, by the TUI's and the desktop app's rule (includedModel in
+// packages/app/src/utils/provider-brand.ts): zero cost from OpenCode Zen for its catalogue
+// models, which carry a release date, or for any model when it runs keyless. A model defined
+// only in config defaults to zero cost, and on a Zen key it bills the Zen balance.
+const ZEN_PROVIDER_IDS = new Set(["opencode", "opencode-zen"])
+
+export function includedModel(
+  provider: Pick<RunProvider, "id" | "options">,
+  model: { cost?: { input?: number }; release_date?: string },
+): boolean {
+  if (!ZEN_PROVIDER_IDS.has(provider.id) || model.cost?.input !== 0) {
+    return false
+  }
+
+  return Boolean(model.release_date) || provider.options?.apiKey === "public"
+}
+
+// Included catalogue names often end in "Free" or "(Free)"; nothing Vector shows calls these
+// models free. "Nemotron 3 Ultra Free" reads "Nemotron 3 Ultra".
+export function includedModelName(name: string): string {
+  return name.replace(/\s+(?:\(free\)|free)\s*$/i, "").trim() || name
+}
+
+// Where an included model's provider would be named. An included row names no provider, as in
+// the app and the TUI: the catalogue's "OpenCode Zen" isn't how Vector offers it.
+const INCLUDED_PROVIDER_LABEL = "Included with Vector"
+
 export function modelInfo(providers: RunProvider[] | undefined, model: NonNullable<RunInput["model"]>) {
   const provider = providers?.find((item) => item.id === model.providerID)
+  const info = provider?.models[model.modelID]
+  const name = info?.name ?? model.modelID
+  const included = Boolean(provider && info && includedModel(provider, info))
   return {
-    provider: provider?.name ?? model.providerID,
-    model: provider?.models[model.modelID]?.name ?? model.modelID,
+    provider: included ? INCLUDED_PROVIDER_LABEL : (provider?.name ?? model.providerID),
+    model: included ? includedModelName(name) : name,
   }
 }
 

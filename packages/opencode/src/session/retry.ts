@@ -7,7 +7,7 @@ import { isRecord } from "@/util/record"
 
 export type Err = ReturnType<NamedError["toObject"]>
 
-export const GO_UPSELL_MESSAGE = "Free Vector model usage limit reached"
+export const GO_UPSELL_MESSAGE = "Included model limit reached"
 export const GO_UPSELL_URL = "https://vectordev.ai"
 export type RetryReason = "free_tier_limit" | "account_rate_limit" | (string & {})
 
@@ -79,8 +79,9 @@ export function retryable(error: Err, provider: string) {
         action: {
           reason: "free_tier_limit",
           provider,
-          title: "Free model limit reached",
-          message: "The selected free Vector-hosted model is temporarily out of quota. Choose another free model, connect your own provider key, or try again later.",
+          title: "Included model limit reached",
+          message:
+            "This model included with Vector is temporarily out of quota. Choose another included model, connect your own provider key, or try again later.",
           label: "choose model",
           link: GO_UPSELL_URL,
         },

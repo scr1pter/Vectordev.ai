@@ -30,6 +30,7 @@ import {
   routeVariantForTask,
   type TaskDifficulty,
 } from "@/utils/task-intelligence"
+import { modelDisplayName } from "@/utils/provider-brand"
 
 type PendingPrompt = {
   abort: AbortController
@@ -572,13 +573,13 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     if (routed.image) {
       showToast({
         title: "Vector selected an image-capable model",
-        description: `Switched to ${routed.model.name} to inspect the attached image.`,
+        description: `Switched to ${modelDisplayName(routed.model)} to inspect the attached image.`,
         duration: 5_000,
       })
     } else if (routed.task) {
       showToast({
         title: "Vector routed a complex task",
-        description: `Switched to ${routed.model.name} for stronger planning and implementation.`,
+        description: `Switched to ${modelDisplayName(routed.model)} for stronger planning and implementation.`,
         duration: 5_000,
       })
     }

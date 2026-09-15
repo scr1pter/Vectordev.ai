@@ -218,8 +218,8 @@ export const GUIDE_SECTIONS: GuideSection[] = [
       {
         title: "Settings",
         where: "The gear at the bottom of the sidebar.",
-        body: "Everything about how Vector runs. Providers is where you bring your own keys — OpenAI, Anthropic, Google, and more — and where OpenCode Zen's free curated models live, so there's a capable model before you've paid anyone. Models manages which models appear in your pickers. Keybinds remaps Vector's shortcuts to fit your fingers, and Appearance sets the theme and workspace colors.",
-        tip: "Set up one paid provider and keep a free model around — then switch per task from the composer's model chip.",
+        body: "Everything about how Vector runs. Providers is where you bring your own keys — OpenAI, Anthropic, Google, and more — though you don't need one to start: Vector comes with models included. Models manages which models appear in your pickers. Keybinds remaps Vector's shortcuts to fit your fingers, and Appearance sets the theme and workspace colors.",
+        tip: "Start on a model included with Vector and add your own key whenever you like — then switch per task from the composer's model chip.",
       },
     ],
   },

@@ -343,7 +343,7 @@ const spendRows = [
   ],
   [
     "Your keys, your bill",
-    "Bring your own provider keys and the model spend is between you and that provider. Vector's own price is the licence — it does not resell tokens or add a margin to them.",
+    "The models included with Vector come with your Vector account and need no key. Bring your own provider keys and that model spend is between you and that provider — Vector does not resell tokens or add a margin to them.",
   ],
 ]
 
@@ -378,7 +378,7 @@ const systemRows = [
   ],
   [
     "Start with no key at all",
-    "Curated free models are included, so there is a capable model available before you have connected a provider or paid anyone.",
+    "Models are included with Vector, among them NVIDIA's Nemotron and Meta's Muse Spark, so a capable model is ready before you have connected a provider or added an API key.",
   ],
   [
     "Dictation that stays on device",
@@ -399,7 +399,7 @@ const systemRows = [
 ]
 
 const connectionGroups = [
-  ["Models", "Included free models, then Anthropic, OpenAI, Google, and other BYOK providers"],
+  ["Models", "Models included with Vector, then Anthropic, OpenAI, Google, and other BYOK providers"],
   ["Agent runtimes", "Local Claude Code, Codex, and Cursor tools when Vector detects them installed"],
   ["Protocols and source", "118 catalog connectors, your own MCP servers, GitHub, and GitLab"],
   ["Cloud and validation", "Vercel, Netlify, Supabase, AWS through its CLI, and Playwright"],
@@ -547,12 +547,16 @@ const changelog = [
           <p class="headline">
             <span class="headline-lead">An engineering workspace that</span>{" "}
             <span class="headline-rotate" data-scramble aria-hidden="true">has an agent of its own.</span>
-            <span class="sr-only">An engineering workspace that has an agent of its own, verifies its work before calling it done, sets up your database and deploys it, runs subagents in parallel with no cap, invites your team into the session, runs in your terminal too, records what a run really cost, hosts Claude, Codex and Cursor alongside its own agent, and has its own 300 billion parameter model coming.</span>
+            <span class="sr-only">An engineering workspace that has an agent of its own, comes with models included so no API key is needed, verifies its work before calling it done, sets up your database and deploys it, runs subagents in parallel with no cap, invites your team into the session, runs in your terminal too, records what a run really cost, hosts Claude, Codex and Cursor alongside its own agent, and has its own 300 billion parameter model coming.</span>
           </p>
 
           <p class="hero-deck simple-deck">
             Open a repository on your computer. Plan, edit, run, and ship with Vector's own agent beside your editor —
             on your desktop, in your terminal, or from the cloud.
+          </p>
+          <p class="hero-deck simple-deck">
+            <strong>No API key needed.</strong> Models come included with Vector, among them NVIDIA's Nemotron and
+            Meta's Muse Spark, and you can bring your own key for Claude, GPT, or Gemini whenever you want.
           </p>
 
           <div class="simple-actions">
@@ -562,7 +566,7 @@ const changelog = [
             </a>
             <a class="simple-secondary" href="#ch-cli">Install the CLI</a>
           </div>
-          <p class="hero-note">Free to start. macOS, Windows, and Linux.</p>
+          <p class="hero-note">Free during beta. macOS, Windows, and Linux.</p>
         </div>
 
         <div class="showcase simple-showcase" aria-label="Interactive preview of the Vector interface">
@@ -597,7 +601,7 @@ const changelog = [
         <article class="simple-card" data-reveal style="--rd: 60ms">
           <p class="section-kicker">CLI</p>
           <h3>The same agent in any terminal.</h3>
-          <p>Run it in any repository, in any shell. Free with an account, and a free model is included.</p>
+          <p>Run it in any repository, in any shell. Free with a Vector account, and models come included.</p>
           <a href="#ch-cli">Install →</a>
         </article>
         <article class="simple-card" data-reveal style="--rd: 120ms">
@@ -656,7 +660,7 @@ const changelog = [
           </div>
           <pre class="cli-screen"><code><span class="cli-prompt">$</span> npm install -g @vectordevai/cli
 <span class="cli-prompt">$</span> vector
-<span class="cli-ok">◇ signed in as you@yourteam.dev · model: big pickle (free)</span>
+<span class="cli-ok">◇ signed in as you@yourteam.dev · model: big pickle (included)</span>
 <span class="cli-prompt">&gt;</span> the checkout test started failing on main — find it, fix it
 
 <span class="cli-dim">● read tests/checkout.test.ts, git log -S couponExpiry</span>
@@ -664,8 +668,8 @@ const changelog = [
 <span class="cli-ok">✓ 14 passing · 1 fixed · commit staged · $0.00 spent</span></code></pre>
         </figure>
         <ul class="simple-list" data-reveal>
-          <li><strong>Free with a free account.</strong> No card, no trial clock.</li>
-          <li><strong>A free model included.</strong> Big Pickle works the moment it installs — no API key.</li>
+          <li><strong>Free with a Vector account.</strong> No card needed.</li>
+          <li><strong>Models included.</strong> They work the moment it installs, starting on Big Pickle.</li>
           <li><strong>Or bring your own key.</strong> Claude, GPT, or Gemini with <code>vector auth login</code>.</li>
           <li><strong>Multiplayer.</strong> <code>vector invite</code> shares your live workspace with a teammate over one link.</li>
           <li><strong>Works from GitHub.</strong> Comment <code>/vector</code> on an issue and get a pull request back, with the checks it ran, what it cost, and the judge's verdict.</li>
@@ -673,27 +677,29 @@ const changelog = [
       </div>
     </section>
 
-    <section id="ch-models" data-chapter="Free models" class="simple-section section-width" aria-labelledby="models-title">
+    <section id="ch-models" data-chapter="Models included" class="simple-section section-width" aria-labelledby="models-title">
       <div class="section-heading simple-heading" data-reveal>
-        <p class="section-kicker">Free models</p>
-        <h2 id="models-title">State-of-the-art models, included free.</h2>
+        <p class="section-kicker">Models included with Vector</p>
+        <h2 id="models-title">No API key needed. The models come with Vector.</h2>
         <p>
-          A free Vector account includes a roster of zero-cost models — no API key, no card. Every one of them supports
-          tool calling, so it can read the repository, run the checks, and edit files rather than only describe them.
+          Nothing to connect, no provider key, no second bill: the models come with your Vector account during the
+          beta, and with your subscription once public pricing begins. Every one of them supports tool calling, so it
+          can read the repository, run the checks, and edit files rather than only describe them.
         </p>
       </div>
       <ul class="simple-models" data-reveal>
         <li><strong>Big Pickle</strong><span>The default a new install starts on</span></li>
-        <li><strong>Nemotron 3 Ultra</strong><span>1M context</span></li>
-        <li><strong>Nemotron 3.5 Lightning</strong><span>262k context</span></li>
-        <li><strong>Muse Spark 1.3</strong><span>1M context</span></li>
-        <li><strong>Muse Spark 1.2</strong><span>1M context</span></li>
+        <li><strong>NVIDIA Nemotron 3 Ultra</strong><span>1M context</span></li>
+        <li><strong>NVIDIA Nemotron 3.5 Lightning</strong><span>262k context</span></li>
+        <li><strong>Meta Muse Spark 1.3</strong><span>1M context</span></li>
+        <li><strong>Meta Muse Spark 1.2</strong><span>1M context</span></li>
         <li><strong>MiMo V2.5</strong><span>200k context</span></li>
-        <li><strong>Ling 3.0 Flash</strong><span>262k context</span></li>
+        <li><strong>Ling 3.0 Flash Fin</strong><span>262k context</span></li>
       </ul>
       <p class="simple-note" data-reveal>
-        That is the whole free roster today. It changes as providers add and retire models, and a key of your own
-        still works beside them.
+        The lineup today. It changes as providers add and retire models, and a key of your own for Claude, GPT,
+        Gemini and the rest still works beside them. Included models are served by outside providers, and some may use
+        your prompts to improve their models, so use your own provider key for confidential code.
       </p>
     </section>
 
@@ -752,7 +758,7 @@ const changelog = [
       <div class="section-heading simple-heading" data-reveal>
         <p class="section-kicker">Pricing</p>
         <h2 id="pricing-title">Free during beta.</h2>
-        <p>Create an account and download Vector today. When public pricing begins, it's $10 a month or $99 a year — model usage is billed by whichever provider you bring, and free models are always included.</p>
+        <p>Create an account and download Vector today. When public pricing begins, it's $10 a month or $99 a year, and the subscription comes with models included, so you can work without paying a model provider. Bring your own key for Claude, GPT, Gemini and the rest, and that usage is billed by the provider you bring.</p>
       </div>
     </section>
 
@@ -807,6 +813,7 @@ const changelog = [
     // reads as one sentence rather than a label with a caption.
     const phrases = [
       "has an agent of its own.",
+      "comes with models included.",
       "verifies before it says done.",
       "sets up your database and deploys.",
       "runs subagents in parallel, no cap.",

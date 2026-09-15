@@ -272,9 +272,9 @@ describe("session.retry.retryable", () => {
       action: {
         reason: "free_tier_limit",
         provider: "opencode",
-        title: "Free model limit reached",
+        title: "Included model limit reached",
         message:
-          "The selected free Vector-hosted model is temporarily out of quota. Choose another free model, connect your own provider key, or try again later.",
+          "This model included with Vector is temporarily out of quota. Choose another included model, connect your own provider key, or try again later.",
         label: "choose model",
         link: SessionRetry.GO_UPSELL_URL,
       },

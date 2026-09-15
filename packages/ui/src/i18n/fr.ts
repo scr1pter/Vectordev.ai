@@ -46,10 +46,10 @@ export const dict = {
   "ui.sessionTurn.error.freeUsageExceeded": "Limite d'utilisation gratuite dépassée",
   "ui.sessionTurn.error.addCredits": "Ajouter des crédits",
 
-  "dialog.usageExceeded.freeTier.title": "Limite gratuite atteinte",
+  "dialog.usageExceeded.freeTier.title": "Limite du modèle inclus atteinte",
   "dialog.usageExceeded.freeTier.description":
-    "The selected free Vector-hosted model is temporarily out of quota. Choose another free model, connect your own provider key, or try again later.",
-  "dialog.usageExceeded.freeTier.actionLabel": "S'abonner",
+    "Ce modèle inclus avec Vector a temporairement épuisé son quota. Choisissez un autre modèle inclus, connectez votre propre clé de fournisseur ou réessayez plus tard.",
+  "dialog.usageExceeded.freeTier.actionLabel": "Choisir un modèle",
   "dialog.usageExceeded.accountRateLimit.title": "Limite Go atteinte",
   "dialog.usageExceeded.accountRateLimit.description":
     "Limite d'utilisation atteinte. Pour continuer à utiliser ce modèle maintenant, activez l'utilisation depuis votre solde disponible",

@@ -52,10 +52,10 @@ export const dict = {
   "ui.sessionTurn.error.freeUsageExceeded": "Ücretsiz kullanım aşıldı",
   "ui.sessionTurn.error.addCredits": "Kredi ekle",
 
-  "dialog.usageExceeded.freeTier.title": "Ücretsiz sınıra ulaşıldı",
+  "dialog.usageExceeded.freeTier.title": "Vector'a dahil model sınırına ulaşıldı",
   "dialog.usageExceeded.freeTier.description":
-    "The selected free Vector-hosted model is temporarily out of quota. Choose another free model, connect your own provider key, or try again later.",
-  "dialog.usageExceeded.freeTier.actionLabel": "Abone ol",
+    "Vector'a dahil olan bu modelin kotası geçici olarak doldu. Vector'a dahil başka bir model seçin, kendi sağlayıcı anahtarınızı bağlayın veya daha sonra tekrar deneyin.",
+  "dialog.usageExceeded.freeTier.actionLabel": "Model seç",
   "dialog.usageExceeded.accountRateLimit.title": "Go sınırına ulaşıldı",
   "dialog.usageExceeded.accountRateLimit.description":
     "Kullanım sınırına ulaşıldı. Bu modeli şimdi kullanmaya devam etmek için mevcut bakiyenizden kullanımı etkinleştirin",

@@ -1323,12 +1323,16 @@ test("direct model panel renders current model selector", async () => {
     expect(frame).toContain("opencode")
     expect(frame).toContain("GPT-5")
     expect(frame).toContain("current")
-    expect(frame).toContain("GPT Free")
-    expect(frame).toContain("Free")
+    // Zero cost from Zen's catalogue: included, named without the catalogue's "Free", and listed
+    // first under the heading the app and the TUI use.
+    expect(frame).toContain("Models included with Vector")
+    expect(frame).toContain("Included")
+    expect(frame).not.toContain("Free")
     expect(frame).not.toContain("┌")
     expect(frame).not.toContain("┃")
     expect(frame).not.toContain("Old Model")
-    expectPaletteList(list, 2)
+    // Rows: the included heading, GPT, a spacer, the opencode heading, then GPT-5 (current).
+    expectPaletteList(list, 4)
   } finally {
     app.renderer.destroy()
   }

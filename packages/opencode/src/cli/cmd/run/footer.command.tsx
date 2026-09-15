@@ -6,6 +6,7 @@ import { createEffect, createMemo, createSignal, type Accessor } from "solid-js"
 import { RunFooterMenu, createFooterMenuState, type RunFooterMenuItem } from "./footer.menu"
 import type { RunFooterTheme } from "./theme"
 import type { FooterQueuedPrompt, FooterSubagentTab, RunCommand, RunInput, RunProvider } from "./types"
+import { includedModel, includedModelName } from "./variant.shared"
 
 type PanelEntry = RunFooterMenuItem & {
   category: string
@@ -27,8 +28,12 @@ type ModelEntry = PanelEntry & {
   providerID: string
   modelID: string
   providerName: string
+  included: boolean
   current: boolean
 }
+
+// The heading the included models share in the model picker, as in the app and the TUI.
+const INCLUDED_CATEGORY = "Models included with Vector"
 
 type VariantEntry = PanelEntry & {
   variant: string | undefined
@@ -190,15 +195,18 @@ function handleKey(input: {
   }
 }
 
-function match<T extends PanelEntry>(query: string, entries: T[]) {
+const PANEL_SEARCH_KEYS = ["display", "category", "description", "keywords"]
+// The model panel doesn't search its headings: "Models included with Vector" would pull every
+// included row into fuzzy searches like "mini". Its keywords already carry the provider name.
+const MODEL_SEARCH_KEYS = ["display", "keywords"]
+
+function match<T extends PanelEntry>(query: string, entries: T[], keys: string[] = PANEL_SEARCH_KEYS) {
   const text = query.trim()
   if (!text) {
     return entries
   }
 
-  return fuzzysort
-    .go(text, entries, { keys: ["display", "category", "description", "keywords"] })
-    .map((item) => item.obj)
+  return fuzzysort.go(text, entries, { keys }).map((item) => item.obj)
 }
 
 function PanelShell(props: {
@@ -956,28 +964,33 @@ export function RunModelSelectBody(props: {
         Object.entries(provider.models)
           .filter(([, model]) => model.status !== "deprecated")
           .map(([modelID, model]) => {
-            const title = model.name ?? modelID
+            const name = model.name ?? modelID
+            const included = includedModel(provider, model)
+            // An included model drops the "Free" its catalogue name carries; search still finds it by that name.
+            const title = included ? includedModelName(name) : name
             const current = props.current()?.providerID === provider.id && props.current()?.modelID === modelID
-            const footer = current
-              ? "current"
-              : model.cost?.input === 0 && provider.id === "opencode"
-                ? "Free"
-                : title !== modelID
-                  ? modelID
-                  : undefined
+            const footer = current ? "current" : included ? "Included" : title !== modelID ? modelID : undefined
             return {
               providerID: provider.id,
               modelID,
               providerName: provider.name,
-              category: provider.name,
+              included,
+              // Included rows share one heading.
+              category: included ? INCLUDED_CATEGORY : provider.name,
               display: title,
               footer,
-              keywords: `${provider.id} ${provider.name} ${modelID} ${title} ${footer ?? ""}`,
+              keywords: `${provider.id} ${provider.name} ${modelID} ${name} ${footer ?? ""}`,
               current,
             }
           }),
       )
       .sort((a, b) => {
+        // Included rows first, together under their heading, then OpenCode's, then the rest by provider.
+        const included = Number(!a.included) - Number(!b.included)
+        if (included !== 0) {
+          return included
+        }
+
         const provider = Number(a.providerID !== "opencode") - Number(b.providerID !== "opencode")
         if (provider !== 0) {
           return provider
@@ -991,7 +1004,7 @@ export function RunModelSelectBody(props: {
         return a.display.localeCompare(b.display)
       }),
   )
-  const items = createMemo<ModelEntry[]>(() => match(query(), entries()))
+  const items = createMemo<ModelEntry[]>(() => match(query(), entries(), MODEL_SEARCH_KEYS))
   const menu = createFooterMenuState({ count: () => items().length, limit: PANEL_LIST_ROWS })
   const pick = (item: ModelEntry) => {
     props.onSelect({ providerID: item.providerID, modelID: item.modelID })

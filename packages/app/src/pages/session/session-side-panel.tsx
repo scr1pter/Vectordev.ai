@@ -758,7 +758,7 @@ function buildVectorLocalReport(
           ? {
               strength: modelStrength,
               verdict: "Use carefully",
-              detail: "Cheap/free/fast models can miss context or output incomplete edits on larger workspaces.",
+              detail: "Cheap, fast models can miss context or output incomplete edits on larger workspaces.",
               route: "Route simple questions here; use a stronger model for multi-file code generation.",
             }
           : {
@@ -770,7 +770,7 @@ function buildVectorLocalReport(
 
   const promptReplayBench = [
     {
-      model: "Cheap / free model",
+      model: "Cheap / fast model",
       quality: risk === "High" ? "Low for this project size" : "Useful for small questions",
       cost: "Lowest",
       recommendation: "Use for explanations, quick searches, and narrow one-file fixes.",

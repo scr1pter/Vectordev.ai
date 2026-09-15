@@ -71,10 +71,10 @@ export const dict: Record<string, string> = {
   "ui.sessionTurn.error.freeUsageExceeded": "Free usage exceeded",
   "ui.sessionTurn.error.addCredits": "Add credits",
 
-  "dialog.usageExceeded.freeTier.title": "Free limit reached",
+  "dialog.usageExceeded.freeTier.title": "Included model limit reached",
   "dialog.usageExceeded.freeTier.description":
-    "The selected free Vector-hosted model is temporarily out of quota. Choose another free model, connect your own provider key, or try again later.",
-  "dialog.usageExceeded.freeTier.actionLabel": "Subscribe",
+    "This model included with Vector is temporarily out of quota. Choose another included model, connect your own provider key, or try again later.",
+  "dialog.usageExceeded.freeTier.actionLabel": "Choose model",
   "dialog.usageExceeded.accountRateLimit.title": "Go limit reached",
   "dialog.usageExceeded.accountRateLimit.description":
     "Usage limit reached. To continue using this model now, enable usage from your available balance",

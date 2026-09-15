@@ -75,6 +75,7 @@ import { DictationIndicator } from "@/components/dictation-indicator"
 import { ImagePreview } from "@opencode-ai/ui/image-preview"
 import type { ReferenceInfo } from "@opencode-ai/sdk/v2/client"
 import { modelVariantDescription, modelVariantLabel } from "@/context/model-variant"
+import { modelDisplayName } from "@/utils/provider-brand"
 import { detectParallelIntent } from "@/features/delegation/delegation"
 import { listOutcomes } from "@/features/economics/economics-repository"
 import { recommendModel } from "@/features/economics/economics-recommender"
@@ -1701,6 +1702,12 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     return "Ask anything, / for commands, @ for context..."
   }
 
+  // Included models drop the trailing "Free" their catalogue names carry, as in the model picker.
+  const currentModelName = () => {
+    const current = props.controls.model.selection.current()
+    return current ? modelDisplayName(current) : language.t("dialog.model.select.title")
+  }
+
   const modelControlState = createMemo<ComposerModelControlState>(() => ({
     loading: providersLoading(),
     shouldAnimate: providersShouldFadeIn(),
@@ -1709,7 +1716,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     keybind: command.keybindParts("model.choose"),
     model: props.controls.model.selection,
     providerID: props.controls.model.selection.current()?.provider?.id,
-    modelName: props.controls.model.selection.current()?.name ?? language.t("dialog.model.select.title"),
+    modelName: currentModelName(),
     newLayoutDesigns: props.controls.newLayoutDesigns,
     style: control(),
     onClose: restoreFocus,
@@ -2454,10 +2461,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                                   style={{ "will-change": "opacity", transform: "translateZ(0)" }}
                                 />
                               </Show>
-                              <span class="truncate">
-                                {props.controls.model.selection.current()?.name ??
-                                  language.t("dialog.model.select.title")}
-                              </span>
+                              <span class="truncate">{currentModelName()}</span>
                               <Icon name="chevron-down" size="small" class="shrink-0" />
                             </Button>
                           </TooltipKeybind>

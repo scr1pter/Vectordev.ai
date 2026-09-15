@@ -14,7 +14,13 @@ import { useLanguage } from "@/context/language"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { DialogSelectProvider } from "./dialog-select-provider"
 import { decode64 } from "@/utils/base64"
-import { brandProviderName, isFreeOnZen, OPENCODE_ZEN_SECTION } from "@/utils/provider-brand"
+import {
+  brandProviderName,
+  INCLUDED_ICON,
+  INCLUDED_SECTION,
+  isIncludedModel,
+  modelDisplayName,
+} from "@/utils/provider-brand"
 import { SettingsListV2 } from "./settings-v2/parts/list"
 import { SettingsRowV2 } from "./settings-v2/parts/row"
 import "./settings-v2/settings-v2.css"
@@ -23,12 +29,12 @@ type ModelItem = ReturnType<ReturnType<typeof useLocal>["model"]["list"]>[number
 
 const HIDDEN_PROVIDER_IDS = new Set<string>()
 
-/** OpenCode Zen's free models form their own group, as in the model picker, and everything
-    else groups by provider. Priced gateway models (a Zen key) stay under the provider's name. */
-const ZEN_GROUP = "vector:included"
-const groupOf = (item: ModelItem) => (isFreeOnZen(item) ? ZEN_GROUP : item.provider.id)
+/** Models included with Vector form their own group, as in the model picker, and everything
+    else groups by provider. Priced Zen models (a Zen key) stay under the provider's name. */
+const INCLUDED_GROUP = "vector:included"
+const groupOf = (item: ModelItem) => (isIncludedModel(item) ? INCLUDED_GROUP : item.provider.id)
 const groupName = (category: string, item: ModelItem) =>
-  category === ZEN_GROUP ? OPENCODE_ZEN_SECTION : brandProviderName(item.provider.id, item.provider.name)
+  category === INCLUDED_GROUP ? INCLUDED_SECTION : brandProviderName(item.provider.id, item.provider.name)
 
 export const DialogManageModelsV2: Component = () => {
   // Works both inside a project (chat) and at the shell level (e.g. Parallel
@@ -67,8 +73,8 @@ export const DialogManageModelsV2: Component = () => {
     sortBy: (a, b) => a.name.localeCompare(b.name),
     groupBy: groupOf,
     sortGroupsBy: (a, b) => {
-      // "OpenCode Zen" comes last, as in the model picker.
-      const included = Number(a.category === ZEN_GROUP) - Number(b.category === ZEN_GROUP)
+      // Models included with Vector come last, as in the model picker.
+      const included = Number(a.category === INCLUDED_GROUP) - Number(b.category === INCLUDED_GROUP)
       if (included !== 0) return included
       const aRank = popularProviders.indexOf(a.category)
       const bRank = popularProviders.indexOf(b.category)
@@ -149,7 +155,7 @@ export const DialogManageModelsV2: Component = () => {
                       <div class="settings-v2-models-group-header justify-between">
                         <div class="flex min-w-0 items-center gap-2">
                           <ProviderIcon
-                            id={group.category === ZEN_GROUP ? "opencode" : group.category}
+                            id={group.category === INCLUDED_GROUP ? INCLUDED_ICON : group.category}
                             width={16}
                             height={16}
                             class="ml-4 shrink-0"
@@ -170,14 +176,14 @@ export const DialogManageModelsV2: Component = () => {
                       <SettingsListV2>
                         <For each={group.items}>
                           {(item) => (
-                            <SettingsRowV2 title={item.name} description="">
+                            <SettingsRowV2 title={modelDisplayName(item)} description="">
                               <div>
                                 <SwitchV2
                                   checked={models.visible({ modelID: item.id, providerID: item.provider.id })}
                                   onChange={(checked) => setModelVisibility(item, checked)}
                                   hideLabel
                                 >
-                                  {item.name}
+                                  {modelDisplayName(item)}
                                 </SwitchV2>
                               </div>
                             </SettingsRowV2>

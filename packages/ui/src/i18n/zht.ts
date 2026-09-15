@@ -50,10 +50,10 @@ export const dict = {
   "ui.sessionTurn.error.freeUsageExceeded": "免費使用額度已用完",
   "ui.sessionTurn.error.addCredits": "新增點數",
 
-  "dialog.usageExceeded.freeTier.title": "已達免費額度上限",
+  "dialog.usageExceeded.freeTier.title": "Vector 內含的模型額度已用完",
   "dialog.usageExceeded.freeTier.description":
-    "The selected free Vector-hosted model is temporarily out of quota. Choose another free model, connect your own provider key, or try again later.",
-  "dialog.usageExceeded.freeTier.actionLabel": "訂閱",
+    "這個 Vector 內含的模型暫時沒有可用額度。請選擇其他 Vector 內含的模型、連接你自己的提供者金鑰，或稍後再試。",
+  "dialog.usageExceeded.freeTier.actionLabel": "選擇模型",
   "dialog.usageExceeded.accountRateLimit.title": "已達 Go 額度上限",
   "dialog.usageExceeded.accountRateLimit.description":
     "已達使用額度上限。若要現在繼續使用此模型，請從可用餘額中啟用使用",

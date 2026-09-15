@@ -112,7 +112,8 @@ export function CliTokenPage() {
             <code>vector</code> — start the agent in any repository
           </li>
           <li>
-            That's it. Big Pickle is included free; add your own keys with <code>vector auth login</code>
+            That's it. No API key needed: models are included with Vector. Add your own keys with{" "}
+            <code>vector auth login</code>
           </li>
         </ol>
       </div>

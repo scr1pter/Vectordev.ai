@@ -13,6 +13,7 @@ import { useTheme } from "./theme"
 import { useToast } from "../ui/toast"
 import { useRoute } from "./route"
 import { usePermission } from "./permission"
+import { modelDisplayName, modelProviderName } from "../util/included-model"
 
 export type LocalTheme = {
   secondary: RGBA
@@ -267,8 +268,10 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           const provider = sync.data.provider.find((item) => item.id === value.providerID)
           const info = provider?.models[value.modelID]
           return {
-            provider: provider?.name ?? value.providerID,
-            model: info?.name ?? value.modelID,
+            // Named as the model dialog names it: an included model drops its catalogue name's
+            // "Free" and names no provider.
+            provider: provider && info ? modelProviderName(provider, info) : (provider?.name ?? value.providerID),
+            model: provider && info ? modelDisplayName(provider, info) : value.modelID,
             reasoning: info?.capabilities?.reasoning ?? false,
           }
         }),
