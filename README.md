@@ -18,7 +18,7 @@ vector
 
 **No API key needed.** Vector comes with models included, today among them NVIDIA's Nemotron and Meta's Muse Spark, so it works before you connect anything, and you can bring your own key for Claude, GPT, Gemini and the rest whenever you want. The desktop app is a free download for macOS, Windows and Linux at [vectordev.ai](https://vectordev.ai), and the terminal agent is free too. Both need only a Vector account. The desktop app is free to use during the beta; when public pricing begins, it is $10 a month or $99 a year, and the subscription comes with the included models.
 
-**New in 1.99.8:** Subagents that work in parallel, every agent's edits typed live in the editor, no agent limit, every model in the picker, and a glass launch screen. [Release notes →](https://vectordev.ai/releases)
+**New in 1.99.8:** Subagents that work in parallel, code review on every pull request, every agent's edits typed live in the editor, no agent limit, every model in the picker, and a glass launch screen. [Release notes →](https://vectordev.ai/releases)
 
 ## Features
 
@@ -56,6 +56,8 @@ vector
 
 **Task in, pull request out.** Comment `/vector fix the flaky auth test` on a GitHub issue and Vector opens a branch and a pull request. Every PR carries its evidence: the files changed, the checks it ran with their exit codes and output, what the run cost, and the judge's verdict.
 
+**Every pull request, reviewed.** Turn on automatic review in `vector github install` and Vector reviews each pull request when it opens and again on every push: one summary with the risk and the files that matter, and comments on the exact lines, each with a severity and, where it is safe, a fix you can commit from GitHub. It reads the repository, not just the diff, follows your `.vector/review.md` rules, and on the next push reviews only what changed and says what got fixed. Every review states the model it ran on and what it cost. Run the same review before you push with `vector review`.
+
 ## Install
 
 | Surface                         | How                                                    |
@@ -63,7 +65,7 @@ vector
 | Desktop (macOS, Windows, Linux) | Download from [vectordev.ai](https://vectordev.ai)     |
 | Terminal                        | `npm install -g @vectordevai/cli`, then `vector login` |
 
-Run `vector` inside any repository to start the agent. `vector auth login` adds your own provider keys, `vector invite` shares the workspace, and `vector github install` sets up the GitHub flow.
+Run `vector` inside any repository to start the agent. `vector auth login` adds your own provider keys, `vector invite` shares the workspace, and `vector github install` sets up GitHub: pull requests from issues, and reviews of pull requests. `vector review` reviews your branch locally.
 
 ## Coming soon
 
