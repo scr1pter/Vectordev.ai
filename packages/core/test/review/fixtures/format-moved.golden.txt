@@ -1,0 +1,40 @@
+## Vector review · Risk: High
+
+This change adds refresh-token rotation to the auth client and moves session storage from localStorage to IndexedDB. Rotation can race with logout, and sessions saved by older builds are not migrated.
+
+**No issues found** on the changed lines · 3 nits below
+
+Vector could not attach 2 comments to lines; they are listed under Outside the changed lines.
+
+| File | + | − | Why it matters |
+| --- | ---: | ---: | --- |
+| `src/auth/refresh.ts` | 84 | 12 | Rotation loop; races logout |
+| `src/auth/storage.ts` | 40 | 31 | IndexedDB adapter replaces localStorage |
+| `src/auth/client.ts` | 9 | 3 | Wires the adapter in |
+
+_4 more files changed (tests and docs)._
+
+<details><summary>Outside the changed lines (3)</summary>
+
+- **Concern** · `src/api/session.ts:88` · `readSession()` still expects the old stored shape. This PR changes what `storage.ts` writes, and this reader was not updated.
+- **Concern** · `src/auth/refresh.ts:88` · Rotation retries forever on a 401. The retry loop treats a 401 like a network error and never gives up.
+- **Blocking** · `src/auth/refresh.ts:52` · Refresh can restore a session after logout. `rotate()` awaits the token request and then writes the result unconditionally. If `logout()` runs while that request is in flight (the user clicks Sign out during a slow refresh), line 52 writes a fresh token for a signed-out user. `logout()` in `src/auth/client.ts:31` neither waits for nor cancels…
+</details>
+
+<details><summary>Nits (3)</summary>
+
+- `src/auth/storage.ts:18` · `openDB` is imported but never used
+- `src/auth/storage.ts:30` · Comment still says localStorage
+- `src/auth/client.ts:5` · Imports are out of order
+</details>
+
+<details><summary>Not reviewed (3 files)</summary>
+
+`bun.lock` lockfile · `dist/auth.js` build output · `assets/logo.png` binary
+</details>
+
+---
+<sub>Reviewed `d4e5f6a` against `main` · full review · anthropic/claude-sonnet-4-5 · $0.21 (48.2k in, 31.0k of it cached / 3.1k out) · 1m 52s · this pull request: $0.21 over 1 review · [workflow run](https://github.com/o/r/actions/runs/42)</sub>
+<sub>Comment `/vector review` to review again, `/vector review full` to start over, or `/vector pause` to stop automatic reviews. Resolve a comment or react to it with a thumbs-down to dismiss it.</sub>
+<!-- vector-review:summary -->
+<!-- vector-review:state v1 eyJ2IjoxLCJyIjoyLCJjIjowLjM3LCJ0IjpbNjAwMDAsNTAwMF0sInUiOltdLCJpIjozLCJzIjpbXSwicCI6W10sImgiOiJkNGU1ZjZhN2I4YzlkMGUxZjJhM2I0YzVkNmU3ZjhhOWIwYzFkMmUzIiwiYiI6IjAxMjM0NTY3ODlhYmNkZWYwMTIzNDU2Nzg5YWJjZGVmMDEyMzQ1NjcifQ -->

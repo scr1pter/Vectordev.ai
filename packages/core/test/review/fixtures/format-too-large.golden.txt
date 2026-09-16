@@ -1,0 +1,6 @@
+## Vector review
+
+> Too large to review automatically: 412 files and 18,230 changed lines (limits: 300 files, 5,000 lines). Comment `/vector review full` to review it anyway; with the current model that costs about $1.10–$4.80.
+
+<!-- vector-review:summary -->
+<!-- vector-review:state v1 eyJ2IjoxLCJyIjoyLCJjIjowLjM3LCJ0IjpbNjAwMDAsNTAwMF0sInUiOltdLCJpIjozLCJzIjpbXSwicCI6W10sImgiOiJkNGU1ZjZhN2I4YzlkMGUxZjJhM2I0YzVkNmU3ZjhhOWIwYzFkMmUzIiwiYiI6IjAxMjM0NTY3ODlhYmNkZWYwMTIzNDU2Nzg5YWJjZGVmMDEyMzQ1NjcifQ -->

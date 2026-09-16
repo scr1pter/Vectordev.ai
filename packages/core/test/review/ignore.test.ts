@@ -1,0 +1,212 @@
+import { describe, expect, test } from "bun:test"
+import { fromGitHubFiles } from "@opencode-ai/core/review/diff"
+import {
+  classifyFiles,
+  classifyPath,
+  generatedHeaderDecision,
+  hasGeneratedHeader,
+  isBinaryPath,
+  isSensitivePath,
+  LOCKFILES,
+  parseGitAttributes,
+} from "@opencode-ai/core/review/ignore"
+import { DEFAULT_REVIEW_CONFIG } from "@opencode-ai/core/review/types"
+
+const defaults = { config: DEFAULT_REVIEW_CONFIG }
+
+describe("classifyPath", () => {
+  test("skips the lockfiles in section 2.8 at any depth", () => {
+    expect(LOCKFILES).toEqual([
+      "bun.lock",
+      "bun.lockb",
+      "package-lock.json",
+      "npm-shrinkwrap.json",
+      "yarn.lock",
+      "pnpm-lock.yaml",
+      "Cargo.lock",
+      "go.sum",
+      "poetry.lock",
+      "Pipfile.lock",
+      "uv.lock",
+      "composer.lock",
+      "Gemfile.lock",
+      "flake.lock",
+      "Podfile.lock",
+      "pubspec.lock",
+      "mix.lock",
+      "packages.lock.json",
+    ])
+    for (const name of LOCKFILES) {
+      expect(classifyPath(name, defaults)).toBe("lockfile")
+      expect(classifyPath(`packages/app/${name}`, defaults)).toBe("lockfile")
+    }
+  })
+
+  test("limits build, out and vendor to the repository root", () => {
+    expect(classifyPath("src/build/x.ts", defaults)).toBeUndefined()
+    expect(classifyPath("build/x.js", defaults)).toBe("build-output")
+    expect(classifyPath("packages/a/dist/x.js", defaults)).toBe("build-output")
+    expect(classifyPath("out/a.js", defaults)).toBe("build-output")
+    expect(classifyPath("src/out/a.ts", defaults)).toBeUndefined()
+    expect(classifyPath("vendor/lib.go", defaults)).toBe("vendored")
+    expect(classifyPath("src/vendor/lib.go", defaults)).toBeUndefined()
+  })
+
+  test("skips the other defaults with their reasons", () => {
+    const cases: [string, string][] = [
+      ["web/.next/server.js", "build-output"],
+      ["coverage/lcov.info", "build-output"],
+      ["a/node_modules/x/index.js", "vendored"],
+      ["src/__snapshots__/a.ts.snap", "generated"],
+      ["src/__generated__/types.ts", "generated"],
+      ["public/app.min.js", "build-output"],
+      ["public/app.min.css", "build-output"],
+      ["public/app.js.map", "build-output"],
+      ["test/view.snap", "generated"],
+      ["api/v1/api.pb.go", "generated"],
+      ["api/api_pb2.py", "generated"],
+      ["src/schema.generated.ts", "generated"],
+      ["assets/logo.png", "binary"],
+    ]
+    for (const [name, reason] of cases) expect([name, classifyPath(name, defaults)]).toEqual([name, reason])
+    expect(classifyPath("src/app.ts", defaults)).toBeUndefined()
+    expect(classifyPath("src/icon.svg", defaults)).toBeUndefined()
+  })
+
+  test("adds user globs to the defaults, or replaces them with ignoreDefaults: false", () => {
+    const user = { config: { ...DEFAULT_REVIEW_CONFIG, ignore: ["docs/**"] } }
+    expect(classifyPath("docs/nested/a.md", user)).toBe("ignored")
+    expect(classifyPath("bun.lock", user)).toBe("lockfile")
+    const bare = { config: { ...DEFAULT_REVIEW_CONFIG, ignoreDefaults: false } }
+    expect(classifyPath("bun.lock", bare)).toBeUndefined()
+    expect(classifyPath("dist/x.js", bare)).toBeUndefined()
+    expect(classifyPath("assets/logo.png", bare)).toBe("binary")
+  })
+})
+
+describe(".gitattributes", () => {
+  const attributes = parseGitAttributes(
+    [
+      "# comment",
+      "*.gen.ts linguist-generated",
+      "/third_party/** linguist-vendored",
+      "src/keep.gen.ts -linguist-generated",
+      "proto/** linguist-generated=true",
+      "proto/manual.ts linguist-generated=false",
+      "legacy/** linguist-vendored",
+      "legacy/kept.ts !linguist-vendored",
+      "vendor/ linguist-vendored",
+      "[attr]custom text",
+    ].join("\n"),
+  )
+
+  test("reads linguist-generated and linguist-vendored, the last match winning", () => {
+    expect(attributes.generated("a/b/x.gen.ts")).toBe(true)
+    expect(attributes.generated("src/keep.gen.ts")).toBe(false)
+    expect(attributes.generated("proto/x.ts")).toBe(true)
+    expect(attributes.generated("proto/manual.ts")).toBe(false)
+    expect(attributes.vendored("third_party/lib/a.c")).toBe(true)
+    expect(attributes.vendored("src/third_party/a.c")).toBe(false)
+    expect(attributes.vendored("legacy/a.ts")).toBe(true)
+    expect(attributes.vendored("legacy/kept.ts")).toBe(false)
+    expect(attributes.vendored("vendor/a.go")).toBe(false)
+  })
+
+  test("classifies through the base attributes, with or without the defaults", () => {
+    expect(classifyPath("x/y.gen.ts", { ...defaults, attributes })).toBe("generated")
+    expect(classifyPath("third_party/z.c", { ...defaults, attributes })).toBe("vendored")
+    const bare = { config: { ...DEFAULT_REVIEW_CONFIG, ignoreDefaults: false }, attributes }
+    expect(classifyPath("x/y.gen.ts", bare)).toBe("generated")
+  })
+})
+
+describe("generated headers", () => {
+  test("look at the first 5 lines only", () => {
+    expect(hasGeneratedHeader("// Code generated by protoc-gen-go. DO NOT EDIT.\npackage api")).toBe(true)
+    expect(hasGeneratedHeader("/**\n * @generated\n */")).toBe(true)
+    expect(hasGeneratedHeader("a\nb\nc\nd\ne\n// DO NOT EDIT")).toBe(false)
+  })
+
+  test("count on an existing file only when the base agrees", () => {
+    const header = "// @generated by a tool\nexport const x = 1\n"
+    expect(
+      generatedHeaderDecision({ path: "src/auth.ts", headText: header, baseText: "export const x = 0\n" }),
+    ).toEqual({ skip: false, reviewedAnyway: true })
+    expect(generatedHeaderDecision({ path: "src/auth.ts", headText: header, baseText: header })).toEqual({ skip: true })
+    const attributes = parseGitAttributes("src/auth.ts linguist-generated")
+    expect(generatedHeaderDecision({ path: "src/auth.ts", headText: header, baseText: "x", attributes })).toEqual({
+      skip: true,
+    })
+  })
+
+  test("skip a new file only under a generated name", () => {
+    const header = "// Code generated by sqlc. DO NOT EDIT.\n"
+    expect(generatedHeaderDecision({ path: "src/db/query.generated.ts", headText: header })).toEqual({ skip: true })
+    expect(generatedHeaderDecision({ path: "src/new.ts", headText: header })).toEqual({
+      skip: false,
+      reviewedAnyway: true,
+    })
+  })
+
+  test("do nothing without a header or with ignoreDefaults: false", () => {
+    expect(generatedHeaderDecision({ path: "src/a.ts", headText: "export {}\n", baseText: "" })).toEqual({
+      skip: false,
+    })
+    expect(
+      generatedHeaderDecision({ path: "src/a.generated.ts", headText: "// @generated\n", ignoreDefaults: false }),
+    ).toEqual({ skip: false })
+  })
+})
+
+describe("classifyFiles", () => {
+  test("lists new code under ignored paths first, with its added lines", () => {
+    const files = fromGitHubFiles([
+      {
+        filename: "src/app.ts",
+        status: "modified",
+        additions: 3,
+        deletions: 1,
+        patch: "@@ -1 +1,3 @@\n-a\n+b\n+c\n+d",
+      },
+      { filename: "bun.lock", status: "modified", additions: 20, deletions: 10, patch: "@@ -1 +1 @@\n-a\n+b" },
+      { filename: "build/small.js", status: "added", additions: 5, deletions: 0, patch: "@@ -0,0 +1 @@\n+x" },
+      { filename: "dist/hidden.ts", status: "added", additions: 40, deletions: 0, patch: "@@ -0,0 +1 @@\n+x" },
+      { filename: "assets/logo.png", status: "modified", additions: 0, deletions: 0 },
+      { filename: "src/gone.ts", status: "removed", additions: 0, deletions: 900 },
+      { filename: "src/old.ts", status: "removed", additions: 0, deletions: 1, patch: "@@ -1 +0,0 @@\n-x" },
+    ])
+    const result = classifyFiles(files, defaults)
+    expect(result.review.map((file) => file.path)).toEqual(["src/app.ts", "src/old.ts"])
+    expect(result.skipped).toEqual([
+      { path: "dist/hidden.ts", reason: "build-output", additions: 40 },
+      { path: "build/small.js", reason: "build-output", additions: 5 },
+      { path: "bun.lock", reason: "lockfile" },
+      { path: "assets/logo.png", reason: "binary" },
+      { path: "src/gone.ts", reason: "deleted" },
+    ])
+  })
+})
+
+describe("isSensitivePath and isBinaryPath", () => {
+  test("flag trust boundaries, secrets and data access by whole path words", () => {
+    for (const name of [
+      "src/db.ts",
+      "src/auth/refresh.ts",
+      "src/api/sessionStore.ts",
+      "src/payments/charge.ts",
+      ".github/workflows/ci.yml",
+      "Dockerfile",
+      "infra/main.tf",
+      "migrations/001_init.sql",
+      "server/middleware/csrf.go",
+    ])
+      expect([name, isSensitivePath(name)]).toEqual([name, true])
+    for (const name of ["src/list.ts", "src/tokenizer.ts", "src/keyboard.ts", "docs/auth.md", "README.md"])
+      expect([name, isSensitivePath(name)]).toEqual([name, false])
+  })
+
+  test("know binary extensions", () => {
+    expect(["a.png", "b.PDF", "c.woff2", "d.wasm"].map(isBinaryPath)).toEqual([true, true, true, true])
+    expect(["a.svg", "b.ts", "Makefile", ".env"].map(isBinaryPath)).toEqual([false, false, false, false])
+  })
+})

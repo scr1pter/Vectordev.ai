@@ -1,0 +1,63 @@
+## Vector review · Risk: Medium
+
+> Rebased onto `main` with no change to this pull request's own diff; nothing new to review.
+
+This change adds refresh-token rotation to the auth client and moves session storage from localStorage to IndexedDB. Rotation can race with logout, and sessions saved by older builds are not migrated.
+
+**1 blocking · 2 concerns** on the changed lines · 3 nits below
+
+**Since last review** (`a1b2c3d` → `d4e5f6a`): 2 fixed · 1 still open · 4 new
+
+_2 lower-confidence notes were left out._
+
+| File | + | − | Why it matters |
+| --- | ---: | ---: | --- |
+| `src/auth/refresh.ts` | 84 | 12 | Rotation loop; races logout |
+| `src/auth/storage.ts` | 40 | 31 | IndexedDB adapter replaces localStorage |
+| `src/auth/client.ts` | 9 | 3 | Wires the adapter in |
+
+_4 more files changed (tests and docs)._
+
+<details><summary>Still open from earlier reviews (1)</summary>
+
+- **Concern** · `src/auth/storage.ts:22` · Sessions from older builds are dropped ([comment](https://github.com/o/r/pull/7#discussion_r123))
+</details>
+
+<details><summary>Fixed since last review (2)</summary>
+
+- `src/auth/refresh.ts:40` · Token stored before it is validated · fixed in `d4e5f6a`
+- `src/auth/client.ts:12` · Unhandled rejection on network error · fixed in `c3d4e5f`
+</details>
+
+<details><summary>Dismissed (1)</summary>
+
+- `src/auth/client.ts:9` · Refresh request has no timeout · dismissed by @​alice
+</details>
+
+<details><summary>Outside the changed lines (1)</summary>
+
+- **Concern** · `src/api/session.ts:88` · `readSession()` still expects the old stored shape. This PR changes what `storage.ts` writes, and this reader was not updated.
+</details>
+
+<details><summary>Elsewhere in this pull request (1)</summary>
+
+- **Concern** · `src/auth/refresh.ts:12` · Retry delay is not capped. Not in the code changed since the last review, so it is listed here rather than posted as a comment.
+</details>
+
+<details><summary>Nits (3)</summary>
+
+- `src/auth/storage.ts:18` · `openDB` is imported but never used
+- `src/auth/storage.ts:30` · Comment still says localStorage
+- `src/auth/client.ts:5` · Imports are out of order
+</details>
+
+<details><summary>Not reviewed (3 files)</summary>
+
+`bun.lock` lockfile · `dist/auth.js` build output · `assets/logo.png` binary
+</details>
+
+---
+<sub>Reviewed `d4e5f6a` against `main` · incremental from `a1b2c3d` · anthropic/claude-sonnet-4-5 · $0.21 (48.2k in, 31.0k of it cached / 3.1k out) · 1m 52s · this pull request: $0.37 over 2 reviews · [workflow run](https://github.com/o/r/actions/runs/42)</sub>
+<sub>Comment `/vector review` to review again, `/vector review full` to start over, or `/vector pause` to stop automatic reviews. Resolve a comment or react to it with a thumbs-down to dismiss it.</sub>
+<!-- vector-review:summary -->
+<!-- vector-review:state v1 eyJ2IjoxLCJyIjoyLCJjIjowLjM3LCJ0IjpbNjAwMDAsNTAwMF0sInUiOltdLCJpIjozLCJzIjpbXSwicCI6W10sImgiOiJkNGU1ZjZhN2I4YzlkMGUxZjJhM2I0YzVkNmU3ZjhhOWIwYzFkMmUzIiwiYiI6IjAxMjM0NTY3ODlhYmNkZWYwMTIzNDU2Nzg5YWJjZGVmMDEyMzQ1NjcifQ -->

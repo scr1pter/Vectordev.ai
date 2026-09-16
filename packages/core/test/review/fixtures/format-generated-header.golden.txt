@@ -1,0 +1,20 @@
+## Vector review · Risk: Low
+
+Renames a helper and updates its two callers.
+
+**No issues found** on the changed lines.
+
+`src/auth.ts` gained a generated-file header in this pull request, so Vector reviewed it anyway.
+
+_2 files changed (code)._
+
+<details><summary>Not reviewed (3 files)</summary>
+
+`src/gen/client.ts` generated (+120 lines) · `src/gen/one.ts` generated (+1 line) · `package-lock.json` lockfile
+</details>
+
+---
+<sub>Reviewed `d4e5f6a` against `main` · full review · opencode/big-pickle · included with Vector (48.2k in / 3.1k out) · 48s · this pull request: 1 review · [workflow run](https://github.com/o/r/actions/runs/42)</sub>
+<sub>Comment `/vector review` to review again, `/vector review full` to start over, or `/vector pause` to stop automatic reviews. Resolve a comment or react to it with a thumbs-down to dismiss it.</sub>
+<!-- vector-review:summary -->
+<!-- vector-review:state v1 eyJ2IjoxLCJyIjoyLCJjIjowLjM3LCJ0IjpbNjAwMDAsNTAwMF0sInUiOltdLCJpIjozLCJzIjpbXSwicCI6W10sImgiOiJkNGU1ZjZhN2I4YzlkMGUxZjJhM2I0YzVkNmU3ZjhhOWIwYzFkMmUzIiwiYiI6IjAxMjM0NTY3ODlhYmNkZWYwMTIzNDU2Nzg5YWJjZGVmMDEyMzQ1NjcifQ -->

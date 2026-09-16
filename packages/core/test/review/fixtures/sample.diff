@@ -1,0 +1,89 @@
+diff --git a/assets/logo.png b/assets/logo.png
+index 981fc64..9d5c999 100644
+Binary files a/assets/logo.png and b/assets/logo.png differ
+diff --git a/docs/a.md b/docs/b.md
+similarity index 100%
+rename from docs/a.md
+rename to docs/b.md
+diff --git a/src/added.ts b/src/added.ts
+new file mode 100644
+index 0000000..4e87ea6
+--- /dev/null
++++ b/src/added.ts
+@@ -0,0 +1,3 @@
++export async function added() {
++  return "added"
++}
+diff --git "a/src/caf\303\251.ts" "b/src/caf\303\251.ts"
+index 3b6bb8a..b0353fb 100644
+--- "a/src/caf\303\251.ts"
++++ "b/src/caf\303\251.ts"
+@@ -1 +1 @@
+-const x = 1
++const x = 2
+diff --git a/src/eof.ts b/src/eof.ts
+index 2ce746c..850c70f 100644
+--- a/src/eof.ts
++++ b/src/eof.ts
+@@ -1,2 +1,2 @@
+ export const value = 1
+-export const other = 2
+\ No newline at end of file
++export const other = 3
+\ No newline at end of file
+diff --git a/src/list.ts b/src/list.ts
+index 4747293..93d10e9 100644
+--- a/src/list.ts
++++ b/src/list.ts
+@@ -3,7 +3,7 @@ export function first(items) {
+ }
+ 
+ export function last(items) {
+-  return items[items.length]
++  return items[items.length - 1]
+ }
+ 
+ // padding 1
+@@ -16,5 +16,6 @@ export function last(items) {
+ // padding 8
+ 
+ export function count(items) {
++  if (!items) return 0
+   return items.length
+ }
+diff --git a/src/old-name.ts b/src/new-name.ts
+similarity index 83%
+rename from src/old-name.ts
+rename to src/new-name.ts
+index dcf5eed..cdea22a 100644
+--- a/src/old-name.ts
++++ b/src/new-name.ts
+@@ -1,4 +1,4 @@
+-export const name = "old"
++export const name = "new"
+ export const keep = 1
+ export const a = 1
+ export const b = 2
+diff --git a/src/one.txt b/src/one.txt
+index 7898192..6178079 100644
+--- a/src/one.txt
++++ b/src/one.txt
+@@ -1 +1 @@
+-a
++b
+diff --git a/src/removed.ts b/src/removed.ts
+deleted file mode 100644
+index b1c6a8f..0000000
+--- a/src/removed.ts
++++ /dev/null
+@@ -1,3 +0,0 @@
+-export function gone() {
+-  return 1
+-}
+diff --git a/src/with space.ts b/src/with space.ts
+index 9c59e24..e019be0 100644
+--- a/src/with space.ts	
++++ b/src/with space.ts	
+@@ -1 +1 @@
+-first
++second
