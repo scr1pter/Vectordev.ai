@@ -19,12 +19,13 @@ import { useLayout } from "@/context/layout"
 import { usePlanMode } from "@/context/plan-mode"
 import { usePlatform } from "@/context/platform"
 import { pathKey } from "@/utils/path-key"
+import { modelDisplayName } from "@/utils/provider-brand"
 import { decodeRouteSegment, projectPathFromWorkspaceRoute, sessionIDFromRouteValue } from "@/utils/project-route"
 import { taskScopeId, taskScopeSearch, type TaskScope } from "@/utils/task-scope"
 import { sessionIDFromEvent } from "@/utils/session-event"
 import { WORKSPACE_FILE_SAVED_EVENT, workspaceFileSavedDetail } from "@/utils/workspace-file-saved"
 import { WORKSPACE_MODE_CHANGED_EVENT, workspaceModeFromEvent, type WorkspaceMode } from "@/utils/workspace-mode"
-import { extractAssistantReply } from "@/utils/assistant-reply"
+import { reviewCatalog, runPullRequestReview } from "@/features/pull-requests/ai-review"
 import { setNavigate } from "@/utils/notification-click"
 import { setV2Toast, showToast, ToastRegion } from "@/utils/toast"
 import { useProviders } from "@/hooks/use-providers"
@@ -617,7 +618,7 @@ export default function NewLayout(props: ParentProps) {
         providerID: provider.id,
         providerName: provider.name || provider.id,
         modelID: model.id,
-        modelName: model.name || model.id,
+        modelName: modelDisplayName({ ...model, provider }) || model.id,
       })),
     ),
   )
@@ -2873,7 +2874,7 @@ export default function NewLayout(props: ParentProps) {
   globalThis.window?.addEventListener(ONBOARDING_UPDATED_EVENT, refreshOnboardingFlags)
   onCleanup(() => globalThis.window?.removeEventListener(ONBOARDING_UPDATED_EVENT, refreshOnboardingFlags))
 
-  // Any usable model — a key the user just added, or the free starter model —
+  // Any usable model — a key the user just added, or a model included with Vector —
   // completes the step on its own. A finished session turn (recorded on
   // session.idle above) still marks it verified end to end, and only changes
   // the wording here.
@@ -2889,7 +2890,7 @@ export default function NewLayout(props: ParentProps) {
         ? "Vector completed a real model response with your selected provider."
         : onboardingProviderConnected()
           ? "Connected. Run the safe first task below to see the model answer end to end."
-          : "Bring your own key — OpenAI, Anthropic, Google, or the free starter model.",
+          : "Bring your own key — OpenAI, Anthropic, Google — or start on a model included with Vector.",
       done: onboardingProviderDone(),
       cta: "Connect",
       onGo: () => {
@@ -6377,18 +6378,22 @@ export default function NewLayout(props: ParentProps) {
         open={pullRequestsOpen()}
         projectPath={activeWorkspaceScope().sourcePath}
         onClose={() => setPullRequestsOpen(false)}
-        onAiReview={async (prompt) => {
+        onReview={async (input) => {
+          // The review runs on the user's own project, as the read-only review agent under read-only session
+          // rules; another person's code is never opened as an instance.
           const directory = activeWorkspaceScope().sourcePath
           if (!directory) throw new Error("Open a project before running a review.")
-          const client = serverSDK().createClient({ directory, throwOnError: true })
-          const created = await client.session.create().then((result) => result.data ?? undefined)
-          if (!created) throw new Error("Vector could not create a session for this review.")
-          const outcome = await client.session.prompt({
-            sessionID: created.id,
-            directory,
-            parts: [{ type: "text", text: prompt }],
-          })
-          return extractAssistantReply(outcome.data)
+          const config = serverSync().data.config
+          return runPullRequestReview(
+            {
+              ...input,
+              directory,
+              catalog: reviewCatalog(byokProviders.connected()),
+              // Section 2.9: the review agent's own model, then the configured default.
+              preferredModels: [config.agent?.review?.model, config.model],
+            },
+            serverSDK().createClient({ directory, throwOnError: true }),
+          )
         }}
       />
 
@@ -6763,7 +6768,7 @@ export default function NewLayout(props: ParentProps) {
               <div class="mb-2 flex items-center justify-between">
                 <h3 class="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/42">Agent runtime</h3>
                 <span class="text-[11px] text-white/42">
-                  {parallelModelState.current()?.name || "No model selected"}
+                  {parallelModelState.current() ? modelDisplayName(parallelModelState.current()!) : "No model selected"}
                 </span>
               </div>
               <div>

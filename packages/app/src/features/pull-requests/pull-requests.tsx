@@ -1,10 +1,18 @@
 import { createEffect, createSignal, For, Show } from "solid-js"
 import {
-  buildReviewPrompt,
+  buildDesktopSummary,
   countBySeverity,
-  formatReviewComment,
-  parseReview,
-  type PullRequestReview,
+  estimateText,
+  findingGroups,
+  REBUILT_HINT,
+  reviewEvents,
+  reviewFooter,
+  skippedText,
+  type ReviewCheckout,
+  type ReviewEstimate,
+  type ReviewEvent,
+  type ReviewOutcomeLite,
+  type ReviewRequest,
 } from "./ai-review"
 import {
   buildPullRequestCreateInput,
@@ -45,6 +53,9 @@ type PullRequestDetail = PullRequest & {
   body: string
   files: { path: string; additions: number; deletions: number }[]
   comments: { author: string; body: string; createdAt: string }[]
+  headRefOid?: string
+  baseRefOid?: string
+  isCrossRepository?: boolean
 }
 
 type PullRequestsApi = {
@@ -124,16 +135,41 @@ function CopyableCommand(props: { command: string }) {
   )
 }
 
+const SEVERITY_TITLE = { blocking: "Blocking", concern: "Concern", nit: "Nit" } as const
+
+// Backticks mark code in Vector's own copy and in model titles; they are shown as code, not as raw backticks.
+function CodeText(props: { text: string }) {
+  return (
+    <For each={props.text.split("`")}>
+      {(part, index) =>
+        index() % 2 === 1 ? (
+          <code class="rounded-[3px] bg-white/[0.07] px-1 font-mono text-[0.92em]">{part}</code>
+        ) : (
+          part
+        )
+      }
+    </For>
+  )
+}
+
+function capital(text: string) {
+  return text.charAt(0).toUpperCase() + text.slice(1)
+}
+
 export function PullRequests(props: {
   open: boolean
   projectPath?: string
   onClose: () => void
-  onAiReview: (prompt: string) => Promise<string>
+  onReview: (input: ReviewRequest) => Promise<ReviewOutcomeLite | undefined>
 }) {
   const [status, setStatus] = createSignal<CliStatus>()
   const [list, setList] = createSignal<PullRequest[]>([])
   const [selected, setSelected] = createSignal<PullRequestDetail>()
-  const [review, setReview] = createSignal<PullRequestReview>()
+  const [review, setReview] = createSignal<ReviewOutcomeLite>()
+  const [reviewRun, setReviewRun] = createSignal<{ controller: AbortController; number: number }>()
+  const [checkout, setCheckout] = createSignal<{ mode: ReviewCheckout["mode"]; label: string }>()
+  const [estimate, setEstimate] = createSignal<{ value: ReviewEstimate; answer: (go: boolean) => void }>()
+  const [postMenuOpen, setPostMenuOpen] = createSignal(false)
   const [busy, setBusy] = createSignal<string>()
   const [error, setError] = createSignal<string>()
   const [posted, setPosted] = createSignal(false)
@@ -154,7 +190,31 @@ export function PullRequests(props: {
   let projectRevision = 0
   let refreshRequest = 0
 
+  const groups = () => {
+    const outcome = review()
+    return outcome ? findingGroups(outcome) : []
+  }
+  const counts = () => countBySeverity(groups())
+  const events = () => {
+    const outcome = review()
+    return outcome ? reviewEvents(outcome.selection) : undefined
+  }
+  const reviewing = () => {
+    const run = reviewRun()
+    return Boolean(run) && run!.number === selected()?.number
+  }
+
+  // A review of another project's pull request is stopped, not left running for a panel that moved on.
+  const discardReview = () => {
+    estimate()?.answer(false)
+    reviewRun()?.controller.abort()
+    setReviewRun(undefined)
+    setCheckout(undefined)
+    setPostMenuOpen(false)
+  }
+
   const clearProjectState = () => {
+    discardReview()
     setList([])
     setSelected(undefined)
     setReview(undefined)
@@ -261,9 +321,11 @@ export function PullRequests(props: {
     const bridge = api()
     const projectPath = props.projectPath
     const request = { path: projectPath, revision: projectRevision }
-    if (!bridge || !projectPath) return
+    if (!bridge || !projectPath || reviewRun()) return
     setBusy(`Loading #${number}…`)
     setReview(undefined)
+    setCheckout(undefined)
+    setPostMenuOpen(false)
     setPosted(false)
     setConfirmingMerge(false)
     const detail = await bridge.view(projectPath, number).catch((cause: unknown) => {
@@ -277,48 +339,99 @@ export function PullRequests(props: {
     setBusy(undefined)
   }
 
-  const runAiReview = async () => {
+  const runReview = async () => {
     const bridge = api()
     const pr = selected()
-    if (!bridge || !pr || !props.projectPath) return
+    const projectPath = props.projectPath
+    const request = { path: projectPath, revision: projectRevision }
+    if (!bridge || !pr || !projectPath || reviewRun()) return
+    const current = () =>
+      pullRequestProjectIsCurrent(request, { path: props.projectPath, revision: projectRevision }) &&
+      selected()?.number === pr.number
+    const controller = new AbortController()
+    setReviewRun({ controller, number: pr.number })
     setBusy("Reading the diff…")
     setError(undefined)
-    const diff = await bridge.diff(props.projectPath, pr.number).catch((cause: unknown) => {
-      setError(pullRequestErrorMessage(cause))
+    setReview(undefined)
+    setCheckout(undefined)
+    setPostMenuOpen(false)
+    setPosted(false)
+    const diff = await bridge.diff(projectPath, pr.number).catch((cause: unknown) => {
+      if (current()) setError(pullRequestErrorMessage(cause))
       return ""
     })
-    if (!diff) {
-      setBusy(undefined)
-      return
-    }
-    setBusy("Vector is reviewing…")
-    const answer = await props
-      .onAiReview(
-        buildReviewPrompt({ title: pr.title, body: pr.body, baseRef: pr.baseRefName, headRef: pr.headRefName, diff }),
-      )
-      .catch((cause: unknown) => {
-        setError(pullRequestErrorMessage(cause))
-        return ""
-      })
-    // Constrain findings to files actually in this PR so a hallucinated path
-    // never reaches someone else's pull request.
-    const parsed = parseReview(
-      answer,
-      pr.files.map((file) => file.path),
-    )
-    if (!parsed) setError("Vector could not produce a structured review for this diff.")
-    setReview(parsed)
+    const outcome =
+      diff && !controller.signal.aborted
+        ? await props
+            .onReview({
+              pr: {
+                number: pr.number,
+                title: pr.title,
+                body: pr.body,
+                author: pr.author,
+                url: pr.url,
+                baseRefName: pr.baseRefName,
+                headRefName: pr.headRefName,
+                headRefOid: pr.headRefOid,
+                baseRefOid: pr.baseRefOid,
+                isCrossRepository: pr.isCrossRepository,
+                comments: pr.comments,
+              },
+              diff,
+              signal: controller.signal,
+              confirm: (value) =>
+                new Promise<boolean>((resolve) => {
+                  if (controller.signal.aborted) return resolve(false)
+                  setBusy("Waiting for you to start the review…")
+                  setEstimate({
+                    value,
+                    answer: (go) => {
+                      setEstimate(undefined)
+                      resolve(go)
+                    },
+                  })
+                }),
+              onProgress: (progress) => {
+                if (!current() || controller.signal.aborted) return
+                if (progress.type === "status") setBusy(progress.text)
+                else setCheckout({ mode: progress.checkout.mode, label: progress.label })
+              },
+            })
+            .catch((cause: unknown) => {
+              if (current()) setError(pullRequestErrorMessage(cause))
+              return undefined
+            })
+        : undefined
+    if (reviewRun()?.controller === controller) setReviewRun(undefined)
+    if (!current()) return
+    setReview(outcome)
     setBusy(undefined)
   }
 
-  const postReview = async () => {
+  // Stop ends the review early; what the reviewers confirmed so far still comes back.
+  const stopReview = () => {
+    const run = reviewRun()
+    if (!run || run.controller.signal.aborted) return
+    run.controller.abort()
+    const pending = estimate()
+    if (pending) {
+      pending.answer(false)
+      return
+    }
+    setBusy("Finishing the review…")
+  }
+
+  // Posting is the one step visible to other people, so it only ever happens from these buttons.
+  const postReview = async (event: ReviewEvent) => {
     const bridge = api()
     const pr = selected()
     const current = review()
-    if (!bridge || !pr || !current || !props.projectPath) return
+    if (!bridge || !pr || !current || !props.projectPath || !reviewEvents(current.selection)[event]) return
+    setPostMenuOpen(false)
     setBusy("Posting review…")
+    setError(undefined)
     const result = await bridge
-      .review({ cwd: props.projectPath, number: pr.number, body: formatReviewComment(current), event: current.verdict })
+      .review({ cwd: props.projectPath, number: pr.number, body: buildDesktopSummary(current, pr.url), event })
       .catch((cause: unknown) => {
         setError(pullRequestErrorMessage(cause))
         return undefined
@@ -390,6 +503,7 @@ export function PullRequests(props: {
     }
     setSelected(undefined)
     setReview(undefined)
+    setCheckout(undefined)
     await refresh(projectPath)
   }
 
@@ -578,7 +692,8 @@ export function PullRequests(props: {
                       {(pr) => (
                         <button
                           type="button"
-                          class="rounded-[6px] border px-3 py-2.5 text-left transition"
+                          disabled={Boolean(reviewRun())}
+                          class="rounded-[6px] border px-3 py-2.5 text-left transition disabled:cursor-default"
                           classList={{
                             "border-[color:var(--vx-purple)] bg-[color:var(--vx-surface)]":
                               selected()?.number === pr.number,
@@ -708,26 +823,26 @@ export function PullRequests(props: {
                       </div>
 
                       <div class="mt-3 flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                          disabled={Boolean(busy())}
-                          class="rounded-[6px] bg-[color:var(--vx-purple)] px-3 py-1.5 text-[12.5px] font-medium text-white disabled:opacity-50"
-                          onClick={() => void runAiReview()}
+                        <Show
+                          when={reviewing()}
+                          fallback={
+                            <button
+                              type="button"
+                              disabled={Boolean(busy())}
+                              class="rounded-[6px] bg-[color:var(--vx-purple)] px-3 py-1.5 text-[12.5px] font-medium text-white disabled:opacity-50"
+                              onClick={() => void runReview()}
+                            >
+                              Review with Vector
+                            </button>
+                          }
                         >
-                          Run Vector AI review
-                        </button>
-                        <Show when={review() && !posted()}>
                           <button
                             type="button"
-                            disabled={Boolean(busy())}
-                            class="rounded-[6px] border border-[color:var(--vx-line)] px-3 py-1.5 text-[12.5px] text-white/75 hover:text-white disabled:opacity-50"
-                            onClick={() => void postReview()}
+                            class="rounded-[6px] border border-rose-400/35 px-3 py-1.5 text-[12.5px] text-rose-200 hover:border-rose-300/60"
+                            onClick={stopReview}
                           >
-                            Post to GitHub ({review()!.verdict})
+                            Stop review
                           </button>
-                        </Show>
-                        <Show when={posted()}>
-                          <span class="self-center text-[12px] text-emerald-300">Review posted</span>
                         </Show>
                         <select
                           aria-label="Merge strategy"
@@ -759,41 +874,188 @@ export function PullRequests(props: {
                         </button>
                       </div>
 
-                      <Show when={review()}>
-                        <div class="mt-4 border-t border-[color:var(--vx-line)] pt-3">
-                          <div class="mb-2 flex flex-wrap gap-3 text-[11.5px]">
-                            <span class="text-rose-300">{countBySeverity(review()!.findings).blocking} blocking</span>
-                            <span class="text-amber-300">{countBySeverity(review()!.findings).concern} concerns</span>
-                            <span class="text-white/45">{countBySeverity(review()!.findings).nit} nits</span>
+                      <Show when={estimate()}>
+                        {(pending) => (
+                          <div class="mt-3 rounded-[6px] border border-[color:var(--vx-line)] bg-black/20 px-3 py-2.5">
+                            <p class="text-[12px] leading-relaxed text-white/70">{estimateText(pending().value)}</p>
+                            <div class="mt-2 flex gap-2">
+                              <button
+                                type="button"
+                                class="rounded-[6px] bg-[color:var(--vx-purple)] px-3 py-1 text-[12px] font-medium text-white"
+                                onClick={() => pending().answer(true)}
+                              >
+                                Start review
+                              </button>
+                              <button
+                                type="button"
+                                class="rounded-[6px] border border-[color:var(--vx-line)] px-3 py-1 text-[12px] text-white/75 hover:text-white"
+                                onClick={() => pending().answer(false)}
+                              >
+                                Cancel
+                              </button>
+                            </div>
                           </div>
-                          <p class="mb-3 text-[12.5px] leading-relaxed text-white/70">{review()!.summary}</p>
-                          <For each={review()!.findings}>
-                            {(finding) => (
-                              <div class="mb-2 rounded-[6px] border border-[color:var(--vx-line)] px-3 py-2">
-                                <div class="flex items-baseline gap-2">
-                                  <span
-                                    class="shrink-0 text-[10.5px] uppercase tracking-wide"
+                        )}
+                      </Show>
+
+                      <Show when={checkout()}>
+                        {(info) => (
+                          <p class="mt-3 text-[11.5px] leading-relaxed text-white/50">
+                            <CodeText text={info().label} />
+                            <Show when={info().mode === "rebuilt"}>
+                              <span class="text-white/40"> {REBUILT_HINT}</span>
+                            </Show>
+                          </p>
+                        )}
+                      </Show>
+
+                      <Show when={review()}>
+                        {(outcome) => (
+                          <div class="mt-4 border-t border-[color:var(--vx-line)] pt-3">
+                            <div class="mb-2 flex flex-wrap items-baseline gap-3 text-[11.5px]">
+                              <span class="font-medium text-white/80">Risk: {capital(outcome().selection.risk)}</span>
+                              <span class="text-rose-300">{counts().blocking} blocking</span>
+                              <span class="text-amber-300">
+                                {counts().concern} {counts().concern === 1 ? "concern" : "concerns"}
+                              </span>
+                              <span class="text-white/45">
+                                {counts().nit} {counts().nit === 1 ? "nit" : "nits"}
+                              </span>
+                            </div>
+                            <For each={[...outcome().banners, ...outcome().notes]}>
+                              {(note) => (
+                                <p class="mb-2 text-[12px] leading-relaxed text-amber-200/80">
+                                  <CodeText text={note.replaceAll("**", "")} />
+                                </p>
+                              )}
+                            </For>
+                            <Show when={outcome().report.summary}>
+                              <p class="mb-3 text-[12.5px] leading-relaxed text-white/70">{outcome().report.summary}</p>
+                            </Show>
+                            <Show when={groups().length === 0 && outcome().notes.length === 0}>
+                              <p class="mb-3 text-[12px] text-white/55">No issues found on the changed lines.</p>
+                            </Show>
+                            <For each={groups()}>
+                              {(group) => (
+                                <div class="mb-3">
+                                  <div
+                                    class="mb-1.5 text-[10.5px] uppercase tracking-wide"
                                     classList={{
-                                      "text-rose-300": finding.severity === "blocking",
-                                      "text-amber-300": finding.severity === "concern",
-                                      "text-white/40": finding.severity === "nit",
+                                      "text-rose-300": group.severity === "blocking",
+                                      "text-amber-300": group.severity === "concern",
+                                      "text-white/40": group.severity === "nit",
                                     }}
                                   >
-                                    {finding.severity}
-                                  </span>
-                                  <span class="min-w-0 flex-1 text-[12.5px] font-medium text-white">
-                                    {finding.title}
-                                  </span>
+                                    {SEVERITY_TITLE[group.severity]} ({group.findings.length})
+                                  </div>
+                                  <For each={group.findings}>
+                                    {(finding) => (
+                                      <div class="mb-2 rounded-[6px] border border-[color:var(--vx-line)] px-3 py-2">
+                                        <div class="text-[12.5px] font-medium text-white">
+                                          <CodeText text={finding.title} />
+                                        </div>
+                                        <div class="mt-0.5 font-mono text-[11px] text-[color:var(--vx-purple-bright)]">
+                                          {finding.path}:{finding.line}
+                                          <Show when={finding.place !== "changed"}>
+                                            <span class="ml-2 font-sans text-white/40">
+                                              {finding.place === "outside"
+                                                ? "outside the changed lines"
+                                                : "elsewhere in this pull request"}
+                                            </span>
+                                          </Show>
+                                        </div>
+                                        <Show when={finding.body}>
+                                          <p class="mt-1 whitespace-pre-wrap text-[12px] leading-relaxed text-white/65">
+                                            {finding.body}
+                                          </p>
+                                        </Show>
+                                        <Show when={finding.fix}>
+                                          {(fix) => (
+                                            <pre class="mt-2 max-h-48 overflow-auto rounded bg-black/30 p-2 font-mono text-[10.5px] leading-snug">
+                                              <For each={fix().removed}>
+                                                {(line) => <div class="text-rose-300/80">-{line}</div>}
+                                              </For>
+                                              <For each={fix().added}>
+                                                {(line) => <div class="text-emerald-300/80">+{line}</div>}
+                                              </For>
+                                            </pre>
+                                          )}
+                                        </Show>
+                                      </div>
+                                    )}
+                                  </For>
                                 </div>
-                                <div class="mt-0.5 font-mono text-[11px] text-[color:var(--vx-purple-bright)]">
-                                  {finding.file}
-                                  {finding.line ? `:${finding.line}` : ""}
+                              )}
+                            </For>
+                            <Show when={outcome().skipped.length}>
+                              <p class="mb-2 text-[11px] leading-relaxed text-white/40">
+                                Not reviewed: {skippedText(outcome().skipped)}
+                              </p>
+                            </Show>
+                            <p class="mb-3 text-[11px] text-white/40">{reviewFooter(outcome())}</p>
+                            <Show
+                              when={!posted()}
+                              fallback={<span class="text-[12px] text-emerald-300">Review posted</span>}
+                            >
+                              <div class="flex flex-wrap items-center gap-2">
+                                <button
+                                  type="button"
+                                  disabled={Boolean(busy())}
+                                  class="rounded-[6px] bg-[color:var(--vx-purple)] px-3 py-1.5 text-[12.5px] font-medium text-white disabled:opacity-50"
+                                  onClick={() => void postReview("comment")}
+                                >
+                                  Comment
+                                </button>
+                                <div class="relative">
+                                  <button
+                                    type="button"
+                                    aria-haspopup="menu"
+                                    aria-expanded={postMenuOpen()}
+                                    disabled={Boolean(busy())}
+                                    class="rounded-[6px] border border-[color:var(--vx-line)] px-3 py-1.5 text-[12.5px] text-white/75 hover:text-white disabled:opacity-50"
+                                    onClick={() => setPostMenuOpen((value) => !value)}
+                                  >
+                                    More ▾
+                                  </button>
+                                  <Show when={postMenuOpen()}>
+                                    <div
+                                      role="menu"
+                                      class="absolute left-0 top-full z-10 mt-1 flex min-w-[190px] flex-col rounded-[6px] border border-[color:var(--vx-line)] bg-[color:var(--vx-surface)] p-1"
+                                    >
+                                      <button
+                                        type="button"
+                                        role="menuitem"
+                                        disabled={!events()?.approve}
+                                        title={
+                                          events()?.approve
+                                            ? undefined
+                                            : "Approve is off while a blocking finding stands."
+                                        }
+                                        class="rounded-[4px] px-2.5 py-1.5 text-left text-[12px] text-white/80 hover:bg-white/[0.06] disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent"
+                                        onClick={() => void postReview("approve")}
+                                      >
+                                        Approve
+                                      </button>
+                                      <button
+                                        type="button"
+                                        role="menuitem"
+                                        class="rounded-[4px] px-2.5 py-1.5 text-left text-[12px] text-white/80 hover:bg-white/[0.06]"
+                                        onClick={() => void postReview("request-changes")}
+                                      >
+                                        Request changes
+                                      </button>
+                                    </div>
+                                  </Show>
                                 </div>
-                                <p class="mt-1 text-[12px] leading-relaxed text-white/65">{finding.detail}</p>
+                                <span class="text-[11.5px] text-white/45">
+                                  {status()?.login
+                                    ? `Posting as @${status()!.login}`
+                                    : "Posting with your GitHub CLI sign-in"}
+                                </span>
                               </div>
-                            )}
-                          </For>
-                        </div>
+                            </Show>
+                          </div>
+                        )}
                       </Show>
                     </div>
                   </Show>

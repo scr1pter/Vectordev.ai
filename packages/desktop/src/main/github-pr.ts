@@ -131,8 +131,22 @@ export type PullRequestSummary = {
   reviewDecision?: string
 }
 
-const LIST_FIELDS =
+const LEGACY_LIST_FIELDS =
   "number,title,author,state,isDraft,baseRefName,headRefName,additions,deletions,changedFiles,url,updatedAt,reviewDecision"
+// The SHAs and the fork flag let a review tell whether the user's checkout is this pull request.
+const LIST_FIELDS = `${LEGACY_LIST_FIELDS},headRefOid,baseRefOid,isCrossRepository`
+
+// gh rejects the whole call when it does not know one field ("Unknown JSON field"), and older releases lack
+// baseRefOid, so retry with the fields every release has rather than losing the pull request list.
+async function ghJson(
+  args: (fields: string) => string[],
+  extra: string,
+  opts: { cwd?: string; timeoutMs?: number },
+): Promise<GhRunResult> {
+  const result = await gh(args(LIST_FIELDS + extra), opts)
+  if (!result.failed || !/unknown json field/i.test(result.stderr)) return result
+  return gh(args(LEGACY_LIST_FIELDS + extra), opts)
+}
 
 function parseJson<T>(raw: string): T | undefined {
   const trimmed = raw.trim()
@@ -157,19 +171,12 @@ export async function listPullRequests(
   options?: { state?: "open" | "closed" | "merged" | "all"; limit?: number },
 ) {
   const directory = requirePullRequestDirectory(cwd)
-  const result = await gh(
-    [
-      "pr",
-      "list",
-      "--state",
-      requirePullRequestState(options?.state ?? "open"),
-      "--limit",
-      String(requirePullRequestLimit(options?.limit ?? 100)),
-      "--json",
-      LIST_FIELDS,
-    ],
-    { cwd: directory, timeoutMs: 45_000 },
-  )
+  const state = requirePullRequestState(options?.state ?? "open")
+  const limit = String(requirePullRequestLimit(options?.limit ?? 100))
+  const result = await ghJson((fields) => ["pr", "list", "--state", state, "--limit", limit, "--json", fields], "", {
+    cwd: directory,
+    timeoutMs: 45_000,
+  })
   if (result.failed) throw new Error(result.stderr.trim() || "Could not list pull requests.")
   return (parseJson<RawPullRequest[]>(result.stdout) ?? []).map(normalize)
 }
@@ -178,22 +185,27 @@ export type PullRequestDetail = PullRequestSummary & {
   body: string
   files: { path: string; additions: number; deletions: number }[]
   comments: { author: string; body: string; createdAt: string }[]
+  // Absent on gh releases that predate them.
+  headRefOid?: string
+  baseRefOid?: string
+  isCrossRepository?: boolean
 }
 
 export async function viewPullRequest(cwd: string, number: number): Promise<PullRequestDetail> {
-  const result = await gh(
-    ["pr", "view", String(requirePullRequestNumber(number)), "--json", `${LIST_FIELDS},body,files,comments`],
-    {
-      cwd: requirePullRequestDirectory(cwd),
-      timeoutMs: 45_000,
-    },
-  )
+  const pr = String(requirePullRequestNumber(number))
+  const result = await ghJson((fields) => ["pr", "view", pr, "--json", fields], ",body,files,comments", {
+    cwd: requirePullRequestDirectory(cwd),
+    timeoutMs: 45_000,
+  })
   if (result.failed) throw new Error(result.stderr.trim() || `Could not load pull request #${number}.`)
   const raw = parseJson<
     RawPullRequest & {
       body?: string
       files?: { path: string; additions: number; deletions: number }[]
       comments?: { author?: { login?: string }; body?: string; createdAt?: string }[]
+      headRefOid?: string
+      baseRefOid?: string
+      isCrossRepository?: boolean
     }
   >(result.stdout)
   if (!raw) throw new Error(`Could not read pull request #${number}.`)
@@ -206,6 +218,9 @@ export async function viewPullRequest(cwd: string, number: number): Promise<Pull
       body: comment.body ?? "",
       createdAt: comment.createdAt ?? "",
     })),
+    headRefOid: raw.headRefOid,
+    baseRefOid: raw.baseRefOid,
+    isCrossRepository: raw.isCrossRepository,
   }
 }
 
