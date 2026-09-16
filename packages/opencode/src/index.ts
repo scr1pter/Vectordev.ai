@@ -25,6 +25,7 @@ import { EOL } from "os"
 import { WebCommand } from "./cli/cmd/web"
 import { InviteCommand } from "./cli/cmd/invite"
 import { PrCommand } from "./cli/cmd/pr"
+import { ReviewCommand } from "./cli/cmd/review"
 import { SessionCommand } from "./cli/cmd/session"
 import { DbCommand } from "./cli/cmd/db"
 import { errorMessage } from "./util/error"
@@ -117,6 +118,7 @@ const cli = yargs(args)
   .command(ImportCommand)
   .command(GithubCommand)
   .command(PrCommand)
+  .command(ReviewCommand)
   .command(SessionCommand)
   .command(PluginCommand)
   .command(DbCommand)

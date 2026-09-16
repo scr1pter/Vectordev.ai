@@ -126,6 +126,28 @@ function commands(node: Node) {
   return node.descendantsOfType("command").filter((child): child is Node => Boolean(child))
 }
 
+// Bash statements that change the shell instead of running a program. None of
+// them is a `command` node, so without these `export GIT_EXTERNAL_DIFF=/bin/sh;
+// git diff` would be checked only as `git diff`.
+const STATEMENTS = [
+  "declaration_command",
+  "unset_command",
+  "function_definition",
+  "variable_assignment",
+  "variable_assignments",
+]
+const ASSIGNMENTS = new Set(["variable_assignment", "variable_assignments"])
+// An assignment inside one of these (`A=1 git diff`, `export A=1`) is already
+// part of that statement's pattern.
+const OWNERS = new Set(["command", "declaration_command", "variable_assignments"])
+
+function statements(node: Node) {
+  return node
+    .descendantsOfType(STATEMENTS)
+    .filter((child): child is Node => Boolean(child))
+    .filter((child) => !ASSIGNMENTS.has(child.type) || !OWNERS.has(child.parent?.type ?? ""))
+}
+
 function unquote(text: string) {
   if (text.length < 2) return text
   const first = text[0]
@@ -448,6 +470,17 @@ export const ShellTool = Tool.define(
         if (tokens.length && (!cmd || !CWD.has(cmd))) {
           scan.patterns.add(source(node))
           scan.always.add(BashArity.prefix(tokens).join(" ") + " *")
+        }
+      }
+
+      // PowerShell's grammar has none of these node types. "Always" approves
+      // only the exact statement, since a changed environment or a redefined
+      // name alters what an already-allowed command does.
+      if (!ps) {
+        for (const node of statements(root)) {
+          const text = source(node)
+          scan.patterns.add(text)
+          scan.always.add(text)
         }
       }
 

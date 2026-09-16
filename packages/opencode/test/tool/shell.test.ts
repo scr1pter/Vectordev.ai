@@ -10,7 +10,7 @@ import { Shell } from "@opencode-ai/core/shell"
 import { ShellTool } from "../../src/tool/shell"
 import { Filesystem } from "@/util/filesystem"
 import { provideInstance, testInstanceStoreLayer, tmpdirScoped } from "../fixture/fixture"
-import type { Permission } from "../../src/permission"
+import { Permission } from "../../src/permission"
 import { Agent } from "../../src/agent/agent"
 import { Truncate } from "@/tool/truncate"
 import { SessionID, MessageID } from "../../src/session/schema"
@@ -1062,6 +1062,108 @@ describe("tool.shell permissions", () => {
       )
     }),
   )
+})
+
+describe("tool.shell read-only allowlist", () => {
+  // Shaped like agent.ts's readonlyVerificationBash, the rules the review,
+  // judge, explore and security agents run under.
+  const readonly = Permission.fromConfig({
+    bash: {
+      "*": "deny",
+      "git diff*": "allow",
+      "git status*": "allow",
+      "git show*": "allow",
+      "git log*": "allow",
+    },
+  })
+
+  // Decides a request the way Permission.ask does: one denied pattern denies
+  // the whole command.
+  const enforce = (requests: Array<Omit<PermissionV1.Request, "id" | "sessionID" | "tool">>) => ({
+    ...ctx,
+    ask: (req: Omit<PermissionV1.Request, "id" | "sessionID" | "tool">) =>
+      Effect.sync(() => {
+        requests.push(req)
+        const rules = req.patterns.map((pattern) => Permission.evaluate(req.permission, pattern, readonly))
+        if (rules.some((rule) => rule.action === "deny")) throw new PermissionV1.DeniedError({ ruleset: readonly })
+        if (rules.some((rule) => rule.action === "ask")) throw new Error(`unexpected prompt: ${req.patterns}`)
+      }),
+  })
+
+  // [command, the pattern that must be checked for it]
+  const denied = [
+    ["export GIT_EXTERNAL_DIFF=/bin/sh; git diff", "export GIT_EXTERNAL_DIFF=/bin/sh"],
+    ["declare -x X=1; git status", "declare -x X=1"],
+    ["readonly X=1", "readonly X=1"],
+    ["unset X", "unset X"],
+    ["X=1; git status", "X=1"],
+    ["f() { rm -rf x; }; git diff", "f() { rm -rf x; }"],
+    ["A=1 git diff", "A=1 git diff"],
+  ]
+
+  // PowerShell parses these as different statements.
+  for (const item of shells.filter((item) => !PS.has(item.label))) {
+    for (const [command, pattern] of denied) {
+      it.live(`denies ${command} [${item.label}]`, () =>
+        withShell(
+          item,
+          Effect.gen(function* () {
+            const tmp = yield* tmpdirScoped()
+            yield* runIn(
+              tmp,
+              Effect.gen(function* () {
+                const requests: Array<Omit<PermissionV1.Request, "id" | "sessionID" | "tool">> = []
+                expect(yield* fail({ command }, enforce(requests))).toBeInstanceOf(PermissionV1.DeniedError)
+                expect(requests.find((r) => r.permission === "bash")?.patterns).toContain(pattern)
+              }),
+            )
+          }),
+        ),
+      )
+    }
+
+    for (const command of ["git diff main", "git log -5"]) {
+      it.live(`allows ${command} [${item.label}]`, () =>
+        withShell(
+          item,
+          Effect.gen(function* () {
+            const tmp = yield* tmpdirScoped({ git: true })
+            yield* runIn(
+              tmp,
+              Effect.gen(function* () {
+                const requests: Array<Omit<PermissionV1.Request, "id" | "sessionID" | "tool">> = []
+                const result = yield* run({ command }, enforce(requests))
+                expect(requests.map((r) => r.patterns)).toEqual([[command]])
+                expect(result.metadata.exit).toEqual(expect.any(Number))
+              }),
+            )
+          }),
+        ),
+      )
+    }
+
+    it.live(`always-allow covers only the exact statement [${item.label}]`, () =>
+      withShell(
+        item,
+        Effect.gen(function* () {
+          const tmp = yield* tmpdirScoped()
+          yield* runIn(
+            tmp,
+            Effect.gen(function* () {
+              const err = new Error("stop after permission")
+              const requests: Array<Omit<PermissionV1.Request, "id" | "sessionID" | "tool">> = []
+              expect(yield* fail({ command: "export X=1; git status" }, capture(requests, err))).toMatchObject({
+                message: err.message,
+              })
+              expect(requests[0]?.always).toContain("export X=1")
+              expect(requests[0]?.always).toContain("git status *")
+              expect(requests[0]?.always).not.toContain("export *")
+            }),
+          )
+        }),
+      ),
+    )
+  }
 })
 
 describe("tool.shell abort", () => {

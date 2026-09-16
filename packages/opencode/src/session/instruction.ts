@@ -135,10 +135,16 @@ const layer: Layer.Layer<
 
       // Vector memory and project rules are additive rather than mutually
       // exclusive with project instructions. They must be loaded even when a
-      // global AGENTS.md or CLAUDE.md exists.
-      for (const file of additiveProjectFiles) {
-        const matches = yield* fs.findUp(file, ctx.directory, ctx.worktree).pipe(Effect.catch(() => Effect.succeed([])))
-        matches.forEach((item) => paths.add(path.resolve(item)))
+      // global AGENTS.md or CLAUDE.md exists. They are still project files, so
+      // OPENCODE_DISABLE_PROJECT_CONFIG skips them: a code review runs on a pull
+      // request's tree and must not take instructions from it.
+      if (!Flag.OPENCODE_DISABLE_PROJECT_CONFIG) {
+        for (const file of additiveProjectFiles) {
+          const matches = yield* fs
+            .findUp(file, ctx.directory, ctx.worktree)
+            .pipe(Effect.catch(() => Effect.succeed([])))
+          matches.forEach((item) => paths.add(path.resolve(item)))
+        }
       }
 
       // The first project-level match wins so we don't stack AGENTS.md/CLAUDE.md from every ancestor.

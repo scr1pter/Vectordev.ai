@@ -322,6 +322,7 @@ manage GitHub agent
 Commands:
   opencode github install  install the GitHub agent
   opencode github run      run the GitHub agent
+  opencode github review   review a pull request and post the results
 
 Options:
   -h, --help        show help                                                              [boolean]
@@ -345,6 +346,37 @@ Options:
       --print-logs  print logs to stderr                                                   [boolean]
       --log-level   log level                   [string] [choices: "DEBUG", "INFO", "WARN", "ERROR"]
       --pure        run without external plugins                                           [boolean]"
+`;
+
+exports[`opencode CLI help-text snapshots every documented command emits stable help text: opencode review --help 1`] = `
+"opencode review
+
+review your branch, uncommitted changes or a pull request
+
+Options:
+  -h, --help          show help                                                            [boolean]
+  -v, --version       show version number                                                  [boolean]
+      --print-logs    print logs to stderr                                                 [boolean]
+      --log-level     log level                 [string] [choices: "DEBUG", "INFO", "WARN", "ERROR"]
+      --pure          run without external plugins                                         [boolean]
+      --base          branch or commit to compare with (default: the merge-base with origin's
+                      default branch)                                                       [string]
+      --uncommitted   review changes you have not committed, untracked files included      [boolean]
+      --staged        review only staged changes                                           [boolean]
+      --pr            review pull request <n> from origin without checking it out           [number]
+      --post          post the review to the pull request (with --pr)                      [boolean]
+      --yes           answer yes to confirmation questions                                 [boolean]
+      --json          print { version, target, outcome } as JSON                           [boolean]
+      --model         model to review with, as provider/model                               [string]
+      --security      always run the security reviewer (--no-security: never)              [boolean]
+      --max-comments  findings listed in detail, 0 to 50 (default 10)                       [number]
+      --min-severity  lowest severity listed in detail (default concern)
+                                                    [string] [choices: "blocking", "concern", "nit"]
+      --max-cost      stop the review at this many US dollars; 0 for no limit               [number]
+      --fail-on       exit 1 while findings of this severity or above are open
+                                                  [string] [choices: "blocking", "concern", "never"]
+      --checks        let the reviewer run your tests and typecheck                        [boolean]
+      --full          review the whole change again, ignoring the last local review        [boolean]"
 `;
 
 exports[`opencode CLI help-text snapshots every documented command emits stable help text: opencode session --help 1`] = `
@@ -607,6 +639,22 @@ Options:
       --pure        run without external plugins                                           [boolean]
       --event       GitHub mock event to run the agent for                                  [string]
       --token       GitHub personal access token (github_pat_********)                      [string]"
+`;
+
+exports[`opencode CLI help-text snapshots every documented command emits stable help text: opencode github review --help 1`] = `
+"opencode github review
+
+review a pull request and post the results
+
+Options:
+  -h, --help        show help                                                              [boolean]
+  -v, --version     show version number                                                    [boolean]
+      --print-logs  print logs to stderr                                                   [boolean]
+      --log-level   log level                   [string] [choices: "DEBUG", "INFO", "WARN", "ERROR"]
+      --pure        run without external plugins                                           [boolean]
+      --event       GitHub event JSON to review instead of the Actions event                [string]
+      --pr          pull request number to review                                           [number]
+      --dry-run     print every write as JSON instead of posting it                        [boolean]"
 `;
 
 exports[`opencode CLI help-text snapshots every documented command emits stable help text: opencode db path --help 1`] = `

@@ -1172,3 +1172,91 @@ it.instance(
     }),
   { git: true },
 )
+
+// approvals and session rules
+
+// Grants an "always" approval the way a user's reply does, from another session in the same instance.
+const approve = (permission: string, always: string[]) =>
+  Effect.gen(function* () {
+    const fiber = yield* ask({
+      sessionID: SessionID.make("session_grant"),
+      permission,
+      patterns: always,
+      metadata: {},
+      always,
+      ruleset: [],
+    }).pipe(Effect.forkScoped)
+
+    const [pending] = yield* waitForPending(1)
+    yield* reply({ requestID: pending.id, reply: "always" })
+    yield* Fiber.join(fiber)
+  })
+
+it.instance(
+  "ask - an always approval does not override the session's deny",
+  () =>
+    Effect.gen(function* () {
+      yield* approve("read", ["*"])
+
+      const err = yield* fail(
+        ask({
+          sessionID: SessionID.make("session_review"),
+          permission: "read",
+          patterns: [".env"],
+          metadata: {},
+          always: [],
+          ruleset: [
+            { permission: "*", pattern: "*", action: "deny" },
+            { permission: "read", pattern: "*", action: "allow" },
+            { permission: "read", pattern: "*.env", action: "deny" },
+          ],
+        }),
+      )
+      expect(err).toBeInstanceOf(PermissionV1.DeniedError)
+      expect(yield* list()).toHaveLength(0)
+    }),
+  { git: true },
+)
+
+it.instance(
+  "ask - an always approval turns the session's ask into an allow",
+  () =>
+    Effect.gen(function* () {
+      yield* approve("read", ["*"])
+
+      const result = yield* ask({
+        sessionID: SessionID.make("session_build"),
+        permission: "read",
+        patterns: [".env"],
+        metadata: {},
+        always: [],
+        ruleset: [
+          { permission: "read", pattern: "*", action: "allow" },
+          { permission: "read", pattern: "*.env", action: "ask" },
+        ],
+      })
+      expect(result).toBeUndefined()
+      expect(yield* list()).toHaveLength(0)
+    }),
+  { git: true },
+)
+
+it.instance(
+  "ask - the session's allow stays an allow alongside approvals",
+  () =>
+    Effect.gen(function* () {
+      yield* approve("read", ["docs/*"])
+
+      const result = yield* ask({
+        sessionID: SessionID.make("session_build"),
+        permission: "read",
+        patterns: ["src/index.ts", "docs/guide.md"],
+        metadata: {},
+        always: [],
+        ruleset: [{ permission: "read", pattern: "*", action: "allow" }],
+      })
+      expect(result).toBeUndefined()
+      expect(yield* list()).toHaveLength(0)
+    }),
+  { git: true },
+)

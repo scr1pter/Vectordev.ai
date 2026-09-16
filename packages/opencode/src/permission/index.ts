@@ -70,7 +70,10 @@ const layer = Layer.effect(
       let needsAsk = false
 
       for (const pattern of request.patterns) {
-        const rule = evaluate(request.permission, pattern, ruleset, approved)
+        // Approvals are shared by every session in the instance and come last, so on their own they would override a
+        // session's deny (plan mode, a review session). They may only turn an ask into an allow.
+        const own = evaluate(request.permission, pattern, ruleset)
+        const rule = own.action === "deny" ? own : evaluate(request.permission, pattern, ruleset, approved)
         yield* Effect.logInfo("evaluated", { permission: request.permission, pattern, action: rule })
         if (rule.action === "deny") {
           return yield* new PermissionV1.DeniedError({
