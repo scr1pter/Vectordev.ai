@@ -1,0 +1,77 @@
+---
+// Text a recording types (recording.ts `type`). Rendered fully typed, which is the final frame; the runner empties
+// it before playing. The untyped rest stays in the layout, invisible, so the text wraps the same at every step.
+interface Props {
+  name: string
+  text: string
+  /** Whether the final frame shows the text typed. False for text that is sent and cleared. */
+  typed?: boolean
+  class?: string
+}
+
+const { name, text, typed = true, class: className } = Astro.props
+---
+
+<span class:list={["typed", className]} data-rec={name} data-type data-text={text}
+  ><span data-typed>{typed ? text : ""}</span><span class="typed-caret" aria-hidden="true"></span><span
+    class="typed-rest"
+    data-rest>{typed ? "" : text}</span
+  ></span
+>
+
+<style>
+  .typed {
+    white-space: pre-wrap;
+  }
+
+  .typed-rest {
+    visibility: hidden;
+  }
+
+  /* An empty inline, not an inline-block: an atomic inline would add a line-break opportunity mid-word. */
+  .typed-caret {
+    position: relative;
+  }
+
+  .typed-caret::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 1px;
+    width: 0.12em;
+    min-width: 1.5px;
+    height: 1.15em;
+    border-radius: 1px;
+    background: var(--rec-caret, currentColor);
+    opacity: 0;
+    transform: translateY(-50%);
+  }
+
+  .typed[data-caret] .typed-caret::after {
+    animation: typed-blink 1.05s steps(1, end) infinite;
+  }
+
+  /* Solid while characters arrive, as a real caret is. */
+  .typed[data-caret][data-typing] .typed-caret::after {
+    animation: none;
+    opacity: 1;
+  }
+
+  @keyframes typed-blink {
+    0%,
+    49% {
+      opacity: 1;
+    }
+    50%,
+    100% {
+      opacity: 0;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .typed[data-caret] .typed-caret::after {
+      animation: none;
+      opacity: 0;
+    }
+  }
+</style>

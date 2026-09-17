@@ -1,0 +1,33 @@
+---
+// Text a recording streams in word by word (recording.ts `stream`). Every word is laid out from the start and only
+// its opacity changes, so a streaming reply never pushes anything below it.
+interface Props {
+  name: string
+  text: string
+  class?: string
+}
+
+const { name, text, class: className } = Astro.props
+const parts = text.split(/(\s+)/).filter(Boolean)
+---
+
+<span class:list={["words", className]} data-rec={name}
+  >{parts.map((part) => (/^\s+$/.test(part) ? part : <span class="word" data-word data-on>{part}</span>))}</span
+>
+
+<style>
+  .word {
+    opacity: 0;
+    transition: opacity 260ms ease-out;
+  }
+
+  .word[data-on] {
+    opacity: 1;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .word {
+      transition: none;
+    }
+  }
+</style>

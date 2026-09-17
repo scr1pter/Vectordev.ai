@@ -1,19 +1,19 @@
 ---
-import { ArrowRight, BadgeCheck, Brain, CalendarClock, ChevronDown, Cloud, CloudUpload, Code2, Coins, Globe2, Puzzle, ShieldCheck, Terminal, Users } from "lucide-react"
-import MarketingFooter from "./marketing/MarketingFooter.astro"
+import "@fontsource-variable/inter"
+import { ArrowRight, BadgeCheck, ChevronLeft, ChevronRight, Coins, Laptop, Plus, ShieldCheck } from "lucide-react"
 import MarketingNav from "./marketing/MarketingNav.astro"
 import ProductDemo from "./marketing/ProductDemo.astro"
 import LanderMotion from "./marketing/LanderMotion.astro"
 import LanderMaterials from "./marketing/LanderMaterials.astro"
-import desktopPackage from "../../../desktop/package.json"
-import { release119, release199 } from "../data/vector-releases"
-import sessionScreenshot from "../assets/lander/vector-session-live.png"
-import FeatureDemo from "./marketing/FeatureDemo.astro"
+import LandingFooter from "./marketing/LandingFooter.astro"
+import ScrollTicks from "./marketing/ScrollTicks.astro"
+import CliRecording from "./marketing/recordings/CliRecording.astro"
+import ModelsRecording from "./marketing/recordings/ModelsRecording.astro"
+import ReviewRecording from "./marketing/recordings/ReviewRecording.astro"
 
-// Read from the desktop package and the release log at build time rather than
-// typed in, so the page cannot advertise a version that was never shipped.
-const currentVersion = desktopPackage.version
-const currentRelease = [...release119, ...release199].find((release) => release.version === currentVersion)
+// Everything the product does, section by section, lives on /docs/product.
+// This page is the short version: the hero, three recordings, why the agent
+// can be trusted, and a way in.
 
 const pixelFont: Record<string, string[]> = {
   V: ["10001", "10001", "10001", "10001", "10001", "01010", "00100"],
@@ -30,489 +30,36 @@ const wordmarkCells = "VECTOR".split("").flatMap((letter, letterIndex) =>
   ),
 )
 
-const ecosystem = [
-  "Claude Code",
-  "Codex",
-  "Cursor Agent",
-  "Anthropic",
-  "OpenAI",
-  "Google",
-  "MCP",
-  "GitHub",
-  "GitLab",
-  "Linear",
-  "Sentry",
-  "Figma",
-  "Stripe",
-  "Vercel",
-  "Netlify",
-  "Supabase",
-  "AWS",
-  "Playwright",
-]
-
-// The nine parts of the workspace, in the order the page argues them. Each one
-// gets a card here and a full section below, so no single capability carries
-// the page on its own.
-const pillars = [
+// Each card links to the docs section that backs its sentence up.
+const trustCards = [
   {
-    name: "The workspace",
-    eyebrow: "Editor, file search, diagnostics, terminal",
-    body: "Agent and Editor are two modes over the same local repository and session, with project-wide file search, diagnostics, a terminal, browser, review, and the same agent beside the file you opened.",
-    icon: Code2,
-  },
-  {
-    name: "Local memory",
-    eyebrow: "One file, on your machine",
-    body: "What you choose to save about how you work is stored in a Markdown file in Vector's local app config directory and deleted when you erase it. The file is not uploaded to Vector's servers; when it exists, Vector automatically includes it in built-in agent context sent to the model provider you chose.",
-    icon: Brain,
-  },
-  {
-    name: "Model economics",
-    eyebrow: "Provider-reported, or nothing",
-    body: "The tokens and cost a run spent, taken from what the provider itself reported. Nothing estimated. A run nothing reported is marked unmeasured rather than shown as free.",
-    icon: Coins,
-  },
-  {
-    name: "Controlled browser",
-    eyebrow: "Observe, repair, retest",
-    body: "A real browser view the agent drives against the running product — and one that refuses to type into password, one-time-code and card fields, handing the step to you instead.",
-    icon: Globe2,
-  },
-  {
-    name: "Verified completion",
-    eyebrow: "Opt-in · not on plan or quick",
-    body: "Turn on LLM-as-a-judge and a separate subagent compares the finished work against your original request and the evidence, and sends it back for repair on a failed verdict.",
     icon: BadgeCheck,
+    lead: "Verified before done.",
+    text: "A judge checks finished work against what you asked.",
+    href: "/docs#verified-completion",
+    more: "Read about verified completion",
   },
   {
-    name: "Cloud Services",
-    eyebrow: "Your own accounts",
-    body: "Deployments, domains with real DNS checks, environment variables, databases and logs, run through the Vercel, Netlify, Supabase and AWS accounts that already belong to you.",
-    icon: Cloud,
+    icon: Laptop,
+    lead: "Runs on your machine.",
+    text: "Vector works in your repository, on your own computer.",
+    href: "/docs#local-memory",
+    more: "Read about local memory",
   },
   {
-    name: "MCP and plugins",
-    eyebrow: "118 ready to connect",
-    body: "GitHub, Linear, Sentry, Figma, Playwright, Postgres, Stripe, Slack and more, plus any MCP server you add — and Vector installs the runtime a plugin needs instead of sending you to a terminal.",
-    icon: Puzzle,
+    icon: ShieldCheck,
+    lead: "Asks before it spends.",
+    text: "Anything that creates, changes or spends in your cloud accounts asks first.",
+    href: "/docs#cloud-services",
+    more: "Read about cloud services",
   },
   {
-    name: "Parallel agents",
-    eyebrow: "No agent cap · isolated or shared",
-    body: "When one agent is not enough, run several in their own checkouts or together in one, watch them from a single dashboard, and merge only what you trust.",
-    icon: Users,
+    icon: Coins,
+    lead: "Costs you can see.",
+    text: "Every run records what it really spent, per model and per task.",
+    href: "/docs#tokenomics",
+    more: "Read about the tokenomics engine",
   },
-  {
-    name: "Automations",
-    eyebrow: "Desktop · runs with no window open",
-    body: "Recurring work across repositories on a repeat you set, each run a real session with a transcript waiting, still firing after the last window is closed.",
-    icon: CalendarClock,
-  },
-]
-
-type FeatureKind = "editor" | "memory" | "browser" | "cloud" | "agents" | "automations" | "work" | "cost" | "terminal" | "diff"
-
-type Feature = {
-  title: string
-  body: string
-  tag: string
-  note: string
-  href: string
-  link: string
-  demo?: FeatureKind
-  proof?: string[][]
-}
-
-// Each pillar in full. `proof` stands in for an interactive demo on the
-// pillars the product does not show in a single frame.
-const features: Feature[] = [
-  {
-    title: "Agent and Editor, without losing the thread.",
-    body: "Vector opens a repository that is already on your computer and keeps Agent and Editor as two views of the same session. Search across the project, open files in full-screen tabs, use language diagnostics and the terminal, edit directly, or ask the agent beside the file to make the change. The browser and review stay attached to that same workspace, and edits an agent makes while you watch remain attributable. None of this is a hosted IDE: the files are the files on your disk, and your repository is never proxied through Vector.",
-    tag: "Agent and Editor",
-    note: "Your files, on your disk",
-    demo: "editor",
-    href: "/docs",
-    link: "Explore Agent and Editor",
-  },
-  {
-    title: "It remembers how you work, with storage you can inspect.",
-    body: "Vector lets you save durable facts about how you work — your stack, your conventions, the corrections you would otherwise repeat — in one MEMORY.md file inside Vector's local app config directory. It is read across every project and repository. The file stays on your computer rather than being uploaded to Vector's servers; when it exists, Vector automatically includes it in built-in agent context sent to the model provider you selected. Settings lets you add and edit the text and shows the exact platform-specific path, size, and last change. Erasing it deletes the file rather than blanking it.",
-    tag: "Local memory",
-    note: "Stored locally · inspect or erase",
-    demo: "memory",
-    href: "/docs",
-    link: "How local memory works",
-  },
-  {
-    title: "What the run cost, as the provider reported it.",
-    body: "Vector records what a run cost by reading the numbers the provider itself reported on the assistant messages — input, output, reasoning, cache reads and cache writes — along with the provider's own cost figure. Nothing is estimated from character counts. A run whose provider reported no usage is recorded as unmeasured rather than as zero, because a fabricated zero reads as free. Finished work builds a ledger of outcomes per kind of task, and once a model has at least three recorded runs in a category Vector can suggest it in the composer, ranked by check pass rate first, measured cost second, median latency third. Below three it suggests nothing at all: the cold start is silent rather than confident.",
-    tag: "Model economics",
-    note: "Measured, or marked unmeasured",
-    demo: "cost",
-    href: "/docs",
-    link: "Read how spend is measured",
-  },
-  {
-    title: "The browser is part of the loop, and it will not touch your password.",
-    body: "The browser is a real Chromium view embedded in the Vector window, not a screenshot service. The agent opens the running product, clicks and types, reads console and network failures, captures what it saw, repairs the code, and loads the page again. It will not type into a password field, a one-time-code field, or a card number field — that is refused where the keystrokes are executed, not merely discouraged in a prompt — and the run hands you the live browser to finish that step yourself before carrying on from what it can see. You can take the browser back at any other moment too, and everything it observed stays attached to the session that asked for it.",
-    tag: "Controlled browser",
-    note: "Refuses credential fields",
-    demo: "browser",
-    href: "/docs",
-    link: "See the browser loop",
-  },
-  {
-    title: "Completion you can check, instead of a confident summary.",
-    body: "Turn on LLM-as-a-judge and finishing stops being the agent's own opinion. Before it starts, it writes down the observable success criteria your request implies. After implementing, it has to exercise the work rather than describe it — run the tests, typechecks, build, browser or CLI checks — and capture what they actually printed. It then hands the original request, those criteria, the changed files and that evidence to a separate judge subagent, which returns PASS, FAIL, or INCONCLUSIVE. A FAIL has to name each blocking finding with its evidence and the specific repair; the agent applies them and is judged again, up to three rounds, then reports what is still blocking. It is off until you turn it on, it costs extra model calls, and it does not apply to the plan or quick lanes.",
-    tag: "Verified completion",
-    note: "Opt-in · extra model calls",
-    demo: "terminal",
-    href: "/docs",
-    link: "Turn on verified completion",
-  },
-  {
-    title: "Ship it on the accounts that are already yours.",
-    body: "Deployments, domains, environment variables, databases, logs and build settings sit beside the project they belong to and run on accounts that already belong to you. Authorize Vercel, Netlify or Supabase once and Vector drives the deploy on your account, hands back the live URL, and can promote a release, roll one back, re-run its checks, or pull its runtime logs. An AWS profile already configured on this computer is read through the AWS CLI you installed. A custom domain is checked with a real DNS lookup, so “verified” means a CNAME actually resolves to the target rather than that a form was submitted. Your code is never proxied through Vector.",
-    tag: "Cloud Services",
-    note: "OAuth into your own account",
-    demo: "cloud",
-    href: "/docs",
-    link: "Read about Cloud Services",
-  },
-  {
-    title: "118 connectors, and the runtime installs itself.",
-    body: "Vector ships a catalog of 118 connectors you can turn on today — GitHub, Linear, Sentry, Figma, Playwright, Supabase, Postgres, Stripe, Notion, Slack, Chrome DevTools, Context7, Exa, Greptile, CodeRabbit and more — grouped into categories like observability, project tracking, databases, design and search, alongside any MCP server you configure yourself. A further seventeen are listed in the catalog and marked coming soon rather than presented as ready. Several of them are published to PyPI and run through uvx, which most machines do not have. Rather than sending you to a terminal, Vector looks for that runner on your PATH and in the places uv actually installs itself, installs it through Astral's own installer when it is missing and tells you it is doing so, then rewrites the plugin's command to the resolved absolute path so it still spawns from a process that has no login shell.",
-    tag: "MCP and plugins",
-    note: "Catalog · plus your own servers",
-    proof: [
-      ["118 ready to connect", "GitHub, Linear, Sentry, Figma, Playwright, Supabase, Postgres, Stripe, Notion, Slack, Chrome DevTools, Context7, Exa, Greptile, CodeRabbit and more, by category. Seventeen further entries are marked coming soon."],
-      ["Your own MCP servers too", "Anything you configure yourself runs beside the catalog entries, with the same tool surface for the agent."],
-      ["No terminal detour", "A plugin that needs uvx gets it: resolved on PATH, installed through Astral's installer when absent, then rewritten to an absolute path."],
-    ],
-    href: "/docs",
-    link: "Browse the connectors",
-  },
-  {
-    title: "Start with the ticket. Close the loop from the same session.",
-    body: "There is no separate Work product or ticket board in Vector. Instead, connect Jira, Linear, Slack, GitHub, Sentry and other systems through MCP, then use those tools from an ordinary project session. An agent can read the ticket's description, comments and links, navigate the repository, make the change, run the project's checks, open a pull request, and report back through the connected service. You stay the reviewer; the connected session handles the round trip.",
-    tag: "End to end",
-    note: "Connected-tool workflow",
-    demo: "work",
-    href: "/docs",
-    link: "See the connectors",
-  },
-  {
-    title: "Write the project rule once. Carry it across runtimes.",
-    body: "Standards your team cares about, written the way you would say them in review and scoped to a repository or the files they govern. Vector saves project rules to .vector/RULES.md, making them committed and reviewable instead of a preference buried on one machine. Vector agents read that file as project instructions, while matching rules are included in the prompts Vector starts for Claude Code, Codex and Cursor. Clone the repository and the committed project rules come with it.",
-    tag: "Project rules",
-    note: "Committed with the repo",
-    proof: [
-      ["Plain English", "Describe the standard the way you would in review. No configuration language, no rule engine, no schema to learn."],
-      ["Scoped where it matters", "A rule can cover a whole repository, a folder, or a glob like src/app/web/*.tsx — and the scope travels into the prompt as words, so it still means something to the model."],
-      ["Across supported runtimes", "Vector agents read the committed file; matching rules are included when Vector starts Claude Code, Codex or Cursor for that project."],
-    ],
-    href: "/docs",
-    link: "Set your rules",
-  },
-  {
-    title: "Every agent, on one board.",
-    body: "The Agent Dashboard now opens on a board: Running, Needs you, Done. A card carries the task, what the agent is doing right now, how long it has been at it, and whether a pull request is already waiting. Search across names and tasks, then narrow by status, by runtime, by team, or to just the runs that opened a PR. Needs you deliberately merges failed with needs review — both are stopped and waiting on a person, and splitting them would put the same decision in two places. Teams stay first-class: agents that share a team or a swarm can be filtered as a unit, because in Vector they are not independent runs that happen to be adjacent — they message each other while they work.",
-    tag: "Agent Dashboard",
-    note: "Board or list",
-    proof: [
-      ["Three columns, honest ones", "Running, Needs you, Done — derived from real run state, including a finished run that reported an error and still needs a person."],
-      ["Filters that compose", "Two statuses means either; a status and a runtime means both. Facet choices stay available from the whole dashboard, while counts, warnings, cards and team conversations follow the visible result."],
-      ["Teams are a unit", "Filter by a team or a swarm and see only that crew, including the messages they sent each other mid-run."],
-    ],
-    href: "/docs",
-    link: "See the dashboard",
-  },
-  {
-    title: "Nothing lands until you say it lands.",
-    body: "An agent works in its own git worktree or its own copy of the project, so while it is running your files are untouched. What comes back is a diff you review — and you merge it the way you would review a colleague's branch: hunk by hunk, keeping the parts that are right and leaving the rest behind. Vector writes a checkpoint before it touches your working tree, refuses the merge outright when a deterministic check is still failing, and tells you which files two agents are both holding so you never discover the conflict by merging into it. The agent proposes. You are still the one who decides what your project becomes.",
-    tag: "Review and merge",
-    note: "Hunk by hunk",
-    demo: "diff",
-    href: "/docs",
-    link: "How review works",
-  },
-  {
-    title: "And when one agent is not enough, run as many as the work needs.",
-    body: "A single task can hold as many active agents as you start. Vector sets no cap — your computer and your provider's rate limits do, and the launcher tells you when a launch outruns your cores. Each gets its own checkout: a Git worktree on its own branch cut from HEAD when the project is a Git repository with a clean working tree, and an isolated copy of the project otherwise — Vector records which one it used rather than failing quietly. Or put them in one shared checkout, where they see each other's edits as they happen and message a named teammate or the whole team; you choose who may reach whom, and a message to someone you have not linked is refused with a reason rather than dropped. The dashboard shows status, model, files touched, cost so far, elapsed time, and both agents whenever two are holding the same file.",
-    tag: "Parallel agents",
-    note: "Isolated by default",
-    demo: "agents",
-    href: "/docs",
-    link: "Learn about workspaces",
-  },
-  {
-    title: "Work that repeats, whether or not you are there.",
-    body: "Put recurring work on a repeat — every day, weekdays only, one weekday a week, or once at a set time — and each run opens a real Vector session in that project's directory, sends your prompt, and leaves the finished transcript waiting. One task can name several repositories, each with a new session or a thread you already have, and each reports its own result so one failure does not condemn the rest. A recurring task re-arms itself the moment a run settles. This lives in the Vector desktop app: close the last window and it stays resident in the menu bar or tray while tasks are armed, and on a desktop that offers no tray it closes as it always did rather than leaving a process you cannot quit.",
-    tag: "Automations",
-    note: "Desktop only",
-    demo: "automations",
-    href: "#conditions",
-    link: "See what scheduling needs",
-  },
-]
-
-// Every capability above that carries a condition, stated once, in one place.
-const conditions = [
-  [
-    "Worktrees need clean Git",
-    "An isolated agent gets a Git worktree on its own branch only when the project is a Git repository and the working tree is clean. Without one — no repository, uncommitted changes, or a worktree that cannot be created — Vector provisions an isolated copy instead and records which it used in the workspace log.",
-  ],
-  [
-    "Recommendations need evidence",
-    "Model economics suggests nothing until a model has at least three recorded runs for that kind of task. There is no cold-start guess, and a model whose spend was never reported never sorts ahead of one that reported a real cost.",
-  ],
-  [
-    "Unmeasured is not zero",
-    "Cost and tokens come from the provider's own report for that run. When a provider reports nothing, the run is stored and shown as unmeasured. Vector will not print a zero that reads as free.",
-  ],
-  [
-    "The judge is opt-in",
-    "LLM-as-a-judge is off until you switch it on, and it spends extra model calls on every prompt it covers. It cannot apply to the plan lane, which produces nothing to verify, or to the quick lane, which has no ability to spawn the judge at all.",
-  ],
-  [
-    "External runtimes are yours",
-    "Claude Code, Codex, and Cursor Agent run as workspace engines, but only where Vector detects that CLI installed on this computer, and the run is signed in by the subscription already in it. Vector never asks for a second key — and teammate messaging is carried by Vector's own agent, so an external runtime shares the checkout but not the message channel.",
-  ],
-  [
-    "Automations are a desktop feature",
-    "Scheduling lives in the Vector desktop app, so tasks fire while that app is running — including with every window closed, but not while the machine is off or Vector has been quit from the tray. A scheduled run uses Vector's own agent rather than an external CLI runtime.",
-  ],
-  [
-    "The shell sandbox is off by default",
-    "Commands an agent runs can be confined to their workspace by the operating system's own mechanism — a seatbelt profile on macOS, bubblewrap on Linux where it is installed — by setting OPENCODE_SHELL_SANDBOX. It is opt-in, off by default, and Windows ships no equivalent, so Vector says so and runs unconfined there rather than pretending.",
-  ],
-  [
-    "Cloud actions need your authorization",
-    "Vercel, Netlify, and Supabase work once you authorize them, and AWS reads a profile you already configured for the AWS CLI. Vector acts inside those accounts; it does not host your project itself and does not proxy your code.",
-  ],
-  [
-    "Dictation downloads once, then stays local",
-    "Speech is transcribed by a Whisper model that runs on your machine. The model file is fetched and cached the first time, after which nothing is sent to a cloud speech service.",
-  ],
-]
-
-const workflow = [
-  ["Open", "Attach the repository already on your computer."],
-  ["Work", "Open a file in Editor or hand the same session to an agent — one, or several in their own checkouts."],
-  ["Observe", "Follow plans, edits, commands, browser actions, and the tokens and cost the provider reported."],
-  ["Verify", "Run checks, inspect the product in the browser, review the diff, and optionally require an independent judge verdict."],
-  ["Ship", "Merge the hunks you trust and publish through your own connected accounts."],
-]
-
-// What actually happens when someone buys Vector and when a run spends money.
-// Every claim here is checked against the implementation: license-service.ts
-// for activation and the grace window, spend-limits.ts for the ledger.
-const licenseRows = [
-  [
-    "One key, minted per purchase",
-    "Your verified Vector account owns the purchase. Stripe takes the payment; Vector never sees a card number. Your existing VEC1 license format is preserved, and the private key is emailed and available from your account.",
-  ],
-  [
-    "Bound to a hash, not to your hardware",
-    "Activation reads a stable machine identifier — the platform UUID on macOS and Windows, /etc/machine-id on Linux — and immediately SHA-256 hashes it with a Vector-specific salt. Only that hash is ever sent. The raw identifier never leaves your computer, so the licence can tell two machines apart without ever learning anything about either.",
-  ],
-  [
-    "Stored where only you can read it",
-    "The activated licence lives in one file in Vector's own application data, written with 0600 permissions — owner read and write, nobody else — and replaced atomically, so an interrupted write can never leave a half-file behind.",
-  ],
-  [
-    "Seven days offline before it asks again",
-    "Vector re-checks in the background. If it cannot reach licensing — you are on a plane, the network is down, the service is having a bad day — it keeps working on the last good answer for seven days and tells you it is doing so. It does not fail closed the moment a request times out.",
-  ],
-]
-
-const spendRows = [
-  [
-    "Measured, never estimated",
-    "What a run cost comes from the numbers the provider itself reported — input, output, reasoning, cache reads and cache writes — alongside its own cost figure. Nothing is inferred from character counts.",
-  ],
-  [
-    "Unmeasured is not free",
-    "A run whose provider reported no usage is recorded as unmeasured rather than as zero, because a fabricated zero reads as free and quietly poisons every total built on top of it.",
-  ],
-  [
-    "The ledger is yours and it is local",
-    "Spend is kept in a file on your machine, with daily totals retained far longer than the raw events behind them. Vector reads it to enforce the caps you set and to stop a run before it goes past them.",
-  ],
-  [
-    "Your keys, your bill",
-    "The models included with Vector come with your Vector account and need no key. Bring your own provider keys and that model spend is between you and that provider — Vector does not resell tokens or add a margin to them.",
-  ],
-]
-
-const systemRows = [
-  [
-    "Memory that is one file you can delete",
-    "Local memory is a single MEMORY.md in your own config directory, read in every repository. Settings shows its path, size, last change, and full contents, and erasing removes the file rather than emptying it.",
-  ],
-  [
-    "Spend that is measured, not modelled",
-    "Tokens and cost come from what the provider reported for that run — input, output, reasoning, cache read and cache write. A run nothing reported is marked unmeasured, and an unmeasured model never outranks one that reported a real cost.",
-  ],
-  [
-    "A judge that can fail the work",
-    "Optional LLM-as-a-judge hands the original request, the success criteria, the changed files and the captured test output to a separate subagent. A FAIL names the specific repair and the agent goes back to work, up to three rounds.",
-  ],
-  [
-    "A browser that refuses credentials",
-    "The browser agent will not type into a password, one-time-code, or card field. It pauses and hands the live browser to you, then resumes with what it can see.",
-  ],
-  [
-    "Plugin runtimes that install themselves",
-    "A catalog plugin that needs uvx no longer becomes a terminal errand. Vector resolves the runner, installs it through Astral's own installer when it is missing, and rewrites the command to an absolute path so it spawns without a login shell.",
-  ],
-  [
-    "Publishing on accounts that stay yours",
-    "Deploy through your own Vercel, Netlify, or Supabase authorization, manage domains, environment variables, and databases, and verify a domain with a real CNAME lookup — from a workspace that never proxies your repository.",
-  ],
-  [
-    "See who edited what",
-    "The editor attributes each live edit to the agent that made it. When two agents hold the same file, Vector names the file and both agents before either merges.",
-  ],
-  [
-    "Start with no key at all",
-    "Models are included with Vector, among them NVIDIA's Nemotron and Meta's Muse Spark, so a capable model is ready before you have connected a provider or added an API key.",
-  ],
-  [
-    "Dictation that stays on device",
-    "Speech is transcribed by a Whisper model running on your machine. Nothing is sent to a cloud speech service.",
-  ],
-  [
-    "Merge the hunks you trust",
-    "Review an agent's diff and merge selected hunks or files rather than accepting the whole change, with secret scanning and a restorable checkpoint before anything lands on main.",
-  ],
-  [
-    "Run the other agents too",
-    "Claude Code, Codex, and Cursor Agent run as engines inside Vector, on the CLIs and subscriptions you already have — alongside Vector's own agent, the browser, the editor, scheduling, and cloud delivery in the same workspace.",
-  ],
-  [
-    "Agents wired the way you want",
-    "A team can be everyone-to-everyone, a coordinator broadcasting down to workers, or any pairing you set yourself. A message to a teammate you have not linked is refused and told so, rather than dropped where the sender never finds out.",
-  ],
-]
-
-const connectionGroups = [
-  ["Models", "Models included with Vector, then Anthropic, OpenAI, Google, and other BYOK providers"],
-  ["Agent runtimes", "Local Claude Code, Codex, and Cursor tools when Vector detects them installed"],
-  ["Protocols and source", "118 catalog connectors, your own MCP servers, GitHub, and GitLab"],
-  ["Cloud and validation", "Vercel, Netlify, Supabase, AWS through its CLI, and Playwright"],
-]
-
-const comparison = [
-  ["Editor, file search, diagnostics, terminal", "Built in", "Terminal-first", "Terminal-first", "IDE-native", "Managed editor"],
-  ["Memory file the app shows and can erase", "One MEMORY.md, with path, size and one-click erase", "—", "—", "—", "—"],
-  ["Provider-reported spend recorded per run", "Ledger, plus model ranking", "Session cost readout", "—", "Usage dashboard", "—"],
-  ["Independent judge before “done”", "Opt-in judge subagent", "—", "—", "—", "—"],
-  ["Connector catalog", "118 connectors, plus your own MCP", "Via MCP", "Via MCP", "Via MCP", "—"],
-  ["Browser the agent drives", "Built in, refuses credentials", "Via tools", "Browser + CDP", "Via tools", "Preview-centric"],
-  ["Deploys on accounts you own", "Vercel, Netlify, Supabase, AWS", "Via tools", "Via tools", "Via MCP", "Native hosting"],
-  ["Parallel isolated agents", "No cap", "Subagents", "Worktrees", "Background agents", "—"],
-  ["Recurring work with no window open", "Desktop tray", "—", "—", "—", "—"],
-]
-
-// The engine's nine subagents (packages/opencode/src/agent/agent.ts) and the
-// display identities painted over them. Roles restate the engine descriptions
-// and the labels mirror the real permission sets — review and security cannot
-// write, the judge cannot edit files and only runs under verified completion —
-// so no card promises more than its agent is allowed to do.
-const crew = [
-  {
-    label: "explore",
-    name: "Explore",
-    summary: "Finds code fast",
-    hue: 25,
-    readOnly: true,
-    role: "Finds files by pattern, searches code for keywords, and answers questions about how the codebase works. Never edits.",
-    mark: `<circle cx="19" cy="19" r="8"/><path d="M25 25l7 7"/>`,
-  },
-  {
-    label: "judge",
-    name: "Judge",
-    summary: "Verifies completion",
-    hue: 265,
-    readOnly: true,
-    role: "Scores finished work against the original request and returns PASS, FAIL or INCONCLUSIVE. Verified completion relies on it, and Vector can also call it for an independent check.",
-    mark: `<path d="M22 11v22M14 16h16M16.5 16l-3.5 7h7zM27.5 16l-3.5 7h7z"/>`,
-  },
-  {
-    label: "debug",
-    name: "Debug",
-    summary: "Finds root causes",
-    hue: 95,
-    readOnly: false,
-    role: "Reproduces a failure, isolates the cause, applies a focused repair and re-checks that it holds.",
-    mark: `<rect x="16" y="15" width="12" height="15" rx="6"/><path d="M11 19h5M28 19h5M11 26h5M28 26h5M18 12l2 3M26 12l-2 3"/>`,
-  },
-  {
-    label: "migration",
-    name: "Migration",
-    summary: "Upgrades safely",
-    hue: 200,
-    readOnly: false,
-    role: "Plans and stages framework, dependency, API, schema and configuration upgrades across compatibility boundaries.",
-    mark: `<path d="M10 22h19M24.5 17.5 29 22l-4.5 4.5M34 12v20"/>`,
-  },
-  {
-    label: "performance",
-    name: "Performance",
-    summary: "Makes it faster",
-    hue: 45,
-    readOnly: false,
-    role: "Measures a baseline, then optimises slow runtime paths, builds, bundles, queries and rendering against it.",
-    mark: `<path d="M11 30l7-9 5 5 9-11"/><path d="M26 15h6v6"/>`,
-  },
-  {
-    label: "review",
-    name: "Review",
-    summary: "Reads the diff",
-    hue: 320,
-    readOnly: true,
-    role: "Inspects a change for correctness, regressions, missing tests and maintainability, with file and line. Never edits.",
-    mark: `<path d="M14 10h11l6 6v18a1 1 0 0 1-1 1H14a1 1 0 0 1-1-1V11a1 1 0 0 1 1-1Z"/><path d="M17 24l3.4 3.4L27 20"/>`,
-  },
-  {
-    label: "security",
-    name: "Security",
-    summary: "Checks the boundaries",
-    hue: 220,
-    readOnly: true,
-    role: "Reviews trust boundaries, authentication, secrets, injection risk and unsafe data flow. Never edits.",
-    mark: `<path d="M22 10l10 4v7c0 6-4 10.5-10 12.5C16 31.5 12 27 12 21v-7Z"/>`,
-  },
-  {
-    label: "test",
-    name: "Test",
-    summary: "Writes coverage",
-    hue: 175,
-    readOnly: false,
-    role: "Designs focused coverage, writes or repairs tests, runs the suite and reports failures with evidence.",
-    mark: `<path d="M18 10v8l-6 12a2.4 2.4 0 0 0 2 3.6h16a2.4 2.4 0 0 0 2-3.6l-6-12v-8"/><path d="M16.5 10h11M15 25h14"/>`,
-  },
-]
-
-const changelog = [
-  [
-    "August 2026",
-    "One workspace, two ways to work",
-    "Agent and Editor now share one session, files open in persistent full-screen tabs, Settings is a searchable full-screen destination, and the Agent Dashboard, browser, terminal and review use one calmer purple project shell.",
-  ],
-  ["August 2026", "Scheduled work that runs while you are away", "Vector keeps a tray presence and stays resident after the last window closes, so a recurring task still fires with no window open. The tray shows what is armed and when it next runs, can run or pause everything from there, and notifies you when a run finishes."],
-  ["August 2026", "Economics that actually learn", "Every session now feeds measured token and cost evidence into model recommendations, so the ranking is built from what providers actually reported rather than from list prices."],
-  ["August 2026", "Plugins that install themselves", "Vector fetches whatever runtime a plugin needs, so Computer Use and other tools connect without a terminal detour."],
-  ["August 2026", "Measured spend and in-app help", "Model economics now records real provider-reported tokens and cost per run, plus a Help AI Assistant and one-click bug reporting inside the workspace."],
-  ["August 2026", "Agents can actually reach each other", "Fixed the teammate message tool, which was registered where the engine never looked, so collaborating agents could not reach each other."],
-  ["August 2026", "Agents that work together", "Shared workspaces where agents message each other, an Agent Dashboard with clash detection, per-agent edit attribution in the editor, and AI pull request review."],
-  ["August 2026", "Licensing and disclosure", "HEIC conversion moved to the operating system, removing the last copyleft dependency, with expanded privacy and terms coverage."],
-  ["July 2026", "Vector desktop release and download refresh", "Verified installers for macOS, Windows, and Linux, served from the new download pipeline. Signed builds continue through automatic updates; unsigned previews stay manual-download only."],
-  ["July 2026", "Review tools and shell polish", "A refined review panel, window recovery fixes, and a cleaner desktop chrome across the workspace."],
-  ["July 2026", "Models and settings controls", "Restored provider management, model pickers, and execution settings throughout the rebuilt shell."],
 ]
 ---
 
@@ -560,7 +107,7 @@ const changelog = [
               <span>Get Vector</span>
               <ArrowRight size={18} strokeWidth={2} aria-hidden="true" />
             </a>
-            <a class="simple-secondary" href="#ch-cli">Install the CLI</a>
+            <a class="simple-secondary" href="#cli">Install the CLI</a>
           </div>
           <p class="hero-note">Free during beta. macOS, Windows, and Linux.</p>
         </div>
@@ -582,198 +129,100 @@ const changelog = [
       </div>
     </section>
 
-    <section id="workspace" class="simple-section section-width" aria-labelledby="surfaces-title">
-      <div class="section-heading simple-heading" data-reveal>
-        <p class="section-kicker">Everywhere you work</p>
-        <h2 id="surfaces-title">One agent, every surface.</h2>
+    <section id="cli" data-chapter="Vector CLI" class="stage" aria-labelledby="cli-title">
+      <div class="stage-visual">
+        <CliRecording />
       </div>
-      <div class="simple-grid">
-        <article class="simple-card" data-reveal>
-          <p class="section-kicker">Desktop</p>
-          <h3>An editor with the agent built in.</h3>
-          <p>Files, search, diagnostics, a terminal, and a real browser — beside an agent that can use all of them.</p>
-          <a href="/login">Download →</a>
-        </article>
-        <article class="simple-card" data-reveal style="--rd: 60ms">
-          <p class="section-kicker">CLI</p>
-          <h3>The same agent in any terminal.</h3>
-          <p>Run it in any repository, in any shell. Free with a Vector account, and models come included.</p>
-          <a href="#ch-cli">Install →</a>
-        </article>
-        <article class="simple-card" data-reveal style="--rd: 120ms">
-          <p class="section-kicker">Cloud</p>
-          <h3>Ship from your own accounts.</h3>
-          <p>Connect Vercel, Netlify, or Supabase and deploy from inside the workspace. Your keys stay yours.</p>
-          <a href="/docs">Learn more →</a>
-        </article>
-        <article class="simple-card" data-reveal style="--rd: 180ms">
-          <p class="section-kicker">Connections</p>
-          <h3>Plug in the tools you already use.</h3>
-          <p>GitHub, Linear, Sentry, Notion, Figma, Stripe, and more — turned on with one click.</p>
-          <a href="/docs">See the list →</a>
-        </article>
+      <div class="stage-copy" data-reveal-group>
+        <h2 id="cli-title" class="stage-title" data-reveal>Vector CLI</h2>
+        <p class="stage-subtitle" data-reveal>The same agent, in any terminal.</p>
+        <div class="stage-action" data-reveal>
+          <a class="landing-pill" href="/docs/product#ch-cli" aria-label="Learn more about Vector CLI">Learn more</a>
+        </div>
+        <p class="stage-note" data-reveal>Free with a Vector account.</p>
       </div>
     </section>
 
-    <section id="ch-engine" data-chapter="The engine" class="simple-section section-width" aria-labelledby="engine-title">
-      <div class="section-heading simple-heading" data-reveal>
-        <p class="section-kicker">Under the workspace</p>
-        <h2 id="engine-title">An engine of its own.</h2>
-        <p>
-          Vector's agent is Vector's. It runs on your machine with its own session engine, its own tools, and its own
-          memory of the project — the same agent in the desktop app, in your terminal, and on a pull request.
-        </p>
+    <section id="models" data-chapter="No API key needed" class="stage" aria-labelledby="models-title">
+      <div class="stage-visual">
+        <ModelsRecording />
       </div>
-      <ul class="simple-models" data-reveal>
-        <li><strong>Its own agent</strong><span>Plans, edits, runs commands, and splits work across subagents</span></li>
-        <li><strong>Its own session engine</strong><span>Sessions, history, and file state persist on your machine</span></li>
-        <li><strong>Its own tools</strong><span>Read, edit, shell, browser, and cloud, behind one permission gate</span></li>
-        <li><strong>Its own memory</strong><span>What it learns lives in your repository, committed and reviewable</span></li>
-        <li><strong>Its own verification</strong><span>A judge reads the finished work before you do</span></li>
-        <li><strong>Its own accounting</strong><span>Every run measured against what the provider reported</span></li>
-        <li><strong>Its own terminal agent</strong><span>The same engine, with no desktop app required</span></li>
-        <li><strong>Its own model, soon</strong><span>Vector Velocity, over 300 billion parameters</span></li>
-      </ul>
-      <p class="simple-note" data-reveal>
-        Claude Code, Codex, and Cursor Agent can run inside Vector too, on the subscriptions you already have. They
-        share the checkout. The workspace, the memory, the verification, and the channel your teammates talk on stay
-        Vector's own.
-      </p>
+      <div class="stage-copy" data-reveal-group>
+        <h2 id="models-title" class="stage-title" data-reveal>No API key needed.</h2>
+        <p class="stage-subtitle" data-reveal>Models come included with Vector.</p>
+        <div class="stage-action" data-reveal>
+          <a class="landing-pill" href="/docs/product#ch-models">See the models</a>
+        </div>
+      </div>
     </section>
 
-    <section id="ch-cli" data-chapter="CLI" class="simple-section section-width" aria-labelledby="cli-title">
-      <div class="section-heading simple-heading" data-reveal>
-        <p class="section-kicker">Vector CLI</p>
-        <h2 id="cli-title">The whole agent, in your terminal.</h2>
-        <p>Install once, sign in once, and start working in any repository.</p>
+    <section id="review" data-chapter="Code review" class="stage" aria-labelledby="review-title">
+      <div class="stage-visual">
+        <ReviewRecording />
       </div>
-      <div class="simple-cli">
-        <figure class="cli-terminal" data-reveal aria-label="A Vector CLI session">
-          <div class="product-bar" aria-hidden="true">
-            <span class="traffic"><i></i><i></i><i></i></span>
-            <span class="product-title">vector — zsh</span>
-            <span class="product-status"><i></i> Big Pickle · $0.00</span>
-          </div>
-          <pre class="cli-screen"><code><span class="cli-prompt">$</span> npm install -g @vectordevai/cli
-<span class="cli-prompt">$</span> vector
-<span class="cli-ok">◇ signed in as you@yourteam.dev · model: big pickle (included)</span>
-<span class="cli-prompt">&gt;</span> the checkout test started failing on main — find it, fix it
+      <div class="stage-copy" data-reveal-group>
+        <h2 id="review-title" class="stage-title" data-reveal>Code review</h2>
+        <p class="stage-subtitle" data-reveal>Every pull request, reviewed.</p>
+        <div class="stage-action" data-reveal>
+          <a class="landing-pill" href="/docs#code-review" aria-label="Learn more about code review">Learn more</a>
+        </div>
+      </div>
+    </section>
 
-<span class="cli-dim">● read tests/checkout.test.ts, git log -S couponExpiry</span>
-<span class="cli-dim">● the fixture clock froze before midnight UTC. patching, re-running.</span>
-<span class="cli-ok">✓ 14 passing · 1 fixed · commit staged · $0.00 spent</span></code></pre>
-        </figure>
-        <ul class="simple-list" data-reveal>
-          <li><strong>Free with a Vector account.</strong> No card needed.</li>
-          <li><strong>Models included.</strong> They work the moment it installs, starting on Big Pickle.</li>
-          <li><strong>Or bring your own key.</strong> Claude, GPT, or Gemini with <code>vector auth login</code>.</li>
-          <li><strong>Multiplayer.</strong> <code>vector invite</code> shares your live workspace with a teammate over one link.</li>
-          <li><strong>Works from GitHub.</strong> Comment <code>/vector</code> on an issue and get a pull request back, with the checks it ran, what it cost, and the judge's verdict.</li>
-          <li><strong>Reviews pull requests.</strong> A summary and line-by-line comments on every pull request, and the same review on your own branch with <code>vector review</code> before you push.</li>
+    <section id="trust" data-chapter="Trust" class="trust" aria-labelledby="trust-title">
+      <div class="trust-head" data-reveal-group>
+        <div class="trust-mark" data-reveal aria-hidden="true">
+          <svg
+            viewBox={`0 0 ${6 * 7 - 2} 7`}
+            width="92"
+            height="16"
+            fill="currentColor"
+            shape-rendering="crispEdges"
+          >
+            {wordmarkCells.map((cell) => <rect x={cell.x} y={cell.y} width="0.92" height="0.92" />)}
+          </svg>
+        </div>
+        <h2 id="trust-title" class="trust-title" data-reveal>
+          An agent you can <strong>trust</strong><br class="trust-break" /> is one that <strong>shows its work</strong>.
+        </h2>
+      </div>
+
+      <div class="trust-carousel">
+        <ul class="trust-row" data-trust-row data-reveal-group>
+          {
+            trustCards.map((card) => {
+              const Icon = card.icon
+              return (
+                <li class="trust-slot" data-reveal>
+                  <article class="trust-card">
+                    <span class="trust-icon">
+                      <Icon size={26} strokeWidth={1.75} aria-hidden="true" />
+                    </span>
+                    <h3 class="trust-lead">{card.lead}</h3>
+                    <p class="trust-text">{card.text}</p>
+                    <a class="trust-more" href={card.href} aria-label={card.more}>
+                      <Plus size={18} strokeWidth={2} aria-hidden="true" />
+                    </a>
+                  </article>
+                </li>
+              )
+            })
+          }
         </ul>
+        <div class="trust-controls" data-trust-controls>
+          <button type="button" class="trust-arrow" data-trust-step="-1" aria-label="Previous card">
+            <ChevronLeft size={18} strokeWidth={2} aria-hidden="true" />
+          </button>
+          <button type="button" class="trust-arrow" data-trust-step="1" aria-label="Next card">
+            <ChevronRight size={18} strokeWidth={2} aria-hidden="true" />
+          </button>
+        </div>
       </div>
-    </section>
-
-    <section id="ch-models" data-chapter="Models included" class="simple-section section-width" aria-labelledby="models-title">
-      <div class="section-heading simple-heading" data-reveal>
-        <p class="section-kicker">Models included with Vector</p>
-        <h2 id="models-title">No API key needed. The models come with Vector.</h2>
-        <p>
-          Nothing to connect, no provider key, no second bill: the models come with your Vector account during the
-          beta, and with your subscription once public pricing begins. Every one of them supports tool calling, so it
-          can read the repository, run the checks, and edit files rather than only describe them.
-        </p>
-      </div>
-      <ul class="simple-models" data-reveal>
-        <li><strong>Big Pickle</strong><span>The default a new install starts on</span></li>
-        <li><strong>NVIDIA Nemotron 3 Ultra</strong><span>1M context</span></li>
-        <li><strong>NVIDIA Nemotron 3.5 Lightning</strong><span>262k context</span></li>
-        <li><strong>Meta Muse Spark 1.3</strong><span>1M context</span></li>
-        <li><strong>Meta Muse Spark 1.2</strong><span>1M context</span></li>
-        <li><strong>MiMo V2.5</strong><span>200k context</span></li>
-        <li><strong>Ling 3.0 Flash Fin</strong><span>262k context</span></li>
-      </ul>
-      <p class="simple-note" data-reveal>
-        The lineup today. It changes as providers add and retire models, and a key of your own for Claude, GPT,
-        Gemini and the rest still works beside them. Included models are served by outside providers, and some may use
-        your prompts to improve their models, so use your own provider key for confidential code.
-      </p>
-    </section>
-
-    <section id="ch-evidence" data-chapter="Evidence" class="simple-section section-width" aria-labelledby="evidence-title">
-      <div class="section-heading simple-heading" data-reveal>
-        <p class="section-kicker">Measured, not implied</p>
-        <h2 id="evidence-title">One repair task, reported in full.</h2>
-        <p>
-          In a July 2026 scheduler-repair benchmark, Vector Balanced completed the task in 149 seconds and reported
-          roughly 67% fewer tokens than Codex CLI. Both passed all five public tests. Codex passed more hidden tests, so
-          this is evidence from one reproducible run, not a universal claim.
-        </p>
-      </div>
-      <dl class="simple-stats" data-reveal>
-        <div><dt>Vector Balanced</dt><dd>149s<span>Completion time</span></dd></div>
-        <div><dt>Codex CLI</dt><dd>284s<span>Completion time</span></dd></div>
-        <div><dt>Reported tokens</dt><dd>67%<span>Fewer for Vector</span></dd></div>
-        <div><dt>Public tests</dt><dd>5 / 5<span>Passed by both</span></dd></div>
-      </dl>
-      <p class="simple-note" data-reveal>
-        284 seconds against 149 is roughly 1.9× faster on this one task. The hidden tests went the other way, and that
-        stays on the page: a benchmark that hides its loss is worth nothing.
-      </p>
-    </section>
-
-    <section id="ch-features" data-chapter="What it does" class="simple-section section-width" aria-labelledby="features-title">
-      <div class="section-heading simple-heading" data-reveal>
-        <p class="section-kicker">Built for real work</p>
-        <h2 id="features-title">Knows your project. Shows its work.</h2>
-      </div>
-      <div class="simple-rows">
-        <article class="simple-row" data-reveal>
-          <h3>Remembers how you work</h3>
-          <p>What Vector learns about you stays in a file on your machine and follows you between sessions.</p>
-        </article>
-        <article class="simple-row" data-reveal style="--rd: 60ms">
-          <h3>Records what a run cost</h3>
-          <p>The number is the one your provider reported. Set limits per day, per run, per project.</p>
-        </article>
-        <article class="simple-row" data-reveal style="--rd: 120ms">
-          <h3>Verifies before it's done</h3>
-          <p>Runs the checks, opens the result in a real browser, and reads the console back before it calls it finished.</p>
-        </article>
-        <article class="simple-row" data-reveal style="--rd: 180ms">
-          <h3>Splits the work when it helps</h3>
-          <p>Vector's agent hands pieces of a task to subagents on its own and runs them together. For separate lines of work, start as many agents as your machine can run, each in its own workspace, merged when you say so.</p>
-        </article>
-        <article class="simple-row simple-row-wide" data-reveal style="--rd: 240ms">
-          <h3>Vector Velocity <span class="simple-soon">Coming soon</span></h3>
-          <p>Our own model, over 300 billion parameters, tuned for the loop Vector actually runs rather than for chat: planning a change, calling tools, editing several files at once and keeping them consistent, then checking its own work. It is not shipped yet — when it is, it comes with Vector accounts. <a href="/about">Read about it →</a></p>
-        </article>
-      </div>
-    </section>
-
-    <section id="ch-pricing" data-chapter="Pricing" class="simple-section section-width" aria-labelledby="pricing-title">
-      <div class="section-heading simple-heading" data-reveal>
-        <p class="section-kicker">Pricing</p>
-        <h2 id="pricing-title">Free during beta.</h2>
-        <p>Create an account and download Vector today. When public pricing begins, it's $10 a month or $99 a year, and the subscription comes with models included, so you can work without paying a model provider. Bring your own key for Claude, GPT, Gemini and the rest, and that usage is billed by the provider you bring.</p>
-      </div>
-    </section>
-
-    <section id="ch-get" data-chapter="Get Vector" class="closing">
-      <div class="sky" aria-hidden="true">
-        <i class="sky-aurora"></i>
-        <i class="sky-stars"></i>
-      </div>
-      <h2 data-reveal class="reveal-blur">Start building.</h2>
-      <p data-reveal style="--rd: 120ms">Open a repository. Write, delegate, verify, ship — without leaving it.</p>
-      <a class="closing-cta" href="/login" data-reveal style="--rd: 220ms">
-        <span>Get Vector</span>
-        <ArrowRight size={18} strokeWidth={2} aria-hidden="true" />
-      </a>
     </section>
   </main>
 
-  <MarketingFooter />
+  <LandingFooter cells={wordmarkCells} />
+  <ScrollTicks />
 </div>
 
 <script>
@@ -784,6 +233,16 @@ const changelog = [
   document.documentElement.classList.add("va")
 
   const initReveals = () => {
+    // A group reveals its marked children together, 80ms apart, when the group
+    // itself comes into view. That keeps a heading, its subtitle and its button
+    // in step, and lets a row of cards in a horizontal scroller reveal even
+    // though the cards past its edge are clipped.
+    const groups = Array.from(document.querySelectorAll<HTMLElement>("[data-reveal-group]"))
+    groups.forEach((group) => {
+      group.querySelectorAll<HTMLElement>("[data-reveal]").forEach((node, index) => {
+        if (!node.style.getPropertyValue("--rd")) node.style.setProperty("--rd", `${index * 80}ms`)
+      })
+    })
     const nodes = Array.from(document.querySelectorAll<HTMLElement>("[data-reveal]:not(.in)"))
     if (reducedMotion() || !("IntersectionObserver" in globalThis)) {
       nodes.forEach((node) => node.classList.add("in"))
@@ -792,14 +251,21 @@ const changelog = [
     const observer = new IntersectionObserver(
       (entries) => {
         entries.forEach((entry) => {
-          if (!entry.isIntersecting) return
-          entry.target.classList.add("in")
-          observer.unobserve(entry.target)
+          // The first report for every target arrives on observe, visible or
+          // not, so check the ratio rather than trusting isIntersecting.
+          if (!entry.isIntersecting || entry.intersectionRatio < 0.11) return
+          const target = entry.target as HTMLElement
+          const members = target.hasAttribute("data-reveal-group")
+            ? Array.from(target.querySelectorAll<HTMLElement>("[data-reveal]"))
+            : [target]
+          members.forEach((member) => member.classList.add("in"))
+          observer.unobserve(target)
         })
       },
-      { rootMargin: "0px 0px -6%", threshold: 0.08 },
+      { threshold: [0, 0.12] },
     )
-    nodes.forEach((node) => observer.observe(node))
+    groups.forEach((group) => observer.observe(group))
+    nodes.filter((node) => !node.parentElement?.closest("[data-reveal-group]")).forEach((node) => observer.observe(node))
     return () => observer.disconnect()
   }
 
@@ -842,6 +308,16 @@ const changelog = [
     node.style.minWidth = `${Math.ceil(measure.getBoundingClientRect().width)}px`
     node.style.display = "inline-block"
     measure.remove()
+    // Inter is a web font on systems without SF Pro, and it can finish loading
+    // after the first measure. Measure again once it has, so the reserved width
+    // is the real one.
+    document.fonts?.ready.then(() => {
+      if (!node.isConnected) return
+      node.after(measure)
+      measure.style.font = getComputedStyle(node).font
+      node.style.minWidth = `${Math.ceil(measure.getBoundingClientRect().width)}px`
+      measure.remove()
+    })
 
     const glyphs = "abcdefghijklmnopqrstuvwxyz<>{}/\\=+*"
     let phrase = 0
@@ -878,89 +354,6 @@ const changelog = [
       if (raf) cancelAnimationFrame(raf)
       node.textContent = phrases[0]
       selectStage(0)
-    }
-  }
-
-  const initScenes = () => {
-    const scenes = Array.from(document.querySelectorAll<HTMLElement>("[data-scene]"))
-    if (!scenes.length) return () => {}
-    const park = () => scenes.forEach((scene) => scene.style.setProperty("--p", "1"))
-    if (reducedMotion()) {
-      park()
-      return () => {}
-    }
-    let frame = 0
-    const update = () => {
-      frame = 0
-      if (globalThis.innerWidth < 641) {
-        park()
-        return
-      }
-      const viewport = globalThis.innerHeight
-      scenes.forEach((scene) => {
-        if (scene.hasAttribute("data-static")) return
-        const rect = scene.getBoundingClientRect()
-        const span = rect.height - viewport
-        const raw = span > 0 ? -rect.top / span : 1
-        // Only touch scenes near the viewport; distant ones keep their edge value.
-        if (raw < -0.2 || raw > 1.2) return
-        scene.style.setProperty("--p", Math.min(1, Math.max(0, raw)).toFixed(4))
-      })
-    }
-    // A pinned stage must show its whole chapter at once. When the viewport is
-    // too short for a scene's content, pinning would clip it against the glass
-    // nav — so that scene falls back to a plain, fully-revealed section.
-    const audit = () => {
-      scenes.forEach((scene) => {
-        scene.removeAttribute("data-static")
-        const stage = scene.querySelector<HTMLElement>(".scene-stage")
-        if (!stage) return
-        if (stage.scrollHeight > stage.clientHeight + 1) {
-          scene.setAttribute("data-static", "")
-          scene.style.setProperty("--p", "1")
-        }
-      })
-      update()
-    }
-    const queue = () => {
-      if (!frame) frame = requestAnimationFrame(update)
-    }
-    const requeue = () => {
-      audit()
-      queue()
-    }
-    globalThis.addEventListener("scroll", queue, { passive: true })
-    globalThis.addEventListener("resize", requeue, { passive: true })
-    audit()
-    return () => {
-      globalThis.removeEventListener("scroll", queue)
-      globalThis.removeEventListener("resize", requeue)
-      if (frame) cancelAnimationFrame(frame)
-      scenes.forEach((scene) => {
-        scene.style.removeProperty("--p")
-        scene.removeAttribute("data-static")
-      })
-    }
-  }
-
-  const initParallax = () => {
-    const node = document.querySelector<HTMLElement>("[data-parallax]")
-    if (!node || reducedMotion()) return () => {}
-    let frame = 0
-    const update = () => {
-      frame = 0
-      const shift = Math.min(globalThis.scrollY, 900) * -0.028
-      node.style.transform = `scale(1.06) translateY(${shift.toFixed(1)}px)`
-    }
-    const queue = () => {
-      if (!frame) frame = requestAnimationFrame(update)
-    }
-    globalThis.addEventListener("scroll", queue, { passive: true })
-    update()
-    return () => {
-      globalThis.removeEventListener("scroll", queue)
-      if (frame) cancelAnimationFrame(frame)
-      node.style.transform = ""
     }
   }
 
@@ -1148,10 +541,58 @@ const changelog = [
     }
   }
 
+  const initTrust = () => {
+    const row = document.querySelector<HTMLElement>("[data-trust-row]")
+    const controls = document.querySelector<HTMLElement>("[data-trust-controls]")
+    if (!row || !controls) return () => {}
+    const buttons = Array.from(controls.querySelectorAll<HTMLButtonElement>("[data-trust-step]"))
+    let frame = 0
+
+    const update = () => {
+      frame = 0
+      const max = row.scrollWidth - row.clientWidth
+      // When every card fits there is nothing to page through.
+      controls.hidden = max <= 2
+      buttons.forEach((button) => {
+        const back = button.dataset.trustStep === "-1"
+        const stuck = back ? row.scrollLeft <= 2 : row.scrollLeft >= max - 2
+        button.setAttribute("aria-disabled", String(stuck))
+      })
+    }
+    const queue = () => {
+      if (!frame) frame = requestAnimationFrame(update)
+    }
+    // One card at a time: the width of a card plus the gap after it.
+    const step = (direction: number) => {
+      const card = row.querySelector<HTMLElement>("li")
+      if (!card) return
+      const gap = Number.parseFloat(getComputedStyle(row).columnGap) || 0
+      row.scrollBy({ left: direction * (card.getBoundingClientRect().width + gap), behavior: reducedMotion() ? "auto" : "smooth" })
+    }
+    const handlers = buttons.map((button) => {
+      const handler = () => {
+        if (button.getAttribute("aria-disabled") === "true") return
+        step(Number(button.dataset.trustStep))
+      }
+      button.addEventListener("click", handler)
+      return () => button.removeEventListener("click", handler)
+    })
+
+    row.addEventListener("scroll", queue, { passive: true })
+    globalThis.addEventListener("resize", queue, { passive: true })
+    update()
+    return () => {
+      row.removeEventListener("scroll", queue)
+      globalThis.removeEventListener("resize", queue)
+      handlers.forEach((remove) => remove())
+      if (frame) cancelAnimationFrame(frame)
+    }
+  }
+
   let cleanups: Array<() => void> = []
   const boot = () => {
     cleanups.forEach((cleanup) => cleanup())
-    cleanups = [initReveals(), initScramble(), initScenes(), initParallax(), initField()]
+    cleanups = [initReveals(), initScramble(), initField(), initTrust()]
   }
   const teardown = () => {
     cleanups.forEach((cleanup) => cleanup())
@@ -1165,24 +606,17 @@ const changelog = [
 
 <style>
   .vector-marketing {
-    --paper: #08060d;
-    --card: var(--glass-fill);
-    --purple: #8f52ff;
-    --purple-bright: #a77cff;
     --purple-soft: #c9b0ff;
     --lavender: #e2d7ff;
-    --hairline: rgba(224, 211, 255, 0.16);
-    /* One measure for the whole page. Six unrelated widths — 620, 820, 980,
-       1080, 1150 — read as a narrow ribbon down the middle of a wide screen
-       rather than as a layout. */
-    /* Named --measure, not --page: the layout already uses --page for the
-       background colour, and one name with two meanings resolved a colour to a
-       length wherever the two met. */
-    --measure: min(1240px, calc(100% - 56px));
     --measure-wide: min(1440px, calc(100% - 40px));
     --ink-70: rgba(255, 255, 255, 0.7);
     --ink-55: rgba(255, 255, 255, 0.55);
     --ink-40: rgba(255, 255, 255, 0.4);
+    /* The landing page's type: the system face where there is one (SF Pro on
+       Apple devices) and self-hosted Inter everywhere else. */
+    --font-landing: -apple-system, system-ui, "SF Pro Display", "SF Pro Text", Inter, "Inter Variable", "Helvetica Neue",
+      Arial, sans-serif;
+    --font-landing-mono: ui-monospace, "SF Mono", Menlo, monospace;
     position: relative;
     isolation: isolate;
     min-height: 100vh;
@@ -1191,7 +625,28 @@ const changelog = [
     background:
       linear-gradient(118deg, rgba(143, 82, 255, 0.065), transparent 27%, transparent 72%, rgba(95, 49, 185, 0.055)),
       rgba(8, 6, 13, 0.5);
+    font-family: var(--font-landing);
+  }
+
+  /* Components inside the page that ask for the site font (the product window,
+     the recordings) get the landing type too. The top bar is the site's shared
+     chrome and keeps Geist, exactly as on every other page. */
+  .vector-marketing > main {
+    --font-sans: var(--font-landing);
+  }
+
+  .vector-marketing > :global(.site-header) {
     font-family: var(--font-sans);
+  }
+
+  :global(html) {
+    scroll-behavior: smooth;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    :global(html) {
+      scroll-behavior: auto;
+    }
   }
 
   .vector-marketing,
@@ -1226,46 +681,43 @@ const changelog = [
     white-space: nowrap;
   }
 
-  /* ---- motion system ---- */
+  /* ---- motion system ----
+     Content rises into place once as it enters: 12px and a fade, 700ms, with
+     groups staggered 80ms apart by the script. Recordings fade and grow from
+     96% instead. Nothing is pinned and scrolling is never taken over. The
+     rules reach into the footer component, which reveals the same way. */
 
-  :global(html.va) [data-reveal] {
+  :global(html.va) .vector-marketing :global([data-reveal]) {
     opacity: 0;
-    transform: translate3d(0, 18px, 0);
+    transform: translate3d(0, 12px, 0);
     transition:
-      opacity 640ms cubic-bezier(0.16, 1, 0.3, 1),
-      transform 640ms cubic-bezier(0.16, 1, 0.3, 1),
-      filter 640ms cubic-bezier(0.16, 1, 0.3, 1);
+      opacity 700ms cubic-bezier(0.16, 1, 0.3, 1),
+      transform 700ms cubic-bezier(0.16, 1, 0.3, 1);
     transition-delay: var(--rd, 0ms);
   }
 
-  :global(html.va) [data-reveal].reveal-blur {
-    filter: blur(14px);
+  :global(html.va) .vector-marketing :global([data-reveal].reveal-record) {
+    transform: scale(0.96);
+    transition-duration: 800ms;
   }
 
-  :global(html.va) [data-reveal].reveal-zoom {
-    transform: translate3d(0, 26px, 0) scale(0.965);
-  }
-
-  :global(html.va) [data-reveal].in {
+  :global(html.va) .vector-marketing :global([data-reveal].in) {
     opacity: 1;
-    transform: translate3d(0, 0, 0);
-    filter: none;
+    transform: none;
   }
 
   @media (prefers-reduced-motion: reduce) {
-    :global(html.va) [data-reveal] {
+    :global(html.va) .vector-marketing :global([data-reveal]) {
       opacity: 1;
       transform: none;
-      filter: none;
       transition: none;
     }
   }
 
-  /* ---- pinned scenes ----
-     Each scene is a tall runway; its stage stays pinned a full viewport while
-     scroll progress (--p, written by initScenes) drives the choreography.
-     Everything is gated on html.va + desktop + motion-ok, so no-JS, reduced
-     motion, and small screens all read the plain stacked layout. */
+  /* ---- hero stage ----
+     The hero keeps the stage styles it was built with. The pinned-scroll
+     variant below is overridden by the simplified layout at the end of the
+     hero rules, which sizes the stage to its content. */
 
   .scene {
     position: relative;
@@ -1275,17 +727,7 @@ const changelog = [
     position: relative;
   }
 
-  .scene-rail,
-  .workflow-rail {
-    display: none;
-  }
-
   @media (min-width: 641px) and (prefers-reduced-motion: no-preference) {
-    :global(html.va) .scene[data-scene] {
-      height: calc(var(--scene-span, 2.4) * 100vh);
-      height: calc(var(--scene-span, 2.4) * 100svh);
-    }
-
     :global(html.va) .scene-stage {
       position: sticky;
       top: 0;
@@ -1300,66 +742,6 @@ const changelog = [
       /* Clear the sticky glass nav so pinned chapter heads never sit under it. */
       padding-top: 96px;
       padding-bottom: 20px;
-    }
-
-    /* Scenes whose content can't fit a pinned viewport (short windows) become
-       plain, fully-revealed sections — initScenes marks them data-static. */
-    :global(html.va) .scene[data-static] {
-      height: auto;
-    }
-
-    :global(html.va) .scene[data-static] .scene-stage {
-      position: static;
-      display: block;
-      height: auto;
-      padding: 0;
-      overflow: visible;
-    }
-
-    :global(html.va) .scene[data-static] .hero,
-    :global(html.va) .scene[data-static] .showcase,
-    :global(html.va) .scene[data-static] .chapter-head,
-    :global(html.va) .scene[data-static] .suite-grid article,
-    :global(html.va) .scene[data-static] .workflow-list li {
-      opacity: 1;
-      transform: none;
-      filter: none;
-    }
-
-    :global(html.va) .scene[data-static] .scene-rail,
-    :global(html.va) .scene[data-static] .workflow-rail {
-      display: none;
-    }
-
-    :global(html.va) .scene[data-static].scene-suite .suite {
-      margin-top: clamp(68px, 10vw, 126px);
-    }
-
-    :global(html.va) .scene[data-static].scene-workflow .workflow {
-      margin-top: clamp(64px, 9vw, 118px);
-    }
-
-    :global(html.va) .scene[data-static].scene-hero .hero {
-      padding-top: clamp(72px, 10vw, 128px);
-    }
-
-    :global(html.va) .scene[data-static].scene-hero .showcase {
-      padding-top: clamp(56px, 7vw, 88px);
-    }
-
-    @media (max-height: 780px) {
-      :global(html.va) .scene .chapter-head h2 {
-        font-size: clamp(28px, 4.4vw, 44px);
-      }
-
-      :global(html.va) .scene-suite .suite-grid article {
-        min-height: 0;
-        padding: 18px 20px;
-      }
-
-      :global(html.va) .scene-suite .suite-grid p {
-        font-size: 12px;
-      }
     }
 
     /* Hero: the copy holds the stage, then hands off to the product window. */
@@ -1389,63 +771,6 @@ const changelog = [
       opacity: min(1, calc(var(--t-window) * 2.4));
       transform: translateY(calc((1 - var(--t-window)) * 84vh)) scale(calc(0.94 + var(--t-window) * 0.06));
       will-change: transform;
-    }
-
-    /* Suite: the four command-center cards deal in one at a time. */
-    :global(html.va) .scene-suite .suite {
-      margin-top: 0;
-      --t-head: clamp(0, var(--p, 0) / 0.16, 1);
-    }
-
-    :global(html.va) .scene-suite .chapter-head {
-      opacity: var(--t-head);
-      transform: translateY(calc((1 - var(--t-head)) * 34px));
-      filter: blur(calc((1 - var(--t-head)) * 12px));
-    }
-
-    :global(html.va) .scene-suite .suite-grid article {
-      --t: clamp(0, (var(--p, 0) - 0.18 - var(--i, 0) * 0.16) / 0.14, 1);
-      opacity: var(--t);
-      transform: translateY(calc((1 - var(--t)) * 34px)) scale(calc(0.97 + var(--t) * 0.03));
-    }
-
-    /* Workflow: the five steps light up along the loop. */
-    :global(html.va) .scene-workflow .workflow {
-      margin-top: 0;
-      --t-head: clamp(0, var(--p, 0) / 0.16, 1);
-    }
-
-    :global(html.va) .scene-workflow .chapter-head {
-      opacity: var(--t-head);
-      transform: translateY(calc((1 - var(--t-head)) * 34px));
-      filter: blur(calc((1 - var(--t-head)) * 12px));
-    }
-
-    :global(html.va) .scene-workflow .workflow-list li {
-      --t: clamp(0, (var(--p, 0) - 0.16 - var(--i, 0) * 0.14) / 0.12, 1);
-      opacity: calc(0.2 + var(--t) * 0.8);
-      transform: translateY(calc((1 - var(--t)) * 16px));
-    }
-
-    :global(html.va) .scene-rail,
-    :global(html.va) .workflow-rail {
-      display: block;
-      height: 2px;
-      margin-top: 30px;
-      overflow: hidden;
-      border-radius: 999px;
-      background: rgba(201, 176, 255, 0.12);
-    }
-
-    :global(html.va) .scene-rail i,
-    :global(html.va) .workflow-rail i {
-      display: block;
-      height: 100%;
-      border-radius: inherit;
-      background: linear-gradient(90deg, var(--purple), var(--purple-soft));
-      box-shadow: 0 0 16px rgba(167, 124, 255, 0.6);
-      transform: scaleX(var(--p, 0));
-      transform-origin: left center;
     }
   }
 
@@ -1558,111 +883,6 @@ const changelog = [
     line-height: 1.68;
   }
 
-  .hero-loop {
-    position: relative;
-    width: min(720px, 100%);
-    min-height: 78px;
-    margin-top: 30px;
-    padding: 12px;
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 6px;
-    overflow: hidden;
-    background: linear-gradient(145deg, rgba(32, 23, 49, 0.78), rgba(11, 8, 17, 0.74));
-    border: 1px solid rgba(201, 176, 255, 0.2);
-    border-radius: 20px;
-    box-shadow:
-      0 22px 70px rgba(0, 0, 0, 0.34),
-      0 0 42px rgba(143, 82, 255, 0.08),
-      inset 0 1px 0 rgba(255, 255, 255, 0.1);
-    backdrop-filter: blur(24px) saturate(145%);
-    -webkit-backdrop-filter: blur(24px) saturate(145%);
-  }
-
-  .hero-loop-progress {
-    position: absolute;
-    inset: auto 12px 7px;
-    height: 2px;
-    overflow: hidden;
-    background: rgba(201, 176, 255, 0.1);
-    border-radius: 999px;
-  }
-
-  .hero-loop-progress i {
-    --stage: 0;
-    display: block;
-    width: 33.333%;
-    height: 100%;
-    border-radius: inherit;
-    background: linear-gradient(90deg, var(--purple), var(--purple-soft));
-    box-shadow: 0 0 16px rgba(167, 124, 255, 0.72);
-    transform: translateX(calc(var(--stage) * 100%));
-    transition: transform 460ms cubic-bezier(0.16, 1, 0.3, 1);
-  }
-
-  .hero-loop-stage {
-    min-width: 0;
-    min-height: 48px;
-    padding: 8px 10px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    color: var(--ink-40);
-    border: 1px solid transparent;
-    border-radius: 13px;
-    transition:
-      color 240ms ease,
-      background 240ms ease,
-      border-color 240ms ease,
-      transform 240ms ease;
-  }
-
-  .hero-loop-stage.is-active {
-    color: var(--ink);
-    background: rgba(143, 82, 255, 0.12);
-    border-color: rgba(201, 176, 255, 0.2);
-    transform: translateY(-1px);
-  }
-
-  .hero-loop-icon {
-    width: 30px;
-    height: 30px;
-    flex: 0 0 30px;
-    display: grid;
-    place-items: center;
-    color: var(--ink-40);
-    background: rgba(255, 255, 255, 0.045);
-    border: 1px solid rgba(255, 255, 255, 0.07);
-    border-radius: 9px;
-    transition: color 240ms ease, background 240ms ease, box-shadow 240ms ease;
-  }
-
-  .hero-loop-stage.is-active .hero-loop-icon {
-    color: var(--lavender);
-    background: rgba(143, 82, 255, 0.18);
-    box-shadow: 0 0 22px rgba(143, 82, 255, 0.2);
-  }
-
-  .hero-loop-stage > span:last-child {
-    min-width: 0;
-    display: grid;
-    gap: 2px;
-  }
-
-  .hero-loop-stage strong {
-    color: inherit;
-    font-size: 12.5px;
-    font-weight: 650;
-  }
-
-  .hero-loop-stage small {
-    overflow: hidden;
-    color: var(--ink-40);
-    font-size: 10.5px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
   .hero-cta {
     width: 100%;
     min-height: 48px;
@@ -1700,43 +920,6 @@ const changelog = [
     transform: translateX(3px);
   }
 
-  .hero-cli-chip {
-    margin-top: 18px;
-    display: inline-flex;
-    align-items: center;
-    gap: 9px;
-    padding: 9px 16px 9px 9px;
-    color: var(--ink-70);
-    font-size: 12.5px;
-    text-decoration: none;
-    background: rgba(143, 82, 255, 0.09);
-    border: 1px solid rgba(183, 149, 255, 0.26);
-    border-radius: 999px;
-    transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
-  }
-
-  .hero-cli-chip strong {
-    color: var(--lavender);
-    font-weight: 620;
-  }
-
-  .hero-cli-chip:hover {
-    background: rgba(143, 82, 255, 0.16);
-    border-color: rgba(183, 149, 255, 0.45);
-    transform: translateY(-1px);
-  }
-
-  .hero-cli-chip-new {
-    padding: 3px 9px;
-    color: #171020;
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    background: linear-gradient(180deg, #eee7ff, #c2a7f8);
-    border-radius: 999px;
-  }
-
   .hero-note {
     margin: 18px 0 0;
     color: var(--ink-40);
@@ -1750,233 +933,6 @@ const changelog = [
     width: var(--measure-wide);
     margin-inline: auto;
     padding-top: clamp(56px, 7vw, 88px);
-  }
-
-  /* ---- licensing ---- */
-
-  .licensing {
-    margin-top: clamp(56px, 8vw, 104px);
-  }
-
-  .licensing-grid {
-    display: grid;
-    gap: 16px;
-    margin-top: 30px;
-  }
-
-  @media (min-width: 900px) {
-    .licensing-grid {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-  }
-
-  .licensing-card {
-    padding: clamp(22px, 2.6vw, 30px);
-    background: var(--glass-fill);
-    border: 1px solid var(--glass-line);
-    border-radius: 24px;
-    box-shadow: var(--glass-shadow-soft);
-    backdrop-filter: blur(24px) saturate(145%);
-    -webkit-backdrop-filter: blur(24px) saturate(145%);
-  }
-
-  .licensing-tag {
-    margin: 0 0 10px;
-    color: var(--purple-soft);
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 11px;
-    font-weight: 500;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
-
-  .licensing-card h3 {
-    margin: 0;
-    color: var(--ink);
-    font-size: clamp(18px, 2.1vw, 21px);
-    font-weight: 600;
-    letter-spacing: -0.015em;
-    line-height: 1.25;
-  }
-
-  .licensing-lead {
-    margin: 11px 0 0;
-    color: var(--ink-55);
-    font-size: 14.5px;
-    line-height: 1.6;
-  }
-
-  .licensing-card dl {
-    margin: 20px 0 0;
-    display: grid;
-    gap: 14px;
-  }
-
-  .licensing-card dt {
-    color: var(--ink);
-    font-size: 13px;
-    font-weight: 600;
-  }
-
-  .licensing-card dd {
-    margin: 4px 0 0;
-    color: var(--ink-45);
-    font-size: 13px;
-    line-height: 1.6;
-  }
-
-  .licensing-note {
-    margin: 20px 0 0;
-    padding-top: 14px;
-    border-top: 1px solid var(--hairline);
-    color: var(--ink-40);
-    font-size: 12.5px;
-    line-height: 1.6;
-  }
-
-  .proof-shot {
-    margin-top: clamp(48px, 7vw, 92px);
-    display: grid;
-    gap: clamp(20px, 3vw, 34px);
-  }
-
-  @media (min-width: 1000px) {
-    .proof-shot {
-      grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
-      align-items: center;
-    }
-  }
-
-  .proof-shot-copy h2 {
-    margin: 0 0 12px;
-    color: var(--ink);
-    font-size: clamp(21px, 2.5vw, 27px);
-    font-weight: 600;
-    letter-spacing: -0.018em;
-    line-height: 1.2;
-  }
-
-  .proof-shot-copy p:last-child {
-    margin: 0;
-    color: var(--ink-55);
-    font-size: 14.5px;
-    line-height: 1.65;
-  }
-
-  .proof-shot-frame {
-    margin: 0;
-    overflow: hidden;
-    padding: 6px;
-    border: 1px solid var(--glass-line);
-    border-radius: 20px;
-    background: var(--glass-fill-strong);
-    box-shadow: var(--glass-shadow);
-  }
-
-  .proof-shot-frame img {
-    display: block;
-    width: 100%;
-    height: auto;
-    border-radius: 14px;
-  }
-
-  /* ---- tally ---- */
-
-  .tally {
-    display: grid;
-    gap: 18px;
-    margin-top: clamp(52px, 7vw, 92px);
-    padding: clamp(26px, 3vw, 38px) clamp(22px, 3vw, 40px);
-    border: 1px solid var(--glass-line);
-    border-radius: 24px;
-    background: var(--glass-fill);
-    box-shadow: var(--glass-shadow-soft);
-  }
-
-  @media (min-width: 760px) {
-    .tally {
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 26px;
-    }
-  }
-
-  .tally strong {
-    display: block;
-    color: var(--ink);
-    font-size: clamp(30px, 4.4vw, 46px);
-    font-weight: 600;
-    letter-spacing: -0.03em;
-    font-variant-numeric: tabular-nums;
-    line-height: 1;
-  }
-
-  .tally span {
-    display: block;
-    margin-top: 8px;
-    color: var(--ink-45);
-    font-size: 12.5px;
-    line-height: 1.5;
-  }
-
-  /* ---- pull quote ---- */
-
-  .pullquote {
-    margin: clamp(64px, 10vw, 132px) auto;
-    text-align: center;
-  }
-
-  .pullquote blockquote {
-    max-width: 20ch;
-    margin: 0 auto;
-    color: var(--ink);
-    font-size: clamp(28px, 5.2vw, 58px);
-    font-weight: 600;
-    letter-spacing: -0.03em;
-    line-height: 1.1;
-  }
-
-  .hero-ship {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin: 14px 0 0;
-    color: var(--ink-40);
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 11.5px;
-    letter-spacing: 0.01em;
-  }
-
-  .hero-ship-dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: #6ee7b7;
-    box-shadow: 0 0 10px rgba(110, 231, 183, 0.55);
-  }
-
-  .hero-ship-sep {
-    opacity: 0.4;
-  }
-
-  /* Rows land one after another instead of the whole grid appearing at once. */
-  .comparison-section tbody tr {
-    animation: row-land 520ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
-    animation-delay: calc(var(--row, 0) * 55ms);
-  }
-
-  @keyframes row-land {
-    from {
-      opacity: 0;
-      transform: translateY(9px);
-    }
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .comparison-section tbody tr {
-      animation: none;
-    }
   }
 
   .showcase-note {
@@ -2030,906 +986,6 @@ const changelog = [
     box-shadow: 0 0 10px rgba(99, 201, 139, 0.4);
   }
 
-  .product-window img {
-    display: block;
-    width: 100%;
-    height: auto;
-    will-change: transform;
-    transform-origin: center top;
-    border-radius: 0 0 20px 20px;
-  }
-
-  /* ---- belt ---- */
-
-  .belt {
-    width: var(--measure);
-    margin: clamp(52px, 7vw, 88px) auto 0;
-    padding: 30px 0;
-    overflow: hidden;
-    background: var(--glass-fill);
-    border: 1px solid var(--glass-line);
-    border-radius: 24px;
-    box-shadow: var(--glass-shadow-soft);
-    backdrop-filter: blur(24px) saturate(140%);
-    -webkit-backdrop-filter: blur(24px) saturate(140%);
-  }
-
-  .belt > p {
-    margin: 0 auto 26px;
-    width: min(680px, calc(100% - 40px));
-    color: var(--ink-40);
-    font-size: 13px;
-    text-align: center;
-    letter-spacing: 0.01em;
-  }
-
-  .marquee {
-    position: relative;
-    overflow: hidden;
-    mask-image: linear-gradient(90deg, transparent, #000 14%, #000 86%, transparent);
-    -webkit-mask-image: linear-gradient(90deg, transparent, #000 14%, #000 86%, transparent);
-  }
-
-  .marquee-track {
-    display: flex;
-    align-items: center;
-    gap: 52px;
-    width: max-content;
-    padding-right: 52px;
-    animation: marquee 44s linear infinite;
-  }
-
-  .marquee:hover .marquee-track {
-    animation-play-state: paused;
-  }
-
-  .marquee-track span {
-    color: var(--ink-55);
-    font-size: clamp(15px, 1.7vw, 18px);
-    font-weight: 500;
-    white-space: nowrap;
-  }
-
-  .marquee-static {
-    display: none;
-    margin: 0;
-    padding: 0;
-    flex-wrap: wrap;
-    justify-content: center;
-    gap: 12px 28px;
-    list-style: none;
-  }
-
-  .marquee-static li {
-    color: var(--ink-55);
-    font-size: 14px;
-    font-weight: 500;
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .marquee {
-      mask-image: none;
-      -webkit-mask-image: none;
-    }
-    .marquee-track { display: none; }
-    .marquee-static { display: flex; }
-  }
-
-  /* ---- product loop ---- */
-
-  .section-width {
-    width: var(--measure);
-    margin-inline: auto;
-  }
-
-  .section-heading {
-    max-width: 760px;
-  }
-
-  .section-kicker {
-    margin: 0 0 13px;
-    color: var(--purple-soft);
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
-    font-size: 10.5px;
-    font-weight: 600;
-    letter-spacing: 0.11em;
-    text-transform: uppercase;
-  }
-
-  .section-heading h2,
-  .runtime-intro h2 {
-    margin: 0;
-    color: var(--ink);
-    font-size: clamp(30px, 4.4vw, 50px);
-    font-weight: 590;
-    line-height: 1.06;
-    letter-spacing: -0.035em;
-  }
-
-  .section-heading > p:last-child,
-  .runtime-intro > p:last-child {
-    margin: 20px 0 0;
-    color: var(--ink-55);
-    font-size: 16px;
-    line-height: 1.7;
-  }
-
-  /* Chapter heads carry the Apple-scale voice: bigger, tighter, brighter. */
-  .chapter-head h2 {
-    font-size: clamp(34px, 5.4vw, 62px);
-    font-weight: 620;
-    line-height: 1.02;
-    letter-spacing: -0.042em;
-    background: linear-gradient(180deg, #ffffff 62%, #cdb6ff);
-    -webkit-background-clip: text;
-    background-clip: text;
-    color: transparent;
-  }
-
-  .chapter-head > p:last-child {
-    max-width: 58ch;
-    font-size: 17px;
-  }
-
-  .suite {
-    margin-top: clamp(68px, 10vw, 126px);
-  }
-
-  .suite-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 1px;
-    margin-top: 44px;
-    overflow: hidden;
-    border: 1px solid var(--glass-line);
-    border-radius: 24px;
-    background: var(--glass-line);
-    box-shadow: var(--glass-shadow);
-  }
-
-  .suite-grid article {
-    min-height: 226px;
-    background: color-mix(in srgb, var(--glass-fill-strong) 96%, #15131a);
-    padding: 26px;
-    backdrop-filter: blur(28px) saturate(140%);
-    -webkit-backdrop-filter: blur(28px) saturate(140%);
-  }
-
-  .suite-icon {
-    display: grid;
-    width: 38px;
-    height: 38px;
-    place-items: center;
-    border: 1px solid rgba(184, 158, 252, 0.22);
-    border-radius: 10px;
-    background: rgba(147, 116, 236, 0.11);
-    color: var(--purple-soft);
-  }
-
-  .suite-grid small {
-    display: block;
-    margin-top: 22px;
-    color: var(--purple-soft);
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 9.5px;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
-
-  .suite-grid h3 {
-    margin: 6px 0 0;
-    color: white;
-    font-size: 21px;
-    font-weight: 590;
-  }
-
-  .suite-grid p {
-    max-width: 48ch;
-    margin: 11px 0 0;
-    color: var(--ink-45);
-    font-size: 12.5px;
-    line-height: 1.62;
-  }
-
-  .workflow {
-    margin-top: clamp(64px, 9vw, 118px);
-    padding: clamp(34px, 5vw, 58px);
-    background: var(--glass-fill-strong);
-    border: 1px solid var(--glass-line);
-    border-radius: 30px;
-    box-shadow: var(--glass-shadow);
-    backdrop-filter: blur(30px) saturate(145%);
-    -webkit-backdrop-filter: blur(30px) saturate(145%);
-  }
-
-  .workflow-list {
-    margin: 48px 0 0;
-    padding: 0;
-    display: grid;
-    grid-template-columns: repeat(5, 1fr);
-    border-top: 1px solid rgba(227, 215, 255, 0.14);
-    border-bottom: 1px solid rgba(227, 215, 255, 0.14);
-    list-style: none;
-  }
-
-  .workflow-list li {
-    min-height: 166px;
-    padding: 22px 17px;
-    border-right: 1px solid rgba(227, 215, 255, 0.12);
-  }
-
-  .workflow-list li:last-child { border-right: 0; }
-  .workflow-list li > span {
-    color: var(--purple-soft);
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 10px;
-  }
-  .workflow-list strong {
-    display: block;
-    margin-top: 24px;
-    color: #f3eef9;
-    font-size: 14px;
-    font-weight: 600;
-  }
-  .workflow-list li p {
-    margin: 9px 0 0;
-    color: var(--ink-40);
-    font-size: 12px;
-    line-height: 1.55;
-  }
-
-  /* ---- features ---- */
-
-  .features {
-    padding: clamp(24px, 4vw, 48px) 0;
-  }
-
-  .feature {
-    width: var(--measure);
-    margin-inline: auto;
-    padding: clamp(44px, 6vw, 64px) 0;
-    display: grid;
-    gap: 22px;
-  }
-
-  /* Side by side once there is room for both: the copy keeps a readable
-     measure while the live surface gets the width it needs, and alternating
-     which side leads stops the run of features reading as one long column. */
-  @media (min-width: 1000px) {
-    .feature {
-      grid-template-columns: minmax(0, 0.86fr) minmax(0, 1.14fr);
-      gap: clamp(28px, 3.4vw, 52px);
-      align-items: center;
-    }
-
-    .features > .feature:nth-child(even) > .feature-copy {
-      order: 2;
-    }
-  }
-
-  .feature-tag {
-    margin: 0 0 10px;
-    color: var(--purple-soft);
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 11px;
-    font-weight: 500;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-  }
-
-  .feature-copy {
-    padding: 25px 26px 27px;
-    background: var(--glass-fill);
-    border: 1px solid var(--glass-line);
-    border-radius: 24px;
-    box-shadow: var(--glass-shadow-soft);
-    backdrop-filter: blur(24px) saturate(145%);
-    -webkit-backdrop-filter: blur(24px) saturate(145%);
-  }
-
-  .feature h2 {
-    margin: 0;
-    color: var(--ink);
-    font-size: clamp(20px, 2.6vw, 24px);
-    font-weight: 600;
-    letter-spacing: -0.015em;
-    line-height: 1.25;
-  }
-
-  .feature-body {
-    margin: 12px 0 0;
-    color: var(--ink-55);
-    font-size: 15.5px;
-    line-height: 1.65;
-  }
-
-  .feature-card {
-    margin: 0;
-    overflow: hidden;
-    border: 1px solid var(--hairline);
-    padding: 7px;
-    border-radius: 26px;
-    background: var(--card);
-    box-shadow: var(--glass-shadow);
-    backdrop-filter: blur(28px) saturate(145%);
-    -webkit-backdrop-filter: blur(28px) saturate(145%);
-    transition: transform 360ms cubic-bezier(0.16, 1, 0.3, 1), border-color 360ms ease;
-  }
-
-  .feature-card:hover {
-    transform: translateY(-4px);
-    border-color: rgba(167, 124, 255, 0.4);
-  }
-
-  .card-topline {
-    min-height: 36px;
-    padding: 0 13px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 14px;
-    color: var(--ink-40);
-    background: rgba(255, 255, 255, 0.04);
-    border-bottom: 1px solid rgba(190, 166, 255, 0.1);
-    border-radius: 18px 18px 0 0;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 10.5px;
-    letter-spacing: 0.04em;
-  }
-
-  .feature-card img {
-    display: block;
-    width: 100%;
-    height: auto;
-    border-radius: 0 0 18px 18px;
-  }
-
-  /* Stands in for a screenshot on the pillars the product does not show in one
-     frame, at the same card size so no pillar reads as the smaller claim. */
-  .feature-proof dl {
-    margin: 0;
-    display: grid;
-    gap: 1px;
-    overflow: hidden;
-    border-radius: 0 0 18px 18px;
-    background: rgba(190, 166, 255, 0.1);
-  }
-
-  .feature-proof dl > div {
-    padding: 28px 26px;
-    background: color-mix(in srgb, var(--glass-fill-strong) 96%, #15131a);
-  }
-
-  .feature-proof dt {
-    margin: 0;
-    color: var(--purple-soft);
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 9.5px;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
-
-  .feature-proof dd {
-    margin: 11px 0 0;
-    color: var(--ink-40);
-    font-size: 13.5px;
-    line-height: 1.72;
-  }
-
-  .feature-link {
-    display: inline-flex;
-    align-items: center;
-    gap: 7px;
-    width: fit-content;
-    margin-top: 20px;
-    min-height: 38px;
-    padding: 0 14px;
-    color: #fff !important;
-    background: rgba(255, 255, 255, 0.055);
-    border: 1px solid var(--glass-line);
-    border-radius: 999px;
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
-    backdrop-filter: blur(18px);
-    -webkit-backdrop-filter: blur(18px);
-    font-size: 14px;
-    font-weight: 550;
-    text-decoration: none;
-  }
-
-  .feature-link svg {
-    transition: transform 180ms ease;
-  }
-
-  .feature-link:hover svg {
-    transform: translateX(3px);
-  }
-
-  /* ---- scheduled automation and stated conditions ---- */
-
-  .card-topline span:first-child {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-  }
-
-  .automation-note {
-    margin: clamp(24px, 3vw, 34px) 0 0;
-    padding: 20px 22px;
-    color: var(--ink-55);
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid var(--glass-line);
-    border-radius: 18px;
-    font-size: 13px;
-    line-height: 1.72;
-  }
-
-  .automation-note strong {
-    color: var(--purple-soft);
-    font-weight: 600;
-  }
-
-  .automation-note code {
-    padding: 1px 6px;
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(227, 215, 255, 0.16);
-    border-radius: 6px;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
-    font-size: 11.5px;
-  }
-
-  /* ---- observable runtime and proof ---- */
-
-  .runtime,
-  .connections,
-  .comparison-section,
-  .automation,
-  .crew {
-    margin-top: clamp(56px, 8vw, 96px);
-    padding: clamp(34px, 5vw, 58px);
-    background: var(--glass-fill-strong);
-    border: 1px solid var(--glass-line);
-    border-radius: 30px;
-    box-shadow: var(--glass-shadow);
-    backdrop-filter: blur(30px) saturate(145%);
-    -webkit-backdrop-filter: blur(30px) saturate(145%);
-  }
-
-  .runtime {
-    display: grid;
-    grid-template-columns: minmax(260px, 0.76fr) minmax(0, 1.24fr);
-    gap: clamp(40px, 7vw, 84px);
-    align-items: start;
-  }
-
-  .runtime-intro {
-    position: sticky;
-    top: 106px;
-  }
-
-  .runtime-list {
-    border-top: 1px solid rgba(227, 215, 255, 0.14);
-  }
-
-  .runtime-list article {
-    padding: 24px 0;
-    display: grid;
-    grid-template-columns: 30px minmax(120px, 0.48fr) minmax(0, 1fr);
-    gap: 18px;
-    border-bottom: 1px solid rgba(227, 215, 255, 0.14);
-  }
-
-  .runtime-list article > span {
-    color: var(--purple-soft);
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 10px;
-  }
-
-  .runtime-list h3,
-  .connection-grid h3 {
-    margin: 0;
-    color: #f2edf7;
-    font-size: 13.5px;
-    font-weight: 600;
-  }
-
-  .runtime-list article p,
-  .connection-grid article p {
-    margin: 0;
-    color: var(--ink-40);
-    font-size: 12.5px;
-    line-height: 1.65;
-  }
-
-
-
-
-  .connection-grid {
-    margin-top: 46px;
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    border-top: 1px solid rgba(227, 215, 255, 0.14);
-    border-left: 1px solid rgba(227, 215, 255, 0.14);
-    border-radius: 18px;
-    overflow: hidden;
-  }
-
-  .connection-grid article {
-    min-height: 126px;
-    padding: 23px;
-    background: rgba(255, 255, 255, 0.025);
-    border-right: 1px solid rgba(227, 215, 255, 0.14);
-    border-bottom: 1px solid rgba(227, 215, 255, 0.14);
-  }
-
-  .connection-grid article p { margin-top: 11px; }
-
-  .comparison {
-    margin-top: 44px;
-    overflow: hidden;
-    background: rgba(4, 3, 7, 0.25);
-    border: 1px solid rgba(227, 215, 255, 0.14);
-    border-radius: 20px;
-  }
-
-  .comparison summary {
-    min-height: 62px;
-    padding: 0 19px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 18px;
-    color: #e5dfee;
-    cursor: pointer;
-    font-size: 13.5px;
-    list-style: none;
-  }
-
-  .comparison summary::-webkit-details-marker { display: none; }
-  .comparison summary svg { transition: transform 180ms ease; }
-  .comparison[open] summary svg { transform: rotate(180deg); }
-  .comparison-scroll {
-    overflow-x: auto;
-    border-top: 1px solid rgba(227, 215, 255, 0.14);
-  }
-  .comparison table { width: 100%; min-width: 880px; border-collapse: collapse; }
-  .comparison th,
-  .comparison td {
-    padding: 15px 13px;
-    color: var(--ink-40);
-    border-bottom: 1px solid rgba(227, 215, 255, 0.1);
-    font-size: 11.5px;
-    text-align: left;
-  }
-  .comparison thead th { color: var(--ink-55); font-weight: 600; }
-  .comparison tbody th { color: var(--ink-70); font-weight: 550; }
-  .comparison th:nth-child(2),
-  .comparison td:nth-child(2) {
-    color: #d4c3ff;
-    background: rgba(126, 83, 220, 0.08);
-  }
-
-  /* ---- the crew ---- */
-
-  .crew-grid {
-    margin-top: 46px;
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 10px;
-  }
-
-  .crew-grid article {
-    min-height: 224px;
-    padding: 22px;
-    background: rgba(7, 5, 10, 0.42);
-    border: 1px solid rgba(227, 215, 255, 0.11);
-    border-radius: 16px;
-    transition: transform 220ms ease, border-color 220ms ease, background 220ms ease;
-  }
-
-  .crew-grid article:hover {
-    transform: translateY(-3px);
-    border-color: hsl(var(--crew-hue) 70% 72% / 0.34);
-    background: rgba(38, 27, 57, 0.6);
-  }
-
-  .crew-mark {
-    width: 44px;
-    height: 44px;
-    display: grid;
-    place-items: center;
-    color: hsl(var(--crew-hue) 78% 72%);
-    background: hsl(var(--crew-hue) 72% 62% / 0.1);
-    border: 1px solid hsl(var(--crew-hue) 72% 72% / 0.2);
-    border-radius: 13px;
-  }
-
-  .crew-mark svg {
-    width: 30px;
-    height: 30px;
-  }
-
-  .crew-grid small {
-    display: block;
-    margin-top: 18px;
-    color: var(--ink-40);
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 9.5px;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
-
-  .crew-grid h3 {
-    margin: 6px 0 0;
-    color: #f6f2fb;
-    font-size: 17px;
-    font-weight: 600;
-  }
-
-  .crew-species {
-    color: var(--ink-55);
-    font-weight: 500;
-  }
-
-  .crew-tagline {
-    margin: 8px 0 0;
-    color: hsl(var(--crew-hue) 72% 78%);
-    font-size: 12.5px;
-    font-style: italic;
-  }
-
-  .crew-role {
-    margin: 9px 0 0;
-    color: var(--ink-40);
-    font-size: 12.5px;
-    line-height: 1.62;
-  }
-
-  /* ---- changelog ---- */
-
-  .changelog {
-    padding: 42px 0;
-  }
-
-  .changelog-inner {
-    width: var(--measure);
-    margin-inline: auto;
-    padding: clamp(42px, 6vw, 66px);
-    background: var(--glass-fill-strong);
-    border: 1px solid var(--glass-line);
-    border-radius: 28px;
-    box-shadow: var(--glass-shadow);
-    backdrop-filter: blur(30px) saturate(145%);
-    -webkit-backdrop-filter: blur(30px) saturate(145%);
-  }
-
-  .changelog h2 {
-    margin: 0 0 34px;
-    color: var(--ink);
-    font-size: 24px;
-    font-weight: 600;
-    letter-spacing: -0.015em;
-  }
-
-  .changelog ol {
-    margin: 0;
-    padding: 0;
-    list-style: none;
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
-  }
-
-  .changelog li {
-    padding: 22px 0;
-    display: grid;
-    grid-template-columns: 118px 1fr;
-    gap: 18px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  }
-
-  .changelog-date {
-    color: var(--ink-40);
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 12px;
-    padding-top: 3px;
-  }
-
-  .changelog strong {
-    display: block;
-    color: var(--ink);
-    font-size: 15px;
-    font-weight: 600;
-  }
-
-  .changelog li p {
-    margin: 7px 0 0;
-    color: var(--ink-55);
-    font-size: 14px;
-    line-height: 1.6;
-  }
-
-  .changelog-link {
-    margin-top: 26px;
-    display: inline-flex;
-    align-items: center;
-    gap: 7px;
-    min-height: 38px;
-    padding: 0 14px;
-    color: #fff !important;
-    background: rgba(255, 255, 255, 0.055);
-    border: 1px solid var(--glass-line);
-    border-radius: 999px;
-    font-size: 14px;
-    font-weight: 550;
-    text-decoration: none;
-  }
-
-  .changelog-link svg {
-    transition: transform 180ms ease;
-  }
-
-  .changelog-link:hover svg {
-    transform: translateX(3px);
-  }
-
-  /* ---- connected product system ---- */
-
-  .product-system {
-    margin-top: clamp(72px, 10vw, 150px);
-    padding: clamp(44px, 7vw, 82px);
-    background: var(--glass-fill-strong);
-    border: 1px solid var(--glass-line);
-    border-radius: 28px;
-    box-shadow: var(--glass-shadow-soft);
-    backdrop-filter: blur(28px) saturate(145%);
-    -webkit-backdrop-filter: blur(28px) saturate(145%);
-  }
-
-  .product-system-grid {
-    margin-top: 46px;
-    display: grid;
-    grid-template-columns: repeat(6, minmax(0, 1fr));
-    gap: 10px;
-  }
-
-  .product-system-grid article {
-    grid-column: span 2;
-    min-height: 250px;
-    padding: 24px;
-    display: flex;
-    flex-direction: column;
-    background: rgba(7, 5, 10, 0.42);
-    border: 1px solid rgba(227, 215, 255, 0.11);
-    border-radius: 16px;
-    transition: transform 220ms ease, border-color 220ms ease, background 220ms ease;
-  }
-
-  .product-system-grid article:hover {
-    transform: translateY(-3px);
-    border-color: rgba(197, 168, 255, 0.26);
-    background: rgba(38, 27, 57, 0.6);
-  }
-
-  .product-system-icon {
-    width: 39px;
-    height: 39px;
-    display: grid;
-    place-items: center;
-    color: var(--purple-soft);
-    background: rgba(157, 111, 255, 0.11);
-    border: 1px solid rgba(203, 178, 255, 0.15);
-    border-radius: 12px;
-  }
-
-  .product-system-grid small {
-    margin-top: 26px;
-    color: var(--purple-soft);
-    font-size: 10px;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
-
-  .product-system-grid h3 {
-    margin: 7px 0 0;
-    color: #f6f2fb;
-    font-size: 20px;
-    font-weight: 570;
-    letter-spacing: 0;
-  }
-
-  .product-system-grid p {
-    margin: 13px 0 0;
-    color: var(--ink-55);
-    font-size: 13px;
-    line-height: 1.65;
-  }
-
-  .product-system-account {
-    width: fit-content;
-    min-height: 44px;
-    margin-top: 22px;
-    padding: 0 17px;
-    display: inline-flex;
-    align-items: center;
-    gap: 9px;
-    color: var(--lavender) !important;
-    background: rgba(143, 82, 255, 0.1);
-    border: 1px solid rgba(197, 168, 255, 0.2);
-    border-radius: 13px;
-    font-size: 13px;
-    text-decoration: none;
-  }
-
-  .product-system-account svg { transition: transform 180ms ease; }
-  .product-system-account:hover svg { transform: translateX(3px); }
-
-  /* ---- closing ---- */
-
-  .closing {
-    position: relative;
-    width: var(--measure);
-    margin: clamp(72px, 10vw, 150px) auto clamp(88px, 12vw, 170px);
-    padding: clamp(56px, 9vw, 120px) 20px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    text-align: center;
-  }
-
-  .closing h2 {
-    margin: 0;
-    font-size: clamp(38px, 6.8vw, 82px);
-    font-weight: 640;
-    letter-spacing: -0.045em;
-    line-height: 1.02;
-    background: linear-gradient(180deg, #ffffff 55%, #c9b0ff);
-    -webkit-background-clip: text;
-    background-clip: text;
-    color: transparent;
-  }
-
-  .closing p {
-    margin: 22px 0 0;
-    color: var(--ink-55);
-    font-size: clamp(16px, 1.8vw, 19px);
-  }
-
-  .closing-cta {
-    min-height: 54px;
-    margin-top: 40px;
-    padding: 0 30px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 12px;
-    color: #120d17 !important;
-    background: linear-gradient(180deg, rgba(245, 240, 255, 0.98), rgba(207, 184, 255, 0.94));
-    border: 1px solid rgba(255, 255, 255, 0.62);
-    border-radius: 999px;
-    box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.82),
-      0 16px 45px rgba(79, 51, 137, 0.2),
-      0 0 60px rgba(143, 82, 255, 0.22);
-    font-size: 16px;
-    font-weight: 600;
-    text-decoration: none;
-    transition: background 180ms ease, transform 180ms ease, box-shadow 180ms ease;
-  }
-
-  .closing-cta:hover {
-    background: linear-gradient(180deg, #f7f2ff, #c9b0ff);
-    border-color: rgba(255, 255, 255, 0.74);
-    transform: translateY(-1px);
-    box-shadow: 0 12px 44px rgba(146, 116, 236, 0.32);
-  }
-
-  .closing-cta svg {
-    transition: transform 180ms ease;
-  }
-
-  .closing-cta:hover svg {
-    transform: translateX(3px);
-  }
-
   /* ---- keyframes ---- */
 
   @keyframes field-breathe {
@@ -2937,241 +993,23 @@ const changelog = [
     to { opacity: 1; transform: translate3d(5px, 3px, 0); }
   }
 
-  @keyframes marquee {
-    to { transform: translateX(-50%); }
-  }
-
   /* ---- responsive ---- */
-
-  @media (max-width: 900px) {
-    .suite-grid { grid-template-columns: 1fr; }
-    .workflow-list { grid-template-columns: repeat(2, 1fr); }
-    .workflow-list li { border-bottom: 1px solid rgba(227, 215, 255, 0.12); }
-    .workflow-list li:nth-child(2n) { border-right: 0; }
-    .workflow-list li:last-child { border-bottom: 0; }
-
-    .runtime { grid-template-columns: 1fr; }
-    .runtime-intro { position: static; }
-    .crew-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .product-system-grid { grid-template-columns: 1fr 1fr; }
-    .product-system-grid article,
-    .product-system-grid article:nth-child(4),
-    .product-system-grid article:nth-child(5) { grid-column: auto; }
-  }
 
   @media (max-width: 640px) {
     .hero { padding-top: 44px; }
     .wordmark { margin-bottom: 26px; }
     .headline { min-height: 3.4em; font-size: clamp(26px, 7.6vw, 32px); }
-    .hero-loop { grid-template-columns: 1fr; min-height: 0; margin-top: 24px; padding: 9px 9px 13px; }
-    .hero-loop-stage { min-height: 42px; }
-    .hero-loop-stage:not(.is-active) { display: none; }
-    .hero-loop-progress { inset: auto 9px 6px; }
 
     .showcase { width: calc(100% - 24px); padding-top: 44px; }
     .product-window { padding: 5px; border-radius: 21px; }
     .product-bar { min-height: 34px; padding-inline: 10px; }
     .product-title { display: none; }
-    .product-window img {
-      aspect-ratio: 16 / 10;
-      object-fit: cover;
-      object-position: top left;
-    }
-
-    .belt { width: calc(100% - 24px); margin-top: 48px; padding: 26px 0; border-radius: 20px; }
-    .marquee-track { gap: 32px; padding-right: 32px; }
-    .marquee-track span { font-size: 13.5px; }
-
-    .section-width { width: calc(100% - 24px); }
-    .suite-grid { border-radius: 20px; }
-    .suite-grid article { min-height: 200px; padding: 22px; }
-    .workflow,
-    .runtime,
-    .connections,
-    .comparison-section,
-    .automation,
-    .crew { padding: 30px 20px; border-radius: 22px; }
-    .crew-grid { grid-template-columns: 1fr; margin-top: 34px; }
-    .crew-grid article { min-height: 0; }
-    .automation-note { padding: 16px 18px; border-radius: 15px; font-size: 12.5px; }
-    .product-system { padding: 30px 20px; border-radius: 22px; }
-    .product-system-grid { grid-template-columns: 1fr; margin-top: 34px; }
-    .product-system-grid article,
-    .product-system-grid article:last-child { grid-column: auto; min-height: 220px; }
-    .section-heading h2,
-    .runtime-intro h2 { font-size: 32px; }
-    .section-heading > p:last-child,
-    .runtime-intro > p:last-child { font-size: 14.5px; }
-    .workflow-list { grid-template-columns: 1fr; margin-top: 34px; }
-    .workflow-list li { min-height: 118px; border-right: 0; }
-    .workflow-list strong { margin-top: 12px; }
-
-    .runtime-list article { grid-template-columns: 28px 1fr; gap: 12px; }
-    .runtime-list article p { grid-column: 2; }
-    .connection-grid { grid-template-columns: 1fr; }
-    .connection-grid article { min-height: 108px; }
-
-    .feature { width: calc(100% - 24px); padding: 30px 0; gap: 16px; }
-    .feature-copy { padding: 22px 20px 23px; border-radius: 20px; }
-    .feature-card { padding: 5px; border-radius: 21px; }
-    .feature-card img {
-      aspect-ratio: 16 / 10;
-      object-fit: cover;
-      object-position: top left;
-    }
-    .feature-proof dl > div { padding: 16px 18px; }
-    .card-topline span:last-child { display: none; }
-
-    .changelog li { grid-template-columns: 1fr; gap: 6px; padding: 18px 0; }
-    .changelog-date { padding-top: 0; }
-
-    .changelog-inner { width: calc(100% - 24px); padding: 32px 20px; border-radius: 22px; }
-    .closing { width: calc(100% - 24px); padding: 36px 22px; border-radius: 22px; }
   }
 
   @media (prefers-reduced-motion: reduce) {
     .ascii-field { animation: none; transform: none; }
-    .feature-card,
-    .feature-card:hover { transform: none; }
-    .product-window img { will-change: auto; }
-  }
-  /* ── Vector CLI section ─────────────────────────────────────────── */
-  .cli-scene {
-    padding: clamp(64px, 9vw, 120px) 0 clamp(48px, 7vw, 88px);
-    scroll-margin-top: 96px; /* clear the sticky glass nav on #ch-cli jumps */
   }
 
-  .cli-grid {
-    margin-top: clamp(28px, 4vw, 46px);
-    display: grid;
-    grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
-    gap: clamp(20px, 3vw, 36px);
-    align-items: start;
-  }
-
-  .cli-terminal {
-    margin: 0;
-    overflow: hidden;
-    background: rgba(10, 7, 16, 0.92);
-    border: 1px solid var(--hairline);
-    border-radius: 18px;
-    box-shadow: 0 30px 90px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.08);
-  }
-
-  .cli-screen {
-    margin: 0;
-    padding: 22px 24px 26px;
-    overflow-x: auto;
-    color: var(--ink-70);
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
-    font-size: 12.5px;
-    line-height: 1.75;
-  }
-
-  .cli-prompt { color: var(--purple-soft); font-weight: 700; }
-  .cli-ok { color: #7fd8a4; }
-  .cli-dim { color: var(--ink-55); }
-
-  .cli-points {
-    display: grid;
-    gap: 14px;
-  }
-
-  .cli-points article {
-    padding: 18px 20px;
-    background: var(--glass-fill);
-    border: 1px solid var(--glass-line);
-    border-radius: var(--glass-radius-small);
-    box-shadow: var(--glass-shadow-soft);
-  }
-
-  .cli-points h3 {
-    margin: 0;
-    color: var(--lavender);
-    font-size: 14.5px;
-    font-weight: 620;
-    letter-spacing: -0.01em;
-  }
-
-  .cli-points p {
-    margin: 7px 0 0;
-    color: var(--ink-55);
-    font-size: 12.8px;
-    line-height: 1.65;
-  }
-
-  .cli-points code,
-  .cli-install {
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
-  }
-
-  .cli-points code {
-    padding: 1px 6px;
-    color: var(--purple-soft);
-    font-size: 11.5px;
-    background: rgba(143, 82, 255, 0.12);
-    border: 1px solid rgba(183, 149, 255, 0.22);
-    border-radius: 6px;
-  }
-
-  .cli-get {
-    margin-top: clamp(26px, 4vw, 40px);
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: space-between;
-    gap: 18px;
-    padding: 20px 24px;
-    background: var(--glass-fill-strong);
-    border: 1px solid var(--glass-line);
-    border-radius: var(--glass-radius-small);
-    box-shadow: var(--glass-shadow-soft);
-  }
-
-  .cli-install {
-    display: inline-flex;
-    align-items: center;
-    gap: 10px;
-    color: var(--lavender);
-    font-size: 13px;
-  }
-
-  .cli-install > span[aria-hidden] { color: var(--purple-soft); }
-
-  .cli-install-tag {
-    padding: 3px 9px;
-    color: var(--purple-soft);
-    font-size: 10px;
-    font-weight: 620;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
-    background: rgba(143, 82, 255, 0.12);
-    border: 1px solid rgba(183, 149, 255, 0.28);
-    border-radius: 999px;
-  }
-
-  .cli-get-actions {
-    display: flex;
-    align-items: center;
-    gap: 18px;
-  }
-
-  .cli-get-cta { margin: 0; }
-
-  .cli-get-token {
-    color: var(--ink-55);
-    font-size: 12.5px;
-    text-decoration: underline;
-    text-decoration-color: rgba(183, 149, 255, 0.4);
-    text-underline-offset: 3px;
-  }
-
-  .cli-get-token:hover { color: var(--lavender); }
-
-  @media (max-width: 960px) {
-    .cli-grid { grid-template-columns: 1fr; }
-    .cli-get { flex-direction: column; align-items: flex-start; }
-  }
   /* ── Simplified layout ───────────────────────────────────────────── */
   /* The old scene system sizes every .scene-stage to the viewport; the
      simplified hero is content-sized like a normal page. */
@@ -3205,47 +1043,406 @@ const changelog = [
     filter: none !important;
     pointer-events: auto !important;
   }
-  .simple-shot { width: var(--measure-wide); margin: clamp(36px, 5vw, 64px) auto 0; padding: clamp(10px, 1.6vw, 18px); background: rgba(255, 255, 255, 0.04); border: 1px solid var(--hairline); border-radius: 22px; box-shadow: 0 40px 120px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.08); }
-  .simple-shot img { display: block; width: 100%; height: auto; border-radius: 12px; }
-  .simple-section { padding: clamp(56px, 8vw, 110px) 0 0; }
-  .simple-heading { max-width: 640px; margin-bottom: clamp(24px, 3.5vw, 40px); }
-  .simple-heading h2 { margin: 10px 0 0; font-size: clamp(28px, 4vw, 44px); font-weight: 600; letter-spacing: -0.03em; line-height: 1.08; color: var(--lavender); }
-  .simple-heading > p:last-child { margin: 14px 0 0; font-size: 16px; line-height: 1.6; color: var(--ink-55); }
-  .simple-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
-  .simple-card { padding: 26px 26px 24px; background: rgba(255, 255, 255, 0.035); border: 1px solid var(--hairline); border-radius: 18px; }
-  .simple-card h3 { margin: 10px 0 0; font-size: 19px; font-weight: 600; letter-spacing: -0.02em; color: var(--lavender); }
-  .simple-card p:not(.section-kicker) { margin: 10px 0 0; font-size: 14.5px; line-height: 1.6; color: var(--ink-55); }
-  .simple-card a { display: inline-block; margin-top: 16px; color: var(--purple-soft); font-size: 14px; text-decoration: none; }
-  .simple-card a:hover { color: var(--lavender); }
-  .simple-cli { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.75fr); gap: clamp(20px, 3vw, 36px); align-items: start; }
-  .simple-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 16px; }
-  .simple-list li { font-size: 15px; line-height: 1.6; color: var(--ink-55); }
-  .simple-list strong { display: block; color: var(--lavender); font-weight: 600; }
-  .simple-list code { padding: 1px 6px; color: var(--purple-soft); font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace; font-size: 12.5px; background: rgba(143, 82, 255, 0.12); border: 1px solid rgba(183, 149, 255, 0.22); border-radius: 6px; }
-  .simple-rows { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 40px; border-top: 1px solid var(--hairline); }
-  .simple-row { padding: 26px 0; border-bottom: 1px solid var(--hairline); }
-  .simple-row h3 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -0.015em; color: var(--lavender); }
-  .simple-row p { margin: 8px 0 0; font-size: 14.5px; line-height: 1.6; color: var(--ink-55); }
-  .simple-row p a { color: var(--purple-soft); text-decoration: none; }
-  .simple-row-wide { grid-column: 1 / -1; }
-  .simple-soon { display: inline-block; margin-left: 10px; padding: 3px 9px; vertical-align: middle; color: var(--purple-soft); font-size: 10px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; background: rgba(143, 82, 255, 0.12); border: 1px solid rgba(183, 149, 255, 0.28); border-radius: 999px; }
-  /* The model roster reads as a price list, not as cards: name on the left, the
-     one fact that decides whether you can use it on the right. */
-  .simple-models { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 40px; border-top: 1px solid var(--hairline); }
-  .simple-models li { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 16px; padding: 14px 0; border-bottom: 1px solid var(--hairline); }
-  .simple-models strong { font-size: 15px; font-weight: 600; letter-spacing: -0.015em; color: var(--lavender); }
-  .simple-models span { font-size: 13px; color: var(--ink-40); }
-  .simple-stats { margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
-  .simple-stats > div { padding: 22px 22px 20px; background: rgba(255, 255, 255, 0.035); border: 1px solid var(--hairline); border-radius: 18px; }
-  .simple-stats dt { font-size: 11.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-55); }
-  .simple-stats dd { margin: 12px 0 0; font-size: clamp(26px, 3.2vw, 34px); font-weight: 600; letter-spacing: -0.03em; line-height: 1; color: var(--lavender); }
-  .simple-stats dd span { display: block; margin-top: 8px; font-size: 13px; font-weight: 400; letter-spacing: 0; color: var(--ink-40); }
-  .simple-note { max-width: 640px; margin: 20px 0 0; font-size: 14px; line-height: 1.6; color: var(--ink-40); }
-  @media (max-width: 900px) {
-    .simple-grid, .simple-cli, .simple-rows, .simple-models { grid-template-columns: 1fr; }
-    .simple-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+  /* ==================================================================
+     The page after the hero: three recordings, the trust row, the footer.
+     Centred, one measure, generous air, and the type does the work.
+     ================================================================== */
+
+  .vector-marketing {
+    --landing-title: #f5f5f7;
+    --landing-subtitle: rgba(245, 245, 247, 0.92);
+    --landing-secondary: #a1a1a6;
+    --landing-accent: #aa8cff;
+    --landing-surface: rgba(255, 255, 255, 0.05);
+    --landing-line: rgba(255, 255, 255, 0.08);
+    --landing-content: min(1180px, calc(100% - 40px));
+    --landing-ease: cubic-bezier(0.16, 1, 0.3, 1);
   }
+
+  /* ---- pills ---- */
+
+  .vector-marketing :global(.landing-pill) {
+    height: 48px;
+    padding: 0 24px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: #1d1d1f;
+    background: #f5f5f7;
+    border-radius: 999px;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.6),
+      0 12px 32px rgba(0, 0, 0, 0.32);
+    font-size: 17px;
+    font-weight: 500;
+    line-height: 1;
+    letter-spacing: -0.012em;
+    white-space: nowrap;
+    text-decoration: none;
+    transition:
+      background-color 200ms ease,
+      box-shadow 200ms ease,
+      transform 200ms var(--landing-ease);
+  }
+
+  .vector-marketing :global(.landing-pill:hover) {
+    background: #ffffff;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.6),
+      0 16px 40px rgba(0, 0, 0, 0.38),
+      0 0 0 6px rgba(170, 140, 255, 0.1);
+    transform: translateY(-1px);
+  }
+
+  .vector-marketing :global(.landing-pill:active) {
+    transform: translateY(0) scale(0.98);
+  }
+
+  /* ---- recording sections ---- */
+
+  .stage {
+    padding: 120px 0 40px;
+  }
+
+  #cli {
+    padding-top: clamp(128px, 12vw, 176px);
+  }
+
+  .stage-visual {
+    width: min(1080px, calc(100% - 40px));
+    margin-inline: auto;
+    transform-origin: 50% 35%;
+  }
+
+  .stage-copy {
+    width: var(--landing-content);
+    margin: 48px auto 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+  }
+
+  .stage-title {
+    margin: 0;
+    color: var(--landing-title);
+    font-size: 80px;
+    font-weight: 500;
+    line-height: 84px;
+    letter-spacing: -1.2px;
+    text-wrap: balance;
+  }
+
+  .stage-subtitle {
+    margin: 12px 0 0;
+    color: var(--landing-subtitle);
+    font-size: 28px;
+    font-weight: 500;
+    line-height: 35px;
+    letter-spacing: -0.14px;
+    text-wrap: balance;
+  }
+
+  .stage-action {
+    margin-top: 32px;
+  }
+
+  .stage-note {
+    margin: 16px 0 0;
+    color: var(--landing-secondary);
+    font-size: 15px;
+    line-height: 1.55;
+  }
+
+  /* ---- trust ---- */
+
+  .trust {
+    padding: 112px 0;
+  }
+
+  .trust-head {
+    width: var(--landing-content);
+    margin-inline: auto;
+  }
+
+  .trust-mark {
+    color: var(--landing-title);
+  }
+
+  .trust-mark svg {
+    display: block;
+    width: 92px;
+    height: auto;
+  }
+
+  .trust-title {
+    max-width: 780px;
+    margin: 22px 0 0;
+    color: var(--landing-title);
+    font-size: 60px;
+    font-weight: 500;
+    line-height: 1.04;
+    letter-spacing: -1.5px;
+  }
+
+  .trust-title strong {
+    font-weight: 700;
+  }
+
+  .trust-carousel {
+    margin-top: 56px;
+  }
+
+  /* The row runs to the right edge of the window, like a shelf, while its
+     first card lines up with the heading above it. */
+  .trust-row {
+    --trust-inset: max(20px, calc((100% - 1180px) / 2));
+    margin: 0;
+    padding: 4px var(--trust-inset) 8px;
+    display: flex;
+    gap: 16px;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scroll-snap-type: x mandatory;
+    scroll-padding-inline: var(--trust-inset);
+    scrollbar-width: none;
+    list-style: none;
+  }
+
+  .trust-row::-webkit-scrollbar {
+    display: none;
+  }
+
+  .trust-slot {
+    flex: 0 0 calc((100% - 32px) / 3);
+    min-width: 0;
+    scroll-snap-align: start;
+  }
+
+  .trust-card {
+    position: relative;
+    height: 100%;
+    min-height: 292px;
+    padding: 32px 32px 28px;
+    display: flex;
+    flex-direction: column;
+    background: var(--landing-surface);
+    border: 1px solid var(--landing-line);
+    border-radius: 28px;
+    transition:
+      background-color 240ms ease,
+      border-color 240ms ease;
+  }
+
+  .trust-card:hover {
+    background: rgba(255, 255, 255, 0.07);
+    border-color: rgba(255, 255, 255, 0.13);
+  }
+
+  .trust-icon {
+    width: 28px;
+    height: 28px;
+    display: inline-flex;
+    color: var(--landing-accent);
+  }
+
+  .trust-lead {
+    margin: 32px 0 0;
+    color: var(--landing-accent);
+    font-size: 21px;
+    font-weight: 500;
+    line-height: 1.3;
+    letter-spacing: -0.012em;
+  }
+
+  .trust-text {
+    margin: 2px 0 0;
+    color: var(--landing-title);
+    font-size: 21px;
+    font-weight: 500;
+    line-height: 1.3;
+    letter-spacing: -0.012em;
+  }
+
+  .trust-more {
+    width: 40px;
+    height: 40px;
+    margin: auto 0 0 auto;
+    display: grid;
+    place-items: center;
+    flex: none;
+    color: var(--landing-title);
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 50%;
+    transition: background-color 200ms ease;
+  }
+
+  .trust-more svg {
+    transition: transform 320ms var(--landing-ease);
+  }
+
+  /* The whole card is the link's hit area; the circle is only its mark. */
+  .trust-more::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: 28px;
+  }
+
+  .trust-more:focus-visible {
+    outline: none;
+  }
+
+  .trust-more:focus-visible::after {
+    outline: 2px solid var(--landing-accent);
+    outline-offset: 3px;
+  }
+
+  .trust-card:hover .trust-more {
+    background: rgba(255, 255, 255, 0.16);
+  }
+
+  .trust-card:hover .trust-more svg {
+    transform: rotate(90deg);
+  }
+
+  .trust-controls {
+    width: var(--landing-content);
+    margin: 24px auto 0;
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+
+  .trust-controls[hidden] {
+    display: none;
+  }
+
+  .trust-arrow {
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    display: grid;
+    place-items: center;
+    color: var(--landing-title);
+    background: rgba(255, 255, 255, 0.08);
+    border: 0;
+    border-radius: 50%;
+    cursor: pointer;
+    transition:
+      background-color 200ms ease,
+      color 200ms ease,
+      opacity 200ms ease;
+  }
+
+  .trust-arrow:hover {
+    background: rgba(255, 255, 255, 0.16);
+  }
+
+  .trust-arrow[aria-disabled="true"] {
+    color: rgba(245, 245, 247, 0.4);
+    background: rgba(255, 255, 255, 0.04);
+    cursor: default;
+  }
+
+  /* ---- landing breakpoints ---- */
+
+  @media (max-width: 1100px) {
+    .stage-title {
+      font-size: 64px;
+      line-height: 1.06;
+      letter-spacing: -0.015em;
+    }
+
+    .trust-title {
+      font-size: 52px;
+      letter-spacing: -0.022em;
+    }
+
+    .trust-slot {
+      flex-basis: min(380px, calc(100% - 48px));
+    }
+  }
+
   @media (max-width: 640px) {
-    .simple-stats { grid-template-columns: 1fr; }
+    .stage {
+      padding: 88px 0 24px;
+    }
+
+    #cli {
+      padding-top: 104px;
+    }
+
+    .stage-visual {
+      width: calc(100% - 24px);
+    }
+
+    .stage-copy {
+      margin-top: 36px;
+    }
+
+    .stage-title {
+      font-size: 44px;
+      line-height: 1.05;
+      letter-spacing: -0.02em;
+    }
+
+    .stage-subtitle {
+      margin-top: 10px;
+      font-size: 20px;
+      line-height: 1.3;
+      letter-spacing: -0.01em;
+    }
+
+    .stage-action {
+      margin-top: 26px;
+    }
+
+    .trust {
+      padding: 88px 0;
+    }
+
+    .trust-title {
+      margin-top: 18px;
+      font-size: 44px;
+      line-height: 1.06;
+      letter-spacing: -0.025em;
+    }
+
+    .trust-break {
+      display: none;
+    }
+
+    .trust-carousel {
+      margin-top: 40px;
+    }
+
+    .trust-row {
+      gap: 12px;
+    }
+
+    .trust-slot {
+      flex-basis: calc(100% - 32px);
+    }
+
+    .trust-card {
+      min-height: 264px;
+      padding: 28px 26px 24px;
+      border-radius: 24px;
+    }
+
+    .trust-more::after {
+      border-radius: 24px;
+    }
+
+    .trust-lead {
+      margin-top: 28px;
+    }
+
+    .trust-lead,
+    .trust-text {
+      font-size: 19px;
+    }
   }
 </style>

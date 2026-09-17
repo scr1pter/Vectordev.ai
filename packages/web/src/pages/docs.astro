@@ -530,44 +530,87 @@ const faqs = [
   description="Learn how to install Vector, open a repository, run agents, test with the controlled browser, review changes, and publish projects."
 >
   <div class="docs-page">
-    <MarketingNav active="docs" />
-
-    <header class="docs-hero">
-      <p class="eyebrow">Documentation</p>
-      <h1>Build with Vector.</h1>
-      <p>
-        Open a local repository, direct one or many agents, work beside them in the editor, verify the result in the
-        terminal and browser, then review and publish without leaving the workspace.
-      </p>
-      <div class="quick-links" aria-label="Quick links">
-        <a href="#first-task">Run your first session <span aria-hidden="true">→</span></a>
-        <a href="#agent-workspaces">Use multiple agents <span aria-hidden="true">→</span></a>
-        <a href="#cloud-services">Publish a repository <span aria-hidden="true">→</span></a>
-      </div>
-    </header>
+    <div class="docs-topbar">
+      <MarketingNav active="docs" />
+    </div>
 
     <div class="docs-shell">
-      <aside class="docs-nav">
-        <label for="docs-search">Search the guide</label>
-        <div class="search-field">
-          <span aria-hidden="true">⌕</span>
-          <input id="docs-search" type="search" placeholder="Search documentation" autocomplete="off" />
-        </div>
-        <nav aria-label="Documentation sections">
-          {navigation.map((group) => (
-            <section>
-              <h2>{group.label}</h2>
-              {group.links.map(([label, id]) => <a href={`#${id}`} data-doc-link>{label}</a>)}
-            </section>
-          ))}
+      <header class="docs-header">
+        <p class="docs-kicker">Documentation</p>
+        <h1>Build with Vector.</h1>
+        <p class="docs-lede">
+          Open a local repository, direct one or many agents, work beside them in the editor, verify the result in the
+          terminal and browser, then review and publish without leaving the workspace.
+        </p>
+        <nav class="docs-quick" aria-label="Quick links">
+          <a class="is-tour" href="/docs/product">Product tour <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" /><path d="m12 5 7 7-7 7" /></svg></a>
+          <a href="#first-task">Run your first session <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" /><path d="m12 5 7 7-7 7" /></svg></a>
+          <a href="#agent-workspaces">Use multiple agents <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" /><path d="m12 5 7 7-7 7" /></svg></a>
+          <a href="#cloud-services">Publish a repository <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" /><path d="m12 5 7 7-7 7" /></svg></a>
         </nav>
-        <p class="search-empty" hidden>No matching section.</p>
+      </header>
+
+      <button
+        class="docs-toc-toggle"
+        type="button"
+        aria-controls="docs-contents"
+        aria-expanded="false"
+        aria-haspopup="dialog"
+        data-chrome
+      >
+        <svg class="toggle-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01" /></svg>
+        <span class="toggle-label">Contents</span>
+        <span class="toggle-current" data-toc-current></span>
+        <svg class="toggle-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
+      </button>
+
+      <aside class="docs-sidebar" id="docs-contents" aria-label="Documentation contents">
+        <div class="docs-sidebar-inner">
+          <div class="docs-sidebar-head" data-chrome>
+            <p id="docs-contents-title">Contents</p>
+            <button class="docs-sidebar-close" type="button" aria-label="Close contents">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
+            </button>
+          </div>
+          <div class="docs-search">
+            <label class="docs-sr" for="docs-search">Search the guide</label>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
+            <input id="docs-search" type="search" placeholder="Search documentation" autocomplete="off" spellcheck="false" />
+            <kbd aria-hidden="true">/</kbd>
+          </div>
+          <nav class="docs-nav" aria-label="Documentation sections">
+            <ul class="docs-nav-tour" role="list">
+              <li>
+                <a href="/docs/product" data-doc-link>
+                  <span class="tour-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="m15.5 8.5-1.6 4.6a1.5 1.5 0 0 1-.9.9l-4.5 1.5 1.6-4.6a1.5 1.5 0 0 1 .9-.9z" /></svg>
+                  </span>
+                  <span>Product tour</span>
+                  <svg class="tour-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7" /><path d="M8 7h9v9" /></svg>
+                </a>
+              </li>
+            </ul>
+            {navigation.map((group, index) => (
+              <div class="docs-nav-group" data-doc-group>
+                <p class="docs-nav-label" id={`docs-nav-group-${index}`}>{group.label}</p>
+                <ul role="list" aria-labelledby={`docs-nav-group-${index}`}>
+                  {group.links.map(([label, id]) => (
+                    <li><a href={`#${id}`} data-doc-link>{label}</a></li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+            <p class="search-empty" hidden>No matching section.</p>
+          </nav>
+        </div>
       </aside>
 
       <main class="docs-content">
         <section id="install" class="doc-section">
-          <p class="section-number">01</p>
-          <h2>Install Vector</h2>
+          <div class="doc-heading">
+            <h2>Install Vector</h2>
+            <a class="doc-anchor" href="#install" aria-label="Link to Install Vector" data-chrome></a>
+          </div>
           <p>
             Download the installer that matches your computer, open it, and move through the operating
             system's installation flow. Vector is available for Apple silicon and Intel Macs, Windows,
@@ -576,13 +619,15 @@ const faqs = [
           <div class="callout">
             <strong>Start with the right build.</strong>
             <span>The download page detects your platform and keeps every architecture available.</span>
-            <a href="/login?returnTo=%2Faccount">Sign in to download →</a>
+            <a class="callout-link" href="/login?returnTo=%2Faccount">Sign in to download →</a>
           </div>
         </section>
 
         <section id="open-repository" class="doc-section">
-          <p class="section-number">02</p>
-          <h2>Open a repository</h2>
+          <div class="doc-heading">
+            <h2>Open a repository</h2>
+            <a class="doc-anchor" href="#open-repository" aria-label="Link to Open a repository" data-chrome></a>
+          </div>
           <p>
             From Home, choose <strong>Open repository</strong> and select a local project folder. Vector
             attaches conversations, browser state, usage, engineering tools, and agent workspaces to
@@ -596,18 +641,28 @@ const faqs = [
         </section>
 
         <section id="first-task" class="doc-section">
-          <p class="section-number">03</p>
-          <h2>Run your first task</h2>
+          <div class="doc-heading">
+            <h2>Run your first task</h2>
+            <a class="doc-anchor" href="#first-task" aria-label="Link to Run your first task" data-chrome></a>
+          </div>
           <p>
             Describe the result, the constraints, and how Vector should verify the work. A strong first
             request is specific enough to test but small enough to review.
           </p>
-          <div class="prompt-example">
-            <span>Example</span>
-            <p>
+          <div class="prompt-example" data-copy-block>
+            <div class="code-bar">
+              <span>Example</span>
+              <button class="copy-button" type="button" aria-label="Copy example prompt" data-copy data-chrome>
+                <svg class="icon-copy" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2" /><path d="M5 15H4.5A1.5 1.5 0 0 1 3 13.5v-9A1.5 1.5 0 0 1 4.5 3h9A1.5 1.5 0 0 1 15 4.5V5" /></svg>
+                <svg class="icon-check" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg>
+                <span data-copy-label>Copy</span>
+              </button>
+            </div>
+            <p data-copy-source>
               Add a responsive settings page to this project. Follow the existing design system, run
               the relevant tests, open the app in the browser, and summarize every changed file.
             </p>
+            <span class="docs-sr" aria-live="polite" data-copy-status data-chrome></span>
           </div>
           <figure class="docs-image">
             <img
@@ -622,8 +677,10 @@ const faqs = [
         </section>
 
         <section id="vector-agent" class="doc-section">
-          <p class="section-number">04</p>
-          <h2>Vector Agent</h2>
+          <div class="doc-heading">
+            <h2>Vector Agent</h2>
+            <a class="doc-anchor" href="#vector-agent" aria-label="Link to Vector Agent" data-chrome></a>
+          </div>
           <p>
             The main session can inspect the repository, edit files, run commands, use project tools,
             and report a reviewable result. Use Plan mode when you want analysis without edits, and
@@ -644,8 +701,10 @@ const faqs = [
         </section>
 
         <section id="agent-workspaces" class="doc-section">
-          <p class="section-number">05</p>
-          <h2>Agent workspaces</h2>
+          <div class="doc-heading">
+            <h2>Agent workspaces</h2>
+            <a class="doc-anchor" href="#agent-workspaces" aria-label="Link to Agent workspaces" data-chrome></a>
+          </div>
           <p>
             Use another workspace when work can happen independently: one agent can handle the
             interface while another investigates tests or infrastructure. Vector isolates each agent
@@ -656,7 +715,7 @@ const faqs = [
             <li><span>2</span><div><strong>Keep working</strong><p>Switch between workspaces while they stream activity independently.</p></div></li>
             <li><span>3</span><div><strong>Review and merge</strong><p>Inspect the diff and checks before bringing selected work into main.</p></div></li>
           </ol>
-          <p class="note">
+          <p class="note is-caution">
             Two agents should not intentionally edit the same lines at the same time. Split work by
             responsibility to reduce conflicts and make review easier.
           </p>
@@ -667,8 +726,10 @@ const faqs = [
         </section>
 
         <section id="project-rules" class="doc-section">
-          <p class="section-number">06</p>
-          <h2>Project rules</h2>
+          <div class="doc-heading">
+            <h2>Project rules</h2>
+            <a class="doc-anchor" href="#project-rules" aria-label="Link to Project rules" data-chrome></a>
+          </div>
           <p>
             A rule is a standard written the way you would say it to a new teammate — "we don't put database query
             logic in the controller". Open <strong>Project rules</strong> from the workspace rail, the home screen, or
@@ -691,8 +752,10 @@ const faqs = [
         </section>
 
         <section id="agent-dashboard" class="doc-section">
-          <p class="section-number">07</p>
-          <h2>Agent Dashboard</h2>
+          <div class="doc-heading">
+            <h2>Agent Dashboard</h2>
+            <a class="doc-anchor" href="#agent-dashboard" aria-label="Link to Agent Dashboard" data-chrome></a>
+          </div>
           <p>
             Every agent in the project on one board: <strong>Running</strong>, <strong>Needs you</strong> and
             <strong>Done</strong>. Open it from the workspace rail. Switch to a list for a denser view of the same
@@ -704,15 +767,17 @@ const faqs = [
             <li><strong>Pull request state</strong><span>Open, merged, or never opened — merge state wins, so a merged run does not sit under "open" forever.</span></li>
             <li><strong>Teams as a unit</strong><span>Agents sharing a team or swarm filter together, and the board shows the messages they sent each other mid-run.</span></li>
           </ul>
-          <p class="note">
+          <p class="note is-caution">
             Two agents holding uncommitted work on the same file are reported as a clash. Merging both will conflict —
             review one before merging the other.
           </p>
         </section>
 
         <section id="external-agents" class="doc-section">
-          <p class="section-number">08</p>
-          <h2>Claude Code, Codex and Cursor</h2>
+          <div class="doc-heading">
+            <h2>Claude Code, Codex and Cursor</h2>
+            <a class="doc-anchor" href="#external-agents" aria-label="Link to Claude Code, Codex and Cursor" data-chrome></a>
+          </div>
           <p>
             A workspace can run someone else's CLI instead of Vector's own agent. Vector finds the CLI through your
             login shell, so a tool installed by nvm, Homebrew or an app bundle is detected even though a desktop app
@@ -731,8 +796,10 @@ const faqs = [
         </section>
 
         <section id="automations" class="doc-section">
-          <p class="section-number">09</p>
-          <h2>Automations</h2>
+          <div class="doc-heading">
+            <h2>Automations</h2>
+            <a class="doc-anchor" href="#automations" aria-label="Link to Automations" data-chrome></a>
+          </div>
           <p>
             An automation is one task Vector runs again and again on a schedule. Open <strong>Automations</strong> from
             the home screen, write the task, choose the repositories it runs in, and pick how often it repeats.
@@ -749,8 +816,10 @@ const faqs = [
         </section>
 
         <section id="agent-editor" class="doc-section">
-          <p class="section-number">10</p>
-          <h2>Agent and Editor</h2>
+          <div class="doc-heading">
+            <h2>Agent and Editor</h2>
+            <a class="doc-anchor" href="#agent-editor" aria-label="Link to Agent and Editor" data-chrome></a>
+          </div>
           <p>
             Agent and Editor are two modes over one Vector session. Switch to Editor when you want to work directly:
             search the project, open files in tabs, edit with language support, or keep the same agent beside the
@@ -764,8 +833,10 @@ const faqs = [
         </section>
 
         <section id="browser" class="doc-section">
-          <p class="section-number">11</p>
-          <h2>Controlled browser</h2>
+          <div class="doc-heading">
+            <h2>Controlled browser</h2>
+            <a class="doc-anchor" href="#browser" aria-label="Link to Controlled browser" data-chrome></a>
+          </div>
           <p>
             The Browser is attached to the current repository and session. Open a local preview or URL,
             interact manually, or ask Vector to inspect and test the page as part of the engineering task.
@@ -783,8 +854,10 @@ const faqs = [
         </section>
 
         <section id="terminal-review" class="doc-section">
-          <p class="section-number">12</p>
-          <h2>Terminal and review</h2>
+          <div class="doc-heading">
+            <h2>Terminal and review</h2>
+            <a class="doc-anchor" href="#terminal-review" aria-label="Link to Terminal and review" data-chrome></a>
+          </div>
           <p>
             The Terminal runs commands inside the active repository or isolated workspace. Review keeps the files an
             agent changed, validation results, risk signals and merge controls together, so you can inspect what will
@@ -793,8 +866,10 @@ const faqs = [
         </section>
 
         <section id="cloud-services" class="doc-section">
-          <p class="section-number">13</p>
-          <h2>Cloud Services</h2>
+          <div class="doc-heading">
+            <h2>Cloud Services</h2>
+            <a class="doc-anchor" href="#cloud-services" aria-label="Link to Cloud Services" data-chrome></a>
+          </div>
           <p>
             Cloud work is part of the task, not a panel you operate afterwards. The agent drives it through one
             permission-gated tool: it checks which providers are connected, detects the project's build settings,
@@ -814,8 +889,10 @@ const faqs = [
         </section>
 
         <section id="models" class="doc-section">
-          <p class="section-number">14</p>
-          <h2>Models and BYOK</h2>
+          <div class="doc-heading">
+            <h2>Models and BYOK</h2>
+            <a class="doc-anchor" href="#models" aria-label="Link to Models and BYOK" data-chrome></a>
+          </div>
           <h3>Models included with Vector</h3>
           <p>
             You do not need an API key. Vector comes with models included, today among them NVIDIA's
@@ -823,7 +900,7 @@ const faqs = [
             on Big Pickle, so the first session works before you connect anything. The lineup changes
             as providers add and retire models.
           </p>
-          <p class="note">
+          <p class="note is-caution">
             Included models are served by outside providers, and some may use your prompts to improve
             their models. For confidential code, use your own provider key.
           </p>
@@ -837,8 +914,10 @@ const faqs = [
         </section>
 
         <section id="connections" class="doc-section">
-          <p class="section-number">15</p>
-          <h2>MCP and connections</h2>
+          <div class="doc-heading">
+            <h2>MCP and connections</h2>
+            <a class="doc-anchor" href="#connections" aria-label="Link to MCP and connections" data-chrome></a>
+          </div>
           <p>
             MCP servers and project connections give an agent structured access to approved tools.
             Add only services you trust, confirm the permissions they request, and verify the
@@ -851,8 +930,10 @@ const faqs = [
         </section>
 
         <section id="review" class="doc-section">
-          <p class="section-number">16</p>
-          <h2>Review and recovery</h2>
+          <div class="doc-heading">
+            <h2>Review and recovery</h2>
+            <a class="doc-anchor" href="#review" aria-label="Link to Review and recovery" data-chrome></a>
+          </div>
           <p>
             Review changed files before merging or publishing. Checkpoints preserve recoverable
             project states, while isolated workspace diffs show exactly what an agent wants to bring
@@ -862,8 +943,10 @@ const faqs = [
         </section>
 
         <section id="troubleshooting" class="doc-section">
-          <p class="section-number">17</p>
-          <h2>Troubleshooting</h2>
+          <div class="doc-heading">
+            <h2>Troubleshooting</h2>
+            <a class="doc-anchor" href="#troubleshooting" aria-label="Link to Troubleshooting" data-chrome></a>
+          </div>
           <div class="troubleshooting">
             <article><strong>The agent does not respond</strong><p>Confirm a provider and model are connected, then check whether the provider reports a quota or authentication error.</p></article>
             <article><strong>The browser cannot open the app</strong><p>Start the development server in Terminal and use the local URL printed by the project.</p></article>
@@ -877,20 +960,25 @@ const faqs = [
         </section>
 
         <section id="faq" class="doc-section">
-          <p class="section-number">18</p>
-          <h2>Frequently asked questions</h2>
+          <div class="doc-heading">
+            <h2>Frequently asked questions</h2>
+            <a class="doc-anchor" href="#faq" aria-label="Link to Frequently asked questions" data-chrome></a>
+          </div>
           <div class="faq-list">
             {faqs.map((item) => (
               <details>
-                <summary>{item.question}<span aria-hidden="true">+</span></summary>
+                <summary><span>{item.question}</span><span class="faq-icon" aria-hidden="true"></span></summary>
                 <p>{item.answer}</p>
               </details>
             ))}
           </div>
         </section>
+
         <section id="why-vector" class="doc-section">
-          <p class="section-number">19</p>
-          <h2>Why Vector</h2>
+          <div class="doc-heading">
+            <h2>Why Vector</h2>
+            <a class="doc-anchor" href="#why-vector" aria-label="Link to Why Vector" data-chrome></a>
+          </div>
           <p>
             Most tools write the code. The hard part was never the writing. Vector is a workspace, not a wrapper
             around one trick: the editor, the memory, the measured spend, the verification, the connectors, the
@@ -920,8 +1008,10 @@ const faqs = [
         </section>
 
         <section id="operating-loop" class="doc-section">
-          <p class="section-number">20</p>
-          <h2>One operating loop</h2>
+          <div class="doc-heading">
+            <h2>One operating loop</h2>
+            <a class="doc-anchor" href="#operating-loop" aria-label="Link to One operating loop" data-chrome></a>
+          </div>
           <p>
             From a brief to verified, shipped work. Vector keeps the request, repository context, your own edits,
             agent activity, files, terminal, browser, measured usage, review, and release in one place.
@@ -932,16 +1022,18 @@ const faqs = [
             ))}
           </ol>
           <div class="doc-grid doc-grid-4">
-            <article class="doc-card"><h4>Editor, file search, terminal</h4><p>A real editor over your own files, with project-wide search, language diagnostics, a terminal, and an editor agent beside them.</p></article>
-            <article class="doc-card"><h4>Memory and measured spend</h4><p>Local memory in one file you can inspect, edit, or erase. Model economics records the tokens and cost the provider reported.</p></article>
-            <article class="doc-card"><h4>Review before main</h4><p>Inspect diffs, focused checks, pull-request findings, risk signals, checkpoints, and an optional independent judge verdict before work reaches the primary files.</p></article>
-            <article class="doc-card"><h4>MCP, providers, and Cloud</h4><p>Bring your own model provider, connect approved tools through MCP and the plugin catalog, and publish through infrastructure accounts that already belong to you.</p></article>
+            <article class="doc-card"><h3>Editor, file search, terminal</h3><p>A real editor over your own files, with project-wide search, language diagnostics, a terminal, and an editor agent beside them.</p></article>
+            <article class="doc-card"><h3>Memory and measured spend</h3><p>Local memory in one file you can inspect, edit, or erase. Model economics records the tokens and cost the provider reported.</p></article>
+            <article class="doc-card"><h3>Review before main</h3><p>Inspect diffs, focused checks, pull-request findings, risk signals, checkpoints, and an optional independent judge verdict before work reaches the primary files.</p></article>
+            <article class="doc-card"><h3>MCP, providers, and Cloud</h3><p>Bring your own model provider, connect approved tools through MCP and the plugin catalog, and publish through infrastructure accounts that already belong to you.</p></article>
           </div>
         </section>
 
         <section id="local-memory" class="doc-section">
-          <p class="section-number">21</p>
-          <h2>Local memory</h2>
+          <div class="doc-heading">
+            <h2>Local memory</h2>
+            <a class="doc-anchor" href="#local-memory" aria-label="Link to Local memory" data-chrome></a>
+          </div>
           <p>
             Vector lets you save durable facts about how you work — your stack, your conventions, the corrections you
             would otherwise repeat — in one <code>MEMORY.md</code> file inside Vector's local app config directory. It
@@ -953,8 +1045,10 @@ const faqs = [
         </section>
 
         <section id="tokenomics" class="doc-section">
-          <p class="section-number">22</p>
-          <h2>Tokenomics engine</h2>
+          <div class="doc-heading">
+            <h2>Tokenomics engine</h2>
+            <a class="doc-anchor" href="#tokenomics" aria-label="Link to Tokenomics engine" data-chrome></a>
+          </div>
           <p>
             The number is the provider's, not ours. Vector records what a run really spent by reading what the
             provider reported on the assistant messages — input, output, reasoning, cache reads and cache writes —
@@ -973,8 +1067,10 @@ const faqs = [
         </section>
 
         <section id="hulk" class="doc-section">
-          <p class="section-number">23</p>
-          <h2>HULK — hidden unique licence keys</h2>
+          <div class="doc-heading">
+            <h2>HULK — hidden unique licence keys</h2>
+            <a class="doc-anchor" href="#hulk" aria-label="Link to HULK — hidden unique licence keys" data-chrome></a>
+          </div>
           <p>
             Every copy has its own key. No shared serial, no keygen-shaped pattern, nothing embedded in the installer.
             Each purchase mints a key that exists only for that buyer, and activation ties it to the machines it runs
@@ -983,15 +1079,17 @@ const faqs = [
           <dl class="doc-rows">
             {licenseRows.map(([term, detail]) => (<div><dt>{term}</dt><dd>{detail}</dd></div>))}
           </dl>
-          <p class="note">
+          <p class="note is-caution">
             HULK is designed to make casual key-sharing not work and to keep your hardware private while doing it. It
             is not — and no licence system is — a guarantee against a determined attacker with your machine in hand.
           </p>
         </section>
 
         <section id="verified-completion" class="doc-section">
-          <p class="section-number">24</p>
-          <h2>Verified completion</h2>
+          <div class="doc-heading">
+            <h2>Verified completion</h2>
+            <a class="doc-anchor" href="#verified-completion" aria-label="Link to Verified completion" data-chrome></a>
+          </div>
           <p>
             Completion you can check, instead of a confident summary. Turn on LLM-as-a-judge and finishing stops
             being the agent's own opinion. Before it starts, the agent writes down the observable success criteria
@@ -1004,8 +1102,10 @@ const faqs = [
         </section>
 
         <section id="controlled-browser" class="doc-section">
-          <p class="section-number">25</p>
-          <h2>Controlled browser</h2>
+          <div class="doc-heading">
+            <h2>Controlled browser</h2>
+            <a class="doc-anchor" href="#controlled-browser" aria-label="Link to Controlled browser, in Why Vector" data-chrome></a>
+          </div>
           <p>
             The browser is a real Chromium view embedded in the Vector window, not a screenshot service. The agent
             opens the running product, clicks and types, reads console and network failures, captures what it saw,
@@ -1015,8 +1115,10 @@ const faqs = [
         </section>
 
         <section id="only-in-vector" class="doc-section">
-          <p class="section-number">26</p>
-          <h2>Only in Vector</h2>
+          <div class="doc-heading">
+            <h2>Only in Vector</h2>
+            <a class="doc-anchor" href="#only-in-vector" aria-label="Link to Only in Vector" data-chrome></a>
+          </div>
           <p>
             Things that are rarely true in one place. The difficult part is not generating text. It is keeping what
             you know, knowing what it cost, proving the work holds, and leaving you in control of what lands.
@@ -1027,8 +1129,10 @@ const faqs = [
         </section>
 
         <section id="conditions" class="doc-section">
-          <p class="section-number">27</p>
-          <h2>The conditions, stated</h2>
+          <div class="doc-heading">
+            <h2>The conditions, stated</h2>
+            <a class="doc-anchor" href="#conditions" aria-label="Link to The conditions, stated" data-chrome></a>
+          </div>
           <p>
             Where a capability has a catch, here it is. Rather than leaving these in footnotes, every one of them is
             written out in one place.
@@ -1045,8 +1149,10 @@ const faqs = [
         </section>
 
         <section id="subagents" class="doc-section">
-          <p class="section-number">28</p>
-          <h2>Subagents and subagent specialists</h2>
+          <div class="doc-heading">
+            <h2>Subagents and subagent specialists</h2>
+            <a class="doc-anchor" href="#subagents" aria-label="Link to Subagents and subagent specialists" data-chrome></a>
+          </div>
           <p>
             Vector's agent does not have to do every part of a task itself. It can hand self-contained pieces of the
             work to other agents, which run at the same time. There are two kinds, and Vector uses the same two names in
@@ -1055,12 +1161,12 @@ const faqs = [
           <div class="doc-grid doc-grid-4">
             <article class="doc-card">
               <small>General purpose · for big tasks</small>
-              <h4>Subagents</h4>
+              <h3>Subagents</h3>
               <p>A subagent takes whatever piece of the task the main agent hands it: answer a question about the code, change a group of files, find out why a check fails. Vector uses them for big tasks, one per independent part, launched together so they run at the same time, and does small tasks itself. You can turn them off in Settings → Agents.</p>
             </article>
             <article class="doc-card">
               <small>Named · one focus each</small>
-              <h4>Subagent specialists</h4>
+              <h3>Subagent specialists</h3>
               <p>A subagent specialist is a named agent with a fixed focus and its own permissions. Vector calls one when part of the task fits that focus, such as reviewing a diff or finding the cause of a failure. Agents you define yourself count as custom specialists.</p>
             </article>
           </div>
@@ -1108,18 +1214,20 @@ const faqs = [
         </section>
 
         <section id="comparison" class="doc-section">
-          <p class="section-number">29</p>
-          <h2>How Vector compares</h2>
+          <div class="doc-heading">
+            <h2>How Vector compares</h2>
+            <a class="doc-anchor" href="#comparison" aria-label="Link to How Vector compares" data-chrome></a>
+          </div>
           <p>
             Vector combines capabilities commonly split across an agent, an editor, a browser, a Git client, and a
             deployment dashboard. Capabilities change quickly, so verify current vendor documentation. A dash means
             Vector makes no claim.
           </p>
-          <div class="doc-table-wrap">
+          <div class="doc-table-wrap" role="region" aria-label="Comparison table" tabindex="0">
             <table class="doc-table">
-              <thead><tr><th>Capability</th><th>Vector</th><th>Claude Code</th><th>Codex</th><th>Cursor</th><th>App builders</th></tr></thead>
+              <thead><tr><th scope="col">Capability</th><th scope="col">Vector</th><th scope="col">Claude Code</th><th scope="col">Codex</th><th scope="col">Cursor</th><th scope="col">App builders</th></tr></thead>
               <tbody>
-                {comparison.map((row) => (<tr>{row.map((cell, index) => index === 0 ? <th scope="row">{cell}</th> : <td>{cell}</td>)}</tr>))}
+                {comparison.map((row) => (<tr>{row.map((cell, index) => index === 0 ? <th scope="row">{cell}</th> : <td class:list={{ "is-word": /^\S+$/.test(cell) }}>{cell}</td>)}</tr>))}
               </tbody>
             </table>
           </div>
@@ -1129,8 +1237,10 @@ const faqs = [
         </section>
 
         <section id="velocity" class="doc-section">
-          <p class="section-number">30</p>
-          <h2>Vector Velocity model <span class="doc-soon">Coming soon</span></h2>
+          <div class="doc-heading">
+            <h2>Vector Velocity model <span class="doc-soon">Coming soon</span></h2>
+            <a class="doc-anchor" href="#velocity" aria-label="Link to Vector Velocity model" data-chrome></a>
+          </div>
           <p>
             Vector Velocity is Vector's own model — over 300 billion parameters — tuned for the loop Vector actually runs — planning, tool calls,
             edits, checks, and verification — rather than for open-ended chat. It will join the models included with
@@ -1144,8 +1254,10 @@ const faqs = [
         </section>
 
         <section id="api-platform" class="doc-section">
-          <p class="section-number">31</p>
-          <h2>API platform <span class="doc-soon">Coming soon</span></h2>
+          <div class="doc-heading">
+            <h2>API platform <span class="doc-soon">Coming soon</span></h2>
+            <a class="doc-anchor" href="#api-platform" aria-label="Link to API platform" data-chrome></a>
+          </div>
           <p>
             Programmatic access to the same workspace: start sessions, run tasks, read transcripts and measured spend,
             manage connections, and trigger automations from your own systems and CI. Vector accounts and CLI tokens
@@ -1155,8 +1267,10 @@ const faqs = [
         </section>
 
         <section id="multiplayer" class="doc-section">
-          <p class="section-number">32</p>
-          <h2>Multiplayer</h2>
+          <div class="doc-heading">
+            <h2>Multiplayer</h2>
+            <a class="doc-anchor" href="#multiplayer" aria-label="Link to Multiplayer" data-chrome></a>
+          </div>
           <p>
             One workspace, several people. <code>vector invite</code> starts your workspace as a shared server and prints
             two links: your own, and an invite link for teammates. Anyone who opens the invite lands in the same Vector
@@ -1171,8 +1285,10 @@ const faqs = [
         </section>
 
         <section id="github" class="doc-section">
-          <p class="section-number">33</p>
-          <h2>GitHub automation</h2>
+          <div class="doc-heading">
+            <h2>GitHub automation</h2>
+            <a class="doc-anchor" href="#github" aria-label="Link to GitHub automation" data-chrome></a>
+          </div>
           <p>
             Task in, pull request out. Run <code>vector github install</code> once inside a repository: it writes a
             workflow that installs the CLI from npm on every <code>/vector</code> comment, then add the
@@ -1197,8 +1313,10 @@ const faqs = [
         </section>
 
         <section id="code-review" class="doc-section">
-          <p class="section-number">34</p>
-          <h2>Code review</h2>
+          <div class="doc-heading">
+            <h2>Code review</h2>
+            <a class="doc-anchor" href="#code-review" aria-label="Link to Code review" data-chrome></a>
+          </div>
           <p>
             Every pull request, reviewed. Say yes to automatic review during <code>vector github install</code> and
             Vector reviews each pull request when it opens and again on every push. It leaves one summary comment with
@@ -1224,8 +1342,10 @@ const faqs = [
         </section>
 
         <section id="follow" class="doc-section">
-          <p class="section-number">35</p>
-          <h2>Follow mode</h2>
+          <div class="doc-heading">
+            <h2>Follow mode</h2>
+            <a class="doc-anchor" href="#follow" aria-label="Link to Follow mode" data-chrome></a>
+          </div>
           <p>
             Watch the agent type. With Follow mode on, the editor opens whatever file the agent is editing, scrolls to
             the lines it changed, tints them in that agent's colour, and places a labelled caret at the end of the
@@ -1239,12 +1359,26 @@ const faqs = [
         </section>
 
         <section id="changelog" class="doc-section">
-          <p class="section-number">36</p>
-          <h2>Changelog</h2>
+          <div class="doc-heading">
+            <h2>Changelog</h2>
+            <a class="doc-anchor" href="#changelog" aria-label="Link to Changelog" data-chrome></a>
+          </div>
           <p>Keep the whole build in view. Recent releases, newest first.</p>
-          <dl class="doc-rows">
-            {changelog.map(([date, title, blurb]) => (<div><dt>{title}<small>{date}</small></dt><dd>{blurb}</dd></div>))}
-          </dl>
+          <ol class="changelog">
+            {changelog.map(([date, title, blurb]) => {
+              const [when, version] = date.split(" · ")
+              return (
+                <li>
+                  <h3>{title}</h3>
+                  <p class="changelog-date">
+                    <span>{when}</span>
+                    {version && <span class="changelog-version">{version}</span>}
+                  </p>
+                  <p class="changelog-body">{blurb}</p>
+                </li>
+              )
+            })}
+          </ol>
         </section>
       </main>
     </div>
@@ -1254,531 +1388,1993 @@ const faqs = [
 </MarketingLayout>
 
 <script>
+  const sidebar = document.querySelector<HTMLElement>("#docs-contents")
+  const scroller = document.querySelector<HTMLElement>(".docs-nav")
   const input = document.querySelector<HTMLInputElement>("#docs-search")
-  const links = [...document.querySelectorAll<HTMLAnchorElement>("[data-doc-link]")]
   const empty = document.querySelector<HTMLElement>(".search-empty")
+  const toggle = document.querySelector<HTMLButtonElement>(".docs-toc-toggle")
+  const closeButton = document.querySelector<HTMLButtonElement>(".docs-sidebar-close")
+  const currentLabel = document.querySelector<HTMLElement>("[data-toc-current]")
+  const groups = [...document.querySelectorAll<HTMLElement>("[data-doc-group]")]
+  const sections = [...document.querySelectorAll<HTMLElement>(".docs-content > .doc-section[id]")]
+  const compact = window.matchMedia("(max-width: 1023.98px)")
+  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)")
 
-  input?.addEventListener("input", () => {
+  // Every sidebar link, with the section it points at, so search can match a section's words as well as its name.
+  const entries = [...document.querySelectorAll<HTMLAnchorElement>("[data-doc-link]")].map((link) => {
+    const href = link.getAttribute("href") ?? ""
+    const id = href.startsWith("#") ? decodeURIComponent(href.slice(1)) : ""
+    const section = id ? document.getElementById(id) : null
+    return {
+      link,
+      id,
+      item: link.closest("li") ?? link,
+      label: (link.textContent ?? "").replace(/\s+/g, " ").trim(),
+      body: (section?.textContent ?? "").replace(/\s+/g, " ").toLowerCase(),
+    }
+  })
+  const entryById = new Map(entries.filter((entry) => entry.id).map((entry) => [entry.id, entry]))
+
+  // ---- Search ------------------------------------------------------------------------------------------------
+
+  function filter() {
+    if (!input) return
     const query = input.value.trim().toLowerCase()
     let matches = 0
 
-    for (const link of links) {
-      const visible = !query || link.textContent?.toLowerCase().includes(query)
-      link.hidden = !visible
+    for (const entry of entries) {
+      const visible =
+        !query || entry.label.toLowerCase().includes(query) || (query.length > 2 && entry.body.includes(query))
+      entry.item.hidden = !visible
       if (visible) matches += 1
     }
 
+    for (const group of groups) group.hidden = !group.querySelector("li:not([hidden])")
     if (empty) empty.hidden = matches > 0
+  }
+
+  input?.addEventListener("input", filter)
+  input?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      // A section whose name matches beats one that only mentions the words somewhere in its text.
+      const query = input.value.trim().toLowerCase()
+      const visible = entries.filter((entry) => !entry.item.hidden)
+      const first = visible.find((entry) => entry.label.toLowerCase().includes(query)) ?? visible[0]
+      if (!first) return
+      event.preventDefault()
+      first.link.click()
+    } else if (event.key === "Escape" && input.value) {
+      event.preventDefault()
+      event.stopPropagation()
+      input.value = ""
+      filter()
+    }
   })
+
+  // ---- Active section ----------------------------------------------------------------------------------------
+
+  let activeId = ""
+  let frame = 0
+  let lockUntil = 0
+  let pointerInNav = false
+
+  function revealInNav(link: HTMLElement) {
+    if (!scroller || pointerInNav || compact.matches) return
+    const box = scroller.getBoundingClientRect()
+    const rect = link.getBoundingClientRect()
+    const top = box.top + 40
+    const bottom = Math.min(box.bottom, window.innerHeight) - 56
+    if (rect.top >= top && rect.bottom <= bottom) return
+    scroller.scrollTo({
+      top: scroller.scrollTop + rect.top - box.top - (bottom - box.top) / 2,
+      behavior: reducedMotion.matches ? "auto" : "smooth",
+    })
+  }
+
+  function setActive(id: string) {
+    if (id === activeId) return
+    activeId = id
+    for (const entry of entries) {
+      const on = entry.id !== "" && entry.id === id
+      entry.link.classList.toggle("is-active", on)
+      if (on) entry.link.setAttribute("aria-current", "location")
+      else entry.link.removeAttribute("aria-current")
+    }
+    const entry = entryById.get(id)
+    if (currentLabel) currentLabel.textContent = entry?.label ?? ""
+    if (entry) revealInNav(entry.link)
+  }
+
+  function measure() {
+    frame = 0
+    if (performance.now() < lockUntil) return
+    const line = Math.min(window.innerHeight * 0.3, 240)
+    let current = ""
+    for (const section of sections) {
+      if (section.getBoundingClientRect().top <= line) current = section.id
+      else break
+    }
+    const root = document.documentElement
+    const last = sections[sections.length - 1]
+    if (last && window.scrollY + window.innerHeight >= root.scrollHeight - 2 && last.getBoundingClientRect().top < window.innerHeight) {
+      current = last.id
+    }
+    setActive(current)
+  }
+
+  function schedule() {
+    if (!frame) frame = requestAnimationFrame(measure)
+  }
+
+  window.addEventListener("scroll", schedule, { passive: true })
+  window.addEventListener("resize", schedule)
+  window.addEventListener("scrollend", () => {
+    lockUntil = 0
+    schedule()
+  })
+  scroller?.addEventListener("pointerenter", () => (pointerInNav = true))
+  scroller?.addEventListener("pointerleave", () => (pointerInNav = false))
+  schedule()
+
+  // ---- Contents menu (below 1024px) --------------------------------------------------------------------------
+
+  let open = false
+  let inerted: HTMLElement[] = []
+
+  function focusables() {
+    if (!sidebar) return []
+    return [...sidebar.querySelectorAll<HTMLElement>("a[href], button:not([disabled]), input:not([disabled])")].filter(
+      (element) => element.getClientRects().length > 0,
+    )
+  }
+
+  function openContents() {
+    if (!sidebar || !toggle || open || !compact.matches) return
+    open = true
+    sidebar.classList.add("is-open")
+    sidebar.setAttribute("role", "dialog")
+    sidebar.setAttribute("aria-modal", "true")
+    sidebar.setAttribute("aria-labelledby", "docs-contents-title")
+    toggle.setAttribute("aria-expanded", "true")
+    inerted = [...document.querySelectorAll<HTMLElement>(".docs-page > *, .docs-shell > *")].filter(
+      (element) => element !== sidebar && !element.contains(sidebar),
+    )
+    for (const element of inerted) element.inert = true
+    document.documentElement.style.overflow = "hidden"
+
+    const active = activeId ? entryById.get(activeId)?.link : undefined
+    if (active && scroller) scroller.scrollTop = active.offsetTop - scroller.clientHeight / 2
+    closeButton?.focus()
+  }
+
+  function closeContents(restoreFocus = true) {
+    if (!sidebar || !toggle || !open) return
+    open = false
+    sidebar.classList.remove("is-open")
+    sidebar.removeAttribute("role")
+    sidebar.removeAttribute("aria-modal")
+    sidebar.removeAttribute("aria-labelledby")
+    toggle.setAttribute("aria-expanded", "false")
+    for (const element of inerted) element.inert = false
+    inerted = []
+    document.documentElement.style.overflow = ""
+    if (restoreFocus) toggle.focus()
+  }
+
+  toggle?.addEventListener("click", () => (open ? closeContents() : openContents()))
+  closeButton?.addEventListener("click", () => closeContents())
+  sidebar?.addEventListener("click", (event) => {
+    if (open && event.target === sidebar) closeContents()
+  })
+  compact.addEventListener("change", () => {
+    if (!compact.matches) closeContents(false)
+    activeId = ""
+    schedule()
+  })
+
+  for (const entry of entries) {
+    entry.link.addEventListener("click", () => {
+      if (entry.id) {
+        setActive(entry.id)
+        lockUntil = performance.now() + 1200
+      }
+      closeContents(false)
+    })
+  }
+
+  document.addEventListener("keydown", (event) => {
+    if (open && event.key === "Escape") {
+      event.preventDefault()
+      closeContents()
+      return
+    }
+
+    if (open && event.key === "Tab") {
+      const items = focusables()
+      if (!items.length) return
+      const first = items[0]
+      const last = items[items.length - 1]
+      const inside = sidebar?.contains(document.activeElement)
+      if (event.shiftKey && (document.activeElement === first || !inside)) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && (document.activeElement === last || !inside)) {
+        event.preventDefault()
+        first.focus()
+      }
+      return
+    }
+
+    // "/" jumps to search, unless the reader is already typing somewhere.
+    if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey) return
+    const target = event.target as HTMLElement | null
+    if (target?.closest("input, textarea, select, [contenteditable]")) return
+    event.preventDefault()
+    if (compact.matches) openContents()
+    input?.focus()
+  })
+
+  // ---- Copy buttons ------------------------------------------------------------------------------------------
+
+  function legacyCopy(text: string) {
+    const area = document.createElement("textarea")
+    area.value = text
+    area.setAttribute("readonly", "")
+    area.style.position = "fixed"
+    area.style.opacity = "0"
+    document.body.append(area)
+    area.select()
+    let copied = false
+    try {
+      copied = document.execCommand("copy")
+    } catch {
+      copied = false
+    }
+    area.remove()
+    return copied
+  }
+
+  for (const button of document.querySelectorAll<HTMLButtonElement>("[data-copy]")) {
+    const block = button.closest<HTMLElement>("[data-copy-block]")
+    const source = block?.querySelector<HTMLElement>("[data-copy-source]")
+    const label = button.querySelector<HTMLElement>("[data-copy-label]")
+    const status = block?.querySelector<HTMLElement>("[data-copy-status]")
+    let timer = 0
+
+    button.addEventListener("click", async () => {
+      const text = (source?.textContent ?? "").replace(/\s+/g, " ").trim()
+      if (!text) return
+      let copied = false
+      try {
+        await navigator.clipboard.writeText(text)
+        copied = true
+      } catch {
+        copied = legacyCopy(text)
+      }
+      button.dataset.state = copied ? "copied" : "failed"
+      if (label) label.textContent = copied ? "Copied" : "Copy failed"
+      if (status) status.textContent = copied ? "Copied to clipboard" : "Copy failed"
+      window.clearTimeout(timer)
+      timer = window.setTimeout(() => {
+        delete button.dataset.state
+        if (label) label.textContent = "Copy"
+        if (status) status.textContent = ""
+      }, 1800)
+    })
+  }
 </script>
 
 <style>
+  /* ---- Tokens ------------------------------------------------------------------------------------------------ */
+
   .docs-page {
+    --d-heading: #f4f0f9;
+    --d-text: #d3cddc;
+    --d-muted: #a59eb0;
+    --d-subtle: #948d9f;
+    --d-accent: #aa8cff;
+    --d-accent-text: #c9b9ff;
+    --d-line: rgba(233, 226, 255, 0.085);
+    --d-line-strong: rgba(233, 226, 255, 0.15);
+    --d-panel: #0d0b12;
+    --d-sans: "Geist Variable", Geist, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --d-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+    --d-prose: 45rem;
+    --d-wide: 55rem;
+    --d-ease: cubic-bezier(0.16, 1, 0.3, 1);
+    --d-icon-link: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71'/%3E%3Cpath d='M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71'/%3E%3C/svg%3E");
+    --d-icon-info: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='9.5'/%3E%3Cpath d='M12 16.5v-5'/%3E%3Cpath d='M12 7.5h.01'/%3E%3C/svg%3E");
+    --d-icon-caution: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3'/%3E%3Cpath d='M12 9v4'/%3E%3Cpath d='M12 17h.01'/%3E%3C/svg%3E");
     min-width: 320px;
-    overflow: hidden;
+    overflow: clip;
     color: var(--ink);
     background: rgba(8, 6, 13, 0.42);
   }
 
-  .eyebrow,
-  .section-number {
-    margin: 0 0 16px;
-    color: var(--accent-strong);
-    font-size: 12px;
-    font-weight: 720;
-    line-height: 1.2;
-    text-transform: uppercase;
+  /* The top bar is shared and stays exactly as it was: 12px of room keeps its resting offset (8px on phones). */
+  .docs-topbar::after {
+    content: "";
+    display: block;
+    height: 12px;
   }
 
-  .docs-hero {
-    width: min(1120px, calc(100% - 48px));
-    margin: 34px auto 58px;
-    padding: 64px;
-    background: var(--glass-fill-strong);
-    border: 1px solid var(--glass-line);
-    border-radius: 28px;
-    box-shadow: var(--glass-shadow);
-    backdrop-filter: blur(30px) saturate(145%);
-    -webkit-backdrop-filter: blur(30px) saturate(145%);
+  .docs-sr {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
   }
 
-  .docs-hero h1 {
-    margin: 0;
-    font-size: 76px;
-    font-weight: 720;
-    line-height: 1;
-    letter-spacing: 0;
+  .docs-shell [hidden] {
+    display: none !important;
   }
 
-  .docs-hero > p:not(.eyebrow) {
-    max-width: 710px;
-    margin: 26px 0 0;
-    color: var(--muted-strong);
-    font-size: 19px;
+  .docs-shell svg {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
   }
 
-  .quick-links {
-    margin-top: 38px;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 12px;
-  }
-
-  .quick-links a {
-    min-height: 42px;
-    padding: 0 14px;
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    color: var(--ink);
-    background: rgba(255, 255, 255, 0.055);
-    border: 1px solid var(--glass-line);
-    border-radius: 15px;
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
-    backdrop-filter: blur(18px);
-    -webkit-backdrop-filter: blur(18px);
-    font-size: 13px;
-    font-weight: 620;
-    text-decoration: none;
-    transition: border-color 180ms ease, transform 180ms ease;
-  }
-
-  .quick-links a:hover {
-    border-color: var(--accent);
-    transform: translateY(-2px);
-  }
+  /* ---- Layout ------------------------------------------------------------------------------------------------ */
 
   .docs-shell {
-    width: min(1120px, calc(100% - 48px));
+    width: min(1256px, calc(100% - 72px));
     margin: 0 auto;
+    padding-top: 36px;
     display: grid;
-    grid-template-columns: 230px minmax(0, 760px);
-    justify-content: space-between;
-    gap: 84px;
-  }
-
-  .docs-nav {
-    height: fit-content;
-    padding: 22px;
-    position: sticky;
-    top: 94px;
-    background: var(--glass-fill-strong);
-    border: 1px solid var(--glass-line);
-    border-radius: 22px;
-    box-shadow: var(--glass-shadow-soft);
-    backdrop-filter: blur(26px) saturate(145%);
-    -webkit-backdrop-filter: blur(26px) saturate(145%);
-  }
-
-  .docs-nav > label {
-    display: block;
-    margin-bottom: 8px;
-    color: var(--muted);
-    font-size: 11px;
-    font-weight: 650;
-    text-transform: uppercase;
-  }
-
-  .search-field {
-    height: 40px;
-    padding: 0 11px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid var(--glass-line);
-    border-radius: 13px;
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
-  }
-
-  .search-field span {
-    color: var(--muted);
-  }
-
-  .search-field input {
-    width: 100%;
-    min-width: 0;
-    padding: 0;
-    color: var(--ink);
-    background: transparent;
-    border: 0;
-    outline: 0;
-    font-size: 13px;
-  }
-
-  .search-field input::-webkit-search-cancel-button {
-    filter: invert(1);
-    opacity: 0.62;
-  }
-
-  .docs-nav nav section {
-    margin-top: 30px;
-  }
-
-  .docs-nav nav h2 {
-    margin: 0 0 8px;
-    color: var(--ink);
-    font-size: 12px;
-    font-weight: 700;
-  }
-
-  .docs-nav nav a {
-    padding: 5px 0;
-    display: block;
-    color: var(--muted);
-    font-size: 13px;
-    text-decoration: none;
-    transition: color 160ms ease, transform 160ms ease;
-  }
-
-  .docs-nav nav a:hover {
-    color: var(--accent-strong);
-    transform: translateX(3px);
-  }
-
-  .search-empty {
-    color: var(--muted);
-    font-size: 12px;
+    grid-template-columns: 264px minmax(0, 1fr);
+    grid-template-rows: auto 1fr;
+    grid-template-areas:
+      "side header"
+      "side main";
+    column-gap: 72px;
+    font-family: var(--d-sans);
+    font-optical-sizing: auto;
   }
 
   .docs-content {
+    grid-area: main;
     min-width: 0;
-    padding-bottom: 120px;
+    max-width: var(--d-wide);
+    padding-bottom: 136px;
+    container-type: inline-size;
   }
 
-  .doc-section {
-    padding: 78px 0;
-    scroll-margin-top: 28px;
-    border-bottom: 1px solid var(--line);
+  /* ---- Header ------------------------------------------------------------------------------------------------ */
+
+  .docs-header {
+    grid-area: header;
+    position: relative;
+    max-width: var(--d-wide);
+    padding: 22px 0 52px;
+    border-bottom: 1px solid var(--d-line);
   }
 
-  .doc-section h2 {
-    margin: 0;
-    font-size: 42px;
-    font-weight: 680;
-    line-height: 1.08;
-    letter-spacing: 0;
+  .docs-header::before {
+    content: "";
+    position: absolute;
+    z-index: -1;
+    top: -160px;
+    left: -180px;
+    width: 720px;
+    height: 460px;
+    background: radial-gradient(closest-side, rgba(150, 112, 255, 0.12), rgba(150, 112, 255, 0) 100%);
+    pointer-events: none;
   }
 
-  .doc-section > p:not(.section-number, .note) {
-    max-width: 690px;
-    margin: 22px 0 0;
-    color: var(--muted-strong);
-    font-size: 17px;
-  }
-
-  .callout,
-  .prompt-example,
-  .note {
-    margin-top: 30px;
-    padding: 20px 22px;
-    background: var(--glass-fill);
-    border: 1px solid var(--glass-line);
-    border-left: 3px solid var(--accent);
-    border-radius: 16px;
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
-    backdrop-filter: blur(18px);
-    -webkit-backdrop-filter: blur(18px);
-  }
-
-  .callout {
-    display: grid;
-    gap: 5px;
-  }
-
-  .callout span,
-  .callout a,
-  .prompt-example p,
-  .note {
-    color: var(--muted-strong);
-    font-size: 14px;
-  }
-
-  .callout a {
-    margin-top: 6px;
-    width: fit-content;
-    color: var(--accent-strong);
-    font-weight: 650;
-    text-decoration: none;
-  }
-
-  .doc-section p a {
-    color: var(--accent-strong);
-    text-decoration: underline;
-    text-decoration-color: rgba(183, 149, 255, 0.4);
-    text-underline-offset: 3px;
-  }
-
-  .steps {
-    margin: 34px 0 0;
-    padding: 0;
-    list-style: none;
-    border-top: 1px solid var(--line);
-  }
-
-  .steps li {
-    padding: 20px 0;
-    display: grid;
-    grid-template-columns: 38px minmax(0, 1fr);
-    gap: 14px;
-    border-bottom: 1px solid var(--line);
-  }
-
-  .steps li > span {
-    width: 27px;
-    height: 27px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--accent-strong);
-    background: var(--accent-soft);
-    border-radius: 50%;
-    font-size: 11px;
-    font-weight: 700;
-  }
-
-  .steps p,
-  .definition-grid p,
-  .feature-list span,
-  .do-dont p,
-  .troubleshooting p {
-    margin: 4px 0 0;
-    color: var(--muted);
-    font-size: 14px;
-  }
-
-  .prompt-example > span {
-    color: var(--accent-strong);
-    font-size: 11px;
-    font-weight: 700;
+  .docs-kicker {
+    margin: 0 0 14px;
+    color: var(--d-accent-text);
+    font-size: 12.5px;
+    font-weight: 600;
+    line-height: 1.2;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
   }
 
-  .prompt-example p {
-    margin: 8px 0 0;
-    color: var(--ink);
-    font-size: 15px;
+  .docs-header h1 {
+    margin: 0;
+    color: var(--d-heading);
+    font-size: 48px;
+    font-weight: 600;
+    line-height: 1.06;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
   }
 
+  .docs-lede {
+    max-width: 40rem;
+    margin: 18px 0 0;
+    color: var(--d-text);
+    font-size: 18px;
+    line-height: 1.6;
+    text-wrap: pretty;
+  }
+
+  .docs-quick {
+    margin-top: 30px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .docs-quick a {
+    min-height: 40px;
+    padding: 0 14px 0 16px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--d-heading);
+    background: rgba(255, 255, 255, 0.035);
+    border: 1px solid var(--d-line-strong);
+    border-radius: 999px;
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 1;
+    text-decoration: none;
+    transition: background 160ms ease, border-color 160ms ease;
+  }
+
+  .docs-quick a svg {
+    width: 15px;
+    height: 15px;
+    color: var(--d-muted);
+    stroke-width: 2;
+    transition: transform 220ms var(--d-ease), color 160ms ease;
+  }
+
+  .docs-quick a:hover {
+    background: rgba(255, 255, 255, 0.07);
+    border-color: rgba(233, 226, 255, 0.26);
+  }
+
+  .docs-quick a:hover svg {
+    color: var(--d-heading);
+    transform: translateX(2px);
+  }
+
+  .docs-quick a.is-tour {
+    color: #17111f;
+    background: #f3effa;
+    border-color: transparent;
+  }
+
+  .docs-quick a.is-tour svg {
+    color: #4a3d63;
+  }
+
+  .docs-quick a.is-tour:hover {
+    background: #ffffff;
+  }
+
+  .docs-quick a.is-tour:hover svg {
+    color: #17111f;
+  }
+
+  /* ---- Sidebar ----------------------------------------------------------------------------------------------- */
+
+  .docs-toc-toggle {
+    display: none;
+  }
+
+  .docs-sidebar {
+    grid-area: side;
+    min-width: 0;
+    border-right: 1px solid var(--d-line);
+  }
+
+  .docs-sidebar-inner {
+    position: sticky;
+    top: 24px;
+    max-height: calc(100vh - 48px);
+    max-height: calc(100dvh - 48px);
+    padding: 22px 24px 0 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .docs-sidebar-head {
+    display: none;
+  }
+
+  .docs-search {
+    position: relative;
+    flex: none;
+  }
+
+  .docs-search > svg {
+    position: absolute;
+    top: 50%;
+    left: 12px;
+    width: 15px;
+    height: 15px;
+    color: var(--d-subtle);
+    stroke-width: 2;
+    transform: translateY(-50%);
+    pointer-events: none;
+  }
+
+  .docs-search input {
+    width: 100%;
+    height: 38px;
+    padding: 0 34px 0 35px;
+    color: var(--d-heading);
+    background: rgba(255, 255, 255, 0.035);
+    border: 1px solid var(--d-line-strong);
+    border-radius: 10px;
+    outline: none;
+    font-size: 14px;
+    -webkit-appearance: none;
+    appearance: none;
+    transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
+  }
+
+  .docs-search input::placeholder {
+    color: var(--d-subtle);
+  }
+
+  .docs-search input:hover {
+    border-color: rgba(233, 226, 255, 0.24);
+  }
+
+  .docs-search input:focus-visible {
+    outline: none;
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(170, 140, 255, 0.62);
+    box-shadow: 0 0 0 3px rgba(170, 140, 255, 0.2);
+  }
+
+  .docs-search input::-webkit-search-cancel-button {
+    filter: invert(1);
+    opacity: 0.55;
+  }
+
+  .docs-search kbd {
+    position: absolute;
+    top: 50%;
+    right: 9px;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 6px;
+    display: grid;
+    place-items: center;
+    color: var(--d-muted);
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--d-line-strong);
+    border-radius: 5px;
+    font: 500 11.5px/1 var(--d-mono);
+    transform: translateY(-50%);
+    pointer-events: none;
+    transition: opacity 120ms ease;
+  }
+
+  .docs-search input:focus ~ kbd,
+  .docs-search input:not(:placeholder-shown) ~ kbd {
+    opacity: 0;
+  }
+
+  .docs-nav {
+    position: relative;
+    flex: 1 1 auto;
+    min-height: 0;
+    margin: 14px -8px 0 0;
+    padding: 8px 8px 48px 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 10px, #000 calc(100% - 44px), transparent 100%);
+    mask-image: linear-gradient(to bottom, transparent 0, #000 10px, #000 calc(100% - 44px), transparent 100%);
+  }
+
+  .docs-nav ul {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .docs-nav-tour a {
+    min-height: 44px;
+    padding: 6px 10px 6px 6px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--d-heading);
+    background: linear-gradient(135deg, rgba(170, 140, 255, 0.13), rgba(170, 140, 255, 0.035));
+    border: 1px solid rgba(170, 140, 255, 0.24);
+    border-radius: 11px;
+    font-size: 14px;
+    font-weight: 500;
+    text-decoration: none;
+    transition: border-color 160ms ease, background 160ms ease;
+  }
+
+  .docs-nav-tour a:hover {
+    background: linear-gradient(135deg, rgba(170, 140, 255, 0.2), rgba(170, 140, 255, 0.06));
+    border-color: rgba(170, 140, 255, 0.42);
+  }
+
+  .docs-nav-tour .tour-icon {
+    width: 30px;
+    height: 30px;
+    flex: none;
+    display: grid;
+    place-items: center;
+    color: var(--d-accent-text);
+    background: rgba(170, 140, 255, 0.16);
+    border-radius: 8px;
+  }
+
+  .docs-nav-tour .tour-icon svg {
+    width: 17px;
+    height: 17px;
+  }
+
+  .docs-nav-tour .tour-arrow {
+    width: 15px;
+    height: 15px;
+    margin-left: auto;
+    color: var(--d-muted);
+    transition: transform 220ms var(--d-ease), color 160ms ease;
+  }
+
+  .docs-nav-tour a:hover .tour-arrow {
+    color: var(--d-heading);
+    transform: translate(1px, -1px);
+  }
+
+  .docs-nav-group {
+    margin-top: 28px;
+  }
+
+  .docs-nav-label {
+    margin: 0 0 9px;
+    color: var(--d-subtle);
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.3;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+  }
+
+  .docs-nav-group ul {
+    border-left: 1px solid var(--d-line);
+  }
+
+  .docs-nav-group a {
+    margin-left: -1px;
+    padding: 5px 0 5px 14px;
+    display: block;
+    color: var(--d-muted);
+    border-left: 1px solid transparent;
+    font-size: 14px;
+    line-height: 1.45;
+    text-decoration: none;
+    transition: color 140ms ease, border-color 140ms ease;
+  }
+
+  .docs-nav-group a:hover {
+    color: var(--d-heading);
+    border-left-color: rgba(233, 226, 255, 0.34);
+  }
+
+  .docs-nav-group a.is-active {
+    color: var(--d-heading);
+    border-left-color: var(--d-accent);
+    font-weight: 500;
+  }
+
+  .docs-nav a:focus-visible {
+    outline-offset: -2px;
+    border-radius: 6px;
+  }
+
+  .search-empty {
+    margin: 18px 0 0;
+    color: var(--d-muted);
+    font-size: 13.5px;
+  }
+
+  /* ---- Sections ---------------------------------------------------------------------------------------------- */
+
+  .doc-section {
+    padding: 48px 0 44px;
+    scroll-margin-top: 24px;
+  }
+
+  .doc-section + .doc-section {
+    border-top: 1px solid var(--d-line);
+  }
+
+  .doc-heading {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .doc-heading h2 {
+    margin: 0;
+    color: var(--d-heading);
+    font-size: 30px;
+    font-weight: 600;
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+  }
+
+  .doc-anchor {
+    width: 30px;
+    height: 30px;
+    margin-top: 3px;
+    flex: none;
+    display: grid;
+    place-items: center;
+    color: var(--d-subtle);
+    border-radius: 8px;
+    opacity: 0;
+    transition: opacity 140ms ease, color 140ms ease, background 140ms ease;
+  }
+
+  .doc-anchor::before {
+    content: "";
+    width: 16px;
+    height: 16px;
+    background: currentColor;
+    -webkit-mask: var(--d-icon-link) center / contain no-repeat;
+    mask: var(--d-icon-link) center / contain no-repeat;
+  }
+
+  .doc-heading:hover .doc-anchor,
+  .doc-anchor:focus-visible {
+    opacity: 1;
+  }
+
+  .doc-anchor:hover {
+    color: var(--d-heading);
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  .doc-soon {
+    position: relative;
+    top: -4px;
+    margin-left: 10px;
+    padding: 4px 10px;
+    display: inline-block;
+    color: var(--d-accent-text);
+    background: rgba(170, 140, 255, 0.12);
+    border: 1px solid rgba(170, 140, 255, 0.26);
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.2;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  .doc-section > p {
+    max-width: var(--d-prose);
+    margin: 16px 0 0;
+    color: var(--d-text);
+    font-size: 16px;
+    line-height: 1.7;
+    text-wrap: pretty;
+  }
+
+  .doc-section > .doc-heading + p {
+    margin-top: 14px;
+  }
+
+  .doc-section h3 {
+    margin: 44px 0 0;
+    color: var(--d-heading);
+    font-size: 19px;
+    font-weight: 600;
+    line-height: 1.35;
+    letter-spacing: -0.012em;
+  }
+
+  .doc-section > .doc-heading + h3 {
+    margin-top: 24px;
+  }
+
+  .doc-section > h3 + p {
+    margin-top: 10px;
+  }
+
+  .doc-section strong {
+    color: var(--d-heading);
+    font-weight: 600;
+  }
+
+  .doc-section a:not(.doc-anchor, .callout-link) {
+    color: var(--d-accent-text);
+    text-decoration: underline;
+    text-decoration-color: rgba(201, 185, 255, 0.38);
+    text-decoration-thickness: 1px;
+    text-underline-offset: 3px;
+    transition: text-decoration-color 140ms ease;
+  }
+
+  .doc-section a:not(.doc-anchor, .callout-link):hover {
+    text-decoration-color: currentColor;
+  }
+
+  .docs-shell code {
+    padding: 0.12em 0.4em;
+    color: #e8e1f3;
+    background: rgba(255, 255, 255, 0.055);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 6px;
+    font-family: var(--d-mono);
+    font-size: 0.86em;
+    overflow-wrap: anywhere;
+    -webkit-box-decoration-break: clone;
+    box-decoration-break: clone;
+  }
+
+  /* ---- Callouts and notes ------------------------------------------------------------------------------------ */
+
+  .callout {
+    max-width: var(--d-prose);
+    margin-top: 24px;
+    padding: 18px 18px 18px 20px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "title link"
+      "text link";
+    align-items: center;
+    gap: 3px 24px;
+    background: linear-gradient(135deg, rgba(170, 140, 255, 0.1), rgba(170, 140, 255, 0.025) 65%);
+    border: 1px solid rgba(170, 140, 255, 0.22);
+    border-radius: 14px;
+  }
+
+  .callout strong {
+    grid-area: title;
+    font-size: 15.5px;
+    line-height: 1.5;
+  }
+
+  .callout span {
+    grid-area: text;
+    color: var(--d-muted);
+    font-size: 14.5px;
+    line-height: 1.55;
+  }
+
+  .callout-link {
+    grid-area: link;
+    min-height: 40px;
+    padding: 0 16px;
+    display: inline-flex;
+    align-items: center;
+    color: #17111f;
+    background: #f3effa;
+    border-radius: 999px;
+    font-size: 14px;
+    font-weight: 500;
+    text-decoration: none;
+    white-space: nowrap;
+    transition: background 160ms ease;
+  }
+
+  .callout-link:hover {
+    background: #ffffff;
+  }
+
+  .doc-section > .note {
+    position: relative;
+    max-width: var(--d-prose);
+    margin: 24px 0 0;
+    padding: 14px 18px 15px 46px;
+    color: var(--d-text);
+    background: rgba(170, 140, 255, 0.055);
+    border: 1px solid rgba(170, 140, 255, 0.17);
+    border-radius: 12px;
+    font-size: 15px;
+    line-height: 1.65;
+  }
+
+  .doc-section > .note::before {
+    content: "";
+    position: absolute;
+    top: 17px;
+    left: 17px;
+    width: 17px;
+    height: 17px;
+    background: var(--d-accent-text);
+    -webkit-mask: var(--d-icon-info) center / contain no-repeat;
+    mask: var(--d-icon-info) center / contain no-repeat;
+  }
+
+  .doc-section > .note.is-caution {
+    background: rgba(240, 190, 100, 0.055);
+    border-color: rgba(240, 190, 100, 0.2);
+  }
+
+  .doc-section > .note.is-caution::before {
+    background: #efc47a;
+    -webkit-mask-image: var(--d-icon-caution);
+    mask-image: var(--d-icon-caution);
+  }
+
+  .doc-section > .note + .note {
+    margin-top: 12px;
+  }
+
+  /* ---- Code block -------------------------------------------------------------------------------------------- */
+
+  .prompt-example {
+    max-width: var(--d-prose);
+    margin-top: 24px;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.028);
+    border: 1px solid var(--d-line-strong);
+    border-radius: 12px;
+  }
+
+  .code-bar {
+    min-height: 42px;
+    padding: 0 6px 0 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    background: rgba(255, 255, 255, 0.02);
+    border-bottom: 1px solid var(--d-line);
+  }
+
+  .code-bar > span {
+    color: var(--d-muted);
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .copy-button {
+    min-width: 76px;
+    height: 32px;
+    padding: 0 10px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    color: var(--d-muted);
+    background: transparent;
+    border: 0;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    transition: color 140ms ease, background 140ms ease;
+  }
+
+  .copy-button:hover {
+    color: var(--d-heading);
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  .copy-button:focus-visible {
+    outline-offset: -2px;
+  }
+
+  .copy-button svg {
+    width: 14px;
+    height: 14px;
+    stroke-width: 2;
+  }
+
+  .copy-button .icon-check,
+  .copy-button[data-state="copied"] .icon-copy {
+    display: none;
+  }
+
+  .copy-button[data-state="copied"] {
+    color: #8fdcb3;
+  }
+
+  .copy-button[data-state="copied"] .icon-check {
+    display: block;
+  }
+
+  .prompt-example p {
+    margin: 0;
+    padding: 16px 18px 18px;
+    color: #ebe5f4;
+    font-family: var(--d-mono);
+    font-size: 13.5px;
+    line-height: 1.75;
+  }
+
+  /* ---- Figures ----------------------------------------------------------------------------------------------- */
+
   .docs-image {
-    margin: 38px 0 0;
+    margin: 32px 0 0;
   }
 
   .docs-image img {
     width: 100%;
     height: auto;
     display: block;
-    padding: 6px;
-    background: rgba(24, 18, 38, 0.68);
-    border: 1px solid var(--glass-line-strong);
-    border-radius: 24px;
-    box-shadow: var(--glass-shadow);
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
+    background: var(--d-panel);
+    border: 1px solid var(--d-line-strong);
+    border-radius: 14px;
+    box-shadow: 0 30px 70px rgba(0, 0, 0, 0.45);
   }
 
   .docs-image figcaption {
-    margin-top: 10px;
-    color: var(--muted);
-    font-size: 12px;
+    margin-top: 12px;
+    color: var(--d-muted);
+    font-size: 13.5px;
+    line-height: 1.5;
+    text-align: center;
   }
 
-  .definition-grid,
-  .do-dont {
-    margin-top: 34px;
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 10px;
-  }
+  /* ---- Steps ------------------------------------------------------------------------------------------------- */
 
-  .definition-grid article,
-  .do-dont article {
-    min-height: 132px;
-    padding: 20px;
-    background: var(--glass-fill);
-    border: 1px solid var(--glass-line);
-    border-radius: 18px;
-    box-shadow: var(--glass-shadow-soft);
-    backdrop-filter: blur(20px) saturate(140%);
-    -webkit-backdrop-filter: blur(20px) saturate(140%);
-  }
-
-  .feature-list {
-    margin: 32px 0 0;
+  .steps {
+    max-width: var(--d-prose);
+    margin: 28px 0 0;
     padding: 0;
     list-style: none;
-    border-top: 1px solid var(--line);
   }
 
-  .feature-list li {
-    padding: 16px 0;
+  .steps li {
+    position: relative;
+    padding-bottom: 22px;
     display: grid;
-    grid-template-columns: 150px minmax(0, 1fr);
-    gap: 22px;
-    border-bottom: 1px solid var(--line);
+    grid-template-columns: 28px minmax(0, 1fr);
+    gap: 16px;
   }
 
-  .feature-list span {
-    margin: 0;
+  .steps li:last-child {
+    padding-bottom: 0;
   }
 
-  .note {
-    line-height: 1.55;
+  .steps li:not(:last-child)::before {
+    content: "";
+    position: absolute;
+    top: 34px;
+    bottom: 6px;
+    left: 13.5px;
+    width: 1px;
+    background: var(--d-line-strong);
   }
 
+  .steps li > span {
+    width: 28px;
+    height: 28px;
+    display: grid;
+    place-items: center;
+    color: var(--d-accent-text);
+    background: #120e1a;
+    border: 1px solid rgba(170, 140, 255, 0.34);
+    border-radius: 50%;
+    font-size: 12.5px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .steps strong {
+    display: block;
+    font-size: 15.5px;
+    line-height: 28px;
+  }
+
+  .steps p {
+    margin: 2px 0 0;
+    color: var(--d-text);
+    font-size: 15px;
+    line-height: 1.65;
+  }
+
+  /* ---- Lists and rows ---------------------------------------------------------------------------------------- */
+
+  .feature-list,
+  .doc-rows,
   .troubleshooting {
-    margin-top: 32px;
+    margin: 24px 0 0;
+    padding: 0;
+    list-style: none;
+    border-top: 1px solid var(--d-line);
   }
 
+  .feature-list li,
+  .doc-rows > div,
   .troubleshooting article {
-    padding: 20px 0;
-    border-top: 1px solid var(--line);
+    padding: 15px 0 16px;
+    display: grid;
+    grid-template-columns: minmax(0, 13.5rem) minmax(0, 1fr);
+    gap: 4px 32px;
+    border-bottom: 1px solid var(--d-line);
   }
+
+  .feature-list strong,
+  .doc-rows dt,
+  .troubleshooting strong {
+    margin: 0;
+    color: var(--d-heading);
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 1.6;
+  }
+
+  .feature-list span,
+  .doc-rows dd,
+  .troubleshooting p {
+    max-width: var(--d-prose);
+    margin: 0;
+    color: var(--d-text);
+    font-size: 15px;
+    line-height: 1.68;
+  }
+
+  .doc-section > h3 + .feature-list,
+  .doc-section > h3 + .doc-rows {
+    margin-top: 16px;
+  }
+
+  /* A list that ends its section hands the closing rule to the section divider, so the two never stack. */
+  .doc-section > :is(.feature-list, .doc-rows, .troubleshooting, .faq-list):last-child > :last-child {
+    border-bottom: 0;
+  }
+
+  .definition-grid {
+    margin-top: 28px;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1px;
+    overflow: hidden;
+    background: var(--d-line);
+    border: 1px solid var(--d-line);
+    border-radius: 14px;
+  }
+
+  .definition-grid article {
+    padding: 18px 20px 20px;
+    background: #0c0a11;
+  }
+
+  .definition-grid strong {
+    display: block;
+    font-size: 15.5px;
+    line-height: 1.4;
+  }
+
+  .definition-grid p,
+  .do-dont p {
+    margin: 6px 0 0;
+    color: var(--d-muted);
+    font-size: 14.5px;
+    line-height: 1.6;
+  }
+
+  .do-dont {
+    margin-top: 24px;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .do-dont article {
+    padding: 18px 20px 20px;
+    background: rgba(255, 255, 255, 0.025);
+    border: 1px solid var(--d-line);
+    border-radius: 14px;
+  }
+
+  .do-dont strong {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 15.5px;
+    line-height: 1.4;
+  }
+
+  .do-dont strong::before {
+    content: "";
+    width: 24px;
+    height: 24px;
+    flex: none;
+    border-radius: 7px;
+  }
+
+  .do-dont article:first-child strong::before {
+    background: rgba(97, 201, 150, 0.14)
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238fdcb3' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E")
+      center / 14px no-repeat;
+  }
+
+  .do-dont article:last-child strong::before {
+    background: rgba(240, 190, 100, 0.13)
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23efc47a' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z'/%3E%3C/svg%3E")
+      center / 14px no-repeat;
+  }
+
+  /* ---- FAQ --------------------------------------------------------------------------------------------------- */
 
   .faq-list {
-    margin-top: 34px;
-    border-top: 1px solid var(--line);
+    margin-top: 20px;
+    border-top: 1px solid var(--d-line);
   }
 
-  details {
-    margin-top: 10px;
-    padding: 0 18px;
-    background: var(--glass-fill);
-    border: 1px solid var(--glass-line);
-    border-radius: 16px;
-    backdrop-filter: blur(18px);
-    -webkit-backdrop-filter: blur(18px);
+  .faq-list details {
+    border-bottom: 1px solid var(--d-line);
   }
 
-  summary {
-    padding: 21px 0;
+  .faq-list summary {
+    padding: 16px 0;
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 24px;
-    color: var(--ink);
+    color: var(--d-heading);
     cursor: pointer;
-    font-size: 15px;
-    font-weight: 630;
+    font-size: 16px;
+    font-weight: 500;
+    line-height: 1.45;
     list-style: none;
+    transition: color 140ms ease;
   }
 
-  summary::-webkit-details-marker {
+  .faq-list summary::-webkit-details-marker {
     display: none;
   }
 
-  summary span {
-    color: var(--accent-strong);
-    font-size: 20px;
-    transition: transform 180ms ease;
+  .faq-list summary:focus-visible {
+    border-radius: 6px;
   }
 
-  details[open] summary span {
+  .faq-icon {
+    position: relative;
+    width: 28px;
+    height: 28px;
+    flex: none;
+    border: 1px solid var(--d-line-strong);
+    border-radius: 50%;
+    transition: transform 260ms var(--d-ease), background 140ms ease, border-color 140ms ease;
+  }
+
+  .faq-icon::before,
+  .faq-icon::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 10px;
+    height: 1.5px;
+    background: var(--d-muted);
+    border-radius: 1px;
+    transform: translate(-50%, -50%);
+  }
+
+  .faq-icon::after {
+    transform: translate(-50%, -50%) rotate(90deg);
+  }
+
+  .faq-list summary:hover .faq-icon {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(233, 226, 255, 0.26);
+  }
+
+  .faq-list details[open] .faq-icon {
     transform: rotate(45deg);
   }
 
-  details > p {
-    max-width: 650px;
-    margin: -4px 0 22px;
-    color: var(--muted);
+  .faq-list details > p {
+    max-width: var(--d-prose);
+    margin: -2px 52px 20px 0;
+    color: var(--d-text);
+    font-size: 15px;
+    line-height: 1.7;
+  }
+
+  /* ---- Why Vector -------------------------------------------------------------------------------------------- */
+
+  .doc-tally {
+    margin-top: 28px;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    border-top: 1px solid var(--d-line);
+    border-bottom: 1px solid var(--d-line);
+  }
+
+  .doc-tally div {
+    padding: 22px 20px 22px 0;
+  }
+
+  .doc-tally div + div {
+    padding-left: 22px;
+    border-left: 1px solid var(--d-line);
+  }
+
+  .doc-tally strong {
+    display: block;
+    color: var(--d-heading);
+    font-size: 30px;
+    font-weight: 600;
+    line-height: 1.1;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .doc-tally span {
+    margin-top: 6px;
+    display: block;
+    color: var(--d-muted);
+    font-size: 13.5px;
+    line-height: 1.45;
+  }
+
+  .doc-grid {
+    margin-top: 18px;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .doc-grid-4,
+  .doc-grid-3 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .doc-section > p + .doc-grid,
+  .doc-section > .steps + .doc-grid {
+    margin-top: 28px;
+  }
+
+  /* Subgrid lines up eyebrows, titles and text across a row, so every card in a row starts its title together. */
+  .doc-card {
+    grid-row: span 3;
+    padding: 18px 20px 20px;
+    display: grid;
+    grid-template-rows: subgrid;
+    row-gap: 0;
+    align-content: start;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.038), rgba(255, 255, 255, 0.014));
+    border: 1px solid var(--d-line);
+    border-radius: 14px;
+    transition: border-color 180ms ease;
+  }
+
+  .doc-card:not(:has(> small)) {
+    grid-row: span 2;
+  }
+
+  .doc-card:hover {
+    border-color: var(--d-line-strong);
+  }
+
+  .doc-card small {
+    display: block;
+    color: var(--d-accent-text);
+    font-size: 11.5px;
+    font-weight: 600;
+    line-height: 1.45;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .doc-section .doc-card :is(h3, h4) {
+    margin: 10px 0 0;
+    color: var(--d-heading);
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 1.35;
+    letter-spacing: -0.01em;
+  }
+
+  .doc-section .doc-card:not(:has(> small)) :is(h3, h4) {
+    margin-top: 0;
+  }
+
+  .doc-card p {
+    margin: 7px 0 0;
+    color: var(--d-muted);
+    font-size: 14.5px;
+    line-height: 1.6;
+  }
+
+  /* ---- Table ------------------------------------------------------------------------------------------------- */
+
+  .doc-table-wrap {
+    margin-top: 28px;
+    overflow-x: auto;
+    background: #0c0a11;
+    border: 1px solid var(--d-line-strong);
+    border-radius: 14px;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+  }
+
+  .doc-table-wrap:focus-visible {
+    outline-offset: 2px;
+  }
+
+  .doc-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
     font-size: 14px;
+    line-height: 1.5;
   }
 
-  @media (max-width: 900px) {
-    .docs-hero h1 {
-      font-size: 62px;
+  .doc-table th,
+  .doc-table td {
+    padding: 13px 16px;
+    text-align: left;
+    vertical-align: top;
+    border-bottom: 1px solid var(--d-line);
+  }
+
+  .doc-table tbody tr:last-child > * {
+    border-bottom: 0;
+  }
+
+  .doc-table thead th {
+    padding-top: 12px;
+    padding-bottom: 11px;
+    color: var(--d-muted);
+    background: #110e17;
+    border-bottom-color: var(--d-line-strong);
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  .doc-table tbody th {
+    color: var(--d-heading);
+    font-weight: 500;
+  }
+
+  /* Minimum widths keep every column readable; the wrapper scrolls sideways when the column is narrower. */
+  .doc-table td {
+    min-width: 7.25rem;
+    color: var(--d-text);
+  }
+
+  /* A single hyphenated word ("Terminal-first") never splits at its hyphen. */
+  .doc-table td.is-word {
+    white-space: nowrap;
+  }
+
+  .doc-table thead th:nth-child(2) {
+    color: var(--d-accent-text);
+  }
+
+  .doc-table td:nth-child(2) {
+    min-width: 10rem;
+    color: var(--d-heading);
+    background: rgba(170, 140, 255, 0.055);
+  }
+
+  .doc-table thead th:first-child,
+  .doc-table tbody th {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    min-width: 176px;
+    box-shadow: inset -1px 0 0 var(--d-line);
+  }
+
+  .doc-table tbody th {
+    background: #0c0a11;
+  }
+
+  /* ---- Changelog --------------------------------------------------------------------------------------------- */
+
+  .changelog {
+    margin: 32px 0 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .changelog li {
+    --date-column: 9.5rem;
+    position: relative;
+    padding-bottom: 30px;
+    display: grid;
+    grid-template-columns: var(--date-column) minmax(0, 1fr);
+    grid-template-areas:
+      "date title"
+      "date body";
+    grid-template-rows: auto 1fr;
+    column-gap: 48px;
+  }
+
+  .changelog li:last-child {
+    padding-bottom: 0;
+  }
+
+  .changelog li::before {
+    content: "";
+    position: absolute;
+    top: 8px;
+    left: calc(var(--date-column) + 19px);
+    width: 9px;
+    height: 9px;
+    background: #0c0a11;
+    border: 1.5px solid var(--d-accent);
+    border-radius: 50%;
+  }
+
+  .changelog li:first-child::before {
+    background: var(--d-accent);
+    box-shadow: 0 0 0 4px rgba(170, 140, 255, 0.16);
+  }
+
+  .changelog li:not(:last-child)::after {
+    content: "";
+    position: absolute;
+    top: 24px;
+    bottom: 0;
+    left: calc(var(--date-column) + 23px);
+    width: 1px;
+    background: var(--d-line-strong);
+  }
+
+  .changelog h3 {
+    grid-area: title;
+    margin: 0;
+    color: var(--d-heading);
+    font-size: 16.5px;
+    font-weight: 600;
+    line-height: 1.5;
+    letter-spacing: -0.01em;
+  }
+
+  .changelog-date {
+    grid-area: date;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 6px;
+    color: var(--d-muted);
+    font-size: 13.5px;
+    line-height: 25px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  .changelog-version {
+    padding: 4px 8px;
+    color: var(--d-accent-text);
+    background: rgba(170, 140, 255, 0.1);
+    border: 1px solid rgba(170, 140, 255, 0.22);
+    border-radius: 999px;
+    font: 500 12px/1 var(--d-mono);
+  }
+
+  .changelog-body {
+    grid-area: body;
+    max-width: var(--d-prose);
+    margin: 4px 0 0;
+    color: var(--d-text);
+    font-size: 15px;
+    line-height: 1.7;
+  }
+
+  /* ---- Content-width adjustments (the content column, not the viewport) ------------------------------------- */
+
+  @container (max-width: 720px) {
+    .doc-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
-    .docs-shell {
-      grid-template-columns: 190px minmax(0, 1fr);
-      gap: 48px;
+    .feature-list li,
+    .doc-rows > div,
+    .troubleshooting article {
+      grid-template-columns: minmax(0, 11rem) minmax(0, 1fr);
+      column-gap: 24px;
     }
   }
 
-  @media (max-width: 720px) {
-    .docs-hero,
+  @container (max-width: 600px) {
+    .callout {
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-areas:
+        "title"
+        "text"
+        "link";
+    }
+
+    .callout-link {
+      margin-top: 12px;
+      justify-self: start;
+    }
+
+    .feature-list li,
+    .doc-rows > div,
+    .troubleshooting article {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .doc-tally {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .doc-tally div:nth-child(odd) {
+      padding-left: 0;
+      border-left: 0;
+    }
+
+    .doc-tally div:nth-child(n + 3) {
+      border-top: 1px solid var(--d-line);
+    }
+
+    .doc-table thead th:first-child,
+    .doc-table tbody th {
+      width: 9rem;
+      min-width: 9rem;
+    }
+
+    .changelog li {
+      padding-left: 28px;
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-areas:
+        "date"
+        "title"
+        "body";
+      grid-template-rows: auto;
+    }
+
+    .changelog li::before {
+      top: 8px;
+      left: 0;
+    }
+
+    .changelog li:not(:last-child)::after {
+      top: 24px;
+      left: 4px;
+    }
+
+    .changelog-date {
+      margin-bottom: 2px;
+      flex-direction: row;
+      align-items: center;
+      gap: 10px;
+      text-align: left;
+    }
+  }
+
+  @container (max-width: 520px) {
+    .doc-grid,
+    .doc-grid-4,
+    .doc-grid-3,
+    .definition-grid,
+    .do-dont {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+
+  /* ---- Viewport breakpoints ---------------------------------------------------------------------------------- */
+
+  @media (max-width: 1279.98px) {
     .docs-shell {
-      width: min(100% - 28px, 1120px);
+      width: calc(100% - 64px);
+      grid-template-columns: 236px minmax(0, 1fr);
+      column-gap: 44px;
     }
 
-    .docs-hero {
-      margin-top: 24px;
-      padding: 40px 24px;
-      border-radius: 22px;
+    .docs-sidebar-inner {
+      padding-right: 20px;
     }
 
-    .docs-hero h1 {
-      font-size: 48px;
-    }
-
-    .docs-hero > p:not(.eyebrow) {
-      font-size: 17px;
-    }
-
-    .docs-shell {
-      display: block;
-    }
-
-    .docs-nav {
-      padding: 18px;
-      position: static;
-      border: 1px solid var(--glass-line);
-    }
-
-    .docs-nav nav {
+    .docs-search kbd {
       display: none;
     }
 
+    .docs-search input {
+      padding-right: 12px;
+    }
+  }
+
+  @media (hover: none) {
+    .doc-anchor {
+      display: none;
+    }
+  }
+
+  @media (max-width: 1023.98px) {
+    .docs-shell {
+      width: min(760px, calc(100% - 64px));
+      padding-top: 28px;
+      display: block;
+    }
+
+    .docs-header {
+      padding: 16px 0 36px;
+      border-bottom: 0;
+    }
+
+    .docs-toc-toggle {
+      position: sticky;
+      top: 10px;
+      z-index: 30;
+      width: 100%;
+      min-height: 50px;
+      padding: 0 14px 0 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--d-heading);
+      background: rgba(18, 14, 26, 0.8);
+      border: 1px solid var(--d-line-strong);
+      border-radius: 15px;
+      box-shadow: 0 12px 34px rgba(0, 0, 0, 0.36), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+      backdrop-filter: blur(22px) saturate(150%);
+      -webkit-backdrop-filter: blur(22px) saturate(150%);
+      cursor: pointer;
+      font-family: var(--d-sans);
+      font-size: 14.5px;
+      font-weight: 500;
+      text-align: left;
+    }
+
+    .docs-toc-toggle:focus-visible {
+      outline-offset: 2px;
+    }
+
+    .toggle-icon {
+      width: 17px;
+      height: 17px;
+      flex: none;
+      color: var(--d-accent-text);
+      stroke-width: 2;
+    }
+
+    .toggle-label {
+      flex: none;
+    }
+
+    .toggle-current {
+      min-width: 0;
+      overflow: hidden;
+      color: var(--d-muted);
+      font-weight: 400;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .toggle-current::before {
+      content: "/";
+      margin-right: 10px;
+      color: var(--d-line-strong);
+    }
+
+    .toggle-current:empty {
+      display: none;
+    }
+
+    .toggle-chevron {
+      width: 17px;
+      height: 17px;
+      margin-left: auto;
+      flex: none;
+      color: var(--d-muted);
+      stroke-width: 2;
+    }
+
+    .docs-sidebar {
+      position: fixed;
+      inset: 0;
+      z-index: 80;
+      padding: 10px;
+      display: none;
+      background: rgba(4, 3, 8, 0.62);
+      border: 0;
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+    }
+
+    .docs-sidebar.is-open {
+      display: block;
+      animation: docs-fade 180ms ease both;
+    }
+
+    .docs-sidebar-inner {
+      position: relative;
+      top: auto;
+      width: 100%;
+      max-width: 520px;
+      height: 100%;
+      max-height: none;
+      margin: 0 auto;
+      padding: 8px 8px 0 16px;
+      background: #0f0c15;
+      border: 1px solid var(--d-line-strong);
+      border-radius: 20px;
+      box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    }
+
+    .docs-sidebar.is-open .docs-sidebar-inner {
+      animation: docs-sheet 260ms var(--d-ease) both;
+    }
+
+    .docs-sidebar-head {
+      min-height: 48px;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .docs-sidebar-head p {
+      margin: 0;
+      color: var(--d-heading);
+      font-size: 16px;
+      font-weight: 600;
+    }
+
+    .docs-sidebar-close {
+      width: 44px;
+      height: 44px;
+      display: grid;
+      place-items: center;
+      color: var(--d-muted);
+      background: transparent;
+      border: 0;
+      border-radius: 12px;
+      cursor: pointer;
+    }
+
+    .docs-sidebar-close:hover {
+      color: var(--d-heading);
+      background: rgba(255, 255, 255, 0.06);
+    }
+
+    .docs-sidebar-close:focus-visible {
+      outline-offset: -2px;
+    }
+
+    .docs-sidebar-close svg {
+      width: 20px;
+      height: 20px;
+      stroke-width: 2;
+    }
+
+    .docs-search {
+      margin-right: 8px;
+    }
+
+    .docs-search input {
+      height: 44px;
+      font-size: 16px;
+    }
+
+    .docs-nav {
+      margin-right: -8px;
+      padding: 10px 16px 40px 0;
+    }
+
+    .docs-nav-group a {
+      min-height: 44px;
+      padding: 10px 0 10px 16px;
+      font-size: 15px;
+    }
+
+    .docs-nav-tour a {
+      min-height: 50px;
+      font-size: 15px;
+    }
+
     .doc-section {
-      padding: 60px 0;
+      scroll-margin-top: 76px;
     }
-
-    .doc-section h2 {
-      font-size: 36px;
-    }
-
-    .definition-grid,
-    .do-dont {
-      grid-template-columns: 1fr;
-    }
-
-    .feature-list li {
-      grid-template-columns: 1fr;
-      gap: 2px;
-    }
-
   }
-  /* Why Vector */
-  .doc-section h3 { margin: 40px 0 0; font-size: 22px; font-weight: 650; letter-spacing: -0.01em; }
-  .doc-section h2 .doc-soon { display: inline-block; margin-left: 12px; padding: 4px 11px; vertical-align: middle; color: var(--accent-strong); font-size: 12px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; background: var(--accent-soft); border: 1px solid var(--glass-line); border-radius: 999px; }
-  .doc-tally { margin-top: 30px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
-  .doc-tally div { padding: 18px; background: var(--glass-fill); border: 1px solid var(--glass-line); border-radius: 14px; }
-  .doc-tally strong { display: block; font-size: 30px; font-weight: 680; line-height: 1; color: var(--accent-strong); }
-  .doc-tally span { display: block; margin-top: 8px; color: var(--muted-strong); font-size: 13px; }
-  .doc-grid { margin-top: 20px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
-  .doc-grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 26px; }
-  .doc-card { padding: 20px; background: var(--glass-fill); border: 1px solid var(--glass-line); border-radius: 14px; }
-  .doc-card small { display: block; color: var(--accent-strong); font-size: 11px; font-weight: 650; letter-spacing: 0.08em; text-transform: uppercase; }
-  .doc-card h4 { margin: 8px 0 0; font-size: 16px; font-weight: 650; }
-  .doc-card p { margin: 8px 0 0; color: var(--muted-strong); font-size: 13.5px; line-height: 1.6; }
-  .doc-rows { margin: 30px 0 0; padding: 0; border-top: 1px solid var(--line); }
-  .doc-rows > div { padding: 18px 0; display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.6fr); gap: 16px 32px; border-bottom: 1px solid var(--line); }
-  .doc-rows dt { margin: 0; font-size: 15px; font-weight: 650; }
-  .doc-rows dt small { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; font-weight: 500; }
-  .doc-rows dd { margin: 0; color: var(--muted-strong); font-size: 14.5px; line-height: 1.65; }
-  .doc-table-wrap { margin-top: 30px; overflow-x: auto; border: 1px solid var(--glass-line); border-radius: 14px; }
-  .doc-table { width: 100%; min-width: 760px; border-collapse: collapse; font-size: 13.5px; }
-  .doc-table th, .doc-table td { padding: 12px 14px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); }
-  .doc-table thead th { color: var(--accent-strong); font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; background: var(--glass-fill); }
-  .doc-table tbody th { color: var(--ink); font-weight: 600; }
-  .doc-table td { color: var(--muted-strong); }
-  .doc-table td:first-of-type { color: var(--ink); }
-  .doc-section code { padding: 1px 6px; color: var(--accent-strong); background: var(--accent-soft); border: 1px solid var(--glass-line); border-radius: 6px; font-size: 0.9em; }
-  @media (max-width: 860px) {
-    .doc-tally, .doc-grid, .doc-grid-4 { grid-template-columns: 1fr 1fr; }
-    .doc-rows > div { grid-template-columns: 1fr; gap: 6px; }
+
+  @media (max-width: 640px) {
+    .docs-topbar::after {
+      height: 8px;
+    }
+
+    .docs-shell {
+      width: calc(100% - 40px);
+      padding-top: 24px;
+    }
+
+    .docs-header {
+      padding-bottom: 30px;
+    }
+
+    .docs-header::before {
+      top: -120px;
+      left: -160px;
+      width: 480px;
+      height: 360px;
+    }
+
+    .docs-header h1 {
+      font-size: 40px;
+    }
+
+    .docs-lede {
+      font-size: 17px;
+    }
+
+    .docs-quick {
+      margin-top: 26px;
+    }
+
+    .docs-quick a {
+      min-height: 44px;
+    }
+
+    .docs-toc-toggle {
+      top: 8px;
+      width: calc(100% + 12px);
+      margin: 0 -6px;
+    }
+
+    .doc-section {
+      padding: 40px 0 36px;
+    }
+
+    .doc-heading h2 {
+      font-size: 26px;
+    }
+
+    .doc-soon {
+      top: -3px;
+    }
+
+    .doc-section > h3 {
+      margin-top: 36px;
+      font-size: 18px;
+    }
+
+    .doc-section > .note {
+      padding-right: 16px;
+    }
+
+    .code-bar {
+      padding-left: 14px;
+    }
+
+    .copy-button {
+      height: 40px;
+    }
+
+    .faq-list summary {
+      min-height: 56px;
+    }
+
+    .faq-list details > p {
+      margin-right: 0;
+    }
   }
-  @media (max-width: 560px) {
-    .doc-tally, .doc-grid, .doc-grid-4 { grid-template-columns: 1fr; }
+
+  @keyframes docs-fade {
+    from {
+      opacity: 0;
+    }
+  }
+
+  @keyframes docs-sheet {
+    from {
+      opacity: 0;
+      transform: translateY(10px) scale(0.99);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .docs-sidebar.is-open,
+    .docs-sidebar.is-open .docs-sidebar-inner {
+      animation: none;
+    }
   }
 </style>
