@@ -58,7 +58,8 @@ const count = 32
 
   /* The landing page gives every direct child position: relative, so the
      selector carries the page root to outrank that rule. */
-  @media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  /* Only where the page leaves a real side margin, so the rail never sits on a card. */
+  @media (min-width: 1360px) and (hover: hover) and (pointer: fine) {
     :global(.vector-marketing) > .scroll-ticks {
       position: fixed;
       top: 50%;

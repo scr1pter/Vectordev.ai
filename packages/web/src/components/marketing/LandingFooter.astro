@@ -48,11 +48,13 @@ const width = 6 * 7 - 2
     <div class="footer-lead" data-reveal>
       <a class="footer-mark" href="/" aria-label="Vector home">
         <svg viewBox={`0 0 ${width} 7`} width="96" height="17" fill="currentColor" shape-rendering="crispEdges" aria-hidden="true">
-          {cells.map((cell) => <rect x={cell.x} y={cell.y} width="0.92" height="0.92" />)}
+          {cells.map((cell) => <rect x={cell.x} y={cell.y} width="1" height="1" />)}
         </svg>
       </a>
-      <h2 class="footer-title">Get Vector today.</h2>
-      <p class="footer-copy">The agentic workspace for builders. Free during beta.</p>
+      <h2 class="footer-title">Start building with Vector.</h2>
+      <p class="footer-copy">
+        The engineering workspace with an agent of its own. Free during beta, and the CLI is free with a Vector account.
+      </p>
       <a class="landing-pill footer-pill" href="/login">Get Vector</a>
       <p class="footer-legal">© 2026 Vector</p>
     </div>
@@ -77,7 +79,7 @@ const width = 6 * 7 - 2
 
   <div class="footer-wordmark" aria-hidden="true">
     <svg viewBox={`0 0 ${width} 7`} fill="currentColor" shape-rendering="crispEdges" preserveAspectRatio="xMidYMin meet">
-      {cells.map((cell) => <rect x={cell.x} y={cell.y} width="0.92" height="0.92" />)}
+      {cells.map((cell) => <rect x={cell.x} y={cell.y} width="1.02" height="1.02" />)}
     </svg>
   </div>
 </footer>
@@ -94,7 +96,7 @@ const width = 6 * 7 - 2
     display: grid;
     grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
     gap: 48px;
-    background: rgba(255, 255, 255, 0.05);
+    background: rgba(20, 18, 26, 0.92);
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 32px;
     box-shadow: 0 40px 120px rgba(0, 0, 0, 0.35);
@@ -197,9 +199,11 @@ const width = 6 * 7 - 2
     width: calc(100% - 40px);
     max-width: 1680px;
     margin: 72px auto 0;
-    aspect-ratio: 40 / 4.4;
+    aspect-ratio: 40 / 5.2;
     overflow: hidden;
-    color: rgba(245, 245, 247, 0.06);
+    /* Solid and just above the page colour: the word reads as letters, and the
+       glyph field does not show through them. */
+    color: #17141e;
     pointer-events: none;
     user-select: none;
   }
@@ -246,6 +250,18 @@ const width = 6 * 7 - 2
     .footer-wordmark {
       width: calc(100% - 24px);
       margin-top: 48px;
+      aspect-ratio: 40 / 5.6;
+    }
+  }
+
+  /* Very wide screens: line the card and the word up with the product window. */
+  @media (min-width: 1800px) {
+    .footer-card {
+      width: min(1440px, calc(100% - 40px));
+    }
+
+    .footer-wordmark {
+      max-width: none;
     }
   }
 </style>

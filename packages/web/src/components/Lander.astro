@@ -7,13 +7,38 @@ import LanderMotion from "./marketing/LanderMotion.astro"
 import LanderMaterials from "./marketing/LanderMaterials.astro"
 import LandingFooter from "./marketing/LandingFooter.astro"
 import ScrollTicks from "./marketing/ScrollTicks.astro"
-import CliRecording from "./marketing/recordings/CliRecording.astro"
-import ModelsRecording from "./marketing/recordings/ModelsRecording.astro"
-import ReviewRecording from "./marketing/recordings/ReviewRecording.astro"
 
 // Everything the product does, section by section, lives on /docs/product.
-// This page is the short version: the hero, three recordings, why the agent
-// can be trusted, and a way in.
+// This page is the short version: the hero and its one interactive picture,
+// two things worth knowing in detail, why the agent can be trusted, and a way in.
+
+// The OpenCode Zen models Vector includes today, with no API key. Named, never
+// counted: the lineup changes as model makers add and retire models.
+const includedModels = [
+  "Big Pickle",
+  "Nemotron 3 Ultra",
+  "Nemotron 3.5 Lightning",
+  "Muse Spark 1.3",
+  "Muse Spark 1.2",
+  "MiMo V2.5",
+  "Ling 3.0 Flash Fin",
+]
+
+// What a review leaves on a pull request (packages/core/src/review/format.ts).
+const reviewFacts = [
+  {
+    title: "The risk, and the files that matter",
+    text: "One summary comment on the pull request, updated as new commits land.",
+  },
+  {
+    title: "Comments on the exact lines",
+    text: "Each with a severity and, where it is safe, a fix you can commit from GitHub.",
+  },
+  {
+    title: "Picks up where it left off",
+    text: "Later reviews look at the new commits and say what got fixed.",
+  },
+]
 
 const pixelFont: Record<string, string[]> = {
   V: ["10001", "10001", "10001", "10001", "10001", "01010", "00100"],
@@ -34,29 +59,29 @@ const wordmarkCells = "VECTOR".split("").flatMap((letter, letterIndex) =>
 const trustCards = [
   {
     icon: BadgeCheck,
-    lead: "Verified before done.",
-    text: "A judge checks finished work against what you asked.",
+    lead: "A second check on done.",
+    text: "A separate judge compares finished work with what you asked.",
     href: "/docs#verified-completion",
     more: "Read about verified completion",
   },
   {
     icon: Laptop,
-    lead: "Runs on your machine.",
-    text: "Vector works in your repository, on your own computer.",
+    lead: "Memory stays yours.",
+    text: "Your notes for the agent live in one local file you can read, edit or delete.",
     href: "/docs#local-memory",
     more: "Read about local memory",
   },
   {
     icon: ShieldCheck,
-    lead: "Asks before it spends.",
-    text: "Anything that creates, changes or spends in your cloud accounts asks first.",
-    href: "/docs#cloud-services",
-    more: "Read about cloud services",
+    lead: "Reviews can only read.",
+    text: "Code review runs with read-only tools and ignores instructions hidden in a pull request.",
+    href: "/docs#code-review",
+    more: "Read about code review",
   },
   {
     icon: Coins,
-    lead: "Costs you can see.",
-    text: "Every run records what it really spent, per model and per task.",
+    lead: "Spend, itemized.",
+    text: "Each run records what it spent, per model and per task.",
     href: "/docs#tokenomics",
     more: "Read about the tokenomics engine",
   },
@@ -92,7 +117,7 @@ const trustCards = [
           </h1>
 
           <p class="headline">
-            <span class="headline-lead">An engineering workspace that</span>{" "}
+            <span class="headline-lead">An engineering workspace&nbsp;that</span>{" "}
             <span class="headline-rotate" data-scramble aria-hidden="true">has an agent of its own.</span>
             <span class="sr-only">An engineering workspace that has an agent of its own, verifies its work before calling it done, sets up your database and deploys it, runs subagents in parallel with no cap, invites your team into the session, runs in your terminal too, records what a run really cost, hosts Claude, Codex and Cursor alongside its own agent, and has its own 300 billion parameter model coming.</span>
           </p>
@@ -107,7 +132,7 @@ const trustCards = [
               <span>Get Vector</span>
               <ArrowRight size={18} strokeWidth={2} aria-hidden="true" />
             </a>
-            <a class="simple-secondary" href="#cli">Install the CLI</a>
+            <a class="simple-secondary" href="/docs/product#ch-cli">Install the CLI</a>
           </div>
           <p class="hero-note">Free during beta. macOS, Windows, and Linux.</p>
         </div>
@@ -129,42 +154,46 @@ const trustCards = [
       </div>
     </section>
 
-    <section id="cli" data-chapter="Vector CLI" class="stage" aria-labelledby="cli-title">
-      <div class="stage-visual">
-        <CliRecording />
-      </div>
-      <div class="stage-copy" data-reveal-group>
-        <h2 id="cli-title" class="stage-title" data-reveal>Vector CLI</h2>
-        <p class="stage-subtitle" data-reveal>The same agent, in any terminal.</p>
-        <div class="stage-action" data-reveal>
-          <a class="landing-pill" href="/docs/product#ch-cli" aria-label="Learn more about Vector CLI">Learn more</a>
-        </div>
-        <p class="stage-note" data-reveal>Free with a Vector account.</p>
-      </div>
-    </section>
-
-    <section id="models" data-chapter="No API key needed" class="stage" aria-labelledby="models-title">
-      <div class="stage-visual">
-        <ModelsRecording />
-      </div>
-      <div class="stage-copy" data-reveal-group>
-        <h2 id="models-title" class="stage-title" data-reveal>No API key needed.</h2>
-        <p class="stage-subtitle" data-reveal>Models come included with Vector.</p>
-        <div class="stage-action" data-reveal>
+    <section id="models" data-chapter="No API key needed" class="story" aria-labelledby="models-title">
+      <div class="story-copy" data-reveal-group>
+        <p class="story-kicker" data-reveal>Models</p>
+        <h2 id="models-title" class="story-title" data-reveal>No API&nbsp;key needed.</h2>
+        <p class="story-subtitle" data-reveal>Models come included with Vector.</p>
+        <p class="story-body" data-reveal>
+          Big Pickle is the default, alongside models from NVIDIA, Meta and others, so your first task runs before you
+          connect anything. Want Claude, GPT or Gemini too? Add your own key and choose them from the same list.
+        </p>
+        <ul class="story-models" data-reveal aria-label="Models included with Vector today">
+          {includedModels.map((model) => <li>{model}</li>)}
+        </ul>
+        <div class="story-action" data-reveal>
           <a class="landing-pill" href="/docs/product#ch-models">See the models</a>
         </div>
       </div>
     </section>
 
-    <section id="review" data-chapter="Code review" class="stage" aria-labelledby="review-title">
-      <div class="stage-visual">
-        <ReviewRecording />
-      </div>
-      <div class="stage-copy" data-reveal-group>
-        <h2 id="review-title" class="stage-title" data-reveal>Code review</h2>
-        <p class="stage-subtitle" data-reveal>Every pull request, reviewed.</p>
-        <div class="stage-action" data-reveal>
-          <a class="landing-pill" href="/docs#code-review" aria-label="Learn more about code review">Learn more</a>
+    <section id="review" data-chapter="Code review" class="story" aria-labelledby="review-title">
+      <div class="story-copy" data-reveal-group>
+        <p class="story-kicker" data-reveal>Code review</p>
+        <h2 id="review-title" class="story-title" data-reveal>Every pull&nbsp;request, reviewed.</h2>
+        <p class="story-subtitle" data-reveal>When it opens, and on every push.</p>
+        <p class="story-body" data-reveal>
+          Vector reads the repository around each change, not just the diff, and follows your rules in
+          <code>.vector/review.md</code>. Each review names the model it ran on and what it cost. Turn it on with
+          <code>vector github install</code>, or run it locally with <code>vector review</code>.
+        </p>
+        <ul class="story-facts" data-reveal>
+          {
+            reviewFacts.map((fact) => (
+              <li>
+                <h3>{fact.title}</h3>
+                <p>{fact.text}</p>
+              </li>
+            ))
+          }
+        </ul>
+        <div class="story-action" data-reveal>
+          <a class="landing-pill" href="/docs#code-review">See how reviews work</a>
         </div>
       </div>
     </section>
@@ -179,7 +208,7 @@ const trustCards = [
             fill="currentColor"
             shape-rendering="crispEdges"
           >
-            {wordmarkCells.map((cell) => <rect x={cell.x} y={cell.y} width="0.92" height="0.92" />)}
+            {wordmarkCells.map((cell) => <rect x={cell.x} y={cell.y} width="1" height="1" />)}
           </svg>
         </div>
         <h2 id="trust-title" class="trust-title" data-reveal>
@@ -305,7 +334,7 @@ const trustCards = [
     node.after(measure)
     measure.style.font = getComputedStyle(node).font
     measure.textContent = phrases.reduce((longest, phrase) => (phrase.length > longest.length ? phrase : longest), "")
-    node.style.minWidth = `${Math.ceil(measure.getBoundingClientRect().width)}px`
+    node.style.minWidth = `${Math.min(Math.ceil(measure.getBoundingClientRect().width), node.parentElement?.clientWidth || Infinity)}px`
     node.style.display = "inline-block"
     measure.remove()
     // Inter is a web font on systems without SF Pro, and it can finish loading
@@ -315,7 +344,7 @@ const trustCards = [
       if (!node.isConnected) return
       node.after(measure)
       measure.style.font = getComputedStyle(node).font
-      node.style.minWidth = `${Math.ceil(measure.getBoundingClientRect().width)}px`
+      node.style.minWidth = `${Math.min(Math.ceil(measure.getBoundingClientRect().width), node.parentElement?.clientWidth || Infinity)}px`
       measure.remove()
     })
 
@@ -628,8 +657,8 @@ const trustCards = [
     font-family: var(--font-landing);
   }
 
-  /* Components inside the page that ask for the site font (the product window,
-     the recordings) get the landing type too. The top bar is the site's shared
+  /* Components inside the page that ask for the site font (the product window)
+     get the landing type too. The top bar is the site's shared
      chrome and keeps Geist, exactly as on every other page. */
   .vector-marketing > main {
     --font-sans: var(--font-landing);
@@ -661,7 +690,10 @@ const trustCards = [
     z-index: 1;
   }
 
-  .ascii-field {
+  /* The page gives its direct children position: relative, and in the production
+     build that rule can load after this one. Carrying the page root keeps the
+     glyph field a fixed backdrop instead of a screen-tall block above the hero. */
+  .vector-marketing > .ascii-field {
     position: fixed;
     inset: 0;
     z-index: 0;
@@ -683,8 +715,8 @@ const trustCards = [
 
   /* ---- motion system ----
      Content rises into place once as it enters: 12px and a fade, 700ms, with
-     groups staggered 80ms apart by the script. Recordings fade and grow from
-     96% instead. Nothing is pinned and scrolling is never taken over. The
+     groups staggered 80ms apart by the script. Nothing is pinned and
+     scrolling is never taken over. The
      rules reach into the footer component, which reveals the same way. */
 
   :global(html.va) .vector-marketing :global([data-reveal]) {
@@ -694,11 +726,6 @@ const trustCards = [
       opacity 700ms cubic-bezier(0.16, 1, 0.3, 1),
       transform 700ms cubic-bezier(0.16, 1, 0.3, 1);
     transition-delay: var(--rd, 0ms);
-  }
-
-  :global(html.va) .vector-marketing :global([data-reveal].reveal-record) {
-    transform: scale(0.96);
-    transition-duration: 800ms;
   }
 
   :global(html.va) .vector-marketing :global([data-reveal].in) {
@@ -998,7 +1025,7 @@ const trustCards = [
   @media (max-width: 640px) {
     .hero { padding-top: 44px; }
     .wordmark { margin-bottom: 26px; }
-    .headline { min-height: 3.4em; font-size: clamp(26px, 7.6vw, 32px); }
+    .headline { min-height: 4.6em; font-size: clamp(26px, 7.6vw, 32px); }
 
     .showcase { width: calc(100% - 24px); padding-top: 44px; }
     .product-window { padding: 5px; border-radius: 21px; }
@@ -1045,7 +1072,7 @@ const trustCards = [
   }
 
   /* ==================================================================
-     The page after the hero: three recordings, the trust row, the footer.
+     The page after the hero: two stories told in type, the trust row, the footer.
      Centred, one measure, generous air, and the type does the work.
      ================================================================== */
 
@@ -1099,43 +1126,61 @@ const trustCards = [
     transform: translateY(0) scale(0.98);
   }
 
-  /* ---- recording sections ---- */
+  /* ---- story sections: one idea each, told in type ---- */
 
-  .stage {
-    padding: 120px 0 40px;
+  .story {
+    padding: clamp(120px, 11vw, 168px) 0 24px;
   }
 
-  #cli {
-    padding-top: clamp(128px, 12vw, 176px);
+  #models {
+    padding-top: clamp(136px, 13vw, 200px);
   }
 
-  .stage-visual {
-    width: min(1080px, calc(100% - 40px));
-    margin-inline: auto;
-    transform-origin: 50% 35%;
-  }
-
-  .stage-copy {
+  .story-copy {
+    position: relative;
+    isolation: isolate;
     width: var(--landing-content);
-    margin: 48px auto 0;
+    margin-inline: auto;
     display: flex;
     flex-direction: column;
     align-items: center;
     text-align: center;
   }
 
-  .stage-title {
+  /* A soft dark pool under the words, so the glyph field keeps moving around
+     the section without running through the sentences. */
+  .story-copy::before,
+  .trust-head::before {
+    content: "";
+    position: absolute;
+    inset: -96px -12%;
+    z-index: -1;
+    pointer-events: none;
+    background: radial-gradient(closest-side, rgba(8, 6, 13, 0.86), rgba(8, 6, 13, 0.62) 55%, rgba(8, 6, 13, 0) 100%);
+  }
+
+  .story-kicker {
+    margin: 0 0 18px;
+    color: var(--landing-accent);
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .story-title {
     margin: 0;
     color: var(--landing-title);
-    font-size: 80px;
+    font-size: 64px;
     font-weight: 500;
-    line-height: 84px;
-    letter-spacing: -1.2px;
+    line-height: 68px;
+    letter-spacing: -1px;
     text-wrap: balance;
   }
 
-  .stage-subtitle {
-    margin: 12px 0 0;
+  .story-subtitle {
+    margin: 14px 0 0;
     color: var(--landing-subtitle);
     font-size: 28px;
     font-weight: 500;
@@ -1144,24 +1189,102 @@ const trustCards = [
     text-wrap: balance;
   }
 
-  .stage-action {
-    margin-top: 32px;
+  .story-body {
+    max-width: 640px;
+    margin: 28px 0 0;
+    color: rgba(245, 245, 247, 0.72);
+    font-size: 19px;
+    line-height: 1.6;
+    letter-spacing: -0.005em;
+    text-wrap: pretty;
   }
 
-  .stage-note {
-    margin: 16px 0 0;
-    color: var(--landing-secondary);
+  .story-body code {
+    padding: 2px 7px;
+    color: var(--landing-title);
+    background: rgba(255, 255, 255, 0.07);
+    border-radius: 6px;
+    font-family: var(--font-landing-mono);
+    font-size: 0.84em;
+    white-space: nowrap;
+  }
+
+  .story-models {
+    max-width: 760px;
+    margin: 36px 0 0;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 10px;
+    list-style: none;
+  }
+
+  .story-models li {
+    padding: 9px 16px;
+    color: var(--landing-title);
+    background: var(--landing-surface);
+    border: 1px solid var(--landing-line);
+    border-radius: 999px;
     font-size: 15px;
+    font-weight: 500;
+    line-height: 1.2;
+    letter-spacing: -0.005em;
+  }
+
+  .story-facts {
+    width: 100%;
+    max-width: 980px;
+    margin: 52px 0 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 24px;
+    list-style: none;
+    text-align: left;
+  }
+
+  .story-facts li {
+    padding-top: 22px;
+    border-top: 1px solid rgba(255, 255, 255, 0.14);
+  }
+
+  .story-facts h3 {
+    margin: 0;
+    color: var(--landing-title);
+    font-size: 19px;
+    font-weight: 600;
+    line-height: 1.3;
+    letter-spacing: -0.012em;
+  }
+
+  .story-facts p {
+    margin: 8px 0 0;
+    color: var(--landing-secondary);
+    font-size: 16px;
     line-height: 1.55;
+  }
+
+  .story-action {
+    margin-top: 44px;
+  }
+
+  /* The hero's purple glow fades out before the next section instead of ending
+     in a straight line; the top of the page is unchanged. */
+  .simple-hero-section .sky {
+    -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 320px), transparent);
+    mask-image: linear-gradient(to bottom, #000 calc(100% - 320px), transparent);
   }
 
   /* ---- trust ---- */
 
   .trust {
-    padding: 112px 0;
+    padding: clamp(136px, 12vw, 176px) 0 112px;
   }
 
   .trust-head {
+    position: relative;
+    isolation: isolate;
     width: var(--landing-content);
     margin-inline: auto;
   }
@@ -1227,7 +1350,7 @@ const trustCards = [
     padding: 32px 32px 28px;
     display: flex;
     flex-direction: column;
-    background: var(--landing-surface);
+    background: #14121a;
     border: 1px solid var(--landing-line);
     border-radius: 28px;
     transition:
@@ -1236,7 +1359,7 @@ const trustCards = [
   }
 
   .trust-card:hover {
-    background: rgba(255, 255, 255, 0.07);
+    background: #19161f;
     border-color: rgba(255, 255, 255, 0.13);
   }
 
@@ -1348,9 +1471,39 @@ const trustCards = [
 
   /* ---- landing breakpoints ---- */
 
+  /* Where the tick rail shows, the row's peeking card fades out before it. */
+  @media (min-width: 1360px) and (hover: hover) and (pointer: fine) {
+    .trust-row {
+      -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 112px), transparent calc(100% - 40px));
+      mask-image: linear-gradient(90deg, #000 calc(100% - 112px), transparent calc(100% - 40px));
+    }
+  }
+
+  /* Very wide screens: line the sections up with the product window. */
+  @media (min-width: 1800px) {
+    .vector-marketing {
+      --landing-content: min(1440px, calc(100% - 40px));
+    }
+
+    .trust-row {
+      --trust-inset: max(20px, calc((100% - 1440px) / 2));
+    }
+  }
+
+  /* Short and mid-width windows: the same side margin the hero keeps. */
+  @media (min-width: 641px) and (max-width: 1100px) {
+    .vector-marketing {
+      --landing-content: min(1180px, calc(100% - 64px));
+    }
+
+    .trust-row {
+      --trust-inset: max(32px, calc((100% - 1180px) / 2));
+    }
+  }
+
   @media (max-width: 1100px) {
-    .stage-title {
-      font-size: 64px;
+    .story-title {
+      font-size: 56px;
       line-height: 1.06;
       letter-spacing: -0.015em;
     }
@@ -1366,37 +1519,78 @@ const trustCards = [
   }
 
   @media (max-width: 640px) {
-    .stage {
-      padding: 88px 0 24px;
+    .story {
+      padding: 88px 0 16px;
     }
 
-    #cli {
+    #models {
       padding-top: 104px;
     }
 
-    .stage-visual {
-      width: calc(100% - 24px);
+    .story-kicker {
+      margin-bottom: 14px;
     }
 
-    .stage-copy {
-      margin-top: 36px;
-    }
-
-    .stage-title {
-      font-size: 44px;
+    .story-title {
+      font-size: clamp(34px, 10.2vw, 44px);
       line-height: 1.05;
       letter-spacing: -0.02em;
     }
 
-    .stage-subtitle {
+    .story-subtitle {
       margin-top: 10px;
       font-size: 20px;
       line-height: 1.3;
       letter-spacing: -0.01em;
     }
 
-    .stage-action {
-      margin-top: 26px;
+    .story-body {
+      margin-top: 20px;
+      font-size: 17px;
+      text-wrap: balance;
+    }
+
+    .story-models {
+      margin-top: 28px;
+      gap: 8px;
+    }
+
+    .story-models li {
+      padding: 8px 13px;
+      font-size: 14px;
+    }
+
+    .story-facts {
+      margin-top: 36px;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 18px;
+      text-align: center;
+    }
+
+    .story-facts li {
+      padding-top: 18px;
+    }
+
+    .story-action {
+      margin-top: 32px;
+    }
+
+    /* On a narrow screen the dark pool runs the full height of the words, so the
+       glyphs stay out of every line rather than only the middle ones. */
+    .story-copy::before {
+      inset: -80px -20px;
+      background: linear-gradient(
+        to bottom,
+        rgba(8, 6, 13, 0),
+        rgba(8, 6, 13, 0.82) 80px,
+        rgba(8, 6, 13, 0.82) calc(100% - 80px),
+        rgba(8, 6, 13, 0)
+      );
+    }
+
+    .trust-arrow {
+      width: 44px;
+      height: 44px;
     }
 
     .trust {
