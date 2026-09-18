@@ -1,8 +1,7 @@
 ---
 // The landing page's footer: one rounded card with the call to action and the
-// site's links, then the pixel VECTOR wordmark at page width, faded almost to
-// nothing and cut off by the bottom of the page. Every other page keeps
-// MarketingFooter.
+// site's links, and nothing after it — the card is the bottom of the page.
+// Every other page keeps MarketingFooter.
 
 interface Props {
   /** The lit cells of the pixel VECTOR wordmark, passed in so every mark on the page is drawn from one font. */
@@ -77,16 +76,12 @@ const width = 6 * 7 - 2
     </div>
   </div>
 
-  <div class="footer-wordmark" aria-hidden="true">
-    <svg viewBox={`0 0 ${width} 7`} fill="currentColor" shape-rendering="crispEdges" preserveAspectRatio="xMidYMin meet">
-      {cells.map((cell) => <rect x={cell.x} y={cell.y} width="1.02" height="1.02" />)}
-    </svg>
-  </div>
 </footer>
 
 <style>
   .landing-footer {
-    padding-top: 80px;
+    padding-top: 56px;
+    padding-bottom: 72px;
   }
 
   .footer-card {
@@ -193,27 +188,6 @@ const width = 6 * 7 - 2
     color: #f5f5f7;
   }
 
-  /* The mark runs the page's full width and the page ends partway down its
-     letters, so only the top of the word shows. */
-  .footer-wordmark {
-    width: calc(100% - 40px);
-    max-width: 1680px;
-    margin: 72px auto 0;
-    aspect-ratio: 40 / 5.2;
-    overflow: hidden;
-    /* Solid and just above the page colour: the word reads as letters, and the
-       glyph field does not show through them. */
-    color: #17141e;
-    pointer-events: none;
-    user-select: none;
-  }
-
-  .footer-wordmark svg {
-    display: block;
-    width: 100%;
-    height: auto;
-  }
-
   @media (max-width: 900px) {
     .footer-card {
       grid-template-columns: 1fr;
@@ -224,6 +198,7 @@ const width = 6 * 7 - 2
   @media (max-width: 640px) {
     .landing-footer {
       padding-top: 56px;
+      padding-bottom: 48px;
     }
 
     .footer-card {
@@ -246,22 +221,12 @@ const width = 6 * 7 - 2
       grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 28px 20px;
     }
-
-    .footer-wordmark {
-      width: calc(100% - 24px);
-      margin-top: 48px;
-      aspect-ratio: 40 / 5.6;
-    }
   }
 
-  /* Very wide screens: line the card and the word up with the product window. */
+  /* Very wide screens: line the card up with the product window. */
   @media (min-width: 1800px) {
     .footer-card {
       width: min(1440px, calc(100% - 40px));
-    }
-
-    .footer-wordmark {
-      max-width: none;
     }
   }
 </style>

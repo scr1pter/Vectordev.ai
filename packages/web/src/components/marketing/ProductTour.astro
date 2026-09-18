@@ -27,6 +27,44 @@ import LanderMaterials from "./LanderMaterials.astro"
   <main>
     <slot />
 
+    <section id="ch-why" data-chapter="What's different" class="simple-section section-width" aria-labelledby="why-title">
+      <div class="section-heading simple-heading" data-reveal>
+        <p class="section-kicker">What makes it different</p>
+        <h2 id="why-title">A workspace, not a wrapper.</h2>
+        <p>
+          Writing the code was never the only work. Vector keeps the editor, the terminal, the browser, the memory of
+          the project, the review, the connectors, your cloud accounts and every agent you start in one place — over
+          the repository already on your disk.
+        </p>
+      </div>
+      <div class="simple-rows">
+        <article class="simple-row" data-reveal>
+          <h3>Its own engine, not a chat box</h3>
+          <p>Sessions, file state, permissions and tools belong to Vector and run on your machine — the same agent in the desktop app, in your terminal and on a pull request.</p>
+        </article>
+        <article class="simple-row" data-reveal style="--rd: 60ms">
+          <h3>Finished means checked</h3>
+          <p>Turn on verified completion and a read-only judge reads your request, the changed files and the output of the checks that ran before the work counts as done.</p>
+        </article>
+        <article class="simple-row" data-reveal style="--rd: 120ms">
+          <h3>Models come with it</h3>
+          <p>A fresh install works with no API key, starting on Big Pickle. Your own Claude, GPT or Gemini keys sit beside the included models, and you choose per task.</p>
+        </article>
+        <article class="simple-row" data-reveal style="--rd: 180ms">
+          <h3>As many agents as you can run</h3>
+          <p>No cap on agents or subagents. Run them side by side in isolated workspaces, watch each one's work, and merge the ones you want.</p>
+        </article>
+        <article class="simple-row" data-reveal style="--rd: 240ms">
+          <h3>Four runtimes, one workspace</h3>
+          <p>Vector's own agent, plus Claude Code, Codex and Cursor Agent on the subscriptions you already pay for — sharing one checkout, one memory and one review.</p>
+        </article>
+        <article class="simple-row" data-reveal style="--rd: 300ms">
+          <h3>Your code stays on your machine</h3>
+          <p>Vector works in the repository on your disk. Nothing is uploaded to Vector; what a task needs goes to the model provider you picked, and every run records what it cost.</p>
+        </article>
+      </div>
+    </section>
+
     <section id="workspace" class="simple-section section-width" aria-labelledby="surfaces-title">
       <div class="section-heading simple-heading" data-reveal>
         <p class="section-kicker">Everywhere you work</p>
@@ -54,8 +92,69 @@ import LanderMaterials from "./LanderMaterials.astro"
         <article class="simple-card" data-reveal style="--rd: 180ms">
           <p class="section-kicker">Connections</p>
           <h3>Plug in the tools you already use.</h3>
-          <p>GitHub, Linear, Sentry, Notion, Figma, Stripe, and more — turned on with one click.</p>
+          <p>135 plugins — GitHub, Linear, Sentry, Notion, Figma, Stripe and the rest — turned on with one click, plus any MCP server you write.</p>
           <a href="/docs">See the list →</a>
+        </article>
+      </div>
+    </section>
+
+    <section id="ch-ide" data-chapter="In the workspace" class="simple-section section-width" aria-labelledby="ide-title">
+      <div class="section-heading simple-heading" data-reveal>
+        <p class="section-kicker">Inside the IDE</p>
+        <h2 id="ide-title">Everything the agent can reach, you can too.</h2>
+        <p>
+          The agent works with the same editor, shell, browser and history you do — so nothing it did is hidden from
+          you, and nothing you do is hidden from it.
+        </p>
+      </div>
+      <div class="simple-rows">
+        <article class="simple-row" data-reveal>
+          <h3>Agent and Editor</h3>
+          <p>Two views of one session: ask for the change, or make it yourself in a real editor with project-wide search and language diagnostics.</p>
+        </article>
+        <article class="simple-row" data-reveal style="--rd: 40ms">
+          <h3>Edits you can watch</h3>
+          <p>The file an agent touches opens on its own and the change types itself in that agent's colour, behind a labelled cursor.</p>
+        </article>
+        <article class="simple-row" data-reveal style="--rd: 80ms">
+          <h3>A real terminal</h3>
+          <p>A shell in the workspace, in your repository. The agent runs commands there, and you read the same output it read.</p>
+        </article>
+        <article class="simple-row" data-reveal style="--rd: 120ms">
+          <h3>A controlled browser</h3>
+          <p>The agent loads your app, clicks through it, reads the console and reports what happened. Sites beyond your own need your approval first.</p>
+        </article>
+        <article class="simple-row" data-reveal style="--rd: 160ms">
+          <h3>Review and checkpoints</h3>
+          <p>Diffs by turn, by branch or against git, comments on a line, and a checkpoint to put a run back the way it was.</p>
+        </article>
+        <article class="simple-row" data-reveal style="--rd: 200ms">
+          <h3>Pull requests, reviewed</h3>
+          <p>Open and merge from the workspace, and Vector reviews the change — on your branch with <code>vector review</code>, or on the pull request itself.</p>
+        </article>
+        <article class="simple-row" data-reveal style="--rd: 240ms">
+          <h3>Cloud accounts</h3>
+          <p>Provision Supabase, sync environment values and publish to your own Vercel or Netlify account, without leaving the repository.</p>
+        </article>
+        <article class="simple-row" data-reveal style="--rd: 280ms">
+          <h3>Connections</h3>
+          <p>135 one-click plugins hand the agent your tools — GitHub, Linear, Sentry, Notion, Figma, Stripe and the rest — beside any MCP server you write yourself.</p>
+        </article>
+        <article class="simple-row" data-reveal style="--rd: 320ms">
+          <h3>Parallel workspaces</h3>
+          <p>Each agent gets its own checkout, so several lines of work run at once without stepping on each other. Merge the ones that worked.</p>
+        </article>
+        <article class="simple-row" data-reveal style="--rd: 360ms">
+          <h3>Subagents in the background</h3>
+          <p>Vector splits a large job on its own and runs the pieces together, with a card for each one showing what it is doing.</p>
+        </article>
+        <article class="simple-row" data-reveal style="--rd: 400ms">
+          <h3>Memory and rules</h3>
+          <p>What Vector learns lives in files you can read, edit or delete, next to the rules a project asks every agent to follow.</p>
+        </article>
+        <article class="simple-row" data-reveal style="--rd: 440ms">
+          <h3>Spend, measured</h3>
+          <p>Tokens and cost as the provider reported them, per model and per run, with limits per day, per run and per project.</p>
         </article>
       </div>
     </section>
@@ -737,6 +836,11 @@ import LanderMaterials from "./LanderMaterials.astro"
     to { opacity: 1; transform: translate3d(5px, 3px, 0); }
   }
 
+  @keyframes field-breathe-quiet {
+    from { opacity: 0.4; transform: translate3d(-4px, -2px, 0); }
+    to { opacity: 0.5; transform: translate3d(5px, 3px, 0); }
+  }
+
   /* ---- responsive ---- */
 
   @media (max-width: 640px) {
@@ -816,6 +920,11 @@ import LanderMaterials from "./LanderMaterials.astro"
   @media (max-width: 900px) {
     .simple-grid, .simple-cli, .simple-rows, .simple-models { grid-template-columns: 1fr; }
     .simple-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+    /* One column means long paragraphs run the width of the screen, right over
+       the glyphs. The field keeps breathing, quieter, so the text is what reads.
+       (The opacity has to come from the animation: it is what sets it.) */
+    .vector-marketing > .ascii-field { animation-name: field-breathe-quiet; }
   }
   @media (max-width: 640px) {
     .simple-stats { grid-template-columns: 1fr; }

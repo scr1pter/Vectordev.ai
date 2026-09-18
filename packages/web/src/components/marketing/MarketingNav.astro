@@ -1,9 +1,9 @@
 ---
 interface Props {
-  active?: "product" | "docs" | "releases" | "login" | "about"
+  active?: "home" | "product" | "docs" | "releases" | "login" | "about"
 }
 
-const { active = "product" } = Astro.props
+const { active = "home" } = Astro.props
 ---
 
 <header class="site-header">
@@ -13,7 +13,7 @@ const { active = "product" } = Astro.props
     </a>
 
     <nav class="desktop-links" aria-label="Primary navigation">
-      <a class:list={{ active: active === "product" }} href="/#workspace">Product</a>
+      <a class:list={{ active: active === "product" }} href="/docs/product">Product</a>
       <a class:list={{ active: active === "docs" }} href="/docs">Docs</a>
       <a class:list={{ active: active === "releases" }} href="/releases">Releases</a>
       <a class:list={{ active: active === "about" }} href="/about">About</a>
@@ -47,7 +47,7 @@ const { active = "product" } = Astro.props
             Open a repository, direct agents, inspect their work, and ship from one desktop workspace.
           </p>
           <nav class="mobile-nav-links" aria-label="Mobile navigation">
-            <a href="/" aria-current={active === "product" ? "page" : undefined} class:list={{ current: active === "product" }}>Product</a>
+            <a href="/docs/product" aria-current={active === "product" ? "page" : undefined} class:list={{ current: active === "product" }}>Product</a>
             <a href="/docs" aria-current={active === "docs" ? "page" : undefined} class:list={{ current: active === "docs" }}>Documentation</a>
             <a href="/releases" aria-current={active === "releases" ? "page" : undefined} class:list={{ current: active === "releases" }}>Releases</a>
             <a href="/about" aria-current={active === "about" ? "page" : undefined} class:list={{ current: active === "about" }}>About</a>
