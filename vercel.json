@@ -1,4 +1,9 @@
 {
+  "git": {
+    "deploymentEnabled": {
+      "workspace-redesign": false
+    }
+  },
   "installCommand": "bun install",
   "buildCommand": "bun --cwd packages/web build && node script/prune-vector-site.mjs",
   "outputDirectory": "packages/web/dist",
