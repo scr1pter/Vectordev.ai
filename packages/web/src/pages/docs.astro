@@ -43,6 +43,32 @@ const navigation = [
     ],
   },
   {
+    label: "How the agent works",
+    links: [
+      ["The agent's tools", "tools"],
+      ["Permissions", "permissions"],
+      ["Context and compaction", "context"],
+      ["Skills", "skills"],
+      ["Custom commands", "commands"],
+      ["Custom agents and subagents", "custom-agents"],
+    ],
+  },
+  {
+    label: "Terminal",
+    links: [
+      ["The terminal agent", "cli-terminal"],
+      ["One-shot and scripted runs", "cli-run"],
+      ["Account and CLI tokens", "cli-account"],
+      ["Models and variants", "cli-models"],
+      ["Sessions", "cli-sessions"],
+      ["MCP from the terminal", "cli-mcp"],
+      ["Plugins", "cli-plugins"],
+      ["Server, web and editors", "cli-server"],
+      ["GitHub from the terminal", "cli-github"],
+      ["Upkeep and your data", "cli-maintenance"],
+    ],
+  },
+  {
     label: "Help",
     links: [
       ["Troubleshooting", "troubleshooting"],
@@ -717,12 +743,14 @@ const faqs = [
             <li><span>2</span><div><strong>Keep working</strong><p>Switch between workspaces while they stream activity independently.</p></div></li>
             <li><span>3</span><div><strong>Review and merge</strong><p>Inspect the diff and checks before bringing selected work into main.</p></div></li>
           </ol>
-          <h3>Swarm: one objective, a team of agents</h3>
+          <h3>Coordinated runs: one objective, a team of agents</h3>
           <p>
-            Instead of naming each workspace yourself, switch the launcher to Swarm and give Vector the objective. A
-            planner model reads the repository and writes a plan: tasks with roles — explore, implement, debug, test,
-            review, security, docs — and the dependencies between them. Each task becomes its own agent in its own
-            workspace, routed to a model by tier, and tasks run as soon as the ones they depend on finish.
+            Instead of naming each workspace yourself, choose <strong>Coordinate agents</strong> in the launcher and
+            give Vector the objective. A planner model reads the repository and writes a plan: tasks with roles —
+            explore, implement, debug, test, review, security, docs — and the dependencies between them. Each task
+            becomes its own agent in its own workspace, routed to a model by tier, and tasks run as soon as the ones
+            they depend on finish. Explore, debug, test, review and security tasks go to the matching subagent
+            specialist; implement and docs tasks run on the general agent.
           </p>
           <p>
             You set the strategy (economy, balanced or quality), the most agents that may run at once, and how many
@@ -954,6 +982,252 @@ const faqs = [
             into the main branch.
           </p>
           <p>To review a whole branch before you push, see <a href="#code-review">Code review</a>.</p>
+        </section>
+
+        <section id="tools" class="doc-section">
+          <div class="doc-heading">
+            <h2>The agent's tools</h2>
+            <a class="doc-anchor" href="#tools" aria-label="Link to The agent's tools" data-chrome></a>
+          </div>
+          <p>
+            The agent changes your project through a fixed set of first-class tools rather than free-form shell commands, so its behaviour is the same in the desktop app, in the terminal and in GitHub Actions.
+          </p>
+          <ul class="feature-list">
+            <li><strong>Files</strong><span><code>read</code> with line offsets and limits, <code>write</code>, <code>edit</code> for an exact string replacement, and <code>apply_patch</code> for a patch that spans several files.</span></li>
+            <li><strong>Search</strong><span><code>glob</code> for filename patterns and <code>grep</code> for content, so it finds code without reading whole directories.</span></li>
+            <li><strong>Language servers</strong><span><code>lsp</code> asks your project's language servers for a definition, the references to a symbol, hover type information or a workspace symbol search — the same answers your editor gets.</span></li>
+            <li><strong>The web</strong><span><code>websearch</code> takes a query and a mode — <code>auto</code>, <code>fast</code> or <code>deep</code> — and <code>webfetch</code> returns one URL as markdown, text or HTML. Search works on the models included with Vector, or on an Exa or Parallel key you supply.</span></li>
+            <li><strong>The shell</strong><span><code>bash</code> runs commands in the project, behind the permission rules below.</span></li>
+            <li><strong>Keeping it legible</strong><span><code>todowrite</code> maintains the checklist you can see, and <code>question</code> lets the agent stop and ask you a structured question instead of guessing.</span></li>
+          </ul>
+          <p class="note">
+            Tools are built in. MCP servers and plugins add more beside them; they never replace these.
+          </p>
+        </section>
+
+        <section id="permissions" class="doc-section">
+          <div class="doc-heading">
+            <h2>Permissions</h2>
+            <a class="doc-anchor" href="#permissions" aria-label="Link to Permissions" data-chrome></a>
+          </div>
+          <p>
+            Every tool action is checked against a ruleset whose effect is <strong>allow</strong>, <strong>ask</strong> or <strong>deny</strong>. Rules from the agent, from the project and from your saved answers are merged: deny wins, then ask, then allow, and anything with no matching rule defaults to ask. An agent with no permissions at all is denied everything rather than trusted.
+          </p>
+          <p>
+            When you answer <strong>always</strong>, that allow is saved for the project, so the same action is not asked again. Saved answers are per project, and you can clear them.
+          </p>
+          <p class="note is-caution">
+            For unattended runs the terminal agent takes <code>--auto</code> (also spelled <code>--yolo</code> or <code>--dangerously-skip-permissions</code>). It auto-approves anything not explicitly denied — deny rules still hold. It is off by default, and it is the flag to think twice about.
+          </p>
+        </section>
+
+        <section id="context" class="doc-section">
+          <div class="doc-heading">
+            <h2>Context and compaction</h2>
+            <a class="doc-anchor" href="#context" aria-label="Link to Context and compaction" data-chrome></a>
+          </div>
+          <p>
+            A long session does not fail when it reaches the model's context limit. Vector compacts it: older turns are summarised and pruned while a protected window of recent work is kept intact, and the run continues from the compacted history. A dedicated internal agent writes that summary, so it is written for the model that has to keep working rather than for a reader.
+          </p>
+          <p>
+            Compaction can also be triggered deliberately, and the transcript records where it happened.
+          </p>
+        </section>
+
+        <section id="skills" class="doc-section">
+          <div class="doc-heading">
+            <h2>Skills</h2>
+            <a class="doc-anchor" href="#skills" aria-label="Link to Skills" data-chrome></a>
+          </div>
+          <p>
+            A skill is a packaged set of instructions for a recurring kind of work — a house style, a review checklist, a deployment runbook. Vector finds a skill as a <code>SKILL.md</code> (or <code>&lt;name&gt;.md</code>) in a skill folder, project or global, and the agent calls it by name from the list of available skills.
+          </p>
+          <p>
+            Downloaded skills are cached under a versioned directory, so updating one is clean rather than a manual copy. Skills are a Vector mechanism, not an MCP server.
+          </p>
+        </section>
+
+        <section id="commands" class="doc-section">
+          <div class="doc-heading">
+            <h2>Custom commands</h2>
+            <a class="doc-anchor" href="#commands" aria-label="Link to Custom commands" data-chrome></a>
+          </div>
+          <p>
+            Your own commands are Markdown files in a <code>command/</code> or <code>commands/</code> folder, in the project or in your global config. Frontmatter carries the metadata, the body is the prompt template, and the file's path becomes the name — so <code>command/review/api.md</code> is available as <code>review/api</code>.
+          </p>
+          <p class="doc-cmd"><code>vector run --command review/api "the new billing endpoints"</code><button class="doc-cmd-copy" type="button" aria-label="Copy this command">Copy</button></p>
+        </section>
+
+        <section id="custom-agents" class="doc-section">
+          <div class="doc-heading">
+            <h2>Custom agents and subagents</h2>
+            <a class="doc-anchor" href="#custom-agents" aria-label="Link to Custom agents and subagents" data-chrome></a>
+          </div>
+          <p>
+            Vector ships nine subagents an agent can delegate to: a general one, and the specialists <strong>explore</strong>, <strong>review</strong>, <strong>judge</strong>, <strong>debug</strong>, <strong>test</strong>, <strong>security</strong>, <strong>performance</strong> and <strong>migration</strong>. Explore, review, judge and security carry a read-only boundary that is re-applied after your repository's config is merged, so a checked-in file cannot turn a read-only reviewer into one that writes; they can still run verification commands from an allowlist such as <code>git diff</code>, <code>git log</code> and the project's test and build scripts.
+          </p>
+          <p>
+            Delegation does not recurse. A subagent cannot start subagents of its own, and nesting stops at two levels. A parent can declare which paths each subagent owns, and Vector refuses two siblings that claim overlapping paths; tasks can depend on each other, run in the background and be resumed later by id.
+          </p>
+          <p>
+            You can add your own:
+          </p>
+          <p class="doc-cmd"><code>vector agent create --description "reviews SQL migrations" --mode subagent
+vector agent list</code><button class="doc-cmd-copy" type="button" aria-label="Copy this command">Copy</button></p>
+          <p class="note">
+            There is no cap on how many subagents one session runs at once. Past six running siblings Vector tells the model to mention the spend, because each subagent spends on your keys.
+          </p>
+        </section>
+
+        <section id="cli-terminal" class="doc-section">
+          <div class="doc-heading">
+            <h2>The terminal agent</h2>
+            <a class="doc-anchor" href="#cli-terminal" aria-label="Link to The terminal agent" data-chrome></a>
+          </div>
+          <p>
+            Running <code>vector</code> with no subcommand starts the interactive agent in the current directory, or in the path you pass. It takes the same session flags as <code>run</code>: <code>--model</code>, <code>--agent</code>, <code>--prompt</code>, <code>--continue</code>, <code>--session</code> and <code>--fork</code>. <code>--mini</code> starts a minimal interface, and <code>--replay</code>, <code>--no-replay</code> and <code>--replay-limit</code> control how much history is redrawn when you resume or resize.
+          </p>
+          <p class="doc-cmd"><code>vector
+vector ~/code/myapp --model anthropic/claude-sonnet-5</code><button class="doc-cmd-copy" type="button" aria-label="Copy this command">Copy</button></p>
+        </section>
+
+        <section id="cli-run" class="doc-section">
+          <div class="doc-heading">
+            <h2>One-shot and scripted runs</h2>
+            <a class="doc-anchor" href="#cli-run" aria-label="Link to One-shot and scripted runs" data-chrome></a>
+          </div>
+          <p>
+            <code>vector run</code> sends one prompt and prints the result. It is the surface you script against: <code>--format json</code> emits raw events for a pipeline, <code>--file</code> attaches files, <code>--model</code> and <code>--agent</code> choose who answers, <code>--variant</code> sets reasoning effort and <code>--title</code> names the session. <code>--continue</code> resumes the last session, <code>--session</code> a specific one, and <code>--fork</code> branches instead of appending.
+          </p>
+          <p class="doc-cmd"><code>vector run "why is the checkout test flaky?" --format json
+vector run -c "now fix it" --variant high</code><button class="doc-cmd-copy" type="button" aria-label="Copy this command">Copy</button></p>
+        </section>
+
+        <section id="cli-account" class="doc-section">
+          <div class="doc-heading">
+            <h2>Account and CLI tokens</h2>
+            <a class="doc-anchor" href="#cli-account" aria-label="Link to Account and CLI tokens" data-chrome></a>
+          </div>
+          <p>
+            The published <code>vector</code> binary is free but needs a Vector account. <code>vector login</code> opens the page that mints a token, or takes one directly with <code>--token</code>; <code>vector whoami</code> prints who is signed in and <code>vector logout</code> removes it. The same token is the <code>VECTOR_CLI_TOKEN</code> secret used by GitHub Actions.
+          </p>
+          <p class="doc-cmd"><code>vector login
+vector whoami</code><button class="doc-cmd-copy" type="button" aria-label="Copy this command">Copy</button></p>
+          <p class="note">
+            The token is verified about once a day and cached with a seven-day offline grace window, so a flaky network never locks you out of your own terminal. Only a definitive invalid or expired answer signs you out. <code>login</code>, <code>logout</code>, <code>whoami</code>, <code>completion</code>, <code>upgrade</code> and <code>uninstall</code> work signed out.
+          </p>
+        </section>
+
+        <section id="cli-models" class="doc-section">
+          <div class="doc-heading">
+            <h2>Models and variants in the terminal</h2>
+            <a class="doc-anchor" href="#cli-models" aria-label="Link to Models and variants in the terminal" data-chrome></a>
+          </div>
+          <p>
+            <code>vector models</code> lists every model available to you — the ones included with Vector and the providers you have connected. Pass a provider id to filter, <code>--verbose</code> for metadata such as per-token cost, and <code>--refresh</code> to re-pull the catalogue instead of using the cached copy.
+          </p>
+          <p class="doc-cmd"><code>vector models
+vector models anthropic --verbose</code><button class="doc-cmd-copy" type="button" aria-label="Copy this command">Copy</button></p>
+          <p>
+            Models that expose reasoning effort take <code>--variant</code>. The level resolves from the flag, then your saved preference, then what the session last used, and your choice is kept per provider and model.
+          </p>
+        </section>
+
+        <section id="cli-sessions" class="doc-section">
+          <div class="doc-heading">
+            <h2>Sessions: list, export, share</h2>
+            <a class="doc-anchor" href="#cli-sessions" aria-label="Link to Sessions: list, export, share" data-chrome></a>
+          </div>
+          <p>
+            <code>vector session list</code> prints recent sessions, with <code>--max-count</code> to cap them and <code>--format</code> for scripting; <code>vector session delete &lt;id&gt;</code> removes one permanently. Those ids are what <code>--session</code> takes elsewhere.
+          </p>
+          <p class="doc-cmd"><code>vector session list -n 20
+vector export <id> --sanitize > session.json
+vector import session.json</code><button class="doc-cmd-copy" type="button" aria-label="Copy this command">Copy</button></p>
+          <p>
+            <code>vector export</code> writes a session's transcript and metadata as JSON, and <code>--sanitize</code> redacts the sensitive parts — transcript text, file contents, subtask commands — so it can be attached to a bug report. <code>vector import</code> reads that file back, from a path or from a share URL; <code>vector run --share</code> publishes a link for a run.
+          </p>
+        </section>
+
+        <section id="cli-mcp" class="doc-section">
+          <div class="doc-heading">
+            <h2>MCP from the terminal</h2>
+            <a class="doc-anchor" href="#cli-mcp" aria-label="Link to MCP from the terminal" data-chrome></a>
+          </div>
+          <p>
+            <code>vector mcp add</code> registers a server: <code>--url</code> for a remote one with <code>--header KEY=VALUE</code>, or a command with <code>--env KEY=VALUE</code> for a local one. <code>vector mcp list</code> shows every configured server and whether it is reachable.
+          </p>
+          <p class="doc-cmd"><code>vector mcp add linear --url https://mcp.linear.app/sse
+vector mcp auth linear
+vector mcp list</code><button class="doc-cmd-copy" type="button" aria-label="Copy this command">Copy</button></p>
+          <p>
+            For OAuth-protected servers, <code>vector mcp auth</code> runs the flow, <code>vector mcp auth list</code> shows which servers are OAuth-capable and their status, <code>vector mcp logout</code> drops stored credentials, and <code>vector mcp debug &lt;name&gt;</code> diagnoses a failing connection.
+          </p>
+        </section>
+
+        <section id="cli-plugins" class="doc-section">
+          <div class="doc-heading">
+            <h2>Plugins</h2>
+            <a class="doc-anchor" href="#cli-plugins" aria-label="Link to Plugins" data-chrome></a>
+          </div>
+          <p>
+            <code>vector plugin &lt;module&gt;</code> installs an npm module as a plugin and writes it into your config; <code>--global</code> installs into the global config rather than the project's, and <code>--force</code> replaces a version already there. A plugin can register extra tools, which the registry merges alongside the built-in ones.
+          </p>
+          <p class="doc-cmd"><code>vector plugin @acme/vector-plugin -g</code><button class="doc-cmd-copy" type="button" aria-label="Copy this command">Copy</button></p>
+          <p class="note">
+            <code>--pure</code> on any command runs without external plugins. It is the first thing to try when you suspect one of breaking a run.
+          </p>
+        </section>
+
+        <section id="cli-server" class="doc-section">
+          <div class="doc-heading">
+            <h2>Server, web and editors</h2>
+            <a class="doc-anchor" href="#cli-server" aria-label="Link to Server, web and editors" data-chrome></a>
+          </div>
+          <p>
+            <code>vector serve</code> runs the agent as a headless server with <code>--port</code> and <code>--hostname</code>; <code>vector web</code> starts the same server and opens the browser interface. <code>vector attach &lt;url&gt;</code> connects a terminal session to a server that is already running, with <code>--dir</code> to choose the directory on it, the usual session flags, and <code>--username</code> and <code>--password</code> for basic auth.
+          </p>
+          <p class="doc-cmd"><code>vector serve --port 4096
+vector attach http://localhost:4096 --dir ~/code/myapp</code><button class="doc-cmd-copy" type="button" aria-label="Copy this command">Copy</button></p>
+          <p>
+            <code>vector acp</code> starts an Agent Client Protocol server, so an ACP-speaking editor can drive Vector's agent as its backend.
+          </p>
+        </section>
+
+        <section id="cli-github" class="doc-section">
+          <div class="doc-heading">
+            <h2>GitHub from the terminal</h2>
+            <a class="doc-anchor" href="#cli-github" aria-label="Link to GitHub from the terminal" data-chrome></a>
+          </div>
+          <p>
+            <code>vector pr &lt;number&gt;</code> fetches a pull request's branch, checks it out and starts Vector in that working tree — the shortcut for picking a review conversation up on your own machine.
+          </p>
+          <p class="doc-cmd"><code>vector pr 482
+vector github review --pr 482 --dry-run</code><button class="doc-cmd-copy" type="button" aria-label="Copy this command">Copy</button></p>
+          <p>
+            The generated workflow calls two commands you can also run yourself. <code>vector github run</code> executes the agent for a GitHub event, with <code>--event</code> for a payload and <code>--token</code> for a personal access token. <code>vector github review</code> reviews a pull request and posts the result; <code>--dry-run</code> prints every write it would make as JSON instead of posting, which is how you test a configuration change without commenting on a real pull request.
+          </p>
+        </section>
+
+        <section id="cli-maintenance" class="doc-section">
+          <div class="doc-heading">
+            <h2>Upkeep, flags and your data</h2>
+            <a class="doc-anchor" href="#cli-maintenance" aria-label="Link to Upkeep, flags and your data" data-chrome></a>
+          </div>
+          <p>
+            <code>vector upgrade</code> moves the CLI to the newest version, or one you name, with <code>--method</code> when several installation methods are possible. <code>vector uninstall</code> removes it, keeping configuration with <code>--keep-config</code> or sessions with <code>--keep-data</code>, and <code>--dry-run</code> lists what would go.
+          </p>
+          <p class="doc-cmd"><code>vector db path
+vector db "select count(*) from session"</code><button class="doc-cmd-copy" type="button" aria-label="Copy this command">Copy</button></p>
+          <p>
+            Vector keeps sessions, messages, permissions and shares in a local SQLite database. <code>vector db</code> opens a sqlite3 shell against it, <code>vector db "&lt;query&gt;"</code> runs one query with <code>--format</code> for the output shape, and <code>vector db path</code> prints where the file is. It is the plain answer to where your data lives: on your disk, in a file you can open yourself.
+          </p>
+          <ul class="feature-list">
+            <li><strong>--print-logs</strong><span>Send logs to stderr.</span></li>
+            <li><strong>--log-level</strong><span>DEBUG, INFO, WARN or ERROR.</span></li>
+            <li><strong>--pure</strong><span>Run without external plugins.</span></li>
+            <li><strong>vector completion</strong><span>Print a shell completion script.</span></li>
+          </ul>
         </section>
 
         <section id="troubleshooting" class="doc-section">
@@ -1503,14 +1777,14 @@ const faqs = [
     if (!rail) return
     const section = id ? document.getElementById(id) : null
     const headings = section ? [...section.querySelectorAll<HTMLElement>("h3[id]")] : []
-    if (railTitle) railTitle.textContent = section ? "In this section" : "Contents"
+    const column = rail.closest<HTMLElement>(".docs-rail")
     rail.innerHTML = ""
     if (!headings.length) {
-      const note = document.createElement("li")
-      note.innerHTML = '<p class="docs-rail-empty">One part, no subsections.</p>'
-      rail.append(note)
+      if (column) column.dataset.empty = "true"
       return
     }
+    if (column) delete column.dataset.empty
+    if (railTitle) railTitle.textContent = "In this section"
     for (const heading of headings) {
       const item = document.createElement("li")
       const link = document.createElement("a")
@@ -1545,15 +1819,12 @@ const faqs = [
   }, { passive: true })
   window.addEventListener("resize", paintProgress)
 
-  for (const block of document.querySelectorAll<HTMLElement>(".doc-cmd")) {
-    const button = document.createElement("button")
-    button.type = "button"
-    button.className = "doc-cmd-copy"
-    button.textContent = "Copy"
-    button.setAttribute("aria-label", "Copy this command")
+  for (const button of document.querySelectorAll<HTMLButtonElement>(".doc-cmd-copy")) {
+    const command = button.parentElement?.querySelector("code")
+    if (!command) continue
     button.addEventListener("click", async () => {
       try {
-        await navigator.clipboard.writeText((block.textContent ?? "").replace(/\s*Copy\s*$/, "").trim())
+        await navigator.clipboard.writeText((command.textContent ?? "").trim())
         button.textContent = "Copied"
         button.dataset.copied = "true"
       } catch {
@@ -1564,7 +1835,6 @@ const faqs = [
         delete button.dataset.copied
       }, 1800)
     })
-    block.append(button)
   }
 
   // ---- Active section ----------------------------------------------------------------------------------------
@@ -1931,14 +2201,19 @@ const faqs = [
     color: #d9c9ff;
   }
 
-  .docs-rail-empty {
-    margin: 0;
-    color: rgba(255, 255, 255, 0.3);
-    font-size: 12.5px;
-    line-height: 1.5;
+  .docs-rail[data-empty] .docs-rail-inner {
+    visibility: hidden;
   }
 
   /* A command you are meant to run, with a button that copies it. */
+  .docs-shell .doc-cmd code {
+    font: inherit;
+    color: inherit;
+    background: none;
+    border: 0;
+    padding: 0;
+  }
+
   .doc-cmd {
     position: relative;
     margin: 18px 0 0;

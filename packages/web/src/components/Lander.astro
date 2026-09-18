@@ -11,10 +11,15 @@ import {
   Eye,
   GitBranch,
   GitPullRequest,
+  GitFork,
   Laptop,
+  Lock,
+  Network,
   Plus,
+  Radar,
   Rocket,
   ShieldCheck,
+  ScanEye,
   Sparkles,
   Split,
   Terminal,
@@ -105,9 +110,10 @@ const wordmarkCells = "VECTOR".split("").flatMap((letter, letterIndex) =>
   ),
 )
 
-// The shelf of things Vector does, each one checked against the code that
-// ships it and linked to the docs section that describes it in full. Cards
-// read left to right: review, the agents, the proof, then what it runs on.
+// The shelf of things Vector does, each sentence checked against the code that
+// ships it and linked to the docs section that describes it in full. Order:
+// review, the browser, the agents, what it ships to, then how it keeps itself
+// honest.
 const trustCards = [
   {
     icon: GitPullRequest,
@@ -131,16 +137,30 @@ const trustCards = [
     more: "Read about reviewing before you push",
   },
   {
-    icon: Workflow,
-    lead: "One objective, many agents.",
-    text: "A planner splits the work into roles — explore, implement, test, review — and gives each one its own agent.",
-    href: "/docs#agent-workspaces",
-    more: "Read about swarms",
+    icon: AppWindow,
+    lead: "A real browser, not screenshots.",
+    text: "Vector opens a Chromium view in its own window: the agent drives the page, and you can take it over.",
+    href: "/docs#controlled-browser",
+    more: "Read about the controlled browser",
   },
   {
-    icon: GitBranch,
-    lead: "Every agent in its own checkout.",
-    text: "Each agent works in its own git worktree, so unfinished work never touches the files you are in.",
+    icon: ScanEye,
+    lead: "It sees what it clicked.",
+    text: "Every action hands back the page text, the clickable elements, runtime errors, console errors and failed requests.",
+    href: "/docs#controlled-browser",
+    more: "Read what the browser reports back",
+  },
+  {
+    icon: Lock,
+    lead: "Localhost until you approve.",
+    text: "The browser opens local pages only until you approve an origin, and refuses to type into password or card fields.",
+    href: "/docs#controlled-browser",
+    more: "Read about the browser's guardrails",
+  },
+  {
+    icon: Network,
+    lead: "Run agents side by side.",
+    text: "Start as many as you like: each works in its own git worktree, or a managed copy when a worktree won't do.",
     href: "/docs#agent-workspaces",
     more: "Read about agent workspaces",
   },
@@ -150,6 +170,41 @@ const trustCards = [
     text: "Wire a team everyone-to-everyone or through one coordinator; a message to a pair you never linked is refused.",
     href: "/docs#agent-workspaces",
     more: "Read about agent teams",
+  },
+  {
+    icon: GitBranch,
+    lead: "Agents split their own work.",
+    text: "One agent delegates to nine built-in subagents — and four of them cannot edit a file, whatever the repo config says.",
+    href: "/docs#subagents",
+    more: "Read about subagents and specialists",
+  },
+  {
+    icon: Workflow,
+    lead: "One objective, many agents.",
+    text: "Vector plans the task graph itself, gives each task its own agent and model, and runs them in dependency order.",
+    href: "/docs#agent-workspaces",
+    more: "Read about coordinated runs",
+  },
+  {
+    icon: Rocket,
+    lead: "Ship from your own accounts.",
+    text: "Connect Vercel, Netlify or Supabase and deploy on your own tokens, encrypted on your machine.",
+    href: "/docs#cloud-services",
+    more: "Read about Cloud Services",
+  },
+  {
+    icon: Radar,
+    lead: "Deploys check themselves.",
+    text: "Vector scans the build for leaked secrets, health-checks the live URL, and reads the provider's logs back.",
+    href: "/docs#cloud-services",
+    more: "Read what Vector checks before it publishes",
+  },
+  {
+    icon: GitFork,
+    lead: "GitHub, GitLab and AWS.",
+    text: "Pull requests and review on GitHub, sign-in, repositories and pushes on GitLab, read-only checks on your AWS.",
+    href: "/docs#cloud-services",
+    more: "Read about the integrations",
   },
   {
     icon: BadgeCheck,
@@ -164,13 +219,6 @@ const trustCards = [
     text: "Tick the parts of an agent's diff you want and Vector merges a patch built from exactly those.",
     href: "/docs#only-in-vector",
     more: "Read about selective merges",
-  },
-  {
-    icon: AppWindow,
-    lead: "A browser you both drive.",
-    text: "It reads the console and network errors, fixes the code and retests — and never types into a password field.",
-    href: "/docs#controlled-browser",
-    more: "Read about the controlled browser",
   },
   {
     icon: Eye,
@@ -192,13 +240,6 @@ const trustCards = [
     text: "Every run records the tokens and cost your provider reported, then ranks the models you actually use.",
     href: "/docs#tokenomics",
     more: "Read about the tokenomics engine",
-  },
-  {
-    icon: Rocket,
-    lead: "Ship from the same window.",
-    text: "Publish to your own Vercel or Netlify, wire up Supabase, and point a domain with a real DNS check.",
-    href: "/docs#cloud-services",
-    more: "Read about Cloud Services",
   },
   {
     icon: Bot,
