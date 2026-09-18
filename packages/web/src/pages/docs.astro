@@ -715,6 +715,18 @@ const faqs = [
             <li><span>2</span><div><strong>Keep working</strong><p>Switch between workspaces while they stream activity independently.</p></div></li>
             <li><span>3</span><div><strong>Review and merge</strong><p>Inspect the diff and checks before bringing selected work into main.</p></div></li>
           </ol>
+          <h3>Swarm: one objective, a team of agents</h3>
+          <p>
+            Instead of naming each workspace yourself, switch the launcher to Swarm and give Vector the objective. A
+            planner model reads the repository and writes a plan: tasks with roles — explore, implement, debug, test,
+            review, security, docs — and the dependencies between them. Each task becomes its own agent in its own
+            workspace, routed to a model by tier, and tasks run as soon as the ones they depend on finish.
+          </p>
+          <p>
+            You set the strategy (economy, balanced or quality), the most agents that may run at once, and how many
+            run in parallel. The run reports as one board — planning, running, needs review — and nothing reaches your
+            main checkout until you look at the combined diff and merge it.
+          </p>
           <p class="note is-caution">
             Two agents should not intentionally edit the same lines at the same time. Split work by
             responsibility to reduce conflicts and make review easier.

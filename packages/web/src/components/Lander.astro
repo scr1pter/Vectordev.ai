@@ -1,6 +1,26 @@
 ---
 import "@fontsource-variable/inter"
-import { ArrowRight, BadgeCheck, ChevronLeft, ChevronRight, Coins, Laptop, Plus, ShieldCheck } from "lucide-react"
+import {
+  AppWindow,
+  ArrowRight,
+  BadgeCheck,
+  Bot,
+  ChevronLeft,
+  ChevronRight,
+  Coins,
+  Eye,
+  GitBranch,
+  GitPullRequest,
+  Laptop,
+  Plus,
+  Rocket,
+  ShieldCheck,
+  Sparkles,
+  Split,
+  Terminal,
+  Waypoints,
+  Workflow,
+} from "lucide-react"
 import MarketingNav from "./marketing/MarketingNav.astro"
 import ProductDemo from "./marketing/ProductDemo.astro"
 import LanderMotion from "./marketing/LanderMotion.astro"
@@ -85,14 +105,107 @@ const wordmarkCells = "VECTOR".split("").flatMap((letter, letterIndex) =>
   ),
 )
 
-// Each card links to the docs section that backs its sentence up.
+// The shelf of things Vector does, each one checked against the code that
+// ships it and linked to the docs section that describes it in full. Cards
+// read left to right: review, the agents, the proof, then what it runs on.
 const trustCards = [
+  {
+    icon: GitPullRequest,
+    lead: "Every pull request, reviewed.",
+    text: "A summary, comments on the exact lines, and a fix you can commit — and it never approves your code itself.",
+    href: "/docs#code-review",
+    more: "Read about code review",
+  },
+  {
+    icon: ShieldCheck,
+    lead: "Security gets its own reader.",
+    text: "Touch auth, crypto, SQL, payments or a workflow file and a second, security-only review runs beside the first.",
+    href: "/docs#code-review",
+    more: "Read what the security pass covers",
+  },
+  {
+    icon: Terminal,
+    lead: "Reviewed before you push.",
+    text: "One command runs the same review on your branch, against its merge base, before anyone else sees it.",
+    href: "/docs#code-review",
+    more: "Read about reviewing before you push",
+  },
+  {
+    icon: Workflow,
+    lead: "One objective, many agents.",
+    text: "A planner splits the work into roles — explore, implement, test, review — and gives each one its own agent.",
+    href: "/docs#agent-workspaces",
+    more: "Read about swarms",
+  },
+  {
+    icon: GitBranch,
+    lead: "Every agent in its own checkout.",
+    text: "Each agent works in its own git worktree, so unfinished work never touches the files you are in.",
+    href: "/docs#agent-workspaces",
+    more: "Read about agent workspaces",
+  },
+  {
+    icon: Waypoints,
+    lead: "Agents talk where you link them.",
+    text: "Wire a team everyone-to-everyone or through one coordinator; a message to a pair you never linked is refused.",
+    href: "/docs#agent-workspaces",
+    more: "Read about agent teams",
+  },
   {
     icon: BadgeCheck,
     lead: "A second check on done.",
-    text: "A separate judge compares finished work with what you asked.",
+    text: "Turn the judge on and a read-only subagent weighs your request, the changed files and the test output.",
     href: "/docs#verified-completion",
     more: "Read about verified completion",
+  },
+  {
+    icon: Split,
+    lead: "Merge the hunks you trust.",
+    text: "Tick the parts of an agent's diff you want and Vector merges a patch built from exactly those.",
+    href: "/docs#only-in-vector",
+    more: "Read about selective merges",
+  },
+  {
+    icon: AppWindow,
+    lead: "A browser you both drive.",
+    text: "It reads the console and network errors, fixes the code and retests — and never types into a password field.",
+    href: "/docs#controlled-browser",
+    more: "Read about the controlled browser",
+  },
+  {
+    icon: Eye,
+    lead: "Watch it type.",
+    text: "Follow mode opens the file an agent is about to change and tints those lines in that agent's own colour.",
+    href: "/docs#follow",
+    more: "Read about Follow mode",
+  },
+  {
+    icon: Sparkles,
+    lead: "Start with no key at all.",
+    text: "Models come included with Vector, in the desktop app and the terminal alike, before you connect a provider.",
+    href: "/docs#models",
+    more: "Read about the models included with Vector",
+  },
+  {
+    icon: Coins,
+    lead: "Spend, measured not modelled.",
+    text: "Every run records the tokens and cost your provider reported, then ranks the models you actually use.",
+    href: "/docs#tokenomics",
+    more: "Read about the tokenomics engine",
+  },
+  {
+    icon: Rocket,
+    lead: "Ship from the same window.",
+    text: "Publish to your own Vercel or Netlify, wire up Supabase, and point a domain with a real DNS check.",
+    href: "/docs#cloud-services",
+    more: "Read about Cloud Services",
+  },
+  {
+    icon: Bot,
+    lead: "Run the other agents too.",
+    text: "Claude Code, Codex and Cursor Agent can drive a Vector workspace on the subscriptions you already pay for.",
+    href: "/docs#external-agents",
+    more: "Read about running other agents",
   },
   {
     icon: Laptop,
@@ -100,20 +213,6 @@ const trustCards = [
     text: "Your notes for the agent live in one local file you can read, edit or delete.",
     href: "/docs#local-memory",
     more: "Read about local memory",
-  },
-  {
-    icon: ShieldCheck,
-    lead: "Your tools, your keys.",
-    text: "Plugins and MCP servers are configured on your machine, and the keys they use stay there.",
-    href: "/docs#connections",
-    more: "Read about connections",
-  },
-  {
-    icon: Coins,
-    lead: "Spend, itemized.",
-    text: "Each run records what it spent, per model and per task.",
-    href: "/docs#tokenomics",
-    more: "Read about the tokenomics engine",
   },
 ]
 ---
@@ -248,6 +347,10 @@ const trustCards = [
         <h2 id="trust-title" class="trust-title" data-reveal>
           An agent you can <strong>trust</strong><br class="trust-break" /> is one that <strong>shows its work</strong>.
         </h2>
+        <p class="trust-sub" data-reveal>
+          {trustCards.length} of them, in detail — code review, swarms, the judge, the browser, the ledger. Every card
+          opens the documentation behind it.
+        </p>
       </div>
 
       <div class="trust-carousel">
@@ -625,12 +728,15 @@ const trustCards = [
     const queue = () => {
       if (!frame) frame = requestAnimationFrame(update)
     }
-    // One card at a time: the width of a card plus the gap after it.
+    // A page at a time: as many whole cards as the shelf shows, so a long row
+    // does not take a dozen presses. Cards snap to the start either way.
     const step = (direction: number) => {
       const card = row.querySelector<HTMLElement>("li")
       if (!card) return
       const gap = Number.parseFloat(getComputedStyle(row).columnGap) || 0
-      row.scrollBy({ left: direction * (card.getBoundingClientRect().width + gap), behavior: reducedMotion() ? "auto" : "smooth" })
+      const stride = card.getBoundingClientRect().width + gap
+      const perPage = Math.max(1, Math.floor((row.clientWidth + gap) / stride))
+      row.scrollBy({ left: direction * perPage * stride, behavior: reducedMotion() ? "auto" : "smooth" })
     }
     const handlers = buttons.map((button) => {
       const handler = () => {
@@ -1345,6 +1451,15 @@ const trustCards = [
 
   .trust-title strong {
     font-weight: 700;
+  }
+
+  .trust-sub {
+    max-width: 52ch;
+    margin: 28px 0 0;
+    color: var(--landing-secondary);
+    font-size: 19px;
+    line-height: 1.55;
+    text-wrap: pretty;
   }
 
   .trust-carousel {
