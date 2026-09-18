@@ -534,6 +534,8 @@ const faqs = [
       <MarketingNav active="docs" />
     </div>
 
+    <div class="docs-progress" aria-hidden="true"><i data-progress></i></div>
+
     <div class="docs-shell">
       <header class="docs-header">
         <p class="docs-kicker">Documentation</p>
@@ -1393,6 +1395,13 @@ const faqs = [
           </ol>
         </section>
       </main>
+
+      <aside class="docs-rail" aria-label="In this section">
+        <div class="docs-rail-inner">
+          <p class="docs-rail-title" data-rail-title>In this section</p>
+          <ol class="docs-rail-list" data-rail></ol>
+        </div>
+      </aside>
     </div>
 
     <MarketingFooter />
@@ -1463,6 +1472,101 @@ const faqs = [
     }
   })
 
+  // ---- In-section rail, progress, and copyable commands ------------------------------------------------------
+
+  const rail = document.querySelector<HTMLElement>("[data-rail]")
+  const railTitle = document.querySelector<HTMLElement>("[data-rail-title]")
+  const progress = document.querySelector<HTMLElement>("[data-progress]")
+
+  const slug = (text: string) =>
+    text
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
+
+  // Subheadings are written without ids; give them stable ones so the rail can
+  // link to them and so those links can be shared.
+  const usedIds = new Set([...document.querySelectorAll<HTMLElement>("[id]")].map((element) => element.id))
+  for (const section of sections) {
+    for (const heading of section.querySelectorAll<HTMLElement>("h3")) {
+      if (heading.id) continue
+      const base = `${section.id}-${slug(heading.textContent ?? "")}`.slice(0, 64)
+      let id = base
+      let n = 2
+      while (usedIds.has(id)) id = `${base}-${n++}`
+      usedIds.add(id)
+      heading.id = id
+    }
+  }
+
+  function fillRail(id: string) {
+    if (!rail) return
+    const section = id ? document.getElementById(id) : null
+    const headings = section ? [...section.querySelectorAll<HTMLElement>("h3[id]")] : []
+    if (railTitle) railTitle.textContent = section ? "In this section" : "Contents"
+    rail.innerHTML = ""
+    if (!headings.length) {
+      const note = document.createElement("li")
+      note.innerHTML = '<p class="docs-rail-empty">One part, no subsections.</p>'
+      rail.append(note)
+      return
+    }
+    for (const heading of headings) {
+      const item = document.createElement("li")
+      const link = document.createElement("a")
+      link.href = `#${heading.id}`
+      link.textContent = (heading.textContent ?? "").replace(/\s+/g, " ").trim()
+      item.append(link)
+      rail.append(item)
+    }
+  }
+
+  function markRail() {
+    if (!rail) return
+    const links = [...rail.querySelectorAll<HTMLAnchorElement>("a")]
+    let current: HTMLAnchorElement | undefined
+    for (const link of links) {
+      const target = document.getElementById(decodeURIComponent(link.hash.slice(1)))
+      if (target && target.getBoundingClientRect().top <= 160) current = link
+    }
+    for (const link of links) link.classList.toggle("is-active", link === current)
+  }
+
+  function paintProgress() {
+    if (!progress) return
+    const root = document.documentElement
+    const span = root.scrollHeight - window.innerHeight
+    progress.style.width = `${span > 0 ? Math.min(100, Math.max(0, (window.scrollY / span) * 100)) : 0}%`
+  }
+
+  window.addEventListener("scroll", () => {
+    markRail()
+    paintProgress()
+  }, { passive: true })
+  window.addEventListener("resize", paintProgress)
+
+  for (const block of document.querySelectorAll<HTMLElement>(".doc-cmd")) {
+    const button = document.createElement("button")
+    button.type = "button"
+    button.className = "doc-cmd-copy"
+    button.textContent = "Copy"
+    button.setAttribute("aria-label", "Copy this command")
+    button.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText((block.textContent ?? "").replace(/\s*Copy\s*$/, "").trim())
+        button.textContent = "Copied"
+        button.dataset.copied = "true"
+      } catch {
+        button.textContent = "Press ⌘C"
+      }
+      window.setTimeout(() => {
+        button.textContent = "Copy"
+        delete button.dataset.copied
+      }, 1800)
+    })
+    block.append(button)
+  }
+
   // ---- Active section ----------------------------------------------------------------------------------------
 
   let activeId = ""
@@ -1495,6 +1599,8 @@ const faqs = [
     const entry = entryById.get(id)
     if (currentLabel) currentLabel.textContent = entry?.label ?? ""
     if (entry) revealInNav(entry.link)
+    fillRail(id)
+    markRail()
   }
 
   function measure() {
@@ -1524,6 +1630,7 @@ const faqs = [
     lockUntil = 0
     schedule()
   })
+  paintProgress()
   scroller?.addEventListener("pointerenter", () => (pointerInNav = true))
   scroller?.addEventListener("pointerleave", () => (pointerInNav = false))
   schedule()
@@ -1747,8 +1854,138 @@ const faqs = [
       "side header"
       "side main";
     column-gap: 72px;
+    row-gap: 0;
     font-family: var(--d-sans);
     font-optical-sizing: auto;
+  }
+
+  /* A hairline of progress across the top: 30,000 pixels of documentation is
+     easier to read when you can see where you are in it. */
+  .docs-progress {
+    position: fixed;
+    inset: 0 0 auto;
+    z-index: 60;
+    height: 2px;
+    pointer-events: none;
+  }
+
+  .docs-progress i {
+    display: block;
+    width: 0;
+    height: 100%;
+    background: linear-gradient(90deg, rgba(170, 140, 255, 0.35), #aa8cff);
+    transition: width 120ms linear;
+  }
+
+  /* The third column: the subheadings of whichever section you are reading.
+     Only where there is room for it without squeezing the prose. */
+  .docs-rail {
+    display: none;
+    grid-area: rail;
+  }
+
+  .docs-rail-inner {
+    position: sticky;
+    top: 104px;
+    max-height: calc(100vh - 140px);
+    overflow-y: auto;
+    padding-left: 18px;
+    border-left: 1px solid var(--d-line, rgba(255, 255, 255, 0.08));
+  }
+
+  .docs-rail-title {
+    margin: 0 0 12px;
+    color: rgba(255, 255, 255, 0.42);
+    font-family: var(--d-mono, ui-monospace, monospace);
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    line-height: 1.4;
+    text-transform: uppercase;
+  }
+
+  .docs-rail-list {
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 2px;
+    list-style: none;
+    counter-reset: none;
+  }
+
+  .docs-rail-list a {
+    display: block;
+    padding: 5px 0;
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 13px;
+    line-height: 1.45;
+    text-decoration: none;
+    transition: color 160ms ease;
+  }
+
+  .docs-rail-list a:hover {
+    color: #fff;
+  }
+
+  .docs-rail-list a.is-active {
+    color: #d9c9ff;
+  }
+
+  .docs-rail-empty {
+    margin: 0;
+    color: rgba(255, 255, 255, 0.3);
+    font-size: 12.5px;
+    line-height: 1.5;
+  }
+
+  /* A command you are meant to run, with a button that copies it. */
+  .doc-cmd {
+    position: relative;
+    margin: 18px 0 0;
+    padding: 14px 56px 14px 16px;
+    display: block;
+    overflow-x: auto;
+    color: #e9e2f7;
+    background: rgba(255, 255, 255, 0.035);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    font-family: var(--d-mono, ui-monospace, monospace);
+    font-size: 13.5px;
+    line-height: 1.7;
+    white-space: pre;
+  }
+
+  .doc-cmd-copy {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    min-width: 34px;
+    height: 30px;
+    padding: 0 9px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: rgba(255, 255, 255, 0.6);
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    font-family: var(--d-mono, ui-monospace, monospace);
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: color 160ms ease, border-color 160ms ease, background 160ms ease;
+  }
+
+  .doc-cmd-copy:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.09);
+    border-color: rgba(224, 211, 255, 0.28);
+  }
+
+  .doc-cmd-copy[data-copied] {
+    color: #b9f5cf;
+    border-color: rgba(120, 230, 160, 0.34);
   }
 
   .docs-content {
@@ -3389,4 +3626,22 @@ const faqs = [
       animation: none;
     }
   }
+
+  /* ---- Wide screens: the third column ---------------------------------------------------------------------- */
+
+  @media (min-width: 1500px) {
+    .docs-shell {
+      width: min(1560px, calc(100% - 80px));
+      grid-template-columns: 264px minmax(0, 1fr) 208px;
+      grid-template-areas:
+        "side header rail"
+        "side main rail";
+      column-gap: 64px;
+    }
+
+    .docs-rail {
+      display: block;
+    }
+  }
+
 </style>
