@@ -35,19 +35,7 @@ import ScrollTicks from "./marketing/ScrollTicks.astro"
 
 // Everything the product does, section by section, lives on /docs/product.
 // This page is the short version: the hero and its one interactive picture,
-// two things worth knowing in detail, why the agent can be trusted, and a way in.
-
-// The OpenCode Zen models Vector includes today, with no API key. Named, never
-// counted: the lineup changes as model makers add and retire models.
-const includedModels = [
-  "Big Pickle",
-  "Nemotron 3 Ultra",
-  "Nemotron 3.5 Lightning",
-  "Muse Spark 1.3",
-  "Muse Spark 1.2",
-  "MiMo V2.5",
-  "Ling 3.0 Flash Fin",
-]
+// one thing worth knowing in detail, why the agent can be trusted, and a way in.
 
 // The work Vector does in one window. Six, so the grid fills two even rows.
 const workspaceFacts = [
@@ -320,24 +308,6 @@ const trustCards = [
             An interactive preview — move around the rail, filter the board, open a file. The desktop app connects
             these surfaces to your real repository and agents.
           </p>
-        </div>
-      </div>
-    </section>
-
-    <section id="models" data-chapter="No API key needed" class="story" aria-labelledby="models-title">
-      <div class="story-copy" data-reveal-group>
-        <p class="story-kicker" data-reveal>Models</p>
-        <h2 id="models-title" class="story-title" data-reveal>No API&nbsp;key needed.</h2>
-        <p class="story-subtitle" data-reveal>Models come included with Vector.</p>
-        <p class="story-body" data-reveal>
-          Big Pickle is the default, alongside models from NVIDIA, Meta and others, so your first task runs before you
-          connect anything. Want Claude, GPT or Gemini too? Add your own key and choose them from the same list.
-        </p>
-        <ul class="story-models" data-reveal aria-label="Models included with Vector today">
-          {includedModels.map((model) => <li>{model}</li>)}
-        </ul>
-        <div class="story-action" data-reveal>
-          <a class="landing-pill" href="/docs/product#ch-models">See the models</a>
         </div>
       </div>
     </section>
