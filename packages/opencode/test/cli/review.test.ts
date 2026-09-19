@@ -469,7 +469,7 @@ describe("vector review: pull requests and --checks", () => {
     Effect.gen(function* () {
       const bareDir = yield* scopedTmpdir()
       const bare = bareDir.path
-      yield* git(bare, "init", "-q", "--bare")
+      yield* git(bare, "init", "-q", "--bare", "--initial-branch=main")
 
       const repo = yield* branched
       yield* git(repo.dir, "checkout", "-q", "main")

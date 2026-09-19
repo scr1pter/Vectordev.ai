@@ -1,42 +1,8 @@
 import { describe, expect, test } from "bun:test"
+import path from "node:path"
 import { PassThrough } from "node:stream"
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js"
 import { drainStderr, isRequestTimeout } from "@/mcp/index"
-
-// A stdio "server" that floods stderr past the pipe + PassThrough capacity
-// before it says anything on stdout. A typical server (node on Linux, python
-// anywhere) blocks in write(2) on a full pipe; bun makes its own stdio
-// non-blocking, so the retry loop below emulates that blocking write.
-const floodingServer = `
-const fs = require("node:fs")
-const chunk = Buffer.alloc(64 * 1024, "e")
-const sleep = new Int32Array(new SharedArrayBuffer(4))
-function blockingWrite(fd, buf) {
-  let offset = 0
-  while (offset < buf.length) {
-    try {
-      offset += fs.writeSync(fd, buf, offset)
-    } catch (error) {
-      if (error.code !== "EAGAIN") throw error
-      Atomics.wait(sleep, 0, 0, 2)
-    }
-  }
-}
-for (let i = 0; i < 16; i++) blockingWrite(2, chunk)
-blockingWrite(1, Buffer.from(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) + "\\n"))
-setTimeout(() => {}, 60_000)
-`
-
-function firstMessage(transport: StdioClientTransport, timeout: number) {
-  return new Promise<unknown>((resolve) => {
-    const timer = setTimeout(() => resolve(undefined), timeout)
-    transport.onmessage = (message) => {
-      clearTimeout(timer)
-      resolve(message)
-    }
-  })
-}
 
 describe("drainStderr", () => {
   test("consumes stderr so the pipe never backs up and bounds what it logs", async () => {
@@ -67,24 +33,22 @@ describe("drainStderr", () => {
   })
 
   test("a server that floods stderr still delivers stdout when drained", async () => {
-    const transport = new StdioClientTransport({
+    // Other MCP tests mock the SDK globally; keep this real transport in its own process.
+    const child = Bun.spawn([process.execPath, path.join(import.meta.dir, "../fixture/mcp-stderr-drain.ts")], {
+      cwd: path.join(import.meta.dir, "../.."),
+      stdout: "pipe",
       stderr: "pipe",
-      command: process.execPath,
-      args: ["-e", floodingServer],
     })
-    let drained = 0
-    drainStderr(transport.stderr, (text) => {
-      drained += text.length
-    })
-    const pending = firstMessage(transport, 10_000)
-    await transport.start()
-    try {
-      const message = await pending
-      expect(message).toMatchObject({ jsonrpc: "2.0", method: "notifications/initialized" })
-      expect(drained).toBeGreaterThan(0)
-    } finally {
-      await transport.close()
-    }
+    const [code, stdout, stderr] = await Promise.all([
+      child.exited,
+      Bun.readableStreamToText(child.stdout),
+      Bun.readableStreamToText(child.stderr),
+    ])
+
+    expect(code, stderr).toBe(0)
+    const result = JSON.parse(stdout)
+    expect(result.message).toMatchObject({ jsonrpc: "2.0", method: "notifications/initialized" })
+    expect(result.drained).toBeGreaterThan(0)
   }, 15_000)
 })
 
