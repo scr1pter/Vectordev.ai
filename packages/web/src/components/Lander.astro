@@ -292,7 +292,7 @@ const trustCards = [
             </a>
             <a class="simple-secondary" href="/docs/product#ch-cli">Install the CLI</a>
           </div>
-          <p class="hero-note">Free during beta. macOS, Windows, and Linux.</p>
+          <p class="hero-note">$10/month or $99/year. macOS, Windows, and Linux.</p>
         </div>
 
         <div class="showcase simple-showcase" aria-label="Interactive preview of the Vector interface">
@@ -788,6 +788,8 @@ const trustCards = [
   .vector-marketing {
     --purple-soft: #c9b0ff;
     --lavender: #e2d7ff;
+    /* The pixel wordmark is purple, not white: it is the logo, not type. */
+    --wordmark: #b79aff;
     --measure-wide: min(1440px, calc(100% - 40px));
     --ink-70: rgba(255, 255, 255, 0.7);
     --ink-55: rgba(255, 255, 255, 0.55);
@@ -1022,8 +1024,7 @@ const trustCards = [
 
   .wordmark {
     margin: 0 0 34px;
-    /* --lavender is a glow colour, which has nothing to glow against on paper. */
-    color: var(--lavender);
+    color: var(--wordmark);
     filter: drop-shadow(0 0 24px rgba(143, 82, 255, 0.28));
   }
 
@@ -1441,7 +1442,7 @@ const trustCards = [
   }
 
   .trust-mark {
-    color: var(--landing-title);
+    color: var(--wordmark);
   }
 
   .trust-mark svg {
