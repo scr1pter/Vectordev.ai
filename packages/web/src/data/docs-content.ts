@@ -366,8 +366,8 @@ export const subagentKinds = [
 export const changelog = [
   [
     "September 2026 · 1.99.9",
-    "Meet Vecbot, the code review bot",
-    "Vector's code reviewer is now Vecbot: /vecbot on a pull request, vector vecbot in a terminal, and the Pull Requests panel in the app, all running the same review that reads the repository around a change. The older /vector and /vx mentions still work. The documentation is now a page per subject with search, and the landing page carries twenty feature cards.",
+    "Meet Vectorscope, the code review bot",
+    "Vector's code reviewer is now Vectorscope: /vectorscope on a pull request, vector vectorscope in a terminal, and the Pull Requests panel in the app, all running the same review that reads the repository around a change. The older /vector and /vx mentions still work. The documentation is now a page per subject with search, and the landing page carries twenty feature cards. You can also delete your Vector account from the account page: it cancels billing, revokes your licence and CLI tokens, and asks you to type your email to confirm.",
   ],
   [
     "September 2026 · 1.99.8",

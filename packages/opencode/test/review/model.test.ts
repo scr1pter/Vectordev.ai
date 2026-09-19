@@ -164,7 +164,7 @@ describe("ReviewModel.resolveReviewModel refusals", () => {
     Effect.gen(function* () {
       const error = yield* resolve({ trigger: "command", env: { MODEL: "tiny/small" } }).pipe(Effect.flip)
       expect(error).toBeInstanceOf(ReviewModel.ReviewModelError)
-      expect(error.message).toBe("Vecbot reviews need a model with at least 32k tokens of context; tiny/small has 16k.")
+      expect(error.message).toBe("Vectorscope reviews need a model with at least 32k tokens of context; tiny/small has 16k.")
     }),
   )
 

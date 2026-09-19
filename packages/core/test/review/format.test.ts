@@ -353,7 +353,7 @@ describe("the summary comment", () => {
     )
     const body = buildSummaryBody({ ...FULL, banners: [banner] })
     await golden("partial", body)
-    expect(body).toContain(`## Vecbot review · Risk: High\n\n> ${banner}\n\n`)
+    expect(body).toContain(`## Vectorscope review · Risk: High\n\n> ${banner}\n\n`)
   })
 
   test("no findings, on a model included with Vector", async () => {
@@ -424,7 +424,7 @@ describe("running and note bodies", () => {
   test("the first run shows only the Reviewing line", () => {
     const body = buildRunningBody({ head: HEAD, startedAt: STARTED, state: STATE })
     expect(body.split("\n").slice(0, 4)).toEqual([
-      "## Vecbot review · Reviewing `d4e5f6a`…",
+      "## Vectorscope review · Reviewing `d4e5f6a`…",
       "",
       "This comment shows the results when the review finishes, usually in 2–5 minutes.",
       "",
@@ -441,7 +441,7 @@ describe("running and note bodies", () => {
       state: inflight,
     })
     await golden("running-later", body)
-    expect(body).toContain("## Vecbot review · Risk: High\n\n> Reviewing `e5f6a7b`… (started 14:02 UTC)\n\n")
+    expect(body).toContain("## Vectorscope review · Risk: High\n\n> Reviewing `e5f6a7b`… (started 14:02 UTC)\n\n")
     expect(readState(body)).toEqual(inflight)
     expect(body.match(/vector-review:state/g)).toHaveLength(1)
     // Running again replaces the quoted line rather than stacking a second one.
@@ -471,7 +471,7 @@ describe("running and note bodies", () => {
     )
     const body = buildNoteBody({ previous: buildSummaryBody(FULL), note, state: STATE })
     await golden("month-budget", body)
-    expect(body.startsWith(`## Vecbot review · Risk: High\n\n> ${note}\n\nThis change adds`)).toBe(true)
+    expect(body.startsWith(`## Vectorscope review · Risk: High\n\n> ${note}\n\nThis change adds`)).toBe(true)
   })
 
   test("a model error after a first run that never finished", async () => {
@@ -499,17 +499,17 @@ describe("notes", () => {
     expect(noteAlreadyReviewed(HEAD)).toBe(
       "`d4e5f6a` was already reviewed. Comment `/vector review full` to review it again.",
     )
-    expect(noteSuperseded(NEWER)).toBe("A newer commit (`e5f6a7b`) arrived during this review. Vecbot reviews it next.")
+    expect(noteSuperseded(NEWER)).toBe("A newer commit (`e5f6a7b`) arrived during this review. Vectorscope reviews it next.")
     expect(noteForcePush(SINCE, 3)).toBe(
-      "History was rewritten since `a1b2c3d`; Vecbot reviewed the 3 files whose changes differ.",
+      "History was rewritten since `a1b2c3d`; Vectorscope reviewed the 3 files whose changes differ.",
     )
     expect(noteLowConfidence(2)).toBe("_2 lower-confidence notes were left out._")
     expect(noteGeneratedHeader("src/auth.ts")).toBe(
-      "`src/auth.ts` gained a generated-file header in this pull request, so Vecbot reviewed it anyway.",
+      "`src/auth.ts` gained a generated-file header in this pull request, so Vectorscope reviewed it anyway.",
     )
     // The path comes from the pull request, so it can neither close the code span nor carry a marker.
     expect(noteGeneratedHeader("src/a`b<!-- vector-review:summary -->.ts")).toBe(
-      "`src/a'b&lt;!-- vector-review:summary -->.ts` gained a generated-file header in this pull request, so Vecbot reviewed it anyway.",
+      "`src/a'b&lt;!-- vector-review:summary -->.ts` gained a generated-file header in this pull request, so Vectorscope reviewed it anyway.",
     )
     expect(noteMoved(2)).toBe(
       "Vector could not attach 2 comments to lines; they are listed under Outside the changed lines.",
@@ -622,14 +622,14 @@ describe("the review body", () => {
         summaryUrl: "https://github.com/o/r/pull/7#issuecomment-123",
       }),
     ).toBe(
-      "Vecbot review of `d4e5f6a`: 1 blocking issue and 1 concern on the changed lines. [Summary](https://github.com/o/r/pull/7#issuecomment-123)\n<!-- vector-review:review head=d4e5f6a run=8f3c21aa -->",
+      "Vectorscope review of `d4e5f6a`: 1 blocking issue and 1 concern on the changed lines. [Summary](https://github.com/o/r/pull/7#issuecomment-123)\n<!-- vector-review:review head=d4e5f6a run=8f3c21aa -->",
     )
     expect(buildReviewBody({ head: HEAD, run: "8f3c21aa", inline: [], continued: true })).toBe(
-      "Vecbot review of `d4e5f6a` (continued).\n<!-- vector-review:review head=d4e5f6a run=8f3c21aa -->",
+      "Vectorscope review of `d4e5f6a` (continued).\n<!-- vector-review:review head=d4e5f6a run=8f3c21aa -->",
     )
     const many = [blocking, blocking, concern, concern, concern]
     expect(buildReviewBody({ head: HEAD, run: "r", inline: many })).toStartWith(
-      "Vecbot review of `d4e5f6a`: 2 blocking issues and 3 concerns on the changed lines.\n",
+      "Vectorscope review of `d4e5f6a`: 2 blocking issues and 3 concerns on the changed lines.\n",
     )
   })
 })
@@ -780,7 +780,7 @@ describe("capBody", () => {
   test("many generated-header notes are one line, and notes are trimmed before the file table", () => {
     const paths = Array.from({ length: 3_000 }, (_, i) => `src/gen${i}.ts`)
     expect(noteGeneratedHeaders(paths)).toBe(
-      "`src/gen0.ts`, `src/gen1.ts`, `src/gen2.ts` and 2,997 more gained a generated-file header in this pull request, so Vecbot reviewed them anyway.",
+      "`src/gen0.ts`, `src/gen1.ts`, `src/gen2.ts` and 2,997 more gained a generated-file header in this pull request, so Vectorscope reviewed them anyway.",
     )
     expect(noteGeneratedHeaders(["a.ts"])).toBe(noteGeneratedHeader("a.ts"))
     expect(noteGeneratedHeaders([])).toBeUndefined()

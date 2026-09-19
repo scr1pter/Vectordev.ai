@@ -200,7 +200,7 @@ describe("runPullRequestReview", () => {
     const { client, calls } = fakeClient({ files: { "src/list.ts": HEAD } })
     const outcome = await run(client)
     expect(calls.create).toEqual([
-      { directory: "/w/project", title: "Vecbot review · #7 · review", permission: reviewPermissionRules({}) },
+      { directory: "/w/project", title: "Vectorscope review · #7 · review", permission: reviewPermissionRules({}) },
     ])
     // The reviewer can only read: nothing that edits, runs commands or starts other agents is allowed back.
     const allowed = calls.create[0]!.permission!.filter((rule) => rule.action === "allow").map(
@@ -453,7 +453,7 @@ describe("showing and posting", () => {
   test("the posted summary has no state marker or commands, and shows the fix as a diff", async () => {
     const outcome = (await run(fakeClient({ files: { "src/list.ts": HEAD } }).client))!
     const body = buildDesktopSummary(outcome, pr.url)
-    expect(body).toContain("## Vecbot review · Risk: High")
+    expect(body).toContain("## Vectorscope review · Risk: High")
     expect(body).toContain("src/list.ts:2")
     expect(body).toContain("```diff\n+  return items[items.length - 1]")
     expect(body).not.toContain("vector-review:")

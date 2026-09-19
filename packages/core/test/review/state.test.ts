@@ -313,7 +313,7 @@ describe("markers", () => {
   test("the review marker", () => {
     const marker = reviewMarker(HEAD, "8f3c21aa")
     expect(marker).toBe("<!-- vector-review:review head=e5f6a7b run=8f3c21aa -->")
-    expect(parseReviewMarker(`Vecbot review of \`e5f6a7b\`.\n${marker}`)).toEqual({ head: "e5f6a7b", run: "8f3c21aa" })
+    expect(parseReviewMarker(`Vectorscope review of \`e5f6a7b\`.\n${marker}`)).toEqual({ head: "e5f6a7b", run: "8f3c21aa" })
     expect(parseReviewMarker("nothing")).toBeUndefined()
   })
 

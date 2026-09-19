@@ -213,7 +213,7 @@ describe("vector review: what it compares", () => {
       expect(yield* Effect.promise(() => input.knownPath("src/other.ts"))).toBe(true)
       expect(yield* Effect.promise(() => input.knownPath("src/missing.ts"))).toBe(false)
       expect(run.out()).toStartWith(
-        `Vecbot review · feature vs main (merge-base ${repo.main.slice(0, 7)}) · 1 file, +2 −1\n`,
+        `Vectorscope review · feature vs main (merge-base ${repo.main.slice(0, 7)}) · 1 file, +2 −1\n`,
       )
       expect(run.out()).toContain("Not reviewed: bun.lock (lockfile)")
       expect(run.err()).toContain("Reviewing 1 file with test/test-model…")
@@ -284,7 +284,7 @@ describe("vector review: what it compares", () => {
       expect(yield* Effect.promise(() => input.knownPath("src/new.ts"))).toBe(true)
       expect(yield* Effect.promise(() => input.knownPath("../outside.ts"))).toBe(false)
       expect(uncommitted.out()).toStartWith(
-        `Vecbot review · uncommitted changes vs HEAD (${repo.head.slice(0, 7)}) · 3 files`,
+        `Vectorscope review · uncommitted changes vs HEAD (${repo.head.slice(0, 7)}) · 3 files`,
       )
 
       const staged = fake()
@@ -301,7 +301,7 @@ describe("vector review: what it compares", () => {
         "src/staged.ts",
       ])
       expect(withBase.out()).toStartWith(
-        `Vecbot review · feature with uncommitted changes vs main (merge-base ${repo.main.slice(0, 7)})`,
+        `Vectorscope review · feature with uncommitted changes vs main (merge-base ${repo.main.slice(0, 7)})`,
       )
 
       const both = yield* review({ directory: repo.dir, uncommitted: true, staged: true }, fake().deps)
@@ -457,7 +457,7 @@ describe("vector review: results and exit codes", () => {
       expect(input.files.map((file) => file.path).toSorted()).toEqual(["src/fresh.ts", "src/real.ts"])
       expect(input.skipped).toEqual([{ path: "src/gen.ts", reason: "generated" }])
       expect(run.out()).toContain(
-        "src/real.ts has a generated-file header that its base does not, so Vecbot reviewed it anyway.",
+        "src/real.ts has a generated-file header that its base does not, so Vectorscope reviewed it anyway.",
       )
       expect(run.out()).toContain("src/fresh.ts has a generated-file header that its base does not")
     }),
@@ -529,7 +529,7 @@ describe("vector review: pull requests and --checks", () => {
       expect(yield* git(repo.dir, "rev-parse", "HEAD")).toBe(headBefore)
       expect(yield* Effect.promise(() => Bun.file(path.join(repo.dir, "src/list.ts")).text())).toBe(LIST)
       expect(yield* Effect.promise(() => input.knownPath("docs/NOTES.md"))).toBe(true)
-      expect(run.out()).toStartWith("Vecbot review · pull request #7 vs origin/main")
+      expect(run.out()).toStartWith("Vectorscope review · pull request #7 vs origin/main")
     }),
   )
 
@@ -661,7 +661,7 @@ describe("vector review: --post", () => {
       expect(sent).not.toContain(TOKEN)
       expect(sent).toContain("[redacted]")
       expect(github.comments).toHaveLength(1)
-      expect(github.comments[0]).toContain("Vecbot review")
+      expect(github.comments[0]).toContain("Vectorscope review")
       expect(github.comments[0]).not.toContain("<!-- vector-review:summary -->")
       expect(github.comments[0]).not.toContain("vector-review:state")
       expect(run.err()).toContain("Posted to acme/widgets#7: https://github.com/acme/widgets/pull/7#issuecomment-1")
@@ -737,7 +737,7 @@ describe("vector review: since the last local review", () => {
       expect((yield* review({ directory: repo.dir, failOn: "concern" }, again.deps)).exitCode).toBe(1)
       expect(again.calls).toHaveLength(0)
       expect(again.out()).toStartWith(
-        `Nothing new to review: ${repo.head.slice(0, 7)} was already reviewed. 1 finding from the last review is still open. Run \`vector review --full\` to review it again.\n\n(from the last review of ${repo.head.slice(0, 7)})\nVecbot review · feature vs main`,
+        `Nothing new to review: ${repo.head.slice(0, 7)} was already reviewed. 1 finding from the last review is still open. Run \`vector review --full\` to review it again.\n\n(from the last review of ${repo.head.slice(0, 7)})\nVectorscope review · feature vs main`,
       )
       expect(again.out()).toContain("Returns undefined for the last item")
       const json = fake()

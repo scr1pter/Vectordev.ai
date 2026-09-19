@@ -247,7 +247,7 @@ export const run: (
   function ask<T>(spec: Spec<T>): Effect.Effect<Asked<T>> {
     return Effect.gen(function* () {
       const session = yield* sessions.create({
-        title: `Vecbot review · ${input.head.slice(0, 7)} · ${spec.name}`,
+        title: `Vectorscope review · ${input.head.slice(0, 7)} · ${spec.name}`,
         permission: rules,
       })
       const track: Track = {

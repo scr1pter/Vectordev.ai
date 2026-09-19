@@ -1,10 +1,11 @@
-// Vecbot commands in comments (section 2.4). /vecbot is the name; /vector and /vx
-// still work, because they are written into workflows people already installed. The route script embeds `parseReviewCommand.toString()`, so that
+// Vectorscope commands in comments (section 2.4). /vectorscope is the name, /vs the
+// short form; /vector and /vx still work, because they are written into workflows
+// people already installed. The route script embeds `parseReviewCommand.toString()`, so that
 // function must stay self-contained: no imports, no module-level values and no helpers outside its own body.
 
 export type ReviewCommandKind = "review" | "review-full" | "pause" | "resume" | "dismiss" | "task" | "none"
 
-export const DEFAULT_MENTIONS = ["/vecbot", "/vector", "/vx"]
+export const DEFAULT_MENTIONS = ["/vectorscope", "/vs", "/vector", "/vx"]
 
 export function parseReviewCommand(body: string, mentions: string[]): { kind: ReviewCommandKind } {
   const names = mentions

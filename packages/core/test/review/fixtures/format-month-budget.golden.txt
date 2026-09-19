@@ -1,4 +1,4 @@
-## Vecbot review · Risk: High
+## Vectorscope review · Risk: High
 
 > Reviews are paused for this repository until October 1: this month's $50.00 review budget is used (at least $50.40 across 61 pull requests). Raise `REVIEW_MAX_COST_USD_PER_MONTH` in `.github/workflows/vector.yml` to continue.
 

@@ -1,5 +1,6 @@
 import { enforceRateLimit, requireTrustedJsonRequest } from "../_lib/abuse.js"
 import { verifyCliToken } from "../_lib/cli-token.js"
+import { accountTokensRevoked } from "../_lib/revocation.js"
 import { ApiError, handleApiError, json, readJson, requireMethod, type ApiRequest, type ApiResponse } from "../_lib/http.js"
 
 export default async function handler(request: ApiRequest, response: ApiResponse) {
@@ -17,6 +18,11 @@ export default async function handler(request: ApiRequest, response: ApiResponse
     )
     const body = await readJson<{ token?: unknown }>(request, 4_000)
     const user = verifyCliToken(typeof body.token === "string" ? body.token : "")
+    // A token outlives the account that minted it, so a deleted account's
+    // terminal would keep verifying for up to ninety days without this.
+    if (await accountTokensRevoked(user.id)) {
+      throw new ApiError(401, "CLI_TOKEN_INVALID", "That CLI token is not valid. Generate a new one.")
+    }
     json(response, 200, { ok: true, user })
   } catch (error) {
     handleApiError(response, error)

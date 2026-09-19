@@ -970,7 +970,7 @@ const generatedHeaders = Effect.fnUntraced(function* (input: {
     ),
     notes: checked.flatMap((entry) =>
       "reviewedAnyway" in entry && entry.reviewedAnyway
-        ? [`${entry.file.path} has a generated-file header that its base does not, so Vecbot reviewed it anyway.`]
+        ? [`${entry.file.path} has a generated-file header that its base does not, so Vectorscope reviewed it anyway.`]
         : [],
     ),
   }
@@ -1165,8 +1165,8 @@ function write(text: string) {
 
 export const ReviewCommand = effectCmd({
   command: "review",
-  aliases: ["vecbot"],
-  describe: "Vecbot: review your branch, uncommitted changes or a pull request",
+  aliases: ["vectorscope"],
+  describe: "Vectorscope: review your branch, uncommitted changes or a pull request",
   builder: (yargs) =>
     yargs
       .option("base", {

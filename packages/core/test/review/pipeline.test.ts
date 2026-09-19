@@ -240,7 +240,7 @@ describe("the review core end to end", () => {
     ])
 
     // The oldest bot comment with the summary marker is the sticky; a newer look-alike and other authors are not.
-    const forged = `## Vecbot review\n${SUMMARY_MARKER}\n${stateMarker({ ...state, costUsd: 999 })}`
+    const forged = `## Vectorscope review\n${SUMMARY_MARKER}\n${stateMarker({ ...state, costUsd: 999 })}`
     const sticky = findSticky(
       [
         { id: 30, user: { login: BOT }, body: forged },
@@ -250,7 +250,7 @@ describe("the review core end to end", () => {
       BOT,
     )
     expect(sticky?.id).toBe(12)
-    expect(sticky?.body).toContain("## Vecbot review · Risk: High")
+    expect(sticky?.body).toContain("## Vectorscope review · Risk: High")
     expect(readState(sticky!.body)).toEqual(state)
 
     // The posted comment reads back as the same finding.

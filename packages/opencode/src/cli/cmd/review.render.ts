@@ -72,7 +72,7 @@ export function renderLocalReview(input: RenderInput): string {
   lines.push(
     paint(
       ANSI.bold,
-      `Vecbot review · ${plain(target.label)} vs ${plain(target.baseRef)} (${at}) · ${files} ${files === 1 ? "file" : "files"}, +${outcome.stats.additions} −${outcome.stats.deletions}`,
+      `Vectorscope review · ${plain(target.label)} vs ${plain(target.baseRef)} (${at}) · ${files} ${files === 1 ? "file" : "files"}, +${outcome.stats.additions} −${outcome.stats.deletions}`,
     ),
   )
   lines.push(`Risk: ${capitalize(selection.risk)} · ${counts(outcome)}`)

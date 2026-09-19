@@ -324,3 +324,86 @@
   .callback-spinner,
   .account-loading svg { animation: none; }
 }
+
+/* ---- deleting the account ------------------------------------------------ */
+
+.acct-danger {
+  margin-top: 28px;
+  padding-top: 22px;
+  border-top: 1px solid rgba(255, 120, 120, 0.16);
+}
+
+.acct-danger h3 {
+  margin: 0 0 6px;
+  color: #f5f5f7;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.acct-danger .acct-fine {
+  max-width: 68ch;
+}
+
+.acct-danger-label {
+  display: block;
+  margin: 16px 0 8px;
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 13.5px;
+}
+
+.acct-danger-label strong {
+  color: #f5f5f7;
+  font-weight: 600;
+}
+
+.acct-danger-input {
+  width: min(360px, 100%);
+  height: 40px;
+  padding: 0 12px;
+  color: #f5f5f7;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  font: inherit;
+  font-size: 14px;
+  outline: none;
+}
+
+.acct-danger-input:focus {
+  border-color: rgba(255, 140, 140, 0.5);
+}
+
+.acct-danger-actions {
+  margin-top: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.acct-button-quiet {
+  color: rgba(255, 160, 160, 0.9);
+  background: transparent;
+  border: 1px solid rgba(255, 120, 120, 0.28);
+}
+
+.acct-button-quiet:hover:not(:disabled) {
+  color: #ffd5d5;
+  border-color: rgba(255, 120, 120, 0.5);
+  background: rgba(255, 90, 90, 0.08);
+}
+
+.acct-button-danger {
+  color: #1a0d0d;
+  background: #ff8b8b;
+  border: 1px solid #ffa5a5;
+}
+
+.acct-button-danger:hover:not(:disabled) {
+  background: #ffa0a0;
+}
+
+.acct-button-danger:disabled {
+  color: rgba(255, 255, 255, 0.4);
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.1);
+}

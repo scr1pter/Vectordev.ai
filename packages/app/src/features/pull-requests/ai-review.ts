@@ -500,7 +500,7 @@ export async function runPullRequestReview(
         client,
         directory,
         name,
-        title: `Vecbot review · #${pr.number} · ${name}`,
+        title: `Vectorscope review · #${pr.number} · ${name}`,
         text: texts[name],
         model,
         rules,

@@ -628,6 +628,44 @@ export async function accountBilling(account: Pick<AccountUser, "id" | "email">)
   }
 }
 
+/**
+ * Closes the billing side of an account the user has asked to delete: cancels a
+ * live subscription so nothing charges again, marks the licence revoked so an
+ * activated desktop stops passing, and deletes the Stripe customer, which is
+ * what removes the name and email Stripe holds. Stripe keeps the underlying
+ * charges and invoices for the business's own records; they are simply no longer
+ * attached to a person.
+ *
+ * Every step is reported so the caller can tell the user exactly what happened
+ * rather than claiming more than it did.
+ */
+export async function deleteAccountBilling(account: Pick<AccountUser, "id" | "email">) {
+  const configuration = billingConfiguration()
+  if (!configuration.stripe) return { billing: "not-configured" as const }
+  const stripe = stripeClient()
+  const customer = await customerForAccount(stripe, account).catch(() => undefined)
+  if (!customer) return { billing: "none" as const }
+
+  let subscriptionCancelled = false
+  const subscriptionID = customer.metadata.vector_subscription_id
+  if (subscriptionID) {
+    const subscription = await stripe.subscriptions.retrieve(subscriptionID).catch(() => undefined)
+    if (subscription && subscription.status !== "canceled") {
+      await stripe.subscriptions.cancel(subscriptionID)
+      subscriptionCancelled = true
+    }
+  }
+
+  // Revoke before deleting: a licence check reads this metadata, and if the
+  // delete fails we would rather leave a revoked customer than a live licence.
+  await stripe.customers
+    .update(customer.id, { metadata: { ...customer.metadata, vector_revoked_at: new Date().toISOString() } })
+    .catch(() => undefined)
+  await stripe.customers.del(customer.id)
+
+  return { billing: "deleted" as const, subscriptionCancelled, customer: customer.id }
+}
+
 export async function billingPortalForAccount(account: Pick<AccountUser, "id" | "email">) {
   const stripe = stripeClient()
   const customer = await customerForAccount(stripe, account)

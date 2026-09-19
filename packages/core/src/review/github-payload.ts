@@ -64,7 +64,7 @@ export function splitHalves(payload: CreateReviewPayload): [CreateReviewPayload,
   const marker = parseReviewMarker(payload.body)
   const body = marker
     ? buildReviewBody({ head: payload.commit_id, run: marker.run, inline: [], continued: true })
-    : `Vecbot review of \`${payload.commit_id.slice(0, 7)}\` (continued).`
+    : `Vectorscope review of \`${payload.commit_id.slice(0, 7)}\` (continued).`
   return [
     { ...payload, comments: payload.comments.slice(0, middle) },
     { ...payload, body, comments: payload.comments.slice(middle) },

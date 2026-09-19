@@ -1,4 +1,4 @@
-## Vecbot review · Risk: High
+## Vectorscope review · Risk: High
 
 > Reviewing `e5f6a7b`… (started 14:02 UTC)
 

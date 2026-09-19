@@ -110,7 +110,7 @@ export const docsNav: DocGroup[] = [
       },
       {
         "id": "code-review",
-        "title": "Vecbot, the code review bot",
+        "title": "Vectorscope, the code review bot",
         "blurb": "Vector's code review bot: on every pull request, on your branch before you push, and in the workspace."
       },
       {
@@ -248,6 +248,11 @@ export const docsNav: DocGroup[] = [
   {
     "label": "Help",
     "links": [
+      {
+        "id": "delete-account",
+        "title": "Delete your account",
+        "blurb": "Delete your Vector account, what that removes, and what stays on your own machine."
+      },
       {
         "id": "troubleshooting",
         "title": "Troubleshooting",

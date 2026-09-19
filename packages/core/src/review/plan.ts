@@ -56,7 +56,7 @@ export function diffBudgetChars(context: number, maxDiffChars: number): number {
 export function contextRefusal(model: string, context: number): string | undefined {
   if (context >= MIN_CONTEXT) return undefined
   const size = context > 0 ? `${Math.round(context / 1000)}k` : "no listed context size"
-  return `Vecbot reviews need a model with at least 32k tokens of context; ${model} has ${size}.`
+  return `Vectorscope reviews need a model with at least 32k tokens of context; ${model} has ${size}.`
 }
 
 function usd(tokens: number, perMillion: number) {

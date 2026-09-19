@@ -1,4 +1,4 @@
-## Vecbot review · Risk: Low
+## Vectorscope review · Risk: Low
 
 Renames a helper and updates its two callers.
 

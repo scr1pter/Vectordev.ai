@@ -46,6 +46,8 @@ export function AccountPage(props: { preview?: AccountState }) {
   const [error, setError] = useState("")
   const [notice, setNotice] = useState("")
   const [copied, setCopied] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [confirmEmail, setConfirmEmail] = useState("")
   const downloadAllowed = Boolean(account?.betaAccess || account?.billing?.status.access)
 
   const loadAccount = (accessToken: string) =>
@@ -151,6 +153,32 @@ export function AccountPage(props: { preview?: AccountState }) {
         setError(cause instanceof Error ? cause.message : "Vector could not open checkout.")
         setAction("")
       })
+  }
+
+  const deleteAccount = () => {
+    if (!token || !account) return
+    setAction("delete")
+    setError("")
+    void fetch("/api/account/delete", {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+        authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ confirm: confirmEmail }),
+    })
+      .then(async (response) => {
+        await readAccountApiResponse(response, "Vector could not delete your account.")
+        // The identity is gone; end the session before anything tries to use it.
+        const client = await vectorAccountClient()
+        await client.auth.signOut().catch(() => undefined)
+        location.replace("/?deleted=1")
+      })
+      .catch((cause) => {
+        setError(cause instanceof Error ? cause.message : "Vector could not delete your account.")
+      })
+      .finally(() => setAction(""))
   }
 
   const portal = () => {
@@ -345,6 +373,71 @@ export function AccountPage(props: { preview?: AccountState }) {
           <button className="acct-button acct-button-secondary" type="button" onClick={signOut} disabled={Boolean(action)}>
             Sign out
           </button>
+
+          <div className="acct-danger">
+            <h3>Delete this account</h3>
+            {deleting ? (
+              <>
+                <p className="acct-fine">
+                  This cannot be undone. Vector deletes your account and sign-in, cancels an active subscription,
+                  revokes your license key, deletes your customer record at Stripe, and stops the CLI tokens this
+                  account has issued. Repositories on your own machine are not touched, and neither is anything you
+                  have already published to your own cloud accounts.
+                </p>
+                <label className="acct-danger-label" htmlFor="acct-delete-confirm">
+                  Type <strong>{account?.user.email}</strong> to confirm
+                </label>
+                <input
+                  id="acct-delete-confirm"
+                  className="acct-danger-input"
+                  type="email"
+                  autoComplete="off"
+                  spellCheck={false}
+                  value={confirmEmail}
+                  onChange={(event) => setConfirmEmail(event.target.value)}
+                  placeholder={account?.user.email}
+                />
+                <div className="acct-danger-actions">
+                  <button
+                    className="acct-button acct-button-danger"
+                    type="button"
+                    onClick={deleteAccount}
+                    disabled={
+                      Boolean(action) ||
+                      confirmEmail.trim().toLowerCase() !== (account?.user.email ?? "").trim().toLowerCase()
+                    }
+                  >
+                    {action === "delete" ? "Deleting…" : "Delete my account"}
+                  </button>
+                  <button
+                    className="acct-button acct-button-secondary"
+                    type="button"
+                    onClick={() => {
+                      setDeleting(false)
+                      setConfirmEmail("")
+                    }}
+                    disabled={Boolean(action)}
+                  >
+                    Keep my account
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="acct-fine">
+                  Deleting removes your sign-in, cancels billing and revokes your license. It cannot be undone.
+                </p>
+                <button
+                  className="acct-button acct-button-quiet"
+                  type="button"
+                  onClick={() => setDeleting(true)}
+                  disabled={Boolean(action)}
+                >
+                  Delete account…
+                </button>
+              </>
+            )}
+          </div>
         </section>
       </div>
     </main>

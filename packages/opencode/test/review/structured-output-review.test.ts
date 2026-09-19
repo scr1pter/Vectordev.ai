@@ -216,7 +216,7 @@ describe("structured output in a review session", () => {
       const sessions = yield* Session.Service
       const prompt = yield* SessionPrompt.Service
       const session = yield* sessions.create({
-        title: "Vecbot review",
+        title: "Vectorscope review",
         permission: reviewPermissionRules({ truncateGlob: Truncate.GLOB }),
       })
       yield* llm.tool("StructuredOutput", REPORT)
@@ -241,7 +241,7 @@ describe("structured output in a review session", () => {
       const llm = yield* useServer
       const sessions = yield* Session.Service
       const prompt = yield* SessionPrompt.Service
-      const session = yield* sessions.create({ title: "Vecbot review" })
+      const session = yield* sessions.create({ title: "Vectorscope review" })
 
       const result = yield* prompt.prompt({
         sessionID: session.id,
@@ -264,7 +264,7 @@ describe("structured output in a review session", () => {
       const sessions = yield* Session.Service
       const prompt = yield* SessionPrompt.Service
       const session = yield* sessions.create({
-        title: "Vecbot review",
+        title: "Vectorscope review",
         permission: reviewPermissionRules({ truncateGlob: Truncate.GLOB }),
       })
       yield* llm.tool("StructuredOutput", REPORT)
