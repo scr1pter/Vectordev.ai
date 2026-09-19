@@ -16,7 +16,7 @@ vector login
 vector
 ```
 
-**No API key needed.** Vector comes with models included, today among them NVIDIA's Nemotron and Meta's Muse Spark, so it works before you connect anything, and you can bring your own key for Claude, GPT, Gemini and the rest whenever you want. The desktop app is a free download for macOS, Windows and Linux at [vectordev.ai](https://vectordev.ai), and the terminal agent is free too. Both need only a Vector account. The desktop app is free to use during the beta; when public pricing begins, it is $10 a month or $99 a year, and the subscription comes with the included models.
+**No API key needed.** Vector comes with models included, today among them NVIDIA's Nemotron and Meta's Muse Spark, so it works before you connect anything, and you can bring your own key for Claude, GPT, Gemini and the rest whenever you want. Vector desktop is available for macOS, Windows and Linux at [vectordev.ai](https://vectordev.ai) for $10 a month or $99 a year, with models included in the subscription. Create a Vector account, then choose a plan from Account. Creating an account does not start a subscription. The terminal agent is free with a Vector account.
 
 **New in 1.99.8:** Subagents that work in parallel, code review on every pull request, every agent's edits typed live in the editor, no agent limit, every model in the picker, and a glass launch screen. [Release notes →](https://vectordev.ai/releases)
 

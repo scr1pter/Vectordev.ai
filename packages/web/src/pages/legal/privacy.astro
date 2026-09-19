@@ -3,18 +3,312 @@ import LegalPage from "../../components/marketing/LegalPage.astro"
 export const prerender = true
 ---
 
-<LegalPage eyebrow="Privacy" title="Privacy Policy" description="What Vector stores locally, what billing requires, and what connected providers receive.">
-  <section><h2>Vector account</h2><p>Supabase stores the email address, authentication identifiers, sign-in provider, and profile name associated with your Vector account. Vector requires a verified account before the website resolves an installer or starts checkout. Google processes Google sign-in under its own privacy terms. Your account does not contain your repositories, prompts, model keys, or local memory.</p></section>
-  <section><h2>Local workspaces</h2><p>Vector Desktop is designed to keep repositories, sessions, preferences, checkpoints, browser state, and workspace metadata on your computer. Signing in on the website does not upload your repository as part of ordinary local use.</p></section>
-  <section><h2>Model and tool providers</h2><p>Prompts, selected files, tool results, or other context may be sent to the model and integration providers you choose. Their privacy policies apply. Vector does not centrally store your model API keys as part of the license service.</p></section>
-  <section><h2>Billing and license data</h2><p>Stripe processes payment details. Vector receives and stores the billing email, Stripe customer and subscription identifiers, your Supabase account identifier for ownership, subscription status, renewal state, license metadata, a hashed activation token, a one-way device identifier derived from stable hardware and system characteristics of the computer you activate, device name/platform, and recent verification timestamps. Vector does not receive your full card number.</p></section>
-  <section><h2>Purchase email</h2><p>Resend delivers the purchase confirmation and license key. The message contains your billing email, license key, expiration date, and purchase link. Resend processes that delivery under its own privacy terms.</p></section>
-  <section><h2>Local memory</h2><p>Vector can keep durable notes about how you work — conventions you follow, corrections you have made, preferences you have stated — so it does not have to re-ask across projects. This is a plain file in your own configuration directory on your computer. It is never uploaded to Vector. Its contents are included in prompts sent to the model provider you have chosen, in the same way your other project context is. You can view the file, see its size and location, and erase it entirely from Settings.</p></section>
-  <section><h2>Help assistant</h2><p>When you ask the in-app help assistant a question, your question and the matching sections of Vector's own documentation are sent to a Vector-operated endpoint and forwarded to Groq, which generates the answer. Your repository, files, and session contents are not sent. Groq processes that request under its own privacy terms. To prevent abuse, Vector temporarily stores a keyed, non-reversible identifier derived from the request's network address; the counter expires after ten minutes.</p></section>
-  <section><h2>Bug reports</h2><p>If you send a bug report from inside Vector, the description you write is delivered by email to Vector support, together with your application version, operating system, processor architecture, and release channel, and your email address if you choose to provide one. Nothing else is attached. Short-lived abuse-prevention counters use keyed identifiers derived from the request's network address and, when supplied, a one-way identifier derived from the reporter email.</p></section>
-  <section><h2>Screen and desktop control</h2><p>Optional plugins can capture the screen or control the mouse and keyboard. These run on your computer, only after you connect the plugin, and only when you ask an agent to use them. Your operating system additionally requires you to grant screen recording and accessibility permission before they can function. Screenshots taken this way may be sent to the model provider you have chosen so it can act on what is shown.</p></section>
-  <section><h2>Diagnostics</h2><p>Remote crash diagnostics are disabled by default. If you explicitly enable them in Settings, Vector uses Sentry to receive the application version, operating system, stack traces, and technical error state. Vector disables default personally identifiable information and performance tracing and removes request, user, breadcrumb, and extra fields before transmission. Vector does not intentionally attach repository files, prompts, terminal output, or provider credentials. You can turn remote diagnostics off at any time. Local crash dumps remain on your computer.</p></section>
-  <section><h2>Connected cloud services</h2><p>When you connect Vercel, Netlify, Supabase, GitHub, GitLab, an MCP server, or another provider, Vector sends only the requests needed for the operation you approve. Provider credentials are stored by the desktop application, and each provider's own privacy terms apply.</p></section>
-  <section><h2>Security and retention</h2><p>Packaged Vector builds protect provider credentials and the local credential-vault key with the operating system's credential store and stop with a visible error when secure storage is unavailable. Activation tokens are stored locally in a restricted application file. Server-side billing records store hashes rather than plaintext activation tokens. Purchase, subscription, payment-failure, and license records are retained as needed to provide access, prevent abuse, resolve disputes, and satisfy legal obligations. Abuse counters expire automatically at the end of their stated rate-limit windows.</p></section>
-  <section><h2>Your choices</h2><p>You can sign out, request account deletion, disconnect providers, remove local data, cancel renewal, and deactivate a computer from Vector. For account, billing, or privacy requests, contact <a href="mailto:krishnabharadwaj0521@gmail.com">krishnabharadwaj0521@gmail.com</a>.</p></section>
+<LegalPage
+  eyebrow="Privacy"
+  title="Privacy Policy"
+  description="How Vector handles account information, local work, AI requests, connected services, and diagnostics."
+  updated="September 18, 2026"
+>
+  <section>
+    <h2>1. Scope and contact</h2>
+    <p>
+      This Policy explains information handling for the Vector website, desktop application, command-line
+      tools, and Vector-operated account, billing, support, and cloud endpoints. “Vector,” “we,” and “us” refer
+      to the provider of those services. For privacy questions or requests, email
+      <a href="mailto:krishnabharadwaj0521@gmail.com">krishnabharadwaj0521@gmail.com</a>.
+    </p>
+    <p>
+      Vector keeps much of your work on the computer running the application. AI requests, connected tools,
+      help, billing, and publishing involve other systems. The data sent depends on your instructions, selected
+      model, enabled features, permissions, and connected accounts. Independent providers also process
+      information under their own terms and privacy policies.
+    </p>
+  </section>
+
+  <section>
+    <h2>2. Account and sign-in information</h2>
+    <p>
+      Supabase provides account authentication and stores your email address, account and authentication
+      identifiers, sign-in provider, and profile information supplied at sign-in, such as your name. If you use
+      Google sign-in, Google processes that authentication and supplies the permitted account information.
+      We use account information to authenticate you, verify access, associate purchases, and respond to
+      account requests. CLI access may use an account-linked token for verification.
+    </p>
+    <p>
+      Website sign-in does not itself upload your repository or local conversation history. Authentication
+      uses browser storage to keep your session signed in and complete sign-in redirects. Signing out or
+      clearing that storage removes the local session but does not delete the account or cancel a subscription.
+    </p>
+  </section>
+
+  <section>
+    <h2>3. Billing, licensing, and device information</h2>
+    <p>
+      Stripe processes payment details, subscriptions, invoices, and billing-portal activity. We receive or
+      maintain the billing email, account and Stripe customer identifiers, subscription and invoice status,
+      renewal and payment-failure information, and license metadata needed to supply and verify access. Vector
+      does not receive your full payment card number through its checkout integration.
+    </p>
+    <p>
+      Activation uses a device identifier derived from hardware and system characteristics, device name and
+      platform, activation-token hash, recent verification timestamps, and transfer or download activity.
+      These records enforce the one-active-computer license and prevent misuse. A hashed device identifier
+      can still be linked to your account; it is not anonymous. The desktop stores its activation token locally
+      in a restricted application file. Server-side activation verification stores a hash of that token.
+    </p>
+    <p>
+      Resend delivers purchase, license, and payment-related emails. Messages can contain your billing email,
+      license key, purchase link, and subscription or expiration information. Our billing and email providers
+      receive the information needed to process and deliver those communications.
+    </p>
+  </section>
+
+  <section>
+    <h2>4. Local projects, conversations, and memory</h2>
+    <p>
+      Repositories, session history, tool results, preferences, checkpoints, workspace metadata, and local
+      logs are generally stored on the computer running Vector. The embedded browser can retain cookies,
+      sign-in sessions, and other website storage on that computer. Connected remote runtimes or servers may
+      instead hold the data they process.
+    </p>
+    <p>
+      Optional local memory stores notes and preferences in a local configuration file. You can inspect and
+      erase that file in Settings. Relevant memory and instructions can be included in requests to your
+      selected model. Deleting local memory does not delete a copy already sent to a provider, copied into
+      conversation history, or included in a backup.
+    </p>
+    <p>
+      <strong>Dictation.</strong> With microphone permission, desktop dictation processes recorded audio on
+      your computer using a local Whisper model. The model is downloaded and cached; its hosting service
+      receives the download request, but this transcription path does not upload your audio. Browser dictation
+      uses the browser's speech-recognition service, which may send audio to a remote provider under that
+      browser or provider's privacy practices. The resulting text enters the composer and, when submitted,
+      is handled like a typed prompt. Stop recording or revoke microphone permission to prevent further capture.
+    </p>
+  </section>
+
+  <section>
+    <h2>5. Models and AI request content</h2>
+    <p>
+      To answer a task, Vector may send prompts, conversation history, selected or agent-read files, code,
+      images, instructions, memory, repository metadata, and tool output to the selected model service.
+      Tool output can include terminal text, search results, browser content, or information returned by an
+      integration. Content is selected according to the task and enabled permissions; it may include personal
+      or confidential information present in those sources.
+    </p>
+    <p>
+      Models labeled “included with Vector” are still remote services. The current included-model integration
+      uses OpenCode Zen and the upstream providers serving those models. Bringing your own key or signing in
+      to a provider uses that provider's service and account. Requests can pass through a configured gateway
+      or proxy. Each recipient's retention, abuse-review, and model-training rules depend on the service and
+      your agreement or settings with it. Vector does not promise that every provider offers zero retention
+      or excludes all request content from training.
+    </p>
+  </section>
+
+  <section>
+    <h2>6. External agents, plugins, and connected tools</h2>
+    <p>
+      If you select an external runtime such as Claude Code, Codex CLI, or Cursor Agent, Vector can pass your
+      task and working directory to the installed program and display its responses. That program may read
+      project files, use its own credentials, transmit context, and maintain its own logs and history under
+      its own permissions and provider policies.
+    </p>
+    <p>
+      Plugins, MCP servers, repository services, and other integrations receive the requests and data needed
+      for the actions you authorize. Responses can enter the local conversation and subsequent model requests.
+      A standing permission or scheduled task may allow multiple operations without a new prompt each time.
+      Disconnecting an integration prevents future use through that connection but does not remove records
+      the provider already received or revoke credentials everywhere they may be used.
+    </p>
+    <p>
+      <strong>Invitations and session sharing.</strong> A live workspace invitation contains guest credentials.
+      People who have the link and can reach your server can access the workspace through the guest account;
+      a tunnel provider may also process connection traffic. Share invitations only with trusted people and
+      stop the server to end live access. Separately, upstream session sharing is disabled by default. Enabling
+      manual or automatic sharing can upload session details, messages and their content, tool results, file
+      diffs, and model metadata to the OpenCode sharing service or your configured organization or enterprise
+      service, with later updates synchronized. Shared links can expose that content to their recipients.
+      Use the unshare control to request removal; disabling future sharing alone does not remove an existing
+      share, and recipients may retain copies.
+    </p>
+  </section>
+
+  <section>
+    <h2>7. Browser and computer use</h2>
+    <p>
+      Browser automation can inspect page text, URLs, page structure, screenshots, and technical browser
+      output, and interact with sites you open. Those sites receive ordinary browser traffic and any
+      information submitted to them; their cookies and privacy policies apply.
+    </p>
+    <p>
+      Where available and enabled, computer-use features or optional plugins can list available targets,
+      capture a selected window or screen, and send mouse or keyboard input. These features process window
+      or application names, target and frame identifiers, screenshots, and requested input actions.
+      Operating-system permissions, including screen recording and accessibility permissions on macOS, may
+      also be required. Availability and controls depend on your platform, application version, and plugin.
+    </p>
+    <p>
+      Screenshots and action results can be stored as session content and sent to your selected model provider.
+      They may reveal notifications, messages, personal information, or confidential content visible in the
+      selected area. Close or hide unrelated sensitive content before use. You can stop the session, disable
+      the feature or plugin, and revoke operating-system permissions. Stopping future capture does not delete
+      previously recorded session content or copies already received by a provider.
+    </p>
+  </section>
+
+  <section>
+    <h2>8. Cloud connections and published content</h2>
+    <p>
+      Cloud features can transmit project files, build output, deployment settings, database operations,
+      resource identifiers, and configuration to providers such as Vercel, Netlify, Supabase, AWS, GitHub, or
+      GitLab, depending on the connection and action. Responses, resource metadata, and logs may be displayed
+      or retained locally and included in agent context when you use them in a task.
+    </p>
+    <p>
+      Some connections use Vector-operated OAuth endpoints to exchange authorization codes, refresh access,
+      or revoke a connection. Those endpoints process the necessary codes, access or refresh tokens, and
+      transaction metadata before returning the result to the application. Credentials are therefore not
+      confined to your device throughout every connection flow.
+    </p>
+    <p>
+      If you publish through a Vector-hosted publishing feature, the selected files and deployment metadata
+      are uploaded to the hosting infrastructure; public site files may be stored in Vercel Blob and served
+      to anyone with access to their URLs. Publishing can disclose content publicly. Remove private data and
+      secrets before uploading. Local deletion, sign-out, or subscription cancellation does not itself remove
+      a hosted deployment; use the hosting provider's controls or contact support about Vector-hosted content.
+    </p>
+  </section>
+
+  <section>
+    <h2>9. Help and support</h2>
+    <p>
+      The in-app help assistant sends your recent help conversation and matching Vector documentation through
+      a Vector-operated endpoint to Groq to generate an answer. It does not automatically attach your
+      repository or coding-session history. Anything you type or paste into the help conversation is part of
+      the information sent. Service error logs may include upstream error details.
+    </p>
+    <p>
+      When you submit a bug report, we receive the description, any optional reply email, application version,
+      operating system, architecture, release channel, and technical context included by that report flow.
+      Resend delivers the report to our support mailbox. Email you send directly also becomes support
+      correspondence. Avoid including credentials or unnecessary confidential information.
+    </p>
+  </section>
+
+  <section>
+    <h2>10. Diagnostics and service logs</h2>
+    <p>
+      Remote crash diagnostics are off by default. If you enable them and reporting is configured, Sentry
+      receives application version, platform, stack traces, and technical error information. Vector disables
+      default personally identifiable information and performance tracing and removes request, user,
+      breadcrumb, and extra fields from diagnostic events before sending them. Error text and stack traces
+      can still contain incidental information. Repository files, prompts, terminal output, and credentials
+      are not intentionally attached. You can disable future reporting in Settings. Local crash dumps and
+      application logs remain on your computer unless you separately share them.
+    </p>
+    <p>
+      Our website, API, hosting, and security providers process network information such as IP addresses,
+      request time, browser or client details, requested routes, and response or error information to deliver
+      and protect the service. These operational records are separate from optional desktop diagnostics.
+      Update and download requests also disclose ordinary connection and requested-release information.
+    </p>
+    <p>
+      Help and bug-report abuse controls use keyed identifiers derived from network addresses and, for some
+      reports, a derived email identifier. These identifiers are pseudonymous, not necessarily anonymous.
+      The help counter expires after ten minutes; bug-report network counters expire after one hour and
+      email counters after 24 hours. Expiration of those counters does not delete separate provider logs.
+    </p>
+  </section>
+
+  <section>
+    <h2>11. Why information is used and who receives it</h2>
+    <p>
+      We use information to provide requested features, authenticate accounts, administer subscriptions and
+      licenses, deliver communications, answer support requests, troubleshoot failures, prevent fraud and
+      abuse, secure the service, and meet legal obligations. Recipients include the account, payment, email,
+      hosting, security, and diagnostic providers described above and the model and integration providers
+      involved in your selected workflow.
+    </p>
+    <p>
+      Information may also be disclosed when necessary to comply with a lawful obligation, establish or defend
+      legal claims, or protect people and service security. If the business is reorganized or transferred,
+      relevant account and service records may transfer with it, subject to applicable law and appropriate
+      notice. This Policy does not authorize unrelated use of your project content.
+    </p>
+    <p>
+      Where a law requires a legal basis for processing, the applicable basis depends on the purpose: providing
+      a service you request and administering your purchase; legitimate interests in security, abuse prevention,
+      and service support balanced against your rights; compliance with legal obligations; or consent for
+      optional processing such as remote crash diagnostics. You can withdraw consent for optional processing
+      without affecting processing that was lawful before withdrawal. Required account and billing information
+      is necessary to provide those features; optional diagnostics are not a condition of purchase.
+    </p>
+  </section>
+
+  <section>
+    <h2>12. Storage, security, and retention</h2>
+    <p>
+      Packaged desktop builds use the operating system's secure storage for supported provider credentials
+      and the local credential-vault key. Some application data, including local memory and activation state,
+      uses local files instead. External runtimes have their own storage practices. Device access controls,
+      backups, and the permissions you grant also affect security. No storage or transmission method can
+      guarantee absolute security.
+    </p>
+    <p>
+      Local data remains until removed through application controls or from the relevant files, subject to
+      local cleanup and backups. Account and licensing records are retained while needed to provide access
+      and resolve account issues. Billing records may remain after cancellation for tax, accounting, fraud,
+      and dispute obligations. Support records and diagnostic or operational logs are retained according to
+      their troubleshooting and security purpose and applicable provider settings. We consider the type of
+      record, whether the account or issue is active, legal retention requirements, and unresolved disputes
+      when deciding retention. No single deletion period applies to every category.
+    </p>
+    <p>
+      Providers may process information outside your country, with different privacy laws. Locations and
+      transfer arrangements depend on the provider and service configuration. Contact us for information
+      about the arrangements relevant to your account. A provider's independent retention rules continue
+      to apply to information already sent to it.
+    </p>
+  </section>
+
+  <section>
+    <h2>13. Your choices and privacy rights</h2>
+    <p>
+      You can choose models and integrations, limit permissions, stop background work or computer use,
+      disconnect providers, turn off diagnostics, edit or erase local memory, and remove local sessions and
+      other data. Use the relevant provider's controls to revoke its credentials or manage records it holds.
+      Cancelling renewal, deleting an account, deleting local data, and deleting provider-held content are
+      separate actions.
+    </p>
+    <p>
+      Depending on the law that applies to you, you may have rights to access or receive a copy of personal
+      information, correct it, request deletion, object to or restrict processing, withdraw consent, or appeal
+      a request decision. You may also have rights relating to sale, sharing, or targeted advertising where
+      those activities occur. These rights can have exceptions, including necessary billing, security, and
+      legal records. We will not unlawfully discriminate against you for exercising an applicable right.
+    </p>
+    <p>
+      Send requests to <a href="mailto:krishnabharadwaj0521@gmail.com">krishnabharadwaj0521@gmail.com</a>.
+      Identify the account and the request without sending passwords, full card numbers, or private keys.
+      We may need proportionate identity or authorized-agent verification before responding. We will respond
+      within the period required by applicable law and explain a refusal where required. You can also complain
+      to the privacy regulator where you live or work, including the UK Information Commissioner's Office
+      where applicable. We cannot directly erase data held independently by a provider you connected.
+    </p>
+  </section>
+
+  <section>
+    <h2>14. Children and policy updates</h2>
+    <p>
+      Vector is intended for adults and is not directed to children. If you believe a child has supplied
+      personal information to our account or service endpoints, contact us so we can review and address it.
+    </p>
+    <p>
+      We update this Policy when relevant practices change and show the effective date above. Material changes
+      will be communicated through the service or an account contact where appropriate. We will provide any
+      additional notice or obtain consent required by law before using information for a materially different
+      purpose.
+    </p>
+  </section>
 </LegalPage>

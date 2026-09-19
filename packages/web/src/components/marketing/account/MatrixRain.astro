@@ -13,6 +13,7 @@
     let height = 1
     let fontSize = 10
     let lastFrame = 0
+    let frame = 0
     let columns: Array<{ x: number; y: number; speed: number; trail: number; phase: number; opacity: number }> = []
 
     const build = () => {
@@ -31,7 +32,7 @@
     const render = (timestamp = performance.now()) => {
       const elapsed = lastFrame ? timestamp - lastFrame : 34
       if (!reduced && elapsed < 30) {
-        requestAnimationFrame(render)
+        frame = requestAnimationFrame(render)
         return
       }
       const delta = Math.min(elapsed, 80) / 1000
@@ -66,7 +67,7 @@
         column.trail = 10 + Math.floor(Math.random() * 22)
         column.phase = Math.floor(Math.random() * glyphs.length)
       })
-      if (!reduced && !document.hidden) requestAnimationFrame(render)
+      if (!reduced && !document.hidden) frame = requestAnimationFrame(render)
     }
 
     const resize = () => {
@@ -84,7 +85,15 @@
     const observer = new ResizeObserver(resize)
     observer.observe(canvas)
     resize()
-    if (!reduced) requestAnimationFrame(render)
+    if (!reduced) {
+      frame = requestAnimationFrame(render)
+      document.addEventListener("visibilitychange", () => {
+        cancelAnimationFrame(frame)
+        if (document.hidden) return
+        lastFrame = 0
+        frame = requestAnimationFrame(render)
+      })
+    }
   }
 
   bootMatrix()

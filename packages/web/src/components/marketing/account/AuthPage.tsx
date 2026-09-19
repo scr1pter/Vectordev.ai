@@ -1,5 +1,5 @@
 /** @jsxImportSource react */
-import { Eye, EyeOff } from "lucide-react"
+import { ArrowRight, Eye, EyeOff } from "lucide-react"
 import { type SubmitEventHandler, useEffect, useMemo, useState } from "react"
 import {
   rememberAccountReturnPath,
@@ -34,10 +34,6 @@ function GoogleMark() {
   )
 }
 
-/**
- * /login — one centered card. Google first, email second, nothing else on the
- * page: no marketing column, no tabs, no feature list.
- */
 export function AuthPage() {
   const [mode, setMode] = useState<Mode>("signin")
   const [name, setName] = useState("")
@@ -123,95 +119,114 @@ export function AuthPage() {
     setError("")
     setNotice("")
     setMode(mode === "signin" ? "register" : "signin")
+    setVisible(false)
   }
 
   return (
-    <main className="auth-page">
-      <a className="auth-brand" href="/" aria-label="Vector home">
-        <img src="/vector-logo.png" alt="" />
-        <span>Vector</span>
-      </a>
+    <section className="auth-card" aria-labelledby="auth-title">
+      <div className="auth-form-mark" aria-hidden="true">
+        <img src="/vector-logo.png" alt="" width="44" height="44" />
+      </div>
+      <p className="auth-form-eyebrow">YOUR VECTOR WORKSPACE</p>
+      <h1 id="auth-title">{mode === "signin" ? "Welcome back." : "Create your account."}</h1>
+      <p className="auth-sub">
+        {mode === "signin" ? "Sign in to your Vector workspace." : "Your next project starts here."}
+      </p>
 
-      <section className="auth-card" aria-labelledby="auth-title">
-        <h1 id="auth-title">{mode === "signin" ? "Sign in to Vector" : "Create your account"}</h1>
-        <p className="auth-sub">{mode === "signin" ? "Welcome back." : "Free. No card needed."}</p>
+      <button className="google-button" type="button" onClick={google} disabled={loading}>
+        <GoogleMark /> Continue with Google
+      </button>
 
-        <button className="google-button" type="button" onClick={google} disabled={loading}>
-          <GoogleMark /> Continue with Google
-        </button>
+      <div className="auth-divider">
+        <span>or continue with email</span>
+      </div>
 
-        <div className="auth-divider">
-          <span>or</span>
-        </div>
-
-        <form className="auth-form" onSubmit={submit}>
-          {mode === "register" && (
-            <label>
-              <span>Name</span>
-              <input
-                className="auth-field"
-                value={name}
-                onInput={(event) => setName(event.currentTarget.value)}
-                autoComplete="name"
-                placeholder="Your name"
-                required
-              />
-            </label>
-          )}
+      <form className="auth-form" onSubmit={submit} aria-busy={loading}>
+        {mode === "register" && (
           <label>
-            <span>Email</span>
+            <span>Name</span>
             <input
               className="auth-field"
-              type="email"
-              value={email}
-              onInput={(event) => setEmail(event.currentTarget.value)}
-              autoComplete="email"
-              placeholder="you@example.com"
+              value={name}
+              onInput={(event) => setName(event.currentTarget.value)}
+              autoComplete="name"
+              placeholder="Your name"
               required
             />
           </label>
-          <label>
-            <span>Password</span>
-            <div className="auth-password">
-              <input
-                className="auth-field"
-                type={visible ? "text" : "password"}
-                value={password}
-                onInput={(event) => setPassword(event.currentTarget.value)}
-                autoComplete={mode === "signin" ? "current-password" : "new-password"}
-                minLength={8}
-                placeholder={mode === "signin" ? "Your password" : "At least 8 characters"}
-                required
-              />
-              <button
-                type="button"
-                aria-label={visible ? "Hide password" : "Show password"}
-                onClick={() => setVisible((value) => !value)}
-              >
-                {visible ? <EyeOff size={16} /> : <Eye size={16} />}
-              </button>
-            </div>
-          </label>
+        )}
+        <label>
+          <span>Email address</span>
+          <input
+            className="auth-field"
+            type="email"
+            value={email}
+            onInput={(event) => setEmail(event.currentTarget.value)}
+            autoComplete="email"
+            autoCapitalize="none"
+            spellCheck={false}
+            placeholder="you@example.com"
+            required
+          />
+        </label>
+        <label>
+          <span>Password</span>
+          <div className="auth-password">
+            <input
+              className="auth-field"
+              type={visible ? "text" : "password"}
+              value={password}
+              onInput={(event) => setPassword(event.currentTarget.value)}
+              autoComplete={mode === "signin" ? "current-password" : "new-password"}
+              minLength={8}
+              placeholder={mode === "signin" ? "Your password" : "At least 8 characters"}
+              required
+            />
+            <button
+              type="button"
+              aria-label={visible ? "Hide password" : "Show password"}
+              aria-pressed={visible}
+              onClick={() => setVisible((value) => !value)}
+            >
+              {visible ? <EyeOff size={16} /> : <Eye size={16} />}
+            </button>
+          </div>
+        </label>
 
-          {notice && <p className="auth-notice">{notice}</p>}
-          {error && <p className="auth-error">{error}</p>}
+        {notice && (
+          <p className="auth-notice" role="status">
+            {notice}
+          </p>
+        )}
+        {error && (
+          <p className="auth-error" role="alert">
+            {error}
+          </p>
+        )}
 
-          <button className="auth-submit" disabled={loading}>
-            {loading ? "Please wait…" : mode === "signin" ? "Sign in" : "Create account"}
-          </button>
-        </form>
+        <button className="auth-submit" disabled={loading}>
+          {loading ? "Please wait…" : mode === "signin" ? "Sign in" : "Create account"}
+          {!loading && <ArrowRight size={17} aria-hidden="true" />}
+        </button>
+      </form>
 
-        <p className="auth-switch-line">
-          {mode === "signin" ? "New to Vector?" : "Already have an account?"}{" "}
-          <button type="button" onClick={switchMode}>
-            {mode === "signin" ? "Create an account" : "Sign in"}
-          </button>
-        </p>
-      </section>
-
-      <p className="auth-legal">
-        By continuing you agree to the <a href="/legal/terms">Terms</a> and <a href="/legal/privacy">Privacy Policy</a>.
+      <p className="auth-switch-line">
+        {mode === "signin" ? "New to Vector?" : "Already have an account?"}{" "}
+        <button type="button" onClick={switchMode} disabled={loading}>
+          {mode === "signin" ? "Create an account" : "Sign in"}
+        </button>
       </p>
-    </main>
+      {mode === "register" && (
+        <p className="auth-plan-note">
+          Desktop plans are $10/month or $99/year.
+          <br />
+          Creating an account does not start a subscription.
+        </p>
+      )}
+      <p className="auth-legal">
+        By continuing, you agree to the <a href="/legal/terms">Terms of Service</a> and acknowledge our{" "}
+        <a href="/legal/privacy">Privacy Policy</a>.
+      </p>
+    </section>
   )
 }
