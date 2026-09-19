@@ -94,7 +94,7 @@ export function FreeDownload({
       </button>
 
       <p className="free-download-note">
-        Included with your Vector account during private beta.{" "}
+        Sign in to your Vector account to access available installers.{" "}
         {version ? `Checksum-verified release v${version}.` : "macOS, Windows and Linux."}
       </p>
       {error && <p className="purchase-error">{error}</p>}

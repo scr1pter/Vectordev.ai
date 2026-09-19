@@ -1,0 +1,22 @@
+---
+import DocsPage from "../../layouts/DocsPage.astro"
+
+export const prerender = true
+---
+
+<DocsPage id="automations">
+
+          <p>
+            An automation is one task Vector runs again and again on a schedule. Open <strong>Automations</strong> from
+            the home screen, write the task, choose the repositories it runs in, and pick how often it repeats.
+          </p>
+          <ul class="feature-list">
+            <li><strong>Across repositories</strong><span>One task and one schedule, in every repository you select. Each run reports back separately.</span></li>
+            <li><strong>New or existing sessions</strong><span>Continue a thread you already started, or open a fresh session for every run.</span></li>
+            <li><strong>While you are away</strong><span>Vector stays in the tray after you close the window, so runs fire without you there.</span></li>
+          </ul>
+          <p class="note">
+            Runs that fall due while Vector is fully closed are not replayed one by one. The next start catches up with
+            a single run and says how many it skipped.
+          </p>
+</DocsPage>

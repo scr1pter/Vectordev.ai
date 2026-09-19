@@ -1,0 +1,27 @@
+---
+import DocsPage from "../../layouts/DocsPage.astro"
+
+export const prerender = true
+---
+
+<DocsPage id="models">
+
+          <h3>Models included with Vector</h3>
+          <p>
+            You do not need an API key. Vector comes with models included, today among them NVIDIA's
+            Nemotron and Meta's Muse Spark, in the desktop app and the CLI alike. A new install starts
+            on Big Pickle, so the first session works before you connect anything. The lineup changes
+            as providers add and retire models.
+          </p>
+          <p class="note is-caution">
+            Included models are served by outside providers, and some may use your prompts to improve
+            their models. For confidential code, use your own provider key.
+          </p>
+          <h3>Bring your own key</h3>
+          <p>
+            Connect a provider in Settings, or run <code>vector auth login</code> in the terminal, then
+            select a model in the session composer. Model availability, context limits, pricing, and
+            rate limits come from the provider. Vector's usage view tracks the information returned by
+            those sessions.
+          </p>
+</DocsPage>

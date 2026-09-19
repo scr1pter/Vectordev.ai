@@ -1,0 +1,16 @@
+---
+import DocsPage from "../../layouts/DocsPage.astro"
+
+export const prerender = true
+---
+
+<DocsPage id="cli-plugins">
+
+          <p>
+            <code>vector plugin &lt;module&gt;</code> installs an npm module as a plugin and writes it into your config; <code>--global</code> installs into the global config rather than the project's, and <code>--force</code> replaces a version already there. A plugin can register extra tools, which the registry merges alongside the built-in ones.
+          </p>
+          <p class="doc-cmd"><code>vector plugin @acme/vector-plugin -g</code><button class="doc-cmd-copy" type="button" aria-label="Copy this command">Copy</button></p>
+          <p class="note">
+            <code>--pure</code> on any command runs without external plugins. It is the first thing to try when you suspect one of breaking a run.
+          </p>
+</DocsPage>

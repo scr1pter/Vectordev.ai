@@ -1,0 +1,18 @@
+---
+import DocsPage from "../../layouts/DocsPage.astro"
+
+export const prerender = true
+---
+
+<DocsPage id="cli-sessions">
+
+          <p>
+            <code>vector session list</code> prints recent sessions, with <code>--max-count</code> to cap them and <code>--format</code> for scripting; <code>vector session delete &lt;id&gt;</code> removes one permanently. Those ids are what <code>--session</code> takes elsewhere.
+          </p>
+          <p class="doc-cmd"><code>vector session list -n 20
+vector export <id> --sanitize > session.json
+vector import session.json</code><button class="doc-cmd-copy" type="button" aria-label="Copy this command">Copy</button></p>
+          <p>
+            <code>vector export</code> writes a session's transcript and metadata as JSON, and <code>--sanitize</code> redacts the sensitive parts — transcript text, file contents, subtask commands — so it can be attached to a bug report. <code>vector import</code> reads that file back, from a path or from a share URL; <code>vector run --share</code> publishes a link for a run.
+          </p>
+</DocsPage>

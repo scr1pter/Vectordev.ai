@@ -1,0 +1,15 @@
+---
+import DocsPage from "../../layouts/DocsPage.astro"
+
+export const prerender = true
+---
+
+<DocsPage id="skills">
+
+          <p>
+            A skill is a packaged set of instructions for a recurring kind of work — a house style, a review checklist, a deployment runbook. Vector finds a skill as a <code>SKILL.md</code> (or <code>&lt;name&gt;.md</code>) in a skill folder, project or global, and the agent calls it by name from the list of available skills.
+          </p>
+          <p>
+            Downloaded skills are cached under a versioned directory, so updating one is clean rather than a manual copy. Skills are a Vector mechanism, not an MCP server.
+          </p>
+</DocsPage>

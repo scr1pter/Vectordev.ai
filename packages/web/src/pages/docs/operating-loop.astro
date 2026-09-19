@@ -1,0 +1,25 @@
+---
+import DocsPage from "../../layouts/DocsPage.astro"
+import { workflow } from "../../data/docs-content"
+
+export const prerender = true
+---
+
+<DocsPage id="operating-loop">
+
+          <p>
+            From a brief to verified, shipped work. Vector keeps the request, repository context, your own edits,
+            agent activity, files, terminal, browser, measured usage, review, and release in one place.
+          </p>
+          <ol class="steps">
+            {workflow.map(([title, body], index) => (
+              <li><span>{index + 1}</span><div><strong>{title}</strong><p>{body}</p></div></li>
+            ))}
+          </ol>
+          <div class="doc-grid doc-grid-4">
+            <article class="doc-card"><h3>Editor, file search, terminal</h3><p>A real editor over your own files, with project-wide search, language diagnostics, a terminal, and an editor agent beside them.</p></article>
+            <article class="doc-card"><h3>Memory and measured spend</h3><p>Local memory in one file you can inspect, edit, or erase. Model economics records the tokens and cost the provider reported.</p></article>
+            <article class="doc-card"><h3>Review before main</h3><p>Inspect diffs, focused checks, pull-request findings, risk signals, checkpoints, and an optional independent judge verdict before work reaches the primary files.</p></article>
+            <article class="doc-card"><h3>MCP, providers, and Cloud</h3><p>Bring your own model provider, connect approved tools through MCP and the plugin catalog, and publish through infrastructure accounts that already belong to you.</p></article>
+          </div>
+</DocsPage>

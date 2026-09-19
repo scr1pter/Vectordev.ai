@@ -1,0 +1,17 @@
+---
+import DocsPage from "../../layouts/DocsPage.astro"
+import { systemRows } from "../../data/docs-content"
+
+export const prerender = true
+---
+
+<DocsPage id="only-in-vector">
+
+          <p>
+            Things that are rarely true in one place. The difficult part is not generating text. It is keeping what
+            you know, knowing what it cost, proving the work holds, and leaving you in control of what lands.
+          </p>
+          <dl class="doc-rows">
+            {systemRows.map(([term, detail]) => (<div><dt>{term}</dt><dd>{detail}</dd></div>))}
+          </dl>
+</DocsPage>

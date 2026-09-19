@@ -2,13 +2,49 @@
 import { AuthPage } from "../components/marketing/account/AuthPage"
 import MatrixRain from "../components/marketing/account/MatrixRain.astro"
 import MarketingLayout from "../components/marketing/MarketingLayout.astro"
+import "../components/marketing/account/account.css"
 
 export const prerender = true
 ---
 
 <MarketingLayout title="Sign in to Vector" description="Sign in or create a Vector account to download the desktop app and manage billing." noindex>
-  <div class="account-environment">
+  <div class="account-environment auth-environment">
     <MatrixRain />
-    <AuthPage client:only="react" />
+    <main class="auth-page">
+      <aside class="auth-story" aria-label="The Vector workspace">
+        <a class="auth-brand" href="/" aria-label="Vector home">
+          <img src="/vector-logo.png" alt="" width="34" height="34" />
+          <span>Vector</span>
+        </a>
+
+        <div class="auth-story-copy">
+          <p class="auth-eyebrow"><span></span> The AI engineering workspace</p>
+          <h2>Think bigger.<br />Build with<br /><em>Vector.</em></h2>
+          <p>Bring your code and AI agents together.<br />From the first idea to the final commit.</p>
+          <a class="auth-explore" href="/docs/product">Explore the workspace <span aria-hidden="true">↗</span></a>
+        </div>
+
+        <div class="auth-story-footer">
+          <div><span class="auth-footer-label">Built around you</span><p>Local workspace. Parallel agents. Your choice of models.</p></div>
+          <span class="auth-footer-mark" aria-hidden="true">↗</span>
+        </div>
+      </aside>
+
+      <div class="auth-panel">
+        <nav class="auth-panel-nav" aria-label="Account navigation">
+          <a href="/">← <span>Back to home</span></a>
+          <a href="/docs">Need a hand? <span aria-hidden="true">↗</span></a>
+        </nav>
+        <div class="auth-panel-content">
+          <AuthPage client:only="react">
+            <div slot="fallback" class="auth-loading" role="status">Preparing your workspace…</div>
+          </AuthPage>
+        </div>
+        <footer class="auth-panel-footer">
+          <span>© {new Date().getFullYear()} Vector</span>
+          <div><a href="/legal/terms">Terms of Service</a><a href="/legal/privacy">Privacy Policy</a></div>
+        </footer>
+      </div>
+    </main>
   </div>
 </MarketingLayout>

@@ -1,0 +1,26 @@
+---
+import DocsPage from "../../layouts/DocsPage.astro"
+
+export const prerender = true
+---
+
+<DocsPage id="vector-agent">
+
+          <p>
+            The main session can inspect the repository, edit files, run commands, use project tools,
+            and report a reviewable result. Use Plan mode when you want analysis without edits, and
+            switch back to an editing mode when the plan is approved.
+          </p>
+          <p>
+            When a big task splits into pieces that do not depend on each other, the agent hands them to subagents
+            that run at the same time; a small task it does itself. It calls a subagent specialist when part of the
+            work fits one. See
+            <a href="#subagents">Subagents and subagent specialists</a>.
+          </p>
+          <div class="definition-grid">
+            <article><strong>Quick</strong><p>Short answers and lightweight requests with a smaller context budget.</p></article>
+            <article><strong>Normal</strong><p>The default balance of speed, context, and execution depth.</p></article>
+            <article><strong>Fast</strong><p>Prioritizes lower latency and may use more parallel model work.</p></article>
+            <article><strong>Plan</strong><p>Reviews and proposes an approach without changing project files.</p></article>
+          </div>
+</DocsPage>

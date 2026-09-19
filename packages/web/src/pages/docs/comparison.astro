@@ -1,0 +1,26 @@
+---
+import DocsPage from "../../layouts/DocsPage.astro"
+import { connectionGroups, comparison } from "../../data/docs-content"
+
+export const prerender = true
+---
+
+<DocsPage id="comparison">
+
+          <p>
+            Vector combines capabilities commonly split across an agent, an editor, a browser, a Git client, and a
+            deployment dashboard. Capabilities change quickly, so verify current vendor documentation. A dash means
+            Vector makes no claim.
+          </p>
+          <div class="doc-table-wrap" role="region" aria-label="Comparison table" tabindex="0">
+            <table class="doc-table">
+              <thead><tr><th scope="col">Capability</th><th scope="col">Vector</th><th scope="col">Claude Code</th><th scope="col">Codex</th><th scope="col">Cursor</th><th scope="col">App builders</th></tr></thead>
+              <tbody>
+                {comparison.map((row) => (<tr>{row.map((cell, index) => index === 0 ? <th scope="row">{cell}</th> : <td class:list={{ "is-word": /^\S+$/.test(cell) }}>{cell}</td>)}</tr>))}
+              </tbody>
+            </table>
+          </div>
+          <dl class="doc-rows">
+            {connectionGroups.map(([term, detail]) => (<div><dt>{term}</dt><dd>{detail}</dd></div>))}
+          </dl>
+</DocsPage>

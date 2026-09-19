@@ -1,0 +1,24 @@
+---
+import DocsPage from "../../layouts/DocsPage.astro"
+
+export const prerender = true
+---
+
+<DocsPage id="agent-dashboard">
+
+          <p>
+            Every agent in the project on one board: <strong>Running</strong>, <strong>Needs you</strong> and
+            <strong>Done</strong>. Open it from the workspace rail. Switch to a list for a denser view of the same
+            three groups.
+          </p>
+          <ul class="feature-list">
+            <li><strong>Needs you</strong><span>Merges failed with needs-review, including a finished run that reported an error. Both are stopped and waiting on a person.</span></li>
+            <li><strong>Filters that compose</strong><span>Status, Team, Pull request and Agent. Two values in one menu means either; values in two menus means both.</span></li>
+            <li><strong>Pull request state</strong><span>Open, merged, or never opened — merge state wins, so a merged run does not sit under "open" forever.</span></li>
+            <li><strong>Teams as a unit</strong><span>Agents sharing a team or swarm filter together, and the board shows the messages they sent each other mid-run.</span></li>
+          </ul>
+          <p class="note is-caution">
+            Two agents holding uncommitted work on the same file are reported as a clash. Merging both will conflict —
+            review one before merging the other.
+          </p>
+</DocsPage>

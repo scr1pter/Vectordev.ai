@@ -1,0 +1,18 @@
+---
+import DocsPage from "../../layouts/DocsPage.astro"
+
+export const prerender = true
+---
+
+<DocsPage id="verified-completion">
+
+          <p>
+            Completion you can check, instead of a confident summary. Turn on LLM-as-a-judge and finishing stops
+            being the agent's own opinion. Before it starts, the agent writes down the observable success criteria
+            your request implies. After implementing, it has to exercise the work rather than describe it. Then the
+            Judge, a read-only subagent specialist, compares the original request, the criteria, the changed files and
+            the captured test output. A FAIL names the specific repair and sends the agent back to work, up to three
+            rounds.
+          </p>
+          <p class="note">Opt-in, and it spends extra model calls on every prompt it covers. It does not apply to the plan lane or the quick lane.</p>
+</DocsPage>

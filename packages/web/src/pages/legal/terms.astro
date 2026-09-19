@@ -3,16 +3,240 @@ import LegalPage from "../../components/marketing/LegalPage.astro"
 export const prerender = true
 ---
 
-<LegalPage eyebrow="Terms" title="Terms of Service" description="The terms for purchasing and using Vector services and software.">
-  <section><h2>Agreement</h2><p>By purchasing, downloading, or using Vector, you agree to these Terms and the <a href="/legal/license">Vector Software License</a>. If you use Vector for an organization, you represent that you can accept these terms for it.</p></section>
-  <section><h2>Accounts and beta access</h2><p>A verified Vector account is required to download from the website. Desktop access is free during the private beta unless the account page clearly says otherwise. You are responsible for activity under your account and must not share sign-in credentials or private license keys.</p></section>
-  <section><h2>Purchases and renewal</h2><p>Optional Vector licenses are available for $10 per month or $99 per year during the private beta. The selected plan renews automatically at the same interval until cancelled. Stripe processes payments and may provide invoices, payment-method controls, and tax handling. Prices and applicable taxes are shown before checkout.</p></section>
-  <section><h2>Failed monthly payments</h2><p>If a monthly renewal payment fails, Vector will notify the billing email and provide a three-day grace period beginning with the first failed attempt for that invoice. Access expires when that grace period ends unless Stripe confirms payment. Paying the outstanding invoice restores access automatically. Annual subscriptions retain their existing paid-term and Stripe billing behavior.</p></section>
-  <section><h2>Cancellation</h2><p>You can cancel renewal from Settings → Billing &amp; license or the Stripe billing portal. Cancellation takes effect at the end of the current paid term. Vector remains usable until that date unless access is suspended for fraud or a material breach.</p></section>
-  <section><h2>Connected services</h2><p>You are responsible for provider credentials and connected services. Do not give Vector authority you do not have. You must review sensitive actions such as payments, messages, destructive changes, deployments, database operations, and external browser submissions.</p></section>
-  <section><h2>Acceptable use</h2><p>Do not use Vector to break laws, bypass security controls, distribute malware, infringe intellectual property, access systems without permission, or abuse third-party services.</p></section>
-  <section><h2>Generated output</h2><p>AI output can be incorrect. You are responsible for reviewing code, tests, diffs, licenses, security, and deployments before relying on them. Keep backups and use review and checkpoint features where appropriate.</p></section>
-  <section><h2>Autonomous actions</h2><p>Vector can take actions on your computer and on services you connect: editing and deleting files, running commands and processes, controlling a browser, and — where you enable it — controlling the mouse, keyboard, and screen. It can also push branches, open pull requests, post reviews, and deploy to providers you have authorised. You decide which capabilities to enable and which actions to approve, and you remain responsible for what results, including on shared repositories and production systems. Review changes before merging or deploying them, and keep independent backups of anything you cannot afford to lose.</p></section>
-  <section><h2>Changes</h2><p>These terms may be updated for future purchases or renewals. Material changes will be identified by a new effective date. Mandatory rights under applicable law are not limited by these terms.</p></section>
-  <section><h2>Contact</h2><p>Questions about Vector purchases or terms can be sent to <a href="mailto:krishnabharadwaj0521@gmail.com">krishnabharadwaj0521@gmail.com</a>.</p></section>
+<LegalPage
+  eyebrow="Terms"
+  title="Terms of Service"
+  description="The agreement for Vector accounts, subscriptions, software, and connected services."
+  updated="September 18, 2026"
+>
+  <section>
+    <h2>1. This agreement</h2>
+    <p>
+      These Terms govern your use of the Vector website, desktop application, command-line tools, and services
+      provided under the Vector name (“Vector,” “we,” or “us”). By accepting these Terms or purchasing or using
+      Vector, you agree to them. If you use Vector for an organization, you confirm that you are authorized to
+      bind that organization. You must be at least 18 and legally able to enter into this agreement.
+    </p>
+    <p>
+      The <a href="/legal/license">Vector Software License</a> also governs installation and use of the software.
+      Third-party components remain subject to their own licenses, described in the
+      <a href="/legal/third-party">Third-Party Notices</a>. The <a href="/legal/privacy">Privacy Policy</a>
+      explains how information is handled. Nothing in these documents takes away rights that applicable law
+      does not allow us to limit.
+    </p>
+  </section>
+
+  <section>
+    <h2>2. Your account and access</h2>
+    <p>
+      A verified account is required for website downloads and purchases. Provide accurate account and billing
+      information, protect your sign-in credentials, license keys, and activation tokens, and contact us if you
+      suspect unauthorized use. You are responsible for people you authorize to use your account and for the
+      access you grant to repositories, devices, and connected services.
+    </p>
+    <p>
+      A standard subscription permits one active computer at a time. You can deactivate a computer before
+      activating another. Activation and periodic license verification require an internet connection. Any
+      temporary offline access is limited and does not extend an expired or revoked subscription.
+    </p>
+  </section>
+
+  <section>
+    <h2>3. Subscription price and automatic renewal</h2>
+    <p>
+      Vector costs <strong>US$10 per month</strong> on the monthly plan or <strong>US$99 per year</strong> on the
+      annual plan, plus applicable taxes disclosed before checkout. The annual plan is billed as one annual
+      payment. Your subscription includes desktop access and updates during the paid term, subject to these
+      Terms and the Software License.
+    </p>
+    <p>
+      <strong>Your subscription automatically renews at the selected monthly or annual interval until you
+      cancel.</strong> By completing a checkout that discloses recurring billing, you authorize Stripe, our
+      payment processor, to charge your selected payment method for the initial term and subsequent renewals.
+      Your checkout confirmation and billing page identify your plan and renewal information. A free offer or
+      trial, if separately offered, has only the duration and conversion terms disclosed when you accept it.
+    </p>
+    <p>
+      The Vector subscription does not include paid third-party model usage, external agent subscriptions,
+      hosting, domains, storage, or other connected-service charges unless an offer expressly says so. Models
+      described as included may have provider quotas, rate limits, and availability restrictions; included
+      access is not a promise of unlimited use or permanent availability of a particular model.
+    </p>
+  </section>
+
+  <section>
+    <h2>4. Cancellation, refunds, and billing changes</h2>
+    <p>
+      Cancel renewal in Settings → Billing &amp; license, or open the Stripe billing portal from your
+      <a href="/account">Vector account</a>. Cancel before the next renewal to stop that charge. Cancellation
+      takes effect at the end of the paid term, and access continues until then unless lawfully suspended for
+      another reason. Uninstalling Vector, signing out, or deactivating a computer does not cancel renewal.
+      If you cannot access cancellation controls, email
+      <a href="mailto:krishnabharadwaj0521@gmail.com">krishnabharadwaj0521@gmail.com</a> for assistance.
+    </p>
+    <p>
+      Cancellation does not automatically refund the current term. Contact us about duplicate charges,
+      billing errors, or a refund request. Any refund or withdrawal rights required by your local law apply,
+      including remedies for defective services. These Terms do not waive a statutory cooling-off period or
+      treat use of the software as the consent needed to waive one.
+    </p>
+    <p>
+      Price changes apply to future terms after advance notice and any consent required by law. You may cancel
+      before the change takes effect. We do not increase the price of an already-paid term. We will provide
+      renewal or other billing notices where required by applicable law.
+    </p>
+  </section>
+
+  <section>
+    <h2>5. Failed payments</h2>
+    <p>
+      If a monthly renewal fails, we notify the billing email and provide a three-day payment grace period,
+      measured from the first failed payment attempt for that invoice. Access ends after that period unless
+      payment is confirmed. Paying the outstanding invoice restores access after verification. Annual access
+      lasts through the paid term; the monthly three-day grace period does not apply to annual renewals.
+      Stripe may retry failed payments. Keep your payment details current and contact support to resolve a
+      billing error.
+    </p>
+  </section>
+
+  <section>
+    <h2>6. Your content and AI output</h2>
+    <p>
+      You retain your rights in prompts, repositories, files, and other material you provide. Vector does not
+      claim ownership of your content or generated output. You authorize us and the service providers used by
+      your selected features to process that material as needed to carry out your requests and provide the
+      service, as described in the Privacy Policy. You must have the rights and permissions needed to provide
+      the material and direct those actions.
+    </p>
+    <p>
+      AI output may be inaccurate, insecure, incomplete, or similar to material generated for someone else.
+      Ownership, copyright protection, and permitted uses of output depend on applicable law, source material,
+      and the relevant provider's terms. Review code, licenses, factual claims, security, tests, and deployments
+      before relying on output. Vector does not provide legal, medical, financial, or other regulated
+      professional advice.
+    </p>
+  </section>
+
+  <section>
+    <h2>7. Tools, automation, and computer use</h2>
+    <p>
+      Vector can read, create, edit, and delete files; run commands and processes; use a browser; operate
+      connected services; and carry out background or scheduled tasks. Depending on enabled features and
+      permissions, it can also capture a selected screen or window and control mouse and keyboard input.
+      Actions may affect real accounts, shared repositories, infrastructure, or production systems and may
+      cause charges or disclose information.
+    </p>
+    <p>
+      You control the instructions, permissions, and integrations you enable. Standing approvals and automated
+      workflows can allow actions without asking you again for every step. Grant only authority you possess,
+      review permissions and intended destinations, and supervise sensitive work. Keep independent backups
+      and verify changes before publishing, merging, or deploying. Permission prompts, checkpoints, and
+      protective controls reduce risk but cannot guarantee that every unintended action will be prevented or
+      reversible. Stop computer use and take over when private information or a sensitive action is involved.
+    </p>
+  </section>
+
+  <section>
+    <h2>8. Providers, plugins, and external runtimes</h2>
+    <p>
+      Models, MCP servers, plugins, browser destinations, cloud providers, and external coding runtimes are
+      separate services. This includes models made available through OpenCode Zen and runtimes such as Claude
+      Code, Codex CLI, and Cursor Agent. Their terms, privacy practices, permissions, availability, and charges
+      apply to your use of them. A Vector subscription does not grant rights to their paid services or imply
+      endorsement or affiliation.
+    </p>
+    <p>
+      Review the provider and account used by each task. A connected tool or runtime may transmit project
+      context, keep its own records, or perform actions under its own permission settings. You are responsible
+      for your agreements with those providers. We do not control their independent changes or outages.
+    </p>
+  </section>
+
+  <section>
+    <h2>9. Publishing and cloud resources</h2>
+    <p>
+      Publishing can upload files, build artifacts, configuration, or other selected content to a hosting
+      provider and make it publicly accessible. Check the content and access settings before publishing; do
+      not upload secrets or material you lack permission to disclose. You are responsible for the content
+      you publish and for cloud resources and charges you authorize. Cancelling Vector does not automatically
+      delete deployments or cancel separate provider subscriptions.
+    </p>
+  </section>
+
+  <section>
+    <h2>10. Acceptable use</h2>
+    <p>
+      Do not use Vector to violate law or another person's rights; access systems without authorization;
+      distribute malware; commit fraud; harass or exploit others; steal credentials or confidential material;
+      evade security or usage controls; or disrupt our services or connected providers. Do not share or resell
+      license keys or misrepresent another person's identity or your authority. Software restrictions remain
+      subject to applicable law and the rights granted by third-party open-source licenses.
+    </p>
+  </section>
+
+  <section>
+    <h2>11. Availability and changes to the service</h2>
+    <p>
+      Features and compatibility may change, and maintenance or provider outages may interrupt service.
+      Experimental features may be less reliable. No service-level commitment applies unless separately
+      agreed in writing. We may issue updates for security, compatibility, or functionality. If we discontinue
+      a paid service during a prepaid term, we will provide notice where practicable and any refund or other
+      remedy required by law; this does not limit remedies for a material failure to supply what you purchased.
+    </p>
+  </section>
+
+  <section>
+    <h2>12. Suspension and termination</h2>
+    <p>
+      We may restrict access when reasonably necessary to address nonpayment, fraud, a material breach, a
+      security threat, or a legal requirement. Where practicable, we will explain the reason and allow you to
+      resolve a remediable breach. Urgent security or legal circumstances may require immediate action. You
+      may stop using Vector and cancel renewal at any time. Ending access does not transfer ownership of your
+      content to us or automatically remove local data or third-party resources.
+    </p>
+  </section>
+
+  <section>
+    <h2>13. Warranties and responsibility</h2>
+    <p>
+      To the extent permitted by law, Vector is provided “as is” and “as available,” without implied warranties
+      of merchantability, fitness for a particular purpose, or noninfringement. We do not promise that output
+      will be accurate or that the service will be uninterrupted or error-free. This paragraph does not exclude
+      statutory quality guarantees or remedies that cannot lawfully be excluded.
+    </p>
+    <p>
+      To the extent permitted by law, neither party is liable to the other for indirect, special, or
+      consequential losses arising from this agreement. Vector's aggregate liability for claims arising from
+      the service is limited to the fees you paid to Vector for that service in the 12 months before the event
+      giving rise to the claim. These limits do not apply to fraud, willful misconduct, or any liability that
+      applicable law prohibits limiting, and do not limit your non-waivable consumer rights.
+    </p>
+  </section>
+
+  <section>
+    <h2>14. Disputes and general provisions</h2>
+    <p>
+      Contact us first so we can try to resolve a concern. This does not prevent you from contacting a
+      regulator, seeking urgent relief, or bringing a claim in a court available to you under applicable law.
+      These Terms do not require arbitration or waive class actions. If a provision is unenforceable, the
+      remaining provisions continue to apply to the extent permitted by law. A delay in enforcing a provision
+      is not a waiver. Provisions concerning accrued payments, ownership, liability, and disputes survive
+      termination where their nature requires it.
+    </p>
+  </section>
+
+  <section>
+    <h2>15. Changes and contact</h2>
+    <p>
+      We may update these Terms prospectively. Material changes will be identified by a revised effective
+      date and communicated through the service or an account contact where appropriate. We will obtain
+      consent when required by law. Changes do not retroactively remove accrued rights or resolve an existing
+      dispute. If you do not agree to a future change, you can cancel renewal and stop using the affected
+      service, subject to your existing paid-term and statutory rights.
+    </p>
+    <p>
+      For terms, billing, cancellation, or support questions, email
+      <a href="mailto:krishnabharadwaj0521@gmail.com">krishnabharadwaj0521@gmail.com</a>.
+    </p>
+  </section>
 </LegalPage>

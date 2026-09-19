@@ -1,0 +1,23 @@
+---
+import DocsPage from "../../layouts/DocsPage.astro"
+
+export const prerender = true
+---
+
+<DocsPage id="cli-maintenance">
+
+          <p>
+            <code>vector upgrade</code> moves the CLI to the newest version, or one you name, with <code>--method</code> when several installation methods are possible. <code>vector uninstall</code> removes it, keeping configuration with <code>--keep-config</code> or sessions with <code>--keep-data</code>, and <code>--dry-run</code> lists what would go.
+          </p>
+          <p class="doc-cmd"><code>vector db path
+vector db "select count(*) from session"</code><button class="doc-cmd-copy" type="button" aria-label="Copy this command">Copy</button></p>
+          <p>
+            Vector keeps sessions, messages, permissions and shares in a local SQLite database. <code>vector db</code> opens a sqlite3 shell against it, <code>vector db "&lt;query&gt;"</code> runs one query with <code>--format</code> for the output shape, and <code>vector db path</code> prints where the file is. It is the plain answer to where your data lives: on your disk, in a file you can open yourself.
+          </p>
+          <ul class="feature-list">
+            <li><strong>--print-logs</strong><span>Send logs to stderr.</span></li>
+            <li><strong>--log-level</strong><span>DEBUG, INFO, WARN or ERROR.</span></li>
+            <li><strong>--pure</strong><span>Run without external plugins.</span></li>
+            <li><strong>vector completion</strong><span>Print a shell completion script.</span></li>
+          </ul>
+</DocsPage>

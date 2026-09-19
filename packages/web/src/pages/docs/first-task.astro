@@ -1,0 +1,39 @@
+---
+import DocsPage from "../../layouts/DocsPage.astro"
+import screenshotAgent from "../../assets/lander/vector-agent-current.png"
+
+export const prerender = true
+---
+
+<DocsPage id="first-task">
+
+          <p>
+            Describe the result, the constraints, and how Vector should verify the work. A strong first
+            request is specific enough to test but small enough to review.
+          </p>
+          <div class="prompt-example" data-copy-block>
+            <div class="code-bar">
+              <span>Example</span>
+              <button class="copy-button" type="button" aria-label="Copy example prompt" data-copy data-chrome>
+                <svg class="icon-copy" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2" /><path d="M5 15H4.5A1.5 1.5 0 0 1 3 13.5v-9A1.5 1.5 0 0 1 4.5 3h9A1.5 1.5 0 0 1 15 4.5V5" /></svg>
+                <svg class="icon-check" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg>
+                <span data-copy-label>Copy</span>
+              </button>
+            </div>
+            <p data-copy-source>
+              Add a responsive settings page to this project. Follow the existing design system, run
+              the relevant tests, open the app in the browser, and summarize every changed file.
+            </p>
+            <span class="docs-sr" aria-live="polite" data-copy-status data-chrome></span>
+          </div>
+          <figure class="docs-image">
+            <img
+              src={screenshotAgent.src}
+              width={screenshotAgent.width}
+              height={screenshotAgent.height}
+              alt="An active Vector agent session attached to an isolated workspace"
+              loading="lazy"
+            />
+            <figcaption>The task, tools, changes, and project remain in one workspace.</figcaption>
+          </figure>
+</DocsPage>

@@ -1,0 +1,17 @@
+---
+import DocsPage from "../../layouts/DocsPage.astro"
+
+export const prerender = true
+---
+
+<DocsPage id="local-memory">
+
+          <p>
+            Vector lets you save durable facts about how you work — your stack, your conventions, the corrections you
+            would otherwise repeat — in one <code>MEMORY.md</code> file inside Vector's local app config directory. It
+            is read in every repository and automatically included in the context Vector sends to the model provider
+            you choose. Settings shows its path, size, last change, and full contents; erasing removes the file rather
+            than emptying it.
+          </p>
+          <p class="note">The file is never uploaded to Vector's servers. Memory is yours to inspect, edit, or delete.</p>
+</DocsPage>

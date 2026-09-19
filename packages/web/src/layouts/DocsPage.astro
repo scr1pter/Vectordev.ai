@@ -1,0 +1,275 @@
+---
+// One documentation page: the sidebar of every page, this page's content, and
+// the rail of its own headings. A leaf in the navigation is a URL, so a link to
+// a subject lands on that subject rather than a hash halfway down a long page.
+import MarketingLayout from "../components/marketing/MarketingLayout.astro"
+import MarketingNav from "../components/marketing/MarketingNav.astro"
+import MarketingFooter from "../components/marketing/MarketingFooter.astro"
+import { docsNav, docsOrder, groupOf, neighbours } from "../data/docs-nav"
+import "../styles/docs.css"
+import "../styles/docs-shell.css"
+
+interface Props {
+  /** The page's id, which is also its slug and its entry in docs-nav. */
+  id?: string
+  /** For the introduction, which is not a leaf in the navigation. */
+  title?: string
+  eyebrow?: string
+  description?: string
+}
+
+const { id, title, eyebrow, description } = Astro.props
+const entry = id ? docsOrder.find((link) => link.id === id) : undefined
+if (id && !entry) throw new Error(`/docs/${id} has no entry in docs-nav.ts`)
+const heading = entry?.title ?? title ?? "Documentation"
+const blurb = entry?.blurb ?? description ?? ""
+const group = id ? groupOf(id) : (eyebrow ?? "Documentation")
+const { previous, next } = id ? neighbours(id) : { previous: undefined, next: docsOrder[0] }
+
+const externals: [string, string][] = [
+  ["Product tour", "/docs/product"],
+  ["Releases", "/releases"],
+  ["Download Vector", "/login"],
+]
+---
+
+<MarketingLayout title={`${heading} — Vector docs`} description={blurb}>
+  <div class="docs-page">
+    <MarketingNav active="docs" />
+
+    <div class="dx">
+      <button class="dx-drawer-open" type="button" aria-expanded="false" data-drawer-open>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+          <line x1="4" y1="7" x2="20" y2="7"></line>
+          <line x1="4" y1="12" x2="20" y2="12"></line>
+          <line x1="4" y1="17" x2="20" y2="17"></line>
+        </svg>
+        <span>{group} · {heading}</span>
+      </button>
+
+      <aside class="dx-side" data-drawer aria-label="Documentation">
+        <div class="dx-side-inner">
+          <div class="dx-search">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <circle cx="11" cy="11" r="7"></circle>
+              <line x1="16.5" y1="16.5" x2="21" y2="21" stroke-linecap="round"></line>
+            </svg>
+            <input type="search" placeholder="Search" aria-label="Search the documentation" data-dx-search />
+            <kbd>/</kbd>
+            <div class="dx-results" data-dx-results hidden></div>
+          </div>
+
+          <nav class="dx-nav" aria-label="Documentation sections">
+            {
+              docsNav.map((navGroup) => (
+                <div class="dx-group">
+                  <p class="dx-group-label">{navGroup.label}</p>
+                  <ul>
+                    {navGroup.links.map((link) => (
+                      <li>
+                        <a
+                          href={`/docs/${link.id}`}
+                          class:list={{ current: link.id === id }}
+                          aria-current={link.id === id ? "page" : undefined}
+                        >
+                          {link.title}
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))
+            }
+            <div class="dx-group dx-group-out">
+              <p class="dx-group-label">Elsewhere</p>
+              <ul>
+                {
+                  externals.map(([label, href]) => (
+                    <li>
+                      <a href={href} class="dx-out">
+                        {label}
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true">
+                          <path d="M7 17 17 7"></path>
+                          <path d="M9 7h8v8"></path>
+                        </svg>
+                      </a>
+                    </li>
+                  ))
+                }
+              </ul>
+            </div>
+          </nav>
+        </div>
+      </aside>
+
+      <main class="dx-main">
+        <nav class="dx-crumb" aria-label="Breadcrumb">
+          <a href="/docs">Documentation</a>
+          <span aria-hidden="true">›</span>
+          <span>{group}</span>
+        </nav>
+
+        <p class="dx-eyebrow">{group}</p>
+        <h1 class="dx-title">{heading}</h1>
+
+        <div class="dx-body docs-content">
+          <section class="doc-section" id={id ?? "docs"}>
+            <slot />
+          </section>
+        </div>
+
+        <nav class="dx-pager" aria-label="More documentation">
+          {
+            previous ? (
+              <a class="dx-pager-link" href={`/docs/${previous.id}`} rel="prev">
+                <span class="dx-pager-dir">← Previous</span>
+                <b>{previous.title}</b>
+                <span class="dx-pager-blurb">{previous.blurb}</span>
+              </a>
+            ) : (
+              <span />
+            )
+          }
+          {
+            next && (
+              <a class="dx-pager-link dx-pager-next" href={`/docs/${next.id}`} rel="next">
+                <span class="dx-pager-dir">Next →</span>
+                <b>{next.title}</b>
+                <span class="dx-pager-blurb">{next.blurb}</span>
+              </a>
+            )
+          }
+        </nav>
+
+        <MarketingFooter />
+      </main>
+
+      <aside class="dx-rail" aria-label="On this page">
+        <div class="dx-rail-inner">
+          <p class="dx-rail-title">On this page</p>
+          <ol class="dx-rail-list" data-dx-rail></ol>
+        </div>
+      </aside>
+    </div>
+  </div>
+</MarketingLayout>
+
+<script is:inline define:vars={{ index: docsOrder.map((l) => ({ i: l.id, t: l.title, b: l.blurb, g: groupOf(l.id) })) }}>
+  window.__docsIndex = index
+</script>
+
+<script>
+  // ---- the rail: this page's own headings ------------------------------------
+  const body = document.querySelector<HTMLElement>(".dx-body")
+  const rail = document.querySelector<HTMLElement>("[data-dx-rail]")
+  const railColumn = document.querySelector<HTMLElement>(".dx-rail")
+
+  const slug = (text: string) =>
+    text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60)
+
+  const headings = body ? [...body.querySelectorAll<HTMLElement>("h2, h3")] : []
+  const used = new Set([...document.querySelectorAll("[id]")].map((element) => element.id))
+  for (const heading of headings) {
+    if (heading.id) continue
+    let candidate = slug(heading.textContent ?? "")
+    let n = 2
+    while (!candidate || used.has(candidate)) candidate = `${slug(heading.textContent ?? "section")}-${n++}`
+    used.add(candidate)
+    heading.id = candidate
+  }
+
+  if (rail && railColumn) {
+    if (!headings.length) railColumn.dataset.empty = "true"
+    else
+      rail.innerHTML = headings
+        .map(
+          (heading) =>
+            `<li class="${heading.tagName === "H3" ? "is-sub" : ""}"><a href="#${heading.id}">${(heading.textContent ?? "").trim()}</a></li>`,
+        )
+        .join("")
+  }
+
+  const railLinks = rail ? [...rail.querySelectorAll<HTMLAnchorElement>("a")] : []
+  const markRail = () => {
+    let current: HTMLAnchorElement | undefined
+    for (const link of railLinks) {
+      const target = document.getElementById(decodeURIComponent(link.hash.slice(1)))
+      if (target && target.getBoundingClientRect().top <= 140) current = link
+    }
+    for (const link of railLinks) link.classList.toggle("is-active", link === current)
+  }
+  addEventListener("scroll", markRail, { passive: true })
+  markRail()
+
+  // ---- search over every page -------------------------------------------------
+  const input = document.querySelector<HTMLInputElement>("[data-dx-search]")
+  const results = document.querySelector<HTMLElement>("[data-dx-results]")
+  const pages: { i: string; t: string; b: string; g: string }[] = (window as any).__docsIndex ?? []
+
+  const run = () => {
+    if (!input || !results) return
+    const query = input.value.trim().toLowerCase()
+    if (!query) {
+      results.hidden = true
+      return
+    }
+    const words = query.split(/\s+/)
+    const rows = pages
+      .filter((page) => {
+        const hay = `${page.t} ${page.g} ${page.b}`.toLowerCase()
+        return words.every((word) => hay.includes(word))
+      })
+      .sort((a, b) => Number(!a.t.toLowerCase().startsWith(query)) - Number(!b.t.toLowerCase().startsWith(query)))
+      .slice(0, 8)
+    results.innerHTML = rows.length
+      ? rows.map((page) => `<a href="/docs/${page.i}"><b>${page.t}</b><span>${page.g}</span></a>`).join("")
+      : '<p class="dx-none">Nothing matches.</p>'
+    results.hidden = false
+  }
+
+  input?.addEventListener("input", run)
+  input?.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      input.value = ""
+      if (results) results.hidden = true
+      input.blur()
+    }
+    if (event.key === "Enter") {
+      const first = results?.querySelector("a")
+      if (first) (first as HTMLAnchorElement).click()
+    }
+  })
+  addEventListener("keydown", (event) => {
+    if (event.key === "/" && document.activeElement !== input) {
+      event.preventDefault()
+      input?.focus()
+    }
+  })
+  document.addEventListener("click", (event) => {
+    if (results && !results.contains(event.target as Node) && event.target !== input) results.hidden = true
+  })
+
+  // ---- the sidebar as a drawer, below the three-column width -------------------
+  const drawer = document.querySelector<HTMLElement>("[data-drawer]")
+  const openButton = document.querySelector<HTMLButtonElement>("[data-drawer-open]")
+  const setDrawer = (open: boolean) => {
+    drawer?.classList.toggle("is-open", open)
+    openButton?.setAttribute("aria-expanded", String(open))
+    document.documentElement.style.overflow = open ? "hidden" : ""
+  }
+  openButton?.addEventListener("click", () => setDrawer(!drawer?.classList.contains("is-open")))
+  drawer?.addEventListener("click", (event) => {
+    if ((event.target as HTMLElement).closest("a")) setDrawer(false)
+  })
+  addEventListener("keydown", (event) => {
+    if (event.key === "Escape") setDrawer(false)
+  })
+
+  // The current page's nav entry should be in view when the sidebar is long.
+  const current = document.querySelector<HTMLElement>(".dx-nav a.current")
+  const scroller = document.querySelector<HTMLElement>(".dx-nav")
+  if (current && scroller) {
+    const top = current.offsetTop - scroller.clientHeight / 2
+    if (top > 0) scroller.scrollTop = top
+  }
+</script>

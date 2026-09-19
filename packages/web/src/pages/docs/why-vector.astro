@@ -1,0 +1,36 @@
+---
+import DocsPage from "../../layouts/DocsPage.astro"
+import { ecosystem, pillars } from "../../data/docs-content"
+
+export const prerender = true
+---
+
+<DocsPage id="why-vector">
+
+          <p>
+            Most tools write the code. The hard part was never the writing. Vector is a workspace, not a wrapper
+            around one trick: the editor, the memory, the measured spend, the verification, the connectors, the
+            browser, the cloud accounts, the parallel agents and the schedule all sit in one place, over the
+            repository already on your disk. No single feature is the reason to use it — the combination is.
+          </p>
+          <div class="doc-tally">
+            <div><strong>135</strong><span>connectors ready to turn on</span></div>
+            <div><strong>No cap</strong><span>on agents and subagents running at once</span></div>
+            <div><strong>4</strong><span>runtimes — Vector's and three others</span></div>
+            <div><strong>0</strong><span>lines of your code uploaded to Vector by default</span></div>
+          </div>
+          <h3>Nine parts, one workspace</h3>
+          <div class="doc-grid">
+            {pillars.map((pillar) => (
+              <article class="doc-card">
+                <small>{pillar.eyebrow}</small>
+                <h4>{pillar.name}</h4>
+                <p>{pillar.body}</p>
+              </article>
+            ))}
+          </div>
+          <p class="note">
+            Works alongside what you already use: {ecosystem.join(", ")}. Models come included, and BYOK works
+            too — bring the agents, models, and services you already trust.
+          </p>
+</DocsPage>

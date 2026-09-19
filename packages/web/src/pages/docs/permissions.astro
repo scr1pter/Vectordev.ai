@@ -1,0 +1,18 @@
+---
+import DocsPage from "../../layouts/DocsPage.astro"
+
+export const prerender = true
+---
+
+<DocsPage id="permissions">
+
+          <p>
+            Every tool action is checked against a ruleset whose effect is <strong>allow</strong>, <strong>ask</strong> or <strong>deny</strong>. Rules from the agent, from the project and from your saved answers are merged: deny wins, then ask, then allow, and anything with no matching rule defaults to ask. An agent with no permissions at all is denied everything rather than trusted.
+          </p>
+          <p>
+            When you answer <strong>always</strong>, that allow is saved for the project, so the same action is not asked again. Saved answers are per project, and you can clear them.
+          </p>
+          <p class="note is-caution">
+            For unattended runs the terminal agent takes <code>--auto</code> (also spelled <code>--yolo</code> or <code>--dangerously-skip-permissions</code>). It auto-approves anything not explicitly denied — deny rules still hold. It is off by default, and it is the flag to think twice about.
+          </p>
+</DocsPage>

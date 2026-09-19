@@ -1,0 +1,24 @@
+---
+import DocsPage from "../../layouts/DocsPage.astro"
+
+export const prerender = true
+---
+
+<DocsPage id="external-agents">
+
+          <p>
+            A workspace can run someone else's CLI instead of Vector's own agent. Vector finds the CLI through your
+            login shell, so a tool installed by nvm, Homebrew or an app bundle is detected even though a desktop app
+            inherits none of that.
+          </p>
+          <ol class="steps">
+            <li><span>1</span><div><strong>Pick the runtime</strong><p>Choose Claude Code, Codex or Cursor when you create the workspace. The tile shows the version it found, or that it is signed out.</p></div></li>
+            <li><span>2</span><div><strong>Let it work</strong><p>The run happens in an isolated worktree or copy. Vector streams its output and runs the project's own checks afterwards.</p></div></li>
+            <li><span>3</span><div><strong>Keep talking</strong><p>The workspace has a message box. A follow-up resumes the CLI's own conversation, so it still remembers the file it just changed.</p></div></li>
+          </ol>
+          <ul class="feature-list">
+            <li><strong>Signed out is visible</strong><span>Vector asks each CLI whether it is authenticated and shows "Signed out" with the one command that fixes it.</span></li>
+            <li><strong>Resume, or an honest restart</strong><span>If a CLI refuses to resume, Vector re-briefs it with a written summary and labels that turn as restarted rather than pretending it remembers.</span></li>
+            <li><strong>They can receive, not send</strong><span>External CLIs have no teammate-message tool, so they can be told what teammates did but cannot reply.</span></li>
+          </ul>
+</DocsPage>

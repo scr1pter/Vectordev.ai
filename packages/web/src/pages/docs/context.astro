@@ -1,0 +1,15 @@
+---
+import DocsPage from "../../layouts/DocsPage.astro"
+
+export const prerender = true
+---
+
+<DocsPage id="context">
+
+          <p>
+            A long session does not fail when it reaches the model's context limit. Vector compacts it: older turns are summarised and pruned while a protected window of recent work is kept intact, and the run continues from the compacted history. A dedicated internal agent writes that summary, so it is written for the model that has to keep working rather than for a reader.
+          </p>
+          <p>
+            Compaction can also be triggered deliberately, and the transcript records where it happened.
+          </p>
+</DocsPage>

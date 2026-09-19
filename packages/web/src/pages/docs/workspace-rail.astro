@@ -1,0 +1,20 @@
+---
+import DocsPage from "../../layouts/DocsPage.astro"
+
+export const prerender = true
+---
+
+<DocsPage id="workspace-rail">
+
+          <p>
+            The slim rail down the left edge is the app's top-level navigation: Home, Projects, Search, Agent Dashboard, Browser, Pull Requests, Plugins, Connections and Settings, with a help cluster for Docs, Best practices, Changelog, Diagnostics, Support and Send feedback. It hides, it resizes by dragging, a double-click resets the width, and workspaces are added to or removed from it.
+          </p>
+          <h3>Command palette</h3>
+          <p>
+            The palette searches every action by category — view, project, provider, server, session, theme, language, file, context, terminal, model, MCP, agent, permissions, workspace and settings — and runs it without the mouse. Shortcuts are editable and can be reset to their defaults, and some actions live only here, such as adding the current file selection to the prompt context.
+          </p>
+          <h3>Chat search</h3>
+          <p>
+            A search overlay finds sessions and messages across the workspace, so you can return to a conversation without scrolling the sidebar. It opens over whatever you were looking at and closes on Escape.
+          </p>
+</DocsPage>

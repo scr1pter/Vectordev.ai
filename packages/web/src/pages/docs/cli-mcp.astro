@@ -1,0 +1,18 @@
+---
+import DocsPage from "../../layouts/DocsPage.astro"
+
+export const prerender = true
+---
+
+<DocsPage id="cli-mcp">
+
+          <p>
+            <code>vector mcp add</code> registers a server: <code>--url</code> for a remote one with <code>--header KEY=VALUE</code>, or a command with <code>--env KEY=VALUE</code> for a local one. <code>vector mcp list</code> shows every configured server and whether it is reachable.
+          </p>
+          <p class="doc-cmd"><code>vector mcp add linear --url https://mcp.linear.app/sse
+vector mcp auth linear
+vector mcp list</code><button class="doc-cmd-copy" type="button" aria-label="Copy this command">Copy</button></p>
+          <p>
+            For OAuth-protected servers, <code>vector mcp auth</code> runs the flow, <code>vector mcp auth list</code> shows which servers are OAuth-capable and their status, <code>vector mcp logout</code> drops stored credentials, and <code>vector mcp debug &lt;name&gt;</code> diagnoses a failing connection.
+          </p>
+</DocsPage>

@@ -1,0 +1,31 @@
+---
+import DocsPage from "../../layouts/DocsPage.astro"
+import { workflow } from "../../data/docs-content"
+
+export const prerender = true
+---
+
+<DocsPage id="github">
+
+          <p>
+            Task in, pull request out. Run <code>vector github install</code> once inside a repository: it writes a
+            workflow that installs the CLI from npm on every <code>/vector</code> comment, then add the
+            <code>VECTOR_CLI_TOKEN</code> secret from your account page. From then on, commenting
+            <code>/vector fix the flaky auth test</code> on an issue opens a branch and a pull request; commenting on an
+            existing pull request replies on that branch.
+          </p>
+          <p>
+            Every pull request carries its evidence, not just a diff: a Changes table with line counts per file, the
+            output of any test, typecheck, lint, or build command the agent ran with its exit code, the measured token
+            cost of the run, the judge's PASS or FAIL verdict when a judge pass ran, and a link back to the workflow run.
+            Reviewers see what was checked before they read a line.
+          </p>
+          <p class="note">
+            A model included with Vector runs the workflow with nothing but the account token, no API key needed. Add a provider key as a second secret to
+            use Claude, GPT, or Gemini in CI. One repository setting is required: under Settings → Actions → General →
+            Workflow permissions, tick "Allow GitHub Actions to create and approve pull requests" (GitHub leaves it off
+            by default; without it the branch is pushed and Vector comments a compare link instead). Pull requests opened
+            with the built-in GitHub token do not trigger the repository's other workflows; use a personal access token
+            if you need CI to run on them.
+          </p>
+</DocsPage>

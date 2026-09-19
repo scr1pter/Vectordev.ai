@@ -1,0 +1,26 @@
+---
+import DocsPage from "../../layouts/DocsPage.astro"
+import { changelog } from "../../data/docs-content"
+
+export const prerender = true
+---
+
+<DocsPage id="changelog">
+
+          <p>Keep the whole build in view. Recent releases, newest first.</p>
+          <ol class="changelog">
+            {changelog.map(([date, title, blurb]) => {
+              const [when, version] = date.split(" · ")
+              return (
+                <li>
+                  <h3>{title}</h3>
+                  <p class="changelog-date">
+                    <span>{when}</span>
+                    {version && <span class="changelog-version">{version}</span>}
+                  </p>
+                  <p class="changelog-body">{blurb}</p>
+                </li>
+              )
+            })}
+          </ol>
+</DocsPage>

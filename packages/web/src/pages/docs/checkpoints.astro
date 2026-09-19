@@ -1,0 +1,27 @@
+---
+import DocsPage from "../../layouts/DocsPage.astro"
+
+export const prerender = true
+---
+
+<DocsPage id="checkpoints">
+
+          <p>
+            Vector snapshots the files an agent changed as named checkpoints. You can rename one, write documentation against it, and restore it. <strong>Code Archaeology</strong> opens the whole history — every checkpoint from the first to the latest — with the files each one captured.
+          </p>
+          <p class="note">
+            Checkpoint storage is bounded. Once a session passes its size or count budget the oldest checkpoints are dropped.
+          </p>
+          <h3>The engineering timeline</h3>
+          <p>
+            The side panel builds one chronological timeline from the session's events: each changed file with its risk estimate, each checkpoint, and each problem found while scanning the project. Filter it by kind, search it, and expand any event for its files and details — it is how you reconstruct a long run without rereading the transcript.
+          </p>
+          <h3>Project report and risk scan</h3>
+          <p>
+            Vector scans the open project and writes a local report: the language breakdown by files and lines, a judgement on model fit, and a list of problems with severities that feed the timeline as risk events. The scan runs on your machine against your own repository, and refreshes on demand.
+          </p>
+          <h3>Skill mode</h3>
+          <p>
+            The side panel remembers whether you want beginner, intermediate or advanced explanations, and the engineering surfaces say more or less accordingly. The setting is stored on the machine you set it on rather than synced.
+          </p>
+</DocsPage>

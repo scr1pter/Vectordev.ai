@@ -1,0 +1,17 @@
+---
+import DocsPage from "../../layouts/DocsPage.astro"
+
+export const prerender = true
+---
+
+<DocsPage id="cli-models">
+
+          <p>
+            <code>vector models</code> lists every model available to you — the ones included with Vector and the providers you have connected. Pass a provider id to filter, <code>--verbose</code> for metadata such as per-token cost, and <code>--refresh</code> to re-pull the catalogue instead of using the cached copy.
+          </p>
+          <p class="doc-cmd"><code>vector models
+vector models anthropic --verbose</code><button class="doc-cmd-copy" type="button" aria-label="Copy this command">Copy</button></p>
+          <p>
+            Models that expose reasoning effort take <code>--variant</code>. The level resolves from the flag, then your saved preference, then what the session last used, and your choice is kept per provider and model.
+          </p>
+</DocsPage>

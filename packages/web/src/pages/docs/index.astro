@@ -1,0 +1,76 @@
+---
+// The documentation's front door. Every subject is its own page under /docs;
+// this one says what Vector is, points at the first three pages, and lists the
+// groups. It also catches the old single-page anchors — /docs#code-review and
+// the rest are still linked from the landing page and from inside the app — and
+// sends them to the page that subject now lives on.
+import DocsPage from "../../layouts/DocsPage.astro"
+import { docsNav, docsOrder } from "../../data/docs-nav"
+
+export const prerender = true
+
+const start = [
+  ["install", "Install Vector", "macOS, Windows or Linux, and the CLI in any terminal."],
+  ["open-repository", "Open a repository", "Point Vector at a project on your disk. Nothing is uploaded."],
+  ["first-task", "Run your first task", "Ask for a change, watch it work, review what it did."],
+] as const
+---
+
+<DocsPage
+  title="Vector documentation"
+  eyebrow="Start here"
+  description="How to install Vector, run agents on your own repository, review what they did, and ship it."
+>
+  <p class="dx-lede">
+    Vector is an engineering workspace with an agent of its own: an editor, a terminal, a browser and a code reviewer
+    around one agent that works in the repository already on your disk. These pages cover every part of it.
+  </p>
+
+  <h2>Get going</h2>
+  <ol class="steps">
+    {
+      start.map(([id, title, blurb]) => (
+        <li>
+          <span />
+          <div>
+            <strong>
+              <a href={`/docs/${id}`}>{title}</a>
+            </strong>
+            <p>{blurb}</p>
+          </div>
+        </li>
+      ))
+    }
+  </ol>
+
+  <h2>Everything else</h2>
+  <div class="dx-cards">
+    {
+      docsNav.map((group) => (
+        <a class="dx-card" href={`/docs/${group.links[0].id}`}>
+          <b>{group.label}</b>
+          <span>
+            {group.links
+              .map((link) => link.title)
+              .slice(0, 3)
+              .join(" · ")}
+          </span>
+          <span class="dx-card-count">{group.links.length} pages</span>
+        </a>
+      ))
+    }
+  </div>
+
+  <p class="note">
+    Looking for the product tour instead — what Vector is and what it does? That lives at
+    <a href="/docs/product">/docs/product</a>.
+  </p>
+</DocsPage>
+
+<script is:inline define:vars={{ ids: docsOrder.map((link) => link.id) }}>
+  // The single-page docs used one anchor per subject. Those links are still out
+  // there — on the landing page, in the app's help menu, in old messages — so a
+  // hash that names a page redirects to it rather than landing on nothing.
+  const hash = decodeURIComponent(location.hash.replace(/^#/, ""))
+  if (hash && ids.includes(hash)) location.replace(`/docs/${hash}`)
+</script>

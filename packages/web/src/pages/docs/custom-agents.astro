@@ -1,0 +1,23 @@
+---
+import DocsPage from "../../layouts/DocsPage.astro"
+
+export const prerender = true
+---
+
+<DocsPage id="custom-agents">
+
+          <p>
+            Vector ships nine subagents an agent can delegate to: a general one, and the specialists <strong>explore</strong>, <strong>review</strong>, <strong>judge</strong>, <strong>debug</strong>, <strong>test</strong>, <strong>security</strong>, <strong>performance</strong> and <strong>migration</strong>. Explore, review, judge and security carry a read-only boundary that is re-applied after your repository's config is merged, so a checked-in file cannot turn a read-only reviewer into one that writes; they can still run verification commands from an allowlist such as <code>git diff</code>, <code>git log</code> and the project's test and build scripts.
+          </p>
+          <p>
+            Delegation does not recurse. A subagent cannot start subagents of its own, and nesting stops at two levels. A parent can declare which paths each subagent owns, and Vector refuses two siblings that claim overlapping paths; tasks can depend on each other, run in the background and be resumed later by id.
+          </p>
+          <p>
+            You can add your own:
+          </p>
+          <p class="doc-cmd"><code>vector agent create --description "reviews SQL migrations" --mode subagent
+vector agent list</code><button class="doc-cmd-copy" type="button" aria-label="Copy this command">Copy</button></p>
+          <p class="note">
+            There is no cap on how many subagents one session runs at once. Past six running siblings Vector tells the model to mention the spend, because each subagent spends on your keys.
+          </p>
+</DocsPage>

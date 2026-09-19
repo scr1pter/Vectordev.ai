@@ -1,0 +1,17 @@
+---
+import DocsPage from "../../layouts/DocsPage.astro"
+
+export const prerender = true
+---
+
+<DocsPage id="cli-server">
+
+          <p>
+            <code>vector serve</code> runs the agent as a headless server with <code>--port</code> and <code>--hostname</code>; <code>vector web</code> starts the same server and opens the browser interface. <code>vector attach &lt;url&gt;</code> connects a terminal session to a server that is already running, with <code>--dir</code> to choose the directory on it, the usual session flags, and <code>--username</code> and <code>--password</code> for basic auth.
+          </p>
+          <p class="doc-cmd"><code>vector serve --port 4096
+vector attach http://localhost:4096 --dir ~/code/myapp</code><button class="doc-cmd-copy" type="button" aria-label="Copy this command">Copy</button></p>
+          <p>
+            <code>vector acp</code> starts an Agent Client Protocol server, so an ACP-speaking editor can drive Vector's agent as its backend.
+          </p>
+</DocsPage>

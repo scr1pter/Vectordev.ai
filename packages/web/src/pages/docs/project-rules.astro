@@ -1,0 +1,28 @@
+---
+import DocsPage from "../../layouts/DocsPage.astro"
+
+export const prerender = true
+---
+
+<DocsPage id="project-rules">
+
+          <p>
+            A rule is a standard written the way you would say it to a new teammate — "we don't put database query
+            logic in the controller". Open <strong>Project rules</strong> from the workspace rail, the home screen, or
+            Settings, write the rule, and point it at a repository and optionally at the files it governs.
+          </p>
+          <ol class="steps">
+            <li><span>1</span><div><strong>Write it in plain English</strong><p>No rule language, no schema. One sentence describing the standard.</p></div></li>
+            <li><span>2</span><div><strong>Scope it</strong><p>Leave the repository empty to apply it everywhere, or name one. Add file paths like <code>src/app/web/*.tsx</code> to narrow it further.</p></div></li>
+            <li><span>3</span><div><strong>Commit it</strong><p>Vector writes the rules to <code>.vector/RULES.md</code> in the repository. Commit that file and your whole team gets the same rules.</p></div></li>
+          </ol>
+          <ul class="feature-list">
+            <li><strong>Vector agents</strong><span>Read the rules file directly — the engine loads it as an instruction file on every prompt.</span></li>
+            <li><strong>Claude Code, Codex, Cursor</strong><span>Read their own instruction files and never see it, so Vector copies the matching rules into the prompt it hands them.</span></li>
+            <li><strong>Scope survives as words</strong><span>Instruction files load whole, so the file paths a rule covers are stated in the sentence the agent reads.</span></li>
+          </ul>
+          <p class="note">
+            A rule that conflicts with the task you asked for is reported rather than silently resolved. Vector tells
+            the agent to say so instead of quietly picking a side.
+          </p>
+</DocsPage>

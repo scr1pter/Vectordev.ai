@@ -1,0 +1,20 @@
+---
+import DocsPage from "../../layouts/DocsPage.astro"
+
+export const prerender = true
+---
+
+<DocsPage id="multiplayer">
+
+          <p>
+            One workspace, several people. <code>vector invite</code> starts your workspace as a shared server and prints
+            two links: your own, and an invite link for teammates. Anyone who opens the invite lands in the same Vector
+            UI, on the same sessions, files, and agents, as a guest. The header shows who is present, and a short
+            "joined" or "left" notice when someone comes or goes.
+          </p>
+          <dl class="doc-rows">
+            <div><dt>How the link works</dt><dd>The invite carries a guest password that is generated fresh each time you run <code>vector invite</code>. Guests are a separate credential from you, so revoking access is as simple as ending the session with Ctrl+C.</dd></div>
+            <div><dt>Where it works</dt><dd>Anywhere on your network out of the box. From elsewhere, expose the port through a tunnel you already trust — <code>tailscale serve &lt;port&gt;</code> or <code>cloudflared tunnel --url http://localhost:&lt;port&gt;</code> — and share that host instead.</dd></div>
+            <div><dt>What guests can do</dt><dd>Everything you can in that workspace: read and steer sessions, open files, run the agent. Share the link only with people you would hand your keyboard to.</dd></div>
+          </dl>
+</DocsPage>
