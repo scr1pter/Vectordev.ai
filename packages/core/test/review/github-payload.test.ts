@@ -153,7 +153,7 @@ describe("splitHalves", () => {
     expect([...first.comments, ...second.comments]).toEqual(five.comments)
     expect(first.body).toBe(body)
     expect(second.body).toBe(
-      "Vector review of `d4e5f6a` (continued).\n<!-- vector-review:review head=d4e5f6a run=8f3c21aa -->",
+      "Vecbot review of `d4e5f6a` (continued).\n<!-- vector-review:review head=d4e5f6a run=8f3c21aa -->",
     )
     expect(parseReviewMarker(second.body)).toEqual(parseReviewMarker(body))
     for (const half of [first, second]) {

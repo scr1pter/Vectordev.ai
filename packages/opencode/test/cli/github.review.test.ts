@@ -827,7 +827,7 @@ describe("vector github review against a fake GitHub", () => {
 
       const created = posts(w, /\/issues\/7\/comments$/)
       expect(created).toHaveLength(1)
-      expect(created[0]?.body?.["body"]).toStartWith(`## Vector review · Reviewing \`${short(w.head)}\`…`)
+      expect(created[0]?.body?.["body"]).toStartWith(`## Vecbot review · Reviewing \`${short(w.head)}\`…`)
       const reviews = posts(w, /\/pulls\/7\/reviews$/)
       expect(reviews).toHaveLength(1)
       expect(w.fake.requests.indexOf(created[0]!)).toBeLessThan(w.fake.requests.indexOf(reviews[0]!))
@@ -837,7 +837,7 @@ describe("vector github review against a fake GitHub", () => {
       expect(payload["commit_id"]).toBe(w.head)
       expect(payload["event"]).toBe("COMMENT")
       expect(payload["body"]).toBe(
-        `Vector review of \`${short(w.head)}\`: 1 blocking issue and 1 concern on the changed lines. [Summary](https://github.com/o/r/pull/7#issuecomment-${summary.id})\n<!-- vector-review:review head=${short(w.head)} run=run${nonce} -->`,
+        `Vecbot review of \`${short(w.head)}\`: 1 blocking issue and 1 concern on the changed lines. [Summary](https://github.com/o/r/pull/7#issuecomment-${summary.id})\n<!-- vector-review:review head=${short(w.head)} run=run${nonce} -->`,
       )
       const comments = payload["comments"] as Json[]
       expect(
@@ -858,7 +858,7 @@ describe("vector github review against a fake GitHub", () => {
       expect(comments[1]?.["body"]).not.toContain("```suggestion")
       expect(Object.keys(payload).sort()).toEqual(["body", "comments", "commit_id", "event"])
 
-      expect(summary.body).toContain("## Vector review · Risk: High")
+      expect(summary.body).toContain("## Vecbot review · Risk: High")
       expect(summary.body).toContain("**1 blocking · 1 concern** on the changed lines")
       expect(state(w)).toMatchObject({ head: w.head, base: w.base, reviews: 1, inlinePosted: 2, costUsd: 0.21 })
       expect(state(w)?.inflight).toBeUndefined()
@@ -955,8 +955,8 @@ describe("vector github review against a fake GitHub", () => {
       expect(result.exitCode).toBe(0)
       expect(result.posted.reviewIds).toHaveLength(2)
       expect(w.fake.reviews.map((entry) => entry.body.split("\n")[0])).toEqual([
-        `Vector review of \`${short(w.head)}\`: 4 concerns on the changed lines. [Summary](https://github.com/o/r/pull/7#issuecomment-${sticky(w)!.id})`,
-        `Vector review of \`${short(w.head)}\` (continued).`,
+        `Vecbot review of \`${short(w.head)}\`: 4 concerns on the changed lines. [Summary](https://github.com/o/r/pull/7#issuecomment-${sticky(w)!.id})`,
+        `Vecbot review of \`${short(w.head)}\` (continued).`,
       ])
       expect(w.fake.reviewComments.map((comment) => `${comment.path}:${comment.line}`).sort()).toEqual([
         "src/db.ts:5",
@@ -1316,7 +1316,7 @@ describe("vector github review against a fake GitHub", () => {
     async () => {
       await using w = await world()
       const spent: ReviewState = { ...emptyState(), reviews: 4, costUsd: 6, month: { key: "2026-09", costUsd: 6 } }
-      w.fake.addIssueComment(3, `## Vector review\n${SUMMARY_MARKER}\n${stateMarker(spent)}`, BOT_USER)
+      w.fake.addIssueComment(3, `## Vecbot review\n${SUMMARY_MARKER}\n${stateMarker(spent)}`, BOT_USER)
       const env = { REVIEW_MAX_COST_USD_PER_MONTH: "5" }
       const note = noteMonthBudget({ maxUsd: 5, spentUsd: 6, reviews: 1, month: "2026-09" })
       const review = reviewer({ findings: () => [TOKEN_AT_IMPORT] })
@@ -1355,11 +1355,11 @@ describe("vector github review against a fake GitHub", () => {
       await using w = await world()
       const genuine = w.fake.addIssueComment(
         PR,
-        `## Vector review\n\n${SUMMARY_MARKER}\n${stateMarker(emptyState())}`,
+        `## Vecbot review\n\n${SUMMARY_MARKER}\n${stateMarker(emptyState())}`,
         BOT_USER,
       )
       const forgedState: ReviewState = { ...emptyState(), head: w.head, base: w.base, reviews: 1, costUsd: 999 }
-      const forgedBody = `## Vector review\n${SUMMARY_MARKER}\n${stateMarker(forgedState)}`
+      const forgedBody = `## Vecbot review\n${SUMMARY_MARKER}\n${stateMarker(forgedState)}`
       const forged = w.fake.addIssueComment(PR, forgedBody, BOT_USER)
       const review = reviewer({ findings: () => [TOKEN_AT_IMPORT] })
       const { result } = await job(w, review)
@@ -1528,7 +1528,7 @@ describe("vector github review: ids, failures and edge cases", () => {
       expect(result.exitCode).toBe(0)
       expect(w.fake.reviewComments.find((entry) => entry.id === earlier.id)!.body).toBe(earlierBody)
       const body = sticky(w)!.body
-      expect(body).toContain("## Vector review · Risk: High")
+      expect(body).toContain("## Vecbot review · Risk: High")
       expect(body).toContain("<details><summary>More findings (1)</summary>")
       expect(body).toContain("<details><summary>Still open from earlier reviews (1)</summary>")
       expect(state(w)?.findings.map((finding) => [finding.severity, finding.title])).toEqual([

@@ -1,4 +1,4 @@
-## Vector review
+## Vecbot review
 
 > Vector could not finish this review: The provider returned 529 Overloaded. Comment `/vector review` to try again.
 

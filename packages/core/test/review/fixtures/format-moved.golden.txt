@@ -1,4 +1,4 @@
-## Vector review · Risk: High
+## Vecbot review · Risk: High
 
 This change adds refresh-token rotation to the auth client and moves session storage from localStorage to IndexedDB. Rotation can race with logout, and sessions saved by older builds are not migrated.
 

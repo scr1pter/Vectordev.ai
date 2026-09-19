@@ -110,8 +110,8 @@ export const docsNav: DocGroup[] = [
       },
       {
         "id": "code-review",
-        "title": "Code review",
-        "blurb": "Every pull request, reviewed."
+        "title": "Vecbot, the code review bot",
+        "blurb": "Vector's code review bot: on every pull request, on your branch before you push, and in the workspace."
       },
       {
         "id": "follow",

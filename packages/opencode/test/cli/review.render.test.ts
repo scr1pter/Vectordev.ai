@@ -152,7 +152,7 @@ describe("renderLocalReview", () => {
 
     expect(text).toBe(
       [
-        "Vector review · feature/refresh vs main (merge-base 1a2b3c4) · 7 files, +212 −61",
+        "Vecbot review · feature/refresh vs main (merge-base 1a2b3c4) · 7 files, +212 −61",
         "Risk: Medium · 1 blocking · 2 concerns · 3 nits",
         "",
         "src/auth/refresh.ts",
@@ -195,7 +195,7 @@ describe("renderLocalReview", () => {
     })
     expect(text).toBe(
       [
-        "Vector review · feature/refresh vs main (merge-base 1a2b3c4) · 1 file, +3 −0",
+        "Vecbot review · feature/refresh vs main (merge-base 1a2b3c4) · 1 file, +3 −0",
         "Risk: Low · No issues found",
         "",
         "anthropic/claude-sonnet-4-5 · $0.21 · 48.2k in, 31.0k of it cached / 3.1k out · 1m 52s · sessions: ses_1",
@@ -243,7 +243,7 @@ describe("renderLocalReview", () => {
         }),
       }),
     })
-    expect(text.split("\n")[0]).toBe("Vector review · uncommitted changes vs HEAD (d4e5f6a) · 1 file, +1 −1")
+    expect(text.split("\n")[0]).toBe("Vecbot review · uncommitted changes vs HEAD (d4e5f6a) · 1 file, +1 −1")
     expect(text).toContain("a.ts\n  −12  Concern   A check was removed\n")
   })
 
@@ -261,13 +261,13 @@ describe("renderLocalReview", () => {
           ],
           elsewhere: [finding({ path: "b\x1b[1m.ts", line: 3, title: "Elsewhere" })],
         }),
-        notes: ["`src/x.ts` has a generated-file header that its base does not, so Vector reviewed it anyway."],
+        notes: ["`src/x.ts` has a generated-file header that its base does not, so Vecbot reviewed it anyway."],
       }),
     })
     expect(text).not.toMatch(/[]/)
     expect(text).toContain("Title ]0;pwned here")
     expect(text).toContain("Elsewhere in this change\n  b[1m.ts:3  Concern  Elsewhere")
-    expect(text).toContain("src/x.ts has a generated-file header that its base does not, so Vector reviewed it anyway.")
+    expect(text).toContain("src/x.ts has a generated-file header that its base does not, so Vecbot reviewed it anyway.")
   })
 
   test("findings hidden by --min-severity say their severity on the compact line", () => {

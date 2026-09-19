@@ -56,8 +56,14 @@ const replacements = [
 
 const it = testEffect(LayerNode.compile(root, replacements))
 const withBrokenPlugin = testEffect(LayerNode.compile(root, [...replacements, [Plugin.node, brokenPluginLayer]]))
+const originalComputerBridgeUrl = process.env.VECTOR_COMPUTER_BRIDGE_URL
+const originalComputerBridgeToken = process.env.VECTOR_COMPUTER_BRIDGE_TOKEN
 
 afterEach(async () => {
+  delete process.env.VECTOR_COMPUTER_BRIDGE_URL
+  delete process.env.VECTOR_COMPUTER_BRIDGE_TOKEN
+  if (originalComputerBridgeUrl !== undefined) process.env.VECTOR_COMPUTER_BRIDGE_URL = originalComputerBridgeUrl
+  if (originalComputerBridgeToken !== undefined) process.env.VECTOR_COMPUTER_BRIDGE_TOKEN = originalComputerBridgeToken
   await disposeAllInstances()
 })
 
@@ -68,6 +74,26 @@ describe("tool.registry", () => {
       const ids = yield* registry.ids()
 
       expect(ids).not.toContain("task_status")
+    }),
+  )
+
+  it.instance("does not expose computer without both desktop bridge values", () =>
+    Effect.gen(function* () {
+      delete process.env.VECTOR_COMPUTER_BRIDGE_URL
+      process.env.VECTOR_COMPUTER_BRIDGE_TOKEN = "test-secret"
+      const registry = yield* ToolRegistry.Service
+
+      expect(yield* registry.ids()).not.toContain("computer")
+    }),
+  )
+
+  it.instance("exposes computer when the desktop bridge is configured", () =>
+    Effect.gen(function* () {
+      process.env.VECTOR_COMPUTER_BRIDGE_URL = "http://127.0.0.1:12345"
+      process.env.VECTOR_COMPUTER_BRIDGE_TOKEN = "test-secret"
+      const registry = yield* ToolRegistry.Service
+
+      expect(yield* registry.ids()).toContain("computer")
     }),
   )
 

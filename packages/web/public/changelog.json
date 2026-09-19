@@ -1,6 +1,20 @@
 {
   "releases": [
     {
+      "tag": "v1.99.9",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Meet Vecbot, the code review bot",
+              "description": "Vector's code review system has a name, a command and a front door: Vecbot. It is the same reviewer that reads the repository around a change rather than the diff alone, now reachable wherever you are working. On a pull request it answers /vecbot review, /vecbot review full, /vecbot pause, /vecbot resume and /vecbot fix on a comment; the mentions installed before the name, /vector and /vx, still work, so no workflow needs rewriting. In a terminal, vector vecbot runs the same review on your branch against its merge base, or on your uncommitted work with --uncommitted, and posts nothing anywhere. In the desktop app the Pull Requests panel reviews a pull request in place and lets you decide whether to post it. Reviews now sign their summary as a Vecbot review, with the risk, the files that matter, comments on the exact lines with a severity and, where it is safe, a fix you can commit from GitHub, and every review still ends with the model it ran on and what it cost. The documentation was rebuilt around it: every subject is now its own page under /docs with a breadcrumb, the page's own headings beside it, previous and next at the foot, and search across all sixty pages, and the old single-page links still land on the right page. The landing page now carries twenty feature cards covering the browser, agent workspaces, subagents, cloud publishing and the ledger, each sentence checked against the code that ships it."
+            }
+          ]
+        }
+      ]
+    },
+    {
       "tag": "v1.99.8",
       "highlights": [
         {

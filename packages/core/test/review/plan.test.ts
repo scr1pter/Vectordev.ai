@@ -43,10 +43,10 @@ describe("context budget", () => {
 
   test("refuses models under 32k of context", () => {
     expect(contextRefusal("acme/tiny", 16_000)).toBe(
-      "Vector reviews need a model with at least 32k tokens of context; acme/tiny has 16k.",
+      "Vecbot reviews need a model with at least 32k tokens of context; acme/tiny has 16k.",
     )
     expect(contextRefusal("acme/tiny", 0)).toBe(
-      "Vector reviews need a model with at least 32k tokens of context; acme/tiny has no listed context size.",
+      "Vecbot reviews need a model with at least 32k tokens of context; acme/tiny has no listed context size.",
     )
     expect(contextRefusal("acme/ok", 32_000)).toBeUndefined()
     expect(contextRefusal("acme/big", 1_000_000)).toBeUndefined()

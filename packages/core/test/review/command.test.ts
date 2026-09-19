@@ -45,11 +45,19 @@ const CORPUS: [string, ReviewCommandKind][] = [
   ["/vector review <!-- sent from mobile -->", "review"],
   ["<!-- /vector review -->", "none"],
   ["/vector review the auth code.", "task"],
+
+  // Vecbot is the name now; the older mentions still work, because they are
+  // written into workflows people already installed.
+  ["/vecbot review", "review"],
+  ["/vecbot review full", "review-full"],
+  ["/vecbot pause", "pause"],
+  ["/vecbot resume", "resume"],
+  ["/vecbot fix the flaky auth test", "task"],
 ]
 
 describe("parseReviewCommand", () => {
   test("parses the corpus with the default mentions", () => {
-    expect(DEFAULT_MENTIONS).toEqual(["/vector", "/vx"])
+    expect(DEFAULT_MENTIONS).toEqual(["/vecbot", "/vector", "/vx"])
     for (const [body, kind] of CORPUS)
       expect([body, parseReviewCommand(body, DEFAULT_MENTIONS).kind]).toEqual([body, kind])
   })

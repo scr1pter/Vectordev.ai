@@ -365,14 +365,14 @@ export function buildReviewBody(input: {
   continued?: boolean
 }): string {
   const marker = reviewMarker(input.head, input.run)
-  if (input.continued) return `Vector review of \`${short(input.head)}\` (continued).\n${marker}`
+  if (input.continued) return `Vecbot review of \`${short(input.head)}\` (continued).\n${marker}`
   const blocking = input.inline.filter((finding) => finding.severity === "blocking").length
   const concerns = input.inline.filter((finding) => finding.severity === "concern").length
   const parts: string[] = []
   if (blocking) parts.push(`${blocking} blocking ${blocking === 1 ? "issue" : "issues"}`)
   if (concerns) parts.push(`${concerns} ${concerns === 1 ? "concern" : "concerns"}`)
   const link = input.summaryUrl ? ` [Summary](${input.summaryUrl})` : ""
-  return `Vector review of \`${short(input.head)}\`: ${parts.length ? parts.join(" and ") : "no new comments"} on the changed lines.${link}\n${marker}`
+  return `Vecbot review of \`${short(input.head)}\`: ${parts.length ? parts.join(" and ") : "no new comments"} on the changed lines.${link}\n${marker}`
 }
 
 // The lead line for findings that continue an earlier one, by id.
@@ -485,7 +485,7 @@ export function notePartial(input: {
 }
 
 export function noteSuperseded(newHead: string): string {
-  return `A newer commit (\`${short(newHead)}\`) arrived during this review. Vector reviews it next.`
+  return `A newer commit (\`${short(newHead)}\`) arrived during this review. Vecbot reviews it next.`
 }
 
 export function noteRebase(baseRef: string): string {
@@ -493,7 +493,7 @@ export function noteRebase(baseRef: string): string {
 }
 
 export function noteForcePush(since: string, files: number): string {
-  return `History was rewritten since \`${short(since)}\`; Vector reviewed the ${files} ${files === 1 ? "file" : "files"} whose changes differ.`
+  return `History was rewritten since \`${short(since)}\`; Vecbot reviewed the ${files} ${files === 1 ? "file" : "files"} whose changes differ.`
 }
 
 export function noteLowConfidence(count: number): string {
@@ -501,7 +501,7 @@ export function noteLowConfidence(count: number): string {
 }
 
 export function noteGeneratedHeader(path: string): string {
-  return `${codeSpan(path)} gained a generated-file header in this pull request, so Vector reviewed it anyway.`
+  return `${codeSpan(path)} gained a generated-file header in this pull request, so Vecbot reviewed it anyway.`
 }
 
 // One line for any number of files, so thousands of them cannot crowd out the rest of the summary.
@@ -510,7 +510,7 @@ export function noteGeneratedHeaders(paths: readonly string[]): string | undefin
   const shown = paths.slice(0, 3).map(codeSpan)
   const rest = paths.length - shown.length
   const names = rest ? `${shown.join(", ")} and ${formatCount(rest)} more` : joinWords(shown)
-  return `${names} gained a generated-file header in this pull request, so Vector reviewed them anyway.`
+  return `${names} gained a generated-file header in this pull request, so Vecbot reviewed them anyway.`
 }
 
 export function noteMoved(count: number): string {
@@ -603,7 +603,7 @@ export function capBody(input: SummaryInput, max = MAX_BODY_CHARS): string {
 
 function render(input: SummaryInput, limits: Limits): string {
   const selection = input.selection
-  const lines = [selection ? `## Vector review · Risk: ${capital(selection.risk)}` : "## Vector review", ""]
+  const lines = [selection ? `## Vecbot review · Risk: ${capital(selection.risk)}` : "## Vecbot review", ""]
   if (input.banners?.length) lines.push(quote(input.banners), "")
   const summary = input.report?.summary.trim()
   if (summary) lines.push(sanitizeModelMarkdown(clip(summary, MAX_SUMMARY_TEXT), input.repo).replace(/^>/, "\\>"), "")
@@ -869,7 +869,7 @@ export function buildRunningBody(input: {
   const running = `Reviewing \`${short(input.head)}\`…`
   if (!input.previous || !hasResults(input.previous))
     return [
-      `## Vector review · ${running}`,
+      `## Vecbot review · ${running}`,
       "",
       "This comment shows the results when the review finishes, usually in 2–5 minutes.",
       "",
@@ -881,19 +881,19 @@ export function buildRunningBody(input: {
 // A note from section 1.1 (a skip, a failure, a rebase). Earlier results stay below it.
 export function buildNoteBody(input: { previous?: string; note: string; state?: ReviewState }): string {
   if (!input.previous || !hasResults(input.previous))
-    return ["## Vector review", "", quote([input.note]), "", ...markers(input.state)].join("\n")
+    return ["## Vecbot review", "", quote([input.note]), "", ...markers(input.state)].join("\n")
   return withBanner(input.previous, input.note, input.state)
 }
 
 function hasResults(body: string): boolean {
-  const heading = body.split("\n").find((line) => line.startsWith("## Vector review"))
+  const heading = body.split("\n").find((line) => line.startsWith("## Vecbot review"))
   return heading !== undefined && !heading.includes("· Reviewing")
 }
 
 // Replaces the quoted block under the heading, and the state marker.
 function withBanner(previous: string, banner: string, state: ReviewState | undefined): string {
   const lines = previous.replace(/\r\n?/g, "\n").split("\n")
-  const heading = lines.findIndex((line) => line.startsWith("## Vector review"))
+  const heading = lines.findIndex((line) => line.startsWith("## Vecbot review"))
   let index = heading + 1
   while (lines[index] === "") index++
   if (lines[index]?.startsWith(">")) {

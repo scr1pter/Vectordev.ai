@@ -1,10 +1,10 @@
-## Vector review · Risk: Low
+## Vecbot review · Risk: Low
 
 Renames a helper and updates its two callers.
 
 **No issues found** on the changed lines.
 
-`src/auth.ts` gained a generated-file header in this pull request, so Vector reviewed it anyway.
+`src/auth.ts` gained a generated-file header in this pull request, so Vecbot reviewed it anyway.
 
 _2 files changed (code)._
 

@@ -7,22 +7,36 @@ export const prerender = true
 
 <DocsPage id="code-review">
 
+          <p class="dx-lede">
+            Vecbot is Vector's code review bot. It reads the repository around a change, not just the diff, and says
+            what is wrong with it — on a pull request, on your branch before you push, or on the work sitting in your
+            editor right now.
+          </p>
+
+          <h2>Where Vecbot runs</h2>
+          <dl class="doc-rows">
+            <div><dt>On every pull request</dt><dd>Say yes to automatic review during <code>vector github install</code>. Vecbot reviews each pull request when it opens and again on every push, and answers <code>/vecbot</code> in a comment.</dd></div>
+            <div><dt>Before you push</dt><dd><code>vector vecbot</code> in your terminal runs the same review on your branch against its merge base, or on your uncommitted work with <code>--uncommitted</code>. Nothing is posted anywhere.</dd></div>
+            <div><dt>In the workspace</dt><dd>The desktop app's Pull Requests panel reviews a pull request in place and lets you post the result, or keep it to yourself.</dd></div>
+          </dl>
+
+          <h2>On a pull request</h2>
           <p>
-            Every pull request, reviewed. Say yes to automatic review during <code>vector github install</code> and
-            Vector reviews each pull request when it opens and again on every push. It leaves one summary comment with
+            Say yes to automatic review during <code>vector github install</code> and
+            Vecbot reviews each pull request when it opens and again on every push. It leaves one summary comment with
             the risk, what changed and the files that matter, and comments on the exact lines, each with a severity
             and, where it is safe, a fix you can commit from GitHub. It reads the repository, not just the diff: it
             opens the changed files, follows their callers and checks the tests. On the next push it reviews only what
             changed and says what got fixed instead of repeating itself.
           </p>
           <dl class="doc-rows">
-            <div><dt>What you get</dt><dd>A summary that is edited in place, and one review per push that contains only new comments. Severities are Blocking, Concern and Nit; nits and anything outside the changed lines stay in the summary. Vector only ever comments. It never approves or blocks a pull request, unless you set <code>failOn</code> to make its check fail on blocking issues.</dd></div>
-            <div><dt>Commands</dt><dd><code>/vector review</code> reviews again, <code>/vector review full</code> starts over, and <code>/vector pause</code> or <code>/vector resume</code> turns automatic reviews off or on for one pull request (or add the <code>vector:paused</code> label). Reply <code>/vector fix</code> on a comment and Vector applies that fix. A person with write access, or the pull request's author, can resolve a comment or react to it with a thumbs-down, and Vector won't raise it again. Commands need write access.</dd></div>
+            <div><dt>What you get</dt><dd>A summary that is edited in place, and one review per push that contains only new comments. Severities are Blocking, Concern and Nit; nits and anything outside the changed lines stay in the summary. Vecbot only ever comments. It never approves or blocks a pull request, unless you set <code>failOn</code> to make its check fail on blocking issues.</dd></div>
+            <div><dt>Commands</dt><dd><code>/vecbot review</code> reviews again, <code>/vecbot review full</code> starts over, and <code>/vecbot pause</code> or <code>/vecbot resume</code> turns automatic reviews off or on for one pull request (or add the <code>vector:paused</code> label). Reply <code>/vecbot fix</code> on a comment and Vecbot applies that fix. <code>/vector</code> and <code>/vx</code> still work, so workflows installed before the name existed keep running. A person with write access, or the pull request's author, can resolve a comment or react to it with a thumbs-down, and Vecbot won't raise it again. Commands need write access.</dd></div>
             <div><dt>Your rules</dt><dd>Write plain-English rules in <code>.vector/review.md</code>. A <code>## path: src/billing/**</code> heading scopes the rules under it. Tune limits in <code>.vector/review.json</code>: <code>maxComments</code> (10), <code>minSeverity</code> (concern), <code>minConfidence</code> (0.7), <code>ignore</code>, <code>security</code>, <code>maxCostUsd</code>. Both are read from the base branch, so a pull request can't change the rules it is reviewed under, except by editing the workflow file, which needs write access.</dd></div>
             <div><dt>Low noise</dt><dd>Lockfiles, build output, generated and vendored files, snapshots and binaries are skipped and listed. Drafts, dependency bots and pull requests labelled <code>vector:skip</code> are skipped. To review drafts too, delete the <code>draft == false</code> line from <code>.github/workflows/vector.yml</code>. Very large pull requests get a note with a cost estimate instead of a review.</dd></div>
             <div><dt>Cost</dt><dd>Reviews run on your own provider keys, or on a model included with Vector with no key needed. Every review ends with the model, the tokens, what it cost and the total for that pull request. Each review stops at <code>maxCostUsd</code> ($2.00), automatic reviews of one pull request stop at <code>maxCostUsdPerPr</code> ($10.00), and <code>REVIEW_MAX_COST_USD_PER_MONTH</code> in the workflow caps a month. Set <code>REVIEW_AUTO_MODEL</code> to use a cheaper model for automatic reviews.</dd></div>
-            <div><dt>Before you push</dt><dd><code>vector review</code> runs the same review on your branch against its merge-base with the default branch. Use <code>--uncommitted</code> for work in progress, <code>--json</code> for scripts, and <code>--fail-on blocking</code> in a pre-push hook.</dd></div>
-            <div><dt>Security</dt><dd>The reviewer can only read. It cannot edit files, run commands or browse the web; Vector's own code gathers git history and posts the results. Pull requests from forks are not reviewed automatically, because GitHub gives their runs no secrets. A maintainer can comment <code>/vector review</code>, and that review never checks out or runs the fork's code.</dd></div>
+            <div><dt>Before you push</dt><dd><code>vector vecbot</code> (or <code>vector review</code>) runs the same review on your branch against its merge-base with the default branch. Use <code>--uncommitted</code> for work in progress, <code>--json</code> for scripts, and <code>--fail-on blocking</code> in a pre-push hook.</dd></div>
+            <div><dt>Security</dt><dd>The reviewer can only read. It cannot edit files, run commands or browse the web; Vector's own code gathers git history and posts the results. Pull requests from forks are not reviewed automatically, because GitHub gives their runs no secrets. A maintainer can comment <code>/vecbot review</code>, and that review never checks out or runs the fork's code.</dd></div>
           </dl>
           <p class="note">
             Reviews post as github-actions[bot] and need only <code>contents: read</code> and

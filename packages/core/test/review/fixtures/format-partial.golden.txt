@@ -1,4 +1,4 @@
-## Vector review · Risk: High
+## Vecbot review · Risk: High
 
 > **Partial review.** Stopped at the $2.00 budget after 9 of 14 files. Not reviewed: `a.ts`, `b.ts`. The next run reviews them, or comment `/vector review` to continue now.
 

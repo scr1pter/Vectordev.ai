@@ -16,9 +16,9 @@ vector login
 vector
 ```
 
-**No API key needed.** Vector comes with models included, today among them NVIDIA's Nemotron and Meta's Muse Spark, so it works before you connect anything, and you can bring your own key for Claude, GPT, Gemini and the rest whenever you want. The desktop app is a free download for macOS, Windows and Linux at [vectordev.ai](https://vectordev.ai), and the terminal agent is free too. Both need only a Vector account. The desktop app is free to use during the beta; when public pricing begins, it is $10 a month or $99 a year, and the subscription comes with the included models.
+**No API key needed.** Vector comes with models included, today among them NVIDIA's Nemotron and Meta's Muse Spark, so it works before you connect anything, and you can bring your own key for Claude, GPT, Gemini and the rest whenever you want. Vector desktop is available for macOS, Windows and Linux at [vectordev.ai](https://vectordev.ai) for $10 a month or $99 a year, with models included in the subscription. Create a Vector account, then choose a plan from Account. Creating an account does not start a subscription. The terminal agent is free with a Vector account.
 
-**New in 1.99.8:** Subagents that work in parallel, code review on every pull request, every agent's edits typed live in the editor, no agent limit, every model in the picker, and a glass launch screen. [Release notes →](https://vectordev.ai/releases)
+**New in 1.99.9:** Vecbot, Vector's code review bot — `/vecbot` on a pull request, `vector vecbot` in your terminal, and the Pull Requests panel in the app, all running the same review. Plus documentation rebuilt as a page per subject with search. [Release notes →](https://vectordev.ai/releases)
 
 ## Features
 
@@ -54,9 +54,15 @@ vector
 
 **Cloud work in the loop.** The agent can create a real Supabase project on your own account, write the keys into your repository, apply the migrations you keep there, sync environment values, and publish to your own Vercel or Netlify account. Then it loads the deployed URL in a real browser and reports what it found, and reads the logs when a deploy misbehaves. Everything that creates, changes or spends asks first.
 
-**Task in, pull request out.** Comment `/vector fix the flaky auth test` on a GitHub issue and Vector opens a branch and a pull request. Every PR carries its evidence: the files changed, the checks it ran with their exit codes and output, what the run cost, and the judge's verdict.
+**Task in, pull request out.** Comment `/vecbot fix the flaky auth test` on a GitHub issue and Vector opens a branch and a pull request. Every PR carries its evidence: the files changed, the checks it ran with their exit codes and output, what the run cost, and the judge's verdict.
 
-**Every pull request, reviewed.** Turn on automatic review in `vector github install` and Vector reviews each pull request when it opens and again on every push: one summary with the risk and the files that matter, and comments on the exact lines, each with a severity and, where it is safe, a fix you can commit from GitHub. It reads the repository, not just the diff, follows your `.vector/review.md` rules, and on the next push reviews only what changed and says what got fixed. Every review states the model it ran on and what it cost. Run the same review before you push with `vector review`.
+**Vecbot, the code review bot.** Vecbot reads the repository around a change rather than the diff alone, and it runs in three places: on a pull request, on your branch before you push, and inside the desktop app.
+
+- **On a pull request.** Turn on automatic review in `vector github install` and Vecbot reviews each pull request when it opens and again on every push: one summary with the risk and the files that matter, and comments on the exact lines, each with a severity and, where it is safe, a fix you can commit from GitHub. It follows your `.vector/review.md` rules, and on the next push reviews only what changed and says what got fixed. Comment `/vecbot review`, `/vecbot review full`, `/vecbot pause`, `/vecbot resume`, or reply `/vecbot fix` on a comment. The older `/vector` and `/vx` mentions still work.
+- **Before you push.** `vector vecbot` reviews your branch against its merge base, `--uncommitted` reviews work in progress, and `--fail-on blocking` fits a pre-push hook. Nothing is posted anywhere.
+- **In the workspace.** The Pull Requests panel reviews a pull request in place and lets you decide whether to post the result.
+
+Vecbot only ever comments — it never approves or blocks a pull request unless you ask it to fail a check — and every review states the model it ran on and what it cost.
 
 ## Install
 

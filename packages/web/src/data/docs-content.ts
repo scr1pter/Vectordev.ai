@@ -365,6 +365,11 @@ export const subagentKinds = [
 ]
 export const changelog = [
   [
+    "September 2026 · 1.99.9",
+    "Meet Vecbot, the code review bot",
+    "Vector's code reviewer is now Vecbot: /vecbot on a pull request, vector vecbot in a terminal, and the Pull Requests panel in the app, all running the same review that reads the repository around a change. The older /vector and /vx mentions still work. The documentation is now a page per subject with search, and the landing page carries twenty feature cards.",
+  ],
+  [
     "September 2026 · 1.99.8",
     "Subagents that work in parallel",
     "For big tasks the main agent launches general-purpose Subagents on its own, one per independent part and in parallel, and does small tasks itself; eight Subagent specialists keep their focus, and Settings → Agents can turn Subagents off. They show as cards in the chat and in the Background tasks panel. Turned on in vector github install, code review covers each pull request when it opens and on every push: one summary, and comments on the exact lines, each with a severity and, where it is safe, a fix you can commit from GitHub. It follows your .vector/review.md rules, re-reviews only what changed and says what got fixed, runs locally as vector review and from the desktop app's Pull Requests panel, and every review states its model and cost. The editor follows every agent live, the main agent included; Claude Code, Codex and Cursor chats answer like any other; the 16-agent limit is gone; and every model your providers offer is listed.",

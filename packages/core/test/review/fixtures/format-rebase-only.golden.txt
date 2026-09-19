@@ -1,4 +1,4 @@
-## Vector review · Risk: Medium
+## Vecbot review · Risk: Medium
 
 > Rebased onto `main` with no change to this pull request's own diff; nothing new to review.
 

@@ -1,4 +1,4 @@
-## Vector review · Risk: High
+## Vecbot review · Risk: High
 
 > Reviewing `e5f6a7b`… (started 14:02 UTC)
 
