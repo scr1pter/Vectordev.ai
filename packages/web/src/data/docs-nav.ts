@@ -114,6 +114,11 @@ export const docsNav: DocGroup[] = [
         "blurb": "Vector's code review bot: on every pull request, on your branch before you push, and in the workspace."
       },
       {
+        "id": "review-pipeline",
+        "title": "How a review runs",
+        "blurb": "The path from a trigger to a comment: the skip ladder, what the reviewer reads, the verify pass, noise control and the limits."
+      },
+      {
         "id": "follow",
         "title": "Follow mode",
         "blurb": "Watch the agent type."

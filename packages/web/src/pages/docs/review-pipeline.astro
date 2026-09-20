@@ -1,0 +1,249 @@
+---
+import DocsPage from "../../layouts/DocsPage.astro"
+
+export const prerender = true
+---
+
+<DocsPage id="review-pipeline">
+          <p class="dx-lede">
+            Vectorscope is one engine behind three doors: the GitHub Action, <code>vector vectorscope</code> in your
+            terminal, and the Pull Requests panel in the desktop app. They share the same prompts, the same output
+            schema, the same filters and the same summary. This page is what happens between a trigger and a comment.
+          </p>
+
+          <h2>The path a review takes</h2>
+          <ol class="steps">
+            <li>
+              <span />
+              <div>
+                <strong>A trigger arrives</strong>
+                <p>
+                  A pull request opens or takes a push, or someone comments a command. Vectorscope answers to
+                  <code>/vectorscope</code>, <code>/vs</code>, <code>/vector</code> and <code>/vx</code>, longest name
+                  first.
+                </p>
+              </div>
+            </li>
+            <li>
+              <span />
+              <div>
+                <strong>The skip ladder decides whether to run</strong>
+                <p>Ten rules in order, first match wins. Most of them only apply to automatic runs.</p>
+              </div>
+            </li>
+            <li>
+              <span />
+              <div>
+                <strong>The run is planned</strong>
+                <p>
+                  Which specialists run, how much diff fits the model's context, and what the run is allowed to spend.
+                </p>
+              </div>
+            </li>
+            <li>
+              <span />
+              <div>
+                <strong>Each specialist reads the code</strong>
+                <p>
+                  A read-only session per specialist, with the changed files, their callers, their history and your
+                  rules — not just the diff.
+                </p>
+              </div>
+            </li>
+            <li>
+              <span />
+              <div>
+                <strong>A verify pass checks the candidates</strong>
+                <p>A second pass re-reads the code at each cited location and confirms or rejects the finding.</p>
+              </div>
+            </li>
+            <li>
+              <span />
+              <div>
+                <strong>Selection decides what is worth saying</strong>
+                <p>Confidence, severity and caps decide what goes on a line, what goes in the summary, and what is dropped.</p>
+              </div>
+            </li>
+            <li>
+              <span />
+              <div>
+                <strong>The review is posted</strong>
+                <p>One summary comment, edited in place, and only the comments that are new since the last push.</p>
+              </div>
+            </li>
+          </ol>
+
+          <h2>Reading the command</h2>
+          <p>
+            The parser strips HTML comments, code fences and quoted lines before it looks for anything, so showing or
+            quoting a command never runs it. Only the first line that starts with a mention is read. A known verb runs
+            that verb; anything else is treated as a task for the agent rather than ignored.
+          </p>
+          <p class="note">
+            <code>/vecbot</code> was the name for one evening. <code>/vector</code> and <code>/vx</code> keep working
+            because they are written into workflow files installed before the name existed.
+          </p>
+
+          <h2>The skip ladder</h2>
+          <p>Rules apply in this order and the first match wins:</p>
+          <ul class="feature-list">
+            <li><strong>month-budget</strong><span>The monthly cap is spent. This one has no command exception.</span></li>
+            <li><strong>label</strong><span>A <code>vector:paused</code>, <code>vector:skip</code> or <code>no-review</code> label. Automatic runs only.</span></li>
+            <li><strong>draft</strong><span>Draft pull requests. Automatic runs only.</span></li>
+            <li><strong>author</strong><span>Dependabot and Renovate by default. Automatic runs only.</span></li>
+            <li><strong>branch</strong><span>Branches matching a glob you set. Automatic runs only.</span></li>
+            <li><strong>fork</strong><span>Automatic runs only — a command on a fork <em>does</em> run, in untrusted mode.</span></li>
+            <li><strong>already-reviewed</strong><span>This head is already reviewed. Not overridable by <code>/vectorscope review</code>; only <code>review full</code> clears it.</span></li>
+            <li><strong>pr-budget</strong><span>This pull request has spent its dollar cap. Automatic runs only.</span></li>
+            <li><strong>nothing-to-review</strong><span>Every changed file was ignored — lockfiles, generated, vendored, binary.</span></li>
+            <li><strong>too-large</strong><span>More than 300 files or 5,000 changed lines. Automatic runs only; the summary carries a cost estimate instead.</span></li>
+          </ul>
+
+          <h2>Planning the run</h2>
+          <dl class="doc-rows">
+            <div>
+              <dt>Which specialists</dt>
+              <dd>
+                The code reviewer always runs. A second, security-only reviewer joins it when <code>security</code> is
+                <code>auto</code> (the default) and the change touches a sensitive path — authentication, crypto, SQL,
+                payments, CI workflows, Dockerfiles — or whenever you set <code>always</code>. Each reports only its own
+                kind of defect, so one problem is not posted twice.
+              </dd>
+            </div>
+            <div>
+              <dt>How much diff</dt>
+              <dd>
+                The budget is taken from the model's context: about 30% of what is left after a reserve, which is
+                roughly 16,800 characters at 32k of context and 79,800 at 128k, capped by <code>maxDiffChars</code>
+                (120,000). Files that do not fit inline are still reachable with the read tool.
+              </dd>
+            </div>
+            <div>
+              <dt>Which models</dt>
+              <dd>
+                Any model with at least 32k tokens of context. Below that the review refuses rather than truncating,
+                and says which model and what size it has.
+              </dd>
+            </div>
+          </dl>
+
+          <h2>What the reviewer sees</h2>
+          <p>
+            A review is not a diff in a prompt. Each specialist gets a read-only session and, with it:
+          </p>
+          <ul class="feature-list">
+            <li><strong>The changed files at head</strong><span>Whole files where they fit, otherwise the hunks with context.</span></li>
+            <li><strong>Their callers</strong><span>Declarations found in the added lines, then grep hits for where those symbols are used elsewhere.</span></li>
+            <li><strong>Their history</strong><span><code>git log</code> and blame for the changed ranges, so a line that was deliberately written that way reads as such.</span></li>
+            <li><strong>The conversation</strong><span>Human review comments already on the pull request.</span></li>
+            <li><strong>Your rules</strong><span>Plain English from <code>.vector/review.md</code>, scoped by <code>## path:</code> headings, read from the base branch.</span></li>
+            <li><strong>What is still open</strong><span>Findings from earlier runs, and what your team has dismissed elsewhere in the repository.</span></li>
+          </ul>
+          <p class="note">
+            The tools are <code>read</code>, <code>grep</code>, <code>glob</code> and <code>list</code>. The reviewer
+            cannot edit files, run commands or browse the web. Vector's own code gathers the git history and posts the
+            result.
+          </p>
+
+          <h2>The verify pass</h2>
+          <p>
+            Candidate findings go to a second pass that re-reads the code at each cited location and answers
+            <strong>confirmed</strong> only when the defect is real and triggers as described, otherwise
+            <strong>rejected</strong> with a one-sentence reason. Each candidate is handed over as untrusted text — a
+            claim to check, never an instruction — because the first pass wrote it after reading code the pull
+            request's author controls. On an untrusted pull request a committable fix is offered only after the verify
+            pass confirms the finding.
+          </p>
+
+          <h2>Noise control</h2>
+          <p>
+            Selection is where a review stops being a wall of text. A finding below <code>minConfidence</code> (0.7) or
+            below <code>minSeverity</code> (concern) does not go on a line; nits and anything outside the changed lines
+            are listed in the summary instead.
+          </p>
+          <p>
+            The cap for a run is the smaller of <code>maxComments</code> (10) and what is left of
+            <code>maxCommentsPerPr</code> (25) across the whole pull request; 50 is the ceiling either can be raised
+            to. Findings over the cap move to the summary rather than disappearing.
+          </p>
+          <p class="note is-caution">
+            One finding ignores the caps entirely: instructions in the pull request aimed at an AI reviewer. That is
+            the finding a maintainer most needs to see, so it is always posted.
+          </p>
+
+          <h2>What carries between runs</h2>
+          <dl class="doc-rows">
+            <div>
+              <dt>Finding identity</dt>
+              <dd>
+                A finding's id is a fingerprint of its file, its category, the meaningful words of its title and the
+                code it points at — never the line number. A force-push or a rebase moves the line without creating a
+                duplicate comment.
+              </dd>
+            </div>
+            <div>
+              <dt>Status</dt>
+              <dd>
+                Hidden markers in the comment bodies carry <code>open</code>, <code>fixed</code>,
+                <code>dismissed</code> and <code>outdated</code> forward. The author or anyone with write access can
+                resolve a comment or react with a thumbs-down, and that finding is not raised again.
+              </dd>
+            </div>
+            <div>
+              <dt>Team memory</dt>
+              <dd>
+                Dismissals are read across the repository, not just this pull request: up to thirty patterns of
+                category, directory and title words. It is how the reviewer stops repeating a kind of comment your team
+                has already said it does not want.
+              </dd>
+            </div>
+          </dl>
+
+          <h2>Posting</h2>
+          <p>
+            Vectorscope posts one review per run with the event <strong>comment</strong>. It never approves a pull
+            request and never requests changes; the only way it can block a merge is the check you opt into with
+            <code>failOn</code>. The summary comment is edited in place rather than repeated, and each push adds only
+            comments that are new.
+          </p>
+          <p>
+            If GitHub refuses a batch of inline comments, the batch is split and each half posted on its own; a single
+            comment GitHub will not take moves to the summary with its file and line, so no finding is silently lost.
+          </p>
+
+          <h2>Limits</h2>
+          <p>Every run is bounded. Before each step Vectorscope prices the next one and stops if it would cross a line.</p>
+          <dl class="doc-rows">
+            <div><dt>maxSteps</dt><dd>30 model steps per specialist.</dd></div>
+            <div><dt>maxCostUsd</dt><dd>$2.00 for one review.</dd></div>
+            <div><dt>maxCostUsdPerPr</dt><dd>$10.00 across the automatic reviews of one pull request.</dd></div>
+            <div><dt>maxCostUsdPerMonth</dt><dd>Off by default; <code>vector github install</code> writes $50 into the workflow for paid models.</dd></div>
+            <div><dt>timeoutMinutes</dt><dd>12 minutes.</dd></div>
+            <div><dt>maxFiles / maxChangedLines</dt><dd>300 files, 5,000 lines, after the ignores.</dd></div>
+          </dl>
+          <p>
+            A run that stops early is asked to finalize — return what it has confirmed rather than nothing — so a
+            budget or a timeout still produces a review. Every review ends with the model it ran on, the tokens and what
+            it cost.
+          </p>
+
+          <h2>Security</h2>
+          <ul class="feature-list">
+            <li><strong>Read-only by construction</strong><span>Permission rules, not a prompt: no edit, no write, no patch, no shell. The local <code>--checks</code> option allows a short list of bare test and typecheck commands, never with flags, because flags on those commands can run any program.</span></li>
+            <li><strong>Untrusted text is fenced</strong><span>Everything the pull request controls — code, titles, comments — is wrapped in untrusted tags, and any tag-like text inside it is escaped, so it cannot close its own block or open a trusted one.</span></li>
+            <li><strong>Forks never run</strong><span>A fork's review resolves the checkout to the merge base. Its code is read as text and never executed, and automatic reviews of forks are off because GitHub gives those runs no secrets.</span></li>
+            <li><strong>Settings come from the base</strong><span><code>.vector/review.md</code> and <code>.vector/review.json</code> are read from the base branch, so a pull request cannot change the rules it is reviewed under.</span></li>
+            <li><strong>Secrets are stripped</strong><span>Secret-looking values are redacted from everything posted, and the security reviewer is told to write the same placeholder rather than a value.</span></li>
+            <li><strong>Least privilege</strong><span>Reviews post as <code>github-actions[bot]</code> and need only <code>contents: read</code> and <code>pull-requests: write</code>.</span></li>
+          </ul>
+
+          <h2>Running it yourself</h2>
+          <p class="doc-cmd"><code>vector vectorscope
+vector vectorscope --uncommitted
+vector vectorscope --pr 482 --json
+vector github review --pr 482 --dry-run</code><button class="doc-cmd-copy" type="button" aria-label="Copy this command">Copy</button></p>
+          <p>
+            <code>--dry-run</code> prints every write it would make as JSON instead of posting it, which is how to test
+            a configuration change without commenting on a real pull request.
+          </p>
+</DocsPage>
