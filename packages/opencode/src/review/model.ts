@@ -57,11 +57,22 @@ export const resolveReviewModel = Effect.fn("ReviewModel.resolve")(function* (in
     return yield* new ReviewModelError({
       message: `Invalid model ${name}. Model must be in the format "provider/model".`,
     })
+  // Nothing was chosen and the fallback is not loadable: that is a review with no
+  // model rather than a broken provider, so it reads as the former.
+  const fellBack = !chosen && name === DEFAULT_MODEL
   const model = yield* provider
     .getModel(ref.providerID, ref.modelID)
     .pipe(
       Effect.catch(() =>
-        Effect.fail(new ReviewModelError({ message: `${name} is not available. Check the provider and its key.` })),
+        Effect.fail(
+          new ReviewModelError({
+            message: fellBack
+              ? ci
+                ? "No review model is set. Add REVIEW_AUTO_MODEL to the workflow, or model to .vector/review.json, and give the run that provider's key."
+                : "No review model is set. Pass --model, set model in .vector/review.json, or connect a provider in Vector."
+              : `${name} is not available. Check the provider and its key.`,
+          }),
+        ),
       ),
     )
   const refusal = contextRefusal(name, model.limit.context)

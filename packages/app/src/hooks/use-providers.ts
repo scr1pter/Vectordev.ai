@@ -6,9 +6,6 @@ import type { Accessor } from "solid-js"
 import { selectProviderCatalog } from "./provider-catalog"
 
 export const popularProviders = [
-  "opencode",
-  "opencode-go",
-  "opencode-zen",
   "anthropic",
   "github-copilot",
   "openai",
@@ -17,7 +14,11 @@ export const popularProviders = [
   "vercel",
 ]
 const popularProviderSet = new Set(popularProviders)
-const hiddenProviderSet = new Set<string>()
+// OpenCode Zen's keyless gateway is not Vector's to serve: those requests run
+// against OpenCode's endpoint. The engine no longer loads it without a key of the
+// user's own (ZEN_PUBLIC_GATEWAY in opencode/src/provider/provider.ts), and these
+// entries keep it out of the connect dialog and the provider lists as well.
+const hiddenProviderSet = new Set<string>(["opencode", "opencode-zen", "opencode-go"])
 
 type ProviderInfo = ReturnType<typeof selectProviderCatalog>["all"] extends Map<string, infer T> ? T : never
 

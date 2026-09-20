@@ -76,9 +76,12 @@ const providerLayer = (flags: Partial<RuntimeFlags.Info> = {}) =>
 
 const list = Provider.use.list()
 
+// Vector no longer serves OpenCode Zen's keyless gateway, so with no key of the
+// user's own the provider is absent entirely rather than present with only its
+// zero-cost models. `paid` therefore reports undefined for that case.
 const paid = (providers: Record<string, { models: Record<string, { cost: { input: number } }> }>) => {
   const item = providers[ProviderV2.ID.make("opencode")]
-  expect(item).toBeDefined()
+  if (!item) return undefined
   return Object.values(item.models).filter((model) => model.cost.input > 0).length
 }
 
@@ -1874,7 +1877,8 @@ it.effect("opencode loader keeps paid models when config apiKey is present", () 
     const none = paid(yield* listIn(noneDir))
     const keyedCount = paid(yield* listIn(keyedDir))
 
-    expect(none).toBe(0)
+    // No key: the provider does not load at all.
+    expect(none).toBeUndefined()
     expect(keyedCount).toBeGreaterThan(0)
   }).pipe(provideMultiInstance),
 )
@@ -1891,6 +1895,8 @@ it.effect("opencode loader keeps paid models when auth exists", () =>
         .pipe(Effect.provide(instanceStoreLayer), Effect.provide(AppNodeBuilder.build(CrossSpawnSpawner.node)))
 
     const none = paid(yield* listIn(noneDir))
+    // No auth: the provider does not load at all.
+    expect(none).toBeUndefined()
 
     const authPath = path.join(Global.Path.data, "auth.json")
     const original = yield* Effect.promise(() => Filesystem.readText(authPath).catch(() => undefined))
@@ -1906,7 +1912,6 @@ it.effect("opencode loader keeps paid models when auth exists", () =>
 
     const keyedCount = paid(yield* listIn(keyedDir))
 
-    expect(none).toBe(0)
     expect(keyedCount).toBeGreaterThan(0)
   }).pipe(provideMultiInstance),
 )

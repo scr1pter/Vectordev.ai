@@ -33,6 +33,12 @@ import { ModelStatus } from "./model-status"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderError } from "./error"
 
+// Models included with Vector will come from a provider Vector has its own
+// agreement with. Until then Vector does not serve OpenCode Zen's keyless
+// gateway; flipping this back on restores the old behaviour, and nothing else
+// about the provider was removed.
+const ZEN_PUBLIC_GATEWAY = false
+
 const OPENAI_HEADER_TIMEOUT_DEFAULT = 10_000
 
 function wrapSSE(res: Response, ms: number, ctl: AbortController) {
@@ -188,7 +194,17 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
         Boolean(yield* dep.auth(input.id)) ||
         Boolean((yield* dep.config()).provider?.["opencode"]?.options?.apiKey)
 
+      // Without a key of the user's own, this provider used to load OpenCode Zen's
+      // zero-cost models on the shared "public" key: every such request would run
+      // against OpenCode's endpoint on Vector's behalf, which is not ours to give
+      // away. The keyless path is closed, so those models appear nowhere — not in
+      // the picker, not in `vector models`, not as a review model. A user who
+      // brings their own opencode key still gets the provider, as with any other.
       if (!ok) {
+        if (!ZEN_PUBLIC_GATEWAY) {
+          for (const key of Object.keys(input.models)) delete input.models[key]
+          return { autoload: false, options: {} }
+        }
         for (const [key, value] of Object.entries(input.models)) {
           if (value.cost.input === 0) continue
           delete input.models[key]

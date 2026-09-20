@@ -8,14 +8,14 @@ export const prerender = true
 
           <h3>Models included with Vector</h3>
           <p>
-            You do not need an API key. Vector comes with models included, today among them NVIDIA's
-            Nemotron and Meta's Muse Spark, in the desktop app and the CLI alike. A new install starts
-            on Big Pickle, so the first session works before you connect anything. The lineup changes
-            as providers add and retire models.
+            Vector is moving the models it includes onto a provider it has its own agreement with.
+            While that is being set up, no models ship with the app: connect a provider below, and
+            your subscription covers Vector itself rather than model usage.
           </p>
-          <p class="note is-caution">
-            Included models are served by outside providers, and some may use your prompts to improve
-            their models. For confidential code, use your own provider key.
+          <p class="note">
+            Earlier builds offered a set of no-key models through OpenCode Zen's shared gateway. Those
+            requests ran against OpenCode's own endpoint, so Vector has stopped serving them. Nothing
+            you configured yourself is affected: your own keys, including an OpenCode key, keep working.
           </p>
           <h3>Bring your own key</h3>
           <p>
