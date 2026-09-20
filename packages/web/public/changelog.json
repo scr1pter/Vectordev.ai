@@ -1,6 +1,20 @@
 {
   "releases": [
     {
+      "tag": "v1.99.10",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Models included with Vector are changing hands",
+              "description": "Vector no longer serves the no-key models it used to include. Those ran on OpenCode Zen's shared gateway, which meant every request went to OpenCode's own endpoint on Vector's behalf — not something Vector should be giving away. The provider is closed unless you bring your own key, and the models are gone from the picker, the connect dialog, the terminal's model list and the reviewer's default. Models included with Vector are moving to a provider Vector has its own agreement with; until that lands, connect a provider of your own in Settings or with vector auth login, and your subscription covers Vector itself rather than model usage. Nothing you configured yourself changed: your own keys, an OpenCode key included, keep working exactly as before. Also in this build: Command-F opened the chat search bar sixteen pixels from the top of the window, which put it on the title strip and across the session header; it now measures the chrome above it and hangs below it, and re-measures when the window resizes."
+            }
+          ]
+        }
+      ]
+    },
+    {
       "tag": "v1.99.9",
       "highlights": [
         {
