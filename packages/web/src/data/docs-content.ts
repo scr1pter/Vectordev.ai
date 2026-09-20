@@ -365,7 +365,7 @@ export const subagentKinds = [
 ]
 export const changelog = [
   [
-    "September 2026 · 1.99.10",
+    "September 2026 · 1.99.91",
     "Models included with Vector are changing hands",
     "The no-key models that ran through OpenCode Zen's shared gateway are withdrawn — those requests hit OpenCode's endpoint on Vector's behalf. Bring your own key for now; included models are moving to a provider Vector has an agreement with. Command-F no longer opens the chat search bar on top of the title strip.",
   ],

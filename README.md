@@ -18,7 +18,7 @@ vector
 
 **Bring your own key, for now.** Vector is moving the models it includes onto a provider it has its own agreement with; until that lands, connect Claude, GPT, Gemini or any other provider you already pay for. Vector desktop is available for macOS, Windows and Linux at [vectordev.ai](https://vectordev.ai) for $10 a month or $99 a year — the subscription covers Vector itself. Create a Vector account, then choose a plan from Account. Creating an account does not start a subscription. The terminal agent is free with a Vector account.
 
-**New in 1.99.10:** The no-key models that ran through OpenCode Zen's shared gateway are withdrawn — bring your own key while Vector moves included models to a provider it has its own agreement with. Plus Vectorscope, Vector's code review bot, and account deletion you can do yourself. [Release notes →](https://vectordev.ai/releases)
+**New in 1.99.91:** The no-key models that ran through OpenCode Zen's shared gateway are withdrawn — bring your own key while Vector moves included models to a provider it has its own agreement with. Plus Vectorscope, Vector's code review bot, and account deletion you can do yourself. [Release notes →](https://vectordev.ai/releases)
 
 ## Features
 
