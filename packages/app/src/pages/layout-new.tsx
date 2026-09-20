@@ -571,6 +571,10 @@ export default function NewLayout(props: ParentProps) {
   const [engineeringRefreshBusy, setEngineeringRefreshBusy] = createSignal(false)
   const [sidePanelOpen, setSidePanelOpen] = createSignal(false)
   const [chatSearchOpen, setChatSearchOpen] = createSignal(false)
+  // Where the chat search bar hangs from. Fixed to the viewport it landed on the
+  // window's own title strip and the session header; it measures the chrome
+  // above it instead, so it clears both on every platform and titlebar variant.
+  const [chatSearchTop, setChatSearchTop] = createSignal(16)
   const [chatSearchValue, setChatSearchValue] = createSignal("")
   const [navigationVisible, setNavigationVisible] = createSignal(true)
   const [navigationWidth, setNavigationWidth] = createSignal(readNavigationWidth())
@@ -763,9 +767,20 @@ export default function NewLayout(props: ParentProps) {
     root.dataset.vectorTheme = "dark"
   })
 
+  const measureChatSearchTop = () => {
+    const header = document.querySelector("[data-vector-session-header]")?.getBoundingClientRect()
+    if (header && header.height > 0) return Math.round(header.bottom + 12)
+    const stage = document.querySelector("[data-vector-main-stage]")?.getBoundingClientRect()
+    return Math.round((stage?.top ?? 0) + 12)
+  }
+
   createEffect(() => {
     if (!chatSearchOpen()) return
+    setChatSearchTop(measureChatSearchTop())
     queueMicrotask(() => chatSearchRef?.focus())
+    const remeasure = () => setChatSearchTop(measureChatSearchTop())
+    globalThis.addEventListener("resize", remeasure)
+    onCleanup(() => globalThis.removeEventListener("resize", remeasure))
   })
 
   createEffect(() => {
@@ -6906,7 +6921,8 @@ export default function NewLayout(props: ParentProps) {
 
       <Show when={chatSearchOpen()}>
         <form
-          class="fixed right-4 top-4 z-[70] flex w-[min(360px,calc(100vw-88px))] items-center gap-1 rounded-2xl border border-[#303036] bg-[#242428]/96 p-1.5 shadow-[0_24px_70px_rgba(0,0,0,0.42)] backdrop-blur-2xl"
+          class="fixed right-4 z-[70] flex w-[min(360px,calc(100vw-88px))] items-center gap-1 rounded-2xl border border-[#303036] bg-[#242428]/96 p-1.5 shadow-[0_24px_70px_rgba(0,0,0,0.42)] backdrop-blur-2xl"
+          style={{ top: `${chatSearchTop()}px` }}
           onSubmit={(event) => {
             event.preventDefault()
             searchChat()
