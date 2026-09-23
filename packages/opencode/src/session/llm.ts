@@ -4,6 +4,7 @@ import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { Provider } from "@/provider/provider"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { serviceUse } from "@opencode-ai/core/effect/service-use"
+import { providerCredentialAllowed } from "@opencode-ai/core/provider-policy"
 import { Context, Effect, Layer } from "effect"
 import * as Stream from "effect/Stream"
 import { streamText, wrapLanguageModel, type ModelMessage, type Tool } from "ai"
@@ -97,7 +98,13 @@ const live: Layer.Layer<
           provider.getLanguage(input.model),
           config.get(),
           provider.getProvider(input.model.providerID),
-          auth.get(input.model.providerID),
+          auth
+            .get(input.model.providerID)
+            .pipe(
+              Effect.map((stored) =>
+                stored && providerCredentialAllowed(input.model.providerID, stored) ? stored : undefined,
+              ),
+            ),
         ],
         { concurrency: "unbounded" },
       )

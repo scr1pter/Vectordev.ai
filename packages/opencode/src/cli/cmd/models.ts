@@ -1,5 +1,7 @@
 import { EOL } from "os"
 import { Effect } from "effect"
+import { Flag } from "@opencode-ai/core/flag/flag"
+import { providerEndpointAllowed } from "@opencode-ai/core/provider-policy"
 import { ModelsDev } from "@opencode-ai/core/models-dev"
 import { effectCmd, fail } from "../effect-cmd"
 import { UI } from "../ui"
@@ -20,14 +22,22 @@ export const ModelsCommand = effectCmd({
         type: "boolean",
       })
       .option("refresh", {
-        describe: "refresh the models cache from models.dev",
+        describe: "refresh the model catalog from the configured mirror",
         type: "boolean",
       }),
   handler: Effect.fn("Cli.models")(function* (args) {
     const { Provider } = yield* Effect.promise(() => import("@/provider/provider"))
     if (args.refresh) {
-      yield* ModelsDev.Service.use((s) => s.refresh(true))
-      UI.println(UI.Style.TEXT_SUCCESS_BOLD + "Models cache refreshed" + UI.Style.TEXT_NORMAL)
+      const enabled =
+        Flag.OPENCODE_MODELS_URL &&
+        providerEndpointAllowed(Flag.OPENCODE_MODELS_URL) &&
+        !Flag.OPENCODE_DISABLE_MODELS_FETCH
+      if (enabled) yield* ModelsDev.Service.use((s) => s.refresh(true))
+      UI.println(
+        enabled
+          ? "Model catalog refresh attempted; the last available catalog remains usable if the mirror is offline."
+          : "Using the bundled model catalog. Set VECTOR_MODELS_URL to a Vector-hosted mirror to enable refresh.",
+      )
     }
 
     const provider = yield* Provider.Service
@@ -53,13 +63,7 @@ export const ModelsCommand = effectCmd({
       return
     }
 
-    const ids = Object.keys(providers).sort((a, b) => {
-      const aIsOpencode = a.startsWith("opencode")
-      const bIsOpencode = b.startsWith("opencode")
-      if (aIsOpencode && !bIsOpencode) return -1
-      if (!aIsOpencode && bIsOpencode) return 1
-      return a.localeCompare(b)
-    })
+    const ids = Object.keys(providers).sort((a, b) => a.localeCompare(b))
 
     for (const providerID of ids) print(ProviderV2.ID.make(providerID), args.verbose)
   }),

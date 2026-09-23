@@ -1,5 +1,6 @@
 export * as Integration from "./integration"
 
+import { providerCredentialAllowed } from "./provider-policy"
 import { makeLocationNode } from "./effect/app-node"
 import {
   Cause,
@@ -287,6 +288,7 @@ export const locationLayer = Layer.effect(
 
     const resolveConnections = (entry: Entry | undefined, saved: readonly Credential.Info[]) => {
       const credentials = saved
+        .filter((credential) => providerCredentialAllowed(credential.integrationID, credential.value))
         .map((credential) => ({
           type: "credential" as const,
           id: credential.id,
@@ -389,6 +391,7 @@ export const locationLayer = Layer.effect(
           }
           const credential = yield* credentials.get(connection.id)
           if (!credential) return undefined
+          if (!providerCredentialAllowed(credential.integrationID, credential.value)) return undefined
           if (credential.value.type === "key") return credential.value
           const implementation = state
             .get()

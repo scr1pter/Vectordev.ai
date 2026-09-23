@@ -1,3 +1,4 @@
+import { CHATGPT_SIGN_IN } from "../../provider-policy"
 import { createServer } from "node:http"
 import type { IntegrationOAuthMethodRegistration } from "@opencode-ai/plugin/v2/effect/integration"
 import { define } from "@opencode-ai/plugin/v2/effect/plugin"
@@ -11,7 +12,7 @@ import { OauthCallbackPage } from "../../oauth/page"
 import { ProviderV2 } from "../../provider"
 import type { PluginInternal } from "../internal"
 
-const clientID = "app_EMoamEEZ73f0CkXaXp7hrann"
+const clientID = "" // Requires a Vector-owned OpenAI OAuth registration.
 const issuer = "https://auth.openai.com"
 const callbackPort = 1455
 const pollingSafetyMargin = 3000
@@ -155,6 +156,7 @@ export const OpenAIPlugin = define({
   id: "openai",
   effect: Effect.fn(function* (ctx) {
     yield* ctx.integration.transform((draft) => {
+      if (!CHATGPT_SIGN_IN) return
       draft.method.update(browser)
       draft.method.update(headless)
     })
@@ -189,7 +191,7 @@ export const OpenAIPlugin = define({
 } satisfies PluginInternal.Plugin<PluginInternal.Requirements | Scope.Scope>)
 
 function headers(contentType: string) {
-  return { "Content-Type": contentType, "User-Agent": `opencode/${InstallationVersion}` }
+  return { "Content-Type": contentType, "User-Agent": `vector/${InstallationVersion}` }
 }
 
 function exchange(code: string, redirect: string, pkce: Pkce) {
@@ -268,7 +270,7 @@ function authorizeURL(redirect: string, pkce: Pkce, state: string) {
     id_token_add_organizations: "true",
     codex_cli_simplified_flow: "true",
     state,
-    originator: "opencode",
+    originator: "vector",
   })}`
 }
 

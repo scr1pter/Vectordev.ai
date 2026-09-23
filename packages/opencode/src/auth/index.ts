@@ -1,3 +1,4 @@
+import { readEnv } from "@opencode-ai/core/flag/compat"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import path from "path"
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto"
@@ -26,6 +27,7 @@ export class Oauth extends Schema.Class<Oauth>("OAuth")({
   access: Schema.String,
   expires: NonNegativeInt,
   accountId: Schema.optional(Schema.String),
+  clientId: Schema.optional(Schema.String),
   enterpriseUrl: Schema.optional(Schema.String),
 }) {}
 
@@ -82,8 +84,8 @@ const layer = Layer.effect(
     })
 
     const all = Effect.fn("Auth.all")(function* () {
-      if (process.env.OPENCODE_AUTH_CONTENT) {
-        const parsed = Option.getOrUndefined(decodeJson(process.env.OPENCODE_AUTH_CONTENT))
+      if (readEnv("OPENCODE_AUTH_CONTENT")) {
+        const parsed = Option.getOrUndefined(decodeJson(readEnv("OPENCODE_AUTH_CONTENT")))
         if (parsed) return decodeAuthData(parsed)
       }
 

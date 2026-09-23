@@ -1,4 +1,5 @@
 import type { Auth } from "@/auth"
+import { providerAllowed, providerCredentialAllowed, providerEndpointAllowed } from "@opencode-ai/core/provider-policy"
 import type { Provider } from "@/provider/provider"
 import { ProviderTransform } from "@/provider/transform"
 import { errorMessage } from "@/util/error"
@@ -52,8 +53,14 @@ function statusWithFetch(
   fetch: typeof globalThis.fetch | undefined,
 ): RuntimeStatus {
   const providerID = input.model.providerID
-  if (providerID !== "openai" && providerID !== "anthropic" && !providerID.startsWith("opencode"))
-    return { type: "unsupported", reason: "provider is not openai, opencode, or anthropic" }
+  if (!providerAllowed(providerID) || !providerAllowed(input.provider.id))
+    return { type: "unsupported", reason: "provider is retired" }
+  if (!providerEndpointAllowed(input.model.api.url) || !providerEndpointAllowed(input.provider.options.baseURL))
+    return { type: "unsupported", reason: "provider endpoint is retired" }
+  if (input.auth && !providerCredentialAllowed(providerID, input.auth))
+    return { type: "unsupported", reason: "provider sign-in is paused" }
+  if (providerID !== "openai" && providerID !== "anthropic")
+    return { type: "unsupported", reason: "provider is not openai or anthropic" }
   const npm = input.model.api.npm
   if (npm !== "@ai-sdk/openai" && npm !== "@ai-sdk/openai-compatible" && npm !== "@ai-sdk/anthropic")
     return { type: "unsupported", reason: "provider package is not OpenAI, OpenAI-compatible, or Anthropic" }

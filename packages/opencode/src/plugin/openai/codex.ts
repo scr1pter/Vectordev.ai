@@ -1,3 +1,4 @@
+import { CHATGPT_SIGN_IN } from "@opencode-ai/core/provider-policy"
 import type { Hooks, PluginInput } from "@opencode-ai/plugin"
 import { InstallationVersion } from "@opencode-ai/core/installation/version"
 import { OAUTH_DUMMY_KEY } from "../../auth"
@@ -7,7 +8,7 @@ import { createServer } from "http"
 import { OpenAIWebSocketPool } from "./ws-pool"
 import { OauthCallbackPage } from "@opencode-ai/core/oauth/page"
 
-const CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
+const CLIENT_ID = "" // Requires a Vector-owned OpenAI OAuth registration.
 const ISSUER = "https://auth.openai.com"
 const CODEX_API_ENDPOINT = "https://chatgpt.com/backend-api/codex/responses"
 const OAUTH_PORT = 1455
@@ -84,7 +85,7 @@ function buildAuthorizeUrl(redirectUri: string, pkce: PkceCodes, state: string):
     id_token_add_organizations: "true",
     codex_cli_simplified_flow: "true",
     state,
-    originator: "opencode",
+    originator: "vector",
   })
   return `${ISSUER}/oauth/authorize?${params.toString()}`
 }
@@ -276,7 +277,7 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
     provider: {
       id: "openai",
       async models(provider, ctx) {
-        if (ctx.auth?.type !== "oauth") return provider.models
+        if (!CHATGPT_SIGN_IN || ctx.auth?.type !== "oauth") return provider.models
 
         return Object.fromEntries(
           Object.entries(provider.models)
@@ -315,6 +316,7 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
       provider: "openai",
       async loader(getAuth) {
         const auth = await getAuth()
+        if (auth.type === "oauth" && !CHATGPT_SIGN_IN) return {}
         const websocketFetch = options.experimentalWebSockets
           ? OpenAIWebSocketPool.createWebSocketFetch({ httpFetch: fetch })
           : undefined
@@ -419,130 +421,132 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
           },
         }
       },
-      methods: [
-        {
-          label: "ChatGPT Pro/Plus (browser)",
-          type: "oauth",
-          authorize: async () => {
-            const { redirectUri } = await startOAuthServer()
-            const pkce = await generatePKCE()
-            const state = base64UrlEncode(crypto.getRandomValues(new Uint8Array(32)).buffer)
-            const authUrl = buildAuthorizeUrl(redirectUri, pkce, state)
+      methods: (
+        [
+          {
+            label: "ChatGPT Pro/Plus (browser)",
+            type: "oauth",
+            authorize: async () => {
+              const { redirectUri } = await startOAuthServer()
+              const pkce = await generatePKCE()
+              const state = base64UrlEncode(crypto.getRandomValues(new Uint8Array(32)).buffer)
+              const authUrl = buildAuthorizeUrl(redirectUri, pkce, state)
 
-            const callbackPromise = waitForOAuthCallback(pkce, state)
+              const callbackPromise = waitForOAuthCallback(pkce, state)
 
-            return {
-              url: authUrl,
-              instructions: "Complete authorization in your browser. This window will close automatically.",
-              method: "auto" as const,
-              callback: async () => {
-                const tokens = await callbackPromise
-                stopOAuthServer()
-                const accountId = extractAccountId(tokens)
-                return {
-                  type: "success" as const,
-                  refresh: tokens.refresh_token,
-                  access: tokens.access_token,
-                  expires: Date.now() + (tokens.expires_in ?? 3600) * 1000,
-                  accountId,
-                }
-              },
-            }
+              return {
+                url: authUrl,
+                instructions: "Complete authorization in your browser. This window will close automatically.",
+                method: "auto" as const,
+                callback: async () => {
+                  const tokens = await callbackPromise
+                  stopOAuthServer()
+                  const accountId = extractAccountId(tokens)
+                  return {
+                    type: "success" as const,
+                    refresh: tokens.refresh_token,
+                    access: tokens.access_token,
+                    expires: Date.now() + (tokens.expires_in ?? 3600) * 1000,
+                    accountId,
+                  }
+                },
+              }
+            },
           },
-        },
-        {
-          label: "ChatGPT Pro/Plus (headless)",
-          type: "oauth",
-          authorize: async () => {
-            const deviceResponse = await fetch(`${ISSUER}/api/accounts/deviceauth/usercode`, {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                "User-Agent": `opencode/${InstallationVersion}`,
-              },
-              body: JSON.stringify({ client_id: CLIENT_ID }),
-            })
+          {
+            label: "ChatGPT Pro/Plus (headless)",
+            type: "oauth",
+            authorize: async () => {
+              const deviceResponse = await fetch(`${ISSUER}/api/accounts/deviceauth/usercode`, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "User-Agent": `vector/${InstallationVersion}`,
+                },
+                body: JSON.stringify({ client_id: CLIENT_ID }),
+              })
 
-            if (!deviceResponse.ok) throw new Error("Failed to initiate device authorization")
+              if (!deviceResponse.ok) throw new Error("Failed to initiate device authorization")
 
-            const deviceData = (await deviceResponse.json()) as {
-              device_auth_id: string
-              user_code: string
-              interval: string
-            }
-            const interval = Math.max(parseInt(deviceData.interval) || 5, 1) * 1000
+              const deviceData = (await deviceResponse.json()) as {
+                device_auth_id: string
+                user_code: string
+                interval: string
+              }
+              const interval = Math.max(parseInt(deviceData.interval) || 5, 1) * 1000
 
-            return {
-              url: `${ISSUER}/codex/device`,
-              instructions: `Enter code: ${deviceData.user_code}`,
-              method: "auto" as const,
-              async callback() {
-                while (true) {
-                  const response = await fetch(`${ISSUER}/api/accounts/deviceauth/token`, {
-                    method: "POST",
-                    headers: {
-                      "Content-Type": "application/json",
-                      "User-Agent": `opencode/${InstallationVersion}`,
-                    },
-                    body: JSON.stringify({
-                      device_auth_id: deviceData.device_auth_id,
-                      user_code: deviceData.user_code,
-                    }),
-                  })
-
-                  if (response.ok) {
-                    const data = (await response.json()) as {
-                      authorization_code: string
-                      code_verifier: string
-                    }
-
-                    const tokenResponse = await fetch(`${ISSUER}/oauth/token`, {
+              return {
+                url: `${ISSUER}/codex/device`,
+                instructions: `Enter code: ${deviceData.user_code}`,
+                method: "auto" as const,
+                async callback() {
+                  while (true) {
+                    const response = await fetch(`${ISSUER}/api/accounts/deviceauth/token`, {
                       method: "POST",
-                      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-                      body: new URLSearchParams({
-                        grant_type: "authorization_code",
-                        code: data.authorization_code,
-                        redirect_uri: `${ISSUER}/deviceauth/callback`,
-                        client_id: CLIENT_ID,
-                        code_verifier: data.code_verifier,
-                      }).toString(),
+                      headers: {
+                        "Content-Type": "application/json",
+                        "User-Agent": `vector/${InstallationVersion}`,
+                      },
+                      body: JSON.stringify({
+                        device_auth_id: deviceData.device_auth_id,
+                        user_code: deviceData.user_code,
+                      }),
                     })
 
-                    if (!tokenResponse.ok) {
-                      throw new Error(`Token exchange failed: ${tokenResponse.status}`)
+                    if (response.ok) {
+                      const data = (await response.json()) as {
+                        authorization_code: string
+                        code_verifier: string
+                      }
+
+                      const tokenResponse = await fetch(`${ISSUER}/oauth/token`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                        body: new URLSearchParams({
+                          grant_type: "authorization_code",
+                          code: data.authorization_code,
+                          redirect_uri: `${ISSUER}/deviceauth/callback`,
+                          client_id: CLIENT_ID,
+                          code_verifier: data.code_verifier,
+                        }).toString(),
+                      })
+
+                      if (!tokenResponse.ok) {
+                        throw new Error(`Token exchange failed: ${tokenResponse.status}`)
+                      }
+
+                      const tokens: TokenResponse = await tokenResponse.json()
+
+                      return {
+                        type: "success" as const,
+                        refresh: tokens.refresh_token,
+                        access: tokens.access_token,
+                        expires: Date.now() + (tokens.expires_in ?? 3600) * 1000,
+                        accountId: extractAccountId(tokens),
+                      }
                     }
 
-                    const tokens: TokenResponse = await tokenResponse.json()
-
-                    return {
-                      type: "success" as const,
-                      refresh: tokens.refresh_token,
-                      access: tokens.access_token,
-                      expires: Date.now() + (tokens.expires_in ?? 3600) * 1000,
-                      accountId: extractAccountId(tokens),
+                    if (response.status !== 403 && response.status !== 404) {
+                      return { type: "failed" as const }
                     }
-                  }
 
-                  if (response.status !== 403 && response.status !== 404) {
-                    return { type: "failed" as const }
+                    await sleep(interval + OAUTH_POLLING_SAFETY_MARGIN_MS)
                   }
-
-                  await sleep(interval + OAUTH_POLLING_SAFETY_MARGIN_MS)
-                }
-              },
-            }
+                },
+              }
+            },
           },
-        },
-        {
-          label: "Manually enter API Key",
-          type: "api",
-        },
-      ],
+          {
+            label: "Manually enter API Key",
+            type: "api",
+          },
+        ] satisfies NonNullable<Hooks["auth"]>["methods"]
+      ).filter((method) => CHATGPT_SIGN_IN || method.type !== "oauth"),
     },
     "chat.headers": async (input, output) => {
       if (input.model.providerID !== "openai") return
-      output.headers.originator = "opencode"
-      output.headers["User-Agent"] = `opencode/${InstallationVersion} (${os.platform()} ${os.release()}; ${os.arch()})`
+      output.headers.originator = "vector"
+      output.headers["User-Agent"] = `vector/${InstallationVersion} (${os.platform()} ${os.release()}; ${os.arch()})`
       output.headers["session-id"] = input.sessionID
       // Temporary fetch-layer hack: title generation currently shares the conversation
       // session ID, so the OpenAI plugin marks it for HTTP fallback until transport

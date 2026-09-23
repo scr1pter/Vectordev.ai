@@ -1,3 +1,4 @@
+import { DIGITALOCEAN_SIGN_IN } from "@opencode-ai/core/provider-policy"
 import type { Hooks, PluginInput } from "@opencode-ai/plugin"
 import type { Model } from "@opencode-ai/sdk/v2"
 import { InstallationVersion } from "@opencode-ai/core/installation/version"
@@ -5,7 +6,7 @@ import { OauthCallbackPage } from "@opencode-ai/core/oauth/page"
 import { createServer } from "http"
 import open from "open"
 
-const DO_OAUTH_CLIENT_ID = "b1a6c5158156caac821fd1b30253ca8acb52454a48fa744420e41889cb589f82"
+const DO_OAUTH_CLIENT_ID = "" // Requires a Vector-owned DigitalOcean registration.
 const DO_AUTHORIZE_URL = "https://cloud.digitalocean.com/v1/oauth/authorize"
 const DO_API_BASE = "https://api.digitalocean.com"
 const DO_GENAI_API = `${DO_API_BASE}/v2/gen-ai`
@@ -171,7 +172,7 @@ async function listRouters(
     headers: {
       Authorization: `Bearer ${bearer}`,
       Accept: "application/json",
-      "User-Agent": `opencode/${InstallationVersion}`,
+      "User-Agent": `vector/${InstallationVersion}`,
     },
     signal: AbortSignal.timeout(10_000),
   }).catch(() => undefined)
@@ -222,6 +223,10 @@ function parseRoutersJSON(raw: string | undefined): RouterEntry[] {
 }
 
 export async function DigitalOceanAuthPlugin(input: PluginInput): Promise<Hooks> {
+  if (!DIGITALOCEAN_SIGN_IN)
+    return {
+      auth: { provider: "digitalocean", methods: [{ type: "api", label: "DigitalOcean inference access key" }] },
+    }
   return {
     provider: {
       id: "digitalocean",
@@ -283,7 +288,7 @@ export async function DigitalOceanAuthPlugin(input: PluginInput): Promise<Hooks>
             return {
               url,
               instructions:
-                "Sign in to DigitalOcean in your browser. OpenCode will use your DigitalOcean API token directly for inference and load your Inference Routers. Re-run /connect to refresh routers later.",
+                "Sign in to DigitalOcean in your browser. Vector will use your DigitalOcean API token directly for inference and load your Inference Routers. Re-run /connect to refresh routers later.",
               method: "auto" as const,
               async callback() {
                 try {

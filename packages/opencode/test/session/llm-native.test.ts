@@ -360,7 +360,7 @@ describe("session.llm-native.request", () => {
     const compatible = LLMNative.model({
       model: {
         ...baseModel,
-        providerID: ProviderV2.ID.make("opencode"),
+        providerID: ProviderV2.ID.make("custom-compatible"),
         api: { ...baseModel.api, url: "https://ai.example.test/v1", npm: "@ai-sdk/openai-compatible" },
       },
       apiKey: "test-key",
@@ -392,51 +392,43 @@ describe("session.llm-native.request", () => {
       type: "supported",
       apiKey: "test-openai-key",
     })
+    for (const id of ["opencode", "opencode-go", "opencode-zen", "opencode-custom"]) {
+      expect(
+        LLMNativeRuntime.status({
+          model: { ...baseModel, providerID: ProviderV2.ID.make(id) },
+          provider: { ...providerInfo, id: ProviderV2.ID.make(id) },
+          auth: { type: "api", key: "user-supplied-key" },
+        }),
+      ).toEqual({ type: "unsupported", reason: "provider is retired" })
+    }
     expect(
       LLMNativeRuntime.status({
-        model: { ...baseModel, providerID: ProviderV2.ID.make("opencode") },
-        provider: { ...providerInfo, id: ProviderV2.ID.make("opencode") },
+        model: baseModel,
+        provider: { ...providerInfo, options: { apiKey: "test-key", baseURL: "https://opencode.ai/zen/v1" } },
         auth: undefined,
       }),
-    ).toMatchObject({
-      type: "supported",
-      apiKey: "test-openai-key",
-    })
-    expect(
-      LLMNativeRuntime.status({
-        model: {
-          ...baseModel,
-          providerID: ProviderV2.ID.make("opencode"),
-          api: { ...baseModel.api, npm: "@ai-sdk/openai-compatible" },
-        },
-        provider: { ...providerInfo, id: ProviderV2.ID.make("opencode") },
-        auth: undefined,
-      }),
-    ).toMatchObject({
-      type: "supported",
-      apiKey: "test-openai-key",
-    })
+    ).toEqual({ type: "unsupported", reason: "provider endpoint is retired" })
     expect(
       LLMNativeRuntime.status({
         model: { ...baseModel, providerID: ProviderV2.ID.make("google") },
         provider: { ...providerInfo, id: ProviderV2.ID.make("google") },
         auth: undefined,
       }),
-    ).toEqual({ type: "unsupported", reason: "provider is not openai, opencode, or anthropic" })
+    ).toEqual({ type: "unsupported", reason: "provider is not openai or anthropic" })
     expect(
       LLMNativeRuntime.status({
         model: baseModel,
         provider: providerInfo,
         auth: { type: "oauth", refresh: "refresh", access: "access", expires: 1 },
       }),
-    ).toEqual({ type: "unsupported", reason: "OAuth auth requires a provider fetch override" })
+    ).toEqual({ type: "unsupported", reason: "provider sign-in is paused" })
     expect(
       LLMNativeRuntime.status({
         model: baseModel,
         provider: { ...providerInfo, options: { apiKey: OAUTH_DUMMY_KEY, fetch: async () => new Response() } },
         auth: { type: "oauth", refresh: "refresh", access: "access", expires: 1 },
       }),
-    ).toMatchObject({ type: "supported", apiKey: OAUTH_DUMMY_KEY })
+    ).toEqual({ type: "unsupported", reason: "provider sign-in is paused" })
 
     expect(
       LLMNativeRuntime.status({
@@ -475,21 +467,20 @@ describe("session.llm-native.request", () => {
     ).toMatchObject({ type: "supported", apiKey: "test-anthropic-key" })
   })
 
-  test("prefers console provider api key over stored opencode auth", () => {
+  test("prefers explicit provider API key over stored API-key auth", () => {
     expect(
       LLMNativeRuntime.status({
-        model: { ...baseModel, providerID: ProviderV2.ID.make("opencode") },
+        model: baseModel,
         provider: {
           ...providerInfo,
-          id: ProviderV2.ID.make("opencode"),
-          options: { apiKey: "console-token" },
-          key: "zen-token",
+          options: { apiKey: "explicit-key" },
+          key: "stored-key",
         },
-        auth: { type: "api", key: "zen-token" },
+        auth: { type: "api", key: "stored-key" },
       }),
     ).toMatchObject({
       type: "supported",
-      apiKey: "console-token",
+      apiKey: "explicit-key",
     })
     expect(
       LLMNativeRuntime.status({
@@ -710,7 +701,7 @@ describe("session.llm-native.request", () => {
     }),
   )
 
-  it.effect("uses provider fetch override for native OpenAI OAuth requests", () =>
+  it.effect("rejects paused OpenAI OAuth before invoking a provider fetch override", () =>
     Effect.gen(function* () {
       const captures: Array<{ url: string; body: unknown }> = []
       const customFetch = Object.assign(
@@ -737,25 +728,8 @@ describe("session.llm-native.request", () => {
         headers: {},
         abort: new AbortController().signal,
       })
-      expect(native.type).toBe("supported")
-      if (native.type === "unsupported") throw new Error(native.reason)
-      const events = Array.from(yield* native.stream.pipe(Stream.runCollect))
-
-      expect(captures).toHaveLength(1)
-      expect(captures[0]).toMatchObject({
-        url: "https://api.openai.com/v1/responses",
-        body: {
-          model: "gpt-5-mini",
-          instructions: "You are concise.",
-          input: [{ role: "user", content: [{ type: "input_text", text: "hello" }] }],
-        },
-      })
-      expect(events).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ type: "text-delta", text: "Hello" }),
-          expect.objectContaining({ type: "finish" }),
-        ]),
-      )
+      expect(native).toEqual({ type: "unsupported", reason: "provider sign-in is paused" })
+      expect(captures).toHaveLength(0)
     }),
   )
 })

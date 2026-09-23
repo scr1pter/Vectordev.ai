@@ -149,144 +149,18 @@ describe("plugin.codex", () => {
     await enabled.dispose?.()
   })
 
-  test("deduplicates concurrent Codex token refreshes", async () => {
-    let auth = {
-      type: "oauth" as const,
-      refresh: "refresh-old",
-      access: "",
-      expires: 0,
-    }
-    const authUpdates: Array<{
-      body: { refresh: string; access: string; expires: number; accountId?: string }
-    }> = []
-    let resolveRefresh: (() => void) | undefined
-    const refreshReady = new Promise<void>((resolve) => {
-      resolveRefresh = resolve
-    })
-    let refreshRequests = 0
-    const apiRequests: { authorization: string | null; accountId: string | null }[] = []
-
-    using server = Bun.serve({
-      port: 0,
-      async fetch(request) {
-        const url = new URL(request.url)
-        if (url.pathname === "/oauth/token") {
-          expect(await request.text()).toContain("refresh_token=refresh-old")
-          refreshRequests += 1
-          await refreshReady
-          return Response.json({
-            id_token: createTestJwt({ chatgpt_account_id: "acc-123" }),
-            access_token: "access-new",
-            refresh_token: "refresh-new",
-            expires_in: 3600,
-          })
-        }
-
-        if (url.pathname === "/backend-api/codex/responses") {
-          apiRequests.push({
-            authorization: request.headers.get("authorization"),
-            accountId: request.headers.get("ChatGPT-Account-Id"),
-          })
-          return new Response("{}", { status: 200 })
-        }
-
-        return new Response("unexpected request", { status: 500 })
-      },
-    })
-
-    const hooks = await CodexAuthPlugin(
-      {
-        client: {
-          auth: {
-            async set(input: { body: { refresh: string; access: string; expires: number; accountId?: string } }) {
-              authUpdates.push(input)
-              auth = {
-                type: "oauth",
-                refresh: input.body.refresh,
-                access: input.body.access,
-                expires: input.body.expires,
-                ...(input.body.accountId && { accountId: input.body.accountId }),
-              }
-            },
-          },
-        } as never,
-        project: {} as never,
-        directory: "",
-        worktree: "",
-        experimental_workspace: {
-          register() {},
-        },
-        serverUrl: new URL("https://example.com"),
-        $: {} as never,
-      },
-      {
-        issuer: server.url.origin,
-        codexApiEndpoint: new URL("/backend-api/codex/responses", server.url).toString(),
-      },
+  test("offers only API keys and ignores cached ChatGPT OAuth credentials", async () => {
+    const hooks = await CodexAuthPlugin({} as never)
+    expect(hooks.auth?.methods.map((method) => method.type)).toEqual(["api"])
+    const options = await hooks.auth!.loader!(
+      async () => ({
+        type: "oauth",
+        refresh: "placeholder",
+        access: "placeholder",
+        expires: 0,
+      }),
+      {} as never,
     )
-    const loaded = await hooks.auth!.loader!(async () => auth as never, {} as never)
-
-    const first = loaded.fetch!("https://api.openai.com/v1/responses")
-    const second = loaded.fetch!("https://api.openai.com/v1/responses")
-
-    await waitFor(() => refreshRequests === 1)
-    expect(apiRequests).toHaveLength(0)
-
-    resolveRefresh!()
-    await Promise.all([first, second])
-
-    expect(refreshRequests).toBe(1)
-    expect(authUpdates).toHaveLength(1)
-    expect(authUpdates[0]?.body.refresh).toBe("refresh-new")
-    expect(authUpdates[0]?.body.access).toBe("access-new")
-    expect(authUpdates[0]?.body.accountId).toBe("acc-123")
-    expect(apiRequests).toEqual([
-      { authorization: "Bearer access-new", accountId: "acc-123" },
-      { authorization: "Bearer access-new", accountId: "acc-123" },
-    ])
-  })
-
-  test("a ChatGPT sign-in keeps every GPT-5 and GPT-6 model, pro tiers included, and drops older ones", async () => {
-    const plugin = await CodexAuthPlugin({} as never)
-    const model = (id: string) => ({ id, api: { id }, limit: { context: 1, output: 1 }, cost: { input: 1, output: 1 } })
-    const ids = [
-      "gpt-6-astra",
-      "gpt-6-astra-pro",
-      "gpt-5.10",
-      "gpt-5.6",
-      "gpt-5.5",
-      "gpt-5.5-pro",
-      "gpt-5.4",
-      "gpt-5.3",
-      "gpt-4o",
-      "o3",
-    ]
-    const provider = { models: Object.fromEntries(ids.map((id) => [id, model(id)])) }
-
-    const signedIn = await plugin.provider!.models!(provider as never, { auth: { type: "oauth" } } as never)
-    // Point releases, pro tiers and GPT-6 (no minor version) all stay; gpt-4o and o3 are not served through Codex.
-    expect(Object.keys(signedIn).sort()).toEqual([
-      "gpt-5.10",
-      "gpt-5.3",
-      "gpt-5.4",
-      "gpt-5.5",
-      "gpt-5.5-pro",
-      "gpt-5.6",
-      "gpt-6-astra",
-      "gpt-6-astra-pro",
-    ])
-    expect(signedIn["gpt-6-astra"]?.cost).toEqual({ input: 0, output: 0, cache: { read: 0, write: 0 } })
-
-    const withKey = await plugin.provider!.models!(provider as never, { auth: { type: "api" } } as never)
-    expect(Object.keys(withKey)).toHaveLength(ids.length)
-    await plugin.dispose?.()
+    expect(options).toEqual({})
   })
 })
-
-async function waitFor(predicate: () => boolean) {
-  const started = Date.now()
-  while (!predicate()) {
-    if (Date.now() - started > 1_000) throw new Error("timed out waiting for condition")
-    await new Promise((resolve) => setTimeout(resolve, 1))
-  }
-}

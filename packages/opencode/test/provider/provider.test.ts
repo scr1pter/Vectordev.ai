@@ -1151,12 +1151,12 @@ it.instance("ModelNotFoundError for provider includes suggestions", () =>
 
 it.instance("ModelNotFoundError suggests catalog models for unloaded providers", () =>
   Effect.gen(function* () {
-    yield* remove("OPENCODE_API_KEY")
+    yield* remove("ANTHROPIC_API_KEY")
     const error = yield* Provider.use
-      .getModel(ProviderV2.ID.opencode, ModelV2.ID.make("claude-haiku-fake-model"))
+      .getModel(ProviderV2.ID.anthropic, ModelV2.ID.make("claude-haiku-fake-model"))
       .pipe(Effect.flip)
     if (!Provider.ModelNotFoundError.isInstance(error)) throw error
-    expect(error.suggestions ?? []).toContain("claude-haiku-4-5")
+    expect(error.suggestions ?? []).toContain("claude-3-5-haiku-latest")
   }),
 )
 
@@ -1861,7 +1861,7 @@ it.instance(
   }),
 )
 
-it.effect("opencode loader keeps paid models when config apiKey is present", () =>
+it.effect("OpenCode providers remain absent when config apiKey is present", () =>
   Effect.gen(function* () {
     const noneDir = yield* tmpdirScoped()
     const keyedDir = yield* tmpdirScoped({
@@ -1879,11 +1879,11 @@ it.effect("opencode loader keeps paid models when config apiKey is present", () 
 
     // No key: the provider does not load at all.
     expect(none).toBeUndefined()
-    expect(keyedCount).toBeGreaterThan(0)
+    expect(keyedCount).toBeUndefined()
   }).pipe(provideMultiInstance),
 )
 
-it.effect("opencode loader keeps paid models when auth exists", () =>
+it.effect("OpenCode providers remain absent when auth exists", () =>
   Effect.gen(function* () {
     const noneDir = yield* tmpdirScoped()
     const keyedDir = yield* tmpdirScoped()
@@ -1912,6 +1912,79 @@ it.effect("opencode loader keeps paid models when auth exists", () =>
 
     const keyedCount = paid(yield* listIn(keyedDir))
 
-    expect(keyedCount).toBeGreaterThan(0)
+    expect(keyedCount).toBeUndefined()
   }).pipe(provideMultiInstance),
+)
+
+it.instance(
+  "retired providers stay absent with environment, config, and stored credentials",
+  () =>
+    Effect.gen(function* () {
+      yield* set("OPENCODE_API_KEY", "placeholder")
+      yield* set(
+        "OPENCODE_AUTH_CONTENT",
+        JSON.stringify(
+          Object.fromEntries(
+            ["opencode", "opencode-go", "opencode-zen", "opencode-custom"].map((id) => [
+              id,
+              { type: "api", key: "placeholder" },
+            ]),
+          ),
+        ),
+      )
+      const providers = yield* Provider.use.list()
+      expect(Object.keys(providers).filter((id) => id.startsWith("opencode"))).toEqual([])
+    }),
+  {
+    config: {
+      provider: Object.fromEntries(
+        ["opencode", "opencode-go", "opencode-zen", "opencode-custom"].map((id) => [
+          id,
+          {
+            npm: "@ai-sdk/openai-compatible",
+            options: { apiKey: "placeholder" },
+            models: { example: { name: "Example" } },
+          },
+        ]),
+      ),
+    },
+  },
+)
+
+it.instance(
+  "custom provider aliases cannot restore retired endpoints",
+  () =>
+    Effect.gen(function* () {
+      const providers = yield* Provider.use.list()
+      expect(providers[ProviderV2.ID.make("custom-hosted")]).toBeUndefined()
+    }),
+  {
+    config: {
+      provider: {
+        "custom-hosted": {
+          npm: "@ai-sdk/openai-compatible",
+          options: { apiKey: "placeholder", baseURL: "https://api.opencode.ai/v1" },
+          models: { example: { name: "Example" } },
+        },
+      },
+    },
+  },
+)
+
+it.instance("Vector auth content wins over legacy credentials and still rejects retired providers", () =>
+  Effect.gen(function* () {
+    yield* set("OPENCODE_AUTH_CONTENT", JSON.stringify({ anthropic: { type: "api", key: "placeholder-legacy" } }))
+    yield* set(
+      "VECTOR_AUTH_CONTENT",
+      JSON.stringify({
+        anthropic: { type: "api", key: "placeholder-current" },
+        opencode: { type: "api", key: "placeholder-retired" },
+        openai: { type: "oauth", access: "placeholder", refresh: "placeholder", expires: Date.now() + 60_000 },
+      }),
+    )
+    const providers = yield* Provider.use.list()
+    expect(providers[ProviderV2.ID.anthropic].key).toBe("placeholder-current")
+    expect(providers[ProviderV2.ID.opencode]).toBeUndefined()
+    expect(providers[ProviderV2.ID.openai]).toBeUndefined()
+  }),
 )

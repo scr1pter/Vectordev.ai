@@ -324,47 +324,9 @@ test("clears existing variants so refreshed models calculate provider-specific v
   expect(models["claude-opus-4.7"].variants).toBeUndefined()
 })
 
-test("remaps fallback oauth model urls to the enterprise host", async () => {
-  globalThis.fetch = mock(() => Promise.reject(new Error("timeout"))) as unknown as typeof fetch
-
-  const hooks = await CopilotAuthPlugin({
-    client: {} as never,
-    project: {} as never,
-    directory: "",
-    worktree: "",
-    experimental_workspace: {
-      register() {},
-    },
-    serverUrl: new URL("https://example.com"),
-    $: {} as never,
-  })
-
-  const models = await hooks.provider!.models!(
-    {
-      id: "github-copilot",
-      models: {
-        claude: {
-          id: "claude",
-          providerID: "github-copilot",
-          api: {
-            id: "claude-sonnet-4.5",
-            url: "https://api.githubcopilot.com/v1",
-            npm: "@ai-sdk/anthropic",
-          },
-        },
-      },
-    } as never,
-    {
-      auth: {
-        type: "oauth",
-        refresh: "token",
-        access: "token",
-        expires: Date.now() + 60_000,
-        enterpriseUrl: "ghe.example.com",
-      } as never,
-    },
-  )
-
-  expect(models.claude.api.url).toBe("https://copilot-api.ghe.example.com")
-  expect(models.claude.api.npm).toBe("@ai-sdk/github-copilot")
+test("does not expose Copilot sign-in, loaders, or credential-based model discovery", async () => {
+  const hooks = await CopilotAuthPlugin({} as never)
+  expect(hooks.auth?.methods).toEqual([])
+  expect(hooks.auth?.loader).toBeUndefined()
+  expect(hooks.provider).toBeUndefined()
 })

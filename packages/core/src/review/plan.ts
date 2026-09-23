@@ -12,7 +12,7 @@ export const MIN_CONTEXT = 32_000
 // Tokens a step adds to the context before the next one: tool results and the model's own output.
 export const NEXT_STEP_SLACK = 3_000
 
-// USD per million tokens, as models.dev lists them.
+// USD per million tokens, as the catalog lists them.
 export interface ReviewPrice {
   input: number
   output: number

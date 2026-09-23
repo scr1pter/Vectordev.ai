@@ -61,7 +61,7 @@ it.instance(
 )
 
 it.instance(
-  "digitalocean provider.models surfaces cached routers from auth metadata",
+  "digitalocean ignores live OAuth tokens previously stored as API keys",
   () =>
     withAuth(
       {
@@ -76,19 +76,14 @@ it.instance(
       Effect.gen(function* () {
         const provider = yield* Provider.Service
         const providers = yield* provider.list()
-        const models = providers[DIGITALOCEAN].models
-        expect(models["router:my-router"]).toBeDefined()
-        expect(models["router:my-router"].api.id).toBe("router:my-router")
-        expect(models["router:my-router"].api.url).toBe("https://inference.do-ai.run/v1")
-        expect(models["router:my-router"].api.npm).toBe("@ai-sdk/openai-compatible")
-        expect(models["router:other-router"]).toBeDefined()
+        expect(providers[DIGITALOCEAN]).toBeUndefined()
       }),
     ),
   { config: {} },
 )
 
 it.instance(
-  "digitalocean provider.models skips refresh when oauth bearer is expired",
+  "digitalocean ignores expired OAuth tokens previously stored as API keys",
   () =>
     withAuth(
       {
@@ -100,8 +95,7 @@ it.instance(
       Effect.gen(function* () {
         const provider = yield* Provider.Service
         const providers = yield* provider.list()
-        const models = providers[DIGITALOCEAN].models
-        expect(models["router:stale-router"]).toBeDefined()
+        expect(providers[DIGITALOCEAN]).toBeUndefined()
       }),
     ),
   { config: {} },

@@ -5,7 +5,7 @@ import { HttpRecorder } from "@opencode-ai/http-recorder"
 import { HttpRecorderInternal } from "@opencode-ai/http-recorder/internal"
 import { describe, expect, test } from "bun:test"
 import { tool, type ModelMessage, type JSONValue } from "ai"
-import { Effect, Layer, Option, Schema, Stream } from "effect"
+import { Effect, Layer, Stream } from "effect"
 import path from "node:path"
 import z from "zod"
 import { Auth } from "@/auth"
@@ -15,6 +15,7 @@ import { Filesystem } from "@/util/filesystem"
 import { LLMEvent, LLMResponse } from "@opencode-ai/llm"
 import { RequestExecutor } from "@opencode-ai/llm/route"
 import { RuntimeFlags } from "@/effect/runtime-flags"
+import { Env } from "@/env"
 import type { Agent } from "../../src/agent/agent"
 import { LLM } from "../../src/session/llm"
 import { MessageID, SessionID } from "../../src/session/schema"
@@ -27,8 +28,6 @@ import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { LayerNodePlatform } from "@opencode-ai/core/effect/app-node-platform"
 
 const FIXTURES_DIR = path.join(import.meta.dir, "../fixtures/recordings")
-
-const zenURL = (connection: string) => `https://console.opencode.ai/proxy/connections/${connection}/v1`
 
 const replayOpenAIOAuth = {
   type: "oauth",
@@ -47,7 +46,6 @@ type RecordedScenario = {
   readonly protocol: string
   readonly tags: ReadonlyArray<string>
   readonly canRecord: () => boolean
-  readonly recordAuth?: () => Auth.Info | undefined
   readonly replayAuth?: Auth.Info
   readonly stableID?: string
   readonly config: (model: ModelsDev.Provider["models"][string]) => Partial<ConfigV1.Info>
@@ -66,29 +64,6 @@ const cloneModel = (model: ModelsDev.Provider["models"][string]) => {
 }
 
 const envValue = (...names: string[]) => names.map((name) => process.env[name]).find(Boolean)
-const decodeAuth = Schema.decodeUnknownOption(Auth.Info)
-const recordOpenAIOAuth = (() => {
-  let loaded = false
-  let auth: Auth.Info | undefined
-  return () => {
-    if (loaded) return auth
-    loaded = true
-    auth = decodeRecordOpenAIOAuth()
-    return auth
-  }
-})()
-
-function decodeRecordOpenAIOAuth() {
-  const value = process.env.OPENCODE_RECORD_OPENAI_AUTH
-  if (!value) return undefined
-  try {
-    const auth = Option.getOrUndefined(decodeAuth(JSON.parse(value)))
-    return auth?.type === "oauth" ? auth : undefined
-  } catch {
-    return undefined
-  }
-}
-
 const providerConfig = (input: {
   readonly providerID: ProviderV2.ID
   readonly name: string
@@ -111,75 +86,39 @@ const providerConfig = (input: {
   },
 })
 
+const OPENAI_SCENARIO = {
+  id: "openai-api-key",
+  name: "OpenAI API key",
+  providerID: ProviderV2.ID.openai,
+  modelID: "gpt-5.5",
+  cassette: "session/native-openai-tool-loop",
+  protocol: "openai-responses",
+  tags: ["vector", "native", "api-key", "tool-loop"],
+  canRecord: () => Boolean(envValue("OPENCODE_RECORD_OPENAI_API_KEY", "OPENAI_API_KEY")),
+  config: (model) =>
+    providerConfig({
+      providerID: ProviderV2.ID.openai,
+      name: "OpenAI",
+      env: ["OPENAI_API_KEY"],
+      npm: "@ai-sdk/openai",
+      api: "https://api.openai.com/v1",
+      model,
+      options: {
+        apiKey: shouldRecord ? envValue("OPENCODE_RECORD_OPENAI_API_KEY", "OPENAI_API_KEY") : "fixture-openai-key",
+        // The cassette intercepts native requests. A runtime regression must fail locally, not contact a live API.
+        baseURL: shouldRecord ? "https://api.openai.com/v1" : "http://127.0.0.1:1/v1",
+      },
+    }),
+} satisfies RecordedScenario
+
 const RECORDED_SCENARIOS = [
+  OPENAI_SCENARIO,
   {
-    id: "openai-api-key",
-    name: "OpenAI API key",
-    providerID: ProviderV2.ID.openai,
-    modelID: "gpt-4.1-mini",
-    cassette: "session/native-openai-tool-loop",
-    protocol: "openai-responses",
-    tags: ["opencode", "native", "tool-loop"],
-    canRecord: () => Boolean(envValue("OPENCODE_RECORD_OPENAI_API_KEY", "OPENAI_API_KEY")),
-    config: (model) =>
-      providerConfig({
-        providerID: ProviderV2.ID.openai,
-        name: "OpenAI",
-        env: ["OPENAI_API_KEY"],
-        npm: "@ai-sdk/openai",
-        api: "https://api.openai.com/v1",
-        model,
-        options: {
-          apiKey: envValue("OPENCODE_RECORD_OPENAI_API_KEY", "OPENAI_API_KEY") ?? "fixture-openai-key",
-          baseURL: "https://api.openai.com/v1",
-        },
-      }),
-  },
-  {
-    id: "openai-oauth",
-    name: "OpenAI OAuth",
-    providerID: ProviderV2.ID.openai,
-    modelID: "gpt-5.5",
-    cassette: "session/native-openai-oauth-tool-loop",
-    protocol: "openai-responses",
-    tags: ["opencode", "native", "oauth", "tool-loop"],
-    canRecord: () => recordOpenAIOAuth() !== undefined,
-    recordAuth: recordOpenAIOAuth,
+    ...OPENAI_SCENARIO,
+    id: "openai-api-key-with-stale-oauth",
+    name: "OpenAI API key with ignored stale OAuth",
+    canRecord: () => false,
     replayAuth: replayOpenAIOAuth,
-    stableID: "openai-oauth",
-    config: (model) =>
-      providerConfig({
-        providerID: ProviderV2.ID.openai,
-        name: "OpenAI",
-        env: ["OPENAI_API_KEY"],
-        npm: "@ai-sdk/openai",
-        api: "https://api.openai.com/v1",
-        model,
-        options: { baseURL: "https://api.openai.com/v1" },
-      }),
-  },
-  {
-    id: "opencode-proxy",
-    name: "OpenCode proxy",
-    providerID: ProviderV2.ID.opencode,
-    modelID: "gpt-5.2-codex",
-    cassette: "session/native-zen-tool-loop",
-    protocol: "openai-responses",
-    tags: ["opencode", "zen", "native", "tool-loop"],
-    canRecord: () => Boolean(process.env.OPENCODE_RECORD_CONSOLE_TOKEN && process.env.OPENCODE_RECORD_ZEN_ORG_ID),
-    config: (model) =>
-      providerConfig({
-        providerID: ProviderV2.ID.opencode,
-        name: "OpenCode Zen",
-        env: ["OPENCODE_CONSOLE_TOKEN"],
-        npm: "@ai-sdk/openai-compatible",
-        api: zenURL(process.env.OPENCODE_RECORD_ZEN_CONNECTION ?? "fixture"),
-        model,
-        options: {
-          apiKey: process.env.OPENCODE_RECORD_CONSOLE_TOKEN ?? "fixture-console-token",
-          headers: { "x-org-id": process.env.OPENCODE_RECORD_ZEN_ORG_ID ?? "fixture-org" },
-        },
-      }),
   },
   {
     id: "anthropic-api-key",
@@ -199,7 +138,9 @@ const RECORDED_SCENARIOS = [
         api: "https://api.anthropic.com/v1",
         model,
         options: {
-          apiKey: envValue("OPENCODE_RECORD_ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY") ?? "fixture-anthropic-key",
+          apiKey: shouldRecord
+            ? envValue("OPENCODE_RECORD_ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY")
+            : "fixture-anthropic-key",
           baseURL: "https://api.anthropic.com/v1",
         },
       }),
@@ -226,10 +167,7 @@ const canRun = (scenario: RecordedScenario) =>
     ? scenario.canRecord()
     : HttpRecorderInternal.hasCassetteSync(scenario.cassette, { directory: FIXTURES_DIR })
 
-const recordError = (scenario: RecordedScenario) =>
-  scenario.id === "openai-oauth"
-    ? "Set OPENCODE_RECORD_OPENAI_AUTH to an OAuth auth JSON object in the recording environment."
-    : `Missing recording credentials for ${scenario.name}.`
+const recordError = (scenario: RecordedScenario) => `Missing recording credentials for ${scenario.name}.`
 
 const redactRecordedBody = (body: string) =>
   body
@@ -238,7 +176,7 @@ const redactRecordedBody = (body: string) =>
     .replace(/"(access|access_token|refresh|refresh_token|accountId|account_id)"\s*:\s*"[^"]+"/g, '"$1":"redacted"')
 
 function authLayer(scenario: RecordedScenario) {
-  const replayAuth = shouldRecord ? scenario.recordAuth?.() : scenario.replayAuth
+  const replayAuth = shouldRecord ? undefined : scenario.replayAuth
   if (!replayAuth) return undefined
   return Layer.mock(Auth.Service)({
     get: (providerID) => Effect.succeed(providerID === scenario.providerID ? replayAuth : undefined),
@@ -269,7 +207,7 @@ function recordedNativeLLMLayer(scenario: RecordedScenario) {
     tags: scenario.tags,
   }
   const redact = {
-    url: (url: string) => url.replace(/\/proxy\/connections\/[^/]+\/v1/, "/proxy/connections/{connection}/v1"),
+    url: (url: string) => url.replace("http://127.0.0.1:1/v1", "https://api.openai.com/v1"),
     body: redactRecordedBody,
   }
   const recordedHttp = shouldRecord
@@ -290,8 +228,8 @@ function recordedNativeLLMLayer(scenario: RecordedScenario) {
 const writeConfig = (directory: string, scenario: RecordedScenario, model: ModelsDev.Provider["models"][string]) =>
   Effect.promise(() =>
     Bun.write(
-      path.join(directory, "opencode.json"),
-      JSON.stringify({ $schema: "https://opencode.ai/config.json", ...scenario.config(model) }),
+      path.join(directory, "vector.json"),
+      JSON.stringify({ $schema: "https://vectordev.ai/config.json", ...scenario.config(model) }),
     ),
   )
 
@@ -398,7 +336,7 @@ const driveToolLoop = (scenario: RecordedScenario) =>
 describe("session.llm native recorded", () => {
   for (const scenario of RECORDED_SCENARIOS.filter(isSelected)) {
     if (!canRun(scenario)) {
-      if (shouldRecord && scenario.recordAuth && selectedScenarios.size > 0) {
+      if (shouldRecord && selectedScenarios.size > 0) {
         test(`${scenario.name}: drives a tool loop to a final text answer`, () => {
           throw new Error(recordError(scenario))
         })
@@ -409,5 +347,64 @@ describe("session.llm native recorded", () => {
     }
     const it = testEffect(recordedNativeLLMLayer(scenario))
     it.instance(`${scenario.name}: drives a tool loop to a final text answer`, () => driveToolLoop(scenario))
+  }
+
+  const policy = testEffect(
+    AppNodeBuilder.build(Provider.node, [
+      [
+        Auth.node,
+        Layer.mock(Auth.Service)({
+          get: (id) => Effect.succeed(id === ProviderV2.ID.openai ? replayOpenAIOAuth : undefined),
+          all: () =>
+            Effect.succeed({
+              openai: replayOpenAIOAuth,
+              opencode: { type: "api" as const, key: "fixture-retired-key" },
+            }),
+        }),
+      ],
+      [Env.node, Layer.mock(Env.Service)({ get: () => Effect.succeed(undefined), all: () => Effect.succeed({}) })],
+    ]),
+  )
+
+  policy.instance(
+    "OpenAI OAuth alone cannot resolve a native-session model",
+    () =>
+      Effect.gen(function* () {
+        const provider = yield* Provider.Service
+        expect((yield* provider.list())[ProviderV2.ID.openai]).toBeUndefined()
+        const error = yield* provider.getModel(ProviderV2.ID.openai, ModelV2.ID.make("gpt-5.5")).pipe(Effect.flip)
+        expect(Provider.ModelNotFoundError.isInstance(error)).toBe(true)
+      }),
+    { config: { enabled_providers: [ProviderV2.ID.openai] } },
+  )
+
+  for (const id of ["opencode", "opencode-go", "opencode-custom", "custom-hosted"]) {
+    policy.instance(
+      `${id} cannot restore the retired proxy with explicit configuration and a saved key`,
+      () =>
+        Effect.gen(function* () {
+          const provider = yield* Provider.Service
+          const error = yield* provider
+            .getModel(ProviderV2.ID.make(id), ModelV2.ID.make("gpt-5.2-codex"))
+            .pipe(Effect.flip)
+          expect(Provider.ModelNotFoundError.isInstance(error)).toBe(true)
+          expect((yield* provider.list())[ProviderV2.ID.make(id)]).toBeUndefined()
+        }),
+      {
+        config: {
+          enabled_providers: [ProviderV2.ID.make(id)],
+          provider: {
+            [id]: {
+              npm: "@ai-sdk/openai-compatible",
+              options: {
+                apiKey: "fixture-retired-key",
+                baseURL: "https://console.opencode.ai/proxy/connections/fixture/v1",
+              },
+              models: { "gpt-5.2-codex": { name: "Retired fixture" } },
+            },
+          },
+        },
+      },
+    )
   }
 })

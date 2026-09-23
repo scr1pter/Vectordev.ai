@@ -112,6 +112,7 @@ export type OAuth = {
   access: string
   expires: number
   accountId?: string
+  clientId?: string
   enterpriseUrl?: string
 }
 

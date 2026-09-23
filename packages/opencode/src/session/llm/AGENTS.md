@@ -85,6 +85,7 @@ Both runtimes converge on the same `LLMEvent` stream consumed by the session pro
 Safety boundary:
 
 - AI SDK remains the default.
-- `OPENCODE_EXPERIMENTAL_NATIVE_LLM=true` or the umbrella `OPENCODE_EXPERIMENTAL=true` opts in. Native is not a global replacement.
-- Native execution currently supports OpenAI, opencode-managed OpenAI-compatible, and Anthropic API-key paths backed by `@ai-sdk/openai`, `@ai-sdk/openai-compatible`, or `@ai-sdk/anthropic` catalog entries.
-- Unsupported providers, OpenAI OAuth, and missing API-key cases fall back to AI SDK.
+- `VECTOR_EXPERIMENTAL_NATIVE_LLM=true` or the umbrella `VECTOR_EXPERIMENTAL=true` (legacy `OPENCODE_*` aliases remain supported) opts in. Native is not a global replacement.
+- Native execution currently supports OpenAI and Anthropic API-key paths backed by `@ai-sdk/openai`, `@ai-sdk/openai-compatible`, or `@ai-sdk/anthropic` catalog entries.
+- Retired providers/endpoints and paused sign-in credentials are rejected at provider resolution and independently at the native adapter. A provider fetch override must never bypass this policy.
+- Other unsupported native requests and missing API-key cases fall back to AI SDK; neither runtime may use paused OAuth credentials.

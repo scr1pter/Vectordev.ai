@@ -38,7 +38,6 @@ function model(name: string, input: { context?: number; input?: number; output?:
 }
 
 const MODELS = [
-  model("opencode/big-pickle"),
   model("acme/auto", { input: 1, output: 2 }),
   model("acme/json", { input: 1, output: 2 }),
   model("acme/env", { input: 1, output: 2 }),
@@ -97,7 +96,7 @@ const chosen = (input: ReviewModel.ResolveInput, setup: Setup = {}) =>
   resolve(input, setup).pipe(Effect.map((resolved) => `${resolved.providerID}/${resolved.modelID}`))
 
 describe("ReviewModel.resolveReviewModel order", () => {
-  it.effect("automatic CI runs take REVIEW_AUTO_MODEL, then review.json, then MODEL, then the free model", () =>
+  it.effect("automatic CI runs take REVIEW_AUTO_MODEL, then review.json, then MODEL", () =>
     Effect.gen(function* () {
       const env = { REVIEW_AUTO_MODEL: "acme/auto", MODEL: "acme/env" }
       expect(yield* chosen({ trigger: "auto", config: "acme/json", env })).toBe("acme/auto")
@@ -105,8 +104,11 @@ describe("ReviewModel.resolveReviewModel order", () => {
       expect(yield* chosen({ trigger: "auto", env: { MODEL: "acme/env" } })).toBe("acme/env")
       // Project config and the user's default model play no part in CI.
       expect(
-        yield* chosen({ trigger: "auto", env: {} }, { agent: { model: "acme/agent" }, defaultModel: "acme/default" }),
-      ).toBe("opencode/big-pickle")
+        (yield* resolve(
+          { trigger: "auto", env: {} },
+          { agent: { model: "acme/agent" }, defaultModel: "acme/default" },
+        ).pipe(Effect.flip)).message,
+      ).toContain("No review model is set")
     }),
   )
 
@@ -117,11 +119,13 @@ describe("ReviewModel.resolveReviewModel order", () => {
       expect(yield* chosen({ trigger: "command", config: "acme/json", env }, { agent: { model: "acme/agent" } })).toBe(
         "acme/json",
       )
-      expect(yield* chosen({ trigger: "command", env: { REVIEW_AUTO_MODEL: "acme/auto" } })).toBe("opencode/big-pickle")
+      expect(
+        (yield* resolve({ trigger: "command", env: { REVIEW_AUTO_MODEL: "acme/auto" } }).pipe(Effect.flip)).message,
+      ).toContain("No review model is set")
     }),
   )
 
-  it.effect("local runs take --model, review.json, agent.review.model, the default model, then the free model", () =>
+  it.effect("local runs take --model, review.json, agent.review.model, the default model", () =>
     Effect.gen(function* () {
       const env = { MODEL: "acme/env", REVIEW_AUTO_MODEL: "acme/auto" }
       const setup = { agent: { model: "acme/agent", variant: "high" }, defaultModel: "acme/default" }
@@ -131,18 +135,14 @@ describe("ReviewModel.resolveReviewModel order", () => {
       expect(`${agent.providerID}/${agent.modelID}`).toBe("acme/agent")
       expect(agent.variant).toBe("high")
       expect(yield* chosen({ trigger: "desktop", env }, { defaultModel: "acme/default" })).toBe("acme/default")
-      expect(yield* chosen({ trigger: "local", env })).toBe("opencode/big-pickle")
+      expect((yield* resolve({ trigger: "local", env }).pipe(Effect.flip)).message).toContain("No review model is set")
     }),
   )
 })
 
 describe("ReviewModel.resolveReviewModel cost", () => {
-  it.effect("tells free, subscription, unknown and priced models apart", () =>
+  it.effect("tells subscription, unknown and priced models apart", () =>
     Effect.gen(function* () {
-      const free = yield* resolve({ trigger: "command", env: {} })
-      expect(free.costKind).toBe("free")
-      expect(free.price).toBeUndefined()
-
       const plan = yield* resolve({ trigger: "command", env: { MODEL: "anthropic/sonnet" } }, { oauth: ["anthropic"] })
       expect(plan.costKind).toBe("plan")
       expect(plan.price).toBeUndefined()
@@ -164,7 +164,9 @@ describe("ReviewModel.resolveReviewModel refusals", () => {
     Effect.gen(function* () {
       const error = yield* resolve({ trigger: "command", env: { MODEL: "tiny/small" } }).pipe(Effect.flip)
       expect(error).toBeInstanceOf(ReviewModel.ReviewModelError)
-      expect(error.message).toBe("Vectorscope reviews need a model with at least 32k tokens of context; tiny/small has 16k.")
+      expect(error.message).toBe(
+        "Vectorscope reviews need a model with at least 32k tokens of context; tiny/small has 16k.",
+      )
     }),
   )
 

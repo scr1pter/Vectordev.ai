@@ -1,13 +1,12 @@
+import { XAI_SIGN_IN } from "@opencode-ai/core/provider-policy"
 import type { Hooks, PluginInput } from "@opencode-ai/plugin"
 import { OAUTH_DUMMY_KEY } from "../auth"
 import { createServer } from "http"
 import { InstallationVersion } from "@opencode-ai/core/installation/version"
 import { OauthCallbackPage } from "@opencode-ai/core/oauth/page"
 
-// Public Grok-CLI OAuth client. xAI's auth server rejects loopback OAuth from
-// non-allowlisted clients, so we reuse the Grok-CLI client_id that xAI ships
-// for desktop OAuth flows. Source of truth: hermes-agent PR #26534.
-const CLIENT_ID = "b1a00492-073a-47ea-816f-4c329264a828"
+// Re-enabling requires Vector-owned client registration, scopes and redirect URI.
+const CLIENT_ID = ""
 const AUTHORIZE_URL = "https://auth.x.ai/oauth2/authorize"
 const TOKEN_URL = "https://auth.x.ai/oauth2/token"
 // RFC 8628 device authorization grant. Confirmed exposed by xAI's
@@ -88,7 +87,7 @@ function authHeaders() {
   return {
     "Content-Type": "application/x-www-form-urlencoded",
     Accept: "application/json",
-    "User-Agent": `opencode/${InstallationVersion}`,
+    "User-Agent": `vector/${InstallationVersion}`,
   }
 }
 
@@ -123,7 +122,7 @@ export function buildAuthorizeUrl(
 ): string {
   // `plan=generic` opts the consent screen into xAI's generic OAuth plan tier;
   // without it, accounts.x.ai rejects loopback OAuth from non-allowlisted
-  // clients. `referrer=opencode` lets xAI attribute opencode-originated
+  // clients. `referrer=vector` lets xAI attribute Vector-originated
   // logins in their OAuth server logs (best-effort attribution while we
   // continue to reuse the Grok-CLI client_id).
   const params = new URLSearchParams({
@@ -136,7 +135,7 @@ export function buildAuthorizeUrl(
     state,
     nonce,
     plan: "generic",
-    referrer: "opencode",
+    referrer: "vector",
   })
   return `${options.authorizeUrl ?? AUTHORIZE_URL}?${params.toString()}`
 }
@@ -456,6 +455,7 @@ interface RefreshResult {
 }
 
 export async function XaiAuthPlugin(input: PluginInput, options: XaiAuthPluginOptions = {}): Promise<Hooks> {
+  if (!XAI_SIGN_IN) return { auth: { provider: "xai", methods: [{ type: "api", label: "Manually enter API Key" }] } }
   return {
     auth: {
       provider: "xai",
@@ -541,7 +541,7 @@ export async function XaiAuthPlugin(input: PluginInput, options: XaiAuthPluginOp
               }
             }
             headers.set("authorization", `Bearer ${currentAuth.access}`)
-            headers.set("User-Agent", `opencode/${InstallationVersion}`)
+            headers.set("User-Agent", `vector/${InstallationVersion}`)
 
             return fetch(requestInput, { ...init, headers })
           },

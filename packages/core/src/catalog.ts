@@ -8,6 +8,7 @@ import { ProviderV2 } from "./provider"
 import { EventV2 } from "./event"
 import { Policy } from "./policy"
 import { State } from "./state"
+import { providerAllowed, providerEndpointAllowed } from "./provider-policy"
 import { Integration } from "./integration"
 
 export type ProviderRecord = {
@@ -110,6 +111,7 @@ const layer = Layer.effect(
             list: () => Array.fromIterable(draft.providers.values()) as ProviderRecord[],
             get: (providerID) => draft.providers.get(providerID),
             update: (providerID, fn) => {
+              if (!providerAllowed(providerID)) return
               let current = draft.providers.get(providerID)
               if (!current) {
                 current = {
@@ -119,6 +121,7 @@ const layer = Layer.effect(
                 draft.providers.set(providerID, current)
               }
               fn(current.provider)
+              current.provider.id = providerID
               normalizeApi(current.provider)
             },
             remove: (providerID) => {
@@ -128,6 +131,7 @@ const layer = Layer.effect(
           model: {
             get: (providerID, modelID) => draft.providers.get(providerID)?.models.get(modelID),
             update: (providerID, modelID, fn) => {
+              if (!providerAllowed(providerID)) return
               let record = draft.providers.get(providerID)
               if (!record) {
                 record = {
@@ -150,7 +154,7 @@ const layer = Layer.effect(
             default: {
               get: () => draft.defaultModel,
               set: (providerID, modelID) => {
-                draft.defaultModel = { providerID, modelID }
+                if (providerAllowed(providerID)) draft.defaultModel = { providerID, modelID }
               },
             },
           },
@@ -158,6 +162,15 @@ const layer = Layer.effect(
         return result
       },
       finalize: Effect.fn("CatalogV2.finalize")(function* (catalog) {
+        for (const record of catalog.provider.list()) {
+          if (!providerEndpointAllowed(record.provider.api.url)) {
+            catalog.provider.remove(record.provider.id)
+            continue
+          }
+          for (const model of record.models.values()) {
+            if (!providerEndpointAllowed(model.api.url)) catalog.model.remove(record.provider.id, model.id)
+          }
+        }
         if (policy.hasStatements()) {
           for (const record of [...catalog.provider.list()]) {
             if ((yield* policy.evaluate("provider.use", record.provider.id, "allow")) === "deny") {
@@ -239,11 +252,6 @@ const layer = Layer.effect(
           // TODO: Remove these provider-specific assumptions once model syncing reliably reports available deployments.
           if (providerID === ProviderV2.ID.azure || providerID === ProviderV2.ID.make("azure-cognitive-services")) {
             return
-          }
-
-          if (providerID === ProviderV2.ID.opencode) {
-            const gpt5Nano = record.models.get(ModelV2.ID.make("gpt-5-nano"))
-            if (gpt5Nano?.enabled && gpt5Nano.status === "active") return projectModel(gpt5Nano, provider)
           }
 
           const candidates = pipe(

@@ -1,3 +1,4 @@
+import { providerAllowed, providerEndpointAllowed, providerCredentialAllowed } from "@opencode-ai/core/provider-policy"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import os from "os"
 import { ConfigV1 } from "@opencode-ai/core/v1/config/config"
@@ -177,42 +178,6 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
           },
         },
       }),
-    opencode: Effect.fnUntraced(function* (input: Info) {
-      // Keep this disabled flag local so release compilers can remove the
-      // retired shared credential even when this module is lazily initialized.
-      const ZEN_PUBLIC_GATEWAY = false
-      const env = yield* dep.env()
-      const hasKey = iife(() => {
-        if (input.env.some((item) => env[item])) return true
-        return false
-      })
-      const ok =
-        hasKey ||
-        Boolean(yield* dep.auth(input.id)) ||
-        Boolean((yield* dep.config()).provider?.["opencode"]?.options?.apiKey)
-
-      // Without a key of the user's own, this provider used to load OpenCode Zen's
-      // zero-cost models on the shared "public" key: every such request would run
-      // against OpenCode's endpoint on Vector's behalf, which is not ours to give
-      // away. The keyless path is closed, so those models appear nowhere — not in
-      // the picker, not in `vector models`, not as a review model. A user who
-      // brings their own opencode key still gets the provider, as with any other.
-      if (!ok) {
-        if (!ZEN_PUBLIC_GATEWAY) {
-          for (const key of Object.keys(input.models)) delete input.models[key]
-          return { autoload: false, options: {} }
-        }
-        for (const [key, value] of Object.entries(input.models)) {
-          if (value.cost.input === 0) continue
-          delete input.models[key]
-        }
-      }
-
-      return {
-        autoload: Object.keys(input.models).length > 0,
-        options: ZEN_PUBLIC_GATEWAY && !ok ? { apiKey: "public" } : {},
-      }
-    }),
     openai: () =>
       Effect.succeed({
         autoload: false,
@@ -373,14 +338,14 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
           if (model?.api.npm === "@ai-sdk/amazon-bedrock/mantle") return selectBedrockMantleLanguageModel(sdk, modelID)
 
           // Skip region prefixing if model already has a cross-region inference profile prefix
-          // Models from models.dev may already include prefixes like us., eu., global., etc.
+          // Catalog models may already include prefixes like us., eu., global., etc.
           const crossRegionPrefixes = ["global.", "us.", "eu.", "jp.", "apac.", "au."]
           if (crossRegionPrefixes.some((prefix) => modelID.startsWith(prefix))) {
             return sdk.languageModel(modelID)
           }
 
           // Region resolution precedence (highest to lowest):
-          // 1. options.region from opencode.json provider config
+          // 1. options.region from vector.json provider config
           // 2. defaultRegion from AWS_REGION environment variable
           // 3. Default "us-east-1" (baked into defaultRegion)
           const region = options?.region ?? defaultRegion
@@ -502,7 +467,7 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
       }),
     "google-vertex": Effect.fnUntraced(function* (provider: Info) {
       const env = yield* dep.env()
-      // models.dev advertises GOOGLE_VERTEX_PROJECT for Vertex; keep the wider
+      // The catalog advertises GOOGLE_VERTEX_PROJECT for Vertex; keep the wider
       // Google Cloud project env names as fallbacks for existing ADC setups.
       const project =
         provider.options?.project ??
@@ -623,7 +588,7 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
       const directory = yield* InstanceState.directory
 
       const aiGatewayHeaders = {
-        "User-Agent": `opencode/${InstallationVersion} gitlab-ai-provider/${GITLAB_PROVIDER_VERSION} (${os.platform()} ${os.release()}; ${os.arch()})`,
+        "User-Agent": `vector/${InstallationVersion} gitlab-ai-provider/${GITLAB_PROVIDER_VERSION} (${os.platform()} ${os.release()}; ${os.arch()})`,
         "anthropic-beta": "context-1m-2025-08-07",
         ...providerConfig?.options?.aiGatewayHeaders,
       }
@@ -756,7 +721,7 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
         options: {
           apiKey,
           headers: {
-            "User-Agent": `opencode/${InstallationVersion} cloudflare-workers-ai (${os.platform()} ${os.release()}; ${os.arch()})`,
+            "User-Agent": `vector/${InstallationVersion} cloudflare-workers-ai (${os.platform()} ${os.release()}; ${os.arch()})`,
           },
         },
         async getModel(sdk: any, modelID: string) {
@@ -801,7 +766,7 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
       if (!apiToken) {
         throw new Error(
           "CLOUDFLARE_API_TOKEN (or CF_AIG_TOKEN) is required for Cloudflare AI Gateway. " +
-            "Set it via environment variable or run `opencode auth cloudflare-ai-gateway`.",
+            "Set it via environment variable or run `vector auth cloudflare-ai-gateway`.",
         )
       }
 
@@ -824,7 +789,7 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
         skipCache: input.options?.skipCache,
         collectLog: input.options?.collectLog,
         headers: {
-          "User-Agent": `opencode/${InstallationVersion} cloudflare-ai-gateway (${os.platform()} ${os.release()}; ${os.arch()})`,
+          "User-Agent": `vector/${InstallationVersion} cloudflare-ai-gateway (${os.platform()} ${os.release()}; ${os.arch()})`,
         },
       }
 
@@ -887,7 +852,7 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
           autoload: false,
           async getModel() {
             throw new Error(
-              `Snowflake Cortex: missing credentials (${missing}). Provide a bearer token (OAuth, JWT, or PAT) via env var, opencode auth, or provider options.`,
+              `Snowflake Cortex: missing credentials (${missing}). Provide a bearer token (OAuth, JWT, or PAT) via env var, vector auth, or provider options.`,
             )
           },
         }
@@ -1361,7 +1326,9 @@ const layer = Layer.effect(
       Effect.gen(function* () {
         const bridge = yield* EffectBridge.make()
         const cfg = yield* config.get()
-        const modelsDev = yield* modelsDevSvc.get()
+        const modelsDev = Object.fromEntries(
+          Object.entries(yield* modelsDevSvc.get()).filter(([id]) => providerAllowed(id)),
+        )
         const catalog = mapValues(modelsDev, fromModelsDevProvider)
         const database = mapValues(catalog, toPublicInfo)
 
@@ -1378,13 +1345,18 @@ const layer = Layer.effect(
           [providerID: string]: CustomDiscoverModels
         } = {}
         const dep = {
-          auth: (id: string) => auth.get(id).pipe(Effect.orDie),
+          auth: (id: string) =>
+            auth.get(id).pipe(
+              Effect.map((value) => (value && !providerCredentialAllowed(id, value) ? undefined : value)),
+              Effect.orDie,
+            ),
           config: () => config.get(),
           env: () => env.all(),
           get: (key: string) => env.get(key),
         }
 
         function mergeProvider(providerID: ProviderV2.ID, provider: Partial<Info>) {
+          if (!providerAllowed(providerID)) return
           const existing = providers[providerID]
           if (existing) {
             // @ts-expect-error
@@ -1401,11 +1373,17 @@ const layer = Layer.effect(
         const plugins = yield* plugin.list()
 
         // now read config providers - includes any modifications from plugin config() hook
-        const configProviders = Object.entries(cfg.provider ?? {})
+        const configProviders = Object.entries(cfg.provider ?? {}).filter(
+          ([id, provider]) =>
+            providerAllowed(id) &&
+            providerEndpointAllowed(provider.api) &&
+            providerEndpointAllowed(provider.options?.baseURL),
+        )
         const disabled = new Set(cfg.disabled_providers ?? [])
         const enabled = cfg.enabled_providers ? new Set(cfg.enabled_providers) : null
 
         function isProviderAllowed(providerID: ProviderV2.ID): boolean {
+          if (!providerAllowed(providerID)) return false
           if (enabled && !enabled.has(providerID)) return false
           if (disabled.has(providerID)) return false
           return true
@@ -1417,11 +1395,13 @@ const layer = Layer.effect(
           if (!p || !models) continue
 
           const providerID = ProviderV2.ID.make(p.id)
-          if (disabled.has(providerID)) continue
+          if (!isProviderAllowed(providerID)) continue
 
           const provider = database[providerID]
           if (!provider) continue
-          const pluginAuth = yield* auth.get(providerID).pipe(Effect.orDie)
+          const storedPluginAuth = yield* auth.get(providerID).pipe(Effect.orDie)
+          const pluginAuth =
+            storedPluginAuth && providerCredentialAllowed(providerID, storedPluginAuth) ? storedPluginAuth : undefined
 
           provider.models = yield* Effect.promise(async () => {
             const next = await models(toPublicInfo(provider), { auth: pluginAuth })
@@ -1536,7 +1516,7 @@ const layer = Layer.effect(
         const envs = yield* env.all()
         for (const [id, provider] of Object.entries(database)) {
           const providerID = ProviderV2.ID.make(id)
-          if (disabled.has(providerID)) continue
+          if (!isProviderAllowed(providerID)) continue
           const apiKey = provider.env.map((item) => envs[item]).find(Boolean)
           if (!apiKey) continue
           mergeProvider(providerID, {
@@ -1549,8 +1529,8 @@ const layer = Layer.effect(
         const auths = yield* auth.all().pipe(Effect.orDie)
         for (const [id, provider] of Object.entries(auths)) {
           const providerID = ProviderV2.ID.make(id)
-          if (disabled.has(providerID)) continue
-          if (provider.type === "api") {
+          if (!isProviderAllowed(providerID)) continue
+          if (provider.type === "api" && providerCredentialAllowed(providerID, provider)) {
             mergeProvider(providerID, {
               source: "api",
               key: provider.key,
@@ -1562,10 +1542,11 @@ const layer = Layer.effect(
         for (const plugin of plugins) {
           if (!plugin.auth) continue
           const providerID = ProviderV2.ID.make(plugin.auth.provider)
-          if (disabled.has(providerID)) continue
+          if (!isProviderAllowed(providerID)) continue
 
           const stored = yield* auth.get(providerID).pipe(Effect.orDie)
           if (!stored) continue
+          if (!providerCredentialAllowed(providerID, stored)) continue
           if (!plugin.auth.loader) continue
 
           const options = yield* Effect.promise(() =>
@@ -1581,7 +1562,7 @@ const layer = Layer.effect(
 
         for (const [id, fn] of Object.entries(custom(dep))) {
           const providerID = ProviderV2.ID.make(id)
-          if (disabled.has(providerID)) continue
+          if (!isProviderAllowed(providerID)) continue
           const data = database[providerID]
           if (!data) {
             continue
@@ -1642,6 +1623,7 @@ const layer = Layer.effect(
               (providerID === ProviderV2.ID.openrouter && modelID === "openai/gpt-5-chat")
             )
               delete provider.models[modelID]
+            if (!providerEndpointAllowed(model.api.url)) delete provider.models[modelID]
             // Every catalogue model is listed, alpha and beta included; only retired ones go.
             if (model.status === "deprecated") delete provider.models[modelID]
             if (
@@ -1729,6 +1711,7 @@ const layer = Layer.effect(
           return url
         })
 
+        if (!providerEndpointAllowed(baseURL)) throw new Error("This hosted provider is unavailable in Vector")
         if (baseURL !== undefined) options["baseURL"] = baseURL
         if (options["apiKey"] === undefined && provider.key) options["apiKey"] = provider.key
         if (model.headers)
@@ -1754,6 +1737,8 @@ const layer = Layer.effect(
         delete options["headerTimeout"]
 
         options["fetch"] = async (input: any, init?: BunFetchRequestInit) => {
+          if (!providerEndpointAllowed(input instanceof Request ? input.url : String(input)))
+            throw new Error("This hosted provider is unavailable in Vector")
           const fetchFn = customFetch ?? fetch
           const opts = init ?? {}
           const chunkAbortCtl = typeof chunkTimeout === "number" && chunkTimeout > 0 ? new AbortController() : undefined
@@ -1918,11 +1903,9 @@ const layer = Layer.effect(
         return undefined
       }
 
-      const priority = providerID.startsWith("opencode")
-        ? ["gpt-nano"]
-        : providerID.startsWith("github-copilot")
-          ? ["gpt-mini", ...smallModelFamilyPriority]
-          : smallModelFamilyPriority
+      const priority = providerID.startsWith("github-copilot")
+        ? ["gpt-mini", ...smallModelFamilyPriority]
+        : smallModelFamilyPriority
       const models = sortBy(
         Object.values(provider.models),
         [(model) => model.release_date, "desc"],

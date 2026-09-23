@@ -1,3 +1,4 @@
+import { COPILOT_SIGN_IN } from "@opencode-ai/core/provider-policy"
 import type { Hooks, PluginInput } from "@opencode-ai/plugin"
 import type { Model } from "@opencode-ai/sdk/v2"
 import { InstallationVersion } from "@opencode-ai/core/installation/version"
@@ -6,7 +7,7 @@ import { setTimeout as sleep } from "node:timers/promises"
 import { CopilotModels } from "./models"
 import { MessageV2 } from "@/session/message-v2"
 
-const CLIENT_ID = "Ov23li8tweQw6odWQebz"
+const CLIENT_ID = "" // Supply only a Vector-owned registration approved for Copilot API access.
 const API_VERSION = "2026-06-01"
 const UTILITY_MODELS = ["gpt-5.4-nano", "gpt-4.1", "gpt-4o", "gpt-4o-mini"]
 // Add a small safety buffer when polling to avoid hitting the server
@@ -54,6 +55,7 @@ function fix(model: Model, url: string): Model {
 }
 
 export async function CopilotAuthPlugin(input: PluginInput): Promise<Hooks> {
+  if (!COPILOT_SIGN_IN) return { auth: { provider: "github-copilot", methods: [] } }
   const sdk = input.client
   let models: Record<string, Model> = {}
   return {
@@ -72,7 +74,7 @@ export async function CopilotAuthPlugin(input: PluginInput): Promise<Hooks> {
           {
             ...(provider.options?.headers as Record<string, string> | undefined),
             Authorization: `Bearer ${auth.refresh}`,
-            "User-Agent": `opencode/${InstallationVersion}`,
+            "User-Agent": `vector/${InstallationVersion}`,
             "X-GitHub-Api-Version": API_VERSION,
           },
           provider.models,
@@ -160,7 +162,7 @@ export async function CopilotAuthPlugin(input: PluginInput): Promise<Hooks> {
             const headers: Record<string, string> = {
               "x-initiator": isAgent ? "agent" : "user",
               ...(init?.headers as Record<string, string>),
-              "User-Agent": `opencode/${InstallationVersion}`,
+              "User-Agent": `vector/${InstallationVersion}`,
               Authorization: `Bearer ${info.refresh}`,
               "Openai-Intent": "conversation-edits",
             }
@@ -236,7 +238,7 @@ export async function CopilotAuthPlugin(input: PluginInput): Promise<Hooks> {
               headers: {
                 Accept: "application/json",
                 "Content-Type": "application/json",
-                "User-Agent": `opencode/${InstallationVersion}`,
+                "User-Agent": `vector/${InstallationVersion}`,
               },
               body: JSON.stringify({
                 client_id: CLIENT_ID,
@@ -266,7 +268,7 @@ export async function CopilotAuthPlugin(input: PluginInput): Promise<Hooks> {
                     headers: {
                       Accept: "application/json",
                       "Content-Type": "application/json",
-                      "User-Agent": `opencode/${InstallationVersion}`,
+                      "User-Agent": `vector/${InstallationVersion}`,
                     },
                     body: JSON.stringify({
                       client_id: CLIENT_ID,
@@ -391,6 +393,7 @@ export async function CopilotAuthPlugin(input: PluginInput): Promise<Hooks> {
             (part.type === "text" && part.synthetic && part.metadata?.compaction_continue === true),
         )
       ) {
+        // Revisit premium-request attribution before enabling Vector Copilot sign-in.
         output.headers["x-initiator"] = "agent"
         return
       }
@@ -408,6 +411,7 @@ export async function CopilotAuthPlugin(input: PluginInput): Promise<Hooks> {
         .catch(() => undefined)
       if (!session || !session.data.parentID) return
       // mark subagent sessions as agent initiated matching standard that other copilot tools have
+      // Revisit premium-request attribution before enabling Vector Copilot sign-in.
       output.headers["x-initiator"] = "agent"
     },
   }
