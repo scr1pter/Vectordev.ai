@@ -56,13 +56,13 @@ describe("OpenAIPlugin", () => {
       yield* addPlugin()
       const result = yield* aisdk.runSDK({
         model: ModelV2.Info.make({
-          ...ModelV2.Info.empty(ProviderV2.ID.make("custom-openai"), ModelV2.ID.make("gpt-5")),
+          ...ModelV2.Info.empty(ProviderV2.ID.make("lmstudio"), ModelV2.ID.make("gpt-5")),
           api: { id: ModelV2.ID.make("gpt-5"), type: "aisdk", package: "test-provider" },
         }),
         package: "@ai-sdk/openai",
-        options: { name: "custom-openai", apiKey: "test" },
+        options: { name: "lmstudio", apiKey: "test" },
       })
-      expect(result.sdk?.responses("gpt-5").provider).toBe("custom-openai.responses")
+      expect(result.sdk?.responses("gpt-5").provider).toBe("lmstudio.responses")
     }),
   )
 
@@ -148,7 +148,7 @@ describe("OpenAIPlugin", () => {
       const catalog = yield* Catalog.Service
       yield* catalog.transform((catalog) => {
         const item = ProviderV2.Info.make({
-          ...ProviderV2.Info.empty(ProviderV2.ID.make("custom-openai")),
+          ...ProviderV2.Info.empty(ProviderV2.ID.make("lmstudio")),
           api: { type: "aisdk", package: "test-provider" },
         })
         catalog.provider.update(item.id, (draft) => {
@@ -158,7 +158,7 @@ describe("OpenAIPlugin", () => {
       })
       yield* addPlugin()
       expect(
-        required(yield* catalog.model.get(ProviderV2.ID.make("custom-openai"), ModelV2.ID.make("gpt-5-chat-latest")))
+        required(yield* catalog.model.get(ProviderV2.ID.make("lmstudio"), ModelV2.ID.make("gpt-5-chat-latest")))
           .enabled,
       ).toBe(true)
     }),

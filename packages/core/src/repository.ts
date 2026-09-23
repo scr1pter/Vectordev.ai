@@ -167,7 +167,7 @@ function withSlash(input: string) {
 }
 
 function githubRemote(pathname: string) {
-  const base = readEnv("OPENCODE_REPO_CLONE_GITHUB_BASE_URL")
+  const base = readEnv("VECTOR_REPO_CLONE_GITHUB_BASE_URL")
   if (!base) return `https://github.com/${pathname}.git`
   return new URL(`${pathname}.git`, withSlash(base)).href
 }

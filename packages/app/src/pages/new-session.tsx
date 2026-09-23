@@ -20,7 +20,7 @@ import { useComposerCommands } from "@/pages/session/use-composer-commands"
 import { NEW_SESSION_CONTENT_WIDTH } from "@/pages/session/new-session-layout"
 import { PromptWorkspaceSelector } from "@/components/prompt-workspace-selector"
 
-const showWorkspaceBar = import.meta.env.VITE_OPENCODE_CHANNEL !== "prod"
+const showWorkspaceBar = import.meta.env.VITE_VECTOR_CHANNEL !== "prod"
 
 /**
  * The `/new-session` draft page. Unlike `session.tsx`, this only renders the prompt

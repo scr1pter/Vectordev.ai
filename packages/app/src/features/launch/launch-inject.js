@@ -40,7 +40,7 @@ export const LAUNCH_FILES = {
 // at 11.2KB it is over the 10KB inline budget, and a second data: URI for
 // srcset would double the inline bytes.
 const GLYPH_SLOT = "<!--vector-launch-glyph-->"
-const PRELOAD = /<script id="oc-theme-preload-script"[^>]*>[\s\S]*?<\/script>/
+const PRELOAD = /<script id="vector-theme-preload-script"[^>]*>[\s\S]*?<\/script>/
 const BODY = /<body\b[^>]*>/
 // A CSS comment, or a quoted string to keep as it is. Leftmost match wins, so
 // a "/*" inside a string is never read as a comment and an apostrophe inside

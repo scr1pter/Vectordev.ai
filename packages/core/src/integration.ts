@@ -1,6 +1,6 @@
 export * as Integration from "./integration"
 
-import { providerCredentialAllowed } from "./provider-policy"
+import { providerAllowed, providerCredentialAllowed } from "./provider-policy"
 import { makeLocationNode } from "./effect/app-node"
 import {
   Cause,
@@ -194,7 +194,7 @@ export interface Interface extends State.Transformable<Draft> {
   }
 }
 
-export class Service extends Context.Service<Service, Interface>()("@opencode/v2/Integration") {}
+export class Service extends Context.Service<Service, Interface>()("@vector/v2/Integration") {}
 
 const attemptLifetime = Duration.toMillis(Duration.minutes(10))
 const terminalRetention = Duration.toMillis(Duration.minutes(1))
@@ -232,6 +232,7 @@ export const locationLayer = Layer.effect(
         list: () => Array.from(draft.integrations.values(), (entry) => entry.ref) as Ref[],
         get: (id) => draft.integrations.get(id)?.ref as Ref | undefined,
         update: (id, update) => {
+          if (!providerAllowed(id)) return
           const current = draft.integrations.get(id) ?? {
             ref: { id, name: id },
             methods: [],
@@ -245,6 +246,7 @@ export const locationLayer = Layer.effect(
         method: {
           list: (integrationID) => (draft.integrations.get(integrationID)?.methods as Method[] | undefined) ?? [],
           update: (implementation) => {
+            if (!providerAllowed(implementation.integrationID)) return
             const current = draft.integrations.get(implementation.integrationID) ?? {
               ref: {
                 id: implementation.integrationID,
@@ -287,6 +289,7 @@ export const locationLayer = Layer.effect(
     })
 
     const resolveConnections = (entry: Entry | undefined, saved: readonly Credential.Info[]) => {
+      if (entry && !providerAllowed(entry.ref.id)) return []
       const credentials = saved
         .filter((credential) => providerCredentialAllowed(credential.integrationID, credential.value))
         .map((credential) => ({

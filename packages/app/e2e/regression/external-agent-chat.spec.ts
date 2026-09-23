@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test"
-import { mockOpenCodeServer } from "../utils/mock-server"
+import { mockVectorServer } from "../utils/mock-server"
 
 const directory = "/tmp/vector-external-chat"
 const parentSessionId = "ses_external_chat_parent"
@@ -18,7 +18,7 @@ for (const runtime of runtimes) {
         nativePrompts.push(request.url())
       }
     })
-    await mockOpenCodeServer(page, {
+    await mockVectorServer(page, {
       directory,
       project: { id: "project-external-chat", worktree: directory, vcs: "git", name: "External Chat" },
       provider: { all: [], connected: [], default: {} },
@@ -222,7 +222,9 @@ for (const runtime of runtimes) {
       .first()
       .click()
     await expect(editor.locator(".monaco-editor")).toBeVisible()
-    await expect.poll(async () => (await editor.locator(".monaco-editor").boundingBox())?.width ?? 0).toBeGreaterThan(320)
+    await expect
+      .poll(async () => (await editor.locator(".monaco-editor").boundingBox())?.width ?? 0)
+      .toBeGreaterThan(320)
     await expect(editor.locator(".monaco-editor")).toContainText("searchKeyboardAccessible")
     await expect(editor.getByText("Vector Agent", { exact: true })).toHaveCount(0)
     await expect(editor.locator("[data-vector-agent-conversation] .vector-agent-reply pre code")).toContainText(

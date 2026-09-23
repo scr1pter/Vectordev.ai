@@ -37,15 +37,15 @@ const summary = Layer.succeed(
 )
 
 const ref = {
-  providerID: ProviderV2.ID.make("test"),
+  providerID: ProviderV2.ID.make("lmstudio"),
   modelID: ModelV2.ID.make("test-model"),
 }
 
 const cfg = {
   provider: {
-    test: {
+    lmstudio: {
       name: "Test",
-      id: "test",
+      id: "lmstudio",
       env: [],
       npm: "@ai-sdk/openai-compatible",
       models: {
@@ -75,10 +75,10 @@ function providerCfg(url: string) {
     ...cfg,
     provider: {
       ...cfg.provider,
-      test: {
-        ...cfg.provider.test,
+      lmstudio: {
+        ...cfg.provider.lmstudio,
         options: {
-          ...cfg.provider.test.options,
+          ...cfg.provider.lmstudio.options,
           baseURL: url,
         },
       },

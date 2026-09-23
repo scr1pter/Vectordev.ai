@@ -2,7 +2,7 @@ import { define } from "./internal"
 import type { ModelV2Info } from "@vectordevai/sdk/v2/types"
 import { Effect, Stream } from "effect"
 import { EventV2 } from "../event"
-import { ModelsDev } from "../models-dev"
+import { ModelCatalog } from "../model-catalog"
 import { ProviderV2 } from "../provider"
 
 function released(date: string) {
@@ -10,7 +10,7 @@ function released(date: string) {
   return Number.isFinite(time) ? time : 0
 }
 
-function cost(input: ModelsDev.Model["cost"]): ModelV2Info["cost"] {
+function cost(input: ModelCatalog.Model["cost"]): ModelV2Info["cost"] {
   const base = {
     input: input?.input ?? 0,
     output: input?.output ?? 0,
@@ -49,7 +49,7 @@ function cost(input: ModelsDev.Model["cost"]): ModelV2Info["cost"] {
   ]
 }
 
-function mergeCost(base: ModelV2Info["cost"], override: ModelsDev.Model["cost"] | undefined) {
+function mergeCost(base: ModelV2Info["cost"], override: ModelCatalog.Model["cost"] | undefined) {
   if (!override) return base
   const next = cost(override)
   const [baseDefault, ...baseTiers] = base
@@ -69,17 +69,17 @@ function mergeCost(base: ModelV2Info["cost"], override: ModelsDev.Model["cost"] 
   return [merge(baseDefault ?? { input: 0, output: 0, cache: { read: 0, write: 0 } }, nextDefault), ...tiers.values()]
 }
 
-function modeName(model: ModelsDev.Model, mode: string) {
+function modeName(model: ModelCatalog.Model, mode: string) {
   return `${model.name} ${mode.charAt(0).toUpperCase()}${mode.slice(1)}`
 }
 
 function applyModel(
   draft: ModelV2Info,
-  model: ModelsDev.Model,
+  model: ModelCatalog.Model,
   input: {
     readonly name?: string
     readonly cost?: ModelV2Info["cost"]
-    readonly request?: NonNullable<NonNullable<ModelsDev.Model["experimental"]>["modes"]>[string]["provider"]
+    readonly request?: NonNullable<NonNullable<ModelCatalog.Model["experimental"]>["modes"]>[string]["provider"]
   } = {},
 ) {
   draft.name = input.name ?? model.name
@@ -116,14 +116,14 @@ function applyModel(
   Object.assign(draft.request.body, input.request?.body ?? {})
 }
 
-export const ModelsDevPlugin = define({
-  id: "models-dev",
+export const ModelCatalogPlugin = define({
+  id: "model-catalog",
   effect: Effect.fn(function* (ctx) {
-    const modelsDev = yield* ModelsDev.Service
+    const modelCatalog = yield* ModelCatalog.Service
     const events = yield* EventV2.Service
     yield* ctx.integration.transform(
       Effect.fn(function* (integrations) {
-        const data = yield* modelsDev.get()
+        const data = yield* modelCatalog.get()
         for (const item of Object.values(data)) {
           if (item.env.length === 0) continue
           const integrationID = item.id
@@ -141,7 +141,7 @@ export const ModelsDevPlugin = define({
     )
     yield* ctx.catalog.transform(
       Effect.fn(function* (catalog) {
-        const data = yield* modelsDev.get()
+        const data = yield* modelCatalog.get()
         for (const item of Object.values(data)) {
           const providerID = ProviderV2.ID.make(item.id)
           catalog.provider.update(providerID, (provider) => {
@@ -175,7 +175,7 @@ export const ModelsDevPlugin = define({
         }
       }),
     )
-    yield* events.subscribe(ModelsDev.Event.Refreshed).pipe(
+    yield* events.subscribe(ModelCatalog.Event.Refreshed).pipe(
       Stream.runForEach(() => ctx.integration.reload().pipe(Effect.andThen(ctx.catalog.reload()))),
       Effect.forkScoped({ startImmediately: true }),
     )

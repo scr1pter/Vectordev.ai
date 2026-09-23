@@ -83,10 +83,10 @@ const SettingsProvidersContent: Component = () => {
   const canDisconnect = (item: ProviderItem) => source(item) !== "env"
 
   const note = (id: string) => PROVIDER_NOTES.find((item) => item.match(id))?.key
-  const openCodeProviderDescription = (id: string) => brandProviderDescription(id)
+  const vectorProviderDescription = (id: string) => brandProviderDescription(id)
   const description = (id: string) => {
-    const openCodeDescription = openCodeProviderDescription(id)
-    if (openCodeDescription) return openCodeDescription
+    const vectorDescription = vectorProviderDescription(id)
+    if (vectorDescription) return vectorDescription
     const key = note(id)
     return key ? language.t(key) : undefined
   }

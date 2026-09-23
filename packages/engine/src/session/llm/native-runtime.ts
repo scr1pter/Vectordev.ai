@@ -1,5 +1,5 @@
 import type { Auth } from "@/auth"
-import { providerAllowed, providerCredentialAllowed, providerEndpointAllowed } from "@vectordevai/core/provider-policy"
+import { providerAllowed, providerCredentialAllowed } from "@vectordevai/core/provider-policy"
 import type { Provider } from "@/provider/provider"
 import { ProviderTransform } from "@/provider/transform"
 import { errorMessage } from "@/util/error"
@@ -54,9 +54,7 @@ function statusWithFetch(
 ): RuntimeStatus {
   const providerID = input.model.providerID
   if (!providerAllowed(providerID) || !providerAllowed(input.provider.id))
-    return { type: "unsupported", reason: "provider is retired" }
-  if (!providerEndpointAllowed(input.model.api.url) || !providerEndpointAllowed(input.provider.options.baseURL))
-    return { type: "unsupported", reason: "provider endpoint is retired" }
+    return { type: "unsupported", reason: "provider is not supported" }
   if (input.auth && !providerCredentialAllowed(providerID, input.auth))
     return { type: "unsupported", reason: "provider sign-in is paused" }
   if (providerID !== "openai" && providerID !== "anthropic")
@@ -177,7 +175,7 @@ export function nativeTools(tools: Record<string, Tool>, input: Pick<StreamInput
   return Object.fromEntries(
     Object.entries(tools).map(([name, item]) => [
       name,
-      // Tool execution remains opencode-owned. The native runtime only adapts
+      // Tool execution remains vector-owned. The native runtime only adapts
       // the @vectordevai/llm tool call back into the AI SDK Tool.execute shape.
       NativeTool.make({
         description: item.description ?? "",

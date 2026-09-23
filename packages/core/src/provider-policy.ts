@@ -1,8 +1,5 @@
-// Hosted OpenCode providers are deliberately unavailable, including user-supplied keys.
-// This also closes the former ZEN_PUBLIC_GATEWAY path in both engines.
-export function providerAllowed(id: string) {
-  return !id.toLowerCase().startsWith("opencode")
-}
+import { providerAllowed } from "@vectordevai/schema/provider-policy"
+export { providerAllowed } from "@vectordevai/schema/provider-policy"
 
 // Re-enabling these requires Vector-owned registrations and provider approval.
 export const COPILOT_SIGN_IN = false
@@ -17,6 +14,7 @@ export function gitlabSignInEnabled() {
 }
 
 export function providerOAuthAllowed(id: string) {
+  if (!providerAllowed(id)) return false
   if (id.startsWith("github-copilot")) return COPILOT_SIGN_IN
   if (id === "openai") return CHATGPT_SIGN_IN
   if (id === "xai") return XAI_SIGN_IN
@@ -26,20 +24,11 @@ export function providerOAuthAllowed(id: string) {
   return providerAllowed(id)
 }
 
-export function providerEndpointAllowed(value: unknown) {
-  if (typeof value !== "string" || !value) return true
-  const hostname = URL.parse(value)?.hostname.toLowerCase()
-  // These literals are a denylist, never request destinations.
-  return (
-    !hostname ||
-    !["opencode.ai", "opncd.ai", "models.dev"].some((host) => hostname === host || hostname.endsWith(`.${host}`))
-  )
-}
-
 export function providerCredentialAllowed(
   id: string,
   credential: { type: string; clientId?: string; metadata?: Readonly<Record<string, unknown>> },
 ) {
+  if (!providerAllowed(id)) return false
   // The retired DigitalOcean flow persisted its OAuth access token as an API key.
   if (id === "digitalocean" && !DIGITALOCEAN_SIGN_IN && credential.metadata?.oauth_access) return false
   if (id === "gitlab" && credential.type === "oauth") {

@@ -217,7 +217,7 @@ export interface Interface {
   readonly mcp: (agent: Agent.Info, permission?: PermissionV1.Ruleset) => Effect.Effect<string | undefined>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@opencode/SystemPrompt") {}
+export class Service extends Context.Service<Service, Interface>()("@vector/SystemPrompt") {}
 
 const layer = Layer.effect(
   Service,
@@ -238,7 +238,7 @@ const layer = Layer.effect(
         return [
           [
             `You are Vector, an AI coding workspace for planning, editing, reviewing, and running software projects.`,
-            `If the user asks what you are, answer as Vector. Do not call yourself OpenCode or a CLI tool unless the user is explicitly asking about internal compatibility layers.`,
+            `If the user asks what you are, answer as Vector. Do not call yourself Vector or a CLI tool unless the user is explicitly asking about internal compatibility layers.`,
             `You are powered by the model named ${model.api.id}. The exact model ID is ${model.providerID}/${model.api.id}`,
             `Here is some useful information about the environment you are running in:`,
             `<env>`,

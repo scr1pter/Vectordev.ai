@@ -43,7 +43,7 @@ export const Logo = (props: { class?: string }) => {
       fill="none"
       classList={{ [props.class ?? ""]: !!props.class }}
       role="img"
-      aria-label="vector.ai"
+      aria-label="Vector"
     >
       <image href={markHref} x="0" y="0" width="64" height="64" preserveAspectRatio="xMidYMid slice" />
       <text
@@ -55,7 +55,7 @@ export const Logo = (props: { class?: string }) => {
         font-weight="690"
         letter-spacing="0"
       >
-        vector.ai
+        Vector
       </text>
     </svg>
   )

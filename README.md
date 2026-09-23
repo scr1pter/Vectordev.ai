@@ -19,7 +19,7 @@ vector
 
 **Bring your own key, for now.** Vector is moving the models it includes onto a provider it has its own agreement with; until that lands, connect Claude, GPT, Gemini or any other provider you already pay for. Vector desktop is available for macOS, Windows and Linux at [vectordev.ai](https://vectordev.ai) for $10 a month or $99 a year — the subscription covers Vector itself. Create a Vector account, then choose a plan from Account. Creating an account does not start a subscription. The terminal agent is free with a Vector account.
 
-This source revision removes OpenCode's hosted providers and services, including access with an OpenCode API key. Native provider sign-ins that relied on another application's registration are paused; connect an API key where supported. The external Claude Code, Codex, and Cursor runtimes still use your own installed, authenticated CLIs. Check the [release notes](https://vectordev.ai/releases) for published build availability.
+This source revision removes the former third-party model gateway and hosted sharing service, including gateway API-key access. Native provider sign-ins that relied on another application's registration are paused; connect an API key where supported. The external Claude Code, Codex, and Cursor runtimes still use your own installed, authenticated CLIs. Check the [release notes](https://vectordev.ai/releases) for published build availability.
 
 ## Features
 
@@ -45,7 +45,7 @@ This source revision removes OpenCode's hosted providers and services, including
 
 ### Models
 
-**Choose your provider.** Connect your own provider in Settings or with `vector auth login` before starting a task. A fresh install without provider credentials has no available models. OpenCode's Zen and Go providers are no longer supported, even with a key. Native ChatGPT, Copilot, xAI, Poe and DigitalOcean sign-in flows are paused; GitLab OAuth requires an explicitly configured Vector-owned client. API-key methods remain available where supported.
+**Choose your provider.** Connect your own provider in Settings or with `vector auth login` before starting a task. A fresh install without provider credentials has no available models. The former third-party gateway is no longer supported, even with a key. Native ChatGPT, Copilot, xAI, GitLab OAuth, Poe and DigitalOcean sign-in flows are paused pending Vector-owned registrations. API-key methods remain available where supported.
 
 **Every model in one picker.** The model picker lists models from your connected providers, using the catalog bundled with each release. An explicitly configured catalog mirror can refresh metadata.
 
@@ -55,7 +55,7 @@ This source revision removes OpenCode's hosted providers and services, including
 
 **Cloud work in the loop.** The agent can create a real Supabase project on your own account, write the keys into your repository, apply the migrations you keep there, sync environment values, and publish to your own Vercel or Netlify account. Then it loads the deployed URL in a real browser and reports what it found, and reads the logs when a deploy misbehaves. Everything that creates, changes or spends asks first.
 
-**Task in, pull request out.** Comment `/vector fix the flaky auth test` on a GitHub issue and Vector opens a branch and a pull request. General tasks use `/vector`, `/vx`, or `/oc`; `/vectorscope` and `/vs` are review commands. Every PR carries its evidence: the files changed, the checks it ran with their exit codes and output, what the run cost, and the judge's verdict.
+**Task in, pull request out.** Comment `/vector fix the flaky auth test` on a GitHub issue and Vector opens a branch and a pull request. Tasks and reviews use `/vector`, `/vx`, `/vectorscope`, or `/vs`. Every PR carries its evidence: the files changed, the checks it ran with their exit codes and output, what the run cost, and the judge's verdict.
 
 **Vectorscope, the code review bot.** Vectorscope reads the repository around a change rather than the diff alone, and it runs in three places: on a pull request, on your branch before you push, and inside the desktop app.
 
@@ -80,7 +80,7 @@ Unsigned desktop releases require a manual download. They do not replace signed 
 
 ## Configuration
 
-Use `vector.json` or `vector.jsonc` in your repository, or `~/.config/vector/vector.json` for global settings. Put custom agents, commands, plugins and themes under `.vector/`. Existing `opencode.json`, `opencode.jsonc` and `.opencode/` configuration remains readable; the Vector names take precedence. Prefer `VECTOR_*` environment variables. Legacy `OPENCODE_*` names remain fallbacks with a migration warning.
+Use `vector.json` or `vector.jsonc` in your repository, or `~/.config/vector/vector.json` for global settings. Put custom agents, commands, plugins and themes under `.vector/`. Configuration now uses Vector names only: `vector.json`, `.vector/`, and `VECTOR_*` variables. Rename older configuration files, directories and environment variables before upgrading; compatibility aliases are removed. Plugins import `@vectordevai/plugin`, and plugin manifests declare theme files with `vector-themes`. Repositories using Vector’s GitHub workflow should run `vector github install` again.
 
 The model catalog is bundled; startup does not need an upstream catalog service. `VECTOR_MODELS_PATH` selects a local catalog, and `VECTOR_MODELS_URL` opts into a configured mirror. `VECTOR_DISABLE_MODELS_FETCH=1` prevents network refresh.
 
@@ -98,7 +98,7 @@ Vector is a Bun monorepo.
 | ----------------------------------------------------- | ------------------------------------------ |
 | `packages/desktop`                                    | The Electron desktop app                   |
 | `packages/app`                                        | The workspace interface                    |
-| `packages/engine`                                   | The agent server and the `vector` CLI      |
+| `packages/engine`                                     | The agent server and the `vector` CLI      |
 | `packages/tui`                                        | The terminal interface                     |
 | `packages/web`                                        | vectordev.ai                               |
 | `packages/core`, `packages/schema`, `packages/server` | Shared engine, contracts, and HTTP surface |
@@ -107,5 +107,3 @@ Vector is a Bun monorepo.
 bun install
 bun run --cwd packages/desktop dev
 ```
-
-Vector is a fork of [opencode](https://github.com/sst/opencode), extended into a full engineering workspace.

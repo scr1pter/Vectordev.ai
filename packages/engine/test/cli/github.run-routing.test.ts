@@ -101,23 +101,29 @@ const finding: Finding = {
 }
 
 describe("review verbs in the task job", () => {
-  cliIt.live("a workflow without a model fails with provider setup instructions", ({ opencode }) =>
+  cliIt.live("a workflow without a model fails with provider setup instructions", ({ vector }) =>
     Effect.gen(function* () {
-      const result = yield* opencode.spawn(
+      const result = yield* vector.spawn(
         ["github", "run", "--event", JSON.stringify({ eventName: "workflow_dispatch", payload: {} })],
-        { env: { MODEL: "", OPENCODE_CONFIG_CONTENT: JSON.stringify({ enabled_providers: [] }) } },
+        { env: { MODEL: "", VECTOR_CONFIG_CONTENT: JSON.stringify({ enabled_providers: [] }) } },
       )
       expect(result.timedOut).toBe(false)
       expect(result.exitCode).not.toBe(0)
       expect(result.stderr).toContain("No GitHub model is set. Set MODEL in the workflow to provider/model")
       expect(result.stderr).toContain("provider's credentials as GitHub Actions secrets")
       expect(result.stderr).toContain("vector github install")
-      expect(result.stdout + result.stderr).not.toContain("opencode/big-pickle")
     }),
   )
 
   test("an old workflow's review verb gets one reply, and nothing else runs", async () => {
-    for (const body of ["/vector review", "/vector review full", "/vx review", "/oc review", "/vector pause"]) {
+    for (const body of [
+      "/vector review",
+      "/vector review full",
+      "/vx review",
+      "/vectorscope review",
+      "/vs review",
+      "/vector pause",
+    ]) {
       const route = routeGithubEvent(comment(body), TASK_MENTIONS)
       expect(taskRoutePlan(route, { eventName: "issue_comment" })).toEqual({ action: "reply", pr: 7 })
     }

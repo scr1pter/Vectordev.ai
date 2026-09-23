@@ -1,35 +1,14 @@
 ---
 import LegalPage from "../../components/marketing/LegalPage.astro"
+import notices from "../../../../../THIRD_PARTY_NOTICES.md?raw"
 export const prerender = true
 ---
 
 <LegalPage eyebrow="Notices" title="Third-Party Licenses" description="Open-source components included in Vector retain their original license terms.">
   <section>
-    <h2>OpenCode-derived portions</h2>
-    <p>Portions of Vector derive from OpenCode and remain available under the MIT License for those portions.</p>
-    <pre>MIT License
-
-Copyright (c) 2025 opencode
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.</pre>
+    <h2>Bundled third-party notices</h2>
+    <p>These notices are included with Vector. Desktop and CLI distributions also include DEPENDENCY_NOTICES.md with package versions, license texts, and available copyright notices for bundled and external dependencies. Packages that omit a notice file are identified explicitly.</p>
+    <pre>{notices}</pre>
   </section>
-  <section><h2>Other principal components</h2><p>Vector also incorporates software including Electron, Solid, CodeMirror, Monaco Editor, Stripe's Node SDK, Resend's Node SDK, Playwright, Astro, Vite, and other dependencies under their respective licenses. Desktop and CLI distributions include a generated DEPENDENCY_NOTICES.md with package versions, license texts, and available copyright notices for bundled and external dependencies. Packages that omit a notice file are identified explicitly.</p></section>
-  <section><h2>Runtimes and assets</h2><p>The CLI bundles Bun (MIT) and JavaScriptCore/WebKit (LGPL-2). THIRD_PARTY_NOTICES.md includes Bun’s license information and its upstream source and relinking instructions. Desktop bundles also retain Electron’s LICENSE and Chromium’s LICENSES.chromium.html.</p><p>Material Icon Theme assets are MIT licensed, Copyright (c) 2025 Material Extensions. Inter, JetBrains Mono Nerd Font, Geist, and IBM Plex Mono retain their SIL Open Font License 1.1 notices, with additional Nerd Fonts patch notices. The Tauri webview zoom adaptation retains its Apache-2.0/MIT attribution; the proxy-from-env adaptation retains Rob Wu’s MIT notice.</p></section>
   <section><h2>Scope</h2><p>The Vector commercial license applies to Vector-owned code, branding, product assets, and proprietary additions. It does not replace or narrow the permissions attached to third-party code.</p></section>
 </LegalPage>

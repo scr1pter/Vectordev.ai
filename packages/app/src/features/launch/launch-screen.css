@@ -643,7 +643,7 @@ html[data-color-scheme="light"] .vector-launch[data-state="failed"] .vector-laun
 }
 
 /* Light theme. data-color-scheme is stamped before first paint by
-   oc-theme-preload.js from the saved scheme, which the Vector theme setting
+   vector-theme-preload.js from the saved scheme, which the Vector theme setting
    writes (VectorThemeSync), and settings keep it current afterwards. */
 html[data-color-scheme="light"] .vector-launch {
   --vector-launch-ground: #f3f2f6;

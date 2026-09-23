@@ -8,52 +8,52 @@ const positiveInteger = (name: string) =>
     Config.map((value) => (Number.isInteger(value) && value > 0 ? value : undefined)),
     Config.orElse(() => Config.succeed(undefined)),
   )
-const experimental = bool("OPENCODE_EXPERIMENTAL")
+const experimental = bool("VECTOR_EXPERIMENTAL")
 const enabledByExperimental = (name: string) =>
   Config.all({ experimental, enabled: configEnv(name, Config.boolean).pipe(Config.option) }).pipe(
     Config.map((flags) => Option.getOrElse(flags.enabled, () => flags.experimental)),
   )
 
-export class Service extends ConfigService.Service<Service>()("@opencode/RuntimeFlags", {
-  autoShare: bool("OPENCODE_AUTO_SHARE"),
-  pure: bool("OPENCODE_PURE"),
-  disableDefaultPlugins: bool("OPENCODE_DISABLE_DEFAULT_PLUGINS"),
-  disableEmbeddedWebUi: bool("OPENCODE_DISABLE_EMBEDDED_WEB_UI"),
-  disableExternalSkills: bool("OPENCODE_DISABLE_EXTERNAL_SKILLS"),
-  disableLspDownload: bool("OPENCODE_DISABLE_LSP_DOWNLOAD"),
+export class Service extends ConfigService.Service<Service>()("@vector/RuntimeFlags", {
+  autoShare: bool("VECTOR_AUTO_SHARE"),
+  pure: bool("VECTOR_PURE"),
+  disableDefaultPlugins: bool("VECTOR_DISABLE_DEFAULT_PLUGINS"),
+  disableEmbeddedWebUi: bool("VECTOR_DISABLE_EMBEDDED_WEB_UI"),
+  disableExternalSkills: bool("VECTOR_DISABLE_EXTERNAL_SKILLS"),
+  disableLspDownload: bool("VECTOR_DISABLE_LSP_DOWNLOAD"),
   disableClaudeCodePrompt: Config.all({
-    broad: bool("OPENCODE_DISABLE_CLAUDE_CODE"),
-    direct: bool("OPENCODE_DISABLE_CLAUDE_CODE_PROMPT"),
+    broad: bool("VECTOR_DISABLE_CLAUDE_CODE"),
+    direct: bool("VECTOR_DISABLE_CLAUDE_CODE_PROMPT"),
   }).pipe(Config.map((flags) => flags.broad || flags.direct)),
   disableClaudeCodeSkills: Config.all({
-    broad: bool("OPENCODE_DISABLE_CLAUDE_CODE"),
-    direct: bool("OPENCODE_DISABLE_CLAUDE_CODE_SKILLS"),
+    broad: bool("VECTOR_DISABLE_CLAUDE_CODE"),
+    direct: bool("VECTOR_DISABLE_CLAUDE_CODE_SKILLS"),
   }).pipe(Config.map((flags) => flags.broad || flags.direct)),
   enableExa: Config.all({
     experimental,
-    enabled: bool("OPENCODE_ENABLE_EXA"),
-    legacy: bool("OPENCODE_EXPERIMENTAL_EXA"),
+    enabled: bool("VECTOR_ENABLE_EXA"),
+    legacy: bool("VECTOR_EXPERIMENTAL_EXA"),
   }).pipe(Config.map((flags) => flags.experimental || flags.enabled || flags.legacy)),
   enableParallel: Config.all({
-    enabled: bool("OPENCODE_ENABLE_PARALLEL"),
-    legacy: bool("OPENCODE_EXPERIMENTAL_PARALLEL"),
+    enabled: bool("VECTOR_ENABLE_PARALLEL"),
+    legacy: bool("VECTOR_EXPERIMENTAL_PARALLEL"),
   }).pipe(Config.map((flags) => flags.enabled || flags.legacy)),
-  enableExperimentalModels: bool("OPENCODE_ENABLE_EXPERIMENTAL_MODELS"),
-  enableQuestionTool: bool("OPENCODE_ENABLE_QUESTION_TOOL"),
-  experimentalReferences: enabledByExperimental("OPENCODE_EXPERIMENTAL_REFERENCES"),
-  experimentalBackgroundSubagents: enabledByExperimental("OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS"),
-  experimentalLspTy: bool("OPENCODE_EXPERIMENTAL_LSP_TY"),
-  experimentalLspTool: enabledByExperimental("OPENCODE_EXPERIMENTAL_LSP_TOOL"),
-  experimentalOxfmt: enabledByExperimental("OPENCODE_EXPERIMENTAL_OXFMT"),
-  experimentalPlanMode: enabledByExperimental("OPENCODE_EXPERIMENTAL_PLAN_MODE"),
-  experimentalEventSystem: enabledByExperimental("OPENCODE_EXPERIMENTAL_EVENT_SYSTEM"),
-  experimentalWorkspaces: enabledByExperimental("OPENCODE_EXPERIMENTAL_WORKSPACES"),
-  experimentalIconDiscovery: enabledByExperimental("OPENCODE_EXPERIMENTAL_ICON_DISCOVERY"),
-  outputTokenMax: positiveInteger("OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX"),
-  bashDefaultTimeoutMs: positiveInteger("OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS"),
-  experimentalNativeLlm: bool("OPENCODE_EXPERIMENTAL_NATIVE_LLM"),
-  experimentalWebSockets: bool("OPENCODE_EXPERIMENTAL_WEBSOCKETS"),
-  client: configEnv("OPENCODE_CLIENT", Config.string).pipe(Config.withDefault("cli")),
+  enableExperimentalModels: bool("VECTOR_ENABLE_EXPERIMENTAL_MODELS"),
+  enableQuestionTool: bool("VECTOR_ENABLE_QUESTION_TOOL"),
+  experimentalReferences: enabledByExperimental("VECTOR_EXPERIMENTAL_REFERENCES"),
+  experimentalBackgroundSubagents: enabledByExperimental("VECTOR_EXPERIMENTAL_BACKGROUND_SUBAGENTS"),
+  experimentalLspTy: bool("VECTOR_EXPERIMENTAL_LSP_TY"),
+  experimentalLspTool: enabledByExperimental("VECTOR_EXPERIMENTAL_LSP_TOOL"),
+  experimentalOxfmt: enabledByExperimental("VECTOR_EXPERIMENTAL_OXFMT"),
+  experimentalPlanMode: enabledByExperimental("VECTOR_EXPERIMENTAL_PLAN_MODE"),
+  experimentalEventSystem: enabledByExperimental("VECTOR_EXPERIMENTAL_EVENT_SYSTEM"),
+  experimentalWorkspaces: enabledByExperimental("VECTOR_EXPERIMENTAL_WORKSPACES"),
+  experimentalIconDiscovery: enabledByExperimental("VECTOR_EXPERIMENTAL_ICON_DISCOVERY"),
+  outputTokenMax: positiveInteger("VECTOR_EXPERIMENTAL_OUTPUT_TOKEN_MAX"),
+  bashDefaultTimeoutMs: positiveInteger("VECTOR_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS"),
+  experimentalNativeLlm: bool("VECTOR_EXPERIMENTAL_NATIVE_LLM"),
+  experimentalWebSockets: bool("VECTOR_EXPERIMENTAL_WEBSOCKETS"),
+  client: configEnv("VECTOR_CLIENT", Config.string).pipe(Config.withDefault("cli")),
 }) {}
 
 export type Info = Context.Service.Shape<typeof Service>

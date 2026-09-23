@@ -1,13 +1,13 @@
 import { expect, test } from "@playwright/test"
 import { base64Encode } from "@vectordevai/core/util/encode"
-import { mockOpenCodeServer } from "../utils/mock-server"
+import { mockVectorServer } from "../utils/mock-server"
 import { expectSessionTitle } from "../utils/waits"
 
 const directory = "C:/Vector/SettingsWorkspaceRegression"
 const sessionID = "ses_settings_workspace_regression"
 
 test("full-screen Settings is searchable and returns to the active task", async ({ page }, testInfo) => {
-  await mockOpenCodeServer(page, {
+  await mockVectorServer(page, {
     directory,
     project: { id: "project-settings-workspace", worktree: directory, vcs: "git", name: "Settings Workspace" },
     provider: { all: [], connected: [], default: {} },
@@ -85,11 +85,11 @@ test("full-screen Settings is searchable and returns to the active task", async 
   await expect(settings.getByRole("button", { name: "Release notes", exact: true })).toBeVisible()
   await expect(settings.getByRole("button", { name: "Latest installers", exact: true }).locator("use")).toHaveAttribute(
     "href",
-    "#opencode-v2-icon-download",
+    "#vector-v2-icon-download",
   )
   await expect(settings.getByRole("button", { name: "Release notes", exact: true }).locator("use")).toHaveAttribute(
     "href",
-    "#opencode-v2-icon-link",
+    "#vector-v2-icon-link",
   )
   await page.screenshot({ path: testInfo.outputPath("settings-updates.png") })
 

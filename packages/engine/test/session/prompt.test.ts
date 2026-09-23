@@ -68,7 +68,7 @@ const summary = Layer.succeed(
 )
 
 const ref = {
-  providerID: ProviderV2.ID.make("test"),
+  providerID: ProviderV2.ID.make("lmstudio"),
   modelID: ModelV2.ID.make("test-model"),
 }
 
@@ -257,13 +257,13 @@ const withMcpInstructions = testEffect(
 const unix = process.platform !== "win32" ? it.instance : it.instance.skip
 const unixNoLLMServer = process.platform !== "win32" ? noLLMServer.instance : noLLMServer.instance.skip
 
-// Config that registers a custom "test" provider with a "test-model" model
+// Config that registers a custom model under the supported lmstudio provider
 // so provider model lookup succeeds inside the loop.
 const cfg = {
   provider: {
-    test: {
+    lmstudio: {
       name: "Test",
-      id: "test",
+      id: "lmstudio",
       env: [],
       npm: "@ai-sdk/openai-compatible",
       models: {
@@ -293,10 +293,10 @@ function providerCfg(url: string) {
     ...cfg,
     provider: {
       ...cfg.provider,
-      test: {
-        ...cfg.provider.test,
+      lmstudio: {
+        ...cfg.provider.lmstudio,
         options: {
-          ...cfg.provider.test.options,
+          ...cfg.provider.lmstudio.options,
           baseURL: url,
         },
       },
@@ -311,8 +311,8 @@ const writeText = Effect.fn("test.writeText")(function* (file: string, text: str
 
 const writeConfig = Effect.fn("test.writeConfig")(function* (dir: string, config: Partial<ConfigV1.Info>) {
   yield* writeText(
-    path.join(dir, "opencode.json"),
-    JSON.stringify({ $schema: "https://opencode.ai/config.json", ...config }),
+    path.join(dir, "vector.json"),
+    JSON.stringify({ $schema: "https://vectordev.ai/config.json", ...config }),
   )
 })
 
@@ -969,7 +969,7 @@ it.instance("failed subtask preserves metadata on error tool state", () =>
       ...providerCfg(url),
       agent: {
         general: {
-          model: "test/missing-model",
+          model: "lmstudio/missing-model",
         },
       },
     }))
@@ -1001,7 +1001,7 @@ it.instance("failed subtask preserves metadata on error tool state", () =>
     expect(tool.state.metadata).toBeDefined()
     expect(tool.state.metadata?.sessionId).toBeDefined()
     expect(tool.state.metadata?.model).toEqual({
-      providerID: ProviderV2.ID.make("test"),
+      providerID: ProviderV2.ID.make("lmstudio"),
       modelID: ModelV2.ID.make("missing-model"),
     })
   }),
@@ -2374,7 +2374,7 @@ noLLMServer.instance(
       const other = yield* prompt.prompt({
         sessionID: session.id,
         agent: "build",
-        model: { providerID: ProviderV2.ID.make("opencode"), modelID: ModelV2.ID.make("kimi-k2.5-free") },
+        model: { providerID: ref.providerID, modelID: ModelV2.ID.make("alternate-model") },
         noReply: true,
         parts: [{ type: "text", text: "hello" }],
       })
@@ -2389,7 +2389,7 @@ noLLMServer.instance(
       })
       if (match.info.role !== "user") throw new Error("expected user message")
       expect(match.info.model).toEqual({
-        providerID: ProviderV2.ID.make("test"),
+        providerID: ProviderV2.ID.make("lmstudio"),
         modelID: ModelV2.ID.make("test-model"),
         variant: "xhigh",
       })
@@ -2412,11 +2412,16 @@ noLLMServer.instance(
       ...cfg,
       provider: {
         ...cfg.provider,
-        test: {
-          ...cfg.provider.test,
+        lmstudio: {
+          ...cfg.provider.lmstudio,
           models: {
+            "alternate-model": {
+              ...cfg.provider.lmstudio.models["test-model"],
+              id: "alternate-model",
+              name: "Alternate Model",
+            },
             "test-model": {
-              ...cfg.provider.test.models["test-model"],
+              ...cfg.provider.lmstudio.models["test-model"],
               variants: { xhigh: {}, high: {} },
             },
           },
@@ -2424,7 +2429,7 @@ noLLMServer.instance(
       },
       agent: {
         build: {
-          model: "test/test-model",
+          model: "lmstudio/test-model",
           variant: "xhigh",
         },
       },

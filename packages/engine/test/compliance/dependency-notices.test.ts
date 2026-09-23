@@ -11,14 +11,14 @@ async function fixture() {
     path.join(dir, "script/dependency-notices.ts"),
     Bun.file(path.join(root, "script/dependency-notices.ts")),
   )
-  for (const name of ["opencode", "app", "desktop", "tui", "ui"]) {
+  for (const name of ["engine", "app", "desktop", "tui", "ui"]) {
     await Bun.write(
       path.join(dir, "packages", name, "package.json"),
       JSON.stringify({
         name: name === "desktop" ? "vector-desktop" : name,
         version: "1.0.0",
-        dependencies: name === "opencode" ? { direct: "1.0.0" } : {},
-        optionalDependencies: name === "opencode" ? { installed: "1.0.0", unavailable: "1.0.0" } : {},
+        dependencies: name === "engine" ? { direct: "1.0.0" } : {},
+        optionalDependencies: name === "engine" ? { installed: "1.0.0", unavailable: "1.0.0" } : {},
         devDependencies: name === "app" ? { renderer: "1.0.0", buildtool: "1.0.0" } : {},
       }),
     )

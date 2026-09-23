@@ -32,7 +32,7 @@ export type PatchDeps = {
   readText: (file: string) => Promise<string>
   write: (file: string, text: string) => Promise<void>
   exists: (file: string) => Promise<boolean>
-  files: (dir: string, name: "vector" | "opencode" | "tui") => string[]
+  files: (dir: string, name: "vector" | "vector" | "tui") => string[]
 }
 
 export type PatchInput = {
@@ -338,7 +338,7 @@ function patchDir(input: PatchInput) {
   return path.join(root, ".vector")
 }
 
-function patchName(kind: Kind): "vector" | "opencode" | "tui" {
+function patchName(kind: Kind): "vector" | "vector" | "tui" {
   if (kind === "server") return "vector"
   return "tui"
 }
@@ -348,10 +348,10 @@ async function patchOne(dir: string, target: Target, spec: string, force: boolea
   await using _ = await Flock.acquire(`plug-config:${Filesystem.resolve(path.join(dir, name))}`)
 
   const files = dep.files(dir, name)
-  const legacyDir = path.basename(dir) === ".vector" ? path.join(path.dirname(dir), ".opencode") : dir
+  const legacyDir = path.basename(dir) === ".vector" ? path.join(path.dirname(dir), ".vector") : dir
   const legacy =
     target.kind === "server"
-      ? [...dep.files(dir, "opencode"), ...dep.files(legacyDir, "opencode")]
+      ? [...dep.files(dir, "vector"), ...dep.files(legacyDir, "vector")]
       : legacyDir !== dir
         ? dep.files(legacyDir, "tui")
         : []

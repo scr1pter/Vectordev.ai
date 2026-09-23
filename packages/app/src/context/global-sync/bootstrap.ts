@@ -1,6 +1,6 @@
 import type {
   Config,
-  OpencodeClient,
+  VectorClient,
   Path,
   PermissionRequest,
   Project,
@@ -82,13 +82,13 @@ function showErrors(input: {
   })
 }
 
-export const loadGlobalConfigQuery = (scope: ServerScope, sdk: OpencodeClient) =>
+export const loadGlobalConfigQuery = (scope: ServerScope, sdk: VectorClient) =>
   queryOptions({
     queryKey: [scope, "config"],
     queryFn: () => retry(() => sdk.global.config.get().then((x) => x.data!)),
   })
 
-export const loadProjectsQuery = (scope: ServerScope, sdk: OpencodeClient) =>
+export const loadProjectsQuery = (scope: ServerScope, sdk: VectorClient) =>
   queryOptions({
     queryKey: [scope, "project"],
     queryFn: async () => {
@@ -96,10 +96,10 @@ export const loadProjectsQuery = (scope: ServerScope, sdk: OpencodeClient) =>
         sdk.project.list().then((x) =>
           (x.data ?? [])
             .filter((p) => !!p?.id)
-            .filter((p) => !!p.worktree && !p.worktree.includes("opencode-test"))
+            .filter((p) => !!p.worktree && !p.worktree.includes("vector-test"))
             .slice()
             .sort((a, b) => cmp(a.id, b.id)),
-          ),
+        ),
       )
       const desktopApi =
         typeof window === "undefined"
@@ -108,14 +108,16 @@ export const loadProjectsQuery = (scope: ServerScope, sdk: OpencodeClient) =>
       if (scope !== ServerScope.local || !desktopApi?.pathExists) return projects
       const pathExists = desktopApi.pathExists
       const existing = await Promise.all(
-        projects.map(async (project) => ((await pathExists(project.worktree).catch(() => false)) ? project : undefined)),
+        projects.map(async (project) =>
+          (await pathExists(project.worktree).catch(() => false)) ? project : undefined,
+        ),
       )
       return existing.filter((project): project is Project => !!project)
     },
   })
 
 export async function bootstrapGlobal(input: {
-  serverSDK: OpencodeClient
+  serverSDK: VectorClient
   scope: ServerScope
   requestFailedTitle: string
   translate: (key: string, vars?: Record<string, string | number>) => string
@@ -173,7 +175,7 @@ function warmSessions(input: {
   ids: string[]
   store: Store<State>
   setStore: SetStoreFunction<State>
-  sdk: OpencodeClient
+  sdk: VectorClient
 }) {
   const known = new Set(input.store.session.map((item) => item.id))
   const ids = [...new Set(input.ids)].filter((id) => !!id && !known.has(id))
@@ -189,25 +191,25 @@ function warmSessions(input: {
   ).then(() => undefined)
 }
 
-export const loadProvidersQuery = (scope: ServerScope, directory: string | null, sdk: OpencodeClient) =>
+export const loadProvidersQuery = (scope: ServerScope, directory: string | null, sdk: VectorClient) =>
   queryOptions({
     queryKey: [scope, directory, "providers"],
     queryFn: () => retry(() => sdk.provider.list().then((x) => normalizeProviderList(x.data!))),
   })
 
-export const loadAgentsQuery = (scope: ServerScope, directory: string | null, sdk: OpencodeClient) =>
+export const loadAgentsQuery = (scope: ServerScope, directory: string | null, sdk: VectorClient) =>
   queryOptions({
     queryKey: [scope, directory, "agents"],
     queryFn: () => retry(() => sdk.app.agents().then((x) => normalizeAgentList(x.data))),
   })
 
-export const loadPathQuery = (scope: ServerScope, directory: string | null, sdk: OpencodeClient) =>
+export const loadPathQuery = (scope: ServerScope, directory: string | null, sdk: VectorClient) =>
   queryOptions<Path>({
     queryKey: [scope, directory, "path"],
     queryFn: () => retry(() => sdk.path.get().then((x) => x.data!)),
   })
 
-export const loadReferencesQuery = (scope: ServerScope, directory: string, sdk: OpencodeClient) =>
+export const loadReferencesQuery = (scope: ServerScope, directory: string, sdk: VectorClient) =>
   queryOptions<ReferenceInfo[]>({
     queryKey: [scope, directory, "references"] as const,
     queryFn: () => retry(() => sdk.v2.reference.list().then((x) => x.data?.data ?? [])).catch(() => []),
@@ -218,7 +220,7 @@ export async function bootstrapDirectory(input: {
   directory: string
   scope: ServerScope
   mcp: boolean
-  sdk: OpencodeClient
+  sdk: VectorClient
   store: Store<State>
   setStore: SetStoreFunction<State>
   vcsCache: VcsCache

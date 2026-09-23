@@ -405,7 +405,7 @@ export const changelog = [
   [
     "September 2026 · 1.99.91",
     "Provider setup and Vectorscope reliability",
-    "OpenCode Zen's shared keyless gateway is disabled. Connect your own provider in Settings or with vector auth login; your own OpenCode key is still supported. GitHub automation stops with actionable MODEL and provider-key setup instructions when no model is configured, instead of selecting an unavailable default. Vectorscope's /vectorscope, /vs, /vector and /vx aliases and workflow fixtures agree again, and release checks no longer depend on an unshipped computer tool. Command-F places chat search below the title strip. Unsigned desktop releases require a manual download; signed automatic-update feeds are preserved.",
+    "A third-party shared keyless gateway was disabled. That release required connecting a provider in Settings or with vector auth login and retained provider-key connections, including keys for the former gateway. GitHub automation stops with actionable MODEL and provider-key setup instructions when no model is configured, instead of selecting an unavailable default. Vectorscope's /vectorscope, /vs, /vector and /vx aliases and workflow fixtures agree again, and release checks no longer depend on an unshipped computer tool. Command-F places chat search below the title strip. Unsigned desktop releases require a manual download; signed automatic-update feeds are preserved.",
   ],
   [
     "September 2026 · 1.99.9",

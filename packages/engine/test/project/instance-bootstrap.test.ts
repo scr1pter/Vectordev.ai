@@ -50,9 +50,9 @@ const bootstrapFixture = Effect.gen(function* () {
   )
   yield* Effect.promise(() =>
     Bun.write(
-      path.join(dir, "opencode.json"),
+      path.join(dir, "vector.json"),
       JSON.stringify({
-        $schema: "https://opencode.ai/config.json",
+        $schema: "https://vectordev.ai/config.json",
         plugin: [pathToFileURL(pluginFile).href],
       }),
     ),

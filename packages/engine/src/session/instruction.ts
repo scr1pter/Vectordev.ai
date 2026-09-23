@@ -43,7 +43,7 @@ export interface Interface {
   ) => Effect.Effect<{ filepath: string; content: string }[], FSUtil.Error>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@opencode/Instruction") {}
+export class Service extends Context.Service<Service, Interface>()("@vector/Instruction") {}
 
 const layer: Layer.Layer<
   Service,
@@ -89,7 +89,7 @@ const layer: Layer.Layer<
 
     const relative = Effect.fnUntraced(function* (instruction: string) {
       const ctx = yield* InstanceState.context
-      if (!Flag.OPENCODE_DISABLE_PROJECT_CONFIG) {
+      if (!Flag.VECTOR_DISABLE_PROJECT_CONFIG) {
         return yield* fs
           .globUp(instruction, ctx.directory, ctx.worktree)
           .pipe(Effect.catch(() => Effect.succeed([] as string[])))
@@ -136,9 +136,9 @@ const layer: Layer.Layer<
       // Vector memory and project rules are additive rather than mutually
       // exclusive with project instructions. They must be loaded even when a
       // global AGENTS.md or CLAUDE.md exists. They are still project files, so
-      // OPENCODE_DISABLE_PROJECT_CONFIG skips them: a code review runs on a pull
+      // VECTOR_DISABLE_PROJECT_CONFIG skips them: a code review runs on a pull
       // request's tree and must not take instructions from it.
-      if (!Flag.OPENCODE_DISABLE_PROJECT_CONFIG) {
+      if (!Flag.VECTOR_DISABLE_PROJECT_CONFIG) {
         for (const file of additiveProjectFiles) {
           const matches = yield* fs
             .findUp(file, ctx.directory, ctx.worktree)
@@ -148,7 +148,7 @@ const layer: Layer.Layer<
       }
 
       // The first project-level match wins so we don't stack AGENTS.md/CLAUDE.md from every ancestor.
-      if (!Flag.OPENCODE_DISABLE_PROJECT_CONFIG) {
+      if (!Flag.VECTOR_DISABLE_PROJECT_CONFIG) {
         for (const file of instructionFiles) {
           const matches = yield* fs
             .findUp(file, ctx.directory, ctx.worktree)

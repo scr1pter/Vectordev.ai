@@ -97,9 +97,9 @@ const it = testEffect(
 
 const providerCfg = (url: string) => ({
   provider: {
-    test: {
+    lmstudio: {
       name: "Test",
-      id: "test",
+      id: "lmstudio",
       env: [],
       npm: "@ai-sdk/openai-compatible",
       models: {

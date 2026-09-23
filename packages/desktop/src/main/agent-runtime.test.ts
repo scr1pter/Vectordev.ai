@@ -1,14 +1,13 @@
 import { describe, expect, test } from "bun:test"
 import { untrustedChildEnvironment } from "@vectordevai/core/child-environment"
-import { VECTOR_AGENT_RUNTIME_ENV, vectorRuntimeEnv } from "./agent-runtime"
+import { VECTOR_AGENT_RUNTIME_ENV } from "./agent-runtime"
 
 describe("Vector agent runtime", () => {
   test("enables real background subagents in desktop runtimes", () => {
-    expect(VECTOR_AGENT_RUNTIME_ENV.OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS).toBe("true")
     expect(VECTOR_AGENT_RUNTIME_ENV.VECTOR_EXPERIMENTAL_BACKGROUND_SUBAGENTS).toBe("true")
   })
 
-  test("internal overrides win over inherited aliases without leaking credentials to project children", async () => {
+  test("internal overrides win over inherited values without leaking credentials to project children", async () => {
     const env = {
       VECTOR_CONFIG_DIR: "/inherited-config",
       VECTOR_CLIENT: "inherited-client",
@@ -17,19 +16,18 @@ describe("Vector agent runtime", () => {
       VECTOR_CREDENTIAL_KEY: "vault-test-secret",
       OPENAI_API_KEY: "provider-test-secret",
       ...VECTOR_AGENT_RUNTIME_ENV,
-      ...vectorRuntimeEnv({
-        OPENCODE_CONFIG_DIR: "/desktop-config",
-        OPENCODE_CLIENT: "desktop",
-        OPENCODE_SERVER_PASSWORD: "desktop-test-password",
-      }),
+      ...{
+        VECTOR_CONFIG_DIR: "/desktop-config",
+        VECTOR_CLIENT: "desktop",
+        VECTOR_SERVER_PASSWORD: "desktop-test-password",
+      },
     }
     const script = `
       const { Flag } = await import(${JSON.stringify(new URL("../../../core/src/flag/flag.ts", import.meta.url).pathname)})
       console.log(JSON.stringify({
-        config: Flag.OPENCODE_CONFIG_DIR,
-        client: Flag.OPENCODE_CLIENT,
-        password: Flag.OPENCODE_SERVER_PASSWORD,
-        legacyPassword: process.env.OPENCODE_SERVER_PASSWORD,
+        config: Flag.VECTOR_CONFIG_DIR,
+        client: Flag.VECTOR_CLIENT,
+        password: Flag.VECTOR_SERVER_PASSWORD,
         background: process.env.VECTOR_EXPERIMENTAL_BACKGROUND_SUBAGENTS,
         vault: process.env.VECTOR_CREDENTIAL_KEY,
         provider: process.env.OPENAI_API_KEY,
@@ -51,7 +49,6 @@ describe("Vector agent runtime", () => {
         ...(trusted
           ? {
               password: "desktop-test-password",
-              legacyPassword: "desktop-test-password",
               vault: "vault-test-secret",
             }
           : {}),

@@ -2,7 +2,7 @@ import { Binary } from "@vectordevai/core/util/binary"
 import { retry } from "@vectordevai/core/util/retry"
 import type {
   Message,
-  OpencodeClient,
+  VectorClient,
   Part,
   PermissionRequest,
   QuestionRequest,
@@ -130,7 +130,7 @@ function reconcileFetched<T extends { id: string }>(
   return [...result.values()].sort((a, b) => cmp(a.id, b.id))
 }
 
-export function createServerSession(client: OpencodeClient, options?: { retry?: typeof retry }) {
+export function createServerSession(client: VectorClient, options?: { retry?: typeof retry }) {
   const [data, setData] = createStore({
     info: {} as Record<string, Session | undefined>,
     session_status: {} as Record<string, SessionStatus>,

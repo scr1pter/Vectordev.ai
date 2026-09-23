@@ -168,11 +168,11 @@ export default {
     },
     {
       filetype: "vue",
-      wasm: "https://github.com/anomalyco/tree-sitter-vue/releases/download/v0.1.2/tree-sitter-vue.wasm",
+      wasm: "https://cdn.jsdelivr.net/npm/tree-sitter-wasm@2.0.2/out/vue/tree-sitter-vue.wasm",
       queries: {
         highlights: [
-          "https://raw.githubusercontent.com/anomalyco/tree-sitter-vue/v0.1.2/queries/html_tags/highlights.scm",
-          "https://raw.githubusercontent.com/anomalyco/tree-sitter-vue/v0.1.2/queries/vue/highlights.scm",
+          "https://raw.githubusercontent.com/tree-sitter-grammars/tree-sitter-vue/ce8011a414fdf8091f4e4071752efc376f4afb08/queries/html_tags/highlights.scm",
+          "https://raw.githubusercontent.com/nvim-treesitter/nvim-treesitter/ada920f2a43f87a26356d386cefe656bd6b3e9a8/queries/vue/highlights.scm",
         ],
       },
     },
@@ -251,8 +251,7 @@ export default {
     },
     {
       filetype: "clojure",
-      // temporarily using fork to fix issues
-      wasm: "https://github.com/anomalyco/tree-sitter-clojure/releases/download/v0.0.1/tree-sitter-clojure.wasm",
+      wasm: "https://cdn.jsdelivr.net/npm/@yogthos/tree-sitter-clojure@0.0.14/tree-sitter-clojure.wasm",
       queries: {
         highlights: [
           "https://raw.githubusercontent.com/nvim-treesitter/nvim-treesitter/refs/heads/master/queries/clojure/highlights.scm",

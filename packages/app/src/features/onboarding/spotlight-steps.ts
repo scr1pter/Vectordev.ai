@@ -156,7 +156,7 @@ export function createSpotlightSteps(host: SpotlightTourHost): SpotlightStep[] {
       section: "Composer",
       title: "The model chip.",
       body: "Shows which model answers this session. Click to switch — per task, not globally — between the providers and models you've enabled in Settings.",
-      tip: "Keep an included model around for quick questions and a strong one for real work.",
+      tip: "Choose a fast model for quick questions and a stronger one for complex work.",
       target: '[data-action="prompt-model"]',
       placement: "top",
     }),

@@ -100,13 +100,12 @@ describe("OpenRouterPlugin", () => {
     Effect.gen(function* () {
       const catalog = yield* Catalog.Service
       yield* catalog.transform((catalog) => {
-        catalog.provider.update(ProviderV2.ID.make("custom-openrouter"), () => {})
-        catalog.model.update(ProviderV2.ID.make("custom-openrouter"), ModelV2.ID.make("gpt-5-chat-latest"), () => {})
+        catalog.provider.update(ProviderV2.ID.make("lmstudio"), () => {})
+        catalog.model.update(ProviderV2.ID.make("lmstudio"), ModelV2.ID.make("gpt-5-chat-latest"), () => {})
       })
       yield* addPlugin()
       expect(
-        (yield* catalog.model.get(ProviderV2.ID.make("custom-openrouter"), ModelV2.ID.make("gpt-5-chat-latest")))
-          ?.enabled,
+        (yield* catalog.model.get(ProviderV2.ID.make("lmstudio"), ModelV2.ID.make("gpt-5-chat-latest")))?.enabled,
       ).toBe(true)
     }),
   )

@@ -2688,7 +2688,7 @@ export default function NewLayout(props: ParentProps) {
     setWorkspaceMode("editor")
   }
 
-  const openCodespace = () => {
+  const vectorspace = () => {
     if (!requireSidePanelRoute("Code editor")) {
       setWorkspaceMode("agent")
       return
@@ -2889,8 +2889,8 @@ export default function NewLayout(props: ParentProps) {
   globalThis.window?.addEventListener(ONBOARDING_UPDATED_EVENT, refreshOnboardingFlags)
   onCleanup(() => globalThis.window?.removeEventListener(ONBOARDING_UPDATED_EVENT, refreshOnboardingFlags))
 
-  // Any usable model — a key the user just added, or a model included with Vector —
-  // completes the step on its own. A finished session turn (recorded on
+  // Any usable model from a connected provider completes the step.
+  // A finished session turn (recorded on
   // session.idle above) still marks it verified end to end, and only changes
   // the wording here.
   const onboardingProviderConnected = () => parallelModelOptions().length > 0
@@ -2905,7 +2905,7 @@ export default function NewLayout(props: ParentProps) {
         ? "Vector completed a real model response with your selected provider."
         : onboardingProviderConnected()
           ? "Connected. Run the safe first task below to see the model answer end to end."
-          : "Bring your own key — OpenAI, Anthropic, Google — or start on a model included with Vector.",
+          : "Connect a supported provider with your API key, or configure a local model server.",
       done: onboardingProviderDone(),
       cta: "Connect",
       onGo: () => {
@@ -6360,7 +6360,7 @@ export default function NewLayout(props: ParentProps) {
           confirmTwice(`remove-${record.id}`, () => void removeParallelWorkspace(record))
         }}
         onMoveWorkspace={moveAgentWorkspace}
-        onCodeEditor={openCodespace}
+        onCodeEditor={vectorspace}
         onAgentDashboard={() => {
           closeWorkspacePanel()
           setAgentDashboardOpen(true)
@@ -6630,7 +6630,7 @@ export default function NewLayout(props: ParentProps) {
               type="button"
               data-vector-nav-item
               class="flex h-9 items-center gap-2.5 rounded-lg px-2.5 text-[13.5px] transition hover:bg-white/[0.06] hover:text-white"
-              onClick={openCodespace}
+              onClick={vectorspace}
             >
               <svg viewBox="0 0 16 16" class="size-4 shrink-0" aria-hidden="true">
                 <path

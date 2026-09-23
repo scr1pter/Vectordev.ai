@@ -55,11 +55,11 @@ export const GithubReviewCommand = effectCmd({
         type: "boolean",
         describe: "print every write as JSON instead of posting it",
       }),
-  // The pull request's own opencode.json, `.opencode` agents and plugins, AGENTS.md and .vector/RULES.md never configure
+  // The pull request's own vector.json, `.vector` agents and plugins, AGENTS.md and .vector/RULES.md never configure
   // the reviewer, whatever the workflow file sets: both flags are on before the instance loads any of them.
   instance: () => {
-    process.env.VECTOR_PURE = process.env["OPENCODE_PURE"] = "1"
-    process.env.VECTOR_DISABLE_PROJECT_CONFIG = process.env["OPENCODE_DISABLE_PROJECT_CONFIG"] = "1"
+    process.env.VECTOR_PURE = "1"
+    process.env.VECTOR_DISABLE_PROJECT_CONFIG = "1"
     return true
   },
   handler: (args) =>

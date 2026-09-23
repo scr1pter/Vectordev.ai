@@ -1,3 +1,4 @@
+import { VECTOR_USER_AGENT } from "./user-agent"
 import { randomUUID, createHash } from "node:crypto"
 import { resolveCname } from "node:dns/promises"
 import { chmodSync } from "node:fs"
@@ -368,7 +369,7 @@ export async function checkDeployment(
   const probe = await fetch(healthUrl, {
     method: "GET",
     redirect: "follow",
-    headers: { "user-agent": "Vector-Cloud-Health/1.0" },
+    headers: { "user-agent": VECTOR_USER_AGENT },
     signal: AbortSignal.timeout(12_000),
   })
     .then(async (response) => {

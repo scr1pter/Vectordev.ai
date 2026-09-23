@@ -1,6 +1,6 @@
 import { ConfigV1 } from "@vectordevai/core/v1/config/config"
 import { SessionV1 } from "@vectordevai/core/v1/session"
-import { ModelsDev } from "@vectordevai/core/models-dev"
+import { ModelCatalog } from "@vectordevai/core/model-catalog"
 import { HttpRecorder } from "@vectordevai/http-recorder"
 import { HttpRecorderInternal } from "@vectordevai/http-recorder/internal"
 import { describe, expect, test } from "bun:test"
@@ -48,10 +48,10 @@ type RecordedScenario = {
   readonly canRecord: () => boolean
   readonly replayAuth?: Auth.Info
   readonly stableID?: string
-  readonly config: (model: ModelsDev.Provider["models"][string]) => Partial<ConfigV1.Info>
+  readonly config: (model: ModelCatalog.Provider["models"][string]) => Partial<ConfigV1.Info>
 }
 
-const cloneModel = (model: ModelsDev.Provider["models"][string]) => {
+const cloneModel = (model: ModelCatalog.Provider["models"][string]) => {
   const cloned = structuredClone(model)
   const { experimental, ...rest } = cloned
   // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion -- The config schema accepts the same model shape except object-valued experimental metadata.
@@ -70,7 +70,7 @@ const providerConfig = (input: {
   readonly env: string[]
   readonly npm: string
   readonly api: string
-  readonly model: ModelsDev.Provider["models"][string]
+  readonly model: ModelCatalog.Provider["models"][string]
   readonly options: Record<string, unknown>
 }): Partial<ConfigV1.Info> => ({
   enabled_providers: [input.providerID],
@@ -94,7 +94,7 @@ const OPENAI_SCENARIO = {
   cassette: "session/native-openai-tool-loop",
   protocol: "openai-responses",
   tags: ["vector", "native", "api-key", "tool-loop"],
-  canRecord: () => Boolean(envValue("OPENCODE_RECORD_OPENAI_API_KEY", "OPENAI_API_KEY")),
+  canRecord: () => Boolean(envValue("VECTOR_RECORD_OPENAI_API_KEY", "OPENAI_API_KEY")),
   config: (model) =>
     providerConfig({
       providerID: ProviderV2.ID.openai,
@@ -104,7 +104,7 @@ const OPENAI_SCENARIO = {
       api: "https://api.openai.com/v1",
       model,
       options: {
-        apiKey: shouldRecord ? envValue("OPENCODE_RECORD_OPENAI_API_KEY", "OPENAI_API_KEY") : "fixture-openai-key",
+        apiKey: shouldRecord ? envValue("VECTOR_RECORD_OPENAI_API_KEY", "OPENAI_API_KEY") : "fixture-openai-key",
         // The cassette intercepts native requests. A runtime regression must fail locally, not contact a live API.
         baseURL: shouldRecord ? "https://api.openai.com/v1" : "http://127.0.0.1:1/v1",
       },
@@ -127,8 +127,8 @@ const RECORDED_SCENARIOS = [
     modelID: "claude-haiku-4-5-20251001",
     cassette: "session/native-anthropic-tool-loop",
     protocol: "anthropic-messages",
-    tags: ["opencode", "native", "tool-loop"],
-    canRecord: () => Boolean(envValue("OPENCODE_RECORD_ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY")),
+    tags: ["vector", "native", "tool-loop"],
+    canRecord: () => Boolean(envValue("VECTOR_RECORD_ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY")),
     config: (model) =>
       providerConfig({
         providerID: ProviderV2.ID.anthropic,
@@ -139,7 +139,7 @@ const RECORDED_SCENARIOS = [
         model,
         options: {
           apiKey: shouldRecord
-            ? envValue("OPENCODE_RECORD_ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY")
+            ? envValue("VECTOR_RECORD_ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY")
             : "fixture-anthropic-key",
           baseURL: "https://api.anthropic.com/v1",
         },
@@ -149,7 +149,7 @@ const RECORDED_SCENARIOS = [
 
 const shouldRecord = process.env.RECORD === "true"
 const selectedScenarios = new Set(
-  (envValue("OPENCODE_RECORDED_SCENARIO", "RECORDED_PROVIDER") ?? "")
+  (envValue("VECTOR_RECORDED_SCENARIO", "RECORDED_PROVIDER") ?? "")
     .split(",")
     .map((item) => item.trim().toLowerCase())
     .filter(Boolean),
@@ -193,13 +193,13 @@ async function loadFixture(providerID: string, modelID: string) {
   return model
 }
 
-const modelsFixture = Filesystem.readJson<Record<string, ModelsDev.Provider>>(
+const modelsFixture = Filesystem.readJson<Record<string, ModelCatalog.Provider>>(
   path.join(import.meta.dir, "../tool/fixtures/models-api.json"),
 )
 
 function recordedNativeLLMLayer(scenario: RecordedScenario) {
   const auth = authLayer(scenario)
-  // Only the HTTP client is recorded; RequestExecutor and the opencode LLM stack remain real.
+  // Only the HTTP client is recorded; RequestExecutor and the vector LLM stack remain real.
   const metadata = {
     provider: scenario.providerID,
     protocol: scenario.protocol,
@@ -225,7 +225,7 @@ function recordedNativeLLMLayer(scenario: RecordedScenario) {
   ])
 }
 
-const writeConfig = (directory: string, scenario: RecordedScenario, model: ModelsDev.Provider["models"][string]) =>
+const writeConfig = (directory: string, scenario: RecordedScenario, model: ModelCatalog.Provider["models"][string]) =>
   Effect.promise(() =>
     Bun.write(
       path.join(directory, "vector.json"),
@@ -358,7 +358,7 @@ describe("session.llm native recorded", () => {
           all: () =>
             Effect.succeed({
               openai: replayOpenAIOAuth,
-              opencode: { type: "api" as const, key: "fixture-retired-key" },
+              "unsupported-fixture": { type: "api" as const, key: "fixture-unsupported-key" },
             }),
         }),
       ],
@@ -378,9 +378,9 @@ describe("session.llm native recorded", () => {
     { config: { enabled_providers: [ProviderV2.ID.openai] } },
   )
 
-  for (const id of ["opencode", "opencode-go", "opencode-custom", "custom-hosted"]) {
+  for (const id of ["unsupported-fixture", "unsupported-fixture-two"]) {
     policy.instance(
-      `${id} cannot restore the retired proxy with explicit configuration and a saved key`,
+      `${id} cannot register an unsupported provider with explicit configuration and a saved key`,
       () =>
         Effect.gen(function* () {
           const provider = yield* Provider.Service
@@ -398,7 +398,7 @@ describe("session.llm native recorded", () => {
               npm: "@ai-sdk/openai-compatible",
               options: {
                 apiKey: "fixture-retired-key",
-                baseURL: "https://console.opencode.ai/proxy/connections/fixture/v1",
+                baseURL: "https://custom.example.test/v1",
               },
               models: { "gpt-5.2-codex": { name: "Retired fixture" } },
             },

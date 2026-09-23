@@ -5,7 +5,7 @@ export type ClientOptions = {
 }
 
 export type Event =
-  | EventModelsDevRefreshed
+  | EventModelCatalogRefreshed
   | EventIntegrationUpdated
   | EventIntegrationConnectionUpdated
   | EventCatalogUpdated
@@ -736,7 +736,7 @@ export type GlobalEvent = {
   payload:
     | {
         id: string
-        type: "models-dev.refreshed"
+        type: "model-catalog.refreshed"
         properties: {
           [key: string]: unknown
         }
@@ -1649,7 +1649,7 @@ export type GlobalEvent = {
 export type LogLevel = "DEBUG" | "INFO" | "WARN" | "ERROR"
 
 /**
- * Server configuration for opencode serve and web commands
+ * Server configuration for vector serve and web commands
  */
 export type ServerConfig = {
   port?: number
@@ -2986,7 +2986,7 @@ export type QuestionRejected2 = {
 }
 
 export type V2Event =
-  | ModelsDevRefreshed
+  | ModelCatalogRefreshed
   | IntegrationUpdated
   | IntegrationConnectionUpdated
   | CatalogUpdated
@@ -5154,12 +5154,12 @@ export type SkillV2Info = {
   content: string
 }
 
-export type ModelsDevRefreshed = {
+export type ModelCatalogRefreshed = {
   id: string
   metadata?: {
     [key: string]: unknown
   }
-  type: "models-dev.refreshed"
+  type: "model-catalog.refreshed"
   durable?: {
     aggregateID: string
     seq: number
@@ -6287,9 +6287,9 @@ export type ProjectCopyCopy = {
   directory: string
 }
 
-export type EventModelsDevRefreshed = {
+export type EventModelCatalogRefreshed = {
   id: string
-  type: "models-dev.refreshed"
+  type: "model-catalog.refreshed"
   properties: {
     [key: string]: unknown
   }

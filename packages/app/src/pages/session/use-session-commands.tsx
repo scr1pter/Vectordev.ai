@@ -183,7 +183,7 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
     view().terminal.open()
   }
 
-  const openCodespace = () => {
+  const vectorspace = () => {
     const alreadyOpen = view().reviewPanel.opened() && tabs().active() === "codespace"
     layout.fileTree.close()
     view().reviewPanel.open("other")
@@ -231,7 +231,7 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
       title: "Open Vector Codespace",
       description: "Open the synced editor with files, review, and project context.",
       slash: "codespace",
-      onSelect: openCodespace,
+      onSelect: vectorspace,
     }),
     viewCommand({
       id: "vector.codespace.close",

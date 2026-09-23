@@ -268,7 +268,7 @@ jobs:
           - cloud
           - core
           - desktop
-          - opencode
+          - engine
           - sdk-next
     steps:
       - name: Check out release source
@@ -302,7 +302,7 @@ jobs:
           - name: desktop
             directory: packages/desktop
             command: bun test --only-failures
-          - name: opencode
+          - name: vector
             directory: packages/engine
             command: bun test --timeout 30000 --only-failures --max-concurrency 4
           - name: sdk-next
@@ -322,7 +322,7 @@ jobs:
         working-directory: ${{ matrix.directory }}
         env:
           GITHUB_ACTIONS: "false"
-          OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER: "true"
+          VECTOR_EXPERIMENTAL_DISABLE_FILEWATCHER: "true"
         run: ${{ matrix.command }}
 
   build:
@@ -359,12 +359,11 @@ jobs:
         shell: bash
         run: |
           version=$(node -p 'require("./packages/desktop/package.json").version')
-          echo "OPENCODE_VERSION=$version" >> "$GITHUB_ENV"
           echo "VECTOR_VERSION=$version" >> "$GITHUB_ENV"
       - name: Build release surface
         working-directory: packages/${{ matrix.package }}
         env:
-          OPENCODE_CHANNEL: prod
+          VECTOR_CHANNEL: prod
         run: ${{ matrix.command }}
 
   draft:
@@ -458,7 +457,6 @@ jobs:
       - name: Set exact build version
         run: |
           version=$(node -p 'require("./packages/desktop/package.json").version')
-          echo "OPENCODE_VERSION=$version" >> "$GITHUB_ENV"
           echo "VECTOR_VERSION=$version" >> "$GITHUB_ENV"
 
       - name: Require Apple signing and notarization credentials
@@ -485,12 +483,12 @@ jobs:
 
       - name: Build desktop app
         env:
-          OPENCODE_CHANNEL: prod
+          VECTOR_CHANNEL: prod
         run: bun run --cwd packages/desktop build
 
       - name: Package signed and notarized arm64 app
         env:
-          OPENCODE_CHANNEL: prod
+          VECTOR_CHANNEL: prod
           VECTOR_SIGN_MAC: true
           VECTOR_NOTARIZE: true
           VECTOR_SIGN_DMG: true
@@ -530,7 +528,7 @@ jobs:
 
       - name: Package signed and notarized x64 app
         env:
-          OPENCODE_CHANNEL: prod
+          VECTOR_CHANNEL: prod
           VECTOR_SIGN_MAC: true
           VECTOR_NOTARIZE: true
           VECTOR_SIGN_DMG: true
@@ -658,7 +656,6 @@ jobs:
         shell: bash
         run: |
           version=$(node -p 'require("./packages/desktop/package.json").version')
-          echo "OPENCODE_VERSION=$version" >> "$GITHUB_ENV"
           echo "VECTOR_VERSION=$version" >> "$GITHUB_ENV"
 
       - name: Require Windows signing credentials
@@ -692,12 +689,12 @@ jobs:
 
       - name: Build desktop app
         shell: pwsh
-        run: $env:OPENCODE_CHANNEL="prod"; bun run --cwd packages/desktop build
+        run: $env:VECTOR_CHANNEL="prod"; bun run --cwd packages/desktop build
 
       - name: Package signed installer
         shell: pwsh
         env:
-          OPENCODE_CHANNEL: prod
+          VECTOR_CHANNEL: prod
           VECTOR_REQUIRE_WINDOWS_SIGNING: true
           VECTOR_ALLOW_UNSIGNED_RELEASE: ${{ needs.prepare.outputs.unsigned }}
           VECTOR_WINDOWS_PUBLISHER_NAME: ${{ secrets.VECTOR_WINDOWS_PUBLISHER_NAME }}
@@ -799,15 +796,14 @@ jobs:
       - name: Set exact build version
         run: |
           version=$(node -p 'require("./packages/desktop/package.json").version')
-          echo "OPENCODE_VERSION=$version" >> "$GITHUB_ENV"
           echo "VECTOR_VERSION=$version" >> "$GITHUB_ENV"
       - name: Build desktop app
         env:
-          OPENCODE_CHANNEL: prod
+          VECTOR_CHANNEL: prod
         run: bun run --cwd packages/desktop build
       - name: Package AppImage
         env:
-          OPENCODE_CHANNEL: prod
+          VECTOR_CHANNEL: prod
         run: |
           for attempt in 1 2 3; do
             bun run --cwd packages/desktop package -- --linux AppImage --x64 --arm64 --publish never && exit 0

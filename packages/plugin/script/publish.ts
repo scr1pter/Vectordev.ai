@@ -1,38 +1,23 @@
 #!/usr/bin/env bun
-import { Script } from "@vectordevai/script"
 import { $ } from "bun"
-import { fileURLToPath } from "url"
+import path from "node:path"
+import { stagePlugin, verifyPlugin } from "./build"
 
-const dir = fileURLToPath(new URL("..", import.meta.url))
-process.chdir(dir)
+const directory = path.resolve(import.meta.dirname, "..")
+const publish = process.argv.includes("--publish")
+const dryRun = process.argv.includes("--dry-run")
+if (publish && dryRun) throw new Error("Choose --publish or --dry-run, not both")
+const output = process.argv.includes("--skip-build")
+  ? path.join(directory, "dist-publish")
+  : await stagePlugin(directory)
+await verifyPlugin(output)
+const manifest = await Bun.file(path.join(output, "package.json")).json()
 
-async function published(name: string, version: string) {
-  return (await $`npm view ${name}@${version} version`.nothrow()).exitCode === 0
-}
-
-await $`bun tsc`
-const originalText = await Bun.file("package.json").text()
-const pkg = JSON.parse(originalText) as {
-  name: string
-  version: string
-  exports: Record<string, string>
-}
-if (await published(pkg.name, pkg.version)) {
-  console.log(`already published ${pkg.name}@${pkg.version}`)
+if (!publish) {
+  await $`npm pack --offline --json`.cwd(output)
+  console.log(`Packed ${manifest.name}@${manifest.version}; nothing was published`)
 } else {
-  for (const [key, value] of Object.entries(pkg.exports)) {
-    const file = value.replace("./src/", "./dist/").replace(".ts", "")
-    // @ts-ignore
-    pkg.exports[key] = {
-      import: file + ".js",
-      types: file + ".d.ts",
-    }
-  }
-  await Bun.write("package.json", JSON.stringify(pkg, null, 2))
-  try {
-    await $`bun pm pack`
-    await $`npm publish *.tgz --tag ${Script.channel} --access public`
-  } finally {
-    await Bun.write("package.json", originalText)
-  }
+  const existing = await $`npm view ${`${manifest.name}@${manifest.version}`} version`.quiet().nothrow()
+  if (existing.exitCode === 0) console.log(`already published ${manifest.name}@${manifest.version}`)
+  else await $`npm publish --access public`.cwd(output)
 }

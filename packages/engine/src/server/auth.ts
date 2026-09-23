@@ -26,7 +26,7 @@ export type Info = {
   readonly guestUsername?: string
 }
 
-export class Config extends Context.Service<Config, Info>()("@opencode/ServerAuthConfig") {
+export class Config extends Context.Service<Config, Info>()("@vector/ServerAuthConfig") {
   /** Provide already-parsed config, useful in tests. */
   static configLayer(input: Info) {
     return Layer.succeed(this, this.of(input))
@@ -39,12 +39,10 @@ export class Config extends Context.Service<Config, Info>()("@opencode/ServerAut
       Effect.gen(function* () {
         return Config.of(
           yield* EffectConfig.all({
-            password: configEnv("OPENCODE_SERVER_PASSWORD", EffectConfig.string).pipe(EffectConfig.option),
-            username: configEnv("OPENCODE_SERVER_USERNAME", EffectConfig.string).pipe(
-              EffectConfig.withDefault("vector"),
-            ),
-            guestPassword: configEnv("OPENCODE_SERVER_GUEST_PASSWORD", EffectConfig.string).pipe(EffectConfig.option),
-            guestUsername: configEnv("OPENCODE_SERVER_GUEST_USERNAME", EffectConfig.string).pipe(
+            password: configEnv("VECTOR_SERVER_PASSWORD", EffectConfig.string).pipe(EffectConfig.option),
+            username: configEnv("VECTOR_SERVER_USERNAME", EffectConfig.string).pipe(EffectConfig.withDefault("vector")),
+            guestPassword: configEnv("VECTOR_SERVER_GUEST_PASSWORD", EffectConfig.string).pipe(EffectConfig.option),
+            guestUsername: configEnv("VECTOR_SERVER_GUEST_USERNAME", EffectConfig.string).pipe(
               EffectConfig.withDefault("guest"),
             ),
           }),
@@ -66,12 +64,7 @@ export function required(config: Info) {
 /** The identity a credential pair matches, or undefined when it matches neither. */
 export function identity(credentials: DecodedCredentials, config: Info): Identity | undefined {
   const password = Redacted.value(credentials.password)
-  if (
-    Option.isSome(config.password) &&
-    (credentials.username === config.username ||
-      (["vector", "opencode"].includes(config.username) && ["vector", "opencode"].includes(credentials.username))) &&
-    password === config.password.value
-  )
+  if (Option.isSome(config.password) && credentials.username === config.username && password === config.password.value)
     return "owner"
   const guestPassword = config.guestPassword ?? Option.none<string>()
   if (
@@ -89,10 +82,10 @@ export function authorized(credentials: DecodedCredentials, config: Info) {
 }
 
 export function header(credentials?: Credentials) {
-  const password = credentials?.password ?? Flag.OPENCODE_SERVER_PASSWORD
+  const password = credentials?.password ?? Flag.VECTOR_SERVER_PASSWORD
   if (!password) return undefined
 
-  const username = credentials?.username ?? Flag.OPENCODE_SERVER_USERNAME ?? "vector"
+  const username = credentials?.username ?? Flag.VECTOR_SERVER_USERNAME ?? "vector"
   return `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`
 }
 

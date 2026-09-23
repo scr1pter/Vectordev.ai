@@ -1,15 +1,15 @@
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test"
-import { OpencodeClient, type GlobalEvent } from "@vectordevai/sdk/v2"
+import { VectorClient, type GlobalEvent } from "@vectordevai/sdk/v2"
 import { createSessionTransport } from "@/cli/cmd/run/stream.transport"
 import type { FooterApi, FooterEvent, LocalReplayRow, RunFilePart, StreamCommit } from "@/cli/cmd/run/types"
 
-type EventStream = Awaited<ReturnType<OpencodeClient["event"]["subscribe"]>>["stream"]
-type GlobalEventStream = Awaited<ReturnType<OpencodeClient["global"]["event"]>>["stream"]
+type EventStream = Awaited<ReturnType<VectorClient["event"]["subscribe"]>>["stream"]
+type GlobalEventStream = Awaited<ReturnType<VectorClient["global"]["event"]>>["stream"]
 type SdkEvent = EventStream extends AsyncGenerator<infer T, unknown, unknown> ? T : never
-type SessionMessage = NonNullable<Awaited<ReturnType<OpencodeClient["session"]["messages"]>>["data"]>[number]
-type SessionChild = NonNullable<Awaited<ReturnType<OpencodeClient["session"]["children"]>>["data"]>[number]
+type SessionMessage = NonNullable<Awaited<ReturnType<VectorClient["session"]["messages"]>>["data"]>[number]
+type SessionChild = NonNullable<Awaited<ReturnType<VectorClient["session"]["children"]>>["data"]>[number]
 type SessionToolPart = Extract<SessionMessage["parts"][number], { type: "tool" }>
-type SessionStatusMap = NonNullable<Awaited<ReturnType<OpencodeClient["session"]["status"]>>["data"]>
+type SessionStatusMap = NonNullable<Awaited<ReturnType<VectorClient["session"]["status"]>>["data"]>
 type TextPart = Extract<SessionMessage["parts"][number], { type: "text" }>
 type ReasoningPart = Extract<SessionMessage["parts"][number], { type: "reasoning" }>
 
@@ -156,7 +156,7 @@ function ok<T>(data: T) {
   return Promise.resolve({
     data,
     error: undefined,
-    request: new Request("https://opencode.test"),
+    request: new Request("https://vector.test"),
     response: new Response(),
   })
 }
@@ -417,27 +417,27 @@ function sdk(
   input: {
     stream?: EventStream
     globalStream?: GlobalEventStream
-    subscribe?: OpencodeClient["event"]["subscribe"]
-    globalEvent?: OpencodeClient["global"]["event"]
-    promptAsync?: OpencodeClient["session"]["promptAsync"]
-    status?: OpencodeClient["session"]["status"]
-    messages?: OpencodeClient["session"]["messages"]
-    children?: OpencodeClient["session"]["children"]
-    permissions?: OpencodeClient["permission"]["list"]
-    questions?: OpencodeClient["question"]["list"]
+    subscribe?: VectorClient["event"]["subscribe"]
+    globalEvent?: VectorClient["global"]["event"]
+    promptAsync?: VectorClient["session"]["promptAsync"]
+    status?: VectorClient["session"]["status"]
+    messages?: VectorClient["session"]["messages"]
+    children?: VectorClient["session"]["children"]
+    permissions?: VectorClient["permission"]["list"]
+    questions?: VectorClient["question"]["list"]
   } = {},
 ) {
-  const client = new OpencodeClient()
+  const client = new VectorClient()
 
-  const subscribe: OpencodeClient["event"]["subscribe"] = input.subscribe ?? (() => sse(input.stream ?? emptyStream()))
-  const globalEvent: OpencodeClient["global"]["event"] =
+  const subscribe: VectorClient["event"]["subscribe"] = input.subscribe ?? (() => sse(input.stream ?? emptyStream()))
+  const globalEvent: VectorClient["global"]["event"] =
     input.globalEvent ?? (() => globalSse(input.globalStream ?? wrapGlobalStream(input.stream ?? emptyStream())))
-  const promptAsync: OpencodeClient["session"]["promptAsync"] = input.promptAsync ?? (() => ok(undefined))
-  const status: OpencodeClient["session"]["status"] = input.status ?? (() => ok({}))
-  const messages: OpencodeClient["session"]["messages"] = input.messages ?? (() => ok([]))
-  const children: OpencodeClient["session"]["children"] = input.children ?? (() => ok([]))
-  const permissions: OpencodeClient["permission"]["list"] = input.permissions ?? (() => ok([]))
-  const questions: OpencodeClient["question"]["list"] = input.questions ?? (() => ok([]))
+  const promptAsync: VectorClient["session"]["promptAsync"] = input.promptAsync ?? (() => ok(undefined))
+  const status: VectorClient["session"]["status"] = input.status ?? (() => ok({}))
+  const messages: VectorClient["session"]["messages"] = input.messages ?? (() => ok([]))
+  const children: VectorClient["session"]["children"] = input.children ?? (() => ok([]))
+  const permissions: VectorClient["permission"]["list"] = input.permissions ?? (() => ok([]))
+  const questions: VectorClient["question"]["list"] = input.questions ?? (() => ok([]))
 
   spyOn(client.event, "subscribe").mockImplementation(subscribe)
   spyOn(client.global, "event").mockImplementation(globalEvent)

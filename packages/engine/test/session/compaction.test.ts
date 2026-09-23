@@ -44,7 +44,7 @@ const summary = Layer.succeed(
 )
 
 const ref = {
-  providerID: ProviderV2.ID.make("test"),
+  providerID: ProviderV2.ID.make("lmstudio"),
   modelID: ModelV2.ID.make("test-model"),
 }
 
@@ -65,7 +65,7 @@ function createModel(opts: {
 }): Provider.Model {
   return {
     id: "test-model",
-    providerID: "test",
+    providerID: "lmstudio",
     name: "Test",
     limit: {
       context: opts.context,

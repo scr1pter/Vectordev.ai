@@ -5,51 +5,52 @@ import { AppNodeBuilder } from "@vectordevai/core/effect/app-node-builder"
 import { LayerNodePlatform } from "@vectordevai/core/effect/app-node-platform"
 import { Flag } from "@vectordevai/core/flag/flag"
 import { Global } from "@vectordevai/core/global"
-import { ModelsDev } from "@vectordevai/core/models-dev"
+import { ModelCatalog } from "@vectordevai/core/model-catalog"
+import { InstallationChannel, InstallationVersion } from "@vectordevai/core/installation/version"
 import { Hash } from "@vectordevai/core/util/hash"
 import { it } from "./lib/effect"
 import { readFile, rm, writeFile, utimes, mkdir, mkdtemp } from "fs/promises"
 import path from "path"
 import os from "os"
 
-// test/preload.ts pins OPENCODE_MODELS_PATH to a fixture so other tests can
+// test/preload.ts pins VECTOR_MODELS_PATH to a fixture so other tests can
 // resolve providers without network. These tests need to drive the on-disk
 // cache themselves and silence the eager refresh fork. Save/restore around
 // the suite — never leak the mutation to subsequent test files in the same
 // bun process.
-const ORIGINAL_MODELS_PATH = Flag.OPENCODE_MODELS_PATH
-const ORIGINAL_DISABLE_FETCH = Flag.OPENCODE_DISABLE_MODELS_FETCH
-const ORIGINAL_MODELS_URL = Flag.OPENCODE_MODELS_URL
+const ORIGINAL_MODELS_PATH = Flag.VECTOR_MODELS_PATH
+const ORIGINAL_DISABLE_FETCH = Flag.VECTOR_DISABLE_MODELS_FETCH
+const ORIGINAL_MODELS_URL = Flag.VECTOR_MODELS_URL
 const ORIGINAL_CACHE = Global.Path.cache
 const directory = await mkdtemp(path.join(os.tmpdir(), "vector-catalog-test-"))
 const mirror = "https://catalog.vectordev.ai"
 beforeAll(() => {
-  Flag.OPENCODE_MODELS_PATH = undefined
-  Flag.OPENCODE_DISABLE_MODELS_FETCH = true
-  Flag.OPENCODE_MODELS_URL = undefined
+  Flag.VECTOR_MODELS_PATH = undefined
+  Flag.VECTOR_DISABLE_MODELS_FETCH = true
+  Flag.VECTOR_MODELS_URL = undefined
   Global.Path.cache = directory
 })
 afterAll(() => {
-  Flag.OPENCODE_MODELS_PATH = ORIGINAL_MODELS_PATH
-  Flag.OPENCODE_DISABLE_MODELS_FETCH = ORIGINAL_DISABLE_FETCH
-  Flag.OPENCODE_MODELS_URL = ORIGINAL_MODELS_URL
+  Flag.VECTOR_MODELS_PATH = ORIGINAL_MODELS_PATH
+  Flag.VECTOR_DISABLE_MODELS_FETCH = ORIGINAL_DISABLE_FETCH
+  Flag.VECTOR_MODELS_URL = ORIGINAL_MODELS_URL
   Global.Path.cache = ORIGINAL_CACHE
 })
 
 const cacheFile = () =>
   path.join(
     directory,
-    Flag.OPENCODE_MODELS_URL ? `models-${Hash.fast(Flag.OPENCODE_MODELS_URL)}.json` : "models-bundled.json",
+    Flag.VECTOR_MODELS_URL ? `models-${Hash.fast(Flag.VECTOR_MODELS_URL)}.json` : "models-bundled.json",
   )
 
-const fixture: Record<string, ModelsDev.Provider> = {
-  acme: {
-    id: "acme",
+const fixture: Record<string, ModelCatalog.Provider> = {
+  lmstudio: {
+    id: "lmstudio",
     name: "Acme",
     env: ["ACME_API_KEY"],
     models: {
-      "acme-1": {
-        id: "acme-1",
+      "lmstudio-1": {
+        id: "lmstudio-1",
         name: "Acme One",
         release_date: "2026-01-01",
         attachment: false,
@@ -62,14 +63,14 @@ const fixture: Record<string, ModelsDev.Provider> = {
   },
 }
 
-const fixture2: Record<string, ModelsDev.Provider> = {
-  beta: {
-    id: "beta",
+const fixture2: Record<string, ModelCatalog.Provider> = {
+  cerebras: {
+    id: "cerebras",
     name: "Beta",
     env: ["BETA_API_KEY"],
     models: {
-      "beta-1": {
-        id: "beta-1",
+      "cerebras-1": {
+        id: "cerebras-1",
         name: "Beta One",
         release_date: "2026-02-01",
         attachment: false,
@@ -101,11 +102,11 @@ const makeMockClient = (state: Ref.Ref<MockState>) =>
   )
 
 const buildLayer = (state: Ref.Ref<MockState>) =>
-  // Layer.fresh is required because the ModelsDev implementation is a module-level Layer constant,
+  // Layer.fresh is required because the ModelCatalog implementation is a module-level Layer constant,
   // and Effect.provide uses a process-global MemoMap by default — without fresh,
   // every test would reuse the cachedInvalidateWithTTL state from the first run.
   Layer.fresh(
-    AppNodeBuilder.build(ModelsDev.node, [
+    AppNodeBuilder.build(ModelCatalog.node, [
       [LayerNodePlatform.httpClient, Layer.succeed(HttpClient.HttpClient, makeMockClient(state))],
     ]),
   )
@@ -122,26 +123,26 @@ const writeCacheText = (text: string, mtimeMs?: number) =>
 
 const writeCache = (data: object, mtimeMs?: number) => writeCacheText(JSON.stringify(data), mtimeMs)
 
-const provided = <A, E>(state: Ref.Ref<MockState>, eff: Effect.Effect<A, E, ModelsDev.Service>, fetch = false) =>
+const provided = <A, E>(state: Ref.Ref<MockState>, eff: Effect.Effect<A, E, ModelCatalog.Service>, fetch = false) =>
   Effect.gen(function* () {
     // Build with refresh disabled to exercise requests explicitly, without an eager background fork.
     const context = yield* Layer.build(buildLayer(state))
     return yield* Effect.acquireUseRelease(
       Effect.sync(() => {
-        Flag.OPENCODE_DISABLE_MODELS_FETCH = !fetch
+        Flag.VECTOR_DISABLE_MODELS_FETCH = !fetch
       }),
       () => eff.pipe(Effect.provide(context)),
       () =>
         Effect.sync(() => {
-          Flag.OPENCODE_DISABLE_MODELS_FETCH = true
+          Flag.VECTOR_DISABLE_MODELS_FETCH = true
         }),
     )
   })
 
 beforeEach(async () => {
-  Flag.OPENCODE_MODELS_URL = undefined
-  Flag.OPENCODE_MODELS_PATH = undefined
-  Flag.OPENCODE_DISABLE_MODELS_FETCH = true
+  Flag.VECTOR_MODELS_URL = undefined
+  Flag.VECTOR_MODELS_PATH = undefined
+  Flag.VECTOR_DISABLE_MODELS_FETCH = true
   await rm(directory, { recursive: true, force: true })
 })
 
@@ -155,14 +156,14 @@ const initialState: MockState = {
   calls: [],
 }
 
-describe("ModelsDev Service", () => {
+describe("ModelCatalog Service", () => {
   it.live("get() returns providers from disk when cache file exists", () =>
     Effect.gen(function* () {
       yield* writeCache(fixture)
       const state = yield* Ref.make(initialState)
       const result = yield* provided(
         state,
-        ModelsDev.Service.use((s) => s.get()),
+        ModelCatalog.Service.use((s) => s.get()),
       )
       expect(result).toEqual(fixture)
       const final = yield* Ref.get(state)
@@ -175,7 +176,7 @@ describe("ModelsDev Service", () => {
       const state = yield* Ref.make(initialState)
       const result = yield* provided(
         state,
-        ModelsDev.Service.use((s) => s.get()),
+        ModelCatalog.Service.use((s) => s.get()),
       )
       expect(result).toEqual({})
       const final = yield* Ref.get(state)
@@ -185,12 +186,12 @@ describe("ModelsDev Service", () => {
 
   it.live("get() recovers from a corrupted mirror cache by fetching the explicitly configured source", () =>
     Effect.gen(function* () {
-      Flag.OPENCODE_MODELS_URL = mirror
+      Flag.VECTOR_MODELS_URL = mirror
       yield* writeCacheText("{")
       const state = yield* Ref.make({ ...initialState, body: JSON.stringify(fixture2) })
       const result = yield* provided(
         state,
-        ModelsDev.Service.use((s) => s.get()),
+        ModelCatalog.Service.use((s) => s.get()),
         true,
       )
       expect(result).toEqual(fixture2)
@@ -208,7 +209,7 @@ describe("ModelsDev Service", () => {
       const results = yield* provided(
         state,
         Effect.gen(function* () {
-          const svc = yield* ModelsDev.Service
+          const svc = yield* ModelCatalog.Service
           return yield* Effect.all([svc.get(), svc.get(), svc.get(), svc.get(), svc.get()], {
             concurrency: "unbounded",
           })
@@ -225,7 +226,7 @@ describe("ModelsDev Service", () => {
       const first = yield* provided(
         state,
         Effect.gen(function* () {
-          const svc = yield* ModelsDev.Service
+          const svc = yield* ModelCatalog.Service
           const a = yield* svc.get()
           // mutate disk between calls — cache should mask the change
           yield* writeCache(fixture2)
@@ -240,13 +241,13 @@ describe("ModelsDev Service", () => {
 
   it.live("refresh(true) fetches via HttpClient and updates the cache", () =>
     Effect.gen(function* () {
-      Flag.OPENCODE_MODELS_URL = mirror
+      Flag.VECTOR_MODELS_URL = mirror
       yield* writeCache(fixture)
       const state = yield* Ref.make({ ...initialState, body: JSON.stringify(fixture2) })
       const result = yield* provided(
         state,
         Effect.gen(function* () {
-          const svc = yield* ModelsDev.Service
+          const svc = yield* ModelCatalog.Service
           const before = yield* svc.get()
           yield* svc.refresh(true)
           const after = yield* svc.get()
@@ -259,19 +260,19 @@ describe("ModelsDev Service", () => {
       const final = yield* Ref.get(state)
       expect(final.calls.length).toBe(1)
       expect(final.calls[0].url).toBe(`${mirror}/api.json`)
-      expect(final.calls[0].userAgent).toMatch(/^vector\/.*\/cli$/)
+      expect(final.calls[0].userAgent).toBe(`vector/${InstallationVersion} (${InstallationChannel}; cli)`)
     }),
   )
 
   it.live("refresh(false) skips fetch when on-disk file is fresh", () =>
     Effect.gen(function* () {
-      Flag.OPENCODE_MODELS_URL = mirror
+      Flag.VECTOR_MODELS_URL = mirror
       // Fresh: mtime within the 5-minute TTL.
       yield* writeCache(fixture, Date.now() - 1000)
       const state = yield* Ref.make({ ...initialState, body: JSON.stringify(fixture2) })
       yield* provided(
         state,
-        ModelsDev.Service.use((s) => s.refresh(false)),
+        ModelCatalog.Service.use((s) => s.refresh(false)),
         true,
       )
       const final = yield* Ref.get(state)
@@ -281,14 +282,14 @@ describe("ModelsDev Service", () => {
 
   it.live("refresh(false) fetches when on-disk file is stale", () =>
     Effect.gen(function* () {
-      Flag.OPENCODE_MODELS_URL = mirror
+      Flag.VECTOR_MODELS_URL = mirror
       // Stale: mtime 10 minutes ago, beyond the 5-minute TTL.
       yield* writeCache(fixture, Date.now() - 10 * 60 * 1000)
       const state = yield* Ref.make({ ...initialState, body: JSON.stringify(fixture2) })
       const after = yield* provided(
         state,
         Effect.gen(function* () {
-          const svc = yield* ModelsDev.Service
+          const svc = yield* ModelCatalog.Service
           yield* svc.refresh(false)
           return yield* svc.get()
         }),
@@ -302,13 +303,13 @@ describe("ModelsDev Service", () => {
 
   it.live("refresh swallows HTTP errors and leaves cache intact", () =>
     Effect.gen(function* () {
-      Flag.OPENCODE_MODELS_URL = mirror
+      Flag.VECTOR_MODELS_URL = mirror
       yield* writeCache(fixture)
       const state = yield* Ref.make({ ...initialState, status: 500, body: "boom" })
       const result = yield* provided(
         state,
         Effect.gen(function* () {
-          const svc = yield* ModelsDev.Service
+          const svc = yield* ModelCatalog.Service
           yield* svc.refresh(true)
           return yield* svc.get()
         }),
@@ -327,7 +328,7 @@ describe("ModelsDev Service", () => {
       const result = yield* provided(
         state,
         Effect.gen(function* () {
-          const service = yield* ModelsDev.Service
+          const service = yield* ModelCatalog.Service
           yield* service.refresh(true)
           return yield* service.get()
         }),
@@ -341,13 +342,13 @@ describe("ModelsDev Service", () => {
   it.live("a configured mirror does not read the bundled cache or another mirror's cache", () =>
     Effect.gen(function* () {
       yield* writeCache(fixture)
-      Flag.OPENCODE_MODELS_URL = "https://other.vectordev.ai"
+      Flag.VECTOR_MODELS_URL = "https://other.vectordev.ai"
       yield* writeCache(fixture2)
-      Flag.OPENCODE_MODELS_URL = mirror
+      Flag.VECTOR_MODELS_URL = mirror
       const state = yield* Ref.make(initialState)
       const result = yield* provided(
         state,
-        ModelsDev.Service.use((service) => service.get()),
+        ModelCatalog.Service.use((service) => service.get()),
       )
       expect(result).toEqual({})
       expect((yield* Ref.get(state)).calls).toEqual([])
@@ -357,25 +358,25 @@ describe("ModelsDev Service", () => {
   it.live("an explicit local snapshot takes precedence over the cache", () =>
     Effect.gen(function* () {
       yield* writeCache(fixture)
-      Flag.OPENCODE_MODELS_PATH = path.join(directory, "explicit.json")
-      yield* Effect.promise(() => Bun.write(Flag.OPENCODE_MODELS_PATH!, JSON.stringify(fixture2)))
+      Flag.VECTOR_MODELS_PATH = path.join(directory, "explicit.json")
+      yield* Effect.promise(() => Bun.write(Flag.VECTOR_MODELS_PATH!, JSON.stringify(fixture2)))
       const state = yield* Ref.make(initialState)
       const result = yield* provided(
         state,
-        ModelsDev.Service.use((service) => service.get()),
+        ModelCatalog.Service.use((service) => service.get()),
       )
       expect(result).toEqual(fixture2)
       expect((yield* Ref.get(state)).calls).toEqual([])
     }),
   )
 
-  it.live("cached snapshots exclude retired provider IDs", () =>
+  it.live("cached snapshots exclude unsupported provider IDs", () =>
     Effect.gen(function* () {
-      yield* writeCache({ ...fixture, opencode: { ...fixture.acme, id: "opencode" } })
+      yield* writeCache({ ...fixture, "unsupported-fixture": { ...fixture.lmstudio, id: "unsupported-fixture" } })
       const state = yield* Ref.make(initialState)
       const result = yield* provided(
         state,
-        ModelsDev.Service.use((service) => service.get()),
+        ModelCatalog.Service.use((service) => service.get()),
       )
       expect(result).toEqual(fixture)
       expect((yield* Ref.get(state)).calls).toEqual([])

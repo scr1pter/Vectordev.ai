@@ -1,26 +1,10 @@
-import { For, Show, createMemo } from "solid-js"
+import { Show, createMemo } from "solid-js"
 import { ButtonV2 } from "@vectordevai/ui/v2/button-v2"
 import { usePlatform } from "@/context/platform"
 import { useUpdaterAction } from "@/components/updater-action"
 import { updaterPresentation } from "./updater-presentation"
+import notices from "../../../../../THIRD_PARTY_NOTICES.md?raw"
 import "./settings-v2.css"
-
-const notices = [
-  ["Vector", "Proprietary desktop application"],
-  ["OpenCode", "MIT License - retained for incorporated upstream portions"],
-  ["Electron", "MIT License"],
-  ["Solid", "MIT License"],
-  ["Bun / JavaScriptCore", "MIT / LGPL-2; source and relinking information in shipped notices"],
-  ["Material Icon Theme", "MIT License"],
-  [
-    "Inter, JetBrains Mono Nerd Font, Geist, IBM Plex Mono",
-    "SIL Open Font License 1.1; Nerd Fonts patch notices retained",
-  ],
-  ["Tauri and proxy-from-env adaptations", "MIT; Tauri also offered under Apache-2.0"],
-  ["Bundled dependencies", "See DEPENDENCY_NOTICES.md included with each distribution"],
-  ["Stripe SDK", "MIT License"],
-  ["CodeMirror and Monaco Editor", "MIT License"],
-] as const
 
 export function SettingsAboutV2() {
   const platform = usePlatform()
@@ -124,16 +108,12 @@ export function SettingsAboutV2() {
               those components.
             </p>
           </div>
-          <div class="settings-notice-list">
-            <For each={notices}>
-              {([name, license]) => (
-                <div>
-                  <strong>{name}</strong>
-                  <span>{license}</span>
-                </div>
-              )}
-            </For>
-          </div>
+          <details class="settings-notice-list">
+            <summary>Read bundled third-party notices</summary>
+            <pre class="max-h-96 overflow-auto whitespace-pre-wrap break-words text-12-regular" tabIndex={0}>
+              {notices}
+            </pre>
+          </details>
           <ButtonV2 variant="outline" icon="link" onClick={() => open("/legal/third-party")}>
             Read complete notices
           </ButtonV2>

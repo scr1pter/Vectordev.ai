@@ -21,8 +21,8 @@ vector attach http://localhost:4096 --dir ~/code/myapp</code><button class="doc-
           </p>
           <p>
             Server configuration uses <code>VECTOR_SERVER_PASSWORD</code> and <code>VECTOR_SERVER_USERNAME</code>;
-            the default username is <code>vector</code>. Legacy <code>OPENCODE_*</code> variables remain readable
-            when their <code>VECTOR_*</code> counterparts are unset.
+            the default username is <code>vector</code>. The upcoming release reads only <code>VECTOR_*</code> variables;
+            update server scripts and configuration before upgrading.
           </p>
           <p>
             <code>vector acp</code> starts an Agent Client Protocol server, so an ACP-speaking editor can drive Vector's agent as its backend.

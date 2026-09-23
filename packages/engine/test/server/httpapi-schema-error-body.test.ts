@@ -34,7 +34,7 @@ const seedCorruptStepFinishPart = Effect.gen(function* () {
     role: "user",
     sessionID: info.id,
     agent: "build",
-    model: { providerID: ProviderV2.ID.make("test"), modelID: ModelV2.ID.make("test") },
+    model: { providerID: ProviderV2.ID.make("lmstudio"), modelID: ModelV2.ID.make("test") },
     time: { created: Date.now() },
   })
   const partID = PartID.ascending()

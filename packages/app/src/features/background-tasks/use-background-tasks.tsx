@@ -128,7 +128,6 @@ export function BackgroundTasksProvider(props: ParentProps<{ sessionID: Accessor
     children: children(),
     status: (id) => sync().data.session_status[id],
     waiting: (id) => (sync().data.permission[id]?.length ?? 0) > 0 || (sync().data.question[id]?.length ?? 0) > 0,
-    // Named as the model picker names it: an included model drops its catalogue name's "Free".
     modelName: (providerID, modelID) => {
       const provider = sync().data.provider?.all?.get(providerID)
       const model = provider?.models?.[modelID]

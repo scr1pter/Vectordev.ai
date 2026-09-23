@@ -1,3 +1,4 @@
+import { VECTOR_USER_AGENT } from "./user-agent"
 export type CloudProviderId = "vercel" | "netlify" | "supabase"
 
 type CloudFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>
@@ -19,7 +20,7 @@ async function providerJson(token: string, url: string, request: CloudFetch): Pr
     headers: {
       accept: "application/json",
       authorization: `Bearer ${token}`,
-      "user-agent": "Vector-Desktop/1",
+      "user-agent": VECTOR_USER_AGENT,
     },
     signal: AbortSignal.timeout(20_000),
   })

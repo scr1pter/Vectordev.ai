@@ -4,11 +4,11 @@ import { existsSync } from "fs"
 import os from "os"
 import path from "path"
 import { Process } from "@/util/process"
-import { readEnv, warnLegacy } from "@vectordevai/core/flag/compat"
+import { readEnv } from "@vectordevai/core/flag/compat"
 
-const MANAGED_PLIST_DOMAINS = ["ai.vector.managed", "ai.opencode.managed"]
+const MANAGED_PLIST_DOMAINS = ["ai.vector.managed"]
 
-// Keys injected by macOS/MDM into the managed plist that are not OpenCode config
+// Keys injected by macOS/MDM into the managed plist that are not Vector config
 const PLIST_META = new Set([
   "PayloadDisplayName",
   "PayloadIdentifier",
@@ -30,13 +30,9 @@ function systemManagedConfigDir(name = "vector"): string {
 }
 
 export function managedConfigDir() {
-  const override = readEnv("OPENCODE_TEST_MANAGED_CONFIG_DIR")
+  const override = readEnv("VECTOR_TEST_MANAGED_CONFIG_DIR")
   if (override) return override
-  const current = systemManagedConfigDir()
-  const legacy = systemManagedConfigDir("opencode")
-  if (existsSync(current) || !existsSync(legacy)) return current
-  warnLegacy(legacy, current)
-  return legacy
+  return systemManagedConfigDir()
 }
 
 export function parseManagedPlist(json: string): string {
@@ -64,7 +60,6 @@ export async function readManagedPreferences() {
 
   for (const plist of paths) {
     if (!existsSync(plist)) continue
-    if (plist.includes("ai.opencode.managed")) warnLegacy("ai.opencode.managed", "ai.vector.managed")
     const result = await Process.run(["plutil", "-convert", "json", "-o", "-", plist], { nothrow: true })
     if (result.code !== 0) continue
     return {

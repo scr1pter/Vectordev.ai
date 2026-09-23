@@ -46,7 +46,7 @@ export function withTmpdirStripped(text: string, marker = "<TMPDIR>"): string {
 /**
  * Separator-agnostic match class for path-style strings. Use inside a
  * larger regex when you want to match both `/` (POSIX) and `\` (Windows)
- * boundaries — e.g. `<TMPDIR>${PATH_SEP}oc-cli-[a-z0-9]+`.
+ * boundaries — e.g. `<TMPDIR>${PATH_SEP}vector-cli-[a-z0-9]+`.
  */
 export const PATH_SEP = "[/\\\\]"
 

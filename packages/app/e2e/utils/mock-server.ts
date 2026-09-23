@@ -22,7 +22,7 @@ export interface MockServerConfig {
   sessionStatus?: unknown
 }
 
-export async function mockOpenCodeServer(page: Page, config: MockServerConfig) {
+export async function mockVectorServer(page: Page, config: MockServerConfig) {
   const cursors = new Map<string, string>()
   let nextCursor = 0
   const staticRoutes: Record<string, unknown> = {
@@ -32,7 +32,7 @@ export async function mockOpenCodeServer(page: Page, config: MockServerConfig) {
       config: config.directory,
       worktree: config.directory,
       directory: config.directory,
-      home: "C:/OpenCode",
+      home: "C:/Vector",
     },
     "/project": [config.project],
     "/project/current": config.project,

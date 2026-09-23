@@ -39,14 +39,14 @@ describe("CatalogV2", () => {
         .pipe(Stream.take(1), Stream.runCollect, Effect.forkScoped)
       yield* Effect.yieldNow
 
-      yield* catalog.transform((editor) => editor.provider.update(ProviderV2.ID.make("test"), () => {}))
+      yield* catalog.transform((editor) => editor.provider.update(ProviderV2.ID.make("lmstudio"), () => {}))
 
       expect((yield* Fiber.join(updated)).length).toBe(1)
     }),
   )
 
   it.effect("derives availability from active credentials without changing provider state", () => {
-    const integrationID = Integration.ID.make("test")
+    const integrationID = Integration.ID.make("lmstudio")
     const localCatalogLayer = Layer.fresh(
       AppNodeBuilder.build(LayerNode.group([Catalog.node, Credential.node]), [[Location.node, locationLayer]]),
     )
@@ -54,28 +54,32 @@ describe("CatalogV2", () => {
     return Effect.gen(function* () {
       const catalog = yield* Catalog.Service
       const credentials = yield* Credential.Service
-      yield* catalog.transform((editor) => editor.provider.update(ProviderV2.ID.make("test"), () => {}))
+      yield* catalog.transform((editor) => editor.provider.update(ProviderV2.ID.make("lmstudio"), () => {}))
       yield* credentials.create({
         integrationID,
         label: "First",
         value: Credential.Key.make({ type: "key", key: "first", metadata: { tenant: "one" } }),
       })
 
-      expect((yield* catalog.provider.available()).map((provider) => provider.id)).toEqual([ProviderV2.ID.make("test")])
-      expect(required(yield* catalog.provider.get(ProviderV2.ID.make("test"))).request.body).toEqual({})
+      expect((yield* catalog.provider.available()).map((provider) => provider.id)).toEqual([
+        ProviderV2.ID.make("lmstudio"),
+      ])
+      expect(required(yield* catalog.provider.get(ProviderV2.ID.make("lmstudio"))).request.body).toEqual({})
       yield* credentials.create({
         integrationID,
         label: "Second",
         value: Credential.Key.make({ type: "key", key: "second", metadata: { tenant: "two" } }),
       })
-      expect((yield* catalog.provider.available()).map((provider) => provider.id)).toEqual([ProviderV2.ID.make("test")])
-      expect(required(yield* catalog.provider.get(ProviderV2.ID.make("test"))).request.body).toEqual({})
+      expect((yield* catalog.provider.available()).map((provider) => provider.id)).toEqual([
+        ProviderV2.ID.make("lmstudio"),
+      ])
+      expect(required(yield* catalog.provider.get(ProviderV2.ID.make("lmstudio"))).request.body).toEqual({})
     }).pipe(Effect.provide(localCatalogLayer))
   })
 
   it.effect("derives availability from a provider's integration", () => {
-    const integrationID = Integration.ID.make("gateway")
-    const providerID = ProviderV2.ID.make("remote")
+    const integrationID = Integration.ID.make("vercel")
+    const providerID = ProviderV2.ID.make("cerebras")
     const localCatalogLayer = Layer.fresh(
       AppNodeBuilder.build(LayerNode.group([Catalog.node, Credential.node, Integration.node]), [
         [Location.node, locationLayer],
@@ -112,7 +116,7 @@ describe("CatalogV2", () => {
         Effect.gen(function* () {
           const catalog = yield* Catalog.Service
           const integrations = yield* Integration.Service
-          const providerID = ProviderV2.ID.make("test")
+          const providerID = ProviderV2.ID.make("lmstudio")
           yield* integrations.transform((editor) =>
             editor.method.update({
               integrationID: Integration.ID.make(providerID),
@@ -134,7 +138,7 @@ describe("CatalogV2", () => {
   it.effect("normalizes provider baseURL into api url", () =>
     Effect.gen(function* () {
       const catalog = yield* Catalog.Service
-      const providerID = ProviderV2.ID.make("test")
+      const providerID = ProviderV2.ID.make("lmstudio")
       yield* catalog.transform((catalog) =>
         catalog.provider.update(providerID, (provider) => {
           provider.api = {
@@ -157,7 +161,7 @@ describe("CatalogV2", () => {
   it.effect("normalizes model baseURL into api url", () =>
     Effect.gen(function* () {
       const catalog = yield* Catalog.Service
-      const providerID = ProviderV2.ID.make("test")
+      const providerID = ProviderV2.ID.make("lmstudio")
       const modelID = ModelV2.ID.make("model")
       yield* catalog.transform((catalog) => {
         catalog.provider.update(providerID, (provider) => {
@@ -191,7 +195,7 @@ describe("CatalogV2", () => {
   it.effect("resolves default model api from provider api", () =>
     Effect.gen(function* () {
       const catalog = yield* Catalog.Service
-      const providerID = ProviderV2.ID.make("test")
+      const providerID = ProviderV2.ID.make("lmstudio")
       const modelID = ModelV2.ID.make("model")
       yield* catalog.transform((catalog) => {
         catalog.provider.update(providerID, (provider) => {
@@ -216,7 +220,7 @@ describe("CatalogV2", () => {
   it.effect("resolves provider and model request merges", () =>
     Effect.gen(function* () {
       const catalog = yield* Catalog.Service
-      const providerID = ProviderV2.ID.make("test")
+      const providerID = ProviderV2.ID.make("lmstudio")
       const modelID = ModelV2.ID.make("model")
       yield* catalog.transform((catalog) => {
         catalog.provider.update(providerID, (provider) => {
@@ -242,7 +246,7 @@ describe("CatalogV2", () => {
   it.effect("falls back to newest available model when no default is configured", () =>
     Effect.gen(function* () {
       const catalog = yield* Catalog.Service
-      const providerID = ProviderV2.ID.make("test")
+      const providerID = ProviderV2.ID.make("lmstudio")
       yield* catalog.transform((catalog) => {
         catalog.provider.update(providerID, () => {})
         catalog.model.update(providerID, ModelV2.ID.make("old"), (model) => {
@@ -260,7 +264,7 @@ describe("CatalogV2", () => {
   it.effect("uses a transform-provided default model until that transform is replaced", () =>
     Effect.gen(function* () {
       const catalog = yield* Catalog.Service
-      const providerID = ProviderV2.ID.make("test")
+      const providerID = ProviderV2.ID.make("lmstudio")
       const old = ModelV2.ID.make("old")
       const newest = ModelV2.ID.make("new")
       const models = (catalog: Catalog.Draft) => {
@@ -289,8 +293,8 @@ describe("CatalogV2", () => {
   it.effect("ignores a configured default on a disabled provider", () =>
     Effect.gen(function* () {
       const catalog = yield* Catalog.Service
-      const disabledProvider = ProviderV2.ID.make("disabled")
-      const enabledProvider = ProviderV2.ID.make("enabled")
+      const disabledProvider = ProviderV2.ID.make("anthropic")
+      const enabledProvider = ProviderV2.ID.make("openai")
       const disabledModel = ModelV2.ID.make("configured")
       const fallbackModel = ModelV2.ID.make("fallback")
       yield* catalog.transform((catalog) => {
@@ -313,7 +317,7 @@ describe("CatalogV2", () => {
   it.effect("small model prefers small keyword candidates before cost scoring", () =>
     Effect.gen(function* () {
       const catalog = yield* Catalog.Service
-      const providerID = ProviderV2.ID.make("test")
+      const providerID = ProviderV2.ID.make("lmstudio")
       yield* catalog.transform((catalog) => {
         catalog.provider.update(providerID, () => {})
         catalog.model.update(providerID, ModelV2.ID.make("cheap-large"), (model) => {
@@ -338,8 +342,8 @@ describe("CatalogV2", () => {
     Effect.gen(function* () {
       const catalog = yield* Catalog.Service
       const policy = yield* Policy.Service
-      const providerID = ProviderV2.ID.make("blocked")
-      yield* policy.load([new Policy.Info({ effect: "deny", action: "provider.use", resource: "blocked" })])
+      const providerID = ProviderV2.ID.make("lmstudio")
+      yield* policy.load([new Policy.Info({ effect: "deny", action: "provider.use", resource: "lmstudio" })])
       yield* catalog.transform((catalog) => {
         catalog.provider.update(providerID, () => {})
         catalog.model.update(providerID, ModelV2.ID.make("model"), () => {})

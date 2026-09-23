@@ -107,7 +107,7 @@ describe("authenticationStartsOpen", () => {
 
   test("add mode opens for a password or a non-default username", () => {
     expect(authenticationStartsOpen({ mode: "add", username: DEFAULT_SERVER_USERNAME, password: "x" })).toBe(true)
-    expect(authenticationStartsOpen({ mode: "add", username: "opencode", password: "" })).toBe(true)
+    expect(authenticationStartsOpen({ mode: "add", username: "custom-user", password: "" })).toBe(true)
   })
 
   test("edit mode opens whenever the server has credentials", () => {

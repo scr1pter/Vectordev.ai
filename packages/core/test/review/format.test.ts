@@ -74,7 +74,7 @@ const STATE: ReviewState = {
 const usage = { input: 17_200, output: 3_100, reasoning: 0, cacheRead: 31_000, cacheWrite: 0 }
 const priced: ReviewCost = { ...usage, costUsd: 0.21, kind: "priced", model: "anthropic/claude-sonnet-4-5" }
 const plain = { input: 48_200, output: 3_100, reasoning: 0, cacheRead: 0, cacheWrite: 0, costUsd: 0 }
-const free: ReviewCost = { ...plain, kind: "free", model: "opencode/big-pickle" }
+const free: ReviewCost = { ...plain, kind: "free", model: "openai/gpt-4.1" }
 const plan: ReviewCost = { ...plain, kind: "plan", model: "openai/gpt-5" }
 const unknown: ReviewCost = { ...plain, kind: "unknown", model: "provider/model" }
 
@@ -362,7 +362,7 @@ describe("the summary comment", () => {
     expect(body).toContain("**No issues found** on the changed lines.")
     expect(body).toContain("_2 files changed (code)._")
     expect(body).toContain(
-      "opencode/big-pickle · included with Vector (48.2k in / 3.1k out) · 48s · this pull request: 1 review",
+      "openai/gpt-4.1 · included with Vector (48.2k in / 3.1k out) · 48s · this pull request: 1 review",
     )
   })
 
@@ -499,7 +499,9 @@ describe("notes", () => {
     expect(noteAlreadyReviewed(HEAD)).toBe(
       "`d4e5f6a` was already reviewed. Comment `/vector review full` to review it again.",
     )
-    expect(noteSuperseded(NEWER)).toBe("A newer commit (`e5f6a7b`) arrived during this review. Vectorscope reviews it next.")
+    expect(noteSuperseded(NEWER)).toBe(
+      "A newer commit (`e5f6a7b`) arrived during this review. Vectorscope reviews it next.",
+    )
     expect(noteForcePush(SINCE, 3)).toBe(
       "History was rewritten since `a1b2c3d`; Vectorscope reviewed the 3 files whose changes differ.",
     )
@@ -813,7 +815,7 @@ describe("capBody", () => {
 describe("numbers and cost", () => {
   test("costWording for every kind", () => {
     expect(costWording(priced)).toBe("anthropic/claude-sonnet-4-5 · $0.21 (48.2k in, 31.0k of it cached / 3.1k out)")
-    expect(costWording(free)).toBe("opencode/big-pickle · included with Vector (48.2k in / 3.1k out)")
+    expect(costWording(free)).toBe("openai/gpt-4.1 · included with Vector (48.2k in / 3.1k out)")
     expect(costWording(plan)).toBe("openai/gpt-5 · subscription sign-in, no per-token price (48.2k in / 3.1k out)")
     expect(costWording(unknown)).toBe(
       "provider/model · cost unknown: no price is listed for this model (48.2k in / 3.1k out)",

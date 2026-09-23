@@ -90,13 +90,9 @@ export function isRequestTimeout(error: unknown, signal?: AbortSignal) {
 }
 const CLIENT_OPTIONS = {
   capabilities: {
-    // https://github.com/anomalyco/opencode/issues/11948
     // sampling: {},
-    // https://github.com/anomalyco/opencode/issues/23066
     // elicitation: {},
-    // https://github.com/anomalyco/opencode/issues/2308
     roots: {},
-    // https://github.com/anomalyco/opencode/issues/28567
     // tasks: {},
   },
 } satisfies ClientOptions
@@ -302,7 +298,7 @@ export interface Interface {
   readonly getAuthStatus: (mcpName: string) => Effect.Effect<AuthStatus>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@opencode/MCP") {}
+export class Service extends Context.Service<Service, Interface>()("@vector/MCP") {}
 
 export const use = serviceUse(Service)
 
@@ -467,7 +463,7 @@ const layer = Layer.effect(
         command: cmd,
         args,
         cwd,
-        env: untrustedChildEnvironment(process.env, cmd === "opencode" ? { BUN_BE_BUN: "1" } : undefined, environment),
+        env: untrustedChildEnvironment(process.env, cmd === "vector" ? { BUN_BE_BUN: "1" } : undefined, environment),
       })
       drainStderr(transport.stderr, (output) =>
         bridge.fork(Effect.logWarning("MCP server stderr", { server: key, output }).pipe(Effect.ignore)),
@@ -813,7 +809,7 @@ const layer = Layer.effect(
               events
                 .publish(TuiEvent.ToastShow, {
                   title: "MCP config not saved",
-                  message: `Could not write "${name}" to .opencode/opencode.local.json; the change may not survive a restart.`,
+                  message: `Could not write "${name}" to .vector/vector.local.json; the change may not survive a restart.`,
                   variant: "warning",
                   duration: 8000,
                 })

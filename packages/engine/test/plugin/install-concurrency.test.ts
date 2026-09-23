@@ -23,7 +23,7 @@ function run(msg: Msg) {
     exactEnv: true,
     env: Object.fromEntries(
       Object.entries(process.env).map(([key, value]) => {
-        const current = key.replace(/^OPENCODE_/, "VECTOR_")
+        const current = key.replace(/^VECTOR_/, "VECTOR_")
         return [current, process.env[current] ?? value]
       }),
     ),
@@ -121,7 +121,7 @@ describe("plugin.install.concurrent", () => {
   test("preserves updates when existing config uses .json", async () => {
     await using tmp = await tmpdir()
     const target = await plugin(tmp.path, ["server"])
-    const cfg = path.join(tmp.path, ".opencode", "opencode.json")
+    const cfg = path.join(tmp.path, ".vector", "vector.json")
     await fs.mkdir(path.dirname(cfg), { recursive: true })
     await Bun.write(cfg, JSON.stringify({ plugin: ["seed@1.0.0"] }, null, 2))
 
@@ -142,6 +142,6 @@ describe("plugin.install.concurrent", () => {
 
     const json = await read(cfg)
     expectPlugins(json.plugin, ["seed@1.0.0", ...next])
-    expect(await Filesystem.exists(path.join(tmp.path, ".opencode", "opencode.jsonc"))).toBe(false)
+    expect(await Filesystem.exists(path.join(tmp.path, ".vector", "vector.jsonc"))).toBe(false)
   }, 25_000)
 })

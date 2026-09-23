@@ -10,15 +10,15 @@ import { createAcpClient, initialize, newSession, verifierConfig } from "./helpe
 
 const tinyPng = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII="
 
-describe("opencode acp prompt content subprocess", () => {
+describe("vector acp prompt content subprocess", () => {
   cliIt.live(
     "accepts embedded text resource image and file resource link prompt content",
-    ({ home, llm, opencode }) =>
+    ({ home, llm, vector }) =>
       Effect.gen(function* () {
         yield* Effect.promise(() => writeFile(path.join(home, "README.md"), "# ACP content smoke\n"))
         const acp = yield* createAcpClient(
-          { opencode },
-          { OPENCODE_CONFIG_CONTENT: JSON.stringify(promptContentConfig(llm.url)) },
+          { vector },
+          { VECTOR_CONFIG_CONTENT: JSON.stringify(promptContentConfig(llm.url)) },
         )
         yield* initialize(acp)
         const session = yield* newSession(acp, home)
@@ -79,10 +79,10 @@ function promptContentConfig(llmUrl: string) {
   return {
     ...config,
     provider: {
-      test: {
-        ...config.provider.test,
+      lmstudio: {
+        ...config.provider.lmstudio,
         models: Object.fromEntries(
-          Object.entries(config.provider.test.models).map(([id, model]) => [
+          Object.entries(config.provider.lmstudio.models).map(([id, model]) => [
             id,
             {
               ...model,

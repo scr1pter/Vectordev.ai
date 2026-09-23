@@ -230,7 +230,7 @@ it.instance(
 )
 
 // Cross-region inference profile prefix handling.
-// Models from models.dev may come with prefixes already (e.g. us., eu., global.).
+// Models from the model catalog may come with prefixes already (e.g. us., eu., global.).
 // These should NOT be double-prefixed when passed to the SDK.
 
 it.instance(

@@ -16,7 +16,7 @@ import type {
   PullRequestEvent,
 } from "@octokit/webhooks-types"
 import { UI } from "../ui"
-import { ModelsDev } from "@vectordevai/core/models-dev"
+import { ModelCatalog } from "@vectordevai/core/model-catalog"
 import { InstanceRef } from "@/effect/instance-ref"
 import { Session } from "@/session/session"
 import type { SessionID } from "../../session/schema"
@@ -167,14 +167,14 @@ export const githubInstall = Effect.fn("Cli.github.install")(function* () {
   const maybeCtx = yield* InstanceRef
   if (!maybeCtx) return yield* Effect.die("InstanceRef not provided")
   const ctx = maybeCtx
-  const modelsDev = yield* ModelsDev.Service
+  const modelCatalog = yield* ModelCatalog.Service
   const gitSvc = yield* Git.Service
   yield* Effect.promise(async () => {
     {
       UI.empty()
       prompts.intro("Install GitHub agent")
       const app = await getAppInfo()
-      const providers = await Effect.runPromise(modelsDev.get()).then((p) => {
+      const providers = await Effect.runPromise(modelCatalog.get()).then((p) => {
         // TODO: add guide for copilot, for now just hide it
         delete p["github-copilot"]
         return p

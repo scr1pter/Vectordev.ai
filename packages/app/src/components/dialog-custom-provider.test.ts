@@ -7,7 +7,7 @@ describe("validateCustomProvider", () => {
   test("builds trimmed config payload", () => {
     const result = validateCustomProvider({
       form: {
-        providerID: "custom-provider",
+        providerID: "lmstudio",
         name: " Custom Provider ",
         baseURL: "https://api.example.com ",
         apiKey: " {env: CUSTOM_PROVIDER_KEY} ",
@@ -19,12 +19,10 @@ describe("validateCustomProvider", () => {
         err: {},
       },
       t,
-      disabledProviders: [],
-      existingProviderIDs: new Set(),
     })
 
     expect(result.result).toEqual({
-      providerID: "custom-provider",
+      providerID: "lmstudio",
       name: "Custom Provider",
       key: undefined,
       config: {
@@ -47,7 +45,7 @@ describe("validateCustomProvider", () => {
   test("flags duplicate rows and allows reconnecting disabled providers", () => {
     const result = validateCustomProvider({
       form: {
-        providerID: "custom-provider",
+        providerID: "lmstudio",
         name: "Provider",
         baseURL: "https://api.example.com",
         apiKey: "secret",
@@ -62,8 +60,6 @@ describe("validateCustomProvider", () => {
         err: {},
       },
       t,
-      disabledProviders: ["custom-provider"],
-      existingProviderIDs: new Set(["custom-provider"]),
     })
 
     expect(result.result).toBeUndefined()
@@ -77,4 +73,20 @@ describe("validateCustomProvider", () => {
       value: undefined,
     })
   })
+})
+
+test("rejects unlisted provider IDs while allowing a supported provider's custom endpoint", () => {
+  const form = {
+    providerID: "unlisted-provider",
+    name: "Private endpoint",
+    baseURL: "https://models.example.test/v1",
+    apiKey: "test-only",
+    models: [{ row: "m0", id: "local-model", name: "Local model", err: {} }],
+    headers: [],
+    err: {},
+  }
+  expect(validateCustomProvider({ form, t }).result).toBeUndefined()
+  const supported = validateCustomProvider({ form: { ...form, providerID: "openai" }, t })
+  expect(supported.err.providerID).toBeUndefined()
+  expect(supported.result?.config.options.baseURL).toBe("https://models.example.test/v1")
 })

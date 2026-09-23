@@ -6,9 +6,9 @@ import { cliIt } from "../lib/cli-process"
 describe("vector mcp add (non-interactive subprocess)", () => {
   cliIt.concurrent(
     "adds a remote server with HTTP headers",
-    ({ home, opencode }) =>
+    ({ home, vector }) =>
       Effect.gen(function* () {
-        const result = yield* opencode.spawn([
+        const result = yield* vector.spawn([
           "mcp",
           "add",
           "github",
@@ -19,7 +19,7 @@ describe("vector mcp add (non-interactive subprocess)", () => {
           "--header",
           "X-Option=one=two",
         ])
-        opencode.expectExit(result, 0)
+        vector.expectExit(result, 0)
 
         const config = yield* Effect.promise(() => Bun.file(path.join(home, ".config", "vector", "vector.json")).json())
         expect(config.mcp.github).toEqual({
@@ -36,9 +36,9 @@ describe("vector mcp add (non-interactive subprocess)", () => {
 
   cliIt.concurrent(
     "adds a local server while preserving argv and environment values",
-    ({ home, opencode }) =>
+    ({ home, vector }) =>
       Effect.gen(function* () {
-        const result = yield* opencode.spawn([
+        const result = yield* vector.spawn([
           "mcp",
           "add",
           "local",
@@ -53,7 +53,7 @@ describe("vector mcp add (non-interactive subprocess)", () => {
           "--label",
           "two words",
         ])
-        opencode.expectExit(result, 0)
+        vector.expectExit(result, 0)
 
         const config = yield* Effect.promise(() => Bun.file(path.join(home, ".config", "vector", "vector.json")).json())
         expect(config.mcp.local).toEqual({

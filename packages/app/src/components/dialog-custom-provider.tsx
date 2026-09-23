@@ -106,8 +106,6 @@ export function DialogCustomProvider(props: Props) {
     const output = validateCustomProvider({
       form,
       t: language.t,
-      disabledProviders: serverSync().data.config.disabled_providers ?? [],
-      existingProviderIDs: new Set(serverSync().data.provider.all.keys()),
     })
     batch(() => {
       setForm("err", output.err)
@@ -194,8 +192,8 @@ export function DialogCustomProvider(props: Props) {
             <TextField
               autofocus
               label={language.t("provider.custom.field.providerID.label")}
-              placeholder={language.t("provider.custom.field.providerID.placeholder")}
-              description={language.t("provider.custom.field.providerID.description")}
+              placeholder="lmstudio"
+              description="Use a supported provider ID, such as lmstudio or openai. Saving configures its custom endpoint and models."
               value={form.providerID}
               onChange={(v) => setField("providerID", v)}
               validationState={form.err.providerID ? "invalid" : undefined}

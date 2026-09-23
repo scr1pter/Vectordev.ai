@@ -1,9 +1,10 @@
+import { rm } from "node:fs/promises"
 import { resolveChannel } from "./utils"
 
 const arg = process.argv[2]
 const channel = arg === "dev" || arg === "beta" || arg === "prod" ? arg : resolveChannel()
 
-const appId = channel === "prod" ? "ai.vector.desktop" : `ai.vector.desktop.${channel}`
+const appId = channel === "prod" ? "ai.vector.app" : `ai.vector.app.${channel}`
 const productName = channel === "prod" ? "Vector" : `Vector ${channel.charAt(0).toUpperCase() + channel.slice(1)}`
 const summary = `Free BYOK AI coding workspace${channel !== "prod" ? ` (${channel})` : ""}`
 
@@ -17,7 +18,7 @@ const xml = `<?xml version="1.0" encoding="UTF-8"?>
   <name>${productName}</name>
   <summary>${summary}</summary>
 
-  <developer id="ly.anoma">
+  <developer id="ai.vectordev">
     <name>Vector</name>
   </developer>
 
@@ -43,5 +44,9 @@ const xml = `<?xml version="1.0" encoding="UTF-8"?>
 </component>
 `
 
+// Keep packaging from picking up generated metadata for a different channel or an earlier application id.
+for await (const file of new Bun.Glob("ai.vector.*.metainfo.xml").scan("resources")) {
+  if (file !== `${appId}.metainfo.xml`) await rm(`resources/${file}`)
+}
 await Bun.write(`resources/${appId}.metainfo.xml`, xml)
 console.log(`Generated metainfo for ${channel} at resources/${appId}.metainfo.xml`)

@@ -11,9 +11,9 @@ import {
   type AcpClient,
 } from "./acp-test-client"
 
-export function createAcpClient(input: Pick<CliFixture, "opencode">, env?: Record<string, string>) {
+export function createAcpClient(input: Pick<CliFixture, "vector">, env?: Record<string, string>) {
   return Effect.gen(function* () {
-    return createJsonRpcAcpClient(yield* input.opencode.acp(env ? { env } : undefined))
+    return createJsonRpcAcpClient(yield* input.vector.acp(env ? { env } : undefined))
   })
 }
 
@@ -23,7 +23,7 @@ export function initialize(acp: AcpClient) {
       yield* acp.request<InitializeResponse>("initialize", {
         protocolVersion: 1,
         clientCapabilities: { _meta: { "terminal-auth": true } },
-        clientInfo: { name: "opencode-local-acp", version: "0.1.0" },
+        clientInfo: { name: "vector-local-acp", version: "0.1.0" },
       }),
     )
   })
@@ -39,21 +39,21 @@ export function verifierConfig(llmUrl: string, skills?: string) {
   const config = testProviderConfig(llmUrl)
   return {
     ...config,
-    model: "test/test-model",
+    model: "lmstudio/test-model",
     ...(skills ? { skills: { paths: [skills] } } : {}),
     provider: {
-      test: {
-        ...config.provider.test,
+      lmstudio: {
+        ...config.provider.lmstudio,
         models: {
           "test-model": {
-            ...config.provider.test.models["test-model"],
+            ...config.provider.lmstudio.models["test-model"],
             variants: {
               low: {},
               high: {},
             },
           },
           "second-model": {
-            ...config.provider.test.models["test-model"],
+            ...config.provider.lmstudio.models["test-model"],
             id: "second-model",
             name: "Second Test Model",
             variants: {

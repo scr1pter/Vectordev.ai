@@ -16,7 +16,7 @@ import { httpApiLayer, requestInDirectory } from "./httpapi-layer"
 const it = testEffect(Layer.mergeAll(LayerNode.compile(SessionNs.node), httpApiLayer))
 
 const model = {
-  providerID: ProviderV2.ID.make("test"),
+  providerID: ProviderV2.ID.make("lmstudio"),
   modelID: ModelV2.ID.make("test"),
 }
 
@@ -28,15 +28,15 @@ const withoutWatcher = <A, E, R>(effect: Effect.Effect<A, E, R>) => {
   if (process.platform !== "win32") return effect
   return Effect.acquireUseRelease(
     Effect.sync(() => {
-      const previous = process.env.OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER
-      process.env.OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER = "true"
+      const previous = process.env.VECTOR_EXPERIMENTAL_DISABLE_FILEWATCHER
+      process.env.VECTOR_EXPERIMENTAL_DISABLE_FILEWATCHER = "true"
       return previous
     }),
     () => effect,
     (previous) =>
       Effect.sync(() => {
-        if (previous === undefined) delete process.env.OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER
-        else process.env.OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER = previous
+        if (previous === undefined) delete process.env.VECTOR_EXPERIMENTAL_DISABLE_FILEWATCHER
+        else process.env.VECTOR_EXPERIMENTAL_DISABLE_FILEWATCHER = previous
       }),
   )
 }

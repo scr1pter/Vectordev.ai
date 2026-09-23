@@ -392,22 +392,22 @@ describe("session.llm-native.request", () => {
       type: "supported",
       apiKey: "test-openai-key",
     })
-    for (const id of ["opencode", "opencode-go", "opencode-zen", "opencode-custom"]) {
+    for (const id of ["unsupported-fixture", "unsupported-fixture-two"]) {
       expect(
         LLMNativeRuntime.status({
           model: { ...baseModel, providerID: ProviderV2.ID.make(id) },
           provider: { ...providerInfo, id: ProviderV2.ID.make(id) },
           auth: { type: "api", key: "user-supplied-key" },
         }),
-      ).toEqual({ type: "unsupported", reason: "provider is retired" })
+      ).toEqual({ type: "unsupported", reason: "provider is not supported" })
     }
     expect(
       LLMNativeRuntime.status({
         model: baseModel,
-        provider: { ...providerInfo, options: { apiKey: "test-key", baseURL: "https://opencode.ai/zen/v1" } },
+        provider: { ...providerInfo, options: { apiKey: "test-key", baseURL: "https://custom.example.test/v1" } },
         auth: undefined,
       }),
-    ).toEqual({ type: "unsupported", reason: "provider endpoint is retired" })
+    ).toMatchObject({ type: "supported", apiKey: "test-key" })
     expect(
       LLMNativeRuntime.status({
         model: { ...baseModel, providerID: ProviderV2.ID.make("google") },

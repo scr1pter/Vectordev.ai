@@ -8,8 +8,8 @@ const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf
 
 // packages/app/index.html after the theme-preload plugin inlined the script.
 const web = read("../../../index.html").replace(
-  '<script id="oc-theme-preload-script" src="/oc-theme-preload.js"></script>',
-  `<script id="oc-theme-preload-script">${read("../../../public/oc-theme-preload.js")}</script>`,
+  '<script id="vector-theme-preload-script" src="/vector-theme-preload.js"></script>',
+  `<script id="vector-theme-preload-script">${read("../../../public/vector-theme-preload.js")}</script>`,
 )
 // packages/desktop/src/renderer/index.html keeps the external ./ script.
 const desktop = read("../../../../desktop/src/renderer/index.html")
@@ -53,7 +53,7 @@ describe("launch screen injection", () => {
   ] as const) {
     test(`${name}: style and script are inline right after the theme preload, markup before #root`, () => {
       const out = injectLaunchScreen(source, parts)
-      const preload = out.indexOf('id="oc-theme-preload-script"')
+      const preload = out.indexOf('id="vector-theme-preload-script"')
       const style = out.indexOf('<style id="vector-launch-style">')
       const script = out.indexOf('<script id="vector-launch-script">')
       const overlay = out.indexOf('<div id="vector-launch"')

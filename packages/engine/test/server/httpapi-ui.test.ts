@@ -23,18 +23,18 @@ import { testEffect } from "../lib/effect"
 const testStateLayer = Layer.effectDiscard(
   Effect.gen(function* () {
     const original = {
-      OPENCODE_SERVER_PASSWORD: Flag.OPENCODE_SERVER_PASSWORD,
-      OPENCODE_SERVER_USERNAME: Flag.OPENCODE_SERVER_USERNAME,
-      envPassword: process.env.OPENCODE_SERVER_PASSWORD,
-      envUsername: process.env.OPENCODE_SERVER_USERNAME,
+      VECTOR_SERVER_PASSWORD: Flag.VECTOR_SERVER_PASSWORD,
+      VECTOR_SERVER_USERNAME: Flag.VECTOR_SERVER_USERNAME,
+      envPassword: process.env.VECTOR_SERVER_PASSWORD,
+      envUsername: process.env.VECTOR_SERVER_USERNAME,
     }
 
     yield* Effect.addFinalizer(() =>
       Effect.sync(() => {
-        Flag.OPENCODE_SERVER_PASSWORD = original.OPENCODE_SERVER_PASSWORD
-        Flag.OPENCODE_SERVER_USERNAME = original.OPENCODE_SERVER_USERNAME
-        restoreEnv("OPENCODE_SERVER_PASSWORD", original.envPassword)
-        restoreEnv("OPENCODE_SERVER_USERNAME", original.envUsername)
+        Flag.VECTOR_SERVER_PASSWORD = original.VECTOR_SERVER_PASSWORD
+        Flag.VECTOR_SERVER_USERNAME = original.VECTOR_SERVER_USERNAME
+        restoreEnv("VECTOR_SERVER_PASSWORD", original.envPassword)
+        restoreEnv("VECTOR_SERVER_USERNAME", original.envUsername)
       }),
     )
   }),
@@ -46,7 +46,7 @@ const it = testEffect(Layer.mergeAll(testStateLayer, fsUtilLayer, RuntimeFlags.l
 function authConfigLayer(input?: { password?: string; username?: string }) {
   return ServerAuth.Config.configLayer({
     password: input?.password === undefined ? Option.none() : Option.some(input.password),
-    username: input?.username ?? "opencode",
+    username: input?.username ?? "vector",
   })
 }
 
@@ -64,8 +64,8 @@ function app(input?: { password?: string; username?: string }) {
       Layer.provide(
         ConfigProvider.layer(
           ConfigProvider.fromUnknown({
-            OPENCODE_SERVER_PASSWORD: input?.password,
-            OPENCODE_SERVER_USERNAME: input?.username,
+            VECTOR_SERVER_PASSWORD: input?.password,
+            VECTOR_SERVER_USERNAME: input?.username,
           }),
         ),
       ),
@@ -237,7 +237,7 @@ describe("HttpApi UI fallback", () => {
             return path === "/$bunfs/root/index.html"
               ? Effect.succeed(
                   new TextEncoder().encode(
-                    `<html><head><script id="oc-theme-preload-script">${script}</script></head></html>`,
+                    `<html><head><script id="vector-theme-preload-script">${script}</script></head></html>`,
                   ),
                 )
               : Effect.die(`unexpected embedded UI path: ${path}`)
@@ -267,7 +267,7 @@ describe("HttpApi UI fallback", () => {
     Effect.gen(function* () {
       const response = yield* uiApp({
         password: "secret",
-        username: "opencode",
+        username: "vector",
         disableEmbeddedWebUi: true,
       }).request("/")
 
@@ -280,10 +280,10 @@ describe("HttpApi UI fallback", () => {
     Effect.gen(function* () {
       const response = yield* uiApp({
         password: "secret",
-        username: "opencode",
+        username: "vector",
         disableEmbeddedWebUi: true,
-        client: httpClient(new Response("<html>opencode</html>", { headers: { "content-type": "text/html" } })),
-      }).request(`/?auth_token=${btoa("opencode:secret")}`)
+        client: httpClient(new Response("<html>vector</html>", { headers: { "content-type": "text/html" } })),
+      }).request(`/?auth_token=${btoa("vector:secret")}`)
 
       expect(response.status).toBe(404)
       expect(yield* responseText(response)).toContain("Not Found")
@@ -294,10 +294,10 @@ describe("HttpApi UI fallback", () => {
     Effect.gen(function* () {
       const response = yield* uiApp({
         password: "secret",
-        username: "opencode",
+        username: "vector",
         disableEmbeddedWebUi: true,
       }).request("/", {
-        headers: { authorization: `Basic ${btoa("opencode:secret")}` },
+        headers: { authorization: `Basic ${btoa("vector:secret")}` },
       })
 
       expect(response.status).toBe(404)
@@ -308,10 +308,10 @@ describe("HttpApi UI fallback", () => {
     Effect.gen(function* () {
       const response = yield* uiApp({
         password: "sec:ret",
-        username: "opencode",
+        username: "vector",
         disableEmbeddedWebUi: true,
       }).request("/", {
-        headers: { authorization: `Basic ${btoa("opencode:sec:ret")}` },
+        headers: { authorization: `Basic ${btoa("vector:sec:ret")}` },
       })
 
       expect(response.status).toBe(404)
@@ -328,7 +328,7 @@ describe("HttpApi UI fallback", () => {
       for (const path of ["/site.webmanifest", "/web-app-manifest-192x192.png", "/web-app-manifest-512x512.png"]) {
         const response = yield* uiApp({
           password: "secret",
-          username: "opencode",
+          username: "vector",
           disableEmbeddedWebUi: true,
           client: httpClient(new Response("ok")),
         }).request(path)
@@ -339,7 +339,7 @@ describe("HttpApi UI fallback", () => {
 
   it.live("allows web UI preflight without auth", () =>
     Effect.gen(function* () {
-      const response = yield* app({ password: "secret", username: "opencode" }).request("/", {
+      const response = yield* app({ password: "secret", username: "vector" }).request("/", {
         method: "OPTIONS",
         headers: {
           origin: "http://localhost:3000",

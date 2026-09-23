@@ -1,13 +1,13 @@
 import { expect, test } from "@playwright/test"
 import { base64Encode } from "@vectordevai/core/util/encode"
-import { mockOpenCodeServer } from "../utils/mock-server"
+import { mockVectorServer } from "../utils/mock-server"
 import { expectSessionTitle } from "../utils/waits"
 
 const directory = "C:/Vector/NoGlobalTabs"
 const sessionID = "ses_no_global_tabs"
 
 test("the redesigned workspace never renders the retired global session strip", async ({ page }, testInfo) => {
-  await mockOpenCodeServer(page, {
+  await mockVectorServer(page, {
     directory,
     project: { id: "project-no-global-tabs", worktree: directory, vcs: "git", name: "No Global Tabs" },
     provider: { all: [], connected: [], default: {} },

@@ -339,8 +339,8 @@ function useWslAddServerController(props: DialogWslServerProps) {
     const distro = model().selectedDistro
     const action = button.action
     if (!distro || !action) return
-    if (action === "install-opencode") {
-      await run(() => api.installOpencode(distro))
+    if (action === "install-vector") {
+      await run(() => api.installVector(distro))
       return
     }
     setStore("adding", true)

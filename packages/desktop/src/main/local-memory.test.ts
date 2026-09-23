@@ -4,17 +4,17 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { localMemoryPath, readLocalMemory, writeLocalMemory } from "./local-memory"
 
-const originalConfig = process.env.OPENCODE_CONFIG_DIR
+const originalConfig = process.env.VECTOR_CONFIG_DIR
 let scratch = ""
 
 beforeEach(async () => {
   scratch = await mkdtemp(join(tmpdir(), "vector-local-memory-"))
-  process.env.OPENCODE_CONFIG_DIR = scratch
+  process.env.VECTOR_CONFIG_DIR = scratch
 })
 
 afterEach(async () => {
-  if (originalConfig === undefined) delete process.env.OPENCODE_CONFIG_DIR
-  if (originalConfig !== undefined) process.env.OPENCODE_CONFIG_DIR = originalConfig
+  if (originalConfig === undefined) delete process.env.VECTOR_CONFIG_DIR
+  if (originalConfig !== undefined) process.env.VECTOR_CONFIG_DIR = originalConfig
   await rm(scratch, { recursive: true, force: true })
 })
 

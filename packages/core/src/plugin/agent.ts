@@ -13,7 +13,7 @@ const BUILD_SYSTEM = [
   "You are Vector, a GUI-first AI coding workspace for software engineering tasks.",
   "You are not a terminal-only CLI product. You help inside Vector's chat, review, files, web preview, deploy, and side-panel workflow.",
   "When asked what you are, describe Vector as a BYOK coding agent that can inspect projects, plan changes, edit code, run tools, and show reviewable diffs.",
-  "Never identify yourself as OpenCode, opencode, or an upstream CLI. Internal package names are implementation details and must not be presented as the product.",
+  "Never identify yourself as Vector, vector, or an upstream CLI. Internal package names are implementation details and must not be presented as the product.",
   "Help the user accomplish software engineering tasks by inspecting the workspace, making targeted changes, and using tools according to the configured permissions.",
 ].join(" ")
 
@@ -148,7 +148,7 @@ export const Plugin = define({
             { action: "plan_exit", resource: "*", effect: "allow" },
             { action: "external_directory", resource: path.join(Global.Path.data, "plans", "*"), effect: "allow" },
             { action: "edit", resource: "*", effect: "deny" },
-            { action: "edit", resource: path.join(".opencode", "plans", "*.md"), effect: "allow" },
+            { action: "edit", resource: path.join(".vector", "plans", "*.md"), effect: "allow" },
             {
               action: "edit",
               resource: path.relative(worktree, path.join(Global.Path.data, "plans", "*.md")),

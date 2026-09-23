@@ -41,9 +41,9 @@ async function generate(dir: string, env: Record<string, string>) {
 test("a pinned catalog uses caller-relative paths and replays byte-for-byte for every platform", async () => {
   await using tmp = await fixture({
     anthropic: { api: "https://api.anthropic.com/v1", models: { example: { name: "Example" } } },
-    opencode: { api: "https://example.com" },
-    "OpenCode-custom": { api: "https://example.com" },
-    alias: { api: "https://api.opencode.ai/v1" },
+    "unsupported-fixture": { api: "https://example.com" },
+    "unsupported-fixture-two": { api: "https://example.com" },
+    alias: { api: "https://provider.example.test/v1" },
   })
   const prepared = await generate(tmp.dir, { VECTOR_MODELS_SHA256: tmp.sha256 })
   expect(prepared.code, prepared.stderr).toBe(0)
@@ -72,8 +72,8 @@ test("a changed or missing pinned snapshot fails before producing a release cata
   expect(await Bun.file(path.join(tmp.dir, "api.json")).exists()).toBe(false)
 })
 
-for (const input of [{}, [], { opencode: {} }]) {
-  test(`refuses an empty or wholly retired catalog ${JSON.stringify(input)}`, async () => {
+for (const input of [{}, [], { "unsupported-fixture": {} }]) {
+  test(`refuses an empty or wholly unsupported catalog ${JSON.stringify(input)}`, async () => {
     await using tmp = await fixture(input)
     const result = await generate(tmp.dir, {})
     expect(result.code).not.toBe(0)

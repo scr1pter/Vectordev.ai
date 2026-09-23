@@ -13,8 +13,8 @@ await Effect.runPromise(
         emitPromise(contract, {
           outputTypes: {
             "events.subscribe": {
-              name: "OpenCodeEventEncoded",
-              import: 'import type { OpenCodeEventEncoded } from "@vectordevai/protocol/groups/event"',
+              name: "VectorEventEncoded",
+              import: 'import type { VectorEventEncoded } from "@vectordevai/protocol/groups/event"',
             },
           },
         }),

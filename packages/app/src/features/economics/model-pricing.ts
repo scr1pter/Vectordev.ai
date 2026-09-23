@@ -42,10 +42,8 @@ export type ModelCostSource = {
   models?: Record<string, { cost?: ModelRates } | undefined>
 }
 
-// A model whose every rate is zero is either free (the anonymous gateway) or
-// simply unpriced in the catalog. Either way there is no spend to report, and
-// reporting $0.00 would make it look cheaper than a model that honestly costs
-// something — so callers get undefined and render "cost unknown".
+// All-zero catalog rates do not establish what the provider bills.
+// Return undefined so callers render "cost unknown" rather than an unsupported $0.00 claim.
 function priced(rates: ModelRates | undefined): ModelRates | undefined {
   if (!rates) return undefined
   if (rates.input === 0 && rates.output === 0 && rates.cache.read === 0 && rates.cache.write === 0) return undefined

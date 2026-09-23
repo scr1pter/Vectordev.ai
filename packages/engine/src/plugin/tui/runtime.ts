@@ -253,9 +253,9 @@ function createThemeInstaller(
     const name = path.basename(src, path.extname(src))
     const source_dir = path.dirname(meta.source)
     const local_dir =
-      path.basename(source_dir) === ".opencode"
+      path.basename(source_dir) === ".vector"
         ? path.join(source_dir, "themes")
-        : path.join(source_dir, ".opencode", "themes")
+        : path.join(source_dir, ".vector", "themes")
     const dest_dir = meta.scope === "local" ? local_dir : path.join(Global.Path.config, "themes")
     const dest = path.join(dest_dir, `${name}.json`)
     const stat = await Filesystem.statAsync(src)
@@ -365,7 +365,7 @@ async function readThemeFiles(spec: string, pkg?: PluginPackage) {
   return Promise.resolve()
     .then(() => readPackageThemes(spec, pkg))
     .catch((error) => {
-      warn("invalid tui plugin oc-themes", {
+      warn("invalid tui plugin vector-themes", {
         path: spec,
         pkg: pkg.pkg,
         error,
@@ -380,7 +380,7 @@ async function syncPluginThemes(plugin: PluginEntry) {
   const install = createThemeInstaller(plugin.load.origin, plugin.load.plugin_root, plugin.load.spec, plugin)
   for (const file of plugin.load.theme_files) {
     await install(file).catch((error) => {
-      warn("failed to sync tui plugin oc-themes", { path: plugin.load.spec, id: plugin.id, theme: file, error })
+      warn("failed to sync tui plugin vector-themes", { path: plugin.load.spec, id: plugin.id, theme: file, error })
     })
   }
 }
@@ -814,7 +814,7 @@ function defaultPluginOrigin(state: RuntimeState, spec: string): ConfigPlugin.Or
   return {
     spec,
     scope: "local",
-    source: state.api.state.path.config || path.join(state.directory, ".opencode", "tui.json"),
+    source: state.api.state.path.config || path.join(state.directory, ".vector", "tui.json"),
   }
 }
 
@@ -931,7 +931,7 @@ async function installPluginBySpec(
     if (manifest.code === "manifest_no_targets") {
       return {
         ok: false,
-        message: `"${spec}" does not expose plugin entrypoints or oc-themes in package.json`,
+        message: `"${spec}" does not expose plugin entrypoints or vector-themes in package.json`,
       }
     }
 
@@ -1086,8 +1086,8 @@ async function load(input: {
       }).pipe(Effect.provide(AppNodeBuilder.build(RuntimeFlags.node))),
     )
     const pluginOrigins = config.plugin_origins ?? (await TuiConfig.pluginOrigins())
-    const records = Flag.OPENCODE_PURE ? [] : pluginOrigins
-    if (Flag.OPENCODE_PURE && pluginOrigins.length) {
+    const records = Flag.VECTOR_PURE ? [] : pluginOrigins
+    if (Flag.VECTOR_PURE && pluginOrigins.length) {
     }
 
     for (const item of internalTuiPlugins(flags)) {

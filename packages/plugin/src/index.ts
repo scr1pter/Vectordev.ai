@@ -1,10 +1,9 @@
 import type {
   Event,
-  createOpencodeClient,
+  createVectorClient,
   Project,
   Model,
   Provider,
-  Permission,
   UserMessage,
   Message,
   Part,
@@ -16,6 +15,19 @@ import type { BunShell } from "./shell.js"
 import { type ToolDefinition } from "./tool.js"
 
 export * from "./tool.js"
+
+// Retained as the public permission.ask hook contract; this differs from the server request schema.
+export type Permission = {
+  id: string
+  type: string
+  pattern?: string | string[]
+  sessionID: string
+  messageID: string
+  callID?: string
+  title: string
+  metadata: Record<string, unknown>
+  time: { created: number }
+}
 
 export type ProviderContext = {
   source: "env" | "config" | "custom" | "api"
@@ -54,7 +66,7 @@ export type WorkspaceAdapter = {
 }
 
 export type PluginInput = {
-  client: ReturnType<typeof createOpencodeClient>
+  client: ReturnType<typeof createVectorClient>
   project: Project
   directory: string
   worktree: string

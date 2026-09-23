@@ -2,7 +2,7 @@ import * as http from "node:http"
 import * as tls from "node:tls"
 import { join } from "node:path"
 import { mkdirSync } from "node:fs"
-import { VECTOR_AGENT_RUNTIME_ENV, vectorRuntimeEnv } from "./agent-runtime"
+import { VECTOR_AGENT_RUNTIME_ENV } from "./agent-runtime"
 
 type NodeHttpWithEnvProxy = typeof http & {
   setGlobalProxyFromEnv: () => void
@@ -57,7 +57,7 @@ async function start(command: StartCommand) {
     ensureLoopbackNoProxy()
     useSystemCertificates()
     useEnvProxy()
-    const { Server } = await import("virtual:opencode-server")
+    const { Server } = await import("virtual:vector-server")
 
     listener = await Server.listen({
       port: command.port,
@@ -94,11 +94,11 @@ function prepareSidecarEnv(password: string, userDataPath: string) {
   }
   Object.assign(process.env, {
     ...VECTOR_AGENT_RUNTIME_ENV,
-    ...vectorRuntimeEnv({
-      OPENCODE_SERVER_USERNAME: "vector",
-      OPENCODE_SERVER_PASSWORD: password,
-      OPENCODE_CONFIG_DIR: configDir,
-    }),
+    ...{
+      VECTOR_SERVER_USERNAME: "vector",
+      VECTOR_SERVER_PASSWORD: password,
+      VECTOR_CONFIG_DIR: configDir,
+    },
     VECTOR_APP_NAMESPACE: "vector",
     XDG_DATA_HOME: process.env.XDG_DATA_HOME ?? dataHome,
     XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME ?? xdgConfigHome,

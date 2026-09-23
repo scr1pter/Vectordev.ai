@@ -12,7 +12,7 @@ export interface Interface {
   readonly closeAll: Effect.Effect<void>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@opencode/HttpApiWebSocketTracker") {}
+export class Service extends Context.Service<Service, Interface>()("@vector/HttpApiWebSocketTracker") {}
 
 const layer = Layer.sync(Service)(() => {
   const sockets = new Set<Close>()

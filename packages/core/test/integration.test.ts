@@ -291,7 +291,7 @@ describe("Integration", () => {
   )
 
   it.effect("projects credential and env connections", () => {
-    const integrationID = Integration.ID.make("acme")
+    const integrationID = Integration.ID.make("lmstudio")
     return Effect.acquireUseRelease(
       Effect.sync(() => {
         const previous = process.env.INTEGRATION_TEST_ACME_KEY

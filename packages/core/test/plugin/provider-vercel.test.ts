@@ -75,9 +75,9 @@ describe("VercelPlugin", () => {
   it.effect("ignores non-Vercel providers", () =>
     Effect.gen(function* () {
       const catalog = yield* Catalog.Service
-      yield* catalog.transform((catalog) => catalog.provider.update(ProviderV2.ID.make("gateway"), () => {}))
+      yield* catalog.transform((catalog) => catalog.provider.update(ProviderV2.ID.make("lmstudio"), () => {}))
       yield* addPlugin()
-      expect((yield* catalog.provider.get(ProviderV2.ID.make("gateway")))?.request.headers).toEqual({})
+      expect((yield* catalog.provider.get(ProviderV2.ID.make("lmstudio")))?.request.headers).toEqual({})
     }),
   )
 })

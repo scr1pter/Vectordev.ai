@@ -1,14 +1,14 @@
 import { expect, test, type Page } from "@playwright/test"
 import { base64Encode } from "@vectordevai/core/util/encode"
-import { mockOpenCodeServer } from "../utils/mock-server"
+import { mockVectorServer } from "../utils/mock-server"
 import { expectAppVisible } from "../utils/waits"
 
-const directory = "C:/OpenCode/PromptThinkingLevelRegression"
+const directory = "C:/Vector/PromptThinkingLevelRegression"
 const projectID = "proj_prompt_thinking_level_regression"
 const sessionID = "ses_prompt_thinking_level_regression"
 
 test("keeps the V2 thinking level control available in the Agent composer", async ({ page }) => {
-  await mockOpenCodeServer(page, {
+  await mockVectorServer(page, {
     directory,
     project: {
       id: projectID,
@@ -21,8 +21,8 @@ test("keeps the V2 thinking level control available in the Agent composer", asyn
     provider: {
       all: [
         {
-          id: "opencode",
-          name: "OpenCode",
+          id: "anthropic",
+          name: "Anthropic",
           models: {
             "thinking-model": {
               id: "thinking-model",
@@ -33,8 +33,8 @@ test("keeps the V2 thinking level control available in the Agent composer", asyn
           },
         },
       ],
-      connected: ["opencode"],
-      default: { providerID: "opencode", modelID: "thinking-model" },
+      connected: ["anthropic"],
+      default: { providerID: "anthropic", modelID: "thinking-model" },
     },
     sessions: [
       {

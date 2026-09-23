@@ -1,7 +1,8 @@
 /** @jsxImportSource @opentui/solid */
 import { describe, expect, test } from "bun:test"
 import { tmpdir } from "../../../fixture/fixture"
-import { mount, wait } from "./sync-fixture"
+import { json, mount, wait } from "./sync-fixture"
+import { useConnected } from "../../../../src/component/use-connected"
 import type { GlobalEvent } from "@vectordevai/sdk/v2"
 
 function branchEvent(branch: string, workspace?: string): GlobalEvent {
@@ -62,4 +63,29 @@ describe("tui sync", () => {
       app.renderer.destroy()
     }
   })
+})
+
+test.each([
+  { providers: [], expected: false },
+  { providers: ["unlisted-service"], expected: false },
+  { providers: ["unlisted-service", "anthropic"], expected: true },
+])("connected state follows supported providers: $providers", async ({ providers, expected }) => {
+  await using tmp = await tmpdir()
+  await Bun.write(`${tmp.path}/kv.json`, "{}")
+  let connected!: ReturnType<typeof useConnected>
+  const { app } = await mount(
+    (url) =>
+      url.pathname === "/config/providers"
+        ? json({ providers: providers.map((id) => ({ id, name: id, models: {} })), default: {} })
+        : undefined,
+    tmp.path,
+    () => {
+      connected = useConnected()
+    },
+  )
+  try {
+    expect(connected()).toBe(expected)
+  } finally {
+    app.renderer.destroy()
+  }
 })

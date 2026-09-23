@@ -1,4 +1,4 @@
-export * as OpenCode from "./opencode"
+export * as Vector from "./vector"
 export * as Tool from "./tool"
 
 export { ClientError } from "@vectordevai/client/effect"
@@ -14,4 +14,4 @@ export {
   SessionInput,
   SessionMessage,
 } from "@vectordevai/client/effect"
-export type { OpenCodeEvent } from "@vectordevai/client/effect"
+export type { VectorEvent } from "@vectordevai/client/effect"

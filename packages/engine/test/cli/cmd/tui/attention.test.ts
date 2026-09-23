@@ -115,7 +115,7 @@ describe("createTuiAttention", () => {
     const audio = new FakeAudioEngine()
     const attention = createTuiAttention({
       renderer: new FakeRenderer(),
-      config: config({ sound_pack: "opencode.default" }),
+      config: config({ sound_pack: "vector.default" }),
       audio,
     })
 

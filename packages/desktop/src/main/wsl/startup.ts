@@ -2,7 +2,7 @@ export function wslServerIdsToStartOnInitialize(servers: { id: string }[]) {
   return servers.map((server) => server.id)
 }
 
-export function expectOpencodeVersion(installed: string | null, expected: string, distro = "Debian") {
+export function expectVectorVersion(installed: string | null, expected: string, distro = "Debian") {
   if (installed === expected) return
   throw new Error(
     `Vector update finished but ${distro} still reports ${installed ?? "no version"}; expected ${expected}`,

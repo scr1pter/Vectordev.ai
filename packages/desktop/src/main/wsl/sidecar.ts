@@ -4,9 +4,9 @@ import { createServer } from "node:net"
 import { untrustedChildEnvironment } from "@vectordevai/core/child-environment"
 import { app } from "electron"
 import { checkHealth } from "../server"
-import { type WslCommandLine, resolveWslOpencode, shellEscape, wslArgs } from "./runtime"
+import { type WslCommandLine, resolveWslVector, shellEscape, wslArgs } from "./runtime"
 import { pollWslHealth } from "./startup"
-import { VECTOR_AGENT_RUNTIME_ENV, vectorRuntimeEnv } from "../agent-runtime"
+import { VECTOR_AGENT_RUNTIME_ENV } from "../agent-runtime"
 
 export type WslSidecar = {
   listener: { stop: () => void; onExit: (cb: (code: number | null, signal: NodeJS.Signals | null) => void) => void }
@@ -19,7 +19,7 @@ export async function spawnWslSidecar(
   distro: string,
   opts: { onLine?: (line: WslCommandLine) => void; healthTimeoutMs?: number } = {},
 ): Promise<WslSidecar> {
-  const vector = await resolveWslOpencode(distro)
+  const vector = await resolveWslVector(distro)
   if (!vector) throw new Error(`Vector is not installed in ${distro}`)
 
   const port = await allocatePort()
@@ -33,12 +33,12 @@ export async function spawnWslSidecar(
     "export WSLENV=",
     ...Object.entries({
       ...VECTOR_AGENT_RUNTIME_ENV,
-      ...vectorRuntimeEnv({
-        OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER: "true",
-        OPENCODE_CLIENT: "desktop",
-        OPENCODE_SERVER_USERNAME: username,
-        OPENCODE_SERVER_PASSWORD: password,
-      }),
+      ...{
+        VECTOR_EXPERIMENTAL_DISABLE_FILEWATCHER: "true",
+        VECTOR_CLIENT: "desktop",
+        VECTOR_SERVER_USERNAME: username,
+        VECTOR_SERVER_PASSWORD: password,
+      },
     }).map(([key, value]) => `export ${key}=${shellEscape(value)}`),
     ...(process.env.VECTOR_MCP_AUTH_KEY
       ? [`export VECTOR_MCP_AUTH_KEY=${shellEscape(process.env.VECTOR_MCP_AUTH_KEY)}`]

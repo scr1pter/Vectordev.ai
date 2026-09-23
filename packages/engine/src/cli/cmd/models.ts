@@ -1,8 +1,7 @@
 import { EOL } from "os"
 import { Effect } from "effect"
 import { Flag } from "@vectordevai/core/flag/flag"
-import { providerEndpointAllowed } from "@vectordevai/core/provider-policy"
-import { ModelsDev } from "@vectordevai/core/models-dev"
+import { ModelCatalog } from "@vectordevai/core/model-catalog"
 import { effectCmd, fail } from "../effect-cmd"
 import { UI } from "../ui"
 import { ProviderV2 } from "@vectordevai/core/provider"
@@ -29,10 +28,8 @@ export const ModelsCommand = effectCmd({
     const { Provider } = yield* Effect.promise(() => import("@/provider/provider"))
     if (args.refresh) {
       const enabled =
-        Flag.OPENCODE_MODELS_URL &&
-        providerEndpointAllowed(Flag.OPENCODE_MODELS_URL) &&
-        !Flag.OPENCODE_DISABLE_MODELS_FETCH
-      if (enabled) yield* ModelsDev.Service.use((s) => s.refresh(true))
+        Flag.VECTOR_MODELS_URL && ModelCatalog.mirrorURL(Flag.VECTOR_MODELS_URL) && !Flag.VECTOR_DISABLE_MODELS_FETCH
+      if (enabled) yield* ModelCatalog.Service.use((s) => s.refresh(true))
       UI.println(
         enabled
           ? "Model catalog refresh attempted; the last available catalog remains usable if the mirror is offline."

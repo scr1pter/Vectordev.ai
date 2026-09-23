@@ -7,9 +7,9 @@ import { createAcpClient, expectErrorCode, initialize } from "./helpers"
 describe("vector acp initialize/auth subprocess", () => {
   cliIt.live(
     "initialize responds with capabilities",
-    ({ opencode }) =>
+    ({ vector }) =>
       Effect.gen(function* () {
-        const initialized = yield* initialize(yield* createAcpClient({ opencode }))
+        const initialized = yield* initialize(yield* createAcpClient({ vector }))
 
         expect(initialized.protocolVersion).toBe(1)
         expect(initialized.agentCapabilities?.promptCapabilities?.embeddedContext).toBe(true)
@@ -28,29 +28,29 @@ describe("vector acp initialize/auth subprocess", () => {
 
   cliIt.live(
     "auth negotiation is explicit and safe",
-    ({ opencode }) =>
+    ({ vector }) =>
       Effect.gen(function* () {
-        const acp = yield* createAcpClient({ opencode })
+        const acp = yield* createAcpClient({ vector })
         const initialized = yield* initialize(acp)
 
         expect(initialized.authMethods?.[0]?.id).toBe("vector-login")
         expect(initialized.authMethods?.[0]?._meta?.["terminal-auth"]).toBeDefined()
-        for (const methodId of ["vector-login", "opencode-login"]) {
+        for (const methodId of ["vector-login", "vector-login"]) {
           expect(yield* acp.request<AuthenticateResponse>("authenticate", { methodId })).toMatchObject({ result: {} })
         }
 
         const rejected = yield* acp.request<AuthenticateResponse>("authenticate", { methodId: "missing-auth-method" })
         expectErrorCode(rejected.error, -32602)
-        expect(JSON.stringify(rejected.error)).not.toContain(process.env.OPENCODE_AUTH_CONTENT ?? "not-present")
+        expect(JSON.stringify(rejected.error)).not.toContain(process.env.VECTOR_AUTH_CONTENT ?? "not-present")
       }),
     60_000,
   )
 
   cliIt.live(
     "initialize without terminal-auth metadata keeps auth command implicit",
-    ({ opencode }) =>
+    ({ vector }) =>
       Effect.gen(function* () {
-        const acp = yield* createAcpClient({ opencode })
+        const acp = yield* createAcpClient({ vector })
         const initialized = yield* acp.request<InitializeResponse>("initialize", { protocolVersion: 1 })
 
         expect(initialized.result?.authMethods?.[0]?.id).toBe("vector-login")

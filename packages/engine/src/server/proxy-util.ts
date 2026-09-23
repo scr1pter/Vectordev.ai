@@ -16,8 +16,6 @@ function sanitize(out: Headers) {
   out.delete("accept-encoding")
   out.delete("x-vector-directory")
   out.delete("x-vector-workspace")
-  out.delete("x-opencode-directory")
-  out.delete("x-opencode-workspace")
 }
 
 export function headers(input: Request | HeadersInit | Record<string, string>, extra?: HeadersInit) {

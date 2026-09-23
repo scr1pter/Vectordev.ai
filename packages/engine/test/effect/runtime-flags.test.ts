@@ -23,18 +23,18 @@ describe("RuntimeFlags", () => {
       const flags = yield* readFlags.pipe(
         Effect.provide(
           fromConfig({
-            OPENCODE_PURE: "true",
-            OPENCODE_DISABLE_DEFAULT_PLUGINS: "true",
-            OPENCODE_AUTO_SHARE: "true",
-            OPENCODE_DISABLE_EMBEDDED_WEB_UI: "true",
-            OPENCODE_DISABLE_EXTERNAL_SKILLS: "true",
-            OPENCODE_DISABLE_LSP_DOWNLOAD: "true",
-            OPENCODE_EXPERIMENTAL: "true",
-            OPENCODE_ENABLE_EXA: "true",
-            OPENCODE_ENABLE_PARALLEL: "true",
-            OPENCODE_ENABLE_EXPERIMENTAL_MODELS: "true",
-            OPENCODE_ENABLE_QUESTION_TOOL: "true",
-            OPENCODE_CLIENT: "desktop",
+            VECTOR_PURE: "true",
+            VECTOR_DISABLE_DEFAULT_PLUGINS: "true",
+            VECTOR_AUTO_SHARE: "true",
+            VECTOR_DISABLE_EMBEDDED_WEB_UI: "true",
+            VECTOR_DISABLE_EXTERNAL_SKILLS: "true",
+            VECTOR_DISABLE_LSP_DOWNLOAD: "true",
+            VECTOR_EXPERIMENTAL: "true",
+            VECTOR_ENABLE_EXA: "true",
+            VECTOR_ENABLE_PARALLEL: "true",
+            VECTOR_ENABLE_EXPERIMENTAL_MODELS: "true",
+            VECTOR_ENABLE_QUESTION_TOOL: "true",
+            VECTOR_CLIENT: "desktop",
           }),
         ),
       )
@@ -65,12 +65,12 @@ describe("RuntimeFlags", () => {
     }),
   )
 
-  it.effect("layer parses OPENCODE_EXPERIMENTAL_LSP_TY", () =>
+  it.effect("layer parses VECTOR_EXPERIMENTAL_LSP_TY", () =>
     Effect.gen(function* () {
       const flags = yield* readFlags.pipe(
         Effect.provide(
           fromConfig({
-            OPENCODE_EXPERIMENTAL_LSP_TY: "true",
+            VECTOR_EXPERIMENTAL_LSP_TY: "true",
           }),
         ),
       )
@@ -81,8 +81,8 @@ describe("RuntimeFlags", () => {
 
   it.effect("enables native LLM via dedicated flag only", () =>
     Effect.gen(function* () {
-      const explicit = yield* readFlags.pipe(Effect.provide(fromConfig({ OPENCODE_EXPERIMENTAL_NATIVE_LLM: "true" })))
-      const umbrella = yield* readFlags.pipe(Effect.provide(fromConfig({ OPENCODE_EXPERIMENTAL: "true" })))
+      const explicit = yield* readFlags.pipe(Effect.provide(fromConfig({ VECTOR_EXPERIMENTAL_NATIVE_LLM: "true" })))
+      const umbrella = yield* readFlags.pipe(Effect.provide(fromConfig({ VECTOR_EXPERIMENTAL: "true" })))
 
       expect(explicit.experimentalNativeLlm).toBe(true)
       expect(umbrella.experimentalNativeLlm).toBe(false)
@@ -91,8 +91,8 @@ describe("RuntimeFlags", () => {
 
   it.effect("enables WebSockets via dedicated flag only", () =>
     Effect.gen(function* () {
-      const explicit = yield* readFlags.pipe(Effect.provide(fromConfig({ OPENCODE_EXPERIMENTAL_WEBSOCKETS: "true" })))
-      const umbrella = yield* readFlags.pipe(Effect.provide(fromConfig({ OPENCODE_EXPERIMENTAL: "true" })))
+      const explicit = yield* readFlags.pipe(Effect.provide(fromConfig({ VECTOR_EXPERIMENTAL_WEBSOCKETS: "true" })))
+      const umbrella = yield* readFlags.pipe(Effect.provide(fromConfig({ VECTOR_EXPERIMENTAL: "true" })))
 
       expect(explicit.experimentalWebSockets).toBe(true)
       expect(umbrella.experimentalWebSockets).toBe(false)
@@ -139,9 +139,9 @@ describe("RuntimeFlags", () => {
     }),
   )
 
-  it.effect("disableExternalSkills reads OPENCODE_DISABLE_EXTERNAL_SKILLS", () =>
+  it.effect("disableExternalSkills reads VECTOR_DISABLE_EXTERNAL_SKILLS", () =>
     Effect.gen(function* () {
-      const flags = yield* readFlags.pipe(Effect.provide(fromConfig({ OPENCODE_DISABLE_EXTERNAL_SKILLS: "true" })))
+      const flags = yield* readFlags.pipe(Effect.provide(fromConfig({ VECTOR_DISABLE_EXTERNAL_SKILLS: "true" })))
 
       expect(flags.disableExternalSkills).toBe(true)
     }),
@@ -155,9 +155,9 @@ describe("RuntimeFlags", () => {
     }),
   )
 
-  it.effect("disableLspDownload reads OPENCODE_DISABLE_LSP_DOWNLOAD", () =>
+  it.effect("disableLspDownload reads VECTOR_DISABLE_LSP_DOWNLOAD", () =>
     Effect.gen(function* () {
-      const flags = yield* readFlags.pipe(Effect.provide(fromConfig({ OPENCODE_DISABLE_LSP_DOWNLOAD: "true" })))
+      const flags = yield* readFlags.pipe(Effect.provide(fromConfig({ VECTOR_DISABLE_LSP_DOWNLOAD: "true" })))
 
       expect(flags.disableLspDownload).toBe(true)
     }),
@@ -171,45 +171,45 @@ describe("RuntimeFlags", () => {
     }),
   )
 
-  it.effect("disableClaudeCodePrompt reads OPENCODE_DISABLE_CLAUDE_CODE_PROMPT", () =>
+  it.effect("disableClaudeCodePrompt reads VECTOR_DISABLE_CLAUDE_CODE_PROMPT", () =>
     Effect.gen(function* () {
-      const flags = yield* readFlags.pipe(Effect.provide(fromConfig({ OPENCODE_DISABLE_CLAUDE_CODE_PROMPT: "true" })))
+      const flags = yield* readFlags.pipe(Effect.provide(fromConfig({ VECTOR_DISABLE_CLAUDE_CODE_PROMPT: "true" })))
 
       expect(flags.disableClaudeCodePrompt).toBe(true)
     }),
   )
 
-  it.effect("disableClaudeCodePrompt inherits OPENCODE_DISABLE_CLAUDE_CODE", () =>
+  it.effect("disableClaudeCodePrompt inherits VECTOR_DISABLE_CLAUDE_CODE", () =>
     Effect.gen(function* () {
-      const flags = yield* readFlags.pipe(Effect.provide(fromConfig({ OPENCODE_DISABLE_CLAUDE_CODE: "true" })))
+      const flags = yield* readFlags.pipe(Effect.provide(fromConfig({ VECTOR_DISABLE_CLAUDE_CODE: "true" })))
 
       expect(flags.disableClaudeCodePrompt).toBe(true)
     }),
   )
 
-  it.effect("experimentalIconDiscovery reads OPENCODE_EXPERIMENTAL_ICON_DISCOVERY", () =>
+  it.effect("experimentalIconDiscovery reads VECTOR_EXPERIMENTAL_ICON_DISCOVERY", () =>
     Effect.gen(function* () {
-      const flags = yield* readFlags.pipe(Effect.provide(fromConfig({ OPENCODE_EXPERIMENTAL_ICON_DISCOVERY: "true" })))
+      const flags = yield* readFlags.pipe(Effect.provide(fromConfig({ VECTOR_EXPERIMENTAL_ICON_DISCOVERY: "true" })))
 
       expect(flags.experimentalIconDiscovery).toBe(true)
     }),
   )
 
-  it.effect("experimentalIconDiscovery inherits OPENCODE_EXPERIMENTAL", () =>
+  it.effect("experimentalIconDiscovery inherits VECTOR_EXPERIMENTAL", () =>
     Effect.gen(function* () {
-      const flags = yield* readFlags.pipe(Effect.provide(fromConfig({ OPENCODE_EXPERIMENTAL: "true" })))
+      const flags = yield* readFlags.pipe(Effect.provide(fromConfig({ VECTOR_EXPERIMENTAL: "true" })))
 
       expect(flags.experimentalIconDiscovery).toBe(true)
     }),
   )
 
-  it.effect("specific experimental flags override OPENCODE_EXPERIMENTAL", () =>
+  it.effect("specific experimental flags override VECTOR_EXPERIMENTAL", () =>
     Effect.gen(function* () {
       const flags = yield* readFlags.pipe(
         Effect.provide(
           fromConfig({
-            OPENCODE_EXPERIMENTAL: "true",
-            OPENCODE_EXPERIMENTAL_ICON_DISCOVERY: "false",
+            VECTOR_EXPERIMENTAL: "true",
+            VECTOR_EXPERIMENTAL_ICON_DISCOVERY: "false",
           }),
         ),
       )
@@ -226,12 +226,12 @@ describe("RuntimeFlags", () => {
     }),
   )
 
-  it.effect("experimentalOxfmt is enabled by OPENCODE_EXPERIMENTAL_OXFMT", () =>
+  it.effect("experimentalOxfmt is enabled by VECTOR_EXPERIMENTAL_OXFMT", () =>
     Effect.gen(function* () {
       const flags = yield* readFlags.pipe(
         Effect.provide(
           fromConfig({
-            OPENCODE_EXPERIMENTAL_OXFMT: "true",
+            VECTOR_EXPERIMENTAL_OXFMT: "true",
           }),
         ),
       )
@@ -240,12 +240,12 @@ describe("RuntimeFlags", () => {
     }),
   )
 
-  it.effect("experimentalOxfmt inherits OPENCODE_EXPERIMENTAL", () =>
+  it.effect("experimentalOxfmt inherits VECTOR_EXPERIMENTAL", () =>
     Effect.gen(function* () {
       const flags = yield* readFlags.pipe(
         Effect.provide(
           fromConfig({
-            OPENCODE_EXPERIMENTAL: "true",
+            VECTOR_EXPERIMENTAL: "true",
           }),
         ),
       )
@@ -258,19 +258,19 @@ describe("RuntimeFlags", () => {
     { name: "absent", config: {}, expected: undefined },
     {
       name: "valid positive integer",
-      config: { OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS: "1234" },
+      config: { VECTOR_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS: "1234" },
       expected: 1234,
     },
     {
       name: "invalid string",
-      config: { OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS: "nope" },
+      config: { VECTOR_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS: "nope" },
       expected: undefined,
     },
-    { name: "zero", config: { OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS: "0" }, expected: undefined },
-    { name: "negative", config: { OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS: "-1" }, expected: undefined },
+    { name: "zero", config: { VECTOR_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS: "0" }, expected: undefined },
+    { name: "negative", config: { VECTOR_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS: "-1" }, expected: undefined },
     {
       name: "non-integer",
-      config: { OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS: "1.5" },
+      config: { VECTOR_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS: "1.5" },
       expected: undefined,
     },
   ]) {
@@ -287,19 +287,19 @@ describe("RuntimeFlags", () => {
     { name: "absent", config: {}, expected: undefined },
     {
       name: "valid positive integer",
-      config: { OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX: "1234" },
+      config: { VECTOR_EXPERIMENTAL_OUTPUT_TOKEN_MAX: "1234" },
       expected: 1234,
     },
     {
       name: "invalid string",
-      config: { OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX: "nope" },
+      config: { VECTOR_EXPERIMENTAL_OUTPUT_TOKEN_MAX: "nope" },
       expected: undefined,
     },
-    { name: "zero", config: { OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX: "0" }, expected: undefined },
-    { name: "negative", config: { OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX: "-1" }, expected: undefined },
+    { name: "zero", config: { VECTOR_EXPERIMENTAL_OUTPUT_TOKEN_MAX: "0" }, expected: undefined },
+    { name: "negative", config: { VECTOR_EXPERIMENTAL_OUTPUT_TOKEN_MAX: "-1" }, expected: undefined },
     {
       name: "non-integer",
-      config: { OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX: "1.5" },
+      config: { VECTOR_EXPERIMENTAL_OUTPUT_TOKEN_MAX: "1.5" },
       expected: undefined,
     },
   ]) {
@@ -319,14 +319,14 @@ describe("RuntimeFlags", () => {
         Effect.provide(
           ConfigProvider.layer(
             ConfigProvider.fromUnknown({
-              OPENCODE_PURE: "true",
-              OPENCODE_DISABLE_DEFAULT_PLUGINS: "true",
-              OPENCODE_DISABLE_EXTERNAL_SKILLS: "true",
-              OPENCODE_DISABLE_LSP_DOWNLOAD: "true",
-              OPENCODE_EXPERIMENTAL: "true",
-              OPENCODE_ENABLE_EXA: "true",
-              OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS: "1234",
-              OPENCODE_CLIENT: "desktop",
+              VECTOR_PURE: "true",
+              VECTOR_DISABLE_DEFAULT_PLUGINS: "true",
+              VECTOR_DISABLE_EXTERNAL_SKILLS: "true",
+              VECTOR_DISABLE_LSP_DOWNLOAD: "true",
+              VECTOR_EXPERIMENTAL: "true",
+              VECTOR_ENABLE_EXA: "true",
+              VECTOR_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS: "1234",
+              VECTOR_CLIENT: "desktop",
             }),
           ),
         ),
@@ -356,34 +356,31 @@ describe("RuntimeFlags", () => {
     }),
   )
 
-  it.effect("disableClaudeCodeSkills reads OPENCODE_DISABLE_CLAUDE_CODE_SKILLS", () =>
+  it.effect("disableClaudeCodeSkills reads VECTOR_DISABLE_CLAUDE_CODE_SKILLS", () =>
     Effect.gen(function* () {
-      const flags = yield* readFlags.pipe(Effect.provide(fromConfig({ OPENCODE_DISABLE_CLAUDE_CODE_SKILLS: "true" })))
+      const flags = yield* readFlags.pipe(Effect.provide(fromConfig({ VECTOR_DISABLE_CLAUDE_CODE_SKILLS: "true" })))
 
       expect(flags.disableClaudeCodeSkills).toBe(true)
     }),
   )
 
-  it.effect("disableClaudeCodeSkills inherits OPENCODE_DISABLE_CLAUDE_CODE", () =>
+  it.effect("disableClaudeCodeSkills inherits VECTOR_DISABLE_CLAUDE_CODE", () =>
     Effect.gen(function* () {
-      const flags = yield* readFlags.pipe(Effect.provide(fromConfig({ OPENCODE_DISABLE_CLAUDE_CODE: "true" })))
+      const flags = yield* readFlags.pipe(Effect.provide(fromConfig({ VECTOR_DISABLE_CLAUDE_CODE: "true" })))
 
       expect(flags.disableClaudeCodeSkills).toBe(true)
     }),
   )
 })
 
-it.effect("Vector flags override legacy values without losing ConfigProvider support", () =>
+it.effect("Vector flags read explicit values through ConfigProvider", () =>
   Effect.gen(function* () {
     const flags = yield* readFlags.pipe(
       Effect.provide(
         fromConfig({
           VECTOR_PURE: "false",
-          OPENCODE_PURE: "true",
           VECTOR_CLIENT: "vector-client",
-          OPENCODE_CLIENT: "legacy-client",
           VECTOR_EXPERIMENTAL_OUTPUT_TOKEN_MAX: "4096",
-          OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX: "1024",
         }),
       ),
     )

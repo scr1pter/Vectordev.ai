@@ -16,7 +16,7 @@ export type DecodedCredentials = {
 /** Which configured credential pair a request matched. */
 export type Identity = "owner" | "guest"
 
-// Guest fields are optional so owner-only configs (and the opencode package's
+// Guest fields are optional so owner-only configs (and the vector package's
 // twin of this service, which shares the key id) stay mutually assignable.
 export type Info = {
   readonly password: Option.Option<string>
@@ -25,7 +25,7 @@ export type Info = {
   readonly guestUsername?: string
 }
 
-export class Config extends Context.Service<Config, Info>()("@opencode/ServerAuthConfig") {
+export class Config extends Context.Service<Config, Info>()("@vector/ServerAuthConfig") {
   static configLayer(input: Info) {
     return Layer.succeed(this, this.of(input))
   }
@@ -36,12 +36,10 @@ export class Config extends Context.Service<Config, Info>()("@opencode/ServerAut
       Effect.gen(function* () {
         return Config.of(
           yield* EffectConfig.all({
-            password: configEnv("OPENCODE_SERVER_PASSWORD", EffectConfig.string).pipe(EffectConfig.option),
-            username: configEnv("OPENCODE_SERVER_USERNAME", EffectConfig.string).pipe(
-              EffectConfig.withDefault("vector"),
-            ),
-            guestPassword: configEnv("OPENCODE_SERVER_GUEST_PASSWORD", EffectConfig.string).pipe(EffectConfig.option),
-            guestUsername: configEnv("OPENCODE_SERVER_GUEST_USERNAME", EffectConfig.string).pipe(
+            password: configEnv("VECTOR_SERVER_PASSWORD", EffectConfig.string).pipe(EffectConfig.option),
+            username: configEnv("VECTOR_SERVER_USERNAME", EffectConfig.string).pipe(EffectConfig.withDefault("vector")),
+            guestPassword: configEnv("VECTOR_SERVER_GUEST_PASSWORD", EffectConfig.string).pipe(EffectConfig.option),
+            guestUsername: configEnv("VECTOR_SERVER_GUEST_USERNAME", EffectConfig.string).pipe(
               EffectConfig.withDefault("guest"),
             ),
           }),
@@ -63,12 +61,7 @@ export function required(config: Info) {
 /** The identity a credential pair matches, or undefined when it matches neither. */
 export function identity(credentials: DecodedCredentials, config: Info): Identity | undefined {
   const password = Redacted.value(credentials.password)
-  if (
-    Option.isSome(config.password) &&
-    (credentials.username === config.username ||
-      (["vector", "opencode"].includes(config.username) && ["vector", "opencode"].includes(credentials.username))) &&
-    password === config.password.value
-  )
+  if (Option.isSome(config.password) && credentials.username === config.username && password === config.password.value)
     return "owner"
   const guestPassword = config.guestPassword ?? Option.none<string>()
   if (
@@ -88,10 +81,10 @@ export function authorized(credentials: DecodedCredentials, config: Info) {
 }
 
 export function header(credentials?: Credentials) {
-  const password = credentials?.password ?? readEnv("OPENCODE_SERVER_PASSWORD")
+  const password = credentials?.password ?? readEnv("VECTOR_SERVER_PASSWORD")
   if (!password) return undefined
 
-  return `Basic ${Buffer.from(`${credentials?.username ?? readEnv("OPENCODE_SERVER_USERNAME") ?? "vector"}:${password}`).toString("base64")}`
+  return `Basic ${Buffer.from(`${credentials?.username ?? readEnv("VECTOR_SERVER_USERNAME") ?? "vector"}:${password}`).toString("base64")}`
 }
 
 export function headers(credentials?: Credentials) {

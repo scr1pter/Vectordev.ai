@@ -30,7 +30,7 @@ describe("reference HttpApi", () => {
       pollWithTimeout(
         Effect.promise(async () => {
           const response = await Server.Default().app.request("/api/reference", {
-            headers: { "x-opencode-directory": tmp.path },
+            headers: { "x-vector-directory": tmp.path },
           })
           expect(response.status).toBe(200)
           const body = await response.json()

@@ -7,6 +7,7 @@ import fs from "fs"
 import fsp from "fs/promises"
 import path from "path"
 import { Effect, Schema } from "effect"
+import { InstallationVersion } from "@vectordevai/core/installation/version"
 import {
   parseReviewConfig,
   parseReviewRules,
@@ -679,7 +680,7 @@ const GITHUB: GitHubAccess = {
       headers: {
         authorization: `Bearer ${token}`,
         accept: "application/vnd.github+json",
-        "user-agent": "vector-review",
+        "user-agent": `vector/${InstallationVersion}`,
       },
     }).catch(() => undefined)
     if (!response?.ok) return undefined

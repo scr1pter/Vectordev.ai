@@ -63,7 +63,7 @@ export interface Interface {
   readonly clearOAuthState: (mcpName: string) => Effect.Effect<void>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@opencode/McpAuth") {}
+export class Service extends Context.Service<Service, Interface>()("@vector/McpAuth") {}
 
 export const use = serviceUse(Service)
 

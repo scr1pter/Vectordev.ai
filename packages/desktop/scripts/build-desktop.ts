@@ -14,7 +14,7 @@ const result = Bun.spawnSync(
   ],
   {
     cwd: packageDir,
-    env: { ...process.env, VECTOR_CHANNEL: channel, OPENCODE_CHANNEL: channel },
+    env: { ...process.env, VECTOR_CHANNEL: channel },
     stderr: "inherit",
     stdout: "inherit",
   },

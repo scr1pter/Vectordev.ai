@@ -771,7 +771,7 @@
         },
         "server": {
           "$ref": "#/$defs/ServerConfig",
-          "description": "Server configuration for opencode serve and web commands"
+          "description": "Server configuration for vector serve and web commands"
         },
         "command": {
           "type": "object",

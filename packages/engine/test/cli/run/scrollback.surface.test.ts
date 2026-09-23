@@ -670,15 +670,15 @@ test("renders completed bash output with one blank line after the command and be
       }),
     )
     take()
-    await out.scrollback.append(assistant("oc-run-dev ahead 1"))
+    await out.scrollback.append(assistant("vector-run-dev ahead 1"))
     await out.scrollback.complete()
     take()
 
     const output = lines.join("\n")
     expect(output).toContain("# Running in /tmp/demo\n$ git status")
     expect(output).toContain("$ git status\n\nOn branch demo")
-    expect(output).toContain("nothing to commit, working tree clean\n\noc-run-dev ahead 1")
-    expect(output).not.toContain("nothing to commit, working tree clean\n\n\noc-run-dev ahead 1")
+    expect(output).toContain("nothing to commit, working tree clean\n\nvector-run-dev ahead 1")
+    expect(output).not.toContain("nothing to commit, working tree clean\n\n\nvector-run-dev ahead 1")
   } finally {
     out.scrollback.destroy()
   }

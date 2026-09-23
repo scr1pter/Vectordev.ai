@@ -12,7 +12,7 @@
 //   3. starts the stream transport (SDK event subscription), lazily for fresh
 //      local sessions,
 //   4. runs the prompt queue until the footer closes.
-import { createOpencodeClient } from "@vectordevai/sdk/v2"
+import { createVectorClient } from "@vectordevai/sdk/v2"
 import { Flag } from "@vectordevai/core/flag/flag"
 import { MessageID } from "@/session/schema"
 import { createRunDemo } from "./demo"
@@ -403,7 +403,7 @@ async function runInteractiveRuntime(input: RunRuntimeInput, deps: RunRuntimeDep
     .then(loadCatalog)
     .catch(() => {})
 
-  if (Flag.OPENCODE_SHOW_TTFD) {
+  if (Flag.VECTOR_SHOW_TTFD) {
     footer.append({
       kind: "system",
       text: `startup ${Math.max(0, Math.round(performance.now() - start))}ms`,
@@ -732,7 +732,7 @@ async function runInteractiveRuntime(input: RunRuntimeInput, deps: RunRuntimeDep
 // Local in-process mode. Creates an SDK client backed by a direct fetch to
 // the in-process server, so no external HTTP server is needed.
 export async function runInteractiveLocalMode(input: RunLocalInput): Promise<void> {
-  const sdk = createOpencodeClient({
+  const sdk = createVectorClient({
     baseUrl: "http://vector.internal",
     fetch: input.fetch,
     directory: input.directory,

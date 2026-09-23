@@ -7,7 +7,7 @@ import { selectProviderCatalog } from "./provider-catalog"
 
 export const popularProviders = ["anthropic", "github-copilot", "openai", "google", "openrouter", "vercel"]
 const popularProviderSet = new Set(popularProviders)
-// Vector does not connect to OpenCode's model services, even with a user-supplied key.
+// Only reviewed provider IDs can appear in Vector provider setup.
 export { isHiddenProvider } from "@/utils/provider-brand"
 import { isHiddenProvider } from "@/utils/provider-brand"
 

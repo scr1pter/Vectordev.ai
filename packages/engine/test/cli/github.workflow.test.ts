@@ -35,10 +35,10 @@ function parse(yaml: string): Workflow {
   return { ...(parsed as object), on: (parsed["on"] ?? parsed["true"]) as Record<string, unknown> } as Workflow
 }
 
-const OPENCODE = {
-  provider: "opencode",
-  model: "big-pickle",
-  keys: ["OPENCODE_API_KEY"],
+const OPENAI = {
+  provider: "openai",
+  model: "gpt-4.1",
+  keys: ["OPENAI_API_KEY"],
   autoReview: true,
   version: "1.17.14",
 }
@@ -52,7 +52,7 @@ const ANTHROPIC = {
   version: "local",
 }
 
-const OPENCODE_AUTO = `name: vector
+const OPENAI_AUTO = `name: vector
 
 on:
   pull_request:
@@ -135,15 +135,14 @@ jobs:
           VECTOR_CLI_TOKEN: \${{ secrets.VECTOR_CLI_TOKEN }}
           VECTOR_REVIEW_PR: \${{ github.event.pull_request.number || needs.route.outputs.pr }}
           VECTOR_REVIEW_REF: \${{ needs.route.outputs.ref || github.event.pull_request.head.sha }}
-          MODEL: opencode/big-pickle
+          MODEL: openai/gpt-4.1
           # REVIEW_AUTO_MODEL: provider/cheaper-model # automatic reviews only
-          OPENCODE_PURE: "1"
-          OPENCODE_DISABLE_PROJECT_CONFIG: "1"
-          OPENCODE_CONFIG_CONTENT: '{"lsp":false,"formatter":false,"snapshot":false}'
+          VECTOR_PURE: "1"
+          VECTOR_DISABLE_PROJECT_CONFIG: "1"
+          VECTOR_CONFIG_CONTENT: '{"lsp":false,"formatter":false,"snapshot":false}'
           # Add the selected provider's credentials as repository secrets.
-          OPENCODE_API_KEY: \${{ secrets.OPENCODE_API_KEY }}
+          OPENAI_API_KEY: \${{ secrets.OPENAI_API_KEY }}
           # ANTHROPIC_API_KEY: \${{ secrets.ANTHROPIC_API_KEY }}
-          # OPENAI_API_KEY: \${{ secrets.OPENAI_API_KEY }}
 
   vector:
     needs: route
@@ -179,12 +178,11 @@ jobs:
           GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
           VECTOR_CLI_TOKEN: \${{ secrets.VECTOR_CLI_TOKEN }}
           USE_GITHUB_TOKEN: "true"
-          MODEL: opencode/big-pickle
+          MODEL: openai/gpt-4.1
           VECTOR_REVIEW_AUTO: "1"
           # Add the selected provider's credentials as repository secrets.
-          OPENCODE_API_KEY: \${{ secrets.OPENCODE_API_KEY }}
+          OPENAI_API_KEY: \${{ secrets.OPENAI_API_KEY }}
           # ANTHROPIC_API_KEY: \${{ secrets.ANTHROPIC_API_KEY }}
-          # OPENAI_API_KEY: \${{ secrets.OPENAI_API_KEY }}
 `
 
 const ANTHROPIC_COMMANDS_ONLY = `name: vector
@@ -263,9 +261,9 @@ jobs:
           VECTOR_REVIEW_REF: \${{ needs.route.outputs.ref || github.event.pull_request.head.sha }}
           MODEL: anthropic/claude-sonnet-4-5
           REVIEW_MAX_COST_USD_PER_MONTH: "50" # "0" means no limit
-          OPENCODE_PURE: "1"
-          OPENCODE_DISABLE_PROJECT_CONFIG: "1"
-          OPENCODE_CONFIG_CONTENT: '{"lsp":false,"formatter":false,"snapshot":false}'
+          VECTOR_PURE: "1"
+          VECTOR_DISABLE_PROJECT_CONFIG: "1"
+          VECTOR_CONFIG_CONTENT: '{"lsp":false,"formatter":false,"snapshot":false}'
           # Add the selected provider's credentials as repository secrets.
           ANTHROPIC_API_KEY: \${{ secrets.ANTHROPIC_API_KEY }}
           # OPENAI_API_KEY: \${{ secrets.OPENAI_API_KEY }}
@@ -310,15 +308,15 @@ jobs:
 `
 
 const COMBOS = [
-  { name: "opencode, automatic review", options: OPENCODE },
-  { name: "opencode, commands only", options: { ...OPENCODE, autoReview: false } },
+  { name: "vector, automatic review", options: OPENAI },
+  { name: "vector, commands only", options: { ...OPENAI, autoReview: false } },
   { name: "anthropic, automatic review", options: { ...ANTHROPIC, autoReview: true } },
   { name: "anthropic, commands only", options: ANTHROPIC },
 ]
 
 describe("buildWorkflowYaml", () => {
-  test("golden: opencode with automatic review", () => {
-    expect(withoutScript(buildWorkflowYaml(OPENCODE))).toBe(OPENCODE_AUTO)
+  test("golden: openai with automatic review", () => {
+    expect(withoutScript(buildWorkflowYaml(OPENAI))).toBe(OPENAI_AUTO)
   })
 
   test("golden: anthropic with commands only", () => {
@@ -362,9 +360,9 @@ describe("buildWorkflowYaml", () => {
       })
       expect(workflow.jobs.vector.concurrency?.["cancel-in-progress"]).toBe(false)
       const env = review.steps.find((step) => step.run === "vector github review")?.env ?? {}
-      expect(env["OPENCODE_PURE"]).toBe("1")
-      expect(env["OPENCODE_DISABLE_PROJECT_CONFIG"]).toBe("1")
-      expect(JSON.parse(env["OPENCODE_CONFIG_CONTENT"] ?? "{}")).toEqual({
+      expect(env["VECTOR_PURE"]).toBe("1")
+      expect(env["VECTOR_DISABLE_PROJECT_CONFIG"]).toBe("1")
+      expect(JSON.parse(env["VECTOR_CONFIG_CONTENT"] ?? "{}")).toEqual({
         lsp: false,
         formatter: false,
         snapshot: false,
@@ -379,7 +377,7 @@ describe("buildWorkflowYaml", () => {
     })
 
   test("the automatic branch filters forks, drafts, the skip and pause labels, and dependency bots", () => {
-    const auto = parse(buildWorkflowYaml(OPENCODE)).jobs.review.if ?? ""
+    const auto = parse(buildWorkflowYaml(OPENAI)).jobs.review.if ?? ""
     for (const condition of [
       "github.event_name == 'pull_request'",
       "github.event.pull_request.head.repo.full_name == github.repository",
@@ -392,14 +390,14 @@ describe("buildWorkflowYaml", () => {
     ])
       expect(auto).toContain(condition)
     expect(auto.startsWith("!cancelled() && (")).toBe(true)
-    const off = parse(buildWorkflowYaml({ ...OPENCODE, autoReview: false })).jobs.review.if ?? ""
+    const off = parse(buildWorkflowYaml({ ...OPENAI, autoReview: false })).jobs.review.if ?? ""
     expect(off).not.toContain("pull_request.draft")
     expect(off).not.toContain("github.event_name == 'pull_request'")
     expect(off).toContain("needs.route.outputs.kind == 'review'")
   })
 
   test("the route job ignores bots and runs only for the mentions it was built with", () => {
-    const route = parse(buildWorkflowYaml({ ...OPENCODE, mentions: ["/bot"] })).jobs.route
+    const route = parse(buildWorkflowYaml({ ...OPENAI, mentions: ["/bot"] })).jobs.route
     expect(route.if).toContain("github.event.comment.user.type != 'Bot'")
     expect(route.if).toContain("contains(github.event.comment.body, '/bot')")
     expect(route.if).not.toContain("'/vector'")
@@ -409,7 +407,7 @@ describe("buildWorkflowYaml", () => {
   test("the monthly limit is written only when one is given, and 0 means none", () => {
     const env = (yaml: string) =>
       parse(yaml).jobs.review.steps.find((step) => step.run === "vector github review")?.env ?? {}
-    expect(env(buildWorkflowYaml(OPENCODE))["REVIEW_MAX_COST_USD_PER_MONTH"]).toBeUndefined()
+    expect(env(buildWorkflowYaml(OPENAI))["REVIEW_MAX_COST_USD_PER_MONTH"]).toBeUndefined()
     expect(env(buildWorkflowYaml(ANTHROPIC))["REVIEW_MAX_COST_USD_PER_MONTH"]).toBe("50")
     expect(env(buildWorkflowYaml({ ...ANTHROPIC, monthlyUsd: 0 }))["REVIEW_MAX_COST_USD_PER_MONTH"]).toBe("0")
     expect(env(buildWorkflowYaml({ ...ANTHROPIC, monthlyUsd: 12.5 }))["REVIEW_MAX_COST_USD_PER_MONTH"]).toBe("12.5")
@@ -421,9 +419,7 @@ describe("buildWorkflowYaml", () => {
     expect(cliVersionSpec("local")).toEqual({ spec: "latest", pinned: false })
     expect(cliVersionSpec("0.0.0-dev-202609141200")).toEqual({ spec: "latest", pinned: false })
     const install = (version: string) =>
-      parse(buildWorkflowYaml({ ...OPENCODE, version })).jobs.review.steps.find(
-        (step) => step.name === "Install Vector",
-      )
+      parse(buildWorkflowYaml({ ...OPENAI, version })).jobs.review.steps.find((step) => step.name === "Install Vector")
     expect(install("1.17.14")?.run).toBe(
       "npm install -g @vectordevai/cli@1.17.14 --prefer-offline --no-audit --no-fund",
     )

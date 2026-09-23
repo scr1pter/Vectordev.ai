@@ -162,6 +162,7 @@
     "packages/cloud": {
       "name": "@vector/cloud",
       "dependencies": {
+        "@vectordevai/schema": "workspace:*",
         "@vercel/blob": "2.7.0",
       },
       "devDependencies": {
@@ -176,7 +177,7 @@
       "name": "@vectordevai/core",
       "version": "1.17.14",
       "bin": {
-        "opencode": "./bin/opencode",
+        "vector": "./bin/vector",
       },
       "dependencies": {
         "@ai-sdk/alibaba": "1.0.17",
@@ -351,7 +352,6 @@
       "name": "@vectordevai/engine",
       "version": "1.17.14",
       "bin": {
-        "opencode": "./bin/opencode",
         "vector": "./bin/vector.cjs",
       },
       "dependencies": {
@@ -684,6 +684,7 @@
         "@opentui/solid": "catalog:",
         "@vectordevai/core": "workspace:*",
         "@vectordevai/plugin": "workspace:*",
+        "@vectordevai/schema": "workspace:*",
         "@vectordevai/sdk": "workspace:*",
         "@vectordevai/ui": "workspace:*",
         "clipboardy": "4.0.0",

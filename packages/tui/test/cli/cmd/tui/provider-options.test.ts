@@ -5,7 +5,7 @@ describe("providerOptions", () => {
   test("includes a synthetic Other option for custom providers", () => {
     expect(providerOptions([{ id: "openai", name: "OpenAI" }]).at(-1)).toMatchObject({
       title: "Other",
-      description: "Custom provider",
+      description: "Supported provider credential",
       category: "Providers",
     })
   })
@@ -18,12 +18,13 @@ describe("providerOptions", () => {
     expect(
       providerOptions([
         { id: "openai", name: "OpenAI" },
-        { id: "custom-z", name: "Zebra Provider" },
+        { id: "zai", name: "Z.AI" },
+        { id: "custom-z", name: "Unsupported provider" },
         { id: "anthropic", name: "Anthropic" },
         { id: "mistral", name: "Mistral" },
-        { id: "aws", name: "AWS Bedrock" },
+        { id: "amazon-bedrock", name: "AWS Bedrock" },
       ]).map((option) => option.value),
-    ).toEqual(["openai", "anthropic", "aws", "mistral", "custom-z", "__vector_custom_provider__"])
+    ).toEqual(["openai", "anthropic", "amazon-bedrock", "mistral", "zai", "__vector_custom_provider__"])
   })
 
   test("does not collide with a configured provider named other", () => {
@@ -32,9 +33,10 @@ describe("providerOptions", () => {
   })
 
   test("normalizes and validates custom provider ids", () => {
-    expect(normalizeCustomProviderID("  custom-provider  ")).toBe("custom-provider")
-    expect(normalizeCustomProviderID("custom_provider")).toBe("custom_provider")
-    expect(normalizeCustomProviderID("@ai-sdk/custom-provider")).toBe("custom-provider")
+    expect(normalizeCustomProviderID("  lmstudio  ")).toBe("lmstudio")
+    expect(normalizeCustomProviderID("custom_provider")).toBeUndefined()
+    expect(normalizeCustomProviderID("@ai-sdk/openai")).toBe("openai")
+    expect(normalizeCustomProviderID("custom-provider")).toBeUndefined()
     expect(normalizeCustomProviderID("-custom-provider")).toBeUndefined()
     expect(normalizeCustomProviderID("Custom Provider")).toBeUndefined()
   })

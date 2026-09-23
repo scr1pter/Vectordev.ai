@@ -223,9 +223,9 @@ describe("tool.shell", () => {
       Effect.sync(() => {
         const values = {
           BLOB_READ_WRITE_TOKEN: "release-store-secret",
-          OPENCODE_AUTH_CONTENT: "aggregate-secret",
-          OPENCODE_CONSOLE_TOKEN: "console-secret",
-          OPENCODE_SERVER_PASSWORD: "server-secret",
+          VECTOR_AUTH_CONTENT: "aggregate-secret",
+          VECTOR_CONSOLE_TOKEN: "console-secret",
+          VECTOR_SERVER_PASSWORD: "server-secret",
           VECTOR_CLOUD_TOKEN: "cloud-secret",
           VECTOR_CREDENTIAL_KEY: "vault-secret",
           VECTOR_INSTALLER_BLOB_TOKEN: "installer-secret",
@@ -242,9 +242,9 @@ describe("tool.shell", () => {
           Effect.gen(function* () {
             const code = `process.stdout.write(JSON.stringify({
               blob: process.env.BLOB_READ_WRITE_TOKEN,
-              aggregate: process.env.OPENCODE_AUTH_CONTENT,
-              console: process.env.OPENCODE_CONSOLE_TOKEN,
-              password: process.env.OPENCODE_SERVER_PASSWORD,
+              aggregate: process.env.VECTOR_AUTH_CONTENT,
+              console: process.env.VECTOR_CONSOLE_TOKEN,
+              password: process.env.VECTOR_SERVER_PASSWORD,
               cloud: process.env.VECTOR_CLOUD_TOKEN,
               vault: process.env.VECTOR_CREDENTIAL_KEY,
               installer: process.env.VECTOR_INSTALLER_BLOB_TOKEN,
@@ -600,7 +600,7 @@ describe("tool.shell permissions", () => {
           item,
           Effect.acquireUseRelease(
             Effect.sync(() => {
-              const key = "OPENCODE_TEST_MISSING"
+              const key = "VECTOR_TEST_MISSING"
               const prev = process.env[key]
               delete process.env[key]
               return { key, prev }
@@ -915,7 +915,7 @@ describe("tool.shell permissions", () => {
               expect(
                 yield* fail(
                   {
-                    command: "cat /tmp/opencode-does-not-exist",
+                    command: "cat /tmp/vector-does-not-exist",
                   },
                   capture(requests, err),
                 ),

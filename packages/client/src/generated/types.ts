@@ -1,4 +1,4 @@
-import type { OpenCodeEventEncoded } from "@vectordevai/protocol/groups/event"
+import type { VectorEventEncoded } from "@vectordevai/protocol/groups/event"
 
 export type JsonValue =
   | null
@@ -2538,7 +2538,7 @@ export type SkillsListOutput = {
   }>
 }
 
-export type EventsSubscribeOutput = OpenCodeEventEncoded
+export type EventsSubscribeOutput = VectorEventEncoded
 
 export type PtysListInput = {
   readonly location?: {

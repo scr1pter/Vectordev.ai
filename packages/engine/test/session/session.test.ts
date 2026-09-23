@@ -148,7 +148,7 @@ describe("step-finish token propagation via event", () => {
           role: "user",
           time: { created: Date.now() },
           agent: "user",
-          model: { providerID: "test", modelID: "test" },
+          model: { providerID: "lmstudio", modelID: "test" },
           tools: {},
           mode: "",
         } as unknown as SessionV1.Info)

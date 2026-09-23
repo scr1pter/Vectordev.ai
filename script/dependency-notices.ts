@@ -73,7 +73,7 @@ async function visit(dir: string) {
   }
 }
 
-for (const name of ["opencode", "app", "desktop", "tui", "ui"]) await visit(path.join(root, "packages", name))
+for (const name of ["engine", "app", "desktop", "tui", "ui"]) await visit(path.join(root, "packages", name))
 if (missing.length)
   throw new Error(
     `Missing license texts (add exact upstream notices under licenses/dependencies):\n${missing.join("\n")}`,

@@ -30,7 +30,7 @@ afterEach(async () => {
 })
 
 const ref = {
-  providerID: ProviderV2.ID.make("test"),
+  providerID: ProviderV2.ID.make("lmstudio"),
   modelID: ModelV2.ID.make("test-model"),
 }
 
@@ -497,7 +497,11 @@ describe("tool.task", () => {
         const tool = yield* TaskTool
         const def = yield* tool.init()
         let asked = 0
-        const cases: { subagent_type?: string }[] = [{}, { subagent_type: "general" }, { subagent_type: "general-purpose" }]
+        const cases: { subagent_type?: string }[] = [
+          {},
+          { subagent_type: "general" },
+          { subagent_type: "general-purpose" },
+        ]
         for (const params of cases) {
           const exit = yield* Effect.exit(
             def.execute(

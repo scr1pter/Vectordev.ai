@@ -20,7 +20,7 @@ if ($allowUnsignedRelease) {
   exit 0
 }
 
-$required = $env:VECTOR_REQUIRE_WINDOWS_SIGNING -eq "true" -or $env:OPENCODE_CHANNEL -eq "prod"
+$required = $env:VECTOR_REQUIRE_WINDOWS_SIGNING -eq "true" -or $env:VECTOR_CHANNEL -eq "prod"
 
 $vars = @{
   endpoint = $env:AZURE_TRUSTED_SIGNING_ENDPOINT

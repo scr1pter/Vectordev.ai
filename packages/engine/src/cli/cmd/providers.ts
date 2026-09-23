@@ -1,10 +1,11 @@
+import { providerAllowed } from "@vectordevai/schema/provider-policy"
 import type { Argv } from "yargs"
 import { Auth } from "../../auth"
 import { cmd } from "./cmd"
 import { CliError, effectCmd, fail } from "../effect-cmd"
 import { UI } from "../ui"
 import * as Prompt from "../effect/prompt"
-import { ModelsDev } from "@vectordevai/core/models-dev"
+import { ModelCatalog } from "@vectordevai/core/model-catalog"
 
 import { map, pipe, sortBy, values } from "remeda"
 import path from "path"
@@ -41,6 +42,7 @@ const handlePluginAuth = Effect.fn("Cli.providers.pluginAuth")(function* (
   provider: string,
   methodName?: string,
 ) {
+  if (!plugin.auth.methods.length) return yield* fail(`${provider} sign-in is currently unavailable in Vector.`)
   const index = yield* Effect.gen(function* () {
     if (!methodName) {
       if (plugin.auth.methods.length <= 1) return 0
@@ -222,7 +224,7 @@ export function resolvePluginProviders(input: {
   for (const hook of input.hooks) {
     if (!hook.auth) continue
     const id = hook.auth.provider
-    if (seen.has(id)) continue
+    if (!providerAllowed(id) || seen.has(id)) continue
     seen.add(id)
     if (Object.hasOwn(input.existingProviders, id)) continue
     if (input.disabled.has(id)) continue
@@ -253,7 +255,7 @@ export const ProvidersListCommand = effectCmd({
   instance: false,
   handler: Effect.fn("Cli.providers.list")(function* (_args) {
     const authSvc = yield* Auth.Service
-    const modelsDev = yield* ModelsDev.Service
+    const modelCatalog = yield* ModelCatalog.Service
 
     UI.empty()
     const authPath = path.join(Global.Path.data, "auth.json")
@@ -261,7 +263,7 @@ export const ProvidersListCommand = effectCmd({
     const displayPath = authPath.startsWith(homedir) ? authPath.replace(homedir, "~") : authPath
     yield* Prompt.intro(`Credentials ${UI.Style.TEXT_DIM}${displayPath}`)
     const results = Object.entries(yield* Effect.orDie(authSvc.all()))
-    const database = yield* modelsDev.get()
+    const database = yield* modelCatalog.get()
 
     for (const [providerID, result] of results) {
       const name = database[providerID]?.name || providerID
@@ -326,9 +328,8 @@ export const ProvidersLoginCommand = effectCmd({
       const url = args.url.replace(/\/+$/, "")
       const wellknown = (yield* cliTry(`Failed to load auth provider metadata from ${url}: `, async () => {
         const response = await fetch(`${url}/.well-known/vector`)
-        if (response.status !== 404) return response.json()
-        console.warn("This auth provider uses legacy metadata. Ask its maintainer to support .well-known/vector.")
-        return fetch(`${url}/.well-known/opencode`).then((value) => value.json())
+        if (!response.ok) throw new Error(`Auth metadata returned HTTP ${response.status}`)
+        return response.json()
       })) as {
         auth: { command: string[]; env: string }
       }
@@ -356,15 +357,15 @@ export const ProvidersLoginCommand = effectCmd({
 
     const cfgSvc = yield* Config.Service
     const pluginSvc = yield* Plugin.Service
-    const modelsDev = yield* ModelsDev.Service
-    yield* Effect.ignore(modelsDev.refresh(true))
+    const modelCatalog = yield* ModelCatalog.Service
+    yield* Effect.ignore(modelCatalog.refresh(true))
 
     const config = yield* cfgSvc.get()
 
     const disabled = new Set(config.disabled_providers ?? [])
     const enabled = config.enabled_providers ? new Set(config.enabled_providers) : undefined
 
-    const allProviders = yield* modelsDev.get()
+    const allProviders = yield* modelCatalog.get()
     const providers: Record<string, (typeof allProviders)[string]> = {}
     for (const [key, value] of Object.entries(allProviders)) {
       if ((enabled ? enabled.has(key) : true) && !disabled.has(key)) providers[key] = value
@@ -424,7 +425,7 @@ export const ProvidersLoginCommand = effectCmd({
         yield* Prompt.autocomplete({
           message: "Select provider",
           maxItems: 8,
-          options: [...options, { value: "other", label: "Other" }],
+          options,
         }),
       )
     }
@@ -433,25 +434,6 @@ export const ProvidersLoginCommand = effectCmd({
     if (plugin && plugin.auth) {
       const handled = yield* handlePluginAuth({ auth: plugin.auth! }, provider, args.method)
       if (handled) return
-    }
-
-    if (provider === "other") {
-      provider = (yield* promptValue(
-        yield* Prompt.text({
-          message: "Enter provider id",
-          validate: (x) => (x && x.match(/^[0-9a-z-]+$/) ? undefined : "a-z, 0-9 and hyphens only"),
-        }),
-      )).replace(/^@ai-sdk\//, "")
-
-      const customPlugin = hooks.findLast((x) => x.auth?.provider === provider)
-      if (customPlugin && customPlugin.auth) {
-        const handled = yield* handlePluginAuth({ auth: customPlugin.auth! }, provider, args.method)
-        if (handled) return
-      }
-
-      yield* Prompt.log.warn(
-        `This only stores a credential for ${provider} - you will need configure it in vector.json, check the docs for examples.`,
-      )
     }
 
     if (provider === "amazon-bedrock") {
@@ -497,7 +479,7 @@ export const ProvidersLogoutCommand = effectCmd({
   instance: false,
   handler: Effect.fn("Cli.providers.logout")(function* (args) {
     const authSvc = yield* Auth.Service
-    const modelsDev = yield* ModelsDev.Service
+    const modelCatalog = yield* ModelCatalog.Service
 
     UI.empty()
     const credentials: Array<[string, Auth.Info]> = Object.entries(yield* Effect.orDie(authSvc.all()))
@@ -506,7 +488,7 @@ export const ProvidersLogoutCommand = effectCmd({
       yield* Prompt.log.error("No credentials found")
       return
     }
-    const database = yield* modelsDev.get()
+    const database = yield* modelCatalog.get()
     const options = credentials.map(([key, value]) => ({
       label: (database[key]?.name || key) + UI.Style.TEXT_DIM + " (" + value.type + ")",
       value: key,

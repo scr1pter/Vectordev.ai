@@ -139,19 +139,18 @@ describe("Project.fromDirectory", () => {
     }),
   )
 
-  it.live("preserves the legacy cached project ID while writing the Vector cache", () =>
+  it.live("preserves an existing Vector project ID cache", () =>
     Effect.gen(function* () {
       const project = yield* Project.Service
       const tmp = yield* tmpdirScoped({ git: true })
-      const legacy = path.join(tmp, ".git", "opencode")
+      const cache = path.join(tmp, ".git", "vector", "project-id")
       const id = ProjectV2.ID.make("a".repeat(40))
-      yield* Effect.promise(() => Bun.write(legacy, id))
+      yield* Effect.promise(() => Bun.write(cache, id))
 
       const result = yield* project.fromDirectory(tmp)
 
       expect(result.project.id).toBe(id)
-      expect(yield* Effect.promise(() => Bun.file(legacy).text())).toBe(id)
-      expect(yield* Effect.promise(() => Bun.file(path.join(tmp, ".git", "vector", "project-id")).text())).toBe(id)
+      expect(yield* Effect.promise(() => Bun.file(cache).text())).toBe(id)
     }),
   )
 

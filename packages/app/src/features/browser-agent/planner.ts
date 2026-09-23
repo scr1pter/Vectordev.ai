@@ -44,7 +44,11 @@ type PlannerSessionClient = {
 export function extractBrowserModelText(value: unknown, depth = 0): string {
   if (!value || depth > 6) return ""
   if (typeof value === "string") return value.trim()
-  if (Array.isArray(value)) return value.map((item) => extractBrowserModelText(item, depth + 1)).filter(Boolean).join("\n")
+  if (Array.isArray(value))
+    return value
+      .map((item) => extractBrowserModelText(item, depth + 1))
+      .filter(Boolean)
+      .join("\n")
   if (typeof value !== "object") return ""
   const record = value as Record<string, unknown>
   for (const key of ["text", "content", "message", "output", "data", "parts", "part"]) {
@@ -57,12 +61,13 @@ export function extractBrowserModelText(value: unknown, depth = 0): string {
 export function parseBrowserModelPlan(text: string): BrowserModelPlan {
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1]
   const source = (fenced || text).trim()
-  const json = source.startsWith("{") ? source : source.match(/\{[\s\S]*\}/)?.[0] ?? source
+  const json = source.startsWith("{") ? source : (source.match(/\{[\s\S]*\}/)?.[0] ?? source)
   const parsed = JSON.parse(json) as Partial<BrowserModelPlan>
   const actions = Array.isArray(parsed.actions)
     ? parsed.actions
         .filter((action): action is BrowserModelAction => {
-          if (!action || typeof action !== "object" || typeof (action as { type?: unknown }).type !== "string") return false
+          if (!action || typeof action !== "object" || typeof (action as { type?: unknown }).type !== "string")
+            return false
           const type = (action as { type: string }).type
           if (type === "click") return typeof (action as { selector?: unknown }).selector === "string"
           if (type === "type")
@@ -100,19 +105,39 @@ export function fallbackBrowserModelPlan(
 ): BrowserModelPlan {
   const lower = prompt.toLowerCase()
   const words = lower.match(/[a-z0-9][a-z0-9_-]{2,}/g) ?? []
-  const ignored = new Set(["the", "this", "that", "with", "from", "into", "page", "website", "please", "browser", "agent"])
+  const ignored = new Set([
+    "the",
+    "this",
+    "that",
+    "with",
+    "from",
+    "into",
+    "page",
+    "website",
+    "please",
+    "browser",
+    "agent",
+  ])
   const terms = [...new Set(words.filter((word) => !ignored.has(word)))]
   const inputs = report.domSummary?.inputs ?? report.inputs ?? []
   const controls = report.domSummary?.interactives ?? report.interactives ?? []
   const already = new Set(completed)
   const quoted = prompt.match(/["“]([^"”]{1,180})["”]/)?.[1]
-  const typed = quoted || prompt.match(/\b(?:type|enter|search(?:\s+for)?)\s+(.{1,160})/i)?.[1]?.replace(/[.!?]\s*$/, "").trim()
+  const typed =
+    quoted ||
+    prompt
+      .match(/\b(?:type|enter|search(?:\s+for)?)\s+(.{1,160})/i)?.[1]
+      ?.replace(/[.!?]\s*$/, "")
+      .trim()
 
   if (typed) {
     const preferred = inputs
-      .filter((input) => !/password|secret|token/i.test(`${input.type ?? ""} ${input.name ?? ""} ${input.placeholder ?? ""}`))
+      .filter(
+        (input) => !/password|secret|token/i.test(`${input.type ?? ""} ${input.name ?? ""} ${input.placeholder ?? ""}`),
+      )
       .map((input) => {
-        const haystack = `${input.name ?? ""} ${input.placeholder ?? ""} ${input.type ?? ""} ${input.selector}`.toLowerCase()
+        const haystack =
+          `${input.name ?? ""} ${input.placeholder ?? ""} ${input.type ?? ""} ${input.selector}`.toLowerCase()
         const score = terms.reduce((total, term) => total + (haystack.includes(term) ? 2 : 0), 0)
         return { input, score }
       })
@@ -176,7 +201,8 @@ export function fallbackBrowserModelPlan(
   return {
     summary: "Vector could not ground another safe action in the current page.",
     complete: false,
-    needsUser: "No matching visible control was found. Take over the browser directly or make the request more specific.",
+    needsUser:
+      "No matching visible control was found. Take over the browser directly or make the request more specific.",
     actions: [],
   }
 }
@@ -188,7 +214,7 @@ const PLANNER_SYSTEM = [
   "click and type selectors must come from the supplied live DOM inventory. Never invent selectors or claim an action already happened.",
   "navigate opens any http(s) URL, including a different website mid-task. Multi-site tasks are normal: navigate wherever the requested data lives.",
   "NEVER type into credential fields (passwords, one-time codes, card numbers) and never attempt logins, 2FA, or captchas yourself — the executor refuses credential typing.",
-  "Whenever login, 2FA, a captcha, or any other human-only step blocks progress, emit a single wait_for_user action whose reason is a short instruction, for example \"Log in to your account, then continue\". The run pauses, the user acts directly in the live browser, and your next observation reflects the changed page.",
+  'Whenever login, 2FA, a captcha, or any other human-only step blocks progress, emit a single wait_for_user action whose reason is a short instruction, for example "Log in to your account, then continue". The run pauses, the user acts directly in the live browser, and your next observation reflects the changed page.',
   "Generic pattern for fetching data behind an account: navigate to the site, observe, emit wait_for_user if blocked by authentication, then after the user continues, navigate and read to find the requested data, and finish with complete=true and the extracted value stated plainly in summary. The summary is the user-facing answer, so include the value itself.",
   "Use needsUser only when the request itself is unclear or impossible; use wait_for_user whenever the user just needs to act in the browser before you continue.",
   "Never perform a purchase, booking confirmation, external communication, or destructive action — hand those steps to the user with wait_for_user.",
@@ -211,13 +237,12 @@ export function createBrowserPlanner(deps: {
     sessionDirectory = undefined
   }
 
-  const plan = async (
-    prompt: string,
-    report: BrowserAutomationRun,
-    completed: string[],
-  ): Promise<BrowserModelPlan> => {
+  const plan = async (prompt: string, report: BrowserAutomationRun, completed: string[]): Promise<BrowserModelPlan> => {
     const directory = await deps.resolveDirectory()
-    if (!directory) throw new Error("Open a project before running Browser Agent so Vector can use the selected project model safely.")
+    if (!directory)
+      throw new Error(
+        "Open a project before running Browser Agent so Vector can use the selected project model safely.",
+      )
     const model = deps.model()
     if (!model) throw new Error("Connect and select a model before running Browser Agent.")
 
@@ -230,7 +255,7 @@ export function createBrowserPlanner(deps: {
         model: { providerID: model.providerID, id: model.modelID },
         metadata: {
           source: "vector-browser-agent",
-          engine: "opencode-compatible",
+          engine: "vector-compatible",
           hidden: true,
         },
       })

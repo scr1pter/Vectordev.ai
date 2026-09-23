@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 
 import { validateCloudProviderToken } from "./cloud-provider-token"
+import manifest from "../../package.json"
 
 describe("manual cloud provider tokens", () => {
   test("validates provider identity with a bearer token without returning the token", async () => {
@@ -8,6 +9,7 @@ describe("manual cloud provider tokens", () => {
     const identity = await validateCloudProviderToken("vercel", "  secret-token  ", async (input, init) => {
       requests.push(String(input))
       expect(new Headers(init?.headers).get("authorization")).toBe("Bearer secret-token")
+      expect(new Headers(init?.headers).get("user-agent")).toBe(`vector/${manifest.version}`)
       return Response.json({ user: { id: "user_1", username: "vector-user" } })
     })
 

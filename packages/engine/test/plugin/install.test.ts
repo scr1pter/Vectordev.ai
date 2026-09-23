@@ -93,7 +93,7 @@ async function plugin(
         version: "1.0.0",
         ...(server ? { main: "./server.js" } : {}),
         ...(Object.keys(exports).length ? { exports } : {}),
-        ...(themes?.length ? { "oc-themes": themes } : {}),
+        ...(themes?.length ? { "vector-themes": themes } : {}),
       },
       null,
       2,
@@ -153,8 +153,8 @@ describe("plugin.install.task", () => {
   test("preserves JSONC comments when adding plugins to server and tui config", async () => {
     await using tmp = await tmpdir()
     const target = await plugin(tmp.path, ["server", "tui"])
-    const cfg = path.join(tmp.path, ".opencode")
-    const server = path.join(cfg, "opencode.jsonc")
+    const cfg = path.join(tmp.path, ".vector")
+    const server = path.join(cfg, "vector.jsonc")
     const tui = path.join(cfg, "tui.jsonc")
     await fs.mkdir(cfg, { recursive: true })
     await Bun.write(
@@ -179,7 +179,7 @@ describe("plugin.install.task", () => {
     "seed@1.0.0"
   ],
   // tui tail
-  "theme": "opencode"
+  "theme": "vector"
 }
 `,
     )
@@ -212,7 +212,7 @@ describe("plugin.install.task", () => {
   test("preserves JSONC comments when force replacing plugin version", async () => {
     await using tmp = await tmpdir()
     const target = await plugin(tmp.path, ["server"])
-    const cfg = path.join(tmp.path, ".opencode", "opencode.jsonc")
+    const cfg = path.join(tmp.path, ".vector", "vector.jsonc")
     await fs.mkdir(path.dirname(cfg), { recursive: true })
     await Bun.write(
       cfg,
@@ -264,7 +264,7 @@ describe("plugin.install.task", () => {
   test("does not change configured package version without force", async () => {
     await using tmp = await tmpdir()
     const target = await plugin(tmp.path, ["server"])
-    const cfg = path.join(tmp.path, ".opencode", "opencode.json")
+    const cfg = path.join(tmp.path, ".vector", "vector.json")
     await fs.mkdir(path.dirname(cfg), { recursive: true })
     await Bun.write(cfg, JSON.stringify({ plugin: ["acme@1.0.0"] }, null, 2))
 
@@ -284,7 +284,7 @@ describe("plugin.install.task", () => {
   test("does not change scoped package version without force", async () => {
     await using tmp = await tmpdir()
     const target = await plugin(tmp.path, ["server"])
-    const cfg = path.join(tmp.path, ".opencode", "opencode.json")
+    const cfg = path.join(tmp.path, ".vector", "vector.json")
     await fs.mkdir(path.dirname(cfg), { recursive: true })
     await Bun.write(cfg, JSON.stringify({ plugin: ["@scope/acme@1.0.0"] }, null, 2))
 
@@ -304,7 +304,7 @@ describe("plugin.install.task", () => {
   test("keeps file plugin entries and still adds npm plugin", async () => {
     await using tmp = await tmpdir()
     const target = await plugin(tmp.path, ["server"])
-    const cfg = path.join(tmp.path, ".opencode", "opencode.json")
+    const cfg = path.join(tmp.path, ".vector", "vector.json")
     await fs.mkdir(path.dirname(cfg), { recursive: true })
     await Bun.write(cfg, JSON.stringify({ plugin: ["file:///tmp/acme.ts"] }, null, 2))
 
@@ -324,7 +324,7 @@ describe("plugin.install.task", () => {
   test("force replaces configured package version and keeps tuple options", async () => {
     await using tmp = await tmpdir()
     const target = await plugin(tmp.path, ["server"])
-    const cfg = path.join(tmp.path, ".opencode", "opencode.json")
+    const cfg = path.join(tmp.path, ".vector", "vector.json")
     await fs.mkdir(path.dirname(cfg), { recursive: true })
     await Bun.write(
       cfg,
@@ -440,7 +440,7 @@ describe("plugin.install.task", () => {
     expect(await Filesystem.exists(path.join(tmp.path, ".vector", "vector.jsonc"))).toBe(false)
   })
 
-  test("writes tui config for oc-themes-only packages", async () => {
+  test("writes tui config for vector-themes-only packages", async () => {
     await using tmp = await tmpdir()
     const target = await plugin(tmp.path, undefined, undefined, ["themes/forest.json"])
     await fs.mkdir(path.join(target, "themes"), { recursive: true })
@@ -461,7 +461,7 @@ describe("plugin.install.task", () => {
     expect(tui.plugin).toEqual(["acme@1.2.3"])
   })
 
-  test("returns false for oc-themes outside plugin directory", async () => {
+  test("returns false for vector-themes outside plugin directory", async () => {
     await using tmp = await tmpdir()
     const target = await plugin(tmp.path, undefined, undefined, ["../outside.json"])
     const run = createPlugTask(
@@ -480,8 +480,8 @@ describe("plugin.install.task", () => {
   test("force replaces version in both server and tui configs", async () => {
     await using tmp = await tmpdir()
     const target = await plugin(tmp.path, ["server", "tui"])
-    const server = path.join(tmp.path, ".opencode", "opencode.json")
-    const tui = path.join(tmp.path, ".opencode", "tui.json")
+    const server = path.join(tmp.path, ".vector", "vector.json")
+    const tui = path.join(tmp.path, ".vector", "tui.json")
     await fs.mkdir(path.dirname(server), { recursive: true })
     await Bun.write(server, JSON.stringify({ plugin: ["acme@1.0.0", "other@1.0.0"] }, null, 2))
     await Bun.write(tui, JSON.stringify({ plugin: [["acme@1.0.0", { mode: "safe" }], "other@1.0.0"] }, null, 2))
@@ -505,7 +505,7 @@ describe("plugin.install.task", () => {
   test("returns false and keeps config unchanged for invalid JSONC", async () => {
     await using tmp = await tmpdir()
     const target = await plugin(tmp.path, ["server"])
-    const cfg = path.join(tmp.path, ".opencode", "opencode.jsonc")
+    const cfg = path.join(tmp.path, ".vector", "vector.jsonc")
     await fs.mkdir(path.dirname(cfg), { recursive: true })
     const bad = '{"plugin": ["acme@1.0.0",}'
     await Bun.write(cfg, bad)
@@ -569,28 +569,28 @@ describe("plugin.install.task", () => {
   })
 })
 
-test("plugin installation prefers an existing Vector config and preserves the legacy file", async () => {
+test("plugin installation updates Vector config and leaves unrelated files untouched", async () => {
   await using tmp = await tmpdir()
   const target = await plugin(tmp.path, ["server"])
-  const legacy = path.join(tmp.path, ".opencode", "opencode.json")
+  const unrelated = path.join(tmp.path, ".vector", "unrelated.json")
   const current = path.join(tmp.path, ".vector", "vector.json")
-  await Filesystem.write(legacy, JSON.stringify({ plugin: [["acme@1.0.0", { source: "legacy" }]] }))
+  await Filesystem.write(unrelated, JSON.stringify({ plugin: [["acme@1.0.0", { source: "legacy" }]] }))
   await Filesystem.write(current, JSON.stringify({ plugin: [["acme@2.0.0", { source: "vector" }]] }))
   const run = createPlugTask({ mod: "acme@3.0.0", force: true }, deps(path.join(tmp.path, "global"), target))
   expect(await run(ctx(tmp.path))).toBe(true)
   expect((await read(current)).plugin).toEqual([["acme@3.0.0", { source: "vector" }]])
-  expect((await read(legacy)).plugin).toEqual([["acme@1.0.0", { source: "legacy" }]])
+  expect((await read(unrelated)).plugin).toEqual([["acme@1.0.0", { source: "legacy" }]])
 })
 
-test("legacy plugin updates retain relative paths in their original directory", async () => {
+test("Vector plugin updates retain relative paths in their original directory", async () => {
   await using tmp = await tmpdir()
   const target = await plugin(tmp.path, ["server"])
-  const legacy = path.join(tmp.path, ".opencode", "opencode.jsonc")
-  await Filesystem.write(legacy, '{\n // Preserve relative references\n "plugin": ["./plugin.ts", "acme@1.0.0"]\n}')
+  const config = path.join(tmp.path, ".vector", "vector.jsonc")
+  await Filesystem.write(config, '{\n // Preserve relative references\n "plugin": ["./plugin.ts", "acme@1.0.0"]\n}')
   const run = createPlugTask({ mod: "acme@2.0.0", force: true }, deps(path.join(tmp.path, "global"), target))
   expect(await run(ctx(tmp.path))).toBe(true)
-  const content = await Filesystem.readText(legacy)
+  const content = await Filesystem.readText(config)
   expect(content).toContain("// Preserve relative references")
   expect(parseJsonc(content).plugin).toEqual(["./plugin.ts", "acme@2.0.0"])
-  expect(await Filesystem.exists(path.join(tmp.path, ".vector", "vector.jsonc"))).toBe(false)
+  expect(await Filesystem.exists(path.join(tmp.path, ".vector", "vector.json"))).toBe(false)
 })

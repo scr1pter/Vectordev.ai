@@ -69,7 +69,7 @@ export function providerOptions(list: { id: string; name: string }[]): ProviderO
       type: "custom",
       title: "Other",
       value: CUSTOM_PROVIDER_OPTION_VALUE,
-      description: "Custom provider",
+      description: "Supported provider credential",
       category: "Providers",
     },
   ]
@@ -91,10 +91,10 @@ export function createDialogProviderOptions() {
 
   async function promptCustomProviderID(): Promise<string | undefined> {
     const value = await DialogPrompt.show(dialog, "Other", {
-      placeholder: "Provider id",
+      placeholder: "Provider id, such as lmstudio",
       description: () => (
         <text fg={theme.textMuted}>
-          This only stores a credential. Configure the provider in vector.json to use it.
+          Use a supported provider ID. This stores a credential; configure its endpoint and models in vector.json.
         </text>
       ),
     })
@@ -105,8 +105,7 @@ export function createDialogProviderOptions() {
 
     toast.show({
       variant: "error",
-      message:
-        "Provider ids must start with a lowercase letter or number and only use lowercase letters, numbers, hyphens, and underscores",
+      message: "Choose a supported provider ID, such as lmstudio or openai.",
     })
     return promptCustomProviderID()
   }

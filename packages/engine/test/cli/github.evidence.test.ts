@@ -24,8 +24,8 @@ function assistant(
     role: "assistant",
     time: { created: 0, completed: 1 },
     parentID: MessageID.make("msg_user"),
-    modelID: opts.modelID ?? "big-pickle",
-    providerID: opts.providerID ?? "opencode",
+    modelID: opts.modelID ?? "gpt-4.1",
+    providerID: opts.providerID ?? "openai",
     mode: "build",
     agent: "build",
     path: { cwd: "/", root: "/" },
@@ -47,7 +47,7 @@ function user(): SessionV1.User {
     role: "user",
     time: { created: 0 },
     agent: "build",
-    model: { providerID: "opencode", modelID: "big-pickle" },
+    model: { providerID: "openai", modelID: "gpt-4.1" },
   } as SessionV1.User
 }
 
@@ -238,12 +238,12 @@ describe("buildEvidenceBody", () => {
     expect(body).toContain("<summary>✅ <code>bun test src/a.test.ts</code> (exit 0)</summary>")
     expect(body).toContain("<summary>❌ <code>bun run typecheck</code> (exit 1)</summary>")
     expect(body).toContain("```text\n3 pass\n0 fail\n```")
-    expect(body).toContain("**Cost:** $0.01 · 12.3k in / 1.2k out · opencode/big-pickle · 1 turn")
+    expect(body).toContain("**Cost:** $0.01 · 12.3k in / 1.2k out · openai/gpt-4.1 · 1 turn")
     expect(body).toContain("**Judge:** ✅ PASS — requirement 4/4, correctness 4/4")
     expect(body).toContain("\nCloses #7\n")
     expect(body.endsWith(`---\n[Vector run](${runUrl})`)).toBe(true)
     // The upstream share link and social card must not come back.
-    expect(body).not.toContain("opencode.ai")
+    expect(body).not.toContain("vectordev.ai")
     expect(body).not.toContain("social-cards")
   })
 

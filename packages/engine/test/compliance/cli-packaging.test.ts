@@ -15,6 +15,14 @@ async function fixture() {
     Bun.file(path.join(root, "packages/engine/script/publish-vector.ts")),
   )
   await Bun.write(path.join(dir, "packages/desktop/package.json"), JSON.stringify({ version }))
+  await Bun.write(
+    path.join(dir, "packages/plugin/package.json"),
+    JSON.stringify({ name: "@vectordevai/plugin", version: "0.1.0" }),
+  )
+  await Bun.write(
+    path.join(dir, "packages/plugin/script/publish.ts"),
+    'await Bun.write("publisher-args.json", JSON.stringify(process.argv.slice(2)))\n',
+  )
   await Bun.write(path.join(dir, "user.npmrc"), "")
   await Bun.write(path.join(dir, "global.npmrc"), "")
   for (const notice of notices) await Bun.write(path.join(dir, notice), `Fixture ${notice}\n`)
@@ -78,7 +86,7 @@ test("dry-run packages every target with notices and a working Vector launcher w
     // Observe the real publisher's build boundary without compiling the application.
     await Bun.write(
       path.join(cwd, "script/build.ts"),
-      'await Bun.write("build-env.json", JSON.stringify({ version: process.env.VECTOR_VERSION, targets: process.env.VECTOR_TARGETS, release: process.env.VECTOR_RELEASE, legacyRelease: process.env.OPENCODE_RELEASE }))\n',
+      'await Bun.write("build-env.json", JSON.stringify({ version: process.env.VECTOR_VERSION, targets: process.env.VECTOR_TARGETS, release: process.env.VECTOR_RELEASE }))\n',
     )
     const result = await run([process.execPath, "script/publish-vector.ts", "--dry-run"], cwd, {
       ...tmp.env,
@@ -86,17 +94,16 @@ test("dry-run packages every target with notices and a working Vector launcher w
       VECTOR_VERSION: "stale-inherited-version",
       VECTOR_TARGETS: "stale-inherited-target",
       VECTOR_RELEASE: "true",
-      OPENCODE_RELEASE: "true",
       VECTOR_CLI_VERSION: version,
       VECTOR_CLI_TARGETS: targets.join(","),
     })
     expect(result.code, result.stderr).toBe(0)
     expect(requests).toEqual([])
+    expect(await Bun.file(path.join(tmp.dir, "packages/plugin/publisher-args.json")).json()).toEqual(["--dry-run"])
     expect(await Bun.file(path.join(cwd, "build-env.json")).json()).toEqual({
       version,
       targets: targets.join(","),
       release: "",
-      legacyRelease: "",
     })
 
     for (const target of [...targets, "umbrella"]) {
@@ -175,3 +182,19 @@ for (const problem of ["stale version", "missing binary", "missing notice", "exc
     expect(await Bun.file(path.join(cwd, "dist/vectordev-cli/package.json")).exists()).toBe(false)
   })
 }
+
+test("a failed plugin preparation stops the CLI publisher before any npm publish", async () => {
+  await using tmp = await fixture()
+  await Bun.write(
+    path.join(tmp.dir, "packages/plugin/script/publish.ts"),
+    'throw new Error("fixture plugin failure")\n',
+  )
+  const result = await run(
+    [process.execPath, "script/publish-vector.ts", "--skip-build", "--publish"],
+    path.join(tmp.dir, "packages/engine"),
+    tmp.env,
+  )
+  expect(result.code).not.toBe(0)
+  expect(result.stderr).toContain("fixture plugin failure")
+  expect(result.stdout).not.toContain("published @vectordevai/cli")
+})

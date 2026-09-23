@@ -20,28 +20,28 @@ describe("util.model", () => {
     const provider = (id: string, models: ReturnType<typeof model>[]) =>
       ({ id, options: {}, models: Object.fromEntries(models.map((item) => [item.id, item])) }) as unknown as Provider
     const list = [
-      provider("opencode", [
+      provider("groq", [
         model("nemotron-3-ultra-free", "Nemotron 3 Ultra Free"),
         model("muse-spark-1.3", "Muse Spark 1.3 Free", 1.25),
       ]),
       provider("ollama", [model("llama-free", "Llama Free")]),
     ]
 
-    expect(name(list, "opencode", "nemotron-3-ultra-free")).toBe("Nemotron 3 Ultra Free")
-    // A priced Zen model, and a zero-cost model from any other provider, keep their catalogue names.
-    expect(name(list, "opencode", "muse-spark-1.3")).toBe("Muse Spark 1.3 Free")
+    expect(name(list, "groq", "nemotron-3-ultra-free")).toBe("Nemotron 3 Ultra Free")
+    // A priced remote model, and a zero-cost model from any other provider, keep their catalogue names.
+    expect(name(list, "groq", "muse-spark-1.3")).toBe("Muse Spark 1.3 Free")
     expect(name(list, "ollama", "llama-free")).toBe("Llama Free")
-    expect(name(list, "opencode", "missing")).toBe("missing")
+    expect(name(list, "groq", "missing")).toBe("missing")
   })
 
   test("preserves provider names in existing history", () => {
-    const zen = { id: "opencode", name: "OpenCode Zen", options: { apiKey: "public" } }
+    const remote = { id: "groq", name: "Groq", options: { apiKey: "public" } }
     const local = { id: "ollama", name: "Ollama", options: {} }
     const zeroCost = { cost: { input: 0 }, release_date: "2026-03-11" }
 
-    expect(modelProviderName(zen, zeroCost)).toBe("OpenCode Zen")
-    // A zero-cost model from any other provider, and a priced Zen model, keep their provider's name.
+    expect(modelProviderName(remote, zeroCost)).toBe("Groq")
+    // A zero-cost model from any other provider, and a priced remote model, keep their provider's name.
     expect(modelProviderName(local, zeroCost)).toBe("Ollama")
-    expect(modelProviderName(zen, { cost: { input: 1 }, release_date: "2026-03-11" })).toBe("OpenCode Zen")
+    expect(modelProviderName(remote, { cost: { input: 1 }, release_date: "2026-03-11" })).toBe("Groq")
   })
 })

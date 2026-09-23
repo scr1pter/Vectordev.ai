@@ -2,14 +2,14 @@ import { For, Show, onMount, Suspense, onCleanup, createMemo, createSignal, Susp
 import { DateTime } from "luxon"
 import { createStore, reconcile } from "solid-js/store"
 import { IconArrowDown } from "./icons"
-import { IconOpencode } from "./icons/custom"
+import { IconVector } from "./icons/custom"
 import { ShareI18nProvider, formatCurrency, formatNumber, normalizeLocale } from "./share/common"
 import styles from "./share.module.css"
 import type { SessionV1 } from "@vectordevai/core/v1/session"
 import type { ModelV2 } from "@vectordevai/core/model"
 import type { ProviderV2 } from "@vectordevai/core/provider"
-import type { Message } from "opencode/session/message"
-import type { Session } from "opencode/session/session"
+import type { Message } from "vector/session/message"
+import type { Session } from "vector/session/session"
 import { Part, ProviderIcon } from "./share/part"
 import { parseShareStreamEvent, shareMessageBelongsToSession } from "./share/stream"
 
@@ -148,11 +148,7 @@ export default function Share(props: {
           }
           if (streamEvent.type === "part") {
             if (
-              !shareMessageBelongsToSession(
-                store.messages[streamEvent.messageID],
-                props.info.id,
-                streamEvent.messageID,
-              )
+              !shareMessageBelongsToSession(store.messages[streamEvent.messageID], props.info.id, streamEvent.messageID)
             )
               return
             const content = streamEvent.content as SessionV1.Part
@@ -325,9 +321,9 @@ export default function Share(props: {
             <h1 data-component="header-title">{store.info?.title}</h1>
             <div data-component="header-details">
               <ul data-component="header-stats">
-                <li title={props.messages.opencode_version} data-slot="item">
-                  <div data-slot="icon" title={props.messages.opencode_name}>
-                    <IconOpencode width={16} height={16} />
+                <li title={props.messages.vector_version} data-slot="item">
+                  <div data-slot="icon" title={props.messages.vector_name}>
+                    <IconVector width={16} height={16} />
                   </div>
                   <Show when={store.info?.version} fallback="v0.0.1">
                     <span>v{store.info?.version}</span>

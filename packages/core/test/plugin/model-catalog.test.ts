@@ -9,8 +9,8 @@ import { EventV2 } from "@vectordevai/core/event"
 import { Flag } from "@vectordevai/core/flag/flag"
 import { Location } from "@vectordevai/core/location"
 import { ModelV2 } from "@vectordevai/core/model"
-import { ModelsDev } from "@vectordevai/core/models-dev"
-import { ModelsDevPlugin } from "@vectordevai/core/plugin/models-dev"
+import { ModelCatalog } from "@vectordevai/core/model-catalog"
+import { ModelCatalogPlugin } from "@vectordevai/core/plugin/model-catalog"
 import { ProviderV2 } from "@vectordevai/core/provider"
 import { AbsolutePath } from "@vectordevai/core/schema"
 import { location } from "../fixture/location"
@@ -26,20 +26,20 @@ const layer = AppNodeBuilder.build(LayerNode.group([Catalog.node, Integration.no
 ])
 const it = testEffect(layer)
 
-describe("ModelsDevPlugin", () => {
-  it.effect("projects models.dev modes as separate models instead of variants", () =>
+describe("ModelCatalogPlugin", () => {
+  it.effect("projects catalog modes as separate models instead of variants", () =>
     Effect.gen(function* () {
       const integrations = yield* Integration.Service
       const catalog = yield* Catalog.Service
-      const models = ModelsDev.Service.of({
+      const models = ModelCatalog.Service.of({
         get: () =>
           Effect.succeed({
-            acme: {
-              id: "acme",
+            lmstudio: {
+              id: "lmstudio",
               name: "Acme",
               env: [],
               npm: "@ai-sdk/openai-compatible",
-              api: "https://api.acme.test/v1",
+              api: "https://api.lmstudio.test/v1",
               models: {
                 "gpt-5.4": {
                   id: "gpt-5.4",
@@ -78,18 +78,18 @@ describe("ModelsDevPlugin", () => {
                 },
               },
             },
-          } satisfies Record<string, ModelsDev.Provider>),
+          } satisfies Record<string, ModelCatalog.Provider>),
         refresh: () => Effect.void,
       })
 
-      yield* ModelsDevPlugin.effect(
+      yield* ModelCatalogPlugin.effect(
         host({
           catalog: catalogHost(catalog),
           integration: integrationHost(integrations),
         }),
-      ).pipe(Effect.provideService(ModelsDev.Service, models))
+      ).pipe(Effect.provideService(ModelCatalog.Service, models))
 
-      const providerID = ProviderV2.ID.make("acme")
+      const providerID = ProviderV2.ID.make("lmstudio")
       const base = yield* catalog.model.get(providerID, ModelV2.ID.make("gpt-5.4"))
       const fast = yield* catalog.model.get(providerID, ModelV2.ID.make("gpt-5.4-fast"))
 
@@ -97,7 +97,7 @@ describe("ModelsDevPlugin", () => {
       expect(base?.request.body).toEqual({})
       expect(fast).toMatchObject({
         id: "gpt-5.4-fast",
-        providerID: "acme",
+        providerID: "lmstudio",
         name: "GPT-5.4 Fast",
         api: { id: "gpt-5.4" },
         request: {
@@ -128,18 +128,18 @@ describe("ModelsDevPlugin", () => {
     Effect.acquireUseRelease(
       Effect.sync(() => {
         const previous = {
-          path: Flag.OPENCODE_MODELS_PATH,
-          disabled: Flag.OPENCODE_DISABLE_MODELS_FETCH,
+          path: Flag.VECTOR_MODELS_PATH,
+          disabled: Flag.VECTOR_DISABLE_MODELS_FETCH,
         }
-        Flag.OPENCODE_MODELS_PATH = path.join(import.meta.dir, "fixtures", "models-dev.json")
-        Flag.OPENCODE_DISABLE_MODELS_FETCH = true
+        Flag.VECTOR_MODELS_PATH = path.join(import.meta.dir, "fixtures", "model-catalog.json")
+        Flag.VECTOR_DISABLE_MODELS_FETCH = true
         return previous
       }),
       () =>
         Effect.gen(function* () {
           const integrations = yield* Integration.Service
           const catalog = yield* Catalog.Service
-          yield* ModelsDevPlugin.effect(
+          yield* ModelCatalogPlugin.effect(
             host({
               catalog: catalogHost(catalog),
               integration: integrationHost(integrations),
@@ -147,7 +147,7 @@ describe("ModelsDevPlugin", () => {
           )
           expect(yield* integrations.list()).toEqual([
             new Integration.Info({
-              id: Integration.ID.make("acme"),
+              id: Integration.ID.make("lmstudio"),
               name: "Acme",
               methods: [
                 { type: "key" },
@@ -159,11 +159,11 @@ describe("ModelsDevPlugin", () => {
               connections: [],
             }),
           ])
-        }).pipe(Effect.provide(AppNodeBuilder.build(ModelsDev.node))),
+        }).pipe(Effect.provide(AppNodeBuilder.build(ModelCatalog.node))),
       (previous) =>
         Effect.sync(() => {
-          Flag.OPENCODE_MODELS_PATH = previous.path
-          Flag.OPENCODE_DISABLE_MODELS_FETCH = previous.disabled
+          Flag.VECTOR_MODELS_PATH = previous.path
+          Flag.VECTOR_DISABLE_MODELS_FETCH = previous.disabled
         }),
     ),
   )

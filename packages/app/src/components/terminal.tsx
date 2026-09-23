@@ -521,7 +521,7 @@ export const Terminal = (props: TerminalProps) => {
             { ptyID: id, directory },
             {
               throwOnError: false,
-              headers: { "x-vector-ticket": "1", "x-opencode-ticket": "1" },
+              headers: { "x-vector-ticket": "1" },
             },
           )
           .catch((err: unknown) => {

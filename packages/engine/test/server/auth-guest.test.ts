@@ -54,7 +54,7 @@ describe("ServerAuth guest credentials", () => {
     // guest-only server as unauthenticated would serve the workspace to anyone.
     expect(ServerAuth.required(guestOnly)).toBe(true)
     expect(ServerAuth.identity(credential("guest", "guest-secret"), guestOnly)).toBe("guest")
-    expect(ServerAuth.identity(credential("opencode", "owner-secret"), guestOnly)).toBeUndefined()
+    expect(ServerAuth.identity(credential("vector", "owner-secret"), guestOnly)).toBeUndefined()
     expect(ServerAuth.required(config)).toBe(true)
     expect(ServerAuth.required({ ...config, password: Option.none(), guestPassword: Option.none() })).toBe(false)
     expect(ServerAuth.required({ ...config, password: Option.none(), guestPassword: Option.some("") })).toBe(false)
@@ -76,11 +76,11 @@ const apiLayer = HttpRouter.serve(
 
 const guestLayer = ServerAuth.Config.configLayer({
   password: Option.some("owner-secret"),
-  username: "opencode",
+  username: "vector",
   guestPassword: Option.some("guest-secret"),
   guestUsername: "guest",
 })
-const ownerOnlyLayer = ServerAuth.Config.configLayer({ password: Option.some("owner-secret"), username: "opencode" })
+const ownerOnlyLayer = ServerAuth.Config.configLayer({ password: Option.some("owner-secret"), username: "vector" })
 
 const itGuest = testEffect(apiLayer.pipe(Layer.provide(guestLayer)))
 const itOwnerOnly = testEffect(apiLayer.pipe(Layer.provide(ownerOnlyLayer)))
@@ -98,10 +98,10 @@ describe("HttpApi authorization middleware with a guest pair", () => {
     Effect.gen(function* () {
       const [owner, guest, missing, swapped, wrong] = yield* Effect.all(
         [
-          getProbe({ authorization: basic("opencode", "owner-secret") }),
+          getProbe({ authorization: basic("vector", "owner-secret") }),
           getProbe({ authorization: basic("guest", "guest-secret") }),
           getProbe(),
-          getProbe({ authorization: basic("opencode", "guest-secret") }),
+          getProbe({ authorization: basic("vector", "guest-secret") }),
           getProbe({ authorization: basic("guest", "owner-secret") }),
         ],
         { concurrency: "unbounded" },
@@ -128,7 +128,7 @@ describe("HttpApi authorization middleware with a guest pair", () => {
     Effect.gen(function* () {
       const [owner, guest] = yield* Effect.all(
         [
-          getProbe({ authorization: basic("opencode", "owner-secret") }),
+          getProbe({ authorization: basic("vector", "owner-secret") }),
           getProbe({ authorization: basic("guest", "guest-secret") }),
         ],
         { concurrency: "unbounded" },
@@ -188,7 +188,7 @@ const openAbortableEventStream = (directory: string, headers: Record<string, str
     yield* Effect.addFinalizer(() => Effect.sync(() => controller.abort()))
     const response = yield* Effect.promise(() =>
       fetch(`http://localhost:${address.port}${EventPaths.event}`, {
-        headers: { ...headers, "x-opencode-directory": directory },
+        headers: { ...headers, "x-vector-directory": directory },
         signal: controller.signal,
       }),
     )
@@ -239,7 +239,7 @@ describe("event stream presence", () => {
       Effect.gen(function* () {
         const { directory } = yield* TestInstance
 
-        const owner = yield* openEventStream(directory, { authorization: basic("opencode", "anything") })
+        const owner = yield* openEventStream(directory, { authorization: basic("vector", "anything") })
         expect(yield* next(owner.events, "server.connected")).toMatchObject({ type: "server.connected" })
 
         const guest = yield* openAbortableEventStream(directory, { authorization: basic("guest", "guest-secret") })
@@ -253,7 +253,7 @@ describe("event stream presence", () => {
         // The guest's stream opens with the roster of peers already connected.
         expect(yield* next(guest.events, "server.connected")).toMatchObject({ type: "server.connected" })
         const peer = yield* next(guest.events, "client.joined")
-        expect(peer.properties.username).toBe("opencode")
+        expect(peer.properties.username).toBe("vector")
         expect(peer.properties.clientID).not.toBe(joined.properties.clientID)
 
         // Hanging up tells the owner the guest left.

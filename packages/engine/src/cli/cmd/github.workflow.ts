@@ -234,9 +234,9 @@ export function buildWorkflowYaml(opts: WorkflowOptions): string {
     ...(opts.monthlyUsd !== undefined
       ? [`          REVIEW_MAX_COST_USD_PER_MONTH: "${formatAmount(opts.monthlyUsd)}" # "0" means no limit`]
       : []),
-    '          OPENCODE_PURE: "1"',
-    '          OPENCODE_DISABLE_PROJECT_CONFIG: "1"',
-    `          OPENCODE_CONFIG_CONTENT: '{"lsp":false,"formatter":false,"snapshot":false}'`,
+    '          VECTOR_PURE: "1"',
+    '          VECTOR_DISABLE_PROJECT_CONFIG: "1"',
+    `          VECTOR_CONFIG_CONTENT: '{"lsp":false,"formatter":false,"snapshot":false}'`,
     ...keys,
     "",
     "  vector:",

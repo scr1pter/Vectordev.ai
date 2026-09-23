@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test"
 import { base64Encode } from "@vectordevai/core/util/encode"
-import { mockOpenCodeServer } from "../utils/mock-server"
+import { mockVectorServer } from "../utils/mock-server"
 import { expectSessionTitle } from "../utils/waits"
 
 const directory = "C:/Vector/EditorProviderRegression"
@@ -10,14 +10,14 @@ test("Editor opens a project file beside the active Vector Agent", async ({ page
   const errors: string[] = []
   page.on("pageerror", (error) => errors.push(error.stack ?? error.message))
 
-  await mockOpenCodeServer(page, {
+  await mockVectorServer(page, {
     directory,
     project: { id: "project-editor-provider", worktree: directory, vcs: "git", name: "Editor Provider" },
     provider: {
       all: [
         {
-          id: "opencode",
-          name: "OpenCode",
+          id: "anthropic",
+          name: "Anthropic",
           models: {
             "editor-model": {
               id: "editor-model",
@@ -27,8 +27,8 @@ test("Editor opens a project file beside the active Vector Agent", async ({ page
           },
         },
       ],
-      connected: ["opencode"],
-      default: { providerID: "opencode", modelID: "editor-model" },
+      connected: ["anthropic"],
+      default: { providerID: "anthropic", modelID: "editor-model" },
     },
     sessions: [
       {
@@ -65,7 +65,7 @@ test("Editor opens a project file beside the active Vector Agent", async ({ page
   await page.addInitScript((projectDirectory) => {
     localStorage.setItem("vector.onboarding.v1", JSON.stringify({ tour: true, dismissed: true }))
     localStorage.setItem(
-      "opencode.global.dat:server",
+      "vector.global.dat:server",
       JSON.stringify({
         projects: { local: [{ worktree: projectDirectory, expanded: true }] },
         lastProject: { local: projectDirectory },

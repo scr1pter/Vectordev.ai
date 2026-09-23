@@ -21,7 +21,7 @@ const scopedTmpdir = (options?: Parameters<typeof tmpdir>[0]) =>
 const git = (cwd: string, ...args: string[]) =>
   Effect.promise(() => $`git ${args}`.cwd(cwd).quiet().text()).pipe(Effect.map((text) => text.trim()))
 
-const commit = (cwd: string, message: string, files: Record<string, string>, author = "Test <test@opencode.test>") =>
+const commit = (cwd: string, message: string, files: Record<string, string>, author = "Test <test@vector.test>") =>
   Effect.gen(function* () {
     yield* Effect.promise(async () => {
       for (const [file, text] of Object.entries(files)) {

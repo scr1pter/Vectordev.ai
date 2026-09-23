@@ -2,7 +2,8 @@ import * as fs from "node:fs/promises"
 import * as path from "node:path"
 
 const RECORDINGS_DIR = path.resolve(import.meta.dir, "..", "test", "fixtures", "recordings")
-const MODELS_DEV_URL = "https://models.dev/api.json"
+const catalogFile = process.env.VECTOR_MODELS_PATH
+if (!catalogFile) throw new Error("Set VECTOR_MODELS_PATH to a prepared Vector model catalog snapshot")
 
 type JsonRecord = Record<string, unknown>
 
@@ -216,7 +217,7 @@ const rowFor = (models: JsonRecord, file: string, cassette: unknown): Row | unde
 const money = (value: number) => (value === 0 ? "$0.000000" : `$${value.toFixed(6)}`)
 const tokens = (value: number) => value.toLocaleString("en-US")
 
-const models = (await (await fetch(MODELS_DEV_URL)).json()) as JsonRecord
+const models = (await Bun.file(catalogFile).json()) as JsonRecord
 const rows = (
   await Promise.all(
     (await walk(RECORDINGS_DIR))
@@ -235,7 +236,7 @@ const totals = rows.reduce(
 
 console.log("# Recording Cost Report")
 console.log("")
-console.log(`Pricing: ${MODELS_DEV_URL}`)
+console.log(`Pricing: ${catalogFile}`)
 console.log(`Cassettes: ${rows.length}`)
 console.log(`Reported cost: ${money(totals.reportedCost)}`)
 console.log(`Estimated cost: ${money(totals.estimatedCost)}`)

@@ -20,7 +20,7 @@ export interface Options {
   timeout?: number
   /** Use `env` exactly instead of extending the current process environment. */
   exactEnv?: boolean
-  /** Reserved for trusted OpenCode child processes that must share runtime control secrets. */
+  /** Reserved for trusted Vector child processes that must share runtime control secrets. */
   inheritInternalEnv?: boolean
 }
 
@@ -163,7 +163,7 @@ export async function run(cmd: string[], opts: RunOptions = {}): Promise<Result>
 }
 
 // Duplicated in `packages/sdk/js/src/process.ts` because the SDK cannot import
-// `opencode` without creating a cycle. Keep both copies in sync.
+// `vector` without creating a cycle. Keep both copies in sync.
 export async function stop(proc: ChildProcess) {
   if (proc.exitCode !== null || proc.signalCode !== null) return
 

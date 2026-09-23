@@ -20,7 +20,7 @@ import { FSUtil } from "../fs-util"
 import { Global } from "../global"
 import { Integration } from "../integration"
 import { Location } from "../location"
-import { ModelsDev } from "../models-dev"
+import { ModelCatalog } from "../model-catalog"
 import { Npm } from "../npm"
 import { PluginV2 } from "../plugin"
 import { Reference } from "../reference"
@@ -29,7 +29,7 @@ import { State } from "../state"
 import { FetchHttpClient, HttpClient } from "effect/unstable/http"
 import { AgentPlugin } from "./agent"
 import { CommandPlugin } from "./command"
-import { ModelsDevPlugin } from "./models-dev"
+import { ModelCatalogPlugin } from "./model-catalog"
 import { ProviderPlugins } from "./provider"
 import { SkillPlugin } from "./skill"
 import { VariantPlugin } from "./variant"
@@ -46,7 +46,7 @@ export type Requirements =
   | HttpClient.HttpClient
   | Integration.Service
   | Location.Service
-  | ModelsDev.Service
+  | ModelCatalog.Service
   | Npm.Service
   | Reference.Service
   | SkillV2.Service
@@ -69,7 +69,7 @@ const layer = Layer.effectDiscard(
     const agents = yield* AgentV2.Service
     const config = yield* Config.Service
     const location = yield* Location.Service
-    const modelsDev = yield* ModelsDev.Service
+    const modelCatalog = yield* ModelCatalog.Service
     const npm = yield* Npm.Service
     const events = yield* EventV2.Service
     const fs = yield* FSUtil.Service
@@ -91,7 +91,7 @@ const layer = Layer.effectDiscard(
               Effect.provideService(AgentV2.Service, agents),
               Effect.provideService(Config.Service, config),
               Effect.provideService(Location.Service, location),
-              Effect.provideService(ModelsDev.Service, modelsDev),
+              Effect.provideService(ModelCatalog.Service, modelCatalog),
               Effect.provideService(Npm.Service, npm),
               Effect.provideService(EventV2.Service, events),
               Effect.provideService(FSUtil.Service, fs),
@@ -111,7 +111,7 @@ const layer = Layer.effectDiscard(
         yield* add(AgentPlugin.Plugin)
         yield* add(CommandPlugin.Plugin)
         yield* add(SkillPlugin.Plugin)
-        yield* add(ModelsDevPlugin)
+        yield* add(ModelCatalogPlugin)
         yield* add(ConfigAgentPlugin.Plugin)
         yield* add(ConfigCommandPlugin.Plugin)
         yield* add(ConfigSkillPlugin.Plugin)
@@ -140,7 +140,7 @@ export const node = makeLocationNode({
     AgentV2.node,
     Config.node,
     Location.node,
-    ModelsDev.node,
+    ModelCatalog.node,
     Npm.node,
     EventV2.node,
     FSUtil.node,

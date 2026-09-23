@@ -1,6 +1,6 @@
-// Shared provider config for tests that need opencode to talk to a fake LLM
-// over a real HTTP endpoint. Registers a single provider `test` with a single
-// model `test-model` (i.e. `--model test/test-model`), pointed at the URL the
+// Shared provider config for tests that need vector to talk to a fake LLM
+// over a real HTTP endpoint. Registers a single provider `lmstudio` with a single
+// model `test-model` (i.e. `--model lmstudio/test-model`), pointed at the URL the
 // caller supplies (typically a TestLLMServer instance).
 //
 // Used by:
@@ -11,9 +11,9 @@ export function testProviderConfig(llmUrl: string) {
     formatter: false,
     lsp: false,
     provider: {
-      test: {
+      lmstudio: {
         name: "Test",
-        id: "test",
+        id: "lmstudio",
         env: [],
         npm: "@ai-sdk/openai-compatible",
         models: {

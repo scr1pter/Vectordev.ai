@@ -192,9 +192,9 @@ export function SettingsSubagentsV2() {
               <div class="settings-v2-row-title">In the terminal</div>
               <div class="settings-v2-row-description">
                 The terminal reads its own config file. To turn subagents off there, set agent.general.disable to true
-                in ~/.config/vector/opencode.json {"(%USERPROFILE%\\.config\\vector\\opencode.json on Windows)"}. It
-                takes effect the next time you start Vector in the terminal. The same setting in a project's
-                opencode.json turns them off for that project everywhere, whatever this switch says.
+                in ~/.config/vector/vector.json {"(%USERPROFILE%\\.config\\vector\\vector.json on Windows)"}. It takes
+                effect the next time you start Vector in the terminal. The same setting in a project's vector.json turns
+                them off for that project everywhere, whatever this switch says.
               </div>
             </div>
           </div>

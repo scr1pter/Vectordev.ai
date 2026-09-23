@@ -30,7 +30,7 @@ Permission prompts are an authorization boundary, not a substitute for operating
 
 ### Shell sandbox
 
-The agent shell sandbox is an opt-in preview and is disabled by default. Set `OPENCODE_SHELL_SANDBOX=1` before launching Vector to enable it on a supported host (`true`, `yes`, and `on` are also accepted). When enabled:
+The agent shell sandbox is an opt-in preview and is disabled by default. Set `VECTOR_SHELL_SANDBOX=1` before launching Vector to enable it on a supported host (`true`, `yes`, and `on` are also accepted). When enabled:
 
 - macOS uses the system seatbelt facility;
 - Linux uses Bubblewrap when `bwrap` is installed; and
@@ -38,7 +38,7 @@ The agent shell sandbox is an opt-in preview and is disabled by default. Set `OP
 
 The sandbox limits writes to the active workspace and selected build caches, and masks common SSH, cloud, browser, keychain, and package-manager credential locations. Shared Git objects, refs, and reflogs remain read-only for linked worktrees, so commands that mutate shared repository state may fail while the preview is enabled. Network access remains available for normal development workflows. The sandbox reduces blast radius but is not a hardened container and should not be treated as protection against a malicious repository, dependency, compiler, kernel exploit, or deliberately adversarial code.
 
-If enabled confinement is unavailable or fails to initialize, Vector reports the reason and requires approval before running the command unconfined. Unset `OPENCODE_SHELL_SANDBOX` (or set it to `0`) to return to the default unsandboxed behavior. For high-risk or untrusted work, run Vector in a dedicated VM or container with separate credentials.
+If enabled confinement is unavailable or fails to initialize, Vector reports the reason and requires approval before running the command unconfined. Unset `VECTOR_SHELL_SANDBOX` (or set it to `0`) to return to the default unsandboxed behavior. For high-risk or untrusted work, run Vector in a dedicated VM or container with separate credentials.
 
 ### Credential storage
 

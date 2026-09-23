@@ -2150,8 +2150,7 @@ html[data-vector-navigation-resizing] * {
    The "Select model" dialog (composer model button, mod+') and the popover
    (Parallel Workspaces) share one row anatomy: a 16px mark gutter, the model
    name, an optional "New", and a quiet right-aligned spec line: the context
-   size, after "Free" or "<Plan> plan" where a section mixes ways of paying
-   ("ChatGPT plan · 400K"). The rest is in the row's tooltip. Theme tokens and
+   size. The rest is in the row's tooltip. Theme tokens and
    hairlines only. One neutral fill marks the keyboard/pointer row, Manage
    models included (data-active); the current model gets a purple check and a
    heavier name, never a fill of its own. */
@@ -3183,12 +3182,8 @@ html[data-vector-glass="false"] [data-vector-help-menu] {
 /* The shell's accessibility preference normally draws a bright outline on
    every focused textarea. This composer already exposes focus on its parent,
    so keep that accessible halo without reintroducing a white inner box. */
-html[data-vector-focus-indicators="true"]
-  [data-vector-agent-launcher]
-  input.vx-launcher__name:focus-visible,
-html[data-vector-focus-indicators="true"]
-  [data-vector-agent-launcher]
-  textarea.vx-launcher__prompt:focus-visible,
+html[data-vector-focus-indicators="true"] [data-vector-agent-launcher] input.vx-launcher__name:focus-visible,
+html[data-vector-focus-indicators="true"] [data-vector-agent-launcher] textarea.vx-launcher__prompt:focus-visible,
 [data-vector-agent-launcher] #vector-agent-launcher-prompt:focus-visible,
 [data-vector-shell] [data-vector-agent-launcher] .vx-launcher__name:focus-visible,
 [data-vector-shell] [data-vector-agent-launcher] .vx-launcher__prompt:focus-visible {

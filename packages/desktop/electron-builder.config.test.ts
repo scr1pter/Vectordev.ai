@@ -13,14 +13,14 @@ const channels = [
 
 for (const channel of channels) {
   test(`uses one Linux desktop identity for ${channel.channel}`, async () => {
-    const previous = process.env.OPENCODE_CHANNEL
-    process.env.OPENCODE_CHANNEL = channel.channel
+    const previous = process.env.VECTOR_CHANNEL
+    process.env.VECTOR_CHANNEL = channel.channel
 
     const module = await import(`./electron-builder.config.ts?channel=${channel.channel}`)
     const config = module.default as Configuration
 
-    if (previous === undefined) delete process.env.OPENCODE_CHANNEL
-    else process.env.OPENCODE_CHANNEL = previous
+    if (previous === undefined) delete process.env.VECTOR_CHANNEL
+    else process.env.VECTOR_CHANNEL = previous
 
     expect(config.appId).toBe(channel.appId)
     expect(config.extraMetadata?.desktopName).toBe(`${channel.appId}.desktop`)
@@ -48,14 +48,14 @@ for (const channel of channels) {
 }
 
 test("ships the branded Vector Linux launcher", async () => {
-  const previous = process.env.OPENCODE_CHANNEL
-  process.env.OPENCODE_CHANNEL = "prod"
+  const previous = process.env.VECTOR_CHANNEL
+  process.env.VECTOR_CHANNEL = "prod"
 
   const module = await import("./electron-builder.config.ts?compat=prod")
   const config = module.default as Configuration
 
-  if (previous === undefined) delete process.env.OPENCODE_CHANNEL
-  else process.env.OPENCODE_CHANNEL = previous
+  if (previous === undefined) delete process.env.VECTOR_CHANNEL
+  else process.env.VECTOR_CHANNEL = previous
 
   expect(config.deb?.fpm?.[0]).toEndWith(`${vectorDesktopEntry}=/usr/share/applications/vector-desktop.desktop`)
   expect(config.rpm?.fpm?.[0]).toEndWith(`${vectorDesktopEntry}=/usr/share/applications/vector-desktop.desktop`)
@@ -70,12 +70,12 @@ test("ships the branded Vector Linux launcher", async () => {
 test("allows only an explicit unsigned production package to skip platform verification", async () => {
   const previous = {
     allowUnsignedRelease: process.env.VECTOR_ALLOW_UNSIGNED_RELEASE,
-    channel: process.env.OPENCODE_CHANNEL,
+    channel: process.env.VECTOR_CHANNEL,
     githubActions: process.env.GITHUB_ACTIONS,
     publisherName: process.env.VECTOR_WINDOWS_PUBLISHER_NAME,
   }
   process.env.VECTOR_ALLOW_UNSIGNED_RELEASE = "true"
-  process.env.OPENCODE_CHANNEL = "prod"
+  process.env.VECTOR_CHANNEL = "prod"
   process.env.GITHUB_ACTIONS = "true"
   delete process.env.VECTOR_WINDOWS_PUBLISHER_NAME
 
@@ -84,8 +84,8 @@ test("allows only an explicit unsigned production package to skip platform verif
 
   if (previous.allowUnsignedRelease === undefined) delete process.env.VECTOR_ALLOW_UNSIGNED_RELEASE
   else process.env.VECTOR_ALLOW_UNSIGNED_RELEASE = previous.allowUnsignedRelease
-  if (previous.channel === undefined) delete process.env.OPENCODE_CHANNEL
-  else process.env.OPENCODE_CHANNEL = previous.channel
+  if (previous.channel === undefined) delete process.env.VECTOR_CHANNEL
+  else process.env.VECTOR_CHANNEL = previous.channel
   if (previous.githubActions === undefined) delete process.env.GITHUB_ACTIONS
   else process.env.GITHUB_ACTIONS = previous.githubActions
   if (previous.publisherName === undefined) delete process.env.VECTOR_WINDOWS_PUBLISHER_NAME

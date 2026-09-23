@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { Schema } from "effect"
 import { ConfigProviderV1 } from "@vectordevai/core/v1/config/provider"
 import { CatalogModelStatus, ModelStatus } from "@/provider/model-status"
-import { ModelsDev } from "@vectordevai/core/models-dev"
+import { ModelCatalog } from "@vectordevai/core/model-catalog"
 import { Provider } from "@/provider/provider"
 
 describe("provider model status schemas", () => {
@@ -15,7 +15,7 @@ describe("provider model status schemas", () => {
   test("accepts active status across public provider schemas", () => {
     expect(Schema.decodeUnknownSync(ConfigProviderV1.Model)({ status: "active" }).status).toBe("active")
     expect(
-      Schema.decodeUnknownSync(ModelsDev.Model)({
+      Schema.decodeUnknownSync(ModelCatalog.Model)({
         id: "test-model",
         name: "Test Model",
         release_date: "2026-01-01",

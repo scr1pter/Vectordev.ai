@@ -15,8 +15,8 @@ const MERGE_BASE = "c".repeat(40)
 
 function script(): string {
   const yaml = buildWorkflowYaml({
-    provider: "opencode",
-    model: "big-pickle",
+    provider: "openai",
+    model: "gpt-4.1",
     keys: [],
     autoReview: true,
     version: "1.17.14",

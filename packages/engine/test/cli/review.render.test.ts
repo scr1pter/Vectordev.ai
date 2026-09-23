@@ -78,7 +78,7 @@ const outcome = (overrides: Partial<ReviewOutcome> = {}): ReviewOutcome => ({
     cacheRead: 0,
     cacheWrite: 0,
     kind: "free",
-    model: "opencode/big-pickle",
+    model: "openai/gpt-4.1",
   },
   durationMs: 112_000,
   base: MERGE_BASE,
@@ -170,7 +170,7 @@ describe("renderLocalReview", () => {
         "Not reviewed: bun.lock (lockfile) · dist/auth.js (build output)",
         "Since last local review (9f8e7d6): 1 fixed · 1 still open",
         "",
-        "opencode/big-pickle · included with Vector · 48.2k in / 3.1k out · 1m 52s · sessions: ses_a1, ses_b2",
+        "openai/gpt-4.1 · included with Vector · 48.2k in / 3.1k out · 1m 52s · sessions: ses_a1, ses_b2",
         "",
       ].join("\n"),
     )
@@ -267,7 +267,9 @@ describe("renderLocalReview", () => {
     expect(text).not.toMatch(/[]/)
     expect(text).toContain("Title ]0;pwned here")
     expect(text).toContain("Elsewhere in this change\n  b[1m.ts:3  Concern  Elsewhere")
-    expect(text).toContain("src/x.ts has a generated-file header that its base does not, so Vectorscope reviewed it anyway.")
+    expect(text).toContain(
+      "src/x.ts has a generated-file header that its base does not, so Vectorscope reviewed it anyway.",
+    )
   })
 
   test("findings hidden by --min-severity say their severity on the compact line", () => {

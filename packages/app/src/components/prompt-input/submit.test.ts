@@ -105,7 +105,7 @@ beforeAll(async () => {
   }))
 
   mock.module("@vectordevai/sdk/v2/client", () => ({
-    createOpencodeClient: (input: { directory: string }) => {
+    createVectorClient: (input: { directory: string }) => {
       createdClients.push(input.directory)
       return clientFor(input.directory)
     },
@@ -553,7 +553,7 @@ describe("follow-up optimistic echo", () => {
         prompt: [{ type: "text", content: text, start: 0, end: text.length }, pasted],
         context: [],
         agent: "build",
-        model: { providerID: "opencode", modelID: "big-pickle" },
+        model: { providerID: "anthropic", modelID: "claude-sonnet-4-5" },
         ...draft,
       },
     })

@@ -1,4 +1,4 @@
-import { providerAllowed, providerEndpointAllowed, providerCredentialAllowed } from "@vectordevai/core/provider-policy"
+import { providerAllowed, providerCredentialAllowed } from "@vectordevai/core/provider-policy"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import os from "os"
 import { ConfigV1 } from "@vectordevai/core/v1/config/config"
@@ -11,7 +11,7 @@ import { Hash } from "@vectordevai/core/util/hash"
 import { Plugin } from "../plugin"
 import { serviceUse } from "@vectordevai/core/effect/service-use"
 import { type LanguageModelV3 } from "@ai-sdk/provider"
-import { ModelsDev } from "@vectordevai/core/models-dev"
+import { ModelCatalog } from "@vectordevai/core/model-catalog"
 import { OAUTH_DUMMY_KEY } from "@/auth"
 import { Auth } from "../auth"
 import { Env } from "../env"
@@ -1165,11 +1165,11 @@ interface State {
   varsLoaders: Record<string, CustomVarsLoader>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@opencode/Provider") {}
+export class Service extends Context.Service<Service, Interface>()("@vector/Provider") {}
 
 export const use = serviceUse(Service)
 
-function cost(c: ModelsDev.Model["cost"]): Model["cost"] {
+function cost(c: ModelCatalog.Model["cost"]): Model["cost"] {
   const result: Model["cost"] = {
     input: c?.input ?? 0,
     output: c?.output ?? 0,
@@ -1202,7 +1202,7 @@ function cost(c: ModelsDev.Model["cost"]): Model["cost"] {
   return result
 }
 
-function fromModelsDevModel(provider: ModelsDev.Provider, model: ModelsDev.Model): Model {
+function fromModelCatalogModel(provider: ModelCatalog.Provider, model: ModelCatalog.Model): Model {
   const base: Model = {
     id: ModelV2.ID.make(model.id),
     providerID: ProviderV2.ID.make(provider.id),
@@ -1253,13 +1253,13 @@ function fromModelsDevModel(provider: ModelsDev.Provider, model: ModelsDev.Model
   }
 }
 
-export function fromModelsDevProvider(provider: ModelsDev.Provider): Info {
+export function fromModelCatalogProvider(provider: ModelCatalog.Provider): Info {
   const models: Record<string, Model> = {}
   for (const [key, model] of Object.entries(provider.models)) {
-    models[key] = fromModelsDevModel(provider, model)
+    models[key] = fromModelCatalogModel(provider, model)
     for (const [mode, opts] of Object.entries(model.experimental?.modes ?? {})) {
       const id = `${model.id}-${mode}`
-      const base = fromModelsDevModel(provider, model)
+      const base = fromModelCatalogModel(provider, model)
       models[id] = {
         ...base,
         id: ModelV2.ID.make(id),
@@ -1319,17 +1319,17 @@ const layer = Layer.effect(
     const auth = yield* Auth.Service
     const env = yield* Env.Service
     const plugin = yield* Plugin.Service
-    const modelsDevSvc = yield* ModelsDev.Service
+    const modelCatalogSvc = yield* ModelCatalog.Service
     const runtimeFlags = yield* RuntimeFlags.Service
 
     const state = yield* InstanceState.make<State>(() =>
       Effect.gen(function* () {
         const bridge = yield* EffectBridge.make()
         const cfg = yield* config.get()
-        const modelsDev = Object.fromEntries(
-          Object.entries(yield* modelsDevSvc.get()).filter(([id]) => providerAllowed(id)),
+        const modelCatalog = Object.fromEntries(
+          Object.entries(yield* modelCatalogSvc.get()).filter(([id]) => providerAllowed(id)),
         )
-        const catalog = mapValues(modelsDev, fromModelsDevProvider)
+        const catalog = mapValues(modelCatalog, fromModelCatalogProvider)
         const database = mapValues(catalog, toPublicInfo)
 
         const providers: Record<ProviderV2.ID, Info> = {} as Record<ProviderV2.ID, Info>
@@ -1373,12 +1373,7 @@ const layer = Layer.effect(
         const plugins = yield* plugin.list()
 
         // now read config providers - includes any modifications from plugin config() hook
-        const configProviders = Object.entries(cfg.provider ?? {}).filter(
-          ([id, provider]) =>
-            providerAllowed(id) &&
-            providerEndpointAllowed(provider.api) &&
-            providerEndpointAllowed(provider.options?.baseURL),
-        )
+        const configProviders = Object.entries(cfg.provider ?? {}).filter(([id]) => providerAllowed(id))
         const disabled = new Set(cfg.disabled_providers ?? [])
         const enabled = cfg.enabled_providers ? new Set(cfg.enabled_providers) : null
 
@@ -1437,7 +1432,7 @@ const layer = Layer.effect(
               model.provider?.npm ??
               provider.npm ??
               existingModel?.api.npm ??
-              modelsDev[providerID]?.npm ??
+              modelCatalog[providerID]?.npm ??
               "@ai-sdk/openai-compatible"
             const name = iife(() => {
               if (model.name) return model.name
@@ -1449,7 +1444,8 @@ const layer = Layer.effect(
               api: {
                 id: apiID,
                 npm: apiNpm,
-                url: model.provider?.api ?? provider?.api ?? existingModel?.api.url ?? modelsDev[providerID]?.api ?? "",
+                url:
+                  model.provider?.api ?? provider?.api ?? existingModel?.api.url ?? modelCatalog[providerID]?.api ?? "",
               },
               status: model.status ?? existingModel?.status ?? "active",
               name,
@@ -1623,7 +1619,6 @@ const layer = Layer.effect(
               (providerID === ProviderV2.ID.openrouter && modelID === "openai/gpt-5-chat")
             )
               delete provider.models[modelID]
-            if (!providerEndpointAllowed(model.api.url)) delete provider.models[modelID]
             // Every catalogue model is listed, alpha and beta included; only retired ones go.
             if (model.status === "deprecated") delete provider.models[modelID]
             if (
@@ -1711,7 +1706,6 @@ const layer = Layer.effect(
           return url
         })
 
-        if (!providerEndpointAllowed(baseURL)) throw new Error("This hosted provider is unavailable in Vector")
         if (baseURL !== undefined) options["baseURL"] = baseURL
         if (options["apiKey"] === undefined && provider.key) options["apiKey"] = provider.key
         if (model.headers)
@@ -1737,8 +1731,6 @@ const layer = Layer.effect(
         delete options["headerTimeout"]
 
         options["fetch"] = async (input: any, init?: BunFetchRequestInit) => {
-          if (!providerEndpointAllowed(input instanceof Request ? input.url : String(input)))
-            throw new Error("This hosted provider is unavailable in Vector")
           const fetchFn = customFetch ?? fetch
           const opts = init ?? {}
           const chunkAbortCtl = typeof chunkTimeout === "number" && chunkTimeout > 0 ? new AbortController() : undefined
@@ -1977,7 +1969,7 @@ const layer = Layer.effect(
   }),
 )
 
-const priority = ["gpt-5", "claude-sonnet-4", "big-pickle", "gemini-3-pro"]
+const priority = ["gpt-5", "claude-sonnet-4", "gemini-3-pro"]
 const smallModelFamilyPriority = ["gemini-flash", "gpt-nano", "claude-haiku"]
 export function sort<T extends { id: string }>(models: T[]) {
   return sortBy(
@@ -1999,7 +1991,7 @@ export function parseModel(model: string) {
 export const node = LayerNode.make({
   service: Service,
   layer: layer,
-  deps: [FSUtil.node, Config.node, Auth.node, Env.node, Plugin.node, ModelsDev.node, RuntimeFlags.node],
+  deps: [FSUtil.node, Config.node, Auth.node, Env.node, Plugin.node, ModelCatalog.node, RuntimeFlags.node],
 })
 
 export * as Provider from "./provider"

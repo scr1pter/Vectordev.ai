@@ -87,11 +87,11 @@ for (const item of targets) {
       windows: {},
     },
     define: {
-      OPENCODE_VERSION: `'${Script.version}'`,
-      OPENCODE_CLI_NAME: `'${binary}'`,
-      OPENCODE_MODELS_DEV: modelsData,
-      OPENCODE_CHANNEL: `'${Script.channel}'`,
-      OPENCODE_LIBC: item.os === "linux" ? `'${item.abi ?? "glibc"}'` : "undefined",
+      VECTOR_VERSION: `'${Script.version}'`,
+      VECTOR_CLI_NAME: `'${binary}'`,
+      VECTOR_MODEL_CATALOG: modelsData,
+      VECTOR_CHANNEL: `'${Script.channel}'`,
+      VECTOR_LIBC: item.os === "linux" ? `'${item.abi ?? "glibc"}'` : "undefined",
       // FFF_LIBC selects the fff native lib variant: "musl" or "gnu".
       FFF_LIBC: item.os === "linux" ? `'${item.abi ?? "gnu"}'` : "undefined",
       OTUI_TREE_SITTER_WORKER_PATH:
@@ -114,7 +114,7 @@ for (const item of targets) {
         name: `@vectordevai/${name}`,
         version: Script.version,
         license: "MIT",
-        repository: { type: "git", url: "git+https://github.com/anomalyco/opencode.git" },
+        repository: { type: "git", url: "git+https://github.com/scr1pter/Vectordev.ai.git" },
         os: [item.os],
         cpu: [item.arch],
       },

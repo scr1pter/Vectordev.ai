@@ -14,7 +14,7 @@ import { SessionStatus } from "../../src/session/status"
 import { testEffect } from "../lib/effect"
 import { ProviderV2 } from "@vectordevai/core/provider"
 
-const providerID = ProviderV2.ID.make("test")
+const providerID = ProviderV2.ID.make("lmstudio")
 const retryProvider = "test"
 const it = testEffect(LayerNode.compile(LayerNode.group([SessionStatus.node, CrossSpawnSpawner.node])))
 
@@ -254,96 +254,21 @@ describe("session.retry.retryable", () => {
     expect(retryable).toEqual({ message: "Response decompression failed" })
   })
 
-  test("maps free limits to Go upsell action", () => {
+  test("preserves provider quota messages without adding subscription actions", () => {
     const error = Schema.decodeUnknownSync(SessionV1.APIError.Schema)(
       new SessionV1.APIError({
-        message: "Free usage exceeded",
+        message: "Provider quota exceeded",
         isRetryable: true,
         statusCode: 429,
+        responseHeaders: { "retry-after": "900" },
         responseBody: JSON.stringify({
           type: "error",
-          error: { type: "FreeUsageLimitError", message: "Free usage exceeded" },
+          error: { type: "ProviderQuotaExceededError", message: "Provider quota exceeded" },
         }),
       }).toObject(),
     )
 
-    expect(SessionRetry.retryable(error, "opencode")).toEqual({
-      message: SessionRetry.GO_UPSELL_MESSAGE,
-      action: {
-        reason: "free_tier_limit",
-        provider: "opencode",
-        title: "Included model limit reached",
-        message:
-          "This model included with Vector is temporarily out of quota. Choose another included model, connect your own provider key, or try again later.",
-        label: "choose model",
-        link: SessionRetry.GO_UPSELL_URL,
-      },
-    })
-  })
-
-  test("maps Go subscription limits to workspace PAYG upsell", () => {
-    const error = Schema.decodeUnknownSync(SessionV1.APIError.Schema)(
-      new SessionV1.APIError({
-        message: "Subscription quota exceeded. You can continue using free models.",
-        isRetryable: true,
-        statusCode: 429,
-        responseHeaders: {
-          "retry-after": "19380",
-        },
-        responseBody: JSON.stringify({
-          type: "error",
-          error: {
-            type: "GoUsageLimitError",
-            message: "Subscription quota exceeded. You can continue using free models.",
-          },
-          metadata: {
-            workspace: "wrk_01K6XGM22R6FM8JVABE9XDQXGH",
-            limitName: "5 hour",
-          },
-        }),
-      }).toObject(),
-    )
-
-    expect(SessionRetry.retryable(error, "opencode-go")).toEqual({
-      message:
-        "5 hour usage limit reached. It will reset in 5 hours 23 minutes. To continue using this model now, enable usage from your available balance - https://vectordev.ai",
-      action: {
-        reason: "account_rate_limit",
-        provider: "opencode-go",
-        title: "Vector model limit reached",
-        message:
-          "5 hour usage limit reached. It will reset in 5 hours 23 minutes. To continue using this model now, enable usage from your available balance",
-        label: "choose model",
-        link: "https://vectordev.ai",
-      },
-    })
-  })
-
-  test("maps Go subscription limits without limit metadata", () => {
-    const error = Schema.decodeUnknownSync(SessionV1.APIError.Schema)(
-      new SessionV1.APIError({
-        message: "Subscription quota exceeded. You can continue using free models.",
-        isRetryable: true,
-        statusCode: 429,
-        responseHeaders: {
-          "retry-after": "900",
-        },
-        responseBody: JSON.stringify({
-          type: "error",
-          error: {
-            type: "GoUsageLimitError",
-            message: "Subscription quota exceeded. You can continue using free models.",
-          },
-          metadata: {
-            workspace: "wrk_01K6XGM22R6FM8JVABE9XDQXGH",
-          },
-        }),
-      }).toObject(),
-    )
-
-    expect(SessionRetry.retryable(error, "opencode-go")?.action?.message).toBe(
-      "Usage limit reached. It will reset in 15 minutes. To continue using this model now, enable usage from your available balance",
-    )
+    expect(SessionRetry.retryable(error, "openai")).toEqual({ message: "Provider quota exceeded" })
   })
 })
 

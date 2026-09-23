@@ -2,10 +2,10 @@ import type { ModelMessage, ToolResultPart } from "ai"
 import { mergeDeep, unique } from "remeda"
 import type { JSONSchema7 } from "@ai-sdk/provider"
 import type * as Provider from "./provider"
-import type * as ModelsDev from "@vectordevai/core/models-dev"
+import type { ModelCatalog } from "@vectordevai/core/model-catalog"
 import { iife } from "@/util/iife"
 
-type Modality = NonNullable<ModelsDev.Model["modalities"]>["input"][number]
+type Modality = NonNullable<ModelCatalog.Model["modalities"]>["input"][number]
 
 function mimeToModality(mime: string): Modality | undefined {
   if (mime.startsWith("image/")) return "image"
@@ -716,8 +716,7 @@ export function variants(model: Provider.Model): Record<string, Record<string, a
     (id.includes("glm") && !glm52) ||
     id.includes("kimi") ||
     id.includes("k2p") ||
-    id.includes("qwen") ||
-    id.includes("big-pickle")
+    id.includes("qwen")
   )
     return {}
 
@@ -1110,10 +1109,7 @@ export function options(input: {
     }
   }
 
-  if (
-    input.model.providerID === "baseten" ||
-    (input.model.providerID === "opencode" && ["kimi-k2-thinking", "glm-4.6"].includes(input.model.api.id))
-  ) {
+  if (input.model.providerID === "baseten") {
     result["chat_template_args"] = { enable_thinking: true }
   }
 
@@ -1204,12 +1200,6 @@ export function options(input: {
       input.model.providerID !== "azure"
     ) {
       result["textVerbosity"] = "low"
-    }
-
-    if (input.model.providerID.startsWith("opencode")) {
-      result["promptCacheKey"] = input.sessionID
-      result["include"] = INCLUDE_ENCRYPTED_REASONING
-      result["reasoningSummary"] = "auto"
     }
   }
 
@@ -1437,7 +1427,7 @@ export function schema(model: Provider.Model, schema: JSONSchema7): JSONSchema7 
 
   if (model.api.npm === "@ai-sdk/openai" || model.api.npm === "@ai-sdk/azure") {
     schema = sanitizeOpenAISchema(schema) as JSONSchema7
-    // Codex also applies lossy compaction above 4 KB; defer that until OpenCode needs the same schema budget.
+    // Codex also applies lossy compaction above 4 KB; defer that until Vector needs the same schema budget.
   }
 
   if (model.providerID === "moonshotai" || model.api.id.toLowerCase().includes("kimi")) {

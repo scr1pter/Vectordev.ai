@@ -11,10 +11,11 @@ export const prerender = true
           </p>
           <p class="doc-cmd"><code>vector plugin @acme/vector-plugin -g</code><button class="doc-cmd-copy" type="button" aria-label="Copy this command">Copy</button></p>
           <p>
-            New configuration uses <code>vector.json</code> or <code>vector.jsonc</code> and the <code>.vector/</code>
-            directory. Existing <code>opencode.json</code>, <code>opencode.jsonc</code> and <code>.opencode/</code>
-            files remain readable; Vector names take precedence. Plugins can keep importing the public
-            <code>@vectordevai/plugin</code> and <code>@vectordevai/sdk</code> packages for compatibility.
+            In the upcoming release, configuration uses Vector names only: <code>vector.json</code>,
+            <code>vector.jsonc</code>, <code>.vector/</code>, and <code>VECTOR_*</code> variables. Rename your
+            configuration before upgrading. Plugins import <code>@vectordevai/plugin</code>, including its
+            <code>/tui</code> export. Existing plugins must update their imports. The package will be published
+            before the CLI release that installs it.
           </p>
           <p class="note">
             <code>--pure</code> on any command runs without external plugins. It is the first thing to try when you suspect one of breaking a run.

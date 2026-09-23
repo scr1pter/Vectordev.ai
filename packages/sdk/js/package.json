@@ -6,8 +6,9 @@
   "license": "MIT",
   "scripts": {
     "test": "bun test",
-    "typecheck": "tsgo --noEmit",
-    "build": "bun ./script/build.ts"
+    "typecheck": "tsgo --noEmit && tsgo --noEmit -p test/tsconfig.json",
+    "build": "bun ./script/build.ts",
+    "emit": "tsc --build --force"
   },
   "exports": {
     ".": "./src/index.ts",

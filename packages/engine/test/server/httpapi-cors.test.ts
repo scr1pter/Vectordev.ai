@@ -13,13 +13,13 @@ import { testEffect } from "../lib/effect"
 const testStateLayer = Layer.effectDiscard(
   Effect.gen(function* () {
     const original = {
-      OPENCODE_SERVER_PASSWORD: Flag.OPENCODE_SERVER_PASSWORD,
+      VECTOR_SERVER_PASSWORD: Flag.VECTOR_SERVER_PASSWORD,
     }
-    Flag.OPENCODE_SERVER_PASSWORD = "secret"
+    Flag.VECTOR_SERVER_PASSWORD = "secret"
     yield* Effect.promise(() => resetDatabase())
     yield* Effect.addFinalizer(() =>
       Effect.promise(async () => {
-        Flag.OPENCODE_SERVER_PASSWORD = original.OPENCODE_SERVER_PASSWORD
+        Flag.VECTOR_SERVER_PASSWORD = original.VECTOR_SERVER_PASSWORD
         await resetDatabase()
       }),
     )
@@ -64,14 +64,14 @@ describe("HttpApi CORS", () => {
     Effect.gen(function* () {
       const handler = HttpRouter.toWebHandler(
         HttpApiApp.createRoutes().pipe(
-          Layer.provide(ConfigProvider.layer(ConfigProvider.fromUnknown({ OPENCODE_SERVER_PASSWORD: "secret" }))),
+          Layer.provide(ConfigProvider.layer(ConfigProvider.fromUnknown({ VECTOR_SERVER_PASSWORD: "secret" }))),
         ),
         { disableLogger: true },
       ).handler
       const response = yield* Effect.promise(() =>
         handler(
           new Request(new URL("/global/config", "http://localhost"), {
-            headers: { origin: "https://app.opencode.ai" },
+            headers: { origin: "https://app.untrusted.example.net" },
           }),
           HttpApiApp.context,
         ),
@@ -85,10 +85,10 @@ describe("HttpApi CORS", () => {
   it.live("rejects every upstream subdomain from the default CORS allowlist", () =>
     Effect.gen(function* () {
       for (const origin of [
-        "https://opencode.ai",
-        "https://app.opencode.ai",
-        "https://console.opencode.ai",
-        "https://nested.app.opencode.ai",
+        "https://untrusted.example.net",
+        "https://app.untrusted.example.net",
+        "https://console.untrusted.example.net",
+        "https://nested.app.untrusted.example.net",
       ]) {
         const response = yield* HttpClientRequest.options(InstancePaths.path).pipe(
           HttpClientRequest.setHeaders({ origin, "access-control-request-method": "GET" }),

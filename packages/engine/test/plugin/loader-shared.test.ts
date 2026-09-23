@@ -37,7 +37,7 @@ function withTmp<T, A, E, R>(
 }
 
 function load(dir: string, flags?: Parameters<typeof RuntimeFlags.layer>[0]) {
-  const source = path.join(dir, "opencode.json")
+  const source = path.join(dir, "vector.json")
   return Effect.gen(function* () {
     const config = yield* Effect.promise(
       () => Bun.file(source).json() as Promise<{ plugin?: Array<string | [string, Record<string, unknown>]> }>,
@@ -85,10 +85,7 @@ describe("plugin.loader.shared", () => {
           ].join("\n"),
         )
 
-        await Bun.write(
-          path.join(dir, "opencode.json"),
-          JSON.stringify({ plugin: [pathToFileURL(file).href] }, null, 2),
-        )
+        await Bun.write(path.join(dir, "vector.json"), JSON.stringify({ plugin: [pathToFileURL(file).href] }, null, 2))
 
         return { mark }
       },
@@ -120,10 +117,7 @@ describe("plugin.loader.shared", () => {
           ].join("\n"),
         )
 
-        await Bun.write(
-          path.join(dir, "opencode.json"),
-          JSON.stringify({ plugin: [pathToFileURL(file).href] }, null, 2),
-        )
+        await Bun.write(path.join(dir, "vector.json"), JSON.stringify({ plugin: [pathToFileURL(file).href] }, null, 2))
 
         return { mark }
       },
@@ -158,10 +152,7 @@ describe("plugin.loader.shared", () => {
           ].join("\n"),
         )
 
-        await Bun.write(
-          path.join(dir, "opencode.json"),
-          JSON.stringify({ plugin: [pathToFileURL(file).href] }, null, 2),
-        )
+        await Bun.write(path.join(dir, "vector.json"), JSON.stringify({ plugin: [pathToFileURL(file).href] }, null, 2))
 
         return { mark }
       },
@@ -191,10 +182,7 @@ describe("plugin.loader.shared", () => {
           ].join("\n"),
         )
 
-        await Bun.write(
-          path.join(dir, "opencode.json"),
-          JSON.stringify({ plugin: [pathToFileURL(file).href] }, null, 2),
-        )
+        await Bun.write(path.join(dir, "vector.json"), JSON.stringify({ plugin: [pathToFileURL(file).href] }, null, 2))
 
         return { mark }
       },
@@ -233,10 +221,7 @@ describe("plugin.loader.shared", () => {
           ].join("\n"),
         )
 
-        await Bun.write(
-          path.join(dir, "opencode.json"),
-          JSON.stringify({ plugin: [pathToFileURL(file).href] }, null, 2),
-        )
+        await Bun.write(path.join(dir, "vector.json"), JSON.stringify({ plugin: [pathToFileURL(file).href] }, null, 2))
 
         return { mark }
       },
@@ -274,7 +259,7 @@ describe("plugin.loader.shared", () => {
         await Bun.write(path.join(scope, "index.js"), "export default { server: async () => ({}) }\n")
 
         await Bun.write(
-          path.join(dir, "opencode.json"),
+          path.join(dir, "vector.json"),
           JSON.stringify({ plugin: ["acme-plugin", "scope-plugin@2.3.4"] }, null, 2),
         )
 
@@ -338,7 +323,7 @@ describe("plugin.loader.shared", () => {
         )
         await Bun.write(path.join(mod, "tui.js"), "export default {}\n")
 
-        await Bun.write(path.join(dir, "opencode.json"), JSON.stringify({ plugin: ["acme-plugin@1.0.0"] }, null, 2))
+        await Bun.write(path.join(dir, "vector.json"), JSON.stringify({ plugin: ["acme-plugin@1.0.0"] }, null, 2))
 
         return {
           mod,
@@ -397,7 +382,7 @@ describe("plugin.loader.shared", () => {
           ].join("\n"),
         )
 
-        await Bun.write(path.join(dir, "opencode.json"), JSON.stringify({ plugin: ["acme-plugin@1.0.0"] }, null, 2))
+        await Bun.write(path.join(dir, "vector.json"), JSON.stringify({ plugin: ["acme-plugin@1.0.0"] }, null, 2))
 
         return {
           mod,
@@ -451,7 +436,7 @@ describe("plugin.loader.shared", () => {
           ].join("\n"),
         )
 
-        await Bun.write(path.join(dir, "opencode.json"), JSON.stringify({ plugin: ["acme-plugin@1.0.0"] }, null, 2))
+        await Bun.write(path.join(dir, "vector.json"), JSON.stringify({ plugin: ["acme-plugin@1.0.0"] }, null, 2))
 
         return {
           mod,
@@ -501,7 +486,7 @@ describe("plugin.loader.shared", () => {
           ].join("\n"),
         )
 
-        await Bun.write(path.join(dir, "opencode.json"), JSON.stringify({ plugin: ["acme-plugin@1.0.0"] }, null, 2))
+        await Bun.write(path.join(dir, "vector.json"), JSON.stringify({ plugin: ["acme-plugin@1.0.0"] }, null, 2))
 
         return { mod, mark }
       },
@@ -565,7 +550,7 @@ describe("plugin.loader.shared", () => {
         )
         await fs.symlink(outside, path.join(mod, "escape"), process.platform === "win32" ? "junction" : "dir")
 
-        await Bun.write(path.join(dir, "opencode.json"), JSON.stringify({ plugin: ["acme-plugin"] }, null, 2))
+        await Bun.write(path.join(dir, "vector.json"), JSON.stringify({ plugin: ["acme-plugin"] }, null, 2))
 
         return {
           mod,
@@ -596,10 +581,10 @@ describe("plugin.loader.shared", () => {
     withTmp(
       async (dir) => {
         await Bun.write(
-          path.join(dir, "opencode.json"),
+          path.join(dir, "vector.json"),
           JSON.stringify(
             {
-              plugin: ["opencode-openai-codex-auth@1.0.0", "opencode-copilot-auth@1.0.0", "regular-plugin@1.0.0"],
+              plugin: ["vector-openai-codex-auth@1.0.0", "vector-copilot-auth@1.0.0", "regular-plugin@1.0.0"],
             },
             null,
             2,
@@ -615,8 +600,8 @@ describe("plugin.loader.shared", () => {
 
             const pkgs = install.mock.calls.map((call) => call[0])
             expect(pkgs).toContain("regular-plugin@1.0.0")
-            expect(pkgs).not.toContain("opencode-openai-codex-auth@1.0.0")
-            expect(pkgs).not.toContain("opencode-copilot-auth@1.0.0")
+            expect(pkgs).not.toContain("vector-openai-codex-auth@1.0.0")
+            expect(pkgs).not.toContain("vector-copilot-auth@1.0.0")
           } finally {
             install.mockRestore()
           }
@@ -643,7 +628,7 @@ describe("plugin.loader.shared", () => {
           ].join("\n"),
         )
         await Bun.write(
-          path.join(dir, "opencode.json"),
+          path.join(dir, "vector.json"),
           JSON.stringify({ plugin: ["broken-plugin@9.9.9", pathToFileURL(ok).href] }, null, 2),
         )
         return { mark }
@@ -695,7 +680,7 @@ describe("plugin.loader.shared", () => {
           ].join("\n"),
         )
 
-        await Bun.write(path.join(dir, "opencode.json"), JSON.stringify({ plugin: [file, ok] }, null, 2))
+        await Bun.write(path.join(dir, "vector.json"), JSON.stringify({ plugin: [file, ok] }, null, 2))
 
         return { mark }
       },
@@ -731,7 +716,7 @@ describe("plugin.loader.shared", () => {
           ].join("\n"),
         )
 
-        await Bun.write(path.join(dir, "opencode.json"), JSON.stringify({ plugin: [file, ok] }, null, 2))
+        await Bun.write(path.join(dir, "vector.json"), JSON.stringify({ plugin: [file, ok] }, null, 2))
 
         return { mark }
       },
@@ -762,7 +747,7 @@ describe("plugin.loader.shared", () => {
             "",
           ].join("\n"),
         )
-        await Bun.write(path.join(dir, "opencode.json"), JSON.stringify({ plugin: [missing, ok] }, null, 2))
+        await Bun.write(path.join(dir, "vector.json"), JSON.stringify({ plugin: [missing, ok] }, null, 2))
 
         return { mark }
       },
@@ -794,10 +779,7 @@ describe("plugin.loader.shared", () => {
           ].join("\n"),
         )
 
-        await Bun.write(
-          path.join(dir, "opencode.json"),
-          JSON.stringify({ plugin: [pathToFileURL(file).href] }, null, 2),
-        )
+        await Bun.write(path.join(dir, "vector.json"), JSON.stringify({ plugin: [pathToFileURL(file).href] }, null, 2))
 
         return { mark }
       },
@@ -830,7 +812,7 @@ describe("plugin.loader.shared", () => {
         )
 
         await Bun.write(
-          path.join(dir, "opencode.json"),
+          path.join(dir, "vector.json"),
           JSON.stringify({ plugin: [[pathToFileURL(file).href, { source: "tuple", enabled: true }]] }, null, 2),
         )
 
@@ -887,7 +869,7 @@ export default {
 `,
         )
 
-        await Bun.write(path.join(dir, "opencode.json"), JSON.stringify({ plugin: [aSpec, bSpec] }, null, 2))
+        await Bun.write(path.join(dir, "vector.json"), JSON.stringify({ plugin: [aSpec, bSpec] }, null, 2))
 
         return { marker }
       },
@@ -919,10 +901,7 @@ export default {
           ].join("\n"),
         )
 
-        await Bun.write(
-          path.join(dir, "opencode.json"),
-          JSON.stringify({ plugin: [pathToFileURL(file).href] }, null, 2),
-        )
+        await Bun.write(path.join(dir, "vector.json"), JSON.stringify({ plugin: [pathToFileURL(file).href] }, null, 2))
 
         return { mark }
       },
@@ -940,7 +919,7 @@ export default {
     ),
   )
 
-  it.live("reads oc-themes from package manifest", () =>
+  it.live("reads vector-themes from package manifest", () =>
     withTmp(
       async (dir) => {
         const mod = path.join(dir, "mod")
@@ -951,7 +930,7 @@ export default {
             {
               name: "acme-plugin",
               version: "1.0.0",
-              "oc-themes": ["themes/one.json", "./themes/one.json", "themes/two.json"],
+              "vector-themes": ["themes/one.json", "./themes/one.json", "themes/two.json"],
             },
             null,
             2,
@@ -990,7 +969,7 @@ export default {
             {
               name: "acme-plugin",
               version: "1.0.0",
-              "oc-themes": ["themes/night.json"],
+              "vector-themes": ["themes/night.json"],
             },
             null,
             2,
@@ -1062,7 +1041,7 @@ export default {
               exports: {
                 "./tui": "./tui.js",
               },
-              "oc-themes": ["themes/night.json"],
+              "vector-themes": ["themes/night.json"],
             },
             null,
             2,
@@ -1110,13 +1089,13 @@ export default {
     ),
   )
 
-  it.live("rejects oc-themes path traversal", () =>
+  it.live("rejects vector-themes path traversal", () =>
     withTmp(
       async (dir) => {
         const mod = path.join(dir, "mod")
         await fs.mkdir(mod, { recursive: true })
         const file = path.join(mod, "package.json")
-        await Bun.write(file, JSON.stringify({ name: "acme", "oc-themes": ["../escape.json"] }, null, 2))
+        await Bun.write(file, JSON.stringify({ name: "acme", "vector-themes": ["../escape.json"] }, null, 2))
         return { mod, file }
       },
       (tmp) =>

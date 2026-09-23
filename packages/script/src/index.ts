@@ -18,21 +18,21 @@ if (!semver.satisfies(process.versions.bun, expectedBunVersionRange)) {
 }
 
 const env = {
-  OPENCODE_CHANNEL: process.env.VECTOR_CHANNEL ?? process.env.OPENCODE_CHANNEL,
-  OPENCODE_BUMP: process.env.VECTOR_BUMP ?? process.env.OPENCODE_BUMP,
-  OPENCODE_VERSION: process.env.VECTOR_VERSION ?? process.env.OPENCODE_VERSION,
-  OPENCODE_RELEASE: process.env.VECTOR_RELEASE ?? process.env.OPENCODE_RELEASE,
+  VECTOR_CHANNEL: process.env.VECTOR_CHANNEL,
+  VECTOR_BUMP: process.env.VECTOR_BUMP,
+  VECTOR_VERSION: process.env.VECTOR_VERSION,
+  VECTOR_RELEASE: process.env.VECTOR_RELEASE,
 }
 const CHANNEL = await (async () => {
-  if (env.OPENCODE_CHANNEL) return env.OPENCODE_CHANNEL
-  if (env.OPENCODE_BUMP) return "latest"
-  if (env.OPENCODE_VERSION && !env.OPENCODE_VERSION.startsWith("0.0.0-")) return "latest"
+  if (env.VECTOR_CHANNEL) return env.VECTOR_CHANNEL
+  if (env.VECTOR_BUMP) return "latest"
+  if (env.VECTOR_VERSION && !env.VECTOR_VERSION.startsWith("0.0.0-")) return "latest"
   return await $`git branch --show-current`.text().then((x) => x.trim())
 })()
 const IS_PREVIEW = CHANNEL !== "latest"
 
 const VERSION = await (async () => {
-  if (env.OPENCODE_VERSION) return env.OPENCODE_VERSION
+  if (env.VECTOR_VERSION) return env.VECTOR_VERSION
   if (IS_PREVIEW) return `0.0.0-${CHANNEL}-${new Date().toISOString().slice(0, 16).replace(/[-:T]/g, "")}`
   const version = await fetch("https://registry.npmjs.org/@vectordevai/cli/latest")
     .then((res) => {
@@ -41,13 +41,13 @@ const VERSION = await (async () => {
     })
     .then((data: any) => data.version)
   const [major, minor, patch] = version.split(".").map((x: string) => Number(x) || 0)
-  const t = env.OPENCODE_BUMP?.toLowerCase()
+  const t = env.VECTOR_BUMP?.toLowerCase()
   if (t === "major") return `${major + 1}.0.0`
   if (t === "minor") return `${major}.${minor + 1}.0`
   return `${major}.${minor}.${patch + 1}`
 })()
 
-const team = ["actions-user", "opencode", "opencode-agent[bot]"]
+const team = ["scr1pter", "actions-user", "github-actions[bot]"]
 
 export const Script = {
   get channel() {
@@ -60,7 +60,7 @@ export const Script = {
     return IS_PREVIEW
   },
   get release(): boolean {
-    return !!env.OPENCODE_RELEASE
+    return !!env.VECTOR_RELEASE
   },
   get team() {
     return team

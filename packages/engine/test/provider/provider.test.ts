@@ -4,7 +4,7 @@ import path from "path"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { AppNodeBuilder } from "@vectordevai/core/effect/app-node-builder"
 import { Effect, Layer } from "effect"
-import { ModelsDev } from "@vectordevai/core/models-dev"
+import { ModelCatalog } from "@vectordevai/core/model-catalog"
 import { FSUtil } from "@vectordevai/core/fs-util"
 import { CrossSpawnSpawner } from "@vectordevai/core/cross-spawn-spawner"
 import { Global } from "@vectordevai/core/global"
@@ -68,22 +68,13 @@ const providerLayer = (flags: Partial<RuntimeFlags.Info> = {}) =>
       Config.node,
       Auth.node,
       Plugin.node,
-      ModelsDev.node,
+      ModelCatalog.node,
       RuntimeFlags.node,
     ]),
     [[RuntimeFlags.node, RuntimeFlags.layer(flags)]],
   )
 
 const list = Provider.use.list()
-
-// Vector no longer serves OpenCode Zen's keyless gateway, so with no key of the
-// user's own the provider is absent entirely rather than present with only its
-// zero-cost models. `paid` therefore reports undefined for that case.
-const paid = (providers: Record<string, { models: Record<string, { cost: { input: number } }> }>) => {
-  const item = providers[ProviderV2.ID.make("opencode")]
-  if (!item) return undefined
-  return Object.values(item.models).filter((model) => model.cost.input > 0).length
-}
 
 const languageBaseURL = (language: unknown) => (language as { config: { baseURL: string } }).config.baseURL
 
@@ -92,7 +83,7 @@ const experimentalModels = testEffect(providerLayer({ enableExperimentalModels: 
 
 const alphaProviderConfig = {
   provider: {
-    "custom-provider": {
+    lmstudio: {
       name: "Custom Provider",
       npm: "@ai-sdk/openai-compatible",
       api: "https://api.custom.com/v1",
@@ -202,14 +193,14 @@ it.instance(
   "custom provider with npm package",
   Effect.gen(function* () {
     const providers = yield* list
-    expect(providers[ProviderV2.ID.make("custom-provider")]).toBeDefined()
-    expect(providers[ProviderV2.ID.make("custom-provider")].name).toBe("Custom Provider")
-    expect(providers[ProviderV2.ID.make("custom-provider")].models["custom-model"]).toBeDefined()
+    expect(providers[ProviderV2.ID.make("lmstudio")]).toBeDefined()
+    expect(providers[ProviderV2.ID.make("lmstudio")].name).toBe("Custom Provider")
+    expect(providers[ProviderV2.ID.make("lmstudio")].models["custom-model"]).toBeDefined()
   }),
   {
     config: {
       provider: {
-        "custom-provider": {
+        lmstudio: {
           name: "Custom Provider",
           npm: "@ai-sdk/openai-compatible",
           api: "https://api.custom.com/v1",
@@ -232,8 +223,8 @@ it.instance(
   "lists alpha provider models by default",
   Effect.gen(function* () {
     const providers = yield* list
-    expect(providers[ProviderV2.ID.make("custom-provider")].models["active-model"]).toBeDefined()
-    expect(providers[ProviderV2.ID.make("custom-provider")].models["alpha-model"]).toBeDefined()
+    expect(providers[ProviderV2.ID.make("lmstudio")].models["active-model"]).toBeDefined()
+    expect(providers[ProviderV2.ID.make("lmstudio")].models["alpha-model"]).toBeDefined()
   }),
   { config: alphaProviderConfig },
 )
@@ -242,8 +233,8 @@ experimentalModels.instance(
   "includes alpha provider models when experimental models are enabled",
   Effect.gen(function* () {
     const providers = yield* list
-    expect(providers[ProviderV2.ID.make("custom-provider")].models["active-model"]).toBeDefined()
-    expect(providers[ProviderV2.ID.make("custom-provider")].models["alpha-model"]).toBeDefined()
+    expect(providers[ProviderV2.ID.make("lmstudio")].models["active-model"]).toBeDefined()
+    expect(providers[ProviderV2.ID.make("lmstudio")].models["alpha-model"]).toBeDefined()
   }),
   { config: alphaProviderConfig },
 )
@@ -252,18 +243,16 @@ it.instance(
   "custom DeepSeek openai-compatible model defaults interleaved reasoning field",
   Effect.gen(function* () {
     const providers = yield* list
-    const provider = providers[ProviderV2.ID.make("custom-provider")]
+    const provider = providers[ProviderV2.ID.make("lmstudio")]
     expect(provider.models["deepseek-r1"].capabilities.interleaved).toEqual({ field: "reasoning_content" })
     expect(provider.models["deepseek-details"].capabilities.interleaved).toEqual({ field: "reasoning_details" })
     expect(provider.models["custom-model"].capabilities.interleaved).toBe(false)
-    expect(
-      providers[ProviderV2.ID.make("custom-anthropic-provider")].models["deepseek-r1"].capabilities.interleaved,
-    ).toBe(false)
+    expect(providers[ProviderV2.ID.make("cerebras")].models["deepseek-r1"].capabilities.interleaved).toBe(false)
   }),
   {
     config: {
       provider: {
-        "custom-provider": {
+        lmstudio: {
           name: "Custom Provider",
           npm: "@ai-sdk/openai-compatible",
           api: "https://api.custom.com/v1",
@@ -274,7 +263,7 @@ it.instance(
           },
           options: { apiKey: "custom-key" },
         },
-        "custom-anthropic-provider": {
+        cerebras: {
           name: "Custom Anthropic Provider",
           npm: "@ai-sdk/anthropic",
           api: "https://api.custom.com/v1",
@@ -391,13 +380,13 @@ it.instance(
   "provider with baseURL from config",
   Effect.gen(function* () {
     const providers = yield* list
-    expect(providers[ProviderV2.ID.make("custom-openai")]).toBeDefined()
-    expect(providers[ProviderV2.ID.make("custom-openai")].options.baseURL).toBe("https://custom.openai.com/v1")
+    expect(providers[ProviderV2.ID.make("lmstudio")]).toBeDefined()
+    expect(providers[ProviderV2.ID.make("lmstudio")].options.baseURL).toBe("https://custom.openai.com/v1")
   }),
   {
     config: {
       provider: {
-        "custom-openai": {
+        lmstudio: {
           name: "Custom OpenAI",
           npm: "@ai-sdk/openai-compatible",
           env: [],
@@ -413,7 +402,7 @@ it.instance(
   "model cost defaults to zero when not specified",
   Effect.gen(function* () {
     const providers = yield* list
-    const model = providers[ProviderV2.ID.make("test-provider")].models["test-model"]
+    const model = providers[ProviderV2.ID.make("lmstudio")].models["test-model"]
     expect(model.cost.input).toBe(0)
     expect(model.cost.output).toBe(0)
     expect(model.cost.cache.read).toBe(0)
@@ -422,7 +411,7 @@ it.instance(
   {
     config: {
       provider: {
-        "test-provider": {
+        lmstudio: {
           name: "Test Provider",
           npm: "@ai-sdk/openai-compatible",
           env: [],
@@ -507,12 +496,12 @@ it.instance(
   Effect.gen(function* () {
     const providers = yield* list
     // api field is stored on model.api.url, used by getSDK to set baseURL
-    expect(providers[ProviderV2.ID.make("custom-api")].models["model-1"].api.url).toBe("https://api.example.com/v1")
+    expect(providers[ProviderV2.ID.make("lmstudio")].models["model-1"].api.url).toBe("https://api.example.com/v1")
   }),
   {
     config: {
       provider: {
-        "custom-api": {
+        lmstudio: {
           name: "Custom API",
           npm: "@ai-sdk/openai-compatible",
           api: "https://api.example.com/v1",
@@ -529,12 +518,12 @@ it.instance(
   "explicit baseURL overrides api field",
   Effect.gen(function* () {
     const providers = yield* list
-    expect(providers[ProviderV2.ID.make("custom-api")].options.baseURL).toBe("https://custom.override.com/v1")
+    expect(providers[ProviderV2.ID.make("lmstudio")].options.baseURL).toBe("https://custom.override.com/v1")
   }),
   {
     config: {
       provider: {
-        "custom-api": {
+        lmstudio: {
           name: "Custom API",
           npm: "@ai-sdk/openai-compatible",
           api: "https://api.example.com/v1",
@@ -613,14 +602,14 @@ it.instance(
   "model modalities default correctly",
   Effect.gen(function* () {
     const providers = yield* list
-    const model = providers[ProviderV2.ID.make("test-provider")].models["test-model"]
+    const model = providers[ProviderV2.ID.make("lmstudio")].models["test-model"]
     expect(model.capabilities.input.text).toBe(true)
     expect(model.capabilities.output.text).toBe(true)
   }),
   {
     config: {
       provider: {
-        "test-provider": {
+        lmstudio: {
           name: "Test",
           npm: "@ai-sdk/openai-compatible",
           env: [],
@@ -636,7 +625,7 @@ it.instance(
   "model with custom cost values",
   Effect.gen(function* () {
     const providers = yield* list
-    const model = providers[ProviderV2.ID.make("test-provider")].models["test-model"]
+    const model = providers[ProviderV2.ID.make("lmstudio")].models["test-model"]
     expect(model.cost.input).toBe(5)
     expect(model.cost.output).toBe(15)
     expect(model.cost.cache.read).toBe(2.5)
@@ -645,7 +634,7 @@ it.instance(
   {
     config: {
       provider: {
-        "test-provider": {
+        lmstudio: {
           name: "Test",
           npm: "@ai-sdk/openai-compatible",
           env: [],
@@ -685,13 +674,13 @@ it.instance("getSmallModel prefers Gemini for Google Vertex", () =>
 it.instance(
   "getSmallModel selects the latest model in the preferred family",
   Effect.gen(function* () {
-    const model = yield* Provider.use.getSmallModel(ProviderV2.ID.make("test-provider"))
+    const model = yield* Provider.use.getSmallModel(ProviderV2.ID.make("lmstudio"))
     expect(model?.id).toBe(ModelV2.ID.make("new-flash"))
   }),
   {
     config: {
       provider: {
-        "test-provider": {
+        lmstudio: {
           name: "Test Provider",
           npm: "@ai-sdk/openai-compatible",
           models: {
@@ -709,13 +698,13 @@ it.instance(
 it.instance(
   "getSmallModel matches exact model families",
   Effect.gen(function* () {
-    const model = yield* Provider.use.getSmallModel(ProviderV2.ID.make("test-provider"))
+    const model = yield* Provider.use.getSmallModel(ProviderV2.ID.make("lmstudio"))
     expect(model?.id).toBe(ModelV2.ID.make("claude-haiku"))
   }),
   {
     config: {
       provider: {
-        "test-provider": {
+        lmstudio: {
           name: "Test Provider",
           npm: "@ai-sdk/openai-compatible",
           models: {
@@ -732,13 +721,13 @@ it.instance(
 it.instance(
   "getSmallModel ignores model IDs without family metadata",
   Effect.gen(function* () {
-    const model = yield* Provider.use.getSmallModel(ProviderV2.ID.make("test-provider"))
+    const model = yield* Provider.use.getSmallModel(ProviderV2.ID.make("lmstudio"))
     expect(model).toBeUndefined()
   }),
   {
     config: {
       provider: {
-        "test-provider": {
+        lmstudio: {
           name: "Test Provider",
           npm: "@ai-sdk/openai-compatible",
           models: {
@@ -831,14 +820,14 @@ it.instance(
   "provider with custom npm package",
   Effect.gen(function* () {
     const providers = yield* list
-    expect(providers[ProviderV2.ID.make("local-llm")]).toBeDefined()
-    expect(providers[ProviderV2.ID.make("local-llm")].models["llama-3"].api.npm).toBe("@ai-sdk/openai-compatible")
-    expect(providers[ProviderV2.ID.make("local-llm")].options.baseURL).toBe("http://localhost:11434/v1")
+    expect(providers[ProviderV2.ID.make("lmstudio")]).toBeDefined()
+    expect(providers[ProviderV2.ID.make("lmstudio")].models["llama-3"].api.npm).toBe("@ai-sdk/openai-compatible")
+    expect(providers[ProviderV2.ID.make("lmstudio")].options.baseURL).toBe("http://localhost:11434/v1")
   }),
   {
     config: {
       provider: {
-        "local-llm": {
+        lmstudio: {
           name: "Local LLM",
           npm: "@ai-sdk/openai-compatible",
           env: [],
@@ -875,14 +864,14 @@ it.instance(
   Effect.gen(function* () {
     yield* set("MULTI_ENV_KEY_1", "test-key")
     const providers = yield* list
-    expect(providers[ProviderV2.ID.make("multi-env")]).toBeDefined()
+    expect(providers[ProviderV2.ID.make("lmstudio")]).toBeDefined()
     // When multiple env options exist, key should NOT be auto-set
-    expect(providers[ProviderV2.ID.make("multi-env")].key).toBeUndefined()
+    expect(providers[ProviderV2.ID.make("lmstudio")].key).toBeUndefined()
   }),
   {
     config: {
       provider: {
-        "multi-env": {
+        lmstudio: {
           name: "Multi Env Provider",
           npm: "@ai-sdk/openai-compatible",
           env: ["MULTI_ENV_KEY_1", "MULTI_ENV_KEY_2"],
@@ -899,14 +888,14 @@ it.instance(
   Effect.gen(function* () {
     yield* set("SINGLE_ENV_KEY", "my-api-key")
     const providers = yield* list
-    expect(providers[ProviderV2.ID.make("single-env")]).toBeDefined()
+    expect(providers[ProviderV2.ID.make("lmstudio")]).toBeDefined()
     // Single env option should auto-set key
-    expect(providers[ProviderV2.ID.make("single-env")].key).toBe("my-api-key")
+    expect(providers[ProviderV2.ID.make("lmstudio")].key).toBe("my-api-key")
   }),
   {
     config: {
       provider: {
-        "single-env": {
+        lmstudio: {
           name: "Single Env Provider",
           npm: "@ai-sdk/openai-compatible",
           env: ["SINGLE_ENV_KEY"],
@@ -939,12 +928,12 @@ it.instance(
 )
 
 it.instance(
-  "completely new provider not in database can be configured",
+  "an approved provider absent from the bundled database can be configured",
   Effect.gen(function* () {
     const providers = yield* list
-    expect(providers[ProviderV2.ID.make("brand-new-provider")]).toBeDefined()
-    expect(providers[ProviderV2.ID.make("brand-new-provider")].name).toBe("Brand New")
-    const model = providers[ProviderV2.ID.make("brand-new-provider")].models["new-model"]
+    expect(providers[ProviderV2.ID.make("ai21")]).toBeDefined()
+    expect(providers[ProviderV2.ID.make("ai21")].name).toBe("Brand New")
+    const model = providers[ProviderV2.ID.make("ai21")].models["new-model"]
     expect(model.capabilities.reasoning).toBe(true)
     expect(model.capabilities.attachment).toBe(true)
     expect(model.capabilities.input.image).toBe(true)
@@ -952,7 +941,7 @@ it.instance(
   {
     config: {
       provider: {
-        "brand-new-provider": {
+        ai21: {
           name: "Brand New",
           npm: "@ai-sdk/openai-compatible",
           env: [],
@@ -1000,12 +989,12 @@ it.instance(
   "model with tool_call false",
   Effect.gen(function* () {
     const providers = yield* list
-    expect(providers[ProviderV2.ID.make("no-tools")].models["basic-model"].capabilities.toolcall).toBe(false)
+    expect(providers[ProviderV2.ID.make("lmstudio")].models["basic-model"].capabilities.toolcall).toBe(false)
   }),
   {
     config: {
       provider: {
-        "no-tools": {
+        lmstudio: {
           name: "No Tools Provider",
           npm: "@ai-sdk/openai-compatible",
           env: [],
@@ -1021,12 +1010,12 @@ it.instance(
   "model defaults tool_call to true when not specified",
   Effect.gen(function* () {
     const providers = yield* list
-    expect(providers[ProviderV2.ID.make("default-tools")].models["model"].capabilities.toolcall).toBe(true)
+    expect(providers[ProviderV2.ID.make("lmstudio")].models["model"].capabilities.toolcall).toBe(true)
   }),
   {
     config: {
       provider: {
-        "default-tools": {
+        lmstudio: {
           name: "Default Tools Provider",
           npm: "@ai-sdk/openai-compatible",
           env: [],
@@ -1042,7 +1031,7 @@ it.instance(
   "model headers are preserved",
   Effect.gen(function* () {
     const providers = yield* list
-    const model = providers[ProviderV2.ID.make("headers-provider")].models["model"]
+    const model = providers[ProviderV2.ID.make("lmstudio")].models["model"]
     expect(model.headers).toEqual({
       "X-Custom-Header": "custom-value",
       Authorization: "Bearer special-token",
@@ -1051,7 +1040,7 @@ it.instance(
   {
     config: {
       provider: {
-        "headers-provider": {
+        lmstudio: {
           name: "Headers Provider",
           npm: "@ai-sdk/openai-compatible",
           env: [],
@@ -1077,12 +1066,12 @@ it.instance(
     yield* set("FALLBACK_KEY", "fallback-api-key")
     const providers = yield* list
     // Provider should load because fallback env var is set
-    expect(providers[ProviderV2.ID.make("fallback-env")]).toBeDefined()
+    expect(providers[ProviderV2.ID.make("lmstudio")]).toBeDefined()
   }),
   {
     config: {
       provider: {
-        "fallback-env": {
+        lmstudio: {
           name: "Fallback Env Provider",
           npm: "@ai-sdk/openai-compatible",
           env: ["PRIMARY_KEY", "FALLBACK_KEY"],
@@ -1109,12 +1098,12 @@ it.instance(
   "provider name defaults to id when not in database",
   Effect.gen(function* () {
     const providers = yield* list
-    expect(providers[ProviderV2.ID.make("my-custom-id")].name).toBe("my-custom-id")
+    expect(providers[ProviderV2.ID.make("ai21")].name).toBe("ai21")
   }),
   {
     config: {
       provider: {
-        "my-custom-id": {
+        ai21: {
           npm: "@ai-sdk/openai-compatible",
           env: [],
           models: { model: { name: "Model", tool_call: true, limit: { context: 4000, output: 1000 } } },
@@ -1198,14 +1187,14 @@ it.instance(
   "model limit defaults to zero when not specified",
   Effect.gen(function* () {
     const providers = yield* list
-    const model = providers[ProviderV2.ID.make("no-limit")].models["model"]
+    const model = providers[ProviderV2.ID.make("lmstudio")].models["model"]
     expect(model.limit.context).toBe(0)
     expect(model.limit.output).toBe(0)
   }),
   {
     config: {
       provider: {
-        "no-limit": {
+        lmstudio: {
           name: "No Limit Provider",
           npm: "@ai-sdk/openai-compatible",
           env: [],
@@ -1283,7 +1272,7 @@ it.instance(
 )
 
 it.instance(
-  "custom model inherits npm package from models.dev provider config",
+  "custom model inherits npm package from the model catalog provider config",
   Effect.gen(function* () {
     yield* set("OPENAI_API_KEY", "test-api-key")
     const providers = yield* list
@@ -1309,7 +1298,7 @@ it.instance(
 )
 
 it.instance(
-  "custom model inherits api.url from models.dev provider",
+  "custom model inherits api.url from the model catalog provider",
   Effect.gen(function* () {
     yield* set("OPENROUTER_API_KEY", "test-api-key")
     const providers = yield* list
@@ -1389,9 +1378,9 @@ test("mode cost preserves over-200k pricing from base model", () => {
         },
       },
     },
-  } as unknown as ModelsDev.Provider
+  } as unknown as ModelCatalog.Provider
 
-  const model = Provider.fromModelsDevProvider(provider).models["gpt-5.4-fast"]
+  const model = Provider.fromModelCatalogProvider(provider).models["gpt-5.4-fast"]
   expect(model.cost.input).toEqual(5)
   expect(model.cost.output).toEqual(30)
   expect(model.cost.cache.read).toEqual(0.5)
@@ -1404,7 +1393,7 @@ test("mode cost preserves over-200k pricing from base model", () => {
   })
 })
 
-test("models.dev normalization fills required response fields", () => {
+test("the model catalog normalization fills required response fields", () => {
   const provider = {
     id: "gateway",
     name: "Gateway",
@@ -1418,9 +1407,9 @@ test("models.dev normalization fills required response fields", () => {
         limit: { context: 1_050_000, input: 922_000, output: 128_000 },
       },
     },
-  } as unknown as ModelsDev.Provider
+  } as unknown as ModelCatalog.Provider
 
-  const model = Provider.fromModelsDevProvider(provider).models["gpt-5.4"]
+  const model = Provider.fromModelCatalogProvider(provider).models["gpt-5.4"]
   expect(model.api.url).toBe("")
   expect(model.capabilities.temperature).toBe(false)
   expect(model.capabilities.reasoning).toBe(false)
@@ -1582,7 +1571,7 @@ it.instance(
   "custom model with variants enabled and disabled",
   Effect.gen(function* () {
     const providers = yield* list
-    const model = providers[ProviderV2.ID.make("custom-reasoning")].models["reasoning-model"]
+    const model = providers[ProviderV2.ID.make("lmstudio")].models["reasoning-model"]
     expect(model.variants).toBeDefined()
     // Enabled variants should exist
     expect(model.variants!["low"]).toBeDefined()
@@ -1602,7 +1591,7 @@ it.instance(
   {
     config: {
       provider: {
-        "custom-reasoning": {
+        lmstudio: {
           name: "Custom Reasoning Provider",
           npm: "@ai-sdk/openai-compatible",
           env: [],
@@ -1632,13 +1621,13 @@ it.instance(
   Effect.gen(function* () {
     yield* set("GOOGLE_APPLICATION_CREDENTIALS", "test-creds")
     const providers = yield* list
-    expect(providers[ProviderV2.ID.make("vertex-proxy")]).toBeDefined()
-    expect(providers[ProviderV2.ID.make("vertex-proxy")].options.baseURL).toBe("https://my-proxy.com/v1")
+    expect(providers[ProviderV2.ID.make("lmstudio")]).toBeDefined()
+    expect(providers[ProviderV2.ID.make("lmstudio")].options.baseURL).toBe("https://my-proxy.com/v1")
   }),
   {
     config: {
       provider: {
-        "vertex-proxy": {
+        lmstudio: {
           name: "Vertex Proxy",
           npm: "@ai-sdk/google-vertex",
           api: "https://my-proxy.com/v1",
@@ -1660,14 +1649,14 @@ it.instance(
   Effect.gen(function* () {
     yield* set("GOOGLE_APPLICATION_CREDENTIALS", "test-creds")
     const providers = yield* list
-    const model = providers[ProviderV2.ID.make("vertex-openai")].models["gpt-4"]
+    const model = providers[ProviderV2.ID.make("lmstudio")].models["gpt-4"]
     expect(model).toBeDefined()
     expect(model.api.npm).toBe("@ai-sdk/openai-compatible")
   }),
   {
     config: {
       provider: {
-        "vertex-openai": {
+        lmstudio: {
           name: "Vertex OpenAI",
           npm: "@ai-sdk/google-vertex",
           env: ["GOOGLE_APPLICATION_CREDENTIALS"],
@@ -1752,12 +1741,12 @@ it.instance(
     expect(providers[ProviderV2.ID.make("cloudflare-ai-gateway")]).toBeDefined()
     expect(providers[ProviderV2.ID.make("cloudflare-ai-gateway")].options.metadata).toEqual({
       invoked_by: "test",
-      project: "opencode",
+      project: "vector",
     })
   }),
   {
     config: {
-      provider: { "cloudflare-ai-gateway": { options: { metadata: { invoked_by: "test", project: "opencode" } } } },
+      provider: { "cloudflare-ai-gateway": { options: { metadata: { invoked_by: "test", project: "vector" } } } },
     },
   },
 )
@@ -1774,7 +1763,7 @@ const provideMultiInstance = <A, E, R>(eff: Effect.Effect<A, E, R>) =>
 it.effect("plugin config providers persist after instance dispose", () =>
   Effect.gen(function* () {
     const dir = yield* tmpdirScoped()
-    const configDir = path.join(dir, ".opencode")
+    const configDir = path.join(dir, ".vector")
     const root = path.join(configDir, "plugin")
     yield* Effect.promise(() => mkdir(root, { recursive: true }))
     yield* Effect.promise(() => markPluginDependenciesReady(configDir))
@@ -1788,7 +1777,7 @@ it.effect("plugin config providers persist after instance dispose", () =>
           "  server: async () => ({",
           "    async config(cfg) {",
           "      cfg.provider ??= {}",
-          "      cfg.provider.demo = {",
+          "      cfg.provider.lmstudio = {",
           '        name: "Demo Provider",',
           '        npm: "@ai-sdk/openai-compatible",',
           '        api: "https://example.com/v1",',
@@ -1816,14 +1805,14 @@ it.effect("plugin config providers persist after instance dispose", () =>
     }).pipe(provideInstanceEffect(dir))
 
     const first = yield* loadAndList
-    expect(first[ProviderV2.ID.make("demo")]).toBeDefined()
-    expect(first[ProviderV2.ID.make("demo")].models[ModelV2.ID.make("chat")]).toBeDefined()
+    expect(first[ProviderV2.ID.make("lmstudio")]).toBeDefined()
+    expect(first[ProviderV2.ID.make("lmstudio")].models[ModelV2.ID.make("chat")]).toBeDefined()
 
     yield* Effect.promise(() => disposeAllInstances())
 
     const second = yield* loadAndList
-    expect(second[ProviderV2.ID.make("demo")]).toBeDefined()
-    expect(second[ProviderV2.ID.make("demo")].models[ModelV2.ID.make("chat")]).toBeDefined()
+    expect(second[ProviderV2.ID.make("lmstudio")]).toBeDefined()
+    expect(second[ProviderV2.ID.make("lmstudio")].models[ModelV2.ID.make("chat")]).toBeDefined()
   }).pipe(provideMultiInstance),
 )
 
@@ -1831,7 +1820,7 @@ it.instance(
   "plugin config enabled and disabled providers are honored",
   Effect.gen(function* () {
     const instance = yield* TestInstance
-    const configDir = path.join(instance.directory, ".opencode")
+    const configDir = path.join(instance.directory, ".vector")
     const root = path.join(configDir, "plugin")
     yield* Effect.promise(() => mkdir(root, { recursive: true }))
     yield* Effect.promise(() => markPluginDependenciesReady(configDir))
@@ -1861,87 +1850,30 @@ it.instance(
   }),
 )
 
-it.effect("OpenCode providers remain absent when config apiKey is present", () =>
-  Effect.gen(function* () {
-    const noneDir = yield* tmpdirScoped()
-    const keyedDir = yield* tmpdirScoped({
-      config: { provider: { opencode: { options: { apiKey: "test-key" } } } },
-    })
-
-    const listIn = (directory: string) =>
-      Provider.use
-        .list()
-        .pipe(provideInstanceEffect(directory))
-        .pipe(Effect.provide(instanceStoreLayer), Effect.provide(AppNodeBuilder.build(CrossSpawnSpawner.node)))
-
-    const none = paid(yield* listIn(noneDir))
-    const keyedCount = paid(yield* listIn(keyedDir))
-
-    // No key: the provider does not load at all.
-    expect(none).toBeUndefined()
-    expect(keyedCount).toBeUndefined()
-  }).pipe(provideMultiInstance),
-)
-
-it.effect("OpenCode providers remain absent when auth exists", () =>
-  Effect.gen(function* () {
-    const noneDir = yield* tmpdirScoped()
-    const keyedDir = yield* tmpdirScoped()
-
-    const listIn = (directory: string) =>
-      Provider.use
-        .list()
-        .pipe(provideInstanceEffect(directory))
-        .pipe(Effect.provide(instanceStoreLayer), Effect.provide(AppNodeBuilder.build(CrossSpawnSpawner.node)))
-
-    const none = paid(yield* listIn(noneDir))
-    // No auth: the provider does not load at all.
-    expect(none).toBeUndefined()
-
-    const authPath = path.join(Global.Path.data, "auth.json")
-    const original = yield* Effect.promise(() => Filesystem.readText(authPath).catch(() => undefined))
-
-    yield* Effect.acquireRelease(
-      Effect.promise(() => Filesystem.write(authPath, JSON.stringify({ opencode: { type: "api", key: "test-key" } }))),
-      () =>
-        Effect.promise(async () => {
-          if (original !== undefined) await Filesystem.write(authPath, original)
-          else await unlink(authPath).catch(() => undefined)
-        }),
-    )
-
-    const keyedCount = paid(yield* listIn(keyedDir))
-
-    expect(keyedCount).toBeUndefined()
-  }).pipe(provideMultiInstance),
-)
-
 it.instance(
-  "retired providers stay absent with environment, config, and stored credentials",
+  "unknown providers stay absent with environment, config, and stored credentials",
   () =>
     Effect.gen(function* () {
-      yield* set("OPENCODE_API_KEY", "placeholder")
+      yield* set("UNSUPPORTED_FIXTURE_KEY", "placeholder")
       yield* set(
-        "OPENCODE_AUTH_CONTENT",
+        "VECTOR_AUTH_CONTENT",
         JSON.stringify(
           Object.fromEntries(
-            ["opencode", "opencode-go", "opencode-zen", "opencode-custom"].map((id) => [
-              id,
-              { type: "api", key: "placeholder" },
-            ]),
+            ["unsupported-fixture", "unsupported-fixture-two"].map((id) => [id, { type: "api", key: "placeholder" }]),
           ),
         ),
       )
       const providers = yield* Provider.use.list()
-      expect(Object.keys(providers).filter((id) => id.startsWith("opencode"))).toEqual([])
+      expect(Object.keys(providers).filter((id) => id.startsWith("unsupported-fixture"))).toEqual([])
     }),
   {
     config: {
       provider: Object.fromEntries(
-        ["opencode", "opencode-go", "opencode-zen", "opencode-custom"].map((id) => [
+        ["unsupported-fixture", "unsupported-fixture-two"].map((id) => [
           id,
           {
             npm: "@ai-sdk/openai-compatible",
+            env: ["UNSUPPORTED_FIXTURE_KEY"],
             options: { apiKey: "placeholder" },
             models: { example: { name: "Example" } },
           },
@@ -1952,18 +1884,18 @@ it.instance(
 )
 
 it.instance(
-  "custom provider aliases cannot restore retired endpoints",
+  "supported providers allow user-configured endpoints",
   () =>
     Effect.gen(function* () {
       const providers = yield* Provider.use.list()
-      expect(providers[ProviderV2.ID.make("custom-hosted")]).toBeUndefined()
+      expect(providers[ProviderV2.ID.make("lmstudio")].options.baseURL).toBe("https://provider.example.test/v1")
     }),
   {
     config: {
       provider: {
-        "custom-hosted": {
+        lmstudio: {
           npm: "@ai-sdk/openai-compatible",
-          options: { apiKey: "placeholder", baseURL: "https://api.opencode.ai/v1" },
+          options: { apiKey: "placeholder", baseURL: "https://provider.example.test/v1" },
           models: { example: { name: "Example" } },
         },
       },
@@ -1971,20 +1903,19 @@ it.instance(
   },
 )
 
-it.instance("Vector auth content wins over legacy credentials and still rejects retired providers", () =>
+it.instance("Vector auth content admits API keys and rejects unsupported providers and paused OAuth", () =>
   Effect.gen(function* () {
-    yield* set("OPENCODE_AUTH_CONTENT", JSON.stringify({ anthropic: { type: "api", key: "placeholder-legacy" } }))
     yield* set(
       "VECTOR_AUTH_CONTENT",
       JSON.stringify({
         anthropic: { type: "api", key: "placeholder-current" },
-        opencode: { type: "api", key: "placeholder-retired" },
+        "unsupported-fixture": { type: "api", key: "placeholder-unsupported" },
         openai: { type: "oauth", access: "placeholder", refresh: "placeholder", expires: Date.now() + 60_000 },
       }),
     )
     const providers = yield* Provider.use.list()
     expect(providers[ProviderV2.ID.anthropic].key).toBe("placeholder-current")
-    expect(providers[ProviderV2.ID.opencode]).toBeUndefined()
+    expect(providers[ProviderV2.ID.make("unsupported-fixture")]).toBeUndefined()
     expect(providers[ProviderV2.ID.openai]).toBeUndefined()
   }),
 )

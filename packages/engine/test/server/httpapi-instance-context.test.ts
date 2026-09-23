@@ -187,7 +187,7 @@ describe("HttpApi instance context middleware", () => {
       yield* serveProbe()
 
       const response = yield* HttpClientRequest.get(`/session?workspace=${workspace.id}`).pipe(
-        HttpClientRequest.setHeader("x-opencode-directory", dir),
+        HttpClientRequest.setHeader("x-vector-directory", dir),
         HttpClient.execute,
       )
 
@@ -212,7 +212,7 @@ describe("HttpApi instance context middleware", () => {
       yield* serveProbe()
 
       const response = yield* HttpClientRequest.get(`/probe?workspace=${workspace.id}`).pipe(
-        HttpClientRequest.setHeader("x-opencode-directory", dir),
+        HttpClientRequest.setHeader("x-vector-directory", dir),
         HttpClient.execute,
       )
 
@@ -240,7 +240,7 @@ describe("HttpApi instance context middleware", () => {
       yield* serveProbe()
 
       const response = yield* HttpClientRequest.get(`/probe?workspace=${workspace.id}`).pipe(
-        HttpClientRequest.setHeader("x-opencode-directory", dir),
+        HttpClientRequest.setHeader("x-vector-directory", dir),
         HttpClient.execute,
       )
 
@@ -268,7 +268,7 @@ describe("HttpApi instance context middleware", () => {
       // workspace id.
       const unknownWorkspaceID = WorkspaceV2.ID.ascending()
       const response = yield* HttpClientRequest.get(`/probe?workspace=${unknownWorkspaceID}`).pipe(
-        HttpClientRequest.setHeader("x-opencode-directory", dir),
+        HttpClientRequest.setHeader("x-vector-directory", dir),
         HttpClient.execute,
       )
 
@@ -300,7 +300,7 @@ describe("HttpApi instance context middleware", () => {
       yield* serveProbe()
 
       const response = yield* HttpClientRequest.get(`/session?workspace=${workspace.id}`).pipe(
-        HttpClientRequest.setHeader("x-opencode-directory", dir),
+        HttpClientRequest.setHeader("x-vector-directory", dir),
         HttpClient.execute,
       )
 

@@ -1,56 +1,86 @@
 # Vector service independence — release draft
 
-Unversioned draft for the owner-selected release. This file describes the source changes; it does not claim npm publication, installer availability, signing, or a production deployment. Add the chosen version and verified distribution status before publishing.
+Unversioned draft for the owner-selected release. This describes source changes under final verification. It does not claim a registry publication, new installers, a signed update feed, or a production website deployment. Final version, commit, test totals and publication evidence remain pending.
 
 ## Public release note
 
-Vector no longer uses OpenCode's model services or hosted console, sharing, update, or web-interface services. Connect a supported model provider with your own credentials to run the native agent. OpenCode Zen and Go are unavailable even when an OpenCode API key is present. Model metadata ships with the app and CLI; network catalog refresh requires an explicitly configured mirror.
+Vector has removed the former third-party model gateway and its hosted console, sharing, installer and web-interface integrations. Connect a supported model provider with your own credentials to run the native agent. Model metadata ships with the app and CLI; network catalog refresh requires an explicitly configured Vector-hosted mirror. Catalog metadata does not provide model access.
 
-Sign-in methods that borrowed another application's registration are paused. API-key methods remain where supported, and your installed Claude Code, Codex, and Cursor runtimes keep their own authentication. CLI and desktop distributions include expanded third-party notices. The CLI process, terminal banner, help, configuration examples, and network identity now use Vector; existing configuration remains readable during migration.
+Sign-ins that relied on other applications' registrations are paused. API keys remain supported where the provider offers them. Configuration now uses Vector names only: `vector.json`, `.vector/`, and `VECTOR_*` variables. Repositories using Vector's GitHub workflow should run `vector github install` again. Plugins import `@vectordevai/plugin`; plugin manifests declare theme files with `vector-themes`. License notices now ship with the CLI.
 
-## Detailed engineering notes
+## Provider admission and catalog
 
-### Provider isolation
+The shared readable allowlist in `packages/schema/src/provider-policy.ts` admits **221 provider IDs**, frozen from the reviewed catalog. A new provider requires an explicit reviewed list change. Both engine generations, catalog edits, configured credentials, plugin integration, model history, desktop and TUI selectors use that policy. An unknown ID cannot become available merely because a key or custom model was configured for it.
 
-Both engine generations exclude the complete `opencode*` provider family. Filters cover catalog input, stored credentials, environment keys, project and global provider configuration, and stale provider responses reaching the desktop. OpenCode's V2 provider plugin is no longer registered. The UI cannot reconnect a banned id through the custom-provider form, model history, or model picker. GitHub and desktop Vectorscope use an explicitly selected connected model and report setup errors when none resolves.
+Arbitrary custom provider IDs therefore stop loading. Users can configure models, credentials and custom base URLs under supported IDs; the custom-provider dialog explains that it configures an existing supported provider. GitHub automation and desktop Vectorscope require a selected connected model and produce a setup error when none resolves.
 
-The runtime uses its bundled catalog instead of contacting the upstream catalog service. `VECTOR_MODELS_PATH` can supply a local catalog; `VECTOR_MODELS_URL` opts into a configured mirror; `VECTOR_DISABLE_MODELS_FETCH=1` disables network refresh. Release publishing also packages a filtered catalog snapshot. Catalog metadata does not itself supply model access.
+The former endpoint denylist is removed. A user who hand-enters a custom provider URL is making their own choice; Vector no longer rejects those URLs using the previous host safeguard. Vector-authored request destinations are independently covered by the repository guard. Runtime catalog refresh has its own positive owned-host rule and does not inherit that custom-endpoint freedom.
 
-### Removed service connections
+The runtime starts from the bundled filtered snapshot. `VECTOR_MODELS_PATH` can supply a local catalog. `VECTOR_MODELS_URL` explicitly opts into an HTTPS mirror on an approved Vector-owned host; invalid or non-owned sources are ignored. `VECTOR_DISABLE_MODELS_FETCH=1` prevents network refresh. One explicit build-time refresh script prepares the filtered catalog, and the release workflow reuses the same prepared artifact for platform builds and mirror publication. Other build and pricing tools consume local data rather than performing independent upstream refreshes.
 
-CLI detection, version checks, upgrades, and uninstall operations target `@vectordevai/cli` with npm, pnpm, or Bun. No upstream curl installer or unrelated Homebrew, Scoop, or Chocolatey package is used. WSL installs the Linux CLI with npm under `~/.vector`. Install Linux Node.js/npm first, then run `~/.vector/bin/vector login` and connect provider credentials inside the distro before starting a WSL server.
+The catalog mirror returned 404 in the recorded pre-release checks. Its upload and a subsequent successful live fetch remain release requirements.
 
-Public session sharing, auto-sharing, the CLI share switch, TUI share commands, and import from share URLs are removed. Import and export of local JSON remain. Live workspace invitations are separate and remain available. Previously uploaded content is not deleted by upgrading Vector.
+## Removed hosted integrations
 
-Upstream console login and GitHub App token exchange are removed. Unmatched server requests no longer proxy the upstream web app or forward authentication headers. Documentation social images use Vector's own static asset. Configuration writers and themes point to Vector's schema after its publication is verified.
+CLI package detection, version checks, upgrades and uninstall target `@vectordevai/cli` through npm, pnpm or Bun. WSL installs the Linux package with npm under `~/.vector`. Install Linux Node.js/npm first, then use `~/.vector/bin/vector login` and configure provider credentials inside the distro before starting a WSL server. No unrelated package-manager installation or remote shell installer is used.
 
-### Native sign-in availability
+Public session sharing, project-config auto-sharing and import from share URLs are unavailable. Import/export of local JSON remains. Live workspace invitations are separate. Upgrading does not delete content previously uploaded to a public service.
 
-`COPILOT_SIGN_IN`, `CHATGPT_SIGN_IN`, `XAI_SIGN_IN`, `POE_SIGN_IN`, and `DIGITALOCEAN_SIGN_IN` are disabled in the central provider policy. Re-enabling requires Vector's own approved registration and a review of provider-specific scopes, redirect URLs, and refresh behavior. Copilot additionally requires the provider's grant for API access and review of request-accounting headers. GitLab OAuth requires an explicitly supplied `GITLAB_OAUTH_CLIENT_ID`; personal access-token authentication remains. Previously cached borrowed credentials cannot reactivate these routes.
+The hosted console login and GitHub App token exchange are removed. GitHub automation uses explicitly supplied credentials or `GITHUB_TOKEN`. Unmatched server requests return a local 404 rather than proxying another web app or forwarding authentication headers. Social images use local Vector assets. Configuration writers and themes reference Vector's live schemas.
 
-The desktop's own GitHub integration, MCP connections, and user-installed external agents retain their independent authentication.
+## Paused native sign-ins
 
-### UI, naming, and compatibility
+All six named switches are false in the central provider policy:
 
-The TUI banner spells VECTOR in four rows of 39 columns. Window titles, crash reporting, CLI suggestions, permissions, getting-started text, and onboarding use Vector. Provider pickers no longer invent an included-model section from OpenCode zero-cost catalog entries. Zen/Go promotional dialogs and dead translations are removed. Native onboarding directs users to connect credentials.
+| Sign-in | Switch | Available alternative |
+| --- | --- | --- |
+| GitHub Copilot | `COPILOT_SIGN_IN` | No supported Copilot replacement method currently |
+| ChatGPT | `CHATGPT_SIGN_IN` | OpenAI API key |
+| xAI | `XAI_SIGN_IN` | xAI API key |
+| GitLab Duo OAuth | `GITLAB_SIGN_IN` | GitLab personal access token |
+| Poe OAuth | `POE_SIGN_IN` | Poe API key |
+| DigitalOcean OAuth | `DIGITALOCEAN_SIGN_IN` | DigitalOcean API key |
 
-New configuration uses `vector.json`, `vector.jsonc`, local Vector files, and `.vector/`. Vector environment names take priority over legacy names, which remain readable with a warning. The default TUI theme and sound pack use Vector; saved legacy preferences have aliases. SDK helpers launch `vector`, accept both server startup banners, and export Vector-named aliases while preserving public legacy factories. Desktop and workspace subprocesses set both generations of environment names for explicit overrides. Theme preload migrates persisted keys before the first rendered frame. Project IDs use `.git/vector/project-id`, preserving the old cache and the separate review-history directory. Public plugin and SDK package names are preserved for compatibility. The desktop renderer origin and bundle identifier remain unchanged to avoid discarding user data or breaking application identity.
+Stored borrowed OAuth credentials cannot reactivate these routes. GitLab additionally requires an explicitly configured owned registration before its dormant PKCE flow can be enabled; setting `GITLAB_OAUTH_CLIENT_ID` alone does not bypass the false switch. The old DigitalOcean OAuth credential shape is also rejected. API-key native adapter and tool-loop behavior remains covered by tests.
 
-### Notices and attribution
+Re-enabling any sign-in requires an approved Vector-owned registration, provider permission, refresh-token migration and scope/redirect review. Copilot also needs review of premium-request accounting and its compaction/subagent initiator headers. Poe needs an owned OAuth implementation; toggling its flag alone is insufficient. The desktop's GitHub integration, MCP connections and independently installed external agents keep their separate authentication. No Anthropic subscription sign-in is introduced or advertised.
 
-CLI umbrella and platform packages include the proprietary Vector license, upstream MIT attribution, and generated dependency notices. Package license metadata points at the shipped license. Expanded notices cover the embedded Bun runtime and JavaScriptCore source information, Material Icon Theme, bundled fonts, and vendored components. macOS desktop packaging includes Electron and Chromium license files. Upstream copyright and MIT permission text remain intact.
+## Configuration, protocol and application identity
 
-## Validation recorded so far
+Configuration is a clean break: only Vector filenames, directories and application environment variables are read. Use `vector.json`, `vector.jsonc`, the Vector local configuration files and `.vector/`. Rename older configuration and custom scripts yourself; no legacy aliases or warning-based fallbacks remain. Provider-specific credentials such as `OPENAI_API_KEY` keep their provider names.
 
-- App and TUI package typechecks passed.
-- TUI suite: 195 passed, 1 skipped, 0 failed; 8 snapshots.
-- App suite: 1,219 passed, 0 failed, 3,105 assertions.
-- Engine suite: 3,363 passed, 21 skipped, 1 todo, 2 known baseline failures; 52 snapshots and 10,005 assertions. The remaining failures are the Bedrock PDF media expectation and local linked-worktree sandbox permissions identified in the handoff.
-- Production first-navigation benchmark before and after removing the obsolete upsell listener passed with zero blank or unknown samples. First destination: 48.4 ms before, 48.5 ms after. Stable destination: 102.2 ms before, 178.1 ms after. These are single shared-machine samples, not a performance improvement claim.
-- Insert final engine suite, compliance guard, packed artifact, provider endpoint, binary-string, registry-install, platform build, and live deployment results here after root verification.
+The desktop, engine, TUI, SDK and WSL sidecar use the same Vector protocol: `x-vector-*` headers, `.well-known/vector`, the default Basic-auth username `vector`, `vector.local` discovery and Vector IPC channels. SDK factories and helpers use Vector names and launch `vector`. Explicit subprocess overrides use `VECTOR_*` settings. Regenerated GitHub workflows use Vector variables; run `vector github install` again in repositories using that workflow.
 
-## Owner review and release conditions
+The default theme is `vector`; persisted theme keys and log/cache names use Vector names. Project identity still derives from the same root commit or normalized remote identity, with its cache at `.git/vector/project-id`. The old-build-to-new-build session-survival check must pass before release; do not interpret a cache filename change as permission to change project IDs or the database.
 
-Five minimal legal changes require review: the dependency and runtime/asset notices on the third-party page, plus privacy section 5 removes the Zen routing claim; privacy section 6 removes current public session-sharing instructions and retains a warning about previously shared data; terms section 8 refers to connected providers instead of Zen. Generic website no-key/included-model promises and existing pricing copy are deliberately preserved at the owner's direction, although native builds currently require provider credentials.
+The renderer origin **`oc://`** and desktop application identifier **`ai.vector.app`** stay unchanged. Preserving them avoids discarding device-local project lists or changing the installed application's identity. The renderer origin is the intentional remaining abbreviation.
 
-The owner chooses the version and explicitly authorizes any unsigned desktop release. Unsigned releases publish downloads only and cannot advance signed update feeds. Existing desktop users must reinstall the downloaded build unless a correctly signed release advances their feed. Confirm the actual feed versions before stating them publicly. npm publication and GitHub Actions were previously blocked by authentication and account billing respectively; verify their current status rather than implying distribution succeeded.
+Vectorscope keeps all four task mentions: `/vectorscope`, `/vs`, `/vector` and `/vx`.
+
+## Packages and plugin compatibility
+
+Workspace packages now use the `@vectordevai/*` scope, and the engine lives at `packages/engine/`. Workspace packages other than the public CLI, platform packages and plugin are private. Generated clients and their inputs use Vector names.
+
+The public plugin package is `@vectordevai/plugin`, including its `/tui` export. Third-party plugins must update their imports. Runtime plugin dependency installation uses that package. The SDK remains private: the plugin staging build embeds its complete required declaration tree and rewrites declaration references to local bundled files, rather than asking consumers to install a private SDK. The staged package must pass isolated clean-consumer checks for every exported entry point, with no workspace links or private SDK dependency.
+
+The first plugin publication requires the owner's approval. It must be published and verified before publishing any CLI release that installs it. A package staging or dry-run success is not registry publication evidence.
+
+## Notices and license display
+
+CLI umbrella and platform packages include LICENSE, THIRD_PARTY_NOTICES.md and DEPENDENCY_NOTICES.md, with manifest license metadata pointing to the shipped license. Notices cover the embedded Bun runtime and JavaScriptCore source information, Material Icon Theme assets, bundled fonts and vendored components. The new plugin artifact also stages the required notices. macOS desktop resources include Electron's license and Chromium's license bundle.
+
+Upstream copyright and permission text remain intact in the permitted license files. The website and in-app license panel render the shared notice source at build time instead of duplicating attribution text in application source. The final legal-page diffs still need owner review.
+
+## Verification and release status
+
+Final source commit and complete suite totals: **pending coordinator verification**. Record the engine/app results with known baseline failures identified, whole-repository typecheck, the repository guard and its deliberate-failure test, project/session survival, plugin consumer checks, packed CLI artifacts, provider HTTP response, binary/app archive string counts and notice inspection. Baseline test totals are not substitutes for tests of the final source or built artifacts.
+
+Registry versions, fresh registry-install checks, the desktop workflow run, live catalog response and production pages: **not yet verified for this release**. The existing local build version is not the owner's selected release number. Local builds and source commits do not update users' installed applications.
+
+## Owner decisions
+
+The owner must approve the legal-page diffs, choose the release version and approve the first plugin publication before this branch merges to main. Main automatically deploys the website. Deprecating prior npm releases requires a separate decision. The system-design manual should receive the final version, commit, test totals and real publication evidence, and deploy only when the owner instructs it.
+
+The owner also decides whether to allow an unsigned desktop release. Unsigned releases publish downloads only and must not advance the signed auto-update feed. Existing desktop installs remain on their previous feed until a properly signed release updates it or users reinstall a new download. Preserve the workflow's guard and verify the actual feed before claiming existing users have received the fix.
+
+Pricing and subscription behavior is unchanged. Generic marketing no-key/included-model promises and the existing plan copy are deliberately preserved under the owner's exception, although current native builds require connected provider credentials. These statements need an explicit future pricing decision before a Vector-funded model service launches; this release does not implement that service or a payment-model change.

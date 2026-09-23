@@ -8,7 +8,7 @@ import { ProviderV2 } from "./provider"
 import { EventV2 } from "./event"
 import { Policy } from "./policy"
 import { State } from "./state"
-import { providerAllowed, providerEndpointAllowed } from "./provider-policy"
+import { providerAllowed } from "./provider-policy"
 import { Integration } from "./integration"
 
 export type ProviderRecord = {
@@ -60,7 +60,7 @@ export interface Interface extends State.Transformable<Draft> {
   }
 }
 
-export class Service extends Context.Service<Service, Interface>()("@opencode/v2/Catalog") {}
+export class Service extends Context.Service<Service, Interface>()("@vector/v2/Catalog") {}
 
 const layer = Layer.effect(
   Service,
@@ -106,6 +106,18 @@ const layer = Layer.effect(
     const state = State.create<Data, Draft>({
       initial: () => ({ providers: new Map() }),
       draft: (draft) => {
+        // State rebuilds this API before publishing, so mutable plugin records cannot change their identities.
+        for (const [providerID, record] of draft.providers) {
+          if (!providerAllowed(providerID)) {
+            draft.providers.delete(providerID)
+            continue
+          }
+          record.provider.id = providerID
+          for (const [modelID, model] of record.models) {
+            model.id = modelID
+            model.providerID = providerID
+          }
+        }
         const result: Draft = {
           provider: {
             list: () => Array.fromIterable(draft.providers.values()) as ProviderRecord[],
@@ -162,15 +174,6 @@ const layer = Layer.effect(
         return result
       },
       finalize: Effect.fn("CatalogV2.finalize")(function* (catalog) {
-        for (const record of catalog.provider.list()) {
-          if (!providerEndpointAllowed(record.provider.api.url)) {
-            catalog.provider.remove(record.provider.id)
-            continue
-          }
-          for (const model of record.models.values()) {
-            if (!providerEndpointAllowed(model.api.url)) catalog.model.remove(record.provider.id, model.id)
-          }
-        }
         if (policy.hasStatements()) {
           for (const record of [...catalog.provider.list()]) {
             if ((yield* policy.evaluate("provider.use", record.provider.id, "allow")) === "deny") {

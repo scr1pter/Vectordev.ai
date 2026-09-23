@@ -34,7 +34,7 @@ describe("parallel workspace git environment", () => {
 writeFileSync(process.argv[2], JSON.stringify({
   vault: process.env.VECTOR_CREDENTIAL_KEY,
   cloud: process.env.VECTOR_CLOUD_TOKEN,
-  server: process.env.OPENCODE_SERVER_PASSWORD,
+  server: process.env.VECTOR_SERVER_PASSWORD,
   provider: process.env.OPENAI_API_KEY,
 }))
 `,
@@ -49,13 +49,13 @@ writeFileSync(process.argv[2], JSON.stringify({
     const previous = {
       VECTOR_CREDENTIAL_KEY: process.env.VECTOR_CREDENTIAL_KEY,
       VECTOR_CLOUD_TOKEN: process.env.VECTOR_CLOUD_TOKEN,
-      OPENCODE_SERVER_PASSWORD: process.env.OPENCODE_SERVER_PASSWORD,
+      VECTOR_SERVER_PASSWORD: process.env.VECTOR_SERVER_PASSWORD,
       OPENAI_API_KEY: process.env.OPENAI_API_KEY,
     }
     Object.assign(process.env, {
       VECTOR_CREDENTIAL_KEY: "vault-secret",
       VECTOR_CLOUD_TOKEN: "cloud-secret",
-      OPENCODE_SERVER_PASSWORD: "server-secret",
+      VECTOR_SERVER_PASSWORD: "server-secret",
       OPENAI_API_KEY: "provider-secret",
     })
     try {

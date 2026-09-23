@@ -19,7 +19,7 @@ const testPty = process.platform === "win32" ? test.skip : test
 
 function request(route: string, directory: string, init: RequestInit = {}) {
   const headers = new Headers(init.headers)
-  headers.set("x-opencode-directory", directory)
+  headers.set("x-vector-directory", directory)
   return HttpApiApp.webHandler().handler(
     new Request(`http://localhost${route}`, {
       ...init,
@@ -53,7 +53,7 @@ const effectIt = testEffect(
   ),
 )
 
-const directoryHeader = (dir: string) => HttpClientRequest.setHeader("x-opencode-directory", dir)
+const directoryHeader = (dir: string) => HttpClientRequest.setHeader("x-vector-directory", dir)
 
 const serverUrl = () => HttpServer.HttpServer.use((server) => Effect.succeed(HttpServer.formatAddress(server.address)))
 
@@ -130,14 +130,14 @@ describe("v2 pty HttpApi", () => {
       expect(token.status).toBe(200)
       const ticket = Schema.decodeUnknownSync(Location.response(PtyTicket.ConnectToken))(await token.json()).data.ticket
       expect(ticket).toBeTruthy()
-      const legacy = await request(`/api/pty/${info.id}/connect-token`, tmp.path, {
+      const unrelated = await request(`/api/pty/${info.id}/connect-token`, tmp.path, {
         method: "POST",
-        headers: { "x-opencode-ticket": "1" },
+        headers: { "x-unrelated-ticket": "1" },
       })
-      expect(legacy.status).toBe(200)
+      expect(unrelated.status).toBe(403)
       const conflicting = await request(`/api/pty/${info.id}/connect-token`, tmp.path, {
         method: "POST",
-        headers: { "x-vector-ticket": "invalid", "x-opencode-ticket": "1" },
+        headers: { "x-vector-ticket": "invalid", "x-unrelated-ticket": "1" },
       })
       expect(conflicting.status).toBe(403)
 
@@ -218,7 +218,7 @@ describe("v2 pty HttpApi", () => {
         )
         yield* Effect.promise(() =>
           Bun.write(
-            path.join(dir, "opencode.json"),
+            path.join(dir, "vector.json"),
             JSON.stringify({ plugin: [pathToFileURL(plugin).href], formatter: false, lsp: false }),
           ),
         )

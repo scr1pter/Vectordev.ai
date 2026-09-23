@@ -2,7 +2,7 @@ import { expect, test, type Page } from "@playwright/test"
 import { base64Encode } from "@vectordevai/core/util/encode"
 import { fixture, pageMessages } from "./session-timeline.fixture"
 import { trackPageErrors, expectNoSmokeErrors } from "../utils/errors"
-import { mockOpenCodeServer } from "../utils/mock-server"
+import { mockVectorServer } from "../utils/mock-server"
 import { APP_READY_TIMEOUT, expectAppVisible, expectSessionTitle } from "../utils/waits"
 
 const forbiddenText = ["Load details", "Show earlier steps"]
@@ -32,7 +32,7 @@ test.describe("smoke: session timeline", () => {
 
   test("keeps the visible message fixed while prepending history", async ({ page }) => {
     const requests: { before?: string; phase: "start" | "end"; at: number }[] = []
-    await mockOpenCodeServer(page, {
+    await mockVectorServer(page, {
       sessions: fixture.sessions,
       provider: fixture.provider,
       directory: fixture.directory,
@@ -90,7 +90,7 @@ test.describe("smoke: session timeline", () => {
   })
 
   test("preserves the timeline gap above the composer", async ({ page }) => {
-    await mockOpenCodeServer(page, {
+    await mockVectorServer(page, {
       sessions: fixture.sessions,
       provider: fixture.provider,
       directory: fixture.directory,
@@ -117,7 +117,7 @@ test.describe("smoke: session timeline", () => {
 
   test("loads older history when task navigation lands on a short initial page", async ({ page }) => {
     const loaded: string[] = []
-    await mockOpenCodeServer(page, {
+    await mockVectorServer(page, {
       sessions: fixture.sessions,
       provider: fixture.provider,
       directory: fixture.directory,
@@ -151,7 +151,7 @@ test.describe("smoke: session timeline", () => {
   })
 
   test("paints cached sessions at the latest message when switching tasks", async ({ page }) => {
-    await mockOpenCodeServer(page, {
+    await mockVectorServer(page, {
       sessions: fixture.sessions,
       provider: fixture.provider,
       directory: fixture.directory,
@@ -261,7 +261,7 @@ test.describe("smoke: session timeline", () => {
   })
 
   test("paints a cold session at the latest message when switching tasks", async ({ page }) => {
-    await mockOpenCodeServer(page, {
+    await mockVectorServer(page, {
       sessions: fixture.sessions,
       provider: fixture.provider,
       directory: fixture.directory,
@@ -324,7 +324,7 @@ test.describe("smoke: session timeline", () => {
 
   test("renders seeded timeline in order while paging through history", async ({ page }) => {
     const errors = trackPageErrors(page)
-    await mockOpenCodeServer(page, {
+    await mockVectorServer(page, {
       sessions: fixture.sessions,
       provider: fixture.provider,
       directory: fixture.directory,

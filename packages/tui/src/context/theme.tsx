@@ -38,7 +38,7 @@ const themeSource: ThemeSource = {
   async discover() {
     const directories = [Global.Path.config]
     for (let current = process.cwd(); ; current = path.dirname(current)) {
-      directories.push(path.join(current, ".opencode"), path.join(current, ".vector"))
+      directories.push(path.join(current, ".vector"), path.join(current, ".vector"))
       if (path.dirname(current) === current) break
     }
     return discoverThemes(directories)
@@ -119,14 +119,14 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
         draft.mode = mode
         draft.lock = lock
         const active = config.theme ?? kv.get("theme", "vector")
-        draft.active = typeof active === "string" && active !== "opencode" ? active : "vector"
+        draft.active = typeof active === "string" && active !== "vector" ? active : "vector"
         draft.ready = false
       }),
     )
 
     createEffect(() => {
       const theme = config.theme
-      if (theme) setStore("active", theme === "opencode" ? "vector" : theme)
+      if (theme) setStore("active", theme === "vector" ? "vector" : theme)
     })
 
     function syncCustomThemes() {
@@ -292,8 +292,8 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
       setMode: pin,
       set(theme: string) {
         if (!hasTheme(theme)) return false
-        setStore("active", theme === "opencode" ? "vector" : theme)
-        kv.set("theme", theme === "opencode" ? "vector" : theme)
+        setStore("active", theme === "vector" ? "vector" : theme)
+        kv.set("theme", theme === "vector" ? "vector" : theme)
         return true
       },
       get ready() {

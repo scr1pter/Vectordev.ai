@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test"
-import { costOfUsage, projectCost, ratesAtContext, ratesFor, type ModelCostSource, type ModelRates } from "./model-pricing"
+import {
+  costOfUsage,
+  projectCost,
+  ratesAtContext,
+  ratesFor,
+  type ModelCostSource,
+  type ModelRates,
+} from "./model-pricing"
 
 // Shaped exactly like the engine's provider catalog (Provider.models[id].cost),
 // which is what the app holds at runtime via useProviders().all().
@@ -14,7 +21,7 @@ const tiered: ModelRates = {
 
 const catalog: ReadonlyMap<string, ModelCostSource> = new Map([
   ["anthropic", { models: { "claude-sonnet-5": { cost: sonnet } } }],
-  ["opencode", { models: { "big-pickle": { cost: free } } }],
+  ["ollama", { models: { "llama3.2": { cost: free } } }],
   ["google", { models: { "gemini-3-pro": { cost: tiered } } }],
 ])
 
@@ -24,14 +31,12 @@ describe("ratesFor", () => {
   })
 
   test("any model the engine knows about is priced — no hand-maintained allowlist", () => {
-    // The old substring table had no entry for gpt-5, gemini-3-pro or
-    // big-pickle, which are exactly the default models, so every cost read
-    // "unknown". Anything in the catalog now prices.
+    // Catalog rates work even when no hand-maintained substring rule matches the model.
     expect(ratesFor(catalog, "google", "gemini-3-pro")).toBeDefined()
   })
 
   test("returns undefined for an unpriced or all-zero model rather than reporting $0", () => {
-    expect(ratesFor(catalog, "opencode", "big-pickle")).toBeUndefined()
+    expect(ratesFor(catalog, "ollama", "llama3.2")).toBeUndefined()
     expect(ratesFor(catalog, "anthropic", "not-a-model")).toBeUndefined()
     expect(ratesFor(catalog, "nope", "claude-sonnet-5")).toBeUndefined()
     expect(ratesFor(undefined, "anthropic", "claude-sonnet-5")).toBeUndefined()
@@ -78,7 +83,9 @@ describe("costOfUsage", () => {
   })
 
   test("returns undefined without rates instead of reporting free", () => {
-    expect(costOfUsage(undefined, { input: 1000, output: 1000, reasoning: 0, cacheRead: 0, cacheWrite: 0 })).toBeUndefined()
+    expect(
+      costOfUsage(undefined, { input: 1000, output: 1000, reasoning: 0, cacheRead: 0, cacheWrite: 0 }),
+    ).toBeUndefined()
   })
 })
 

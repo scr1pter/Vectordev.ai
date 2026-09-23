@@ -342,7 +342,7 @@ async function resolveLauncher(runtime: RuntimeId): Promise<Launcher | undefined
   // Vector's engine is usually not on PATH during development, so fall back to
   // running it straight from source the way packages/engine's own CLI tests do.
   const explicit = process.env.VECTOR_EVAL_ENGINE
-  const binary = explicit ?? (await resolveBinary("vector")) ?? (await resolveBinary("opencode"))
+  const binary = explicit ?? (await resolveBinary("vector")) ?? (await resolveBinary("vector"))
   if (binary) return { command: binary, prefix: [], label: binary }
   const source = join(REPO_ROOT, "packages", "engine", "src", "index.ts")
   if (!(await exists(source))) return undefined

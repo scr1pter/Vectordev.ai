@@ -23,14 +23,14 @@ const npmLayer = (cache: string) =>
 
 describe("Npm.sanitize", () => {
   test("keeps normal scoped package specs unchanged", () => {
-    expect(Npm.sanitize("@opencode/acme")).toBe("@opencode/acme")
-    expect(Npm.sanitize("@opencode/acme@1.0.0")).toBe("@opencode/acme@1.0.0")
+    expect(Npm.sanitize("@vector/acme")).toBe("@vector/acme")
+    expect(Npm.sanitize("@vector/acme@1.0.0")).toBe("@vector/acme@1.0.0")
     expect(Npm.sanitize("prettier")).toBe("prettier")
   })
 
   test("handles git https specs", () => {
-    const spec = "acme@git+https://github.com/opencode/acme.git"
-    const expected = win ? "acme@git+https_//github.com/opencode/acme.git" : spec
+    const spec = "acme@git+https://github.com/vector/acme.git"
+    const expected = win ? "acme@git+https_//github.com/vector/acme.git" : spec
     expect(Npm.sanitize(spec)).toBe(expected)
   })
 })

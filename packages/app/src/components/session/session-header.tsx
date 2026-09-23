@@ -289,8 +289,8 @@ export function SessionHeader() {
   const [centerMount, setCenterMount] = createSignal<HTMLElement | null>(null)
   const [rightMount, setRightMount] = createSignal<HTMLElement | null>(null)
   onMount(() => {
-    setCenterMount(document.getElementById("opencode-titlebar-center"))
-    setRightMount(document.getElementById("opencode-titlebar-right"))
+    setCenterMount(document.getElementById("vector-titlebar-center"))
+    setRightMount(document.getElementById("vector-titlebar-right"))
   })
 
   return (
@@ -310,17 +310,16 @@ export function SessionHeader() {
                 />
               </svg>
             </span>
-            <span data-vector-session-title>{session()?.title || (params.id ? "Untitled project" : "New project")}</span>
+            <span data-vector-session-title>
+              {session()?.title || (params.id ? "Untitled project" : "New project")}
+            </span>
             <span data-vector-session-path>{name()}</span>
           </div>
 
           <div data-vector-session-controls>
             <PresenceBanner />
             <span data-vector-session-branch>{branch()}</span>
-            <span
-              data-vector-session-status
-              data-status={activity().status}
-            >
+            <span data-vector-session-status data-status={activity().status}>
               <span aria-hidden="true" />
               {activity().label}
             </span>
@@ -330,10 +329,7 @@ export function SessionHeader() {
               </Tooltip>
             </Show>
             <BackgroundTasksButton variant="v2" />
-            <TooltipKeybind
-              title={language.t("command.review.toggle")}
-              keybind={command.keybind("review.toggle")}
-            >
+            <TooltipKeybind title={language.t("command.review.toggle")} keybind={command.keybind("review.toggle")}>
               <button
                 type="button"
                 data-vector-session-tool
@@ -350,10 +346,7 @@ export function SessionHeader() {
                 </Show>
               </button>
             </TooltipKeybind>
-            <TooltipKeybind
-              title={language.t("command.terminal.toggle")}
-              keybind={command.keybind("terminal.toggle")}
-            >
+            <TooltipKeybind title={language.t("command.terminal.toggle")} keybind={command.keybind("terminal.toggle")}>
               <button
                 type="button"
                 data-vector-session-tool

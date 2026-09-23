@@ -111,9 +111,9 @@ describe("routeGithubEvent", () => {
       expect(routeGithubEvent({ eventName, payload: {} })).toMatchObject({ job: "none" })
   })
 
-  test("mentions: /oc counts only when the caller lists it", () => {
-    expect(routeGithubEvent(issueComment("/oc review"))).toMatchObject({ job: "none" })
-    expect(routeGithubEvent(issueComment("/oc review"), TASK_MENTIONS)).toMatchObject({ job: "review", pr: 7 })
+  test("mentions: Vector aliases route tasks and custom aliases remain opt-in", () => {
+    expect(routeGithubEvent(issueComment("/unrelated review"))).toMatchObject({ job: "none" })
+    expect(routeGithubEvent(issueComment("/vx review"), TASK_MENTIONS)).toMatchObject({ job: "review", pr: 7 })
     expect(routeGithubEvent(issueComment("/bot review"), ["/bot"])).toMatchObject({ job: "review" })
   })
 

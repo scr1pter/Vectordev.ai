@@ -1,5 +1,6 @@
-// Vector does not offer OpenCode's hosted model services.
-export const isHiddenProvider = (id: string) => id.startsWith("opencode")
+import { providerAllowed } from "@vectordevai/schema/provider-policy"
+
+export const isHiddenProvider = (id: string) => !providerAllowed(id)
 
 export function brandProviderName(id: string, name?: string | null): string {
   return name?.trim() || id
@@ -17,22 +18,6 @@ export function brandProviderDescription(_id: string): string | undefined {
    Never read, return or log provider.key here. /provider ships stored API keys to
    the renderer, and the picker must not surface them. The only option read is
    provider.options.apiKey, compared against the known markers below. */
-
-/** The placeholder key opencode's sign-in plugins (Codex, xAI, Snowflake Cortex) put in
-    provider.options.apiKey: OAUTH_DUMMY_KEY in opencode/src/auth/index.ts. */
-const SIGN_IN_MARKER = "opencode-oauth-dummy-key"
-
-/** Copilot's sign-in loader sets provider.options.apiKey to "", and only under OAuth
-    (opencode/src/plugin/github-copilot/copilot.ts). */
-const COPILOT_SIGN_IN_KEY = ""
-
-/** Providers whose sign-in is a known subscription, by plan name. Only these can read as a
-    plan. xAI's and Snowflake Cortex's sign-ins set the same marker, but they keep per-token
-    or credit billing and prove no particular plan, so they claim nothing. */
-const SIGN_IN_PLANS: Record<string, string> = {
-  openai: "ChatGPT",
-  "github-copilot": "Copilot",
-}
 
 /** The fields the picker reads. Structural, so tests can pass plain objects. */
 export type PickerModel = {
@@ -67,7 +52,7 @@ export type PickerModel = {
     A missing field never hides a model. `capabilities` is read first, the config shape
     (tool_call, modalities.output) fills a gap, and with neither the model stays. The server
     reports every output flag false when a catalogue entry has no modalities
-    (opencode/src/provider/provider.ts), so an output record with nothing set counts as
+    (vector/src/provider/provider.ts), so an output record with nothing set counts as
     missing too. */
 const VOICE_MODEL = /realtime|audio|tts|transcribe|(^|[-_.])live([-_.]|$)/i
 
@@ -83,7 +68,7 @@ export function isCodingModel(model: PickerModel) {
   return true
 }
 
-export type AccessKind = "plan" | "key" | "none"
+export type AccessKind = "key" | "none"
 
 export type ModelAccess = {
   kind: AccessKind
@@ -107,39 +92,13 @@ export const costInput = (cost: unknown): number | undefined => {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined
 }
 
-function signInPlan(model: PickerModel, cost: number | undefined) {
-  const provider = model.provider
-  const plan = SIGN_IN_PLANS[provider.id]
-  if (!plan) return undefined
-  // A GITHUB_TOKEN env var connects Copilot too, with no sign-in, so the provider alone
-  // proves nothing: only the sign-in loader's empty key does.
-  if (provider.id === "github-copilot") return provider.options?.apiKey === COPILOT_SIGN_IN_KEY ? plan : undefined
-  if (provider.options?.apiKey === SIGN_IN_MARKER) return plan
-  // If the server ever stops sending options, zero cost still identifies a ChatGPT
-  // sign-in: Codex zeroes OpenAI prices only under OAuth (opencode/src/plugin/openai/codex.ts).
-  // Config-defined OpenAI models also default to zero, so this applies only when
-  // options are missing entirely.
-  if (provider.id === "openai" && provider.options === undefined && cost === 0) return plan
-  return undefined
-}
-
 /** Describe verified user credentials; price alone never means Vector includes a model. */
 export function modelAccess(model: PickerModel): ModelAccess {
   const provider = model.provider
   if (isHiddenProvider(provider.id)) return NO_ACCESS
+  // An OAuth loader placeholder is not evidence that an API key pays for this model.
+  if (provider.options?.apiKey === "vector-oauth-dummy-key") return NO_ACCESS
   const cost = costInput(model.cost)
-  const plan = signInPlan(model, cost)
-  if (plan)
-    return {
-      kind: "plan",
-      label: `${plan} plan`,
-      title: `Uses your ${plan} plan`,
-      spoken: `uses your ${plan} plan`,
-    }
-  if (provider.id === "github-copilot") return NO_ACCESS
-  // Any other sign-in (xAI, Snowflake Cortex) is neither a known plan nor a key the user
-  // pasted, even when a key env var is also set.
-  if (provider.options?.apiKey === SIGN_IN_MARKER) return NO_ACCESS
   if (cost === undefined || cost <= 0) return NO_ACCESS
   // An env var is the key only when it's the provider's single var, the server's own rule.
   // Vertex and Bedrock also connect from project, region and credential-file vars.
@@ -154,7 +113,7 @@ export function modelAccess(model: PickerModel): ModelAccess {
 }
 
 /** Row captions only earn their place where rows are paid for in more than one way. A
-    section of nothing but included models doesn't need "Included" on every row. */
+    section with a single access method does not need that label on every row. */
 export function showRowAccess(models: readonly PickerModel[]) {
   return new Set(models.map((model) => modelAccess(model).kind)).size > 1
 }
@@ -215,7 +174,6 @@ const WORD_BREAK = /[\s\-_.]+/
 function specWords(model: PickerModel, now: number) {
   const words: string[] = []
   const access = modelAccess(model)
-  if (access.kind === "plan") words.push(...access.label.toLowerCase().split(" "))
   if (access.kind === "key") words.push("api", "key")
   if (model.capabilities?.reasoning) words.push("reasoning")
   if (isNewRelease(model, now)) words.push("new")
@@ -240,7 +198,7 @@ export function matchRank(model: PickerModel, term: string, now: number): number
 
 export const pickerModelKey = (model: { id: string; provider: { id: string } }) => `${model.provider.id}:${model.id}`
 
-/** "GPT-6 Astra, OpenAI, 1M context, reasoning, new, uses your ChatGPT plan" */
+/** "GPT-6 Astra, OpenAI, 1M context, reasoning, new" */
 export function modelAriaLabel(model: PickerModel, now: number) {
   const access = modelAccess(model)
   const context = contextLabel(model.limit?.context)
@@ -258,7 +216,7 @@ export function modelAriaLabel(model: PickerModel, now: number) {
 
 /** The row's hover tooltip, one fact per line, with the details and exact figures the
     row itself leaves out or rounds:
-    "GPT-6 Astra\nOpenAI · Reasoning\n1,050,000-token context window\nReleased Sep 4, 2026\nUses your ChatGPT plan" */
+    "GPT-6 Astra\nOpenAI · Reasoning\n1,050,000-token context window\nReleased Sep 4, 2026" */
 export function modelTitle(model: PickerModel) {
   const access = modelAccess(model)
   const about = [
@@ -366,7 +324,7 @@ export function buildModelSections<T extends PickerModel>(input: {
   const rank = (model: T) => ranks.get(model) ?? 0
   const order = (a: T, b: T) => rank(a) - rank(b) || byRelease(a, b)
 
-  const popular = (input.popular ?? []).filter((id) => !id.startsWith("opencode"))
+  const popular = (input.popular ?? []).filter(providerAllowed)
   const popularity = (id: string) => {
     const index = popular.indexOf(id)
     return index === -1 ? popular.length : index

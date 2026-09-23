@@ -10,7 +10,7 @@ export const csp = (hash = "") =>
 export const DEFAULT_CSP = csp()
 
 export function themePreloadHash(body: string) {
-  return body.match(/<script\b(?![^>]*\bsrc\s*=)[^>]*\bid=(['"])oc-theme-preload-script\1[^>]*>([\s\S]*?)<\/script>/i)
+  return body.match(/<script\b(?![^>]*\bsrc\s*=)[^>]*\bid=(['"])vector-theme-preload-script\1[^>]*>([\s\S]*?)<\/script>/i)
 }
 
 export function cspForHtml(body: string) {
@@ -22,7 +22,7 @@ export function embeddedUI(disableEmbeddedWebUi: boolean) {
   if (disableEmbeddedWebUi) return Promise.resolve(null)
   return (embeddedUIPromise ??=
     // @ts-expect-error - generated file at build time
-    import("opencode-web-ui.gen.ts").then((module) => module.default as Record<string, string>).catch(() => null))
+    import("vector-web-ui.gen.ts").then((module) => module.default as Record<string, string>).catch(() => null))
 }
 
 function notFound() {

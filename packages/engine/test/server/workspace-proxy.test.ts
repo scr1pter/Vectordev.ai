@@ -128,7 +128,7 @@ describe("HttpApi workspace proxy", () => {
     }),
   )
 
-  it.live("strips opencode-internal headers and merges extra headers", () =>
+  it.live("strips vector-internal headers and merges extra headers", () =>
     Effect.gen(function* () {
       let forwarded: Record<string, string> = {}
       const url = yield* listenServer((req) =>
@@ -141,8 +141,8 @@ describe("HttpApi workspace proxy", () => {
       const request = HttpServerRequest.fromWeb(
         new Request("http://localhost/test", {
           headers: {
-            "x-opencode-directory": "/secret/path",
-            "x-opencode-workspace": "ws_123",
+            "x-vector-directory": "/secret/path",
+            "x-vector-workspace": "ws_123",
             "x-custom": "preserved",
           },
         }),
@@ -150,8 +150,8 @@ describe("HttpApi workspace proxy", () => {
       const httpClient = yield* HttpClient.HttpClient
       yield* HttpApiProxy.http(httpClient, `${url}/test`, { "x-injected": "extra" }, request)
 
-      expect(forwarded["x-opencode-directory"]).toBeUndefined()
-      expect(forwarded["x-opencode-workspace"]).toBeUndefined()
+      expect(forwarded["x-vector-directory"]).toBeUndefined()
+      expect(forwarded["x-vector-workspace"]).toBeUndefined()
       expect(forwarded["x-custom"]).toBe("preserved")
       expect(forwarded["x-injected"]).toBe("extra")
     }),

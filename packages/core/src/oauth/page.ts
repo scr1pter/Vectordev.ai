@@ -77,17 +77,17 @@ type Status = "pending" | "success" | "error"
 
 function renderCard(input: { status: Status; headline: string; message: string; detail?: string; footnote: string }) {
   const detail = input.detail?.trim()
-  return `<main class="card" id="oc-card" data-status="${input.status}" role="status" aria-live="polite">
+  return `<main class="card" id="vector-card" data-status="${input.status}" role="status" aria-live="polite">
       <div class="brand">${WORDMARK}</div>
       <div class="status" aria-hidden="true">
         <span class="icon icon-pending">${ICON_SPINNER}</span>
         <span class="icon icon-success">${ICON_CHECK}</span>
         <span class="icon icon-error">${ICON_CROSS}</span>
       </div>
-      <h1 class="headline" id="oc-headline">${escapeHtml(input.headline)}</h1>
-      <p class="message" id="oc-message">${input.message}</p>
-      <pre class="detail" id="oc-detail"${detail ? "" : " hidden"}>${detail ? escapeHtml(detail) : ""}</pre>
-      <p class="footnote" id="oc-footnote">${escapeHtml(input.footnote)}</p>
+      <h1 class="headline" id="vector-headline">${escapeHtml(input.headline)}</h1>
+      <p class="message" id="vector-message">${input.message}</p>
+      <pre class="detail" id="vector-detail"${detail ? "" : " hidden"}>${detail ? escapeHtml(detail) : ""}</pre>
+      <p class="footnote" id="vector-footnote">${escapeHtml(input.footnote)}</p>
     </main>`
 }
 
@@ -113,7 +113,7 @@ function bootstrapScript(options: BootstrapOptions) {
   return `var PROVIDER=${scriptString(options.provider ?? "")};
 var TOKEN_URL=new URL(${scriptString(options.tokenPath)},window.location.origin).href;
 (function(){
-  var card=document.getElementById("oc-card"),headline=document.getElementById("oc-headline"),message=document.getElementById("oc-message"),detail=document.getElementById("oc-detail"),footnote=document.getElementById("oc-footnote");
+  var card=document.getElementById("vector-card"),headline=document.getElementById("vector-headline"),message=document.getElementById("vector-message"),detail=document.getElementById("vector-detail"),footnote=document.getElementById("vector-footnote");
   function fail(text){card.dataset.status="error";headline.textContent="Authorization failed";message.textContent=PROVIDER?("Vector couldn't finish connecting to "+PROVIDER+"."):"Vector couldn't complete authorization.";if(text){detail.textContent=text;detail.hidden=false}footnote.textContent="Close this window and try again from Vector."}
   function ok(){card.dataset.status="success";headline.textContent="Authorization successful";message.textContent=PROVIDER?("Vector is now connected to "+PROVIDER+"."):"Vector is now authorized.";detail.hidden=true;footnote.textContent="You can close this window.";setTimeout(function(){try{window.close()}catch(e){}},2500)}
   try{
@@ -144,45 +144,45 @@ function escapeHtml(value: string) {
     .replaceAll("'", "&#39;")
 }
 
-// Curated subset of OC-2 tokens (packages/ui/src/styles/theme.css). Default is
+// Curated subset of Vector Modern tokens (packages/ui/src/styles/theme.css). Default is
 // light; dark applies via prefers-color-scheme. The [data-theme] selectors let a
 // host force a scheme without changing the default.
 const LIGHT_VARS = `
-    --oc-bg: #f8f8f8;
-    --oc-card: #fcfcfc;
-    --oc-text-strong: #171717;
-    --oc-text-base: #6f6f6f;
-    --oc-text-weak: #8f8f8f;
-    --oc-border-weak: #e5e5e5;
-    --oc-icon-strong: #171717;
-    --oc-icon-base: #8f8f8f;
-    --oc-icon-weak: #dbdbdb;
-    --oc-success: #2dba26;
-    --oc-error: #ed4831;
-    --oc-detail-bg: #fff8f6;
-    --oc-detail-border: #fdc3b7;
-    --oc-shadow: 0 16px 48px -6px rgba(0,0,0,.10), 0 6px 12px -2px rgba(0,0,0,.05), 0 1px 2px rgba(0,0,0,.06);`
+    --vector-bg: #f8f8f8;
+    --vector-card: #fcfcfc;
+    --vector-text-strong: #171717;
+    --vector-text-base: #6f6f6f;
+    --vector-text-weak: #8f8f8f;
+    --vector-border-weak: #e5e5e5;
+    --vector-icon-strong: #171717;
+    --vector-icon-base: #8f8f8f;
+    --vector-icon-weak: #dbdbdb;
+    --vector-success: #2dba26;
+    --vector-error: #ed4831;
+    --vector-detail-bg: #fff8f6;
+    --vector-detail-border: #fdc3b7;
+    --vector-shadow: 0 16px 48px -6px rgba(0,0,0,.10), 0 6px 12px -2px rgba(0,0,0,.05), 0 1px 2px rgba(0,0,0,.06);`
 
 const DARK_VARS = `
-    --oc-bg: #101010;
-    --oc-card: #161616;
-    --oc-text-strong: rgba(255,255,255,.936);
-    --oc-text-base: rgba(255,255,255,.618);
-    --oc-text-weak: rgba(255,255,255,.422);
-    --oc-border-weak: #282828;
-    --oc-icon-strong: #ededed;
-    --oc-icon-base: #7e7e7e;
-    --oc-icon-weak: #343434;
-    --oc-success: #12c905;
-    --oc-error: #fc533a;
-    --oc-detail-bg: #28110c;
-    --oc-detail-border: #6a1206;
-    --oc-shadow: 0 16px 48px -6px rgba(0,0,0,.55), 0 6px 12px -2px rgba(0,0,0,.35), 0 1px 2px rgba(0,0,0,.4);`
+    --vector-bg: #101010;
+    --vector-card: #161616;
+    --vector-text-strong: rgba(255,255,255,.936);
+    --vector-text-base: rgba(255,255,255,.618);
+    --vector-text-weak: rgba(255,255,255,.422);
+    --vector-border-weak: #282828;
+    --vector-icon-strong: #ededed;
+    --vector-icon-base: #7e7e7e;
+    --vector-icon-weak: #343434;
+    --vector-success: #12c905;
+    --vector-error: #fc533a;
+    --vector-detail-bg: #28110c;
+    --vector-detail-border: #6a1206;
+    --vector-shadow: 0 16px 48px -6px rgba(0,0,0,.55), 0 6px 12px -2px rgba(0,0,0,.35), 0 1px 2px rgba(0,0,0,.4);`
 
 const STYLES = `
   :root { color-scheme: light dark;${LIGHT_VARS}
-    --oc-font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    --oc-font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    --vector-font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --vector-font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   }
   @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {${DARK_VARS} } }
   :root[data-theme="dark"] {${DARK_VARS} }
@@ -195,9 +195,9 @@ const STYLES = `
     display: grid;
     place-items: center;
     padding: 24px;
-    background: var(--oc-bg);
-    color: var(--oc-text-base);
-    font-family: var(--oc-font-sans);
+    background: var(--vector-bg);
+    color: var(--vector-text-base);
+    font-family: var(--vector-font-sans);
     line-height: 1.5;
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
@@ -205,36 +205,35 @@ const STYLES = `
   .card {
     width: min(100%, 28rem);
     padding: 2.25rem 2rem 1.75rem;
-    background: var(--oc-card);
-    border: 1px solid var(--oc-border-weak);
+    background: var(--vector-card);
+    border: 1px solid var(--vector-border-weak);
     border-radius: 14px;
-    box-shadow: var(--oc-shadow);
+    box-shadow: var(--vector-shadow);
     text-align: center;
   }
   .brand { display: flex; justify-content: center; margin-bottom: 1.75rem; }
-  .vector-wordmark { color: var(--oc-text-strong); font-weight: 700; letter-spacing: -0.02em; font-size: 1.35rem; }
-  .vector-wordmark span { color: #9d6cff; }
+  .vector-wordmark { color: var(--vector-text-strong); font-weight: 700; letter-spacing: -0.02em; font-size: 1.35rem; }
   .status { display: flex; justify-content: center; margin-bottom: 1.125rem; }
   .icon { display: none; line-height: 0; }
   .icon svg { display: block; }
   .card[data-status="pending"] .icon-pending,
   .card[data-status="success"] .icon-success,
   .card[data-status="error"] .icon-error { display: block; }
-  .icon-success { color: var(--oc-success); }
-  .icon-error { color: var(--oc-error); }
-  .icon-pending { color: var(--oc-text-weak); }
-  .headline { margin: 0; font-size: 1.1875rem; font-weight: 500; line-height: 1.3; letter-spacing: -0.012em; color: var(--oc-text-strong); }
-  .message { margin: 0.5rem 0 0; font-size: 0.9375rem; color: var(--oc-text-base); }
+  .icon-success { color: var(--vector-success); }
+  .icon-error { color: var(--vector-error); }
+  .icon-pending { color: var(--vector-text-weak); }
+  .headline { margin: 0; font-size: 1.1875rem; font-weight: 500; line-height: 1.3; letter-spacing: -0.012em; color: var(--vector-text-strong); }
+  .message { margin: 0.5rem 0 0; font-size: 0.9375rem; color: var(--vector-text-base); }
   .detail {
     margin: 1.25rem 0 0;
     padding: 0.75rem 0.875rem;
     text-align: left;
-    font-family: var(--oc-font-mono);
+    font-family: var(--vector-font-mono);
     font-size: 0.8125rem;
     line-height: 1.55;
-    color: var(--oc-text-strong);
-    background: var(--oc-detail-bg);
-    border: 1px solid var(--oc-detail-border);
+    color: var(--vector-text-strong);
+    background: var(--vector-detail-bg);
+    border: 1px solid var(--vector-detail-border);
     border-radius: 8px;
     white-space: pre-wrap;
     word-break: break-word;
@@ -242,13 +241,13 @@ const STYLES = `
     overflow: auto;
   }
   .detail[hidden] { display: none; }
-  .footnote { margin: 1.5rem 0 0; font-size: 0.8125rem; color: var(--oc-text-weak); }
-  .spinner { animation: oc-spin 0.8s linear infinite; transform-origin: center; }
-  @keyframes oc-spin { to { transform: rotate(360deg); } }
+  .footnote { margin: 1.5rem 0 0; font-size: 0.8125rem; color: var(--vector-text-weak); }
+  .spinner { animation: vector-spin 0.8s linear infinite; transform-origin: center; }
+  @keyframes vector-spin { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
 `
 
-const WORDMARK = `<div class="vector-wordmark" aria-label="Vector" role="img">vector<span>.ai</span></div>`
+const WORDMARK = `<div class="vector-wordmark" aria-label="Vector" role="img">Vector</div>`
 
 const ICON_CHECK = `<svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9" /><path d="m8.5 12.5 2.4 2.4 4.6-5.4" /></svg>`
 

@@ -2108,7 +2108,7 @@ export function CodespaceWorkbench(props: {
       },
       metadata: {
         source: "vector-codespace",
-        engine: "opencode-compatible",
+        engine: "vector-compatible",
         hidden: true,
       },
     })
@@ -2536,7 +2536,7 @@ export function CodespaceWorkbench(props: {
         title: `${INTERNAL_SESSION_TITLE_PREFIX}Autocomplete`,
         agent: activeAgentName(),
         model: { providerID: model.providerID, id: model.modelID, variant: activeVariant() },
-        metadata: { source: "vector-codespace", engine: "opencode-compatible", hidden: true },
+        metadata: { source: "vector-codespace", engine: "vector-compatible", hidden: true },
       })
       .catch(() => undefined)
     completionSessionId = created?.data?.id
@@ -5104,7 +5104,7 @@ export function SessionSidePanel(props: {
     }
   }
 
-  const openCodeArchaeologyPanel = (_event?: Event) => {
+  const vectorArchaeologyPanel = (_event?: Event) => {
     setArchaeologyOpen(true)
     view().reviewPanel.close()
     layout.fileTree.close()
@@ -5272,7 +5272,7 @@ export function SessionSidePanel(props: {
     announceWorkspaceMode("agent")
   }
 
-  const openCodespaceTab = () => {
+  const vectorspaceTab = () => {
     view().reviewPanel.open("other")
     layout.fileTree.close()
     void tabs().open("codespace")
@@ -5321,7 +5321,7 @@ export function SessionSidePanel(props: {
         showToast({
           title: `${target.agentName} is editing ${fileBasename(target.path)}`,
           description: target.path,
-          actions: [{ label: "Watch", onClick: openCodespaceTab }],
+          actions: [{ label: "Watch", onClick: vectorspaceTab }],
         })
       },
       { defer: true },
@@ -5338,7 +5338,7 @@ export function SessionSidePanel(props: {
 
   const handleTabChange = (value: string) => {
     if (value === "codespace") {
-      openCodespaceTab()
+      vectorspaceTab()
       return
     }
     if (value === "preview") {
@@ -5499,7 +5499,7 @@ export function SessionSidePanel(props: {
                                     class="flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-[12.5px] text-white/60 transition hover:bg-white/[0.06] hover:text-white"
                                     aria-label="Code Archaeology"
                                     title="Code Archaeology — every checkpoint, from first to latest"
-                                    onClick={() => openCodeArchaeologyPanel()}
+                                    onClick={() => vectorArchaeologyPanel()}
                                   >
                                     <svg viewBox="0 0 16 16" class="size-4" aria-hidden="true">
                                       <path

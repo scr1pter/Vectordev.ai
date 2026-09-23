@@ -4,8 +4,8 @@
 
 import { DEFAULT_MENTIONS, parseReviewCommand } from "@vectordevai/core/review/command"
 
-// The task job has always answered `/oc` too.
-export const TASK_MENTIONS = ["/vector", "/vx", "/oc"]
+// Task comments use the same four Vector mentions as reviews.
+export const TASK_MENTIONS = ["/vectorscope", "/vs", "/vector", "/vx"]
 
 // The pull_request actions that start an automatic review.
 export const REVIEW_ACTIONS = ["opened", "synchronize", "reopened", "ready_for_review"]

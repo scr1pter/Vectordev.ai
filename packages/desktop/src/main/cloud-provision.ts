@@ -1,3 +1,4 @@
+import { VECTOR_USER_AGENT } from "./user-agent"
 import { randomBytes } from "node:crypto"
 import { basename } from "node:path"
 
@@ -165,7 +166,7 @@ async function supabaseJson(token: string, url: string, request: CloudFetch, ini
   const headers = new Headers(init?.headers)
   headers.set("accept", "application/json")
   headers.set("authorization", `Bearer ${token}`)
-  headers.set("user-agent", "Vector-Desktop/1")
+  headers.set("user-agent", VECTOR_USER_AGENT)
   if (init?.body) headers.set("content-type", "application/json")
   const response = await request(url, {
     ...init,

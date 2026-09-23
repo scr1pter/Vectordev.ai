@@ -7,7 +7,7 @@ import {
   wslTerminalArgs,
 } from "./policy"
 import {
-  expectOpencodeVersion,
+  expectVectorVersion,
   pendingRestartAfterWslInstall,
   pollWslHealth,
   wslServerIdsToStartOnInitialize,
@@ -15,7 +15,7 @@ import {
 import { createWslServersController, type WslServerConfig } from "./servers"
 
 let persistedServers: WslServerConfig[] = []
-let releaseOpencodeResolve: (() => void) | undefined
+let releaseVectorResolve: (() => void) | undefined
 
 test("starts every configured WSL server on initialization", () => {
   expect(
@@ -27,8 +27,8 @@ test("starts every configured WSL server on initialization", () => {
 })
 
 test("rejects an update that did not install the Vector desktop version", () => {
-  expect(() => expectOpencodeVersion("1.16.2", "1.16.2")).not.toThrow()
-  expect(() => expectOpencodeVersion("1.14.35", "1.16.2")).toThrow(
+  expect(() => expectVectorVersion("1.16.2", "1.16.2")).not.toThrow()
+  expect(() => expectVectorVersion("1.14.35", "1.16.2")).toThrow(
     "Vector update finished but Debian still reports 1.14.35; expected 1.16.2",
   )
 })
@@ -55,7 +55,7 @@ test("clears cached distro probes when removing a WSL server", () => {
       {
         Debian: {
           distro: "Debian",
-          resolvedPath: "/home/luke/.opencode/bin/opencode",
+          resolvedPath: "/home/luke/.vector/bin/vector",
           version: "1.16.2",
           expectedVersion: "1.16.2",
           matchesDesktop: true,
@@ -64,7 +64,7 @@ test("clears cached distro probes when removing a WSL server", () => {
       },
       "Debian",
     ),
-  ).toEqual({ distroProbes: {}, opencodeChecks: {} })
+  ).toEqual({ distroProbes: {}, vectorChecks: {} })
 })
 
 test("opens terminals for distro names containing spaces", () => {
@@ -106,7 +106,7 @@ test("derives a required Windows restart from the post-install runtime probe", (
 
 test("ignores stale background engine checks after removing a WSL server", async () => {
   persistedServers = []
-  releaseOpencodeResolve = undefined
+  releaseVectorResolve = undefined
   const controller = createWslServersController(
     "1.16.2",
     async () => ({
@@ -115,25 +115,25 @@ test("ignores stale background engine checks after removing a WSL server", async
         onExit: () => undefined,
       },
       url: "http://127.0.0.1:4096",
-      username: "opencode",
+      username: "vector",
       password: "secret",
     }),
     testControllerOptions(),
   )
 
   await controller.addServer("Debian")
-  await waitFor(() => !!releaseOpencodeResolve)
+  await waitFor(() => !!releaseVectorResolve)
   await controller.removeServer("wsl:Debian")
-  releaseOpencodeResolve?.()
+  releaseVectorResolve?.()
   await new Promise((resolve) => setTimeout(resolve, 0))
 
   expect(controller.getState().servers).toEqual([])
-  expect(controller.getState().opencodeChecks).toEqual({})
+  expect(controller.getState().vectorChecks).toEqual({})
 })
 
 test("ignores stale startup engine checks after removing a WSL server", async () => {
   persistedServers = [{ id: "wsl:Debian", distro: "Debian" }]
-  releaseOpencodeResolve = undefined
+  releaseVectorResolve = undefined
   const controller = createWslServersController(
     "1.16.2",
     async () => new Promise<never>(() => undefined),
@@ -141,20 +141,20 @@ test("ignores stale startup engine checks after removing a WSL server", async ()
   )
 
   await controller.initialize()
-  await waitFor(() => !!releaseOpencodeResolve)
+  await waitFor(() => !!releaseVectorResolve)
   await controller.removeServer("wsl:Debian")
-  releaseOpencodeResolve?.()
+  releaseVectorResolve?.()
   await new Promise((resolve) => setTimeout(resolve, 0))
 
   expect(controller.getState().servers).toEqual([])
-  expect(controller.getState().opencodeChecks).toEqual({})
+  expect(controller.getState().vectorChecks).toEqual({})
 })
 
 test("probes addable distros in parallel before checking the engine", async () => {
   persistedServers = []
   const started: string[] = []
   const release = new Map<string, () => void>()
-  const opencode: string[] = []
+  const vector: string[] = []
   const controller = createWslServersController("1.16.2", async () => new Promise<never>(() => undefined), {
     ...testControllerOptions(),
     probeDistro: async (distro) => {
@@ -162,28 +162,28 @@ test("probes addable distros in parallel before checking the engine", async () =
       await new Promise<void>((resolve) => release.set(distro, resolve))
       return { name: distro, canExecute: true, hasBash: true, hasCurl: true, error: null }
     },
-    resolveOpencode: async (distro) => {
-      opencode.push(distro)
-      return "/home/me/.opencode/bin/opencode"
+    resolveVector: async (distro) => {
+      vector.push(distro)
+      return "/home/me/.vector/bin/vector"
     },
   })
 
   const task = controller.probeAddable(["Debian", "Ubuntu"])
   await waitFor(() => started.length === 2)
   expect(started).toEqual(["Debian", "Ubuntu"])
-  expect(opencode).toEqual([])
+  expect(vector).toEqual([])
   release.get("Debian")?.()
   release.get("Ubuntu")?.()
   await task
 
   expect(Object.keys(controller.getState().distroProbes)).toEqual(["Debian", "Ubuntu"])
-  expect(opencode).toEqual(["Debian", "Ubuntu"])
-  expect(Object.keys(controller.getState().opencodeChecks)).toEqual(["Debian", "Ubuntu"])
+  expect(vector).toEqual(["Debian", "Ubuntu"])
+  expect(Object.keys(controller.getState().vectorChecks)).toEqual(["Debian", "Ubuntu"])
 })
 
 test("does not check the engine in addable distros that cannot execute commands", async () => {
   persistedServers = []
-  const opencode: string[] = []
+  const vector: string[] = []
   const controller = createWslServersController("1.16.2", async () => new Promise<never>(() => undefined), {
     ...testControllerOptions(),
     probeDistro: async (distro) => ({
@@ -193,17 +193,17 @@ test("does not check the engine in addable distros that cannot execute commands"
       hasCurl: distro === "Debian",
       error: distro === "Debian" ? null : "Open Ubuntu once to finish setup",
     }),
-    resolveOpencode: async (distro) => {
-      opencode.push(distro)
-      return "/home/me/.opencode/bin/opencode"
+    resolveVector: async (distro) => {
+      vector.push(distro)
+      return "/home/me/.vector/bin/vector"
     },
   })
 
   await controller.probeAddable(["Debian", "Ubuntu"])
 
   expect(Object.keys(controller.getState().distroProbes)).toEqual(["Debian", "Ubuntu"])
-  expect(opencode).toEqual(["Debian"])
-  expect(Object.keys(controller.getState().opencodeChecks)).toEqual(["Debian"])
+  expect(vector).toEqual(["Debian"])
+  expect(Object.keys(controller.getState().vectorChecks)).toEqual(["Debian"])
 })
 
 async function waitFor(check: () => boolean) {
@@ -221,11 +221,11 @@ function testControllerOptions() {
       persistedServers = servers
     },
     readCommandVersion: async () => "1.16.2",
-    resolveOpencode: async () => {
+    resolveVector: async () => {
       await new Promise<void>((resolve) => {
-        releaseOpencodeResolve = resolve
+        releaseVectorResolve = resolve
       })
-      return "/home/me/.opencode/bin/opencode"
+      return "/home/me/.vector/bin/vector"
     },
   }
 }

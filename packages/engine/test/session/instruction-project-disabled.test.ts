@@ -15,7 +15,7 @@ import { provideInstance, tmpdirScoped } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { TestConfig } from "../fixture/config"
 
-// A code review runs on a pull request's tree with OPENCODE_DISABLE_PROJECT_CONFIG set, so none of the project's
+// A code review runs on a pull request's tree with VECTOR_DISABLE_PROJECT_CONFIG set, so none of the project's
 // instruction files, the additive Vector ones included, may reach the reviewer's system prompt.
 
 const it = testEffect(
@@ -57,15 +57,15 @@ const withFiles = (files: Record<string, string>) =>
 const withProjectConfigDisabled = <A, E, R>(self: Effect.Effect<A, E, R>) =>
   Effect.acquireUseRelease(
     Effect.sync(() => {
-      const previous = process.env.OPENCODE_DISABLE_PROJECT_CONFIG
-      process.env.OPENCODE_DISABLE_PROJECT_CONFIG = "1"
+      const previous = process.env.VECTOR_DISABLE_PROJECT_CONFIG
+      process.env.VECTOR_DISABLE_PROJECT_CONFIG = "1"
       return previous
     }),
     () => self,
     (previous) =>
       Effect.sync(() => {
-        if (previous === undefined) delete process.env.OPENCODE_DISABLE_PROJECT_CONFIG
-        else process.env.OPENCODE_DISABLE_PROJECT_CONFIG = previous
+        if (previous === undefined) delete process.env.VECTOR_DISABLE_PROJECT_CONFIG
+        else process.env.VECTOR_DISABLE_PROJECT_CONFIG = previous
       }),
   )
 
@@ -97,7 +97,7 @@ describe("Instruction.system with project config disabled", () => {
     Effect.gen(function* () {
       const project = yield* withFiles(PROJECT)
       const global = yield* withFiles(GLOBAL)
-      expect(process.env.OPENCODE_DISABLE_PROJECT_CONFIG).toBeUndefined()
+      expect(process.env.VECTOR_DISABLE_PROJECT_CONFIG).toBeUndefined()
 
       const result = yield* systemFor(project, global)
 

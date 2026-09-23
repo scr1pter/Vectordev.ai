@@ -1,12 +1,12 @@
 {
-  "acme": {
-    "id": "acme",
+  "lmstudio": {
+    "id": "lmstudio",
     "name": "Acme",
     "env": ["ACME_API_KEY"],
     "models": {}
   },
-  "local": {
-    "id": "local",
+  "v0": {
+    "id": "v0",
     "name": "Local",
     "env": [],
     "models": {}

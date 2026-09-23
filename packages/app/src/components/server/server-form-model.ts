@@ -1,6 +1,6 @@
 import { normalizeServerUrl } from "@/context/server"
 
-/** The username Vector's desktop engine is started with (the sidecar sets OPENCODE_SERVER_USERNAME to it). A plain
+/** The username Vector's desktop engine is started with (the sidecar sets VECTOR_SERVER_USERNAME to it). A plain
  *  CLI engine defaults to CLI_SERVER_USERNAME. Add mode only sends it once a password is set, so the prefill is inert
  *  until then. */
 export const DEFAULT_SERVER_USERNAME = "vector"

@@ -48,7 +48,7 @@ export class WorkspaceRouteContext extends Context.Service<
     readonly directory: string
     readonly workspaceID?: WorkspaceV2.ID
   }
->()("@opencode/ExperimentalHttpApiWorkspaceRouteContext") {}
+>()("@vector/ExperimentalHttpApiWorkspaceRouteContext") {}
 
 export class WorkspaceRoutingMiddleware extends HttpApiMiddleware.Service<
   WorkspaceRoutingMiddleware,
@@ -56,14 +56,14 @@ export class WorkspaceRoutingMiddleware extends HttpApiMiddleware.Service<
     provides: WorkspaceRouteContext
     requires: Session.Service
   }
->()("@opencode/ExperimentalHttpApiWorkspaceRouting") {}
+>()("@vector/ExperimentalHttpApiWorkspaceRouting") {}
 
 function requestURL(request: HttpServerRequest.HttpServerRequest): URL {
   return new URL(request.url, "http://localhost")
 }
 
 function configuredWorkspaceID(): WorkspaceV2.ID | undefined {
-  return Flag.OPENCODE_WORKSPACE_ID ? WorkspaceV2.ID.make(Flag.OPENCODE_WORKSPACE_ID) : undefined
+  return Flag.VECTOR_WORKSPACE_ID ? WorkspaceV2.ID.make(Flag.VECTOR_WORKSPACE_ID) : undefined
 }
 
 function selectedWorkspaceID(
@@ -72,10 +72,7 @@ function selectedWorkspaceID(
   sessionWorkspaceID?: WorkspaceV2.ID,
 ): WorkspaceV2.ID | typeof InvalidWorkspaceID | undefined {
   if (sessionWorkspaceID) return sessionWorkspaceID
-  const workspaceParam =
-    url.searchParams.get("workspace") ||
-    request.headers["x-vector-workspace"] ||
-    request.headers["x-opencode-workspace"]
+  const workspaceParam = url.searchParams.get("workspace") || request.headers["x-vector-workspace"]
   if (!workspaceParam) return undefined
   const workspaceID = Schema.decodeUnknownOption(WorkspaceV2.ID)(workspaceParam)
   if (Option.isNone(workspaceID)) return InvalidWorkspaceID
@@ -85,7 +82,7 @@ function selectedWorkspaceID(
 function defaultDirectory(request: HttpServerRequest.HttpServerRequest, url: URL): string {
   const query = url.searchParams.get("directory")
   if (query) return query
-  const header = request.headers["x-vector-directory"] || request.headers["x-opencode-directory"]
+  const header = request.headers["x-vector-directory"]
   if (!header) return process.cwd()
   try {
     return decodeURIComponent(header)

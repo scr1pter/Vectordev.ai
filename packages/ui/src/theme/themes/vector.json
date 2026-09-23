@@ -1,7 +1,7 @@
 {
   "$schema": "https://vectordev.ai/desktop-theme.json",
   "name": "Vector",
-  "id": "opencode",
+  "id": "vector",
   "light": {
     "palette": {
       "neutral": "#ffffff",

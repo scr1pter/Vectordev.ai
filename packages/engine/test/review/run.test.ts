@@ -166,7 +166,7 @@ const it = testEffect(
 )
 
 const TIMEOUT = 30_000
-const ref = { providerID: ProviderV2.ID.make("test"), modelID: ModelV2.ID.make("test-model") }
+const ref = { providerID: ProviderV2.ID.make("lmstudio"), modelID: ModelV2.ID.make("test-model") }
 const PRICE = { input: 10, output: 10 } // USD per million tokens
 
 const LIST_SOURCE = "export function last(items: number[]) {\n  const index = items.length\n  return items[index]\n}\n"
@@ -249,10 +249,10 @@ const useServer = (cost?: typeof PRICE) =>
     const llm = yield* TestLLMServer
     const fs = yield* FSUtil.Service
     const provider = testProviderConfig(llm.url)
-    if (cost) provider.provider.test.models["test-model"].cost = cost
+    if (cost) provider.provider.lmstudio.models["test-model"].cost = cost
     yield* fs.writeWithDirs(
-      path.join(test.directory, "opencode.json"),
-      JSON.stringify({ $schema: "https://opencode.ai/config.json", ...provider }),
+      path.join(test.directory, "vector.json"),
+      JSON.stringify({ $schema: "https://vectordev.ai/config.json", ...provider }),
     )
     yield* fs.writeWithDirs(path.join(test.directory, "src/list.ts"), LIST_SOURCE)
     return { llm, directory: test.directory }
@@ -334,7 +334,7 @@ describe("Review.run", () => {
         expect(outcome.partial).toBeUndefined()
         expect(outcome.unreviewed).toEqual([])
         expect(outcome.cost?.kind).toBe("free")
-        expect(outcome.cost?.model).toBe("test/test-model")
+        expect(outcome.cost?.model).toBe("lmstudio/test-model")
         expect(outcome.sessions).toHaveLength(1)
         expect(outcome.stats).toEqual({ files: 1, additions: 2, deletions: 1 })
         const requests = yield* modelRequests(llm)
@@ -575,7 +575,7 @@ describe("Review.run", () => {
 
         expect(outcome.sessions).toHaveLength(3)
         expect(saved).toHaveLength(3)
-        expect(saved.every((spent) => spent.kind === "free" && spent.model === "test/test-model")).toBe(true)
+        expect(saved.every((spent) => spent.kind === "free" && spent.model === "lmstudio/test-model")).toBe(true)
       }),
     TIMEOUT,
   )

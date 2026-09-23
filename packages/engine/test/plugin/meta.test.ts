@@ -19,7 +19,7 @@ function run(input: { file: string; spec: string; target: string; id: string }) 
     env: {
       ...Object.fromEntries(
         Object.entries(process.env).map(([key, value]) => {
-          const current = key.replace(/^OPENCODE_/, "VECTOR_")
+          const current = key.replace(/^VECTOR_/, "VECTOR_")
           return [current, process.env[current] ?? value]
         }),
       ),

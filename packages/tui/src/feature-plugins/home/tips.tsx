@@ -1,3 +1,4 @@
+import { providerAllowed } from "@vectordevai/schema/provider-policy"
 import type { TuiPlugin, TuiPluginApi } from "@vectordevai/plugin/tui"
 import type { BuiltinTuiPlugin } from "../builtins"
 import { createMemo, Show } from "solid-js"
@@ -39,7 +40,7 @@ const tui: TuiPlugin = async (api) => {
       home_bottom() {
         const hidden = createMemo(() => api.kv.get("tips_hidden", false))
         const first = createMemo(() => api.state.session.count() === 0)
-        const connected = createMemo(() => api.state.provider.some((item) => !item.id.startsWith("opencode")))
+        const connected = createMemo(() => api.state.provider.some((item) => providerAllowed(item.id)))
         const show = createMemo(() => (!first() || !connected()) && !hidden())
         return <View api={api} hidden={hidden()} show={show()} connected={connected()} />
       },

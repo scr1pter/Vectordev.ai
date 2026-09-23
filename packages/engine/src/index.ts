@@ -41,7 +41,7 @@ const isVectorCli = process.env.VECTOR_CLI === "1"
 
 function show(out: string) {
   const text = out.trimStart()
-  if (!text.startsWith("opencode ") && !text.startsWith("vector ")) {
+  if (!text.startsWith("vector ")) {
     process.stderr.write(UI.logo() + EOL + EOL)
     process.stderr.write(text + EOL)
     return
@@ -74,18 +74,17 @@ const cli = yargs(args)
     type: "boolean",
   })
   .middleware(async (opts) => {
-    if (opts.printLogs) process.env.VECTOR_PRINT_LOGS = process.env.OPENCODE_PRINT_LOGS = "1"
-    if (opts.logLevel) process.env.VECTOR_LOG_LEVEL = process.env.OPENCODE_LOG_LEVEL = opts.logLevel
+    if (opts.printLogs) process.env.VECTOR_PRINT_LOGS = "1"
+    if (opts.logLevel) process.env.VECTOR_LOG_LEVEL = opts.logLevel
     if (opts.pure) {
-      process.env.VECTOR_PURE = process.env.OPENCODE_PURE = "1"
+      process.env.VECTOR_PURE = "1"
     }
 
     Heap.start()
 
     process.env.AGENT = "1"
     process.env.VECTOR = "1"
-    process.env.OPENCODE = "1"
-    process.env.VECTOR_PID = process.env.OPENCODE_PID = String(process.pid)
+    process.env.VECTOR_PID = String(process.pid)
 
     if (isVectorCli && !opts.help && !opts.version) {
       const command = String(opts._?.[0] ?? "")

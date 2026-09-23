@@ -150,7 +150,6 @@ export const DEFAULT_THEMES: Record<string, ThemeJson> = {
   ["one-dark"]: onedark,
   ["osaka-jade"]: osakaJade,
   vector,
-  opencode: vector, // Saved preferences from earlier releases.
   orng,
   ["lucent-orng"]: lucentOrng,
   palenight,

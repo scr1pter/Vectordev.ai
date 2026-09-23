@@ -22,7 +22,7 @@ const DAY_TOTAL_RETENTION_DAYS = 400
 export type SpendSource = "session" | "parallel" | "scheduled"
 
 // One recorded observation of spend. `costUsd` is absent when the provider
-// reported no usage at all — a free or zen model, or a provider that returns
+// reported no usage at all — a zero-cost model, or a provider that returns
 // nothing. Such a run is unmeasured rather than free, so the field is never
 // defaulted to 0: a zero would let unknown spend read as proof of cheapness,
 // and would let a day of unmeasured runs sit under a cap it never tested.

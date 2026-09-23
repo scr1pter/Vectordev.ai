@@ -57,8 +57,8 @@ describe("normalizeProviderList", () => {
         ?.models ?? {},
     ).map((item) => item.name)
 
-  test("drops retired providers from the catalog, connected ids and defaults", () => {
-    const ids = ["opencode", "opencode-go", "opencode-zen", "opencode-custom"]
+  test("drops unlisted providers from the catalog, connected ids and defaults", () => {
+    const ids = ["unlisted-a", "unlisted-b", "unlisted-c", "unlisted-d"]
     const list = ids.map((id) => provider(id, { apiKey: "test-only" }, [model("coding", "Coding")]))
     const result = normalizeProviderList({
       all: [...list, provider("anthropic", {}, [model("new", "New"), model("old", "Old", "deprecated")])],
@@ -74,8 +74,8 @@ describe("normalizeProviderList", () => {
 
 describe("directoryKey", () => {
   test("normalizes slashes", () => {
-    expect(String(directoryKey("C:\\Repos\\sst\\opencode"))).toBe("C:/Repos/sst/opencode")
-    expect(String(directoryKey("C:/Repos/sst/opencode"))).toBe("C:/Repos/sst/opencode")
+    expect(String(directoryKey("C:\\Repos\\sst\\vector"))).toBe("C:/Repos/sst/vector")
+    expect(String(directoryKey("C:/Repos/sst/vector"))).toBe("C:/Repos/sst/vector")
   })
 
   test("preserves backslashes in posix paths", () => {
@@ -83,7 +83,7 @@ describe("directoryKey", () => {
   })
 
   test("trims trailing slashes without breaking roots", () => {
-    expect(String(directoryKey("C:/Repos/sst/opencode/"))).toBe("C:/Repos/sst/opencode")
+    expect(String(directoryKey("C:/Repos/sst/vector/"))).toBe("C:/Repos/sst/vector")
     expect(String(directoryKey("C:/"))).toBe("C:/")
     expect(String(directoryKey("/"))).toBe("/")
   })

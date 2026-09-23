@@ -12,7 +12,6 @@ import { ForbiddenError, PtyNotFoundError } from "@vectordevai/protocol/errors"
 import {
   PTY_CONNECT_TICKET_QUERY,
   PTY_CONNECT_TOKEN_HEADER,
-  PTY_CONNECT_TOKEN_LEGACY_HEADER,
   PTY_CONNECT_TOKEN_HEADER_VALUE,
 } from "@vectordevai/protocol/groups/pty"
 import { response } from "../location"
@@ -120,8 +119,7 @@ export const PtyHandler = HttpApiBuilder.group(Api, "server.pty", (handlers) =>
           // The custom header forces a CORS preflight, so cross-origin browser pages cannot
           // mint tickets without passing the server's origin policy.
           if (
-            (request.headers[PTY_CONNECT_TOKEN_HEADER] ?? request.headers[PTY_CONNECT_TOKEN_LEGACY_HEADER]) !==
-              PTY_CONNECT_TOKEN_HEADER_VALUE ||
+            request.headers[PTY_CONNECT_TOKEN_HEADER] !== PTY_CONNECT_TOKEN_HEADER_VALUE ||
             !isAllowedRequestOrigin(request.headers.origin, request.headers.host, cors)
           )
             return yield* new ForbiddenError({ message: "Invalid PTY connect token request" })

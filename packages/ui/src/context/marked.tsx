@@ -5,7 +5,7 @@ import { bundledLanguages, type BundledLanguage } from "shiki"
 import { createSimpleContext } from "./helper"
 import { getSharedHighlighter, registerCustomTheme, ThemeRegistrationResolved } from "@pierre/diffs"
 
-export const OpenCodeTheme = {
+export const VectorTheme = {
   name: "Vector",
   bg: "var(--color-background-stronger)",
   fg: "var(--text-base)",
@@ -376,8 +376,8 @@ export const OpenCodeTheme = {
   },
 } as unknown as ThemeRegistrationResolved
 
-registerCustomTheme("Vector", () => Promise.resolve(OpenCodeTheme))
-registerCustomTheme("OpenCode", () => Promise.resolve(OpenCodeTheme))
+registerCustomTheme("Vector", () => Promise.resolve(VectorTheme))
+registerCustomTheme("Vector", () => Promise.resolve(VectorTheme))
 
 function renderMathInText(text: string): string {
   let result = text

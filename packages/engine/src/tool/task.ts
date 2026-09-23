@@ -89,7 +89,12 @@ function dependencyIDs(job: BackgroundJob.Info) {
   return job.metadata.dependsOn.filter((item): item is string => typeof item === "string")
 }
 
-function dependencyReaches(jobs: BackgroundJob.Info[], start: string, target: string, seen = new Set<string>()): boolean {
+function dependencyReaches(
+  jobs: BackgroundJob.Info[],
+  start: string,
+  target: string,
+  seen = new Set<string>(),
+): boolean {
   if (start === target) return true
   if (seen.has(start)) return false
   seen.add(start)
@@ -199,7 +204,7 @@ export const TaskTool = Tool.define(
       const runInBackground = params.background === true
       if (runInBackground && !flags.experimentalBackgroundSubagents) {
         return yield* Effect.fail(
-          new Error("Background subagents require OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS=true"),
+          new Error("Background subagents require VECTOR_EXPERIMENTAL_BACKGROUND_SUBAGENTS=true"),
         )
       }
       const parent = yield* sessions.get(ctx.sessionID)
@@ -216,12 +221,12 @@ export const TaskTool = Tool.define(
           return yield* Effect.fail(new Error(`Dependency ${dependency} was not found in this project runtime.`))
         }
         if (job.type !== id || job.metadata?.parentSessionId !== ctx.sessionID) {
-          return yield* Effect.fail(new Error(`Dependency ${dependency} does not belong to this task's subagent group.`))
+          return yield* Effect.fail(
+            new Error(`Dependency ${dependency} does not belong to this task's subagent group.`),
+          )
         }
         if (job.status === "error") {
-          return yield* Effect.fail(
-            new Error(`Dependency ${dependency} failed${job.error ? `: ${job.error}` : "."}`),
-          )
+          return yield* Effect.fail(new Error(`Dependency ${dependency} failed${job.error ? `: ${job.error}` : "."}`))
         }
         if (job.status === "cancelled") {
           return yield* Effect.fail(new Error(`Dependency ${dependency} was cancelled.`))
@@ -273,15 +278,15 @@ export const TaskTool = Tool.define(
       let depth = 0
       while (cursor.parentID) {
         depth += 1
-        const ancestor = yield* sessions
-          .get(cursor.parentID)
-          .pipe(Effect.catchCause(() => Effect.succeed(undefined)))
+        const ancestor = yield* sessions.get(cursor.parentID).pipe(Effect.catchCause(() => Effect.succeed(undefined)))
         if (!ancestor) break
         cursor = ancestor
       }
       if (depth >= MAX_SUBAGENT_DEPTH) {
         return yield* Effect.fail(
-          new Error(`Subagent depth is limited to ${MAX_SUBAGENT_DEPTH} so delegated work cannot recursively fan out forever.`),
+          new Error(
+            `Subagent depth is limited to ${MAX_SUBAGENT_DEPTH} so delegated work cannot recursively fan out forever.`,
+          ),
         )
       }
       let runningSiblings = 0
@@ -301,7 +306,8 @@ export const TaskTool = Tool.define(
       const agents = yield* agent.list()
       const known = new Set(agents.map((item) => item.name))
       const requested =
-        params.subagent_type?.trim() || (session ? (SubagentLifecycle.read(session)?.agent ?? session.agent) : undefined)
+        params.subagent_type?.trim() ||
+        (session ? (SubagentLifecycle.read(session)?.agent ?? session.agent) : undefined)
       const subagentType = resolveSubagentType(requested, (name) => known.has(name))
 
       // A disabled general (agent.general.disable) is missing from the agent list altogether, so
@@ -688,7 +694,11 @@ export const TaskTool = Tool.define(
             }
             // The returned metadata carries the outcome, so the part needs no later
             // patch. A stopped subagent returns the cancelled note instead of failing.
-            yield* finish(result?.status === "cancelled" || ctx.abort.aborted ? "cancelled" : "completed", undefined, false)
+            yield* finish(
+              result?.status === "cancelled" || ctx.abort.aborted ? "cancelled" : "completed",
+              undefined,
+              false,
+            )
             // The settled outcome, not the job's status: a run that returned
             // normally can still have failed or been stopped inside the child.
             const state = outcome.status === "error" || outcome.status === "cancelled" ? outcome.status : "completed"

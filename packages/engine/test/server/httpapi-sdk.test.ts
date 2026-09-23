@@ -10,7 +10,7 @@ import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { FSUtil } from "@vectordevai/core/fs-util"
 import { CrossSpawnSpawner } from "@vectordevai/core/cross-spawn-spawner"
 import { Flag } from "@vectordevai/core/flag/flag"
-import { createOpencodeClient } from "@vectordevai/sdk/v2"
+import { createVectorClient } from "@vectordevai/sdk/v2"
 import { validateSession } from "../../src/cli/tui/validate-session"
 import { InstanceBootstrap } from "../../src/project/bootstrap"
 import { InstanceStore } from "../../src/project/instance-store"
@@ -39,12 +39,12 @@ const appLayer = AppNodeBuilder.build(
 const it = testEffect(Layer.mergeAll(appLayer, httpApiLayer))
 
 const original = {
-  OPENCODE_SERVER_PASSWORD: Flag.OPENCODE_SERVER_PASSWORD,
-  OPENCODE_SERVER_USERNAME: Flag.OPENCODE_SERVER_USERNAME,
+  VECTOR_SERVER_PASSWORD: Flag.VECTOR_SERVER_PASSWORD,
+  VECTOR_SERVER_USERNAME: Flag.VECTOR_SERVER_USERNAME,
 }
 
 type ServerPath = "default" | "raw"
-type Sdk = ReturnType<typeof createOpencodeClient>
+type Sdk = ReturnType<typeof createVectorClient>
 type SdkResult = { response: Response; data?: unknown; error?: unknown }
 type Captured = { status: number; data?: unknown; error?: unknown }
 type ProjectFixture = { sdk: Sdk; directory: string }
@@ -70,7 +70,7 @@ function client(
 ) {
   return serverFetch(serverPath, input).pipe(
     Effect.map((fetch) =>
-      createOpencodeClient({
+      createVectorClient({
         baseUrl: "http://localhost",
         directory,
         experimental_workspaceID: input?.workspaceID,
@@ -88,8 +88,8 @@ function serverFetch(
   return HttpServer.HttpServer.use((server) =>
     Effect.sync(() => {
       void serverPath
-      Flag.OPENCODE_SERVER_PASSWORD = input?.password
-      Flag.OPENCODE_SERVER_USERNAME = input?.username
+      Flag.VECTOR_SERVER_PASSWORD = input?.password
+      Flag.VECTOR_SERVER_USERNAME = input?.username
       const baseUrl = HttpServer.formatAddress(server.address)
       return Object.assign(
         async (request: RequestInfo | URL, init?: RequestInit) => {
@@ -285,7 +285,7 @@ function writeStandardFiles(dir: string) {
 function writeProjectSkill(dir: string) {
   return FSUtil.Service.use((fs) =>
     fs.writeWithDirs(
-      path.join(dir, ".opencode", "skills", "project-rest-skill", "SKILL.md"),
+      path.join(dir, ".vector", "skills", "project-rest-skill", "SKILL.md"),
       `---
 name: project-rest-skill
 description: A project skill visible to REST API prompts.
@@ -310,7 +310,7 @@ function seedMessage(directory: string, sessionID: string) {
             role: "user",
             time: { created: Date.now() },
             agent: "test",
-            model: { providerID: ProviderV2.ID.make("test"), modelID: ModelV2.ID.make("test") },
+            model: { providerID: ProviderV2.ID.make("lmstudio"), modelID: ModelV2.ID.make("test") },
             tools: {},
           } satisfies SessionV1.User)
           const part = yield* svc.updatePart({
@@ -328,8 +328,8 @@ function seedMessage(directory: string, sessionID: string) {
 }
 
 afterEach(async () => {
-  Flag.OPENCODE_SERVER_PASSWORD = original.OPENCODE_SERVER_PASSWORD
-  Flag.OPENCODE_SERVER_USERNAME = original.OPENCODE_SERVER_USERNAME
+  Flag.VECTOR_SERVER_PASSWORD = original.VECTOR_SERVER_PASSWORD
+  Flag.VECTOR_SERVER_USERNAME = original.VECTOR_SERVER_USERNAME
   await disposeAllInstances()
   await resetDatabase()
 })
@@ -349,7 +349,7 @@ describe("HttpApi SDK", () => {
       })
       expect(log.response.status).toBe(200)
       expect(log.data).toBe(true)
-      yield* expectStatus(() => sdk.auth.set({ providerID: "test" }), 400)
+      yield* expectStatus(() => sdk.auth.set({ providerID: "lmstudio" }), 400)
     }),
   )
 
@@ -402,8 +402,8 @@ describe("HttpApi SDK", () => {
         expect(url.searchParams.get("workspace")).toBe(workspaceID)
         expect(url.searchParams.get("location[directory]")).toBe(directory)
         expect(url.searchParams.get("location[workspace]")).toBe(workspaceID)
-        expect(request!.headers.has("x-opencode-directory")).toBe(false)
-        expect(request!.headers.has("x-opencode-workspace")).toBe(false)
+        expect(request!.headers.has("x-vector-directory")).toBe(false)
+        expect(request!.headers.has("x-vector-workspace")).toBe(false)
       }),
     ),
   )
@@ -413,7 +413,7 @@ describe("HttpApi SDK", () => {
       const sdk = yield* client(serverPath)
       const health = yield* capture(() => sdk.global.health())
       const log = yield* capture(() => sdk.app.log({ service: "sdk-parity", level: "info", message: "hello" }))
-      const invalidAuth = yield* capture(() => sdk.auth.set({ providerID: "test" }))
+      const invalidAuth = yield* capture(() => sdk.auth.set({ providerID: "lmstudio" }))
 
       return {
         statuses: statuses({ health, log, invalidAuth }),
@@ -497,12 +497,12 @@ describe("HttpApi SDK", () => {
         const missing = yield* capture(() => missingSdk.file.read({ path: "hello.txt" }))
         const badSdk = yield* client("raw", directory, {
           password: "secret",
-          headers: { authorization: authorization("opencode", "wrong") },
+          headers: { authorization: authorization("vector", "wrong") },
         })
         const bad = yield* capture(() => badSdk.file.read({ path: "hello.txt" }))
         const goodSdk = yield* client("raw", directory, {
           password: "secret",
-          headers: { authorization: authorization("opencode", "secret") },
+          headers: { authorization: authorization("vector", "secret") },
         })
         const good = yield* capture(() => goodSdk.file.read({ path: "hello.txt" }))
 
@@ -786,7 +786,7 @@ describe("HttpApi SDK", () => {
           sdk.session.prompt({
             sessionID,
             agent: "build",
-            model: { providerID: "test", modelID: "test-model" },
+            model: { providerID: "lmstudio", modelID: "test-model" },
             parts: [{ type: "text", text: "hello llm" }],
           }),
         )
@@ -821,7 +821,7 @@ describe("HttpApi SDK", () => {
           sdk.session.prompt({
             sessionID,
             agent: "build",
-            model: { providerID: "test", modelID: "test-model" },
+            model: { providerID: "lmstudio", modelID: "test-model" },
             parts: [{ type: "text", text: "hello skill context" }],
           }),
         )

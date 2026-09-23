@@ -72,7 +72,7 @@ const branched = Effect.gen(function* () {
 })
 
 const model: ResolvedModel = {
-  providerID: ProviderV2.ID.make("test"),
+  providerID: ProviderV2.ID.make("lmstudio"),
   modelID: ModelV2.ID.make("test-model"),
   context: 100_000,
   costKind: "free",
@@ -145,7 +145,7 @@ function fake(options: Fake = {}) {
             cacheRead: 0,
             cacheWrite: 0,
             kind: "free",
-            model: "test/test-model",
+            model: "lmstudio/test-model",
           },
           durationMs: 1000,
           base: input.base,
@@ -216,7 +216,7 @@ describe("vector review: what it compares", () => {
         `Vectorscope review · feature vs main (merge-base ${repo.main.slice(0, 7)}) · 1 file, +2 −1\n`,
       )
       expect(run.out()).toContain("Not reviewed: bun.lock (lockfile)")
-      expect(run.err()).toContain("Reviewing 1 file with test/test-model…")
+      expect(run.err()).toContain("Reviewing 1 file with lmstudio/test-model…")
     }),
   )
 
@@ -790,12 +790,12 @@ function lastUserText(body: Record<string, unknown>) {
 describe("vector review: the command", () => {
   cliIt.concurrent(
     "reviews a branch end to end, prints JSON, and remembers the review for the next run",
-    ({ llm, opencode, home }) =>
+    ({ llm, vector, home }) =>
       Effect.gen(function* () {
         const run = (...args: string[]) => $`git ${args}`.cwd(home).quiet()
         yield* Effect.promise(async () => {
           await run("init", "-q", "-b", "main")
-          await run("config", "user.email", "test@opencode.test")
+          await run("config", "user.email", "test@vector.test")
           await run("config", "user.name", "Test")
           await run("config", "commit.gpgsign", "false")
           await Bun.write(path.join(home, ".gitignore"), ".config/\n.local/\n.cache/\n")
@@ -817,13 +817,13 @@ describe("vector review: the command", () => {
           }),
         )
 
-        const first = yield* opencode.spawn(
-          ["review", "--json", "--model", "test/test-model", "--fail-on", "blocking"],
+        const first = yield* vector.spawn(
+          ["review", "--json", "--model", "lmstudio/test-model", "--fail-on", "blocking"],
           {
             timeoutMs: 90_000,
           },
         )
-        opencode.expectExit(first, 1, "a blocking finding with --fail-on blocking")
+        vector.expectExit(first, 1, "a blocking finding with --fail-on blocking")
         const printed = JSON.parse(first.stdout)
         expect(printed.version).toBe(1)
         expect(printed.target).toMatchObject({ kind: "branch", label: "feature", baseRef: "main" })
@@ -832,14 +832,14 @@ describe("vector review: the command", () => {
           printed.outcome.selection.inline.map((item: { path: string; line: number }) => [item.path, item.line]),
         ).toEqual([["src/list.ts", 3]])
         expect(printed.outcome.sessions).toHaveLength(1)
-        expect(first.stderr).toContain("Reviewing 1 file with test/test-model")
+        expect(first.stderr).toContain("Reviewing 1 file with lmstudio/test-model")
         expect(first.stderr).not.toContain("could not save this review for next time")
         expect(yield* Effect.promise(() => Bun.file(path.join(home, ".git/vector/review/feature.json")).exists())).toBe(
           true,
         )
 
-        const second = yield* opencode.spawn(["review", "--fail-on", "blocking"], { timeoutMs: 90_000 })
-        opencode.expectExit(second, 1, "the saved blocking finding is still open")
+        const second = yield* vector.spawn(["review", "--fail-on", "blocking"], { timeoutMs: 90_000 })
+        vector.expectExit(second, 1, "the saved blocking finding is still open")
         expect(second.stdout).toContain(
           "was already reviewed. 1 finding from the last review is still open (1 blocking).",
         )

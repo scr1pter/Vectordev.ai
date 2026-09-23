@@ -8,8 +8,6 @@ import { mergeDeep } from "remeda"
 import { Global } from "@vectordevai/core/global"
 import fsNode from "fs/promises"
 import { Flag } from "@vectordevai/core/flag/flag"
-import { warnLegacy } from "@vectordevai/core/flag/compat"
-import { providerEndpointAllowed } from "@vectordevai/core/provider-policy"
 import { Auth } from "../auth"
 import { Env } from "../env"
 import { applyEdits, modify } from "jsonc-parser"
@@ -138,19 +136,17 @@ export interface Interface {
   readonly waitForDependencies: () => Effect.Effect<void>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@opencode/Config") {}
+export class Service extends Context.Service<Service, Interface>()("@vector/Config") {}
 
 export const use = serviceUse(Service)
 
-// Machine-local config layer inside .opencode directories. Runtime MCP installs (and their
-// tokens/headers) are written here instead of the committable opencode.json, so the files
+// Machine-local config layer inside .vector directories. Runtime MCP installs (and their
+// tokens/headers) are written here instead of the committable vector.json, so the files
 // must stay gitignored.
-const LOCAL_CONFIG_FILES = ["opencode.local.json", "opencode.local.jsonc", "vector.local.json", "vector.local.jsonc"]
+const LOCAL_CONFIG_FILES = ["vector.local.json", "vector.local.jsonc"]
 
 function globalConfigFile() {
-  const candidates = ["vector.jsonc", "vector.json", "opencode.jsonc", "opencode.json", "config.json"].map((file) =>
-    path.join(Global.Path.config, file),
-  )
+  const candidates = ["vector.jsonc", "vector.json"].map((file) => path.join(Global.Path.config, file))
   for (const file of candidates) {
     if (existsSync(file)) return file
   }
@@ -199,23 +195,16 @@ const layer = Layer.effect(
       headers: Record<string, string> | undefined,
       schema: S,
       loginOrigin: string,
-      fallback?: string,
     ) {
-      if (!providerEndpointAllowed(url))
-        return yield* Effect.die(new Error("Vector no longer uses this hosted service"))
       const response = yield* withTransientReadRetry(http)
         .execute(
           HttpClientRequest.get(url).pipe(HttpClientRequest.acceptJson, HttpClientRequest.setHeaders(headers ?? {})),
         )
         .pipe(
           Effect.flatMap((response) =>
-            response.status === 404 && fallback
-              ? HttpClient.filterStatusOk(http)
-                  .execute(HttpClientRequest.get(fallback).pipe(HttpClientRequest.acceptJson))
-                  .pipe(Effect.tap(() => Effect.sync(() => warnLegacy(".well-known/opencode", ".well-known/vector"))))
-              : response.status >= 200 && response.status < 300
-                ? Effect.succeed(response)
-                : Effect.die(new Error(`Remote config returned HTTP ${response.status}`)),
+            response.status >= 200 && response.status < 300
+              ? Effect.succeed(response)
+              : Effect.die(new Error(`Remote config returned HTTP ${response.status}`)),
           ),
           Effect.catch((error) => Effect.die(new Error(`failed to fetch remote config from ${url}: ${String(error)}`))),
         )
@@ -262,42 +251,14 @@ const layer = Layer.effect(
       yield* Effect.logInfo("loading", { path: filepath })
       const text = yield* readConfigFile(filepath)
       if (!text) return {} as Info
-      if (path.basename(filepath).startsWith("opencode.")) {
-        warnLegacy(path.basename(filepath), path.basename(filepath).replace(/^opencode\./, "vector."))
-      }
       return yield* loadConfig(text, { path: filepath }, env)
     })
 
     const loadGlobal = Effect.fnUntraced(function* (env?: Record<string, string>) {
       let result: Info = {}
-      const legacy = path.join(Global.Path.config, "config")
-      if (existsSync(legacy)) {
-        yield* Effect.promise(() =>
-          import(pathToFileURL(legacy).href, { with: { type: "toml" } })
-            .then(async (mod) => {
-              const { provider, model, ...rest } = mod.default
-              if (provider && model) result.model = `${provider}/${model}`
-              result.$schema = "https://vectordev.ai/config.json"
-              result = mergeConfig(result, rest)
-              warnLegacy("global config", "vector.json")
-              // Keep coexisting files intact: the legacy layer must not overwrite modern settings or comments.
-              if (
-                ["config.json", "opencode.json", "opencode.jsonc", "vector.json", "vector.jsonc"].some((name) =>
-                  existsSync(path.join(Global.Path.config, name)),
-                )
-              )
-                return
-              await fsNode.writeFile(path.join(Global.Path.config, "vector.json"), JSON.stringify(result, null, 2), {
-                flag: "wx",
-              })
-              await fsNode.unlink(legacy)
-            })
-            .catch(() => {}),
-        )
-      }
       // Seed the default global config with the schema for editor completion, but avoid writing when the user
       // explicitly routes config through env-provided paths or content.
-      if (!Flag.OPENCODE_CONFIG && !Flag.OPENCODE_CONFIG_DIR && !Flag.OPENCODE_CONFIG_CONTENT) {
+      if (!Flag.VECTOR_CONFIG && !Flag.VECTOR_CONFIG_DIR && !Flag.VECTOR_CONFIG_CONTENT) {
         const file = globalConfigFile()
         if (!existsSync(file)) {
           yield* fs
@@ -305,9 +266,6 @@ const layer = Layer.effect(
             .pipe(Effect.catch(() => Effect.void))
         }
       }
-      result = mergeConfig(result, yield* loadFile(path.join(Global.Path.config, "config.json"), env))
-      result = mergeConfig(result, yield* loadFile(path.join(Global.Path.config, "opencode.json"), env))
-      result = mergeConfig(result, yield* loadFile(path.join(Global.Path.config, "opencode.jsonc"), env))
 
       result = mergeConfig(result, yield* loadFile(path.join(Global.Path.config, "vector.json"), env))
       result = mergeConfig(result, yield* loadFile(path.join(Global.Path.config, "vector.jsonc"), env))
@@ -358,7 +316,7 @@ const layer = Layer.effect(
 
         const pluginScopeForSource = Effect.fnUntraced(function* (source: string) {
           if (source.startsWith("http://") || source.startsWith("https://")) return "global"
-          if (source === "OPENCODE_CONFIG_CONTENT") return "local"
+          if (source === "VECTOR_CONFIG_CONTENT") return "local"
           if (containsPath(source, ctx)) return "local"
           return "global"
         })
@@ -395,13 +353,7 @@ const layer = Layer.effect(
             authEnv[value.key] = value.token
             const wellknownURL = `${url}/.well-known/vector`
             yield* Effect.logDebug("fetching remote config", { url: wellknownURL })
-            const wellknown = yield* fetchRemoteJson(
-              wellknownURL,
-              undefined,
-              ConfigV1.WellKnown,
-              url,
-              `${url}/.well-known/opencode`,
-            )
+            const wellknown = yield* fetchRemoteJson(wellknownURL, undefined, ConfigV1.WellKnown, url)
             const remote = yield* Effect.promise(() =>
               substituteWellKnownRemoteConfig({
                 value: wellknown.remote_config,
@@ -440,13 +392,13 @@ const layer = Layer.effect(
         const global = Object.keys(authEnv).length ? yield* loadGlobal(authEnv) : yield* getGlobal()
         yield* merge(Global.Path.config, global, "global")
 
-        if (Flag.OPENCODE_CONFIG) {
-          yield* merge(Flag.OPENCODE_CONFIG, yield* loadFile(Flag.OPENCODE_CONFIG, authEnv))
-          yield* Effect.logDebug("loaded custom config", { path: Flag.OPENCODE_CONFIG })
+        if (Flag.VECTOR_CONFIG) {
+          yield* merge(Flag.VECTOR_CONFIG, yield* loadFile(Flag.VECTOR_CONFIG, authEnv))
+          yield* Effect.logDebug("loaded custom config", { path: Flag.VECTOR_CONFIG })
         }
 
-        if (!Flag.OPENCODE_DISABLE_PROJECT_CONFIG) {
-          for (const file of yield* ConfigPaths.files("opencode", ctx.directory, ctx.worktree).pipe(Effect.orDie)) {
+        if (!Flag.VECTOR_DISABLE_PROJECT_CONFIG) {
+          for (const file of yield* ConfigPaths.files("vector", ctx.directory, ctx.worktree).pipe(Effect.orDie)) {
             yield* merge(file, yield* loadFile(file, authEnv), "local")
           }
         }
@@ -457,22 +409,16 @@ const layer = Layer.effect(
 
         const directories = yield* ConfigPaths.directories(ctx.directory, ctx.worktree)
 
-        if (Flag.OPENCODE_CONFIG_DIR) {
-          yield* Effect.logDebug("loading config from OPENCODE_CONFIG_DIR", { path: Flag.OPENCODE_CONFIG_DIR })
+        if (Flag.VECTOR_CONFIG_DIR) {
+          yield* Effect.logDebug("loading config from VECTOR_CONFIG_DIR", { path: Flag.VECTOR_CONFIG_DIR })
         }
 
         const deps: Fiber.Fiber<void>[] = []
 
         for (const dir of directories) {
-          if (dir.endsWith(".opencode") || dir.endsWith(".vector") || dir === Flag.OPENCODE_CONFIG_DIR) {
+          if (dir.endsWith(".vector") || dir === Flag.VECTOR_CONFIG_DIR) {
             // Local files merge after the shared ones so machine-local settings win.
-            for (const file of [
-              "opencode.json",
-              "opencode.jsonc",
-              "vector.json",
-              "vector.jsonc",
-              ...LOCAL_CONFIG_FILES,
-            ]) {
+            for (const file of ["vector.json", "vector.jsonc", ...LOCAL_CONFIG_FILES]) {
               const source = path.join(dir, file)
               yield* Effect.logDebug(`loading config from ${source}`)
               yield* merge(source, yield* loadFile(source, authEnv))
@@ -510,25 +456,25 @@ const layer = Layer.effect(
           result.command = mergeDeep(result.command ?? {}, yield* Effect.promise(() => ConfigCommand.load(dir)))
           result.agent = mergeDeep(result.agent ?? {}, yield* Effect.promise(() => ConfigAgent.load(dir)))
           result.agent = mergeDeep(result.agent ?? {}, yield* Effect.promise(() => ConfigAgent.loadMode(dir)))
-          // Auto-discovered plugins under `.opencode/plugin(s)` are already local files, so ConfigPlugin.load
+          // Auto-discovered plugins under `.vector/plugin(s)` are already local files, so ConfigPlugin.load
           // returns normalized Specs and we only need to attach origin metadata here.
           const list = yield* Effect.promise(() => ConfigPlugin.load(dir))
           yield* mergePluginOrigins(dir, list)
         }
 
-        if (Flag.OPENCODE_CONFIG_CONTENT) {
-          const source = "OPENCODE_CONFIG_CONTENT"
-          const next = yield* loadConfig(Flag.OPENCODE_CONFIG_CONTENT, {
+        if (Flag.VECTOR_CONFIG_CONTENT) {
+          const source = "VECTOR_CONFIG_CONTENT"
+          const next = yield* loadConfig(Flag.VECTOR_CONFIG_CONTENT, {
             dir: ctx.directory,
             source,
           })
           yield* merge(source, next, "local")
-          yield* Effect.logDebug("loaded custom config from OPENCODE_CONFIG_CONTENT")
+          yield* Effect.logDebug("loaded custom config from VECTOR_CONFIG_CONTENT")
         }
 
         const managedDir = ConfigManaged.managedConfigDir()
         if (existsSync(managedDir)) {
-          for (const file of ["opencode.json", "opencode.jsonc", "vector.json", "vector.jsonc"]) {
+          for (const file of ["vector.json", "vector.jsonc"]) {
             const source = path.join(managedDir, file)
             yield* merge(source, yield* loadFile(source), "global")
           }
@@ -555,11 +501,11 @@ const layer = Layer.effect(
           })
         }
 
-        if (Flag.OPENCODE_PERMISSION) {
+        if (Flag.VECTOR_PERMISSION) {
           try {
-            result.permission = mergeDeep(result.permission ?? {}, JSON.parse(Flag.OPENCODE_PERMISSION))
+            result.permission = mergeDeep(result.permission ?? {}, JSON.parse(Flag.VECTOR_PERMISSION))
           } catch (err) {
-            yield* Effect.logWarning("OPENCODE_PERMISSION contains invalid JSON, skipping", { err })
+            yield* Effect.logWarning("VECTOR_PERMISSION contains invalid JSON, skipping", { err })
           }
         }
 
@@ -589,10 +535,10 @@ const layer = Layer.effect(
         result.share = "disabled"
         result.autoshare = false
 
-        if (Flag.OPENCODE_DISABLE_AUTOCOMPACT) {
+        if (Flag.VECTOR_DISABLE_AUTOCOMPACT) {
           result.compaction = { ...result.compaction, auto: false }
         }
-        if (Flag.OPENCODE_DISABLE_PRUNE) {
+        if (Flag.VECTOR_DISABLE_PRUNE) {
           result.compaction = { ...result.compaction, prune: false }
         }
 
@@ -687,7 +633,7 @@ const layer = Layer.effect(
     const removeMcpLocal = Effect.fn("Config.removeMcpLocal")(function* (name: string) {
       const ctx = yield* InstanceState.context
       const root = ctx.worktree === "/" ? ctx.directory : ctx.worktree
-      for (const dir of [path.join(root, ".opencode"), path.join(root, ".vector")]) {
+      for (const dir of [path.join(root, ".vector")]) {
         for (const nameOfFile of LOCAL_CONFIG_FILES) {
           const file = path.join(dir, nameOfFile)
           const before = yield* readConfigFile(file)

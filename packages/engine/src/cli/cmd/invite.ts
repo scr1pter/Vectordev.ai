@@ -29,28 +29,28 @@ export const InviteCommand = effectCmd({
       default: true,
     }),
   describe: "start the server and print an invite link so teammates can join your live workspace",
-  // Same as `web`: instances load per request via the x-opencode-directory header.
+  // Same as `web`: instances load per request via the x-vector-directory header.
   instance: false,
   handler: Effect.fn("Cli.invite")(function* (args) {
     const { Server } = yield* Effect.promise(() => import("../../server/server"))
 
-    // Two credential pairs: yours (reuse OPENCODE_SERVER_PASSWORD when set) and a
+    // Two credential pairs: yours (reuse VECTOR_SERVER_PASSWORD when set) and a
     // fresh one for guests. Server.listen reads both from process.env through a
     // fresh ConfigProvider, and Flag keeps this process's own clients in sync.
     const owner = {
-      username: Flag.OPENCODE_SERVER_USERNAME || "vector",
-      password: Flag.OPENCODE_SERVER_PASSWORD || secret(),
+      username: Flag.VECTOR_SERVER_USERNAME || "vector",
+      password: Flag.VECTOR_SERVER_PASSWORD || secret(),
     }
     const guest = {
-      username: readEnv("OPENCODE_SERVER_GUEST_USERNAME") || GUEST_USERNAME,
+      username: readEnv("VECTOR_SERVER_GUEST_USERNAME") || GUEST_USERNAME,
       password: secret(),
     }
-    process.env.VECTOR_SERVER_USERNAME = process.env.OPENCODE_SERVER_USERNAME = owner.username
-    process.env.VECTOR_SERVER_PASSWORD = process.env.OPENCODE_SERVER_PASSWORD = owner.password
-    process.env.VECTOR_SERVER_GUEST_USERNAME = process.env.OPENCODE_SERVER_GUEST_USERNAME = guest.username
-    process.env.VECTOR_SERVER_GUEST_PASSWORD = process.env.OPENCODE_SERVER_GUEST_PASSWORD = guest.password
-    Flag.OPENCODE_SERVER_USERNAME = owner.username
-    Flag.OPENCODE_SERVER_PASSWORD = owner.password
+    process.env.VECTOR_SERVER_USERNAME = owner.username
+    process.env.VECTOR_SERVER_PASSWORD = owner.password
+    process.env.VECTOR_SERVER_GUEST_USERNAME = guest.username
+    process.env.VECTOR_SERVER_GUEST_PASSWORD = guest.password
+    Flag.VECTOR_SERVER_USERNAME = owner.username
+    Flag.VECTOR_SERVER_PASSWORD = owner.password
 
     // Teammates have to reach this machine, so bind every interface unless the
     // caller picked a hostname explicitly.

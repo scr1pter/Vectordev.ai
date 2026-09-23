@@ -55,7 +55,7 @@ export function fileLogger(file = path.join(Global.Path.log, "vector.log"), id: 
 const stderrLogger = Logger.make((options) => process.stderr.write(formatter().log(options) + "\n"))
 
 export function minimumLogLevel() {
-  const value = readEnv("OPENCODE_LOG_LEVEL")?.toUpperCase()
+  const value = readEnv("VECTOR_LOG_LEVEL")?.toUpperCase()
   const levels = {
     DEBUG: "Debug",
     INFO: "Info",
@@ -66,7 +66,7 @@ export function minimumLogLevel() {
 }
 
 export function loggers() {
-  return readEnv("OPENCODE_PRINT_LOGS") === "1" ? [fileLogger(), stderrLogger] : [fileLogger()]
+  return readEnv("VECTOR_PRINT_LOGS") === "1" ? [fileLogger(), stderrLogger] : [fileLogger()]
 }
 
 export * as Logging from "./logging"

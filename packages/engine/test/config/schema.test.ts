@@ -2,20 +2,17 @@ import { expect, test } from "bun:test"
 import { parse } from "jsonc-parser"
 import { ConfigSchema } from "../../src/config/schema"
 
-test("schema migration preserves comments and only replaces the exact legacy value", () => {
-  const legacy =
-    '{\n  // Keep this comment\n  "$schema": "https://opencode.ai/config.json",\n  "model": "example/model"\n}'
-  const migrated = ConfigSchema.rewrite(legacy)
-  expect(migrated).toContain("// Keep this comment")
-  expect(parse(migrated)).toEqual({ $schema: "https://vectordev.ai/config.json", model: "example/model" })
+test("schema defaults preserve comments and explicit custom schemas", () => {
+  const input = '{\n  // Keep this comment\n  "model": "example/model"\n}'
+  const configured = ConfigSchema.rewrite(input)
+  expect(configured).toContain("// Keep this comment")
+  expect(parse(configured)).toEqual({ $schema: "https://vectordev.ai/config.json", model: "example/model" })
   const custom = '{"$schema":"https://example.com/custom.json","model":"example/model"}'
   expect(ConfigSchema.rewrite(custom)).toBe(custom)
-  const similar = '{"$schema":"https://opencode.ai/config.json?custom=1"}'
-  expect(ConfigSchema.rewrite(similar)).toBe(similar)
 })
 
-test("TUI schema migration uses the TUI schema and leaves custom schemas untouched", () => {
-  expect(parse(ConfigSchema.rewrite('{"$schema":"https://opencode.ai/tui.json","theme":"vector"}', "tui"))).toEqual({
+test("TUI schema defaults use the Vector TUI schema", () => {
+  expect(parse(ConfigSchema.rewrite('{"theme":"vector"}', "tui"))).toEqual({
     $schema: "https://vectordev.ai/tui.json",
     theme: "vector",
   })

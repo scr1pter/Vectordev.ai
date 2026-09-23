@@ -25,7 +25,7 @@ import { Credential } from "../src/credential"
 import { Database } from "../src/database/database"
 import { EventV2 } from "../src/event"
 import { Global } from "../src/global"
-import { ModelsDev } from "../src/models-dev"
+import { ModelCatalog } from "../src/model-catalog"
 import { Npm } from "../src/npm"
 import { Project } from "../src/project"
 import { Reference } from "../src/reference"
@@ -78,9 +78,9 @@ describe("LocationServiceMap", () => {
           })
           yield* Effect.promise(() =>
             fs.writeFile(
-              path.join(blocked.path, "opencode.json"),
+              path.join(blocked.path, "vector.json"),
               JSON.stringify({
-                experimental: { policies: [{ effect: "deny", action: "provider.use", resource: "test" }] },
+                experimental: { policies: [{ effect: "deny", action: "provider.use", resource: "lmstudio" }] },
               }),
             ),
           )
@@ -89,7 +89,7 @@ describe("LocationServiceMap", () => {
             Effect.gen(function* () {
               yield* Reference.Service
               const catalog = yield* Catalog.Service
-              yield* catalog.transform((editor) => editor.provider.update(ProviderV2.ID.make("test"), () => {}))
+              yield* catalog.transform((editor) => editor.provider.update(ProviderV2.ID.make("lmstudio"), () => {}))
               return {
                 providers: yield* catalog.provider.all(),
                 tools: yield* toolDefinitions(yield* ToolRegistry.Service),
@@ -102,7 +102,7 @@ describe("LocationServiceMap", () => {
             )
 
           const blockedState = yield* update(blocked.path)
-          expect(blockedState.providers.some((provider) => provider.id === ProviderV2.ID.make("test"))).toBe(false)
+          expect(blockedState.providers.some((provider) => provider.id === ProviderV2.ID.make("lmstudio"))).toBe(false)
           expect(blockedState.tools.map((tool) => tool.name).sort()).toEqual([
             "application_context",
             "apply_patch",
@@ -120,7 +120,7 @@ describe("LocationServiceMap", () => {
             "write",
           ])
           const allowedState = yield* update(allowed.path)
-          expect(allowedState.providers.some((provider) => provider.id === ProviderV2.ID.make("test"))).toBe(true)
+          expect(allowedState.providers.some((provider) => provider.id === ProviderV2.ID.make("lmstudio"))).toBe(true)
           expect(allowedState.tools.map((tool) => tool.name).sort()).toEqual([
             "application_context",
             "apply_patch",
@@ -152,7 +152,7 @@ describe("LocationServiceMap", () => {
           const location = Location.Ref.make({ directory: AbsolutePath.make(dir.path) })
           yield* Effect.promise(() =>
             fs.writeFile(
-              path.join(dir.path, "opencode.json"),
+              path.join(dir.path, "vector.json"),
               JSON.stringify({
                 providers: {
                   unavailable: {

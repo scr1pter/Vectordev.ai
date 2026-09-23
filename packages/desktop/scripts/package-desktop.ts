@@ -50,9 +50,7 @@ export function packageRequest(input: {
     target,
     environment: {
       VECTOR_CHANNEL: channel,
-      OPENCODE_CHANNEL: channel,
       VECTOR_VERSION: input.version,
-      OPENCODE_VERSION: input.version,
     },
     builderArgs:
       input.unsignedRelease && channel === "prod" && !publish
@@ -97,7 +95,7 @@ if (import.meta.main) {
   const request = packageRequest({
     argv: process.argv.slice(2),
     version: manifest.version,
-    environmentChannel: Bun.env.VECTOR_CHANNEL ?? Bun.env.OPENCODE_CHANNEL,
+    environmentChannel: Bun.env.VECTOR_CHANNEL,
     unsignedRelease: Bun.env.VECTOR_ALLOW_UNSIGNED_RELEASE === "true",
   })
   const environment = { ...process.env, ...request.environment }

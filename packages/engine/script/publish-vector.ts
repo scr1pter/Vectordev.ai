@@ -2,15 +2,16 @@
 /**
  * Publishes the Vector CLI to npm as `@vectordevai/cli`.
  *
- *   bun run script/publish-vector.ts            # build + publish
+ *   bun run script/publish-vector.ts            # build + pack, no publish
  *   bun run script/publish-vector.ts --dry-run  # build + pack, no publish
+ *   bun run script/publish-vector.ts --publish  # explicitly publish plugin, then CLI
  *   bun run script/publish-vector.ts --skip-build
  *
  * Env:
  *   VECTOR_CLI_VERSION   version to publish (default: packages/desktop version)
  *   VECTOR_CLI_TARGETS   comma list, default darwin-arm64,darwin-x64,linux-x64,linux-arm64,windows-x64
  *
- * Layout mirrors how opencode ships: one thin umbrella package whose `vector`
+ * One thin umbrella package exposes the `vector` command and
  * bin resolves a platform package (@vectordevai/cli-<os>-<arch>) that carries the
  * compiled binary. npm only installs the optionalDependency matching the host.
  */
@@ -18,6 +19,7 @@ import { $ } from "bun"
 import path from "path"
 import { fileURLToPath } from "url"
 import desktop from "../../desktop/package.json"
+import plugin from "../../plugin/package.json"
 
 const dir = fileURLToPath(new URL("..", import.meta.url))
 process.chdir(dir)
@@ -29,7 +31,8 @@ const targets = (process.env.VECTOR_CLI_TARGETS ?? "darwin-arm64,darwin-x64,linu
   .split(",")
   .map((item) => item.trim())
   .filter(Boolean)
-const dryRun = process.argv.includes("--dry-run")
+const dryRun = !process.argv.includes("--publish")
+if (!dryRun && process.argv.includes("--dry-run")) throw new Error("Choose --publish or --dry-run, not both")
 const skipBuild = process.argv.includes("--skip-build")
 
 if (!skipBuild) {
@@ -37,9 +40,7 @@ if (!skipBuild) {
     ...process.env,
     VECTOR_VERSION: version,
     VECTOR_TARGETS: targets.join(","),
-    OPENCODE_VERSION: version,
-    OPENCODE_TARGETS: targets.join(","),
-    ...(dryRun ? { VECTOR_RELEASE: "", OPENCODE_RELEASE: "" } : {}),
+    ...(dryRun ? { VECTOR_RELEASE: "" } : {}),
   })
 }
 
@@ -163,7 +164,18 @@ await Bun.file(`${out}/package.json`).write(
   ),
 )
 
-// 3. Publish (platform packages first so the umbrella's optionalDependencies resolve)
+// The runtime installs this public package into config directories. It must exist before any CLI publication.
+if (plugin.name !== "@vectordevai/plugin") throw new Error("Unexpected plugin package name")
+await $`${process.execPath} script/publish.ts ${[dryRun ? "--dry-run" : "--publish", ...(skipBuild ? ["--skip-build"] : [])]}`.cwd(
+  path.resolve(dir, "../plugin"),
+)
+if (!dryRun) {
+  const available = await $`npm view ${`${plugin.name}@${plugin.version}`} version`.quiet().nothrow()
+  if (available.exitCode !== 0)
+    throw new Error(`Plugin ${plugin.name}@${plugin.version} is not available; CLI publication stopped`)
+}
+
+// Publish platform packages before the umbrella so its optionalDependencies resolve.
 async function published(name: string) {
   return (await $`npm view ${name}@${version} version`.quiet().nothrow()).exitCode === 0
 }

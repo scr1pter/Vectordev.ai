@@ -35,10 +35,10 @@ function withProject<A, E, R>(source: string, self: Effect.Effect<A, E, R>) {
         Effect.promise(() => Bun.write(file, source)),
         Effect.promise(() =>
           Bun.write(
-            path.join(test.directory, "opencode.json"),
+            path.join(test.directory, "vector.json"),
             JSON.stringify(
               {
-                $schema: "https://opencode.ai/config.json",
+                $schema: "https://vectordev.ai/config.json",
                 plugin: [pathToFileURL(file).href],
               },
               null,
@@ -70,6 +70,23 @@ const triggerSystemTransform = Effect.fn("PluginTriggerTest.triggerSystemTransfo
 })
 
 describe("plugin.trigger", () => {
+  it.instance("plugin SDK calls the in-process server with a Request adapter", () =>
+    withProject(
+      [
+        "export default async ({ client }) => {",
+        "  const response = await client.global.health({ throwOnError: true })",
+        '  if (response.data?.healthy !== true) throw new Error("Plugin client did not reach the local server")',
+        "  return {",
+        `    ${JSON.stringify(systemHook)}: (_input, output) => output.system.unshift("in-process"),`,
+        "  }",
+        "}",
+      ].join("\n"),
+      Effect.gen(function* () {
+        expect(yield* triggerSystemTransform()).toEqual(["in-process"])
+      }),
+    ),
+  )
+
   it.instance("runs synchronous hooks without crashing", () =>
     withProject(
       [

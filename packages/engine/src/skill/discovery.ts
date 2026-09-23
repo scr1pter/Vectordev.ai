@@ -1,4 +1,3 @@
-import { warnLegacy } from "@vectordevai/core/flag/compat"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { httpClient, path } from "@vectordevai/core/effect/app-node-platform"
 import { NodePath } from "@effect/platform-node"
@@ -25,7 +24,7 @@ export interface Interface {
   readonly pull: (url: string) => Effect.Effect<string[]>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@opencode/SkillDiscovery") {}
+export class Service extends Context.Service<Service, Interface>()("@vector/SkillDiscovery") {}
 
 const layer: Layer.Layer<Service, never, FSUtil.Service | Path.Path | HttpClient.HttpClient> = Layer.effect(
   Service,
@@ -83,20 +82,7 @@ const layer: Layer.Layer<Service, never, FSUtil.Service | Path.Path | HttpClient
             const current =
               version === undefined
                 ? undefined
-                : yield* fs.readFileStringSafe(versionFile).pipe(
-                    Effect.flatMap((value) =>
-                      value === undefined
-                        ? fs.readFileStringSafe(path.join(root, ".opencode-version")).pipe(
-                            Effect.tap((legacy) =>
-                              Effect.sync(() => {
-                                if (legacy !== undefined) warnLegacy(".opencode-version", ".vector-version")
-                              }),
-                            ),
-                          )
-                        : Effect.succeed(value),
-                    ),
-                    Effect.catch(() => Effect.succeed(undefined)),
-                  )
+                : yield* fs.readFileStringSafe(versionFile).pipe(Effect.catch(() => Effect.succeed(undefined)))
 
             if (version === undefined || current === version) {
               yield* Effect.forEach(

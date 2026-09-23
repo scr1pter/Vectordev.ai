@@ -16,7 +16,6 @@ import {
   buildModelSections,
   contextLabel,
   isNewRelease,
-  modelAccess,
   modelAriaLabel,
   modelDisplayName,
   modelTitle,
@@ -35,7 +34,6 @@ type ModelItem = ReturnType<ModelState["list"]>[number]
 type ModelSection = PickerSection<ModelItem>
 
 const connectKey = "action:connect-provider"
-const HIDDEN_PROVIDER_IDS = new Set<string>()
 
 /** The models a picker can show, and the ordered sections both views render. Rows and
     keyboard order both come from sections(), so they can't drift apart, and
@@ -52,7 +50,6 @@ function createModelSections(input: {
     const provider = input.provider()
     return input.model
       .list()
-      .filter((item) => !HIDDEN_PROVIDER_IDS.has(item.provider.id))
       .filter((item) => input.model.visible({ modelID: item.id, providerID: item.provider.id }))
       .filter((item) => (provider ? item.provider.id === provider : true))
   })
@@ -109,18 +106,14 @@ function SectionHeading(props: { section: ModelSection }) {
 }
 
 /** One model row, shared by both views: mark gutter, name, "New", and a quiet spec line
-    with the context size ("ChatGPT plan · 400K" where the section mixes ways of paying).
+    with the context size.
     Everything else is in the row's tooltip (modelTitle), which the caller sets. */
 function ModelRow(props: { item: ModelItem; section: ModelSection; now: number }) {
-  const access = createMemo(() => modelAccess(props.item))
   // The top section mixes providers, so its rows carry their own mark; provider sections
   // carry it once, on the label.
   const mixed = () => props.section.kind === "recent"
   const spec = createMemo(() => {
     const parts: { slot: string; text: string }[] = []
-    const value = access()
-    // Plan captions go on rows; API key captions stay on section labels and in the tooltip.
-    if (props.section.rowAccess && value.kind === "plan") parts.push({ slot: "model-row-access", text: value.label })
     const context = contextLabel(props.item.limit?.context)
     if (context) parts.push({ slot: "model-row-context", text: context })
     return parts

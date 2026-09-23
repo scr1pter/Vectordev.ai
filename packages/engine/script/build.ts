@@ -29,7 +29,7 @@ const createEmbeddedWebUIBundle = async () => {
   console.log(`Building Web UI to embed in the binary`)
   const appDir = path.join(import.meta.dirname, "../../app")
   const dist = path.join(appDir, "dist")
-  await $`OPENCODE_CHANNEL=${Script.channel} bun run --cwd ${appDir} build`
+  await $`VECTOR_CHANNEL=${Script.channel} bun run --cwd ${appDir} build`
   const files = (await Array.fromAsync(new Bun.Glob("**/*").scan({ cwd: dist })))
     .map((file) => file.replaceAll("\\", "/"))
     .filter((file) => !file.endsWith(".map"))
@@ -134,9 +134,8 @@ const targets = singleFlag
       return true
     })
   : allTargets.filter((item) => {
-      // OPENCODE_TARGETS="darwin-arm64,linux-x64" restricts the matrix (used by publish-vector.ts).
-      const only = (process.env.VECTOR_TARGETS ?? process.env.OPENCODE_TARGETS)
-        ?.split(",")
+      // VECTOR_TARGETS="darwin-arm64,linux-x64" restricts the matrix (used by publish-vector.ts).
+      const only = process.env.VECTOR_TARGETS?.split(",")
         .map((t) => t.trim())
         .filter(Boolean)
       if (!only?.length) return true
@@ -203,17 +202,17 @@ for (const item of targets) {
       execArgv: [`--user-agent=vector/${Script.version}`, "--use-system-ca", "--"],
       windows: {},
     },
-    files: embeddedFileMap ? { "opencode-web-ui.gen.ts": embeddedFileMap } : {},
-    entrypoints: ["./src/index.ts", parserWorker, workerPath, ...(embeddedFileMap ? ["opencode-web-ui.gen.ts"] : [])],
+    files: embeddedFileMap ? { "vector-web-ui.gen.ts": embeddedFileMap } : {},
+    entrypoints: ["./src/index.ts", parserWorker, workerPath, ...(embeddedFileMap ? ["vector-web-ui.gen.ts"] : [])],
     define: {
       FFF_LIBC: JSON.stringify(item.abi === "musl" ? "musl" : "gnu"),
-      OPENCODE_VERSION: `'${Script.version}'`,
-      OPENCODE_PLUGIN_VERSION: `'${pluginPkg.version}'`,
-      OPENCODE_MODELS_DEV: generated.modelsData,
+      VECTOR_VERSION: `'${Script.version}'`,
+      VECTOR_PLUGIN_VERSION: `'${pluginPkg.version}'`,
+      VECTOR_MODEL_CATALOG: generated.modelsData,
       OTUI_TREE_SITTER_WORKER_PATH: bunfsRoot + workerRelativePath,
-      OPENCODE_WORKER_PATH: workerPath,
-      OPENCODE_CHANNEL: `'${Script.channel}'`,
-      OPENCODE_LIBC: item.os === "linux" ? `'${item.abi ?? "glibc"}'` : "",
+      VECTOR_WORKER_PATH: workerPath,
+      VECTOR_CHANNEL: `'${Script.channel}'`,
+      VECTOR_LIBC: item.os === "linux" ? `'${item.abi ?? "glibc"}'` : "",
       ...(item.os === "linux" ? { "process.env.OPENTUI_LIBC": JSON.stringify(item.abi ?? "glibc") } : {}),
     },
   })

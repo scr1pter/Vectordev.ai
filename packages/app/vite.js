@@ -6,7 +6,7 @@ import tailwindcss from "@tailwindcss/vite"
 import { fileURLToPath } from "url"
 import { injectLaunchScreen, readLaunchParts } from "./src/features/launch/launch-inject.js"
 
-const theme = fileURLToPath(new URL("./public/oc-theme-preload.js", import.meta.url))
+const theme = fileURLToPath(new URL("./public/vector-theme-preload.js", import.meta.url))
 
 // The local transcription worker `?url`-imports the ONNX wasm runtime so it
 // ships with the bundle instead of loading from a CDN at runtime. onnxruntime-web
@@ -18,7 +18,7 @@ const ortRequire = createRequire(require.resolve("@huggingface/transformers"))
 const ortDist = dirname(ortRequire.resolve("onnxruntime-web/ort-wasm-simd-threaded.asyncify.wasm"))
 
 const channel = (() => {
-  const raw = process.env.VECTOR_CHANNEL ?? process.env.OPENCODE_CHANNEL
+  const raw = process.env.VECTOR_CHANNEL
   if (raw === "dev" || raw === "beta" || raw === "prod") return raw
   if (raw === "latest") return "prod"
   return "dev"
@@ -29,7 +29,7 @@ const channel = (() => {
  */
 export default [
   {
-    name: "opencode-desktop:config",
+    name: "vector-desktop:config",
     config() {
       return {
         resolve: {
@@ -39,7 +39,7 @@ export default [
           },
         },
         define: {
-          "import.meta.env.VITE_OPENCODE_CHANNEL": JSON.stringify(channel),
+          "import.meta.env.VITE_VECTOR_CHANNEL": JSON.stringify(channel),
         },
         worker: {
           format: "es",
@@ -48,11 +48,11 @@ export default [
     },
   },
   {
-    name: "opencode-desktop:theme-preload",
+    name: "vector-desktop:theme-preload",
     transformIndexHtml(html) {
       return html.replace(
-        '<script id="oc-theme-preload-script" src="/oc-theme-preload.js"></script>',
-        `<script id="oc-theme-preload-script">${readFileSync(theme, "utf8")}</script>`,
+        '<script id="vector-theme-preload-script" src="/vector-theme-preload.js"></script>',
+        `<script id="vector-theme-preload-script">${readFileSync(theme, "utf8")}</script>`,
       )
     },
   },

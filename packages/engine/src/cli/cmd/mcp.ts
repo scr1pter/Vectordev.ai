@@ -393,12 +393,9 @@ export const McpLogoutCommand = effectCmd({
 })
 
 async function resolveConfigPath(baseDir: string, global = false) {
-  // Prefer Vector config; keep editing a legacy file when it is the user's only config.
+  // Edit the nearest supported Vector config.
   const candidates = ["vector.json", "vector.jsonc"].map((name) => path.join(baseDir, name))
   if (!global) candidates.push(...["vector.json", "vector.jsonc"].map((name) => path.join(baseDir, ".vector", name)))
-  candidates.push(...["opencode.json", "opencode.jsonc"].map((name) => path.join(baseDir, name)))
-  if (!global)
-    candidates.push(...["opencode.json", "opencode.jsonc"].map((name) => path.join(baseDir, ".opencode", name)))
 
   for (const candidate of candidates) {
     if (await Filesystem.exists(candidate)) {

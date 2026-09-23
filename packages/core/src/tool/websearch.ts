@@ -68,15 +68,15 @@ export interface Config {
   readonly parallelApiKey?: string
 }
 
-export class ConfigService extends Context.Service<ConfigService, Config>()("@opencode/v2/WebSearchConfig") {}
+export class ConfigService extends Context.Service<ConfigService, Config>()("@vector/v2/WebSearchConfig") {}
 
 /** Isolates the retained product environment contract from the generic tool implementation. */
 export const defaultConfigLayer = Layer.sync(ConfigService, () => {
-  const provider = readEnv("OPENCODE_WEBSEARCH_PROVIDER")
+  const provider = readEnv("VECTOR_WEBSEARCH_PROVIDER")
   return ConfigService.of({
     provider: provider === "exa" || provider === "parallel" ? provider : undefined,
-    enableExa: truthy("OPENCODE_EXPERIMENTAL") || truthy("OPENCODE_ENABLE_EXA") || truthy("OPENCODE_EXPERIMENTAL_EXA"),
-    enableParallel: truthy("OPENCODE_ENABLE_PARALLEL") || truthy("OPENCODE_EXPERIMENTAL_PARALLEL"),
+    enableExa: truthy("VECTOR_EXPERIMENTAL") || truthy("VECTOR_ENABLE_EXA") || truthy("VECTOR_EXPERIMENTAL_EXA"),
+    enableParallel: truthy("VECTOR_ENABLE_PARALLEL") || truthy("VECTOR_EXPERIMENTAL_PARALLEL"),
     exaApiKey: process.env.EXA_API_KEY,
     parallelApiKey: process.env.PARALLEL_API_KEY,
   })

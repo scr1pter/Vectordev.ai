@@ -50,7 +50,7 @@ describe("external_directory containment", () => {
       if (process.platform === "win32") return
       const instance = yield* TestInstance
       const outside = yield* Effect.acquireRelease(
-        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "opencode-escape-"))),
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "vector-escape-"))),
         (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })),
       )
       yield* Effect.promise(() => Bun.write(path.join(outside, "secret.txt"), "secret"))
@@ -68,7 +68,7 @@ describe("external_directory containment", () => {
       if (process.platform === "win32") return
       const instance = yield* TestInstance
       const outside = yield* Effect.acquireRelease(
-        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "opencode-escape-new-"))),
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "vector-escape-new-"))),
         (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })),
       )
       const link = path.join(instance.directory, "escape-new")

@@ -383,7 +383,7 @@ describe("models", () => {
   })
 
   test("names the cost kind the way the summary words it", () => {
-    expect(costKindOf({ id: "opencode" }, { input: 0, output: 0 })).toBe("unknown")
+    expect(costKindOf({ id: "vector" }, { input: 0, output: 0 })).toBe("unknown")
     expect(costKindOf({ id: "anthropic", source: "env" }, { input: 3, output: 15 })).toBe("priced")
     expect(costKindOf({ id: "openai", source: "api" }, { input: 0, output: 0 })).toBe("plan")
     expect(costKindOf({ id: "local", source: "config" }, { input: 0, output: 0 })).toBe("unknown")
@@ -412,9 +412,9 @@ describe("models", () => {
     ])
   })
 
-  test("words the estimate for a model included with Vector", () => {
+  test("words the estimate for a model with a listed zero token price", () => {
     expect(estimateText({ files: 51, model: "openai/gpt-5.5", costKind: "free" })).toBe(
-      "This pull request changes 51 files. It runs on openai/gpt-5.5, a model included with Vector.",
+      "This pull request changes 51 files. The listed token price for openai/gpt-5.5 is zero.",
     )
   })
 })

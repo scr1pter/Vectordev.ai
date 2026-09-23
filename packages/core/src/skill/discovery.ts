@@ -1,4 +1,3 @@
-import { warnLegacy } from "../flag/compat"
 export * as SkillDiscovery from "./discovery"
 
 import path from "path"
@@ -67,7 +66,7 @@ export interface Interface {
   readonly pull: (url: string) => Effect.Effect<AbsolutePath[]>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@opencode/v2/SkillDiscovery") {}
+export class Service extends Context.Service<Service, Interface>()("@vector/v2/SkillDiscovery") {}
 
 const layer = Layer.effect(
   Service,
@@ -157,20 +156,7 @@ const layer = Layer.effect(
               const current =
                 version === undefined
                   ? undefined
-                  : yield* fs.readFileStringSafe(versionFile).pipe(
-                      Effect.flatMap((value) =>
-                        value === undefined
-                          ? fs.readFileStringSafe(path.join(root, ".opencode-version")).pipe(
-                              Effect.tap((legacy) =>
-                                Effect.sync(() => {
-                                  if (legacy !== undefined) warnLegacy(".opencode-version", ".vector-version")
-                                }),
-                              ),
-                            )
-                          : Effect.succeed(value),
-                      ),
-                      Effect.catch(() => Effect.succeed(undefined)),
-                    )
+                  : yield* fs.readFileStringSafe(versionFile).pipe(Effect.catch(() => Effect.succeed(undefined)))
               if (version === undefined || current === version) {
                 yield* Effect.forEach(files, (file) => download(file.url, file.destination), {
                   concurrency: fileConcurrency,

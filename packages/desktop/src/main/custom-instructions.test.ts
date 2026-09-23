@@ -11,21 +11,21 @@ import {
 
 let scratch = ""
 const originalXdg = process.env.XDG_CONFIG_HOME
-const originalConfig = process.env.OPENCODE_CONFIG_DIR
+const originalConfig = process.env.VECTOR_CONFIG_DIR
 const originalNamespace = process.env.VECTOR_APP_NAMESPACE
 
 beforeEach(async () => {
   scratch = await mkdtemp(join(tmpdir(), "vector-instructions-"))
   process.env.XDG_CONFIG_HOME = scratch
-  delete process.env.OPENCODE_CONFIG_DIR
+  delete process.env.VECTOR_CONFIG_DIR
   delete process.env.VECTOR_APP_NAMESPACE
 })
 
 afterEach(async () => {
   if (originalXdg === undefined) delete process.env.XDG_CONFIG_HOME
   if (originalXdg !== undefined) process.env.XDG_CONFIG_HOME = originalXdg
-  if (originalConfig === undefined) delete process.env.OPENCODE_CONFIG_DIR
-  if (originalConfig !== undefined) process.env.OPENCODE_CONFIG_DIR = originalConfig
+  if (originalConfig === undefined) delete process.env.VECTOR_CONFIG_DIR
+  if (originalConfig !== undefined) process.env.VECTOR_CONFIG_DIR = originalConfig
   if (originalNamespace === undefined) delete process.env.VECTOR_APP_NAMESPACE
   if (originalNamespace !== undefined) process.env.VECTOR_APP_NAMESPACE = originalNamespace
   await rm(scratch, { recursive: true, force: true })
@@ -44,7 +44,7 @@ describe("custom instructions", () => {
   })
 
   test("uses the sidecar's explicit config directory when packaged", () => {
-    process.env.OPENCODE_CONFIG_DIR = join(scratch, "sidecar-config")
+    process.env.VECTOR_CONFIG_DIR = join(scratch, "sidecar-config")
     expect(customInstructionsPath()).toBe(join(scratch, "sidecar-config", "AGENTS.md"))
   })
 

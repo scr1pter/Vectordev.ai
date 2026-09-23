@@ -1,3 +1,4 @@
+import { VECTOR_USER_AGENT } from "./user-agent"
 import { readFile, readdir } from "node:fs/promises"
 import { join } from "node:path"
 
@@ -183,7 +184,7 @@ export function supabaseSqlRunner(projectRef: string, token: string, request: Cl
         accept: "application/json",
         authorization: `Bearer ${token}`,
         "content-type": "application/json",
-        "user-agent": "Vector-Desktop/1",
+        "user-agent": VECTOR_USER_AGENT,
       },
       body: JSON.stringify({ query: sql }),
       // Schema changes take locks and rebuild indexes; the 20s used for reads

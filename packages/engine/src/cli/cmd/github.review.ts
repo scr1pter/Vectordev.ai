@@ -1055,9 +1055,9 @@ export const githubReview = Effect.fn("Cli.github.review")(function* (args: {
     return yield* fail("GITHUB_TOKEN is not set. The review job needs it to read and comment on the pull request.")
   // The command turns both on before the instance loads. In Actions a review never runs without them: the pull
   // request's own config and plugins would load next to the token and the provider keys.
-  if (env["GITHUB_ACTIONS"] && !(isOn(env["OPENCODE_PURE"]) && isOn(env["OPENCODE_DISABLE_PROJECT_CONFIG"])))
+  if (env["GITHUB_ACTIONS"] && !(isOn(env["VECTOR_PURE"]) && isOn(env["VECTOR_DISABLE_PROJECT_CONFIG"])))
     return yield* fail(
-      "OPENCODE_PURE and OPENCODE_DISABLE_PROJECT_CONFIG must be set for a review in GitHub Actions. Run `vector github install` again to update the workflow.",
+      "VECTOR_PURE and VECTOR_DISABLE_PROJECT_CONFIG must be set for a review in GitHub Actions. Run `vector github install` again to update the workflow.",
     )
 
   const mentions = mentionsFrom(env["MENTIONS"])

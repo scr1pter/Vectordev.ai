@@ -136,7 +136,7 @@ export function createTuiAttention(input: {
   function configuredPackID() {
     const stored = input.kv?.get<string | undefined>(KV_SOUND_PACK, undefined)
     const id = activePackID ?? stored ?? input.config.attention.sound_pack
-    return id === "opencode.default" ? DEFAULT_PACK_ID : id
+    return id === "vector.default" ? DEFAULT_PACK_ID : id
   }
 
   function currentPack() {

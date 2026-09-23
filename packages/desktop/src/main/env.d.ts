@@ -1,12 +1,12 @@
 interface ImportMetaEnv {
-  readonly OPENCODE_CHANNEL: string
+  readonly VECTOR_CHANNEL: string
 }
 
 interface ImportMeta {
   readonly env: ImportMetaEnv
 }
 
-declare module "virtual:opencode-server" {
+declare module "virtual:vector-server" {
   export namespace Server {
     export const listen: typeof import("../../../engine/dist/types/src/node").Server.listen
     export type Listener = import("../../../engine/dist/types/src/node").Server.Listener

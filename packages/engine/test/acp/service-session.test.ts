@@ -10,7 +10,7 @@ import type {
   SessionConfigSelectOption,
   SetSessionConfigOptionResponse,
 } from "@agentclientprotocol/sdk"
-import type { AssistantMessage, OpencodeClient } from "@vectordevai/sdk/v2"
+import type { AssistantMessage, VectorClient } from "@vectordevai/sdk/v2"
 import { ProviderV2 } from "@vectordevai/core/provider"
 import { ModelV2 } from "@vectordevai/core/model"
 import { Effect } from "effect"
@@ -19,7 +19,7 @@ import * as ACPError from "@/acp/error"
 import { UsageService } from "@/acp/usage"
 import type { Provider } from "@/provider/provider"
 
-const providerID = ProviderV2.ID.make("test")
+const providerID = ProviderV2.ID.make("lmstudio")
 const modelID = ModelV2.ID.make("test-model")
 const configuredModelID = ModelV2.ID.make("configured-model")
 const secondModelID = ModelV2.ID.make("second-model")
@@ -165,7 +165,7 @@ describe("ACP service sessions", () => {
     }))
     const sdk = {
       config: {
-        providers: () => Promise.resolve({ data: { providers: [provider], default: { test: modelID } } }),
+        providers: () => Promise.resolve({ data: { providers: [provider], default: { [providerID]: modelID } } }),
         get: () => Promise.resolve({ data: {} }),
       },
       app: {
@@ -245,7 +245,7 @@ describe("ACP service sessions", () => {
           return Promise.resolve({ data: {} })
         },
       },
-    } as unknown as OpencodeClient
+    } as unknown as VectorClient
     const connection = {
       sessionUpdate: (update: SessionNotification) => {
         updates.push(update)
@@ -305,7 +305,7 @@ describe("ACP service sessions", () => {
       {
         info: {
           role: "assistant",
-          providerID: "test",
+          providerID: "lmstudio",
           modelID: "test-model",
           variant: "high",
           mode: "plan",
@@ -401,7 +401,7 @@ describe("ACP service sessions", () => {
           id: "msg_user",
           sessionID: "ses_resume",
           role: "user",
-          model: { providerID: "test", modelID: "test-model", variant: "high" },
+          model: { providerID: "lmstudio", modelID: "test-model", variant: "high" },
           agent: "plan",
         },
         parts: [{ id: "part_user", sessionID: "ses_resume", messageID: "msg_user", type: "text", text: "hello" }],
@@ -480,7 +480,7 @@ describe("ACP service sessions", () => {
       {
         info: {
           role: "assistant",
-          providerID: "test",
+          providerID: "lmstudio",
           modelID: "second-model",
           variant: "medium",
           mode: "plan",
@@ -496,7 +496,7 @@ describe("ACP service sessions", () => {
     )
 
     expect(forked.sessionId).toBe("fork_ses_parent")
-    expect(select(forked, "model")?.currentValue).toBe("test/second-model")
+    expect(select(forked, "model")?.currentValue).toBe("lmstudio/second-model")
     expect(select(forked, "effort")?.currentValue).toBe("medium")
     expect(select(updated, "effort")?.currentValue).toBe("low")
     expect(forks).toEqual(["ses_parent"])
@@ -507,7 +507,7 @@ describe("ACP service sessions", () => {
       {
         info: {
           role: "user",
-          model: { providerID: "test", modelID: "test-model", variant: "default" },
+          model: { providerID: "lmstudio", modelID: "test-model", variant: "default" },
           agent: "build",
         },
         parts: [],
@@ -515,7 +515,7 @@ describe("ACP service sessions", () => {
       {
         info: {
           role: "user",
-          model: { providerID: "test", modelID: "test-model", variant: "high" },
+          model: { providerID: "lmstudio", modelID: "test-model", variant: "high" },
           agent: "plan",
         },
         parts: [],
@@ -533,7 +533,7 @@ describe("ACP service sessions", () => {
     const service = ACPService.make({
       sdk: {
         config: {
-          providers: () => Promise.reject({ name: "ProviderAuthError", data: { providerID: "test" } }),
+          providers: () => Promise.reject({ name: "ProviderAuthError", data: { providerID: "lmstudio" } }),
           get: () => Promise.resolve({ data: {} }),
         },
         app: {
@@ -543,7 +543,7 @@ describe("ACP service sessions", () => {
         command: {
           list: () => Promise.resolve({ data: [] }),
         },
-      } as unknown as OpencodeClient,
+      } as unknown as VectorClient,
     })
     const error = await Effect.runPromise(
       service
@@ -561,9 +561,9 @@ describe("ACP service sessions", () => {
         providers: () => {
           providersCalls++
           if (providersCalls === 1) {
-            return Promise.reject({ name: "ProviderAuthError", data: { providerID: "test" } })
+            return Promise.reject({ name: "ProviderAuthError", data: { providerID: "lmstudio" } })
           }
-          return Promise.resolve({ data: { providers: [provider], default: { test: modelID } } })
+          return Promise.resolve({ data: { providers: [provider], default: { [providerID]: modelID } } })
         },
         get: () => Promise.resolve({ data: {} }),
       },
@@ -581,7 +581,7 @@ describe("ACP service sessions", () => {
       mcp: {
         add: () => Promise.resolve({ data: {} }),
       },
-    } as unknown as OpencodeClient
+    } as unknown as VectorClient
     const service = ACPService.make({ sdk })
 
     const first = await Effect.runPromise(
@@ -601,7 +601,7 @@ describe("ACP service sessions", () => {
     let nextSession = 0
     const sdk = {
       config: {
-        providers: () => Promise.resolve({ data: { providers: [provider], default: { test: modelID } } }),
+        providers: () => Promise.resolve({ data: { providers: [provider], default: { [providerID]: modelID } } }),
         get: () => Promise.resolve({ data: {} }),
       },
       app: {
@@ -624,7 +624,7 @@ describe("ACP service sessions", () => {
           return Promise.resolve({ data: {} })
         },
       },
-    } as unknown as OpencodeClient
+    } as unknown as VectorClient
     const service = ACPService.make({ sdk })
 
     await Effect.runPromise(
@@ -648,8 +648,8 @@ describe("ACP service sessions", () => {
   it("uses the configured model as the new session default", async () => {
     const sdk = {
       config: {
-        providers: () => Promise.resolve({ data: { providers: [provider], default: { test: modelID } } }),
-        get: () => Promise.resolve({ data: { model: "test/configured-model" } }),
+        providers: () => Promise.resolve({ data: { providers: [provider], default: { [providerID]: modelID } } }),
+        get: () => Promise.resolve({ data: { model: "lmstudio/configured-model" } }),
       },
       app: {
         agents: () => Promise.resolve({ data: [{ name: "build", mode: "primary", permission: [], options: {} }] }),
@@ -665,20 +665,22 @@ describe("ACP service sessions", () => {
       mcp: {
         add: () => Promise.resolve({ data: {} }),
       },
-    } as unknown as OpencodeClient
+    } as unknown as VectorClient
     const service = ACPService.make({ sdk })
 
     const result = await Effect.runPromise(service.newSession({ cwd: "/workspace", mcpServers: [] }))
 
     expect(result.sessionId).toBe("configured-model")
-    expect(result.configOptions?.find((option) => option.id === "model")?.currentValue).toBe("test/configured-model")
+    expect(result.configOptions?.find((option) => option.id === "model")?.currentValue).toBe(
+      "lmstudio/configured-model",
+    )
   })
 
   it("does not scan last-used sessions when resolving the new session default", async () => {
     const historyCalls: string[] = []
     const sdk = {
       config: {
-        providers: () => Promise.resolve({ data: { providers: [provider], default: { test: modelID } } }),
+        providers: () => Promise.resolve({ data: { providers: [provider], default: { [providerID]: modelID } } }),
         get: () => Promise.resolve({ data: {} }),
       },
       app: {
@@ -697,20 +699,20 @@ describe("ACP service sessions", () => {
         messages: () => {
           historyCalls.push("messages")
           return Promise.resolve({
-            data: [{ info: { role: "user", model: { providerID: "test", modelID: "second-model" } } }],
+            data: [{ info: { role: "user", model: { providerID: "lmstudio", modelID: "second-model" } } }],
           })
         },
       },
       mcp: {
         add: () => Promise.resolve({ data: {} }),
       },
-    } as unknown as OpencodeClient
+    } as unknown as VectorClient
     const service = ACPService.make({ sdk })
 
     const result = await Effect.runPromise(service.newSession({ cwd: "/workspace", mcpServers: [] }))
 
     expect(result.sessionId).toBe("test-model")
-    expect(result.configOptions?.find((option) => option.id === "model")?.currentValue).toBe("test/test-model")
+    expect(result.configOptions?.find((option) => option.id === "model")?.currentValue).toBe("lmstudio/test-model")
     expect(historyCalls).toEqual([])
   })
 
@@ -721,11 +723,11 @@ describe("ACP service sessions", () => {
       service.setSessionConfigOption({
         sessionId: session.sessionId,
         configId: "model",
-        value: "test/second-model",
+        value: "lmstudio/second-model",
       }),
     )
 
-    expect(select(updated, "model")?.currentValue).toBe("test/second-model")
+    expect(select(updated, "model")?.currentValue).toBe("lmstudio/second-model")
     expect(select(updated, "effort")?.currentValue).toBe("low")
     expect(flattenSelectOptions(select(updated, "effort")).map((option) => option.value)).toEqual(["low", "medium"])
   })
@@ -764,7 +766,7 @@ describe("ACP service sessions", () => {
 
     const results = await Promise.all(
       [
-        { configId: "model", value: "test/missing-model" },
+        { configId: "model", value: "lmstudio/missing-model" },
         { configId: "effort", value: "max" },
         { configId: "mode", value: "missing-mode" },
         { configId: "missing", value: "value" },
@@ -791,7 +793,7 @@ describe("ACP service sessions", () => {
       config: {
         providers: () => {
           calls.providers++
-          return Promise.resolve({ data: { providers: [provider], default: { test: modelID } } })
+          return Promise.resolve({ data: { providers: [provider], default: { [providerID]: modelID } } })
         },
         get: () => Promise.resolve({ data: {} }),
       },
@@ -821,7 +823,7 @@ describe("ACP service sessions", () => {
           return Promise.resolve({ data: {} })
         },
       },
-    } as unknown as OpencodeClient
+    } as unknown as VectorClient
     const service = ACPService.make({ sdk })
     const session = await Effect.runPromise(service.newSession({ cwd: "/workspace", mcpServers: [] }))
 
@@ -849,7 +851,7 @@ describe("ACP service sessions", () => {
       config: {
         providers: () => {
           calls.providers++
-          return Promise.resolve({ data: { providers: [provider], default: { test: modelID } } })
+          return Promise.resolve({ data: { providers: [provider], default: { [providerID]: modelID } } })
         },
         get: () => Promise.resolve({ data: {} }),
       },
@@ -876,18 +878,18 @@ describe("ACP service sessions", () => {
       mcp: {
         add: () => Promise.resolve({ data: {} }),
       },
-    } as unknown as OpencodeClient
+    } as unknown as VectorClient
     const service = ACPService.make({ sdk })
     const session = await Effect.runPromise(service.newSession({ cwd: "/workspace", mcpServers: [] }))
     const updated = await Effect.runPromise(
       service.setSessionConfigOption({
         sessionId: session.sessionId,
         configId: "model",
-        value: "test/second-model",
+        value: "lmstudio/second-model",
       }),
     )
 
-    expect(select(updated, "model")?.currentValue).toBe("test/second-model")
+    expect(select(updated, "model")?.currentValue).toBe("lmstudio/second-model")
     expect(calls).toEqual({ providers: 1, agents: 1, commands: 1, skills: 1 })
   })
 
@@ -906,7 +908,7 @@ describe("ACP service sessions", () => {
       config: {
         providers: () => {
           calls.providers++
-          return Promise.resolve({ data: { providers: [provider], default: { test: modelID } } })
+          return Promise.resolve({ data: { providers: [provider], default: { [providerID]: modelID } } })
         },
         get: () => {
           calls.config++
@@ -946,7 +948,7 @@ describe("ACP service sessions", () => {
       mcp: {
         add: () => Promise.resolve({ data: {} }),
       },
-    } as unknown as OpencodeClient
+    } as unknown as VectorClient
     const service = ACPService.make({ sdk })
 
     const first = await Effect.runPromise(service.newSession({ cwd: "/workspace", mcpServers: [] }))
@@ -1142,7 +1144,7 @@ describe("ACP service sessions", () => {
         sessionID: session.sessionId,
         command: "init",
         arguments: "now",
-        model: "test/test-model",
+        model: "lmstudio/test-model",
         variant: "default",
         agent: "build",
         directory: "/workspace",
@@ -1177,7 +1179,7 @@ describe("ACP service sessions", () => {
     const failing = ACPService.make({
       sdk: {
         config: {
-          providers: () => Promise.resolve({ data: { providers: [provider], default: { test: modelID } } }),
+          providers: () => Promise.resolve({ data: { providers: [provider], default: { [providerID]: modelID } } }),
           get: () => Promise.resolve({ data: {} }),
         },
         app: {
@@ -1190,12 +1192,12 @@ describe("ACP service sessions", () => {
         session: {
           create: () => Promise.resolve({ data: { id: session.sessionId } }),
           list: () => Promise.resolve({ data: [] }),
-          prompt: () => Promise.reject({ name: "ProviderAuthError", data: { providerID: "test" } }),
+          prompt: () => Promise.reject({ name: "ProviderAuthError", data: { providerID: "lmstudio" } }),
         },
         mcp: {
           add: () => Promise.resolve({ data: {} }),
         },
-      } as unknown as OpencodeClient,
+      } as unknown as VectorClient,
       usage: UsageService.Service.of({
         buildUsage: UsageService.buildUsage,
         latestAssistantMessage: UsageService.latestAssistantMessage,
@@ -1221,7 +1223,7 @@ function assistantInfo(
 ): UsageService.AssistantMessage & Pick<AssistantMessage, "error"> {
   return {
     role: "assistant",
-    providerID: "test",
+    providerID: "lmstudio",
     modelID: "test-model",
     cost: 0,
     tokens,

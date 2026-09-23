@@ -158,7 +158,7 @@ const it = testEffect(
   ]),
 )
 
-const ref = { providerID: ProviderV2.ID.make("test"), modelID: ModelV2.ID.make("test-model") }
+const ref = { providerID: ProviderV2.ID.make("lmstudio"), modelID: ModelV2.ID.make("test-model") }
 const format = new SessionV1.OutputFormatJsonSchema({
   type: "json_schema",
   schema: REVIEW_REPORT_JSON_SCHEMA,
@@ -186,8 +186,8 @@ const useServer = Effect.gen(function* () {
   const llm = yield* TestLLMServer
   const fs = yield* FSUtil.Service
   yield* fs.writeWithDirs(
-    path.join(test.directory, "opencode.json"),
-    JSON.stringify({ $schema: "https://opencode.ai/config.json", ...testProviderConfig(llm.url) }),
+    path.join(test.directory, "vector.json"),
+    JSON.stringify({ $schema: "https://vectordev.ai/config.json", ...testProviderConfig(llm.url) }),
   )
   return llm
 })

@@ -103,7 +103,7 @@ if (!(root instanceof HTMLElement) && import.meta.env.DEV) {
 const getCurrentUrl = () => {
   if (location.hostname.includes("vectordev.ai")) return "http://localhost:4096"
   if (import.meta.env.DEV)
-    return `http://${import.meta.env.VITE_OPENCODE_SERVER_HOST ?? "localhost"}:${import.meta.env.VITE_OPENCODE_SERVER_PORT ?? "4096"}`
+    return `http://${import.meta.env.VITE_VECTOR_SERVER_HOST ?? "localhost"}:${import.meta.env.VITE_VECTOR_SERVER_PORT ?? "4096"}`
   return location.origin
 }
 
@@ -159,8 +159,7 @@ const configureCrashDiagnostics = () => {
     },
     integrations: (integrations) => {
       return integrations.filter(
-        (i) =>
-          i.name !== "Breadcrumbs" && !(import.meta.env.OPENCODE_CHANNEL === "prod" && i.name === "GlobalHandlers"),
+        (i) => i.name !== "Breadcrumbs" && !(import.meta.env.VECTOR_CHANNEL === "prod" && i.name === "GlobalHandlers"),
       )
     },
   })

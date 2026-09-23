@@ -101,7 +101,7 @@ describe("McpOAuthCallback.ensureRunning", () => {
       `${redirectUri}?state=test&error=access_denied&error_description=${encodeURIComponent("The user denied access")}`,
     )
 
-    expect(await response.text()).toContain('<pre class="detail" id="oc-detail">The user denied access</pre>')
+    expect(await response.text()).toContain('<pre class="detail" id="vector-detail">The user denied access</pre>')
   })
 
   test("binds the callback server to IPv4 loopback", async () => {

@@ -1,20 +1,20 @@
 import { expect, test } from "@playwright/test"
 import { base64Encode } from "@vectordevai/core/util/encode"
-import { mockOpenCodeServer } from "../utils/mock-server"
+import { mockVectorServer } from "../utils/mock-server"
 import { expectSessionTitle } from "../utils/waits"
 
 const directory = "C:/Vector/AgentLauncherRegression"
 const sessionID = "ses_agent_launcher_regression"
 
 test("the project launcher is a single accessible Vector creation sheet", async ({ page }, testInfo) => {
-  await mockOpenCodeServer(page, {
+  await mockVectorServer(page, {
     directory,
     project: { id: "project-agent-launcher", worktree: directory, vcs: "git", name: "Agent Launcher" },
     provider: {
       all: [
         {
-          id: "opencode",
-          name: "OpenCode",
+          id: "anthropic",
+          name: "Anthropic",
           models: {
             "launcher-model": {
               id: "launcher-model",
@@ -24,8 +24,8 @@ test("the project launcher is a single accessible Vector creation sheet", async 
           },
         },
       ],
-      connected: ["opencode"],
-      default: { providerID: "opencode", modelID: "launcher-model" },
+      connected: ["anthropic"],
+      default: { providerID: "anthropic", modelID: "launcher-model" },
     },
     sessions: [
       {
@@ -41,7 +41,7 @@ test("the project launcher is a single accessible Vector creation sheet", async 
   await page.addInitScript((projectDirectory) => {
     localStorage.setItem("vector.onboarding.v1", JSON.stringify({ tour: true, dismissed: true }))
     localStorage.setItem(
-      "opencode.global.dat:server",
+      "vector.global.dat:server",
       JSON.stringify({
         projects: { local: [{ worktree: projectDirectory, expanded: true }] },
         lastProject: { local: projectDirectory },

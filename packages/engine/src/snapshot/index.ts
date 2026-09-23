@@ -56,7 +56,7 @@ export interface Interface {
   readonly diffFull: (from: string, to: string) => Effect.Effect<FileDiff[]>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@opencode/Snapshot") {}
+export class Service extends Context.Service<Service, Interface>()("@vector/Snapshot") {}
 
 const layer: Layer.Layer<Service, never, FSUtil.Service | AppProcess.Service | Config.Service> = Layer.effect(
   Service,
@@ -346,7 +346,13 @@ const layer: Layer.Layer<Service, never, FSUtil.Service | AppProcess.Service | C
             yield* Effect.logWarning("failed to anchor snapshot", { hash, stderr: commit.stderr })
             return
           }
-          const ref = yield* git(["--git-dir", state.gitdir, "update-ref", `refs/vector/snapshot/${hash}`, commit.text.trim()])
+          const ref = yield* git([
+            "--git-dir",
+            state.gitdir,
+            "update-ref",
+            `refs/vector/snapshot/${hash}`,
+            commit.text.trim(),
+          ])
           if (ref.code !== 0) yield* Effect.logWarning("failed to write snapshot ref", { hash, stderr: ref.stderr })
         })
 
@@ -399,7 +405,10 @@ const layer: Layer.Layer<Service, never, FSUtil.Service | AppProcess.Service | C
               // so revert would delete the new file and never restore the old
               // one — both halves of a rename gone. diffFull already disables it.
               const result = yield* git(
-                [...quote, ...args(["diff", "--cached", "--no-ext-diff", "--no-renames", "--name-only", hash, "--", "."])],
+                [
+                  ...quote,
+                  ...args(["diff", "--cached", "--no-ext-diff", "--no-renames", "--name-only", hash, "--", "."]),
+                ],
                 {
                   cwd: state.directory,
                 },
@@ -587,7 +596,10 @@ const layer: Layer.Layer<Service, never, FSUtil.Service | AppProcess.Service | C
                 for (const op of run) {
                   if (have.has(op.rel)) continue
                   if (!treeReadable) {
-                    yield* Effect.logWarning("snapshot unreadable, refusing to delete", { file: op.file, hash: op.hash })
+                    yield* Effect.logWarning("snapshot unreadable, refusing to delete", {
+                      file: op.file,
+                      hash: op.hash,
+                    })
                     continue
                   }
                   yield* Effect.logInfo("file did not exist in snapshot, deleting", { file: op.file, hash: op.hash })

@@ -3,9 +3,9 @@ export type { FileSystemEntry as LocationFileSystemEntry } from "./gen/types.gen
 
 import { createClient } from "./gen/client/client.gen.js"
 import { type Config } from "./gen/client/types.gen.js"
-import { OpencodeClient } from "./gen/sdk.gen.js"
+import { VectorClient } from "./gen/sdk.gen.js"
 import { wrapClientError } from "../error-interceptor.js"
-export { type Config as OpencodeClientConfig, OpencodeClient }
+export { type Config as VectorClientConfig, VectorClient }
 
 function pick(value: string | null, fallback?: string, encode?: (value: string) => string) {
   if (!value) return
@@ -26,9 +26,7 @@ function rewrite(request: Request, values: { directory?: string; workspace?: str
 
   for (const [name, key] of [
     ["x-vector-directory", "directory"],
-    ["x-opencode-directory", "directory"],
     ["x-vector-workspace", "workspace"],
-    ["x-opencode-workspace", "workspace"],
   ] as const) {
     const value = pick(
       request.headers.get(name),
@@ -49,12 +47,10 @@ function rewrite(request: Request, values: { directory?: string; workspace?: str
   const next = new Request(url, request)
   next.headers.delete("x-vector-directory")
   next.headers.delete("x-vector-workspace")
-  next.headers.delete("x-opencode-directory")
-  next.headers.delete("x-opencode-workspace")
   return next
 }
 
-export function createOpencodeClient(config?: Config & { directory?: string; experimental_workspaceID?: string }) {
+export function createVectorClient(config?: Config & { directory?: string; experimental_workspaceID?: string }) {
   if (!config?.fetch) {
     const customFetch: any = (req: any) => {
       // @ts-ignore
@@ -71,7 +67,6 @@ export function createOpencodeClient(config?: Config & { directory?: string; exp
     config.headers = {
       ...config.headers,
       "x-vector-directory": encodeURIComponent(config.directory),
-      "x-opencode-directory": encodeURIComponent(config.directory),
     }
   }
 
@@ -79,7 +74,6 @@ export function createOpencodeClient(config?: Config & { directory?: string; exp
     config.headers = {
       ...config.headers,
       "x-vector-workspace": config.experimental_workspaceID,
-      "x-opencode-workspace": config.experimental_workspaceID,
     }
   }
 
@@ -98,8 +92,5 @@ export function createOpencodeClient(config?: Config & { directory?: string; exp
     return response
   })
   client.interceptors.error.use(wrapClientError)
-  return new OpencodeClient({ client })
+  return new VectorClient({ client })
 }
-
-// The upstream factory name remains available for existing plugins.
-export const createVectorClient = createOpencodeClient

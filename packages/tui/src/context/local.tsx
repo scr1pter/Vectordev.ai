@@ -268,8 +268,6 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           const provider = sync.data.provider.find((item) => item.id === value.providerID)
           const info = provider?.models[value.modelID]
           return {
-            // Named as the model dialog names it: an included model drops its catalogue name's
-            // "Free" and names no provider.
             provider: provider && info ? modelProviderName(provider, info) : (provider?.name ?? value.providerID),
             model: provider && info ? modelDisplayName(provider, info) : value.modelID,
             reasoning: info?.capabilities?.reasoning ?? false,

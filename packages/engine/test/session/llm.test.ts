@@ -12,7 +12,7 @@ import { LLM } from "../../src/session/llm"
 import { LLMClient, RequestExecutor } from "@vectordevai/llm/route"
 import { Provider } from "@/provider/provider"
 import { ProviderTransform } from "@/provider/transform"
-import { ModelsDev } from "@vectordevai/core/models-dev"
+import { ModelCatalog } from "@vectordevai/core/model-catalog"
 
 import { testEffect } from "../lib/effect"
 import type { Agent } from "../../src/agent/agent"
@@ -30,7 +30,7 @@ import { LayerNodePlatform } from "@vectordevai/core/effect/app-node-platform"
 
 type ConfigModel = NonNullable<NonNullable<ConfigV1.Info["provider"]>[string]["models"]>[string]
 
-const openAIConfig = (model: ModelsDev.Provider["models"][string], baseURL: string): Partial<ConfigV1.Info> => {
+const openAIConfig = (model: ModelCatalog.Provider["models"][string], baseURL: string): Partial<ConfigV1.Info> => {
   const { experimental: _experimental, ...configModel } = model
   return {
     enabled_providers: ["openai"],
@@ -700,7 +700,7 @@ function createChatStream(text: string) {
 
 const MODELS_FIXTURE = JSON.parse(
   await Bun.file(path.join(import.meta.dir, "../tool/fixtures/models-api.json")).text(),
-) as Record<string, ModelsDev.Provider>
+) as Record<string, ModelCatalog.Provider>
 
 function loadFixture(providerID: string, modelID: string) {
   const provider = MODELS_FIXTURE[providerID]
@@ -710,7 +710,7 @@ function loadFixture(providerID: string, modelID: string) {
   return { provider, model }
 }
 
-function configModel(model: ModelsDev.Model) {
+function configModel(model: ModelCatalog.Model) {
   return {
     id: model.id,
     name: model.name,

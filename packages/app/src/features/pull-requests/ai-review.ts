@@ -1,3 +1,4 @@
+import { providerAllowed } from "@vectordevai/schema/provider-policy"
 // Vector code review in the desktop Pull Requests panel (section 6, D1). It runs the same core as the GitHub Action
 // and `vector review`: the same prompts, output schema, filters and summary. The engine instance always stays on the
 // user's own project, so another person's code never loads its config, plugins or language servers. Everything but
@@ -264,7 +265,7 @@ type CatalogProvider = {
 
 export function reviewCatalog(providers: readonly CatalogProvider[]): ReviewModel[] {
   return providers
-    .filter((provider) => !provider.id.startsWith("opencode"))
+    .filter((provider) => providerAllowed(provider.id))
     .flatMap((provider) =>
       Object.values(provider.models).map((model) => {
         const costKind: CostKind = costKindOf(provider, model.cost)
@@ -293,8 +294,7 @@ export function reviewCatalog(providers: readonly CatalogProvider[]): ReviewMode
 export function pickReviewModel(candidates: readonly (string | undefined)[], catalog: readonly ReviewModel[]) {
   for (const name of candidates) {
     const found =
-      name?.trim() &&
-      catalog.find((model) => !model.providerID.startsWith("opencode") && modelName(model) === name.trim())
+      name?.trim() && catalog.find((model) => providerAllowed(model.providerID) && modelName(model) === name.trim())
     if (found) return found
   }
   return undefined
@@ -941,7 +941,7 @@ export function estimateText(estimate: ReviewEstimate) {
   const model = estimate.model ?? "your default model"
   if (estimate.low !== undefined && estimate.high !== undefined)
     return `${size} With ${model} a review costs about ${formatUsd(estimate.low)}–${formatUsd(estimate.high)}.`
-  if (estimate.costKind === "free") return `${size} It runs on ${model}, a model included with Vector.`
+  if (estimate.costKind === "free") return `${size} The listed token price for ${model} is zero.`
   if (estimate.costKind === "plan")
     return `${size} It runs on ${model} through your subscription sign-in, with no per-token price.`
   return `${size} No price is listed for ${model}, so Vector cannot estimate what it costs.`

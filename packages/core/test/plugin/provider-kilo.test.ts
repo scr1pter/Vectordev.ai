@@ -83,7 +83,7 @@ describe("KiloPlugin", () => {
             url: "https://api.kilo.ai/api/gateway",
           }
         })
-        catalog.provider.update(ProviderV2.ID.make("custom-kilo"), (provider) => {
+        catalog.provider.update(ProviderV2.ID.make("lmstudio"), (provider) => {
           provider.api = { type: "aisdk", package: "kilo" }
         })
       })
@@ -93,7 +93,7 @@ describe("KiloPlugin", () => {
         "HTTP-Referer": "https://vectordev.ai/",
         "X-Title": "Vector",
       })
-      expect((yield* catalog.provider.get(ProviderV2.ID.make("custom-kilo")))?.request.headers).toEqual({})
+      expect((yield* catalog.provider.get(ProviderV2.ID.make("lmstudio")))?.request.headers).toEqual({})
     }),
   )
 })

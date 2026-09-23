@@ -33,7 +33,7 @@ it.live("headerTimeout does not abort delayed SSE body after headers arrive", ()
       () =>
         Effect.gen(function* () {
           const provider = yield* Provider.Service
-          const model = yield* provider.getModel(ProviderV2.ID.make("test"), ModelV2.ID.make("test-model"))
+          const model = yield* provider.getModel(ProviderV2.ID.make("lmstudio"), ModelV2.ID.make("test-model"))
           const result = streamText({
             model: yield* provider.getLanguage(model),
             messages: [{ role: "user", content: "hello" }],
@@ -57,7 +57,7 @@ it.live("chunkTimeout raises a response stream error when SSE body stalls", () =
       () =>
         Effect.gen(function* () {
           const provider = yield* Provider.Service
-          const model = yield* provider.getModel(ProviderV2.ID.make("test"), ModelV2.ID.make("test-model"))
+          const model = yield* provider.getModel(ProviderV2.ID.make("lmstudio"), ModelV2.ID.make("test-model"))
           const result = streamText({
             model: yield* provider.getLanguage(model),
             onError() {},
@@ -91,7 +91,7 @@ it.live("headerTimeout aborts when response headers do not arrive", () =>
       () =>
         Effect.gen(function* () {
           const provider = yield* Provider.Service
-          const model = yield* provider.getModel(ProviderV2.ID.make("test"), ModelV2.ID.make("test-model"))
+          const model = yield* provider.getModel(ProviderV2.ID.make("lmstudio"), ModelV2.ID.make("test-model"))
           const result = streamText({
             model: yield* provider.getLanguage(model),
             onError() {},
@@ -123,7 +123,7 @@ it.live("headerTimeout is opt-in for non-OpenAI providers", () =>
       () =>
         Effect.gen(function* () {
           const provider = yield* Provider.Service
-          const model = yield* provider.getModel(ProviderV2.ID.make("test"), ModelV2.ID.make("test-model"))
+          const model = yield* provider.getModel(ProviderV2.ID.make("lmstudio"), ModelV2.ID.make("test-model"))
           const result = streamText({
             model: yield* provider.getLanguage(model),
             messages: [{ role: "user", content: "hello" }],
@@ -176,9 +176,9 @@ function providerConfig(url: string, options: Record<string, unknown> = {}) {
   return {
     ...config,
     provider: {
-      test: {
-        ...config.provider.test,
-        options: { ...config.provider.test.options, ...options },
+      lmstudio: {
+        ...config.provider.lmstudio,
+        options: { ...config.provider.lmstudio.options, ...options },
       },
     },
   }
@@ -214,15 +214,15 @@ async function delayedBodyServer(delay: number): Promise<{ server: Server; url: 
 function withAuthContent<A, E, R>(self: Effect.Effect<A, E, R>, value: Record<string, unknown> = defaultAuthContent()) {
   return Effect.acquireUseRelease(
     Effect.sync(() => {
-      const previous = process.env.OPENCODE_AUTH_CONTENT
-      process.env.OPENCODE_AUTH_CONTENT = JSON.stringify(value)
+      const previous = process.env.VECTOR_AUTH_CONTENT
+      process.env.VECTOR_AUTH_CONTENT = JSON.stringify(value)
       return previous
     }),
     () => self,
     (previous) =>
       Effect.sync(() => {
-        if (previous === undefined) delete process.env.OPENCODE_AUTH_CONTENT
-        else process.env.OPENCODE_AUTH_CONTENT = previous
+        if (previous === undefined) delete process.env.VECTOR_AUTH_CONTENT
+        else process.env.VECTOR_AUTH_CONTENT = previous
       }),
   )
 }

@@ -1,3 +1,4 @@
+import { providerAllowed } from "@vectordevai/schema/provider-policy"
 import type { Provider } from "@vectordevai/sdk/v2"
 
 export function parse(value: string) {
@@ -32,7 +33,7 @@ export function name(
   return item && model ? modelDisplayName(item, model) : modelID
 }
 
-export const isHiddenProvider = (id: string) => id.startsWith("opencode")
+export const isHiddenProvider = (id: string) => !providerAllowed(id)
 
 export function modelProviderName(provider: { id: string; name?: string }, _model?: unknown) {
   return provider.name ?? provider.id

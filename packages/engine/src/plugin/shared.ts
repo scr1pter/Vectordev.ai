@@ -7,7 +7,7 @@ import { isRecord } from "@/util/record"
 import { Npm } from "@vectordevai/core/npm"
 
 // Old npm package names for plugins that are now built-in
-export const DEPRECATED_PLUGIN_PACKAGES = ["opencode-openai-codex-auth", "opencode-copilot-auth"]
+export const DEPRECATED_PLUGIN_PACKAGES = ["vector-openai-codex-auth", "vector-copilot-auth"]
 
 export function isDeprecatedPlugin(spec: string) {
   return DEPRECATED_PLUGIN_PACKAGES.some((pkg) => spec.includes(pkg))
@@ -191,16 +191,16 @@ export async function resolvePathPluginTarget(spec: string) {
   throw new Error(`Plugin directory ${file} is missing package.json or index file`)
 }
 
-export async function checkPluginCompatibility(target: string, opencodeVersion: string, pkg?: PluginPackage) {
-  if (!semver.valid(opencodeVersion) || semver.major(opencodeVersion) === 0) return
+export async function checkPluginCompatibility(target: string, vectorVersion: string, pkg?: PluginPackage) {
+  if (!semver.valid(vectorVersion) || semver.major(vectorVersion) === 0) return
   const hit = pkg ?? (await readPluginPackage(target).catch(() => undefined))
   if (!hit) return
   const engines = hit.json.engines
   if (!isRecord(engines)) return
-  const range = engines.opencode
+  const range = engines.vector
   if (typeof range !== "string") return
-  if (!semver.satisfies(opencodeVersion, range)) {
-    throw new Error(`Plugin requires opencode ${range} but running ${opencodeVersion}`)
+  if (!semver.satisfies(vectorVersion, range)) {
+    throw new Error(`Plugin requires vector ${range} but running ${vectorVersion}`)
   }
 }
 
@@ -236,26 +236,26 @@ export async function createPluginEntry(spec: string, target: string, kind: Plug
 }
 
 export function readPackageThemes(spec: string, pkg: PluginPackage) {
-  const field = pkg.json["oc-themes"]
+  const field = pkg.json["vector-themes"]
   if (field === undefined) return []
   if (!Array.isArray(field)) {
-    throw new TypeError(`Plugin ${spec} has invalid oc-themes field`)
+    throw new TypeError(`Plugin ${spec} has invalid vector-themes field`)
   }
 
   const list = field.map((item) => {
     if (typeof item !== "string") {
-      throw new TypeError(`Plugin ${spec} has invalid oc-themes entry`)
+      throw new TypeError(`Plugin ${spec} has invalid vector-themes entry`)
     }
 
     const raw = item.trim()
     if (!raw) {
-      throw new TypeError(`Plugin ${spec} has empty oc-themes entry`)
+      throw new TypeError(`Plugin ${spec} has empty vector-themes entry`)
     }
     if (raw.startsWith("file://") || isAbsolutePath(raw)) {
-      throw new TypeError(`Plugin ${spec} oc-themes entry must be relative: ${item}`)
+      throw new TypeError(`Plugin ${spec} vector-themes entry must be relative: ${item}`)
     }
 
-    return resolvePackageFile(spec, raw, "oc-themes", pkg)
+    return resolvePackageFile(spec, raw, "vector-themes", pkg)
   })
 
   return Array.from(new Set(list))

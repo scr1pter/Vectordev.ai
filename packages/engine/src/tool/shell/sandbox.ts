@@ -28,7 +28,7 @@ export type Wrapped = {
 
 const SEATBELT = "/usr/bin/sandbox-exec"
 
-export function sandboxEnabled(value = readEnv("OPENCODE_SHELL_SANDBOX")) {
+export function sandboxEnabled(value = readEnv("VECTOR_SHELL_SANDBOX")) {
   if (value === undefined) return false
   return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase())
 }

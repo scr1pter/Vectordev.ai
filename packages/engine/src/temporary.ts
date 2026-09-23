@@ -4,7 +4,7 @@ import { InstallationVersion } from "@vectordevai/core/installation/version"
 import { hideBin } from "yargs/helpers"
 const cli = yargs(hideBin(process.argv))
   .parserConfiguration({ "populate--": true })
-  .scriptName("opencode")
+  .scriptName("vector")
   .wrap(100)
   .help("help", "show help")
   .alias("help", "h")
@@ -24,8 +24,8 @@ const cli = yargs(hideBin(process.argv))
     type: "boolean",
   })
   .middleware((opts) => {
-    if (opts.printLogs) process.env.VECTOR_PRINT_LOGS = process.env.OPENCODE_PRINT_LOGS = "1"
-    if (opts.logLevel) process.env.VECTOR_LOG_LEVEL = process.env.OPENCODE_LOG_LEVEL = opts.logLevel
+    if (opts.printLogs) process.env.VECTOR_PRINT_LOGS = "1"
+    if (opts.logLevel) process.env.VECTOR_LOG_LEVEL = opts.logLevel
   })
   .command(TuiThreadCommand)
   .parse()

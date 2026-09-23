@@ -191,8 +191,7 @@ function handleKey(input: {
 }
 
 const PANEL_SEARCH_KEYS = ["display", "category", "description", "keywords"]
-// The model panel doesn't search its headings: "Models included with Vector" would pull every
-// included row into fuzzy searches like "mini". Its keywords already carry the provider name.
+// Search model names and provider keywords without matching every row in a heading.
 const MODEL_SEARCH_KEYS = ["display", "keywords"]
 
 function match<T extends PanelEntry>(query: string, entries: T[], keys: string[] = PANEL_SEARCH_KEYS) {

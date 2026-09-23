@@ -98,11 +98,10 @@ export function homeSessionServerStatus(active: boolean, status: () => { working
   return status()
 }
 
-const OPENCODE_PROJECT_ID = "4b0ea68d7af9a6031a7ffda7ad66e0cb83315750"
+const VECTOR_PROJECT_ID = "4b0ea68d7af9a6031a7ffda7ad66e0cb83315750"
 
 export function getProjectAvatarSource(id?: string, icon?: { color?: string; url?: string; override?: string }) {
-  if (id === OPENCODE_PROJECT_ID)
-    return "https://vectordev.ai/favicon-96x96-desktop-v4.png?v=desktop-20260712"
+  if (id === VECTOR_PROJECT_ID) return "https://vectordev.ai/favicon-96x96-desktop-v4.png?v=desktop-20260712"
   if (icon?.override) return icon.override
   if (icon?.color) return undefined
   return icon?.url

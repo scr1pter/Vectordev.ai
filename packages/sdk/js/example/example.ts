@@ -1,8 +1,8 @@
-import { createOpencodeClient, createOpencodeServer } from "@vectordevai/sdk"
+import { createVectorClient, createVectorServer } from "@vectordevai/sdk"
 import { pathToFileURL } from "bun"
 
-const server = await createOpencodeServer()
-const client = createOpencodeClient({ baseUrl: server.url })
+const server = await createVectorServer()
+const client = createVectorClient({ baseUrl: server.url })
 
 const input = await Array.fromAsync(new Bun.Glob("packages/core/*.ts").scan())
 

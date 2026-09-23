@@ -1,6 +1,7 @@
 import type { Hooks, PluginInput } from "@vectordevai/plugin"
 import { createServer } from "node:http"
 import { gitlabSignInEnabled, providerCredentialAllowed } from "@vectordevai/core/provider-policy"
+import { InstallationVersion } from "@vectordevai/core/installation/version"
 
 export async function GitlabAuthPlugin(input: PluginInput): Promise<Hooks> {
   const clientId = process.env.GITLAB_OAUTH_CLIENT_ID?.trim()
@@ -24,7 +25,7 @@ export async function GitlabAuthPlugin(input: PluginInput): Promise<Hooks> {
   async function token(url: string, body: Record<string, string>) {
     const response = await fetch(`${url}/oauth/token`, {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded", "User-Agent": "vector" },
+      headers: { "Content-Type": "application/x-www-form-urlencoded", "User-Agent": `vector/${InstallationVersion}` },
       body: new URLSearchParams({ ...body, client_id: clientId! }),
       signal: AbortSignal.timeout(10_000),
     })

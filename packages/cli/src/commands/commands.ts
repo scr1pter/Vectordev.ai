@@ -1,10 +1,10 @@
 import { Argument, Flag } from "effect/unstable/cli"
 import { Spec } from "../framework/spec"
 
-declare const OPENCODE_CLI_NAME: string | undefined
+declare const VECTOR_CLI_NAME: string | undefined
 
-export const Commands = Spec.make(typeof OPENCODE_CLI_NAME === "string" ? OPENCODE_CLI_NAME : "opencode", {
-  description: "OpenCode 2.0 preview command line interface",
+export const Commands = Spec.make(typeof VECTOR_CLI_NAME === "string" ? VECTOR_CLI_NAME : "vector", {
+  description: "Vector 2.0 preview command line interface",
   commands: [
     Spec.make("api", {
       description: "Make a request to the running server",

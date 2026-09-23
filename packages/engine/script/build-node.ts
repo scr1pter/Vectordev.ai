@@ -21,13 +21,13 @@ await Bun.build({
   sourcemap: "linked",
   external: ["jsonc-parser", "@lydell/node-pty"],
   define: {
-    OPENCODE_MODELS_DEV: generated.modelsData,
-    OPENCODE_CHANNEL: `'${Script.channel}'`,
-    OPENCODE_VERSION: `'${Script.version}'`,
-    OPENCODE_PLUGIN_VERSION: `'${pluginPkg.version}'`,
+    VECTOR_MODEL_CATALOG: generated.modelsData,
+    VECTOR_CHANNEL: `'${Script.channel}'`,
+    VECTOR_VERSION: `'${Script.version}'`,
+    VECTOR_PLUGIN_VERSION: `'${pluginPkg.version}'`,
   },
   files: {
-    "opencode-web-ui.gen.ts": "",
+    "vector-web-ui.gen.ts": "",
   },
 })
 

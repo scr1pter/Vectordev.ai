@@ -5,7 +5,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/anomalyco/opencode.git",
+    "url": "git+https://github.com/scr1pter/Vectordev.ai.git",
     "directory": "packages/ui"
   },
   "publishConfig": {
@@ -61,7 +61,7 @@
     "test": "bun test src --only-failures",
     "dev": "vite",
     "generate:tailwind": "bun run script/tailwind.ts",
-    "generate:v2-oc2": "bun run script/build-oc2-v2-overrides.ts"
+    "generate:v2-vector-modern": "bun run script/build-vector-modern-v2-overrides.ts"
   },
   "devDependencies": {
     "@solidjs/meta": "catalog:",

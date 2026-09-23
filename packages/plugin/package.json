@@ -3,10 +3,13 @@
   "name": "@vectordevai/plugin",
   "version": "1.17.14",
   "type": "module",
-  "license": "MIT",
+  "license": "SEE LICENSE IN LICENSE",
   "scripts": {
     "typecheck": "tsgo --noEmit",
-    "build": "tsc"
+    "build": "bun ./script/build.ts",
+    "emit": "tsc",
+    "pack": "bun ./script/publish.ts --dry-run",
+    "test:package": "bun ./script/verify-consumer.ts"
   },
   "exports": {
     ".": "./src/index.ts",

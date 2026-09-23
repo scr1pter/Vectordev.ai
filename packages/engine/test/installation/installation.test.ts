@@ -102,9 +102,9 @@ describe("Vector installation", () => {
   testEffect(
     testLayer(
       () => jsonResponse({}),
-      () => "opencode-ai@1.18.0",
+      () => "vector-ai@1.18.0",
     ),
-  ).effect("never mistakes a separate OpenCode package for Vector", () =>
+  ).effect("never mistakes a separate Vector package for Vector", () =>
     Effect.gen(function* () {
       expect(yield* Installation.use.method()).toBe("unknown")
     }),

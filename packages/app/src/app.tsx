@@ -349,7 +349,7 @@ type SwarmRunRecord = {
 
 declare global {
   interface Window {
-    __OPENCODE__?: {
+    __VECTOR__?: {
       deepLinks?: string[]
     }
     api?: {

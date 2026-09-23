@@ -1,7 +1,8 @@
 import { Effect, Schema } from "effect"
 import { HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { Parser } from "htmlparser2"
-import * as Tool from "./tool"
+import { Tool } from "./tool"
+import { InstallationVersion } from "@vectordevai/core/installation/version"
 import TurndownService from "turndown"
 import DESCRIPTION from "./webfetch.txt"
 import { isImageAttachment } from "@/util/media"
@@ -35,12 +36,6 @@ export const WebFetchTool = Tool.define(
           if (!params.url.startsWith("http://") && !params.url.startsWith("https://")) {
             throw new Error("URL must start with http:// or https://")
           }
-          const url = new URL(params.url)
-          if (url.hostname === "opencode.ai" || url.hostname.endsWith(".opencode.ai")) {
-            throw new Error(
-              "Vector identity questions must be answered from Vector's local app context, not from upstream product pages.",
-            )
-          }
 
           yield* ctx.ask({
             permission: "webfetch",
@@ -73,30 +68,16 @@ export const WebFetchTool = Tool.define(
                 "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8"
           }
           const headers = {
-            "User-Agent":
-              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
+            "User-Agent": `vector/${InstallationVersion}`,
             Accept: acceptHeader,
             "Accept-Language": "en-US,en;q=0.9",
           }
 
           const request = HttpClientRequest.get(params.url).pipe(HttpClientRequest.setHeaders(headers))
 
-          // Retry with honest UA if blocked by Cloudflare bot detection (TLS fingerprint mismatch)
-          const response = yield* httpOk.execute(request).pipe(
-            Effect.catchIf(
-              (err) =>
-                err.reason._tag === "StatusCodeError" &&
-                err.reason.response.status === 403 &&
-                err.reason.response.headers["cf-mitigated"] === "challenge",
-              () =>
-                httpOk.execute(
-                  HttpClientRequest.get(params.url).pipe(
-                    HttpClientRequest.setHeaders({ ...headers, "User-Agent": "Vector" }),
-                  ),
-                ),
-            ),
-            Effect.timeoutOrElse({ duration: timeout, orElse: () => Effect.die(new Error("Request timed out")) }),
-          )
+          const response = yield* httpOk
+            .execute(request)
+            .pipe(Effect.timeoutOrElse({ duration: timeout, orElse: () => Effect.die(new Error("Request timed out")) }))
 
           // Check content length
           const contentLength = response.headers["content-length"]

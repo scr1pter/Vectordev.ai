@@ -20,11 +20,16 @@ import {
 const DAY = 86_400_000
 const NOW = Date.UTC(2026, 8, 11)
 const daysAgo = (days: number) => new Date(NOW - days * DAY).toISOString().slice(0, 10)
-const MARKER = "opencode-oauth-dummy-key"
+const MARKER = "vector-oauth-dummy-key"
 
 type Provider = PickerModel["provider"]
-const gateway: Provider = { id: "opencode", name: "OpenCode Zen", source: "custom", options: { apiKey: "public" } }
-const zenKey: Provider = { id: "opencode", name: "OpenCode Zen", source: "api", options: {} }
+const gateway: Provider = {
+  id: "unlisted-service",
+  name: "Unlisted service",
+  source: "custom",
+  options: { apiKey: "public" },
+}
+const unlistedKey: Provider = { id: "unlisted-service", name: "Unlisted service", source: "api", options: {} }
 const chatgpt: Provider = { id: "openai", name: "OpenAI", source: "custom", options: { apiKey: MARKER } }
 const openaiKey: Provider = { id: "openai", name: "OpenAI", source: "api", options: {} }
 const anthropicKey: Provider = { id: "anthropic", name: "Anthropic", source: "api", options: {} }
@@ -40,7 +45,7 @@ const copilotToken: Provider = { id: "github-copilot", name: "GitHub Copilot", s
 const supergrok: Provider = { id: "xai", name: "xAI", source: "custom", options: { apiKey: MARKER } }
 const xaiKey: Provider = { id: "xai", name: "xAI", source: "api", options: {} }
 const snowflake: Provider = { id: "snowflake-cortex", name: "Snowflake", source: "custom", options: { apiKey: MARKER } }
-const local: Provider = { id: "ollama", name: "Ollama", source: "config", options: {} }
+const local: Provider = { id: "lmstudio", name: "LM Studio", source: "config", options: {} }
 
 function model(provider: Provider, id: string, name: string, extra: Partial<PickerModel> = {}): PickerModel {
   return {
@@ -55,79 +60,40 @@ function model(provider: Provider, id: string, name: string, extra: Partial<Pick
   }
 }
 
-const included = (id: string, name: string, extra: Partial<PickerModel> = {}) =>
+const unlistedModel = (id: string, name: string, extra: Partial<PickerModel> = {}) =>
   model(gateway, id, name, { cost: { input: 0 }, ...extra })
 
 describe("modelAccess", () => {
-  test("a zero-cost model from a provider that normally charges is included with the sign-in plan", () => {
-    const access = modelAccess(model(chatgpt, "gpt-6-astra", "GPT-6 Astra", { cost: { input: 0 } }))
-    expect(access.kind).toBe("plan")
-    expect(access.label).toBe("ChatGPT plan")
-    expect(access.title).toBe("Uses your ChatGPT plan")
-    expect(access.spoken).toBe("uses your ChatGPT plan")
-    expect(modelAccess(model(copilot, "claude-opus-5", "Claude Opus 5", { cost: { input: 0 } })).label).toBe(
-      "Copilot plan",
-    )
-  })
-
-  test("a priced model never reads as included", () => {
-    const priced = [
-      model(gateway, "muse-spark-1.3", "Muse Spark 1.3", { cost: { input: 1.25 } }),
-      model(zenKey, "muse-spark-1.3", "Muse Spark 1.3", { cost: { input: 1.25 } }),
-      model(openaiKey, "gpt-5.5", "GPT-5.5", { cost: { input: 5 } }),
-      model(anthropicKey, "claude-opus-5", "Claude Opus 5", { cost: { input: 5 } }),
-      model(snowflake, "claude", "Claude", { cost: { input: 3 } }),
-      model(local, "llama", "Llama", { cost: [{ input: 0 }, { input: 2 }] }),
-    ]
-    for (const item of priced) expect(modelAccess(item).kind).not.toBe("included")
-  })
-
-  test("known sign-in plans win over price, and the plan name is never invented", () => {
-    // Signed-in Copilot models carry catalogue prices, but the plan pays for them.
-    expect(modelAccess(model(copilot, "gpt-6-astra", "GPT-6 Astra", { cost: { input: 10 } })).label).toBe(
-      "Copilot plan",
-    )
-    // xAI's sign-in proves no plan and keeps per-token prices, so it claims nothing.
-    expect(modelAccess(model(supergrok, "grok-4.6", "Grok 4.6", { cost: { input: 2 } })).kind).toBe("none")
-    expect(modelAccess(model(xaiKey, "grok-4.6", "Grok 4.6", { cost: { input: 2 } })).label).toBe("API key")
-    // Snowflake Cortex sets the same marker but bills credits: no plan, no "Included".
-    expect(modelAccess(model(snowflake, "claude", "Claude", { cost: { input: 0 } })).kind).toBe("none")
-  })
-
-  test("Copilot reads as a plan only with the Copilot sign-in", () => {
-    // A GITHUB_TOKEN env var connects Copilot without the sign-in: no plan, and not an API key either.
-    for (const input of [0, 10]) {
-      const access = modelAccess(model(copilotToken, "claude-opus-5", "Claude Opus 5", { cost: { input } }))
-      expect(access.kind).toBe("none")
-      expect(access.label).toBe("")
+  test("zero costs, old sign-in markers and empty keys never establish a subscription", () => {
+    for (const provider of [chatgpt, copilot, supergrok, snowflake, local, gateway]) {
+      for (const input of [0, 2])
+        expect(modelAccess(model(provider, "coding", "Coding", { cost: { input } })).kind).toBe("none")
     }
+    expect(
+      modelAccess(model({ id: "openai", source: "custom" }, "coding", "Coding", { cost: { input: 0 } })).kind,
+    ).toBe("none")
   })
 
-  test("ChatGPT detection survives options disappearing, without mislabelling config models", () => {
-    const withoutOptions: Provider = { id: "openai", name: "OpenAI", source: "custom" }
-    expect(modelAccess(model(withoutOptions, "gpt-6-astra", "GPT-6 Astra", { cost: { input: 0 } })).label).toBe(
-      "ChatGPT plan",
-    )
-    // An API-key user's config-defined OpenAI model defaults to zero cost: that proves nothing.
-    expect(modelAccess(model(openaiKey, "my-finetune", "My fine-tune", { cost: { input: 0 } })).kind).toBe("none")
+  test("known API sources report the user's key without inferring inclusion", () => {
+    for (const provider of [anthropicKey, anthropicEnv, openaiKey, xaiKey]) {
+      const access = modelAccess(model(provider, "coding", "Coding", { cost: { input: 2 } }))
+      expect(access.kind).toBe("key")
+      expect(access.label).toBe("API key")
+      expect(access.title).toBe(`Uses your ${provider.name} API key`)
+    }
+    expect(modelAccess(model(openaiKey, "custom", "Custom", { cost: { input: 0 } })).kind).toBe("none")
   })
 
-  test("other zero cost claims nothing; a priced key says only that it's used", () => {
-    expect(modelAccess(model(local, "llama", "Llama", { cost: { input: 0 } })).kind).toBe("none")
-    expect(modelAccess(model(local, "llama", "Llama", { cost: undefined })).kind).toBe("none")
-    expect(modelAccess(model(local, "llama", "Llama", { cost: { input: 2 } })).kind).toBe("none")
-    const key = modelAccess(model(anthropicKey, "claude-opus-5", "Claude Opus 5", { cost: { input: 5 } }))
-    expect(key.label).toBe("API key")
-    expect(key.title).toBe("Uses your Anthropic API key")
-    expect(key.spoken).toBe("uses your API key")
-    expect(modelAccess(model(anthropicEnv, "claude-opus-5", "Claude Opus 5", { cost: { input: 5 } })).label).toBe(
-      "API key",
-    )
+  test("ambiguous environment credentials and unlisted providers claim no access method", () => {
+    expect(modelAccess(model(copilotToken, "coding", "Coding", { cost: { input: 2 } })).kind).toBe("none")
+    expect(modelAccess(model(unlistedKey, "coding", "Coding", { cost: { input: 2 } })).kind).toBe("none")
   })
 
-  test("row captions show only when rows are paid for in more than one way", () => {
-    expect(showRowAccess([included("a", "A"), included("b", "B")])).toBe(false)
-    expect(showRowAccess([included("a", "A"), model(chatgpt, "gpt-5.5", "GPT-5.5", { cost: { input: 0 } })])).toBe(true)
+  test("row captions show only for different verified access methods", () => {
+    expect(showRowAccess([unlistedModel("a", "A"), unlistedModel("b", "B")])).toBe(false)
+    expect(
+      showRowAccess([unlistedModel("a", "A"), model(anthropicKey, "claude", "Claude", { cost: { input: 2 } })]),
+    ).toBe(true)
   })
 })
 
@@ -228,9 +194,9 @@ describe("row text", () => {
       cost: { input: 0 },
       limit: { context: 1_050_000 },
     })
-    expect(modelAriaLabel(astra, NOW)).toBe("GPT-6 Astra, OpenAI, 1M context, reasoning, new, uses your ChatGPT plan")
-    expect(modelAriaLabel(included("big-pickle", "Big Pickle"), NOW)).toBe(
-      "Big Pickle, OpenCode Zen, 200K context, reasoning",
+    expect(modelAriaLabel(astra, NOW)).toBe("GPT-6 Astra, OpenAI, 1M context, reasoning, new")
+    expect(modelAriaLabel(unlistedModel("sample-coder", "Sample Coder"), NOW)).toBe(
+      "Sample Coder, Unlisted service, 200K context, reasoning",
     )
   })
 
@@ -241,18 +207,18 @@ describe("row text", () => {
       limit: { context: 1_050_000 },
     })
     expect(modelTitle(astra)).toBe(
-      "GPT-6 Astra\nOpenAI · Reasoning\n1,050,000-token context window\nReleased Sep 4, 2026\nUses your ChatGPT plan",
+      "GPT-6 Astra\nOpenAI · Reasoning\n1,050,000-token context window\nReleased Sep 4, 2026",
     )
-    const lightning = included("nemotron-3.5-lightning-free", "Nemotron 3.5 Lightning Free", {
+    const lightning = unlistedModel("sample-lightning", "Sample Lightning", {
       release_date: "2026-08-11",
       limit: { context: 262_144 },
       capabilities: { reasoning: false },
     })
     expect(modelTitle(lightning)).toBe(
-      "Nemotron 3.5 Lightning Free\nOpenCode Zen\n262,144-token context window\nReleased Aug 11, 2026",
+      "Sample Lightning\nUnlisted service\n262,144-token context window\nReleased Aug 11, 2026",
     )
     const bare = model(local, "llama", "Llama", { capabilities: undefined, limit: undefined, release_date: "" })
-    expect(modelTitle(bare)).toBe("Llama\nOllama")
+    expect(modelTitle(bare)).toBe("Llama\nLM Studio")
   })
 })
 
@@ -281,25 +247,25 @@ describe("buildModelSections", () => {
     release_date: "2026-06-30",
     cost: { input: 2 },
   })
-  const pickle = included("big-pickle", "Big Pickle", { release_date: "2025-10-17" })
-  const muse = included("muse-spark-1.3-free", "Muse Spark 1.3 Free", {
+  const pickle = unlistedModel("sample-coder", "Sample Coder", { release_date: "2025-10-17" })
+  const muse = unlistedModel("sample-spark", "Sample Spark", {
     release_date: "2026-09-02",
     limit: { context: 1_048_576 },
   })
-  const lightning = included("nemotron-3.5-lightning-free", "Nemotron 3.5 Lightning Free", {
+  const lightning = unlistedModel("sample-lightning", "Sample Lightning", {
     release_date: "2026-08-11",
     limit: { context: 262_144 },
     capabilities: { reasoning: false },
   })
-  const ultra = included("nemotron-3-ultra-free", "Nemotron 3 Ultra Free", {
+  const ultra = unlistedModel("sample-ultra", "Sample Ultra", {
     release_date: "2026-03-11",
     limit: { context: 1_000_000 },
   })
-  const mimo = included("mimo-v2.5-free", "MiMo V2.5 Free", { release_date: "2026-05-20" })
+  const mimo = unlistedModel("sample-small", "Sample Small", { release_date: "2026-05-20" })
 
-  // Deliberately in no useful order: the included roster first, the frontier model last.
+  // Deliberately in no useful order: the unlisted roster first, the frontier model last.
   const models = [pickle, muse, lightning, ultra, mimo, gpt55, sol, sonnet, opus, astra]
-  const popular = ["opencode", "opencode-go", "opencode-zen", "anthropic", "github-copilot", "openai", "google"]
+  const popular = ["unlisted-a", "unlisted-b", "unlisted-c", "anthropic", "github-copilot", "openai", "google"]
   const build = (term = "", extra: { currentKey?: string; recentKeys?: string[] } = {}) =>
     buildModelSections({
       models,
@@ -320,23 +286,23 @@ describe("buildModelSections", () => {
       "openai:gpt-5.6-sol",
       "openai:gpt-5.5",
     ])
-    expect(pickerKeys(sections).some((key) => key.startsWith("opencode"))).toBe(false)
+    expect(pickerKeys(sections).some((key) => key.startsWith("unlisted-"))).toBe(false)
   })
 
   test("rows run newest first within a provider, under one access label", () => {
     const sections = build()
     const openai = sections.find((section) => section.id === "provider:openai")
     expect(keysOf(openai?.items ?? [])).toEqual(["openai:gpt-5.6-sol", "openai:gpt-5.5"])
-    expect(openai?.access?.label).toBe("ChatGPT plan")
+    expect(openai?.access).toBeUndefined()
     expect(sections.find((section) => section.id === "provider:anthropic")?.access?.label).toBe("API key")
   })
 
   test("rows carry an access caption only where their section mixes ways of paying", () => {
     const sections = build()
-    // GPT-6 Astra (ChatGPT plan) and Big Pickle (Included) share the top section.
+    // Unlisted providers do not enter the recent section.
     expect(sections[0].rowAccess).toBe(false)
     expect(sections.slice(1).some((section) => section.rowAccess)).toBe(false)
-    // Two ChatGPT plan rows: nothing to tell apart.
+    // Rows without a verified access label need no per-row caption.
     expect(build("", { recentKeys: [pickerModelKey(sol)] })[0].rowAccess).toBe(false)
   })
 
@@ -349,7 +315,7 @@ describe("buildModelSections", () => {
       expect(sections.every((section) => section.items.length > 0)).toBe(true)
     }
     expect(new Set(pickerKeys(build()))).toEqual(
-      new Set(keysOf(models.filter((model) => model.provider.id !== "opencode"))),
+      new Set(keysOf(models.filter((model) => model.provider.id !== "unlisted-service"))),
     )
   })
 
@@ -384,31 +350,31 @@ describe("buildModelSections", () => {
   })
 
   test("searching orders sections by their best match, then popularity, then A to Z", () => {
-    const zed: Provider = { id: "zed", name: "Zed", source: "api", options: {} }
-    const beta: Provider = { id: "beta", name: "Beta", source: "api", options: {} }
+    const zed: Provider = { id: "zai", name: "Zed", source: "api", options: {} }
+    const beta: Provider = { id: "azure", name: "Beta", source: "api", options: {} }
     // Anthropic is the most popular provider here, but its only match is weak.
     const supernova = model(anthropicKey, "claude-supernova", "Claude Supernova")
     const novaPro = model(openaiKey, "nova-pro", "Nova Pro")
     const novaMini = model(zed, "nova-mini", "Nova Mini")
     const novaMax = model(beta, "nova-max", "Nova Max")
-    const novaLite = included("nova-lite-free", "Nova Lite Free")
+    const novaLite = unlistedModel("nova-lite-free", "Nova Lite Free")
     const items = [supernova, novaPro, novaMini, novaMax, novaLite]
     expect(matchRank(supernova, "nova", NOW)).toBe(2)
     expect(buildModelSections({ models: items, now: NOW, popular }).map((section) => section.id)).toEqual([
       "provider:anthropic",
       "provider:openai",
-      "provider:beta",
-      "provider:zed",
+      "provider:azure",
+      "provider:zai",
     ])
     const sections = buildModelSections({ models: items, term: "nova", now: NOW, popular })
     expect(sections.map((section) => section.id)).toEqual([
       "provider:openai",
-      "provider:beta",
-      "provider:zed",
+      "provider:azure",
+      "provider:zai",
       "provider:anthropic",
     ])
     expect(pickerKeys(sections)[0]).toBe("openai:nova-pro")
-    // The included section leads when it holds the best match.
+    // An unlisted provider never enters the search results.
     const bigwig = model(anthropicKey, "claude-bigwig", "Claude Bigwig")
     expect(
       buildModelSections({ models: [bigwig, pickle], term: "big", now: NOW, popular }).map((section) => section.id),
@@ -417,8 +383,8 @@ describe("buildModelSections", () => {
 
   test("searching by spec: context, access and capability words", () => {
     expect(new Set(pickerKeys(build("1m")))).toEqual(new Set(keysOf([astra, opus])))
-    expect(new Set(pickerKeys(build("chatgpt")))).toEqual(new Set(keysOf([astra, sol, gpt55])))
-    // "free" stays a search word for the included models, though no row shows it.
+    expect(new Set(pickerKeys(build("openai")))).toEqual(new Set(keysOf([astra, sol, gpt55])))
+    // Unlisted provider terms do not introduce unavailable models.
     for (const term of ["included", "vector", "free"]) {
       const includedOnly = build(term)
       expect(includedOnly).toEqual([])
@@ -428,7 +394,7 @@ describe("buildModelSections", () => {
   })
 
   test("match rank beats release date inside a section", () => {
-    const provider: Provider = { id: "acme", name: "Acme", source: "api", options: {} }
+    const provider: Provider = { id: "groq", name: "Acme", source: "api", options: {} }
     const supernova = model(provider, "supernova", "Supernova", { release_date: "2026-09-01" })
     const bigNova = model(provider, "big-nova", "Big Nova", { release_date: "2026-08-01" })
     const novaMini = model(provider, "nova-mini", "Nova Mini", { release_date: "2026-01-01" })
@@ -436,12 +402,12 @@ describe("buildModelSections", () => {
     expect(matchRank(bigNova, "nova", NOW)).toBe(1)
     expect(matchRank(supernova, "nova", NOW)).toBe(2)
     const sections = buildModelSections({ models: [supernova, bigNova, novaMini], term: "nova", now: NOW })
-    expect(pickerKeys(sections)).toEqual(["acme:nova-mini", "acme:big-nova", "acme:supernova"])
+    expect(pickerKeys(sections)).toEqual(["groq:nova-mini", "groq:big-nova", "groq:supernova"])
   })
 
   test("providers follow the popular order, then the rest alphabetically; nothing listed means no sections", () => {
-    const zed: Provider = { id: "zed", name: "Zed", source: "api", options: {} }
-    const beta: Provider = { id: "beta", name: "Beta", source: "api", options: {} }
+    const zed: Provider = { id: "zai", name: "Zed", source: "api", options: {} }
+    const beta: Provider = { id: "azure", name: "Beta", source: "api", options: {} }
     const sections = buildModelSections({
       models: [model(zed, "z", "Z"), model(beta, "b", "B"), sonnet, gpt55],
       now: NOW,
@@ -450,8 +416,8 @@ describe("buildModelSections", () => {
     expect(sections.map((section) => section.id)).toEqual([
       "provider:anthropic",
       "provider:openai",
-      "provider:beta",
-      "provider:zed",
+      "provider:azure",
+      "provider:zai",
     ])
     expect(buildModelSections({ models: [], now: NOW, popular })).toEqual([])
   })
@@ -499,11 +465,11 @@ describe("edge cases from review", () => {
 })
 
 test("retired providers are excluded from current, recent, provider and search sections", () => {
-  const retired = ["opencode", "opencode-go", "opencode-zen", "opencode-custom"].map((id) =>
+  const retired = ["unlisted-a", "unlisted-b", "unlisted-c", "unlisted-d"].map((id) =>
     model({ id, source: "api", options: { apiKey: "test-only" } }, "coding", "Coding model", { cost: { input: 3 } }),
   )
   const available = model(anthropicKey, "claude", "Claude")
-  for (const term of ["", "coding", "opencode"]) {
+  for (const term of ["", "coding", "vector"]) {
     const sections = buildModelSections({
       models: [...retired, available],
       term,
@@ -511,7 +477,7 @@ test("retired providers are excluded from current, recent, provider and search s
       recentKeys: retired.map(pickerModelKey),
       now: NOW,
     })
-    expect(pickerKeys(sections).some((key) => key.startsWith("opencode"))).toBe(false)
+    expect(pickerKeys(sections).some((key) => key.startsWith("unlisted-"))).toBe(false)
   }
   for (const item of retired) expect(modelAccess(item).kind).toBe("none")
 })

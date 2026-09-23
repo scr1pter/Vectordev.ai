@@ -21,7 +21,7 @@ export interface ReviewPrice {
 }
 
 // Estimate constants: output tokens per step, and how many tokens each step adds to the next one's input. S and R
-// fitted 2026-09-14 on a live opencode/big-pickle review of a 5-file change: the review and security sessions took
+// fitted 2026-09-14 on a measured review of a 5-file change: the review and security sessions took
 // 5 and 4 steps, and R = 2,000 makes S·P + R·S·(S−1)/2 match their measured 79.3k input tokens. HIGH_GROWTH is
 // unchanged (the largest one-step growth was 4,032). That run averaged 1,800 output tokens a step, reasoning
 // included; OUTPUT_PER_STEP also prices the budget check's next step, so it stays until a priced run confirms it.

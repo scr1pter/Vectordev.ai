@@ -1,3 +1,4 @@
+import { VECTOR_USER_AGENT } from "./user-agent"
 import { getCloudProviderProjectLink, getCloudProviderRuntimeAuth } from "./cloud-connections"
 import { listDeployments, redactCloudLog, type CloudDeployment } from "./cloud-console"
 
@@ -89,7 +90,7 @@ async function providerJson(token: string, url: string | URL, request: CloudFetc
     headers: {
       accept: "application/json",
       authorization: `Bearer ${token}`,
-      "user-agent": "Vector-Desktop/1",
+      "user-agent": VECTOR_USER_AGENT,
     },
     signal: AbortSignal.timeout(20_000),
   })

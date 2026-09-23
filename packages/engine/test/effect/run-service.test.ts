@@ -6,7 +6,7 @@ import { ProjectV2 } from "@vectordevai/core/project"
 import { it } from "../lib/effect"
 
 class Shared extends Context.Service<Shared, { readonly id: number }>()("@test/Shared") {}
-const testDirectory = "/tmp/opencode-test"
+const testDirectory = "/tmp/vector-test"
 
 it.live("makeRuntime shares dependent layers through the shared memo map", () =>
   Effect.gen(function* () {

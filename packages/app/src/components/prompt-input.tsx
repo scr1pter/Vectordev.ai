@@ -1702,7 +1702,6 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     return "Ask anything, / for commands, @ for context..."
   }
 
-  // Included models drop the trailing "Free" their catalogue names carry, as in the model picker.
   const currentModelName = () => {
     const current = props.controls.model.selection.current()
     return current ? modelDisplayName(current) : language.t("dialog.model.select.title")

@@ -1,9 +1,9 @@
 import { base64Encode } from "@vectordevai/core/util/encode"
 import { expect, test, type Page } from "@playwright/test"
-import { mockOpenCodeServer } from "../utils/mock-server"
+import { mockVectorServer } from "../utils/mock-server"
 import { expectSessionTitle } from "../utils/waits"
 
-const directory = "C:/OpenCode/TodoDockNavigation"
+const directory = "C:/Vector/TodoDockNavigation"
 const projectID = "proj_todo_dock_navigation"
 const sourceID = "ses_todo_dock_source"
 const otherID = "ses_todo_dock_other"
@@ -28,7 +28,7 @@ test("animates todo lifecycle without replaying it across task switches", async 
   const events: EventPayload[] = []
   const todos: Record<string, typeof activeTodos> = { [sourceID]: [], [otherID]: [] }
 
-  await mockOpenCodeServer(page, {
+  await mockVectorServer(page, {
     directory,
     project: {
       id: projectID,
@@ -41,8 +41,8 @@ test("animates todo lifecycle without replaying it across task switches", async 
     provider: {
       all: [
         {
-          id: "opencode",
-          name: "OpenCode",
+          id: "anthropic",
+          name: "Anthropic",
           models: {
             "claude-opus-4-6": {
               id: "claude-opus-4-6",
@@ -52,8 +52,8 @@ test("animates todo lifecycle without replaying it across task switches", async 
           },
         },
       ],
-      connected: ["opencode"],
-      default: { providerID: "opencode", modelID: "claude-opus-4-6" },
+      connected: ["anthropic"],
+      default: { providerID: "anthropic", modelID: "claude-opus-4-6" },
     },
     sessions: [session(sourceID, sourceTitle, 1700000000000), session(otherID, otherTitle, 1700000001000)],
     pageMessages: () => ({ items: [] }),

@@ -1,4 +1,3 @@
-import { warnLegacy } from "./flag/compat"
 export * as ProjectV2 from "./project"
 export * as Project from "./project"
 
@@ -41,7 +40,7 @@ export interface Interface {
   /**
    * Temporary bridge method for writing the resolved project ID to the repo-local cache.
    *
-   * This exists while the old opencode project service and this core project
+   * This exists while the old vector project service and this core project
    * service work together: core resolves the ID, while the old service still owns
    * database migration and persistence. The old service should call this after it
    * finishes migrating from `resolve().previous` to `resolve().id`; once project
@@ -50,7 +49,7 @@ export interface Interface {
   readonly commit: (input: { store: AbsolutePath; id: ID }) => Effect.Effect<void>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@opencode/ProjectV2") {}
+export class Service extends Context.Service<Service, Interface>()("@vector/ProjectV2") {}
 
 const layer = Layer.effect(
   Service,
@@ -65,11 +64,6 @@ const layer = Layer.effect(
 
     const cached = Effect.fnUntraced(function* (dir: string) {
       return yield* fs.readFileString(path.join(dir, "vector", "project-id")).pipe(
-        Effect.catch(() =>
-          fs
-            .readFileString(path.join(dir, "opencode"))
-            .pipe(Effect.tap(() => Effect.sync(() => warnLegacy(".git/opencode", ".git/vector/project-id")))),
-        ),
         Effect.map((value) => value.trim()),
         Effect.map((value) => (value ? ID.make(value) : undefined)),
         Effect.catch(() => Effect.succeed(undefined)),

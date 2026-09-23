@@ -58,7 +58,7 @@ describe("ConfigProviderPlugin.Plugin", () => {
   it.effect("keeps configured model variant bodies unchanged", () =>
     Effect.gen(function* () {
       const catalog = yield* Catalog.Service
-      const providerID = ProviderV2.ID.opencode
+      const providerID = ProviderV2.ID.make("lmstudio")
       const modelID = ModelV2.ID.make("alpha-gpt-next")
       const config = Config.Service.of({
         entries: () =>
@@ -67,8 +67,8 @@ describe("ConfigProviderPlugin.Plugin", () => {
               type: "document",
               info: decode({
                 providers: {
-                  opencode: {
-                    api: { type: "aisdk", package: "@ai-sdk/openai", url: "https://opencode.test/v1" },
+                  lmstudio: {
+                    api: { type: "aisdk", package: "@ai-sdk/openai", url: "https://custom.example.test/v1" },
                     models: {
                       "alpha-gpt-next": {
                         variants: [
@@ -109,7 +109,7 @@ describe("ConfigProviderPlugin.Plugin", () => {
   it.effect("keeps layered model variant bodies unchanged", () =>
     Effect.gen(function* () {
       const catalog = yield* Catalog.Service
-      const providerID = ProviderV2.ID.opencode
+      const providerID = ProviderV2.ID.make("lmstudio")
       const modelID = ModelV2.ID.make("alpha-gpt-next")
       const config = Config.Service.of({
         entries: () =>
@@ -118,8 +118,8 @@ describe("ConfigProviderPlugin.Plugin", () => {
               type: "document",
               info: decode({
                 providers: {
-                  opencode: {
-                    api: { type: "aisdk", package: "@ai-sdk/openai", url: "https://opencode.test/v1" },
+                  lmstudio: {
+                    api: { type: "aisdk", package: "@ai-sdk/openai", url: "https://custom.example.test/v1" },
                   },
                 },
               }),
@@ -128,7 +128,7 @@ describe("ConfigProviderPlugin.Plugin", () => {
               type: "document",
               info: decode({
                 providers: {
-                  opencode: {
+                  lmstudio: {
                     models: {
                       "alpha-gpt-next": {
                         variants: [{ id: "high", body: { reasoningEffort: "high" } }],
@@ -156,7 +156,7 @@ describe("ConfigProviderPlugin.Plugin", () => {
       Effect.gen(function* () {
         const catalog = yield* Catalog.Service
         const integrations = yield* Integration.Service
-        const providerID = ProviderV2.ID.make("custom")
+        const providerID = ProviderV2.ID.make("lmstudio")
         const modelID = ModelV2.ID.make("chat")
         const config = Config.Service.of({
           entries: () =>
@@ -164,9 +164,9 @@ describe("ConfigProviderPlugin.Plugin", () => {
               new Config.Document({
                 type: "document",
                 info: decode({
-                  model: "custom/first",
+                  model: "lmstudio/first",
                   providers: {
-                    custom: {
+                    lmstudio: {
                       name: "Configured",
                       env: ["CUSTOM_API_KEY"],
                       api: { type: "native", settings: {} },
@@ -194,9 +194,9 @@ describe("ConfigProviderPlugin.Plugin", () => {
               new Config.Document({
                 type: "document",
                 info: decode({
-                  model: "custom/default",
+                  model: "lmstudio/default",
                   providers: {
-                    custom: {
+                    lmstudio: {
                       api: { type: "aisdk", package: "custom-sdk", url: "https://example.test" },
                       request: request({ last: "last", shared: "last" }),
                       models: {
@@ -228,7 +228,7 @@ describe("ConfigProviderPlugin.Plugin", () => {
                 type: "document",
                 info: decode({
                   providers: {
-                    custom: { name: "Renamed" },
+                    lmstudio: { name: "Renamed" },
                   },
                 }),
               }),
@@ -241,11 +241,11 @@ describe("ConfigProviderPlugin.Plugin", () => {
         const model = required(yield* catalog.model.get(providerID, modelID))
         expect((yield* catalog.model.default())?.id).toBe(ModelV2.ID.make("default"))
         expect(provider.name).toBe("Renamed")
-        expect((yield* integrations.get(Integration.ID.make("custom")))?.methods).toContainEqual({
+        expect((yield* integrations.get(Integration.ID.make("lmstudio")))?.methods).toContainEqual({
           type: "env",
           names: ["CUSTOM_API_KEY"],
         })
-        expect((yield* integrations.get(Integration.ID.make("custom")))?.name).toBe("Renamed")
+        expect((yield* integrations.get(Integration.ID.make("lmstudio")))?.name).toBe("Renamed")
         expect(provider.disabled).toBeUndefined()
         expect(provider.api).toEqual({ type: "aisdk", package: "custom-sdk", url: "https://example.test" })
         expect(provider.request.headers).toEqual({ first: "first", shared: "last", last: "last" })

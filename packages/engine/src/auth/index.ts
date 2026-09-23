@@ -7,7 +7,7 @@ import { NonNegativeInt } from "@vectordevai/core/schema"
 import { Global } from "@vectordevai/core/global"
 import { FSUtil } from "@vectordevai/core/fs-util"
 
-export const OAUTH_DUMMY_KEY = "opencode-oauth-dummy-key"
+export const OAUTH_DUMMY_KEY = "vector-oauth-dummy-key"
 
 const file = path.join(Global.Path.data, "auth.json")
 const decodeJson = Schema.decodeUnknownOption(Schema.UnknownFromJsonString)
@@ -59,7 +59,7 @@ export interface Interface {
   readonly remove: (key: string) => Effect.Effect<void, AuthError>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@opencode/Auth") {}
+export class Service extends Context.Service<Service, Interface>()("@vector/Auth") {}
 
 const layer = Layer.effect(
   Service,
@@ -84,8 +84,8 @@ const layer = Layer.effect(
     })
 
     const all = Effect.fn("Auth.all")(function* () {
-      if (readEnv("OPENCODE_AUTH_CONTENT")) {
-        const parsed = Option.getOrUndefined(decodeJson(readEnv("OPENCODE_AUTH_CONTENT")))
+      if (readEnv("VECTOR_AUTH_CONTENT")) {
+        const parsed = Option.getOrUndefined(decodeJson(readEnv("VECTOR_AUTH_CONTENT")))
         if (parsed) return decodeAuthData(parsed)
       }
 

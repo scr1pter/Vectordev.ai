@@ -39,7 +39,7 @@ the end.
 zero dependencies and never touch the network, so there is no install step and a
 failing check is attributable to the agent rather than to a flaky registry.
 
-For `--runtime vector` the runner looks for a `vector` or `opencode` binary on
+For `--runtime vector` the runner looks for a `vector` or `vector` binary on
 `PATH`, then falls back to running the engine straight from source
 (`packages/engine/src/index.ts`), which is the normal case during development.
 Set `VECTOR_EVAL_ENGINE` to point at a specific build.

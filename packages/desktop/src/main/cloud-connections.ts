@@ -1,3 +1,4 @@
+import { VECTOR_USER_AGENT } from "./user-agent"
 import { constants, createHash, generateKeyPairSync, privateDecrypt, randomBytes, type KeyObject } from "node:crypto"
 import { shell } from "electron"
 
@@ -376,7 +377,7 @@ async function providerJson(token: string, url: string, init?: RequestInit): Pro
   const headers = new Headers(init?.headers)
   headers.set("accept", "application/json")
   headers.set("authorization", `Bearer ${token}`)
-  headers.set("user-agent", "Vector-Desktop/1")
+  headers.set("user-agent", VECTOR_USER_AGENT)
   const response = await fetch(url, {
     ...init,
     headers,
