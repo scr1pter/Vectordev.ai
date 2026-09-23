@@ -2,6 +2,7 @@
 // the finding, everything it posts has Vector's markers escaped, and a pull request it opens is dispatched for review.
 
 import { describe, expect, test } from "bun:test"
+import { Effect } from "effect"
 import type { Octokit } from "@octokit/rest"
 import { buildInlineBody } from "@opencode-ai/core/review/format"
 import type { Finding } from "@opencode-ai/core/review/types"
@@ -18,6 +19,7 @@ import {
   taskRoutePlan,
 } from "../../src/cli/cmd/github.handler"
 import { TASK_MENTIONS, routeGithubEvent } from "../../src/cli/cmd/github.route"
+import { cliIt } from "../lib/cli-process"
 
 const HEAD = "d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3"
 
@@ -100,6 +102,21 @@ const finding: Finding = {
 }
 
 describe("review verbs in the task job", () => {
+  cliIt.live("a workflow without a model fails with provider setup instructions", ({ opencode }) =>
+    Effect.gen(function* () {
+      const result = yield* opencode.spawn(
+        ["github", "run", "--event", JSON.stringify({ eventName: "workflow_dispatch", payload: {} })],
+        { env: { MODEL: "", OPENCODE_CONFIG_CONTENT: JSON.stringify({ enabled_providers: [] }) } },
+      )
+      expect(result.timedOut).toBe(false)
+      expect(result.exitCode).not.toBe(0)
+      expect(result.stderr).toContain("No GitHub model is set. Set MODEL in the workflow to provider/model")
+      expect(result.stderr).toContain("provider's credentials as GitHub Actions secrets")
+      expect(result.stderr).toContain("vector github install")
+      expect(result.stdout + result.stderr).not.toContain("opencode/big-pickle")
+    }),
+  )
+
   test("an old workflow's review verb gets one reply, and nothing else runs", async () => {
     for (const body of ["/vector review", "/vector review full", "/vx review", "/oc review", "/vector pause"]) {
       const route = routeGithubEvent(comment(body), TASK_MENTIONS)
@@ -324,7 +341,7 @@ describe("the install copy", () => {
     expect(isFreeModel("opencode", {})).toBe(false)
     expect(isFreeModel("anthropic", { cost: { input: 0, output: 0 } })).toBe(false)
     expect(reviewCostLine({ model: "opencode/big-pickle", free: true })).toBe(
-      "Reviews run on opencode/big-pickle, a model included with Vector, so no provider key is needed.",
+      "Reviews run on opencode/big-pickle, a zero-priced model that requires your provider key.",
     )
     expect(reviewCostLine({ model: "anthropic/claude-sonnet-4-5", free: false, monthlyUsd: 50 })).toBe(
       "Reviews run on anthropic/claude-sonnet-4-5 with your key. Each review stops at $2.00, each pull request at $10.00, and all reviews at $50.00 a month. Change these in .vector/review.json and the workflow file.",

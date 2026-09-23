@@ -118,7 +118,7 @@ describe("routeGithubEvent", () => {
   })
 
   test("mentionsFrom reads a comma-separated MENTIONS value", () => {
-    expect(mentionsFrom(undefined)).toEqual(["/vector", "/vx"])
+    expect(mentionsFrom(undefined)).toEqual(["/vectorscope", "/vs", "/vector", "/vx"])
     expect(mentionsFrom("", TASK_MENTIONS)).toEqual(TASK_MENTIONS)
     expect(mentionsFrom(" /Bot , /x ,")).toEqual(["/bot", "/x"])
   })

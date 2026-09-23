@@ -160,8 +160,6 @@ const ACTIONS_BOT = "github-actions[bot]"
 const ACTIONS_BOT_EMAIL = "41898282+github-actions[bot]@users.noreply.github.com"
 const AGENT_REACTION = "eyes"
 const VECTOR_SITE = "https://vectordev.ai"
-// The default model is included with Vector: it runs with no provider key at all.
-const VECTOR_DEFAULT_MODEL = "opencode/big-pickle"
 const DEFAULT_MENTIONS = TASK_MENTIONS.join(",")
 const BRANCH_PREFIX = "vector"
 
@@ -218,7 +216,7 @@ export const githubInstall = Effect.fn("Cli.github.install")(function* () {
               ]
             : keys.length
               ? [
-                  `    3. (optional) Add the provider secret${keys.length > 1 ? "s" : ""} for ${provider}/${model}:`,
+                  `    3. Add the provider secret${keys.length > 1 ? "s" : ""} for ${provider}/${model}:`,
                   ...keys.map((e) => `       - ${e}`),
                 ]
               : []
@@ -745,12 +743,12 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: {
           throw new Error(`Invalid model ${value}. Model must be in the format "provider/model".`)
         return { providerID, modelID }
       }
-      // No MODEL in the workflow: honour the repo's configured default, else
-      // the included default model so a repo with only VECTOR_CLI_TOKEN still runs.
+      // Honour a configured default, but do not fall back to the closed shared gateway.
       const configured = await runLocalEffect(providerSvc.defaultModel()).catch(() => undefined)
       if (configured) return configured
-      console.log(`MODEL not set, using ${VECTOR_DEFAULT_MODEL}`)
-      return Provider.parseModel(VECTOR_DEFAULT_MODEL)
+      throw new Error(
+        "No GitHub model is set. Set MODEL in the workflow to provider/model and add that provider's credentials as GitHub Actions secrets. Run `vector github install` to configure the workflow.",
+      )
     }
 
     function normalizeRunId() {
@@ -1951,14 +1949,14 @@ export async function fixContext(
   return findingForPrompt({ body: root.body, path: root.path, line: root.line ?? root.original_line })
 }
 
-// Models included with Vector: the opencode gateway's zero-priced models. A model with no listed price is not one:
-// its cost is unknown.
+// Zero-priced OpenCode catalogue models still require the user's provider key.
+// A model with no listed price has unknown cost.
 export function isFreeModel(provider: string, model: { cost?: { input: number; output: number } } | undefined) {
   return provider === "opencode" && !!model?.cost && model.cost.input === 0 && model.cost.output === 0
 }
 
 export function reviewCostLine(input: { model: string; free: boolean; monthlyUsd?: number }): string {
-  if (input.free) return `Reviews run on ${input.model}, a model included with Vector, so no provider key is needed.`
+  if (input.free) return `Reviews run on ${input.model}, a zero-priced model that requires your provider key.`
   const review = formatUsd(DEFAULT_REVIEW_CONFIG.maxCostUsd)
   const pr = formatUsd(DEFAULT_REVIEW_CONFIG.maxCostUsdPerPr)
   const limits = input.monthlyUsd

@@ -14,7 +14,7 @@ export interface WorkflowOptions {
   autoReview: boolean
   monthlyUsd?: number // REVIEW_MAX_COST_USD_PER_MONTH; written for paid models only
   version: string // the CLI version to pin
-  mentions?: readonly string[] // baked into the route job; /vector and /vx by default
+  mentions?: readonly string[] // baked into the route job; Vectorscope mentions and legacy aliases by default
 }
 
 // A release pins the CLI and lets npm use its cache. Anything else (a local or dev build) installs latest.
@@ -128,12 +128,10 @@ export function buildWorkflowYaml(opts: WorkflowOptions): string {
   const install = cli.pinned
     ? `npm install -g ${CLI_PACKAGE}@${cli.spec} --prefer-offline --no-audit --no-fund`
     : `npm install -g ${CLI_PACKAGE}@latest --no-audit --no-fund`
-  // The default model is included with Vector and needs no key, so its passthrough stays commented out; a paid
-  // provider's keys are wired to same-named repository secrets.
-  const optional = opts.provider === "opencode"
+  // Every selected provider needs the repository's credentials, including OpenCode.
   const keys = [
-    "          # Provider keys are only needed for models not included with Vector.",
-    ...opts.keys.map((key) => `          ${optional ? "# " : ""}${key}: \${{ secrets.${key} }}`),
+    "          # Add the selected provider's credentials as repository secrets.",
+    ...opts.keys.map((key) => `          ${key}: \${{ secrets.${key} }}`),
     ...["ANTHROPIC_API_KEY", "OPENAI_API_KEY"]
       .filter((key) => !opts.keys.includes(key))
       .map((key) => `          # ${key}: \${{ secrets.${key} }}`),

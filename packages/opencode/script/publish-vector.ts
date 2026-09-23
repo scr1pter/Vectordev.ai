@@ -67,10 +67,11 @@ await Bun.file(`${out}/README.md`).write(
     "npm install -g @vectordevai/cli",
     "vector login        # opens vectordev.ai/auth/cli",
     "vector              # start the agent in the current repository",
-    "vector auth login   # bring your own model keys (optional)",
+    "vector auth login   # connect your model provider",
     "```",
     "",
-    "Defaults to Big Pickle, a free model — no API key required.",
+    "Connect a supported provider with your own credentials, then choose a model with vector models.",
+    "For GitHub reviews, set the MODEL workflow input and its provider secret.",
     "",
   ].join("\n"),
 )

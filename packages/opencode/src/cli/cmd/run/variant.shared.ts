@@ -40,10 +40,10 @@ function variantKey(model: NonNullable<RunInput["model"]>): string {
   return modelKey(model.providerID, model.modelID)
 }
 
-// Models included with Vector, by the TUI's and the desktop app's rule (includedModel in
-// packages/app/src/utils/provider-brand.ts): zero cost from OpenCode Zen for its catalogue
-// models, which carry a release date, or for any model when it runs keyless. A model defined
-// only in config defaults to zero cost, and on a Zen key it bills the Zen balance.
+// Match the TUI's and desktop app's catalogue labels (includedModel in
+// packages/app/src/utils/provider-brand.ts). These zero-priced OpenCode catalogue
+// models require the user's provider key; the legacy public marker is display metadata.
+// A model defined only in config defaults to zero cost and can bill the Zen balance.
 const ZEN_PROVIDER_IDS = new Set(["opencode", "opencode-zen"])
 
 export function includedModel(

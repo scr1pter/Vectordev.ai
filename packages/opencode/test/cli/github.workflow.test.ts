@@ -74,7 +74,7 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       ((github.event_name == 'issue_comment' || github.event_name == 'pull_request_review_comment') &&
         github.event.comment.user.type != 'Bot' &&
-        (contains(github.event.comment.body, '/vector') || contains(github.event.comment.body, '/vx')))
+        (contains(github.event.comment.body, '/vectorscope') || contains(github.event.comment.body, '/vs') || contains(github.event.comment.body, '/vector') || contains(github.event.comment.body, '/vx')))
     runs-on: ubuntu-latest
     timeout-minutes: 3
     permissions:
@@ -140,8 +140,8 @@ jobs:
           OPENCODE_PURE: "1"
           OPENCODE_DISABLE_PROJECT_CONFIG: "1"
           OPENCODE_CONFIG_CONTENT: '{"lsp":false,"formatter":false,"snapshot":false}'
-          # Provider keys are only needed for models not included with Vector.
-          # OPENCODE_API_KEY: \${{ secrets.OPENCODE_API_KEY }}
+          # Add the selected provider's credentials as repository secrets.
+          OPENCODE_API_KEY: \${{ secrets.OPENCODE_API_KEY }}
           # ANTHROPIC_API_KEY: \${{ secrets.ANTHROPIC_API_KEY }}
           # OPENAI_API_KEY: \${{ secrets.OPENAI_API_KEY }}
 
@@ -181,8 +181,8 @@ jobs:
           USE_GITHUB_TOKEN: "true"
           MODEL: opencode/big-pickle
           VECTOR_REVIEW_AUTO: "1"
-          # Provider keys are only needed for models not included with Vector.
-          # OPENCODE_API_KEY: \${{ secrets.OPENCODE_API_KEY }}
+          # Add the selected provider's credentials as repository secrets.
+          OPENCODE_API_KEY: \${{ secrets.OPENCODE_API_KEY }}
           # ANTHROPIC_API_KEY: \${{ secrets.ANTHROPIC_API_KEY }}
           # OPENAI_API_KEY: \${{ secrets.OPENAI_API_KEY }}
 `
@@ -207,7 +207,7 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       ((github.event_name == 'issue_comment' || github.event_name == 'pull_request_review_comment') &&
         github.event.comment.user.type != 'Bot' &&
-        (contains(github.event.comment.body, '/vector') || contains(github.event.comment.body, '/vx')))
+        (contains(github.event.comment.body, '/vectorscope') || contains(github.event.comment.body, '/vs') || contains(github.event.comment.body, '/vector') || contains(github.event.comment.body, '/vx')))
     runs-on: ubuntu-latest
     timeout-minutes: 3
     permissions:
@@ -266,7 +266,7 @@ jobs:
           OPENCODE_PURE: "1"
           OPENCODE_DISABLE_PROJECT_CONFIG: "1"
           OPENCODE_CONFIG_CONTENT: '{"lsp":false,"formatter":false,"snapshot":false}'
-          # Provider keys are only needed for models not included with Vector.
+          # Add the selected provider's credentials as repository secrets.
           ANTHROPIC_API_KEY: \${{ secrets.ANTHROPIC_API_KEY }}
           # OPENAI_API_KEY: \${{ secrets.OPENAI_API_KEY }}
 
@@ -304,7 +304,7 @@ jobs:
           VECTOR_CLI_TOKEN: \${{ secrets.VECTOR_CLI_TOKEN }}
           USE_GITHUB_TOKEN: "true"
           MODEL: anthropic/claude-sonnet-4-5
-          # Provider keys are only needed for models not included with Vector.
+          # Add the selected provider's credentials as repository secrets.
           ANTHROPIC_API_KEY: \${{ secrets.ANTHROPIC_API_KEY }}
           # OPENAI_API_KEY: \${{ secrets.OPENAI_API_KEY }}
 `
@@ -372,6 +372,10 @@ describe("buildWorkflowYaml", () => {
       expect(env["VECTOR_REVIEW_REF"]).toBe("${{ needs.route.outputs.ref || github.event.pull_request.head.sha }}")
       const task = workflow.jobs.vector.steps.find((step) => step.run === "vector github run")?.env ?? {}
       expect(task["VECTOR_REVIEW_AUTO"] ?? "unset").toBe(combo.options.autoReview ? "1" : "unset")
+      for (const key of combo.options.keys) {
+        expect(env[key]).toBe(`\${{ secrets.${key} }}`)
+        expect(task[key]).toBe(`\${{ secrets.${key} }}`)
+      }
     })
 
   test("the automatic branch filters forks, drafts, the skip and pause labels, and dependency bots", () => {
