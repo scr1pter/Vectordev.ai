@@ -1,12 +1,10 @@
 #!/usr/bin/env bun
 
-import { Config } from "@/config/config"
 import { ConfigV1 } from "@opencode-ai/core/v1/config/config"
 import { TuiConfig } from "@opencode-ai/tui/config"
 import { Schema } from "effect"
 
 type JsonSchema = Record<string, unknown>
-const MODEL_REF = "https://models.dev/model-schema.json#/$defs/Model"
 
 function generateEffect(schema: Schema.Top) {
   const document = Schema.toJsonSchemaDocument(schema)
@@ -16,11 +14,9 @@ function generateEffect(schema: Schema.Top) {
     $defs: document.definitions,
   })
   if (!isRecord(normalized)) throw new Error("schema generator produced a non-object schema")
-  const restored = restoreModelRefs(normalized)
-  if (!isRecord(restored)) throw new Error("schema generator produced a non-object schema")
-  restored.allowComments = true
-  restored.allowTrailingCommas = true
-  return restored
+  normalized.allowComments = true
+  normalized.allowTrailingCommas = true
+  return normalized
 }
 
 function normalize(value: unknown): unknown {
@@ -47,17 +43,6 @@ function normalize(value: unknown): unknown {
     return { ...schema, maximum: Number.MAX_SAFE_INTEGER }
   }
 
-  return schema
-}
-
-function restoreModelRefs(value: unknown, key?: string): unknown {
-  if (Array.isArray(value)) return value.map((item) => restoreModelRefs(item))
-  if (!isRecord(value)) return value
-
-  const schema = Object.fromEntries(Object.entries(value).map(([name, item]) => [name, restoreModelRefs(item, name)]))
-  if ((key === "model" || key === "small_model") && schema.type === "string") {
-    return { ...schema, $ref: MODEL_REF }
-  }
   return schema
 }
 
