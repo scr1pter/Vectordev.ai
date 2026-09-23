@@ -1,6 +1,4 @@
 import path from "path"
-import { exec } from "child_process"
-import { untrustedChildEnvironment } from "@opencode-ai/core/child-environment"
 import { Filesystem } from "@/util/filesystem"
 import * as prompts from "@clack/prompts"
 import { filter, map, pipe, sortBy, values } from "remeda"
@@ -20,7 +18,6 @@ import type {
 import { UI } from "../ui"
 import { ModelsDev } from "@opencode-ai/core/models-dev"
 import { InstanceRef } from "@/effect/instance-ref"
-import { SessionShare } from "@/share/session"
 import { Session } from "@/session/session"
 import type { SessionID } from "../../session/schema"
 import { MessageID, PartID } from "../../session/schema"
@@ -40,7 +37,6 @@ import { escapeVectorMarkers, inlineTitle, parseFindingMarker } from "@opencode-
 import { wrapUntrusted } from "@opencode-ai/core/review/prompt"
 import { DEFAULT_REVIEW_CONFIG } from "@opencode-ai/core/review/types"
 import { extractResponseText, formatPromptTooLargeError } from "./github.shared"
-import { includedModel, includedModelName } from "./run/variant.shared"
 import { buildEvidenceBody, judgeTextFromMessages, parseNumstat, type EvidenceChange } from "./github.evidence"
 import { sameLogin } from "./github.review-api"
 import { TASK_MENTIONS, mentionsFrom, routeGithubEvent, type GithubRoute } from "./github.route"
@@ -149,12 +145,6 @@ type IssueQueryResponse = {
   }
 }
 
-// The published `vector` bin sets VECTOR_CLI=1 (see src/index.ts). Under it
-// there is no GitHub App to exchange a token with, so the agent runs on the
-// repo's own GITHUB_TOKEN unless the workflow says otherwise.
-const isVector = process.env["VECTOR_CLI"] === "1"
-// Git identity when a GitHub App token is in play (legacy path).
-const AGENT_USERNAME = "vector-agent[bot]"
 // Reactions and commits made with GITHUB_TOKEN show up as this login.
 const ACTIONS_BOT = "github-actions[bot]"
 const ACTIONS_BOT_EMAIL = "41898282+github-actions[bot]@users.noreply.github.com"
@@ -184,12 +174,6 @@ export const githubInstall = Effect.fn("Cli.github.install")(function* () {
       UI.empty()
       prompts.intro("Install GitHub agent")
       const app = await getAppInfo()
-      // Upstream installs its GitHub App here and later exchanges an OIDC
-      // token at api.opencode.ai. Vector runs on the repo's own GITHUB_TOKEN;
-      // the App path is only reachable when a custom App URL is supplied.
-      const appUrl = process.env["VECTOR_GITHUB_APP_URL"]
-      if (appUrl) await installGitHubApp(appUrl)
-
       const providers = await Effect.runPromise(modelsDev.get()).then((p) => {
         // TODO: add guide for copilot, for now just hide it
         delete p["github-copilot"]
@@ -200,9 +184,8 @@ export const githubInstall = Effect.fn("Cli.github.install")(function* () {
       const model = await promptModel()
       //const key = await promptKey()
       const autoReview = await promptAutoReview()
-      const free = isFreeModel(provider, providers[provider]?.models[model])
-      const monthlyUsd = free ? undefined : await promptMonthlyLimit()
-      prompts.log.info(reviewCostLine({ model: `${provider}/${model}`, free, monthlyUsd }))
+      const monthlyUsd = await promptMonthlyLimit()
+      prompts.log.info(reviewCostLine({ model: `${provider}/${model}`, monthlyUsd }))
 
       await addWorkflowFiles()
       printNextSteps()
@@ -262,7 +245,6 @@ export const githubInstall = Effect.fn("Cli.github.install")(function* () {
 
       async function promptProvider() {
         const priority: Record<string, number> = {
-          opencode: 0,
           anthropic: 1,
           openai: 2,
           google: 3,
@@ -292,10 +274,6 @@ export const githubInstall = Effect.fn("Cli.github.install")(function* () {
 
       async function promptModel() {
         const providerData = providers[provider]!
-        // Retired models are left out, and an included model is named as Vector names it
-        // everywhere else: without the "Free" its catalogue name carries.
-        const source = { id: provider, options: {} }
-
         const model = await prompts.select({
           message: "Select model",
           maxItems: 8,
@@ -303,15 +281,7 @@ export const githubInstall = Effect.fn("Cli.github.install")(function* () {
             providerData.models,
             values(),
             filter((x) => x.status !== "deprecated"),
-            map((x) => {
-              const included = includedModel(source, x)
-              const name = x.name ?? x.id
-              return {
-                label: included ? includedModelName(name) : name,
-                value: x.id,
-                hint: included ? "Included with Vector" : undefined,
-              }
-            }),
+            map((x) => ({ label: x.name ?? x.id, value: x.id })),
             sortBy((x) => x.label),
           ),
         })
@@ -348,58 +318,6 @@ export const githubInstall = Effect.fn("Cli.github.install")(function* () {
         return Number(value.trim() || "50")
       }
 
-      // Legacy path: only used when VECTOR_GITHUB_APP_URL points at a GitHub
-      // App whose installation api.opencode.ai can report on.
-      async function installGitHubApp(url: string) {
-        const s = prompts.spinner()
-        s.start("Installing GitHub app")
-
-        // Get installation
-        const installation = await getInstallation()
-        if (installation) return s.stop("GitHub app already installed")
-
-        // Open browser
-        const command =
-          process.platform === "darwin"
-            ? `open "${url}"`
-            : process.platform === "win32"
-              ? `start "" "${url}"`
-              : `xdg-open "${url}"`
-
-        exec(command, { env: untrustedChildEnvironment() }, (error) => {
-          if (error) {
-            prompts.log.warn(`Could not open browser. Please visit: ${url}`)
-          }
-        })
-
-        // Wait for installation
-        s.message("Waiting for GitHub app to be installed")
-        const MAX_RETRIES = 120
-        let retries = 0
-        do {
-          const installation = await getInstallation()
-          if (installation) break
-
-          if (retries > MAX_RETRIES) {
-            s.stop(
-              `Failed to detect GitHub app installation. Make sure to install the app for the \`${app.owner}/${app.repo}\` repository.`,
-            )
-            throw new UI.CancelledError()
-          }
-
-          retries++
-          await sleep(1000)
-        } while (true) // oxlint-disable-line no-constant-condition
-
-        s.stop("Installed GitHub app")
-
-        async function getInstallation() {
-          return await fetch(`https://api.opencode.ai/get_github_app_installation?owner=${app.owner}&repo=${app.repo}`)
-            .then((res) => res.json())
-            .then((data) => data.installation)
-        }
-      }
-
       async function addWorkflowFiles() {
         const keys = provider === "amazon-bedrock" ? [] : providers[provider].env
         // No composite action: the published CLI is installed from npm and run directly, on the repo's
@@ -432,7 +350,6 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: {
   if (!ctx) return yield* Effect.die("InstanceRef not provided")
   const gitSvc = yield* Git.Service
   const sessionSvc = yield* Session.Service
-  const sessionShare = yield* SessionShare.Service
   const sessionPrompt = yield* SessionPrompt.Service
   const providerSvc = yield* Provider.Service
   const events = yield* EventV2Bridge.Service
@@ -485,8 +402,6 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: {
     const { providerID, modelID } = await normalizeModel()
     const variant = process.env["VARIANT"] || undefined
     const runId = normalizeRunId()
-    const share = normalizeShare()
-    const oidcBaseUrl = normalizeOidcBaseUrl()
     const { owner, repo } = context.repo
     // For repo events (schedule, workflow_dispatch), payload has no issue/comment data
     const payload = context.payload as
@@ -511,7 +426,6 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: {
     let appToken: string
     let octoRest: Octokit
     let octoGraph: typeof graphql
-    let gitConfig: string
     let session: { id: SessionID; title: string; version: string }
     // Set when GitHub refused to open the pull request because the repository
     // does not let Actions create PRs; the follow-up comment carries it.
@@ -521,9 +435,7 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: {
     const triggerCommentId = isCommentEvent
       ? (payload as IssueCommentEvent | PullRequestReviewCommentEvent).comment.id
       : undefined
-    const useGithubToken = normalizeUseGithubToken()
-    // Whose reactions to clean up: GITHUB_TOKEN acts as the Actions bot.
-    const botLogin = useGithubToken ? ACTIONS_BOT : AGENT_USERNAME
+    const botLogin = ACTIONS_BOT
     const commentType = isCommentEvent
       ? context.eventName === "pull_request_review_comment"
         ? "pr_review"
@@ -551,36 +463,24 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: {
     }
 
     try {
-      if (useGithubToken) {
-        const githubToken = process.env["GITHUB_TOKEN"]
-        if (!githubToken) {
-          throw new Error(
-            "GITHUB_TOKEN environment variable is not set. When using use_github_token, you must provide GITHUB_TOKEN.",
-          )
-        }
-        appToken = githubToken
-      } else {
-        const actionToken = isMock ? args.token! : await getOidcToken()
-        appToken = await exchangeForAppToken(actionToken)
-      }
+      const githubToken = args.token ?? process.env["GITHUB_TOKEN"]
+      if (!githubToken)
+        throw new Error("GITHUB_TOKEN environment variable is not set. Provide the repository Actions token.")
+      appToken = githubToken
       octoRest = new Octokit({ auth: appToken })
       octoGraph = graphql.defaults({
         headers: { authorization: `token ${appToken}` },
       })
 
       const { userPrompt, promptFiles } = await getUserPrompt()
-      if (!useGithubToken) {
-        await configureGit(appToken)
-      } else {
-        await configureGitIdentity()
-      }
+      await configureGitIdentity()
       // Skip permission check and reactions for repo events (no actor to check, no issue to react to)
       if (isUserEvent) {
         await assertPermissions()
         await addReaction(commentType)
       }
 
-      // Setup opencode session
+      // Setup vector session
       const repoData = await fetchRepo()
       session = await runLocalEffect(
         sessionSvc.create({
@@ -594,9 +494,6 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: {
         }),
       )
       await subscribeSessionEvents()
-      // Sharing publishes the transcript to opencode.ai. Vector PRs link the
-      // GitHub run instead, so only share when the workflow asks for it.
-      if (share === true) await runLocalEffect(sessionShare.share(session.id))
       console.log("vector session", session.id)
 
       // Handle event types:
@@ -727,11 +624,6 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: {
       core.setFailed(msg)
       // Also output the clean error message for the action to capture
       //core.setOutput("prepare_error", e.message);
-    } finally {
-      if (!useGithubToken) {
-        await restoreGitConfig()
-        await revokeAppToken()
-      }
     }
     process.exit(exitCode)
 
@@ -755,29 +647,6 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: {
       const value = process.env["GITHUB_RUN_ID"]
       if (!value) throw new Error(`Environment variable "GITHUB_RUN_ID" is not set`)
       return value
-    }
-
-    function normalizeShare() {
-      const value = process.env["SHARE"]
-      if (!value) return undefined
-      if (value === "true") return true
-      if (value === "false") return false
-      throw new Error(`Invalid share value: ${value}. Share must be a boolean.`)
-    }
-
-    function normalizeUseGithubToken() {
-      const value = process.env["USE_GITHUB_TOKEN"]
-      // The published CLI has no App to exchange with: GITHUB_TOKEN by default.
-      if (!value) return isVector
-      if (value === "true") return true
-      if (value === "false") return false
-      throw new Error(`Invalid use_github_token value: ${value}. Must be a boolean.`)
-    }
-
-    function normalizeOidcBaseUrl(): string {
-      const value = process.env["OIDC_BASE_URL"]
-      if (!value) return "https://api.opencode.ai"
-      return value.replace(/\/+$/, "")
     }
 
     function isIssueCommentEvent(
@@ -1073,70 +942,6 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: {
           return summaryText
         }),
       )
-    }
-
-    async function getOidcToken() {
-      try {
-        return await core.getIDToken("opencode-github-action")
-      } catch (error) {
-        console.error("Failed to get OIDC token:", error instanceof Error ? error.message : error)
-        throw new Error(
-          "Could not fetch an OIDC token. Make sure to add `id-token: write` to your workflow permissions.",
-          { cause: error },
-        )
-      }
-    }
-
-    async function exchangeForAppToken(token: string) {
-      const response = token.startsWith("github_pat_")
-        ? await fetch(`${oidcBaseUrl}/exchange_github_app_token_with_pat`, {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-            body: JSON.stringify({ owner, repo }),
-          })
-        : await fetch(`${oidcBaseUrl}/exchange_github_app_token`, {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          })
-
-      if (!response.ok) {
-        const responseJson = (await response.json()) as { error?: string }
-        throw new Error(`App token exchange failed: ${response.status} ${response.statusText} - ${responseJson.error}`)
-      }
-
-      const responseJson = (await response.json()) as { token: string }
-      return responseJson.token
-    }
-
-    async function configureGit(appToken: string) {
-      // Do not change git config when running locally
-      if (isMock) return
-
-      console.log("Configuring git...")
-      const config = "http.https://github.com/.extraheader"
-      // actions/checkout@v6 no longer stores credentials in .git/config,
-      // so this may not exist - use nothrow() to handle gracefully
-      const ret = await gitStatus(["config", "--local", "--get", config])
-      if (ret.exitCode === 0) {
-        gitConfig = ret.stdout.toString().trim()
-        await gitRun(["config", "--local", "--unset-all", config])
-      }
-
-      const newCredentials = Buffer.from(`x-access-token:${appToken}`, "utf8").toString("base64")
-
-      await gitRun(["config", "--local", config, `AUTHORIZATION: basic ${newCredentials}`])
-      await gitRun(["config", "--global", "user.name", AGENT_USERNAME])
-      await gitRun(["config", "--global", "user.email", `${AGENT_USERNAME}@users.noreply.github.com`])
-    }
-
-    async function restoreGitConfig() {
-      if (gitConfig === undefined) return
-      const config = "http.https://github.com/.extraheader"
-      await gitRun(["config", "--local", config, gitConfig])
     }
 
     async function checkoutNewBranch(type: "issue" | "schedule" | "dispatch") {
@@ -1740,19 +1545,6 @@ query($owner: String!, $repo: String!, $number: Int!) {
         "</pull_request>",
       ].join("\n")
     }
-
-    async function revokeAppToken() {
-      if (!appToken) return
-
-      await fetch("https://api.github.com/installation/token", {
-        method: "DELETE",
-        headers: {
-          Authorization: `Bearer ${appToken}`,
-          Accept: "application/vnd.github+json",
-          "X-GitHub-Api-Version": "2022-11-28",
-        },
-      })
-    }
   })
 })
 
@@ -1949,14 +1741,7 @@ export async function fixContext(
   return findingForPrompt({ body: root.body, path: root.path, line: root.line ?? root.original_line })
 }
 
-// Zero-priced OpenCode catalogue models still require the user's provider key.
-// A model with no listed price has unknown cost.
-export function isFreeModel(provider: string, model: { cost?: { input: number; output: number } } | undefined) {
-  return provider === "opencode" && !!model?.cost && model.cost.input === 0 && model.cost.output === 0
-}
-
-export function reviewCostLine(input: { model: string; free: boolean; monthlyUsd?: number }): string {
-  if (input.free) return `Reviews run on ${input.model}, a zero-priced model that requires your provider key.`
+export function reviewCostLine(input: { model: string; monthlyUsd?: number }): string {
   const review = formatUsd(DEFAULT_REVIEW_CONFIG.maxCostUsd)
   const pr = formatUsd(DEFAULT_REVIEW_CONFIG.maxCostUsdPerPr)
   const limits = input.monthlyUsd

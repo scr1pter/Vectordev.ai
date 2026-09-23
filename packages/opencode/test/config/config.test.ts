@@ -13,8 +13,6 @@ import { Npm } from "@opencode-ai/core/npm"
 import { InstanceRef } from "../../src/effect/instance-ref"
 import type { InstanceContext } from "../../src/project/instance-context"
 import { Auth } from "../../src/auth"
-import { Account } from "../../src/account/account"
-import { AccessToken, AccountID, OrgID } from "../../src/account/schema"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import { Env } from "../../src/env"
 import {
@@ -38,7 +36,6 @@ import { ProjectV2 } from "@opencode-ai/core/project"
 import { Filesystem } from "@/util/filesystem"
 import { ConfigPlugin } from "@/config/plugin"
 import { ConfigPluginV1 } from "@opencode-ai/core/v1/config/plugin"
-import { AccountTest } from "../fake/account"
 import { AuthTest } from "../fake/auth"
 import { NpmTest } from "../fake/npm"
 
@@ -94,13 +91,11 @@ function remoteConfigClient(input: {
 const configLayer = (
   options: {
     auth?: Layer.Layer<Auth.Service>
-    account?: Layer.Layer<Account.Service>
     client?: HttpClient.HttpClient
   } = {},
 ) =>
   LayerNode.compile(LayerNode.group([Config.node, FSUtil.node, Env.node, CrossSpawnSpawner.node]), [
     [Auth.node, options.auth ?? AuthTest.empty],
-    [Account.node, options.account ?? AccountTest.empty],
     [Npm.node, NpmTest.noop],
     [httpClient, Layer.succeed(HttpClient.HttpClient, options.client ?? unexpectedHttp)],
   ])
@@ -313,9 +308,57 @@ it.effect("creates global jsonc config with schema when no global configs exist"
     Effect.gen(function* () {
       yield* Config.use.get().pipe(provideInstanceEffect(dir))
 
-      const content = yield* FSUtil.use.readFileString(path.join(dir, "opencode.jsonc"))
-      expect(content).toContain('"$schema": "https://opencode.ai/config.json"')
+      const content = yield* FSUtil.use.readFileString(path.join(dir, "vector.jsonc"))
+      expect(content).toContain('"$schema": "https://vectordev.ai/config.json"')
     }).pipe(Effect.provide(testInstanceStoreLayer), Effect.provide(LayerNode.compile(CrossSpawnSpawner.node))),
+  ),
+)
+
+it.effect("migrates an extensionless global TOML config to vector.json", () =>
+  withGlobalConfig({}, ({ dir }) =>
+    Effect.gen(function* () {
+      yield* FSUtil.use.writeWithDirs(
+        path.join(dir, "config"),
+        'provider = "legacy"\nmodel = "model"\nusername = "legacy-user"\n',
+      )
+
+      const config = yield* Config.use.getGlobal()
+
+      expect(config).toMatchObject({ model: "legacy/model", username: "legacy-user" })
+      expect(yield* FSUtil.use.readJson(path.join(dir, "vector.json"))).toMatchObject({
+        $schema: "https://vectordev.ai/config.json",
+        model: "legacy/model",
+        username: "legacy-user",
+      })
+      expect(yield* FSUtil.use.existsSafe(path.join(dir, "config"))).toBe(false)
+      expect(yield* FSUtil.use.existsSafe(path.join(dir, "config.json"))).toBe(false)
+    }),
+  ),
+)
+
+it.effect("modern global files override extensionless TOML without overwriting either file", () =>
+  withGlobalConfig({}, ({ dir }) =>
+    Effect.gen(function* () {
+      const legacy = 'provider = "legacy"\nmodel = "model"\nusername = "legacy-user"\nsnapshot = false\n'
+      const current =
+        '{\n  // Keep this comment and the selected model.\n  "$schema": "https://vectordev.ai/config.json",\n  "model": "modern/model",\n  "username": "modern-user"\n}\n'
+      yield* FSUtil.use.writeWithDirs(path.join(dir, "config"), legacy)
+      yield* writeConfigEffect(dir, { model: "old-json/model", instructions: ["shared-rules.md"] }, "opencode.json")
+      yield* writeConfigEffect(dir, { model: "modern-json/model" }, "vector.json")
+      yield* FSUtil.use.writeWithDirs(path.join(dir, "vector.jsonc"), current)
+
+      const config = yield* Config.use.getGlobal()
+
+      expect(config).toMatchObject({
+        model: "modern/model",
+        username: "modern-user",
+        snapshot: false,
+        instructions: ["shared-rules.md"],
+      })
+      expect(yield* FSUtil.use.readFileString(path.join(dir, "config"))).toBe(legacy)
+      expect(yield* FSUtil.use.readFileString(path.join(dir, "vector.jsonc"))).toBe(current)
+      expect(yield* FSUtil.use.readJson(path.join(dir, "vector.json"))).toMatchObject({ model: "modern-json/model" })
+    }),
   ),
 )
 
@@ -366,7 +409,7 @@ it.instance("updates config and preserves empty shell sentinel", () =>
 
     yield* Config.Service.use((svc) => svc.update(ConfigParse.schema(ConfigV1.Info, { shell: "" }, "test:config")))
 
-    const writtenConfig = yield* FSUtil.use.readJson(path.join(test.directory, "config.json"))
+    const writtenConfig = yield* FSUtil.use.readJson(path.join(test.directory, "vector.json"))
     expect(writtenConfig).toMatchObject({ shell: "" })
   }),
 )
@@ -554,49 +597,6 @@ it.instance("handles file inclusion with replacement tokens", () =>
   }),
 )
 
-const accountTokenIt = configIt({
-  account: Layer.mock(Account.Service)({
-    active: () =>
-      Effect.succeed(
-        Option.some({
-          id: AccountID.make("account-1"),
-          email: "user@example.com",
-          url: "https://control.example.com",
-          active_org_id: OrgID.make("org-1"),
-        }),
-      ),
-    activeOrg: () =>
-      Effect.succeed(
-        Option.some({
-          account: {
-            id: AccountID.make("account-1"),
-            email: "user@example.com",
-            url: "https://control.example.com",
-            active_org_id: OrgID.make("org-1"),
-          },
-          org: {
-            id: OrgID.make("org-1"),
-            name: "Example Org",
-          },
-        }),
-      ),
-    config: () =>
-      Effect.succeed(
-        Option.some({
-          provider: { opencode: { options: { apiKey: "{env:OPENCODE_CONSOLE_TOKEN}" } } },
-        }),
-      ),
-    token: () => Effect.succeed(Option.some(AccessToken.make("st_test_token"))),
-  }),
-})
-
-accountTokenIt.instance("resolves env templates in account config with account token", () =>
-  Effect.gen(function* () {
-    const config = yield* Config.use.get()
-    expect(config.provider?.["opencode"]?.options?.apiKey).toBe("st_test_token")
-  }),
-)
-
 it.instance("validates config schema and throws on invalid fields", () =>
   Effect.gen(function* () {
     const test = yield* TestInstance
@@ -688,7 +688,7 @@ it.instance("handles command configuration", () =>
   }),
 )
 
-it.instance("migrates autoshare to share field", () =>
+it.instance("ignores legacy automatic hosted sharing requests", () =>
   Effect.gen(function* () {
     const test = yield* TestInstance
     yield* writeConfigEffect(test.directory, {
@@ -696,8 +696,8 @@ it.instance("migrates autoshare to share field", () =>
       autoshare: true,
     })
     const config = yield* Config.use.get()
-    expect(config.share).toBe("auto")
-    expect(config.autoshare).toBe(true)
+    expect(config.share).toBe("disabled")
+    expect(config.autoshare).toBe(false)
   }),
 )
 
@@ -897,7 +897,7 @@ it.instance("updates config and writes to file", () =>
       svc.update(ConfigParse.schema(ConfigV1.Info, { model: "updated/model" }, "test:config")),
     )
 
-    const writtenConfig = yield* FSUtil.use.readJson(path.join(test.directory, "config.json"))
+    const writtenConfig = yield* FSUtil.use.readJson(path.join(test.directory, "vector.json"))
     expect(writtenConfig).toMatchObject({ model: "updated/model" })
   }),
 )
@@ -1514,7 +1514,7 @@ test("remote well-known config can use FetchHttpClient layer", async () => {
         Config.Service.use((svc) =>
           Effect.gen(function* () {
             const config = yield* svc.get()
-            expect(fetchedUrl).toBe(`${server.url.origin}/.well-known/opencode`)
+            expect(fetchedUrl).toBe(`${server.url.origin}/.well-known/vector`)
             expect(config.mcp?.jira?.enabled).toBe(true)
           }),
         ),
@@ -1525,7 +1525,6 @@ test("remote well-known config can use FetchHttpClient layer", async () => {
         Layer.mergeAll(
           LayerNode.compile(LayerNode.group([Config.node, FSUtil.node, Env.node, CrossSpawnSpawner.node]), [
             [Auth.node, wellKnownAuth(server.url.origin)],
-            [Account.node, AccountTest.empty],
             [Npm.node, NpmTest.noop],
             [httpClient, FetchHttpClient.layer],
           ]),
@@ -2062,7 +2061,7 @@ describe("machine-local config layer", () => {
       yield* Config.use.updateMcpLocal("github", { type: "remote", url: "https://github.example/mcp" })
       yield* Config.use.updateMcpLocal("linear", { enabled: false })
 
-      const file = path.join(test.directory, ".opencode", "opencode.local.json")
+      const file = path.join(test.directory, ".vector", "vector.local.json")
       const parsed = JSON.parse((yield* FSUtil.use.readFileStringSafe(file))!)
       expect(parsed.mcp.github).toEqual({ type: "remote", url: "https://github.example/mcp" })
       expect(parsed.mcp.linear).toEqual({ enabled: false })
@@ -2074,14 +2073,52 @@ describe("machine-local config layer", () => {
   it.instance("updateMcpLocal keeps the local file out of version control", () =>
     Effect.gen(function* () {
       const test = yield* TestInstance
-      const dir = path.join(test.directory, ".opencode")
+      const dir = path.join(test.directory, ".vector")
       yield* FSUtil.use.writeWithDirs(path.join(dir, ".gitignore"), "node_modules\n")
       yield* Config.use.updateMcpLocal("github", { type: "remote", url: "https://github.example/mcp" })
 
       const gitignore = yield* FSUtil.use.readFileStringSafe(path.join(dir, ".gitignore"))
       expect(gitignore).toContain("node_modules")
-      expect(gitignore).toContain("opencode.local.json")
-      expect(gitignore).toContain("opencode.local.jsonc")
+      expect(gitignore).toContain("vector.local.json")
+      expect(gitignore).toContain("vector.local.jsonc")
     }),
   )
 })
+
+it.instance("Vector config files override legacy files while retaining unrelated legacy settings", () =>
+  Effect.gen(function* () {
+    const test = yield* TestInstance
+    yield* writeConfigEffect(test.directory, { model: "legacy/model", username: "legacy-user" }, "opencode.json")
+    yield* writeConfigEffect(test.directory, { model: "vector/model" }, "vector.json")
+    const config = yield* Config.use.get()
+    expect(config.model).toBe("vector/model")
+    expect(config.username).toBe("legacy-user")
+  }),
+)
+
+it.instance(".vector configuration overrides the equivalent legacy directory", () =>
+  Effect.gen(function* () {
+    const test = yield* TestInstance
+    yield* writeConfigEffect(
+      path.join(test.directory, ".opencode"),
+      { model: "legacy/model", username: "legacy-user" },
+      "opencode.json",
+    )
+    yield* writeConfigEffect(path.join(test.directory, ".vector"), { model: "vector/model" }, "vector.json")
+    const config = yield* Config.use.get()
+    expect(config.model).toBe("vector/model")
+    expect(config.username).toBe("legacy-user")
+  }),
+)
+
+it.instance("VECTOR_CONFIG_CONTENT takes precedence over its legacy alias at load time", () =>
+  withProcessEnvs(
+    {
+      VECTOR_CONFIG_CONTENT: JSON.stringify({ model: "vector/model" }),
+      OPENCODE_CONFIG_CONTENT: JSON.stringify({ model: "legacy/model" }),
+    },
+    Effect.gen(function* () {
+      expect((yield* Config.use.get()).model).toBe("vector/model")
+    }),
+  ),
+)

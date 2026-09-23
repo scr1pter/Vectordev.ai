@@ -2,9 +2,10 @@ export * as ConfigPaths from "./paths"
 
 import path from "path"
 import { Flag } from "@opencode-ai/core/flag/flag"
+import { warnLegacy } from "@opencode-ai/core/flag/compat"
 import { Global } from "@opencode-ai/core/global"
 import { unique } from "remeda"
-import * as Effect from "effect/Effect"
+import { Effect } from "effect"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 
 export const files = Effect.fn("ConfigPaths.projectFiles")(function* (
@@ -14,7 +15,10 @@ export const files = Effect.fn("ConfigPaths.projectFiles")(function* (
 ) {
   const afs = yield* FSUtil.Service
   return (yield* afs.up({
-    targets: [`${name}.jsonc`, `${name}.json`],
+    targets:
+      name === "opencode"
+        ? ["vector.jsonc", "vector.json", "opencode.jsonc", "opencode.json"]
+        : [`${name}.jsonc`, `${name}.json`],
     start: directory,
     stop: worktree,
   })).toReversed()
@@ -22,22 +26,24 @@ export const files = Effect.fn("ConfigPaths.projectFiles")(function* (
 
 export const directories = Effect.fn("ConfigPaths.directories")(function* (directory: string, worktree?: string) {
   const afs = yield* FSUtil.Service
-  return unique([
+  const result = unique([
     Global.Path.config,
     ...(!Flag.OPENCODE_DISABLE_PROJECT_CONFIG
       ? yield* afs.up({
-          targets: [".opencode"],
+          targets: [".opencode", ".vector"],
           start: directory,
           stop: worktree,
         })
       : []),
     ...(yield* afs.up({
-      targets: [".opencode"],
+      targets: [".opencode", ".vector"],
       start: Global.Path.home,
       stop: Global.Path.home,
     })),
     ...(Flag.OPENCODE_CONFIG_DIR ? [Flag.OPENCODE_CONFIG_DIR] : []),
   ])
+  if (result.some((dir) => path.basename(dir) === ".opencode")) warnLegacy(".opencode/", ".vector/")
+  return result
 })
 
 export function fileInDirectory(dir: string, name: string) {

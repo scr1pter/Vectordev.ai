@@ -6,10 +6,7 @@ export default {
   url: isProduction ? "https://vectordev.ai" : `https://${stage}.vectordev.ai`,
   console: isProduction ? "https://vectordev.ai/auth" : `https://${stage}.vectordev.ai/auth`,
   email: "contact.astr0gpt@gmail.com",
-  socialCard: "https://social-cards.sst.dev",
   github: "https://github.com/scr1pter/Vectordev.ai",
   discord: "https://github.com/scr1pter/Vectordev.ai",
-  headerLinks: [
-    { name: "app.header.home", url: "/" },
-  ],
+  headerLinks: [{ name: "app.header.home", url: "/" }],
 }

@@ -5,7 +5,6 @@
   "version": "1.17.14",
   "scripts": {
     "dev": "astro dev",
-    "dev:remote": "VITE_API_URL=https://api.opencode.ai astro dev",
     "start": "astro dev",
     "preview": "astro preview",
     "astro": "astro",

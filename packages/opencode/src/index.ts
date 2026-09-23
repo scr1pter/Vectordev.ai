@@ -2,7 +2,6 @@ import yargs from "yargs"
 import { hideBin } from "yargs/helpers"
 import { RunCommand } from "./cli/cmd/run"
 import { GenerateCommand } from "./cli/cmd/generate"
-import { ConsoleCommand } from "./cli/cmd/account"
 import { ProvidersCommand } from "./cli/cmd/providers"
 import { AgentCommand } from "./cli/cmd/agent"
 import { UpgradeCommand } from "./cli/cmd/upgrade"
@@ -55,7 +54,7 @@ const openCommands = new Set(["login", "logout", "whoami", "completion", "uninst
 
 const cli = yargs(args)
   .parserConfiguration({ "populate--": true })
-  .scriptName(isVectorCli ? "vector" : "opencode")
+  .scriptName("vector")
   .wrap(100)
   .help("help", "show help")
   .alias("help", "h")
@@ -75,17 +74,18 @@ const cli = yargs(args)
     type: "boolean",
   })
   .middleware(async (opts) => {
-    if (opts.printLogs) process.env.OPENCODE_PRINT_LOGS = "1"
-    if (opts.logLevel) process.env.OPENCODE_LOG_LEVEL = opts.logLevel
+    if (opts.printLogs) process.env.VECTOR_PRINT_LOGS = process.env.OPENCODE_PRINT_LOGS = "1"
+    if (opts.logLevel) process.env.VECTOR_LOG_LEVEL = process.env.OPENCODE_LOG_LEVEL = opts.logLevel
     if (opts.pure) {
-      process.env.OPENCODE_PURE = "1"
+      process.env.VECTOR_PURE = process.env.OPENCODE_PURE = "1"
     }
 
     Heap.start()
 
     process.env.AGENT = "1"
+    process.env.VECTOR = "1"
     process.env.OPENCODE = "1"
-    process.env.OPENCODE_PID = String(process.pid)
+    process.env.VECTOR_PID = process.env.OPENCODE_PID = String(process.pid)
 
     if (isVectorCli && !opts.help && !opts.version) {
       const command = String(opts._?.[0] ?? "")
@@ -104,7 +104,6 @@ const cli = yargs(args)
   .command(RunCommand)
   .command(GenerateCommand)
   .command(DebugCommand)
-  .command(ConsoleCommand)
   .command(ProvidersCommand)
   .command(AgentCommand)
   .command(UpgradeCommand)

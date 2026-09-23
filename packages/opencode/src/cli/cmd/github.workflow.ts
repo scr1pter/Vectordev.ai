@@ -128,7 +128,7 @@ export function buildWorkflowYaml(opts: WorkflowOptions): string {
   const install = cli.pinned
     ? `npm install -g ${CLI_PACKAGE}@${cli.spec} --prefer-offline --no-audit --no-fund`
     : `npm install -g ${CLI_PACKAGE}@latest --no-audit --no-fund`
-  // Every selected provider needs the repository's credentials, including OpenCode.
+  // Every selected provider needs the repository's credentials.
   const keys = [
     "          # Add the selected provider's credentials as repository secrets.",
     ...opts.keys.map((key) => `          ${key}: \${{ secrets.${key} }}`),

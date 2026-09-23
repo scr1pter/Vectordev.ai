@@ -2,11 +2,10 @@ import { describe, expect } from "bun:test"
 import { makeGlobalNode } from "@opencode-ai/core/effect/app-node"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { httpClient } from "@opencode-ai/core/effect/app-node-platform"
-import { Effect, Layer, Stream } from "effect"
+import { Effect, Layer, Stream, Sink } from "effect"
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { Installation } from "../../src/installation"
-import { InstallationChannel } from "@opencode-ai/core/installation/version"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { testEffect } from "../lib/effect"
 
@@ -31,11 +30,11 @@ function mockSpawner(
         exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(output.code)),
         isRunning: Effect.succeed(false),
         kill: () => Effect.void,
-        stdin: { [Symbol.for("effect/Sink/TypeId")]: Symbol.for("effect/Sink/TypeId") } as any,
+        stdin: Sink.drain,
         stdout: output.stdout ? Stream.make(encoder.encode(output.stdout)) : Stream.empty,
         stderr: output.stderr ? Stream.make(encoder.encode(output.stderr)) : Stream.empty,
         all: Stream.empty,
-        getInputFd: () => ({ [Symbol.for("effect/Sink/TypeId")]: Symbol.for("effect/Sink/TypeId") }) as any,
+        getInputFd: () => Sink.drain,
         getOutputFd: () => Stream.empty,
         unref: Effect.succeed(Effect.void),
       }),
@@ -66,175 +65,101 @@ function testLayer(
   ])
 }
 
-describe("installation", () => {
-  describe("latest", () => {
-    testEffect(testLayer(() => jsonResponse({ tag_name: "v1.2.3" }))).effect(
-      "reads release version from GitHub releases",
-      () =>
-        Effect.gen(function* () {
-          const result = yield* Installation.use.latest("unknown")
-          expect(result).toBe("1.2.3")
-        }),
-    )
-
-    testEffect(testLayer(() => jsonResponse({ tag_name: "v4.0.0-beta.1" }))).effect(
-      "strips v prefix from GitHub release tag",
-      () =>
-        Effect.gen(function* () {
-          const result = yield* Installation.use.latest("curl")
-          expect(result).toBe("4.0.0-beta.1")
-        }),
-    )
-
-    const npmCalls: string[] = []
+describe("Vector installation", () => {
+  for (const method of ["npm", "bun", "pnpm", "unknown"] as const) {
+    const calls: string[] = []
     testEffect(
       testLayer((request) => {
-        npmCalls.push(request.url)
-        return jsonResponse({ version: "1.5.0" })
+        calls.push(request.url)
+        return jsonResponse({ version: "1.99.92" })
       }),
-    ).effect("reads npm versions via registry", () =>
+    ).effect(`${method} uses only the Vector registry package`, () =>
       Effect.gen(function* () {
-        const result = yield* Installation.use.latest("npm")
-        expect(result).toBe("1.5.0")
-        expect(npmCalls).toContain(`https://registry.npmjs.org/opencode-ai/${InstallationChannel}`)
+        expect(yield* Installation.use.latest(method)).toBe("1.99.92")
+        expect(calls).toEqual(["https://registry.npmjs.org/@vectordevai/cli/latest"])
       }),
     )
+  }
 
-    const bunCalls: string[] = []
-    testEffect(
-      testLayer((request) => {
-        bunCalls.push(request.url)
-        return jsonResponse({ version: "1.6.0" })
-      }),
-    ).effect("reads bun versions via registry", () =>
-      Effect.gen(function* () {
-        const result = yield* Installation.use.latest("bun")
-        expect(result).toBe("1.6.0")
-        expect(bunCalls).toContain(`https://registry.npmjs.org/opencode-ai/${InstallationChannel}`)
-      }),
-    )
-
-    const pnpmCalls: string[] = []
-    testEffect(
-      testLayer((request) => {
-        pnpmCalls.push(request.url)
-        return jsonResponse({ version: "1.7.0" })
-      }),
-    ).effect("reads pnpm versions via registry", () =>
-      Effect.gen(function* () {
-        const result = yield* Installation.use.latest("pnpm")
-        expect(result).toBe("1.7.0")
-        expect(pnpmCalls).toContain(`https://registry.npmjs.org/opencode-ai/${InstallationChannel}`)
-      }),
-    )
-
-    testEffect(testLayer(() => jsonResponse({ version: "2.3.4" }))).effect("reads scoop manifest versions", () =>
-      Effect.gen(function* () {
-        const result = yield* Installation.use.latest("scoop")
-        expect(result).toBe("2.3.4")
-      }),
-    )
-
-    testEffect(testLayer(() => jsonResponse({ d: { results: [{ Version: "3.4.5" }] } }))).effect(
-      "reads chocolatey feed versions",
-      () =>
-        Effect.gen(function* () {
-          const result = yield* Installation.use.latest("choco")
-          expect(result).toBe("3.4.5")
-        }),
-    )
-
-    testEffect(
-      testLayer(
-        () => jsonResponse({ versions: { stable: "2.0.0" } }),
-        (cmd, args) => {
-          // getBrewFormula: return core formula (no tap)
-          if (cmd === "brew" && args.includes("--formula") && args.includes("anomalyco/tap/opencode")) return ""
-          if (cmd === "brew" && args.includes("--formula") && args.includes("opencode")) return "opencode"
-          return ""
-        },
-      ),
-    ).effect("reads brew formulae API versions", () =>
-      Effect.gen(function* () {
-        const result = yield* Installation.use.latest("brew")
-        expect(result).toBe("2.0.0")
-      }),
-    )
-
-    const brewInfoJson = JSON.stringify({
-      formulae: [{ versions: { stable: "2.1.0" } }],
-    })
-    testEffect(
-      testLayer(
-        () => jsonResponse({}), // HTTP not used for tap formula
-        (cmd, args) => {
-          if (cmd === "brew" && args.includes("anomalyco/tap/opencode") && args.includes("--formula")) return "opencode"
-          if (cmd === "brew" && args.includes("--json=v2")) return brewInfoJson
-          return ""
-        },
-      ),
-    ).effect("reads brew tap info JSON via CLI", () =>
-      Effect.gen(function* () {
-        const result = yield* Installation.use.latest("brew")
-        expect(result).toBe("2.1.0")
-      }),
-    )
-  })
-
-  describe("upgrade", () => {
+  for (const method of ["npm", "pnpm", "bun"] as const) {
+    const commands: string[][] = []
     testEffect(
       testLayer(
         () => jsonResponse({}),
-        (cmd) => {
-          if (cmd === "npm") return { code: 1, stderr: "token=secret command output" }
+        (command, args) => {
+          commands.push([command, ...args])
           return ""
         },
       ),
-    ).effect("returns sanitized typed errors for failed package upgrades", () =>
+    ).effect(`${method} installs the scoped Vector CLI`, () =>
       Effect.gen(function* () {
-        const error = yield* Effect.flip(Installation.use.upgrade("npm", "9.9.9"))
-        expect(error).toBeInstanceOf(Installation.UpgradeFailedError)
-        expect(error.stderr).toBe("Upgrade failed for npm (exit code 1).")
-        expect(error.message).toBe(error.stderr)
-        expect(error.stderr).not.toContain("secret")
-        expect(error.stderr).not.toContain("command output")
+        yield* Installation.use.upgrade(method, "1.99.92")
+        expect(commands[0]).toEqual([method, "install", "-g", "@vectordevai/cli@1.99.92"])
       }),
     )
+  }
 
-    testEffect(
-      testLayer(
-        () => new Response("install script with token=secret", { status: 200 }),
-        (cmd, args) => {
-          if (cmd === "bash" && args[0] === "--version") return "GNU bash"
-          if (cmd === "bash" || cmd === "sh") return { code: 1, stderr: "script output with token=secret" }
-          return ""
-        },
-      ),
-    ).effect("returns sanitized typed errors when the curl install script fails", () =>
-      Effect.gen(function* () {
-        const error = yield* Effect.flip(Installation.use.upgrade("curl", "9.9.9"))
-        expect(error).toBeInstanceOf(Installation.UpgradeFailedError)
-        expect(error.stderr).toBe("Upgrade failed for curl (exit code 1).")
-        expect(error.message).toBe(error.stderr)
-        expect(error.stderr).not.toContain("secret")
-        expect(error.stderr).not.toContain("script output")
-      }),
-    )
+  testEffect(
+    testLayer(
+      () => jsonResponse({}),
+      () => "opencode-ai@1.18.0",
+    ),
+  ).effect("never mistakes a separate OpenCode package for Vector", () =>
+    Effect.gen(function* () {
+      expect(yield* Installation.use.method()).toBe("unknown")
+    }),
+  )
 
-    testEffect(
-      testLayer(
-        () => new Response("install script", { status: 200 }),
-        (cmd, args) => {
-          if (cmd === "bash" && args[0] === "--version") return { code: 1, stderr: "missing" }
-          if (cmd === "bash") return { code: 1, stderr: "should not execute installer with bash" }
-          if (cmd === "sh") return "ok"
-          return ""
-        },
-      ),
-    ).effect("falls back to sh when bash is unavailable during curl upgrade", () =>
-      Effect.gen(function* () {
-        yield* Installation.use.upgrade("curl", "9.9.9")
-      }),
-    )
-  })
+  testEffect(
+    testLayer(
+      () => jsonResponse({}),
+      (command) => (command === "npm" ? "@vectordevai/cli@1.99.91" : ""),
+    ),
+  ).effect("detects the Vector npm package", () =>
+    Effect.gen(function* () {
+      expect(yield* Installation.use.method()).toBe("npm")
+    }),
+  )
+
+  testEffect(
+    testLayer(
+      () => jsonResponse({}),
+      (command) => (command === "pnpm" ? "@vectordevai/cli 1.99.91" : ""),
+    ),
+  ).effect("detects pnpm's whitespace-separated package listing", () =>
+    Effect.gen(function* () {
+      expect(yield* Installation.use.method()).toBe("pnpm")
+    }),
+  )
+
+  testEffect(
+    testLayer(
+      () => jsonResponse({}),
+      () => ({ code: 1, stderr: "secret-token" }),
+    ),
+  ).effect("sanitizes package-manager failures", () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(Installation.use.upgrade("npm", "1.99.92"))
+      expect(error.stderr).toBe("Upgrade failed for npm (exit code 1).")
+      expect(error.stderr).not.toContain("secret-token")
+    }),
+  )
+
+  testEffect(
+    testLayer(
+      () => jsonResponse({}),
+      () => {
+        throw new Error("must not spawn")
+      },
+    ),
+  ).effect("unknown installs cannot download an upstream installer", () =>
+    Effect.gen(function* () {
+      expect((yield* Effect.flip(Installation.use.upgrade("unknown", "1.99.92"))).message).toContain(
+        "npm, pnpm, or Bun",
+      )
+      expect((yield* Effect.flip(Installation.use.upgrade("npm", "--help"))).message).toContain(
+        "Invalid Vector version",
+      )
+    }),
+  )
 })

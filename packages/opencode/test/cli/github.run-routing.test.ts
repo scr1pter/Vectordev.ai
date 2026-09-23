@@ -14,7 +14,6 @@ import {
   findingForPrompt,
   fixContext,
   isFixCommand,
-  isFreeModel,
   reviewCostLine,
   taskRoutePlan,
 } from "../../src/cli/cmd/github.handler"
@@ -335,18 +334,11 @@ describe("reviews of pull requests Vector opens", () => {
 })
 
 describe("the install copy", () => {
-  test("included and paid models", () => {
-    expect(isFreeModel("opencode", { cost: { input: 0, output: 0 } })).toBe(true)
-    expect(isFreeModel("opencode", { cost: { input: 1, output: 4 } })).toBe(false)
-    expect(isFreeModel("opencode", {})).toBe(false)
-    expect(isFreeModel("anthropic", { cost: { input: 0, output: 0 } })).toBe(false)
-    expect(reviewCostLine({ model: "opencode/big-pickle", free: true })).toBe(
-      "Reviews run on opencode/big-pickle, a zero-priced model that requires your provider key.",
-    )
-    expect(reviewCostLine({ model: "anthropic/claude-sonnet-4-5", free: false, monthlyUsd: 50 })).toBe(
+  test("provider billing and spending limits", () => {
+    expect(reviewCostLine({ model: "anthropic/claude-sonnet-4-5", monthlyUsd: 50 })).toBe(
       "Reviews run on anthropic/claude-sonnet-4-5 with your key. Each review stops at $2.00, each pull request at $10.00, and all reviews at $50.00 a month. Change these in .vector/review.json and the workflow file.",
     )
-    expect(reviewCostLine({ model: "openai/gpt-5", free: false, monthlyUsd: 0 })).toBe(
+    expect(reviewCostLine({ model: "openai/gpt-5", monthlyUsd: 0 })).toBe(
       "Reviews run on openai/gpt-5 with your key. Each review stops at $2.00 and each pull request at $10.00, with no monthly limit. Change these in .vector/review.json and the workflow file.",
     )
   })
