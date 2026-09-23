@@ -2,23 +2,24 @@
 
 # Vector
 
-**AI infrastructure for autonomous software engineering — the workspace, the agents, and the models beneath them.**
+**An AI coding workspace for planning, building, reviewing, and shipping software.**
 
 [vectordev.ai](https://vectordev.ai) · [Docs](https://vectordev.ai/docs) · [Releases](https://vectordev.ai/releases)
 
 </div>
 
-Vector opens a repository on your computer and puts an agent beside your editor. It plans, edits, runs commands, splits large jobs across subagents working in parallel, and checks its own work before it calls it done. It runs on your desktop, in your terminal, or from a GitHub issue, and your code stays on your machine.
+Vector brings an editor, terminal, controlled browser, and AI agents together around the repository on your computer. Ask for a change, watch agents edit files and run checks, then inspect the result before you merge or publish it. Use the desktop workspace, the terminal agent, or GitHub automation; connect the model provider you choose. Your working files stay local, while relevant context is sent to the providers and tools you use.
 
 ```bash
 npm install -g @vectordevai/cli
 vector login
+vector auth login
 vector
 ```
 
 **Bring your own key, for now.** Vector is moving the models it includes onto a provider it has its own agreement with; until that lands, connect Claude, GPT, Gemini or any other provider you already pay for. Vector desktop is available for macOS, Windows and Linux at [vectordev.ai](https://vectordev.ai) for $10 a month or $99 a year — the subscription covers Vector itself. Create a Vector account, then choose a plan from Account. Creating an account does not start a subscription. The terminal agent is free with a Vector account.
 
-**New in 1.99.91:** The no-key models that ran through OpenCode Zen's shared gateway are withdrawn — bring your own key while Vector moves included models to a provider it has its own agreement with. Plus Vectorscope, Vector's code review bot, and account deletion you can do yourself. [Release notes →](https://vectordev.ai/releases)
+**New in 1.99.91:** OpenCode Zen's shared keyless gateway is disabled; your own provider credentials, including an OpenCode key, still work. GitHub automation now reports missing model setup with instructions to set `MODEL` and supply the provider key. Vectorscope supports `/vectorscope`, `/vs`, `/vector`, and `/vx`, and the release checks match those commands. [Release notes →](https://vectordev.ai/releases#release-1-99-91)
 
 ## Features
 
@@ -44,9 +45,9 @@ vector
 
 ### Models
 
-**Models included with Vector.** You do not need an API key. Vector comes with models included, today among them NVIDIA's Nemotron and Meta's Muse Spark, and a new install starts on Big Pickle. The lineup changes as providers add and retire models. Included models are served by outside providers, and some may use your prompts to improve their models, so use your own provider key for confidential code.
+**Models included with Vector.** Included access is being moved off OpenCode Zen's shared gateway. In 1.99.91, connect your own provider in Settings or with `vector auth login` before starting a task. A fresh install without a provider credential has no available models. Your own OpenCode API key remains supported.
 
-**Every model in one picker.** The model picker lists every model your connected providers offer, new releases included, beside the models included with Vector.
+**Every model in one picker.** The model picker lists models from your connected providers, including new releases as their catalogs update.
 
 **Economics you can see.** The Tokenomics engine measures what every session actually spent, per model and per task, and turns that into model recommendations built from real usage rather than list prices.
 
@@ -54,11 +55,11 @@ vector
 
 **Cloud work in the loop.** The agent can create a real Supabase project on your own account, write the keys into your repository, apply the migrations you keep there, sync environment values, and publish to your own Vercel or Netlify account. Then it loads the deployed URL in a real browser and reports what it found, and reads the logs when a deploy misbehaves. Everything that creates, changes or spends asks first.
 
-**Task in, pull request out.** Comment `/vectorscope fix the flaky auth test` on a GitHub issue and Vector opens a branch and a pull request. Every PR carries its evidence: the files changed, the checks it ran with their exit codes and output, what the run cost, and the judge's verdict.
+**Task in, pull request out.** Comment `/vector fix the flaky auth test` on a GitHub issue and Vector opens a branch and a pull request. General tasks use `/vector`, `/vx`, or `/oc`; `/vectorscope` and `/vs` are review commands. Every PR carries its evidence: the files changed, the checks it ran with their exit codes and output, what the run cost, and the judge's verdict.
 
 **Vectorscope, the code review bot.** Vectorscope reads the repository around a change rather than the diff alone, and it runs in three places: on a pull request, on your branch before you push, and inside the desktop app.
 
-- **On a pull request.** Turn on automatic review in `vector github install` and Vectorscope reviews each pull request when it opens and again on every push: one summary with the risk and the files that matter, and comments on the exact lines, each with a severity and, where it is safe, a fix you can commit from GitHub. It follows your `.vector/review.md` rules, and on the next push reviews only what changed and says what got fixed. Comment `/vectorscope review`, `/vectorscope review full`, `/vectorscope pause`, `/vectorscope resume`, or reply `/vectorscope fix` on a comment. The older `/vector` and `/vx` mentions still work.
+- **On a pull request.** Turn on automatic review in `vector github install` and Vectorscope reviews each pull request when it opens and again on every push: one summary with the risk and the files that matter, and comments on the exact lines, each with a severity and, where it is safe, a fix you can commit from GitHub. It follows your `.vector/review.md` rules, and on the next push reviews only what changed and says what got fixed. Comment `/vectorscope review`, `/vectorscope review full`, `/vectorscope pause`, `/vectorscope resume`, or reply `/vectorscope fix` on a comment. The short form `/vs` and older `/vector` and `/vx` mentions also work.
 - **Before you push.** `vector vectorscope` reviews your branch against its merge base, `--uncommitted` reviews work in progress, and `--fail-on blocking` fits a pre-push hook. Nothing is posted anywhere.
 - **In the workspace.** The Pull Requests panel reviews a pull request in place and lets you decide whether to post the result.
 
@@ -72,6 +73,10 @@ Vectorscope only ever comments — it never approves or blocks a pull request un
 | Terminal                        | `npm install -g @vectordevai/cli`, then `vector login` |
 
 Run `vector` inside any repository to start the agent. `vector auth login` adds your own provider keys, `vector invite` shares the workspace, and `vector github install` sets up GitHub: pull requests from issues, and reviews of pull requests. `vector review` reviews your branch locally.
+
+For GitHub Actions, add `VECTOR_CLI_TOKEN` and your provider credential as repository secrets, then set `MODEL` to `provider/model` in the workflow and pass the matching provider secret into its environment. The account token authenticates Vector; it does not supply model access. See [GitHub setup](https://vectordev.ai/docs/github) and [Vectorscope](https://vectordev.ai/docs/code-review).
+
+Unsigned desktop releases require a manual download. They do not replace signed automatic-update feeds, and macOS or Windows may show an unidentified-developer or unknown-publisher warning.
 
 ## Coming soon
 

@@ -8,11 +8,17 @@ export const prerender = true
 <DocsPage id="changelog">
 
           <p>Keep the whole build in view. Recent releases, newest first.</p>
+          <p>
+            For the full version history and installer links, see <a href="/releases">Vector releases</a>.
+            Upgrading to 1.99.91? Connect your own provider in Settings or with <code>vector auth login</code>, and
+            check the <a href="/docs/github">model and provider-key setup for GitHub Actions</a>. Unsigned desktop
+            releases require a manual download; signed automatic-update feeds are preserved.
+          </p>
           <ol class="changelog">
             {changelog.map(([date, title, blurb]) => {
               const [when, version] = date.split(" · ")
               return (
-                <li>
+                <li id={version ? `release-${version.replaceAll(".", "-")}` : undefined}>
                   <h3>{title}</h3>
                   <p class="changelog-date">
                     <span>{when}</span>

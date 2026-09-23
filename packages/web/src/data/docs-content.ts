@@ -366,8 +366,8 @@ export const subagentKinds = [
 export const changelog = [
   [
     "September 2026 · 1.99.91",
-    "Models included with Vector are changing hands",
-    "The no-key models that ran through OpenCode Zen's shared gateway are withdrawn — those requests hit OpenCode's endpoint on Vector's behalf. Bring your own key for now; included models are moving to a provider Vector has an agreement with. Command-F no longer opens the chat search bar on top of the title strip.",
+    "Provider setup and Vectorscope reliability",
+    "OpenCode Zen's shared keyless gateway is disabled. Connect your own provider in Settings or with vector auth login; your own OpenCode key is still supported. GitHub automation stops with actionable MODEL and provider-key setup instructions when no model is configured, instead of selecting an unavailable default. Vectorscope's /vectorscope, /vs, /vector and /vx aliases and workflow fixtures agree again, and release checks no longer depend on an unshipped computer tool. Command-F places chat search below the title strip. Unsigned desktop releases require a manual download; signed automatic-update feeds are preserved.",
   ],
   [
     "September 2026 · 1.99.9",
