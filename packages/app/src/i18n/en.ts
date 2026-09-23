@@ -101,10 +101,7 @@ export const dict = {
   "dialog.provider.group.popular": "Popular",
   "dialog.provider.group.other": "Other",
   "dialog.provider.tag.recommended": "Recommended",
-  "dialog.provider.opencode.note": "Curated models including Claude, GPT, Gemini and more",
-  "dialog.provider.opencode.tagline": "Reliable optimized models",
-  "dialog.provider.opencodeGo.tagline": "Low cost subscription for everyone",
-  "dialog.provider.anthropic.note": "Direct access to Claude models, including Pro and Max",
+  "dialog.provider.anthropic.note": "Claude models with your Anthropic API key",
   "dialog.provider.copilot.note": "AI models for coding assistance via GitHub Copilot",
   "dialog.provider.openai.note": "GPT models for fast, capable general AI tasks",
   "dialog.provider.google.note": "Gemini models for fast, structured responses",
@@ -118,13 +115,10 @@ export const dict = {
   "dialog.model.manage.description": "Customize which models appear in the model selector.",
   "dialog.model.manage.provider.toggle": "Toggle all {{provider}} models",
 
-  "dialog.model.unpaid.freeModels.title": "Free models included with Vector",
-  "dialog.model.unpaid.addMore.title": "Add more models from popular providers",
-
   "dialog.provider.viewAll": "Show more providers",
 
   "provider.connect.title": "Connect {{provider}}",
-  "provider.connect.title.anthropicProMax": "Login with Claude Pro/Max",
+  "provider.connect.title.anthropicProMax": "Connect your Anthropic API key",
   "provider.connect.selectMethod": "Select login method for {{provider}}.",
   "provider.connect.method.apiKey": "API key",
   "provider.connect.status.inProgress": "Authorization in progress...",
@@ -135,13 +129,6 @@ export const dict = {
   "provider.connect.apiKey.label": "{{provider}} API key",
   "provider.connect.apiKey.placeholder": "API key",
   "provider.connect.apiKey.required": "API key is required",
-  "provider.connect.opencodeZen.line1":
-    "OpenCode Zen gives you access to a curated set of reliable optimized models for coding agents.",
-  "provider.connect.opencodeZen.line2":
-    "With a single API key you'll get access to models such as Claude, GPT, Gemini, GLM and more.",
-  "provider.connect.opencodeZen.visit.prefix": "Visit ",
-  "provider.connect.opencodeZen.visit.link": "vectordev.ai/zen",
-  "provider.connect.opencodeZen.visit.suffix": " to collect your API key.",
   "provider.connect.oauth.code.visit.prefix": "Visit ",
   "provider.connect.oauth.code.visit.link": "this link",
   "provider.connect.oauth.code.visit.suffix":
@@ -301,11 +288,12 @@ export const dict = {
   "dialog.mcp.description": "{{enabled}} of {{total}} connected",
   "dialog.mcp.empty": "No MCPs configured",
   "dialog.mcp.connect.title": "Connect an MCP server",
-  "dialog.mcp.connect.subtitle": "Give Vector real tools — connect a server and its tools appear in every session in this workspace.",
+  "dialog.mcp.connect.subtitle":
+    "Give Vector real tools — connect a server and its tools appear in every session in this workspace.",
   "dialog.mcp.local.title": "Local MCP command",
   "dialog.mcp.local.description": "Run an MCP server on this computer.",
   "dialog.mcp.local.name.placeholder": "Name, e.g. filesystem",
-  "dialog.mcp.local.command.placeholder": "Command, e.g. npx -y \"@modelcontextprotocol/server-filesystem\" .",
+  "dialog.mcp.local.command.placeholder": 'Command, e.g. npx -y "@modelcontextprotocol/server-filesystem" .',
   "dialog.mcp.local.submit": "Add local server",
   "dialog.mcp.remote.title": "Remote MCP URL",
   "dialog.mcp.remote.description": "Connect hosted MCP services for tools like GitHub or databases.",
@@ -314,7 +302,8 @@ export const dict = {
   "dialog.mcp.remote.auth.placeholder": "Bearer token environment variable, optional",
   "dialog.mcp.remote.submit": "Add remote server",
   "dialog.mcp.configured.title": "Configured servers",
-  "dialog.mcp.configured.description": "Turn a server on or off. If a server can't connect, the reason appears below its name.",
+  "dialog.mcp.configured.description":
+    "Turn a server on or off. If a server can't connect, the reason appears below its name.",
 
   "dialog.lsp.empty": "LSPs auto-detected from file types",
   "dialog.plugins.empty": "Plugins configured in vector.json",
@@ -410,7 +399,7 @@ export const dict = {
   "wsl.onboarding.distroStatus.ready": "Ready",
   "wsl.onboarding.distroStatus.checking": "Checking...",
   "wsl.onboarding.distroStatus.opencodeMissing": "Vector not installed",
-  "wsl.onboarding.distroStatus.missingTools": "Missing bash, curl",
+  "wsl.onboarding.distroStatus.missingTools": "Missing bash",
   "wsl.onboarding.distroStatus.unsupported": "Unsupported · Use WSL 2",
   "wsl.onboarding.needAnotherDistro": "Need another distro?",
   "wsl.onboarding.needAnotherDistroHint": "Install a Linux distribution from the WSL catalog",
@@ -430,7 +419,9 @@ export const dict = {
   "wsl.onboarding.installDistro": "Install distro",
   "wsl.onboarding.searchDistros": "Search distros",
   "wsl.onboarding.wsl2Required": "WSL 2 is required.",
-  "wsl.onboarding.toolsRequired": "This distro needs bash and curl.",
+  "wsl.onboarding.vectorSetup":
+    "Install Linux Node.js and npm in this distro. After installing Vector, open its terminal and run ~/.vector/bin/vector login before adding the server. Connect model credentials with ~/.vector/bin/vector auth login.",
+  "wsl.onboarding.toolsRequired": "This distro needs bash. Installing Vector also requires npm.",
   "wsl.onboarding.openTerminal": "Open terminal",
   "wsl.onboarding.path": "Path: {{path}}",
   "wsl.onboarding.notFound": "not found",
@@ -597,7 +588,8 @@ export const dict = {
   "error.chain.didYouMean": "Did you mean: {{suggestions}}",
   "error.chain.modelNotFound": "Model not found: {{provider}}/{{model}}",
   "error.chain.checkConfig": "Check your config (vector.json) provider/model names",
-  "error.chain.mcpFailed": 'MCP server "{{name}}" failed. Open MCP settings to review its connection or finish authorization.',
+  "error.chain.mcpFailed":
+    'MCP server "{{name}}" failed. Open MCP settings to review its connection or finish authorization.',
   "error.chain.providerAuthFailed": "Provider authentication failed ({{provider}}): {{message}}",
   "error.chain.providerInitFailed":
     'Failed to initialize provider "{{provider}}". Check credentials and configuration.',
