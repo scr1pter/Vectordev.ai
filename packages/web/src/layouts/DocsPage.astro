@@ -239,7 +239,7 @@ const externals: [string, string][] = [
       if (first) (first as HTMLAnchorElement).click()
     }
   })
-  addEventListener("keydown", (event) => {
+  window.addEventListener("keydown", (event) => {
     if (event.key === "/" && document.activeElement !== input) {
       event.preventDefault()
       input?.focus()
@@ -261,7 +261,7 @@ const externals: [string, string][] = [
   drawer?.addEventListener("click", (event) => {
     if ((event.target as HTMLElement).closest("a")) setDrawer(false)
   })
-  addEventListener("keydown", (event) => {
+  window.addEventListener("keydown", (event) => {
     if (event.key === "Escape") setDrawer(false)
   })
 
