@@ -31,7 +31,7 @@ const SKILL_PATTERN = "**/SKILL.md"
 // actual schemas instead of guesses.
 const CUSTOMIZE_OPENCODE_SKILL_NAME = "customize-opencode"
 const CUSTOMIZE_OPENCODE_SKILL_DESCRIPTION =
-  "Use ONLY when the user is editing or creating opencode's own configuration: opencode.json, opencode.jsonc, files under .opencode/, or files under ~/.config/opencode/. Also use when creating or fixing opencode agents, subagents, skills, plugins, MCP servers, or permission rules. Do not use for the user's own application code, or for any project that is not configuring opencode itself."
+  "Use ONLY when the user is editing or creating Vector's own configuration: vector.json, vector.jsonc, files under .vector/, or files under ~/.config/vector/ (legacy opencode.json and .opencode/ are also accepted). Also use when creating or fixing Vector agents, subagents, skills, plugins, MCP servers, or permission rules. Do not use for the user's own application code, or for any project that is not configuring Vector itself."
 const CUSTOMIZE_OPENCODE_SKILL_BODY = SkillPlugin.CustomizeOpencodeContent
 
 export const Info = Schema.Struct({

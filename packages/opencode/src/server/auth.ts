@@ -1,3 +1,4 @@
+import { configEnv } from "@opencode-ai/core/flag/compat"
 export * as ServerAuth from "./auth"
 
 import { Flag } from "@opencode-ai/core/flag/flag"
@@ -38,10 +39,12 @@ export class Config extends Context.Service<Config, Info>()("@opencode/ServerAut
       Effect.gen(function* () {
         return Config.of(
           yield* EffectConfig.all({
-            password: EffectConfig.string("OPENCODE_SERVER_PASSWORD").pipe(EffectConfig.option),
-            username: EffectConfig.string("OPENCODE_SERVER_USERNAME").pipe(EffectConfig.withDefault("opencode")),
-            guestPassword: EffectConfig.string("OPENCODE_SERVER_GUEST_PASSWORD").pipe(EffectConfig.option),
-            guestUsername: EffectConfig.string("OPENCODE_SERVER_GUEST_USERNAME").pipe(
+            password: configEnv("OPENCODE_SERVER_PASSWORD", EffectConfig.string).pipe(EffectConfig.option),
+            username: configEnv("OPENCODE_SERVER_USERNAME", EffectConfig.string).pipe(
+              EffectConfig.withDefault("vector"),
+            ),
+            guestPassword: configEnv("OPENCODE_SERVER_GUEST_PASSWORD", EffectConfig.string).pipe(EffectConfig.option),
+            guestUsername: configEnv("OPENCODE_SERVER_GUEST_USERNAME", EffectConfig.string).pipe(
               EffectConfig.withDefault("guest"),
             ),
           }),
@@ -63,7 +66,12 @@ export function required(config: Info) {
 /** The identity a credential pair matches, or undefined when it matches neither. */
 export function identity(credentials: DecodedCredentials, config: Info): Identity | undefined {
   const password = Redacted.value(credentials.password)
-  if (Option.isSome(config.password) && credentials.username === config.username && password === config.password.value)
+  if (
+    Option.isSome(config.password) &&
+    (credentials.username === config.username ||
+      (["vector", "opencode"].includes(config.username) && ["vector", "opencode"].includes(credentials.username))) &&
+    password === config.password.value
+  )
     return "owner"
   const guestPassword = config.guestPassword ?? Option.none<string>()
   if (
@@ -84,7 +92,7 @@ export function header(credentials?: Credentials) {
   const password = credentials?.password ?? Flag.OPENCODE_SERVER_PASSWORD
   if (!password) return undefined
 
-  const username = credentials?.username ?? Flag.OPENCODE_SERVER_USERNAME ?? "opencode"
+  const username = credentials?.username ?? Flag.OPENCODE_SERVER_USERNAME ?? "vector"
   return `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`
 }
 

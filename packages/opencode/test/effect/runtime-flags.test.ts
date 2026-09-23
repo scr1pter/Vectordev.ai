@@ -372,3 +372,23 @@ describe("RuntimeFlags", () => {
     }),
   )
 })
+
+it.effect("Vector flags override legacy values without losing ConfigProvider support", () =>
+  Effect.gen(function* () {
+    const flags = yield* readFlags.pipe(
+      Effect.provide(
+        fromConfig({
+          VECTOR_PURE: "false",
+          OPENCODE_PURE: "true",
+          VECTOR_CLIENT: "vector-client",
+          OPENCODE_CLIENT: "legacy-client",
+          VECTOR_EXPERIMENTAL_OUTPUT_TOKEN_MAX: "4096",
+          OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX: "1024",
+        }),
+      ),
+    )
+    expect(flags.pure).toBe(false)
+    expect(flags.client).toBe("vector-client")
+    expect(flags.outputTokenMax).toBe(4096)
+  }),
+)

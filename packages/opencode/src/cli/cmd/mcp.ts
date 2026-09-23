@@ -1,3 +1,4 @@
+import { ConfigSchema } from "@/config/schema"
 import { cmd } from "./cmd"
 import { ConfigV1 } from "@opencode-ai/core/v1/config/config"
 import { effectCmd } from "../effect-cmd"
@@ -119,7 +120,7 @@ export const McpListCommand = effectCmd({
 
     if (servers.length === 0) {
       prompts.log.warn("No MCP servers configured")
-      prompts.outro("Add servers with: opencode mcp add")
+      prompts.outro("Add servers with: vector mcp add")
       return
     }
 
@@ -187,7 +188,7 @@ export const McpAuthCommand = effectCmd({
 
     if (servers.length === 0) {
       prompts.log.warn("No OAuth-capable MCP servers configured")
-      prompts.log.info("Remote MCP servers support OAuth by default. Add a remote server in opencode.json:")
+      prompts.log.info("Remote MCP servers support OAuth by default. Add a remote server in vector.json:")
       prompts.log.info(`
   "mcp": {
     "my-server": {
@@ -392,12 +393,12 @@ export const McpLogoutCommand = effectCmd({
 })
 
 async function resolveConfigPath(baseDir: string, global = false) {
-  // Check for existing config files (prefer .jsonc over .json, check .opencode/ subdirectory too)
-  const candidates = [path.join(baseDir, "opencode.json"), path.join(baseDir, "opencode.jsonc")]
-
-  if (!global) {
-    candidates.push(path.join(baseDir, ".opencode", "opencode.json"), path.join(baseDir, ".opencode", "opencode.jsonc"))
-  }
+  // Prefer Vector config; keep editing a legacy file when it is the user's only config.
+  const candidates = ["vector.json", "vector.jsonc"].map((name) => path.join(baseDir, name))
+  if (!global) candidates.push(...["vector.json", "vector.jsonc"].map((name) => path.join(baseDir, ".vector", name)))
+  candidates.push(...["opencode.json", "opencode.jsonc"].map((name) => path.join(baseDir, name)))
+  if (!global)
+    candidates.push(...["opencode.json", "opencode.jsonc"].map((name) => path.join(baseDir, ".opencode", name)))
 
   for (const candidate of candidates) {
     if (await Filesystem.exists(candidate)) {
@@ -405,7 +406,7 @@ async function resolveConfigPath(baseDir: string, global = false) {
     }
   }
 
-  // Default to opencode.json if none exist
+  // New configs use Vector names
   return candidates[0]
 }
 
@@ -421,7 +422,7 @@ async function addMcpToConfig(name: string, mcpConfig: ConfigMCPV1.Info, configP
   })
   const result = applyEdits(text, edits)
 
-  await Filesystem.write(configPath, result)
+  await Filesystem.write(configPath, ConfigSchema.rewrite(result))
 
   return configPath
 }
@@ -559,7 +560,7 @@ export const McpAddCommand = effectCmd({
       if (type === "local") {
         const command = await prompts.text({
           message: "Enter command to run",
-          placeholder: "e.g., opencode x @modelcontextprotocol/server-filesystem",
+          placeholder: "e.g., npx @modelcontextprotocol/server-filesystem",
           validate: (x) => (x && x.length > 0 ? undefined : "Required"),
         })
         if (prompts.isCancel(command)) throw new UI.CancelledError()
@@ -746,7 +747,7 @@ export const McpDebugCommand = effectCmd({
             params: {
               protocolVersion: LATEST_PROTOCOL_VERSION,
               capabilities: {},
-              clientInfo: { name: "opencode-debug", version: InstallationVersion },
+              clientInfo: { name: "vector-debug", version: InstallationVersion },
             },
             id: 1,
           }),
@@ -790,7 +791,7 @@ export const McpDebugCommand = effectCmd({
 
           try {
             const client = new Client({
-              name: "opencode-debug",
+              name: "vector-debug",
               version: InstallationVersion,
             })
             await client.connect(transport)

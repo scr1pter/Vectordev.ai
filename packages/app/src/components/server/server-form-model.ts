@@ -5,8 +5,8 @@ import { normalizeServerUrl } from "@/context/server"
  *  until then. */
 export const DEFAULT_SERVER_USERNAME = "vector"
 
-/** The username a plain `opencode serve` engine uses. */
-export const CLI_SERVER_USERNAME = "opencode"
+/** The username a plain `vector serve` engine uses. */
+export const CLI_SERVER_USERNAME = "vector"
 
 /** How long typing has to pause before the live reachability check runs. */
 export const SERVER_PREVIEW_DELAY_MS = 350

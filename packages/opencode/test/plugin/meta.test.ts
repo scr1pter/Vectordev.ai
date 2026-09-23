@@ -15,6 +15,16 @@ function run(input: { file: string; spec: string; target: string; id: string }) 
   return Process.run([process.execPath, worker, JSON.stringify(input)], {
     cwd: root,
     nothrow: true,
+    exactEnv: true,
+    env: {
+      ...Object.fromEntries(
+        Object.entries(process.env).map(([key, value]) => {
+          const current = key.replace(/^OPENCODE_/, "VECTOR_")
+          return [current, process.env[current] ?? value]
+        }),
+      ),
+      VECTOR_PLUGIN_META_FILE: input.file,
+    },
   })
 }
 
@@ -23,7 +33,7 @@ async function map<Value>(file: string): Promise<Record<string, Value>> {
 }
 
 afterEach(() => {
-  delete process.env.OPENCODE_PLUGIN_META_FILE
+  delete process.env.VECTOR_PLUGIN_META_FILE
 })
 
 describe("plugin.meta", () => {
@@ -36,8 +46,8 @@ describe("plugin.meta", () => {
       },
     })
 
-    process.env.OPENCODE_PLUGIN_META_FILE = path.join(tmp.path, "state", "plugin-meta.json")
-    const file = process.env.OPENCODE_PLUGIN_META_FILE!
+    process.env.VECTOR_PLUGIN_META_FILE = path.join(tmp.path, "state", "plugin-meta.json")
+    const file = process.env.VECTOR_PLUGIN_META_FILE!
     const spec = pathToFileURL(tmp.extra.file).href
 
     const one = await PluginMeta.touch(spec, spec, "demo.file")
@@ -77,8 +87,8 @@ describe("plugin.meta", () => {
       },
     })
 
-    process.env.OPENCODE_PLUGIN_META_FILE = path.join(tmp.path, "state", "plugin-meta.json")
-    const file = process.env.OPENCODE_PLUGIN_META_FILE!
+    process.env.VECTOR_PLUGIN_META_FILE = path.join(tmp.path, "state", "plugin-meta.json")
+    const file = process.env.VECTOR_PLUGIN_META_FILE!
 
     const one = await PluginMeta.touch("acme-plugin@latest", tmp.extra.mod, "acme-plugin")
     expect(one.state).toBe("first")
@@ -108,8 +118,8 @@ describe("plugin.meta", () => {
       },
     })
 
-    process.env.OPENCODE_PLUGIN_META_FILE = path.join(tmp.path, "state", "plugin-meta.json")
-    const file = process.env.OPENCODE_PLUGIN_META_FILE!
+    process.env.VECTOR_PLUGIN_META_FILE = path.join(tmp.path, "state", "plugin-meta.json")
+    const file = process.env.VECTOR_PLUGIN_META_FILE!
     const spec = pathToFileURL(tmp.extra.file).href
     const n = 12
 

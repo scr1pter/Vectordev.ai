@@ -122,8 +122,8 @@ describe("plugin.install.task", () => {
     const ok = await run(ctx(tmp.path))
     expect(ok).toBe(true)
 
-    const server = await read(path.join(tmp.path, ".opencode", "opencode.jsonc"))
-    const tui = await read(path.join(tmp.path, ".opencode", "tui.jsonc"))
+    const server = await read(path.join(tmp.path, ".vector", "vector.jsonc"))
+    const tui = await read(path.join(tmp.path, ".vector", "tui.jsonc"))
     expect(server.plugin).toEqual(["acme@1.2.3"])
     expect(tui.plugin).toEqual(["acme@1.2.3"])
   })
@@ -144,8 +144,8 @@ describe("plugin.install.task", () => {
     const ok = await run(ctx(tmp.path))
     expect(ok).toBe(true)
 
-    const server = await read(path.join(tmp.path, ".opencode", "opencode.jsonc"))
-    const tui = await read(path.join(tmp.path, ".opencode", "tui.jsonc"))
+    const server = await read(path.join(tmp.path, ".vector", "vector.jsonc"))
+    const tui = await read(path.join(tmp.path, ".vector", "tui.jsonc"))
     expect(server.plugin).toEqual([["acme@1.2.3", { custom: true, other: false }]])
     expect(tui.plugin).toEqual([["acme@1.2.3", { compact: true }]])
   })
@@ -257,7 +257,7 @@ describe("plugin.install.task", () => {
 
     const ok = await run(ctx(tmp.path))
     expect(ok).toBe(true)
-    const server = await read(path.join(tmp.path, ".opencode", "opencode.jsonc"))
+    const server = await read(path.join(tmp.path, ".vector", "vector.jsonc"))
     expect(server.plugin).toEqual(["acme@1.2.3"])
   })
 
@@ -366,8 +366,8 @@ describe("plugin.install.task", () => {
     const ok = await run(ctx(tmp.path))
     expect(ok).toBe(true)
 
-    expect(await Filesystem.exists(path.join(global, "opencode.jsonc"))).toBe(true)
-    expect(await Filesystem.exists(path.join(tmp.path, ".opencode", "opencode.jsonc"))).toBe(false)
+    expect(await Filesystem.exists(path.join(global, "vector.jsonc"))).toBe(true)
+    expect(await Filesystem.exists(path.join(tmp.path, ".vector", "vector.jsonc"))).toBe(false)
   })
 
   test("writes local scope under directory when vcs is not git", async () => {
@@ -386,8 +386,8 @@ describe("plugin.install.task", () => {
 
     const ok = await run(ctxDir(directory, worktree))
     expect(ok).toBe(true)
-    expect(await Filesystem.exists(path.join(directory, ".opencode", "opencode.jsonc"))).toBe(true)
-    expect(await Filesystem.exists(path.join(worktree, ".opencode", "opencode.jsonc"))).toBe(false)
+    expect(await Filesystem.exists(path.join(directory, ".vector", "vector.jsonc"))).toBe(true)
+    expect(await Filesystem.exists(path.join(worktree, ".vector", "vector.jsonc"))).toBe(false)
   })
 
   test("writes local scope under directory when worktree is root slash", async () => {
@@ -404,7 +404,7 @@ describe("plugin.install.task", () => {
 
     const ok = await run(ctxRoot(directory))
     expect(ok).toBe(true)
-    expect(await Filesystem.exists(path.join(directory, ".opencode", "opencode.jsonc"))).toBe(true)
+    expect(await Filesystem.exists(path.join(directory, ".vector", "vector.jsonc"))).toBe(true)
   })
 
   test("writes tui local scope under directory when worktree is root slash", async () => {
@@ -421,7 +421,7 @@ describe("plugin.install.task", () => {
 
     const ok = await run(ctxRoot(directory))
     expect(ok).toBe(true)
-    expect(await Filesystem.exists(path.join(directory, ".opencode", "tui.jsonc"))).toBe(true)
+    expect(await Filesystem.exists(path.join(directory, ".vector", "tui.jsonc"))).toBe(true)
   })
 
   test("writes only tui config for tui-only plugins", async () => {
@@ -436,8 +436,8 @@ describe("plugin.install.task", () => {
 
     const ok = await run(ctx(tmp.path))
     expect(ok).toBe(true)
-    expect(await Filesystem.exists(path.join(tmp.path, ".opencode", "tui.jsonc"))).toBe(true)
-    expect(await Filesystem.exists(path.join(tmp.path, ".opencode", "opencode.jsonc"))).toBe(false)
+    expect(await Filesystem.exists(path.join(tmp.path, ".vector", "tui.jsonc"))).toBe(true)
+    expect(await Filesystem.exists(path.join(tmp.path, ".vector", "vector.jsonc"))).toBe(false)
   })
 
   test("writes tui config for oc-themes-only packages", async () => {
@@ -454,10 +454,10 @@ describe("plugin.install.task", () => {
 
     const ok = await run(ctx(tmp.path))
     expect(ok).toBe(true)
-    expect(await Filesystem.exists(path.join(tmp.path, ".opencode", "tui.jsonc"))).toBe(true)
-    expect(await Filesystem.exists(path.join(tmp.path, ".opencode", "opencode.jsonc"))).toBe(false)
+    expect(await Filesystem.exists(path.join(tmp.path, ".vector", "tui.jsonc"))).toBe(true)
+    expect(await Filesystem.exists(path.join(tmp.path, ".vector", "vector.jsonc"))).toBe(false)
 
-    const tui = await read(path.join(tmp.path, ".opencode", "tui.jsonc"))
+    const tui = await read(path.join(tmp.path, ".vector", "tui.jsonc"))
     expect(tui.plugin).toEqual(["acme@1.2.3"])
   })
 
@@ -473,8 +473,8 @@ describe("plugin.install.task", () => {
 
     const ok = await run(ctx(tmp.path))
     expect(ok).toBe(false)
-    expect(await Filesystem.exists(path.join(tmp.path, ".opencode", "tui.jsonc"))).toBe(false)
-    expect(await Filesystem.exists(path.join(tmp.path, ".opencode", "opencode.jsonc"))).toBe(false)
+    expect(await Filesystem.exists(path.join(tmp.path, ".vector", "tui.jsonc"))).toBe(false)
+    expect(await Filesystem.exists(path.join(tmp.path, ".vector", "vector.jsonc"))).toBe(false)
   })
 
   test("force replaces version in both server and tui configs", async () => {
@@ -534,8 +534,8 @@ describe("plugin.install.task", () => {
 
     const ok = await run(ctx(tmp.path))
     expect(ok).toBe(false)
-    expect(await Filesystem.exists(path.join(tmp.path, ".opencode", "opencode.jsonc"))).toBe(false)
-    expect(await Filesystem.exists(path.join(tmp.path, ".opencode", "tui.jsonc"))).toBe(false)
+    expect(await Filesystem.exists(path.join(tmp.path, ".vector", "vector.jsonc"))).toBe(false)
+    expect(await Filesystem.exists(path.join(tmp.path, ".vector", "tui.jsonc"))).toBe(false)
   })
 
   test("returns false when manifest cannot be read", async () => {
@@ -551,7 +551,7 @@ describe("plugin.install.task", () => {
 
     const ok = await run(ctx(tmp.path))
     expect(ok).toBe(false)
-    expect(await Filesystem.exists(path.join(tmp.path, ".opencode", "opencode.jsonc"))).toBe(false)
+    expect(await Filesystem.exists(path.join(tmp.path, ".vector", "vector.jsonc"))).toBe(false)
   })
 
   test("returns false when install fails", async () => {
@@ -565,6 +565,32 @@ describe("plugin.install.task", () => {
 
     const ok = await run(ctx(tmp.path))
     expect(ok).toBe(false)
-    expect(await Filesystem.exists(path.join(tmp.path, ".opencode", "opencode.jsonc"))).toBe(false)
+    expect(await Filesystem.exists(path.join(tmp.path, ".vector", "vector.jsonc"))).toBe(false)
   })
+})
+
+test("plugin installation prefers an existing Vector config and preserves the legacy file", async () => {
+  await using tmp = await tmpdir()
+  const target = await plugin(tmp.path, ["server"])
+  const legacy = path.join(tmp.path, ".opencode", "opencode.json")
+  const current = path.join(tmp.path, ".vector", "vector.json")
+  await Filesystem.write(legacy, JSON.stringify({ plugin: [["acme@1.0.0", { source: "legacy" }]] }))
+  await Filesystem.write(current, JSON.stringify({ plugin: [["acme@2.0.0", { source: "vector" }]] }))
+  const run = createPlugTask({ mod: "acme@3.0.0", force: true }, deps(path.join(tmp.path, "global"), target))
+  expect(await run(ctx(tmp.path))).toBe(true)
+  expect((await read(current)).plugin).toEqual([["acme@3.0.0", { source: "vector" }]])
+  expect((await read(legacy)).plugin).toEqual([["acme@1.0.0", { source: "legacy" }]])
+})
+
+test("legacy plugin updates retain relative paths in their original directory", async () => {
+  await using tmp = await tmpdir()
+  const target = await plugin(tmp.path, ["server"])
+  const legacy = path.join(tmp.path, ".opencode", "opencode.jsonc")
+  await Filesystem.write(legacy, '{\n // Preserve relative references\n "plugin": ["./plugin.ts", "acme@1.0.0"]\n}')
+  const run = createPlugTask({ mod: "acme@2.0.0", force: true }, deps(path.join(tmp.path, "global"), target))
+  expect(await run(ctx(tmp.path))).toBe(true)
+  const content = await Filesystem.readText(legacy)
+  expect(content).toContain("// Preserve relative references")
+  expect(parseJsonc(content).plugin).toEqual(["./plugin.ts", "acme@2.0.0"])
+  expect(await Filesystem.exists(path.join(tmp.path, ".vector", "vector.jsonc"))).toBe(false)
 })

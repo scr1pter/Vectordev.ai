@@ -22,12 +22,12 @@ describe("ServerAuth", () => {
     expect(ServerAuth.headers()).toBeUndefined()
   })
 
-  test("defaults to the opencode username", () => {
+  test("defaults to the vector username", () => {
     Flag.OPENCODE_SERVER_PASSWORD = "secret"
     Flag.OPENCODE_SERVER_USERNAME = undefined
 
     expect(ServerAuth.headers()).toEqual({
-      Authorization: `Basic ${Buffer.from("opencode:secret").toString("base64")}`,
+      Authorization: `Basic ${Buffer.from("vector:secret").toString("base64")}`,
     })
   })
 
@@ -56,4 +56,22 @@ describe("ServerAuth", () => {
     expect(ServerAuth.authorized({ username: "alice", password: Redacted.make("secret") }, config)).toBe(true)
     expect(ServerAuth.authorized({ username: "opencode", password: Redacted.make("secret") }, config)).toBe(false)
   })
+})
+
+test("Vector and legacy server identities accept only the matching password", () => {
+  for (const configured of ["vector", "opencode"]) {
+    for (const username of ["vector", "opencode"]) {
+      const config = { password: Option.some("secret"), username: configured }
+      expect(ServerAuth.identity({ username, password: Redacted.make("secret") }, config)).toBe("owner")
+      expect(ServerAuth.identity({ username, password: Redacted.make("wrong") }, config)).toBeUndefined()
+    }
+  }
+  for (const username of ["vector", "opencode"]) {
+    expect(
+      ServerAuth.identity(
+        { username, password: Redacted.make("secret") },
+        { password: Option.some("secret"), username: "custom" },
+      ),
+    ).toBeUndefined()
+  }
 })

@@ -7,7 +7,7 @@ import { getLogger } from "./logging"
 import { fallbackBinDirectories, getUserShell, loadShellEnv, pathDelimiter, unionPath } from "./shell-env"
 import { getStore } from "./store"
 import { DEFAULT_SERVER_URL_KEY } from "./store-keys"
-import { VECTOR_AGENT_RUNTIME_ENV } from "./agent-runtime"
+import { VECTOR_AGENT_RUNTIME_ENV, vectorRuntimeEnv } from "./agent-runtime"
 
 export type HealthCheck = { wait: Promise<void> }
 
@@ -67,11 +67,13 @@ export function preferAppEnv(userDataPath: string) {
     ...loaded,
     PATH: path,
     ...VECTOR_AGENT_RUNTIME_ENV,
-    OPENCODE_EXPERIMENTAL_ICON_DISCOVERY: "true",
-    OPENCODE_EXPERIMENTAL_FILEWATCHER: "true",
-    OPENCODE_CLIENT: "desktop",
+    ...vectorRuntimeEnv({
+      OPENCODE_EXPERIMENTAL_ICON_DISCOVERY: "true",
+      OPENCODE_EXPERIMENTAL_FILEWATCHER: "true",
+      OPENCODE_CLIENT: "desktop",
+      OPENCODE_CONFIG_DIR: configDir,
+    }),
     VECTOR_APP_NAMESPACE: "vector",
-    OPENCODE_CONFIG_DIR: configDir,
     XDG_DATA_HOME: process.env.XDG_DATA_HOME ?? dataHome,
     XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME ?? xdgConfigHome,
     XDG_CACHE_HOME: process.env.XDG_CACHE_HOME ?? cacheHome,
@@ -240,7 +242,7 @@ function createSidecarEnv(): Record<string, string> {
   )
   delete env.DEBUG
   if (process.platform === "linux") delete env.LD_PRELOAD
-  if (!app.isPackaged) env.OPENCODE_DISABLE_CHANNEL_DB = "1"
+  if (!app.isPackaged) Object.assign(env, vectorRuntimeEnv({ OPENCODE_DISABLE_CHANNEL_DB: "1" }))
   return env
 }
 

@@ -4,8 +4,9 @@ import { existsSync } from "fs"
 import os from "os"
 import path from "path"
 import { Process } from "@/util/process"
+import { readEnv, warnLegacy } from "@opencode-ai/core/flag/compat"
 
-const MANAGED_PLIST_DOMAIN = "ai.opencode.managed"
+const MANAGED_PLIST_DOMAINS = ["ai.vector.managed", "ai.opencode.managed"]
 
 // Keys injected by macOS/MDM into the managed plist that are not OpenCode config
 const PLIST_META = new Set([
@@ -17,19 +18,25 @@ const PLIST_META = new Set([
   "_manualProfile",
 ])
 
-function systemManagedConfigDir(): string {
+function systemManagedConfigDir(name = "vector"): string {
   switch (process.platform) {
     case "darwin":
-      return "/Library/Application Support/opencode"
+      return `/Library/Application Support/${name}`
     case "win32":
-      return path.join(process.env.ProgramData || "C:\\ProgramData", "opencode")
+      return path.join(process.env.ProgramData || "C:\\ProgramData", name)
     default:
-      return "/etc/opencode"
+      return `/etc/${name}`
   }
 }
 
 export function managedConfigDir() {
-  return process.env.OPENCODE_TEST_MANAGED_CONFIG_DIR || systemManagedConfigDir()
+  const override = readEnv("OPENCODE_TEST_MANAGED_CONFIG_DIR")
+  if (override) return override
+  const current = systemManagedConfigDir()
+  const legacy = systemManagedConfigDir("opencode")
+  if (existsSync(current) || !existsSync(legacy)) return current
+  warnLegacy(legacy, current)
+  return legacy
 }
 
 export function parseManagedPlist(json: string): string {
@@ -50,13 +57,14 @@ export async function readManagedPreferences() {
       return "user"
     }
   })()
-  const paths = [
-    path.join("/Library/Managed Preferences", user, `${MANAGED_PLIST_DOMAIN}.plist`),
-    path.join("/Library/Managed Preferences", `${MANAGED_PLIST_DOMAIN}.plist`),
-  ]
+  const paths = MANAGED_PLIST_DOMAINS.flatMap((domain) => [
+    path.join("/Library/Managed Preferences", user, `${domain}.plist`),
+    path.join("/Library/Managed Preferences", `${domain}.plist`),
+  ])
 
   for (const plist of paths) {
     if (!existsSync(plist)) continue
+    if (plist.includes("ai.opencode.managed")) warnLegacy("ai.opencode.managed", "ai.vector.managed")
     const result = await Process.run(["plutil", "-convert", "json", "-o", "-", plist], { nothrow: true })
     if (result.code !== 0) continue
     return {

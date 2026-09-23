@@ -215,7 +215,7 @@ describe("experimental HttpApi", () => {
   )
 
   it.instance(
-    "serves Console org switch through the default server app",
+    "keeps Console compatibility endpoints inert even with a saved account",
     () =>
       Effect.gen(function* () {
         const tmp = yield* TestInstance
@@ -226,8 +226,13 @@ describe("experimental HttpApi", () => {
           body: JSON.stringify({ accountID, orgID: "org-test" }),
         })
 
-        expect(switched.status).toBe(200)
-        expect(yield* json(switched)).toBe(true)
+        expect(switched.status).toBe(400)
+        const state = yield* request(ExperimentalPaths.console, tmp.directory)
+        expect(state.status).toBe(200)
+        expect(yield* json(state)).toEqual({ consoleManagedProviders: [], switchableOrgCount: 0 })
+        const orgs = yield* request(ExperimentalPaths.consoleOrgs, tmp.directory)
+        expect(orgs.status).toBe(200)
+        expect(yield* json(orgs)).toEqual({ orgs: [] })
       }),
     { config: { formatter: false, lsp: false } },
   )

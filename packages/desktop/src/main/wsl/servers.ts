@@ -176,7 +176,7 @@ export function createWslServersController(
       })
       .catch((error) => {
         const message = error instanceof Error ? error.message : String(error)
-        logger?.error("wsl opencode check failed", { id, distro, message })
+        logger?.error("wsl Vector check failed", { id, distro, message })
       })
   }
 
@@ -190,7 +190,7 @@ export function createWslServersController(
           })
           .catch((error) => {
             const message = error instanceof Error ? error.message : String(error)
-            logger?.error("wsl opencode check failed", {
+            logger?.error("wsl Vector check failed", {
               id: item.config.id,
               distro: item.config.distro,
               message,
@@ -475,7 +475,7 @@ function opencodeCheck(
       version: null,
       expectedVersion,
       matchesDesktop: null,
-      error: "opencode is not installed in this distro",
+      error: "Vector is not installed in this distro",
     }
   }
   if (!version) {
@@ -485,7 +485,7 @@ function opencodeCheck(
       version: null,
       expectedVersion,
       matchesDesktop: null,
-      error: "opencode is installed but could not run",
+      error: "Vector is installed but could not run",
     }
   }
   return {
@@ -499,7 +499,7 @@ function opencodeCheck(
 }
 
 function distroProbeReady(probe: WslDistroProbe | undefined) {
-  return !!probe?.canExecute && probe.hasBash && probe.hasCurl
+  return !!probe?.canExecute && probe.hasBash
 }
 
 function startupFailure(code: number | null, signal: NodeJS.Signals | null) {

@@ -1,3 +1,4 @@
+import { readEnv } from "@opencode-ai/core/flag/compat"
 import { Schema } from "effect"
 import { NamedError } from "@opencode-ai/core/util/error"
 import { Process } from "@/util/process"
@@ -30,7 +31,7 @@ export function ide() {
 }
 
 export function alreadyInstalled() {
-  return process.env["OPENCODE_CALLER"] === "vscode" || process.env["OPENCODE_CALLER"] === "vscode-insiders"
+  return readEnv("OPENCODE_CALLER") === "vscode" || readEnv("OPENCODE_CALLER") === "vscode-insiders"
 }
 
 export async function install(ide: (typeof SUPPORTED_IDES)[number]["name"]) {

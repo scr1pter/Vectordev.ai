@@ -1,15 +1,30 @@
 ;(function () {
-  var key = "opencode-theme-id"
-  var themeId = localStorage.getItem(key) || "oc-2"
+  var migrated = false
+  function read(key) {
+    var current = localStorage.getItem(key)
+    if (current !== null) return current
+    var legacy = localStorage.getItem(key.replace(/^vector-/, "opencode-"))
+    if (legacy !== null) {
+      localStorage.setItem(key, legacy)
+      if (!migrated) console.warn("[Vector] Migrated legacy theme preferences.")
+      migrated = true
+    }
+    return legacy
+  }
+
+  var key = "vector-theme-id"
+  var themeId = read(key) || "oc-2"
 
   if (themeId === "oc-1") {
     themeId = "oc-2"
     localStorage.setItem(key, themeId)
+    localStorage.removeItem("vector-theme-css-light")
+    localStorage.removeItem("vector-theme-css-dark")
     localStorage.removeItem("opencode-theme-css-light")
     localStorage.removeItem("opencode-theme-css-dark")
   }
 
-  var scheme = localStorage.getItem("opencode-color-scheme") || "system"
+  var scheme = read("vector-color-scheme") || "system"
   var isDark = scheme === "dark" || (scheme === "system" && matchMedia("(prefers-color-scheme: dark)").matches)
   var mode = isDark ? "dark" : "light"
 
@@ -23,7 +38,7 @@
 
   if (themeId === "oc-2") return
 
-  var css = localStorage.getItem("opencode-theme-css-" + mode)
+  var css = read("vector-theme-css-" + mode)
   if (css) {
     var style = document.createElement("style")
     style.id = "oc-theme-preload"

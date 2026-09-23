@@ -9,10 +9,13 @@ export { type Config as OpencodeClientConfig, OpencodeClient }
 
 function pick(value: string | null, fallback?: string, encode?: (value: string) => string) {
   if (!value) return
-  if (!fallback) return value
-  if (value === fallback) return fallback
-  if (encode && value === encode(fallback)) return fallback
-  return value
+  if (fallback && (value === fallback || (encode && value === encode(fallback)))) return fallback
+  if (!encode) return value
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return value
+  }
 }
 
 function rewrite(request: Request, values: { directory?: string; workspace?: string }) {
@@ -22,7 +25,9 @@ function rewrite(request: Request, values: { directory?: string; workspace?: str
   let changed = false
 
   for (const [name, key] of [
+    ["x-vector-directory", "directory"],
     ["x-opencode-directory", "directory"],
+    ["x-vector-workspace", "workspace"],
     ["x-opencode-workspace", "workspace"],
   ] as const) {
     const value = pick(
@@ -42,6 +47,8 @@ function rewrite(request: Request, values: { directory?: string; workspace?: str
   if (!changed) return request
 
   const next = new Request(url, request)
+  next.headers.delete("x-vector-directory")
+  next.headers.delete("x-vector-workspace")
   next.headers.delete("x-opencode-directory")
   next.headers.delete("x-opencode-workspace")
   return next
@@ -63,6 +70,7 @@ export function createOpencodeClient(config?: Config & { directory?: string; exp
   if (config?.directory) {
     config.headers = {
       ...config.headers,
+      "x-vector-directory": encodeURIComponent(config.directory),
       "x-opencode-directory": encodeURIComponent(config.directory),
     }
   }
@@ -70,6 +78,7 @@ export function createOpencodeClient(config?: Config & { directory?: string; exp
   if (config?.experimental_workspaceID) {
     config.headers = {
       ...config.headers,
+      "x-vector-workspace": config.experimental_workspaceID,
       "x-opencode-workspace": config.experimental_workspaceID,
     }
   }
@@ -84,10 +93,13 @@ export function createOpencodeClient(config?: Config & { directory?: string; exp
   client.interceptors.response.use((response) => {
     const contentType = response.headers.get("content-type")
     if (contentType === "text/html")
-      throw new Error("Request is not supported by this version of OpenCode Server (Server responded with text/html)")
+      throw new Error("Request is not supported by this version of Vector Server (Server responded with text/html)")
 
     return response
   })
   client.interceptors.error.use(wrapClientError)
   return new OpencodeClient({ client })
 }
+
+// The upstream factory name remains available for existing plugins.
+export const createVectorClient = createOpencodeClient

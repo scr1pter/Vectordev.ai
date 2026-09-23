@@ -16,10 +16,10 @@ const dryRun = values["dry-run"]
 const repo = process.env.GH_REPO
 if (!repo) throw new Error("GH_REPO is required")
 
-const releaseId = process.env.OPENCODE_RELEASE
+const releaseId = process.env.VECTOR_RELEASE ?? process.env.OPENCODE_RELEASE
 if (!releaseId) throw new Error("OPENCODE_RELEASE is required")
 
-const version = process.env.OPENCODE_VERSION
+const version = process.env.VECTOR_VERSION ?? process.env.OPENCODE_VERSION
 if (!version) throw new Error("OPENCODE_VERSION is required")
 
 const dir = process.env.LATEST_YML_DIR

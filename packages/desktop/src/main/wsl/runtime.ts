@@ -265,7 +265,11 @@ export async function installWslOpencode(version: string, distro: string, opts?:
   return runInteractiveCommand(
     resolveSystem32Command("wsl.exe"),
     wslArgs(
-      ["bash", "-lc", `curl -fsSL https://opencode.ai/install | bash -s -- --version ${shellEscape(version)}`],
+      [
+        "bash",
+        "-lc",
+        `PATH=$(awk -v RS=: -v ORS=: '$0 !~ /^\\/mnt\\//' <<<"$PATH" | sed "s/:$//"); export PATH; command -v npm >/dev/null || { printf "%s\\n" "Install Node.js and npm in this Linux distro first." >&2; exit 1; }; npm install --global --prefix "$HOME/.vector" ${shellEscape(`@vectordevai/cli@${version}`)}`,
+      ],
       distro,
     ),
     withTimeout(opts, DEFAULT_WSL_INSTALL_TIMEOUT_MS),
@@ -308,7 +312,7 @@ export async function resolveWslOpencode(distro: string, opts?: RunWslOptions) {
   return firstLine(
     (
       await runWslSh(
-        'if [ -x "$HOME/.opencode/bin/opencode" ]; then printf "%s\\n" "$HOME/.opencode/bin/opencode"; fi',
+        'if [ -x "$HOME/.vector/bin/vector" ]; then printf "%s\\n" "$HOME/.vector/bin/vector"; fi',
         distro,
         opts,
       )

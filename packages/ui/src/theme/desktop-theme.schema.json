@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://opencode.ai/desktop-theme.json",
+  "$id": "https://vectordev.ai/desktop-theme.json",
   "title": "Vector Desktop Theme",
   "description": "A theme definition for the Vector desktop application",
   "type": "object",

@@ -63,46 +63,50 @@ afterEach(async () => {
 })
 
 describe("v2 pty HttpApi", () => {
-  testPty("serves location-wrapped PTY routes and retains exited sessions", async () => {
-    await using tmp = await tmpdir({ git: true, config: { formatter: false, lsp: false } })
+  testPty(
+    "serves location-wrapped PTY routes and retains exited sessions",
+    async () => {
+      await using tmp = await tmpdir({ git: true, config: { formatter: false, lsp: false } })
 
-    const empty = await request("/api/pty", tmp.path)
-    expect(empty.status).toBe(200)
-    expect(Schema.decodeUnknownSync(Location.response(Schema.Array(Pty.Info)))(await empty.json()).data).toEqual([])
+      const empty = await request("/api/pty", tmp.path)
+      expect(empty.status).toBe(200)
+      expect(Schema.decodeUnknownSync(Location.response(Schema.Array(Pty.Info)))(await empty.json()).data).toEqual([])
 
-    const created = await request("/api/pty", tmp.path, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ command: "/usr/bin/env", args: ["sh", "-c", "exit 4"], title: "v2" }),
-    })
-    expect(created.status).toBe(200)
-    const body = Schema.decodeUnknownSync(Location.response(Pty.Info))(await created.json())
-    expect(String(body.location.directory)).toBe(tmp.path)
-    expect(body.data.title).toBe("v2")
+      const created = await request("/api/pty", tmp.path, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ command: "/usr/bin/env", args: ["sh", "-c", "exit 4"], title: "v2" }),
+      })
+      expect(created.status).toBe(200)
+      const body = Schema.decodeUnknownSync(Location.response(Pty.Info))(await created.json())
+      expect(String(body.location.directory)).toBe(tmp.path)
+      expect(body.data.title).toBe("v2")
 
-    // The canonical surface keeps exited sessions observable with their exit code.
-    const deadline = Date.now() + 45_000
-    let info: { status: string; exitCode?: number } | undefined
-    while (Date.now() < deadline) {
-      const found = await request(`/api/pty/${body.data.id}`, tmp.path)
-      expect(found.status).toBe(200)
-      info = Schema.decodeUnknownSync(Location.response(Pty.Info))(await found.json()).data
-      if (info.status === "exited") break
-      await new Promise((resolve) => setTimeout(resolve, 50))
-    }
-    expect(info).toMatchObject({ status: "exited", exitCode: 4 })
+      // The canonical surface keeps exited sessions observable with their exit code.
+      const deadline = Date.now() + 45_000
+      let info: { status: string; exitCode?: number } | undefined
+      while (Date.now() < deadline) {
+        const found = await request(`/api/pty/${body.data.id}`, tmp.path)
+        expect(found.status).toBe(200)
+        info = Schema.decodeUnknownSync(Location.response(Pty.Info))(await found.json()).data
+        if (info.status === "exited") break
+        await new Promise((resolve) => setTimeout(resolve, 50))
+      }
+      expect(info).toMatchObject({ status: "exited", exitCode: 4 })
 
-    const removed = await request(`/api/pty/${body.data.id}`, tmp.path, { method: "DELETE" })
-    expect(removed.status).toBe(204)
+      const removed = await request(`/api/pty/${body.data.id}`, tmp.path, { method: "DELETE" })
+      expect(removed.status).toBe(204)
 
-    const missing = await request(`/api/pty/${body.data.id}`, tmp.path)
-    expect(missing.status).toBe(404)
-    expect(await missing.json()).toMatchObject({ _tag: "PtyNotFoundError", ptyID: body.data.id })
-    // Spawning a shell and waiting for it to exit is load-sensitive, and the
-    // whole suite runs in parallel. The per-test timeout sits above the poll
-    // bound above so a slow machine reports the real assertion rather than a
-    // timeout that says nothing about the route being tested.
-  }, 60_000)
+      const missing = await request(`/api/pty/${body.data.id}`, tmp.path)
+      expect(missing.status).toBe(404)
+      expect(await missing.json()).toMatchObject({ _tag: "PtyNotFoundError", ptyID: body.data.id })
+      // Spawning a shell and waiting for it to exit is load-sensitive, and the
+      // whole suite runs in parallel. The per-test timeout sits above the poll
+      // bound above so a slow machine reports the real assertion rather than a
+      // timeout that says nothing about the route being tested.
+    },
+    60_000,
+  )
 
   testPty("rejects connect tokens without the CSRF header and connects with a valid ticket", async () => {
     await using tmp = await tmpdir({ git: true, config: { formatter: false, lsp: false } })
@@ -121,11 +125,21 @@ describe("v2 pty HttpApi", () => {
 
       const token = await request(`/api/pty/${info.id}/connect-token`, tmp.path, {
         method: "POST",
-        headers: { "x-opencode-ticket": "1" },
+        headers: { "x-vector-ticket": "1" },
       })
       expect(token.status).toBe(200)
       const ticket = Schema.decodeUnknownSync(Location.response(PtyTicket.ConnectToken))(await token.json()).data.ticket
       expect(ticket).toBeTruthy()
+      const legacy = await request(`/api/pty/${info.id}/connect-token`, tmp.path, {
+        method: "POST",
+        headers: { "x-opencode-ticket": "1" },
+      })
+      expect(legacy.status).toBe(200)
+      const conflicting = await request(`/api/pty/${info.id}/connect-token`, tmp.path, {
+        method: "POST",
+        headers: { "x-vector-ticket": "invalid", "x-opencode-ticket": "1" },
+      })
+      expect(conflicting.status).toBe(403)
 
       const invalid = await request(`/api/pty/${info.id}/connect?ticket=not-a-ticket`, tmp.path)
       expect(invalid.status).toBe(403)

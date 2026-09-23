@@ -18,9 +18,9 @@ const ortRequire = createRequire(require.resolve("@huggingface/transformers"))
 const ortDist = dirname(ortRequire.resolve("onnxruntime-web/ort-wasm-simd-threaded.asyncify.wasm"))
 
 const channel = (() => {
-  const raw = process.env.OPENCODE_CHANNEL
+  const raw = process.env.VECTOR_CHANNEL ?? process.env.OPENCODE_CHANNEL
   if (raw === "dev" || raw === "beta" || raw === "prod") return raw
-  if (process.env.OPENCODE_CHANNEL === "latest") return "prod"
+  if (raw === "latest") return "prod"
   return "dev"
 })()
 

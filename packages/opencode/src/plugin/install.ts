@@ -7,7 +7,8 @@ import {
   printParseErrorCode,
 } from "jsonc-parser"
 
-import * as ConfigPaths from "@/config/paths"
+import { ConfigSchema } from "@/config/schema"
+import { ConfigPaths } from "@/config/paths"
 import { Global } from "@opencode-ai/core/global"
 import { Filesystem } from "@/util/filesystem"
 import { Flock } from "@opencode-ai/core/util/flock"
@@ -31,7 +32,7 @@ export type PatchDeps = {
   readText: (file: string) => Promise<string>
   write: (file: string, text: string) => Promise<void>
   exists: (file: string) => Promise<boolean>
-  files: (dir: string, name: "opencode" | "tui") => string[]
+  files: (dir: string, name: "vector" | "opencode" | "tui") => string[]
 }
 
 export type PatchInput = {
@@ -334,11 +335,11 @@ function patchDir(input: PatchInput) {
   if (input.global) return input.config ?? Global.Path.config
   const git = input.vcs === "git" && input.worktree !== "/"
   const root = git ? input.worktree : input.directory
-  return path.join(root, ".opencode")
+  return path.join(root, ".vector")
 }
 
-function patchName(kind: Kind): "opencode" | "tui" {
-  if (kind === "server") return "opencode"
+function patchName(kind: Kind): "vector" | "opencode" | "tui" {
+  if (kind === "server") return "vector"
   return "tui"
 }
 
@@ -347,14 +348,21 @@ async function patchOne(dir: string, target: Target, spec: string, force: boolea
   await using _ = await Flock.acquire(`plug-config:${Filesystem.resolve(path.join(dir, name))}`)
 
   const files = dep.files(dir, name)
-  let cfg = files[0]
-  for (const file of files) {
-    if (!(await dep.exists(file))) continue
-    cfg = file
-    break
-  }
+  const legacyDir = path.basename(dir) === ".vector" ? path.join(path.dirname(dir), ".opencode") : dir
+  const legacy =
+    target.kind === "server"
+      ? [...dep.files(dir, "opencode"), ...dep.files(legacyDir, "opencode")]
+      : legacyDir !== dir
+        ? dep.files(legacyDir, "tui")
+        : []
+  const source =
+    (await Promise.all([...files, ...legacy].map(async (file) => ((await dep.exists(file)) ? file : undefined)))).find(
+      (file) => file !== undefined,
+    ) ?? files[0]
+  // Keep existing files in place: moving them would reinterpret relative plugin and command paths.
+  const cfg = source
 
-  const src = await dep.readText(cfg).catch((err: NodeJS.ErrnoException) => {
+  const src = await dep.readText(source).catch((err: NodeJS.ErrnoException) => {
     if (err.code === "ENOENT") return "{}"
     return err
   })
@@ -398,7 +406,9 @@ async function patchOne(dir: string, target: Target, spec: string, force: boolea
     }
   }
 
-  const write = await dep.write(cfg, out.text).catch((error: unknown) => error)
+  const write = await dep
+    .write(cfg, ConfigSchema.rewrite(out.text, target.kind === "server" ? "config" : "tui"))
+    .catch((error: unknown) => error)
   if (write instanceof Error) {
     return {
       ok: false,

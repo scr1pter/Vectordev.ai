@@ -300,6 +300,8 @@ describe("HttpApi workspace routing middleware", () => {
       const body = '{"title":"Remote workspace request"}'
       const response = yield* HttpClientRequest.patch(`/probe?workspace=${workspace.id}&keep=yes`).pipe(
         HttpClientRequest.setHeaders({
+          "x-vector-directory": "/secret/vector/path",
+          "x-vector-workspace": "internal-vector",
           "x-opencode-directory": "/secret/path",
           "x-opencode-workspace": "internal",
         }),
@@ -324,6 +326,8 @@ describe("HttpApi workspace routing middleware", () => {
       expect(forwarded?.body).toBe(body)
       expect(forwarded?.headers["content-type"]).toBe("application/json")
       expect(forwarded?.headers["x-target-auth"]).toBe("secret")
+      expect(forwarded?.headers["x-vector-directory"]).toBeUndefined()
+      expect(forwarded?.headers["x-vector-workspace"]).toBeUndefined()
       expect(forwarded?.headers["x-opencode-directory"]).toBeUndefined()
       expect(forwarded?.headers["x-opencode-workspace"]).toBeUndefined()
     }),
@@ -539,15 +543,59 @@ describe("HttpApi workspace routing middleware", () => {
       // Without a selected workspace, the middleware falls back to request
       // directory hints before using the process cwd.
       const queryResponse = yield* HttpClient.get(`/probe?directory=${encodeURIComponent(queryDir)}`)
-      const headerResponse = yield* HttpClientRequest.get("/probe").pipe(
-        HttpClientRequest.setHeader("x-opencode-directory", headerDir),
-        HttpClient.execute,
-      )
-
       expect(queryResponse.status).toBe(200)
       expect(yield* queryResponse.json).toEqual({ directory: queryDir, workspaceID: null })
-      expect(headerResponse.status).toBe(200)
-      expect(yield* headerResponse.json).toEqual({ directory: headerDir, workspaceID: null })
+      for (const header of ["x-vector-directory", "x-opencode-directory"]) {
+        const encodedDirectory = `${headerDir}/space %20 東京`
+        const response = yield* HttpClientRequest.get("/probe").pipe(
+          HttpClientRequest.setHeader(header, encodeURIComponent(encodedDirectory)),
+          HttpClient.execute,
+        )
+        expect(response.status).toBe(200)
+        expect(yield* response.json).toEqual({ directory: encodedDirectory, workspaceID: null })
+      }
+      const preferred = yield* HttpClientRequest.get("/probe").pipe(
+        HttpClientRequest.setHeaders({ "x-vector-directory": queryDir, "x-opencode-directory": headerDir }),
+        HttpClient.execute,
+      )
+      expect(yield* preferred.json).toEqual({ directory: queryDir, workspaceID: null })
+    }),
+  )
+
+  it.live("selects workspaces from Vector and legacy headers with query precedence", () =>
+    Effect.gen(function* () {
+      const dir = yield* tmpdirScoped({ git: true })
+      const project = yield* Project.use.fromDirectory(dir)
+      const workspaceDir = path.join(dir, ".workspace-header")
+      const workspace = yield* createLocalWorkspace({
+        projectID: project.project.id,
+        type: "header-target",
+        directory: workspaceDir,
+      })
+      yield* serveProbe
+      for (const header of ["x-vector-workspace", "x-opencode-workspace"]) {
+        const response = yield* HttpClientRequest.get("/probe").pipe(
+          HttpClientRequest.setHeader(header, workspace.id),
+          HttpClient.execute,
+        )
+        expect(response.status).toBe(200)
+        expect(yield* response.json).toEqual({ directory: workspaceDir, workspaceID: workspace.id })
+      }
+      const preferred = yield* HttpClientRequest.get("/probe").pipe(
+        HttpClientRequest.setHeaders({ "x-vector-workspace": workspace.id, "x-opencode-workspace": "invalid" }),
+        HttpClient.execute,
+      )
+      expect(preferred.status).toBe(200)
+      const query = yield* HttpClientRequest.get(`/probe?workspace=${workspace.id}`).pipe(
+        HttpClientRequest.setHeaders({ "x-vector-workspace": "invalid", "x-opencode-workspace": "invalid" }),
+        HttpClient.execute,
+      )
+      expect(query.status).toBe(200)
+      const invalid = yield* HttpClientRequest.get("/api/probe").pipe(
+        HttpClientRequest.setHeader("x-vector-workspace", "invalid"),
+        HttpClient.execute,
+      )
+      expect(invalid.status).toBe(400)
     }),
   )
 

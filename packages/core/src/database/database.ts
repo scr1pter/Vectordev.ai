@@ -1,3 +1,4 @@
+import { readEnv } from "../flag/compat"
 export * as Database from "./database"
 
 import { EffectDrizzleSqlite } from "@opencode-ai/effect-drizzle-sqlite"
@@ -47,8 +48,8 @@ export function path() {
   }
   if (
     ["latest", "beta", "prod"].includes(InstallationChannel) ||
-    process.env.OPENCODE_DISABLE_CHANNEL_DB === "1" ||
-    process.env.OPENCODE_DISABLE_CHANNEL_DB === "true"
+    readEnv("OPENCODE_DISABLE_CHANNEL_DB") === "1" ||
+    readEnv("OPENCODE_DISABLE_CHANNEL_DB") === "true"
   )
     return join(Global.Path.data, "vector.db")
   return join(Global.Path.data, `vector-${InstallationChannel.replace(/[^a-zA-Z0-9._-]/g, "-")}.db`)

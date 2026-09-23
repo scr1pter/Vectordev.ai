@@ -1,3 +1,4 @@
+import { warnLegacy } from "../flag/compat"
 export * as SkillDiscovery from "./discovery"
 
 import path from "path"
@@ -126,7 +127,7 @@ const layer = Layer.effect(
             }
 
             const skillUrl = new URL(`${encodeURIComponent(skill.name)}/`, source)
-            const versionFile = path.join(root, ".opencode-version")
+            const versionFile = path.join(root, ".vector-version")
             const files = skill.files.map((file) => {
               if (!isSafeRelativePath(file)) return undefined
               let resource: URL
@@ -156,7 +157,20 @@ const layer = Layer.effect(
               const current =
                 version === undefined
                   ? undefined
-                  : yield* fs.readFileStringSafe(versionFile).pipe(Effect.catch(() => Effect.succeed(undefined)))
+                  : yield* fs.readFileStringSafe(versionFile).pipe(
+                      Effect.flatMap((value) =>
+                        value === undefined
+                          ? fs.readFileStringSafe(path.join(root, ".opencode-version")).pipe(
+                              Effect.tap((legacy) =>
+                                Effect.sync(() => {
+                                  if (legacy !== undefined) warnLegacy(".opencode-version", ".vector-version")
+                                }),
+                              ),
+                            )
+                          : Effect.succeed(value),
+                      ),
+                      Effect.catch(() => Effect.succeed(undefined)),
+                    )
               if (version === undefined || current === version) {
                 yield* Effect.forEach(files, (file) => download(file.url, file.destination), {
                   concurrency: fileConcurrency,
@@ -177,7 +191,7 @@ const layer = Layer.effect(
                     (yield* fs.exists(path.join(staging, "SKILL.md")).pipe(Effect.orDie)) ||
                     (yield* fs.exists(path.join(staging, `${skill.name}.md`)).pipe(Effect.orDie))
                   if (!exists) return
-                  yield* fs.writeFileString(path.join(staging, ".opencode-version"), version)
+                  yield* fs.writeFileString(path.join(staging, ".vector-version"), version)
                   yield* Effect.uninterruptible(
                     Effect.gen(function* () {
                       const cached = yield* fs.exists(root).pipe(Effect.orDie)

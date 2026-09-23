@@ -526,9 +526,13 @@ const layer = Layer.effect(
         .run()
         .pipe(Effect.orDie)
 
+      const credentials = JSON.stringify(yield* auth.all())
       const env = {
-        OPENCODE_AUTH_CONTENT: JSON.stringify(yield* auth.all()),
+        VECTOR_AUTH_CONTENT: credentials,
+        OPENCODE_AUTH_CONTENT: credentials,
+        VECTOR_WORKSPACE_ID: config.id,
         OPENCODE_WORKSPACE_ID: config.id,
+        VECTOR_EXPERIMENTAL_WORKSPACES: "true",
         OPENCODE_EXPERIMENTAL_WORKSPACES: "true",
         OTEL_EXPORTER_OTLP_HEADERS: process.env.OTEL_EXPORTER_OTLP_HEADERS,
         OTEL_EXPORTER_OTLP_ENDPOINT: process.env.OTEL_EXPORTER_OTLP_ENDPOINT,

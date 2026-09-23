@@ -14,6 +14,7 @@ import { CorsConfig, isAllowedRequestOrigin, type CorsOptions } from "@opencode-
 import {
   PTY_CONNECT_TICKET_QUERY,
   PTY_CONNECT_TOKEN_HEADER,
+  PTY_CONNECT_TOKEN_LEGACY_HEADER,
   PTY_CONNECT_TOKEN_HEADER_VALUE,
 } from "@/server/shared/pty-ticket"
 import { Effect, Layer, Option, Queue, Schema } from "effect"
@@ -143,7 +144,11 @@ export const ptyHandlers = HttpApiBuilder.group(InstanceHttpApi, "pty", (handler
 
     const connectToken = Effect.fn("PtyHttpApi.connectToken")(function* (ctx: { params: { ptyID: PtyID } }) {
       const request = yield* HttpServerRequest.HttpServerRequest
-      if (request.headers[PTY_CONNECT_TOKEN_HEADER] !== PTY_CONNECT_TOKEN_HEADER_VALUE || !validOrigin(request, cors))
+      if (
+        (request.headers[PTY_CONNECT_TOKEN_HEADER] ?? request.headers[PTY_CONNECT_TOKEN_LEGACY_HEADER]) !==
+          PTY_CONNECT_TOKEN_HEADER_VALUE ||
+        !validOrigin(request, cors)
+      )
         return yield* new ApiError.PtyForbiddenError({ message: "Invalid PTY connect token request" })
       yield* get(ctx)
       return yield* tickets.issue({ ptyID: ctx.params.ptyID, ...(yield* ticketScope) })

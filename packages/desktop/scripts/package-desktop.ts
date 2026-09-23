@@ -92,7 +92,7 @@ if (import.meta.main) {
   const request = packageRequest({
     argv: process.argv.slice(2),
     version: manifest.version,
-    environmentChannel: Bun.env.OPENCODE_CHANNEL,
+    environmentChannel: Bun.env.VECTOR_CHANNEL ?? Bun.env.OPENCODE_CHANNEL,
     unsignedRelease: Bun.env.VECTOR_ALLOW_UNSIGNED_RELEASE === "true",
   })
   const environment = { ...process.env, ...request.environment }

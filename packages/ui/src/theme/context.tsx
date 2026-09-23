@@ -12,10 +12,10 @@ import type { DesktopTheme } from "./types"
 export type ColorScheme = "light" | "dark" | "system"
 
 const STORAGE_KEYS = {
-  THEME_ID: "opencode-theme-id",
-  COLOR_SCHEME: "opencode-color-scheme",
-  THEME_CSS_LIGHT: "opencode-theme-css-light",
-  THEME_CSS_DARK: "opencode-theme-css-dark",
+  THEME_ID: "vector-theme-id",
+  COLOR_SCHEME: "vector-color-scheme",
+  THEME_CSS_LIGHT: "vector-theme-css-light",
+  THEME_CSS_DARK: "vector-theme-css-dark",
 } as const
 
 const THEME_STYLE_ID = "oc-theme"
@@ -91,7 +91,14 @@ function normalize(id: string | null | undefined) {
 function read(key: string) {
   if (typeof localStorage !== "object") return null
   try {
-    return localStorage.getItem(key)
+    const current = localStorage.getItem(key)
+    if (current !== null) return current
+    const legacy = localStorage.getItem(key.replace(/^vector-/, "opencode-"))
+    if (legacy !== null) {
+      localStorage.setItem(key, legacy)
+      console.warn("[Vector] Migrated legacy theme preferences.")
+    }
+    return legacy
   } catch {
     return null
   }

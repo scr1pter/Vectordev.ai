@@ -6,7 +6,7 @@ import { app } from "electron"
 import { checkHealth } from "../server"
 import { type WslCommandLine, resolveWslOpencode, shellEscape, wslArgs } from "./runtime"
 import { pollWslHealth } from "./startup"
-import { VECTOR_AGENT_RUNTIME_ENV } from "../agent-runtime"
+import { VECTOR_AGENT_RUNTIME_ENV, vectorRuntimeEnv } from "../agent-runtime"
 
 export type WslSidecar = {
   listener: { stop: () => void; onExit: (cb: (code: number | null, signal: NodeJS.Signals | null) => void) => void }
@@ -19,31 +19,35 @@ export async function spawnWslSidecar(
   distro: string,
   opts: { onLine?: (line: WslCommandLine) => void; healthTimeoutMs?: number } = {},
 ): Promise<WslSidecar> {
-  const opencode = await resolveWslOpencode(distro)
-  if (!opencode) throw new Error(`Vector is not installed in ${distro}`)
+  const vector = await resolveWslOpencode(distro)
+  if (!vector) throw new Error(`Vector is not installed in ${distro}`)
 
   const port = await allocatePort()
   const password = randomUUID()
-  const username = "opencode"
+  const username = "vector"
   const script = [
     "set -euo pipefail",
     'cd "$HOME" || cd /',
     'PATH=$(awk -v RS=: -v ORS=: \'$0 !~ /^\\/mnt\\//\' <<<"$PATH" | sed "s/:$//")',
     "export PATH",
     "export WSLENV=",
-    "export OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER=true",
-    `export OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS=${VECTOR_AGENT_RUNTIME_ENV.OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS}`,
+    ...Object.entries({
+      ...VECTOR_AGENT_RUNTIME_ENV,
+      ...vectorRuntimeEnv({
+        OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER: "true",
+        OPENCODE_CLIENT: "desktop",
+        OPENCODE_SERVER_USERNAME: username,
+        OPENCODE_SERVER_PASSWORD: password,
+      }),
+    }).map(([key, value]) => `export ${key}=${shellEscape(value)}`),
     ...(process.env.VECTOR_MCP_AUTH_KEY
       ? [`export VECTOR_MCP_AUTH_KEY=${shellEscape(process.env.VECTOR_MCP_AUTH_KEY)}`]
       : []),
     ...(process.env.VECTOR_CREDENTIAL_KEY
       ? [`export VECTOR_CREDENTIAL_KEY=${shellEscape(process.env.VECTOR_CREDENTIAL_KEY)}`]
       : []),
-    "export OPENCODE_CLIENT=desktop",
-    `export OPENCODE_SERVER_USERNAME=${shellEscape(username)}`,
-    `export OPENCODE_SERVER_PASSWORD=${shellEscape(password)}`,
     'export XDG_STATE_HOME="$HOME/.local/state"',
-    `exec ${shellEscape(opencode)} --print-logs --log-level ${app.isPackaged ? "WARN" : "INFO"} serve --hostname 0.0.0.0 --port ${port}`,
+    `exec ${shellEscape(vector)} --print-logs --log-level ${app.isPackaged ? "WARN" : "INFO"} serve --hostname 0.0.0.0 --port ${port}`,
   ].join("\n")
   const child = spawn("wsl", wslArgs(["bash", "-se"], distro), {
     env: untrustedChildEnvironment(),

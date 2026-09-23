@@ -128,7 +128,10 @@ describe("authenticationSummary", () => {
 describe("splitOptionalLabel", () => {
   test("splits a trailing parenthetical off the label", () => {
     expect(splitOptionalLabel("Username (optional)")).toEqual({ text: "Username", hint: "optional" })
-    expect(splitOptionalLabel("Nom d'utilisateur (optionnel)")).toEqual({ text: "Nom d'utilisateur", hint: "optionnel" })
+    expect(splitOptionalLabel("Nom d'utilisateur (optionnel)")).toEqual({
+      text: "Nom d'utilisateur",
+      hint: "optionnel",
+    })
   })
 
   test("handles full-width brackets", () => {
@@ -179,7 +182,7 @@ describe("serverFormCopy", () => {
     const tokens = templateParts(SERVER_FORM_COPY.authHint).flatMap((part) => ("token" in part ? [part.token] : []))
     expect(tokens).toEqual(["desktop", "cli"])
     expect(DEFAULT_SERVER_USERNAME).toBe("vector")
-    expect(CLI_SERVER_USERNAME).toBe("opencode")
+    expect(CLI_SERVER_USERNAME).toBe("vector")
   })
 })
 
@@ -243,9 +246,15 @@ describe("createPreviewScheduler", () => {
     const scheduler = createPreviewScheduler({ delayMs: 10, timers: clock.timers })
     const older = deferred<string>()
     const applied: string[] = []
-    scheduler.schedule(() => older.promise, (value) => applied.push(value))
+    scheduler.schedule(
+      () => older.promise,
+      (value) => applied.push(value),
+    )
     clock.flush()
-    scheduler.schedule(() => Promise.resolve("newer"), (value) => applied.push(value))
+    scheduler.schedule(
+      () => Promise.resolve("newer"),
+      (value) => applied.push(value),
+    )
     clock.flush()
     await Promise.resolve()
     await Promise.resolve()
@@ -259,11 +268,17 @@ describe("createPreviewScheduler", () => {
     const clock = fakeTimers()
     const scheduler = createPreviewScheduler({ delayMs: 10, timers: clock.timers })
     const applied: string[] = []
-    scheduler.schedule(() => Promise.resolve("pending"), (value) => applied.push(value))
+    scheduler.schedule(
+      () => Promise.resolve("pending"),
+      (value) => applied.push(value),
+    )
     scheduler.cancel()
     expect(clock.pending.size).toBe(0)
     const inflight = deferred<string>()
-    scheduler.schedule(() => inflight.promise, (value) => applied.push(value))
+    scheduler.schedule(
+      () => inflight.promise,
+      (value) => applied.push(value),
+    )
     clock.flush()
     scheduler.cancel()
     inflight.resolve("inflight")
@@ -276,7 +291,10 @@ describe("createPreviewScheduler", () => {
     const clock = fakeTimers()
     const scheduler = createPreviewScheduler({ delayMs: 10, timers: clock.timers })
     const applied: string[] = []
-    scheduler.schedule(() => Promise.reject(new Error("boom")), (value: string) => applied.push(value))
+    scheduler.schedule(
+      () => Promise.reject(new Error("boom")),
+      (value: string) => applied.push(value),
+    )
     clock.flush()
     await Promise.resolve()
     await Promise.resolve()

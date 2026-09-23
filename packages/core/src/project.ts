@@ -1,3 +1,4 @@
+import { warnLegacy } from "./flag/compat"
 export * as ProjectV2 from "./project"
 export * as Project from "./project"
 
@@ -63,7 +64,12 @@ const layer = Layer.effect(
     })
 
     const cached = Effect.fnUntraced(function* (dir: string) {
-      return yield* fs.readFileString(path.join(dir, "opencode")).pipe(
+      return yield* fs.readFileString(path.join(dir, "vector", "project-id")).pipe(
+        Effect.catch(() =>
+          fs
+            .readFileString(path.join(dir, "opencode"))
+            .pipe(Effect.tap(() => Effect.sync(() => warnLegacy(".git/opencode", ".git/vector/project-id")))),
+        ),
         Effect.map((value) => value.trim()),
         Effect.map((value) => (value ? ID.make(value) : undefined)),
         Effect.catch(() => Effect.succeed(undefined)),
@@ -122,7 +128,7 @@ const layer = Layer.effect(
     })
 
     const commit = Effect.fn("Project.commit")(function* (input: { store: AbsolutePath; id: ID }) {
-      yield* fs.writeFileString(path.join(input.store, "opencode"), input.id).pipe(Effect.ignore)
+      yield* fs.writeWithDirs(path.join(input.store, "vector", "project-id"), input.id).pipe(Effect.ignore)
     })
 
     return Service.of({ directories, resolve, commit })

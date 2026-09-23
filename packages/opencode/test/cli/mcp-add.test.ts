@@ -3,7 +3,7 @@ import { Effect } from "effect"
 import path from "path"
 import { cliIt } from "../lib/cli-process"
 
-describe("opencode mcp add (non-interactive subprocess)", () => {
+describe("vector mcp add (non-interactive subprocess)", () => {
   cliIt.concurrent(
     "adds a remote server with HTTP headers",
     ({ home, opencode }) =>
@@ -21,9 +21,7 @@ describe("opencode mcp add (non-interactive subprocess)", () => {
         ])
         opencode.expectExit(result, 0)
 
-        const config = yield* Effect.promise(() =>
-          Bun.file(path.join(home, ".config", "vector", "opencode.json")).json(),
-        )
+        const config = yield* Effect.promise(() => Bun.file(path.join(home, ".config", "vector", "vector.json")).json())
         expect(config.mcp.github).toEqual({
           type: "remote",
           url: "https://example.com/mcp",
@@ -57,9 +55,7 @@ describe("opencode mcp add (non-interactive subprocess)", () => {
         ])
         opencode.expectExit(result, 0)
 
-        const config = yield* Effect.promise(() =>
-          Bun.file(path.join(home, ".config", "vector", "opencode.json")).json(),
-        )
+        const config = yield* Effect.promise(() => Bun.file(path.join(home, ".config", "vector", "vector.json")).json())
         expect(config.mcp.local).toEqual({
           type: "local",
           command: ["npx", "-y", "@example/server", "--label", "two words"],

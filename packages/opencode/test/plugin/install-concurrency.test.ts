@@ -20,6 +20,13 @@ function run(msg: Msg) {
   return Process.run([process.execPath, worker, JSON.stringify(msg)], {
     cwd: root,
     nothrow: true,
+    exactEnv: true,
+    env: Object.fromEntries(
+      Object.entries(process.env).map(([key, value]) => {
+        const current = key.replace(/^OPENCODE_/, "VECTOR_")
+        return [current, process.env[current] ?? value]
+      }),
+    ),
   })
 }
 
@@ -82,7 +89,7 @@ describe("plugin.install.concurrent", () => {
     expect(out.map((x) => x.code)).toEqual(Array.from({ length: all.length }, () => 0))
     expect(out.map((x) => x.stderr.toString()).filter(Boolean)).toEqual([])
 
-    const cfg = await read(path.join(tmp.path, ".opencode", "opencode.jsonc"))
+    const cfg = await read(path.join(tmp.path, ".vector", "vector.jsonc"))
     expectPlugins(cfg.plugin, all)
   }, 25_000)
 
@@ -105,8 +112,8 @@ describe("plugin.install.concurrent", () => {
     expect(out.map((x) => x.code)).toEqual(Array.from({ length: all.length }, () => 0))
     expect(out.map((x) => x.stderr.toString()).filter(Boolean)).toEqual([])
 
-    const server = await read(path.join(tmp.path, ".opencode", "opencode.jsonc"))
-    const tui = await read(path.join(tmp.path, ".opencode", "tui.jsonc"))
+    const server = await read(path.join(tmp.path, ".vector", "vector.jsonc"))
+    const tui = await read(path.join(tmp.path, ".vector", "tui.jsonc"))
     expectPlugins(server.plugin, all)
     expectPlugins(tui.plugin, all)
   }, 25_000)

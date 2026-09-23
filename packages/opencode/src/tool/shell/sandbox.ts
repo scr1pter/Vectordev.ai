@@ -1,3 +1,4 @@
+import { readEnv } from "@opencode-ai/core/flag/compat"
 export * as Sandbox from "./sandbox"
 
 import fs from "node:fs"
@@ -27,7 +28,7 @@ export type Wrapped = {
 
 const SEATBELT = "/usr/bin/sandbox-exec"
 
-export function sandboxEnabled(value = process.env.OPENCODE_SHELL_SANDBOX) {
+export function sandboxEnabled(value = readEnv("OPENCODE_SHELL_SANDBOX")) {
   if (value === undefined) return false
   return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase())
 }

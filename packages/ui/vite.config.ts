@@ -45,10 +45,15 @@ function providerIconsPlugin() {
 }
 
 async function fetchProviderIcons() {
-  const url = process.env.OPENCODE_MODELS_URL || "https://models.dev"
+  // Build-time asset generation only; shipped clients use checked-in icons.
+  const url =
+    process.env.VECTOR_MODELS_BUILD_URL ??
+    process.env.VECTOR_MODELS_URL ??
+    process.env.OPENCODE_MODELS_URL ??
+    "https://models.dev"
   const providers = await fetch(`${url}/api.json`)
     .then((res) => res.json())
-    .then((json) => Object.keys(json))
+    .then((json) => Object.keys(json).filter((id) => !id.toLowerCase().startsWith("opencode")))
   await Promise.all(
     providers.map((provider) =>
       fetch(`${url}/logos/${provider}.svg`)

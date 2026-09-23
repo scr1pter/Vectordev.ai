@@ -833,6 +833,10 @@ describe("vector review: the command", () => {
         ).toEqual([["src/list.ts", 3]])
         expect(printed.outcome.sessions).toHaveLength(1)
         expect(first.stderr).toContain("Reviewing 1 file with test/test-model")
+        expect(first.stderr).not.toContain("could not save this review for next time")
+        expect(yield* Effect.promise(() => Bun.file(path.join(home, ".git/vector/review/feature.json")).exists())).toBe(
+          true,
+        )
 
         const second = yield* opencode.spawn(["review", "--fail-on", "blocking"], { timeoutMs: 90_000 })
         opencode.expectExit(second, 1, "the saved blocking finding is still open")

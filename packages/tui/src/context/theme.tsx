@@ -38,7 +38,7 @@ const themeSource: ThemeSource = {
   async discover() {
     const directories = [Global.Path.config]
     for (let current = process.cwd(); ; current = path.dirname(current)) {
-      directories.push(path.join(current, ".opencode"))
+      directories.push(path.join(current, ".opencode"), path.join(current, ".vector"))
       if (path.dirname(current) === current) break
     }
     return discoverThemes(directories)
@@ -93,7 +93,7 @@ const [store, setStore] = createStore<State>({
   themes: allThemes(),
   mode: "dark",
   lock: undefined,
-  active: "opencode",
+  active: "vector",
   ready: false,
 })
 
@@ -118,15 +118,15 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
         if (!lock && pick(kv.get("theme_mode")) !== undefined) kv.set("theme_mode", undefined)
         draft.mode = mode
         draft.lock = lock
-        const active = config.theme ?? kv.get("theme", "opencode")
-        draft.active = typeof active === "string" ? active : "opencode"
+        const active = config.theme ?? kv.get("theme", "vector")
+        draft.active = typeof active === "string" && active !== "opencode" ? active : "vector"
         draft.ready = false
       }),
     )
 
     createEffect(() => {
       const theme = config.theme
-      if (theme) setStore("active", theme)
+      if (theme) setStore("active", theme === "opencode" ? "vector" : theme)
     })
 
     function syncCustomThemes() {
@@ -140,7 +140,7 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
             }, {}),
           )
         })
-        .catch(() => setStore("active", "opencode"))
+        .catch(() => setStore("active", "vector"))
     }
 
     onMount(() => {
@@ -159,7 +159,7 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
           if (!colors.palette[0]) {
             if (hasResolvedSystemTheme) return
             setSystemTheme(undefined)
-            if (store.active === "system") setStore("active", "opencode")
+            if (store.active === "system") setStore("active", "vector")
             return
           }
           const next = store.lock ?? terminalMode(colors) ?? mode
@@ -174,7 +174,7 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
         .catch(() => {
           if (hasResolvedSystemTheme) return
           setSystemTheme(undefined)
-          if (store.active === "system") setStore("active", "opencode")
+          if (store.active === "system") setStore("active", "vector")
         })
     }
 
@@ -263,7 +263,7 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
         if (theme) return resolveTheme(theme, store.mode)
       }
 
-      return resolveTheme(store.themes.opencode, store.mode)
+      return resolveTheme(store.themes.vector, store.mode)
     })
 
     createEffect(() => renderer.setBackgroundColor(values().background))
@@ -292,8 +292,8 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
       setMode: pin,
       set(theme: string) {
         if (!hasTheme(theme)) return false
-        setStore("active", theme)
-        kv.set("theme", theme)
+        setStore("active", theme === "opencode" ? "vector" : theme)
+        kv.set("theme", theme === "opencode" ? "vector" : theme)
         return true
       },
       get ready() {

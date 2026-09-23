@@ -8,16 +8,21 @@ export { type Config as OpencodeClientConfig, OpencodeClient }
 
 function pick(value: string | null, fallback?: string) {
   if (!value) return
-  if (!fallback) return value
-  if (value === fallback) return fallback
-  if (value === encodeURIComponent(fallback)) return fallback
-  return value
+  if (fallback && (value === fallback || value === encodeURIComponent(fallback))) return fallback
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return value
+  }
 }
 
 function rewrite(request: Request, directory?: string) {
   if (request.method !== "GET" && request.method !== "HEAD") return request
 
-  const value = pick(request.headers.get("x-opencode-directory"), directory)
+  const value = pick(
+    request.headers.get("x-vector-directory") || request.headers.get("x-opencode-directory"),
+    directory,
+  )
   if (!value) return request
 
   const url = new URL(request.url)
@@ -26,6 +31,7 @@ function rewrite(request: Request, directory?: string) {
   }
 
   const next = new Request(url, request)
+  next.headers.delete("x-vector-directory")
   next.headers.delete("x-opencode-directory")
   return next
 }
@@ -46,6 +52,7 @@ export function createOpencodeClient(config?: Config & { directory?: string }) {
   if (config?.directory) {
     config.headers = {
       ...config.headers,
+      "x-vector-directory": encodeURIComponent(config.directory),
       "x-opencode-directory": encodeURIComponent(config.directory),
     }
   }
@@ -55,3 +62,6 @@ export function createOpencodeClient(config?: Config & { directory?: string }) {
   client.interceptors.error.use(wrapClientError)
   return new OpencodeClient({ client })
 }
+
+// The upstream factory name remains available for existing plugins.
+export const createVectorClient = createOpencodeClient

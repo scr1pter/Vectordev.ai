@@ -1,3 +1,4 @@
+import { readEnv } from "@opencode-ai/core/flag/compat"
 import { app } from "electron"
 import { arch, platform } from "node:os"
 
@@ -22,7 +23,7 @@ export async function sendBugReport(input: BugReportInput): Promise<BugReportRes
       version: app.getVersion(),
       platform: platform(),
       arch: arch(),
-      channel: process.env.OPENCODE_CHANNEL || "prod",
+      channel: readEnv("OPENCODE_CHANNEL") || "prod",
     }),
   }).catch((cause: unknown) => (cause instanceof Error ? cause : new Error(String(cause))))
 

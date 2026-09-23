@@ -60,7 +60,7 @@ describe("HttpApi CORS", () => {
     }),
   )
 
-  it.live("adds CORS headers to unauthorized responses", () =>
+  it.live("does not trust upstream web origins by default", () =>
     Effect.gen(function* () {
       const handler = HttpRouter.toWebHandler(
         HttpApiApp.createRoutes().pipe(
@@ -78,7 +78,24 @@ describe("HttpApi CORS", () => {
       )
 
       expect(response.status).toBe(401)
-      expect(response.headers.get("access-control-allow-origin")).toBe("https://app.opencode.ai")
+      expect(response.headers.get("access-control-allow-origin")).toBeNull()
+    }),
+  )
+
+  it.live("rejects every upstream subdomain from the default CORS allowlist", () =>
+    Effect.gen(function* () {
+      for (const origin of [
+        "https://opencode.ai",
+        "https://app.opencode.ai",
+        "https://console.opencode.ai",
+        "https://nested.app.opencode.ai",
+      ]) {
+        const response = yield* HttpClientRequest.options(InstancePaths.path).pipe(
+          HttpClientRequest.setHeaders({ origin, "access-control-request-method": "GET" }),
+          HttpClient.execute,
+        )
+        expect(response.headers["access-control-allow-origin"]).toBeUndefined()
+      }
     }),
   )
 

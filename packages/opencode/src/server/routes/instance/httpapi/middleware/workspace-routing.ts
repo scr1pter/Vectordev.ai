@@ -67,11 +67,15 @@ function configuredWorkspaceID(): WorkspaceV2.ID | undefined {
 }
 
 function selectedWorkspaceID(
+  request: HttpServerRequest.HttpServerRequest,
   url: URL,
   sessionWorkspaceID?: WorkspaceV2.ID,
 ): WorkspaceV2.ID | typeof InvalidWorkspaceID | undefined {
   if (sessionWorkspaceID) return sessionWorkspaceID
-  const workspaceParam = url.searchParams.get("workspace")
+  const workspaceParam =
+    url.searchParams.get("workspace") ||
+    request.headers["x-vector-workspace"] ||
+    request.headers["x-opencode-workspace"]
   if (!workspaceParam) return undefined
   const workspaceID = Schema.decodeUnknownOption(WorkspaceV2.ID)(workspaceParam)
   if (Option.isNone(workspaceID)) return InvalidWorkspaceID
@@ -79,7 +83,15 @@ function selectedWorkspaceID(
 }
 
 function defaultDirectory(request: HttpServerRequest.HttpServerRequest, url: URL): string {
-  return url.searchParams.get("directory") || request.headers["x-opencode-directory"] || process.cwd()
+  const query = url.searchParams.get("directory")
+  if (query) return query
+  const header = request.headers["x-vector-directory"] || request.headers["x-opencode-directory"]
+  if (!header) return process.cwd()
+  try {
+    return decodeURIComponent(header)
+  } catch {
+    return header
+  }
 }
 
 function shouldStayOnControlPlane(request: HttpServerRequest.HttpServerRequest, url: URL): boolean {
@@ -159,7 +171,7 @@ function planRequest(
   return Effect.gen(function* () {
     const url = requestURL(request)
     const envWorkspaceID = configuredWorkspaceID()
-    const workspaceID = selectedWorkspaceID(url, session?.workspaceID)
+    const workspaceID = selectedWorkspaceID(request, url, session?.workspaceID)
     if (workspaceID === InvalidWorkspaceID) {
       if (url.pathname.startsWith("/api/")) return RequestPlan.InvalidWorkspace()
       return RequestPlan.MissingWorkspace({ workspaceID: url.searchParams.get("workspace") ?? "unknown" })

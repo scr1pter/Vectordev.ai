@@ -238,19 +238,23 @@ describe("pty HttpApi bridge", () => {
       message: "Invalid PTY connect token request",
     })
 
-    const missing = await app().request(PtyPaths.connectToken.replace(":ptyID", missingID), {
+    for (const name of ["x-vector-ticket", "x-opencode-ticket"]) {
+      const missing = await app().request(PtyPaths.connectToken.replace(":ptyID", missingID), {
+        method: "POST",
+        headers: { ...headers, [name]: "1" },
+      })
+      expect(missing.status).toBe(404)
+      expect(await missing.json()).toEqual({
+        _tag: "PtyNotFoundError",
+        ptyID: missingID,
+        message: `PTY session not found: ${missingID}`,
+      })
+    }
+    const conflicting = await app().request(PtyPaths.connectToken.replace(":ptyID", missingID), {
       method: "POST",
-      headers: {
-        ...headers,
-        "x-opencode-ticket": "1",
-      },
+      headers: { ...headers, "x-vector-ticket": "invalid", "x-opencode-ticket": "1" },
     })
-    expect(missing.status).toBe(404)
-    expect(await missing.json()).toEqual({
-      _tag: "PtyNotFoundError",
-      ptyID: missingID,
-      message: `PTY session not found: ${missingID}`,
-    })
+    expect(conflicting.status).toBe(403)
   })
   ;(process.platform === "win32" ? effectIt.live.skip : effectIt.live)(
     "serves PTY websocket output and input through Effect routes",

@@ -485,6 +485,11 @@ describe("workspace CRUD", () => {
         expect(JSON.parse(recorded.calls.create[0].env.OPENCODE_AUTH_CONTENT ?? "{}")).toEqual({
           test: { type: "api", key: "secret" },
         })
+        expect(recorded.calls.create[0].env.VECTOR_AUTH_CONTENT).toBe(
+          recorded.calls.create[0].env.OPENCODE_AUTH_CONTENT,
+        )
+        expect(recorded.calls.create[0].env.VECTOR_WORKSPACE_ID).toBe(workspaceID)
+        expect(recorded.calls.create[0].env.VECTOR_EXPERIMENTAL_WORKSPACES).toBe("true")
         expect(recorded.calls.create[0].env.OPENCODE_WORKSPACE_ID).toBe(workspaceID)
         expect(recorded.calls.create[0].env.OPENCODE_EXPERIMENTAL_WORKSPACES).toBe("true")
         expect(recorded.calls.create[0].env.OTEL_EXPORTER_OTLP_HEADERS).toBe("authorization=otel")

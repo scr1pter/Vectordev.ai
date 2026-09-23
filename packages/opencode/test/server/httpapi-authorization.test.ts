@@ -172,3 +172,29 @@ describe("HttpApi authorization middleware", () => {
     }),
   )
 })
+
+for (const [name, routes, route] of [
+  ["v1", apiLayer, "/probe"],
+  ["v2", v2ApiLayer, "/api/probe"],
+] as const) {
+  const vector = testEffect(
+    routes.pipe(Layer.provide(ServerAuth.Config.configLayer({ password: Option.some("secret"), username: "vector" }))),
+  )
+  vector.live(`${name} accepts Vector and legacy Basic usernames and rejects wrong credentials`, () =>
+    Effect.gen(function* () {
+      for (const [username, password, expected] of [
+        ["vector", "secret", 200],
+        ["opencode", "secret", 200],
+        ["vector", "wrong", 401],
+        ["opencode", "wrong", 401],
+        ["other", "secret", 401],
+      ] as const) {
+        const response = yield* HttpClientRequest.get(route).pipe(
+          HttpClientRequest.setHeader("authorization", basic(username, password)),
+          HttpClient.execute,
+        )
+        expect(response.status).toBe(expected)
+      }
+    }),
+  )
+}

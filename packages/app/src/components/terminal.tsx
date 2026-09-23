@@ -446,7 +446,11 @@ export const Terminal = (props: TerminalProps) => {
           const at = Date.now()
           if (at - lastTerminalStartAt > 1200) {
             lastTerminalStartAt = at
-            dispatchTerminalActivity("running", "Terminal command started", `Terminal ${local.pty.title || local.pty.titleNumber || id} received a command.`)
+            dispatchTerminalActivity(
+              "running",
+              "Terminal command started",
+              `Terminal ${local.pty.title || local.pty.titleNumber || id} received a command.`,
+            )
           }
         }
         if (ws?.readyState === WebSocket.OPEN) ws.send(data)
@@ -517,7 +521,7 @@ export const Terminal = (props: TerminalProps) => {
             { ptyID: id, directory },
             {
               throwOnError: false,
-              headers: { "x-opencode-ticket": "1" },
+              headers: { "x-vector-ticket": "1", "x-opencode-ticket": "1" },
             },
           )
           .catch((err: unknown) => {
@@ -582,7 +586,11 @@ export const Terminal = (props: TerminalProps) => {
           if (disposed) return
           tries = 0
           local.onConnect?.()
-          dispatchTerminalActivity("success", "Terminal connected", `Terminal ${local.pty.title || local.pty.titleNumber || id} is ready.`)
+          dispatchTerminalActivity(
+            "success",
+            "Terminal connected",
+            `Terminal ${local.pty.title || local.pty.titleNumber || id} is ready.`,
+          )
           scheduleSize(t.cols, t.rows)
         }
 
@@ -611,7 +619,12 @@ export const Terminal = (props: TerminalProps) => {
             const at = Date.now()
             if (at - lastTerminalErrorAt > 3000) {
               lastTerminalErrorAt = at
-              dispatchTerminalActivity("failed", "Terminal error detected", "Vector noticed error output in the terminal stream.", data.slice(0, 1200))
+              dispatchTerminalActivity(
+                "failed",
+                "Terminal error detected",
+                "Vector noticed error output in the terminal stream.",
+                data.slice(0, 1200),
+              )
             }
           }
           output?.push(data)
@@ -643,10 +656,18 @@ export const Terminal = (props: TerminalProps) => {
           socket.removeEventListener("close", handleClose)
           if (disposed) return
           if (event.code === 1000) {
-            dispatchTerminalActivity("success", "Terminal command completed", `Terminal ${local.pty.title || local.pty.titleNumber || id} closed cleanly.`)
+            dispatchTerminalActivity(
+              "success",
+              "Terminal command completed",
+              `Terminal ${local.pty.title || local.pty.titleNumber || id} closed cleanly.`,
+            )
             return
           }
-          dispatchTerminalActivity("failed", "Terminal connection lost", language.t("terminal.connectionLost.abnormalClose", { code: event.code }))
+          dispatchTerminalActivity(
+            "failed",
+            "Terminal connection lost",
+            language.t("terminal.connectionLost.abnormalClose", { code: event.code }),
+          )
           retry(new Error(language.t("terminal.connectionLost.abnormalClose", { code: event.code })))
         }
 

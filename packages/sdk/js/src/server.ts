@@ -32,9 +32,10 @@ export async function createOpencodeServer(options?: ServerOptions) {
   const args = [`serve`, `--hostname=${options.hostname}`, `--port=${options.port}`]
   if (options.config?.logLevel) args.push(`--log-level=${options.config.logLevel}`)
 
-  const proc = launch(`opencode`, args, {
+  const proc = launch(`vector`, args, {
     env: {
       ...process.env,
+      VECTOR_CONFIG_CONTENT: JSON.stringify(options.config ?? {}),
       OPENCODE_CONFIG_CONTENT: JSON.stringify(options.config ?? {}),
     },
   })
@@ -53,7 +54,7 @@ export async function createOpencodeServer(options?: ServerOptions) {
       output += chunk.toString()
       const lines = output.split("\n")
       for (const line of lines) {
-        if (line.startsWith("opencode server listening")) {
+        if (/^(vector|opencode) server listening/.test(line)) {
           const match = line.match(/on\s+(https?:\/\/[^\s]+)/)
           if (!match) {
             clear()
@@ -115,10 +116,11 @@ export function createOpencodeTui(options?: TuiOptions) {
     args.push(`--agent=${options.agent}`)
   }
 
-  const proc = launch(`opencode`, args, {
+  const proc = launch(`vector`, args, {
     stdio: "inherit",
     env: {
       ...process.env,
+      VECTOR_CONFIG_CONTENT: JSON.stringify(options?.config ?? {}),
       OPENCODE_CONFIG_CONTENT: JSON.stringify(options?.config ?? {}),
     },
   })
@@ -132,3 +134,7 @@ export function createOpencodeTui(options?: TuiOptions) {
     },
   }
 }
+
+// Keep the public upstream names available for existing integrations.
+export const createVectorServer = createOpencodeServer
+export const createVectorTui = createOpencodeTui

@@ -2,7 +2,7 @@ import * as http from "node:http"
 import * as tls from "node:tls"
 import { join } from "node:path"
 import { mkdirSync } from "node:fs"
-import { VECTOR_AGENT_RUNTIME_ENV } from "./agent-runtime"
+import { VECTOR_AGENT_RUNTIME_ENV, vectorRuntimeEnv } from "./agent-runtime"
 
 type NodeHttpWithEnvProxy = typeof http & {
   setGlobalProxyFromEnv: () => void
@@ -94,10 +94,12 @@ function prepareSidecarEnv(password: string, userDataPath: string) {
   }
   Object.assign(process.env, {
     ...VECTOR_AGENT_RUNTIME_ENV,
-    OPENCODE_SERVER_USERNAME: "vector",
-    OPENCODE_SERVER_PASSWORD: password,
+    ...vectorRuntimeEnv({
+      OPENCODE_SERVER_USERNAME: "vector",
+      OPENCODE_SERVER_PASSWORD: password,
+      OPENCODE_CONFIG_DIR: configDir,
+    }),
     VECTOR_APP_NAMESPACE: "vector",
-    OPENCODE_CONFIG_DIR: configDir,
     XDG_DATA_HOME: process.env.XDG_DATA_HOME ?? dataHome,
     XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME ?? xdgConfigHome,
     XDG_CACHE_HOME: process.env.XDG_CACHE_HOME ?? cacheHome,

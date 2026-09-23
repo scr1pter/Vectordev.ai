@@ -10,7 +10,8 @@ const context = Context.empty() as Context.Context<unknown>
 
 function request(route: string, directory: string, init: RequestInit = {}) {
   const headers = new Headers(init.headers)
-  headers.set("x-opencode-directory", directory)
+  if (!headers.has("x-vector-directory") && !headers.has("x-opencode-directory"))
+    headers.set("x-vector-directory", directory)
   return HttpApiApp.webHandler().handler(
     new Request(`http://localhost${route}`, {
       ...init,
@@ -103,6 +104,34 @@ describe("v2 location HttpApi", () => {
       expect(body.location.directory).toBe(tmp.path)
       expect(body.location.project.id).toBeTruthy()
     }
+  })
+
+  test("resolves both header names and prefers explicit Vector location queries", async () => {
+    await using tmp = await tmpdir({ git: true })
+    for (const prefix of ["vector", "opencode"]) {
+      const response = await request("/api/command", tmp.path, {
+        headers: {
+          [`x-${prefix}-directory`]: encodeURIComponent(tmp.path),
+          [`x-${prefix}-workspace`]: "wrk_header",
+        },
+      })
+      expect(response.status).toBe(200)
+      expect((await response.json()).location).toMatchObject({ directory: tmp.path, workspaceID: "wrk_header" })
+    }
+    const response = await request(
+      `/api/command?location[directory]=${encodeURIComponent(tmp.path)}&location[workspace]=wrk_query`,
+      tmp.path,
+      {
+        headers: {
+          "x-vector-directory": "/wrong",
+          "x-opencode-directory": "/legacy",
+          "x-vector-workspace": "wrk_vector",
+          "x-opencode-workspace": "wrk_legacy",
+        },
+      },
+    )
+    expect(response.status).toBe(200)
+    expect((await response.json()).location).toMatchObject({ directory: tmp.path, workspaceID: "wrk_query" })
   })
 
   test("streams native EventV2 payloads across locations", async () => {

@@ -1,3 +1,4 @@
+import { readEnv } from "../flag/compat"
 import { Formatter, Logger, type LogLevel } from "effect"
 import path from "path"
 import { Global } from "../global"
@@ -46,7 +47,7 @@ function format(input: unknown) {
   return /^[^\s="\\]+$/.test(value) ? value : JSON.stringify(value)
 }
 
-export function fileLogger(file = path.join(Global.Path.log, "opencode.log"), id: string = runID) {
+export function fileLogger(file = path.join(Global.Path.log, "vector.log"), id: string = runID) {
   // Do not set batchWindow to 0; it causes high idle CPU usage.
   return Logger.toFile(formatter(id), file, { flag: "a" })
 }
@@ -54,7 +55,7 @@ export function fileLogger(file = path.join(Global.Path.log, "opencode.log"), id
 const stderrLogger = Logger.make((options) => process.stderr.write(formatter().log(options) + "\n"))
 
 export function minimumLogLevel() {
-  const value = process.env.OPENCODE_LOG_LEVEL?.toUpperCase()
+  const value = readEnv("OPENCODE_LOG_LEVEL")?.toUpperCase()
   const levels = {
     DEBUG: "Debug",
     INFO: "Info",
@@ -65,7 +66,7 @@ export function minimumLogLevel() {
 }
 
 export function loggers() {
-  return process.env.OPENCODE_PRINT_LOGS === "1" ? [fileLogger(), stderrLogger] : [fileLogger()]
+  return readEnv("OPENCODE_PRINT_LOGS") === "1" ? [fileLogger(), stderrLogger] : [fileLogger()]
 }
 
 export * as Logging from "./logging"
