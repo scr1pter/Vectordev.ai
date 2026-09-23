@@ -1,7 +1,7 @@
 import { type Accessor, createMemo, createResource } from "solid-js"
 import { createStore } from "solid-js/store"
 import { uniqueBy } from "remeda"
-import { createSimpleContext } from "@opencode-ai/ui/context"
+import { createSimpleContext } from "@vectordevai/ui/context"
 import { useProviders } from "@/hooks/use-providers"
 import { Persist, persisted } from "@/utils/persist"
 

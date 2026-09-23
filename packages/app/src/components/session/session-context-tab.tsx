@@ -1,6 +1,6 @@
 import { createEffect, createMemo, createResource, on, onCleanup, For, Show } from "solid-js"
-import type { Message } from "@opencode-ai/sdk/v2/client"
-import { ScrollView } from "@opencode-ai/ui/scroll-view"
+import type { Message } from "@vectordevai/sdk/v2/client"
+import { ScrollView } from "@vectordevai/ui/scroll-view"
 import { useLanguage } from "@/context/language"
 import { useProviders } from "@/hooks/use-providers"
 import { useSDK } from "@/context/sdk"

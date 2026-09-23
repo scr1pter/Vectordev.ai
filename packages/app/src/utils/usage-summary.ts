@@ -1,4 +1,4 @@
-import type { SessionUsageSummary } from "@opencode-ai/sdk/v2"
+import type { SessionUsageSummary } from "@vectordevai/sdk/v2"
 
 export type UsageStreakDay = {
   date: string

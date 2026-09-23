@@ -1,4 +1,4 @@
-import type { McpLocalConfig, McpRemoteConfig } from "@opencode-ai/sdk/v2/client"
+import type { McpLocalConfig, McpRemoteConfig } from "@vectordevai/sdk/v2/client"
 import type { PluginDef } from "./catalog"
 
 export function pluginAuthValues(plugin: PluginDef, values: Record<string, string>) {

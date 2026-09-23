@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import { createServer } from "node:net"
-import { untrustedChildEnvironment } from "@opencode-ai/core/child-environment"
+import { untrustedChildEnvironment } from "@vectordevai/core/child-environment"
 import { app } from "electron"
 import { checkHealth } from "../server"
 import { type WslCommandLine, resolveWslOpencode, shellEscape, wslArgs } from "./runtime"

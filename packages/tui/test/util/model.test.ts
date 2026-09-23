@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { Provider } from "@opencode-ai/sdk/v2"
+import type { Provider } from "@vectordevai/sdk/v2"
 import { modelProviderName } from "../../src/util/model"
 import { name, parse } from "../../src/util/model"
 

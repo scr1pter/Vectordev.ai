@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process"
 import { platform } from "node:os"
-import { untrustedChildEnvironment } from "@opencode-ai/core/child-environment"
+import { untrustedChildEnvironment } from "@vectordevai/core/child-environment"
 
 import { GH_INSTALL_COMMAND } from "./github-pr"
 import { redactText } from "./security-redaction"

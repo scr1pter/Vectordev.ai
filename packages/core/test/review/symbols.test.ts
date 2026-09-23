@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { parseUnifiedDiff } from "@opencode-ai/core/review/diff"
-import { changedSymbols } from "@opencode-ai/core/review/symbols"
+import { parseUnifiedDiff } from "@vectordevai/core/review/diff"
+import { changedSymbols } from "@vectordevai/core/review/symbols"
 
 function file(path: string, added: string[], removed: string[] = []) {
   return [

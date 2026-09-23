@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process"
 import { stat } from "node:fs/promises"
-import { untrustedChildEnvironment } from "@opencode-ai/core/child-environment"
+import { untrustedChildEnvironment } from "@vectordevai/core/child-environment"
 
 import { createRepo, getGitlabToken } from "./gitlab-auth"
 

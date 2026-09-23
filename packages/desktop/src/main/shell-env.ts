@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process"
 import { readdirSync } from "node:fs"
 import { homedir, userInfo } from "node:os"
 import { basename, join } from "node:path"
-import { untrustedChildEnvironment } from "@opencode-ai/core/child-environment"
+import { untrustedChildEnvironment } from "@vectordevai/core/child-environment"
 
 // Each probe gets at most PROBE_TIMEOUT, and together they never hold startup
 // past TOTAL_TIMEOUT. A `-il` probe that hangs (a .zshrc waiting on a prompt, a

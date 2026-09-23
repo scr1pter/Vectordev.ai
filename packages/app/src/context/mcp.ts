@@ -2,7 +2,7 @@ import { useMutation } from "@tanstack/solid-query"
 import { useLanguage } from "@/context/language"
 import { useSync } from "@/context/sync"
 import { showToast } from "@/utils/toast"
-import type { McpLocalConfig, McpRemoteConfig, McpStatus } from "@opencode-ai/sdk/v2/client"
+import type { McpLocalConfig, McpRemoteConfig, McpStatus } from "@vectordevai/sdk/v2/client"
 
 type AddMcpInput = {
   name: string

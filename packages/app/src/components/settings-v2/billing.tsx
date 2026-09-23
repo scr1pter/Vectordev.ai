@@ -1,5 +1,5 @@
 import { Show, createResource, createSignal } from "solid-js"
-import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
+import { ButtonV2 } from "@vectordevai/ui/v2/button-v2"
 import { usePlatform } from "@/context/platform"
 import type { VectorLicenseStatus } from "@/license"
 import "./settings-v2.css"

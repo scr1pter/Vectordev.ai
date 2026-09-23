@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { base64Encode } from "@opencode-ai/core/util/encode"
+import { base64Encode } from "@vectordevai/core/util/encode"
 import { decodeRouteSegment, projectPathFromWorkspaceRoute, sessionIDFromRouteValue } from "./project-route"
 
 describe("projectPathFromWorkspaceRoute", () => {

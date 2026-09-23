@@ -1,5 +1,5 @@
-import { Dialog, DialogBody, DialogFooter, DialogHeader, DialogTitleGroup } from "@opencode-ai/ui/v2/dialog-v2"
-import { useDialog } from "@opencode-ai/ui/context/dialog"
+import { Dialog, DialogBody, DialogFooter, DialogHeader, DialogTitleGroup } from "@vectordevai/ui/v2/dialog-v2"
+import { useDialog } from "@vectordevai/ui/context/dialog"
 import { type Component, Show, createEffect, createSignal, onCleanup, onMount } from "solid-js"
 import { ServerFormActions, ServerFormFields, ServerGlyph, useServerFormCopy } from "@/components/server/server-form"
 import { useLanguage } from "@/context/language"

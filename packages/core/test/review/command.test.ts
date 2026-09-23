@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { DEFAULT_MENTIONS, parseReviewCommand, type ReviewCommandKind } from "@opencode-ai/core/review/command"
+import { DEFAULT_MENTIONS, parseReviewCommand, type ReviewCommandKind } from "@vectordevai/core/review/command"
 
 const CORPUS: [string, ReviewCommandKind][] = [
   // section 2.4

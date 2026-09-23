@@ -1,6 +1,6 @@
 export * as TeammateMessageTool from "./teammate"
 
-import { ToolFailure } from "@opencode-ai/llm"
+import { ToolFailure } from "@vectordevai/llm"
 import { randomUUID } from "node:crypto"
 import { access, mkdir, rename, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"

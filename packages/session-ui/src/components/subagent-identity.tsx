@@ -1,7 +1,7 @@
 import { Show, type Component } from "solid-js"
 
 // Display identities for the engine's built-in subagents. The engine ids and
-// their descriptions live in packages/opencode/src/agent/agent.ts and must not
+// their descriptions live in packages/engine/src/agent/agent.ts and must not
 // change — the model routes delegation off those. This is a presentation layer
 // keyed by engine id, so a user-defined agent has no identity here and renders
 // exactly as it did before.

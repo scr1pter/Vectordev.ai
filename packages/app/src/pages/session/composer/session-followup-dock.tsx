@@ -1,8 +1,8 @@
 import { For } from "solid-js"
-import { Button } from "@opencode-ai/ui/button"
-import { DockTray } from "@opencode-ai/ui/dock-surface"
-import { Icon } from "@opencode-ai/ui/icon"
-import { IconButton } from "@opencode-ai/ui/icon-button"
+import { Button } from "@vectordevai/ui/button"
+import { DockTray } from "@vectordevai/ui/dock-surface"
+import { Icon } from "@vectordevai/ui/icon"
+import { IconButton } from "@vectordevai/ui/icon-button"
 import { useLanguage } from "@/context/language"
 
 export function SessionFollowupDock(props: {

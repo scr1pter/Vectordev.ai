@@ -1,4 +1,4 @@
-import { checksum } from "@opencode-ai/core/util/encode"
+import { checksum } from "@vectordevai/core/util/encode"
 import { pathKey } from "@/utils/path-key"
 
 export type TaskScope = {

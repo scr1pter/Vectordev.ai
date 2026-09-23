@@ -4,7 +4,7 @@ import { cpus, hostname, platform as osPlatform, arch } from "node:os"
 import { readFile, rename, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { promisify } from "node:util"
-import type { VectorLicenseStatus } from "@opencode-ai/app/license"
+import type { VectorLicenseStatus } from "@vectordevai/app/license"
 
 const execFileAsync = promisify(execFile)
 const OFFLINE_GRACE_MS = 7 * 24 * 60 * 60 * 1000

@@ -5,8 +5,8 @@ import { cp, mkdir, readFile, readdir, rename, rm, stat, statfs, writeFile } fro
 import { availableParallelism } from "node:os"
 import { basename, dirname, join, relative } from "node:path"
 import { app } from "electron"
-import { VERIFIED_COMPLETION_POLICY } from "@opencode-ai/app/judge"
-import { untrustedChildEnvironment } from "@opencode-ai/core/child-environment"
+import { VERIFIED_COMPLETION_POLICY } from "@vectordevai/app/judge"
+import { untrustedChildEnvironment } from "@vectordevai/core/child-environment"
 import { backupBeforeOverwrite } from "./workspace-checkpoint"
 
 import {

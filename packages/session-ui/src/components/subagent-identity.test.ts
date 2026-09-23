@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { GENERAL_SUBAGENT_ID, isSpecialist, SUBAGENT_IDENTITIES, subagentIdentity } from "./subagent-identity"
 
-// The engine's built-in subagents (packages/opencode/src/agent/agent.ts).
+// The engine's built-in subagents (packages/engine/src/agent/agent.ts).
 // A new engine subagent without an identity would render nameless, so this
 // list is pinned deliberately rather than derived.
 const ENGINE_SUBAGENTS = ["explore", "general", "judge", "debug", "migration", "performance", "review", "security", "test"]
@@ -27,7 +27,7 @@ describe("subagent identities", () => {
   })
 
   // explore, review, security and judge cannot edit files (the engine denies
-  // them every write, packages/opencode/src/agent/agent.ts); saying so in the
+  // them every write, packages/engine/src/agent/agent.ts); saying so in the
   // UI is only honest if the flag matches the engine's own permissions.
   test("the read-only agents are marked read-only", () => {
     expect(SUBAGENT_IDENTITIES.explore!.readOnly).toBe(true)

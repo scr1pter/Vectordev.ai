@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process"
 import { access, readFile } from "node:fs/promises"
 import { join } from "node:path"
-import { untrustedChildEnvironment } from "@opencode-ai/core/child-environment"
+import { untrustedChildEnvironment } from "@vectordevai/core/child-environment"
 
 const MAX_OUTPUT_BYTES = 80_000
 const DEFAULT_TIMEOUT_MS = 120_000

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/package",
-  "name": "@opencode-ai/script",
+  "name": "@vectordevai/script",
   "license": "MIT",
   "dependencies": {
     "semver": "^7.6.3"
@@ -11,5 +11,6 @@
   },
   "exports": {
     ".": "./src/index.ts"
-  }
+  },
+  "private": true
 }

@@ -1,4 +1,4 @@
-import { readEnv } from "@opencode-ai/core/flag/compat"
+import { readEnv } from "@vectordevai/core/flag/compat"
 import { onCleanup, onMount } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Option, Schema, SchemaGetter } from "effect"

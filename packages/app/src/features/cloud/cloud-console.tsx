@@ -2,8 +2,8 @@ import { createEffect, createMemo, createSignal, For, onCleanup, Show } from "so
 import { usePlatform } from "@/context/platform"
 import { DialogGithubPush } from "@/components/session-github-push"
 import { DialogGitlabPush } from "@/components/session-gitlab-push"
-import { Icon } from "@opencode-ai/ui/icon"
-import { useDialog } from "@opencode-ai/ui/context/dialog"
+import { Icon } from "@vectordevai/ui/icon"
+import { useDialog } from "@vectordevai/ui/context/dialog"
 import {
   cloudAgentWorkspaceApi,
   cloudApi,

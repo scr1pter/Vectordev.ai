@@ -2,7 +2,7 @@ import { execFile } from "node:child_process"
 import { access, constants } from "node:fs/promises"
 import { homedir, platform } from "node:os"
 import { join } from "node:path"
-import { untrustedChildEnvironment } from "@opencode-ai/core/child-environment"
+import { untrustedChildEnvironment } from "@vectordevai/core/child-environment"
 
 // Several catalog plugins are published to PyPI and run through `uvx`, which is
 // not installed on most machines. Without this the plugin installs fine and then

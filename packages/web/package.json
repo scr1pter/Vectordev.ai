@@ -1,5 +1,5 @@
 {
-  "name": "@opencode-ai/web",
+  "name": "@vectordevai/web",
   "type": "module",
   "license": "SEE LICENSE IN ../../LICENSE",
   "version": "1.17.14",
@@ -12,7 +12,7 @@
     "build": "astro build"
   },
   "dependencies": {
-    "@opencode-ai/core": "workspace:*",
+    "@vectordevai/core": "workspace:*",
     "@astrojs/cloudflare": "12.6.3",
     "@astrojs/markdown-remark": "6.3.1",
     "@astrojs/react": "4.4.0",
@@ -50,11 +50,12 @@
     "vscode-languageserver-types": "3.17.5"
   },
   "devDependencies": {
-    "opencode": "workspace:*",
     "@types/node": "catalog:",
     "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",
     "@astrojs/check": "0.9.6",
-    "typescript": "catalog:"
-  }
+    "typescript": "catalog:",
+    "@vectordevai/engine": "workspace:*"
+  },
+  "private": true
 }

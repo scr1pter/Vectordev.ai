@@ -1,4 +1,4 @@
-import { readEnv } from "@opencode-ai/core/flag/compat"
+import { readEnv } from "@vectordevai/core/flag/compat"
 import { homedir } from "node:os"
 import { join } from "node:path"
 

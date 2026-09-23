@@ -1,8 +1,8 @@
 import { Component, JSX, Show, createSignal, onCleanup } from "solid-js"
-import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
-import { SelectV2 } from "@opencode-ai/ui/v2/select-v2"
-import { Switch } from "@opencode-ai/ui/v2/switch-v2"
-import { Icon, type IconProps } from "@opencode-ai/ui/icon"
+import { ButtonV2 } from "@vectordevai/ui/v2/button-v2"
+import { SelectV2 } from "@vectordevai/ui/v2/select-v2"
+import { Switch } from "@vectordevai/ui/v2/switch-v2"
+import { Icon, type IconProps } from "@vectordevai/ui/icon"
 import {
   type VectorChatWidthPreference,
   type VectorThemePreference,
@@ -11,7 +11,7 @@ import {
 } from "@/context/settings"
 import "./settings-v2.css"
 
-import { useTheme } from "@opencode-ai/ui/theme/context"
+import { useTheme } from "@vectordevai/ui/theme/context"
 import { useLanguage } from "@/context/language"
 import { LocalMemoryPanel } from "@/features/memory/local-memory-panel"
 import { observeTelemetryPreference, setTelemetryEnabled, telemetryEnabled } from "@/features/privacy/telemetry"

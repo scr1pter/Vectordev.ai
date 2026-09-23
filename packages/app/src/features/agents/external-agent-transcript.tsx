@@ -1,6 +1,6 @@
 import { createEffect, createMemo, createSignal, For, onCleanup, Show } from "solid-js"
 import { createStore } from "solid-js/store"
-import { Markdown } from "@opencode-ai/session-ui/markdown"
+import { Markdown } from "@vectordevai/session-ui/markdown"
 import { showToast } from "@/utils/toast"
 import "./external-agent-chat.css"
 import {

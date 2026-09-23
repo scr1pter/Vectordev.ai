@@ -1,4 +1,4 @@
-import { configEnv, readEnv } from "@opencode-ai/core/flag/compat"
+import { configEnv, readEnv } from "@vectordevai/core/flag/compat"
 export * as ServerAuth from "./auth"
 
 import { Config as EffectConfig, Context, Effect, Layer, Option, Redacted } from "effect"

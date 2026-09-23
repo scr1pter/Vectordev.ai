@@ -1,7 +1,7 @@
-import type { DesktopMenuAction } from "@opencode-ai/app/desktop-menu"
-import type { WslServersPlatform } from "@opencode-ai/app/wsl/types"
-import type { UpdaterState } from "@opencode-ai/app/updater"
-import type { VectorLicenseStatus } from "@opencode-ai/app/license"
+import type { DesktopMenuAction } from "@vectordevai/app/desktop-menu"
+import type { WslServersPlatform } from "@vectordevai/app/wsl/types"
+import type { UpdaterState } from "@vectordevai/app/updater"
+import type { VectorLicenseStatus } from "@vectordevai/app/license"
 import type {
   CloudRuntimeLogResult,
   PublishProgressEvent,
@@ -155,7 +155,7 @@ export type {
   WslServerRuntime,
   WslServersEvent,
   WslServersState,
-} from "@opencode-ai/app/wsl/types"
+} from "@vectordevai/app/wsl/types"
 
 export type ServerReadyData = {
   url: string

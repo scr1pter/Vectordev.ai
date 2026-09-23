@@ -1,5 +1,5 @@
 import type { Component } from "solid-js"
-import type { McpLocalConfig, McpRemoteConfig } from "@opencode-ai/sdk/v2/client"
+import type { McpLocalConfig, McpRemoteConfig } from "@vectordevai/sdk/v2/client"
 
 // Brand marks are simple-icons path data (CC0), 24x24 viewBox, single fill.
 // `satisfies` keeps literal keys so PluginDef.logo stays a checked union.

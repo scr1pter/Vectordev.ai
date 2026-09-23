@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process"
-import { untrustedChildEnvironment } from "@opencode-ai/core/child-environment"
+import { untrustedChildEnvironment } from "@vectordevai/core/child-environment"
 
 export type VoiceSpeechResult = {
   status: "spoken" | "unavailable" | "stopped" | "failed"

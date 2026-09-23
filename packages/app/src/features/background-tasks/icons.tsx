@@ -1,4 +1,4 @@
-import { Icon } from "@opencode-ai/ui/icon"
+import { Icon } from "@vectordevai/ui/icon"
 
 // The panel draws with Vector's shared icon set, the one the session header's
 // Tasks, Changes and Terminal buttons use: square caps and a 1-unit stroke,

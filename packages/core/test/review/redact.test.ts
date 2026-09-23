@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { collectSecretValues, REDACTED, redactSecrets } from "@opencode-ai/core/review/redact"
+import { collectSecretValues, REDACTED, redactSecrets } from "@vectordevai/core/review/redact"
 
 // Placeholders only. Token shapes are assembled at runtime so no token-like literal sits in the source.
 const env = {

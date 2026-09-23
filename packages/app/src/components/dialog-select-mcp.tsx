@@ -1,11 +1,11 @@
 import { Component, createMemo, createSignal, Show } from "solid-js"
 import { useSync } from "@/context/sync"
-import { Dialog } from "@opencode-ai/ui/dialog"
-import { List } from "@opencode-ai/ui/list"
-import { Switch } from "@opencode-ai/ui/switch"
+import { Dialog } from "@vectordevai/ui/dialog"
+import { List } from "@vectordevai/ui/list"
+import { Switch } from "@vectordevai/ui/switch"
 import { useLanguage } from "@/context/language"
 import { useMcpAdd, useMcpRemove, useMcpToggle } from "@/context/mcp"
-import type { McpLocalConfig, McpRemoteConfig } from "@opencode-ai/sdk/v2/client"
+import type { McpLocalConfig, McpRemoteConfig } from "@vectordevai/sdk/v2/client"
 import { showToast } from "@/utils/toast"
 
 const statusLabels = {

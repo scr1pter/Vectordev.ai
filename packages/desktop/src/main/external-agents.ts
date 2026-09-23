@@ -6,7 +6,7 @@ import { homedir } from "node:os"
 import { dirname, isAbsolute, join, normalize, relative, sep } from "node:path"
 import { StringDecoder } from "node:string_decoder"
 import type { AgentChat } from "./parallel-workspace-turns"
-import { untrustedChildEnvironment } from "@opencode-ai/core/child-environment"
+import { untrustedChildEnvironment } from "@vectordevai/core/child-environment"
 
 import {
   fallbackBinDirectories,

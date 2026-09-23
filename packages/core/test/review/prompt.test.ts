@@ -7,9 +7,9 @@ import {
   INJECTION_TITLE,
   wrapUntrusted,
   type PromptInput,
-} from "@opencode-ai/core/review/prompt"
-import { REDACTED } from "@opencode-ai/core/review/redact"
-import type { Finding, PriorFinding } from "@opencode-ai/core/review/types"
+} from "@vectordevai/core/review/prompt"
+import { REDACTED } from "@vectordevai/core/review/redact"
+import type { Finding, PriorFinding } from "@vectordevai/core/review/types"
 
 const HEAD = "d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3"
 const BASE = "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b"

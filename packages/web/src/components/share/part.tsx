@@ -27,7 +27,7 @@ import { ContentBash } from "./content-bash"
 import { ContentError } from "./content-error"
 import { formatCount, formatDuration, formatNumber, normalizeLocale, useShareMessages } from "../share/common"
 import { ContentMarkdown } from "./content-markdown"
-import type { SessionV1 } from "@opencode-ai/core/v1/session"
+import type { SessionV1 } from "@vectordevai/core/v1/session"
 import type { Diagnostic } from "vscode-languageserver-types"
 
 import styles from "./part.module.css"

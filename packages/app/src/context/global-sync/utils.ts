@@ -1,5 +1,5 @@
-import type { Agent, Project, ProviderListResponse } from "@opencode-ai/sdk/v2/client"
-import { NormalizedProviderListResponse } from "@opencode-ai/session-ui/context"
+import type { Agent, Project, ProviderListResponse } from "@vectordevai/sdk/v2/client"
+import { NormalizedProviderListResponse } from "@vectordevai/session-ui/context"
 import { isHiddenProvider } from "@/utils/provider-brand"
 export { pathKey as directoryKey, type PathKey as DirectoryKey } from "@/utils/path-key"
 

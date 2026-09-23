@@ -1,6 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
-  "name": "@opencode-ai/sdk",
+  "name": "@vectordevai/sdk",
   "version": "1.17.14",
   "type": "module",
   "license": "MIT",
@@ -32,5 +32,6 @@
   },
   "dependencies": {
     "cross-spawn": "catalog:"
-  }
+  },
+  "private": true
 }

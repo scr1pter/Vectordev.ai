@@ -1,4 +1,4 @@
-import { readEnv } from "@opencode-ai/core/flag/compat"
+import { readEnv } from "@vectordevai/core/flag/compat"
 import { app } from "electron"
 import { arch, platform } from "node:os"
 

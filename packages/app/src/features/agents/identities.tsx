@@ -6,4 +6,4 @@ export {
   SubagentAvatar,
   subagentIdentity,
   type SubagentIdentity,
-} from "@opencode-ai/session-ui/subagent-identity"
+} from "@vectordevai/session-ui/subagent-identity"

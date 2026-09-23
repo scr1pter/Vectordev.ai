@@ -1,5 +1,5 @@
-import { createSimpleContext } from "@opencode-ai/ui/context"
-import { base64Encode, checksum } from "@opencode-ai/core/util/encode"
+import { createSimpleContext } from "@vectordevai/ui/context"
+import { base64Encode, checksum } from "@vectordevai/core/util/encode"
 import { useParams, useSearchParams } from "@solidjs/router"
 import { batch, createMemo, createRoot, getOwner, onCleanup, type Accessor } from "solid-js"
 import { createStore, type SetStoreFunction } from "solid-js/store"
@@ -12,7 +12,7 @@ import { useTabs, type Tab } from "./tabs"
 import { ServerConnection } from "./server"
 import { requireServerKey } from "@/utils/session-route"
 import { useSettings } from "./settings"
-import type { FilePartSource } from "@opencode-ai/sdk/v2/client"
+import type { FilePartSource } from "@vectordevai/sdk/v2/client"
 
 interface PartBase {
   content: string

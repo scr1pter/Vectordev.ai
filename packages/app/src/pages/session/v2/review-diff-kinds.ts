@@ -1,4 +1,4 @@
-import type { SnapshotFileDiff, VcsFileDiff } from "@opencode-ai/sdk/v2"
+import type { SnapshotFileDiff, VcsFileDiff } from "@vectordevai/sdk/v2"
 import type { Kind } from "@/components/file-tree-v2"
 
 export type RenderDiff = (SnapshotFileDiff & { file: string }) | VcsFileDiff

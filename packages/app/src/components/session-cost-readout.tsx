@@ -1,5 +1,5 @@
 import { Show, createMemo } from "solid-js"
-import { TooltipV2 } from "@opencode-ai/ui/v2/tooltip-v2"
+import { TooltipV2 } from "@vectordevai/ui/v2/tooltip-v2"
 import { useSync } from "@/context/sync"
 import { useLanguage } from "@/context/language"
 import { useSessionLayout } from "@/pages/session/session-layout"

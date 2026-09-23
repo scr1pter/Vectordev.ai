@@ -1,5 +1,5 @@
-import type { Message, Part, Session, SessionStatus, ToolPart } from "@opencode-ai/sdk/v2"
-import { GENERAL_SUBAGENT_ID, subagentIdentity } from "@opencode-ai/session-ui/subagent-identity"
+import type { Message, Part, Session, SessionStatus, ToolPart } from "@vectordevai/sdk/v2"
+import { GENERAL_SUBAGENT_ID, subagentIdentity } from "@vectordevai/session-ui/subagent-identity"
 
 /*
  * Pure derivation behind the Background tasks panel and the inline task chips.
@@ -21,7 +21,7 @@ export type SubagentKind = "subagent" | "specialist"
 /** Display status. Colours: running purple, waiting amber, done green, failed red, stopped muted, pending outlined. */
 export type TaskStatus = "pending" | "running" | "waiting" | "done" | "failed" | "stopped"
 
-/** Engine lifecycle status (packages/opencode/src/agent/subagent-kind.ts). */
+/** Engine lifecycle status (packages/engine/src/agent/subagent-kind.ts). */
 export type LifecycleStatus = "queued" | "running" | "completed" | "error" | "cancelled"
 
 /** Other names models use for the general-purpose Subagent; mirrors the engine's GENERAL_ALIASES. */

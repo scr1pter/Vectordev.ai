@@ -6,7 +6,7 @@ import {
   MIN_CONTEXT,
   nextStepCostUsd,
   planSpecialists,
-} from "@opencode-ai/core/review/plan"
+} from "@vectordevai/core/review/plan"
 
 describe("planSpecialists", () => {
   test("adds security for sensitive paths when it is auto", () => {

@@ -1,4 +1,4 @@
-import { readEnv } from "@opencode-ai/core/flag/compat"
+import { readEnv } from "@vectordevai/core/flag/compat"
 import { Database } from "bun:sqlite"
 import { statSync } from "node:fs"
 import { readFile as readFileAsync } from "node:fs/promises"

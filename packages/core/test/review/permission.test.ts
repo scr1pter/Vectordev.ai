@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
-import { reviewPermissionRules } from "@opencode-ai/core/review/permission"
-import { Wildcard } from "@opencode-ai/core/util/wildcard"
-import type { PermissionV1 } from "@opencode-ai/core/v1/permission"
+import { reviewPermissionRules } from "@vectordevai/core/review/permission"
+import { Wildcard } from "@vectordevai/core/util/wildcard"
+import type { PermissionV1 } from "@vectordevai/core/v1/permission"
 
 type Rule = PermissionV1.Rule
 

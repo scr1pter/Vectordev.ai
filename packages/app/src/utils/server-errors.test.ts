@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { SessionNotFoundError } from "@opencode-ai/sdk/v2/client"
+import type { SessionNotFoundError } from "@vectordevai/sdk/v2/client"
 import type { ConfigInvalidError, ProviderModelNotFoundError } from "./server-errors"
 import {
   formatServerError,
@@ -115,7 +115,7 @@ describe("formatServerError", () => {
   test("explains stale project folders", () => {
     expect(
       formatWorkspaceFailure(
-        "NotFound: FileSystem.realPath (/Users/Krishna/Missing Project) at packages/opencode/src/file.ts",
+        "NotFound: FileSystem.realPath (/Users/Krishna/Missing Project) at packages/engine/src/file.ts",
       ),
     ).toBe(
       "The project folder is unavailable: /Users/Krishna/Missing Project. Reopen the project from its existing folder.",

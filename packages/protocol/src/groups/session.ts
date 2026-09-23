@@ -1,10 +1,10 @@
-import { SessionMessage } from "@opencode-ai/schema/session-message"
-import { SessionInput } from "@opencode-ai/schema/session-input"
-import { PromptInput } from "@opencode-ai/schema/prompt-input"
-import { Session } from "@opencode-ai/schema/session"
-import { Project } from "@opencode-ai/schema/project"
-import { AbsolutePath, NonNegativeInt, PositiveInt, RelativePath, statics } from "@opencode-ai/schema/schema"
-import { Workspace } from "@opencode-ai/schema/workspace"
+import { SessionMessage } from "@vectordevai/schema/session-message"
+import { SessionInput } from "@vectordevai/schema/session-input"
+import { PromptInput } from "@vectordevai/schema/prompt-input"
+import { Session } from "@vectordevai/schema/session"
+import { Project } from "@vectordevai/schema/project"
+import { AbsolutePath, NonNegativeInt, PositiveInt, RelativePath, statics } from "@vectordevai/schema/schema"
+import { Workspace } from "@vectordevai/schema/workspace"
 import { Context, Effect, Encoding, Result, Schema, Struct } from "effect"
 import { HttpApiEndpoint, HttpApiGroup, HttpApiMiddleware, HttpApiSchema, OpenApi } from "effect/unstable/httpapi"
 import {
@@ -16,11 +16,11 @@ import {
   SessionNotFoundError,
   UnknownError,
 } from "../errors"
-import { Agent } from "@opencode-ai/schema/agent"
-import { Model } from "@opencode-ai/schema/model"
-import { Location } from "@opencode-ai/schema/location"
-import { Revert } from "@opencode-ai/schema/revert"
-import { SessionEvent } from "@opencode-ai/schema/session-event"
+import { Agent } from "@vectordevai/schema/agent"
+import { Model } from "@vectordevai/schema/model"
+import { Location } from "@vectordevai/schema/location"
+import { Revert } from "@vectordevai/schema/revert"
+import { SessionEvent } from "@vectordevai/schema/session-event"
 
 const SessionsQueryFields = {
   workspace: Workspace.ID.pipe(Schema.optional),

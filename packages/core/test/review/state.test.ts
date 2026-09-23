@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { DEFAULT_MENTIONS, parseReviewCommand } from "@opencode-ai/core/review/command"
-import { parseUnifiedDiff } from "@opencode-ai/core/review/diff"
+import { DEFAULT_MENTIONS, parseReviewCommand } from "@vectordevai/core/review/command"
+import { parseUnifiedDiff } from "@vectordevai/core/review/diff"
 import {
   classifyPrior,
   decodeState,
@@ -26,7 +26,7 @@ import {
   SUMMARY_MARKER,
   teamPatterns,
   type ClassifyContext,
-} from "@opencode-ai/core/review/state"
+} from "@vectordevai/core/review/state"
 import type {
   Finding,
   PlacedFinding,
@@ -35,7 +35,7 @@ import type {
   ReviewState,
   Selection,
   SummaryFinding,
-} from "@opencode-ai/core/review/types"
+} from "@vectordevai/core/review/types"
 
 const HEAD = "e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4"
 const OLD = "d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3"

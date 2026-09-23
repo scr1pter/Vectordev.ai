@@ -5,7 +5,7 @@
 // finishes the call. That lets the editor open the file and mark where the
 // change will land before it happens.
 
-import { parse as parsePatch } from "@opencode-ai/core/patch"
+import { parse as parsePatch } from "@vectordevai/core/patch"
 import { locateInsertedText, type LineRange } from "./editor-attribution"
 
 export const EDIT_TOOLS: ReadonlySet<string> = new Set(["edit", "write", "apply_patch"])

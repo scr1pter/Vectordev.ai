@@ -1,5 +1,5 @@
-import type { SessionUsageSummary } from "@opencode-ai/sdk/v2"
-import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
+import type { SessionUsageSummary } from "@vectordevai/sdk/v2"
+import { ButtonV2 } from "@vectordevai/ui/v2/button-v2"
 import { Component, For, Match, Show, Switch, createMemo, createResource, createSignal } from "solid-js"
 import { useServerSDK } from "@/context/server-sdk"
 import { formatServerError } from "@/utils/server-errors"

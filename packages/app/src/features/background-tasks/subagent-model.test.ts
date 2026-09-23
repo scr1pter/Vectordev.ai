@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { AssistantMessage, Message, Part, Session, SessionStatus, ToolPart } from "@opencode-ai/sdk/v2"
+import type { AssistantMessage, Message, Part, Session, SessionStatus, ToolPart } from "@vectordevai/sdk/v2"
 import {
   agentLabel,
   agentStatus,

@@ -18,7 +18,7 @@ import {
   resolveAnchor,
   suggestionAllowed,
   touched,
-} from "@opencode-ai/core/review/diff"
+} from "@vectordevai/core/review/diff"
 
 // fixtures/sample.diff is real `git diff --find-renames` output from a throwaway repository.
 const fixtures = path.join(import.meta.dir, "fixtures")

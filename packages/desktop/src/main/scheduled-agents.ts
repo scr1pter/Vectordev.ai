@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto"
 
 import { getStore } from "./store"
-import { nextRun, type Recurrence } from "@opencode-ai/app/schedule"
+import { nextRun, type Recurrence } from "@vectordevai/app/schedule"
 import type { SpendLedger } from "./spend-limits"
 
 const STORE_NAME = "scheduled-agents"

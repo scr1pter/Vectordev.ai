@@ -1,7 +1,7 @@
 import { execFile, spawn } from "node:child_process"
 import { readdir, readFile, stat, writeFile } from "node:fs/promises"
 import { basename, extname, join, relative } from "node:path"
-import { untrustedChildEnvironment } from "@opencode-ai/core/child-environment"
+import { untrustedChildEnvironment } from "@vectordevai/core/child-environment"
 
 import {
   checkDeployment,

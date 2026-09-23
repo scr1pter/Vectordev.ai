@@ -1,4 +1,4 @@
-import type { IconProps } from "@opencode-ai/ui/icon"
+import type { IconProps } from "@vectordevai/ui/icon"
 import type { SettingsSection } from "./general"
 
 export type SettingsTab =

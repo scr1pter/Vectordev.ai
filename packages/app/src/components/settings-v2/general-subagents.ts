@@ -1,8 +1,8 @@
-import type { Config } from "@opencode-ai/sdk/v2/client"
+import type { Config } from "@vectordevai/sdk/v2/client"
 
 // The General subagents switch in Settings → Agents maps to the engine's
 // `agent.general.disable`. The engine removes a disabled agent from its agent
-// list (packages/opencode/src/agent/agent.ts), so the task tool can no longer
+// list (packages/engine/src/agent/agent.ts), so the task tool can no longer
 // launch a general Subagent; subagent specialists are untouched. The switch is
 // on unless the global config says exactly `disable: true`.
 export const generalSubagentsEnabled = (config: Config) => config.agent?.general?.disable !== true

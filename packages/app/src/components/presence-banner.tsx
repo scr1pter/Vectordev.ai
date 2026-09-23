@@ -1,5 +1,5 @@
-import type { Event as SchemaEvent } from "@opencode-ai/schema/event"
-import type { ServerEvent } from "@opencode-ai/schema/server-event"
+import type { Event as SchemaEvent } from "@vectordevai/schema/event"
+import type { ServerEvent } from "@vectordevai/schema/server-event"
 import { createEffect, createMemo, createSignal, onCleanup, Show } from "solid-js"
 import { createStore, produce, reconcile } from "solid-js/store"
 import { useSDK } from "@/context/sdk"

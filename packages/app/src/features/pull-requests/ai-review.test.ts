@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test"
-import { parseUnifiedDiff } from "@opencode-ai/core/review/diff"
-import { reviewPermissionRules } from "@opencode-ai/core/review/permission"
-import { buildFinalizePrompt } from "@opencode-ai/core/review/prompt"
-import { REVIEW_REPORT_JSON_SCHEMA } from "@opencode-ai/core/review/schema"
+import { parseUnifiedDiff } from "@vectordevai/core/review/diff"
+import { reviewPermissionRules } from "@vectordevai/core/review/permission"
+import { buildFinalizePrompt } from "@vectordevai/core/review/prompt"
+import { REVIEW_REPORT_JSON_SCHEMA } from "@vectordevai/core/review/schema"
 import {
   buildDesktopSummary,
   checkoutLabel,

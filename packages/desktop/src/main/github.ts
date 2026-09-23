@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process"
 import { stat } from "node:fs/promises"
 import { basename } from "node:path"
-import { untrustedChildEnvironment } from "@opencode-ai/core/child-environment"
+import { untrustedChildEnvironment } from "@vectordevai/core/child-environment"
 
 import { createRepo, getGithubToken } from "./github-auth"
 import { agentEnvironment, resolveAgentPath, shimmedCommand, type AgentEnvironment } from "./external-agents"

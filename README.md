@@ -98,7 +98,7 @@ Vector is a Bun monorepo.
 | ----------------------------------------------------- | ------------------------------------------ |
 | `packages/desktop`                                    | The Electron desktop app                   |
 | `packages/app`                                        | The workspace interface                    |
-| `packages/opencode`                                   | The agent server and the `vector` CLI      |
+| `packages/engine`                                   | The agent server and the `vector` CLI      |
 | `packages/tui`                                        | The terminal interface                     |
 | `packages/web`                                        | vectordev.ai                               |
 | `packages/core`, `packages/schema`, `packages/server` | Shared engine, contracts, and HTTP surface |

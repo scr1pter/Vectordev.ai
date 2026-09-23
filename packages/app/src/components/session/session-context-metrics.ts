@@ -1,4 +1,4 @@
-import type { AssistantMessage, Message, Session } from "@opencode-ai/sdk/v2/client"
+import type { AssistantMessage, Message, Session } from "@vectordevai/sdk/v2/client"
 import { brandProviderName } from "@/utils/provider-brand"
 
 type Provider = {

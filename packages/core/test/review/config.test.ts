@@ -5,8 +5,8 @@ import {
   parseReviewRules,
   REVIEW_CONFIG_PATH,
   rulesForPaths,
-} from "@opencode-ai/core/review/config"
-import { DEFAULT_REVIEW_CONFIG } from "@opencode-ai/core/review/types"
+} from "@vectordevai/core/review/config"
+import { DEFAULT_REVIEW_CONFIG } from "@vectordevai/core/review/types"
 
 describe("parseReviewConfig", () => {
   test("returns the defaults in new arrays", () => {

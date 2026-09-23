@@ -9,7 +9,7 @@ const STORE_NAME = "repo-rules-state"
 const STORE_KEY = "rules"
 
 // The engine already loads this path as an instruction file for every prompt in
-// the project (packages/opencode/src/session/instruction.ts). Writing a real
+// the project (packages/engine/src/session/instruction.ts). Writing a real
 // file in the repository rather than hiding rules in application data is the
 // point: a standard the team agreed on is reviewable, diffable, and travels
 // with the clone.

@@ -183,7 +183,7 @@ jobs:
             *) echo "Catalog mirror returned HTTP $status; refusing to replace an unknown release snapshot"; exit 1 ;;
           esac
           export VECTOR_CATALOG_FILE="$PWD/release-catalog/api.json"
-          bun packages/opencode/script/generate.ts
+          bun packages/engine/script/generate.ts
           rm -f release-catalog/mirror.json
           (cd release-catalog && sha256sum api.json > api.sha256)
 
@@ -303,7 +303,7 @@ jobs:
             directory: packages/desktop
             command: bun test --only-failures
           - name: opencode
-            directory: packages/opencode
+            directory: packages/engine
             command: bun test --timeout 30000 --only-failures --max-concurrency 4
           - name: sdk-next
             directory: packages/sdk-next

@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test"
-import { buildReviewBody } from "@opencode-ai/core/review/format"
-import { buildCreateReviewPayload, splitHalves } from "@opencode-ai/core/review/github-payload"
-import { parseReviewMarker } from "@opencode-ai/core/review/state"
-import type { PlacedFinding } from "@opencode-ai/core/review/types"
+import { buildReviewBody } from "@vectordevai/core/review/format"
+import { buildCreateReviewPayload, splitHalves } from "@vectordevai/core/review/github-payload"
+import { parseReviewMarker } from "@vectordevai/core/review/state"
+import type { PlacedFinding } from "@vectordevai/core/review/types"
 
 const HEAD = "d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3"
 

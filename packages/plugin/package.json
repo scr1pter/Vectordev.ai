@@ -1,6 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
-  "name": "@opencode-ai/plugin",
+  "name": "@vectordevai/plugin",
   "version": "1.17.14",
   "type": "module",
   "license": "MIT",
@@ -22,7 +22,7 @@
   ],
   "dependencies": {
     "@ai-sdk/provider": "3.0.8",
-    "@opencode-ai/sdk": "workspace:*",
+    "@vectordevai/sdk": "workspace:*",
     "effect": "catalog:",
     "zod": "catalog:"
   },

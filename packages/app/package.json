@@ -1,5 +1,5 @@
 {
-  "name": "@opencode-ai/app",
+  "name": "@vectordevai/app",
   "version": "1.17.14",
   "description": "",
   "type": "module",
@@ -72,11 +72,11 @@
     "@huggingface/transformers": "4.2.0",
     "@kobalte/core": "catalog:",
     "@lezer/highlight": "1.2.3",
-    "@opencode-ai/core": "workspace:*",
-    "@opencode-ai/schema": "workspace:*",
-    "@opencode-ai/sdk": "workspace:*",
-    "@opencode-ai/session-ui": "workspace:*",
-    "@opencode-ai/ui": "workspace:*",
+    "@vectordevai/core": "workspace:*",
+    "@vectordevai/schema": "workspace:*",
+    "@vectordevai/sdk": "workspace:*",
+    "@vectordevai/session-ui": "workspace:*",
+    "@vectordevai/ui": "workspace:*",
     "@pierre/trees": "1.0.0-beta.4",
     "@sentry/solid": "catalog:",
     "@shikijs/transformers": "3.9.2",
@@ -112,5 +112,6 @@
     "tailwindcss": "catalog:",
     "three": "0.182.0",
     "tiff": "7.1.3"
-  }
+  },
+  "private": true
 }

@@ -5,7 +5,7 @@ import {
   normalizeCode,
   normalizeTitle,
   titleSimilarity,
-} from "@opencode-ai/core/review/fingerprint"
+} from "@vectordevai/core/review/fingerprint"
 
 // A BigInt FNV-1a 64 to check the 32-bit-halves implementation against.
 function reference(text: string) {

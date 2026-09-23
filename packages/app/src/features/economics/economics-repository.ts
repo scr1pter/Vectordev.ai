@@ -4,7 +4,7 @@
 // namespaced per project via an FNV-1a hash (the same `checksum` helper
 // persist.ts uses) so unrelated projects never collide or leak into each
 // other's history.
-import { checksum } from "@opencode-ai/core/util/encode"
+import { checksum } from "@vectordevai/core/util/encode"
 import type { ModelOutcome, TaskCategory } from "./economics-types"
 import type { MeasuredUsage } from "./token-usage"
 

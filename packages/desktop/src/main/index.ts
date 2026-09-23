@@ -1,4 +1,4 @@
-import { readEnv } from "@opencode-ai/core/flag/compat"
+import { readEnv } from "@vectordevai/core/flag/compat"
 import { randomUUID } from "node:crypto"
 import { mkdirSync, rmSync } from "node:fs"
 import * as http from "node:http"

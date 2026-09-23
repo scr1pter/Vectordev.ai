@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { createSignal, type JSX } from "solid-js"
-import { showToastV2, toasterV2 } from "@opencode-ai/ui/v2/toast-v2"
+import { showToastV2, toasterV2 } from "@vectordevai/ui/v2/toast-v2"
 
 describe("showToastV2", () => {
   test("creates no reactive computations at call time", () => {

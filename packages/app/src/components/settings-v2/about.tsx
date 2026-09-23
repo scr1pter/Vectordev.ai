@@ -1,5 +1,5 @@
 import { For, Show, createMemo } from "solid-js"
-import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
+import { ButtonV2 } from "@vectordevai/ui/v2/button-v2"
 import { usePlatform } from "@/context/platform"
 import { useUpdaterAction } from "@/components/updater-action"
 import { updaterPresentation } from "./updater-presentation"

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { fromGitHubFiles } from "@opencode-ai/core/review/diff"
+import { fromGitHubFiles } from "@vectordevai/core/review/diff"
 import {
   classifyFiles,
   classifyPath,
@@ -9,8 +9,8 @@ import {
   isSensitivePath,
   LOCKFILES,
   parseGitAttributes,
-} from "@opencode-ai/core/review/ignore"
-import { DEFAULT_REVIEW_CONFIG } from "@opencode-ai/core/review/types"
+} from "@vectordevai/core/review/ignore"
+import { DEFAULT_REVIEW_CONFIG } from "@vectordevai/core/review/types"
 
 const defaults = { config: DEFAULT_REVIEW_CONFIG }
 

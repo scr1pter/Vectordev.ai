@@ -41,7 +41,7 @@ failing check is attributable to the agent rather than to a flaky registry.
 
 For `--runtime vector` the runner looks for a `vector` or `opencode` binary on
 `PATH`, then falls back to running the engine straight from source
-(`packages/opencode/src/index.ts`), which is the normal case during development.
+(`packages/engine/src/index.ts`), which is the normal case during development.
 Set `VECTOR_EVAL_ENGINE` to point at a specific build.
 
 ## The task set

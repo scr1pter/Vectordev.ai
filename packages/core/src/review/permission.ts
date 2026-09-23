@@ -2,7 +2,7 @@
 // matching rule wins, so the leading "*" deny removes every tool and every question, and the rules after it allow
 // back only what a reviewer needs. Browser-safe: the import is type-only.
 
-import type { PermissionV1 } from "@opencode-ai/core/v1/permission"
+import type { PermissionV1 } from "@vectordevai/core/v1/permission"
 
 const READ_ONLY_TOOLS = ["read", "grep", "glob", "list"]
 

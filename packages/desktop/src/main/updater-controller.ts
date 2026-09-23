@@ -1,6 +1,6 @@
-import type { UpdaterState } from "@opencode-ai/app/updater"
+import type { UpdaterState } from "@vectordevai/app/updater"
 
-export type { UpdaterState } from "@opencode-ai/app/updater"
+export type { UpdaterState } from "@vectordevai/app/updater"
 
 export type UpdaterReadyRecord = { version: string }
 

@@ -2,7 +2,7 @@ import { execFile } from "node:child_process"
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { untrustedChildEnvironment } from "@opencode-ai/core/child-environment"
+import { untrustedChildEnvironment } from "@vectordevai/core/child-environment"
 
 // HEIC decoding in JavaScript means libheif, which is LGPL, and bundling that
 // into a closed-source product creates a licensing conflict. Every desktop OS

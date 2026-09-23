@@ -84,7 +84,7 @@
   /* index.css paints the shell from --vector-workspace-bg, with !important in
      several places, so overriding only the --vx-* ramp left a light sidebar
      floating on a dark body. The settings dialog uses a separate --v2-grey-*
-     scale from @opencode-ai/ui that this block does not cover, which is why
+     scale from @vectordevai/ui that this block does not cover, which is why
      light mode is still partial inside that dialog. */
   --vector-workspace-bg: #f3f2f6;
 }

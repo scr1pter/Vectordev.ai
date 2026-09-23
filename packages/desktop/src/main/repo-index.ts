@@ -2,7 +2,7 @@ import { execFile } from "node:child_process"
 import { createHash } from "node:crypto"
 import { mkdir, readFile, readdir, realpath, rename, stat, writeFile } from "node:fs/promises"
 import { dirname, extname, join, normalize, relative, resolve } from "node:path"
-import { untrustedChildEnvironment } from "@opencode-ai/core/child-environment"
+import { untrustedChildEnvironment } from "@vectordevai/core/child-environment"
 
 // A lexical + structural index: BM25 over identifiers and path segments, an
 // import graph, a symbol table, and git co-change counts. There are no

@@ -31,8 +31,8 @@ import {
   noteTooLarge,
   sanitizeModelMarkdown,
   type SummaryInput,
-} from "@opencode-ai/core/review/format"
-import { emptyState, parseFindingMarker, readState } from "@opencode-ai/core/review/state"
+} from "@vectordevai/core/review/format"
+import { emptyState, parseFindingMarker, readState } from "@vectordevai/core/review/state"
 import type {
   AnchorFailure,
   Finding,
@@ -41,7 +41,7 @@ import type {
   ReviewCost,
   ReviewState,
   Selection,
-} from "@opencode-ai/core/review/types"
+} from "@vectordevai/core/review/types"
 
 // Golden bodies live in fixtures/format-<name>.golden.txt. Run with UPDATE_GOLDEN=1 to rewrite them, then read
 // every changed file against the copy in sections 1.1–1.4 of the design.

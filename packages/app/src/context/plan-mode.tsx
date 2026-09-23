@@ -1,4 +1,4 @@
-import { createSimpleContext } from "@opencode-ai/ui/context"
+import { createSimpleContext } from "@vectordevai/ui/context"
 import { useLocation } from "@solidjs/router"
 import { createEffect, createSignal } from "solid-js"
 import { planModeRouteScope, shouldResetPlanMode } from "./plan-mode-scope"

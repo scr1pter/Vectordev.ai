@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { untrustedChildEnvironment } from "@opencode-ai/core/child-environment"
+import { untrustedChildEnvironment } from "@vectordevai/core/child-environment"
 import { VECTOR_AGENT_RUNTIME_ENV, vectorRuntimeEnv } from "./agent-runtime"
 
 describe("Vector agent runtime", () => {

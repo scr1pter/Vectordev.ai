@@ -12,7 +12,7 @@ import {
 } from "solid-js"
 import { createStore, reconcile } from "solid-js/store"
 import { useNavigate, useParams } from "@solidjs/router"
-import type { Session } from "@opencode-ai/sdk/v2"
+import type { Session } from "@vectordevai/sdk/v2"
 import { useSDK } from "@/context/sdk"
 import { useServerSync } from "@/context/server-sync"
 import { useSync } from "@/context/sync"

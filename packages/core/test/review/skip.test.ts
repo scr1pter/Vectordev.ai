@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { decideSkip, PAUSED_LABEL, type SkipDecision, type SkipInput } from "@opencode-ai/core/review/skip"
-import { DEFAULT_REVIEW_CONFIG, type ReviewState } from "@opencode-ai/core/review/types"
+import { decideSkip, PAUSED_LABEL, type SkipDecision, type SkipInput } from "@vectordevai/core/review/skip"
+import { DEFAULT_REVIEW_CONFIG, type ReviewState } from "@vectordevai/core/review/types"
 
 const head = "d4e5f6a" + "0".repeat(33)
 const older = "a1b2c3d" + "0".repeat(33)

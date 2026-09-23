@@ -285,7 +285,7 @@ export const comparison = [
   ["Recurring work with no window open", "Desktop tray", "—", "—", "—", "—"],
 ]
 
-// The engine's eight subagent specialists (packages/opencode/src/agent/agent.ts)
+// The engine's eight subagent specialists (packages/engine/src/agent/agent.ts)
 // and the display identities painted over them. `general` is not listed: it is
 // the general-purpose Subagent described in `subagentKinds` below. Roles restate
 // the engine descriptions and the labels mirror the real permission sets.
@@ -361,7 +361,7 @@ export const crew = [
 // The two kinds of agent Vector's agent hands work to. "Subagents" are the
 // engine's `general` agent; "Subagent specialists" are the agents in `crew`
 // above plus any agent a user defines. Checked against
-// packages/opencode/src/agent/subagent-kind.ts and src/tool/task.txt.
+// packages/engine/src/agent/subagent-kind.ts and src/tool/task.txt.
 export const subagentKinds = [
   [
     "What they take on",

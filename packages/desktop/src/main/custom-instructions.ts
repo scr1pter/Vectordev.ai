@@ -4,7 +4,7 @@ import { vectorConfigDir } from "./config-path"
 
 // Custom instructions the user wants Vector to follow in every session. This
 // writes the global AGENTS.md the engine already loads as an instruction file
-// on every prompt (packages/opencode/src/session/instruction.ts reads
+// on every prompt (packages/engine/src/session/instruction.ts reads
 // <config>/AGENTS.md), so there is no second mechanism to keep in sync — the
 // panel simply edits the file the engine is already reading.
 

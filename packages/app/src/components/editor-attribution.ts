@@ -3,7 +3,7 @@
 // the agent but carries no line ranges, so the ranges come from comparing the
 // buffer before and after the external update.
 
-import { parse as parsePatch } from "@opencode-ai/core/patch"
+import { parse as parsePatch } from "@vectordevai/core/patch"
 import { diffLines } from "diff"
 
 export type LineRange = { start: number; end: number }

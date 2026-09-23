@@ -9,7 +9,7 @@ import {
   REVIEW_CONFIG_PATH,
   REVIEW_RULES_PATHS,
   rulesForPaths,
-} from "@opencode-ai/core/review/config"
+} from "@vectordevai/core/review/config"
 import {
   anchorText,
   applyPatch,
@@ -22,8 +22,8 @@ import {
   resolveAnchor,
   type AnchorIndex,
   type DiffFile,
-} from "@opencode-ai/core/review/diff"
-import { fingerprint, normalizeCode, normalizeTitle } from "@opencode-ai/core/review/fingerprint"
+} from "@vectordevai/core/review/diff"
+import { fingerprint, normalizeCode, normalizeTitle } from "@vectordevai/core/review/fingerprint"
 import {
   buildSummaryBody,
   costWording,
@@ -32,10 +32,10 @@ import {
   noteNothingToReview,
   sanitizeModelMarkdown,
   type RepoRef,
-} from "@opencode-ai/core/review/format"
-import { classifyFiles, classifyPath, isSensitivePath, parseGitAttributes } from "@opencode-ai/core/review/ignore"
-import { reviewPermissionRules } from "@opencode-ai/core/review/permission"
-import { redactSecrets } from "@opencode-ai/core/review/redact"
+} from "@vectordevai/core/review/format"
+import { classifyFiles, classifyPath, isSensitivePath, parseGitAttributes } from "@vectordevai/core/review/ignore"
+import { reviewPermissionRules } from "@vectordevai/core/review/permission"
+import { redactSecrets } from "@vectordevai/core/review/redact"
 import {
   contextRefusal,
   diffBudgetChars,
@@ -43,16 +43,16 @@ import {
   planSpecialists,
   type ReviewPrice,
   type Specialist,
-} from "@opencode-ai/core/review/plan"
+} from "@vectordevai/core/review/plan"
 import {
   buildFinalizePrompt,
   buildReviewPrompt,
   buildSecurityPrompt,
   type HeadFile,
   type PromptInput,
-} from "@opencode-ai/core/review/prompt"
-import { decodeReport, REVIEW_REPORT_JSON_SCHEMA } from "@opencode-ai/core/review/schema"
-import { selectFindings } from "@opencode-ai/core/review/select"
+} from "@vectordevai/core/review/prompt"
+import { decodeReport, REVIEW_REPORT_JSON_SCHEMA } from "@vectordevai/core/review/schema"
+import { selectFindings } from "@vectordevai/core/review/select"
 import {
   SEVERITIES,
   type CostKind,
@@ -65,7 +65,7 @@ import {
   type Severity,
   type SkippedFile,
   type Trust,
-} from "@opencode-ai/core/review/types"
+} from "@vectordevai/core/review/types"
 
 // No dollar cap here, because the user is watching: a Stop button and this cap end a review instead.
 export const REVIEW_TIMEOUT_MS = 10 * 60_000

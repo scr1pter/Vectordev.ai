@@ -10,12 +10,12 @@ import {
   parseUnifiedDiff,
   resolveAnchor,
   type DiffFile,
-} from "@opencode-ai/core/review/diff"
-import { fingerprint, normalizeCode, normalizeTitle } from "@opencode-ai/core/review/fingerprint"
-import { buildFixedEdit, buildReviewBody, buildSummaryBody } from "@opencode-ai/core/review/format"
-import { buildCreateReviewPayload, splitHalves } from "@opencode-ai/core/review/github-payload"
-import { decodeReport } from "@opencode-ai/core/review/schema"
-import { selectFindings } from "@opencode-ai/core/review/select"
+} from "@vectordevai/core/review/diff"
+import { fingerprint, normalizeCode, normalizeTitle } from "@vectordevai/core/review/fingerprint"
+import { buildFixedEdit, buildReviewBody, buildSummaryBody } from "@vectordevai/core/review/format"
+import { buildCreateReviewPayload, splitHalves } from "@vectordevai/core/review/github-payload"
+import { decodeReport } from "@vectordevai/core/review/schema"
+import { selectFindings } from "@vectordevai/core/review/select"
 import {
   classifyPrior,
   findSticky,
@@ -28,8 +28,8 @@ import {
   readState,
   stateMarker,
   SUMMARY_MARKER,
-} from "@opencode-ai/core/review/state"
-import { DEFAULT_REVIEW_CONFIG, type Finding, type ModelReport, type ReviewCost } from "@opencode-ai/core/review/types"
+} from "@vectordevai/core/review/state"
+import { DEFAULT_REVIEW_CONFIG, type Finding, type ModelReport, type ReviewCost } from "@vectordevai/core/review/types"
 
 const BASE = "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b"
 const FIRST = "d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3"

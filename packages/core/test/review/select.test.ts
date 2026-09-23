@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { parseUnifiedDiff } from "@opencode-ai/core/review/diff"
-import { normalizeTitle } from "@opencode-ai/core/review/fingerprint"
+import { parseUnifiedDiff } from "@vectordevai/core/review/diff"
+import { normalizeTitle } from "@vectordevai/core/review/fingerprint"
 import {
   categoryGroup,
   computeRisk,
@@ -8,8 +8,8 @@ import {
   selectFindings,
   teamPenalty,
   type SelectInput,
-} from "@opencode-ai/core/review/select"
-import type { Finding, PriorFinding } from "@opencode-ai/core/review/types"
+} from "@vectordevai/core/review/select"
+import type { Finding, PriorFinding } from "@vectordevai/core/review/types"
 
 const HEAD = "e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4"
 

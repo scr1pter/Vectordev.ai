@@ -6,8 +6,8 @@ import {
   MAX_REPORT_FINDINGS,
   REVIEW_REPORT_JSON_SCHEMA,
   VERIFY_JSON_SCHEMA,
-} from "@opencode-ai/core/review/schema"
-import { CATEGORIES, SEVERITIES } from "@opencode-ai/core/review/types"
+} from "@vectordevai/core/review/schema"
+import { CATEGORIES, SEVERITIES } from "@vectordevai/core/review/types"
 
 // Every key used anywhere in a schema, at any depth.
 function keys(value: unknown): string[] {

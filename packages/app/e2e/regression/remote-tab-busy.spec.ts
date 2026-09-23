@@ -1,5 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test"
-import { base64Encode } from "@opencode-ai/core/util/encode"
+import { base64Encode } from "@vectordevai/core/util/encode"
 import { expectSessionTitle } from "../utils/waits"
 
 const serverA = "http://127.0.0.1:4096"
