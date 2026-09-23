@@ -40,7 +40,7 @@ async function signWindows(configuration: { path: string }) {
 }
 
 const channel = (() => {
-  const raw = process.env.OPENCODE_CHANNEL
+  const raw = process.env.VECTOR_CHANNEL ?? process.env.OPENCODE_CHANNEL
   if (raw === "dev" || raw === "beta" || raw === "prod") return raw
   return "dev"
 })()
@@ -107,8 +107,16 @@ const getBase = (appId: string, executableName: string): Configuration => ({
       from: path.join(rootDir, "THIRD_PARTY_NOTICES.md"),
       to: "THIRD_PARTY_NOTICES.md",
     },
+    {
+      from: path.join(rootDir, "DEPENDENCY_NOTICES.md"),
+      to: "DEPENDENCY_NOTICES.md",
+    },
   ],
   mac: {
+    extraResources: [
+      { from: "node_modules/electron/dist/LICENSE", to: "Electron-LICENSE.txt" },
+      { from: "node_modules/electron/dist/LICENSES.chromium.html", to: "LICENSES.chromium.html" },
+    ],
     category: "public.app-category.developer-tools",
     icon: `resources/icons/icon.icns`,
     extendInfo: {

@@ -135,15 +135,24 @@ const targets = singleFlag
     })
   : allTargets.filter((item) => {
       // OPENCODE_TARGETS="darwin-arm64,linux-x64" restricts the matrix (used by publish-vector.ts).
-      const only = process.env.OPENCODE_TARGETS?.split(",").map((t) => t.trim()).filter(Boolean)
+      const only = (process.env.VECTOR_TARGETS ?? process.env.OPENCODE_TARGETS)
+        ?.split(",")
+        .map((t) => t.trim())
+        .filter(Boolean)
       if (!only?.length) return true
-      const key = [item.os === "win32" ? "windows" : item.os, item.arch, item.avx2 === false ? "baseline" : undefined, item.abi]
+      const key = [
+        item.os === "win32" ? "windows" : item.os,
+        item.arch,
+        item.avx2 === false ? "baseline" : undefined,
+        item.abi,
+      ]
         .filter(Boolean)
         .join("-")
       return only.includes(key)
     })
 
 await $`rm -rf dist`
+await Bun.write("dist/api.json", generated.modelsData)
 
 const binaries: Record<string, string> = {}
 if (!skipInstall) {
@@ -151,6 +160,7 @@ if (!skipInstall) {
   await $`bun install --os="*" --cpu="*" @parcel/watcher@${pkg.dependencies["@parcel/watcher"]}`
   await $`bun install --os="*" --cpu="*" @ff-labs/fff-bun@${pkg.dependencies["@ff-labs/fff-bun"]}`
 }
+await import("../../../script/dependency-notices.ts")
 for (const item of targets) {
   const name = [
     pkg.name,
@@ -189,8 +199,8 @@ for (const item of targets) {
       autoloadTsconfig: true,
       autoloadPackageJson: true,
       target: name.replace(pkg.name, "bun") as any,
-      outfile: `dist/${name}/bin/opencode`,
-      execArgv: [`--user-agent=opencode/${Script.version}`, "--use-system-ca", "--"],
+      outfile: `dist/${name}/bin/vector`,
+      execArgv: [`--user-agent=vector/${Script.version}`, "--use-system-ca", "--"],
       windows: {},
     },
     files: embeddedFileMap ? { "opencode-web-ui.gen.ts": embeddedFileMap } : {},
@@ -210,7 +220,7 @@ for (const item of targets) {
 
   // Smoke test: only run if binary is for current platform
   if (item.os === process.platform && item.arch === process.arch && !item.abi) {
-    const binaryPath = `dist/${name}/bin/opencode`
+    const binaryPath = `dist/${name}/bin/vector${item.os === "win32" ? ".exe" : ""}`
     console.log(`Running smoke test: ${binaryPath} --version`)
     try {
       const versionOutput = await $`${binaryPath} --version`.text()
@@ -228,6 +238,8 @@ for (const item of targets) {
         name,
         version: Script.version,
         preferUnplugged: true,
+        license: "SEE LICENSE IN LICENSE",
+        files: ["bin", "LICENSE", "THIRD_PARTY_NOTICES.md", "DEPENDENCY_NOTICES.md"],
         os: [item.os],
         cpu: [item.arch],
         ...(item.abi ? { libc: [item.abi] } : {}),
@@ -236,15 +248,20 @@ for (const item of targets) {
       2,
     ),
   )
+  for (const notice of ["LICENSE", "THIRD_PARTY_NOTICES.md", "DEPENDENCY_NOTICES.md"]) {
+    await Bun.write(`dist/${name}/${notice}`, Bun.file(path.join(dir, "../..", notice)))
+  }
   binaries[name] = Script.version
 }
 
 if (Script.release) {
   for (const key of Object.keys(binaries)) {
     if (key.includes("linux")) {
-      await $`tar -czf ../../${key}.tar.gz *`.cwd(`dist/${key}/bin`)
+      await $`tar -czf ../${key}.tar.gz -C bin . -C .. LICENSE THIRD_PARTY_NOTICES.md DEPENDENCY_NOTICES.md`.cwd(
+        `dist/${key}`,
+      )
     } else {
-      await $`zip -r ../../${key}.zip *`.cwd(`dist/${key}/bin`)
+      await $`zip -j ../${key}.zip bin/* LICENSE THIRD_PARTY_NOTICES.md DEPENDENCY_NOTICES.md`.cwd(`dist/${key}`)
     }
   }
   await $`gh release upload v${Script.version} ./dist/*.zip ./dist/*.tar.gz --clobber --repo ${process.env.GH_REPO}`

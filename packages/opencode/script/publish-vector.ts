@@ -35,19 +35,33 @@ const skipBuild = process.argv.includes("--skip-build")
 if (!skipBuild) {
   await $`bun run script/build.ts --skip-install`.env({
     ...process.env,
+    VECTOR_VERSION: version,
+    VECTOR_TARGETS: targets.join(","),
     OPENCODE_VERSION: version,
     OPENCODE_TARGETS: targets.join(","),
+    ...(dryRun ? { VECTOR_RELEASE: "", OPENCODE_RELEASE: "" } : {}),
   })
 }
 
 // Verify every platform before publishing any package, including when reusing a build.
 for (const suffix of targets) {
-  const binary = path.join(
-    "dist",
-    `opencode-${suffix}`,
-    "bin",
-    suffix.startsWith("windows") ? "opencode.exe" : "opencode",
-  )
+  const manifest = await Bun.file(path.join("dist", `opencode-${suffix}`, "package.json")).json()
+  if (manifest.version !== version) {
+    throw new Error(`Refusing to relabel ${suffix} build ${manifest.version} as ${version}; rebuild the CLI`)
+  }
+  const [os, cpu] = suffix.split("-")
+  if (!manifest.os?.includes(os === "windows" ? "win32" : os) || !manifest.cpu?.includes(cpu)) {
+    throw new Error(`Platform manifest does not match ${suffix}`)
+  }
+  for (const file of ["bin", "LICENSE", "THIRD_PARTY_NOTICES.md", "DEPENDENCY_NOTICES.md"]) {
+    if (!manifest.files?.includes(file)) throw new Error(`Missing ${file} from ${suffix} package file list`)
+  }
+  const binary = path.join("dist", `opencode-${suffix}`, "bin", suffix.startsWith("windows") ? "vector.exe" : "vector")
+  for (const notice of ["LICENSE", "THIRD_PARTY_NOTICES.md", "DEPENDENCY_NOTICES.md"]) {
+    if (!(await Bun.file(path.join("dist", `opencode-${suffix}`, notice)).exists())) {
+      throw new Error(`Missing ${notice} in ${suffix}`)
+    }
+  }
   if (Buffer.from(await Bun.file(binary).arrayBuffer()).includes('apiKey:"public"')) {
     throw new Error(`Refusing to publish ${suffix}: the binary still embeds the retired shared-gateway credential`)
   }
@@ -60,7 +74,11 @@ for (const suffix of targets) {
   const name = `${SCOPE}/cli-${suffix}`
   const manifest = await Bun.file(`${src}/package.json`).json()
   await Bun.file(`${src}/package.json`).write(
-    JSON.stringify({ ...manifest, name, version, description: `Vector CLI binary for ${suffix}` }, null, 2),
+    JSON.stringify(
+      { ...manifest, name, version, license: "SEE LICENSE IN LICENSE", description: `Vector CLI binary for ${suffix}` },
+      null,
+      2,
+    ),
   )
   platformPackages[name] = version
 }
@@ -69,7 +87,9 @@ for (const suffix of targets) {
 const out = "dist/vectordev-cli"
 await $`rm -rf ${out}`
 await $`mkdir -p ${out}/bin`
-await Bun.file(`${out}/LICENSE`).write(await Bun.file("../../LICENSE").text())
+for (const notice of ["LICENSE", "THIRD_PARTY_NOTICES.md", "DEPENDENCY_NOTICES.md"]) {
+  await Bun.write(`${out}/${notice}`, Bun.file(`../../${notice}`))
+}
 await Bun.file(`${out}/README.md`).write(
   [
     "# Vector CLI",
@@ -102,7 +122,7 @@ const pkg = "${SCOPE}/cli-" + platform + "-" + arch
 let binary
 try {
   const root = path.dirname(require.resolve(pkg + "/package.json"))
-  binary = [path.join(root, "bin", "opencode.exe"), path.join(root, "bin", "opencode")].find((p) => fs.existsSync(p))
+  binary = [path.join(root, "bin", "vector.exe"), path.join(root, "bin", "vector")].find((p) => fs.existsSync(p))
 } catch {}
 if (!binary) {
   console.error("Vector CLI: no prebuilt binary for " + process.platform + "/" + process.arch + " (expected " + pkg + ").")
@@ -129,12 +149,12 @@ await Bun.file(`${out}/package.json`).write(
       name: UMBRELLA,
       version,
       description: "Vector CLI — the Vector agent in your terminal. Free with a Vector account.",
-      license: "MIT",
+      license: "SEE LICENSE IN LICENSE",
       homepage: "https://vectordev.ai",
       repository: { type: "git", url: "https://github.com/scr1pter/Vectordev.ai.git" },
       keywords: ["vector", "ai", "agent", "cli", "coding-agent", "terminal"],
       bin: { vector: "./bin/vector.cjs" },
-      files: ["bin", "README.md", "LICENSE"],
+      files: ["bin", "README.md", "LICENSE", "THIRD_PARTY_NOTICES.md", "DEPENDENCY_NOTICES.md"],
       optionalDependencies: platformPackages,
       engines: { node: ">=18" },
     },
@@ -149,12 +169,12 @@ async function published(name: string) {
 }
 async function publish(pkgDir: string, name: string) {
   if (process.platform !== "win32") await $`chmod -R 755 .`.cwd(pkgDir)
-  if (await published(name)) {
-    console.log(`already published ${name}@${version}`)
+  if (dryRun) {
+    await $`npm pack --dry-run --offline`.cwd(pkgDir)
     return
   }
-  if (dryRun) {
-    await $`npm pack --dry-run`.cwd(pkgDir)
+  if (await published(name)) {
+    console.log(`already published ${name}@${version}`)
     return
   }
   // Inherit the terminal so npm can prompt for 2FA (OTP or browser confirmation).

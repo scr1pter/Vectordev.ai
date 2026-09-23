@@ -1,5 +1,7 @@
 import { expect, test } from "bun:test"
 import type { Configuration } from "electron-builder"
+import { createRequire } from "node:module"
+import path from "node:path"
 
 const vectorDesktopEntry = "resources/linux/vector-desktop.desktop"
 
@@ -94,4 +96,30 @@ test("allows only an explicit unsigned production package to skip platform verif
   expect(config.win?.signExecutable).toBe(false)
   expect(config.win?.verifyUpdateCodeSignature).toBe(false)
   expect(config.win?.signtoolOptions).toBeUndefined()
+})
+
+test("electron-builder merges common and macOS notices into packaged Resources", async () => {
+  const require = createRequire(import.meta.url)
+  const builderRequire = createRequire(require.resolve("electron-builder/package.json"))
+  const { getFileMatchers } = await import(builderRequire.resolve("app-builder-lib/out/fileMatcher.js"))
+  const config = (await import("./electron-builder.config.ts?license-merge")).default
+  const destination = path.join(import.meta.dirname, "dist/license-test/Vector.app/Contents/Resources")
+  const matchers: { from: string; to: string }[] = getFileMatchers(config, "extraResources", destination, {
+    defaultSrc: import.meta.dirname,
+    customBuildOptions: config.mac,
+    globalOutDir: path.join(import.meta.dirname, "dist"),
+    macroExpander: (value: string) => value,
+  })
+  for (const name of [
+    "LICENSE.txt",
+    "THIRD_PARTY_NOTICES.md",
+    "DEPENDENCY_NOTICES.md",
+    "Electron-LICENSE.txt",
+    "LICENSES.chromium.html",
+  ]) {
+    const matching = matchers.filter((entry) => entry.to === path.join(destination, name))
+    expect(matching.length).toBe(1)
+    expect(await Bun.file(matching[0]!.from).exists()).toBe(true)
+    expect((await Bun.file(matching[0]!.from).text()).length).toBeGreaterThan(100)
+  }
 })

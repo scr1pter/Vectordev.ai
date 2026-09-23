@@ -10,6 +10,14 @@ const notices = [
   ["OpenCode", "MIT License - retained for incorporated upstream portions"],
   ["Electron", "MIT License"],
   ["Solid", "MIT License"],
+  ["Bun / JavaScriptCore", "MIT / LGPL-2; source and relinking information in shipped notices"],
+  ["Material Icon Theme", "MIT License"],
+  [
+    "Inter, JetBrains Mono Nerd Font, Geist, IBM Plex Mono",
+    "SIL Open Font License 1.1; Nerd Fonts patch notices retained",
+  ],
+  ["Tauri and proxy-from-env adaptations", "MIT; Tauri also offered under Apache-2.0"],
+  ["Bundled dependencies", "See DEPENDENCY_NOTICES.md included with each distribution"],
   ["Stripe SDK", "MIT License"],
   ["CodeMirror and Monaco Editor", "MIT License"],
 ] as const

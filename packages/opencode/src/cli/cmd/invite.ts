@@ -1,3 +1,4 @@
+import { readEnv } from "@opencode-ai/core/flag/compat"
 import { Effect } from "effect"
 import { randomBytes } from "crypto"
 import open from "open"
@@ -37,17 +38,17 @@ export const InviteCommand = effectCmd({
     // fresh one for guests. Server.listen reads both from process.env through a
     // fresh ConfigProvider, and Flag keeps this process's own clients in sync.
     const owner = {
-      username: Flag.OPENCODE_SERVER_USERNAME || "opencode",
+      username: Flag.OPENCODE_SERVER_USERNAME || "vector",
       password: Flag.OPENCODE_SERVER_PASSWORD || secret(),
     }
     const guest = {
-      username: process.env.OPENCODE_SERVER_GUEST_USERNAME || GUEST_USERNAME,
+      username: readEnv("OPENCODE_SERVER_GUEST_USERNAME") || GUEST_USERNAME,
       password: secret(),
     }
-    process.env.OPENCODE_SERVER_USERNAME = owner.username
-    process.env.OPENCODE_SERVER_PASSWORD = owner.password
-    process.env.OPENCODE_SERVER_GUEST_USERNAME = guest.username
-    process.env.OPENCODE_SERVER_GUEST_PASSWORD = guest.password
+    process.env.VECTOR_SERVER_USERNAME = process.env.OPENCODE_SERVER_USERNAME = owner.username
+    process.env.VECTOR_SERVER_PASSWORD = process.env.OPENCODE_SERVER_PASSWORD = owner.password
+    process.env.VECTOR_SERVER_GUEST_USERNAME = process.env.OPENCODE_SERVER_GUEST_USERNAME = guest.username
+    process.env.VECTOR_SERVER_GUEST_PASSWORD = process.env.OPENCODE_SERVER_GUEST_PASSWORD = guest.password
     Flag.OPENCODE_SERVER_USERNAME = owner.username
     Flag.OPENCODE_SERVER_PASSWORD = owner.password
 
