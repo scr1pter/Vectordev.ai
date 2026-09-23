@@ -45,40 +45,44 @@ describe("Vector provider authentication", () => {
   })
 })
 
-test("GitLab OAuth uses only the configured registration and reconnects legacy credentials", async () => {
+test("GitLab OAuth stays paused with a configured registration and stored refresh tokens", async () => {
   const previous = process.env.GITLAB_OAUTH_CLIENT_ID
   process.env.GITLAB_OAUTH_CLIENT_ID = "vector-test-registration"
-  const requests: URLSearchParams[] = []
+  const requests: string[] = []
   using server = Bun.serve({
     port: 0,
     async fetch(request) {
-      requests.push(new URLSearchParams(await request.text()))
+      requests.push(await request.text())
       return Response.json({ access_token: "test-access", refresh_token: "test-refresh", expires_in: 3600 })
     },
   })
   try {
     const hooks = await GitlabAuthPlugin({} as never)
-    expect(hooks.auth?.methods.map((method) => method.type)).toEqual(["oauth", "api"])
+    expect(hooks.auth?.methods.map((method) => method.type)).toEqual(["api"])
+    for (const clientId of [undefined, "vector-test-registration"]) {
+      for (const expires of [0, Date.now() + 3_600_000]) {
+        expect(
+          await hooks.auth!.loader!(
+            async () => ({
+              type: "oauth",
+              access: "placeholder",
+              refresh: "placeholder",
+              expires,
+              clientId,
+              enterpriseUrl: server.url.toString(),
+            }),
+            {} as never,
+          ),
+        ).toEqual({})
+      }
+    }
     expect(
       await hooks.auth!.loader!(
-        async () => ({ type: "oauth", access: "old", refresh: "old", expires: Date.now() + 60_000 }),
+        async () => ({ type: "api", key: "placeholder", metadata: { instanceUrl: server.url.toString() } }),
         {} as never,
       ),
-    ).toEqual({})
-    const method = hooks.auth!.methods[0]
-    if (method.type !== "oauth") throw new Error("Expected configured GitLab sign-in")
-    const authorization = await method.authorize({ instanceUrl: server.url.toString() })
-    const url = new URL(authorization.url)
-    expect(url.searchParams.get("client_id")).toBe("vector-test-registration")
-    expect(url.searchParams.get("code_challenge_method")).toBe("S256")
-    const callback = new URL(url.searchParams.get("redirect_uri")!)
-    callback.search = new URLSearchParams({ state: url.searchParams.get("state")!, code: "test-code" }).toString()
-    await fetch(callback)
-    if (authorization.method !== "auto") throw new Error("Expected automatic callback")
-    const credential = await authorization.callback()
-    expect(credential).toMatchObject({ type: "success", clientId: "vector-test-registration", access: "test-access" })
-    expect(requests[0].get("client_id")).toBe("vector-test-registration")
-    expect(requests[0].get("code_verifier")?.length).toBeGreaterThanOrEqual(43)
+    ).toEqual({ apiKey: "placeholder", instanceUrl: server.url.origin })
+    expect(requests).toEqual([])
   } finally {
     if (previous === undefined) delete process.env.GITLAB_OAUTH_CLIENT_ID
     if (previous !== undefined) process.env.GITLAB_OAUTH_CLIENT_ID = previous

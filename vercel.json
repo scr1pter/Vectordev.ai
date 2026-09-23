@@ -2,7 +2,8 @@
   "git": {
     "deploymentEnabled": {
       "workspace-redesign": false,
-      "opencode-exit": false
+      "opencode-exit": false,
+      "vector-only": false
     }
   },
   "installCommand": "bun install",

@@ -10,9 +10,10 @@ export const CHATGPT_SIGN_IN = false
 export const XAI_SIGN_IN = false
 export const POE_SIGN_IN = false
 export const DIGITALOCEAN_SIGN_IN = false
+export const GITLAB_SIGN_IN = false
 
 export function gitlabSignInEnabled() {
-  return Boolean(process.env.GITLAB_OAUTH_CLIENT_ID?.trim())
+  return GITLAB_SIGN_IN && Boolean(process.env.GITLAB_OAUTH_CLIENT_ID?.trim())
 }
 
 export function providerOAuthAllowed(id: string) {

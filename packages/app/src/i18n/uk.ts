@@ -101,7 +101,7 @@ export const dict = {
   "dialog.provider.group.popular": "Популярні",
   "dialog.provider.group.other": "Інші",
   "dialog.provider.tag.recommended": "Рекомендовані",
-  "dialog.provider.anthropic.note": "Прямий доступ до моделей Claude, включаючи Pro та Max",
+  "dialog.provider.anthropic.note": "Моделі Claude з вашим API-ключем Anthropic",
   "dialog.provider.copilot.note": "Моделі AI для допомоги в кодуванні через GitHub Copilot",
   "dialog.provider.openai.note": "Моделі GPT для швидких і універсальних завдань AI",
   "dialog.provider.google.note": "Моделі Gemini для швидких структурованих відповідей",
@@ -118,7 +118,7 @@ export const dict = {
   "dialog.provider.viewAll": "Показати більше провайдерів",
 
   "provider.connect.title": "Підключити {{provider}}",
-  "provider.connect.title.anthropicProMax": "Увійти з Claude Pro/Max",
+  "provider.connect.title.anthropicProMax": "Підключіть свій API-ключ Anthropic",
   "provider.connect.selectMethod": "Виберіть спосіб входу для {{provider}}.",
   "provider.connect.method.apiKey": "Ключ API",
   "provider.connect.status.inProgress": "Авторизація виконується...",

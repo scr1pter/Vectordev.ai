@@ -98,7 +98,7 @@ export const dict = {
   "dialog.provider.group.popular": "ยอดนิยม",
   "dialog.provider.group.other": "อื่น ๆ",
   "dialog.provider.tag.recommended": "แนะนำ",
-  "dialog.provider.anthropic.note": "เข้าถึงโมเดล Claude โดยตรง รวมถึง Pro และ Max",
+  "dialog.provider.anthropic.note": "โมเดล Claude ด้วยคีย์ API ของ Anthropic ของคุณ",
   "dialog.provider.copilot.note": "โมเดล AI สำหรับการช่วยเหลือในการเขียนโค้ดผ่าน GitHub Copilot",
   "dialog.provider.openai.note": "โมเดล GPT สำหรับงาน AI ทั่วไปที่รวดเร็วและมีความสามารถ",
   "dialog.provider.google.note": "โมเดล Gemini สำหรับการตอบสนองที่รวดเร็วและมีโครงสร้าง",
@@ -115,7 +115,7 @@ export const dict = {
   "dialog.provider.viewAll": "แสดงผู้ให้บริการเพิ่มเติม",
 
   "provider.connect.title": "เชื่อมต่อ {{provider}}",
-  "provider.connect.title.anthropicProMax": "เข้าสู่ระบบด้วย Claude Pro/Max",
+  "provider.connect.title.anthropicProMax": "เชื่อมต่อคีย์ API ของ Anthropic ของคุณ",
   "provider.connect.selectMethod": "เลือกวิธีการเข้าสู่ระบบสำหรับ {{provider}}",
   "provider.connect.method.apiKey": "คีย์ API",
   "provider.connect.status.inProgress": "กำลังอนุญาต...",
