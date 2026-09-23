@@ -40,6 +40,19 @@ if (!skipBuild) {
   })
 }
 
+// Verify every platform before publishing any package, including when reusing a build.
+for (const suffix of targets) {
+  const binary = path.join(
+    "dist",
+    `opencode-${suffix}`,
+    "bin",
+    suffix.startsWith("windows") ? "opencode.exe" : "opencode",
+  )
+  if (Buffer.from(await Bun.file(binary).arrayBuffer()).includes('apiKey:"public"')) {
+    throw new Error(`Refusing to publish ${suffix}: the binary still embeds the retired shared-gateway credential`)
+  }
+}
+
 // 1. Rename platform packages: opencode-<suffix> -> @vectordevai/cli-<suffix>
 const platformPackages: Record<string, string> = {}
 for (const suffix of targets) {
@@ -145,7 +158,10 @@ async function publish(pkgDir: string, name: string) {
     return
   }
   // Inherit the terminal so npm can prompt for 2FA (OTP or browser confirmation).
-  const proc = Bun.spawn(["npm", "publish", "--access", "public"], { cwd: pkgDir, stdio: ["inherit", "inherit", "inherit"] })
+  const proc = Bun.spawn(["npm", "publish", "--access", "public"], {
+    cwd: pkgDir,
+    stdio: ["inherit", "inherit", "inherit"],
+  })
   if ((await proc.exited) !== 0) throw new Error(`npm publish failed for ${name}`)
   console.log(`published ${name}@${version}`)
 }
