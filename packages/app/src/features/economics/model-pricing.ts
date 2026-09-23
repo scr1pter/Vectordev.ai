@@ -1,7 +1,7 @@
 // Prices a run from the engine's own per-model cost catalog.
 //
 // Vector already knows what every model charges: the engine resolves each
-// model's rates from models.dev and hands them to the renderer on
+// model's rates from the bundled model catalog and hands them to the renderer on
 // `Provider.models[id].cost` (USD per 1M tokens, with separate cache read and
 // write rates and optional context tiers). That is the same catalog the engine
 // bills sessions against, so pricing here agrees with the "Total cost" the user

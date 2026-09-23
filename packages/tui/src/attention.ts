@@ -38,14 +38,14 @@ type TuiAttentionHost = TuiAttention & {
   dispose(): void
 }
 
-const DEFAULT_TITLE = "opencode"
-const DEFAULT_PACK_ID = "opencode.default"
+const DEFAULT_TITLE = "Vector"
+const DEFAULT_PACK_ID = "vector.default"
 const KV_SOUND_PACK = "attention_sound_pack"
 const TITLE_LIMIT = 80
 const MESSAGE_LIMIT = 240
 const BUILTIN_PACK: RegisteredSoundPack = {
   id: DEFAULT_PACK_ID,
-  name: "OpenCode Default",
+  name: "Vector Default",
   builtin: true,
   sounds: {
     default: defaultSoundPath,
@@ -135,7 +135,8 @@ export function createTuiAttention(input: {
 
   function configuredPackID() {
     const stored = input.kv?.get<string | undefined>(KV_SOUND_PACK, undefined)
-    return activePackID ?? stored ?? input.config.attention.sound_pack
+    const id = activePackID ?? stored ?? input.config.attention.sound_pack
+    return id === "opencode.default" ? DEFAULT_PACK_ID : id
   }
 
   function currentPack() {

@@ -58,8 +58,8 @@ export const GithubReviewCommand = effectCmd({
   // The pull request's own opencode.json, `.opencode` agents and plugins, AGENTS.md and .vector/RULES.md never configure
   // the reviewer, whatever the workflow file sets: both flags are on before the instance loads any of them.
   instance: () => {
-    process.env["OPENCODE_PURE"] = "1"
-    process.env["OPENCODE_DISABLE_PROJECT_CONFIG"] = "1"
+    process.env.VECTOR_PURE = process.env["OPENCODE_PURE"] = "1"
+    process.env.VECTOR_DISABLE_PROJECT_CONFIG = process.env["OPENCODE_DISABLE_PROJECT_CONFIG"] = "1"
     return true
   },
   handler: (args) =>

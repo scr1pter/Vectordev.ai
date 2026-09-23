@@ -13,7 +13,7 @@ import { useTheme } from "./theme"
 import { useToast } from "../ui/toast"
 import { useRoute } from "./route"
 import { usePermission } from "./permission"
-import { modelDisplayName, modelProviderName } from "../util/included-model"
+import { modelDisplayName, modelProviderName } from "../util/model"
 
 export type LocalTheme = {
   secondary: RGBA

@@ -1,6 +1,6 @@
 import type { Agent, Project, ProviderListResponse } from "@opencode-ai/sdk/v2/client"
 import { NormalizedProviderListResponse } from "@opencode-ai/session-ui/context"
-import { includedModelName, isIncludedModel } from "@/utils/provider-brand"
+import { isHiddenProvider } from "@/utils/provider-brand"
 export { pathKey as directoryKey, type PathKey as DirectoryKey } from "@/utils/path-key"
 
 export const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
@@ -19,33 +19,27 @@ export function normalizeAgentList(input: unknown): Agent[] {
   return Object.values(input).filter(isAgent)
 }
 
-/** Every provider list the app loads comes through here. Deprecated models are dropped, and an
-    included model gets the name the picker shows, without its catalogue name's "Free", so
-    readers that print a stored name (session turns among them) never call it free. */
+/** Drop retired providers and deprecated models at the shared ingestion boundary. */
 export function normalizeProviderList(input: ProviderListResponse): NormalizedProviderListResponse {
   return {
     ...input,
+    connected: input.connected.filter((id) => !isHiddenProvider(id)),
+    default: Object.fromEntries(Object.entries(input.default).filter(([id]) => !isHiddenProvider(id))),
     all: new Map(
-      input.all.map(
-        (provider) =>
-          [
-            provider.id,
-            {
-              ...provider,
-              models: Object.fromEntries(
-                Object.entries(provider.models)
-                  .filter(([, info]) => info.status !== "deprecated")
-                  .map(
-                    ([id, info]) =>
-                      [
-                        id,
-                        isIncludedModel({ ...info, provider }) ? { ...info, name: includedModelName(info.name) } : info,
-                      ] as const,
-                  ),
-              ),
-            },
-          ] as const,
-      ),
+      input.all
+        .filter((provider) => !isHiddenProvider(provider.id))
+        .map(
+          (provider) =>
+            [
+              provider.id,
+              {
+                ...provider,
+                models: Object.fromEntries(
+                  Object.entries(provider.models).filter(([, info]) => info.status !== "deprecated"),
+                ),
+              },
+            ] as const,
+        ),
     ),
   }
 }

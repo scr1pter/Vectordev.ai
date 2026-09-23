@@ -1,4 +1,5 @@
-const enabled = process.env.OPENCODE_ACP_PROFILE === "1"
+import { readEnv } from "@opencode-ai/core/flag/compat"
+const enabled = readEnv("OPENCODE_ACP_PROFILE") === "1"
 const started = performance.now()
 
 export function mark(name: string, fields?: Record<string, string | number | boolean | undefined>) {

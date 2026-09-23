@@ -1,21 +1,11 @@
-// Preserve accurate upstream provider names while normalizing casing and fallbacks.
-
-const PROVIDER_LABELS: Record<string, string> = {
-  opencode: "OpenCode",
-  "opencode-go": "OpenCode Go",
-  "opencode-zen": "OpenCode Zen",
-}
+// Vector does not offer OpenCode's hosted model services.
+export const isHiddenProvider = (id: string) => id.startsWith("opencode")
 
 export function brandProviderName(id: string, name?: string | null): string {
-  const value = (name ?? "").trim()
-  if (value) return value
-  return PROVIDER_LABELS[id] ?? id
+  return name?.trim() || id
 }
 
-export function brandProviderDescription(id: string): string | undefined {
-  if (id === "opencode" || id === "opencode-zen")
-    return "Models included with Vector — chat instantly, no API key needed."
-  if (id === "opencode-go") return "OpenCode Go models, available inside Vector."
+export function brandProviderDescription(_id: string): string | undefined {
   return undefined
 }
 
@@ -27,14 +17,6 @@ export function brandProviderDescription(id: string): string | undefined {
    Never read, return or log provider.key here. /provider ships stored API keys to
    the renderer, and the picker must not surface them. The only option read is
    provider.options.apiKey, compared against the known markers below. */
-
-/** OpenCode Zen. Its zero-cost catalogue models are included with Vector for every user. */
-const VECTOR_GATEWAY_IDS: ReadonlySet<string> = new Set(["opencode", "opencode-zen"])
-export const isVectorGateway = (providerID: string) => VECTOR_GATEWAY_IDS.has(providerID)
-
-/** The key the gateway runs on with no sign-in and no Zen key, when only its zero-cost
-    models load (opencode/src/provider/provider.ts). */
-const GATEWAY_PUBLIC_KEY = "public"
 
 /** The placeholder key opencode's sign-in plugins (Codex, xAI, Snowflake Cortex) put in
     provider.options.apiKey: OAUTH_DUMMY_KEY in opencode/src/auth/index.ts. */
@@ -101,7 +83,7 @@ export function isCodingModel(model: PickerModel) {
   return true
 }
 
-export type AccessKind = "included" | "plan" | "key" | "none"
+export type AccessKind = "plan" | "key" | "none"
 
 export type ModelAccess = {
   kind: AccessKind
@@ -111,14 +93,6 @@ export type ModelAccess = {
   title: string
   /** Lower-case phrase for the row's aria-label. */
   spoken: string
-}
-
-/** Models that come with a Vector subscription. No label calls them free. */
-const INCLUDED_ACCESS: ModelAccess = {
-  kind: "included",
-  label: "Included",
-  title: "Included with Vector",
-  spoken: "included with Vector",
 }
 
 const NO_ACCESS: ModelAccess = { kind: "none", label: "", title: "", spoken: "" }
@@ -131,14 +105,6 @@ export const costInput = (cost: unknown): number | undefined => {
   if (!cost || typeof cost !== "object" || !("input" in cost)) return undefined
   const value = (cost as { input?: unknown }).input
   return typeof value === "number" && Number.isFinite(value) ? value : undefined
-}
-
-/** Zero cost from OpenCode Zen means included only for its catalogue models, which carry a
-    release date, or when it runs keyless. A model defined only in config defaults to zero
-    cost, and on a Zen key it bills the Zen balance. */
-function includedModel(model: PickerModel, cost: number | undefined) {
-  if (!isVectorGateway(model.provider.id) || cost !== 0) return false
-  return Boolean(model.release_date) || model.provider.options?.apiKey === GATEWAY_PUBLIC_KEY
 }
 
 function signInPlan(model: PickerModel, cost: number | undefined) {
@@ -157,22 +123,11 @@ function signInPlan(model: PickerModel, cost: number | undefined) {
   return undefined
 }
 
-/** How a model is paid for. Decided from provider id, key markers, key source and cost,
-    never from cost alone:
-    1. Zero cost from OpenCode Zen is included with Vector, for its catalogue models or when
-       it runs keyless (includedModel).
-    2. Known sign-in plans come next, before any cost rule, so a plan's zeroed price never
-       reads as included and its priced catalogue entry never reads as billed. Copilot without
-       its sign-in claims nothing: a GitHub token isn't a per-token API key.
-    3. Any other zero or unknown cost claims nothing. Config and local providers default
-       cost to zero (opencode/src/provider/provider.ts), so zero alone proves nothing.
-    4. A priced model on a key the user supplied (auth.json or an env var) uses that key.
-       Whether the key is billed per token or covers a flat subscription (OpenCode Go,
-       "-plan" providers) can't be told from here, so the label says only that. */
+/** Describe verified user credentials; price alone never means Vector includes a model. */
 export function modelAccess(model: PickerModel): ModelAccess {
   const provider = model.provider
+  if (isHiddenProvider(provider.id)) return NO_ACCESS
   const cost = costInput(model.cost)
-  if (includedModel(model, cost)) return INCLUDED_ACCESS
   const plan = signInPlan(model, cost)
   if (plan)
     return {
@@ -198,28 +153,14 @@ export function modelAccess(model: PickerModel): ModelAccess {
   return NO_ACCESS
 }
 
-/** The section OpenCode Zen's included models share, in the picker and in Manage models. */
-export const INCLUDED_SECTION = "Models included with Vector"
-/** The section's mark. The provider sprite has no Vector mark, so it keeps OpenCode's. */
-export const INCLUDED_ICON = "opencode"
-export const isIncludedModel = (model: PickerModel) => modelAccess(model).kind === "included"
-
 /** Row captions only earn their place where rows are paid for in more than one way. A
     section of nothing but included models doesn't need "Included" on every row. */
 export function showRowAccess(models: readonly PickerModel[]) {
   return new Set(models.map((model) => modelAccess(model).kind)).size > 1
 }
 
-const TRAILING_FREE = /\s+(?:\(free\)|free)\s*$/i
-
-/** Included catalogue names often end in "Free" or "(Free)"; the section already says how
-    they're paid for. "Nemotron 3 Ultra Free" reads "Nemotron 3 Ultra". */
-export function includedModelName(name: string) {
-  return name.replace(TRAILING_FREE, "").trim() || name
-}
-
 export function modelDisplayName(model: PickerModel) {
-  return isIncludedModel(model) ? includedModelName(model.name) : model.name
+  return model.name
 }
 
 /** "400K", "262K", "1M", "1.5M". Millions round down to one decimal, so the caption never
@@ -270,12 +211,10 @@ export function releaseTitle(model: Pick<PickerModel, "release_date">) {
 
 const WORD_BREAK = /[\s\-_.]+/
 
-/** What a model can be found by besides its name: "included", "chatgpt", "reasoning", "1m"...
-    "free" still finds the included models for anyone who types it; no row says it. */
+/** Search provider details and model capabilities as well as the model name. */
 function specWords(model: PickerModel, now: number) {
   const words: string[] = []
   const access = modelAccess(model)
-  if (access.kind === "included") words.push("included", "vector", "subscription", "free")
   if (access.kind === "plan") words.push(...access.label.toLowerCase().split(" "))
   if (access.kind === "key") words.push("api", "key")
   if (model.capabilities?.reasoning) words.push("reasoning")
@@ -290,9 +229,6 @@ function specWords(model: PickerModel, now: number) {
     3: the provider name contains it, or (2+ characters) a spec word starts with it. */
 export function matchRank(model: PickerModel, term: string, now: number): number | undefined {
   if (!term) return 0
-  // normalizeProviderList takes the catalogue's "Free" out of an included model's name, so a
-  // search for the name it had ("nemotron 3 ultra free") is matched on the rest.
-  if (isIncludedModel(model)) term = includedModelName(term)
   const name = model.name.toLowerCase()
   if (name.startsWith(term)) return 0
   if (name.split(WORD_BREAK).some((word) => word.startsWith(term))) return 1
@@ -310,7 +246,7 @@ export function modelAriaLabel(model: PickerModel, now: number) {
   const context = contextLabel(model.limit?.context)
   return [
     modelDisplayName(model),
-    access.kind === "included" ? "" : brandProviderName(model.provider.id, model.provider.name),
+    brandProviderName(model.provider.id, model.provider.name),
     context ? `${context} context` : "",
     model.capabilities?.reasoning ? "reasoning" : "",
     isNewRelease(model, now) ? "new" : "",
@@ -326,7 +262,7 @@ export function modelAriaLabel(model: PickerModel, now: number) {
 export function modelTitle(model: PickerModel) {
   const access = modelAccess(model)
   const about = [
-    access.kind === "included" ? "" : brandProviderName(model.provider.id, model.provider.name),
+    brandProviderName(model.provider.id, model.provider.name),
     model.capabilities?.reasoning ? "Reasoning" : "",
   ]
     .filter(Boolean)
@@ -336,7 +272,7 @@ export function modelTitle(model: PickerModel) {
     .join("\n")
 }
 
-export type PickerSectionKind = "recent" | "provider" | "included"
+export type PickerSectionKind = "recent" | "provider"
 
 export type PickerSection<T extends PickerModel = PickerModel> = {
   id: string
@@ -377,20 +313,7 @@ function pickerSection<T extends PickerModel>(section: Omit<PickerSection<T>, "r
   return { ...section, rowAccess: !section.access && showRowAccess(section.items) }
 }
 
-/** The picker's sections, in render order. Every model lands in at most one section, so
-    keys are unique and the flattened keys are exactly the order rows are drawn in. Models
-    that can't hold a coding conversation (isCodingModel) are left out everywhere.
-    - No search: the top section (the current model, then up to two recent ones), one
-      section per provider with its newest models first, and last "Models included with
-      Vector" (isIncludedModel). The top section reads "Recently used" once one of its
-      rows comes from recent history, "Current model" before that: a new user's current
-      model is a default they never picked, and Parallel Workspaces passes no history.
-    - Searching: only the provider sections and the included section, rows by match rank
-      then release date, and sections by their best match, so the first row (the one Enter
-      picks) is the best match in the list.
-    Provider sections follow `popular` (the OpenCode gateway ids excluded), then the rest
-    A to Z, then the included section; while searching, that order breaks ties. Empty
-    sections are dropped. */
+/** Group connected coding models by provider, with recent choices first when not searching. */
 export function buildModelSections<T extends PickerModel>(input: {
   models: readonly T[]
   term?: string
@@ -400,7 +323,7 @@ export function buildModelSections<T extends PickerModel>(input: {
   popular?: readonly string[]
 }): PickerSection<T>[] {
   const term = (input.term ?? "").trim().toLowerCase()
-  const models = input.models.filter(isCodingModel)
+  const models = input.models.filter((model) => !isHiddenProvider(model.provider.id) && isCodingModel(model))
   const sections: PickerSection<T>[] = []
   const taken = new Set<string>()
 
@@ -428,7 +351,6 @@ export function buildModelSections<T extends PickerModel>(input: {
   }
 
   const ranks = new Map<T, number>()
-  const included: T[] = []
   const groups = new Map<string, T[]>()
   for (const model of models) {
     const key = pickerModelKey(model)
@@ -437,10 +359,6 @@ export function buildModelSections<T extends PickerModel>(input: {
     if (rank === undefined) continue
     taken.add(key)
     ranks.set(model, rank)
-    if (isIncludedModel(model)) {
-      included.push(model)
-      continue
-    }
     const group = groups.get(model.provider.id)
     if (group) group.push(model)
     else groups.set(model.provider.id, [model])
@@ -468,16 +386,6 @@ export function buildModelSections<T extends PickerModel>(input: {
       items: provider.items,
     }),
   )
-  // Its label already says how every row is paid for, so it carries no access caption.
-  if (included.length > 0)
-    listed.push(
-      pickerSection({
-        id: "included",
-        kind: "included",
-        label: INCLUDED_SECTION,
-        items: included.sort(order),
-      }),
-    )
   // Each section's first row is its best match. The sort is stable, so equally good
   // sections keep the order above.
   if (term) listed.sort((a, b) => rank(a.items[0]) - rank(b.items[0]))

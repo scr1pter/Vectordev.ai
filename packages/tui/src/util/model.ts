@@ -1,5 +1,4 @@
 import type { Provider } from "@opencode-ai/sdk/v2"
-import { modelDisplayName } from "./included-model"
 
 export function parse(value: string) {
   const [providerID, ...modelID] = value.split("/")
@@ -22,7 +21,7 @@ export function get(list: Provider[] | ReadonlyMap<string, Provider> | undefined
   return provider(list, providerID)?.models[modelID]
 }
 
-/** Named as the model dialog names it: an included model drops its catalogue name's "Free". */
+/** Use the provider's model name consistently in the TUI. */
 export function name(
   list: Provider[] | ReadonlyMap<string, Provider> | undefined,
   providerID: string,
@@ -31,4 +30,14 @@ export function name(
   const item = provider(list, providerID)
   const model = item?.models[modelID]
   return item && model ? modelDisplayName(item, model) : modelID
+}
+
+export const isHiddenProvider = (id: string) => id.startsWith("opencode")
+
+export function modelProviderName(provider: { id: string; name?: string }, _model?: unknown) {
+  return provider.name ?? provider.id
+}
+
+export function modelDisplayName(_provider: unknown, model: { id: string; name?: string }) {
+  return model.name ?? model.id
 }

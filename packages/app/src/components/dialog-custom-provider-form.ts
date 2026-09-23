@@ -1,3 +1,5 @@
+import { isHiddenProvider } from "@/utils/provider-brand"
+
 const PROVIDER_ID = /^[a-z0-9][a-z0-9-_]*$/
 const OPENAI_COMPATIBLE = "@ai-sdk/openai-compatible"
 
@@ -59,9 +61,11 @@ export function validateCustomProvider(input: ValidateArgs) {
 
   const idError = !providerID
     ? input.t("provider.custom.error.providerID.required")
-    : !PROVIDER_ID.test(providerID)
-      ? input.t("provider.custom.error.providerID.format")
-      : undefined
+    : isHiddenProvider(providerID)
+      ? "This provider is not available in Vector."
+      : !PROVIDER_ID.test(providerID)
+        ? input.t("provider.custom.error.providerID.format")
+        : undefined
 
   const nameError = !name ? input.t("provider.custom.error.name.required") : undefined
   const urlError = !baseURL

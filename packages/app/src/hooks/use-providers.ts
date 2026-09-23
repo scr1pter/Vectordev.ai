@@ -5,20 +5,11 @@ import { Iterable, pipe } from "effect"
 import type { Accessor } from "solid-js"
 import { selectProviderCatalog } from "./provider-catalog"
 
-export const popularProviders = [
-  "anthropic",
-  "github-copilot",
-  "openai",
-  "google",
-  "openrouter",
-  "vercel",
-]
+export const popularProviders = ["anthropic", "github-copilot", "openai", "google", "openrouter", "vercel"]
 const popularProviderSet = new Set(popularProviders)
-// OpenCode Zen's keyless gateway is not Vector's to serve: those requests run
-// against OpenCode's endpoint. The engine no longer loads it without a key of the
-// user's own (ZEN_PUBLIC_GATEWAY in opencode/src/provider/provider.ts), and these
-// entries keep it out of the connect dialog and the provider lists as well.
-const hiddenProviderSet = new Set<string>(["opencode", "opencode-zen", "opencode-go"])
+// Vector does not connect to OpenCode's model services, even with a user-supplied key.
+export { isHiddenProvider } from "@/utils/provider-brand"
+import { isHiddenProvider } from "@/utils/provider-brand"
 
 type ProviderInfo = ReturnType<typeof selectProviderCatalog>["all"] extends Map<string, infer T> ? T : never
 
@@ -48,31 +39,24 @@ export function useProviders(directory?: Accessor<string | undefined>) {
     })
   }
   return {
-    all: () => providers().all,
+    all: () => new Map([...providers().all].filter(([id]) => !isHiddenProvider(id))),
     default: () => providers().default,
     popular: () =>
       pipe(
         providers().all,
         Iterable.map(([, p]) => p),
         Iterable.filter((p) => popularProviderSet.has(p.id)),
-        Iterable.filter((p) => !hiddenProviderSet.has(p.id)),
+        Iterable.filter((p) => !isHiddenProvider(p.id)),
         (v) => Array.from(v),
       ),
     connected: () => {
-      return providers().connected
-        .filter((id) => !hiddenProviderSet.has(id))
+      return providers()
+        .connected.filter((id) => !isHiddenProvider(id))
         .flatMap((id) => connectedProvider(providers().all.get(id)))
     },
     paid: () => {
       const connected = new Set(providers().connected)
-      return [
-        ...Iterable.filter(
-          providers().all,
-          ([id]) =>
-            connected.has(id) &&
-            (id !== "opencode" || Object.values(providers().all.get(id)?.models ?? {}).some((m) => m.cost?.input)),
-        ),
-      ]
+      return [...Iterable.filter(providers().all, ([id]) => connected.has(id) && !isHiddenProvider(id))]
     },
   }
 }

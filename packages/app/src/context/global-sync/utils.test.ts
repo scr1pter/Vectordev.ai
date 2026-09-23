@@ -57,19 +57,18 @@ describe("normalizeProviderList", () => {
         ?.models ?? {},
     ).map((item) => item.name)
 
-  test("drops deprecated models and names included ones as the picker does", () => {
-    const list = [
-      provider("opencode", {}, [
-        model("nemotron-3-ultra-free", "Nemotron 3 Ultra Free"),
-        model("old-free", "Old Free", "deprecated"),
-        // Defined only in config: no release date, and on a Zen key it bills the Zen balance.
-        { ...model("my-model", "My model Free"), release_date: "" },
-        { ...model("muse-spark-1.3", "Muse Spark 1.3 Free"), cost: { input: 1.25, output: 10 } },
-      ]),
-    ]
-
-    // Only an included model loses its "Free"; the others keep the name the catalogue gives them.
-    expect(names(list, "opencode")).toEqual(["Nemotron 3 Ultra", "My model Free", "Muse Spark 1.3 Free"])
+  test("drops retired providers from the catalog, connected ids and defaults", () => {
+    const ids = ["opencode", "opencode-go", "opencode-zen", "opencode-custom"]
+    const list = ids.map((id) => provider(id, { apiKey: "test-only" }, [model("coding", "Coding")]))
+    const result = normalizeProviderList({
+      all: [...list, provider("anthropic", {}, [model("new", "New"), model("old", "Old", "deprecated")])],
+      connected: [...ids, "anthropic"],
+      default: Object.fromEntries([...ids, "anthropic"].map((id) => [id, "new"])),
+    } as unknown as ProviderListResponse)
+    expect([...result.all.keys()]).toEqual(["anthropic"])
+    expect(result.connected).toEqual(["anthropic"])
+    expect(result.default).toEqual({ anthropic: "new" })
+    expect(Object.keys(result.all.get("anthropic")!.models)).toEqual(["new"])
   })
 })
 

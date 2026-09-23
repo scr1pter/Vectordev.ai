@@ -1,7 +1,7 @@
 // Bun Snapshot v1, https://bun.sh/docs/test/snapshots
 
 exports[`opencode CLI help-text snapshots every documented command emits stable help text: opencode acp --help 1`] = `
-"opencode acp
+"vector acp
 
 start ACP (Agent Client Protocol) server
 
@@ -15,23 +15,23 @@ Options:
       --hostname     hostname to listen on                           [string] [default: "127.0.0.1"]
       --mdns         enable mDNS service discovery (defaults hostname to 0.0.0.0)
                                                                           [boolean] [default: false]
-      --mdns-domain  custom domain name for mDNS service (default: opencode.local)
-                                                                [string] [default: "opencode.local"]
+      --mdns-domain  custom domain name for mDNS service (default: vector.local)
+                                                                  [string] [default: "vector.local"]
       --cors         additional domains to allow for CORS                      [array] [default: []]
       --cwd          working directory [string] [default: "<HOME>"]"
 `;
 
 exports[`opencode CLI help-text snapshots every documented command emits stable help text: opencode mcp --help 1`] = `
-"opencode mcp
+"vector mcp
 
 manage MCP (Model Context Protocol) servers
 
 Commands:
-  opencode mcp add [name]     add an MCP server
-  opencode mcp list           list MCP servers and their status                        [aliases: ls]
-  opencode mcp auth [name]    authenticate with an OAuth-enabled MCP server
-  opencode mcp logout [name]  remove OAuth credentials for an MCP server
-  opencode mcp debug <name>   debug OAuth connection for an MCP server
+  vector mcp add [name]     add an MCP server
+  vector mcp list           list MCP servers and their status                          [aliases: ls]
+  vector mcp auth [name]    authenticate with an OAuth-enabled MCP server
+  vector mcp logout [name]  remove OAuth credentials for an MCP server
+  vector mcp debug <name>   debug OAuth connection for an MCP server
 
 Options:
   -h, --help        show help                                                              [boolean]
@@ -42,9 +42,9 @@ Options:
 `;
 
 exports[`opencode CLI help-text snapshots every documented command emits stable help text: opencode attach --help 1`] = `
-"opencode attach <url>
+"vector attach <url>
 
-attach to a running opencode server
+attach to a running vector server
 
 Positionals:
   url  http://localhost:4096                                                     [string] [required]
@@ -59,18 +59,17 @@ Options:
   -c, --continue      continue the last session                                            [boolean]
   -s, --session       session id to continue                                                [string]
       --fork          fork the session when continuing (use with --continue or --session)  [boolean]
-  -p, --password      basic auth password (defaults to OPENCODE_SERVER_PASSWORD)            [string]
-  -u, --username      basic auth username (defaults to OPENCODE_SERVER_USERNAME or 'opencode')
-                                                                                            [string]
+  -p, --password      basic auth password (defaults to VECTOR_SERVER_PASSWORD)              [string]
+  -u, --username      basic auth username (default: VECTOR_SERVER_USERNAME or vector)       [string]
       --mini          start the minimal interactive interface             [boolean] [default: false]
       --no-replay     disable mini session history replay on resume and after resize       [boolean]
       --replay-limit  cap visible mini replay to the newest N messages                      [number]"
 `;
 
 exports[`opencode CLI help-text snapshots every documented command emits stable help text: opencode run --help 1`] = `
-"opencode run [message..]
+"vector run [message..]
 
-run opencode with a message
+run vector with a message
 
 Positionals:
   message  message to send                                                     [array] [default: []]
@@ -85,17 +84,15 @@ Options:
   -c, --continue     continue the last session                                             [boolean]
   -s, --session      session id to continue                                                 [string]
       --fork         fork the session before continuing (requires --continue or --session) [boolean]
-      --share        share the session                                                     [boolean]
   -m, --model        model to use in the format of provider/model                           [string]
       --agent        agent to use                                                           [string]
       --format       format: default (formatted) or json (raw JSON events)
                                           [string] [choices: "default", "json"] [default: "default"]
   -f, --file         file(s) to attach to message                                            [array]
       --title        title for the session (uses truncated prompt if no value provided)     [string]
-      --attach       attach to a running opencode server (e.g., http://localhost:4096)      [string]
-  -p, --password     basic auth password (defaults to OPENCODE_SERVER_PASSWORD)             [string]
-  -u, --username     basic auth username (defaults to OPENCODE_SERVER_USERNAME or 'opencode')
-                                                                                            [string]
+      --attach       attach to a running vector server (e.g., http://localhost:4096)        [string]
+  -p, --password     basic auth password (defaults to VECTOR_SERVER_PASSWORD)               [string]
+  -u, --username     basic auth username (default: VECTOR_SERVER_USERNAME or vector)        [string]
       --dir          directory to run in, path on remote server if attaching                [string]
       --port         port for the local server (defaults to random port if no value provided)
                                                                                             [number]
@@ -108,24 +105,24 @@ Options:
 `;
 
 exports[`opencode CLI help-text snapshots every documented command emits stable help text: opencode debug --help 1`] = `
-"opencode debug
+"vector debug
 
 debugging and troubleshooting tools
 
 Commands:
-  opencode debug config        show resolved configuration
-  opencode debug lsp           LSP debugging utilities
-  opencode debug rg            ripgrep debugging utilities
-  opencode debug file          file system debugging utilities
-  opencode debug scrap         list all known projects
-  opencode debug skill         list all available skills
-  opencode debug snapshot      snapshot debugging utilities
-  opencode debug startup       print startup timing
-  opencode debug agent <name>  show agent configuration details
-  opencode debug v2            debug v2 catalog and built-in plugins
-  opencode debug info          show debug information
-  opencode debug paths         show global paths (data, config, cache, state)
-  opencode debug wait          wait indefinitely (for debugging)
+  vector debug config        show resolved configuration
+  vector debug lsp           LSP debugging utilities
+  vector debug rg            ripgrep debugging utilities
+  vector debug file          file system debugging utilities
+  vector debug scrap         list all known projects
+  vector debug skill         list all available skills
+  vector debug snapshot      snapshot debugging utilities
+  vector debug startup       print startup timing
+  vector debug agent <name>  show agent configuration details
+  vector debug v2            debug v2 catalog and built-in plugins
+  vector debug info          show debug information
+  vector debug paths         show global paths (data, config, cache, state)
+  vector debug wait          wait indefinitely (for debugging)
 
 Options:
   -h, --help        show help                                                              [boolean]
@@ -136,14 +133,14 @@ Options:
 `;
 
 exports[`opencode CLI help-text snapshots every documented command emits stable help text: opencode providers --help 1`] = `
-"opencode providers
+"vector providers
 
 manage AI providers and credentials
 
 Commands:
-  opencode providers list               list providers and credentials                 [aliases: ls]
-  opencode providers login [url]        log in to a provider
-  opencode providers logout [provider]  log out from a configured provider
+  vector providers list               list providers and credentials                   [aliases: ls]
+  vector providers login [url]        log in to a provider
+  vector providers logout [provider]  log out from a configured provider
 
 Options:
   -h, --help        show help                                                              [boolean]
@@ -154,13 +151,13 @@ Options:
 `;
 
 exports[`opencode CLI help-text snapshots every documented command emits stable help text: opencode agent --help 1`] = `
-"opencode agent
+"vector agent
 
 manage agents
 
 Commands:
-  opencode agent create  create a new agent
-  opencode agent list    list all available agents
+  vector agent create  create a new agent
+  vector agent list    list all available agents
 
 Options:
   -h, --help        show help                                                              [boolean]
@@ -171,9 +168,9 @@ Options:
 `;
 
 exports[`opencode CLI help-text snapshots every documented command emits stable help text: opencode upgrade --help 1`] = `
-"opencode upgrade [target]
+"vector upgrade [target]
 
-upgrade opencode to the latest or a specific version
+upgrade vector to the latest or a specific version
 
 Positionals:
   target  version to upgrade to, for ex '0.1.48' or 'v0.1.48'                               [string]
@@ -184,14 +181,13 @@ Options:
       --print-logs  print logs to stderr                                                   [boolean]
       --log-level   log level                   [string] [choices: "DEBUG", "INFO", "WARN", "ERROR"]
       --pure        run without external plugins                                           [boolean]
-  -m, --method      installation method to use
-                          [string] [choices: "curl", "npm", "pnpm", "bun", "brew", "choco", "scoop"]"
+  -m, --method      installation method to use              [string] [choices: "npm", "pnpm", "bun"]"
 `;
 
 exports[`opencode CLI help-text snapshots every documented command emits stable help text: opencode uninstall --help 1`] = `
-"opencode uninstall
+"vector uninstall
 
-uninstall opencode and remove all related files
+uninstall vector and remove all related files
 
 Options:
   -h, --help         show help                                                             [boolean]
@@ -206,9 +202,9 @@ Options:
 `;
 
 exports[`opencode CLI help-text snapshots every documented command emits stable help text: opencode serve --help 1`] = `
-"opencode serve
+"vector serve
 
-starts a headless opencode server
+starts a headless vector server
 
 Options:
   -h, --help         show help                                                             [boolean]
@@ -220,15 +216,15 @@ Options:
       --hostname     hostname to listen on                           [string] [default: "127.0.0.1"]
       --mdns         enable mDNS service discovery (defaults hostname to 0.0.0.0)
                                                                           [boolean] [default: false]
-      --mdns-domain  custom domain name for mDNS service (default: opencode.local)
-                                                                [string] [default: "opencode.local"]
+      --mdns-domain  custom domain name for mDNS service (default: vector.local)
+                                                                  [string] [default: "vector.local"]
       --cors         additional domains to allow for CORS                      [array] [default: []]"
 `;
 
 exports[`opencode CLI help-text snapshots every documented command emits stable help text: opencode web --help 1`] = `
-"opencode web
+"vector web
 
-start opencode server and open web interface
+start vector server and open web interface
 
 Options:
   -h, --help         show help                                                             [boolean]
@@ -240,13 +236,13 @@ Options:
       --hostname     hostname to listen on                           [string] [default: "127.0.0.1"]
       --mdns         enable mDNS service discovery (defaults hostname to 0.0.0.0)
                                                                           [boolean] [default: false]
-      --mdns-domain  custom domain name for mDNS service (default: opencode.local)
-                                                                [string] [default: "opencode.local"]
+      --mdns-domain  custom domain name for mDNS service (default: vector.local)
+                                                                  [string] [default: "vector.local"]
       --cors         additional domains to allow for CORS                      [array] [default: []]"
 `;
 
 exports[`opencode CLI help-text snapshots every documented command emits stable help text: opencode models --help 1`] = `
-"opencode models [provider]
+"vector models [provider]
 
 list all available models
 
@@ -260,11 +256,11 @@ Options:
       --log-level   log level                   [string] [choices: "DEBUG", "INFO", "WARN", "ERROR"]
       --pure        run without external plugins                                           [boolean]
       --verbose     use more verbose model output (includes metadata like costs)           [boolean]
-      --refresh     refresh the models cache from models.dev                               [boolean]"
+      --refresh     refresh the model catalog from the configured mirror                   [boolean]"
 `;
 
 exports[`opencode CLI help-text snapshots every documented command emits stable help text: opencode stats --help 1`] = `
-"opencode stats
+"vector stats
 
 show token usage and cost statistics
 
@@ -282,7 +278,7 @@ Options:
 `;
 
 exports[`opencode CLI help-text snapshots every documented command emits stable help text: opencode export --help 1`] = `
-"opencode export [sessionID]
+"vector export [sessionID]
 
 export session data as JSON
 
@@ -299,12 +295,12 @@ Options:
 `;
 
 exports[`opencode CLI help-text snapshots every documented command emits stable help text: opencode import --help 1`] = `
-"opencode import <file>
+"vector import <file>
 
-import session data from JSON file or URL
+import session data from a local JSON file
 
 Positionals:
-  file  path to JSON file or share URL                                           [string] [required]
+  file  path to a local JSON file                                                [string] [required]
 
 Options:
   -h, --help        show help                                                              [boolean]
@@ -315,14 +311,14 @@ Options:
 `;
 
 exports[`opencode CLI help-text snapshots every documented command emits stable help text: opencode github --help 1`] = `
-"opencode github
+"vector github
 
 manage GitHub agent
 
 Commands:
-  opencode github install  install the GitHub agent
-  opencode github run      run the GitHub agent
-  opencode github review   review a pull request and post the results
+  vector github install  install the GitHub agent
+  vector github run      run the GitHub agent
+  vector github review   review a pull request and post the results
 
 Options:
   -h, --help        show help                                                              [boolean]
@@ -333,9 +329,9 @@ Options:
 `;
 
 exports[`opencode CLI help-text snapshots every documented command emits stable help text: opencode pr --help 1`] = `
-"opencode pr <number>
+"vector pr <number>
 
-fetch and checkout a GitHub PR branch, then run opencode
+fetch and checkout a GitHub PR branch, then run Vector
 
 Positionals:
   number  PR number to checkout                                                  [number] [required]
@@ -349,7 +345,7 @@ Options:
 `;
 
 exports[`opencode CLI help-text snapshots every documented command emits stable help text: opencode review --help 1`] = `
-"opencode review
+"vector review
 
 Vectorscope: review your branch, uncommitted changes or a pull request
 
@@ -380,13 +376,13 @@ Options:
 `;
 
 exports[`opencode CLI help-text snapshots every documented command emits stable help text: opencode session --help 1`] = `
-"opencode session
+"vector session
 
 manage sessions
 
 Commands:
-  opencode session list                list sessions
-  opencode session delete <sessionID>  delete a session
+  vector session list                list sessions
+  vector session delete <sessionID>  delete a session
 
 Options:
   -h, --help        show help                                                              [boolean]
@@ -397,7 +393,7 @@ Options:
 `;
 
 exports[`opencode CLI help-text snapshots every documented command emits stable help text: opencode plugin --help 1`] = `
-"opencode plugin <module>
+"vector plugin <module>
 
 install plugin and update config
 
@@ -415,13 +411,13 @@ Options:
 `;
 
 exports[`opencode CLI help-text snapshots every documented command emits stable help text: opencode db --help 1`] = `
-"opencode db
+"vector db
 
 database tools
 
 Commands:
-  opencode db [query]     open an interactive sqlite3 shell or run a query                 [default]
-  opencode db path        print the database path
+  vector db [query]     open an interactive sqlite3 shell or run a query                   [default]
+  vector db path        print the database path
 
 Positionals:
   query  SQL query to execute                                                               [string]
@@ -436,7 +432,7 @@ Options:
 `;
 
 exports[`opencode CLI help-text snapshots every documented command emits stable help text: opencode mcp list --help 1`] = `
-"opencode mcp list
+"vector mcp list
 
 list MCP servers and their status
 
@@ -449,7 +445,7 @@ Options:
 `;
 
 exports[`opencode CLI help-text snapshots every documented command emits stable help text: opencode mcp add --help 1`] = `
-"opencode mcp add [name]
+"vector mcp add [name]
 
 add an MCP server
 
@@ -468,12 +464,12 @@ Options:
 `;
 
 exports[`opencode CLI help-text snapshots every documented command emits stable help text: opencode mcp auth --help 1`] = `
-"opencode mcp auth [name]
+"vector mcp auth [name]
 
 authenticate with an OAuth-enabled MCP server
 
 Commands:
-  opencode mcp auth list  list OAuth-capable MCP servers and their auth status         [aliases: ls]
+  vector mcp auth list  list OAuth-capable MCP servers and their auth status           [aliases: ls]
 
 Positionals:
   name  name of the MCP server                                                              [string]
@@ -487,7 +483,7 @@ Options:
 `;
 
 exports[`opencode CLI help-text snapshots every documented command emits stable help text: opencode mcp logout --help 1`] = `
-"opencode mcp logout [name]
+"vector mcp logout [name]
 
 remove OAuth credentials for an MCP server
 
@@ -503,7 +499,7 @@ Options:
 `;
 
 exports[`opencode CLI help-text snapshots every documented command emits stable help text: opencode providers list --help 1`] = `
-"opencode providers list
+"vector providers list
 
 list providers and credentials
 
@@ -516,12 +512,12 @@ Options:
 `;
 
 exports[`opencode CLI help-text snapshots every documented command emits stable help text: opencode providers login --help 1`] = `
-"opencode providers login [url]
+"vector providers login [url]
 
 log in to a provider
 
 Positionals:
-  url  opencode auth provider                                                               [string]
+  url  vector auth provider                                                                 [string]
 
 Options:
   -h, --help        show help                                                              [boolean]
@@ -534,7 +530,7 @@ Options:
 `;
 
 exports[`opencode CLI help-text snapshots every documented command emits stable help text: opencode providers logout --help 1`] = `
-"opencode providers logout [provider]
+"vector providers logout [provider]
 
 log out from a configured provider
 
@@ -550,7 +546,7 @@ Options:
 `;
 
 exports[`opencode CLI help-text snapshots every documented command emits stable help text: opencode agent create --help 1`] = `
-"opencode agent create
+"vector agent create
 
 create a new agent
 
@@ -570,7 +566,7 @@ Options:
 `;
 
 exports[`opencode CLI help-text snapshots every documented command emits stable help text: opencode agent list --help 1`] = `
-"opencode agent list
+"vector agent list
 
 list all available agents
 
@@ -583,7 +579,7 @@ Options:
 `;
 
 exports[`opencode CLI help-text snapshots every documented command emits stable help text: opencode session list --help 1`] = `
-"opencode session list
+"vector session list
 
 list sessions
 
@@ -598,7 +594,7 @@ Options:
 `;
 
 exports[`opencode CLI help-text snapshots every documented command emits stable help text: opencode session delete --help 1`] = `
-"opencode session delete <sessionID>
+"vector session delete <sessionID>
 
 delete a session
 
@@ -614,7 +610,7 @@ Options:
 `;
 
 exports[`opencode CLI help-text snapshots every documented command emits stable help text: opencode github install --help 1`] = `
-"opencode github install
+"vector github install
 
 install the GitHub agent
 
@@ -627,7 +623,7 @@ Options:
 `;
 
 exports[`opencode CLI help-text snapshots every documented command emits stable help text: opencode github run --help 1`] = `
-"opencode github run
+"vector github run
 
 run the GitHub agent
 
@@ -642,7 +638,7 @@ Options:
 `;
 
 exports[`opencode CLI help-text snapshots every documented command emits stable help text: opencode github review --help 1`] = `
-"opencode github review
+"vector github review
 
 review a pull request and post the results
 
@@ -658,7 +654,7 @@ Options:
 `;
 
 exports[`opencode CLI help-text snapshots every documented command emits stable help text: opencode db path --help 1`] = `
-"opencode db path
+"vector db path
 
 print the database path
 

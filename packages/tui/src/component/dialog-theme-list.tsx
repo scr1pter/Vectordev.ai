@@ -6,6 +6,7 @@ import { onCleanup } from "solid-js"
 export function DialogThemeList() {
   const theme = useTheme()
   const options = Object.keys(theme.all())
+    .filter((name) => name !== "opencode")
     .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }))
     .map((value) => ({
       title: value,

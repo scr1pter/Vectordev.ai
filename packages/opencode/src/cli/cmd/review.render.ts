@@ -211,7 +211,7 @@ function sinceLine(since: string, outcome: ReviewOutcome): string {
   return `Since last local review (${short(since)}): ${parts.length ? parts.join(" · ") : "nothing open from before"}`
 }
 
-// "opencode/big-pickle · included with Vector · 48.2k in / 3.1k out · 1m 52s · sessions: ses_1, ses_2"
+// "anthropic/claude-sonnet-4 · 48.2k in / 3.1k out · 1m 52s · sessions: ses_1, ses_2"
 function footer(outcome: ReviewOutcome): string {
   const parts: string[] = []
   if (outcome.cost) parts.push(outcome.cost.model, costText(outcome.cost), usage(outcome.cost))

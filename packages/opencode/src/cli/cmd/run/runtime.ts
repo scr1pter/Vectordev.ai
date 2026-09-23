@@ -1,4 +1,4 @@
-// Top-level orchestrator for `opencode --mini`.
+// Top-level orchestrator for `vector --mini`.
 //
 // Wires the boot sequence, lifecycle (renderer + footer), stream transport,
 // and prompt queue together into a single session loop. Two entry points:
@@ -62,7 +62,6 @@ type RunLocalInput = {
   fetch: typeof globalThis.fetch
   resolveAgent: () => Promise<string | undefined>
   session: (sdk: RunInput["sdk"]) => Promise<{ id: string; title?: string } | undefined>
-  share: (sdk: RunInput["sdk"], sessionID: string) => Promise<void>
   createSession?: CreateSession
   agent: RunInput["agent"]
   model: RunInput["model"]
@@ -734,7 +733,7 @@ async function runInteractiveRuntime(input: RunRuntimeInput, deps: RunRuntimeDep
 // the in-process server, so no external HTTP server is needed.
 export async function runInteractiveLocalMode(input: RunLocalInput): Promise<void> {
   const sdk = createOpencodeClient({
-    baseUrl: "http://opencode.internal",
+    baseUrl: "http://vector.internal",
     fetch: input.fetch,
     directory: input.directory,
   })
@@ -758,7 +757,6 @@ export async function runInteractiveLocalMode(input: RunLocalInput): Promise<voi
           throw new Error("Session not found")
         }
 
-        void input.share(sdk, next.id).catch(() => {})
         return {
           sessionID: next.id,
           sessionTitle: next.title,

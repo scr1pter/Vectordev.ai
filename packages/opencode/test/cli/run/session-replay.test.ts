@@ -324,28 +324,27 @@ describe("run session replay", () => {
     )
   })
 
-  test("names an included model in replayed turn summaries as the live summary does", () => {
-    // Zero cost from Zen's catalogue: included, so its catalogue name's "Free" is dropped.
-    const zen: RunProvider = { ...provider("Nemotron 3 Ultra Free"), id: "opencode", name: "OpenCode Zen" }
+  test("keeps complete provider model names in replayed turn summaries", () => {
+    const local: RunProvider = { ...provider("Llama Free"), id: "ollama", name: "Ollama" }
     const out = replaySession({
       messages: [
         userMessage("msg-user-1", "Hello, whats the weather today?"),
-        assistantMessage("msg-1", "What city or ZIP code should I check?", { providerID: "opencode" }),
+        assistantMessage("msg-1", "What city or ZIP code should I check?", { providerID: "ollama" }),
       ],
       permissions: [],
       questions: [],
       thinking: true,
       limits: {},
-      providers: [zen],
+      providers: [local],
     })
 
     expect(out.commits.at(-1)).toEqual(
       expect.objectContaining({
         kind: "system",
-        text: "▣ Build · Nemotron 3 Ultra · 2.8s",
+        text: "▣ Build · Llama Free · 2.8s",
         summary: {
           agent: "Build",
-          model: "Nemotron 3 Ultra",
+          model: "Llama Free",
           duration: "2.8s",
         },
       }),

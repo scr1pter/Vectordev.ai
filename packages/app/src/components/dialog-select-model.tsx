@@ -15,7 +15,6 @@ import { decode64 } from "@/utils/base64"
 import {
   buildModelSections,
   contextLabel,
-  INCLUDED_ICON,
   isNewRelease,
   modelAccess,
   modelAriaLabel,
@@ -37,8 +36,6 @@ type ModelSection = PickerSection<ModelItem>
 
 const connectKey = "action:connect-provider"
 const HIDDEN_PROVIDER_IDS = new Set<string>()
-/** The sprite has no "opencode-zen" entry; a paid Zen group shares OpenCode's mark. */
-const iconID = (providerID: string) => (providerID === "opencode-zen" ? "opencode" : providerID)
 
 /** The models a picker can show, and the ordered sections both views render. Rows and
     keyboard order both come from sections(), so they can't drift apart, and
@@ -95,11 +92,8 @@ function SectionHeading(props: { section: ModelSection }) {
   return (
     <>
       <span data-slot="model-row-icon" aria-hidden="true">
-        <Show when={props.section.kind === "included"}>
-          <ProviderIcon id={INCLUDED_ICON} width={14} height={14} />
-        </Show>
         <Show when={props.section.kind === "provider" && props.section.providerID}>
-          {(id) => <ProviderIcon id={iconID(id())} width={14} height={14} />}
+          {(id) => <ProviderIcon id={id()} width={14} height={14} />}
         </Show>
       </span>
       <span data-slot="model-section-name">{props.section.label}</span>
@@ -125,9 +119,8 @@ function ModelRow(props: { item: ModelItem; section: ModelSection; now: number }
   const spec = createMemo(() => {
     const parts: { slot: string; text: string }[] = []
     const value = access()
-    // Only "Included" and "<Plan> plan" go on rows; "API key" stays on section labels and in the tooltip.
-    if (props.section.rowAccess && (value.kind === "included" || value.kind === "plan"))
-      parts.push({ slot: "model-row-access", text: value.label })
+    // Plan captions go on rows; API key captions stay on section labels and in the tooltip.
+    if (props.section.rowAccess && value.kind === "plan") parts.push({ slot: "model-row-access", text: value.label })
     const context = contextLabel(props.item.limit?.context)
     if (context) parts.push({ slot: "model-row-context", text: context })
     return parts
@@ -136,12 +129,7 @@ function ModelRow(props: { item: ModelItem; section: ModelSection; now: number }
     <>
       <span data-slot="model-row-icon" aria-hidden="true">
         <Show when={mixed()}>
-          <Show
-            when={access().kind !== "included"}
-            fallback={<ProviderIcon id={INCLUDED_ICON} width={14} height={14} />}
-          >
-            <ProviderIcon id={iconID(props.item.provider.id)} width={14} height={14} />
-          </Show>
+          <ProviderIcon id={props.item.provider.id} width={14} height={14} />
         </Show>
       </span>
       <span data-slot="model-row-name">{modelDisplayName(props.item)}</span>

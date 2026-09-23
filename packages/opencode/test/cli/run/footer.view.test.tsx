@@ -56,11 +56,11 @@ function model(input: {
 }) {
   return {
     id: input.id,
-    providerID: "opencode",
+    providerID: "openai",
     api: {
-      id: "opencode",
-      url: "https://opencode.ai",
-      npm: "@ai-sdk/openai-compatible",
+      id: "openai",
+      url: "https://api.openai.com/v1",
+      npm: "@ai-sdk/openai",
     },
     name: input.name,
     capabilities: {
@@ -106,8 +106,8 @@ function model(input: {
 
 function provider() {
   return {
-    id: "opencode",
-    name: "opencode",
+    id: "openai",
+    name: "OpenAI",
     source: "api",
     env: [],
     options: {},
@@ -199,7 +199,7 @@ async function renderFooter(
           theme={input.theme ?? (() => RUN_THEME_FALLBACK)}
           tuiConfig={config}
           backgroundSubagents={input.backgroundSubagents ?? true}
-          agent="opencode"
+          agent="vector"
           onSubmit={input.onSubmit ?? (() => true)}
           onPermissionReply={() => {}}
           onQuestionReply={() => {}}
@@ -938,7 +938,7 @@ test("direct footer shows editable prompts and additional queued work while runn
           commands={() => []}
           providers={() => undefined}
           currentModel={() => ({
-            providerID: "opencode",
+            providerID: "openai",
             modelID: "a-model-name-long-enough-to-force-responsive-truncation",
           })}
           variants={() => []}
@@ -952,7 +952,7 @@ test("direct footer shows editable prompts and additional queued work while runn
           theme={() => RUN_THEME_FALLBACK}
           tuiConfig={tuiConfig}
           backgroundSubagents={true}
-          agent="opencode"
+          agent="vector"
           onSubmit={() => true}
           onPermissionReply={() => {}}
           onQuestionReply={() => {}}
@@ -1027,7 +1027,7 @@ test("direct footer shows editable prompts and additional queued work while runn
 test("direct footer separates a lone context hint from model and command hint", async () => {
   const app = await renderFooter({
     providers: [provider()],
-    currentModel: { providerID: "opencode", modelID: "gpt-5" },
+    currentModel: { providerID: "openai", modelID: "gpt-5" },
     currentVariant: "xhigh",
     subagents: {
       tabs: [subagent({ sessionID: "s-1", label: "Explore", description: "Inspect auth flow" })],
@@ -1055,7 +1055,7 @@ test("direct footer separates a lone context hint from model and command hint", 
 test("direct footer hides the subagent hint when only completed subagents remain", async () => {
   const app = await renderFooter({
     providers: [provider()],
-    currentModel: { providerID: "opencode", modelID: "gpt-5" },
+    currentModel: { providerID: "openai", modelID: "gpt-5" },
     currentVariant: "xhigh",
     subagents: {
       tabs: [subagent({ sessionID: "s-1", label: "Explore", description: "Inspect auth flow", status: "completed" })],
@@ -1293,7 +1293,7 @@ test("direct permission rejection submits through keymap return binding", async 
 
 test("direct model panel renders current model selector", async () => {
   const [providers] = createSignal<RunProvider[] | undefined>([provider()])
-  const [current] = createSignal<RunInput["model"]>({ providerID: "opencode", modelID: "gpt-5" })
+  const [current] = createSignal<RunInput["model"]>({ providerID: "openai", modelID: "gpt-5" })
 
   const app = await testRender(
     () => (
@@ -1320,19 +1320,18 @@ test("direct model panel renders current model selector", async () => {
 
     expect(frame).toContain("Select model")
     expect(frame).toContain("Search")
-    expect(frame).toContain("opencode")
+    expect(frame).toContain("OpenAI")
     expect(frame).toContain("GPT-5")
     expect(frame).toContain("current")
-    // Zero cost from Zen's catalogue: included, named without the catalogue's "Free", and listed
-    // first under the heading the app and the TUI use.
-    expect(frame).toContain("Models included with Vector")
-    expect(frame).toContain("Included")
-    expect(frame).not.toContain("Free")
+    // A provider's zero catalog price does not imply that Vector supplies model access.
+    expect(frame).toContain("GPT Free")
+    expect(frame).not.toContain("Models included with Vector")
+    expect(frame).not.toContain("Included")
     expect(frame).not.toContain("┌")
     expect(frame).not.toContain("┃")
     expect(frame).not.toContain("Old Model")
-    // Rows: the included heading, GPT, a spacer, the opencode heading, then GPT-5 (current).
-    expectPaletteList(list, 4)
+    // Rows: the OpenAI heading, GPT Free, then GPT-5 (current).
+    expectPaletteList(list, 2)
   } finally {
     app.renderer.destroy()
   }

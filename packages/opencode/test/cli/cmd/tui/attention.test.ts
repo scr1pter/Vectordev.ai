@@ -89,7 +89,7 @@ function config(attention: Partial<AttentionConfig["attention"]> = {}): Attentio
       notifications: true,
       sound: true,
       volume: 0.4,
-      sound_pack: "opencode.default",
+      sound_pack: "vector.default",
       sounds: {},
       ...attention,
     },
@@ -108,6 +108,23 @@ describe("createTuiAttention", () => {
       sound: true,
     })
     expect(renderer.notifications).toHaveLength(0)
+    expect(audio.playCalls).toBe(1)
+  })
+
+  test("reads the legacy default sound pack selection", async () => {
+    const audio = new FakeAudioEngine()
+    const attention = createTuiAttention({
+      renderer: new FakeRenderer(),
+      config: config({ sound_pack: "opencode.default" }),
+      audio,
+    })
+
+    expect(attention.soundboard.current()).toBe("vector.default")
+    expect(await attention.notify({ message: "hello" })).toEqual({
+      ok: true,
+      notification: false,
+      sound: true,
+    })
     expect(audio.playCalls).toBe(1)
   })
 
@@ -161,7 +178,7 @@ describe("createTuiAttention", () => {
       notification: true,
       sound: false,
     })
-    expect(renderer.notifications).toEqual([{ title: "opencode", message: "focused" }])
+    expect(renderer.notifications).toEqual([{ title: "Vector", message: "focused" }])
   })
 
   test("notification can deliver while focused when requested", async () => {
@@ -176,20 +193,20 @@ describe("createTuiAttention", () => {
       sound: true,
     })
     expect(audio.playCalls).toBe(1)
-    expect(renderer.notifications).toEqual([{ title: "opencode", message: "hello" }])
+    expect(renderer.notifications).toEqual([{ title: "Vector", message: "hello" }])
   })
 
-  test("notifies while blurred", async () => {
+  test("preserves an explicit notification title while blurred", async () => {
     const renderer = new FakeRenderer()
     const attention = createTuiAttention({ renderer, config: config(), audio: new FakeAudioEngine() })
     renderer.emit("blur")
 
-    expect(await attention.notify({ title: "opencode", message: "hello", sound: false })).toEqual({
+    expect(await attention.notify({ title: "Build complete", message: "hello", sound: false })).toEqual({
       ok: true,
       notification: true,
       sound: false,
     })
-    expect(renderer.notifications).toEqual([{ title: "opencode", message: "hello" }])
+    expect(renderer.notifications).toEqual([{ title: "Build complete", message: "hello" }])
   })
 
   test("when requested, blurred-only calls do not notify or play sound while focused", async () => {
@@ -238,7 +255,7 @@ describe("createTuiAttention", () => {
       notification: true,
       sound: true,
     })
-    expect(renderer.notifications).toEqual([{ title: "opencode", message: "hello again" }])
+    expect(renderer.notifications).toEqual([{ title: "Vector", message: "hello again" }])
   })
 
   test("can disable notification per call while still playing sound", async () => {
@@ -383,7 +400,7 @@ describe("createTuiAttention", () => {
     expect(audio.loadPaths).toEqual(["/tmp/question.mp3"])
 
     dispose()
-    expect(attention.soundboard.current()).toBe("opencode.default")
+    expect(attention.soundboard.current()).toBe("vector.default")
   })
 
   test("uses config sound overrides before active pack sounds and falls back on load failure", async () => {

@@ -5,16 +5,10 @@ import { DialogSelect } from "../ui/dialog-select"
 import { useDialog } from "../ui/dialog"
 import { createDialogProviderOptions, DialogProvider } from "./dialog-provider"
 import { DialogVariant } from "./dialog-variant"
-import * as fuzzysort from "fuzzysort"
+import fuzzysort from "fuzzysort"
 import { useConnected } from "./use-connected"
 import { useSync } from "../context/sync"
-import { includedModelName, isIncluded } from "../util/included-model"
-
-export { includedModelName, isIncluded } from "../util/included-model"
-
-/** Models included with Vector (isIncluded) share one section, as in the desktop app. */
-const INCLUDED_CATEGORY = "Models included with Vector"
-const INCLUDED_FOOTER = "Included"
+import { isHiddenProvider } from "../util/model"
 
 export function DialogModel(props: { providerID?: string }) {
   const local = useLocal()
@@ -37,21 +31,17 @@ export function DialogModel(props: { providerID?: string }) {
       if (!showSections) return []
       return items.flatMap((item) => {
         const provider = sync.data.provider.find((provider) => provider.id === item.providerID)
-        if (!provider) return []
+        if (!provider || isHiddenProvider(provider.id)) return []
         const model = provider.models[item.modelID]
         if (!model) return []
-        const included = isIncluded(provider, model)
         const title = model.name ?? item.modelID
         return [
           {
             key: item,
             value: { providerID: provider.id, modelID: model.id },
-            title: included ? includedModelName(title) : title,
-            // The footer already says where an included model comes from.
-            description: included ? undefined : provider.name,
+            title,
+            description: provider.name,
             category,
-            disabled: provider.id === "opencode" && model.id.includes("-nano"),
-            footer: included ? INCLUDED_FOOTER : undefined,
             onSelect: () => {
               onSelect(provider.id, model.id)
             },
@@ -70,10 +60,8 @@ export function DialogModel(props: { providerID?: string }) {
 
     const providerOptions = pipe(
       sync.data.provider,
-      sortBy(
-        (provider) => provider.id !== "opencode",
-        (provider) => provider.name,
-      ),
+      filter((provider) => !isHiddenProvider(provider.id)),
+      sortBy((provider) => provider.name),
       flatMap((provider) =>
         pipe(
           provider.models,
@@ -81,23 +69,19 @@ export function DialogModel(props: { providerID?: string }) {
           filter(([_, info]) => info.status !== "deprecated"),
           filter(([_, info]) => (props.providerID ? info.providerID === props.providerID : true)),
           map(([model, info]) => {
-            const included = isIncluded(provider, info)
             const title = info.name ?? model
             return {
               value: { providerID: provider.id, modelID: model },
-              title: included ? includedModelName(title) : title,
+              title,
               releaseDate: info.release_date,
               description: favorites.some((item) => item.providerID === provider.id && item.modelID === model)
                 ? "(Favorite)"
                 : undefined,
-              // Users with no key get the heading too: they're who it's for.
-              category: included ? INCLUDED_CATEGORY : connected() ? provider.name : undefined,
+              category: connected() ? provider.name : undefined,
               // What search reads (searchModelOptions): the catalogue name and, once a provider
               // is connected, its name. Never the heading.
               searchName: title,
               searchProvider: connected() ? provider.name : undefined,
-              disabled: provider.id === "opencode" && model.includes("-nano"),
-              footer: included ? INCLUDED_FOOTER : undefined,
               onSelect() {
                 onSelect(provider.id, model)
               },
@@ -199,10 +183,7 @@ export function DialogModel(props: { providerID?: string }) {
   )
 }
 
-/** Search finds a row by its catalogue name, so "free" still finds the included models, and,
-    once a provider is connected, by the provider's name. Never by the section heading: its
-    letters would pull in rows that don't match, and the cursor lands on the first row. Included
-    rows come first, as when browsing. */
+/** Search model names and connected provider names, never section headings. */
 export function searchModelOptions<
   T extends {
     searchName: string
@@ -220,13 +201,7 @@ export function searchModelOptions<
 
 export function sortModelOptions<T extends { footer?: string; releaseDate: string | number; title: string }>(
   options: T[],
-  newestFirst: boolean,
+  _newestFirst: boolean,
 ) {
-  if (newestFirst) return sortBy(options, [(option) => option.releaseDate, "desc"], (option) => option.title)
-  return sortBy(
-    options,
-    (option) => option.footer !== INCLUDED_FOOTER,
-    [(option) => option.releaseDate, "desc"],
-    (option) => option.title,
-  )
+  return sortBy(options, [(option) => option.releaseDate, "desc"], (option) => option.title)
 }

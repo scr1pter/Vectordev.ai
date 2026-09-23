@@ -6,7 +6,6 @@ import { createEffect, createMemo, createSignal, type Accessor } from "solid-js"
 import { RunFooterMenu, createFooterMenuState, type RunFooterMenuItem } from "./footer.menu"
 import type { RunFooterTheme } from "./theme"
 import type { FooterQueuedPrompt, FooterSubagentTab, RunCommand, RunInput, RunProvider } from "./types"
-import { includedModel, includedModelName } from "./variant.shared"
 
 type PanelEntry = RunFooterMenuItem & {
   category: string
@@ -28,12 +27,8 @@ type ModelEntry = PanelEntry & {
   providerID: string
   modelID: string
   providerName: string
-  included: boolean
   current: boolean
 }
-
-// The heading the included models share in the model picker, as in the app and the TUI.
-const INCLUDED_CATEGORY = "Models included with Vector"
 
 type VariantEntry = PanelEntry & {
   variant: string | undefined
@@ -965,18 +960,14 @@ export function RunModelSelectBody(props: {
           .filter(([, model]) => model.status !== "deprecated")
           .map(([modelID, model]) => {
             const name = model.name ?? modelID
-            const included = includedModel(provider, model)
-            // An included model drops the "Free" its catalogue name carries; search still finds it by that name.
-            const title = included ? includedModelName(name) : name
+            const title = name
             const current = props.current()?.providerID === provider.id && props.current()?.modelID === modelID
-            const footer = current ? "current" : included ? "Included" : title !== modelID ? modelID : undefined
+            const footer = current ? "current" : title !== modelID ? modelID : undefined
             return {
               providerID: provider.id,
               modelID,
               providerName: provider.name,
-              included,
-              // Included rows share one heading.
-              category: included ? INCLUDED_CATEGORY : provider.name,
+              category: provider.name,
               display: title,
               footer,
               keywords: `${provider.id} ${provider.name} ${modelID} ${name} ${footer ?? ""}`,
@@ -984,25 +975,7 @@ export function RunModelSelectBody(props: {
             }
           }),
       )
-      .sort((a, b) => {
-        // Included rows first, together under their heading, then OpenCode's, then the rest by provider.
-        const included = Number(!a.included) - Number(!b.included)
-        if (included !== 0) {
-          return included
-        }
-
-        const provider = Number(a.providerID !== "opencode") - Number(b.providerID !== "opencode")
-        if (provider !== 0) {
-          return provider
-        }
-
-        const name = a.providerName.localeCompare(b.providerName)
-        if (name !== 0) {
-          return name
-        }
-
-        return a.display.localeCompare(b.display)
-      }),
+      .sort((a, b) => a.providerName.localeCompare(b.providerName) || a.display.localeCompare(b.display)),
   )
   const items = createMemo<ModelEntry[]>(() => match(query(), entries(), MODEL_SEARCH_KEYS))
   const menu = createFooterMenuState({ count: () => items().length, limit: PANEL_LIST_ROWS })

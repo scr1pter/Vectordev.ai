@@ -27,7 +27,8 @@ import { normalizeForSnapshot, PATH_SEP } from "../../lib/snapshot"
 //      path widths produce different leading-whitespace counts (or even
 //      line-wraps onto a fresh line on Windows). `\s+` matches both forms.
 function normalize(text: string): string {
-  return normalizeForSnapshot(text, {
+  // Migration warnings are covered separately and are not part of the help body.
+  return normalizeForSnapshot(text.replace(/^\[Vector\] OPENCODE_.*deprecated; use VECTOR_.*instead\.\n/gm, ""), {
     pathReplacements: [
       // Mixed-case [A-Za-z0-9] because node's mkdtemp suffix is mixed-case
       // (the harness now uses FileSystem.makeTempDirectoryScoped under the

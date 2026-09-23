@@ -442,28 +442,6 @@ export function DialogConnectProvider(props: { provider: string; directory?: Acc
       await complete()
     }
 
-    if (provider().id === "opencode") {
-      return (
-        <div class="flex flex-col items-start gap-4">
-          <div class="flex items-start gap-3 rounded-xl border border-border-weak-base bg-surface-base px-4 py-3">
-            <ProviderIcon id="opencode" class="mt-0.5 size-6 shrink-0 icon-strong-base" />
-            <div class="flex flex-col gap-1">
-              <div class="text-14-medium text-text-strong">
-                Models included with Vector are ready to use, no API key needed.
-              </div>
-              <div class="text-14-regular text-text-weak">
-                Find them in the model picker under Models included with Vector. Add Anthropic, OpenAI, Google,
-                OpenRouter, or a custom provider when you want to bring your own keys.
-              </div>
-            </div>
-          </div>
-          <Button class="w-auto" type="button" size="large" variant="primary" onClick={complete}>
-            Done
-          </Button>
-        </div>
-      )
-    }
-
     return (
       <div class="flex flex-col gap-6">
         <div class="text-14-regular text-text-base">

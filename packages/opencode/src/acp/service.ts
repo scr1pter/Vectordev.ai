@@ -46,7 +46,7 @@ import { ModelV2 } from "@opencode-ai/core/model"
 import { Provider } from "@/provider/provider"
 import type { Command } from "@/command"
 
-export const AuthMethodID = "opencode-login"
+export const AuthMethodID = "vector-login"
 
 export type Error = ACPError.Error
 type ServiceConnection = Pick<AgentSideConnection, "sessionUpdate"> &
@@ -92,17 +92,17 @@ export function make(input: {
   const initialize = Effect.fn("ACP.initialize")(function* (params: InitializeRequest) {
     const started = performance.now()
     const authMethod: AuthMethod = {
-      description: "Run `opencode auth login` in the terminal",
-      name: "Login with opencode",
+      description: "Run `vector auth login` in the terminal",
+      name: "Connect a provider with Vector",
       id: AuthMethodID,
     }
 
     if (params.clientCapabilities?._meta?.["terminal-auth"] === true) {
       authMethod._meta = {
         "terminal-auth": {
-          command: "opencode",
+          command: "vector",
           args: ["auth", "login"],
-          label: "OpenCode Login",
+          label: "Vector provider login",
         },
       }
     }
@@ -128,7 +128,7 @@ export function make(input: {
       },
       authMethods: [authMethod],
       agentInfo: {
-        name: "OpenCode",
+        name: "Vector",
         version: InstallationVersion,
       },
     }
@@ -137,7 +137,7 @@ export function make(input: {
   })
 
   const authenticate = Effect.fn("ACP.authenticate")(function* (params: AuthenticateRequest) {
-    if (params.methodId !== AuthMethodID) {
+    if (params.methodId !== AuthMethodID && params.methodId !== "opencode-login") {
       return yield* new ACPError.UnknownAuthMethodError({ methodId: params.methodId })
     }
     return {}

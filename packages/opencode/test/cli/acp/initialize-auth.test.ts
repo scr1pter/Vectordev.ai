@@ -4,7 +4,7 @@ import { Effect } from "effect"
 import { cliIt } from "../../lib/cli-process"
 import { createAcpClient, expectErrorCode, initialize } from "./helpers"
 
-describe("opencode acp initialize/auth subprocess", () => {
+describe("vector acp initialize/auth subprocess", () => {
   cliIt.live(
     "initialize responds with capabilities",
     ({ opencode }) =>
@@ -21,7 +21,7 @@ describe("opencode acp initialize/auth subprocess", () => {
         expect(initialized.agentCapabilities?.sessionCapabilities?.fork).toEqual({})
         expect(initialized.agentCapabilities?.sessionCapabilities?.list).toEqual({})
         expect(initialized.agentCapabilities?.sessionCapabilities?.resume).toEqual({})
-        expect(initialized.agentInfo?.name).toBe("OpenCode")
+        expect(initialized.agentInfo?.name).toBe("Vector")
       }),
     60_000,
   )
@@ -33,11 +33,11 @@ describe("opencode acp initialize/auth subprocess", () => {
         const acp = yield* createAcpClient({ opencode })
         const initialized = yield* initialize(acp)
 
-        expect(initialized.authMethods?.[0]?.id).toBe("opencode-login")
+        expect(initialized.authMethods?.[0]?.id).toBe("vector-login")
         expect(initialized.authMethods?.[0]?._meta?.["terminal-auth"]).toBeDefined()
-        expect(yield* acp.request<AuthenticateResponse>("authenticate", { methodId: "opencode-login" })).toMatchObject({
-          result: {},
-        })
+        for (const methodId of ["vector-login", "opencode-login"]) {
+          expect(yield* acp.request<AuthenticateResponse>("authenticate", { methodId })).toMatchObject({ result: {} })
+        }
 
         const rejected = yield* acp.request<AuthenticateResponse>("authenticate", { methodId: "missing-auth-method" })
         expectErrorCode(rejected.error, -32602)
@@ -53,7 +53,7 @@ describe("opencode acp initialize/auth subprocess", () => {
         const acp = yield* createAcpClient({ opencode })
         const initialized = yield* acp.request<InitializeResponse>("initialize", { protocolVersion: 1 })
 
-        expect(initialized.result?.authMethods?.[0]?.id).toBe("opencode-login")
+        expect(initialized.result?.authMethods?.[0]?.id).toBe("vector-login")
         expect(initialized.result?.authMethods?.[0]?._meta?.["terminal-auth"]).toBeUndefined()
       }),
     60_000,

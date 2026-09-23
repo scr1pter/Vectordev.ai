@@ -1,3 +1,4 @@
+import semver from "semver"
 import { Config } from "@/config/config"
 import { AppRuntime } from "@/effect/app-runtime"
 import { Flag } from "@opencode-ai/core/flag/flag"
@@ -10,7 +11,7 @@ export async function upgrade() {
   if (config.autoupdate === false || Flag.OPENCODE_DISABLE_AUTOUPDATE) return
   const method = await Installation.method()
   const latest = await Installation.latest(method).catch(() => {})
-  if (!latest) return
+  if (!latest || !semver.valid(InstallationVersion) || !semver.gt(latest, InstallationVersion)) return
 
   if (Flag.OPENCODE_ALWAYS_NOTIFY_UPDATE) {
     GlobalBus.emit("event", {

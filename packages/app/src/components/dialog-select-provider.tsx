@@ -1,6 +1,6 @@
 import { type Accessor, Component, Show } from "solid-js"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
-import { popularProviders, useProviders } from "@/hooks/use-providers"
+import { isHiddenProvider, popularProviders, useProviders } from "@/hooks/use-providers"
 import { Dialog } from "@opencode-ai/ui/dialog"
 import { List } from "@opencode-ai/ui/list"
 import { Tag } from "@opencode-ai/ui/tag"
@@ -11,11 +11,6 @@ import { DialogCustomProvider } from "./dialog-custom-provider"
 import { brandProviderDescription, brandProviderName } from "@/utils/provider-brand"
 
 const CUSTOM_ID = "_custom"
-const OPENCODE_PROVIDER_IDS = new Set(["opencode", "opencode-go", "opencode-zen"])
-const HIDDEN_PROVIDER_IDS = new Set<string>()
-
-const isOpenCodeProvider = (id: string) => OPENCODE_PROVIDER_IDS.has(id)
-
 const providerDisplayName = (id: string, name: string) => brandProviderName(id, name)
 
 export const DialogSelectProvider: Component<{ directory?: Accessor<string | undefined> }> = (props) => {
@@ -46,7 +41,7 @@ export const DialogSelectProvider: Component<{ directory?: Accessor<string | und
         items={() => {
           language.locale()
           return [{ id: CUSTOM_ID, name: customLabel() }, ...providers.all().values()].filter(
-            (provider) => provider.id === CUSTOM_ID || !HIDDEN_PROVIDER_IDS.has(provider.id),
+            (provider) => provider.id === CUSTOM_ID || !isHiddenProvider(provider.id),
           )
         }}
         filterKeys={["id", "name"]}
@@ -77,15 +72,10 @@ export const DialogSelectProvider: Component<{ directory?: Accessor<string | und
           <div class="px-1.25 w-full flex items-center gap-x-3">
             <ProviderIcon data-slot="list-item-extra-icon" id={i.id} />
             <span>{providerDisplayName(i.id, i.name)}</span>
-            <Show when={isOpenCodeProvider(i.id)}>
-              <div class="text-14-regular text-text-weak">{note(i.id)}</div>
-            </Show>
             <Show when={i.id === CUSTOM_ID}>
               <Tag>{language.t("settings.providers.tag.custom")}</Tag>
             </Show>
-            <Show when={!isOpenCodeProvider(i.id) && note(i.id)}>
-              {(value) => <div class="text-14-regular text-text-weak">{value()}</div>}
-            </Show>
+            <Show when={note(i.id)}>{(value) => <div class="text-14-regular text-text-weak">{value()}</div>}</Show>
           </div>
         )}
       </List>

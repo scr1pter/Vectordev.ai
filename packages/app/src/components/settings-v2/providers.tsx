@@ -19,7 +19,6 @@ type ProviderSource = "env" | "api" | "config" | "custom"
 type ProviderItem = ReturnType<ReturnType<typeof useProviders>["connected"]>[number]
 
 const PROVIDER_NOTES = [
-  { match: (id: string) => id === "opencode", key: "dialog.provider.opencode.note" },
   { match: (id: string) => id === "anthropic", key: "dialog.provider.anthropic.note" },
   { match: (id: string) => id.startsWith("github-copilot"), key: "dialog.provider.copilot.note" },
   { match: (id: string) => id === "openai", key: "dialog.provider.openai.note" },
@@ -146,7 +145,9 @@ export const SettingsProvidersV2: Component = () => {
       <div class="settings-v2-tab-header">
         <p class="settings-v2-page-kicker">Models &amp; keys</p>
         <h2 class="settings-v2-tab-title">{language.t("settings.providers.title")}</h2>
-        <p class="settings-v2-page-subtitle">Connect providers and manage the credentials available to this workspace.</p>
+        <p class="settings-v2-page-subtitle">
+          Connect providers and manage the credentials available to this workspace.
+        </p>
       </div>
 
       <div class="settings-v2-tab-body settings-v2-providers">
@@ -206,15 +207,15 @@ export const SettingsProvidersV2: Component = () => {
               {(item) => (
                 <div class="settings-v2-provider-row">
                   <div class="settings-v2-provider-lead">
-                      <ProviderIcon
-                        id={item.id}
-                        width={PROVIDER_ICON_SIZE}
-                        height={PROVIDER_ICON_SIZE}
-                        class="settings-v2-provider-icon shrink-0"
-                      />
-                      <div class="settings-v2-provider-copy">
-                        <div class="settings-v2-provider-main">
-                          <span class="settings-v2-provider-name">{providerDisplayName(item.id, item.name)}</span>
+                    <ProviderIcon
+                      id={item.id}
+                      width={PROVIDER_ICON_SIZE}
+                      height={PROVIDER_ICON_SIZE}
+                      class="settings-v2-provider-icon shrink-0"
+                    />
+                    <div class="settings-v2-provider-copy">
+                      <div class="settings-v2-provider-main">
+                        <span class="settings-v2-provider-name">{providerDisplayName(item.id, item.name)}</span>
                       </div>
                       <Show when={description(item.id)}>
                         {(text) => <p class="settings-v2-provider-description">{text()}</p>}

@@ -71,7 +71,6 @@ import {
 export const REVIEW_TIMEOUT_MS = 10 * 60_000
 // Pull requests with more files than this show the cost estimate before a review starts.
 export const ESTIMATE_FILES = 50
-export const FREE_MODEL = "opencode/big-pickle"
 export const REBUILT_HINT = "For the most accurate review, switch to the base branch."
 
 const FINALIZE_MS = 90_000
@@ -246,7 +245,6 @@ export function modelName(model: Pick<ReviewModel, "providerID" | "modelID">) {
 // Vector ("api") with no listed price stands for a subscription sign-in.
 export function costKindOf(provider: { id: string; source?: string }, cost?: { input: number; output: number }) {
   const listed = !!cost && (cost.input > 0 || cost.output > 0)
-  if (!listed && provider.id === "opencode") return "free" satisfies CostKind
   if (listed) return "priced" satisfies CostKind
   return (provider.source === "api" ? "plan" : "unknown") satisfies CostKind
 }
@@ -265,34 +263,38 @@ type CatalogProvider = {
 }
 
 export function reviewCatalog(providers: readonly CatalogProvider[]): ReviewModel[] {
-  return providers.flatMap((provider) =>
-    Object.values(provider.models).map((model) => {
-      const costKind: CostKind = costKindOf(provider, model.cost)
-      const cost = model.cost
-      const price: ReviewPrice | undefined =
-        costKind === "priced" && cost
-          ? {
-              input: cost.input,
-              output: cost.output,
-              ...(cost.cache && cost.cache.read > 0 ? { cacheRead: cost.cache.read } : {}),
-              ...(cost.cache && cost.cache.write > 0 ? { cacheWrite: cost.cache.write } : {}),
-            }
-          : undefined
-      return {
-        providerID: provider.id,
-        modelID: model.id,
-        ...(model.limit?.context ? { context: model.limit.context } : {}),
-        ...(price ? { price } : {}),
-        costKind,
-      }
-    }),
-  )
+  return providers
+    .filter((provider) => !provider.id.startsWith("opencode"))
+    .flatMap((provider) =>
+      Object.values(provider.models).map((model) => {
+        const costKind: CostKind = costKindOf(provider, model.cost)
+        const cost = model.cost
+        const price: ReviewPrice | undefined =
+          costKind === "priced" && cost
+            ? {
+                input: cost.input,
+                output: cost.output,
+                ...(cost.cache && cost.cache.read > 0 ? { cacheRead: cost.cache.read } : {}),
+                ...(cost.cache && cost.cache.write > 0 ? { cacheWrite: cost.cache.write } : {}),
+              }
+            : undefined
+        return {
+          providerID: provider.id,
+          modelID: model.id,
+          ...(model.limit?.context ? { context: model.limit.context } : {}),
+          ...(price ? { price } : {}),
+          costKind,
+        }
+      }),
+    )
 }
 
-// The first candidate that is a connected model. undefined leaves the choice to the engine.
+// The first candidate that is a connected, supported provider model.
 export function pickReviewModel(candidates: readonly (string | undefined)[], catalog: readonly ReviewModel[]) {
   for (const name of candidates) {
-    const found = name?.trim() && catalog.find((model) => modelName(model) === name.trim())
+    const found =
+      name?.trim() &&
+      catalog.find((model) => !model.providerID.startsWith("opencode") && modelName(model) === name.trim())
     if (found) return found
   }
   return undefined
@@ -443,10 +445,14 @@ export async function runPullRequestReview(
   input.onProgress?.({ type: "checkout", checkout, label })
   if (input.signal?.aborted) return undefined
 
-  // Section 2.9, local order: review.json, then the review agent's model and the configured default, then the model
-  // included with Vector. The resolved model is passed explicitly to every prompt.
+  // Use review.json, then the review agent's model and the configured default.
+  // The resolved model is passed explicitly to every prompt.
   const catalog = input.catalog ?? []
-  const model = pickReviewModel([config.model, ...(input.preferredModels ?? []), FREE_MODEL], catalog)
+  const model = pickReviewModel([config.model, ...(input.preferredModels ?? [])], catalog)
+  if (!model)
+    throw new Error(
+      "No review model is set. Connect a provider and select a model, or set model in .vector/review.json.",
+    )
   const refusal = model?.context ? contextRefusal(modelName(model), model.context) : undefined
   if (refusal) throw new Error(refusal)
 

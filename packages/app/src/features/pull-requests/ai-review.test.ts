@@ -10,7 +10,6 @@ import {
   costKindOf,
   countBySeverity,
   estimateText,
-  FREE_MODEL,
   findingGroups,
   pickReviewModel,
   reviewCatalog,
@@ -66,7 +65,7 @@ const sonnet: ReviewModel = {
   price: { input: 3, output: 15 },
   costKind: "priced",
 }
-const pickle: ReviewModel = { providerID: "opencode", modelID: "big-pickle", context: 200_000, costKind: "free" }
+const pickle: ReviewModel = { providerID: "openai", modelID: "gpt-5.5", context: 200_000, costKind: "unknown" }
 
 const offByOne = {
   path: "src/list.ts",
@@ -343,10 +342,10 @@ describe("runPullRequestReview", () => {
 
   test("uses the model named in review.json first", async () => {
     const { client, calls } = fakeClient({
-      files: { "src/list.ts": HEAD, ".vector/review.json": `{"model":"${FREE_MODEL}"}` },
+      files: { "src/list.ts": HEAD, ".vector/review.json": `{"model":"${"openai/gpt-5.5"}"}` },
     })
     await run(client)
-    expect(calls.prompt[0]!.model).toEqual({ providerID: "opencode", modelID: "big-pickle" })
+    expect(calls.prompt[0]!.model).toEqual({ providerID: "openai", modelID: "gpt-5.5" })
   })
 
   test("keeps a finding outside the diff only when the checkout has that file", async () => {
@@ -376,13 +375,15 @@ describe("runPullRequestReview", () => {
 
 describe("models", () => {
   test("picks the first connected candidate", () => {
-    expect(pickReviewModel(["missing/model", "anthropic/claude-sonnet-4-5", FREE_MODEL], [sonnet, pickle])).toBe(sonnet)
-    expect(pickReviewModel([undefined, "missing/model", FREE_MODEL], [sonnet, pickle])).toBe(pickle)
+    expect(pickReviewModel(["missing/model", "anthropic/claude-sonnet-4-5", "openai/gpt-5.5"], [sonnet, pickle])).toBe(
+      sonnet,
+    )
+    expect(pickReviewModel([undefined, "missing/model", "openai/gpt-5.5"], [sonnet, pickle])).toBe(pickle)
     expect(pickReviewModel(["missing/model"], [sonnet])).toBeUndefined()
   })
 
   test("names the cost kind the way the summary words it", () => {
-    expect(costKindOf({ id: "opencode" }, { input: 0, output: 0 })).toBe("free")
+    expect(costKindOf({ id: "opencode" }, { input: 0, output: 0 })).toBe("unknown")
     expect(costKindOf({ id: "anthropic", source: "env" }, { input: 3, output: 15 })).toBe("priced")
     expect(costKindOf({ id: "openai", source: "api" }, { input: 0, output: 0 })).toBe("plan")
     expect(costKindOf({ id: "local", source: "config" }, { input: 0, output: 0 })).toBe("unknown")
@@ -412,8 +413,8 @@ describe("models", () => {
   })
 
   test("words the estimate for a model included with Vector", () => {
-    expect(estimateText({ files: 51, model: FREE_MODEL, costKind: "free" })).toBe(
-      "This pull request changes 51 files. It runs on opencode/big-pickle, a model included with Vector.",
+    expect(estimateText({ files: 51, model: "openai/gpt-5.5", costKind: "free" })).toBe(
+      "This pull request changes 51 files. It runs on openai/gpt-5.5, a model included with Vector.",
     )
   })
 })

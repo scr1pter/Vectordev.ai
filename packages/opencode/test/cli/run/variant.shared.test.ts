@@ -148,8 +148,8 @@ describe("run variant shared", () => {
     expect(formatModelLabel(model, "high", providers)).toBe("GPT-5 · OpenAI · high")
   })
 
-  test("names an included model without the Free its catalogue name carries", () => {
-    // The fixture's model costs nothing and carries a release date, like Zen's catalogue models.
+  test("preserves provider names and full model names regardless of cost", () => {
+    // Zero-priced catalog metadata must not turn a provider into a Vector service.
     const base = providers[0].models["gpt-5"]
     const provider = (id: string, name: string, modelID: string, modelName: string): RunProvider => ({
       ...providers[0],
@@ -158,14 +158,12 @@ describe("run variant shared", () => {
       models: { [modelID]: { ...base, id: modelID, providerID: id, name: modelName } },
     })
     const list = [
-      provider("opencode", "OpenCode Zen", "nemotron-3-ultra-free", "Nemotron 3 Ultra Free"),
+      provider("example", "Example Provider", "example-model", "Example Model"),
       provider("ollama", "Ollama", "llama-free", "Llama Free"),
     ]
     const label = (providerID: string, modelID: string) => formatModelLabel({ providerID, modelID }, undefined, list)
 
-    // An included model names no provider: the catalogue's "OpenCode Zen" isn't how Vector offers it.
-    expect(label("opencode", "nemotron-3-ultra-free")).toBe("Nemotron 3 Ultra · Included with Vector")
-    // Only Zen's models are included: zero cost from any other provider keeps both names.
+    expect(label("example", "example-model")).toBe("Example Model · Example Provider")
     expect(label("ollama", "llama-free")).toBe("Llama Free · Ollama")
   })
 

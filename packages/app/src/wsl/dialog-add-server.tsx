@@ -140,6 +140,7 @@ export function DialogAddWslServer(props: DialogWslServerProps = {}) {
             }
           >
             <DialogBody class="settings-v2-wsl-dialog-body">
+              <p class="text-12-regular text-text-weak">{language.t("wsl.onboarding.vectorSetup")}</p>
               <div class="settings-v2-wsl-section-header">
                 <span class="settings-v2-wsl-section-title">{language.t("wsl.onboarding.installedDistros")}</span>
                 <ButtonV2

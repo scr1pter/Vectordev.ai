@@ -98,7 +98,6 @@ import { WORKSPACE_FILE_SAVED_EVENT, workspaceFileSavedMatchesDirectory } from "
 import { extractPromptFromParts } from "@/utils/prompt"
 import { formatServerError, isLocalSessionNotFoundError, isSessionNotFoundError } from "@/utils/server-errors"
 import { legacySessionHref, requireServerKey, sessionHref } from "@/utils/session-route"
-import { useUsageExceededDialogs } from "./session/usage-exceeded-dialogs"
 import { createSessionOwnership } from "./session/session-ownership"
 import { createSessionLineage } from "./session/session-lineage"
 import { enqueueSessionFollowup, SESSION_FOLLOWUP_LIMIT } from "./session/followup-queue"
@@ -2036,8 +2035,6 @@ export default function Page() {
     if (scrollStateFrame !== undefined) cancelAnimationFrame(scrollStateFrame)
     if (fillFrame !== undefined) cancelAnimationFrame(fillFrame)
   })
-
-  useUsageExceededDialogs()
 
   const composerRegion = () => {
     const controller = createSessionComposerRegionController({
