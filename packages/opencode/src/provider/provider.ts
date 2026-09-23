@@ -33,12 +33,6 @@ import { ModelStatus } from "./model-status"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderError } from "./error"
 
-// Models included with Vector will come from a provider Vector has its own
-// agreement with. Until then Vector does not serve OpenCode Zen's keyless
-// gateway; flipping this back on restores the old behaviour, and nothing else
-// about the provider was removed.
-const ZEN_PUBLIC_GATEWAY = false
-
 const OPENAI_HEADER_TIMEOUT_DEFAULT = 10_000
 
 function wrapSSE(res: Response, ms: number, ctl: AbortController) {
@@ -184,6 +178,9 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
         },
       }),
     opencode: Effect.fnUntraced(function* (input: Info) {
+      // Keep this disabled flag local so release compilers can remove the
+      // retired shared credential even when this module is lazily initialized.
+      const ZEN_PUBLIC_GATEWAY = false
       const env = yield* dep.env()
       const hasKey = iife(() => {
         if (input.env.some((item) => env[item])) return true

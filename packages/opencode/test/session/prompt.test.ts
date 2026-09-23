@@ -1042,6 +1042,7 @@ noLLMServer.instance("prompt tools replace previous prompt tool rules", () =>
 
     yield* prompt.prompt({
       sessionID: session.id,
+      model: ref,
       agent: "build",
       noReply: true,
       tools: { bash: false },
@@ -1049,6 +1050,7 @@ noLLMServer.instance("prompt tools replace previous prompt tool rules", () =>
     })
     yield* prompt.prompt({
       sessionID: session.id,
+      model: ref,
       agent: "build",
       noReply: true,
       tools: { read: true },
