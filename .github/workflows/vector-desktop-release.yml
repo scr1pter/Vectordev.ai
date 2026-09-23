@@ -135,6 +135,75 @@ jobs:
             echo "### Unsigned release approved for Vector $version" >> "$GITHUB_STEP_SUMMARY"
           fi
 
+  catalog:
+    name: Prepare one immutable release catalog
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      sha256: ${{ steps.catalog-digest.outputs.sha256 }}
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Set up Bun
+        uses: ./.github/actions/setup-bun
+        with:
+          install-flags: --frozen-lockfile
+
+      - name: Restore the catalog from an earlier attempt
+        id: catalog-restore
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          artifact=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" \
+            --jq '.artifacts[] | select(.name == "vector-model-catalog" and .expired == false) | .id')
+          if [ -n "$artifact" ]; then
+            gh run download "$GITHUB_RUN_ID" --name vector-model-catalog --dir release-catalog
+            echo "restored=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Prepare the catalog once for every platform
+        if: steps.catalog-restore.outputs.restored != 'true'
+        env:
+          TAG: ${{ env.RELEASE_TAG }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-catalog
+          # A new workflow run for a partially published release must reuse its immutable mirror.
+          status=$(curl --silent --show-error --location --retry 3 --output release-catalog/mirror.json \
+            --write-out '%{http_code}' \
+            "https://42qryducihx01gl0.public.blob.vercel-storage.com/releases/vector-v${TAG#v}/api.json")
+          case "$status" in
+            200) export VECTOR_MODELS_PATH="$PWD/release-catalog/mirror.json" ;;
+            404) ;;
+            *) echo "Catalog mirror returned HTTP $status; refusing to replace an unknown release snapshot"; exit 1 ;;
+          esac
+          export VECTOR_CATALOG_FILE="$PWD/release-catalog/api.json"
+          bun packages/opencode/script/generate.ts
+          rm -f release-catalog/mirror.json
+          (cd release-catalog && sha256sum api.json > api.sha256)
+
+      - name: Verify and expose the catalog digest
+        id: catalog-digest
+        run: |
+          set -euo pipefail
+          cd release-catalog
+          sha256sum --check api.sha256
+          echo "sha256=$(cut -d ' ' -f 1 api.sha256)" >> "$GITHUB_OUTPUT"
+
+      - name: Preserve the release catalog for builds and retries
+        if: steps.catalog-restore.outputs.restored != 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: vector-model-catalog
+          path: release-catalog/
+          if-no-files-found: error
+          retention-days: 30
+
   credentials:
     name: Preflight release credentials
     needs: prepare
@@ -258,7 +327,7 @@ jobs:
 
   build:
     name: Build smoke (${{ matrix.name }})
-    needs: prepare
+    needs: [prepare, catalog]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -271,9 +340,17 @@ jobs:
           - name: website
             package: web
             command: bun run build
+    env:
+      VECTOR_MODELS_PATH: ${{ github.workspace }}/release-catalog/api.json
+      VECTOR_MODELS_SHA256: ${{ needs.catalog.outputs.sha256 }}
     steps:
       - name: Check out release source
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Download the exact release catalog
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: vector-model-catalog
+          path: release-catalog
       - name: Set up Bun
         uses: ./.github/actions/setup-bun
         with:
@@ -355,6 +432,7 @@ jobs:
   mac:
     name: macOS desktop apps
     needs:
+      - catalog
       - draft
       - prepare
     runs-on: macos-latest
@@ -362,10 +440,17 @@ jobs:
     permissions:
       contents: write
     env:
+      VECTOR_MODELS_PATH: ${{ github.workspace }}/release-catalog/api.json
+      VECTOR_MODELS_SHA256: ${{ needs.catalog.outputs.sha256 }}
       RELEASE_UNSIGNED: ${{ needs.prepare.outputs.unsigned }}
     steps:
       - name: Check out release source
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Download the exact release catalog
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: vector-model-catalog
+          path: release-catalog
       - name: Set up Bun
         uses: ./.github/actions/setup-bun
         with:
@@ -546,6 +631,7 @@ jobs:
   windows:
     name: Windows desktop apps
     needs:
+      - catalog
       - draft
       - prepare
     runs-on: windows-latest
@@ -553,10 +639,17 @@ jobs:
     permissions:
       contents: write
     env:
+      VECTOR_MODELS_PATH: ${{ github.workspace }}/release-catalog/api.json
+      VECTOR_MODELS_SHA256: ${{ needs.catalog.outputs.sha256 }}
       RELEASE_UNSIGNED: ${{ needs.prepare.outputs.unsigned }}
     steps:
       - name: Check out release source
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Download the exact release catalog
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: vector-model-catalog
+          path: release-catalog
       - name: Set up Bun
         uses: ./.github/actions/setup-bun
         with:
@@ -683,14 +776,22 @@ jobs:
 
   linux:
     name: Linux desktop apps
-    needs: draft
+    needs: [draft, catalog]
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
       contents: write
+    env:
+      VECTOR_MODELS_PATH: ${{ github.workspace }}/release-catalog/api.json
+      VECTOR_MODELS_SHA256: ${{ needs.catalog.outputs.sha256 }}
     steps:
       - name: Check out release source
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Download the exact release catalog
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: vector-model-catalog
+          path: release-catalog
       - name: Set up Bun
         uses: ./.github/actions/setup-bun
         with:
@@ -738,6 +839,7 @@ jobs:
   release:
     name: Publish release and update feeds
     needs:
+      - catalog
       - mac
       - prepare
       - windows
@@ -747,10 +849,17 @@ jobs:
     permissions:
       contents: write
     env:
+      VECTOR_MODELS_PATH: ${{ github.workspace }}/release-catalog/api.json
+      VECTOR_MODELS_SHA256: ${{ needs.catalog.outputs.sha256 }}
       RELEASE_UNSIGNED: ${{ needs.prepare.outputs.unsigned }}
     steps:
       - name: Check out release source
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Download the exact release catalog
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: vector-model-catalog
+          path: release-catalog
       - name: Set up Bun
         uses: ./.github/actions/setup-bun
         with:
@@ -816,6 +925,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ env.RELEASE_TAG }}
         run: gh release upload "$TAG" release-assets/checksums.txt --clobber
+
+      - name: Publish Vector model catalog beside installers
+        env:
+          BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
+          TAG: ${{ env.RELEASE_TAG }}
+        run: |
+          set -euo pipefail
+          test "$(sha256sum "$VECTOR_MODELS_PATH" | cut -d ' ' -f 1)" = "$VECTOR_MODELS_SHA256"
+          export VECTOR_CATALOG_FILE="$VECTOR_MODELS_PATH"
+          VECTOR_RELEASE_VERSION="${TAG#v}" bun packages/cloud/src/upload-model-catalog.ts
 
       - name: Stage Vector download and update artifacts
         env:
