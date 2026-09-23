@@ -20,11 +20,11 @@ export function packageRequest(input: {
     throw new Error("Package channel was provided twice with different values")
   }
   if (requestedChannel && input.environmentChannel && requestedChannel !== input.environmentChannel) {
-    throw new Error(`Package channel ${requestedChannel} does not match OPENCODE_CHANNEL=${input.environmentChannel}`)
+    throw new Error(`Package channel ${requestedChannel} does not match VECTOR_CHANNEL=${input.environmentChannel}`)
   }
   const channel = requestedChannel ?? input.environmentChannel
   if (channel !== "dev" && channel !== "beta" && channel !== "prod") {
-    throw new Error("Packaging requires an explicit channel: --channel dev|beta|prod or OPENCODE_CHANNEL")
+    throw new Error("Packaging requires an explicit channel: --channel dev|beta|prod or VECTOR_CHANNEL")
   }
 
   const targetValue = argv.find((arg) => arg.startsWith("--target="))?.slice("--target=".length)
@@ -48,7 +48,12 @@ export function packageRequest(input: {
   return {
     channel,
     target,
-    environment: { OPENCODE_CHANNEL: channel, OPENCODE_VERSION: input.version },
+    environment: {
+      VECTOR_CHANNEL: channel,
+      OPENCODE_CHANNEL: channel,
+      VECTOR_VERSION: input.version,
+      OPENCODE_VERSION: input.version,
+    },
     builderArgs:
       input.unsignedRelease && channel === "prod" && !publish
         ? [...targetedBuilderArgs, "--publish", "never"]

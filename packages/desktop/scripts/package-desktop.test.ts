@@ -25,7 +25,12 @@ describe("desktop package request", () => {
     expect(packageRequest({ argv: ["--channel", "prod", "--mac", "dmg", "--arm64"], version: "1.99.1" })).toEqual({
       channel: "prod",
       target: undefined,
-      environment: { OPENCODE_CHANNEL: "prod", OPENCODE_VERSION: "1.99.1" },
+      environment: {
+        VECTOR_CHANNEL: "prod",
+        OPENCODE_CHANNEL: "prod",
+        VECTOR_VERSION: "1.99.1",
+        OPENCODE_VERSION: "1.99.1",
+      },
       builderArgs: ["--mac", "dmg", "--arm64"],
     })
   })
@@ -40,7 +45,12 @@ describe("desktop package request", () => {
     ).toEqual({
       channel: "beta",
       target: "linux",
-      environment: { OPENCODE_CHANNEL: "beta", OPENCODE_VERSION: "1.99.1" },
+      environment: {
+        VECTOR_CHANNEL: "beta",
+        OPENCODE_CHANNEL: "beta",
+        VECTOR_VERSION: "1.99.1",
+        OPENCODE_VERSION: "1.99.1",
+      },
       builderArgs: ["--linux", "--x64", "--publish", "never"],
     })
   })
@@ -68,7 +78,12 @@ describe("desktop package request", () => {
       throw new Error("Missing desktop version")
     }
     const request = packageRequest({ argv: ["--channel=prod", "--mac"], version: manifest.version })
-    expect(request.environment).toEqual({ OPENCODE_CHANNEL: "prod", OPENCODE_VERSION: manifest.version })
+    expect(request.environment).toEqual({
+      VECTOR_CHANNEL: "prod",
+      OPENCODE_CHANNEL: "prod",
+      VECTOR_VERSION: manifest.version,
+      OPENCODE_VERSION: manifest.version,
+    })
   })
 
   test("forces unsigned production artifacts to remain manual downloads", () => {
