@@ -31,7 +31,7 @@
         },
         "mdnsDomain": {
           "type": "string",
-          "description": "Custom domain name for mDNS service (default: opencode.local)"
+          "description": "Custom domain name for mDNS service (default: vector.local)"
         },
         "cors": {
           "type": "array",
@@ -802,7 +802,7 @@
             ],
             "additionalProperties": false
           },
-          "description": "Command configuration, see https://opencode.ai/docs/commands"
+          "description": "Command configuration, see https://vectordev.ai/docs/commands"
         },
         "skills": {
           "type": "object",
@@ -998,7 +998,7 @@
           "additionalProperties": {
             "$ref": "#/$defs/AgentConfig"
           },
-          "description": "Agent configuration, see https://opencode.ai/docs/agents"
+          "description": "Agent configuration, see https://vectordev.ai/docs/agents"
         },
         "provider": {
           "type": "object",

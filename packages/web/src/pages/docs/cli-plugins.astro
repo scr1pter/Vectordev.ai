@@ -10,6 +10,12 @@ export const prerender = true
             <code>vector plugin &lt;module&gt;</code> installs an npm module as a plugin and writes it into your config; <code>--global</code> installs into the global config rather than the project's, and <code>--force</code> replaces a version already there. A plugin can register extra tools, which the registry merges alongside the built-in ones.
           </p>
           <p class="doc-cmd"><code>vector plugin @acme/vector-plugin -g</code><button class="doc-cmd-copy" type="button" aria-label="Copy this command">Copy</button></p>
+          <p>
+            New configuration uses <code>vector.json</code> or <code>vector.jsonc</code> and the <code>.vector/</code>
+            directory. Existing <code>opencode.json</code>, <code>opencode.jsonc</code> and <code>.opencode/</code>
+            files remain readable; Vector names take precedence. Plugins can keep importing the public
+            <code>@opencode-ai/plugin</code> and <code>@opencode-ai/sdk</code> packages for compatibility.
+          </p>
           <p class="note">
             <code>--pure</code> on any command runs without external plugins. It is the first thing to try when you suspect one of breaking a run.
           </p>

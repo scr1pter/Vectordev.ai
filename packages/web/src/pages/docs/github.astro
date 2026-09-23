@@ -30,10 +30,15 @@ export const prerender = true
           <p>
             New workflows connect the selected provider's secret automatically. Check older workflows too: provider-key
             lines that are commented out do not pass the secret into the run.
-            OpenCode Zen's shared keyless gateway is disabled, while your own OpenCode key remains supported. If no model
-            is configured or available, Vector stops with setup instructions instead of selecting an unavailable model.
+            If no model is configured or available, Vector stops with setup instructions instead of selecting an
+            unavailable model.
             Automatic reviews can use <code>REVIEW_AUTO_MODEL</code> to choose a separate model. See
             <a href="/docs/code-review">Vectorscope setup</a> for review controls.
+          </p>
+          <p class="note">
+            Upcoming release: OpenCode-hosted providers will no longer be available, including access with your own
+            OpenCode API key. Connect another provider for GitHub runs. This service change is implemented in source;
+            the release version and installer publication are pending.
           </p>
           <p class="note">
             One repository setting is required: under Settings → Actions → General →

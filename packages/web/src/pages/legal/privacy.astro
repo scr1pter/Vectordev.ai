@@ -97,9 +97,8 @@ export const prerender = true
       or confidential information present in those sources.
     </p>
     <p>
-      Models labeled “included with Vector” are still remote services. The current included-model integration
-      uses OpenCode Zen and the upstream providers serving those models. Bringing your own key or signing in
-      to a provider uses that provider's service and account. Requests can pass through a configured gateway
+      Model requests use the provider you connect and its service and account. Vector no longer uses
+      OpenCode's model services. Requests can pass through a configured gateway
       or proxy. Each recipient's retention, abuse-review, and model-training rules depend on the service and
       your agreement or settings with it. Vector does not promise that every provider offers zero retention
       or excludes all request content from training.
@@ -125,12 +124,9 @@ export const prerender = true
       <strong>Invitations and session sharing.</strong> A live workspace invitation contains guest credentials.
       People who have the link and can reach your server can access the workspace through the guest account;
       a tunnel provider may also process connection traffic. Share invitations only with trusted people and
-      stop the server to end live access. Separately, upstream session sharing is disabled by default. Enabling
-      manual or automatic sharing can upload session details, messages and their content, tool results, file
-      diffs, and model metadata to the OpenCode sharing service or your configured organization or enterprise
-      service, with later updates synchronized. Shared links can expose that content to their recipients.
-      Use the unshare control to request removal; disabling future sharing alone does not remove an existing
-      share, and recipients may retain copies.
+      stop the server to end live access. Public session sharing through OpenCode's sharing service is no
+      longer available in Vector. This does not remove content shared with an external service using an
+      earlier release, and recipients may retain copies.
     </p>
   </section>
 

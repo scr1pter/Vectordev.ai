@@ -11,6 +11,19 @@ export const prerender = true
           </p>
           <p class="doc-cmd"><code>vector serve --port 4096
 vector attach http://localhost:4096 --dir ~/code/myapp</code><button class="doc-cmd-copy" type="button" aria-label="Copy this command">Copy</button></p>
+          <h3>Windows Subsystem for Linux</h3>
+          <p>
+            Install Linux Node.js and npm inside the WSL 2 distro before choosing Install Vector in server settings.
+            The installer uses <code>npm install --global --prefix "$HOME/.vector" @vectordevai/cli</code>.
+            Open a terminal in that distro and run <code>~/.vector/bin/vector login</code> before adding its server,
+            then <code>~/.vector/bin/vector auth login</code> to connect model credentials. The account token in your
+            Windows app does not sign in the separate Linux installation.
+          </p>
+          <p>
+            Server configuration uses <code>VECTOR_SERVER_PASSWORD</code> and <code>VECTOR_SERVER_USERNAME</code>;
+            the default username is <code>vector</code>. Legacy <code>OPENCODE_*</code> variables remain readable
+            when their <code>VECTOR_*</code> counterparts are unset.
+          </p>
           <p>
             <code>vector acp</code> starts an Agent Client Protocol server, so an ACP-speaking editor can drive Vector's agent as its backend.
           </p>

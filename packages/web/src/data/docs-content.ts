@@ -72,7 +72,17 @@ export const pillars = [
   },
 ]
 
-type FeatureKind = "editor" | "memory" | "browser" | "cloud" | "agents" | "automations" | "work" | "cost" | "terminal" | "diff"
+type FeatureKind =
+  | "editor"
+  | "memory"
+  | "browser"
+  | "cloud"
+  | "agents"
+  | "automations"
+  | "work"
+  | "cost"
+  | "terminal"
+  | "diff"
 
 type Feature = {
   title: string
@@ -118,7 +128,7 @@ export const conditions = [
   ],
   [
     "The shell sandbox is off by default",
-    "Commands an agent runs can be confined to their workspace by the operating system's own mechanism — a seatbelt profile on macOS, bubblewrap on Linux where it is installed — by setting OPENCODE_SHELL_SANDBOX. It is opt-in, off by default, and Windows ships no equivalent, so Vector says so and runs unconfined there rather than pretending.",
+    "Commands an agent runs can be confined to their workspace by the operating system's own mechanism — a seatbelt profile on macOS, bubblewrap on Linux where it is installed — by setting VECTOR_SHELL_SANDBOX. It is opt-in, off by default, and Windows ships no equivalent, so Vector says so and runs unconfined there rather than pretending.",
   ],
   [
     "Cloud actions need your authorization",
@@ -133,7 +143,10 @@ export const workflow = [
   ["Open", "Attach the repository already on your computer."],
   ["Work", "Open a file in Editor or hand the same session to an agent — one, or several in their own checkouts."],
   ["Observe", "Follow plans, edits, commands, browser actions, and the tokens and cost the provider reported."],
-  ["Verify", "Run checks, inspect the product in the browser, review the diff, and optionally require an independent judge verdict."],
+  [
+    "Verify",
+    "Run checks, inspect the product in the browser, review the diff, and optionally require an independent judge verdict.",
+  ],
   ["Ship", "Merge the hunks you trust and publish through your own connected accounts."],
 ]
 
@@ -207,7 +220,7 @@ export const systemRows = [
   ],
   [
     "Start with no key at all",
-    "Models are included with Vector, among them NVIDIA's Nemotron and Meta's Muse Spark, so a capable model is ready before you have connected a provider or added an API key.",
+    "Models are included with Vector, so a capable model is ready before you have connected a provider or added an API key.",
   ],
   [
     "Dictation that stays on device",
@@ -233,13 +246,41 @@ export const connectionGroups = [
   ["Cloud and validation", "Vercel, Netlify, Supabase, AWS through its CLI, and Playwright"],
 ]
 export const comparison = [
-  ["Editor, file search, diagnostics, terminal", "Built in", "Terminal-first", "Terminal-first", "IDE-native", "Managed editor"],
+  [
+    "Editor, file search, diagnostics, terminal",
+    "Built in",
+    "Terminal-first",
+    "Terminal-first",
+    "IDE-native",
+    "Managed editor",
+  ],
   ["Memory file the app shows and can erase", "One MEMORY.md, with path, size and one-click erase", "—", "—", "—", "—"],
-  ["Provider-reported spend recorded per run", "Ledger, plus model ranking", "Session cost readout", "—", "Usage dashboard", "—"],
+  [
+    "Provider-reported spend recorded per run",
+    "Ledger, plus model ranking",
+    "Session cost readout",
+    "—",
+    "Usage dashboard",
+    "—",
+  ],
   ["Independent judge before “done”", "Opt-in Judge subagent specialist", "—", "—", "—", "—"],
   ["Connector catalog", "135 connectors, plus your own MCP", "Via MCP", "Via MCP", "Via MCP", "—"],
-  ["Browser the agent drives", "Built in, refuses credentials", "Via tools", "Browser + CDP", "Via tools", "Preview-centric"],
-  ["Deploys on accounts you own", "Vercel, Netlify, Supabase, AWS", "Via tools", "Via tools", "Via MCP", "Native hosting"],
+  [
+    "Browser the agent drives",
+    "Built in, refuses credentials",
+    "Via tools",
+    "Browser + CDP",
+    "Via tools",
+    "Preview-centric",
+  ],
+  [
+    "Deploys on accounts you own",
+    "Vercel, Netlify, Supabase, AWS",
+    "Via tools",
+    "Via tools",
+    "Via MCP",
+    "Native hosting",
+  ],
   ["Parallel isolated agents", "No cap", "Subagents", "Worktrees", "Background agents", "—"],
   ["Recurring work with no window open", "Desktop tray", "—", "—", "—", "—"],
 ]
@@ -350,10 +391,7 @@ export const subagentKinds = [
     "Where they work",
     "In your session's checkout, not a separate worktree. Vector refuses to start one whose assigned paths overlap another running subagent's.",
   ],
-  [
-    "How deep",
-    "One level. By default, subagents cannot start subagents of their own.",
-  ],
+  ["How deep", "One level. By default, subagents cannot start subagents of their own."],
   [
     "In Plan mode",
     "Vector does not start subagents, and of the built-in specialists it uses only Explore, Review and Security, which cannot edit.",
@@ -399,16 +437,56 @@ export const changelog = [
     "One workspace, two ways to work",
     "Agent and Editor now share one session, files open in persistent full-screen tabs, Settings is a searchable full-screen destination, and the Agent Dashboard, browser, terminal and review use one calmer purple project shell.",
   ],
-  ["August 2026", "Scheduled work that runs while you are away", "Vector keeps a tray presence and stays resident after the last window closes, so a recurring task still fires with no window open. The tray shows what is armed and when it next runs, can run or pause everything from there, and notifies you when a run finishes."],
-  ["August 2026", "Economics that actually learn", "Every session now feeds measured token and cost evidence into model recommendations, so the ranking is built from what providers actually reported rather than from list prices."],
-  ["August 2026", "Plugins that install themselves", "Vector fetches whatever runtime a plugin needs, so Computer Use and other tools connect without a terminal detour."],
-  ["August 2026", "Measured spend and in-app help", "Model economics now records real provider-reported tokens and cost per run, plus a Help AI Assistant and one-click bug reporting inside the workspace."],
-  ["August 2026", "Agents can actually reach each other", "Fixed the teammate message tool, which was registered where the engine never looked, so collaborating agents could not reach each other."],
-  ["August 2026", "Agents that work together", "Shared workspaces where agents message each other, an Agent Dashboard with clash detection, per-agent edit attribution in the editor, and AI pull request review."],
-  ["August 2026", "Licensing and disclosure", "HEIC conversion moved to the operating system, removing the last copyleft dependency, with expanded privacy and terms coverage."],
-  ["July 2026", "Vector desktop release and download refresh", "Verified installers for macOS, Windows, and Linux, served from the new download pipeline. Signed builds continue through automatic updates; unsigned previews stay manual-download only."],
-  ["July 2026", "Review tools and shell polish", "A refined review panel, window recovery fixes, and a cleaner desktop chrome across the workspace."],
-  ["July 2026", "Models and settings controls", "Restored provider management, model pickers, and execution settings throughout the rebuilt shell."],
+  [
+    "August 2026",
+    "Scheduled work that runs while you are away",
+    "Vector keeps a tray presence and stays resident after the last window closes, so a recurring task still fires with no window open. The tray shows what is armed and when it next runs, can run or pause everything from there, and notifies you when a run finishes.",
+  ],
+  [
+    "August 2026",
+    "Economics that actually learn",
+    "Every session now feeds measured token and cost evidence into model recommendations, so the ranking is built from what providers actually reported rather than from list prices.",
+  ],
+  [
+    "August 2026",
+    "Plugins that install themselves",
+    "Vector fetches whatever runtime a plugin needs, so Computer Use and other tools connect without a terminal detour.",
+  ],
+  [
+    "August 2026",
+    "Measured spend and in-app help",
+    "Model economics now records real provider-reported tokens and cost per run, plus a Help AI Assistant and one-click bug reporting inside the workspace.",
+  ],
+  [
+    "August 2026",
+    "Agents can actually reach each other",
+    "Fixed the teammate message tool, which was registered where the engine never looked, so collaborating agents could not reach each other.",
+  ],
+  [
+    "August 2026",
+    "Agents that work together",
+    "Shared workspaces where agents message each other, an Agent Dashboard with clash detection, per-agent edit attribution in the editor, and AI pull request review.",
+  ],
+  [
+    "August 2026",
+    "Licensing and disclosure",
+    "HEIC conversion moved to the operating system, removing the last copyleft dependency, with expanded privacy and terms coverage.",
+  ],
+  [
+    "July 2026",
+    "Vector desktop release and download refresh",
+    "Verified installers for macOS, Windows, and Linux, served from the new download pipeline. Signed builds continue through automatic updates; unsigned previews stay manual-download only.",
+  ],
+  [
+    "July 2026",
+    "Review tools and shell polish",
+    "A refined review panel, window recovery fixes, and a cleaner desktop chrome across the workspace.",
+  ],
+  [
+    "July 2026",
+    "Models and settings controls",
+    "Restored provider management, model pickers, and execution settings throughout the rebuilt shell.",
+  ],
 ]
 
 export const faqs = [
@@ -440,7 +518,7 @@ export const faqs = [
   {
     question: "Can I stop Vector from using subagents?",
     answer:
-      "Yes. In the desktop app, switch off General subagents in Settings → Agents. In the terminal, set agent.general.disable to true in ~/.config/vector/opencode.json, or in a project's opencode.json for that project only. In the terminal it takes effect the next time you start Vector there. Vector's agent then does the work itself, except parts that fit a subagent specialist, which it can still hand to one. You can also still call a specialist yourself with @ and its name.",
+      "Yes. In the desktop app, switch off General subagents in Settings → Agents. In the terminal, set agent.general.disable to true in ~/.config/vector/vector.json, or in a project's vector.json for that project only. In the terminal it takes effect the next time you start Vector there. Vector's agent then does the work itself, except parts that fit a subagent specialist, which it can still hand to one. You can also still call a specialist yourself with @ and its name.",
   },
   {
     question: "Can I edit code myself?",
@@ -455,7 +533,7 @@ export const faqs = [
   {
     question: "Do I need an API key?",
     answer:
-      "No. Vector comes with models included, among them NVIDIA's Nemotron and Meta's Muse Spark, so you can work without connecting a provider. You can also bring your own key for Claude, GPT, Gemini and the rest; availability and billing for those depend on the provider you connect. Included models are served by outside providers, and some may use your prompts to improve their models, so use your own provider key for confidential code.",
+      "No. Vector comes with models included, so you can work without connecting a provider. You can also bring your own key for Claude, GPT, Gemini and the rest; availability and billing for those depend on the provider you connect. Included models are served by outside providers, and some may use your prompts to improve their models, so use your own provider key for confidential code.",
   },
   {
     question: "How do I buy and activate Vector?",

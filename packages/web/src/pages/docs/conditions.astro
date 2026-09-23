@@ -15,7 +15,7 @@ export const prerender = true
             {conditions.map(([term, detail]) => (<div><dt>{term}</dt><dd>{detail}</dd></div>))}
           </dl>
           <p class="note">
-            The sandbox flag: operating-system confinement is enabled with the <code>OPENCODE_SHELL_SANDBOX</code>
+            The sandbox flag: operating-system confinement is enabled with the <code>VECTOR_SHELL_SANDBOX</code>
             environment variable. It is opt-in and off by default, uses a seatbelt profile on macOS and bwrap on Linux
             where installed, and has no Windows equivalent — so on Windows Vector reports that it is running
             unconfined instead of implying protection it cannot provide.

@@ -7,7 +7,7 @@ export const prerender = true
 <DocsPage id="cli-models">
 
           <p>
-            <code>vector models</code> lists every model available to you — the ones included with Vector and the providers you have connected. Pass a provider id to filter, <code>--verbose</code> for metadata such as per-token cost, and <code>--refresh</code> to re-pull the catalogue instead of using the cached copy.
+            <code>vector models</code> lists the supported model catalog. Connect a provider with <code>vector auth login</code> to use its models. Pass a provider id to filter and <code>--verbose</code> for metadata such as per-token cost. The catalog is bundled with the release; <code>--refresh</code> only fetches when a mirror is explicitly configured with <code>VECTOR_MODELS_URL</code>. <code>VECTOR_MODELS_PATH</code> selects a local catalog and <code>VECTOR_DISABLE_MODELS_FETCH=1</code> disables refresh.
           </p>
           <p class="doc-cmd"><code>vector models
 vector models anthropic --verbose</code><button class="doc-cmd-copy" type="button" aria-label="Copy this command">Copy</button></p>

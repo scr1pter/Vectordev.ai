@@ -19,13 +19,13 @@ vector
 
 **Bring your own key, for now.** Vector is moving the models it includes onto a provider it has its own agreement with; until that lands, connect Claude, GPT, Gemini or any other provider you already pay for. Vector desktop is available for macOS, Windows and Linux at [vectordev.ai](https://vectordev.ai) for $10 a month or $99 a year — the subscription covers Vector itself. Create a Vector account, then choose a plan from Account. Creating an account does not start a subscription. The terminal agent is free with a Vector account.
 
-**New in 1.99.91:** OpenCode Zen's shared keyless gateway is disabled; your own provider credentials, including an OpenCode key, still work. GitHub automation now reports missing model setup with instructions to set `MODEL` and supply the provider key. Vectorscope supports `/vectorscope`, `/vs`, `/vector`, and `/vx`, and the release checks match those commands. [Release notes →](https://vectordev.ai/releases#release-1-99-91)
+This source revision removes OpenCode's hosted providers and services, including access with an OpenCode API key. Native provider sign-ins that relied on another application's registration are paused; connect an API key where supported. The external Claude Code, Codex, and Cursor runtimes still use your own installed, authenticated CLIs. Check the [release notes](https://vectordev.ai/releases) for published build availability.
 
 ## Features
 
 ### Agents
 
-**Subagents and Subagent specialists.** When a task is big — it spans several files or areas, splits into independent parts, or needs research as well as changes — the main agent hands its parts to Subagents: general-purpose workers that each take one piece, work through it in their own context, and report back once. It starts one per independent part, in parallel, without being asked, and keeps the integration and final checks itself; a small task, like a one-file fix or a quick question, it does on its own. Eight Subagent specialists — Explore, Review, Judge, Debug, Test, Security, Performance and Migration — have a fixed focus and their own permissions, and the agent picks one when the work matches. Each batch of subagents shows as a card in the conversation and in the Background tasks panel, where you can watch them work or stop them. To turn Subagents off, switch off General subagents in Settings → Agents in the desktop app; in the terminal, add `"agent": { "general": { "disable": true } }` to `~/.config/vector/opencode.json` (`%USERPROFILE%\.config\vector\opencode.json` on Windows); it takes effect the next time you start Vector in the terminal. Subagent specialists keep working either way.
+**Subagents and Subagent specialists.** When a task is big — it spans several files or areas, splits into independent parts, or needs research as well as changes — the main agent hands its parts to Subagents: general-purpose workers that each take one piece, work through it in their own context, and report back once. It starts one per independent part, in parallel, without being asked, and keeps the integration and final checks itself; a small task, like a one-file fix or a quick question, it does on its own. Eight Subagent specialists — Explore, Review, Judge, Debug, Test, Security, Performance and Migration — have a fixed focus and their own permissions, and the agent picks one when the work matches. Each batch of subagents shows as a card in the conversation and in the Background tasks panel, where you can watch them work or stop them. To turn Subagents off, switch off General subagents in Settings → Agents in the desktop app; in the terminal, add `"agent": { "general": { "disable": true } }` to `~/.config/vector/vector.json` (`%USERPROFILE%\.config\vector\vector.json` on Windows); it takes effect the next time you start Vector in the terminal. Subagent specialists keep working either way.
 
 **No agent limit.** For separate lines of work, run as many agents at once as your machine can handle, each in its own checkout or sharing yours, merged only when you say so. Vector tells you when a large run will strain your processor or disk.
 
@@ -45,9 +45,9 @@ vector
 
 ### Models
 
-**Models included with Vector.** Included access is being moved off OpenCode Zen's shared gateway. In 1.99.91, connect your own provider in Settings or with `vector auth login` before starting a task. A fresh install without a provider credential has no available models. Your own OpenCode API key remains supported.
+**Choose your provider.** Connect your own provider in Settings or with `vector auth login` before starting a task. A fresh install without provider credentials has no available models. OpenCode's Zen and Go providers are no longer supported, even with a key. Native ChatGPT, Copilot, xAI, Poe and DigitalOcean sign-in flows are paused; GitLab OAuth requires an explicitly configured Vector-owned client. API-key methods remain available where supported.
 
-**Every model in one picker.** The model picker lists models from your connected providers, including new releases as their catalogs update.
+**Every model in one picker.** The model picker lists models from your connected providers, using the catalog bundled with each release. An explicitly configured catalog mirror can refresh metadata.
 
 **Economics you can see.** The Tokenomics engine measures what every session actually spent, per model and per task, and turns that into model recommendations built from real usage rather than list prices.
 
@@ -77,6 +77,14 @@ Run `vector` inside any repository to start the agent. `vector auth login` adds 
 For GitHub Actions, add `VECTOR_CLI_TOKEN` and your provider credential as repository secrets, then set `MODEL` to `provider/model` in the workflow and pass the matching provider secret into its environment. The account token authenticates Vector; it does not supply model access. See [GitHub setup](https://vectordev.ai/docs/github) and [Vectorscope](https://vectordev.ai/docs/code-review).
 
 Unsigned desktop releases require a manual download. They do not replace signed automatic-update feeds, and macOS or Windows may show an unidentified-developer or unknown-publisher warning.
+
+## Configuration
+
+Use `vector.json` or `vector.jsonc` in your repository, or `~/.config/vector/vector.json` for global settings. Put custom agents, commands, plugins and themes under `.vector/`. Existing `opencode.json`, `opencode.jsonc` and `.opencode/` configuration remains readable; the Vector names take precedence. Prefer `VECTOR_*` environment variables. Legacy `OPENCODE_*` names remain fallbacks with a migration warning.
+
+The model catalog is bundled; startup does not need an upstream catalog service. `VECTOR_MODELS_PATH` selects a local catalog, and `VECTOR_MODELS_URL` opts into a configured mirror. `VECTOR_DISABLE_MODELS_FETCH=1` prevents network refresh.
+
+For a WSL server, install Linux Node.js and npm in that distribution. Vector installs `@vectordevai/cli` into `~/.vector`; run `~/.vector/bin/vector login` in the distro before adding its server. Connect model credentials inside WSL as well: `~/.vector/bin/vector auth login`. Windows-side sign-in does not supply the WSL account token.
 
 ## Coming soon
 
