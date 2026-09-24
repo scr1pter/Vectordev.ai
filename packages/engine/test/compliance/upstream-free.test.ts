@@ -7,6 +7,7 @@ import { Provider } from "@/provider/provider"
 import { Env } from "@/env"
 import { Plugin } from "@/plugin"
 import { testEffect } from "../lib/effect"
+import { tmpdir } from "../fixture/fixture"
 
 const root = path.resolve(import.meta.dir, "../../../..")
 const notices = new Set([
@@ -37,17 +38,18 @@ async function trackedText() {
 
 const tracked = trackedText()
 
+async function upstreamHolder() {
+  // Derive the prohibited name only in this guard, from its required MIT notice,
+  // so source scans and synthetic credential fixtures do not add that name to tracked text.
+  const license = await Bun.file(path.join(root, "THIRD_PARTY_NOTICES.md")).text()
+  const holder = license.match(/^Copyright \(c\) \d{4} (.+)$/m)?.[1]?.trim().toLowerCase()
+  if (!holder) throw new Error("The upstream MIT copyright notice is missing")
+  return holder
+}
+
 describe("Vector source independence", () => {
   test("tracked paths and text keep the upstream holder only in license notices", async () => {
-    // Read the upstream holder from its required MIT notice so the guard itself
-    // does not introduce the prohibited product name into application source.
-    const license = await Bun.file(path.join(root, "THIRD_PARTY_NOTICES.md")).text()
-    const holder = license
-      .match(/^Copyright \(c\) \d{4} (.+)$/m)?.[1]
-      ?.trim()
-      .toLowerCase()
-    expect(holder).toBeDefined()
-    if (!holder) throw new Error("The upstream MIT copyright notice is missing")
+    const holder = await upstreamHolder()
     const violations = (await tracked).flatMap(({ name, text }) => {
       if (notices.has(name) || name.startsWith("licenses/")) return []
       return [
@@ -95,3 +97,108 @@ it.instance(
     },
   },
 )
+
+for (const format of ["mjs", "js"]) {
+  for (const credential of ["configured", "environment", "missing"]) {
+    test(`GitLab ${format} ${credential} credentials never discover a saved sign-in`, async () => {
+      await using directory = await tmpdir()
+      const authFile = path.join(directory.path, "data", await upstreamHolder(), "auth.json")
+      await Bun.write(
+        authFile,
+        JSON.stringify({
+          gitlab: { type: "oauth", access: "fixture-borrowed-token", refresh: "fixture-refresh", expires: 0 },
+        }),
+      )
+      const sdk = path.join(
+        path.dirname(Bun.resolveSync("gitlab-ai-provider/package.json", import.meta.dir)),
+        "dist",
+        `index.${format}`,
+      )
+      const child = Bun.spawn(
+        [
+          process.execPath,
+          "--eval",
+          `
+            import fs from "node:fs"
+            import { mock } from "bun:test"
+            const reads = []
+            mock.module("fs", () => ({
+              ...fs,
+              readFileSync: (filename, ...args) => {
+                if (String(filename) === ${JSON.stringify(authFile)}) reads.push(String(filename))
+                return fs.readFileSync(filename, ...args)
+              },
+            }))
+            const unexpectedRequests = []
+            // The SDK's eager default instance cannot accept an injected fetch.
+            // This isolated process blocks any accidental OAuth refresh before import.
+            globalThis.fetch = async (input) => {
+              unexpectedRequests.push(String(input))
+              return new Response("Unexpected credential refresh", { status: 400 })
+            }
+            const sdk = ${format === "mjs" ? "await import" : "require"}(${JSON.stringify(sdk)})
+            const importReads = reads.length
+            const requests = []
+            const provider = sdk.createGitLab({
+              apiKey: ${credential === "configured" ? '"fixture-configured-pat"' : "undefined"},
+              fetch: async (input, init) => {
+                requests.push({ url: String(input), authorization: new Headers(init.headers).get("authorization") })
+                return new Response("Unauthorized fixture", { status: 401 })
+              },
+            })
+            const models = [
+              provider.agenticChat("duo-chat-sonnet-4-5"),
+              provider.agenticChat("duo-chat-gpt-5-1"),
+              provider.workflowChat("duo-workflow"),
+            ]
+            models[2].selectedModelRef = "fixture-model"
+            const errors = []
+            for (const model of models) {
+              await model.doStream({ prompt: [{ role: "user", content: [{ type: "text", text: "fixture" }] }] })
+                .then(() => errors.push("Unexpected success"), error => errors.push(error.message))
+            }
+            await new Promise(resolve => setTimeout(resolve, 10))
+            console.log(JSON.stringify({ importReads, reads, unexpectedRequests, requests, errors }))
+          `,
+        ],
+        {
+          cwd: directory.path,
+          env: {
+            HOME: directory.path,
+            XDG_DATA_HOME: path.join(directory.path, "data"),
+            XDG_CONFIG_HOME: path.join(directory.path, "config"),
+            XDG_CACHE_HOME: path.join(directory.path, "cache"),
+            ...(credential === "missing" ? {} : { GITLAB_TOKEN: "fixture-environment-pat" }),
+          },
+          stdout: "pipe",
+          stderr: "pipe",
+        },
+      )
+      const [output, error, exit] = await Promise.all([
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+        child.exited,
+      ])
+      expect({ exit, error }).toEqual({ exit: 0, error: "" })
+      const result = JSON.parse(output)
+      // Bun intercepts ESM filesystem imports; CommonJS safety is checked by
+      // observing refresh requests and credentials at the actual SDK boundary.
+      if (format === "mjs") {
+        expect(result.importReads).toBe(0)
+        expect(result.reads).toEqual([])
+      }
+      expect(result.unexpectedRequests).toEqual([])
+      expect(result.errors).toHaveLength(3)
+      if (credential === "missing") {
+        expect(result.requests).toEqual([])
+        expect(result.errors.every((error: string) => error.includes("API key is missing"))).toBe(true)
+        return
+      }
+      expect(result.requests).toHaveLength(6)
+      expect(result.requests.map((request: { authorization: string }) => request.authorization)).toEqual(
+        Array(6).fill(credential === "configured" ? "Bearer fixture-configured-pat" : "Bearer fixture-environment-pat"),
+      )
+      expect(result.errors.every((error: string) => error.includes("401"))).toBe(true)
+    })
+  }
+}

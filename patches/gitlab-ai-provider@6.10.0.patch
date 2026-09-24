@@ -1,0 +1,82 @@
+diff --git a/dist/index.js b/dist/index.js
+index a1c775b4fe837cabc88a4f636b514a78c7ba16ad..592264d733abdf7bcb0f2e7433f1e75261270120 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -5160,15 +5160,8 @@ function createGitLab(options = {}) {
+     if (apiKeyPromise) {
+       return apiKeyPromise;
+     }
+-    apiKeyPromise = loadApiKey(
+-      {
+-        apiKey: options.apiKey,
+-        environmentVariableName: "GITLAB_TOKEN",
+-        description: "GitLab"
+-      },
+-      instanceUrl,
+-      options.clientId
+-    );
++    // Vector owns credential resolution; SDK defaults must not discover saved credentials.
++    apiKeyPromise = Promise.resolve(options.apiKey || process.env["GITLAB_TOKEN"]);
+     try {
+       cachedApiKey = await apiKeyPromise;
+       return cachedApiKey;
+@@ -5183,16 +5176,8 @@ function createGitLab(options = {}) {
+     refreshPromise = (async () => {
+       cachedApiKey = void 0;
+       apiKeyPromise = void 0;
+-      cachedApiKey = await loadApiKey(
+-        {
+-          apiKey: void 0,
+-          // Bypass stale options.apiKey to force auth.json read
+-          environmentVariableName: "GITLAB_TOKEN",
+-          description: "GitLab"
+-        },
+-        instanceUrl,
+-        options.clientId
+-      );
++      // A rejected PAT remains a rejected PAT; retry cannot switch credential sources.
++      cachedApiKey = options.apiKey || process.env["GITLAB_TOKEN"];
+     })();
+     try {
+       return await refreshPromise;
+diff --git a/dist/index.mjs b/dist/index.mjs
+index 3c870557bce766533df230782db5c3ac8aa68b72..354a226cd13a6e27988984e2a64254ace64e8081 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -5081,15 +5081,8 @@ function createGitLab(options = {}) {
+     if (apiKeyPromise) {
+       return apiKeyPromise;
+     }
+-    apiKeyPromise = loadApiKey(
+-      {
+-        apiKey: options.apiKey,
+-        environmentVariableName: "GITLAB_TOKEN",
+-        description: "GitLab"
+-      },
+-      instanceUrl,
+-      options.clientId
+-    );
++    // Vector owns credential resolution; SDK defaults must not discover saved credentials.
++    apiKeyPromise = Promise.resolve(options.apiKey || process.env["GITLAB_TOKEN"]);
+     try {
+       cachedApiKey = await apiKeyPromise;
+       return cachedApiKey;
+@@ -5104,16 +5097,8 @@ function createGitLab(options = {}) {
+     refreshPromise = (async () => {
+       cachedApiKey = void 0;
+       apiKeyPromise = void 0;
+-      cachedApiKey = await loadApiKey(
+-        {
+-          apiKey: void 0,
+-          // Bypass stale options.apiKey to force auth.json read
+-          environmentVariableName: "GITLAB_TOKEN",
+-          description: "GitLab"
+-        },
+-        instanceUrl,
+-        options.clientId
+-      );
++      // A rejected PAT remains a rejected PAT; retry cannot switch credential sources.
++      cachedApiKey = options.apiKey || process.env["GITLAB_TOKEN"];
+     })();
+     try {
+       return await refreshPromise;
