@@ -237,6 +237,20 @@ export function providerAllowed(id: string) {
   return supported.has(id)
 }
 
+/** Runtime providers may also come from explicit user configuration or installed plugins. */
+export function providerUsable(
+  id: string,
+  provider?: { id?: string; source?: string; npm?: string; api?: string; options?: { baseURL?: unknown } },
+) {
+  return (
+    providerAllowed(id) ||
+    provider?.source === "config" ||
+    provider?.source === "custom" ||
+    Boolean(provider?.npm?.trim() || provider?.api?.trim()) ||
+    (typeof provider?.options?.baseURL === "string" && provider.options.baseURL.trim().length > 0)
+  )
+}
+
 export function filterProviderCatalog<T extends { id?: string }>(catalog: Record<string, T>) {
   return Object.fromEntries(
     Object.entries(catalog)

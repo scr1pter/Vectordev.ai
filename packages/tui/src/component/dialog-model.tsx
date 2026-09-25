@@ -31,7 +31,7 @@ export function DialogModel(props: { providerID?: string }) {
       if (!showSections) return []
       return items.flatMap((item) => {
         const provider = sync.data.provider.find((provider) => provider.id === item.providerID)
-        if (!provider || isHiddenProvider(provider.id)) return []
+        if (!provider || isHiddenProvider(provider.id, provider)) return []
         const model = provider.models[item.modelID]
         if (!model) return []
         const title = model.name ?? item.modelID
@@ -60,7 +60,7 @@ export function DialogModel(props: { providerID?: string }) {
 
     const providerOptions = pipe(
       sync.data.provider,
-      filter((provider) => !isHiddenProvider(provider.id)),
+      filter((provider) => !isHiddenProvider(provider.id, provider)),
       sortBy((provider) => provider.name),
       flatMap((provider) =>
         pipe(

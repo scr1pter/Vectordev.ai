@@ -45,11 +45,11 @@ type ProviderOption =
       type: "custom"
     })
 
-export function providerOptions(list: { id: string; name: string }[]): ProviderOption[] {
+export function providerOptions(list: { id: string; name: string; source?: string }[]): ProviderOption[] {
   return [
     ...pipe(
       list,
-      filter((provider) => !isHiddenProvider(provider.id)),
+      filter((provider) => !isHiddenProvider(provider.id, provider)),
       sortBy(
         (x) => PROVIDER_PRIORITY[x.id] ?? 99,
         (x) => x.name.toLowerCase(),

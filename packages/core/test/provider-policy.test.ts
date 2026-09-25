@@ -1,6 +1,11 @@
 import { expect, test } from "bun:test"
 import { Effect } from "effect"
-import { SUPPORTED_PROVIDER_IDS, filterProviderCatalog, providerAllowed } from "@vectordevai/schema/provider-policy"
+import {
+  SUPPORTED_PROVIDER_IDS,
+  filterProviderCatalog,
+  providerAllowed,
+  providerUsable,
+} from "@vectordevai/schema/provider-policy"
 import { Catalog } from "@vectordevai/core/catalog"
 import { Credential } from "@vectordevai/core/credential"
 import { Integration } from "@vectordevai/core/integration"
@@ -40,7 +45,11 @@ test("catalog documentation uses provider guides without changing providers or m
   const catalog = Object.fromEntries(
     SUPPORTED_PROVIDER_IDS.map((id) => [
       id,
-      { id, doc: `https://example.test/${id}/client-guide`, models: { example: { id: "example", cost: { input: 1 } } } },
+      {
+        id,
+        doc: `https://example.test/${id}/client-guide`,
+        models: { example: { id: "example", cost: { input: 1 } } },
+      },
     ]),
   )
   const filtered = filterProviderCatalog(catalog)
@@ -72,7 +81,7 @@ test("runtime catalog refresh only accepts owned HTTPS mirrors", () => {
   }
 })
 
-it.effect("unknown providers cannot acquire models, defaults or credential connections", () =>
+it.effect("plugin-defined providers acquire models, defaults and credential connections", () =>
   Effect.gen(function* () {
     const catalog = yield* Catalog.Service
     const credentials = yield* Credential.Service
@@ -98,15 +107,15 @@ it.effect("unknown providers cannot acquire models, defaults or credential conne
       }),
     ]) {
       const saved = yield* credentials.create({ integrationID, value })
-      expect(yield* integrations.connection.active(integrationID)).toBeUndefined()
-      expect(
-        yield* integrations.connection.resolve({ type: "credential", id: saved.id, label: saved.label }),
-      ).toBeUndefined()
+      expect(yield* integrations.connection.active(integrationID)).toMatchObject({ type: "credential", id: saved.id })
+      expect(yield* integrations.connection.resolve({ type: "credential", id: saved.id, label: saved.label })).toEqual(
+        value,
+      )
     }
-    expect(yield* integrations.get(integrationID)).toBeUndefined()
-    expect(yield* catalog.provider.get(provider)).toBeUndefined()
-    expect(yield* catalog.model.get(provider, ModelV2.ID.make("example"))).toBeUndefined()
-    expect(yield* catalog.model.default()).toBeUndefined()
+    expect(yield* integrations.get(integrationID)).toMatchObject({ id: integrationID })
+    expect(yield* catalog.provider.get(provider)).toMatchObject({ id: provider })
+    expect(yield* catalog.model.get(provider, ModelV2.ID.make("example"))).toMatchObject({ providerID: provider })
+    expect(yield* catalog.model.default()).toMatchObject({ providerID: provider })
   }),
 )
 
@@ -155,5 +164,30 @@ it.effect("paused sign-ins never expose stored OAuth connections", () =>
         yield* integrations.connection.resolve({ type: "credential", id: saved.id, label: saved.label }),
       ).toBeUndefined()
     }
+  }),
+)
+
+test("custom provider admission requires an explicit definition", () => {
+  expect(providerUsable("ollama")).toBe(false)
+  expect(providerUsable("ollama", { npm: "@ai-sdk/openai-compatible" })).toBe(true)
+  expect(providerUsable("ollama", { options: { baseURL: "http://localhost:11434/v1" } })).toBe(true)
+  expect(providerUsable("ollama", { source: "config" })).toBe(true)
+  expect(providerUsable("ollama", { source: "custom" })).toBe(true)
+  expect(providerUsable("ollama", { options: { baseURL: " " } })).toBe(false)
+})
+
+it.effect("a saved key does not create an unregistered custom integration", () =>
+  Effect.gen(function* () {
+    const credentials = yield* Credential.Service
+    const integrations = yield* Integration.Service
+    const integrationID = Integration.ID.make("unregistered-provider")
+    const saved = yield* credentials.create({
+      integrationID,
+      value: Credential.Key.make({ type: "key", key: "fixture" }),
+    })
+    expect(yield* integrations.connection.active(integrationID)).toBeUndefined()
+    expect(
+      yield* integrations.connection.resolve({ type: "credential", id: saved.id, label: saved.label }),
+    ).toBeUndefined()
   }),
 )

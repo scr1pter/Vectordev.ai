@@ -10,9 +10,9 @@ Sign-ins that relied on other applications' registrations are paused. API keys r
 
 ## Provider admission and catalog
 
-The shared readable allowlist in `packages/schema/src/provider-policy.ts` admits **221 provider IDs**, frozen from the reviewed catalog. A new provider requires an explicit reviewed list change. Both engine generations, catalog edits, configured credentials, plugin integration, model history, desktop and TUI selectors use that policy. An unknown ID cannot become available merely because a key or custom model was configured for it.
+The shared readable allowlist in `packages/schema/src/provider-policy.ts` limits Vector's built-in catalog to reviewed provider IDs. User-defined providers with their own SDK package or base URL, including local Ollama servers and company gateways, remain available across both engines, credentials, plugin integration, desktop and TUI selectors. Installed plugins can register their own providers and sign-in methods. Borrowed sign-ins remain paused.
 
-Arbitrary custom provider IDs therefore stop loading. Users can configure models, credentials and custom base URLs under supported IDs; the custom-provider dialog explains that it configures an existing supported provider. GitHub automation and desktop Vectorscope require a selected connected model and produce a setup error when none resolves.
+Custom-provider setup accepts a new provider ID and rejects collisions with existing catalog or configured providers. `vector providers login` offers Other for custom IDs; storing a key alone does not create a model or endpoint. GitHub automation and desktop Vectorscope require a selected connected model and produce a setup error when none resolves.
 
 The former endpoint denylist is removed. A user who hand-enters a custom provider URL is making their own choice; Vector no longer rejects those URLs using the previous host safeguard. Vector-authored request destinations are independently covered by the repository guard. Runtime catalog refresh has its own positive owned-host rule and does not inherit that custom-endpoint freedom.
 

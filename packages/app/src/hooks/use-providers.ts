@@ -7,7 +7,7 @@ import { selectProviderCatalog } from "./provider-catalog"
 
 export const popularProviders = ["anthropic", "github-copilot", "openai", "google", "openrouter", "vercel"]
 const popularProviderSet = new Set(popularProviders)
-// Only reviewed provider IDs can appear in Vector provider setup.
+// Built-in catalog entries and explicit custom providers can appear in setup.
 export { isHiddenProvider } from "@/utils/provider-brand"
 import { isHiddenProvider } from "@/utils/provider-brand"
 
@@ -39,24 +39,26 @@ export function useProviders(directory?: Accessor<string | undefined>) {
     })
   }
   return {
-    all: () => new Map([...providers().all].filter(([id]) => !isHiddenProvider(id))),
+    all: () => new Map([...providers().all].filter(([id, provider]) => !isHiddenProvider(id, provider))),
     default: () => providers().default,
     popular: () =>
       pipe(
         providers().all,
         Iterable.map(([, p]) => p),
         Iterable.filter((p) => popularProviderSet.has(p.id)),
-        Iterable.filter((p) => !isHiddenProvider(p.id)),
+        Iterable.filter((p) => !isHiddenProvider(p.id, p)),
         (v) => Array.from(v),
       ),
     connected: () => {
       return providers()
-        .connected.filter((id) => !isHiddenProvider(id))
+        .connected.filter((id) => !isHiddenProvider(id, providers().all.get(id)))
         .flatMap((id) => connectedProvider(providers().all.get(id)))
     },
     paid: () => {
       const connected = new Set(providers().connected)
-      return [...Iterable.filter(providers().all, ([id]) => connected.has(id) && !isHiddenProvider(id))]
+      return [
+        ...Iterable.filter(providers().all, ([id, provider]) => connected.has(id) && !isHiddenProvider(id, provider)),
+      ]
     },
   }
 }

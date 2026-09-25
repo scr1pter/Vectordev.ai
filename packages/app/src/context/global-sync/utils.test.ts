@@ -57,7 +57,7 @@ describe("normalizeProviderList", () => {
         ?.models ?? {},
     ).map((item) => item.name)
 
-  test("drops unlisted providers from the catalog, connected ids and defaults", () => {
+  test("preserves custom providers across catalog, connected ids and defaults", () => {
     const ids = ["unlisted-a", "unlisted-b", "unlisted-c", "unlisted-d"]
     const list = ids.map((id) => provider(id, { apiKey: "test-only" }, [model("coding", "Coding")]))
     const result = normalizeProviderList({
@@ -65,9 +65,9 @@ describe("normalizeProviderList", () => {
       connected: [...ids, "anthropic"],
       default: Object.fromEntries([...ids, "anthropic"].map((id) => [id, "new"])),
     } as unknown as ProviderListResponse)
-    expect([...result.all.keys()]).toEqual(["anthropic"])
-    expect(result.connected).toEqual(["anthropic"])
-    expect(result.default).toEqual({ anthropic: "new" })
+    expect([...result.all.keys()]).toEqual([...ids, "anthropic"])
+    expect(result.connected).toEqual([...ids, "anthropic"])
+    expect(result.default).toEqual(Object.fromEntries([...ids, "anthropic"].map((id) => [id, "new"])))
     expect(Object.keys(result.all.get("anthropic")!.models)).toEqual(["new"])
   })
 })

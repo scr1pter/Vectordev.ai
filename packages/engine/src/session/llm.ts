@@ -4,7 +4,7 @@ import { PermissionV1 } from "@vectordevai/core/v1/permission"
 import { Provider } from "@/provider/provider"
 import { SessionV1 } from "@vectordevai/core/v1/session"
 import { serviceUse } from "@vectordevai/core/effect/service-use"
-import { providerCredentialAllowed } from "@vectordevai/core/provider-policy"
+import { providerCredentialAllowed, providerUsable } from "@vectordevai/core/provider-policy"
 import { Context, Effect, Layer } from "effect"
 import * as Stream from "effect/Stream"
 import { streamText, wrapLanguageModel, type ModelMessage, type Tool } from "ai"
@@ -102,7 +102,14 @@ const live: Layer.Layer<
             .get(input.model.providerID)
             .pipe(
               Effect.map((stored) =>
-                stored && providerCredentialAllowed(input.model.providerID, stored) ? stored : undefined,
+                stored &&
+                providerCredentialAllowed(
+                  input.model.providerID,
+                  stored,
+                  providerUsable(input.model.providerID, { npm: input.model.api.npm, api: input.model.api.url }),
+                )
+                  ? stored
+                  : undefined,
               ),
             ),
         ],

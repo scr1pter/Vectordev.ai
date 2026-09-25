@@ -18,12 +18,12 @@ function hookWithoutAuth(): Hooks {
 describe("resolvePluginProviders", () => {
   test("returns plugin providers not in the model catalog", () => {
     const result = resolvePluginProviders({
-      hooks: [hookWithAuth("lmstudio")],
+      hooks: [hookWithAuth("acme-gateway")],
       existingProviders: {},
       disabled: new Set(),
       providerNames: {},
     })
-    expect(result).toEqual([{ id: "lmstudio", name: "lmstudio" }])
+    expect(result).toEqual([{ id: "acme-gateway", name: "acme-gateway" }])
   })
 
   test("skips providers already in the model catalog", () => {
@@ -38,19 +38,19 @@ describe("resolvePluginProviders", () => {
 
   test("deduplicates across plugins", () => {
     const result = resolvePluginProviders({
-      hooks: [hookWithAuth("lmstudio"), hookWithAuth("lmstudio")],
+      hooks: [hookWithAuth("acme-gateway"), hookWithAuth("acme-gateway")],
       existingProviders: {},
       disabled: new Set(),
       providerNames: {},
     })
-    expect(result).toEqual([{ id: "lmstudio", name: "lmstudio" }])
+    expect(result).toEqual([{ id: "acme-gateway", name: "acme-gateway" }])
   })
 
   test("respects disabled_providers", () => {
     const result = resolvePluginProviders({
-      hooks: [hookWithAuth("lmstudio")],
+      hooks: [hookWithAuth("acme-gateway")],
       existingProviders: {},
-      disabled: new Set(["lmstudio"]),
+      disabled: new Set(["acme-gateway"]),
       providerNames: {},
     })
     expect(result).toEqual([])
@@ -58,7 +58,7 @@ describe("resolvePluginProviders", () => {
 
   test("respects enabled_providers when provider is absent", () => {
     const result = resolvePluginProviders({
-      hooks: [hookWithAuth("lmstudio")],
+      hooks: [hookWithAuth("acme-gateway")],
       existingProviders: {},
       disabled: new Set(),
       enabled: new Set(["anthropic"]),
@@ -69,43 +69,43 @@ describe("resolvePluginProviders", () => {
 
   test("includes provider when in enabled set", () => {
     const result = resolvePluginProviders({
-      hooks: [hookWithAuth("lmstudio")],
+      hooks: [hookWithAuth("acme-gateway")],
       existingProviders: {},
       disabled: new Set(),
-      enabled: new Set(["lmstudio"]),
+      enabled: new Set(["acme-gateway"]),
       providerNames: {},
     })
-    expect(result).toEqual([{ id: "lmstudio", name: "lmstudio" }])
+    expect(result).toEqual([{ id: "acme-gateway", name: "acme-gateway" }])
   })
 
   test("resolves name from providerNames", () => {
     const result = resolvePluginProviders({
-      hooks: [hookWithAuth("lmstudio")],
+      hooks: [hookWithAuth("acme-gateway")],
       existingProviders: {},
       disabled: new Set(),
-      providerNames: { lmstudio: "Local Models" },
+      providerNames: { "acme-gateway": "Local Models" },
     })
-    expect(result).toEqual([{ id: "lmstudio", name: "Local Models" }])
+    expect(result).toEqual([{ id: "acme-gateway", name: "Local Models" }])
   })
 
   test("falls back to id when no name configured", () => {
     const result = resolvePluginProviders({
-      hooks: [hookWithAuth("lmstudio")],
+      hooks: [hookWithAuth("acme-gateway")],
       existingProviders: {},
       disabled: new Set(),
       providerNames: {},
     })
-    expect(result).toEqual([{ id: "lmstudio", name: "lmstudio" }])
+    expect(result).toEqual([{ id: "acme-gateway", name: "acme-gateway" }])
   })
 
   test("skips hooks without auth", () => {
     const result = resolvePluginProviders({
-      hooks: [hookWithoutAuth(), hookWithAuth("lmstudio"), hookWithoutAuth()],
+      hooks: [hookWithoutAuth(), hookWithAuth("acme-gateway"), hookWithoutAuth()],
       existingProviders: {},
       disabled: new Set(),
       providerNames: {},
     })
-    expect(result).toEqual([{ id: "lmstudio", name: "lmstudio" }])
+    expect(result).toEqual([{ id: "acme-gateway", name: "acme-gateway" }])
   })
 
   test("returns empty for no hooks", () => {
@@ -119,7 +119,7 @@ describe("resolvePluginProviders", () => {
   })
 })
 
-test("unknown plugin providers stay unavailable even when explicitly enabled", () => {
+test("explicit plugin providers are listed when enabled", () => {
   expect(
     resolvePluginProviders({
       hooks: [hookWithAuth("unsupported-fixture")],
@@ -128,5 +128,5 @@ test("unknown plugin providers stay unavailable even when explicitly enabled", (
       enabled: new Set(["unsupported-fixture"]),
       providerNames: { "unsupported-fixture": "Unknown" },
     }),
-  ).toEqual([])
+  ).toEqual([{ id: "unsupported-fixture", name: "Unknown" }])
 })

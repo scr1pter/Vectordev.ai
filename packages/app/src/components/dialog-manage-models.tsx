@@ -42,7 +42,7 @@ export const DialogManageModelsV2: Component = () => {
   const handleConnectProvider = () => {
     dialog.show(() => <DialogSelectProvider directory={directory} />)
   }
-  const visibleModels = () => models.list().filter((x) => !isHiddenProvider(x.provider.id))
+  const visibleModels = () => models.list().filter((x) => !isHiddenProvider(x.provider.id, x.provider))
   const groupList = (category: string) => visibleModels().filter((x) => groupOf(x) === category)
   const groupVisible = (category: string) =>
     groupList(category).every((x) => models.visible({ modelID: x.id, providerID: x.provider.id }))

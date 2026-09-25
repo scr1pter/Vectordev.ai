@@ -1,3 +1,4 @@
+import { providerAllowed } from "@vectordevai/schema/provider-policy"
 import { define } from "./internal"
 import type { ModelV2Info } from "@vectordevai/sdk/v2/types"
 import { Effect, Stream } from "effect"
@@ -125,6 +126,7 @@ export const ModelCatalogPlugin = define({
       Effect.fn(function* (integrations) {
         const data = yield* modelCatalog.get()
         for (const item of Object.values(data)) {
+          if (!providerAllowed(item.id)) continue
           if (item.env.length === 0) continue
           const integrationID = item.id
           integrations.update(integrationID, (integration) => (integration.name = item.name))
@@ -143,6 +145,7 @@ export const ModelCatalogPlugin = define({
       Effect.fn(function* (catalog) {
         const data = yield* modelCatalog.get()
         for (const item of Object.values(data)) {
+          if (!providerAllowed(item.id)) continue
           const providerID = ProviderV2.ID.make(item.id)
           catalog.provider.update(providerID, (provider) => {
             provider.name = item.name

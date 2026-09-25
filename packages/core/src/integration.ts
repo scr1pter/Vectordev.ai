@@ -1,6 +1,6 @@
 export * as Integration from "./integration"
 
-import { providerAllowed, providerCredentialAllowed } from "./provider-policy"
+import { providerCredentialAllowed } from "./provider-policy"
 import { makeLocationNode } from "./effect/app-node"
 import {
   Cause,
@@ -232,7 +232,6 @@ export const locationLayer = Layer.effect(
         list: () => Array.from(draft.integrations.values(), (entry) => entry.ref) as Ref[],
         get: (id) => draft.integrations.get(id)?.ref as Ref | undefined,
         update: (id, update) => {
-          if (!providerAllowed(id)) return
           const current = draft.integrations.get(id) ?? {
             ref: { id, name: id },
             methods: [],
@@ -246,7 +245,6 @@ export const locationLayer = Layer.effect(
         method: {
           list: (integrationID) => (draft.integrations.get(integrationID)?.methods as Method[] | undefined) ?? [],
           update: (implementation) => {
-            if (!providerAllowed(implementation.integrationID)) return
             const current = draft.integrations.get(implementation.integrationID) ?? {
               ref: {
                 id: implementation.integrationID,
@@ -289,9 +287,10 @@ export const locationLayer = Layer.effect(
     })
 
     const resolveConnections = (entry: Entry | undefined, saved: readonly Credential.Info[]) => {
-      if (entry && !providerAllowed(entry.ref.id)) return []
       const credentials = saved
-        .filter((credential) => providerCredentialAllowed(credential.integrationID, credential.value))
+        .filter((credential) =>
+          providerCredentialAllowed(credential.integrationID, credential.value, entry !== undefined),
+        )
         .map((credential) => ({
           type: "credential" as const,
           id: credential.id,
@@ -394,7 +393,14 @@ export const locationLayer = Layer.effect(
           }
           const credential = yield* credentials.get(connection.id)
           if (!credential) return undefined
-          if (!providerCredentialAllowed(credential.integrationID, credential.value)) return undefined
+          if (
+            !providerCredentialAllowed(
+              credential.integrationID,
+              credential.value,
+              state.get().integrations.has(credential.integrationID),
+            )
+          )
+            return undefined
           if (credential.value.type === "key") return credential.value
           const implementation = state
             .get()

@@ -1,4 +1,4 @@
-import { providerAllowed } from "@vectordevai/schema/provider-policy"
+import { providerUsable } from "@vectordevai/schema/provider-policy"
 // Vector code review in the desktop Pull Requests panel (section 6, D1). It runs the same core as the GitHub Action
 // and `vector review`: the same prompts, output schema, filters and summary. The engine instance always stays on the
 // user's own project, so another person's code never loads its config, plugins or language servers. Everything but
@@ -265,7 +265,7 @@ type CatalogProvider = {
 
 export function reviewCatalog(providers: readonly CatalogProvider[]): ReviewModel[] {
   return providers
-    .filter((provider) => providerAllowed(provider.id))
+    .filter((provider) => providerUsable(provider.id, provider))
     .flatMap((provider) =>
       Object.values(provider.models).map((model) => {
         const costKind: CostKind = costKindOf(provider, model.cost)
@@ -293,8 +293,7 @@ export function reviewCatalog(providers: readonly CatalogProvider[]): ReviewMode
 // The first candidate that is a connected, supported provider model.
 export function pickReviewModel(candidates: readonly (string | undefined)[], catalog: readonly ReviewModel[]) {
   for (const name of candidates) {
-    const found =
-      name?.trim() && catalog.find((model) => providerAllowed(model.providerID) && modelName(model) === name.trim())
+    const found = name?.trim() && catalog.find((model) => modelName(model) === name.trim())
     if (found) return found
   }
   return undefined

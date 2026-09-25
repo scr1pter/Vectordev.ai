@@ -1,4 +1,4 @@
-import { providerAllowed } from "@vectordevai/schema/provider-policy"
+import { providerUsable } from "@vectordevai/schema/provider-policy"
 import type { Argv } from "yargs"
 import { Auth } from "../../auth"
 import { cmd } from "./cmd"
@@ -224,7 +224,7 @@ export function resolvePluginProviders(input: {
   for (const hook of input.hooks) {
     if (!hook.auth) continue
     const id = hook.auth.provider
-    if (!providerAllowed(id) || seen.has(id)) continue
+    if (seen.has(id)) continue
     seen.add(id)
     if (Object.hasOwn(input.existingProviders, id)) continue
     if (input.disabled.has(id)) continue
@@ -403,6 +403,16 @@ export const ProvidersLoginCommand = effectCmd({
           }[x.id],
         })),
       ),
+      ...Object.entries(config.provider ?? {})
+        .filter(
+          ([id, provider]) =>
+            !providers[id] &&
+            !pluginProviders.some((item) => item.id === id) &&
+            providerUsable(id, provider) &&
+            !disabled.has(id) &&
+            (!enabled || enabled.has(id)),
+        )
+        .map(([id, provider]) => ({ label: provider.name ?? id, value: id, hint: "custom" })),
       ...pluginProviders.map((x) => ({
         label: x.name,
         value: x.id,
@@ -425,9 +435,26 @@ export const ProvidersLoginCommand = effectCmd({
         yield* Prompt.autocomplete({
           message: "Select provider",
           maxItems: 8,
-          options,
+          options: [...options, { value: "other", label: "Other" }],
         }),
       )
+    }
+
+    if (provider === "other") {
+      provider = yield* promptValue(
+        yield* Prompt.text({
+          message: "Enter provider id",
+          validate: (value) => (value && /^[0-9a-z-]+$/.test(value) ? undefined : "a-z, 0-9 and hyphens only"),
+        }),
+      )
+      if (disabled.has(provider) || (enabled && !enabled.has(provider))) {
+        return yield* fail(`Provider "${provider}" is disabled by your configuration`)
+      }
+      if (!options.some((item) => item.value === provider)) {
+        yield* Prompt.log.info(
+          `Configure ${provider} with your SDK package or base URL in vector.json to use this credential.`,
+        )
+      }
     }
 
     const plugin = hooks.findLast((x) => x.auth?.provider === provider)

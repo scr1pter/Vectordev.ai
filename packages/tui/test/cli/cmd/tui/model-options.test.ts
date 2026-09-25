@@ -15,12 +15,12 @@ describe("model choices", () => {
     }
   })
 
-  test("hides unlisted providers and rejects their custom provider ids", () => {
+  test("hides unknown catalog entries but accepts new custom provider ids", () => {
     const ids = ["unlisted-a", "unlisted-b", "unlisted-c", "unlisted-d", "anthropic"]
     const options = providerOptions(ids.map((id) => ({ id, name: id })))
     expect(options.filter((item) => item.type === "provider").map((item) => item.value)).toEqual(["anthropic"])
-    for (const id of ids.slice(0, -1)) expect(normalizeCustomProviderID(id)).toBeUndefined()
-    expect(normalizeCustomProviderID("anthropic")).toBe("anthropic")
+    for (const id of ids.slice(0, -1)) expect(normalizeCustomProviderID(id)).toBe(id)
+    expect(normalizeCustomProviderID("anthropic")).toBeUndefined()
   })
 
   test("shows provider and model names without invented access labels", () => {

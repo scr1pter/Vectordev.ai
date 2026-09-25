@@ -1,4 +1,3 @@
-import { providerAllowed } from "@vectordevai/schema/provider-policy"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import type { AuthOAuthResult, Hooks } from "@vectordevai/plugin"
 import { serviceUse } from "@vectordevai/core/effect/service-use"
@@ -118,7 +117,7 @@ const layer: Layer.Layer<Service, never, Auth.Service | Plugin.Service> = Layer.
         return {
           hooks: Record.fromEntries(
             Arr.filterMap(plugins, (x) =>
-              x.auth?.provider !== undefined && providerAllowed(x.auth.provider)
+              x.auth?.provider !== undefined
                 ? Result.succeed([ProviderV2.ID.make(x.auth.provider), x.auth] as const)
                 : Result.failVoid,
             ),

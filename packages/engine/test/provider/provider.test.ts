@@ -193,14 +193,14 @@ it.instance(
   "custom provider with npm package",
   Effect.gen(function* () {
     const providers = yield* list
-    expect(providers[ProviderV2.ID.make("lmstudio")]).toBeDefined()
-    expect(providers[ProviderV2.ID.make("lmstudio")].name).toBe("Custom Provider")
-    expect(providers[ProviderV2.ID.make("lmstudio")].models["custom-model"]).toBeDefined()
+    expect(providers[ProviderV2.ID.make("ollama")]).toBeDefined()
+    expect(providers[ProviderV2.ID.make("ollama")].name).toBe("Custom Provider")
+    expect(providers[ProviderV2.ID.make("ollama")].models["custom-model"]).toBeDefined()
   }),
   {
     config: {
       provider: {
-        lmstudio: {
+        ollama: {
           name: "Custom Provider",
           npm: "@ai-sdk/openai-compatible",
           api: "https://api.custom.com/v1",
@@ -1777,7 +1777,7 @@ it.effect("plugin config providers persist after instance dispose", () =>
           "  server: async () => ({",
           "    async config(cfg) {",
           "      cfg.provider ??= {}",
-          "      cfg.provider.lmstudio = {",
+          "      cfg.provider.ollama = {",
           '        name: "Demo Provider",',
           '        npm: "@ai-sdk/openai-compatible",',
           '        api: "https://example.com/v1",',
@@ -1805,14 +1805,14 @@ it.effect("plugin config providers persist after instance dispose", () =>
     }).pipe(provideInstanceEffect(dir))
 
     const first = yield* loadAndList
-    expect(first[ProviderV2.ID.make("lmstudio")]).toBeDefined()
-    expect(first[ProviderV2.ID.make("lmstudio")].models[ModelV2.ID.make("chat")]).toBeDefined()
+    expect(first[ProviderV2.ID.make("ollama")]).toBeDefined()
+    expect(first[ProviderV2.ID.make("ollama")].models[ModelV2.ID.make("chat")]).toBeDefined()
 
     yield* Effect.promise(() => disposeAllInstances())
 
     const second = yield* loadAndList
-    expect(second[ProviderV2.ID.make("lmstudio")]).toBeDefined()
-    expect(second[ProviderV2.ID.make("lmstudio")].models[ModelV2.ID.make("chat")]).toBeDefined()
+    expect(second[ProviderV2.ID.make("ollama")]).toBeDefined()
+    expect(second[ProviderV2.ID.make("ollama")].models[ModelV2.ID.make("chat")]).toBeDefined()
   }).pipe(provideMultiInstance),
 )
 
@@ -1851,7 +1851,7 @@ it.instance(
 )
 
 it.instance(
-  "unknown providers stay absent with environment, config, and stored credentials",
+  "explicit custom providers load with environment, config, and stored credentials",
   () =>
     Effect.gen(function* () {
       yield* set("UNSUPPORTED_FIXTURE_KEY", "placeholder")
@@ -1864,7 +1864,10 @@ it.instance(
         ),
       )
       const providers = yield* Provider.use.list()
-      expect(Object.keys(providers).filter((id) => id.startsWith("unsupported-fixture"))).toEqual([])
+      expect(Object.keys(providers).filter((id) => id.startsWith("unsupported-fixture"))).toEqual([
+        "unsupported-fixture",
+        "unsupported-fixture-two",
+      ])
     }),
   {
     config: {
@@ -1917,5 +1920,54 @@ it.instance("Vector auth content admits API keys and rejects unsupported provide
     expect(providers[ProviderV2.ID.anthropic].key).toBe("placeholder-current")
     expect(providers[ProviderV2.ID.make("unsupported-fixture")]).toBeUndefined()
     expect(providers[ProviderV2.ID.openai]).toBeUndefined()
+  }),
+)
+
+it.instance("plugin-defined provider models retain custom provenance with a stored key", () =>
+  Effect.gen(function* () {
+    const instance = yield* TestInstance
+    const configDir = path.join(instance.directory, ".vector")
+    const root = path.join(configDir, "plugin")
+    yield* Effect.promise(() => mkdir(root, { recursive: true }))
+    yield* Effect.promise(() => markPluginDependenciesReady(configDir))
+    const provider = Provider.fromModelCatalogProvider({
+      id: "acme-gateway",
+      name: "Company Gateway",
+      env: [],
+      npm: "@ai-sdk/openai-compatible",
+      api: "http://127.0.0.1:9/v1",
+      models: {
+        chat: {
+          id: "chat",
+          name: "Company Chat",
+          release_date: "2026-01-01",
+          attachment: false,
+          reasoning: false,
+          temperature: false,
+          tool_call: true,
+          limit: { context: 100_000, output: 10_000 },
+        },
+      },
+    })
+    yield* Effect.promise(() =>
+      Bun.write(
+        path.join(root, "gateway.ts"),
+        `
+      export default {
+        id: "fixture.company-gateway",
+        server: async () => ({
+          provider: { id: "acme-gateway", models: async () => (${JSON.stringify(provider.models)}) },
+        }),
+      }
+    `,
+      ),
+    )
+    yield* set("VECTOR_AUTH_CONTENT", JSON.stringify({ "acme-gateway": { type: "api", key: "fixture-company-key" } }))
+    const providers = yield* list
+    expect(providers[ProviderV2.ID.make("acme-gateway")]).toMatchObject({
+      source: "custom",
+      key: "fixture-company-key",
+      models: { chat: { api: { npm: "@ai-sdk/openai-compatible", url: "http://127.0.0.1:9/v1" } } },
+    })
   }),
 )

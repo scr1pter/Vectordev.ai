@@ -1,4 +1,4 @@
-import { providerAllowed } from "@vectordevai/schema/provider-policy"
+import { hasConnectedProvider } from "../../util/model"
 import type { TuiPlugin, TuiPluginApi } from "@vectordevai/plugin/tui"
 import type { BuiltinTuiPlugin } from "../builtins"
 import { createMemo, Show } from "solid-js"
@@ -10,7 +10,7 @@ const id = "internal:sidebar-footer"
 function View(props: { api: TuiPluginApi; sessionID: string }) {
   const paths = useTuiPaths()
   const theme = () => props.api.theme.current
-  const has = createMemo(() => props.api.state.provider.some((item) => providerAllowed(item.id)))
+  const has = createMemo(() => hasConnectedProvider(props.api.state.provider))
   const done = createMemo(() => props.api.kv.get("dismissed_getting_started", false))
   const show = createMemo(() => !has() && !done())
   const path = createMemo(() => {

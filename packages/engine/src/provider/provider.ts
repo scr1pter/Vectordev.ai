@@ -1,4 +1,4 @@
-import { providerAllowed, providerCredentialAllowed } from "@vectordevai/core/provider-policy"
+import { providerAllowed, providerCredentialAllowed, providerUsable } from "@vectordevai/core/provider-policy"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import os from "os"
 import { ConfigV1 } from "@vectordevai/core/v1/config/config"
@@ -1347,7 +1347,9 @@ const layer = Layer.effect(
         const dep = {
           auth: (id: string) =>
             auth.get(id).pipe(
-              Effect.map((value) => (value && !providerCredentialAllowed(id, value) ? undefined : value)),
+              Effect.map((value) =>
+                value && !providerCredentialAllowed(id, value, userProviders.has(id)) ? undefined : value,
+              ),
               Effect.orDie,
             ),
           config: () => config.get(),
@@ -1356,29 +1358,38 @@ const layer = Layer.effect(
         }
 
         function mergeProvider(providerID: ProviderV2.ID, provider: Partial<Info>) {
-          if (!providerAllowed(providerID)) return
+          if (!isProviderAllowed(providerID)) return
+          const value = providerAllowed(providerID)
+            ? provider
+            : { ...provider, source: database[providerID]?.source ?? "custom" }
           const existing = providers[providerID]
           if (existing) {
             // @ts-expect-error
-            providers[providerID] = mergeDeep(existing, provider)
+            providers[providerID] = mergeDeep(existing, value)
             return
           }
           const match = database[providerID]
           if (!match) return
           // @ts-expect-error
-          providers[providerID] = mergeDeep(match, provider)
+          providers[providerID] = mergeDeep(match, value)
         }
 
         // load plugins first so config() hook runs before reading cfg.provider
         const plugins = yield* plugin.list()
 
         // now read config providers - includes any modifications from plugin config() hook
-        const configProviders = Object.entries(cfg.provider ?? {}).filter(([id]) => providerAllowed(id))
+        const configProviders = Object.entries(cfg.provider ?? {}).filter(([id, provider]) =>
+          providerUsable(id, provider),
+        )
+        const userProviders = new Set([
+          ...configProviders.map(([id]) => id),
+          ...plugins.flatMap((hook) => [hook.provider?.id, hook.auth?.provider].filter((id) => id !== undefined)),
+        ])
         const disabled = new Set(cfg.disabled_providers ?? [])
         const enabled = cfg.enabled_providers ? new Set(cfg.enabled_providers) : null
 
         function isProviderAllowed(providerID: ProviderV2.ID): boolean {
-          if (!providerAllowed(providerID)) return false
+          if (!providerAllowed(providerID) && !userProviders.has(providerID)) return false
           if (enabled && !enabled.has(providerID)) return false
           if (disabled.has(providerID)) return false
           return true
@@ -1392,11 +1403,20 @@ const layer = Layer.effect(
           const providerID = ProviderV2.ID.make(p.id)
           if (!isProviderAllowed(providerID)) continue
 
-          const provider = database[providerID]
-          if (!provider) continue
+          const provider = database[providerID] ?? {
+            id: providerID,
+            name: providerID,
+            env: [],
+            options: {},
+            source: "custom" as const,
+            models: {},
+          }
+          database[providerID] = provider
           const storedPluginAuth = yield* auth.get(providerID).pipe(Effect.orDie)
           const pluginAuth =
-            storedPluginAuth && providerCredentialAllowed(providerID, storedPluginAuth) ? storedPluginAuth : undefined
+            storedPluginAuth && providerCredentialAllowed(providerID, storedPluginAuth, userProviders.has(providerID))
+              ? storedPluginAuth
+              : undefined
 
           provider.models = yield* Effect.promise(async () => {
             const next = await models(toPublicInfo(provider), { auth: pluginAuth })
@@ -1411,6 +1431,7 @@ const layer = Layer.effect(
               ]),
             )
           })
+          if (!catalog[providerID]) mergeProvider(providerID, { source: "custom" })
         }
 
         // extend database from config
@@ -1526,7 +1547,10 @@ const layer = Layer.effect(
         for (const [id, provider] of Object.entries(auths)) {
           const providerID = ProviderV2.ID.make(id)
           if (!isProviderAllowed(providerID)) continue
-          if (provider.type === "api" && providerCredentialAllowed(providerID, provider)) {
+          if (
+            provider.type === "api" &&
+            providerCredentialAllowed(providerID, provider, userProviders.has(providerID))
+          ) {
             mergeProvider(providerID, {
               source: "api",
               key: provider.key,
@@ -1542,8 +1566,8 @@ const layer = Layer.effect(
 
           const stored = yield* auth.get(providerID).pipe(Effect.orDie)
           if (!stored) continue
-          if (!providerCredentialAllowed(providerID, stored)) continue
-          if (!plugin.auth.loader) continue
+          if (!providerCredentialAllowed(providerID, stored, userProviders.has(providerID))) continue
+          if (!plugin.auth.loader || !database[providerID]) continue
 
           const options = yield* Effect.promise(() =>
             plugin.auth!.loader!(

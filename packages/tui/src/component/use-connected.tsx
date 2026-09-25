@@ -1,8 +1,8 @@
-import { providerAllowed } from "@vectordevai/schema/provider-policy"
+import { hasConnectedProvider } from "../util/model"
 import { createMemo } from "solid-js"
 import { useSync } from "../context/sync"
 
 export function useConnected() {
   const sync = useSync()
-  return createMemo(() => sync.data.provider.some((provider) => providerAllowed(provider.id)))
+  return createMemo(() => hasConnectedProvider(sync.data.provider))
 }

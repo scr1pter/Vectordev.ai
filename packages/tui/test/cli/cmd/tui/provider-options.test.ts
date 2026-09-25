@@ -27,8 +27,11 @@ describe("providerOptions", () => {
     ).toEqual(["openai", "anthropic", "amazon-bedrock", "mistral", "zai", "__vector_custom_provider__"])
   })
 
-  test("does not collide with a configured provider named other", () => {
-    const values = providerOptions([{ id: "other", name: "Other Provider" }]).map((option) => option.value)
+  test("includes configured custom providers without colliding with Other", () => {
+    const values = providerOptions([{ id: "other", name: "Other Provider", source: "config" }]).map(
+      (option) => option.value,
+    )
+    expect(values).toContain("other")
     expect(new Set(values).size).toBe(values.length)
   })
 

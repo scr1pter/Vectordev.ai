@@ -8,7 +8,6 @@ import { ProviderV2 } from "./provider"
 import { EventV2 } from "./event"
 import { Policy } from "./policy"
 import { State } from "./state"
-import { providerAllowed } from "./provider-policy"
 import { Integration } from "./integration"
 
 export type ProviderRecord = {
@@ -108,10 +107,6 @@ const layer = Layer.effect(
       draft: (draft) => {
         // State rebuilds this API before publishing, so mutable plugin records cannot change their identities.
         for (const [providerID, record] of draft.providers) {
-          if (!providerAllowed(providerID)) {
-            draft.providers.delete(providerID)
-            continue
-          }
           record.provider.id = providerID
           for (const [modelID, model] of record.models) {
             model.id = modelID
@@ -123,7 +118,6 @@ const layer = Layer.effect(
             list: () => Array.fromIterable(draft.providers.values()) as ProviderRecord[],
             get: (providerID) => draft.providers.get(providerID),
             update: (providerID, fn) => {
-              if (!providerAllowed(providerID)) return
               let current = draft.providers.get(providerID)
               if (!current) {
                 current = {
@@ -143,7 +137,6 @@ const layer = Layer.effect(
           model: {
             get: (providerID, modelID) => draft.providers.get(providerID)?.models.get(modelID),
             update: (providerID, modelID, fn) => {
-              if (!providerAllowed(providerID)) return
               let record = draft.providers.get(providerID)
               if (!record) {
                 record = {
@@ -166,7 +159,7 @@ const layer = Layer.effect(
             default: {
               get: () => draft.defaultModel,
               set: (providerID, modelID) => {
-                if (providerAllowed(providerID)) draft.defaultModel = { providerID, modelID }
+                draft.defaultModel = { providerID, modelID }
               },
             },
           },

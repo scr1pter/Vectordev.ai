@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import type { Provider } from "@vectordevai/sdk/v2"
 import { modelProviderName } from "../../src/util/model"
-import { name, parse } from "../../src/util/model"
+import { name, parse, isHiddenProvider, hasConnectedProvider } from "../../src/util/model"
 
 describe("util.model", () => {
   test("splits provider from a nested model identifier", () => {
@@ -44,4 +44,17 @@ describe("util.model", () => {
     expect(modelProviderName(local, zeroCost)).toBe("Ollama")
     expect(modelProviderName(remote, { cost: { input: 1 }, release_date: "2026-03-11" })).toBe("Groq")
   })
+})
+
+test("custom provider models remain visible while unknown catalog entries stay hidden", () => {
+  expect(isHiddenProvider("ollama", { source: "config" })).toBe(false)
+  expect(isHiddenProvider("acme-gateway", { source: "custom" })).toBe(false)
+  expect(isHiddenProvider("unknown-catalog", { source: "api" })).toBe(true)
+})
+
+test("custom-only setups count as connected", () => {
+  expect(hasConnectedProvider([{ id: "ollama", source: "config" }])).toBe(true)
+  expect(hasConnectedProvider([{ id: "acme-gateway", source: "custom" }])).toBe(true)
+  expect(hasConnectedProvider([{ id: "unknown-catalog", source: "env" }])).toBe(false)
+  expect(hasConnectedProvider([])).toBe(false)
 })

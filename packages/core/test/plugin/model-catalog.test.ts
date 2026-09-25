@@ -168,3 +168,28 @@ describe("ModelCatalogPlugin", () => {
     ),
   )
 })
+
+it.effect("unreviewed catalog IDs cannot register providers or integrations", () =>
+  Effect.gen(function* () {
+    const integrations = yield* Integration.Service
+    const catalog = yield* Catalog.Service
+    const models = ModelCatalog.Service.of({
+      get: () =>
+        Effect.succeed({
+          "unreviewed-catalog": {
+            id: "unreviewed-catalog",
+            name: "Unreviewed",
+            env: ["UNREVIEWED_CATALOG_KEY"],
+            npm: "@ai-sdk/openai-compatible",
+            models: {},
+          },
+        }),
+      refresh: () => Effect.void,
+    })
+    yield* ModelCatalogPlugin.effect(
+      host({ catalog: catalogHost(catalog), integration: integrationHost(integrations) }),
+    ).pipe(Effect.provideService(ModelCatalog.Service, models))
+    expect(yield* catalog.provider.all()).toEqual([])
+    expect(yield* integrations.list()).toEqual([])
+  }),
+)

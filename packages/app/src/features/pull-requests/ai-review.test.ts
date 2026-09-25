@@ -469,3 +469,9 @@ describe("showing and posting", () => {
     expect(body).toContain("[redacted]")
   })
 })
+
+test("review model selection retains explicit custom providers", () => {
+  const catalog = reviewCatalog([{ id: "ollama", source: "config", models: { coder: { id: "coder" } } }])
+  expect(catalog).toEqual([{ providerID: "ollama", modelID: "coder", costKind: "unknown" }])
+  expect(pickReviewModel(["ollama/coder"], catalog)).toEqual(catalog[0])
+})

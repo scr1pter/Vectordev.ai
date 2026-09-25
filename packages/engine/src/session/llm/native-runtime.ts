@@ -1,5 +1,5 @@
 import type { Auth } from "@/auth"
-import { providerAllowed, providerCredentialAllowed } from "@vectordevai/core/provider-policy"
+import { providerUsable, providerCredentialAllowed } from "@vectordevai/core/provider-policy"
 import type { Provider } from "@/provider/provider"
 import { ProviderTransform } from "@/provider/transform"
 import { errorMessage } from "@/util/error"
@@ -53,9 +53,9 @@ function statusWithFetch(
   fetch: typeof globalThis.fetch | undefined,
 ): RuntimeStatus {
   const providerID = input.model.providerID
-  if (!providerAllowed(providerID) || !providerAllowed(input.provider.id))
+  if (!providerUsable(providerID, input.provider) || providerID !== input.provider.id)
     return { type: "unsupported", reason: "provider is not supported" }
-  if (input.auth && !providerCredentialAllowed(providerID, input.auth))
+  if (input.auth && !providerCredentialAllowed(providerID, input.auth, providerUsable(providerID, input.provider)))
     return { type: "unsupported", reason: "provider sign-in is paused" }
   if (providerID !== "openai" && providerID !== "anthropic")
     return { type: "unsupported", reason: "provider is not openai or anthropic" }

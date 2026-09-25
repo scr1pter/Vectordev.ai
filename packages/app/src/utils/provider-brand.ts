@@ -1,6 +1,7 @@
-import { providerAllowed } from "@vectordevai/schema/provider-policy"
+import { providerAllowed, providerUsable } from "@vectordevai/schema/provider-policy"
 
-export const isHiddenProvider = (id: string) => !providerAllowed(id)
+export const isHiddenProvider = (id: string, provider?: Parameters<typeof providerUsable>[1]) =>
+  !providerUsable(id, provider)
 
 export function brandProviderName(id: string, name?: string | null): string {
   return name?.trim() || id
@@ -95,7 +96,7 @@ export const costInput = (cost: unknown): number | undefined => {
 /** Describe verified user credentials; price alone never means Vector includes a model. */
 export function modelAccess(model: PickerModel): ModelAccess {
   const provider = model.provider
-  if (isHiddenProvider(provider.id)) return NO_ACCESS
+  if (isHiddenProvider(provider.id, provider)) return NO_ACCESS
   // An OAuth loader placeholder is not evidence that an API key pays for this model.
   if (provider.options?.apiKey === "vector-oauth-dummy-key") return NO_ACCESS
   const cost = costInput(model.cost)
@@ -281,7 +282,9 @@ export function buildModelSections<T extends PickerModel>(input: {
   popular?: readonly string[]
 }): PickerSection<T>[] {
   const term = (input.term ?? "").trim().toLowerCase()
-  const models = input.models.filter((model) => !isHiddenProvider(model.provider.id) && isCodingModel(model))
+  const models = input.models.filter(
+    (model) => !isHiddenProvider(model.provider.id, model.provider) && isCodingModel(model),
+  )
   const sections: PickerSection<T>[] = []
   const taken = new Set<string>()
 

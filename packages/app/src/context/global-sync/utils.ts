@@ -21,13 +21,16 @@ export function normalizeAgentList(input: unknown): Agent[] {
 
 /** Drop retired providers and deprecated models at the shared ingestion boundary. */
 export function normalizeProviderList(input: ProviderListResponse): NormalizedProviderListResponse {
+  const visible = new Set(
+    input.all.filter((provider) => !isHiddenProvider(provider.id, provider)).map((provider) => provider.id),
+  )
   return {
     ...input,
-    connected: input.connected.filter((id) => !isHiddenProvider(id)),
-    default: Object.fromEntries(Object.entries(input.default).filter(([id]) => !isHiddenProvider(id))),
+    connected: input.connected.filter((id) => visible.has(id)),
+    default: Object.fromEntries(Object.entries(input.default).filter(([id]) => visible.has(id))),
     all: new Map(
       input.all
-        .filter((provider) => !isHiddenProvider(provider.id))
+        .filter((provider) => !isHiddenProvider(provider.id, provider))
         .map(
           (provider) =>
             [

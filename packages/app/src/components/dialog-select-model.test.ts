@@ -26,7 +26,7 @@ type Provider = PickerModel["provider"]
 const gateway: Provider = {
   id: "unlisted-service",
   name: "Unlisted service",
-  source: "custom",
+  source: "api",
   options: { apiKey: "public" },
 }
 const unlistedKey: Provider = { id: "unlisted-service", name: "Unlisted service", source: "api", options: {} }
@@ -480,4 +480,21 @@ test("retired providers are excluded from current, recent, provider and search s
     expect(pickerKeys(sections).some((key) => key.startsWith("unlisted-"))).toBe(false)
   }
   for (const item of retired) expect(modelAccess(item).kind).toBe("none")
+})
+
+test("custom providers remain available in current, recent and searched model choices", () => {
+  const custom = model({ id: "ollama", name: "Ollama", source: "config" }, "coder", "Local Coder")
+  for (const term of ["", "local", "ollama"]) {
+    expect(
+      pickerKeys(
+        buildModelSections({
+          models: [custom],
+          term,
+          currentKey: pickerModelKey(custom),
+          recentKeys: [pickerModelKey(custom)],
+          now: NOW,
+        }),
+      ),
+    ).toEqual([pickerModelKey(custom)])
+  }
 })

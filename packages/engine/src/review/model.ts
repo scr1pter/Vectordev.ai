@@ -77,7 +77,8 @@ export const resolveReviewModel = Effect.fn("ReviewModel.resolve")(function* (in
   const signIn = yield* auth.get(model.providerID).pipe(Effect.catch(() => Effect.succeed(undefined)))
   const listed = model.cost.input > 0 || model.cost.output > 0
   const costKind: CostKind =
-    signIn?.type === "oauth" && providerCredentialAllowed(model.providerID, signIn)
+    signIn?.type === "oauth" &&
+    providerCredentialAllowed(model.providerID, signIn, Boolean(model.api.npm || model.api.url))
       ? "plan"
       : listed
         ? "priced"

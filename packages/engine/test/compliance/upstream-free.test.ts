@@ -78,12 +78,15 @@ describe("Vector source independence", () => {
 
 const it = testEffect(LayerNode.compile(LayerNode.group([Provider.node, Env.node, Plugin.node])))
 it.instance(
-  "an unlisted provider never loads even with a configured credential",
+  "explicit custom providers load without entering the built-in catalog",
   () =>
     Effect.gen(function* () {
       expect(providerAllowed("unlisted-fixture-provider")).toBe(false)
       const providers = yield* Provider.use.list()
-      expect(Object.keys(providers)).not.toContain("unlisted-fixture-provider")
+      expect(Object.values(providers).find((provider) => provider.id === "unlisted-fixture-provider")).toMatchObject({
+        source: "config",
+        options: { apiKey: "fixture-credential" },
+      })
     }),
   {
     config: {

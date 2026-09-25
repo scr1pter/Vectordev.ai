@@ -24,7 +24,7 @@ export const SettingsModelsV2: Component = () => {
   const models = useModels()
 
   const list = useFilteredList<ModelItem>({
-    items: (_filter) => models.list().filter((model) => !isHiddenProvider(model.provider.id)),
+    items: (_filter) => models.list().filter((model) => !isHiddenProvider(model.provider.id, model.provider)),
     key: (x) => `${x.provider.id}:${x.id}`,
     filterKeys: ["provider.name", "name", "id"],
     sortBy: (a, b) => a.name.localeCompare(b.name),
