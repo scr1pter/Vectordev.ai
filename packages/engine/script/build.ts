@@ -2,6 +2,7 @@
 
 import { $ } from "bun"
 import fs from "fs"
+import { prepareGitLab } from "../../../script/prepare-gitlab"
 import path from "path"
 import { fileURLToPath } from "url"
 import { createSolidTransformPlugin } from "@opentui/solid/bun-plugin"
@@ -158,6 +159,7 @@ if (!skipInstall) {
   await $`bun install --os="*" --cpu="*" @parcel/watcher@${pkg.dependencies["@parcel/watcher"]}`
   await $`bun install --os="*" --cpu="*" @ff-labs/fff-bun@${pkg.dependencies["@ff-labs/fff-bun"]}`
 }
+await prepareGitLab()
 await import("../../../script/dependency-notices.ts")
 for (const item of targets) {
   const name = [

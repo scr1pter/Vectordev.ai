@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 
 import { Script } from "@vectordevai/script"
+import { prepareGitLab } from "../../../script/prepare-gitlab"
 import path from "path"
 import { fileURLToPath } from "url"
 
@@ -11,6 +12,8 @@ const dir = path.resolve(__dirname, "..")
 process.chdir(dir)
 
 const generated = await import("./generate.ts")
+
+await prepareGitLab()
 
 await Bun.build({
   target: "node",

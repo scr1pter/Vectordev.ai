@@ -158,7 +158,19 @@ test("dry-run packages every target with notices and a working Vector launcher w
   }
 }, 30_000)
 
-for (const problem of ["stale version", "missing binary", "missing notice", "excluded notice", "shared credential"]) {
+const borrowedRegistrations = [
+  "1d89f9fdb23ee96d4e603201f6861dab6e143c5c3c00469a018a2d94bdc03d4e",
+  "Ov23li8tweQw6odWQebz",
+  "app_EMoamEEZ73f0CkXaXp7hrann",
+]
+for (const problem of [
+  "stale version",
+  "missing binary",
+  "missing notice",
+  "excluded notice",
+  "shared credential",
+  ...borrowedRegistrations,
+]) {
   test(`refuses every package before publishing when the final target has ${problem}`, async () => {
     await using tmp = await fixture()
     const cwd = path.join(tmp.dir, "packages/engine")
@@ -174,6 +186,8 @@ for (const problem of ["stale version", "missing binary", "missing notice", "exc
     if (problem === "missing notice") await rm(path.join(folder, "THIRD_PARTY_NOTICES.md"))
     if (problem === "shared credential")
       await Bun.write(path.join(folder, "bin/vector.exe"), 'compiled fixture apiKey:"public"')
+    if (borrowedRegistrations.includes(problem))
+      await Bun.write(path.join(folder, "bin/vector.exe"), `compiled fixture ${problem}`)
     const result = await run([process.execPath, "script/publish-vector.ts", "--skip-build", "--dry-run"], cwd, tmp.env)
     expect(result.code).not.toBe(0)
     expect((await Bun.file(path.join(cwd, "dist/vector-darwin-arm64/package.json")).json()).name).toBe(
