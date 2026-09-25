@@ -440,7 +440,15 @@ const layer = Layer.effect(
             }
           }
 
-          yield* ensureGitignore(dir).pipe(Effect.orDie)
+          // The desktop also owns .vector directories containing repository state and rules.
+          const runtimeFiles =
+            dir === Global.Path.config ||
+            dir === Flag.VECTOR_AGENT_CONFIG_DIR ||
+            (yield* fs.isFile(path.join(dir, "package.json"))) ||
+            (yield* Effect.forEach(["plugin", "plugins", "tool", "tools"], (name) =>
+              fs.isDir(path.join(dir, name)),
+            )).some(Boolean)
+          if (runtimeFiles) yield* ensureGitignore(dir).pipe(Effect.orDie)
 
           result.command = mergeDeep(result.command ?? {}, yield* Effect.promise(() => ConfigCommand.load(dir)))
           result.agent = mergeDeep(result.agent ?? {}, yield* Effect.promise(() => ConfigAgent.load(dir)))

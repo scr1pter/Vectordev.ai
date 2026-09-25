@@ -923,6 +923,44 @@ it.instance("gets config directories", () =>
   }),
 )
 
+for (const contents of [[], ["RULES.md", "BRAIN.md", "review.json", "team.json", "failure-memory.json"]]) {
+  it.instance(`leaves desktop-only .vector state untouched (${contents.length} files)`, () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      const dir = path.join(test.directory, ".vector")
+      const afs = yield* FSUtil.Service
+      yield* afs.ensureDir(dir)
+      for (const name of contents) {
+        yield* afs.writeFileString(path.join(dir, name), name.endsWith(".json") ? "{}\n" : "Repository state\n")
+      }
+      yield* Config.use.get()
+      expect((yield* afs.readDirectory(dir)).sort()).toEqual([...contents].sort())
+      for (const name of contents) {
+        expect(yield* afs.readFileString(path.join(dir, name))).toBe(
+          name.endsWith(".json") ? "{}\n" : "Repository state\n",
+        )
+      }
+    }),
+  )
+}
+
+for (const marker of ["plugin", "plugins", "tool", "tools", "package.json"]) {
+  it.instance(`recognizes explicit engine runtime files in .vector (${marker})`, () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      const dir = path.join(test.directory, ".vector")
+      const afs = yield* FSUtil.Service
+      yield* afs.ensureDir(dir)
+      if (marker === "package.json") yield* afs.writeFileString(path.join(dir, marker), "{}\n")
+      if (marker !== "package.json") yield* afs.ensureDir(path.join(dir, marker))
+      yield* Config.use.get()
+      expect(yield* afs.readFileString(path.join(dir, ".gitignore"))).toContain("node_modules")
+      expect(yield* afs.existsSafe(path.join(dir, "node_modules"))).toBe(false)
+      expect(yield* afs.existsSafe(path.join(dir, "package-lock.json"))).toBe(false)
+    }),
+  )
+}
+
 it.effect("does not try to install dependencies in read-only VECTOR_AGENT_CONFIG_DIR", () =>
   Effect.gen(function* () {
     if (process.platform === "win32") return
