@@ -192,16 +192,23 @@ jobs:
           set -euo pipefail
           mkdir -p release-catalog
           # A new workflow run for a partially published release must reuse its immutable mirror.
-          status=$(curl --silent --show-error --location --retry 3 --output release-catalog/mirror.json \
+          status=$(curl --silent --show-error --retry 3 --output release-catalog/mirror.json \
             --write-out '%{http_code}' \
             "https://42qryducihx01gl0.public.blob.vercel-storage.com/releases/vector-v${TAG#v}/api.json")
           case "$status" in
-            200) export VECTOR_MODELS_PATH="$PWD/release-catalog/mirror.json" ;;
+            200)
+              export VECTOR_RELEASE_CATALOG_PATH="$PWD/release-catalog/mirror.json"
+              export VECTOR_RELEASE_CATALOG_SHA256="$(sha256sum "$VECTOR_RELEASE_CATALOG_PATH" | cut -d ' ' -f 1)"
+              ;;
             404) ;;
             *) echo "Catalog mirror returned HTTP $status; refusing to replace an unknown release snapshot"; exit 1 ;;
           esac
           export VECTOR_CATALOG_FILE="$PWD/release-catalog/api.json"
-          bun packages/engine/script/generate.ts
+          if [ "$status" = "404" ]; then
+            bun packages/engine/script/generate.ts --fresh-catalog
+          else
+            bun packages/engine/script/generate.ts
+          fi
           rm -f release-catalog/mirror.json
           (cd release-catalog && sha256sum api.json > api.sha256)
 
@@ -359,8 +366,8 @@ jobs:
             package: web
             command: bun run build
     env:
-      VECTOR_MODELS_PATH: ${{ github.workspace }}/release-catalog/api.json
-      VECTOR_MODELS_SHA256: ${{ needs.catalog.outputs.sha256 }}
+      VECTOR_RELEASE_CATALOG_PATH: ${{ github.workspace }}/release-catalog/api.json
+      VECTOR_RELEASE_CATALOG_SHA256: ${{ needs.catalog.outputs.sha256 }}
     steps:
       - name: Check out release source
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -457,8 +464,8 @@ jobs:
     permissions:
       contents: write
     env:
-      VECTOR_MODELS_PATH: ${{ github.workspace }}/release-catalog/api.json
-      VECTOR_MODELS_SHA256: ${{ needs.catalog.outputs.sha256 }}
+      VECTOR_RELEASE_CATALOG_PATH: ${{ github.workspace }}/release-catalog/api.json
+      VECTOR_RELEASE_CATALOG_SHA256: ${{ needs.catalog.outputs.sha256 }}
       RELEASE_UNSIGNED: ${{ needs.prepare.outputs.unsigned }}
     steps:
       - name: Check out release source
@@ -655,8 +662,8 @@ jobs:
     permissions:
       contents: write
     env:
-      VECTOR_MODELS_PATH: ${{ github.workspace }}/release-catalog/api.json
-      VECTOR_MODELS_SHA256: ${{ needs.catalog.outputs.sha256 }}
+      VECTOR_RELEASE_CATALOG_PATH: ${{ github.workspace }}/release-catalog/api.json
+      VECTOR_RELEASE_CATALOG_SHA256: ${{ needs.catalog.outputs.sha256 }}
       RELEASE_UNSIGNED: ${{ needs.prepare.outputs.unsigned }}
     steps:
       - name: Check out release source
@@ -799,8 +806,8 @@ jobs:
     permissions:
       contents: write
     env:
-      VECTOR_MODELS_PATH: ${{ github.workspace }}/release-catalog/api.json
-      VECTOR_MODELS_SHA256: ${{ needs.catalog.outputs.sha256 }}
+      VECTOR_RELEASE_CATALOG_PATH: ${{ github.workspace }}/release-catalog/api.json
+      VECTOR_RELEASE_CATALOG_SHA256: ${{ needs.catalog.outputs.sha256 }}
     steps:
       - name: Check out release source
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -866,8 +873,8 @@ jobs:
     permissions:
       contents: write
     env:
-      VECTOR_MODELS_PATH: ${{ github.workspace }}/release-catalog/api.json
-      VECTOR_MODELS_SHA256: ${{ needs.catalog.outputs.sha256 }}
+      VECTOR_RELEASE_CATALOG_PATH: ${{ github.workspace }}/release-catalog/api.json
+      VECTOR_RELEASE_CATALOG_SHA256: ${{ needs.catalog.outputs.sha256 }}
       RELEASE_UNSIGNED: ${{ needs.prepare.outputs.unsigned }}
     steps:
       - name: Check out release source
@@ -949,8 +956,8 @@ jobs:
           TAG: ${{ env.RELEASE_TAG }}
         run: |
           set -euo pipefail
-          test "$(sha256sum "$VECTOR_MODELS_PATH" | cut -d ' ' -f 1)" = "$VECTOR_MODELS_SHA256"
-          export VECTOR_CATALOG_FILE="$VECTOR_MODELS_PATH"
+          test "$(sha256sum "$VECTOR_RELEASE_CATALOG_PATH" | cut -d ' ' -f 1)" = "$VECTOR_RELEASE_CATALOG_SHA256"
+          export VECTOR_CATALOG_FILE="$VECTOR_RELEASE_CATALOG_PATH"
           VECTOR_RELEASE_VERSION="${TAG#v}" bun packages/cloud/src/upload-model-catalog.ts
 
       - name: Stage Vector download and update artifacts

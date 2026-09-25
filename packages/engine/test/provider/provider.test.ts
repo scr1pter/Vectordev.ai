@@ -1721,14 +1721,34 @@ it.instance("Google Vertex: keeps regional Claude endpoints unchanged", () =>
   }),
 )
 
-it.instance("cloudflare-ai-gateway loads with env variables", () =>
+it.instance("cloudflare-ai-gateway credentials alone do not enable an unbundled catalog SDK", () =>
   Effect.gen(function* () {
     yield* set("CLOUDFLARE_ACCOUNT_ID", "test-account")
     yield* set("CLOUDFLARE_GATEWAY_ID", "test-gateway")
     yield* set("CLOUDFLARE_API_TOKEN", "test-token")
     const providers = yield* list
-    expect(providers[ProviderV2.ID.make("cloudflare-ai-gateway")]).toBeDefined()
+    expect(providers[ProviderV2.ID.make("cloudflare-ai-gateway")]).toBeUndefined()
   }),
+)
+
+const cloudflareGatewayConfig = {
+  npm: "ai-gateway-provider",
+  env: ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_GATEWAY_ID"],
+  models: { "openai/fixture": { name: "Configured gateway model" } },
+}
+
+it.instance(
+  "explicit cloudflare-ai-gateway configuration loads with env variables",
+  Effect.gen(function* () {
+    yield* set("CLOUDFLARE_ACCOUNT_ID", "test-account")
+    yield* set("CLOUDFLARE_GATEWAY_ID", "test-gateway")
+    yield* set("CLOUDFLARE_API_TOKEN", "test-token")
+    const providers = yield* list
+    const provider = providers[ProviderV2.ID.make("cloudflare-ai-gateway")]
+    expect(provider).toBeDefined()
+    expect(provider.models[ModelV2.ID.make("openai/fixture")].api.npm).toBe("ai-gateway-provider")
+  }),
+  { config: { provider: { "cloudflare-ai-gateway": cloudflareGatewayConfig } } },
 )
 
 it.instance(
@@ -1746,7 +1766,12 @@ it.instance(
   }),
   {
     config: {
-      provider: { "cloudflare-ai-gateway": { options: { metadata: { invoked_by: "test", project: "vector" } } } },
+      provider: {
+        "cloudflare-ai-gateway": {
+          ...cloudflareGatewayConfig,
+          options: { metadata: { invoked_by: "test", project: "vector" } },
+        },
+      },
     },
   },
 )

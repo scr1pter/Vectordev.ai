@@ -68,12 +68,18 @@ test("catalog documentation uses provider guides without changing providers or m
 })
 
 test("runtime catalog refresh only accepts owned HTTPS mirrors", () => {
-  expect(ModelCatalog.mirrorURL("https://catalog.vectordev.ai/releases/")).toBe("https://catalog.vectordev.ai/releases")
-  expect(ModelCatalog.mirrorURL("https://42qryducihx01gl0.public.blob.vercel-storage.com/releases/vector-models")).toBe(
-    "https://42qryducihx01gl0.public.blob.vercel-storage.com/releases/vector-models",
+  expect(ModelCatalog.mirrorURL("https://vectordev.ai/models")).toBe("https://vectordev.ai/models")
+  expect(ModelCatalog.mirrorURL("https://42qryducihx01gl0.public.blob.vercel-storage.com/releases/vector-v1.2.3")).toBe(
+    "https://42qryducihx01gl0.public.blob.vercel-storage.com/releases/vector-v1.2.3",
   )
   for (const url of [
     undefined,
+    "https://catalog.vectordev.ai/releases/",
+    "https://vectordev.ai/sites/catalog",
+    "https://vectordev.ai:444/models",
+    "https://42qryducihx01gl0.public.blob.vercel-storage.com/sites/catalog",
+    "https://42qryducihx01gl0.public.blob.vercel-storage.com/releases/../sites/catalog",
+    "https://42qryducihx01gl0.public.blob.vercel-storage.com/releases/vector-v1.2.3/%2e%2e/sites/catalog",
     "http://vectordev.ai/catalog",
     "https://vectordev.ai.example.test/catalog",
     "https://catalog.example.test",

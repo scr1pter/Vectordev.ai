@@ -1,5 +1,6 @@
 import { list, put } from "@vercel/blob"
-import { filterProviderCatalog, providerAllowed } from "@vectordevai/schema/provider-policy"
+import { ModelCatalog } from "@vectordevai/schema/model-catalog"
+import { providerAllowed } from "@vectordevai/schema/provider-policy"
 import { desktopReleaseVersion } from "./desktop-release-version"
 
 export function releaseCatalogBody(data: unknown) {
@@ -21,11 +22,18 @@ export function releaseCatalogBody(data: unknown) {
       return [id, { ...provider, id }]
     }),
   )
+  const decoded = ModelCatalog.decodeCatalog(catalog)
   const body = JSON.stringify(data)
   // Publishing must use the same reviewed snapshot that was embedded in the binaries.
-  if (JSON.stringify(filterProviderCatalog(catalog)) !== body) {
+  if (JSON.stringify(decoded) !== body) {
     throw new Error("The release catalog must be prepared with Vector's catalog generator")
   }
+  return body
+}
+
+export function releaseCatalogText(text: string) {
+  const body = releaseCatalogBody(JSON.parse(text))
+  if (text !== body) throw new Error("The release catalog must preserve the exact prepared bytes")
   return body
 }
 
@@ -33,7 +41,7 @@ if (import.meta.main) {
   const version = desktopReleaseVersion(process.env.VECTOR_RELEASE_VERSION)
   const file = process.env.VECTOR_CATALOG_FILE
   if (!file) throw new Error("VECTOR_CATALOG_FILE is required")
-  const body = releaseCatalogBody(await Bun.file(file).json())
+  const body = releaseCatalogText(await Bun.file(file).text())
   const pathname = `releases/vector-v${version}/api.json`
   const token = process.env.BLOB_READ_WRITE_TOKEN
   const existing = (await list({ prefix: pathname, token })).blobs.find((item) => item.pathname === pathname)

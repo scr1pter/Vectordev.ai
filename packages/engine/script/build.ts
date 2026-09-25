@@ -237,6 +237,7 @@ for (const item of targets) {
       {
         name,
         version: Script.version,
+        vectorCatalogSha256: generated.modelsSha256,
         preferUnplugged: true,
         license: "SEE LICENSE IN LICENSE",
         files: ["bin", "LICENSE", "THIRD_PARTY_NOTICES.md", "DEPENDENCY_NOTICES.md"],

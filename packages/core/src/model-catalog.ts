@@ -1,6 +1,5 @@
-import { filterProviderCatalog } from "@vectordevai/schema/provider-policy"
 import path from "path"
-import { Context, Duration, Effect, Layer, Option, Schedule, Schema } from "effect"
+import { Context, Duration, Effect, Layer, Option, Schedule } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { ModelCatalog } from "@vectordevai/schema/model-catalog"
 import { Global } from "./global"
@@ -13,102 +12,14 @@ import { EventV2 } from "./event"
 import { makeGlobalNode } from "./effect/app-node"
 import { httpClient } from "./effect/app-node-platform"
 
-export const CatalogModelStatus = Schema.Literals(["alpha", "beta", "deprecated"])
-export type CatalogModelStatus = typeof CatalogModelStatus.Type
-
 const USER_AGENT = `vector/${InstallationVersion} (${InstallationChannel}; ${Flag.VECTOR_CLIENT})`
 
-const CostTier = Schema.Struct({
-  input: Schema.Finite,
-  output: Schema.Finite,
-  cache_read: Schema.optional(Schema.Finite),
-  cache_write: Schema.optional(Schema.Finite),
-  tier: Schema.Struct({
-    type: Schema.Literal("context"),
-    size: Schema.Finite,
-  }),
-})
-
-const Cost = Schema.Struct({
-  input: Schema.Finite,
-  output: Schema.Finite,
-  cache_read: Schema.optional(Schema.Finite),
-  cache_write: Schema.optional(Schema.Finite),
-  tiers: Schema.optional(Schema.Array(CostTier)),
-  context_over_200k: Schema.optional(
-    Schema.Struct({
-      input: Schema.Finite,
-      output: Schema.Finite,
-      cache_read: Schema.optional(Schema.Finite),
-      cache_write: Schema.optional(Schema.Finite),
-    }),
-  ),
-})
-
-export const Model = Schema.Struct({
-  id: Schema.String,
-  name: Schema.String,
-  family: Schema.optional(Schema.String),
-  release_date: Schema.String,
-  attachment: Schema.Boolean,
-  reasoning: Schema.Boolean,
-  temperature: Schema.Boolean,
-  tool_call: Schema.Boolean,
-  interleaved: Schema.optional(
-    Schema.Union([
-      Schema.Literal(true),
-      Schema.Struct({
-        field: Schema.Literals(["reasoning", "reasoning_content", "reasoning_details"]),
-      }),
-    ]),
-  ),
-  cost: Schema.optional(Cost),
-  limit: Schema.Struct({
-    context: Schema.Finite,
-    input: Schema.optional(Schema.Finite),
-    output: Schema.Finite,
-  }),
-  modalities: Schema.optional(
-    Schema.Struct({
-      input: Schema.Array(Schema.Literals(["text", "audio", "image", "video", "pdf"])),
-      output: Schema.Array(Schema.Literals(["text", "audio", "image", "video", "pdf"])),
-    }),
-  ),
-  experimental: Schema.optional(
-    Schema.Struct({
-      modes: Schema.optional(
-        Schema.Record(
-          Schema.String,
-          Schema.Struct({
-            cost: Schema.optional(Cost),
-            provider: Schema.optional(
-              Schema.Struct({
-                body: Schema.optional(Schema.Record(Schema.String, Schema.MutableJson)),
-                headers: Schema.optional(Schema.Record(Schema.String, Schema.String)),
-              }),
-            ),
-          }),
-        ),
-      ),
-    }),
-  ),
-  status: Schema.optional(CatalogModelStatus),
-  provider: Schema.optional(
-    Schema.Struct({ npm: Schema.optional(Schema.String), api: Schema.optional(Schema.String) }),
-  ),
-})
-export type Model = Schema.Schema.Type<typeof Model>
-
-export const Provider = Schema.Struct({
-  api: Schema.optional(Schema.String),
-  name: Schema.String,
-  env: Schema.Array(Schema.String),
-  id: Schema.String,
-  npm: Schema.optional(Schema.String),
-  models: Schema.Record(Schema.String, Model),
-})
-
-export type Provider = Schema.Schema.Type<typeof Provider>
+export const CatalogModelStatus = ModelCatalog.CatalogModelStatus
+export type CatalogModelStatus = ModelCatalog.CatalogModelStatus
+export const Model = ModelCatalog.Model
+export type Model = ModelCatalog.Model
+export const Provider = ModelCatalog.Provider
+export type Provider = ModelCatalog.Provider
 
 export const Event = ModelCatalog.Event
 
@@ -125,12 +36,11 @@ export function mirrorURL(value: string | undefined) {
   if (!value) return undefined
   const url = URL.parse(value)
   if (!url || url.protocol !== "https:" || url.username || url.password || url.search || url.hash) return undefined
-  if (
-    url.hostname !== "vectordev.ai" &&
-    !url.hostname.endsWith(".vectordev.ai") &&
-    url.hostname !== "42qryducihx01gl0.public.blob.vercel-storage.com"
-  )
-    return undefined
+  if (url.port) return undefined
+  const releasePath = /^\/releases\/vector-v\d+\.\d+\.\d+\/?$/.test(url.pathname)
+  const owned = url.hostname === "vectordev.ai" && url.pathname === "/models"
+  const release = url.hostname === "42qryducihx01gl0.public.blob.vercel-storage.com" && releasePath
+  if (!owned && !release) return undefined
   return url.href.replace(/\/$/, "")
 }
 
@@ -166,27 +76,33 @@ const layer = Layer.effect(
       return yield* HttpClientRequest.get(`${source}/api.json`).pipe(
         HttpClientRequest.setHeader("User-Agent", USER_AGENT),
         http.execute,
+        Effect.provideService(FetchHttpClient.RequestInit, { redirect: "error" }),
         Effect.flatMap((res) => res.text),
         Effect.timeout("10 seconds"),
       )
     })
 
     const loadFromDisk = fs.readJson(Flag.VECTOR_MODELS_PATH ?? filepath).pipe(
-      Effect.catch((error) => {
-        if (Flag.VECTOR_MODELS_PATH === undefined && error._tag === "FileSystemError" && error.method === "readJson") {
+      Effect.flatMap((value) => Effect.try({ try: () => ModelCatalog.decodeCatalog(value), catch: (cause) => cause })),
+      Effect.catch(() => {
+        if (Flag.VECTOR_MODELS_PATH === undefined) {
           return fs.remove(filepath, { force: true }).pipe(Effect.ignore, Effect.as(undefined))
         }
         return Effect.succeed(undefined)
       }),
-      Effect.map((v) => v as Record<string, Provider> | undefined),
     )
 
     const loadSnapshot = Effect.sync(() =>
-      typeof VECTOR_MODEL_CATALOG === "undefined" ? undefined : VECTOR_MODEL_CATALOG,
+      typeof VECTOR_MODEL_CATALOG === "undefined" ? undefined : ModelCatalog.decodeCatalog(VECTOR_MODEL_CATALOG),
     )
 
     const fetchAndWrite = Effect.fn("ModelCatalog.fetchAndWrite")(function* () {
-      const text = yield* fetchApi()
+      const response = yield* fetchApi()
+      const catalog = yield* Effect.try({
+        try: () => ModelCatalog.decodeCatalog(JSON.parse(response)),
+        catch: (cause) => cause,
+      })
+      const text = JSON.stringify(catalog)
       const tempfile = `${filepath}.${process.pid}.${Date.now()}.tmp`
       yield* fs.writeWithDirs(tempfile, text).pipe(
         Effect.andThen(fs.rename(tempfile, filepath)),
@@ -197,7 +113,7 @@ const layer = Layer.effect(
           }),
         ),
       )
-      return text
+      return catalog
     })
 
     const populate = Effect.gen(function* () {
@@ -207,14 +123,13 @@ const layer = Layer.effect(
       if (snapshot) return snapshot
       if (!source || Flag.VECTOR_DISABLE_MODELS_FETCH) return {}
       // Flock is cross-process: concurrent Vector CLIs can race on this cache file.
-      const text = yield* Effect.scoped(
+      return yield* Effect.scoped(
         Effect.gen(function* () {
           yield* Flock.effect(lockKey)
           return yield* fetchAndWrite()
         }),
       )
-      return JSON.parse(text) as Record<string, Provider>
-    }).pipe(Effect.map(filterProviderCatalog), Effect.withSpan("ModelCatalog.populate"), Effect.orDie)
+    }).pipe(Effect.withSpan("ModelCatalog.populate"), Effect.orDie)
 
     const [cachedGet, invalidate] = yield* Effect.cachedInvalidateWithTTL(populate, Duration.infinity)
 

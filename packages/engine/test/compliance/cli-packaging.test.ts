@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test"
-import { chmod, mkdtemp, mkdir, rm } from "node:fs/promises"
+import { chmod, mkdtemp, mkdir, rm, symlink } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
+import { catalogBody, catalogDigest } from "../../script/release-catalog"
 
 const root = path.resolve(import.meta.dir, "../../../..")
 const notices = ["LICENSE", "THIRD_PARTY_NOTICES.md", "DEPENDENCY_NOTICES.md"]
@@ -10,6 +11,21 @@ const version = "1.2.3"
 
 async function fixture() {
   const dir = await mkdtemp(path.join(os.tmpdir(), "vector-cli-packaging-"))
+  await symlink(
+    path.join(root, "packages/engine/node_modules"),
+    path.join(dir, "node_modules"),
+    process.platform === "win32" ? "junction" : "dir",
+  )
+  const catalog = catalogBody(
+    JSON.stringify({ openai: { id: "openai", name: "OpenAI", env: ["OPENAI_API_KEY"], models: {} } }),
+  )
+  const catalogHash = catalogDigest(catalog)
+  await Bun.write(path.join(dir, "release-catalog.json"), catalog)
+  await Bun.write(path.join(dir, "packages/engine/dist/api.json"), catalog)
+  await Bun.write(
+    path.join(dir, "packages/engine/script/release-catalog.ts"),
+    Bun.file(path.join(root, "packages/engine/script/release-catalog.ts")),
+  )
   await Bun.write(
     path.join(dir, "packages/engine/script/publish-vector.ts"),
     Bun.file(path.join(root, "packages/engine/script/publish-vector.ts")),
@@ -34,6 +50,7 @@ async function fixture() {
       JSON.stringify({
         name: `vector-${target}`,
         version,
+        vectorCatalogSha256: catalogHash,
         os: [platform === "windows" ? "win32" : platform],
         cpu: [arch],
         files: ["bin", ...notices],
@@ -56,6 +73,8 @@ async function fixture() {
       NPM_CONFIG_FETCH_RETRIES: "0",
       NPM_CONFIG_FETCH_TIMEOUT: "1000",
       NPM_CONFIG_UPDATE_NOTIFIER: "false",
+      VECTOR_RELEASE_CATALOG_PATH: path.join(dir, "release-catalog.json"),
+      VECTOR_RELEASE_CATALOG_SHA256: catalogHash,
     },
     [Symbol.asyncDispose]: () => rm(dir, { recursive: true, force: true }),
   }
@@ -86,7 +105,7 @@ test("dry-run packages every target with notices and a working Vector launcher w
     // Observe the real publisher's build boundary without compiling the application.
     await Bun.write(
       path.join(cwd, "script/build.ts"),
-      'await Bun.write("build-env.json", JSON.stringify({ version: process.env.VECTOR_VERSION, targets: process.env.VECTOR_TARGETS, release: process.env.VECTOR_RELEASE }))\n',
+      'await Bun.write("build-env.json", JSON.stringify({ version: process.env.VECTOR_VERSION, targets: process.env.VECTOR_TARGETS, release: process.env.VECTOR_RELEASE, catalog: process.env.VECTOR_RELEASE_CATALOG_PATH, digest: process.env.VECTOR_RELEASE_CATALOG_SHA256 }))\n',
     )
     const result = await run([process.execPath, "script/publish-vector.ts", "--dry-run"], cwd, {
       ...tmp.env,
@@ -104,6 +123,8 @@ test("dry-run packages every target with notices and a working Vector launcher w
       version,
       targets: targets.join(","),
       release: "",
+      catalog: tmp.env.VECTOR_RELEASE_CATALOG_PATH,
+      digest: tmp.env.VECTOR_RELEASE_CATALOG_SHA256,
     })
 
     for (const target of [...targets, "umbrella"]) {
@@ -169,17 +190,19 @@ for (const problem of [
   "missing notice",
   "excluded notice",
   "shared credential",
+  "wrong catalog digest",
   ...borrowedRegistrations,
 ]) {
   test(`refuses every package before publishing when the final target has ${problem}`, async () => {
     await using tmp = await fixture()
     const cwd = path.join(tmp.dir, "packages/engine")
     const folder = path.join(cwd, "dist/vector-windows-x64")
-    if (problem === "stale version" || problem === "excluded notice") {
+    if (problem === "stale version" || problem === "excluded notice" || problem === "wrong catalog digest") {
       const file = Bun.file(path.join(folder, "package.json"))
       const manifest = await file.json()
       if (problem === "stale version") manifest.version = "0.0.1"
       if (problem === "excluded notice") manifest.files = ["bin", "LICENSE"]
+      if (problem === "wrong catalog digest") manifest.vectorCatalogSha256 = "different-snapshot"
       await file.write(JSON.stringify(manifest))
     }
     if (problem === "missing binary") await rm(path.join(folder, "bin/vector.exe"))
@@ -213,37 +236,51 @@ test("a failed plugin preparation stops the CLI publisher before any npm publish
   expect(result.stdout).not.toContain("published @vectordevai/cli")
 })
 
-test.skipIf(process.platform === "win32")("plugin publish inherits input through both publishers and preserves failure status", async () => {
-  await using tmp = await fixture()
-  const plugin = path.join(tmp.dir, "packages/plugin")
-  for (const script of ["publish.ts", "build.ts"]) {
-    await Bun.write(path.join(plugin, "script", script), Bun.file(path.join(root, "packages/plugin/script", script)))
-  }
-  await Bun.write(
-    path.join(plugin, "dist-publish/package.json"),
-    JSON.stringify({ name: "@vectordevai/plugin", version, exports: {}, license: "SEE LICENSE IN LICENSE", files: notices }),
-  )
-  for (const notice of notices) await Bun.write(path.join(plugin, "dist-publish", notice), `Fixture ${notice}`)
-  const npm = path.join(tmp.dir, "fake-bin/npm")
-  await Bun.write(npm, `#!/usr/bin/env node
+test.skipIf(process.platform === "win32")(
+  "plugin publish inherits input through both publishers and preserves failure status",
+  async () => {
+    await using tmp = await fixture()
+    const plugin = path.join(tmp.dir, "packages/plugin")
+    for (const script of ["publish.ts", "build.ts"]) {
+      await Bun.write(path.join(plugin, "script", script), Bun.file(path.join(root, "packages/plugin/script", script)))
+    }
+    await Bun.write(
+      path.join(plugin, "dist-publish/package.json"),
+      JSON.stringify({
+        name: "@vectordevai/plugin",
+        version,
+        exports: {},
+        license: "SEE LICENSE IN LICENSE",
+        files: notices,
+      }),
+    )
+    for (const notice of notices) await Bun.write(path.join(plugin, "dist-publish", notice), `Fixture ${notice}`)
+    const npm = path.join(tmp.dir, "fake-bin/npm")
+    await Bun.write(
+      npm,
+      `#!/usr/bin/env node
 const fs = require("node:fs")
 if (process.argv[2] === "view") process.exit(1)
 if (process.argv[2] !== "publish") process.exit(36)
 fs.writeFileSync(${JSON.stringify(path.join(tmp.dir, "prompt-input"))}, fs.readFileSync(0, "utf8"))
 process.exit(35)
-`)
-  await chmod(npm, 0o755)
-  const child = Bun.spawn([process.execPath, "script/publish-vector.ts", "--skip-build", "--publish"], {
-    cwd: path.join(tmp.dir, "packages/engine"),
-    env: { ...tmp.env, PATH: path.dirname(npm) + path.delimiter + tmp.env.PATH },
-    stdin: new Blob(["synthetic-otp\n"]),
-    stdout: "pipe",
-    stderr: "pipe",
-  })
-  const [code, stdout, stderr] = await Promise.all([
-    child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
-  ])
-  expect(code, stderr).toBe(35)
-  expect(await Bun.file(path.join(tmp.dir, "prompt-input")).text()).toBe("synthetic-otp\n")
-  expect(stdout).not.toContain("published @vectordevai/cli")
-})
+`,
+    )
+    await chmod(npm, 0o755)
+    const child = Bun.spawn([process.execPath, "script/publish-vector.ts", "--skip-build", "--publish"], {
+      cwd: path.join(tmp.dir, "packages/engine"),
+      env: { ...tmp.env, PATH: path.dirname(npm) + path.delimiter + tmp.env.PATH },
+      stdin: new Blob(["synthetic-otp\n"]),
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    const [code, stdout, stderr] = await Promise.all([
+      child.exited,
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+    ])
+    expect(code, stderr).toBe(35)
+    expect(await Bun.file(path.join(tmp.dir, "prompt-input")).text()).toBe("synthetic-otp\n")
+    expect(stdout).not.toContain("published @vectordevai/cli")
+  },
+)

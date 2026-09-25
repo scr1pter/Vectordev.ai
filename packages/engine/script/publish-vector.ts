@@ -6,8 +6,10 @@
  *   bun run script/publish-vector.ts --dry-run  # build + pack, no publish
  *   bun run script/publish-vector.ts --publish  # explicitly publish plugin, then CLI
  *   bun run script/publish-vector.ts --skip-build
+ *   bun run script/publish-vector.ts --fresh-catalog # explicit first-release preparation
  *
  * Env:
+ *   VECTOR_RELEASE_CATALOG_PATH / VECTOR_RELEASE_CATALOG_SHA256  reviewed workflow artifact
  *   VECTOR_CLI_VERSION   version to publish (default: packages/desktop version)
  *   VECTOR_CLI_TARGETS   comma list, default darwin-arm64,darwin-x64,linux-x64,linux-arm64,windows-x64
  *
@@ -17,6 +19,9 @@
  */
 import { $ } from "bun"
 import path from "path"
+import os from "os"
+import fs from "fs/promises"
+import { catalogDigest, ensurePublishedCatalog, prepareReleaseCatalog } from "./release-catalog"
 import { fileURLToPath } from "url"
 import desktop from "../../desktop/package.json"
 import plugin from "../../plugin/package.json"
@@ -34,6 +39,15 @@ const targets = (process.env.VECTOR_CLI_TARGETS ?? "darwin-arm64,darwin-x64,linu
 const dryRun = !process.argv.includes("--publish")
 if (!dryRun && process.argv.includes("--dry-run")) throw new Error("Choose --publish or --dry-run, not both")
 const skipBuild = process.argv.includes("--skip-build")
+const catalogDirectory = await fs.mkdtemp(path.join(os.tmpdir(), "vector-release-catalog-"))
+await using catalogCleanup = { [Symbol.asyncDispose]: () => fs.rm(catalogDirectory, { recursive: true, force: true }) }
+const catalog = await prepareReleaseCatalog({
+  version,
+  directory: catalogDirectory,
+  fresh: process.argv.includes("--fresh-catalog"),
+  file: process.env.VECTOR_RELEASE_CATALOG_PATH,
+  sha256: process.env.VECTOR_RELEASE_CATALOG_SHA256,
+})
 
 if (!skipBuild) {
   await $`bun run script/build.ts --skip-install`.env({
@@ -41,9 +55,15 @@ if (!skipBuild) {
     VECTOR_VERSION: version,
     VECTOR_PLUGIN_VERSION: version,
     VECTOR_TARGETS: targets.join(","),
+    VECTOR_RELEASE_CATALOG_PATH: catalog.file,
+    VECTOR_RELEASE_CATALOG_SHA256: catalog.sha256,
     ...(dryRun ? { VECTOR_RELEASE: "" } : {}),
   })
 }
+
+// dist/api.json records what the compiler embedded and verifies reused builds too.
+if (catalogDigest(await Bun.file("dist/api.json").text()) !== catalog.sha256)
+  throw new Error("CLI build catalog differs from the immutable release catalog; rebuild the CLI")
 
 // Verify every platform before publishing any package, including when reusing a build.
 for (const suffix of targets) {
@@ -51,6 +71,8 @@ for (const suffix of targets) {
   if (manifest.version !== version) {
     throw new Error(`Refusing to relabel ${suffix} build ${manifest.version} as ${version}; rebuild the CLI`)
   }
+  if (manifest.vectorCatalogSha256 !== catalog.sha256)
+    throw new Error(`Catalog provenance for ${suffix} does not match this release; rebuild the CLI`)
   const [os, cpu] = suffix.split("-")
   if (!manifest.os?.includes(os === "windows" ? "win32" : os) || !manifest.cpu?.includes(cpu)) {
     throw new Error(`Platform manifest does not match ${suffix}`)
@@ -190,6 +212,19 @@ if (!dryRun) {
   const available = await $`npm view ${`${plugin.name}@${version}`} version`.quiet().nothrow()
   if (available.exitCode !== 0)
     throw new Error(`Plugin ${plugin.name}@${version} is not available; CLI publication stopped`)
+  // The desktop's first release must reuse these exact bytes, too.
+  await ensurePublishedCatalog({
+    version,
+    file: catalog.file,
+    upload: async () => {
+      const uploader = Bun.spawn([process.execPath, "../cloud/src/upload-model-catalog.ts"], {
+        cwd: dir,
+        env: { ...process.env, VECTOR_RELEASE_VERSION: version, VECTOR_CATALOG_FILE: catalog.file },
+        stdio: ["inherit", "inherit", "inherit"],
+      })
+      if ((await uploader.exited) !== 0) throw new Error("Catalog publication failed; CLI publication stopped")
+    },
+  })
 }
 
 // Publish platform packages before the umbrella so its optionalDependencies resolve.

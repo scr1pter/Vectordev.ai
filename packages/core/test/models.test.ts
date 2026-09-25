@@ -1,6 +1,6 @@
 import { describe, expect, beforeAll, beforeEach, afterAll } from "bun:test"
 import { Effect, Layer, Ref } from "effect"
-import { HttpClient, HttpClientResponse } from "effect/unstable/http"
+import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import { AppNodeBuilder } from "@vectordevai/core/effect/app-node-builder"
 import { LayerNodePlatform } from "@vectordevai/core/effect/app-node-platform"
 import { Flag } from "@vectordevai/core/flag/flag"
@@ -23,7 +23,7 @@ const ORIGINAL_DISABLE_FETCH = Flag.VECTOR_DISABLE_MODELS_FETCH
 const ORIGINAL_MODELS_URL = Flag.VECTOR_MODELS_URL
 const ORIGINAL_CACHE = Global.Path.cache
 const directory = await mkdtemp(path.join(os.tmpdir(), "vector-catalog-test-"))
-const mirror = "https://catalog.vectordev.ai"
+const mirror = "https://vectordev.ai/models"
 beforeAll(() => {
   Flag.VECTOR_MODELS_PATH = undefined
   Flag.VECTOR_DISABLE_MODELS_FETCH = true
@@ -195,7 +195,7 @@ describe("ModelCatalog Service", () => {
         true,
       )
       expect(result).toEqual(fixture2)
-      expect(yield* Effect.promise(() => readFile(cacheFile(), "utf8"))).toBe(JSON.stringify(fixture2))
+      expect(JSON.parse(yield* Effect.promise(() => readFile(cacheFile(), "utf8")))).toEqual(fixture2)
       const final = yield* Ref.get(state)
       expect(final.calls.length).toBe(1)
       expect(final.calls[0].url).toBe(`${mirror}/api.json`)
@@ -342,7 +342,7 @@ describe("ModelCatalog Service", () => {
   it.live("a configured mirror does not read the bundled cache or another mirror's cache", () =>
     Effect.gen(function* () {
       yield* writeCache(fixture)
-      Flag.VECTOR_MODELS_URL = "https://other.vectordev.ai"
+      Flag.VECTOR_MODELS_URL = "https://42qryducihx01gl0.public.blob.vercel-storage.com/releases/vector-v1.2.3"
       yield* writeCache(fixture2)
       Flag.VECTOR_MODELS_URL = mirror
       const state = yield* Ref.make(initialState)
@@ -383,3 +383,121 @@ describe("ModelCatalog Service", () => {
     }),
   )
 })
+
+for (const body of [
+  "{",
+  JSON.stringify({ lmstudio: { ...fixture.lmstudio, name: 42 } }),
+  JSON.stringify({ lmstudio: { ...fixture.lmstudio, id: "different" } }),
+  JSON.stringify({ lmstudio: { ...fixture.lmstudio, npm: "unreviewed-catalog-sdk" } }),
+  JSON.stringify({
+    lmstudio: {
+      ...fixture.lmstudio,
+      models: { example: { ...fixture.lmstudio.models["lmstudio-1"], provider: { npm: "unreviewed-catalog-sdk" } } },
+    },
+  }),
+]) {
+  it.live(`invalid mirror data preserves the last valid cache: ${body.slice(0, 100)}`, () =>
+    Effect.gen(function* () {
+      Flag.VECTOR_MODELS_URL = mirror
+      yield* writeCache(fixture)
+      const state = yield* Ref.make({ ...initialState, body })
+      const result = yield* provided(
+        state,
+        Effect.gen(function* () {
+          const service = yield* ModelCatalog.Service
+          const before = yield* service.get()
+          yield* service.refresh(true)
+          return { before, after: yield* service.get() }
+        }),
+        true,
+      )
+      expect(result.before).toEqual(fixture)
+      expect(result.after).toEqual(fixture)
+      expect(yield* Effect.promise(() => readFile(cacheFile(), "utf8"))).toBe(JSON.stringify(fixture))
+      expect((yield* Ref.get(state)).calls).toHaveLength(1)
+    }),
+  )
+}
+
+it.live("unbundled SDK names in a disk snapshot never enter the runtime catalog", () =>
+  Effect.gen(function* () {
+    yield* writeCache({ lmstudio: { ...fixture.lmstudio, npm: "unreviewed-catalog-sdk" } })
+    const state = yield* Ref.make(initialState)
+    const result = yield* provided(
+      state,
+      ModelCatalog.Service.use((service) => service.get()),
+    )
+    expect(result).toEqual({})
+    expect((yield* Ref.get(state)).calls).toEqual([])
+  }),
+)
+
+it.live("a rejected mirror path makes no HTTP requests", () =>
+  Effect.gen(function* () {
+    Flag.VECTOR_MODELS_URL = "https://42qryducihx01gl0.public.blob.vercel-storage.com/sites/user-content"
+    const state = yield* Ref.make(initialState)
+    yield* provided(
+      state,
+      Effect.gen(function* () {
+        const service = yield* ModelCatalog.Service
+        yield* service.refresh(true)
+        expect(yield* service.get()).toEqual({})
+      }),
+      true,
+    )
+    expect((yield* Ref.get(state)).calls).toEqual([])
+  }),
+)
+
+it.live("the real HTTP client refuses mirror redirects before following their target", () =>
+  Effect.gen(function* () {
+    Flag.VECTOR_MODELS_URL = mirror
+    yield* writeCache(fixture)
+    const paths: string[] = []
+    const server = yield* Effect.acquireRelease(
+      Effect.sync(() =>
+        Bun.serve({
+          hostname: "127.0.0.1",
+          port: 0,
+          fetch(request) {
+            const url = new URL(request.url)
+            paths.push(url.pathname)
+            if (url.pathname === "/redirect-target") return new Response(JSON.stringify(fixture2))
+            return new Response(null, { status: 302, headers: { location: new URL("/redirect-target", url).href } })
+          },
+        }),
+      ),
+      (server) => Effect.promise(() => server.stop(true)),
+    )
+    const localHttp = Layer.effect(
+      HttpClient.HttpClient,
+      Effect.gen(function* () {
+        const client = yield* HttpClient.HttpClient
+        return HttpClient.mapRequest(client, (request) =>
+          HttpClientRequest.setUrl(request, new URL(new URL(request.url).pathname, server.url)),
+        )
+      }),
+    ).pipe(Layer.provide(FetchHttpClient.layer))
+    const context = yield* Layer.build(
+      Layer.fresh(AppNodeBuilder.build(ModelCatalog.node, [[LayerNodePlatform.httpClient, localHttp]])),
+    )
+    yield* Effect.acquireUseRelease(
+      Effect.sync(() => {
+        Flag.VECTOR_DISABLE_MODELS_FETCH = false
+      }),
+      () =>
+        Effect.gen(function* () {
+          const service = yield* ModelCatalog.Service
+          yield* service.refresh(true)
+          expect(yield* service.get()).toEqual(fixture)
+        }).pipe(Effect.provide(context)),
+      () =>
+        Effect.sync(() => {
+          Flag.VECTOR_DISABLE_MODELS_FETCH = true
+        }),
+    )
+    expect(paths.length).toBeGreaterThan(0)
+    expect(paths).not.toContain("/redirect-target")
+    expect(yield* Effect.promise(() => readFile(cacheFile(), "utf8"))).toBe(JSON.stringify(fixture))
+  }),
+)
