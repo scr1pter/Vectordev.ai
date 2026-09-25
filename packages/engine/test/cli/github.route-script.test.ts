@@ -13,19 +13,21 @@ const HEAD = "a".repeat(40)
 const BASE = "b".repeat(40)
 const MERGE_BASE = "c".repeat(40)
 
-function script(): string {
+function script(app = false): string {
   const yaml = buildWorkflowYaml({
     provider: "openai",
     model: "gpt-4.1",
     keys: [],
     autoReview: true,
     version: "1.17.14",
+    ...(app ? { auth: "auto" as const } : {}),
   })
   const workflow = Bun.YAML.parse(yaml) as { jobs: { route: { steps: { with: { script: string } }[] } } }
   return workflow.jobs.route.steps[0]!.with.script
 }
 
 interface Options {
+  app?: boolean
   permission?: string
   role?: string
   permissionStatus?: number
@@ -60,8 +62,8 @@ function fakeGithub(options: Options = {}) {
         get: record("pulls.get", (args) => ({
           data: {
             number: args["pull_number"],
-            head: { sha: HEAD, repo: { full_name: options.fork ? "someone/r" : "o/r" } },
-            base: { sha: BASE, repo: { full_name: "o/r" } },
+            head: { sha: HEAD, repo: { full_name: options.fork ? "someone/r" : "o/r", id: options.fork ? 2 : 1 } },
+            base: { sha: BASE, repo: { full_name: "o/r", id: 1 } },
           },
         })),
       },
@@ -94,7 +96,7 @@ async function route(context: object, options: Options = {}) {
       outputs["failed"] = message
     },
   }
-  await new AsyncFunction("github", "context", "core", script())(
+  await new AsyncFunction("github", "context", "core", script(options.app))(
     github,
     { repo: { owner: "o", repo: "r" }, ...context },
     core,
@@ -231,4 +233,16 @@ describe("the route script", () => {
     const failed = await route(reviewComment("/vector fix the typo"), { permissionStatus: 500 })
     expect(failed.outputs["kind"]).toBe("none")
   })
+})
+
+test("App opt-in rejects fork tasks before an OIDC-enabled job and routes fork review through the safe fallback", async () => {
+  const denied = await route(issueComment("/vector fix the bug"), { app: true, fork: true })
+  expect(denied.outputs.kind).toBe("none")
+  expect(denied.calls.filter((call) => call.method === "pulls.get")).toHaveLength(1)
+  const fork = await route(issueComment("/vector review"), { app: true, fork: true })
+  expect(fork.outputs).toMatchObject({ kind: "review", app: "false", ref: MERGE_BASE })
+  const own = await route(issueComment("/vector review"), { app: true })
+  expect(own.outputs).toMatchObject({ kind: "review", app: "true", ref: HEAD })
+  const unsupported = await route(reviewComment("/vector review"), { app: true })
+  expect(unsupported.outputs).toMatchObject({ kind: "review", app: "false" })
 })

@@ -3,6 +3,7 @@
 // network error the wrapper first looks for what it tried to create, because GitHub can fail a request it carried out.
 
 import { Octokit } from "@octokit/rest"
+import { setTimeout } from "node:timers/promises"
 import type { GitHubPrFile } from "@vectordevai/core/review/diff"
 import type { CreateReviewPayload } from "@vectordevai/core/review/github-payload"
 import { parseReviewMarker } from "@vectordevai/core/review/state"
@@ -111,6 +112,7 @@ export interface ReviewGitHubOptions {
   baseUrl?: string // GITHUB_API_URL on GitHub Enterprise, or a test server
   sleep?: (ms: number) => Promise<void>
   log?: (line: string) => void
+  signal?: AbortSignal
 }
 
 // GraphQL reports a bot as "github-actions" where REST says "github-actions[bot]", so logins compare without it.
@@ -309,11 +311,12 @@ function toPermission(...values: (string | undefined)[]): Permission {
 
 export function createReviewGitHub(options: ReviewGitHubOptions): ReviewGitHub {
   const { owner, repo, botLogin } = options
-  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)))
+  const sleep = options.sleep ?? ((ms: number) => setTimeout(ms, undefined, { signal: options.signal }))
   const log = options.log ?? (() => {})
   const octokit = new Octokit({
     auth: options.token,
     userAgent: "vector-review",
+    request: { signal: options.signal },
     ...(options.baseUrl ? { baseUrl: options.baseUrl.replace(/\/+$/, "") } : {}),
     // Expected 404s (a missing review.json) are handled here; Octokit would print each one.
     log: { debug: () => {}, info: () => {}, warn: (message: string) => log(`GitHub: ${message}`), error: () => {} },
@@ -324,9 +327,11 @@ export function createReviewGitHub(options: ReviewGitHubOptions): ReviewGitHub {
 
   const idempotent = async <T>(send: () => Promise<T>): Promise<T> => {
     for (let attempt = 1; ; attempt++) {
+      options.signal?.throwIfAborted()
       try {
         return await send()
       } catch (error) {
+        options.signal?.throwIfAborted()
         const wait = rateLimitWait(error) ?? (serverError(error) ? backoff(attempt) : undefined)
         if (wait === undefined || attempt >= MAX_ATTEMPTS) throw error
         log(`GitHub answered ${statusOf(error)}; retrying in ${Math.ceil(wait / 1000)}s.`)
@@ -337,9 +342,11 @@ export function createReviewGitHub(options: ReviewGitHubOptions): ReviewGitHub {
 
   const create = async <T>(send: () => Promise<T>, find: () => Promise<T | undefined>): Promise<T> => {
     for (let attempt = 1; ; attempt++) {
+      options.signal?.throwIfAborted()
       try {
         return await send()
       } catch (error) {
+        options.signal?.throwIfAborted()
         // A rate-limited request was not carried out, so it is safe to send again.
         const limited = rateLimitWait(error)
         if (limited !== undefined && attempt < MAX_ATTEMPTS) {

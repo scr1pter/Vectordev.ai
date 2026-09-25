@@ -45,12 +45,13 @@ export interface FetchInput {
   remote?: string
   token?: string // sent as an extra header through the environment, never on the command line
   server?: string // https://github.com unless GitHub Enterprise
+  authEnvironment?: Record<string, string> // already repository-scoped by an authenticated Actions caller
 }
 
 export const ensureObjects = Effect.fn("ReviewSource.ensureObjects")(function* (input: FetchInput) {
   const git = yield* Git.Service
   const remote = input.remote ?? "origin"
-  const env = input.token ? authEnv(input.token, input.server) : undefined
+  const env = input.authEnvironment ?? (input.token ? authEnv(input.token, input.server) : undefined)
   const fetch = (depth: number, refs: string[]) =>
     git.run(["fetch", "--no-tags", "--no-recurse-submodules", `--depth=${depth}`, remote, ...refs], {
       cwd: input.directory,

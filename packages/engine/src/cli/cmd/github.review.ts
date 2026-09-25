@@ -91,14 +91,13 @@ import type {
   Trigger,
   Trust,
 } from "@vectordevai/core/review/types"
-import { EffectBridge } from "@/effect/bridge"
 import { InstanceRef } from "@/effect/instance-ref"
 import { Git } from "@/git"
 import { ReviewContext } from "@/review/context"
 import type { ResolvedModel } from "@/review/model"
 import type { RunInput } from "@/review/run"
 import { ReviewGitError, ReviewSource, type Compare, type RangePlan } from "@/review/source"
-import { fail } from "../effect-cmd"
+import { CliError, fail } from "../effect-cmd"
 import {
   WRITE_PERMISSIONS,
   createReviewGitHub,
@@ -110,6 +109,11 @@ import {
   type ThreadNode,
 } from "./github.review-api"
 import { mentionsFrom, routeGithubEvent, type RouteComment, type RouteEvent } from "./github.route"
+import { setSecret } from "@actions/core"
+import { resolveGithubAuth } from "./github.auth"
+import { appRequested, verifyAppPullRequest } from "./github.app"
+import { prepareGithubGit } from "./github.git"
+import { withGithubCallbacks, withGithubSignals } from "./github.lifecycle"
 
 // Reviews post with the workflow's GITHUB_TOKEN.
 export const ACTIONS_BOT = "github-actions[bot]"
@@ -284,7 +288,7 @@ async function reviewJob(ctx: ReviewJobContext, deps: ReviewJobDeps, seen: Seen)
 
   // 3. Earlier state.
   const comments = await gh.listIssueComments(ctx.pr)
-  const sticky = findSticky(comments, ctx.botLogin)
+  const sticky = findSticky(comments, ctx.botLogin) ?? findSticky(comments, ACTIONS_BOT)
   let stickyId = sticky?.id
   let stickyUrl = sticky?.url
   let stickyBody = sticky?.body
@@ -296,7 +300,7 @@ async function reviewJob(ctx: ReviewJobContext, deps: ReviewJobDeps, seen: Seen)
     (list) =>
       teamPatterns(
         list
-          .filter((comment) => sameLogin(comment.user.login, ctx.botLogin))
+          .filter((comment) => sameReviewBot(comment.user.login, ctx.botLogin))
           .map((comment) => ({ path: comment.path, body: comment.body })),
       ),
     (error: unknown): TeamPattern[] => {
@@ -536,7 +540,7 @@ async function reviewJob(ctx: ReviewJobContext, deps: ReviewJobDeps, seen: Seen)
     const fromComments: PriorFinding[] = []
     for (const thread of threads) {
       const root = thread.comments[0]
-      if (!root || !sameLogin(root.author, ctx.botLogin)) continue
+      if (!root || !sameReviewBot(root.author, ctx.botLogin)) continue
       const prior = priorFromComment({
         id: root.id,
         body: root.body,
@@ -562,7 +566,7 @@ async function reviewJob(ctx: ReviewJobContext, deps: ReviewJobDeps, seen: Seen)
         ...(entry.thread.resolvedBy ? { resolvedBy: entry.thread.resolvedBy } : {}),
         reactions: root?.reactions ?? [],
         replies: rest
-          .filter((reply) => !sameLogin(reply.author, ctx.botLogin))
+          .filter((reply) => !sameReviewBot(reply.author, ctx.botLogin))
           .map((reply) => ({ author: reply.author, body: reply.body })),
       }
       infos.set(prior.commentId, info)
@@ -958,15 +962,18 @@ export function createReviewGit(input: {
   run: <A, E>(effect: Effect.Effect<A, E, Git.Service>) => Promise<A>
   token?: string
   server?: string
+  appGit?: Awaited<ReturnType<typeof prepareGithubGit>>
 }): ReviewGit {
   const { directory, run } = input
-  const auth = input.token
-    ? {
-        GIT_CONFIG_COUNT: "1",
-        GIT_CONFIG_KEY_0: `http.${(input.server ?? "https://github.com").replace(/\/+$/, "")}/.extraheader`,
-        GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${Buffer.from(`x-access-token:${input.token}`).toString("base64")}`,
-      }
-    : undefined
+  const auth =
+    input.appGit?.env ??
+    (input.token
+      ? {
+          GIT_CONFIG_COUNT: "1",
+          GIT_CONFIG_KEY_0: `http.${(input.server ?? "https://github.com").replace(/\/+$/, "")}/.extraheader`,
+          GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${Buffer.from(`x-access-token:${input.token}`).toString("base64")}`,
+        }
+      : undefined)
   const git = (args: string[], env?: Record<string, string>) =>
     run(Git.Service.use((service) => service.run(args, { cwd: directory, ...(env ? { env } : {}) })))
   const has = async (sha: string) =>
@@ -974,19 +981,23 @@ export function createReviewGit(input: {
   // The merge-base can be older than the 50 commits of base history the fetch brings; it is fetched on its own.
   const ensure = async (sha: string) => {
     if (!sha || sha.startsWith("-") || (await has(sha))) return
+    await input.appGit?.verify()
     await git(["fetch", "--no-tags", "--no-recurse-submodules", "--depth=1", "origin", sha], auth)
   }
   return {
     head: async () => (await git(["rev-parse", "HEAD"])).text().trim(),
-    fetch: async (request) =>
-      run(
+    fetch: async (request) => {
+      await input.appGit?.verify()
+      return await run(
         ReviewSource.ensureObjects({
           directory,
           ...request,
           ...(input.token ? { token: input.token } : {}),
           ...(input.server ? { server: input.server } : {}),
+          ...(input.appGit ? { authEnvironment: input.appGit.env } : {}),
         }),
-      ),
+      )
+    },
     planRange: (request) =>
       run(
         ReviewSource.planRange({
@@ -1050,9 +1061,6 @@ export const githubReview = Effect.fn("Cli.github.review")(function* (args: {
   const repository = env["GITHUB_REPOSITORY"] || String(event.payload.repository?.full_name ?? "")
   const [owner, repo] = repository.split("/")
   if (!owner || !repo) return yield* fail("Set GITHUB_REPOSITORY to owner/repo, the repository to review.")
-  const token = env["GITHUB_TOKEN"]
-  if (!token)
-    return yield* fail("GITHUB_TOKEN is not set. The review job needs it to read and comment on the pull request.")
   // The command turns both on before the instance loads. In Actions a review never runs without them: the pull
   // request's own config and plugins would load next to the token and the provider keys.
   if (env["GITHUB_ACTIONS"] && !(isOn(env["VECTOR_PURE"]) && isOn(env["VECTOR_DISABLE_PROJECT_CONFIG"])))
@@ -1073,50 +1081,106 @@ export const githubReview = Effect.fn("Cli.github.review")(function* (args: {
       ? String(event.payload.pull_request.head?.sha ?? "")
       : ""
   const server = (env["GITHUB_SERVER_URL"] || "https://github.com").replace(/\/+$/, "")
-  const botLogin = env["VECTOR_REVIEW_BOT"] || ACTIONS_BOT
   const expectedHead = env["VECTOR_REVIEW_REF"] || eventHead
 
-  const bridge = yield* EffectBridge.make()
-  const { Review } = yield* Effect.promise(() => import("@/review/run"))
-  const { ReviewModel } = yield* Effect.promise(() => import("@/review/model"))
-  const log = (line: string) => console.log(line)
-  const context: ReviewJobContext = {
-    owner,
-    repo,
-    pr,
-    trigger,
-    full: route?.job === "review" ? route.full : false,
-    ...(comment ? { comment } : {}),
-    ...(expectedHead ? { expectedHead } : {}),
-    directory: instance.directory,
-    botLogin,
-    ...(env["GITHUB_RUN_ID"] ? { runUrl: `${server}/${owner}/${repo}/actions/runs/${env["GITHUB_RUN_ID"]}` } : {}),
-    env,
-    mentions,
-  }
-  const result = yield* Effect.promise(() =>
-    executeReviewJob(context, {
-      gh: createReviewGitHub({
-        token,
-        owner,
-        repo,
-        botLogin,
-        ...(env["GITHUB_API_URL"] ? { baseUrl: env["GITHUB_API_URL"] } : {}),
-        log,
-      }),
-      git: createReviewGit({ directory: instance.worktree, run: (effect) => bridge.promise(effect), token, server }),
-      runReview: (input) => bridge.promise(Review.run(input)),
-      resolveModel: async (input) => {
-        const exit = await bridge.promise(Effect.exit(ReviewModel.resolveReviewModel(input)))
-        if (Exit.isSuccess(exit)) return exit.value
-        throw new Error(Cause.prettyErrors(exit.cause)[0]?.message ?? "The review model could not be resolved.")
-      },
-      log,
-      now: Date.now,
-      ...(args.dryRun ? { dryRun: true } : {}),
+  return yield* Effect.acquireUseRelease(
+    Effect.tryPromise(async (signal) => {
+      await verifyAppPullRequest({ repository, pr, env, signal })
+      return await resolveGithubAuth({
+        purpose: "review",
+        repository,
+        pullRequest: pr,
+        env,
+        signal,
+        notice: console.log,
+      })
     }),
+    (auth) =>
+      withGithubCallbacks((run) =>
+        Effect.gen(function* () {
+          const token = auth.token
+          const botLogin = auth.source === "app" ? auth.botLogin : env["VECTOR_REVIEW_BOT"] || ACTIONS_BOT
+          const appGit =
+            auth.source === "app" || (appRequested(env) && env.GITHUB_ACTIONS === "true")
+              ? yield* Effect.tryPromise(() =>
+                  prepareGithubGit({
+                    auth,
+                    mask: setSecret,
+                    identity: false,
+                    run: (args, env) =>
+                      run(Git.Service.use((service) => service.run(args, { cwd: instance.worktree, env }))),
+                  }),
+                )
+              : undefined
+          const { Review } = yield* Effect.promise(() => import("@/review/run"))
+          const { ReviewModel } = yield* Effect.promise(() => import("@/review/model"))
+          const log = (line: string) => console.log(line)
+          const context: ReviewJobContext = {
+            owner,
+            repo,
+            pr,
+            trigger,
+            full: route?.job === "review" ? route.full : false,
+            ...(comment ? { comment } : {}),
+            ...(expectedHead ? { expectedHead } : {}),
+            directory: instance.directory,
+            botLogin,
+            ...(env["GITHUB_RUN_ID"]
+              ? { runUrl: `${server}/${owner}/${repo}/actions/runs/${env["GITHUB_RUN_ID"]}` }
+              : {}),
+            env,
+            mentions,
+          }
+          const result = yield* Effect.promise((signal) =>
+            executeReviewJob(context, {
+              gh: createReviewGitHub({
+                token,
+                signal,
+                owner,
+                repo,
+                botLogin,
+                ...(env["GITHUB_API_URL"] ? { baseUrl: env["GITHUB_API_URL"] } : {}),
+                log,
+              }),
+              git: createReviewGit({
+                directory: instance.worktree,
+                run,
+                token,
+                server,
+                appGit,
+              }),
+              runReview: (input) => run(Review.run(input)),
+              resolveModel: async (input) => {
+                const exit = await run(Effect.exit(ReviewModel.resolveReviewModel(input)))
+                if (Exit.isSuccess(exit)) return exit.value
+                throw new Error(Cause.prettyErrors(exit.cause)[0]?.message ?? "The review model could not be resolved.")
+              },
+              log,
+              now: Date.now,
+              ...(args.dryRun ? { dryRun: true } : {}),
+            }),
+          )
+          if (result.exitCode !== 0) return yield* fail(result.error ?? "The review job failed.")
+        }),
+      ),
+    (auth) =>
+      Effect.promise(() =>
+        auth.dispose().catch(() => {
+          process.exitCode = 1
+          console.error("Vector could not revoke its GitHub App credential. It expires automatically within one hour.")
+        }),
+      ),
+  ).pipe(
+    Effect.catchTag("UnknownError", (error) =>
+      Effect.fail(
+        new CliError({
+          message: error.cause instanceof Error ? error.cause.message : "GitHub App authentication failed.",
+          exitCode: 1,
+        }),
+      ),
+    ),
+    withGithubSignals,
   )
-  if (result.exitCode !== 0) return yield* fail(result.error ?? "The review job failed.")
 })
 
 // The Actions event, or a mock one passed with --event.
@@ -1170,7 +1234,7 @@ async function monthSpend(gh: ReviewGitHub, ctx: ReviewJobContext, state: Review
   const oldest = new Map<number, IssueComment>()
   for (const comment of await gh.listRepoIssueCommentsSince(`${key}-01T00:00:00Z`, MONTH_PAGES)) {
     if (comment.issue === undefined || comment.issue === ctx.pr) continue
-    if (!sameLogin(comment.user.login, ctx.botLogin) || !comment.body.includes(SUMMARY_MARKER)) continue
+    if (!sameReviewBot(comment.user.login, ctx.botLogin) || !comment.body.includes(SUMMARY_MARKER)) continue
     const known = oldest.get(comment.issue)
     if (!known || comment.id < known.id) oldest.set(comment.issue, comment)
   }
@@ -1205,7 +1269,7 @@ function isOn(value: string | undefined): boolean {
 function humanComments(comments: IssueComment[], threads: ThreadNode[], bot: string): HumanComment[] {
   const out: (HumanComment & { at: string })[] = []
   for (const comment of comments) {
-    if (sameLogin(comment.user.login, bot) || !comment.body.trim()) continue
+    if (sameReviewBot(comment.user.login, bot) || !comment.body.trim()) continue
     out.push({
       author: comment.user.login,
       ...(comment.association ? { association: comment.association } : {}),
@@ -1215,7 +1279,7 @@ function humanComments(comments: IssueComment[], threads: ThreadNode[], bot: str
   }
   for (const thread of threads)
     for (const comment of thread.comments) {
-      if (sameLogin(comment.author, bot) || !comment.body.trim()) continue
+      if (sameReviewBot(comment.author, bot) || !comment.body.trim()) continue
       out.push({
         author: comment.author,
         ...(comment.association ? { association: comment.association } : {}),
@@ -1229,6 +1293,10 @@ function humanComments(comments: IssueComment[], threads: ThreadNode[], bot: str
     .sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0))
     .slice(-MAX_HUMAN_COMMENTS)
     .map(({ at: _, ...comment }) => comment)
+}
+
+function sameReviewBot(author: string, bot: string) {
+  return sameLogin(author, bot) || sameLogin(author, ACTIONS_BOT)
 }
 
 // Pathspecs for git grep: the default ignores and the repository's own.

@@ -528,3 +528,35 @@ describe("GitHub public sharing consent", () => {
       )
   })
 })
+
+test("App opt-in grants OIDC only to separate eligible jobs and never persists their checkout credential", () => {
+  const jobs = (
+    Bun.YAML.parse(buildWorkflowYaml({ ...OPENAI, auth: "auto" })) as {
+      jobs: Record<string, Job & { name?: string }>
+    }
+  ).jobs
+  expect(jobs.review_app.name).toBe("Vector review")
+  expect(jobs.vector_app.name).toBe("Vector task")
+  expect(jobs.review_app.permissions["id-token"]).toBe("write")
+  expect(jobs.vector_app.permissions["id-token"]).toBe("write")
+  for (const name of ["route", "review", "vector"]) expect(jobs[name].permissions["id-token"]).toBeUndefined()
+  expect(jobs.review.if).toContain("needs.route.outputs.app != 'true'")
+  expect(jobs.review_app.if).toContain("needs.route.outputs.app == 'true'")
+  expect(jobs.review_app.if).not.toContain("github.event_name == 'pull_request'")
+  expect(jobs.vector_app.if).toContain("github.event_name == 'issue_comment'")
+  expect(jobs.vector.if).toContain("github.event_name != 'issue_comment'")
+  for (const name of ["review_app", "vector_app"]) {
+    expect(
+      jobs[name].steps.find((step) => step.uses?.startsWith("actions/checkout"))?.with?.["persist-credentials"],
+    ).toBe(false)
+    expect(jobs[name].steps.at(-1)?.env?.VECTOR_GITHUB_AUTH).toBe("auto")
+    expect(jobs[name].steps.at(-1)?.env?.USE_GITHUB_TOKEN).toBeUndefined()
+  }
+})
+
+test("App task mode excludes repository plugins and configuration before Instance loads", () => {
+  const env: Record<string, string | undefined> = { VECTOR_GITHUB_AUTH: "auto" }
+  prepareGithubEnvironment(env, false)
+  expect(env.VECTOR_PURE).toBe("1")
+  expect(env.VECTOR_DISABLE_PROJECT_CONFIG).toBe("1")
+})

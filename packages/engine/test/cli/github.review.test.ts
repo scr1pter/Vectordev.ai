@@ -726,6 +726,7 @@ async function job(
     env?: Record<string, string>
     dryRun?: boolean
     expectedHead?: string
+    botLogin?: string
   } = {},
 ) {
   const runner = options.runner ?? (await w.repo.runner(w.fake.pull.head.sha))
@@ -740,7 +741,7 @@ async function job(
     ...(options.comment ? { comment: options.comment } : {}),
     ...(options.expectedHead ? { expectedHead: options.expectedHead } : {}),
     directory: runner,
-    botLogin: BOT,
+    botLogin: options.botLogin ?? BOT,
     runUrl: `https://github.com/${OWNER}/${REPO}/actions/runs/1`,
     env: { ...options.env },
   }
@@ -749,7 +750,7 @@ async function job(
       token: "test-token-placeholder",
       owner: OWNER,
       repo: REPO,
-      botLogin: BOT,
+      botLogin: options.botLogin ?? BOT,
       baseUrl: w.fake.url,
       sleep: async (ms) => {
         waits.push(ms)
@@ -817,6 +818,25 @@ const SQL: ModelFinding = {
 // ---------------------------------------------------------------------------------------------------------------
 
 describe("vector github review against a fake GitHub", () => {
+  test(
+    "App identity reuses the prior Actions-bot review state without duplicate findings",
+    async () => {
+      await using w = await world()
+      const first = reviewer({ findings: () => [OFF_BY_ONE] })
+      await job(w, first)
+      const previous = sticky(w)!
+      const review = reviewer({ findings: () => [OFF_BY_ONE] })
+      const result = await job(w, review, { botLogin: "fixture-vector[bot]" })
+      expect(result.result.exitCode).toBe(0)
+      expect(review.calls).toHaveLength(0)
+      expect(posts(w, /\/issues\/7\/comments$/)).toHaveLength(1)
+      expect(posts(w, /\/pulls\/7\/reviews$/)).toHaveLength(1)
+      expect(sticky(w)?.id).toBe(previous.id)
+      expect(state(w)).toMatchObject({ head: w.head, reviews: 1, inlinePosted: 1, costUsd: COST.costUsd })
+    },
+    TIMEOUT,
+  )
+
   test(
     "1. opened: the summary starts as Reviewing, then one review with a committable suggestion, then state",
     async () => {

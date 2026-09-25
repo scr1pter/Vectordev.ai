@@ -1,0 +1,71 @@
+# Vector GitHub App: owner setup and release gate
+
+The exchange is implemented but disabled until the owner registers a Vector-owned GitHub App and configures production. No App has been registered, no private key has been supplied, and no live branded commit, comment, pull request, or CI run has been verified by this implementation work. Existing GitHub-token workflows remain available. This changes no billing or subscription behavior.
+
+## Registration
+
+1. Register the App under the Vector-owned GitHub organization. Choose the actual available display name and slug; do not assume the example name is available. Use `https://vectordev.ai` as the homepage. Public installation availability is needed if customers outside the owning organization will install it.
+2. Grant these repository permissions only: **Contents, Pull requests, Issues, Actions: read and write; Checks and Metadata: read**. No organization permissions or webhook subscriptions are needed for this baseline. In particular, do not add Administration, Secrets, Members, or Workflows permissions. Actions write permits workflow dispatch; it does not permit editing workflow files.
+3. No user OAuth client secret, user authorization callback, or webhook secret is used by this OIDC exchange. An optional setup URL can explain next steps, but must not treat a supplied `installation_id` as proof of account/repository ownership. [GitHub setup URL security](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/about-the-setup-url)
+4. Generate an App RSA private key and put it directly into Vercel's **production** environment. Keep the PEM out of repository files, client bundles, workflow secrets, support messages, and logs. Record the actual App ID, client ID, and slug.
+5. Initially install the App for **one selected test repository**. Deploy the code with the enable flag disabled; configure and validate before opening wider installation access.
+
+## Production configuration
+
+| Variable                               | Value                                                                                              |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `VECTOR_GITHUB_APP_ENABLED`            | Exact `true` to enable; absent/any other value disables                                            |
+| `VECTOR_GITHUB_APP_ID`                 | Actual decimal App ID                                                                              |
+| `VECTOR_GITHUB_APP_CLIENT_ID`          | Actual App client ID, used as the signed App JWT issuer                                            |
+| `VECTOR_GITHUB_APP_SLUG`               | Actual lowercase App slug, without `[bot]`                                                         |
+| `VECTOR_GITHUB_APP_PRIVATE_KEY`        | Actual RSA PEM, at least 2048 bits; PKCS1/PKCS8 and escaped newlines accepted                      |
+| `KV_REST_API_URL`, `KV_REST_API_TOKEN` | Existing production persistent Redis-compatible REST store; the existing Upstash aliases also work |
+| `VECTOR_ABUSE_SECRET`                  | Stable random secret of at least 32 characters for hashed abuse counters                           |
+
+The exchange explicitly stays disabled when `VERCEL_ENV` is present and is not `production`. Never copy production keys to preview environments. Local tests use ephemeral keys and loopback transports. This deployment uses Node server crypto and the directly declared `jose@6.2.3` dependency (MIT, already pinned in the lockfile; no runtime dependencies or install hooks).
+
+## Workflow opt-in and identity
+
+Use the generated `.github/workflows/vector.yml` on the repository's current default branch. App access is an explicit workflow choice: `VECTOR_GITHUB_AUTH=github` retains the GitHub token; `auto` opts into the App with availability fallback; `app` requires it. Existing `USE_GITHUB_TOKEN=true` continues to force the GitHub-token path. Only opted-in eligible jobs receive `id-token: write`; the route job does not. The exact job names are **Vector task** and **Vector review**. Renaming them, using another workflow file, moving execution to a reusable workflow, adding an environment subject, or using a non-default branch fails the current App trust policy.
+
+Supported App events are `issue_comment`, `issues`, `workflow_dispatch`, and `schedule`. The server rejects `pull_request`, `pull_request_target`, `pull_request_review_comment`, `workflow_run`, `repository_dispatch`, `dynamic`, and other events. Existing automatic/fork review paths deliberately select their GitHub-token behavior before exchange. A denied App proof or policy check must not silently become an automatic fallback; fallback is for disabled, uninstalled, or unavailable service/OIDC permission.
+
+The signed actor and the actual rerun initiator must both be human accounts with **current** write, maintain, or admin permission. Bot-authored triggers do not obtain another elevated credential. Both legacy and GitHub's newer immutable default OIDC subjects are accepted, but repository and owner IDs are always independently verified; a recycled repository name does not authorize access. [GitHub OIDC claims](https://docs.github.com/en/actions/reference/security/oidc)
+
+The workflow must validate its actual event before requesting OIDC or executing code. For PR comments, pass the PR number and reject fork heads before checkout or model/tool execution with App authority. `issue_comment` OIDC and workflow-run metadata do **not** bind the originating issue/PR number. The server verifies every supplied or run-associated PR, but request JSON cannot prove that an omitted PR does not exist. The trusted default-branch workflow and its event validation are therefore part of the security boundary. Do not add untrusted steps to a job with OIDC access. Review from forks must keep the existing base/merge-base path and GitHub token.
+
+## Fixed server contract
+
+Every response is JSON with `Cache-Control: no-store`, `Referrer-Policy: no-referrer`, and `X-Content-Type-Options: nosniff`. No wildcard CORS is provided. URLs, issuers, JWKS locations, API hosts, installation IDs, permission objects, and repository targets cannot be overridden by caller input.
+
+- `GET https://vectordev.ai/api/github/installation`: public `{available, installUrl?}` only. No repository enumeration or query parameters.
+- `POST https://vectordev.ai/api/github/installation`: `Authorization: Bearer <Actions OIDC JWT>`, JSON `{}`, exact audience `https://vectordev.ai/api/github/installation`. Returns `{installed, repositoryId, installUrl?, retryAfterSeconds?}` for the verified signed repository. No credentials or installation ID. Missing installation uses a ten-second retry hint. Client polling is bounded to six attempts, at least ten seconds apart, with fresh proofs as needed.
+- `POST https://vectordev.ai/api/github/token`: the same header, exact audience `https://vectordev.ai/api/github/token`, and JSON `{purpose:"task"|"review", pullRequest?:positiveInteger}`. Maximum body 2,000 bytes; unknown fields and query parameters are rejected. The purpose must match the verified active job.
+
+Token success is `{token, expiresAt, repositoryId, repository, permissions, bot:{login,id}}`. The bot's real login and numeric ID come from GitHub, not a guessed identity. The caller receives exactly one repository, identified by both immutable ID and current name. The fixed task permissions are Contents/Pull requests/Issues/Actions write plus Checks/Metadata read. Review receives Contents/Checks/Metadata read and Pull requests/Issues write, with no Actions grant.
+
+Errors are 400 `INVALID_REQUEST`/`INVALID_JSON`, 401 `OIDC_INVALID`, 403 `WORKFLOW_NOT_TRUSTED`/`EVENT_NOT_ALLOWED`/`ACTOR_NOT_ALLOWED`/`REPOSITORY_MISMATCH`, 404 `APP_NOT_INSTALLED`, 409 `OIDC_REPLAYED`, 429 `RATE_LIMITED`, and 503 `GITHUB_APP_NOT_CONFIGURED`/`GITHUB_UNAVAILABLE`/`PERSISTENT_STORE_UNAVAILABLE`. Standard method, content-type, origin, and size errors also apply. Upstream request objects, tokens, and private key material never appear in these error bodies.
+
+Local `vector github install` may open the public installation URL and generate the workflow. It cannot securely poll a private repository using only a local git remote or Vector account token; the first authenticated Actions job performs that verification. Do not add an unauthenticated `installation_id` callback or upload a user's PAT to bypass this boundary. Cross-repository work is not implicitly authorized even when both repositories belong to the same installation; a future separate owner-controlled grant would be required.
+
+## Verification, expiration, and incident response
+
+The server verifies the RS256 signature against GitHub's fixed cached JWKS, the exact issuer/audience/subject, required timestamps, immutable IDs, full commit hashes, workflow path/ref, and active run attempt/check-run. Proofs must be at most five minutes old and unexpired, including a final expiry check immediately before mint admission. Reusable workflow and environment claims are rejected under the initial policy. Remote requests reject redirects and have bounded bodies/timeouts.
+
+A temporary **server-only read token** verifies repository/run/job/workflow records and the current permissions of both actors. Its actual repository scope is checked and it is revoked in `finally`; failure to revoke stops final issuance. The final token's permissions, expiration, and one-repository access are independently verified before it can leave the server. Unexpected broader tokens are revoked and rejected. REST calls use GitHub API version `2026-03-10`. [Installation token API](https://docs.github.com/en/rest/apps/apps#create-an-installation-access-token-for-an-app)
+
+GitHub installation tokens normally last **one hour**; the create API does not support an arbitrary shorter TTL. Generated task/review timeouts stay within that lifetime. The client must revoke its App token on completion/failure/cancellation before exiting; it must never revoke the supplied GitHub token. Runner loss or SIGKILL can leave the credential usable until GitHub's expiration. The API never stores raw JWTs or installation tokens. [Token lifecycle](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-an-installation-access-token-for-a-github-app), [revocation](https://docs.github.com/en/rest/apps/installations#revoke-an-installation-access-token)
+
+Replay prevention uses atomic persistent `SET NX EX` over a hash of issuer, audience, and JWT ID through expiration plus 31 seconds. A proof is consumed immediately before final minting and stays consumed after uncertain downstream failure. Retry using a newly requested JWT. Rate limits are 60 proof requests/IP/five minutes, 60 verified proofs/repository/endpoint/five minutes, three mint admissions/repository/run/attempt/check-run/hour, and twenty/repository/hour. Denied duplicate admissions may count toward these caps. Persistent-store failure always closes the exchange, including local development. Counters contain hashed identifiers; audit success records contain repository/run/check-run IDs and purpose only.
+
+To stop new issuance, disable `VECTOR_GITHUB_APP_ENABLED` and redeploy. Suspend/uninstall the App as appropriate; revoke known active installation tokens and rotate a compromised App key through GitHub, then update Vercel. Disabling this service alone does not revoke a token already issued by GitHub. Keep the old key only for the intentional rotation window, then delete it in GitHub. Do not paste live tokens into diagnostics.
+
+## Required owner acceptance before declaring this available
+
+1. Configure one selected test installation and explicitly opted-in generated workflow; enable production only for this controlled validation.
+2. Verify a task and a review use the registered bot's real identity and exactly the expected one-repository permissions. Verify comment/commit/PR attribution and automatic CI behavior with the App credential.
+3. Verify git operations use the selected repository credential, no token reaches remote URLs/global git config/argv/logs, and cleanup revokes it on success and failure. Confirm a revoked token is rejected by GitHub.
+4. Confirm uninstalled/disabled/unavailable fallback behavior, strict `app` failure, collaborator downgrade, rerun actor, wrong workflow/job, expired/replayed proof, fork rejection, and inability to access a second installed repository.
+5. Record the actual App ID/slug, deployment, workflow run IDs, and results without recording secrets. Remove the release gate only after live validation passes.
+
+Local crypto, HTTP, policy, and real Redis tests exercise the implementation with ephemeral signing keys and fixture GitHub responses. They do not establish that a real registration, installation, permission grant, live CI trigger, or production key rotation works; those remain the owner's external acceptance steps.
