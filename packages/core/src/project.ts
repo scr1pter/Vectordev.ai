@@ -2,6 +2,7 @@ export * as ProjectV2 from "./project"
 export * as Project from "./project"
 
 import { Context, Effect, Layer, Schema } from "effect"
+import { and, eq, ne } from "drizzle-orm"
 import path from "path"
 import { AbsolutePath } from "./schema"
 import { FSUtil } from "./fs-util"
@@ -10,6 +11,8 @@ import { makeGlobalNode } from "./effect/app-node"
 import { Hash } from "./util/hash"
 import { ProjectDirectories } from "./project/directories"
 import { ProjectSchema } from "./project/schema"
+import { ProjectTable } from "./project/sql"
+import { Database } from "./database/database"
 
 export const ID = ProjectSchema.ID
 export type ID = ProjectSchema.ID
@@ -57,6 +60,7 @@ const layer = Layer.effect(
     const fs = yield* FSUtil.Service
     const git = yield* Git.Service
     const projectDirectories = yield* ProjectDirectories.Service
+    const database = yield* Database.Service
 
     const directories = Effect.fn("Project.directories")(function* (input: DirectoriesInput) {
       return yield* projectDirectories.list(input.projectID)
@@ -68,6 +72,33 @@ const layer = Layer.effect(
         Effect.map((value) => (value ? ID.make(value) : undefined)),
         Effect.catch(() => Effect.succeed(undefined)),
       )
+    })
+
+    const recoverCached = Effect.fnUntraced(function* (repo: Git.Repository) {
+      const projects = yield* database.db
+        .select({ id: ProjectTable.id })
+        .from(ProjectTable)
+        .where(and(eq(ProjectTable.worktree, repo.worktree), ne(ProjectTable.id, ID.global)))
+        .all()
+        .pipe(Effect.orDie)
+      if (projects.length === 0) return undefined
+      const known = new Set(projects.map((project) => project.id))
+      const entries = yield* fs.readDirectoryEntries(repo.commonDirectory).pipe(Effect.orElseSucceed(() => []))
+      const candidates = yield* Effect.forEach(
+        entries.filter((entry) => entry.type === "file"),
+        (entry) =>
+          Effect.gen(function* () {
+            const file = path.join(repo.commonDirectory, entry.name)
+            const stat = yield* fs.stat(file)
+            if (stat.size > 128) return undefined
+            const value = (yield* fs.readFileString(file)).trim()
+            return known.has(ID.make(value)) ? ID.make(value) : undefined
+          }).pipe(Effect.orElseSucceed(() => undefined)),
+      )
+      const matches = candidates.filter((candidate) => candidate !== undefined)
+      // File content plus the persisted worktree proves one prior identity. Never
+      // merge every project at this path, or choose between ambiguous cache files.
+      return matches.length === 1 ? matches[0] : undefined
     })
 
     const remote = Effect.fnUntraced(function* (repo: Git.Repository) {
@@ -111,7 +142,7 @@ const layer = Layer.effect(
       const repo = yield* git.repo.discover(input)
       if (!repo) return { id: ID.global, directory: AbsolutePath.make(path.parse(input).root), vcs: undefined }
 
-      const previous = yield* cached(repo.commonDirectory)
+      const previous = (yield* cached(repo.commonDirectory)) ?? (yield* recoverCached(repo))
       const id = (yield* remote(repo)) ?? previous ?? (yield* root(repo))
       return {
         previous,
@@ -132,5 +163,5 @@ const layer = Layer.effect(
 export const node = makeGlobalNode({
   service: Service,
   layer: layer,
-  deps: [FSUtil.node, Git.node, ProjectDirectories.node],
+  deps: [FSUtil.node, Git.node, ProjectDirectories.node, Database.node],
 })

@@ -112,15 +112,33 @@ function clear() {
   drop(STORAGE_KEYS.THEME_CSS_DARK)
 }
 
+function migratePreferences() {
+  if (typeof localStorage !== "object") return
+  try {
+    for (const key of Object.values(STORAGE_KEYS)) {
+      if (localStorage.getItem(key) !== null) continue
+      const suffix = key.slice("vector".length)
+      const candidates = Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index)).filter(
+        (candidate): candidate is string => candidate !== null && candidate !== key && candidate.endsWith(suffix),
+      )
+      if (candidates.length !== 1) continue
+      const value = localStorage.getItem(candidates[0])
+      if (value === null) continue
+      localStorage.setItem(key, value)
+      localStorage.removeItem(candidates[0])
+    }
+  } catch {}
+}
+
 export function restoreThemePreference(available: (id: string) => boolean, defaultTheme = "vector-modern") {
+  migratePreferences()
   const fallback = available(defaultTheme) ? defaultTheme : "vector-modern"
   const saved = read(STORAGE_KEYS.THEME_ID) ?? fallback
   if (saved === "vector-modern" || available(saved)) return saved
 
-  write(STORAGE_KEYS.THEME_ID, fallback)
-  clear()
-  if (typeof document === "object") document.getElementById("vector-theme-preload")?.remove()
-  return fallback
+  const restored = saved === "oc-1" || saved === "oc-2" ? "vector-modern" : "vector"
+  write(STORAGE_KEYS.THEME_ID, restored)
+  return restored
 }
 
 function ensureThemeStyleElement(): HTMLStyleElement {
