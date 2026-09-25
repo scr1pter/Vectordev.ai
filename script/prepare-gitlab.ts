@@ -23,8 +23,9 @@ export function rewriteGitLab(source: string) {
 }
 
 export async function prepareGitLab() {
+  // Isolated installs expose this dependency only to the workspaces that declare it.
   const manifests = new Set(
-    [".", "../packages/core", "../packages/engine"].map((directory) =>
+    ["../packages/core", "../packages/engine"].map((directory) =>
       Bun.resolveSync("gitlab-ai-provider/package.json", path.resolve(import.meta.dir, directory)),
     ),
   )
