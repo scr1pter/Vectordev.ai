@@ -22,7 +22,7 @@ const globalConfigFiles = ["vector.json", "vector.jsonc", "vector.json", "vector
 
 const cleanState = Effect.gen(function* () {
   const fs = yield* FSUtil.Service
-  delete process.env.VECTOR_CONFIG
+  delete process.env.VECTOR_AGENT_CONFIG
   delete process.env.VECTOR_TUI_CONFIG
   yield* Effect.forEach(globalConfigFiles, (file) => fs.remove(file, { force: true }).pipe(Effect.ignore), {
     discard: true,
@@ -413,7 +413,7 @@ it.instance("top-level keys in tui.json take precedence over nested tui key", ()
   ),
 )
 
-it.instance("project config takes precedence over VECTOR_TUI_CONFIG (matches VECTOR_CONFIG)", () =>
+it.instance("project config takes precedence over VECTOR_TUI_CONFIG (matches VECTOR_AGENT_CONFIG)", () =>
   withCleanState(
     Effect.gen(function* () {
       const fs = yield* FSUtil.Service
@@ -659,7 +659,7 @@ it.instance("VECTOR_TUI_CONFIG provides settings when no project config exists",
   ),
 )
 
-it.instance("does not derive tui path from VECTOR_CONFIG", () =>
+it.instance("does not derive tui path from VECTOR_AGENT_CONFIG", () =>
   withCleanState(
     Effect.gen(function* () {
       const fs = yield* FSUtil.Service
@@ -670,7 +670,7 @@ it.instance("does not derive tui path from VECTOR_CONFIG", () =>
       yield* fs.writeJson(path.join(customDir, "tui.json"), { theme: "should-not-load" })
 
       yield* withEnv(
-        "VECTOR_CONFIG",
+        "VECTOR_AGENT_CONFIG",
         path.join(customDir, "vector.json"),
         Effect.gen(function* () {
           const config = yield* getTuiConfig(test.directory)

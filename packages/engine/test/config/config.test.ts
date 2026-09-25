@@ -376,12 +376,12 @@ it.effect("Vector global files ignore unrelated files without overwriting them",
   ),
 )
 
-it.effect("does not create global config when VECTOR_CONFIG_DIR is set", () =>
+it.effect("does not create global config when VECTOR_AGENT_CONFIG_DIR is set", () =>
   Effect.gen(function* () {
     const custom = yield* tmpdirScoped()
     yield* withGlobalConfig({}, ({ dir }) =>
       withProcessEnv(
-        "VECTOR_CONFIG_DIR",
+        "VECTOR_AGENT_CONFIG_DIR",
         custom,
         Effect.gen(function* () {
           yield* Config.use.get().pipe(provideInstanceEffect(dir))
@@ -923,7 +923,7 @@ it.instance("gets config directories", () =>
   }),
 )
 
-it.effect("does not try to install dependencies in read-only VECTOR_CONFIG_DIR", () =>
+it.effect("does not try to install dependencies in read-only VECTOR_AGENT_CONFIG_DIR", () =>
   Effect.gen(function* () {
     if (process.platform === "win32") return
 
@@ -933,18 +933,18 @@ it.effect("does not try to install dependencies in read-only VECTOR_CONFIG_DIR",
     yield* FSUtil.use.chmod(readonly, 0o555)
     yield* Effect.addFinalizer(() => FSUtil.use.chmod(readonly, 0o755).pipe(Effect.ignore))
 
-    yield* withProcessEnv("VECTOR_CONFIG_DIR", readonly, Config.use.get().pipe(provideInstanceEffect(dir)))
+    yield* withProcessEnv("VECTOR_AGENT_CONFIG_DIR", readonly, Config.use.get().pipe(provideInstanceEffect(dir)))
   }).pipe(Effect.provide(testInstanceStoreLayer), Effect.provide(LayerNode.compile(CrossSpawnSpawner.node))),
 )
 
-it.effect("installs dependencies in writable VECTOR_CONFIG_DIR", () =>
+it.effect("installs dependencies in writable VECTOR_AGENT_CONFIG_DIR", () =>
   Effect.gen(function* () {
     const dir = yield* tmpdirScoped()
     const configDir = path.join(dir, "configdir")
     yield* FSUtil.use.ensureDir(configDir)
 
     yield* withProcessEnv(
-      "VECTOR_CONFIG_DIR",
+      "VECTOR_AGENT_CONFIG_DIR",
       configDir,
       Config.Service.use((svc) => svc.get().pipe(Effect.andThen(svc.waitForDependencies()))).pipe(
         provideInstanceEffect(dir),
@@ -1846,7 +1846,7 @@ describe("VECTOR_DISABLE_PROJECT_CONFIG", () => {
     "skips relative instructions with warning when flag is set but no config dir",
     () =>
       withProcessEnvs(
-        { VECTOR_CONFIG_DIR: undefined, VECTOR_DISABLE_PROJECT_CONFIG: "true" },
+        { VECTOR_AGENT_CONFIG_DIR: undefined, VECTOR_DISABLE_PROJECT_CONFIG: "true" },
         Effect.gen(function* () {
           const test = yield* TestInstance
           yield* FSUtil.use.writeWithDirs(path.join(test.directory, "CUSTOM.md"), "# Custom Instructions")
@@ -1859,12 +1859,12 @@ describe("VECTOR_DISABLE_PROJECT_CONFIG", () => {
   )
 
   it.instance(
-    "VECTOR_CONFIG_DIR still works when flag is set",
+    "VECTOR_AGENT_CONFIG_DIR still works when flag is set",
     () =>
       Effect.gen(function* () {
         const configDir = yield* tmpdirScoped({ config: { model: "configdir/model" } })
         yield* withProcessEnvs(
-          { VECTOR_DISABLE_PROJECT_CONFIG: "true", VECTOR_CONFIG_DIR: configDir },
+          { VECTOR_DISABLE_PROJECT_CONFIG: "true", VECTOR_AGENT_CONFIG_DIR: configDir },
           Effect.gen(function* () {
             const config = yield* Config.use.get()
             expect(config.model).toBe("configdir/model")

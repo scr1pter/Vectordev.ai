@@ -62,7 +62,7 @@ export function make(input: Partial<Interface> = {}): Interface {
     home: Path.home,
     data: Path.data,
     cache: Path.cache,
-    config: Flag.VECTOR_CONFIG_DIR ?? Path.config,
+    config: Flag.VECTOR_AGENT_CONFIG_DIR ?? Path.config,
     state: Path.state,
     tmp: Path.tmp,
     bin: Path.bin,

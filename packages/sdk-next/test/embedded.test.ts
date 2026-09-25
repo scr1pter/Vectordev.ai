@@ -11,7 +11,7 @@ import type { VectorEvent } from "../src"
 // the SDK module graph is evaluated.
 await import("../src")
 const root = await mkdtemp(join(tmpdir(), "vector-embedded-"))
-Flag.VECTOR_DB = join(root, "vector.sqlite")
+Flag.VECTOR_AGENT_DB = join(root, "vector.sqlite")
 
 afterAll(() => rm(root, { recursive: true, force: true }))
 

@@ -19,7 +19,7 @@ export const Flag = {
 
   VECTOR_AUTO_HEAP_SNAPSHOT: truthy("VECTOR_AUTO_HEAP_SNAPSHOT"),
   VECTOR_GIT_BASH_PATH: readEnv("VECTOR_GIT_BASH_PATH"),
-  VECTOR_CONFIG: readEnv("VECTOR_CONFIG"),
+  VECTOR_AGENT_CONFIG: readEnv("VECTOR_AGENT_CONFIG"),
   get VECTOR_CONFIG_CONTENT() {
     return readEnv("VECTOR_CONFIG_CONTENT")
   },
@@ -47,7 +47,7 @@ export const Flag = {
     copy === undefined ? process.platform === "win32" : truthy("VECTOR_EXPERIMENTAL_DISABLE_COPY_ON_SELECT"),
   VECTOR_MODELS_URL: readEnv("VECTOR_MODELS_URL"),
   VECTOR_MODELS_PATH: readEnv("VECTOR_MODELS_PATH"),
-  VECTOR_DB: readEnv("VECTOR_DB"),
+  VECTOR_AGENT_DB: readEnv("VECTOR_AGENT_DB"),
 
   VECTOR_WORKSPACE_ID: readEnv("VECTOR_WORKSPACE_ID"),
   VECTOR_EXPERIMENTAL_WORKSPACES: enabledByExperimental("VECTOR_EXPERIMENTAL_WORKSPACES"),
@@ -63,8 +63,8 @@ export const Flag = {
   get VECTOR_TUI_CONFIG() {
     return readEnv("VECTOR_TUI_CONFIG")
   },
-  get VECTOR_CONFIG_DIR() {
-    return readEnv("VECTOR_CONFIG_DIR")
+  get VECTOR_AGENT_CONFIG_DIR() {
+    return readEnv("VECTOR_AGENT_CONFIG_DIR")
   },
   get VECTOR_PURE() {
     return truthy("VECTOR_PURE")

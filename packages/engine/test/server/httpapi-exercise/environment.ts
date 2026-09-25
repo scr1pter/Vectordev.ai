@@ -18,8 +18,8 @@ const preserveExerciseDatabase = !!process.env.VECTOR_HTTPAPI_EXERCISE_DB
 export const exerciseDatabasePath =
   process.env.VECTOR_HTTPAPI_EXERCISE_DB ??
   path.join(process.env.TMPDIR ?? "/tmp", `vector-httpapi-exercise-${process.pid}.db`)
-process.env.VECTOR_DB = exerciseDatabasePath
-Flag.VECTOR_DB = exerciseDatabasePath
+process.env.VECTOR_AGENT_DB = exerciseDatabasePath
+Flag.VECTOR_AGENT_DB = exerciseDatabasePath
 
 export const original = {
   VECTOR_SERVER_PASSWORD: Flag.VECTOR_SERVER_PASSWORD,

@@ -36,7 +36,7 @@ export const directories = Effect.fn("ConfigPaths.directories")(function* (direc
       start: Global.Path.home,
       stop: Global.Path.home,
     })),
-    ...(Flag.VECTOR_CONFIG_DIR ? [Flag.VECTOR_CONFIG_DIR] : []),
+    ...(Flag.VECTOR_AGENT_CONFIG_DIR ? [Flag.VECTOR_AGENT_CONFIG_DIR] : []),
   ])
   return result
 })

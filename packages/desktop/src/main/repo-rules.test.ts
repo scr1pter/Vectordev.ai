@@ -23,7 +23,7 @@ mock.module("./store", () => ({
 
 const { globalRulesFilePath, listRepoRules, rulesFilePath, saveRepoRule } = await import("./repo-rules")
 
-const originalConfig = process.env.VECTOR_CONFIG_DIR
+const originalConfig = process.env.VECTOR_AGENT_CONFIG_DIR
 const originalXdg = process.env.XDG_CONFIG_HOME
 const originalNamespace = process.env.VECTOR_APP_NAMESPACE
 
@@ -31,14 +31,14 @@ describe("repository rule persistence", () => {
   beforeEach(async () => {
     userDataPath = await mkdtemp(join(tmpdir(), "vector-rules-"))
     store.clear()
-    delete process.env.VECTOR_CONFIG_DIR
+    delete process.env.VECTOR_AGENT_CONFIG_DIR
     process.env.XDG_CONFIG_HOME = join(userDataPath, "config")
     process.env.VECTOR_APP_NAMESPACE = "vector-test"
   })
 
   afterEach(async () => {
-    if (originalConfig === undefined) delete process.env.VECTOR_CONFIG_DIR
-    if (originalConfig !== undefined) process.env.VECTOR_CONFIG_DIR = originalConfig
+    if (originalConfig === undefined) delete process.env.VECTOR_AGENT_CONFIG_DIR
+    if (originalConfig !== undefined) process.env.VECTOR_AGENT_CONFIG_DIR = originalConfig
     if (originalXdg === undefined) delete process.env.XDG_CONFIG_HOME
     if (originalXdg !== undefined) process.env.XDG_CONFIG_HOME = originalXdg
     if (originalNamespace === undefined) delete process.env.VECTOR_APP_NAMESPACE

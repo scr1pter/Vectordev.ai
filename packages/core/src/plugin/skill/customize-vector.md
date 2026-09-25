@@ -426,7 +426,7 @@ When a user's config is broken and Vector won't start, these env vars help:
 - `VECTOR_DISABLE_PROJECT_CONFIG=1`: skip the project's local `vector.json`
   and start from globals only. Run from the project directory, Vector loads,
   the user edits the broken file, then they restart without the flag.
-- `VECTOR_CONFIG=/path/to/file.json`: load an additional explicit config.
+- `VECTOR_AGENT_CONFIG=/path/to/file.json`: load an additional explicit config.
 - `VECTOR_CONFIG_CONTENT='{"$schema":"https://vectordev.ai/config.json"}'`:
   inject inline JSON as a final local-scope merge.
 - `VECTOR_DISABLE_DEFAULT_PLUGINS=1`: skip default plugins.

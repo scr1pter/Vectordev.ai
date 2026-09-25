@@ -48,7 +48,7 @@ const tools: readonly ToolFixture[] = [
   {
     icon: "✱",
     label:
-      'Grep "export const VECTOR_DB|VECTOR_DB|VECTOR_DEV|Global\\.Path\\.data|data =" in packages/engine/src (115 matches)',
+      'Grep "export const VECTOR_AGENT_DB|VECTOR_AGENT_DB|VECTOR_DEV|Global\\.Path\\.data|data =" in packages/engine/src (115 matches)',
   },
 ] as const
 

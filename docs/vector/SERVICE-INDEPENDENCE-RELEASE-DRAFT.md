@@ -47,6 +47,14 @@ Re-enabling any sign-in requires an approved Vector-owned registration, provider
 
 ## Configuration, protocol and application identity
 
+Three environment overrides now use distinctive agent names: `VECTOR_AGENT_CONFIG`
+selects a settings file, `VECTOR_AGENT_CONFIG_DIR` selects its directory, and
+`VECTOR_AGENT_DB` selects the session database. Update shell profiles, launch
+agents, service definitions and scripts that set those overrides. The generic
+`VECTOR_CONFIG`, `VECTOR_CONFIG_DIR` and `VECTOR_DB` variables are ignored, so
+observability pipelines and database tooling cannot redirect Vector's settings or
+sessions. All other `VECTOR_*` names stay unchanged.
+
 Global settings keep the neutral `config.json` layer. Before loading or updating settings, Vector imports a single recognizable prior JSON/JSONC configuration family into `vector.jsonc` when there is no active Vector configuration. Import preserves original files, merges `config.json` then JSON then JSONC, retains comments from the final layer, and reports the source and destination. A schema-only first-run seed does not block import. Ambiguous candidates or invalid schema-identified settings stop startup with repair guidance, so deny rules are not silently discarded. Credential, package and license files are excluded.
 
 Runtime MCP files ending in `.local.json` or `.local.jsonc` in an existing Vector configuration directory are imported into `vector.local.jsonc` and added to its `.gitignore`. Files in a differently named project directory are not scanned automatically: move the local MCP configuration into `.vector/vector.local.jsonc`, preserve its `mcp` object, and add both `vector.local.json` and `vector.local.jsonc` to `.vector/.gitignore` before starting Vector. Review project settings separately and copy them to `vector.json` or `vector.jsonc`; global migration does not import arbitrary project files. Keep backups until the model, permissions, shell, agents and MCP connections have been checked. Provider-specific credentials such as `OPENAI_API_KEY` keep their provider names.

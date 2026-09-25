@@ -9,7 +9,7 @@ describe("Vector agent runtime", () => {
 
   test("internal overrides win over inherited values without leaking credentials to project children", async () => {
     const env = {
-      VECTOR_CONFIG_DIR: "/inherited-config",
+      VECTOR_AGENT_CONFIG_DIR: "/inherited-config",
       VECTOR_CLIENT: "inherited-client",
       VECTOR_SERVER_PASSWORD: "inherited-password",
       VECTOR_EXPERIMENTAL_BACKGROUND_SUBAGENTS: "false",
@@ -17,7 +17,7 @@ describe("Vector agent runtime", () => {
       OPENAI_API_KEY: "provider-test-secret",
       ...VECTOR_AGENT_RUNTIME_ENV,
       ...{
-        VECTOR_CONFIG_DIR: "/desktop-config",
+        VECTOR_AGENT_CONFIG_DIR: "/desktop-config",
         VECTOR_CLIENT: "desktop",
         VECTOR_SERVER_PASSWORD: "desktop-test-password",
       },
@@ -25,7 +25,7 @@ describe("Vector agent runtime", () => {
     const script = `
       const { Flag } = await import(${JSON.stringify(new URL("../../../core/src/flag/flag.ts", import.meta.url).pathname)})
       console.log(JSON.stringify({
-        config: Flag.VECTOR_CONFIG_DIR,
+        config: Flag.VECTOR_AGENT_CONFIG_DIR,
         client: Flag.VECTOR_CLIENT,
         password: Flag.VECTOR_SERVER_PASSWORD,
         background: process.env.VECTOR_EXPERIMENTAL_BACKGROUND_SUBAGENTS,

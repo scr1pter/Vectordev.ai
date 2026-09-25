@@ -42,9 +42,9 @@ export function layerFromPath(filename: string) {
 }
 
 export function path() {
-  if (Flag.VECTOR_DB) {
-    if (Flag.VECTOR_DB === ":memory:" || isAbsolute(Flag.VECTOR_DB)) return Flag.VECTOR_DB
-    return join(Global.Path.data, Flag.VECTOR_DB)
+  if (Flag.VECTOR_AGENT_DB) {
+    if (Flag.VECTOR_AGENT_DB === ":memory:" || isAbsolute(Flag.VECTOR_AGENT_DB)) return Flag.VECTOR_AGENT_DB
+    return join(Global.Path.data, Flag.VECTOR_AGENT_DB)
   }
   if (
     ["latest", "beta", "prod"].includes(InstallationChannel) ||

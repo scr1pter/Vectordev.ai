@@ -71,7 +71,7 @@ export function preferAppEnv(userDataPath: string) {
       VECTOR_EXPERIMENTAL_ICON_DISCOVERY: "true",
       VECTOR_EXPERIMENTAL_FILEWATCHER: "true",
       VECTOR_CLIENT: "desktop",
-      VECTOR_CONFIG_DIR: configDir,
+      VECTOR_AGENT_CONFIG_DIR: configDir,
     },
     VECTOR_APP_NAMESPACE: "vector",
     XDG_DATA_HOME: process.env.XDG_DATA_HOME ?? dataHome,

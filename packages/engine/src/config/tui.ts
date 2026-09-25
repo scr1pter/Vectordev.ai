@@ -169,7 +169,7 @@ const loadState = Effect.fn("TuiConfig.loadState")(function* (ctx: { directory: 
     })
 
   // Every config dir we may read from: global config dir, any `.vector`
-  // folders between cwd and home, and VECTOR_CONFIG_DIR.
+  // folders between cwd and home, and VECTOR_AGENT_CONFIG_DIR.
   const directories = yield* ConfigPaths.directories(ctx.directory)
   yield* Effect.promise(() => migrateTuiConfig({ directories, cwd: ctx.directory }))
 
@@ -197,13 +197,13 @@ const loadState = Effect.fn("TuiConfig.loadState")(function* (ctx: { directory: 
     yield* mergeFile(acc, file)
   }
 
-  // 4. `.vector` directories (and VECTOR_CONFIG_DIR) discovered while
+  // 4. `.vector` directories (and VECTOR_AGENT_CONFIG_DIR) discovered while
   // walking up the tree. Also returned below so callers can install plugin
   // dependencies from each location.
-  const dirs = unique(directories).filter((dir) => dir.endsWith(".vector") || dir === Flag.VECTOR_CONFIG_DIR)
+  const dirs = unique(directories).filter((dir) => dir.endsWith(".vector") || dir === Flag.VECTOR_AGENT_CONFIG_DIR)
 
   for (const dir of dirs) {
-    if (!dir.endsWith(".vector") && dir !== Flag.VECTOR_CONFIG_DIR) continue
+    if (!dir.endsWith(".vector") && dir !== Flag.VECTOR_AGENT_CONFIG_DIR) continue
     for (const file of ConfigPaths.fileInDirectory(dir, "tui")) {
       yield* mergeFile(acc, file)
     }

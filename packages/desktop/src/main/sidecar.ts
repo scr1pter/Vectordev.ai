@@ -97,7 +97,7 @@ function prepareSidecarEnv(password: string, userDataPath: string) {
     ...{
       VECTOR_SERVER_USERNAME: "vector",
       VECTOR_SERVER_PASSWORD: password,
-      VECTOR_CONFIG_DIR: configDir,
+      VECTOR_AGENT_CONFIG_DIR: configDir,
     },
     VECTOR_APP_NAMESPACE: "vector",
     XDG_DATA_HOME: process.env.XDG_DATA_HOME ?? dataHome,

@@ -120,7 +120,7 @@ async function vectorFiles(input: { directories: string[]; cwd: string }) {
   for (const dir of unique(input.directories)) {
     files.push(...ConfigPaths.fileInDirectory(dir, "vector"))
   }
-  if (Flag.VECTOR_CONFIG) files.push(Flag.VECTOR_CONFIG)
+  if (Flag.VECTOR_AGENT_CONFIG) files.push(Flag.VECTOR_AGENT_CONFIG)
 
   const existing = await Promise.all(
     unique(files).map(async (file) => {
