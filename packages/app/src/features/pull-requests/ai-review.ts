@@ -447,10 +447,10 @@ export async function runPullRequestReview(
   // Use review.json, then the review agent's model and the configured default.
   // The resolved model is passed explicitly to every prompt.
   const catalog = input.catalog ?? []
-  const model = pickReviewModel([config.model, ...(input.preferredModels ?? [])], catalog)
+  const model = pickReviewModel([config.model, ...(input.preferredModels ?? [])], catalog) ?? catalog[0]
   if (!model)
     throw new Error(
-      "No review model is set. Connect a provider and select a model, or set model in .vector/review.json.",
+      "Connect a provider in Settings → Providers, or configure a local provider and set model in .vector/review.json.",
     )
   const refusal = model?.context ? contextRefusal(modelName(model), model.context) : undefined
   if (refusal) throw new Error(refusal)

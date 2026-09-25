@@ -340,6 +340,18 @@ describe("runPullRequestReview", () => {
     expect(changed?.selection.inline).toHaveLength(1)
   })
 
+  test("uses a connected model when no review or default model is configured", async () => {
+    const { client, calls } = fakeClient()
+    await run(client, { preferredModels: [], catalog: [sonnet] })
+    expect(calls.prompt[0]!.model).toEqual({ providerID: sonnet.providerID, modelID: sonnet.modelID })
+  })
+
+  test("explains provider setup when the connected catalog is empty", async () => {
+    const { client, calls } = fakeClient()
+    await expect(run(client, { preferredModels: [], catalog: [] })).rejects.toThrow("Settings → Providers")
+    expect(calls.prompt).toEqual([])
+  })
+
   test("uses the model named in review.json first", async () => {
     const { client, calls } = fakeClient({
       files: { "src/list.ts": HEAD, ".vector/review.json": `{"model":"${"openai/gpt-5.5"}"}` },

@@ -2,6 +2,8 @@ import { NamedError } from "@vectordevai/core/util/error"
 import { ConfigErrorV1 } from "@vectordevai/core/v1/config/error"
 import { Cause, Effect } from "effect"
 import { HttpRouter, HttpServerError, HttpServerRespondable, HttpServerResponse } from "effect/unstable/http"
+import { MODEL_SETUP_GUIDANCE } from "@/provider/setup"
+import { isRecord } from "@/util/record"
 
 // Keep typed HttpApi failures on their declared error path; this boundary only replaces defect-only empty 500s.
 export const errorLayer = HttpRouter.middleware<{ handles: unknown }>()((effect) =>
@@ -16,6 +18,14 @@ export const errorLayer = HttpRouter.middleware<{ handles: unknown }>()((effect)
       if (!defect) return Effect.failCause(cause)
 
       const error = defect.defect
+      if (isRecord(error) && (error._tag === "ProviderNoProvidersError" || error._tag === "ProviderNoModelsError")) {
+        return Effect.succeed(
+          HttpServerResponse.jsonUnsafe(
+            { _tag: "InvalidRequestError", kind: "model_setup", message: MODEL_SETUP_GUIDANCE },
+            { status: 400 },
+          ),
+        )
+      }
       if (
         ConfigErrorV1.JsonError.isInstance(error) ||
         ConfigErrorV1.InvalidError.isInstance(error) ||

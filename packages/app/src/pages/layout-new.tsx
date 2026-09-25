@@ -6404,8 +6404,15 @@ export default function NewLayout(props: ParentProps) {
               ...input,
               directory,
               catalog: reviewCatalog(byokProviders.connected()),
-              // Section 2.9: the review agent's own model, then the configured default.
-              preferredModels: [config.agent?.review?.model, config.model],
+              // Prefer explicit settings, then the connected providers' defaults.
+              preferredModels: [
+                config.agent?.review?.model,
+                config.model,
+                ...byokProviders.connected().map((provider) => {
+                  const model = byokProviders.default()[provider.id]
+                  return model ? `${provider.id}/${model}` : undefined
+                }),
+              ],
             },
             serverSDK().createClient({ directory, throwOnError: true }),
           )

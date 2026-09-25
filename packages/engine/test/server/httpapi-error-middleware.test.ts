@@ -7,6 +7,8 @@ import { HttpClient, HttpClientRequest, HttpRouter } from "effect/unstable/http"
 import { errorLayer } from "../../src/server/routes/instance/httpapi/middleware/error"
 import { NotFoundError } from "../../src/storage/storage"
 import { testEffect } from "../lib/effect"
+import { Provider } from "../../src/provider/provider"
+import { ProviderV2 } from "@vectordevai/core/provider"
 
 const it = testEffect(Layer.mergeAll(NodeHttpServer.layerTest, NodeServices.layer))
 
@@ -19,6 +21,25 @@ function expectUnknownErrorBody(body: unknown) {
 }
 
 describe("HttpApi error middleware", () => {
+  for (const error of [
+    new Provider.NoProvidersError(),
+    new Provider.NoModelsError({ providerID: ProviderV2.ID.make("ollama") }),
+  ]) {
+    it.live(`returns setup guidance for ${error._tag}`, () =>
+      Effect.gen(function* () {
+        yield* HttpRouter.add("GET", "/setup-error", Effect.die(error)).pipe(
+          Layer.provide(errorLayer),
+          HttpRouter.serve,
+          Layer.build,
+        )
+        const response = yield* HttpClientRequest.get("/setup-error").pipe(HttpClient.execute)
+        expect(response.status).toBe(400)
+        const body = yield* response.json
+        expect(body).toMatchObject({ _tag: "InvalidRequestError", kind: "model_setup" })
+        expect(JSON.stringify(body)).toContain("vector auth login")
+      }),
+    )
+  }
   it.live("returns a safe body for unknown 500 defects", () =>
     Effect.gen(function* () {
       yield* HttpRouter.add("GET", "/boom", Effect.die(new Error("secret stack marker"))).pipe(

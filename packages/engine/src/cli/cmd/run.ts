@@ -25,6 +25,7 @@ import { Filesystem } from "@/util/filesystem"
 import { createVectorClient, type VectorClient, type ToolPart } from "@vectordevai/sdk/v2"
 import { FormatError, FormatUnknownError } from "../error"
 import { INTERACTIVE_INPUT_ERROR, resolveInteractiveStdin } from "./run/runtime.stdin"
+import { MODEL_SETUP_GUIDANCE } from "@/provider/setup"
 
 type ModelInput = Parameters<VectorClient["session"]["prompt"]>[0]["model"]
 
@@ -648,6 +649,11 @@ export const RunCommand = effectCmd({
       }
 
       async function execute(sdk: VectorClient) {
+        const available = await sdk.config.providers({}, { throwOnError: true })
+        if (!available.data.providers.some((provider) => Object.keys(provider.models).length > 0)) {
+          UI.error(MODEL_SETUP_GUIDANCE)
+          process.exit(1)
+        }
         const sess = await session(sdk)
         if (!sess?.id) {
           UI.error("Session not found")
