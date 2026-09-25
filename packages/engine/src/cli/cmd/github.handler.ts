@@ -635,12 +635,10 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: {
           throw new Error(`Invalid model ${value}. Model must be in the format "provider/model".`)
         const providers = await runLocalEffect(providerSvc.list())
         if (!providers[providerID]?.models[modelID])
-          throw new Error(
-            `Provider/model ${value} is not available in this Vector version. Run vector github install again and choose a connected provider.`,
-          )
+          throw new Error("This workflow was set up by an older Vector; run vector github install again.")
         return { providerID, modelID }
       }
-      // Honour a configured default, but do not fall back to the closed shared gateway.
+      // An available Vector free model is selected when no connected provider has a default.
       const configured = await runLocalEffect(providerSvc.defaultModel()).catch(() => undefined)
       if (configured) return configured
       throw new Error(

@@ -1,3 +1,4 @@
+import { isFreeModel } from "@vectordevai/schema/free-model"
 import { providerUsable } from "@vectordevai/schema/provider-policy"
 // Vector code review in the desktop Pull Requests panel (section 6, D1). It runs the same core as the GitHub Action
 // and `vector review`: the same prompts, output schema, filters and summary. The engine instance always stays on the
@@ -244,7 +245,12 @@ export function modelName(model: Pick<ReviewModel, "providerID" | "modelID">) {
 
 // Section 5.5 from what the desktop can see. The engine knows the sign-in type; here a provider signed in through
 // Vector ("api") with no listed price stands for a subscription sign-in.
-export function costKindOf(provider: { id: string; source?: string }, cost?: { input: number; output: number }) {
+export function costKindOf(
+  provider: { id: string; source?: string },
+  cost?: { input: number; output: number },
+  modelID = "",
+) {
+  if (isFreeModel({ providerID: provider.id, id: modelID, cost })) return "free" satisfies CostKind
   const listed = !!cost && (cost.input > 0 || cost.output > 0)
   if (listed) return "priced" satisfies CostKind
   return (provider.source === "api" ? "plan" : "unknown") satisfies CostKind
@@ -268,7 +274,7 @@ export function reviewCatalog(providers: readonly CatalogProvider[]): ReviewMode
     .filter((provider) => providerUsable(provider.id, provider))
     .flatMap((provider) =>
       Object.values(provider.models).map((model) => {
-        const costKind: CostKind = costKindOf(provider, model.cost)
+        const costKind: CostKind = costKindOf(provider, model.cost, model.id)
         const cost = model.cost
         const price: ReviewPrice | undefined =
           costKind === "priced" && cost
@@ -447,7 +453,10 @@ export async function runPullRequestReview(
   // Use review.json, then the review agent's model and the configured default.
   // The resolved model is passed explicitly to every prompt.
   const catalog = input.catalog ?? []
-  const model = pickReviewModel([config.model, ...(input.preferredModels ?? [])], catalog) ?? catalog[0]
+  const model =
+    pickReviewModel([config.model, ...(input.preferredModels ?? [])], catalog) ??
+    catalog.find((item) => item.costKind === "free") ??
+    catalog[0]
   if (!model)
     throw new Error(
       "Connect a provider in Settings → Providers, or configure a local provider and set model in .vector/review.json.",
@@ -940,6 +949,8 @@ export function estimateText(estimate: ReviewEstimate) {
   const model = estimate.model ?? "your default model"
   if (estimate.low !== undefined && estimate.high !== undefined)
     return `${size} With ${model} a review costs about ${formatUsd(estimate.low)}–${formatUsd(estimate.high)}.`
+  if (estimate.costKind === "free")
+    return `${size} It runs on ${model.replace(/:free$/, "")} through OpenRouter at no charge.`
   if (estimate.costKind === "plan")
     return `${size} It runs on ${model} through your subscription sign-in, with no per-token price.`
   return `${size} No price is listed for ${model}, so Vector cannot estimate what it costs.`

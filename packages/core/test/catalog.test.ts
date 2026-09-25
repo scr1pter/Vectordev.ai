@@ -355,3 +355,20 @@ describe("CatalogV2", () => {
     }),
   )
 })
+
+it.effect("small model selection keeps zero-priced models", () =>
+  Effect.gen(function* () {
+    const catalog = yield* Catalog.Service
+    const providerID = ProviderV2.ID.make("openrouter")
+    yield* catalog.transform((draft) => {
+      draft.provider.update(providerID, () => {})
+      draft.model.update(providerID, ModelV2.ID.make("coder:free"), (model) => {
+        model.capabilities.input = ["text"]
+        model.capabilities.output = ["text"]
+        model.cost = [{ input: 0, output: 0, cache: { read: 0, write: 0 } }]
+        model.time.released = Date.now()
+      })
+    })
+    expect((yield* catalog.model.small(providerID))?.id).toBe(ModelV2.ID.make("coder:free"))
+  }),
+)

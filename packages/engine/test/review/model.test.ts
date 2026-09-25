@@ -47,18 +47,38 @@ const MODELS = [
   model("anthropic/sonnet", { input: 3, output: 15, cacheRead: 0.3 }),
   model("openai/gpt", { input: 1.25, output: 10, cacheRead: 0.125 }),
   model("local/unpriced"),
+  model("vector/acme/coder:free"),
+  model("openrouter/acme/coder:free"),
   model("tiny/small", { context: 16_000, input: 1, output: 1 }),
 ]
 
 interface Setup {
   defaultModel?: string
   agent?: { model?: string; variant?: string }
+  free?: boolean
   oauth?: string[]
 }
 
 const services = (setup: Setup) =>
   Layer.mergeAll(
     Layer.mock(Provider.Service, {
+      list: () =>
+        Effect.succeed(
+          setup.free
+            ? {
+                vector: {
+                  id: ProviderV2.ID.make("vector"),
+                  name: "Vector",
+                  env: [],
+                  source: "api" as const,
+                  options: {},
+                  models: Object.fromEntries(
+                    MODELS.filter((item) => item.providerID === "vector").map((item) => [item.id, item]),
+                  ),
+                },
+              }
+            : {},
+        ),
       getModel: (providerID, modelID) => {
         const found = MODELS.find((item) => item.providerID === providerID && item.id === modelID)
         return found ? Effect.succeed(found) : Effect.fail(new Provider.ModelNotFoundError({ providerID, modelID }))
@@ -176,6 +196,27 @@ describe("ReviewModel.resolveReviewModel refusals", () => {
       expect(malformed.message).toBe('Invalid model nonsense. Model must be in the format "provider/model".')
       const missing = yield* resolve({ trigger: "local", flag: "acme/missing" }).pipe(Effect.flip)
       expect(missing.message).toContain("acme/missing is not available")
+    }),
+  )
+})
+
+describe("free review defaults", () => {
+  it.effect("uses an available free model for CI without MODEL or provider credentials", () =>
+    Effect.gen(function* () {
+      const result = yield* resolve({ trigger: "auto", env: { VECTOR_CLI_TOKEN: "test-only" } }, { free: true })
+      expect(result.providerID).toBe(ProviderV2.ID.make("vector"))
+      expect(result.modelID).toBe(ModelV2.ID.make("acme/coder:free"))
+      expect(result.costKind).toBe("free")
+      expect(result.price).toBeUndefined()
+      expect(yield* chosen({ trigger: "auto", env: { MODEL: "acme/env" } }, { free: true })).toBe("acme/env")
+    }),
+  )
+  it.effect("marks direct OpenRouter free variants free and explains obsolete workflow models", () =>
+    Effect.gen(function* () {
+      expect((yield* resolve({ trigger: "local", flag: "openrouter/acme/coder:free" })).costKind).toBe("free")
+      expect((yield* resolve({ trigger: "command", env: { MODEL: "retired/model" } }).pipe(Effect.flip)).message).toBe(
+        "This workflow was set up by an older Vector; run vector github install again.",
+      )
     }),
   )
 })

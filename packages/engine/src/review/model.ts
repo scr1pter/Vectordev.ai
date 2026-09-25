@@ -1,3 +1,4 @@
+import { isFreeModel } from "@vectordevai/schema/free-model"
 // Which model a review runs on (section 2.9), what it costs (section 5.5), and the 32k context floor.
 
 import { providerCredentialAllowed } from "@vectordevai/core/provider-policy"
@@ -34,7 +35,7 @@ export interface ResolveInput {
 // Project config is disabled in CI, so a pull request cannot choose the model through
 // agent.review.model.
 // Local (local and desktop): --model, review.json, agent.review.model from the user's config, the configured
-// default model. A provider must be configured before any review can run.
+// default model. CI may use an available free model without a provider key.
 export const resolveReviewModel = Effect.fn("ReviewModel.resolve")(function* (input: ResolveInput) {
   const env = input.env ?? process.env
   const provider = yield* Provider.Service
@@ -46,9 +47,17 @@ export const resolveReviewModel = Effect.fn("ReviewModel.resolve")(function* (in
   const chosen = ci
     ? first([input.trigger === "auto" ? env.REVIEW_AUTO_MODEL : undefined, input.config, env.MODEL])
     : first([input.flag, input.config, agent?.model])
+  const free =
+    chosen || !ci
+      ? undefined
+      : Object.values(yield* provider.list())
+          .flatMap((item) => Object.values(item.models))
+          .find(isFreeModel)
   const configured = chosen || ci ? undefined : yield* provider.defaultModel().pipe(Effect.option)
   const name =
-    chosen ?? (configured?._tag === "Some" ? `${configured.value.providerID}/${configured.value.modelID}` : undefined)
+    chosen ??
+    (free ? `${free.providerID}/${free.id}` : undefined) ??
+    (configured?._tag === "Some" ? `${configured.value.providerID}/${configured.value.modelID}` : undefined)
 
   if (!name)
     return yield* new ReviewModelError({
@@ -66,7 +75,9 @@ export const resolveReviewModel = Effect.fn("ReviewModel.resolve")(function* (in
     Effect.catch(() =>
       Effect.fail(
         new ReviewModelError({
-          message: `${name} is not available. Check the provider and its key.`,
+          message: ci
+            ? "This workflow was set up by an older Vector; run vector github install again."
+            : `${name} is not available. Check the provider and its key.`,
         }),
       ),
     ),
@@ -76,9 +87,10 @@ export const resolveReviewModel = Effect.fn("ReviewModel.resolve")(function* (in
 
   const signIn = yield* auth.get(model.providerID).pipe(Effect.catch(() => Effect.succeed(undefined)))
   const listed = model.cost.input > 0 || model.cost.output > 0
-  const costKind: CostKind =
-    signIn?.type === "oauth" &&
-    providerCredentialAllowed(model.providerID, signIn, Boolean(model.api.npm || model.api.url))
+  const costKind: CostKind = isFreeModel(model)
+    ? "free"
+    : signIn?.type === "oauth" &&
+        providerCredentialAllowed(model.providerID, signIn, Boolean(model.api.npm || model.api.url))
       ? "plan"
       : listed
         ? "priced"

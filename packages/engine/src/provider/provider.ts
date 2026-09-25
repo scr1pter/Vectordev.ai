@@ -1,3 +1,4 @@
+import { isFreeModel } from "@vectordevai/schema/free-model"
 import { ProviderUnavailable, providerUnavailable } from "@vectordevai/schema/provider-unavailable"
 import {
   providerAllowed,
@@ -1160,7 +1161,7 @@ export interface Interface {
     providerID: ProviderV2.ID,
     query: string[],
   ) => Effect.Effect<{ providerID: ProviderV2.ID; modelID: string } | undefined>
-  readonly getSmallModel: (providerID: ProviderV2.ID) => Effect.Effect<Model | undefined>
+  readonly getSmallModel: (providerID: ProviderV2.ID, primaryID?: ModelV2.ID) => Effect.Effect<Model | undefined>
   readonly defaultModel: () => Effect.Effect<{ providerID: ProviderV2.ID; modelID: ModelV2.ID }, DefaultModelError>
 }
 
@@ -1915,7 +1916,17 @@ const layer = Layer.effect(
       return undefined
     })
 
-    const getSmallModel = Effect.fn("Provider.getSmallModel")(function* (providerID: ProviderV2.ID) {
+    const getSmallModel = Effect.fn("Provider.getSmallModel")(function* (
+      providerID: ProviderV2.ID,
+      primaryID?: ModelV2.ID,
+    ) {
+      const s = yield* InstanceState.get(state)
+      const provider = s.providers[providerID]
+      if (!provider) return undefined
+      const primary = primaryID ? provider.models[primaryID] : undefined
+      // Background calls must not turn a free conversation into paid inference, even with a small-model override.
+      if (primary && isFreeModel(primary)) return primary
+      if (providerID === "vector") return Object.values(provider.models).find(isFreeModel)
       const cfg = yield* config.get()
 
       if (cfg.small_model) {
@@ -1924,10 +1935,6 @@ const layer = Layer.effect(
           Effect.catchTag("ProviderModelNotFoundError", () => Effect.succeed(undefined)),
         )
       }
-
-      const s = yield* InstanceState.get(state)
-      const provider = s.providers[providerID]
-      if (!provider) return undefined
 
       const experimental = yield* plugin.trigger<"experimental.provider.small_model">(
         "experimental.provider.small_model",
@@ -2000,6 +2007,7 @@ const layer = Layer.effect(
         Effect.catch(() => Effect.succeed([] as { providerID: ProviderV2.ID; modelID: ModelV2.ID }[])),
       )
       for (const entry of recent) {
+        if (entry.providerID === "vector" && Object.keys(s.providers).some((id) => id !== "vector")) continue
         const provider = s.providers[entry.providerID]
         if (!provider) continue
         if (!provider.models[entry.modelID]) continue
@@ -2007,7 +2015,8 @@ const layer = Layer.effect(
       }
 
       const configured = Object.keys(cfg.provider ?? {})
-      const provider = Object.values(s.providers).find((p) => configured.length === 0 || configured.includes(p.id))
+      const providers = Object.values(s.providers).filter((p) => configured.length === 0 || configured.includes(p.id))
+      const provider = providers.find((p) => p.id !== "vector") ?? providers[0]
       if (!provider) return yield* new NoProvidersError()
       const [model] = sort(Object.values(provider.models))
       if (!model) return yield* new NoModelsError({ providerID: provider.id })

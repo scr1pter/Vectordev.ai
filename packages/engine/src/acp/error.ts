@@ -76,7 +76,10 @@ export function toRequestError(error: Error) {
     case "ACPInvalidModeError":
       return RequestError.invalidParams({ mode: error.mode }, `mode not found: ${error.mode}`)
     case "ACPAuthRequiredError":
-      return RequestError.authRequired({ providerId: error.providerId }, "provider authentication required")
+      return RequestError.authRequired(
+        { providerId: error.providerId },
+        "Connect a provider with vector auth login, or sign in to Vector to use available free models.",
+      )
     case "ACPUnknownAuthMethodError":
       return RequestError.invalidParams({ methodId: error.methodId }, `unknown auth method: ${error.methodId}`)
     case "ACPUnsupportedOperationError":

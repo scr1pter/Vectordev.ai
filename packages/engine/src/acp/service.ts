@@ -161,7 +161,7 @@ export function make(input: {
   const newSession = Effect.fn("ACP.newSession")(function* (params: NewSessionRequest) {
     const started = performance.now()
     const snapshot = yield* directorySnapshot(params.cwd)
-    const selected = selectDefaultModel(snapshot)
+    const selected = yield* selectDefaultModel(snapshot)
     const variant = selectVariant(snapshot, selected)
     const modeId = snapshot.availableModes.length > 0 ? snapshot.defaultModeID : undefined
     const created = yield* profiledRequest(
@@ -217,7 +217,7 @@ export function make(input: {
       "session",
     )
     const restored = restoreFromMessages(messages.map((item) => item.info))
-    const model = restored.model ?? selectDefaultModel(snapshot)
+    const model = restored.model ?? (yield* selectDefaultModel(snapshot))
     const state = yield* session.load({
       id: params.sessionId,
       cwd: params.cwd,
@@ -302,7 +302,7 @@ export function make(input: {
       "session",
     )
     const restored = restoreFromMessages(messages.map((item) => item.info))
-    const model = restored.model ?? selectDefaultModel(snapshot)
+    const model = restored.model ?? (yield* selectDefaultModel(snapshot))
     const state = yield* session.load({
       id: params.sessionId,
       cwd: params.cwd,
@@ -370,7 +370,7 @@ export function make(input: {
       "session",
     )
     const restored = restoreFromMessages(messages.map((item) => item.info))
-    const model = restored.model ?? selectDefaultModel(snapshot)
+    const model = restored.model ?? (yield* selectDefaultModel(snapshot))
     const state = yield* session.load({
       id: forked.id,
       cwd: params.cwd,
@@ -420,7 +420,7 @@ export function make(input: {
     }
 
     if (params.configId === "effort") {
-      const model = current.model ?? selectDefaultModel(snapshot)
+      const model = current.model ?? (yield* selectDefaultModel(snapshot))
       const variants = Directory.variants(snapshot, model)
       if (!variants || !Object.keys(variants).includes(params.value)) {
         return yield* new ACPError.InvalidEffortError({ effort: params.value })
@@ -442,7 +442,7 @@ export function make(input: {
       const state = yield* session.setMode(params.sessionId, params.value)
       return {
         configOptions: configOptions(snapshot, {
-          model: state.model ?? selectDefaultModel(snapshot),
+          model: state.model ?? (yield* selectDefaultModel(snapshot)),
           variant: state.variant,
           modeId: state.modeId,
         }),
@@ -492,7 +492,7 @@ export function make(input: {
     prompt: Effect.fn("ACP.prompt")(function* (params: PromptRequest) {
       const current = yield* session.get(params.sessionId)
       const snapshot = yield* directorySnapshot(current.cwd)
-      const selected = current.model ?? selectDefaultModel(snapshot)
+      const selected = current.model ?? (yield* selectDefaultModel(snapshot))
       if (!current.model) {
         yield* session.setModel(params.sessionId, selected)
       }
@@ -782,17 +782,20 @@ function defaultModelFromConfig(
   if (configured && providers[configured.providerID]?.models[configured.modelID]) return configured
 
   // First-session startup resolves configured or sorted available models without reading historical sessions.
-  const best = Provider.sort(Object.values(providers).flatMap((provider) => Object.values(provider.models)))[0]
+  const connected = Object.values(providers)
+  const preferred = connected.some((provider) => provider.id !== "vector")
+    ? connected.filter((provider) => provider.id !== "vector")
+    : connected
+  const best = Provider.sort(preferred.flatMap((provider) => Object.values(provider.models)))[0]
   if (best) return { providerID: best.providerID, modelID: best.id }
-  if (configured) return configured
 }
 
-function selectDefaultModel(snapshot: Directory.Snapshot) {
+const selectDefaultModel = Effect.fn("ACP.selectDefaultModel")(function* (snapshot: Directory.Snapshot) {
   if (snapshot.defaultModel) return snapshot.defaultModel
   const model = snapshot.modelOptions[0]
   if (model) return { providerID: model.providerID, modelID: model.modelID }
-  return { providerID: "unknown" as ProviderV2.ID, modelID: "unknown" as ModelV2.ID }
-}
+  return yield* new ACPError.AuthRequiredError({})
+})
 
 function detectSlashCommand(parts: ReturnType<typeof promptContentToParts>) {
   const text = parts

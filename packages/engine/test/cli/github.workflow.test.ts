@@ -473,3 +473,11 @@ describe("GitHub workflow compatibility", () => {
     expect(prepareGithubEnvironment({}, true)).toBeUndefined()
   })
 })
+
+test("shared free-model workflows only need the Vector account token", () => {
+  const yaml = buildWorkflowYaml({ ...OPENAI, provider: "vector", model: "acme/coder:free", keys: [] })
+  expect(yaml).toContain("VECTOR_CLI_TOKEN: ${{ secrets.VECTOR_CLI_TOKEN }}")
+  expect(yaml).not.toContain("OPENAI_API_KEY")
+  expect(yaml).not.toContain("ANTHROPIC_API_KEY")
+  expect(yaml).toContain("MODEL: vector/acme/coder:free")
+})

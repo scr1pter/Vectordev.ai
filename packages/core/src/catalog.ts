@@ -235,9 +235,11 @@ const layer = Layer.effect(
             }
           }
 
+          const models = yield* result.model.available()
+          const connected = models.filter((model) => model.providerID !== "vector")
           return Option.getOrUndefined(
             pipe(
-              yield* result.model.available(),
+              connected.length ? connected : models,
               Array.sortWith((item) => item.time.released, Order.flip(Order.Number)),
               Array.head,
             ),
@@ -270,7 +272,7 @@ const layer = Layer.effect(
               age: (Date.now() - model.time.released) / (1000 * 60 * 60 * 24 * 30),
               small: SMALL_MODEL_RE.test(`${model.id} ${model.family ?? ""} ${model.name}`.toLowerCase()),
             })),
-            Array.filter((item) => item.cost > 0 && item.age <= 18),
+            Array.filter((item) => item.cost >= 0 && item.age <= 18),
           )
 
           const pick = (items: typeof candidates) => {

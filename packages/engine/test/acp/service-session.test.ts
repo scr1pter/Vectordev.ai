@@ -145,6 +145,7 @@ describe("ACP service sessions", () => {
   const makeService = (
     messages: readonly { info: unknown; parts: readonly unknown[] }[] = [],
     options?: {
+      noProviders?: boolean
       abort?: (input: { sessionID: string }) => Promise<{ data: boolean }>
       prompt?: (input: unknown) => Promise<{ data: { info: ReturnType<typeof assistantInfo> } }>
     },
@@ -165,7 +166,10 @@ describe("ACP service sessions", () => {
     }))
     const sdk = {
       config: {
-        providers: () => Promise.resolve({ data: { providers: [provider], default: { [providerID]: modelID } } }),
+        providers: () =>
+          Promise.resolve({
+            data: { providers: options?.noProviders ? [] : [provider], default: { [providerID]: modelID } },
+          }),
         get: () => Promise.resolve({ data: {} }),
       },
       app: {
@@ -527,6 +531,14 @@ describe("ACP service sessions", () => {
 
     expect(result.configOptions?.find((option) => option.id === "effort")?.currentValue).toBe("high")
     expect(result.configOptions?.find((option) => option.id === "mode")?.currentValue).toBe("plan")
+  })
+
+  it("asks an editor user to connect instead of sending an unknown model", async () => {
+    const { service, prompts } = makeService([], { noProviders: true })
+    const result = await Effect.runPromise(service.newSession({ cwd: "/workspace", mcpServers: [] }).pipe(Effect.flip))
+    expect(result._tag).toBe("ACPAuthRequiredError")
+    expect(ACPError.toRequestError(result).message).toContain("vector auth login")
+    expect(prompts).toEqual([])
   })
 
   it("maps provider auth failures to auth-required request errors", async () => {

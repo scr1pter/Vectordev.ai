@@ -361,9 +361,7 @@ describe("the summary comment", () => {
     await golden("no-findings", body)
     expect(body).toContain("**No issues found** on the changed lines.")
     expect(body).toContain("_2 files changed (code)._")
-    expect(body).toContain(
-      "openai/gpt-4.1 · $0.00 (48.2k in / 3.1k out) · 48s · this pull request: 1 review",
-    )
+    expect(body).toContain("openai/gpt-4.1 · $0.00 (48.2k in / 3.1k out) · 48s · this pull request: 1 review")
   })
 
   test("the cost wording for subscription and unknown prices", () => {
@@ -831,4 +829,10 @@ describe("numbers and cost", () => {
     expect(formatDuration(48_000)).toBe("48s")
     expect(formatDuration(3_720_000)).toBe("1h 2m")
   })
+})
+
+test("free review footer identifies OpenRouter without an unknown price", () => {
+  expect(costWording({ ...zeroCost, kind: "free", model: "vector/acme/coder:free" })).toBe(
+    "vector/acme/coder · free through OpenRouter (48.2k in / 3.1k out)",
+  )
 })

@@ -487,3 +487,12 @@ test("review model selection retains explicit custom providers", () => {
   expect(catalog).toEqual([{ providerID: "ollama", modelID: "coder", costKind: "unknown" }])
   expect(pickReviewModel(["ollama/coder"], catalog)).toEqual(catalog[0])
 })
+
+test("OpenRouter free reviews have an explicit no-charge estimate", () => {
+  expect(costKindOf({ id: "openrouter", source: "api" }, { input: 0, output: 0 }, "acme/coder:free")).toBe("free")
+  expect(costKindOf({ id: "openrouter" }, { input: 1, output: 0 }, "acme/coder:free")).toBe("priced")
+  expect(costKindOf({ id: "vector" }, { input: 0, output: 0 }, "acme/coder:free")).toBe("free")
+  expect(estimateText({ files: 51, model: "openrouter/acme/coder:free", costKind: "free" })).toBe(
+    "This pull request changes 51 files. It runs on openrouter/acme/coder through OpenRouter at no charge.",
+  )
+})

@@ -1,3 +1,4 @@
+import { isFreeModel } from "@vectordevai/schema/free-model"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { SessionV1 } from "@vectordevai/core/v1/session"
 import { ConfigV1 } from "@vectordevai/core/v1/config/config"
@@ -326,9 +327,13 @@ const layer = Layer.effect(
       }
 
       const agent = yield* agents.get("compaction")
-      const model = agent.model
-        ? yield* provider.getModel(agent.model.providerID, agent.model.modelID).pipe(Effect.orDie)
-        : yield* provider.getModel(userMessage.model.providerID, userMessage.model.modelID).pipe(Effect.orDie)
+      const primary = yield* provider
+        .getModel(userMessage.model.providerID, userMessage.model.modelID)
+        .pipe(Effect.orDie)
+      const model =
+        isFreeModel(primary) || !agent.model
+          ? primary
+          : yield* provider.getModel(agent.model.providerID, agent.model.modelID).pipe(Effect.orDie)
       const cfg = yield* config.get()
       const history = compactionPart && messages.at(-1)?.info.id === input.parentID ? messages.slice(0, -1) : messages
       const prior = completedCompactions(history)

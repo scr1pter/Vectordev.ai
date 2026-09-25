@@ -31,7 +31,9 @@ describe("acp.error", () => {
 
     expect(requestError).toBeInstanceOf(RequestError)
     expect(requestError.code).toBe(-32000)
-    expect(requestError.message).toBe("Authentication required: provider authentication required")
+    expect(requestError.message).toBe(
+      "Authentication required: Connect a provider with vector auth login, or sign in to Vector to use available free models.",
+    )
     expect(requestError.data).toEqual({ providerId: "anthropic" })
   })
 

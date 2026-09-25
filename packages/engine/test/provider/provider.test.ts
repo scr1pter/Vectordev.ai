@@ -1996,3 +1996,29 @@ it.instance("plugin-defined provider models retain custom provenance with a stor
     })
   }),
 )
+
+it.instance(
+  "free primary models stay free despite a paid small-model override",
+  Effect.gen(function* () {
+    const primary = ModelV2.ID.make("acme/coder:free")
+    const model = yield* Provider.use.getSmallModel(ProviderV2.ID.make("openrouter"), primary)
+    expect(model?.id).toBe(primary)
+    expect(model?.cost.input).toBe(0)
+    expect(model?.cost.output).toBe(0)
+  }),
+  {
+    config: {
+      small_model: "openrouter/acme/flash",
+      provider: {
+        openrouter: {
+          npm: "@ai-sdk/openai-compatible",
+          options: { apiKey: "test-only" },
+          models: {
+            "acme/coder:free": { cost: { input: 0, output: 0 }, limit: { context: 128000, output: 8000 } },
+            "acme/flash": { family: "gemini-flash", cost: { input: 1, output: 1 } },
+          },
+        },
+      },
+    },
+  },
+)

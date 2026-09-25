@@ -130,14 +130,17 @@ export function buildWorkflowYaml(opts: WorkflowOptions): string {
   const install = cli.pinned
     ? `npm install -g ${CLI_PACKAGE}@${cli.spec} --prefer-offline --no-audit --no-fund`
     : `npm install -g ${CLI_PACKAGE}@latest --no-audit --no-fund`
-  // Every selected provider needs the repository's credentials.
-  const keys = [
-    "          # Add the selected provider's credentials as repository secrets.",
-    ...opts.keys.map((key) => `          ${key}: \${{ secrets.${key} }}`),
-    ...["ANTHROPIC_API_KEY", "OPENAI_API_KEY"]
-      .filter((key) => !opts.keys.includes(key))
-      .map((key) => `          # ${key}: \${{ secrets.${key} }}`),
-  ]
+  // Shared free models authenticate with VECTOR_CLI_TOKEN, already present in every job.
+  const keys =
+    opts.provider === "vector"
+      ? []
+      : [
+          "          # Add the selected provider's credentials as repository secrets.",
+          ...opts.keys.map((key) => `          ${key}: \${{ secrets.${key} }}`),
+          ...["ANTHROPIC_API_KEY", "OPENAI_API_KEY"]
+            .filter((key) => !opts.keys.includes(key))
+            .map((key) => `          # ${key}: \${{ secrets.${key} }}`),
+        ]
   const mentioned = mentions.map((mention) => `contains(github.event.comment.body, '${mention}')`).join(" || ")
   const script = buildRouteScript(mentions)
     .split("\n")
