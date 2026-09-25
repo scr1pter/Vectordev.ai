@@ -1,6 +1,7 @@
 import { Effect } from "effect"
 import { cmd } from "./cmd"
 import { effectCmd } from "../effect-cmd"
+import { prepareGithubEnvironment } from "./github.environment"
 import { TASK_MENTIONS, mentionsFrom, routeGithubEvent } from "./github.route"
 
 export { extractResponseText, formatPromptTooLargeError, parseGitHubRemote } from "./github.shared"
@@ -28,6 +29,11 @@ export const GithubRunCommand = effectCmd({
         type: "string",
         describe: "GitHub personal access token (github_pat_********)",
       }),
+  instance: () => {
+    const warning = prepareGithubEnvironment(process.env, false)
+    if (warning) console.warn(warning)
+    return true
+  },
   handler: (args) =>
     Effect.gen(function* () {
       const { githubRun, githubEventContext } = yield* Effect.promise(() => import("./github.handler"))
@@ -58,8 +64,8 @@ export const GithubReviewCommand = effectCmd({
   // The pull request's own vector.json, `.vector` agents and plugins, AGENTS.md and .vector/RULES.md never configure
   // the reviewer, whatever the workflow file sets: both flags are on before the instance loads any of them.
   instance: () => {
-    process.env.VECTOR_PURE = "1"
-    process.env.VECTOR_DISABLE_PROJECT_CONFIG = "1"
+    const warning = prepareGithubEnvironment(process.env, true)
+    if (warning) console.warn(warning)
     return true
   },
   handler: (args) =>

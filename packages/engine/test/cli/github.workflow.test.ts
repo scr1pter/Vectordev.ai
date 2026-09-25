@@ -1,3 +1,5 @@
+import release from "../../../desktop/package.json"
+import { prepareGithubEnvironment } from "../../src/cli/cmd/github.environment"
 import { describe, expect, test } from "bun:test"
 import { buildRouteScript, buildWorkflowYaml, cliVersionSpec } from "../../src/cli/cmd/github.workflow"
 
@@ -49,7 +51,7 @@ const ANTHROPIC = {
   keys: ["ANTHROPIC_API_KEY"],
   autoReview: false,
   monthlyUsd: 50,
-  version: "local",
+  version: "1.99.1",
 }
 
 const OPENAI_AUTO = `name: vector
@@ -131,6 +133,7 @@ jobs:
       - name: Review
         run: vector github review
         env:
+          VECTOR_WORKFLOW_VERSION: "2"
           GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
           VECTOR_CLI_TOKEN: \${{ secrets.VECTOR_CLI_TOKEN }}
           VECTOR_REVIEW_PR: \${{ github.event.pull_request.number || needs.route.outputs.pr }}
@@ -169,12 +172,17 @@ jobs:
         with:
           node-version: 20
 
+      - uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: vector-cli-1.17.14-\${{ runner.os }}
       - name: Install Vector
-        run: npm install -g @vectordevai/cli
+        run: npm install -g @vectordevai/cli@1.17.14 --prefer-offline --no-audit --no-fund
 
       - name: Run Vector
         run: vector github run
         env:
+          VECTOR_WORKFLOW_VERSION: "2"
           GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
           VECTOR_CLI_TOKEN: \${{ secrets.VECTOR_CLI_TOKEN }}
           USE_GITHUB_TOKEN: "true"
@@ -249,12 +257,13 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ~/.npm
-          key: vector-cli-latest-\${{ runner.os }}
+          key: vector-cli-1.99.1-\${{ runner.os }}
       - name: Install Vector
-        run: npm install -g @vectordevai/cli@latest --no-audit --no-fund
+        run: npm install -g @vectordevai/cli@1.99.1 --prefer-offline --no-audit --no-fund
       - name: Review
         run: vector github review
         env:
+          VECTOR_WORKFLOW_VERSION: "2"
           GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
           VECTOR_CLI_TOKEN: \${{ secrets.VECTOR_CLI_TOKEN }}
           VECTOR_REVIEW_PR: \${{ github.event.pull_request.number || needs.route.outputs.pr }}
@@ -292,12 +301,17 @@ jobs:
         with:
           node-version: 20
 
+      - uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: vector-cli-1.99.1-\${{ runner.os }}
       - name: Install Vector
-        run: npm install -g @vectordevai/cli
+        run: npm install -g @vectordevai/cli@1.99.1 --prefer-offline --no-audit --no-fund
 
       - name: Run Vector
         run: vector github run
         env:
+          VECTOR_WORKFLOW_VERSION: "2"
           GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
           VECTOR_CLI_TOKEN: \${{ secrets.VECTOR_CLI_TOKEN }}
           USE_GITHUB_TOKEN: "true"
@@ -413,20 +427,49 @@ describe("buildWorkflowYaml", () => {
     expect(env(buildWorkflowYaml({ ...ANTHROPIC, monthlyUsd: 12.5 }))["REVIEW_MAX_COST_USD_PER_MONTH"]).toBe("12.5")
   })
 
-  test("the CLI is pinned to a release, and anything else falls back to latest without the offline cache", () => {
+  test("both jobs pin the CLI, including workflows created by development builds", () => {
     expect(cliVersionSpec("1.17.14")).toEqual({ spec: "1.17.14", pinned: true })
     expect(cliVersionSpec("1.18.0-beta.2")).toEqual({ spec: "1.18.0-beta.2", pinned: true })
-    expect(cliVersionSpec("local")).toEqual({ spec: "latest", pinned: false })
-    expect(cliVersionSpec("0.0.0-dev-202609141200")).toEqual({ spec: "latest", pinned: false })
+    expect(cliVersionSpec("local")).toEqual({ spec: release.version, pinned: true })
+    expect(cliVersionSpec("0.0.0-dev-202609141200")).toEqual({ spec: release.version, pinned: true })
     const install = (version: string) =>
       parse(buildWorkflowYaml({ ...OPENAI, version })).jobs.review.steps.find((step) => step.name === "Install Vector")
     expect(install("1.17.14")?.run).toBe(
       "npm install -g @vectordevai/cli@1.17.14 --prefer-offline --no-audit --no-fund",
     )
-    expect(install("local")?.run).toBe("npm install -g @vectordevai/cli@latest --no-audit --no-fund")
+    expect(install("local")?.run).toBe(
+      `npm install -g @vectordevai/cli@${release.version} --prefer-offline --no-audit --no-fund`,
+    )
+    for (const version of ["1.17.14", "local"]) {
+      const jobs = parse(buildWorkflowYaml({ ...OPENAI, version })).jobs
+      expect(jobs.vector.steps.find((step) => step.name === "Install Vector")?.run).toBe(install(version)?.run)
+      expect(jobs.vector.steps.find((step) => step.uses === "actions/cache@v4")?.with).toEqual(
+        jobs.review.steps.find((step) => step.uses === "actions/cache@v4")?.with,
+      )
+    }
   })
 
   test("the route script never contains an Actions expression", () => {
     expect(buildRouteScript()).not.toContain("${{")
+  })
+})
+
+describe("GitHub workflow compatibility", () => {
+  test("stale CI review gets guidance and safe defaults before config loads", () => {
+    const env: Record<string, string | undefined> = { GITHUB_ACTIONS: "true", VECTOR_WORKFLOW_VERSION: "1" }
+    expect(prepareGithubEnvironment(env, true)).toContain("vector github install")
+    expect(env.VECTOR_PURE).toBe("1")
+    expect(env.VECTOR_DISABLE_PROJECT_CONFIG).toBe("1")
+    expect(JSON.parse(env.VECTOR_CONFIG_CONTENT!)).toEqual({ lsp: false, formatter: false, snapshot: false })
+  })
+  test("current workflow preserves explicit config and task mode", () => {
+    const env = { GITHUB_ACTIONS: "true", VECTOR_WORKFLOW_VERSION: "2", VECTOR_CONFIG_CONTENT: '{"snapshot":true}' }
+    expect(prepareGithubEnvironment(env, true)).toBeUndefined()
+    expect(env.VECTOR_CONFIG_CONTENT).toBe('{"snapshot":true}')
+    const task: Record<string, string | undefined> = { GITHUB_ACTIONS: "true" }
+    expect(prepareGithubEnvironment(task, false)).toContain("vector github install")
+    expect(task.VECTOR_PURE).toBeUndefined()
+    expect(task.VECTOR_CONFIG_CONTENT).toBeUndefined()
+    expect(prepareGithubEnvironment({}, true)).toBeUndefined()
   })
 })

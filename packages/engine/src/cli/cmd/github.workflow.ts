@@ -1,6 +1,8 @@
 // The workflow `vector github install` writes (section 2.1) and the route job's script (section 2.2). Pure, so the
 // tests can parse the YAML and run the script.
 
+import release from "../../../../desktop/package.json"
+import { GITHUB_WORKFLOW_VERSION } from "./github.environment"
 import { DEFAULT_MENTIONS, parseReviewCommand } from "@vectordevai/core/review/command"
 import { PAUSED_LABEL } from "@vectordevai/core/review/skip"
 
@@ -17,10 +19,10 @@ export interface WorkflowOptions {
   mentions?: readonly string[] // baked into the route job; Vectorscope mentions and legacy aliases by default
 }
 
-// A release pins the CLI and lets npm use its cache. Anything else (a local or dev build) installs latest.
+// Development builds use the desktop release version instead of a moving registry tag.
 export function cliVersionSpec(version: string): { spec: string; pinned: boolean } {
-  const release = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?$/.test(version) && !version.startsWith("0.0.0")
-  return release ? { spec: version, pinned: true } : { spec: "latest", pinned: false }
+  const pinned = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?$/.test(version) && !version.startsWith("0.0.0")
+  return { spec: pinned ? version : release.version, pinned: true }
 }
 
 // The route job's script for actions/github-script. It embeds core's parser, so the route job and the CLI can never
@@ -225,6 +227,7 @@ export function buildWorkflowYaml(opts: WorkflowOptions): string {
     "      - name: Review",
     "        run: vector github review",
     "        env:",
+    `          VECTOR_WORKFLOW_VERSION: "${GITHUB_WORKFLOW_VERSION}"`,
     "          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}",
     "          VECTOR_CLI_TOKEN: ${{ secrets.VECTOR_CLI_TOKEN }}",
     "          VECTOR_REVIEW_PR: ${{ github.event.pull_request.number || needs.route.outputs.pr }}",
@@ -264,12 +267,17 @@ export function buildWorkflowYaml(opts: WorkflowOptions): string {
     "        with:",
     "          node-version: 20",
     "",
+    "      - uses: actions/cache@v4",
+    "        with:",
+    "          path: ~/.npm",
+    `          key: vector-cli-${cli.spec}-\${{ runner.os }}`,
     "      - name: Install Vector",
-    `        run: npm install -g ${CLI_PACKAGE}`,
+    `        run: ${install}`,
     "",
     "      - name: Run Vector",
     "        run: vector github run",
     "        env:",
+    `          VECTOR_WORKFLOW_VERSION: "${GITHUB_WORKFLOW_VERSION}"`,
     "          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}",
     "          VECTOR_CLI_TOKEN: ${{ secrets.VECTOR_CLI_TOKEN }}",
     '          USE_GITHUB_TOKEN: "true"',
