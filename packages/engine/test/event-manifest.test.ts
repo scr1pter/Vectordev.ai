@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { SessionEvent } from "@vectordevai/core/session/event"
+import { Integration } from "@vectordevai/schema/integration"
 import { EventManifest as SchemaEventManifest } from "@vectordevai/schema/event-manifest"
 import { Todo } from "@/session/todo"
 import { EventManifest } from "@/event-manifest"
@@ -9,7 +10,8 @@ describe("public event manifest", () => {
     expect(EventManifest.Definitions).toBe(SchemaEventManifest.Definitions)
     expect(EventManifest.Latest).toBe(SchemaEventManifest.Latest)
     expect(EventManifest.Durable).toBe(SchemaEventManifest.Durable)
-    expect(EventManifest.Latest.size).toBe(88)
+    expect(EventManifest.Latest.size).toBe(89)
+    expect(EventManifest.Latest.get("provider.unavailable")).toBe(Integration.Event.Unavailable)
     expect(EventManifest.Latest.get("session.next.step.ended")).toBe(SessionEvent.Step.Ended)
     expect(EventManifest.Latest.get("todo.updated")).toBe(Todo.Event.Updated)
     expect(EventManifest.Latest.has("ide.installed")).toBe(false)

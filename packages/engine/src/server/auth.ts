@@ -1,4 +1,3 @@
-import { configEnv } from "@vectordevai/core/flag/compat"
 export * as ServerAuth from "./auth"
 export { unauthorizedMessage } from "@vectordevai/server/auth"
 
@@ -40,10 +39,10 @@ export class Config extends Context.Service<Config, Info>()("@vector/ServerAuthC
       Effect.gen(function* () {
         return Config.of(
           yield* EffectConfig.all({
-            password: configEnv("VECTOR_SERVER_PASSWORD", EffectConfig.string).pipe(EffectConfig.option),
-            username: configEnv("VECTOR_SERVER_USERNAME", EffectConfig.string).pipe(EffectConfig.withDefault("vector")),
-            guestPassword: configEnv("VECTOR_SERVER_GUEST_PASSWORD", EffectConfig.string).pipe(EffectConfig.option),
-            guestUsername: configEnv("VECTOR_SERVER_GUEST_USERNAME", EffectConfig.string).pipe(
+            password: EffectConfig.string("VECTOR_SERVER_PASSWORD").pipe(EffectConfig.option),
+            username: EffectConfig.string("VECTOR_SERVER_USERNAME").pipe(EffectConfig.withDefault("vector")),
+            guestPassword: EffectConfig.string("VECTOR_SERVER_GUEST_PASSWORD").pipe(EffectConfig.option),
+            guestUsername: EffectConfig.string("VECTOR_SERVER_GUEST_USERNAME").pipe(
               EffectConfig.withDefault("guest"),
             ),
           }),

@@ -235,7 +235,7 @@ describe("SessionStatus.Info", () => {
       attempt: 1,
       message: "transient",
       action: {
-        reason: "account_rate_limit",
+        reason: "provider_rate_limit",
         provider: "openai",
         title: "Provider limit reached",
         message: "Check your provider account limits.",

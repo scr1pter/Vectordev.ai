@@ -17,9 +17,13 @@ describe("Provider.toClientInfo", () => {
   })
 
   test("keeps the sign-in markers clients use to tell a plan from a key", () => {
-    for (const marker of ["", "public", OAUTH_DUMMY_KEY]) {
+    for (const marker of ["", OAUTH_DUMMY_KEY]) {
       expect(Provider.toClientInfo(provider({ options: { apiKey: marker } })).options.apiKey).toBe(marker)
     }
+  })
+
+  test("the retired gateway marker is private like any configured key", () => {
+    expect(Provider.toClientInfo(provider({ options: { apiKey: "public" } })).options.apiKey).toBeUndefined()
   })
 
   test("drops nested credentials and auth headers but keeps ordinary options", () => {

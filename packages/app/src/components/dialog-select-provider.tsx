@@ -1,7 +1,7 @@
 import { providerEnabled } from "@vectordevai/schema/provider-policy"
 import { type Accessor, Component, Show } from "solid-js"
 import { useDialog } from "@vectordevai/ui/context/dialog"
-import { isHiddenProvider, popularProviders, useProviders } from "@/hooks/use-providers"
+import { popularProviders, useProviders } from "@/hooks/use-providers"
 import { Dialog } from "@vectordevai/ui/dialog"
 import { List } from "@vectordevai/ui/list"
 import { Tag } from "@vectordevai/ui/tag"
@@ -9,7 +9,7 @@ import { ProviderIcon } from "@vectordevai/ui/provider-icon"
 import { DialogConnectProvider } from "./dialog-connect-provider"
 import { useLanguage } from "@/context/language"
 import { DialogCustomProvider } from "./dialog-custom-provider"
-import { brandProviderDescription, brandProviderName } from "@/utils/provider-brand"
+import { brandProviderName, isHiddenProvider } from "@/utils/provider-brand"
 
 const CUSTOM_ID = "_custom"
 const providerDisplayName = (id: string, name: string) => brandProviderName(id, name)
@@ -23,8 +23,6 @@ export const DialogSelectProvider: Component<{ directory?: Accessor<string | und
   const otherGroup = () => language.t("dialog.provider.group.other")
   const customLabel = () => language.t("settings.providers.tag.custom")
   const note = (id: string) => {
-    const branded = brandProviderDescription(id)
-    if (branded) return branded
     if (id === "anthropic") return language.t("dialog.provider.anthropic.note")
     if (id === "openai") return language.t("dialog.provider.openai.note")
     if (!providerEnabled(id)) return language.t("dialog.provider.copilot.note")
@@ -32,7 +30,6 @@ export const DialogSelectProvider: Component<{ directory?: Accessor<string | und
 
   return (
     <Dialog title={language.t("command.provider.connect")} transition>
-      <div class="px-4 pt-3 pb-1 text-12-medium text-text-base">Connect a model provider:</div>
       <List
         class="px-3"
         search={{ placeholder: language.t("dialog.provider.search.placeholder"), autofocus: true }}

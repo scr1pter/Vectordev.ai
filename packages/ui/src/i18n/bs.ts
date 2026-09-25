@@ -47,18 +47,6 @@ export const dict = {
   "ui.sessionTurn.retry.attempt": "pokušaj #{{attempt}}",
   "ui.sessionTurn.retry.attemptLine": "{{line}} - pokušaj #{{attempt}}",
   "ui.sessionTurn.retry.geminiHot": "gemini je trenutno preopterećen",
-  "ui.sessionTurn.error.freeUsageExceeded": "Besplatna upotreba premašena",
-  "ui.sessionTurn.error.addCredits": "Dodaj kredite",
-
-  "dialog.usageExceeded.freeTier.title": "Dostignut limit uključenog modela",
-  "dialog.usageExceeded.freeTier.description":
-    "Ovaj model uključen u Vector je privremeno potrošio kvotu. Odaberite drugi uključeni model, povežite vlastiti ključ provajdera ili pokušajte ponovo kasnije.",
-  "dialog.usageExceeded.freeTier.actionLabel": "Odaberi model",
-  "dialog.usageExceeded.accountRateLimit.title": "Dostignut Go limit",
-  "dialog.usageExceeded.accountRateLimit.description":
-    "Dostignut je limit korištenja. Da nastavite koristiti ovaj model sada, omogućite korištenje iz vašeg dostupnog stanja",
-  "dialog.usageExceeded.accountRateLimit.actionLabel": "Otvori postavke",
-
   "ui.sessionTurn.status.delegating": "Delegiranje posla",
   "ui.sessionTurn.status.planning": "Planiranje sljedećih koraka",
   "ui.sessionTurn.status.gatheringContext": "Istraživanje",

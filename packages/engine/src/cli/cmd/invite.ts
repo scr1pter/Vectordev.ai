@@ -1,4 +1,3 @@
-import { readEnv } from "@vectordevai/core/flag/compat"
 import { Effect } from "effect"
 import { randomBytes } from "crypto"
 import open from "open"
@@ -42,7 +41,7 @@ export const InviteCommand = effectCmd({
       password: Flag.VECTOR_SERVER_PASSWORD || secret(),
     }
     const guest = {
-      username: readEnv("VECTOR_SERVER_GUEST_USERNAME") || GUEST_USERNAME,
+      username: process.env.VECTOR_SERVER_GUEST_USERNAME || GUEST_USERNAME,
       password: secret(),
     }
     process.env.VECTOR_SERVER_USERNAME = owner.username

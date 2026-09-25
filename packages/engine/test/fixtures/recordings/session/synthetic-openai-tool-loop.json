@@ -1,12 +1,12 @@
 {
   "version": 1,
   "metadata": {
-    "name": "session/native-openai-tool-loop",
+    "name": "session/synthetic-openai-tool-loop",
     "recordedAt": "2026-05-23T20:57:57.655Z",
     "provider": "openai",
     "protocol": "openai-responses",
     "route": "openai-responses",
-    "tags": ["vector", "native", "api-key", "tool-loop"],
+    "tags": ["vector", "synthetic", "api-key", "tool-loop"],
     "adaptedFrom": "Redacted native-openai-oauth-tool-loop response recording; requests adapted for API-key replay. No live API-key recording was made."
   },
   "interactions": [

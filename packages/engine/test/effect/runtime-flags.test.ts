@@ -10,13 +10,6 @@ const fromConfig = (input: Record<string, unknown>) =>
 const readFlags = RuntimeFlags.Service.useSync((flags) => flags)
 
 describe("RuntimeFlags", () => {
-  it.effect("layer defaults autoShare to false", () =>
-    Effect.gen(function* () {
-      const flags = yield* readFlags.pipe(Effect.provide(fromConfig({})))
-
-      expect(flags.autoShare).toBe(false)
-    }),
-  )
 
   it.effect("layer parses plugin flags from the active ConfigProvider", () =>
     Effect.gen(function* () {
@@ -25,7 +18,6 @@ describe("RuntimeFlags", () => {
           fromConfig({
             VECTOR_PURE: "true",
             VECTOR_DISABLE_DEFAULT_PLUGINS: "true",
-            VECTOR_AUTO_SHARE: "true",
             VECTOR_DISABLE_EMBEDDED_WEB_UI: "true",
             VECTOR_DISABLE_EXTERNAL_SKILLS: "true",
             VECTOR_DISABLE_LSP_DOWNLOAD: "true",
@@ -40,7 +32,6 @@ describe("RuntimeFlags", () => {
       )
 
       expect(flags.pure).toBe(true)
-      expect(flags.autoShare).toBe(true)
       expect(flags.disableDefaultPlugins).toBe(true)
       expect(flags.disableEmbeddedWebUi).toBe(true)
       expect(flags.disableExternalSkills).toBe(true)
@@ -106,7 +97,6 @@ describe("RuntimeFlags", () => {
       )
 
       expect(flags.pure).toBe(false)
-      expect(flags.autoShare).toBe(false)
       expect(flags.disableDefaultPlugins).toBe(true)
       expect(flags.disableEmbeddedWebUi).toBe(false)
       expect(flags.disableExternalSkills).toBe(false)

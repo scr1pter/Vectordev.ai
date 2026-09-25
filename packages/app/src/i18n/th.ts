@@ -83,10 +83,6 @@ export const dict = {
   "command.session.compact.description": "สรุปเซสชันเพื่อลดขนาดบริบท",
   "command.session.fork": "แตกแขนงจากข้อความ",
   "command.session.fork.description": "สร้างเซสชันใหม่จากข้อความก่อนหน้า",
-  "command.session.share": "แชร์เซสชัน",
-  "command.session.share.description": "แชร์เซสชันนี้และคัดลอก URL ไปยังคลิปบอร์ด",
-  "command.session.unshare": "ยกเลิกการแชร์เซสชัน",
-  "command.session.unshare.description": "หยุดการแชร์เซสชันนี้",
 
   "palette.search.placeholder": "ค้นหาไฟล์ คำสั่ง และเซสชัน",
   "palette.empty": "ไม่พบผลลัพธ์",
@@ -97,7 +93,6 @@ export const dict = {
   "dialog.provider.empty": "ไม่พบผู้ให้บริการ",
   "dialog.provider.group.popular": "ยอดนิยม",
   "dialog.provider.group.other": "อื่น ๆ",
-  "dialog.provider.tag.recommended": "แนะนำ",
   "dialog.provider.anthropic.note": "โมเดล Claude ด้วยคีย์ API ของ Anthropic ของคุณ",
   "dialog.provider.copilot.note":
     "การลงชื่อเข้าใช้ GitHub Copilot ถูกระงับชั่วคราวใน Vector โปรดเลือกผู้ให้บริการอื่นเพื่อดำเนินการต่อ",
@@ -199,7 +194,6 @@ export const dict = {
   "provider.disconnect.toast.disconnected.title": "{{provider}} ที่ยกเลิกการเชื่อมต่อแล้ว",
   "provider.disconnect.toast.disconnected.description": "โมเดล {{provider}} ไม่พร้อมใช้งานอีกต่อไป",
 
-  "model.tag.free": "ฟรี",
   "model.tag.latest": "ล่าสุด",
   "model.provider.anthropic": "Anthropic",
   "model.provider.openai": "OpenAI",
@@ -436,17 +430,6 @@ export const dict = {
   "toast.context.noLineSelection.title": "ไม่มีการเลือกบรรทัด",
   "toast.context.noLineSelection.description": "เลือกช่วงบรรทัดในแท็บไฟล์ก่อน",
 
-  "toast.session.share.copyFailed.title": "ไม่สามารถคัดลอก URL ไปยังคลิปบอร์ด",
-  "toast.session.share.success.title": "แชร์เซสชันแล้ว",
-  "toast.session.share.success.description": "คัดลอก URL แชร์ไปยังคลิปบอร์ดแล้ว!",
-  "toast.session.share.failed.title": "ไม่สามารถแชร์เซสชัน",
-  "toast.session.share.failed.description": "เกิดข้อผิดพลาดระหว่างการแชร์เซสชัน",
-
-  "toast.session.unshare.success.title": "ยกเลิกการแชร์เซสชันแล้ว",
-  "toast.session.unshare.success.description": "ยกเลิกการแชร์เซสชันสำเร็จ!",
-  "toast.session.unshare.failed.title": "ไม่สามารถยกเลิกการแชร์เซสชัน",
-  "toast.session.unshare.failed.description": "เกิดข้อผิดพลาดระหว่างการยกเลิกการแชร์เซสชัน",
-
   "toast.session.listFailed.title": "ไม่สามารถโหลดเซสชันสำหรับ {{project}}",
 
   "toast.update.title": "มีการอัปเดต",
@@ -570,17 +553,7 @@ export const dict = {
   "status.popover.tab.plugins": "ปลั๊กอิน",
   "status.popover.action.manageServers": "จัดการเซิร์ฟเวอร์",
 
-  "session.share.popover.title": "เผยแพร่บนเว็บ",
-  "session.share.popover.description.shared": "เซสชันนี้เป็นสาธารณะบนเว็บ สามารถเข้าถึงได้โดยผู้ที่มีลิงก์",
-  "session.share.popover.description.unshared": "แชร์เซสชันสาธารณะบนเว็บ จะเข้าถึงได้โดยผู้ที่มีลิงก์",
-  "session.share.action.share": "แชร์",
-  "session.share.action.publish": "เผยแพร่",
-  "session.share.action.publishing": "กำลังเผยแพร่...",
-  "session.share.action.unpublish": "ยกเลิกการเผยแพร่",
-  "session.share.action.unpublishing": "กำลังยกเลิกการเผยแพร่...",
-  "session.share.action.view": "ดู",
   "session.share.copy.copied": "คัดลอกแล้ว",
-  "session.share.copy.copyLink": "คัดลอกลิงก์",
 
   "lsp.tooltip.none": "ไม่มีเซิร์ฟเวอร์ LSP",
   "lsp.label.connected": "{{count}} LSP",

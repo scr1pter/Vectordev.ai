@@ -1440,7 +1440,6 @@ export type GlobalEvent = {
           command:
             | "session.list"
             | "session.new"
-            | "session.share"
             | "session.interrupt"
             | "session.compact"
             | "session.page.up"
@@ -2774,7 +2773,6 @@ export type EventTuiCommandExecute = {
     command:
       | "session.list"
       | "session.new"
-      | "session.share"
       | "session.interrupt"
       | "session.compact"
       | "session.page.up"
@@ -3126,7 +3124,6 @@ export type EventTuiCommandExecute2 = {
     command:
       | "session.list"
       | "session.new"
-      | "session.share"
       | "session.interrupt"
       | "session.compact"
       | "session.page.up"
@@ -5945,7 +5942,6 @@ export type TuiCommandExecute = {
     command:
       | "session.list"
       | "session.new"
-      | "session.share"
       | "session.interrupt"
       | "session.compact"
       | "session.page.up"

@@ -1,4 +1,3 @@
-import { readEnv } from "@vectordevai/core/flag/compat"
 import { randomUUID } from "node:crypto"
 import { mkdirSync, rmSync } from "node:fs"
 import * as http from "node:http"
@@ -67,7 +66,7 @@ const APP_IDS: Record<string, string> = {
   beta: "ai.vector.app.beta",
   prod: "ai.vector.app",
 }
-const TEST_ONBOARDING = readEnv("VECTOR_TEST_ONBOARDING") === "1"
+const TEST_ONBOARDING = process.env.VECTOR_TEST_ONBOARDING === "1"
 const jsCallStackFeature = "DocumentPolicyIncludeJSCallStacksInCrashReports"
 
 let logger: ReturnType<typeof initLogging>
@@ -399,7 +398,7 @@ const main = Effect.gen(function* () {
   )
 
   const port = yield* Effect.gen(function* () {
-    const fromEnv = readEnv("VECTOR_PORT")
+    const fromEnv = process.env.VECTOR_PORT
     if (fromEnv) {
       const parsed = Number.parseInt(fromEnv, 10)
       if (!Number.isNaN(parsed)) return parsed

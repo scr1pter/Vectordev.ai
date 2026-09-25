@@ -43,18 +43,6 @@ export const dict = {
   "ui.sessionTurn.retry.attempt": "المحاولة رقم {{attempt}}",
   "ui.sessionTurn.retry.attemptLine": "{{line}} - المحاولة رقم {{attempt}}",
   "ui.sessionTurn.retry.geminiHot": "gemini مزدحم حاليا",
-  "ui.sessionTurn.error.freeUsageExceeded": "تم تجاوز حد الاستخدام المجاني",
-  "ui.sessionTurn.error.addCredits": "إضافة رصيد",
-
-  "dialog.usageExceeded.freeTier.title": "تم الوصول إلى حد النموذج المضمَّن في Vector",
-  "dialog.usageExceeded.freeTier.description":
-    "نفدت حصة هذا النموذج المضمَّن في Vector مؤقتًا. اختر نموذجًا مضمَّنًا آخر، أو اربط مفتاح الموفر الخاص بك، أو حاول مرة أخرى لاحقًا.",
-  "dialog.usageExceeded.freeTier.actionLabel": "اختر نموذجًا",
-  "dialog.usageExceeded.accountRateLimit.title": "تم الوصول إلى حد Go",
-  "dialog.usageExceeded.accountRateLimit.description":
-    "تم الوصول إلى حد الاستخدام. لمتابعة استخدام هذا النموذج الآن، قم بتفعيل الاستخدام من رصيدك المتاح",
-  "dialog.usageExceeded.accountRateLimit.actionLabel": "فتح الإعدادات",
-
   "ui.sessionTurn.status.delegating": "تفويض العمل",
   "ui.sessionTurn.status.planning": "تخطيط الخطوات التالية",
   "ui.sessionTurn.status.gatheringContext": "استكشاف",

@@ -74,7 +74,7 @@ const STATE: ReviewState = {
 const usage = { input: 17_200, output: 3_100, reasoning: 0, cacheRead: 31_000, cacheWrite: 0 }
 const priced: ReviewCost = { ...usage, costUsd: 0.21, kind: "priced", model: "anthropic/claude-sonnet-4-5" }
 const plain = { input: 48_200, output: 3_100, reasoning: 0, cacheRead: 0, cacheWrite: 0, costUsd: 0 }
-const free: ReviewCost = { ...plain, kind: "free", model: "openai/gpt-4.1" }
+const zeroCost: ReviewCost = { ...plain, kind: "priced", model: "openai/gpt-4.1" }
 const plan: ReviewCost = { ...plain, kind: "plan", model: "openai/gpt-5" }
 const unknown: ReviewCost = { ...plain, kind: "unknown", model: "provider/model" }
 
@@ -294,7 +294,7 @@ const NO_FINDINGS: SummaryInput = {
     { path: "src/util/format.ts", additions: 4, deletions: 4 },
     { path: "src/app.ts", additions: 2, deletions: 2 },
   ],
-  cost: free,
+  cost: zeroCost,
   durationMs: 48_000,
   prTotal: { costUsd: 0, reviews: 1 },
   runUrl: RUN_URL,
@@ -356,13 +356,13 @@ describe("the summary comment", () => {
     expect(body).toContain(`## Vectorscope review · Risk: High\n\n> ${banner}\n\n`)
   })
 
-  test("no findings, on a model included with Vector", async () => {
+  test("no findings, with a known zero-dollar cost", async () => {
     const body = buildSummaryBody(NO_FINDINGS)
     await golden("no-findings", body)
     expect(body).toContain("**No issues found** on the changed lines.")
     expect(body).toContain("_2 files changed (code)._")
     expect(body).toContain(
-      "openai/gpt-4.1 · included with Vector (48.2k in / 3.1k out) · 48s · this pull request: 1 review",
+      "openai/gpt-4.1 · $0.00 (48.2k in / 3.1k out) · 48s · this pull request: 1 review",
     )
   })
 
@@ -815,7 +815,7 @@ describe("capBody", () => {
 describe("numbers and cost", () => {
   test("costWording for every kind", () => {
     expect(costWording(priced)).toBe("anthropic/claude-sonnet-4-5 · $0.21 (48.2k in, 31.0k of it cached / 3.1k out)")
-    expect(costWording(free)).toBe("openai/gpt-4.1 · included with Vector (48.2k in / 3.1k out)")
+    expect(costWording(zeroCost)).toBe("openai/gpt-4.1 · $0.00 (48.2k in / 3.1k out)")
     expect(costWording(plan)).toBe("openai/gpt-5 · subscription sign-in, no per-token price (48.2k in / 3.1k out)")
     expect(costWording(unknown)).toBe(
       "provider/model · cost unknown: no price is listed for this model (48.2k in / 3.1k out)",

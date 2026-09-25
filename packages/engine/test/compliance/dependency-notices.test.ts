@@ -8,8 +8,25 @@ const root = path.resolve(import.meta.dir, "../../../..")
 async function fixture() {
   const dir = await mkdtemp(path.join(os.tmpdir(), "vector-notices-"))
   await Bun.write(
-    path.join(dir, "script/dependency-notices.ts"),
-    Bun.file(path.join(root, "script/dependency-notices.ts")),
+    path.join(dir, "bun.lock"),
+    JSON.stringify({
+      packages: {
+        unavailable: ["unavailable@1.0.0", "", { os: "win32" }, "sha512-fixture"],
+      },
+    }),
+  )
+  await Bun.write(
+    path.join(dir, "licenses/dependencies/platform-notices.json"),
+    JSON.stringify({
+      "unavailable@1.0.0": {
+        name: "unavailable",
+        version: "1.0.0",
+        license: "MIT",
+        integrity: "sha512-fixture",
+        source: "https://registry.npmjs.org/unavailable/-/unavailable-1.0.0.tgz",
+        texts: ["Copyright (c) fixture unavailable\nPermission fixture for unavailable"],
+      },
+    }),
   )
   for (const name of ["engine", "app", "desktop", "tui", "ui"]) {
     await Bun.write(
@@ -43,12 +60,19 @@ async function fixture() {
 }
 
 async function generate(dir: string) {
-  const proc = Bun.spawn([process.execPath, "script/dependency-notices.ts"], {
-    cwd: dir,
-    env: { PATH: process.env.PATH, HOME: path.join(dir, "home") },
-    stdout: "pipe",
-    stderr: "pipe",
-  })
+  const proc = Bun.spawn(
+    [
+      process.execPath,
+      "--eval",
+      `import { dependencyNotices } from ${JSON.stringify(path.join(root, "script/dependency-notices.ts"))}; const result = await dependencyNotices(${JSON.stringify(dir)}); await Bun.write(${JSON.stringify(path.join(dir, "DEPENDENCY_NOTICES.md"))}, result.body);`,
+    ],
+    {
+      cwd: dir,
+      env: { PATH: process.env.PATH, HOME: path.join(dir, "home") },
+      stdout: "pipe",
+      stderr: "pipe",
+    },
+  )
   const [stdout, stderr, code] = await Promise.all([
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),
@@ -62,13 +86,12 @@ test("notices traverse cycles and native optional dependencies, include renderer
   const result = await generate(tmp.dir)
   expect(result.code, result.stderr).toBe(0)
   const output = await Bun.file(path.join(tmp.dir, "DEPENDENCY_NOTICES.md")).text()
-  for (const name of ["direct", "transitive", "installed", "renderer", "electron"]) {
+  for (const name of ["direct", "transitive", "installed", "unavailable", "renderer", "electron"]) {
     expect(output).toContain(`## ${name}@1.0.0\n\nLicense: MIT`)
     expect(output).toContain(`Copyright (c) fixture ${name}\nPermission fixture for ${name}`)
     expect(output.split(`## ${name}@1.0.0`).length).toBe(2)
   }
   expect(output).not.toContain("## buildtool@")
-  expect(output).not.toContain("## unavailable@")
 })
 
 test("missing notice text fails closed and an explicit provenance file is copied without inventing attribution", async () => {

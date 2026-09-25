@@ -102,9 +102,9 @@ describe("Vector installation", () => {
   testEffect(
     testLayer(
       () => jsonResponse({}),
-      () => "vector-ai@1.18.0",
+      () => "other-cli@1.18.0",
     ),
-  ).effect("never mistakes a separate Vector package for Vector", () =>
+  ).effect("never mistakes an unrelated package for Vector", () =>
     Effect.gen(function* () {
       expect(yield* Installation.use.method()).toBe("unknown")
     }),

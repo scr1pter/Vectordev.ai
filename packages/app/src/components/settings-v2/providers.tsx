@@ -13,7 +13,7 @@ import { DialogConnectProvider } from "../dialog-connect-provider"
 import { DialogSelectProvider } from "../dialog-select-provider"
 import { DialogCustomProvider } from "../dialog-custom-provider"
 import { SettingsListV2 } from "./parts/list"
-import { brandProviderDescription, brandProviderName } from "@/utils/provider-brand"
+import { brandProviderName } from "@/utils/provider-brand"
 import "./settings-v2.css"
 
 type ProviderSource = "env" | "api" | "config" | "custom"
@@ -32,8 +32,6 @@ const PROVIDER_ICON_SIZE = 16
 const HIDDEN_PROVIDER_IDS = new Set<string>()
 
 const providerDisplayName = (id: string, name: string) => brandProviderName(id, name)
-
-const vectorProviderDescription = (id: string) => brandProviderDescription(id)
 
 export const SettingsProvidersV2: Component = () => {
   const dialog = useDialog()
@@ -80,8 +78,6 @@ export const SettingsProvidersV2: Component = () => {
 
   const note = (id: string) => PROVIDER_NOTES.find((item) => item.match(id))?.key
   const description = (id: string) => {
-    const vector = vectorProviderDescription(id)
-    if (vector) return vector
     const key = note(id)
     return key ? language.t(key) : undefined
   }

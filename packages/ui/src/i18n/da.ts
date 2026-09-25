@@ -42,18 +42,6 @@ export const dict = {
   "ui.sessionTurn.retry.attempt": "forsøg #{{attempt}}",
   "ui.sessionTurn.retry.attemptLine": "{{line}} - forsøg #{{attempt}}",
   "ui.sessionTurn.retry.geminiHot": "gemini er meget overbelastet lige nu",
-  "ui.sessionTurn.error.freeUsageExceeded": "Gratis forbrug overskredet",
-  "ui.sessionTurn.error.addCredits": "Tilføj kreditter",
-
-  "dialog.usageExceeded.freeTier.title": "Grænse for inkluderet model nået",
-  "dialog.usageExceeded.freeTier.description":
-    "Denne model, der er inkluderet i Vector, har midlertidigt opbrugt sin kvote. Vælg en anden inkluderet model, forbind din egen udbydernøgle, eller prøv igen senere.",
-  "dialog.usageExceeded.freeTier.actionLabel": "Vælg model",
-  "dialog.usageExceeded.accountRateLimit.title": "Go-grænse nået",
-  "dialog.usageExceeded.accountRateLimit.description":
-    "Forbrugsgrænse nået. For at fortsætte med at bruge denne model nu, aktivér forbrug fra din tilgængelige saldo",
-  "dialog.usageExceeded.accountRateLimit.actionLabel": "Åbn indstillinger",
-
   "ui.sessionTurn.status.delegating": "Delegerer arbejde",
   "ui.sessionTurn.status.planning": "Planlægger næste trin",
   "ui.sessionTurn.status.gatheringContext": "Udforsker",

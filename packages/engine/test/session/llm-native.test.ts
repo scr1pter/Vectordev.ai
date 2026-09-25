@@ -396,11 +396,18 @@ describe("session.llm-native.request", () => {
       expect(
         LLMNativeRuntime.status({
           model: { ...baseModel, providerID: ProviderV2.ID.make(id) },
-          provider: { ...providerInfo, id: ProviderV2.ID.make(id) },
+          provider: { ...providerInfo, id: ProviderV2.ID.make(id), source: "api" },
           auth: { type: "api", key: "user-supplied-key" },
         }),
       ).toEqual({ type: "unsupported", reason: "provider is not supported" })
     }
+    expect(
+      LLMNativeRuntime.status({
+        model: { ...baseModel, providerID: ProviderV2.ID.make("configured-local") },
+        provider: { ...providerInfo, id: ProviderV2.ID.make("configured-local") },
+        auth: { type: "api", key: "user-supplied-key" },
+      }),
+    ).toEqual({ type: "unsupported", reason: "provider is not openai or anthropic" })
     expect(
       LLMNativeRuntime.status({
         model: baseModel,

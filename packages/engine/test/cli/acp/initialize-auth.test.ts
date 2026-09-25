@@ -35,7 +35,7 @@ describe("vector acp initialize/auth subprocess", () => {
 
         expect(initialized.authMethods?.[0]?.id).toBe("vector-login")
         expect(initialized.authMethods?.[0]?._meta?.["terminal-auth"]).toBeDefined()
-        for (const methodId of ["vector-login", "vector-login"]) {
+        for (const methodId of ["vector-login"]) {
           expect(yield* acp.request<AuthenticateResponse>("authenticate", { methodId })).toMatchObject({ result: {} })
         }
 

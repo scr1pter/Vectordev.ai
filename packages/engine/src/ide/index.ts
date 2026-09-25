@@ -1,4 +1,3 @@
-import { readEnv } from "@vectordevai/core/flag/compat"
 import { IdeEvent } from "@vectordevai/schema/ide-event"
 
 const SUPPORTED_IDES = [
@@ -22,7 +21,7 @@ export function ide() {
 }
 
 export function alreadyInstalled() {
-  return readEnv("VECTOR_CALLER") === "vscode" || readEnv("VECTOR_CALLER") === "vscode-insiders"
+  return process.env.VECTOR_CALLER === "vscode" || process.env.VECTOR_CALLER === "vscode-insiders"
 }
 
 export * as Ide from "."

@@ -16,7 +16,7 @@ const engine = path.resolve(dir, "../../engine")
 // Always follow it with a normal build so committed output comes from the current server.
 const bootstrap = process.argv.includes("--bootstrap")
 if (bootstrap) await Bun.write(`${dir}/openapi.json`, Bun.file(path.resolve(dir, "../openapi.json")))
-else {
+if (!bootstrap) {
   await $`bun dev generate > ${dir}/openapi.json`.cwd(engine)
   await Bun.write(path.resolve(dir, "../openapi.json"), Bun.file(`${dir}/openapi.json`))
 }
@@ -41,9 +41,9 @@ if (schemas) {
         if (reachable.has(name)) continue
         reachable.add(name)
         visit(schemas[name])
-      } else {
-        visit(child)
+        continue
       }
+      visit(child)
     }
   }
   visit({ ...document, components: { ...document.components, schemas: undefined } })

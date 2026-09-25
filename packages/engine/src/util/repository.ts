@@ -1,4 +1,3 @@
-import { readEnv } from "@vectordevai/core/flag/compat"
 import path from "path"
 import { fileURLToPath } from "url"
 import { Schema } from "effect"
@@ -98,7 +97,7 @@ function withSlash(input: string) {
 }
 
 function githubRemote(pathname: string) {
-  const base = readEnv("VECTOR_REPO_CLONE_GITHUB_BASE_URL")
+  const base = process.env.VECTOR_REPO_CLONE_GITHUB_BASE_URL
   if (!base) return `https://github.com/${pathname}.git`
   return new URL(`${pathname}.git`, withSlash(base)).href
 }

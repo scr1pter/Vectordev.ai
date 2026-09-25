@@ -32,7 +32,7 @@ export type PatchDeps = {
   readText: (file: string) => Promise<string>
   write: (file: string, text: string) => Promise<void>
   exists: (file: string) => Promise<boolean>
-  files: (dir: string, name: "vector" | "vector" | "tui") => string[]
+  files: (dir: string, name: "vector" | "tui") => string[]
 }
 
 export type PatchInput = {
@@ -338,7 +338,7 @@ function patchDir(input: PatchInput) {
   return path.join(root, ".vector")
 }
 
-function patchName(kind: Kind): "vector" | "vector" | "tui" {
+function patchName(kind: Kind): "vector" | "tui" {
   if (kind === "server") return "vector"
   return "tui"
 }
@@ -348,19 +348,8 @@ async function patchOne(dir: string, target: Target, spec: string, force: boolea
   await using _ = await Flock.acquire(`plug-config:${Filesystem.resolve(path.join(dir, name))}`)
 
   const files = dep.files(dir, name)
-  const legacyDir = path.basename(dir) === ".vector" ? path.join(path.dirname(dir), ".vector") : dir
-  const legacy =
-    target.kind === "server"
-      ? [...dep.files(dir, "vector"), ...dep.files(legacyDir, "vector")]
-      : legacyDir !== dir
-        ? dep.files(legacyDir, "tui")
-        : []
   const source =
-    (await Promise.all([...files, ...legacy].map(async (file) => ((await dep.exists(file)) ? file : undefined)))).find(
-      (file) => file !== undefined,
-    ) ?? files[0]
-  // Keep existing files in place: moving them would reinterpret relative plugin and command paths.
-  const cfg = source
+    (await Promise.all(files.map(async (file) => ((await dep.exists(file)) ? file : undefined)))).find(Boolean) ?? files[0]
 
   const src = await dep.readText(source).catch((err: NodeJS.ErrnoException) => {
     if (err.code === "ENOENT") return "{}"
@@ -385,7 +374,7 @@ async function patchOne(dir: string, target: Target, spec: string, force: boolea
       ok: false,
       code: "invalid_json",
       kind: target.kind,
-      file: cfg,
+      file: source,
       line: lines.length,
       col: lines[lines.length - 1].length + 1,
       parse: printParseErrorCode(err.error),
@@ -401,13 +390,13 @@ async function patchOne(dir: string, target: Target, spec: string, force: boolea
       item: {
         kind: target.kind,
         mode: out.mode,
-        file: cfg,
+        file: source,
       },
     }
   }
 
   const write = await dep
-    .write(cfg, ConfigSchema.rewrite(out.text, target.kind === "server" ? "config" : "tui"))
+    .write(source, ConfigSchema.rewrite(out.text, target.kind === "server" ? "config" : "tui"))
     .catch((error: unknown) => error)
   if (write instanceof Error) {
     return {
@@ -423,7 +412,7 @@ async function patchOne(dir: string, target: Target, spec: string, force: boolea
     item: {
       kind: target.kind,
       mode: out.mode,
-      file: cfg,
+      file: source,
     },
   }
 }

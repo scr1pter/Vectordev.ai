@@ -1,4 +1,3 @@
-import { readEnv } from "../flag/compat"
 export * as WebSearchTool from "./websearch"
 
 import { ToolFailure } from "@vectordevai/llm"
@@ -72,7 +71,7 @@ export class ConfigService extends Context.Service<ConfigService, Config>()("@ve
 
 /** Isolates the retained product environment contract from the generic tool implementation. */
 export const defaultConfigLayer = Layer.sync(ConfigService, () => {
-  const provider = readEnv("VECTOR_WEBSEARCH_PROVIDER")
+  const provider = process.env.VECTOR_WEBSEARCH_PROVIDER
   return ConfigService.of({
     provider: provider === "exa" || provider === "parallel" ? provider : undefined,
     enableExa: truthy("VECTOR_EXPERIMENTAL") || truthy("VECTOR_ENABLE_EXA") || truthy("VECTOR_EXPERIMENTAL_EXA"),

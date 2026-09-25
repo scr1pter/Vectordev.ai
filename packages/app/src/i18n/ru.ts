@@ -83,10 +83,6 @@ export const dict = {
   "command.session.compact.description": "Сократить сессию для уменьшения размера контекста",
   "command.session.fork": "Создать ответвление",
   "command.session.fork.description": "Создать новую сессию из сообщения",
-  "command.session.share": "Поделиться сессией",
-  "command.session.share.description": "Поделиться сессией и скопировать URL в буфер обмена",
-  "command.session.unshare": "Отменить публикацию",
-  "command.session.unshare.description": "Прекратить публикацию сессии",
 
   "palette.search.placeholder": "Поиск файлов, команд и сессий",
   "palette.empty": "Ничего не найдено",
@@ -97,7 +93,6 @@ export const dict = {
   "dialog.provider.empty": "Провайдеры не найдены",
   "dialog.provider.group.popular": "Популярные",
   "dialog.provider.group.other": "Другие",
-  "dialog.provider.tag.recommended": "Рекомендуемые",
   "dialog.provider.anthropic.note": "Модели Claude с вашим API-ключом Anthropic",
   "dialog.provider.copilot.note":
     "Вход в GitHub Copilot сейчас приостановлен в Vector. Выберите другого провайдера, чтобы продолжить.",
@@ -200,7 +195,6 @@ export const dict = {
 
   "provider.disconnect.toast.disconnected.title": "{{provider}} отключён",
   "provider.disconnect.toast.disconnected.description": "Модели {{provider}} больше недоступны.",
-  "model.tag.free": "Бесплатно",
   "model.tag.latest": "Последняя",
   "model.provider.anthropic": "Anthropic",
   "model.provider.openai": "OpenAI",
@@ -438,16 +432,6 @@ export const dict = {
   "toast.file.listFailed.title": "Не удалось получить список файлов",
   "toast.context.noLineSelection.title": "Нет выделения строк",
   "toast.context.noLineSelection.description": "Сначала выберите диапазон строк во вкладке файла.",
-  "toast.session.share.copyFailed.title": "Не удалось скопировать URL в буфер обмена",
-  "toast.session.share.success.title": "Сессия опубликована",
-  "toast.session.share.success.description": "URL скопирован в буфер обмена!",
-  "toast.session.share.failed.title": "Не удалось опубликовать сессию",
-  "toast.session.share.failed.description": "Произошла ошибка при публикации сессии",
-
-  "toast.session.unshare.success.title": "Публикация отменена",
-  "toast.session.unshare.success.description": "Публикация успешно отменена!",
-  "toast.session.unshare.failed.title": "Не удалось отменить публикацию",
-  "toast.session.unshare.failed.description": "Произошла ошибка при отмене публикации",
 
   "toast.session.listFailed.title": "Не удалось загрузить сессии для {{project}}",
 
@@ -574,19 +558,7 @@ export const dict = {
   "status.popover.tab.plugins": "Плагины",
   "status.popover.action.manageServers": "Управлять серверами",
 
-  "session.share.popover.title": "Опубликовать в интернете",
-  "session.share.popover.description.shared":
-    "Эта сессия общедоступна. Доступ к ней может получить любой, у кого есть ссылка.",
-  "session.share.popover.description.unshared":
-    "Опубликуйте сессию в интернете. Доступ к ней сможет получить любой, у кого есть ссылка.",
-  "session.share.action.share": "Поделиться",
-  "session.share.action.publish": "Опубликовать",
-  "session.share.action.publishing": "Публикация...",
-  "session.share.action.unpublish": "Отменить публикацию",
-  "session.share.action.unpublishing": "Отмена публикации...",
-  "session.share.action.view": "Посмотреть",
   "session.share.copy.copied": "Скопировано",
-  "session.share.copy.copyLink": "Копировать ссылку",
 
   "lsp.tooltip.none": "Нет LSP серверов",
   "lsp.label.connected": "{{count}} LSP",

@@ -43,18 +43,6 @@ export const dict = {
   "ui.sessionTurn.retry.attempt": "intento #{{attempt}}",
   "ui.sessionTurn.retry.attemptLine": "{{line}} - intento #{{attempt}}",
   "ui.sessionTurn.retry.geminiHot": "gemini está demasiado saturado",
-  "ui.sessionTurn.error.freeUsageExceeded": "Límite de uso gratuito excedido",
-  "ui.sessionTurn.error.addCredits": "Añadir créditos",
-
-  "dialog.usageExceeded.freeTier.title": "Límite del modelo incluido alcanzado",
-  "dialog.usageExceeded.freeTier.description":
-    "Este modelo incluido con Vector se ha quedado temporalmente sin cuota. Elige otro modelo incluido, conecta tu propia clave de proveedor o vuelve a intentarlo más tarde.",
-  "dialog.usageExceeded.freeTier.actionLabel": "Elegir modelo",
-  "dialog.usageExceeded.accountRateLimit.title": "Límite de Go alcanzado",
-  "dialog.usageExceeded.accountRateLimit.description":
-    "Límite de uso alcanzado. Para seguir usando este modelo ahora, habilita el uso desde tu saldo disponible",
-  "dialog.usageExceeded.accountRateLimit.actionLabel": "Abrir configuración",
-
   "ui.sessionTurn.status.delegating": "Delegando trabajo",
   "ui.sessionTurn.status.planning": "Planificando siguientes pasos",
   "ui.sessionTurn.status.gatheringContext": "Explorando",

@@ -1059,11 +1059,8 @@ export function toPublicInfo(provider: Info): Info {
   )
 }
 
-// Values of options.apiKey a client may see. They are markers, not secrets: the
-// free gateway runs on the literal "public", a subscription sign-in sets
-// OAUTH_DUMMY_KEY, and the Copilot sign-in leaves it empty. Clients compare
-// against them to tell a plan from a key. Every other string is a real key.
-const CLIENT_VISIBLE_API_KEYS = new Set<string>(["", "public", OAUTH_DUMMY_KEY])
+// These sign-in placeholders contain no credentials. All other key values stay private.
+const CLIENT_VISIBLE_API_KEYS = new Set<string>(["", OAUTH_DUMMY_KEY])
 // Matched against the end of a field name, so "sessionToken" and "api_key" go
 // while "maxTokens" stays.
 const SECRET_FIELD = /(key|secret|token|password|passphrase|credentials?|authorization|cookie|accesskeyid)$/i

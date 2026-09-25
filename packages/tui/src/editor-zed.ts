@@ -1,4 +1,3 @@
-import { readEnv } from "@vectordevai/core/flag/compat"
 import { Database } from "bun:sqlite"
 import { statSync } from "node:fs"
 import { readFile as readFileAsync } from "node:fs/promises"
@@ -187,7 +186,7 @@ function isZedActiveEditorRow(row: ZedEditorRow): row is ZedActiveEditorRow {
 
 export function resolveZedDbPath() {
   const candidates = [
-    readEnv("VECTOR_ZED_DB"),
+    process.env.VECTOR_ZED_DB,
     path.join(os.homedir(), "Library", "Application Support", "Zed", "db", "0-stable", "db.sqlite"),
     path.join(os.homedir(), ".local", "share", "zed", "db", "0-stable", "db.sqlite"),
   ].filter((item): item is string => Boolean(item))

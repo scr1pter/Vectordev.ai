@@ -49,18 +49,6 @@ export const dict = {
   "ui.sessionTurn.retry.attempt": "deneme #{{attempt}}",
   "ui.sessionTurn.retry.attemptLine": "{{line}} - deneme #{{attempt}}",
   "ui.sessionTurn.retry.geminiHot": "gemini şu anda aşırı yoğun",
-  "ui.sessionTurn.error.freeUsageExceeded": "Ücretsiz kullanım aşıldı",
-  "ui.sessionTurn.error.addCredits": "Kredi ekle",
-
-  "dialog.usageExceeded.freeTier.title": "Vector'a dahil model sınırına ulaşıldı",
-  "dialog.usageExceeded.freeTier.description":
-    "Vector'a dahil olan bu modelin kotası geçici olarak doldu. Vector'a dahil başka bir model seçin, kendi sağlayıcı anahtarınızı bağlayın veya daha sonra tekrar deneyin.",
-  "dialog.usageExceeded.freeTier.actionLabel": "Model seç",
-  "dialog.usageExceeded.accountRateLimit.title": "Go sınırına ulaşıldı",
-  "dialog.usageExceeded.accountRateLimit.description":
-    "Kullanım sınırına ulaşıldı. Bu modeli şimdi kullanmaya devam etmek için mevcut bakiyenizden kullanımı etkinleştirin",
-  "dialog.usageExceeded.accountRateLimit.actionLabel": "Ayarları aç",
-
   "ui.sessionTurn.status.delegating": "Görev devrediliyor",
   "ui.sessionTurn.status.planning": "Sonraki adımlar planlanıyor",
   "ui.sessionTurn.status.gatheringContext": "Keşfediliyor",

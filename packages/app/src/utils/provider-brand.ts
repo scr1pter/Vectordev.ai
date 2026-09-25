@@ -7,18 +7,13 @@ export function brandProviderName(id: string, name?: string | null): string {
   return name?.trim() || id
 }
 
-export function brandProviderDescription(_id: string): string | undefined {
-  return undefined
-}
-
 /* ---- Model picker ------------------------------------------------------------
    Pure helpers behind the model picker (components/dialog-select-model.tsx). They
    live in this module, not the component, so bun can unit-test them: importing the
    .tsx pulls in Solid's client-only build.
 
-   Never read, return or log provider.key here. /provider ships stored API keys to
-   the renderer, and the picker must not surface them. The only option read is
-   provider.options.apiKey, compared against the known markers below. */
+   The provider response removes credentials. The picker only reads the harmless
+   sign-in placeholder in provider.options.apiKey. */
 
 /** The fields the picker reads. Structural, so tests can pass plain objects. */
 export type PickerModel = {
@@ -53,7 +48,7 @@ export type PickerModel = {
     A missing field never hides a model. `capabilities` is read first, the config shape
     (tool_call, modalities.output) fills a gap, and with neither the model stays. The server
     reports every output flag false when a catalogue entry has no modalities
-    (vector/src/provider/provider.ts), so an output record with nothing set counts as
+    (engine/src/provider/provider.ts), so an output record with nothing set counts as
     missing too. */
 const VOICE_MODEL = /realtime|audio|tts|transcribe|(^|[-_.])live([-_.]|$)/i
 

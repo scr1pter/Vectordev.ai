@@ -1,4 +1,3 @@
-import { readEnv } from "@vectordevai/core/flag/compat"
 // Dev-only JSONL event trace for direct interactive mode.
 //
 // Enable with VECTOR_DIRECT_TRACE=1. Writes one JSON line per event to
@@ -56,7 +55,7 @@ export function trace(): Trace | undefined {
     return state || undefined
   }
 
-  if (!readEnv("VECTOR_DIRECT_TRACE")) {
+  if (!process.env.VECTOR_DIRECT_TRACE) {
     state = false
     return undefined
   }

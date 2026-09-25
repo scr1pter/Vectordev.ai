@@ -46,18 +46,6 @@ export const dict: Record<Keys, string> = {
   "ui.sessionTurn.retry.attempt": "forsøk #{{attempt}}",
   "ui.sessionTurn.retry.attemptLine": "{{line}} - forsøk #{{attempt}}",
   "ui.sessionTurn.retry.geminiHot": "gemini er veldig overbelastet nå",
-  "ui.sessionTurn.error.freeUsageExceeded": "Gratis bruk overskredet",
-  "ui.sessionTurn.error.addCredits": "Legg til kreditt",
-
-  "dialog.usageExceeded.freeTier.title": "Grense for inkludert modell nådd",
-  "dialog.usageExceeded.freeTier.description":
-    "Denne modellen, som er inkludert i Vector, har midlertidig brukt opp kvoten sin. Velg en annen inkludert modell, koble til din egen leverandørnøkkel, eller prøv igjen senere.",
-  "dialog.usageExceeded.freeTier.actionLabel": "Velg modell",
-  "dialog.usageExceeded.accountRateLimit.title": "Go-grense nådd",
-  "dialog.usageExceeded.accountRateLimit.description":
-    "Bruksgrense nådd. For å fortsette å bruke denne modellen nå, aktiver bruk fra din tilgjengelige saldo",
-  "dialog.usageExceeded.accountRateLimit.actionLabel": "Åpne innstillinger",
-
   "ui.sessionTurn.status.delegating": "Delegerer arbeid",
   "ui.sessionTurn.status.planning": "Planlegger neste trinn",
   "ui.sessionTurn.status.gatheringContext": "Utforsker",

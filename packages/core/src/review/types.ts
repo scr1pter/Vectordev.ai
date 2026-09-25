@@ -18,7 +18,7 @@ export type Side = "RIGHT" | "LEFT"
 export type Risk = "low" | "medium" | "high"
 export type Trust = "trusted" | "untrusted"
 export type Trigger = "auto" | "command" | "local" | "desktop"
-export type CostKind = "priced" | "free" | "plan" | "unknown"
+export type CostKind = "priced" | "plan" | "unknown"
 
 export interface ModelFinding {
   path: string

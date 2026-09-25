@@ -243,7 +243,7 @@ describe("buildEvidenceBody", () => {
     expect(body).toContain("\nCloses #7\n")
     expect(body.endsWith(`---\n[Vector run](${runUrl})`)).toBe(true)
     // The upstream share link and social card must not come back.
-    expect(body).not.toContain("vectordev.ai")
+    expect(body).not.toContain("/share/")
     expect(body).not.toContain("social-cards")
   })
 

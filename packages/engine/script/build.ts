@@ -160,7 +160,9 @@ if (!skipInstall) {
   await $`bun install --os="*" --cpu="*" @ff-labs/fff-bun@${pkg.dependencies["@ff-labs/fff-bun"]}`
 }
 await prepareGitLab()
-await import("../../../script/dependency-notices.ts")
+const { dependencyNotices } = await import("../../../script/dependency-notices.ts")
+const notices = await dependencyNotices(path.resolve(dir, "../.."))
+await Bun.write(path.resolve(dir, "../../DEPENDENCY_NOTICES.md"), notices.body)
 for (const item of targets) {
   const name = [
     "vector",

@@ -1,4 +1,3 @@
-import { readEnv } from "@vectordevai/core/flag/compat"
 import { app } from "electron"
 import { arch, platform } from "node:os"
 
@@ -23,7 +22,7 @@ export async function sendBugReport(input: BugReportInput): Promise<BugReportRes
       version: app.getVersion(),
       platform: platform(),
       arch: arch(),
-      channel: readEnv("VECTOR_CHANNEL") || "prod",
+      channel: process.env.VECTOR_CHANNEL || "prod",
     }),
   }).catch((cause: unknown) => (cause instanceof Error ? cause : new Error(String(cause))))
 

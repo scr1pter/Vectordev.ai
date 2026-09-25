@@ -1,21 +1,19 @@
-import { configEnv } from "@vectordevai/core/flag/compat"
 import { Config, ConfigProvider, Context, Effect, Layer, Option } from "effect"
 import { ConfigService } from "@/effect/config-service"
 
-const bool = (name: string) => configEnv(name, Config.boolean).pipe(Config.withDefault(false))
+const bool = (name: string) => Config.boolean(name).pipe(Config.withDefault(false))
 const positiveInteger = (name: string) =>
-  configEnv(name, Config.number).pipe(
+  Config.number(name).pipe(
     Config.map((value) => (Number.isInteger(value) && value > 0 ? value : undefined)),
     Config.orElse(() => Config.succeed(undefined)),
   )
 const experimental = bool("VECTOR_EXPERIMENTAL")
 const enabledByExperimental = (name: string) =>
-  Config.all({ experimental, enabled: configEnv(name, Config.boolean).pipe(Config.option) }).pipe(
+  Config.all({ experimental, enabled: Config.boolean(name).pipe(Config.option) }).pipe(
     Config.map((flags) => Option.getOrElse(flags.enabled, () => flags.experimental)),
   )
 
 export class Service extends ConfigService.Service<Service>()("@vector/RuntimeFlags", {
-  autoShare: bool("VECTOR_AUTO_SHARE"),
   pure: bool("VECTOR_PURE"),
   disableDefaultPlugins: bool("VECTOR_DISABLE_DEFAULT_PLUGINS"),
   disableEmbeddedWebUi: bool("VECTOR_DISABLE_EMBEDDED_WEB_UI"),
@@ -53,7 +51,7 @@ export class Service extends ConfigService.Service<Service>()("@vector/RuntimeFl
   bashDefaultTimeoutMs: positiveInteger("VECTOR_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS"),
   experimentalNativeLlm: bool("VECTOR_EXPERIMENTAL_NATIVE_LLM"),
   experimentalWebSockets: bool("VECTOR_EXPERIMENTAL_WEBSOCKETS"),
-  client: configEnv("VECTOR_CLIENT", Config.string).pipe(Config.withDefault("cli")),
+  client: Config.string("VECTOR_CLIENT").pipe(Config.withDefault("cli")),
 }) {}
 
 export type Info = Context.Service.Shape<typeof Service>

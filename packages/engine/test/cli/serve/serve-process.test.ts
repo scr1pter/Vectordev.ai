@@ -6,6 +6,7 @@
 // and kills the process when the test scope closes. The OS-assigned port is
 // parsed off the "listening on http://..." line.
 import { describe, expect } from "bun:test"
+import path from "node:path"
 import { Effect } from "effect"
 import { HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { cliIt } from "../../lib/cli-process"
@@ -13,7 +14,7 @@ import { cliIt } from "../../lib/cli-process"
 describe("vector serve (subprocess)", () => {
   cliIt.live(
     "refuses foreign security variables before any command or listener starts",
-    ({ vector }) =>
+    ({ home }) =>
       Effect.gen(function* () {
         for (const suffix of [
           "SERVER_PASSWORD",
@@ -24,14 +25,65 @@ describe("vector serve (subprocess)", () => {
           "DISABLE_PROJECT_CONFIG",
           "SHELL_SANDBOX",
         ]) {
-          const result = yield* vector.spawn(["serve", "--hostname", "0.0.0.0", "--unsecured"], {
-            env: { [`PRIOR_${suffix}`]: "private-fixture-value", [`VECTOR_${suffix}`]: "" },
-          })
-          expect(result.exitCode).toBe(1)
-          expect(result.timedOut).toBe(false)
-          expect(result.stderr).toContain(`VECTOR_${suffix}`)
-          expect(result.stderr).not.toContain("private-fixture-value")
-          expect(result.stdout).not.toContain("server listening")
+          yield* Effect.scoped(
+            Effect.gen(function* () {
+              // AppProcess deliberately strips foreign secrets. A trusted direct launch
+              // is required to exercise the CLI's own inherited-environment guard.
+              const child = yield* Effect.acquireRelease(
+                Effect.sync(() =>
+                  Bun.spawn(
+                    [
+                      process.execPath,
+                      "run",
+                      "--conditions=browser",
+                      path.resolve(import.meta.dir, "../../../src/index.ts"),
+                      "serve",
+                      "--hostname",
+                      "0.0.0.0",
+                      "--port",
+                      "0",
+                      "--unsecured",
+                    ],
+                    {
+                      cwd: home,
+                      env: {
+                        PATH: path.dirname(process.execPath),
+                        HOME: home,
+                        VECTOR_TEST_HOME: home,
+                        XDG_CONFIG_HOME: path.join(home, ".config"),
+                        XDG_DATA_HOME: path.join(home, ".local/share"),
+                        XDG_STATE_HOME: path.join(home, ".local/state"),
+                        XDG_CACHE_HOME: path.join(home, ".cache"),
+                        VECTOR_CONFIG_CONTENT: "{}",
+                        VECTOR_AUTH_CONTENT: "{}",
+                        VECTOR_DISABLE_PROJECT_CONFIG: "1",
+                        VECTOR_PURE: "1",
+                        VECTOR_DISABLE_AUTOUPDATE: "1",
+                        VECTOR_DISABLE_MODELS_FETCH: "1",
+                        [`PRIOR_${suffix}`]: "private-fixture-value",
+                        [`VECTOR_${suffix}`]: "",
+                      },
+                      stdin: "ignore",
+                      stdout: "pipe",
+                      stderr: "pipe",
+                    },
+                  ),
+                ),
+                (child) =>
+                  Effect.promise(() => {
+                    if (child.exitCode === null) child.kill("SIGKILL")
+                    return child.exited
+                  }).pipe(Effect.ignore),
+              )
+              const result = yield* Effect.promise(() =>
+                Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]),
+              ).pipe(Effect.timeout("10 seconds"))
+              expect(result[0]).toBe(1)
+              expect(result[2]).toContain(`VECTOR_${suffix}`)
+              expect(result[1] + result[2]).not.toContain("private-fixture-value")
+              expect(result[1]).not.toContain("server listening")
+            }),
+          )
         }
       }),
     60_000,

@@ -1,4 +1,3 @@
-import { readEnv } from "../flag/compat"
 export * as Database from "./database"
 
 import { EffectDrizzleSqlite } from "@vectordevai/effect-drizzle-sqlite"
@@ -48,8 +47,8 @@ export function path() {
   }
   if (
     ["latest", "beta", "prod"].includes(InstallationChannel) ||
-    readEnv("VECTOR_DISABLE_CHANNEL_DB") === "1" ||
-    readEnv("VECTOR_DISABLE_CHANNEL_DB") === "true"
+    process.env.VECTOR_DISABLE_CHANNEL_DB === "1" ||
+    process.env.VECTOR_DISABLE_CHANNEL_DB === "true"
   )
     return join(Global.Path.data, "vector.db")
   return join(Global.Path.data, `vector-${InstallationChannel.replace(/[^a-zA-Z0-9._-]/g, "-")}.db`)

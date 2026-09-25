@@ -2434,3 +2434,14 @@ html[data-vector-reduce-animations="true"] *::after {
   border-color: var(--vx-purple, #9b6cff);
   outline: none;
 }
+
+.settings-notice-details {
+  display: block;
+  width: 100%;
+  padding: 12px;
+  border-radius: 9px;
+  background: var(--v2-border-border-muted);
+}
+
+.settings-notice-details summary { cursor: pointer; }
+.settings-notice-details pre { margin-top: 12px; }

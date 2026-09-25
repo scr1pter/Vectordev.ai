@@ -4,7 +4,6 @@ import { existsSync } from "fs"
 import os from "os"
 import path from "path"
 import { Process } from "@/util/process"
-import { readEnv } from "@vectordevai/core/flag/compat"
 
 const MANAGED_PLIST_DOMAINS = ["ai.vector.managed"]
 
@@ -30,7 +29,7 @@ function systemManagedConfigDir(name = "vector"): string {
 }
 
 export function managedConfigDir() {
-  const override = readEnv("VECTOR_TEST_MANAGED_CONFIG_DIR")
+  const override = process.env.VECTOR_TEST_MANAGED_CONFIG_DIR
   if (override) return override
   return systemManagedConfigDir()
 }

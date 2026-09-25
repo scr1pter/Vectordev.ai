@@ -425,8 +425,8 @@ describe("models", () => {
   })
 
   test("words the estimate for a model with a listed zero token price", () => {
-    expect(estimateText({ files: 51, model: "openai/gpt-5.5", costKind: "free" })).toBe(
-      "This pull request changes 51 files. The listed token price for openai/gpt-5.5 is zero.",
+    expect(estimateText({ files: 51, model: "openai/gpt-5.5", costKind: "priced", low: 0, high: 0 })).toBe(
+      "This pull request changes 51 files. With openai/gpt-5.5 a review costs about $0.00–$0.00.",
     )
   })
 })

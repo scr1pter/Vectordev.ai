@@ -14,7 +14,7 @@ import { DialogSelectProvider } from "./dialog-select-provider"
 import { DialogCustomProvider } from "./dialog-custom-provider"
 import { SettingsList } from "./settings-list"
 import { SettingsServerPicker, SettingsServerScope } from "./settings-server-picker"
-import { brandProviderDescription, brandProviderName } from "@/utils/provider-brand"
+import { brandProviderName } from "@/utils/provider-brand"
 
 type ProviderSource = "env" | "api" | "config" | "custom"
 type ProviderItem = ReturnType<ReturnType<typeof useProviders>["connected"]>[number]
@@ -84,10 +84,7 @@ const SettingsProvidersContent: Component = () => {
   const canDisconnect = (item: ProviderItem) => source(item) !== "env"
 
   const note = (id: string) => PROVIDER_NOTES.find((item) => item.match(id))?.key
-  const vectorProviderDescription = (id: string) => brandProviderDescription(id)
   const description = (id: string) => {
-    const vectorDescription = vectorProviderDescription(id)
-    if (vectorDescription) return vectorDescription
     const key = note(id)
     return key ? language.t(key) : undefined
   }

@@ -1,3 +1,4 @@
+import { isHiddenProvider } from "@/utils/provider-brand"
 import { createEffect } from "solid-js"
 import { useLanguage } from "@/context/language"
 import { useServerSDK } from "@/context/server-sdk"
@@ -16,8 +17,6 @@ export const popularProviders = ["anthropic", "github-copilot", "openai", "googl
 )
 const popularProviderSet = new Set(popularProviders)
 // Built-in catalog entries and explicit custom providers can appear in setup.
-export { isHiddenProvider } from "@/utils/provider-brand"
-import { isHiddenProvider } from "@/utils/provider-brand"
 
 type ProviderInfo = ReturnType<typeof selectProviderCatalog>["all"] extends Map<string, infer T> ? T : never
 

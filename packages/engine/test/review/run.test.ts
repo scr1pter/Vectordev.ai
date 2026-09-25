@@ -235,7 +235,7 @@ function input(directory: string, overrides: Partial<Review.RunInput> = {}): Rev
     prior: [],
     rules: "",
     config: config(),
-    model: { ...ref, context: 100_000, costKind: "free" },
+    model: { ...ref, context: 100_000, costKind: "priced" },
     knownPath: async () => true,
     ...overrides,
   }
@@ -333,7 +333,7 @@ describe("Review.run", () => {
         expect(outcome.report.summary).toBe("Changes last() to index past the end.")
         expect(outcome.partial).toBeUndefined()
         expect(outcome.unreviewed).toEqual([])
-        expect(outcome.cost?.kind).toBe("free")
+        expect(outcome.cost?.kind).toBe("priced")
         expect(outcome.cost?.model).toBe("lmstudio/test-model")
         expect(outcome.sessions).toHaveLength(1)
         expect(outcome.stats).toEqual({ files: 1, additions: 2, deletions: 1 })
@@ -575,7 +575,7 @@ describe("Review.run", () => {
 
         expect(outcome.sessions).toHaveLength(3)
         expect(saved).toHaveLength(3)
-        expect(saved.every((spent) => spent.kind === "free" && spent.model === "lmstudio/test-model")).toBe(true)
+        expect(saved.every((spent) => spent.kind === "priced" && spent.model === "lmstudio/test-model")).toBe(true)
       }),
     TIMEOUT,
   )

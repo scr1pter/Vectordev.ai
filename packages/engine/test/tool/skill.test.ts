@@ -1,3 +1,5 @@
+import { ProviderV2 } from "@vectordevai/core/provider"
+import { ModelV2 } from "@vectordevai/core/model"
 import { PermissionV1 } from "@vectordevai/core/v1/permission"
 import { CrossSpawnSpawner } from "@vectordevai/core/cross-spawn-spawner"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
@@ -61,8 +63,8 @@ Use this skill.
       const registry = yield* ToolRegistry.Service
       const agent = { name: "build", mode: "primary" as const, permission: [], options: {} }
       const tool = (yield* registry.tools({
-        providerID: "openai" as any,
-        modelID: "gpt-5" as any,
+        providerID: ProviderV2.ID.openai,
+        modelID: ModelV2.ID.make("gpt-5"),
         agent,
       })).find((tool) => tool.id === SkillTool.id)
       if (!tool) throw new Error("Skill tool not found")
@@ -107,8 +109,8 @@ Use this skill.
       const registry = yield* ToolRegistry.Service
       const agent = { name: "build", mode: "primary" as const, permission: [], options: {} }
       const tool = (yield* registry.tools({
-        providerID: "openai" as any,
-        modelID: "gpt-5" as any,
+        providerID: ProviderV2.ID.openai,
+        modelID: ModelV2.ID.make("gpt-5"),
         agent,
       })).find((tool) => tool.id === SkillTool.id)
       if (!tool) throw new Error("Skill tool not found")

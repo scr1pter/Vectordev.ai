@@ -5,14 +5,9 @@ import path from "node:path"
 
 const v1 = await import("../src/server")
 const v2 = await import("../src/v2/server")
-const previous = { PATH: process.env.PATH, VECTOR_CONFIG_CONTENT: process.env.VECTOR_CONFIG_CONTENT }
 const directories: string[] = []
 
 afterEach(async () => {
-  for (const [key, value] of Object.entries(previous)) {
-    if (value === undefined) delete process.env[key]
-    else process.env[key] = value
-  }
   await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })))
 })
 
@@ -40,17 +35,38 @@ for (const [name, sdk] of [
       )
       await chmod(script, 0o700)
       if (process.platform === "win32") await Bun.write(`${script}.cmd`, `@"${process.execPath}" "${script}" %*\r\n`)
-      process.env.PATH = `${directory}${path.delimiter}${previous.PATH ?? ""}`
-      process.env.VECTOR_CONFIG_CONTENT = JSON.stringify({ username: "inherited" })
-      const server = await sdk.createVectorServer({ config: { username: "explicit" }, timeout: 3000 })
-      try {
-        expect(server.url).toBe("http://127.0.0.1:43210")
-        const config = await Bun.file(capture).json()
-        expect(JSON.parse(config.config)).toEqual({ username: "explicit" })
-        expect(config.args).toEqual(["serve", "--hostname=127.0.0.1", "--port=4096"])
-      } finally {
-        server.close()
-      }
+      const entry = new URL(name === "v1" ? "../src/server.ts" : "../src/v2/server.ts", import.meta.url).href
+      const child = Bun.spawn(
+        [
+          process.execPath,
+          "--eval",
+          `
+          const sdk = await import(${JSON.stringify(entry)})
+          const server = await sdk.createVectorServer({ config: { username: "explicit" }, timeout: 3000 })
+          try { console.log(JSON.stringify({ url: server.url })) }
+          finally { server.close() }
+        `,
+        ],
+        {
+          env: {
+            ...process.env,
+            PATH: `${directory}${path.delimiter}${process.env.PATH ?? ""}`,
+            VECTOR_CONFIG_CONTENT: JSON.stringify({ username: "inherited" }),
+          },
+          stdout: "pipe",
+          stderr: "pipe",
+        },
+      )
+      const [code, output, error] = await Promise.all([
+        child.exited,
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+      ])
+      expect(code, error).toBe(0)
+      expect(JSON.parse(output).url).toBe("http://127.0.0.1:43210")
+      const config = await Bun.file(capture).json()
+      expect(JSON.parse(config.config)).toEqual({ username: "explicit" })
+      expect(config.args).toEqual(["serve", "--hostname=127.0.0.1", "--port=4096"])
     })
   })
 }

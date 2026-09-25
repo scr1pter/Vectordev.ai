@@ -87,10 +87,6 @@ export const dict = {
   "command.session.compact.description": "總結工作階段以減少上下文大小",
   "command.session.fork": "從訊息分支",
   "command.session.fork.description": "從先前的訊息建立新工作階段",
-  "command.session.share": "分享工作階段",
-  "command.session.share.description": "分享此工作階段並將連結複製到剪貼簿",
-  "command.session.unshare": "取消分享工作階段",
-  "command.session.unshare.description": "停止分享此工作階段",
 
   "palette.search.placeholder": "搜尋檔案、命令和工作階段",
   "palette.empty": "找不到結果",
@@ -101,7 +97,6 @@ export const dict = {
   "dialog.provider.empty": "找不到提供者",
   "dialog.provider.group.popular": "熱門",
   "dialog.provider.group.other": "其他",
-  "dialog.provider.tag.recommended": "推薦",
   "dialog.provider.anthropic.note": "使用 Anthropic API 金鑰存取 Claude 模型",
   "dialog.provider.openai.note": "使用 OpenAI API 金鑰存取 GPT 模型",
   "dialog.provider.copilot.note": "Vector 目前已暫停 GitHub Copilot 登入。請選擇其他提供商繼續。",
@@ -197,7 +192,6 @@ export const dict = {
 
   "provider.disconnect.toast.disconnected.title": "{{provider}} 已中斷連線",
   "provider.disconnect.toast.disconnected.description": "{{provider}} 模型已不再可用。",
-  "model.tag.free": "免費",
   "model.tag.latest": "最新",
 
   "model.provider.anthropic": "Anthropic",
@@ -432,16 +426,6 @@ export const dict = {
   "toast.file.listFailed.title": "列出檔案失敗",
   "toast.context.noLineSelection.title": "未選取行",
   "toast.context.noLineSelection.description": "請先在檔案分頁中選取行範圍。",
-  "toast.session.share.copyFailed.title": "無法複製連結到剪貼簿",
-  "toast.session.share.success.title": "工作階段已分享",
-  "toast.session.share.success.description": "分享連結已複製到剪貼簿",
-  "toast.session.share.failed.title": "分享工作階段失敗",
-  "toast.session.share.failed.description": "分享工作階段時發生錯誤",
-
-  "toast.session.unshare.success.title": "已取消分享工作階段",
-  "toast.session.unshare.success.description": "工作階段已成功取消分享",
-  "toast.session.unshare.failed.title": "取消分享失敗",
-  "toast.session.unshare.failed.description": "取消分享工作階段時發生錯誤",
 
   "toast.session.listFailed.title": "無法載入 {{project}} 的工作階段",
 
@@ -564,17 +548,7 @@ export const dict = {
   "status.popover.tab.plugins": "外掛程式",
   "status.popover.action.manageServers": "管理伺服器",
 
-  "session.share.popover.title": "發佈到網頁",
-  "session.share.popover.description.shared": "此工作階段已在網頁上公開。任何擁有連結的人都可以存取。",
-  "session.share.popover.description.unshared": "在網頁上公開分享此工作階段。任何擁有連結的人都可以存取。",
-  "session.share.action.share": "分享",
-  "session.share.action.publish": "發佈",
-  "session.share.action.publishing": "正在發佈...",
-  "session.share.action.unpublish": "取消發佈",
-  "session.share.action.unpublishing": "正在取消發佈...",
-  "session.share.action.view": "檢視",
   "session.share.copy.copied": "已複製",
-  "session.share.copy.copyLink": "複製連結",
 
   "lsp.tooltip.none": "沒有 LSP 伺服器",
   "lsp.label.connected": "{{count}} LSP",

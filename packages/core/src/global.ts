@@ -1,4 +1,3 @@
-import { readEnv } from "./flag/compat"
 import path from "path"
 import fs from "fs/promises"
 import { xdgData, xdgCache, xdgConfig, xdgState } from "xdg-basedir"
@@ -17,7 +16,7 @@ const tmp = path.join(os.tmpdir(), app)
 
 const paths = {
   get home() {
-    return readEnv("VECTOR_TEST_HOME") ?? os.homedir()
+    return process.env.VECTOR_TEST_HOME ?? os.homedir()
   },
   data,
   bin: path.join(cache, "bin"),

@@ -19,6 +19,42 @@ function branchEvent(branch: string, workspace?: string): GlobalEvent {
 }
 
 describe("tui sync", () => {
+  test("bootstrap hydrates provider and configuration data without hosted console requests", async () => {
+    await using tmp = await tmpdir()
+    await Bun.write(`${tmp.path}/kv.json`, "{}")
+    const requests: string[] = []
+    const provider = {
+      id: "custom-gateway",
+      name: "Custom gateway",
+      source: "config" as const,
+      env: [],
+      options: {},
+      models: {},
+    }
+    const agent = { name: "build", mode: "primary" as const, options: {}, permission: [] }
+    const { app, sync } = await mount((url) => {
+      requests.push(url.pathname)
+      if (url.pathname === "/provider") return json({ all: [provider], connected: [provider.id], default: {} })
+      if (url.pathname === "/config/providers") return json({ providers: [provider], default: {} })
+      if (url.pathname === "/provider/auth") return json({ [provider.id]: [{ type: "api", label: "API key" }] })
+      if (url.pathname === "/agent") return json([agent])
+      if (url.pathname === "/config") return json({ model: "custom-gateway/model" })
+      if (url.pathname === "/experimental/capabilities") return json({ backgroundSubagents: true })
+    }, tmp.path)
+    try {
+      expect(sync.data.provider_next.connected).toEqual([provider.id])
+      expect(sync.data.provider).toEqual([provider])
+      expect(sync.data.provider_auth[provider.id]).toEqual([{ type: "api", label: "API key" }])
+      expect(sync.data.agent).toEqual([agent])
+      expect(sync.data.config.model).toBe("custom-gateway/model")
+      expect(sync.data.capabilities.experimentalBackgroundSubagents).toBe(true)
+      expect(requests.some((request) => request.startsWith("/experimental/console"))).toBe(false)
+      expect("console_state" in sync.data).toBe(false)
+    } finally {
+      app.renderer.destroy()
+    }
+  })
+
   test("refresh scopes sessions by default and lists project sessions when disabled", async () => {
     await using tmp = await tmpdir()
     await Bun.write(`${tmp.path}/kv.json`, "{}")

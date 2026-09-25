@@ -46,6 +46,7 @@ test("adds tui plugin at runtime from spec", async () => {
 
     await expect(TuiPluginRuntime.addPlugin(tmp.extra.spec)).resolves.toBe(true)
     await expect(fs.readFile(tmp.extra.marker, "utf8")).resolves.toBe("called")
+    expect(wait).not.toHaveBeenCalled()
     expect(TuiPluginRuntime.list().find((item) => item.id === "demo.add")).toEqual({
       id: "demo.add",
       source: "file",
@@ -54,6 +55,25 @@ test("adds tui plugin at runtime from spec", async () => {
       enabled: true,
       active: true,
     })
+  } finally {
+    await TuiPluginRuntime.dispose()
+    cwd.mockRestore()
+    wait.mockRestore()
+    delete process.env.VECTOR_PLUGIN_META_FILE
+  }
+})
+
+test("runtime add refuses paused sign-in plugins without waiting for dependencies", async () => {
+  await using tmp = await tmpdir()
+  process.env.VECTOR_PLUGIN_META_FILE = path.join(tmp.path, "plugin-meta.json")
+  const wait = spyOn(TuiConfig, "waitForDependencies").mockResolvedValue()
+  const cwd = spyOn(process, "cwd").mockImplementation(() => tmp.path)
+  try {
+    await TuiPluginRuntime.init({ api: createTuiPluginApi(), config: createTuiResolvedConfig({ plugin: [] }) })
+    const before = TuiPluginRuntime.list()
+    await expect(TuiPluginRuntime.addPlugin("fixture-copilot-auth@1.0.0")).resolves.toBe(false)
+    expect(wait).not.toHaveBeenCalled()
+    expect(TuiPluginRuntime.list()).toEqual(before)
   } finally {
     await TuiPluginRuntime.dispose()
     cwd.mockRestore()

@@ -1,4 +1,3 @@
-import { readEnv } from "@vectordevai/core/flag/compat"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import path from "path"
 import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from "node:crypto"
@@ -109,8 +108,8 @@ const layer = Layer.effect(
     })
 
     const contents = Effect.fn("Auth.contents")(function* () {
-      if (readEnv("VECTOR_AUTH_CONTENT")) {
-        const parsed = Option.getOrUndefined(decodeJson(readEnv("VECTOR_AUTH_CONTENT")))
+      if (process.env.VECTOR_AUTH_CONTENT) {
+        const parsed = Option.getOrUndefined(decodeJson(process.env.VECTOR_AUTH_CONTENT))
         if (parsed) return decodeAuthData(parsed)
       }
 

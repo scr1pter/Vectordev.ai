@@ -67,12 +67,11 @@ export function preferAppEnv(userDataPath: string) {
     ...loaded,
     PATH: path,
     ...VECTOR_AGENT_RUNTIME_ENV,
-    ...{
-      VECTOR_EXPERIMENTAL_ICON_DISCOVERY: "true",
-      VECTOR_EXPERIMENTAL_FILEWATCHER: "true",
-      VECTOR_CLIENT: "desktop",
-      VECTOR_AGENT_CONFIG_DIR: configDir,
-    },
+    VECTOR_EXPERIMENTAL_ICON_DISCOVERY: "true",
+    VECTOR_EXPERIMENTAL_FILEWATCHER: "true",
+    VECTOR_CLIENT: "desktop",
+    VECTOR_AGENT_CONFIG_DIR: configDir,
+
     VECTOR_APP_NAMESPACE: "vector",
     XDG_DATA_HOME: process.env.XDG_DATA_HOME ?? dataHome,
     XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME ?? xdgConfigHome,

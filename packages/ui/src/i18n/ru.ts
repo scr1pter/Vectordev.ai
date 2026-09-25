@@ -42,18 +42,6 @@ export const dict = {
   "ui.sessionTurn.retry.attempt": "попытка №{{attempt}}",
   "ui.sessionTurn.retry.attemptLine": "{{line}} - попытка №{{attempt}}",
   "ui.sessionTurn.retry.geminiHot": "gemini сейчас перегружен",
-  "ui.sessionTurn.error.freeUsageExceeded": "Лимит бесплатного использования превышен",
-  "ui.sessionTurn.error.addCredits": "Добавить кредиты",
-
-  "dialog.usageExceeded.freeTier.title": "Достигнут лимит включённой модели",
-  "dialog.usageExceeded.freeTier.description":
-    "Эта модель, включённая в Vector, временно исчерпала квоту. Выберите другую включённую модель, подключите собственный ключ провайдера или повторите попытку позже.",
-  "dialog.usageExceeded.freeTier.actionLabel": "Выбрать модель",
-  "dialog.usageExceeded.accountRateLimit.title": "Достигнут лимит Go",
-  "dialog.usageExceeded.accountRateLimit.description":
-    "Достигнут лимит использования. Чтобы продолжить использовать эту модель сейчас, включите использование из доступного баланса",
-  "dialog.usageExceeded.accountRateLimit.actionLabel": "Открыть настройки",
-
   "ui.sessionTurn.status.delegating": "Делегирование работы",
   "ui.sessionTurn.status.planning": "Планирование следующих шагов",
   "ui.sessionTurn.status.gatheringContext": "Исследование",

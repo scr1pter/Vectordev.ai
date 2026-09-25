@@ -7,12 +7,10 @@ import { isRecord } from "@/util/record"
 
 export type Err = ReturnType<NamedError["toObject"]>
 
-export type RetryReason = "free_tier_limit" | "account_rate_limit" | (string & {})
-
 export type Retryable = {
   message: string
   action?: {
-    reason: RetryReason
+    reason: string
     provider: string
     title: string
     message: string

@@ -43,18 +43,6 @@ export const dict = {
   "ui.sessionTurn.retry.attempt": "{{attempt}}번째",
   "ui.sessionTurn.retry.attemptLine": "{{line}} - {{attempt}}번째",
   "ui.sessionTurn.retry.geminiHot": "gemini가 현재 과부하 상태입니다",
-  "ui.sessionTurn.error.freeUsageExceeded": "무료 사용량 초과",
-  "ui.sessionTurn.error.addCredits": "크레딧 추가",
-
-  "dialog.usageExceeded.freeTier.title": "Vector 포함 모델 한도에 도달했습니다",
-  "dialog.usageExceeded.freeTier.description":
-    "Vector에 포함된 이 모델의 할당량이 일시적으로 소진되었습니다. 포함된 다른 모델을 선택하거나, 자신의 공급자 키를 연결하거나, 나중에 다시 시도하세요.",
-  "dialog.usageExceeded.freeTier.actionLabel": "모델 선택",
-  "dialog.usageExceeded.accountRateLimit.title": "Go 한도에 도달했습니다",
-  "dialog.usageExceeded.accountRateLimit.description":
-    "사용량 한도에 도달했습니다. 지금 이 모델을 계속 사용하려면 사용 가능한 잔액에서 사용을 활성화하세요",
-  "dialog.usageExceeded.accountRateLimit.actionLabel": "설정 열기",
-
   "ui.sessionTurn.status.delegating": "작업 위임 중",
   "ui.sessionTurn.status.planning": "다음 단계 계획 중",
   "ui.sessionTurn.status.gatheringContext": "탐색 중",

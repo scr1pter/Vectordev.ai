@@ -75,7 +75,7 @@ const model: ResolvedModel = {
   providerID: ProviderV2.ID.make("lmstudio"),
   modelID: ModelV2.ID.make("test-model"),
   context: 100_000,
-  costKind: "free",
+  costKind: "priced",
 }
 
 const finding = (overrides: Partial<ModelFinding> = {}): ModelFinding => ({
@@ -144,7 +144,7 @@ function fake(options: Fake = {}) {
             reasoning: 0,
             cacheRead: 0,
             cacheWrite: 0,
-            kind: "free",
+            kind: "priced",
             model: "lmstudio/test-model",
           },
           durationMs: 1000,

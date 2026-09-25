@@ -86,10 +86,6 @@ export const dict = {
   "command.session.compact.description": "Oppsummer sesjonen for å redusere kontekststørrelsen",
   "command.session.fork": "Forgren fra melding",
   "command.session.fork.description": "Opprett en ny sesjon fra en tidligere melding",
-  "command.session.share": "Del sesjon",
-  "command.session.share.description": "Del denne sesjonen og kopier URL-en til utklippstavlen",
-  "command.session.unshare": "Slutt å dele sesjon",
-  "command.session.unshare.description": "Slutt å dele denne sesjonen",
 
   "palette.search.placeholder": "Søk i filer, kommandoer og sesjoner",
   "palette.empty": "Ingen resultater funnet",
@@ -100,7 +96,6 @@ export const dict = {
   "dialog.provider.empty": "Ingen leverandører funnet",
   "dialog.provider.group.popular": "Populære",
   "dialog.provider.group.other": "Andre",
-  "dialog.provider.tag.recommended": "Anbefalt",
   "dialog.provider.anthropic.note": "Claude-modeller med Anthropic API-nøkkelen din",
   "dialog.provider.copilot.note":
     "Innlogging til GitHub Copilot er midlertidig satt på pause i Vector. Velg en annen leverandør for å fortsette.",
@@ -203,7 +198,6 @@ export const dict = {
   "provider.disconnect.toast.disconnected.title": "{{provider}} frakoblet",
   "provider.disconnect.toast.disconnected.description": "Modeller fra {{provider}} er ikke lenger tilgjengelige.",
 
-  "model.tag.free": "Gratis",
   "model.tag.latest": "Nyeste",
   "model.provider.anthropic": "Anthropic",
   "model.provider.openai": "OpenAI",
@@ -440,17 +434,6 @@ export const dict = {
   "toast.context.noLineSelection.title": "Ingen linjevalg",
   "toast.context.noLineSelection.description": "Velg først et linjeområde i en filfane.",
 
-  "toast.session.share.copyFailed.title": "Kunne ikke kopiere URL til utklippstavlen",
-  "toast.session.share.success.title": "Sesjon delt",
-  "toast.session.share.success.description": "Delings-URL kopiert til utklippstavlen!",
-  "toast.session.share.failed.title": "Kunne ikke dele sesjon",
-  "toast.session.share.failed.description": "Det oppstod en feil under deling av sesjonen",
-
-  "toast.session.unshare.success.title": "Deling av sesjon stoppet",
-  "toast.session.unshare.success.description": "Sesjonen deles ikke lenger!",
-  "toast.session.unshare.failed.title": "Kunne ikke stoppe deling av sesjon",
-  "toast.session.unshare.failed.description": "Det oppstod en feil da delingen av sesjonen skulle stoppes",
-
   "toast.session.listFailed.title": "Kunne ikke laste sesjoner for {{project}}",
 
   "toast.update.title": "Oppdatering tilgjengelig",
@@ -577,19 +560,7 @@ export const dict = {
   "status.popover.tab.plugins": "Plugins",
   "status.popover.action.manageServers": "Administrer servere",
 
-  "session.share.popover.title": "Publiser på nett",
-  "session.share.popover.description.shared":
-    "Denne sesjonen er offentlig på nettet. Den er tilgjengelig for alle med lenken.",
-  "session.share.popover.description.unshared":
-    "Del sesjonen offentlig på nettet. Den vil være tilgjengelig for alle med lenken.",
-  "session.share.action.share": "Del",
-  "session.share.action.publish": "Publiser",
-  "session.share.action.publishing": "Publiserer...",
-  "session.share.action.unpublish": "Avpubliser",
-  "session.share.action.unpublishing": "Avpubliserer...",
-  "session.share.action.view": "Vis",
   "session.share.copy.copied": "Kopiert",
-  "session.share.copy.copyLink": "Kopier lenke",
 
   "lsp.tooltip.none": "Ingen LSP-servere",
   "lsp.label.connected": "{{count}} LSP",

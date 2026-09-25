@@ -21,12 +21,7 @@ function run(msg: Msg) {
     cwd: root,
     nothrow: true,
     exactEnv: true,
-    env: Object.fromEntries(
-      Object.entries(process.env).map(([key, value]) => {
-        const current = key.replace(/^VECTOR_/, "VECTOR_")
-        return [current, process.env[current] ?? value]
-      }),
-    ),
+    env: process.env,
   })
 }
 

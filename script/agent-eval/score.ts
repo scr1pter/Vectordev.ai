@@ -93,7 +93,7 @@ export type RuntimeAggregate = {
 // nothing about how surgical its edit was. Kept deliberately short: build
 // output and stray scratch files are NOT here, because producing them in a
 // fixture this small is itself a discipline signal.
-const IGNORED_DIRECTORIES = new Set([".git", "node_modules", ".claude", ".codex", ".cursor", ".vector", ".vector"])
+const IGNORED_DIRECTORIES = new Set([".git", "node_modules", ".claude", ".codex", ".cursor", ".vector"])
 const IGNORED_FILES = new Set(["bun.lock", "bun.lockb", ".DS_Store"])
 
 export const OUT_OF_SCOPE_FILE_PENALTY = 12

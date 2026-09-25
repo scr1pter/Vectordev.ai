@@ -94,11 +94,10 @@ function prepareSidecarEnv(password: string, userDataPath: string) {
   }
   Object.assign(process.env, {
     ...VECTOR_AGENT_RUNTIME_ENV,
-    ...{
-      VECTOR_SERVER_USERNAME: "vector",
-      VECTOR_SERVER_PASSWORD: password,
-      VECTOR_AGENT_CONFIG_DIR: configDir,
-    },
+    VECTOR_SERVER_USERNAME: "vector",
+    VECTOR_SERVER_PASSWORD: password,
+    VECTOR_AGENT_CONFIG_DIR: configDir,
+
     VECTOR_APP_NAMESPACE: "vector",
     XDG_DATA_HOME: process.env.XDG_DATA_HOME ?? dataHome,
     XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME ?? xdgConfigHome,

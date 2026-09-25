@@ -77,7 +77,7 @@ const outcome = (overrides: Partial<ReviewOutcome> = {}): ReviewOutcome => ({
     reasoning: 0,
     cacheRead: 0,
     cacheWrite: 0,
-    kind: "free",
+    kind: "priced",
     model: "openai/gpt-4.1",
   },
   durationMs: 112_000,
@@ -170,7 +170,7 @@ describe("renderLocalReview", () => {
         "Not reviewed: bun.lock (lockfile) · dist/auth.js (build output)",
         "Since last local review (9f8e7d6): 1 fixed · 1 still open",
         "",
-        "openai/gpt-4.1 · included with Vector · 48.2k in / 3.1k out · 1m 52s · sessions: ses_a1, ses_b2",
+        "openai/gpt-4.1 · $0.00 · 48.2k in / 3.1k out · 1m 52s · sessions: ses_a1, ses_b2",
         "",
       ].join("\n"),
     )

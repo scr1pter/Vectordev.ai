@@ -15,6 +15,8 @@ Options:
       --hostname     hostname to listen on                           [string] [default: "127.0.0.1"]
       --mdns         enable mDNS service discovery (defaults hostname to 0.0.0.0)
                                                                           [boolean] [default: false]
+      --unsecured    explicitly allow a network listener without a password
+                                                                          [boolean] [default: false]
       --mdns-domain  custom domain name for mDNS service (default: vector.local)
                                                                   [string] [default: "vector.local"]
       --cors         additional domains to allow for CORS                      [array] [default: []]
@@ -216,6 +218,8 @@ Options:
       --hostname     hostname to listen on                           [string] [default: "127.0.0.1"]
       --mdns         enable mDNS service discovery (defaults hostname to 0.0.0.0)
                                                                           [boolean] [default: false]
+      --unsecured    explicitly allow a network listener without a password
+                                                                          [boolean] [default: false]
       --mdns-domain  custom domain name for mDNS service (default: vector.local)
                                                                   [string] [default: "vector.local"]
       --cors         additional domains to allow for CORS                      [array] [default: []]"
@@ -235,6 +239,8 @@ Options:
       --port         port to listen on                                         [number] [default: 0]
       --hostname     hostname to listen on                           [string] [default: "127.0.0.1"]
       --mdns         enable mDNS service discovery (defaults hostname to 0.0.0.0)
+                                                                          [boolean] [default: false]
+      --unsecured    explicitly allow a network listener without a password
                                                                           [boolean] [default: false]
       --mdns-domain  custom domain name for mDNS service (default: vector.local)
                                                                   [string] [default: "vector.local"]

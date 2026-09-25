@@ -1,4 +1,3 @@
-import { readEnv } from "@vectordevai/core/flag/compat"
 import { render, TimeToFirstDraw, useRenderer, useTerminalDimensions } from "@opentui/solid"
 import { createDefaultOpenTuiKeymap } from "@opentui/keymap/opentui"
 import { Deferred, Effect } from "effect"
@@ -269,8 +268,8 @@ export const run = Effect.fn("Tui.run")(function* (input: TuiInput) {
                     >
                       <TuiStartupProvider
                         value={{
-                          initialRoute: JSON.parse(readEnv("VECTOR_ROUTE") || "null") ?? undefined,
-                          skipInitialLoading: Boolean(readEnv("VECTOR_FAST_BOOT")),
+                          initialRoute: JSON.parse(process.env.VECTOR_ROUTE || "null") ?? undefined,
+                          skipInitialLoading: Boolean(process.env.VECTOR_FAST_BOOT),
                         }}
                       >
                         <ClipboardProvider>

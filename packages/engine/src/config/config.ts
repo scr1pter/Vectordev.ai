@@ -14,7 +14,6 @@ import { applyEdits, modify } from "jsonc-parser"
 import { InstallationLocal } from "@vectordevai/core/installation/version"
 import { existsSync } from "fs"
 import { isRecord } from "@/util/record"
-import type { ConsoleState } from "@vectordevai/core/v1/config/console-state"
 import { FSUtil } from "@vectordevai/core/fs-util"
 import { InstanceState } from "@/effect/instance-state"
 import { Context, Duration, Effect, Fiber, Layer, Schema } from "effect"
@@ -120,13 +119,11 @@ type State = {
   config: Info
   directories: string[]
   deps: Fiber.Fiber<void>[]
-  consoleState: ConsoleState
 }
 
 export interface Interface {
   readonly get: () => Effect.Effect<Info>
   readonly getGlobal: () => Effect.Effect<Info>
-  readonly getConsoleState: () => Effect.Effect<ConsoleState>
   readonly update: (config: Info) => Effect.Effect<void>
   readonly updateGlobal: (config: Info) => Effect.Effect<{ info: Info; changed: boolean }>
   readonly updateMcpLocal: (name: string, entry: ConfigMCPV1.Info | { enabled: boolean }) => Effect.Effect<void>
@@ -551,11 +548,6 @@ const layer = Layer.effect(
           config: result,
           directories,
           deps,
-          consoleState: {
-            consoleManagedProviders: [],
-            activeOrgName: undefined,
-            switchableOrgCount: 0,
-          },
         }
       },
       Effect.provideService(FSUtil.Service, fs),
@@ -573,10 +565,6 @@ const layer = Layer.effect(
 
     const directories = Effect.fn("Config.directories")(function* () {
       return yield* InstanceState.use(state, (s) => s.directories)
-    })
-
-    const getConsoleState = Effect.fn("Config.getConsoleState")(function* () {
-      return yield* InstanceState.use(state, (s) => s.consoleState)
     })
 
     const waitForDependencies = Effect.fn("Config.waitForDependencies")(function* () {
@@ -682,7 +670,6 @@ const layer = Layer.effect(
     return Service.of({
       get,
       getGlobal,
-      getConsoleState,
       update,
       updateGlobal,
       updateMcpLocal,

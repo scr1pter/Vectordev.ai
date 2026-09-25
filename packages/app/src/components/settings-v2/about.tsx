@@ -108,7 +108,7 @@ export function SettingsAboutV2() {
               those components.
             </p>
           </div>
-          <details class="settings-notice-list">
+          <details class="settings-notice-details">
             <summary>Read bundled third-party notices</summary>
             <pre class="max-h-96 overflow-auto whitespace-pre-wrap break-words text-12-regular" tabIndex={0}>
               {notices}

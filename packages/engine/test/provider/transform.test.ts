@@ -4,7 +4,7 @@ import { ProviderTransform } from "@/provider/transform"
 import { LLMRequestPrep } from "@/session/llm/request"
 import { ProviderV2 } from "@vectordevai/core/provider"
 import { ModelV2 } from "@vectordevai/core/model"
-import { jsonSchema } from "ai"
+import { jsonSchema, type ModelMessage } from "ai"
 
 describe("ProviderTransform.options - setCacheKey", () => {
   const sessionID = "test-session-123"
@@ -2489,7 +2489,7 @@ describe("ProviderTransform.message - strip openai metadata when store=false", (
         npm: "@ai-sdk/openai-compatible",
       },
     }
-    const msgs = [
+    const msgs: ModelMessage[] = [
       {
         role: "assistant",
         content: [
@@ -2505,9 +2505,12 @@ describe("ProviderTransform.message - strip openai metadata when store=false", (
           },
         ],
       },
-    ] as any[]
+    ]
 
-    const result = ProviderTransform.message(msgs, lmstudioModel, { store: false }) as any[]
+    const result = ProviderTransform.message(msgs, lmstudioModel, { store: false })
+    if (result[0].role !== "assistant" || typeof result[0].content === "string")
+      throw new Error("Expected assistant parts")
+    if (result[0].content[0].type !== "text") throw new Error("Expected a text part")
 
     expect(result[0].content[0].providerOptions?.lmstudio?.itemId).toBe("msg_123")
     expect(result[0].content[0].providerOptions?.lmstudio?.otherOption).toBe("value")
@@ -2523,7 +2526,7 @@ describe("ProviderTransform.message - strip openai metadata when store=false", (
         npm: "@ai-sdk/openai-compatible",
       },
     }
-    const msgs = [
+    const msgs: ModelMessage[] = [
       {
         role: "assistant",
         providerOptions: {
@@ -2543,9 +2546,12 @@ describe("ProviderTransform.message - strip openai metadata when store=false", (
           },
         ],
       },
-    ] as any[]
+    ]
 
-    const result = ProviderTransform.message(msgs, lmstudioModel, { store: false }) as any[]
+    const result = ProviderTransform.message(msgs, lmstudioModel, { store: false })
+    if (result[0].role !== "assistant" || typeof result[0].content === "string")
+      throw new Error("Expected assistant parts")
+    if (result[0].content[0].type !== "text") throw new Error("Expected a text part")
 
     expect(result[0].providerOptions?.openai?.itemId).toBe("msg_root")
     expect(result[0].providerOptions?.lmstudio?.itemId).toBe("msg_lmstudio")

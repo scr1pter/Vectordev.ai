@@ -1,12 +1,12 @@
 import { defineConfig } from "drizzle-kit"
 import path from "node:path"
-import { Global } from "./src/global"
+import os from "node:os"
 
 export default defineConfig({
   dialect: "sqlite",
   schema: ["./src/**/*.sql.ts", "./src/**/sql.ts"],
   out: "./migration",
   dbCredentials: {
-    url: path.join(Global.Path.data, "vector.db"),
+    url: process.env.VECTOR_DRIZZLE_DB ?? path.join(os.tmpdir(), "vector-drizzle.db"),
   },
 })

@@ -6,7 +6,8 @@
   "license": "SEE LICENSE IN LICENSE",
   "scripts": {
     "typecheck": "tsgo --noEmit",
-    "build": "bun ./script/build.ts",
+    "build": "tsc",
+    "stage": "bun ./script/build.ts",
     "emit": "tsc",
     "pack": "bun ./script/publish.ts --dry-run",
     "test:package": "bun ./script/verify-consumer.ts"

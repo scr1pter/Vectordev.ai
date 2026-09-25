@@ -86,15 +86,15 @@ const providerConfig = (input: {
   },
 })
 
-const OPENAI_SCENARIO = {
-  id: "openai-api-key",
-  name: "OpenAI API key",
+const SYNTHETIC_OPENAI_SCENARIO = {
+  id: "openai-api-key-synthetic",
+  name: "OpenAI API key (synthetic replay)",
   providerID: ProviderV2.ID.openai,
   modelID: "gpt-5.5",
-  cassette: "session/native-openai-tool-loop",
+  cassette: "session/synthetic-openai-tool-loop",
   protocol: "openai-responses",
-  tags: ["vector", "native", "api-key", "tool-loop"],
-  canRecord: () => Boolean(envValue("VECTOR_RECORD_OPENAI_API_KEY", "OPENAI_API_KEY")),
+  tags: ["vector", "synthetic", "api-key", "tool-loop"],
+  canRecord: () => false,
   config: (model) =>
     providerConfig({
       providerID: ProviderV2.ID.openai,
@@ -104,17 +104,17 @@ const OPENAI_SCENARIO = {
       api: "https://api.openai.com/v1",
       model,
       options: {
-        apiKey: shouldRecord ? envValue("VECTOR_RECORD_OPENAI_API_KEY", "OPENAI_API_KEY") : "fixture-openai-key",
+        apiKey: "fixture-openai-key",
         // The cassette intercepts native requests. A runtime regression must fail locally, not contact a live API.
-        baseURL: shouldRecord ? "https://api.openai.com/v1" : "http://127.0.0.1:1/v1",
+        baseURL: "http://127.0.0.1:1/v1",
       },
     }),
 } satisfies RecordedScenario
 
 const RECORDED_SCENARIOS = [
-  OPENAI_SCENARIO,
+  SYNTHETIC_OPENAI_SCENARIO,
   {
-    ...OPENAI_SCENARIO,
+    ...SYNTHETIC_OPENAI_SCENARIO,
     id: "openai-api-key-with-stale-oauth",
     name: "OpenAI API key with ignored stale OAuth",
     canRecord: () => false,
@@ -380,15 +380,16 @@ describe("session.llm native recorded", () => {
 
   for (const id of ["unsupported-fixture", "unsupported-fixture-two"]) {
     policy.instance(
-      `${id} cannot register an unsupported provider with explicit configuration and a saved key`,
+      `${id} admits an explicitly configured custom provider without adding a built-in`,
       () =>
         Effect.gen(function* () {
           const provider = yield* Provider.Service
-          const error = yield* provider
-            .getModel(ProviderV2.ID.make(id), ModelV2.ID.make("gpt-5.2-codex"))
-            .pipe(Effect.flip)
-          expect(Provider.ModelNotFoundError.isInstance(error)).toBe(true)
-          expect((yield* provider.list())[ProviderV2.ID.make(id)]).toBeUndefined()
+          const model = yield* provider.getModel(ProviderV2.ID.make(id), ModelV2.ID.make("gpt-5.2-codex"))
+          expect(String(model.providerID)).toBe(id)
+          expect((yield* provider.list())[ProviderV2.ID.make(id)]?.options).toMatchObject({
+            apiKey: "fixture-custom-key",
+            baseURL: "https://custom.example.test/v1",
+          })
         }),
       {
         config: {
@@ -397,10 +398,10 @@ describe("session.llm native recorded", () => {
             [id]: {
               npm: "@ai-sdk/openai-compatible",
               options: {
-                apiKey: "fixture-retired-key",
+                apiKey: "fixture-custom-key",
                 baseURL: "https://custom.example.test/v1",
               },
-              models: { "gpt-5.2-codex": { name: "Retired fixture" } },
+              models: { "gpt-5.2-codex": { name: "Custom fixture" } },
             },
           },
         },

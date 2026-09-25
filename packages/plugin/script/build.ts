@@ -59,7 +59,9 @@ export async function stagePlugin(packageDirectory = directory, compile = true) 
       return [name, { types: `${target}.d.ts`, import: `${target}.js` }]
     }),
   )
-  const { devDependencies: _development, scripts: _scripts, ...manifest } = source
+  const manifest = Object.fromEntries(
+    Object.entries(source).filter(([name]) => !["devDependencies", "scripts"].includes(name)),
+  )
   await Bun.write(
     path.join(output, "package.json"),
     JSON.stringify(

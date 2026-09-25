@@ -223,7 +223,6 @@ function footer(outcome: ReviewOutcome): string {
 // Section 5.5, as in the summary comment's footer.
 function costText(cost: ReviewCost): string {
   if (cost.kind === "priced") return formatUsd(cost.costUsd)
-  if (cost.kind === "free") return "included with Vector"
   if (cost.kind === "plan") return "subscription sign-in, no per-token price"
   return "cost unknown: no price is listed for this model"
 }

@@ -76,7 +76,7 @@ const configureCrashDiagnostics = () => {
         (i) =>
           i.name !== "Breadcrumbs" &&
           !(
-            import.meta.env.VECTOR_CHANNEL === "prod" &&
+            import.meta.env.VITE_VECTOR_CHANNEL === "prod" &&
             (i.name === "GlobalHandlers" || i.name === "BrowserApiErrors")
           ),
       )

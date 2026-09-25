@@ -12,6 +12,8 @@ function pick(value: string | null, fallback?: string) {
   try {
     return decodeURIComponent(value)
   } catch {
+    // A literal percent sign or malformed UTF-8 escape can be part of a path.
+    // Preserve the original header instead of failing request construction.
     return value
   }
 }
