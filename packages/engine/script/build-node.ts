@@ -3,7 +3,6 @@
 import { Script } from "@vectordevai/script"
 import path from "path"
 import { fileURLToPath } from "url"
-import pluginPkg from "../../plugin/package.json"
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -24,7 +23,7 @@ await Bun.build({
     VECTOR_MODEL_CATALOG: generated.modelsData,
     VECTOR_CHANNEL: `'${Script.channel}'`,
     VECTOR_VERSION: `'${Script.version}'`,
-    VECTOR_PLUGIN_VERSION: `'${pluginPkg.version}'`,
+    VECTOR_PLUGIN_VERSION: JSON.stringify(process.env.VECTOR_PLUGIN_VERSION ?? Script.version),
   },
   files: {
     "vector-web-ui.gen.ts": "",

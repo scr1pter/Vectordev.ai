@@ -17,7 +17,7 @@ import { isRecord } from "@/util/record"
 import type { ConsoleState } from "@vectordevai/core/v1/config/console-state"
 import { FSUtil } from "@vectordevai/core/fs-util"
 import { InstanceState } from "@/effect/instance-state"
-import { Context, Duration, Effect, Exit, Fiber, Layer, Schema } from "effect"
+import { Context, Duration, Effect, Fiber, Layer, Schema } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { EffectFlock } from "@vectordevai/core/util/effect-flock"
 import { containsPath, type InstanceContext } from "../project/instance-context"
@@ -34,9 +34,8 @@ import { ConfigSchema } from "./schema"
 import { ConfigPaths } from "./paths"
 import { ConfigImport } from "./import-settings"
 import { ConfigPlugin } from "./plugin"
-import { PluginDependencyVersion } from "./plugin-version"
+import { ConfigDependencies } from "./dependencies"
 import { ConfigVariable } from "./variable"
-import { Npm } from "@vectordevai/core/npm"
 import { withTransientReadRetry } from "@/util/effect-http-client"
 
 // Custom merge function that concatenates array fields instead of replacing them
@@ -186,7 +185,7 @@ const layer = Layer.effect(
     const fs = yield* FSUtil.Service
     const authSvc = yield* Auth.Service
     const env = yield* Env.Service
-    const npmSvc = yield* Npm.Service
+    const dependencies = yield* ConfigDependencies.Service
     const http = yield* HttpClient.HttpClient
     const flock = yield* EffectFlock.Service
 
@@ -443,29 +442,6 @@ const layer = Layer.effect(
 
           yield* ensureGitignore(dir).pipe(Effect.orDie)
 
-          if (!InstallationLocal) {
-            const dep = yield* npmSvc
-              .install(dir, {
-                add: [
-                  {
-                    name: "@vectordevai/plugin",
-                    version: PluginDependencyVersion,
-                  },
-                ],
-              })
-              .pipe(
-                Effect.exit,
-                Effect.tap((exit) =>
-                  Exit.isFailure(exit)
-                    ? Effect.logWarning("background dependency install failed", { dir, error: String(exit.cause) })
-                    : Effect.void,
-                ),
-                Effect.asVoid,
-                Effect.forkDetach,
-              )
-            deps.push(dep)
-          }
-
           result.command = mergeDeep(result.command ?? {}, yield* Effect.promise(() => ConfigCommand.load(dir)))
           result.agent = mergeDeep(result.agent ?? {}, yield* Effect.promise(() => ConfigAgent.load(dir)))
           result.agent = mergeDeep(result.agent ?? {}, yield* Effect.promise(() => ConfigAgent.loadMode(dir)))
@@ -553,6 +529,10 @@ const layer = Layer.effect(
         }
         if (Flag.VECTOR_DISABLE_PRUNE) {
           result.compaction = { ...result.compaction, prune: false }
+        }
+
+        if (!InstallationLocal && result.plugin?.length) {
+          deps.push(yield* dependencies.prepare().pipe(Effect.forkDetach))
         }
 
         return {
@@ -705,7 +685,7 @@ const layer = Layer.effect(
 export const node = LayerNode.make({
   service: Service,
   layer: layer,
-  deps: [FSUtil.node, Auth.node, Env.node, Npm.node, httpClient, EffectFlock.node],
+  deps: [FSUtil.node, Auth.node, Env.node, ConfigDependencies.node, httpClient, EffectFlock.node],
 })
 
 export * as Config from "./config"

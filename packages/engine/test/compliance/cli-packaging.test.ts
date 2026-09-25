@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { mkdtemp, mkdir, rm } from "node:fs/promises"
+import { chmod, mkdtemp, mkdir, rm } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 
@@ -197,4 +197,39 @@ test("a failed plugin preparation stops the CLI publisher before any npm publish
   expect(result.code).not.toBe(0)
   expect(result.stderr).toContain("fixture plugin failure")
   expect(result.stdout).not.toContain("published @vectordevai/cli")
+})
+
+test.skipIf(process.platform === "win32")("plugin publish inherits input through both publishers and preserves failure status", async () => {
+  await using tmp = await fixture()
+  const plugin = path.join(tmp.dir, "packages/plugin")
+  for (const script of ["publish.ts", "build.ts"]) {
+    await Bun.write(path.join(plugin, "script", script), Bun.file(path.join(root, "packages/plugin/script", script)))
+  }
+  await Bun.write(
+    path.join(plugin, "dist-publish/package.json"),
+    JSON.stringify({ name: "@vectordevai/plugin", version, exports: {}, license: "SEE LICENSE IN LICENSE", files: notices }),
+  )
+  for (const notice of notices) await Bun.write(path.join(plugin, "dist-publish", notice), `Fixture ${notice}`)
+  const npm = path.join(tmp.dir, "fake-bin/npm")
+  await Bun.write(npm, `#!/usr/bin/env node
+const fs = require("node:fs")
+if (process.argv[2] === "view") process.exit(1)
+if (process.argv[2] !== "publish") process.exit(36)
+fs.writeFileSync(${JSON.stringify(path.join(tmp.dir, "prompt-input"))}, fs.readFileSync(0, "utf8"))
+process.exit(35)
+`)
+  await chmod(npm, 0o755)
+  const child = Bun.spawn([process.execPath, "script/publish-vector.ts", "--skip-build", "--publish"], {
+    cwd: path.join(tmp.dir, "packages/engine"),
+    env: { ...tmp.env, PATH: path.dirname(npm) + path.delimiter + tmp.env.PATH },
+    stdin: new Blob(["synthetic-otp\n"]),
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  const [code, stdout, stderr] = await Promise.all([
+    child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
+  ])
+  expect(code, stderr).toBe(35)
+  expect(await Bun.file(path.join(tmp.dir, "prompt-input")).text()).toBe("synthetic-otp\n")
+  expect(stdout).not.toContain("published @vectordevai/cli")
 })

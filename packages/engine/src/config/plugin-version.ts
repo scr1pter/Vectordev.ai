@@ -1,9 +1,9 @@
 export * as ConfigPluginVersion from "./plugin-version"
 
-import plugin from "../../../plugin/package.json"
+import desktop from "../../../desktop/package.json"
 
 declare const VECTOR_PLUGIN_VERSION: string
 
-// The public plugin version is independent of preview/desktop release versions.
+// Published CLI, desktop, and plugin SDK artifacts share the selected release version.
 export const PluginDependencyVersion =
-  typeof VECTOR_PLUGIN_VERSION === "string" ? VECTOR_PLUGIN_VERSION : plugin.version
+  typeof VECTOR_PLUGIN_VERSION === "string" ? VECTOR_PLUGIN_VERSION : desktop.version

@@ -25,7 +25,10 @@ export interface EntryPoint {
 }
 
 export interface Interface {
-  readonly add: (pkg: string) => Effect.Effect<EntryPoint, InstallFailedError | EffectFlock.LockError>
+  readonly add: (
+    pkg: string,
+    options?: { timeout: number; force?: boolean },
+  ) => Effect.Effect<EntryPoint, InstallFailedError | EffectFlock.LockError>
   readonly install: (
     dir: string,
     input?: {
@@ -77,28 +80,35 @@ const layer = Layer.effect(
     const fs = yield* FileSystem.FileSystem
     const flock = yield* EffectFlock.Service
     const directory = (pkg: string) => path.join(global.cache, "packages", sanitize(pkg))
-    const reify = (input: { dir: string; add?: string[] }) =>
+    const reify = (input: { dir: string; add?: string[]; timeout?: number }) =>
       Effect.gen(function* () {
         yield* flock.acquire(`npm-install:${input.dir}`)
         const { Arborist } = yield* Effect.promise(() => import("@npmcli/arborist"))
         const add = input.add ?? []
         const npmOptions = yield* NpmConfig.load(input.dir)
-        const arborist = new Arborist({
-          ...npmOptions,
-          path: input.dir,
-          binLinks: true,
-          progress: false,
-          savePrefix: "",
-          ignoreScripts: true,
-        })
         return yield* Effect.tryPromise({
-          try: () =>
-            arborist.reify({
+          try: (signal) => {
+            // Arborist passes constructor options through pacote to registry fetches.
+            const options = {
               ...npmOptions,
+              signal:
+                input.timeout === undefined ? signal : AbortSignal.any([signal, AbortSignal.timeout(input.timeout)]),
+              ...(input.timeout === undefined
+                ? {}
+                : { timeout: input.timeout, fetchRetries: 0, retry: { retries: 0 } }),
+              path: input.dir,
+              binLinks: true,
+              progress: false,
+              savePrefix: "",
+              ignoreScripts: true,
+            }
+            return new Arborist(options).reify({
+              ...options,
               add,
               save: true,
               saveType: "prod",
-            }),
+            })
+          },
           catch: (cause) =>
             new InstallFailedError({
               cause,
@@ -107,12 +117,13 @@ const layer = Layer.effect(
             }),
         }) as Effect.Effect<ArboristTree, InstallFailedError>
       }).pipe(
+        Effect.interruptible,
         Effect.withSpan("Npm.reify", {
           attributes: input,
         }),
       )
 
-    const add = Effect.fn("Npm.add")(function* (pkg: string) {
+    const add: Interface["add"] = Effect.fn("Npm.add")(function* (pkg, options) {
       const dir = directory(pkg)
       const name = (() => {
         try {
@@ -122,11 +133,11 @@ const layer = Layer.effect(
         }
       })()
 
-      if (yield* afs.existsSafe(path.join(dir, "node_modules", name))) {
+      if (!options?.force && (yield* afs.existsSafe(path.join(dir, "node_modules", name)))) {
         return resolveEntryPoint(name, path.join(dir, "node_modules", name))
       }
 
-      const tree = yield* reify({ dir, add: [pkg] })
+      const tree = yield* reify({ dir, add: [pkg], timeout: options?.timeout })
       const first = tree.edgesOut.values().next().value?.to
       if (!first) {
         const result = resolveEntryPoint(name, path.join(dir, "node_modules", name))

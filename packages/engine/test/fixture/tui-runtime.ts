@@ -47,6 +47,7 @@ export function mockTuiRuntime(dir: string, plugin: PluginSpec[], opts?: { plugi
 
   return {
     config,
+    wait,
     restore: () => {
       cwd.mockRestore()
       wait.mockRestore()

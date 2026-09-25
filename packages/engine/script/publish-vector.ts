@@ -39,6 +39,7 @@ if (!skipBuild) {
   await $`bun run script/build.ts --skip-install`.env({
     ...process.env,
     VECTOR_VERSION: version,
+    VECTOR_PLUGIN_VERSION: version,
     VECTOR_TARGETS: targets.join(","),
     ...(dryRun ? { VECTOR_RELEASE: "" } : {}),
   })
@@ -164,15 +165,22 @@ await Bun.file(`${out}/package.json`).write(
   ),
 )
 
-// The runtime installs this public package into config directories. It must exist before any CLI publication.
+// The runtime uses this public plugin SDK. It must exist before any CLI publication.
 if (plugin.name !== "@vectordevai/plugin") throw new Error("Unexpected plugin package name")
-await $`${process.execPath} script/publish.ts ${[dryRun ? "--dry-run" : "--publish", ...(skipBuild ? ["--skip-build"] : [])]}`.cwd(
-  path.resolve(dir, "../plugin"),
+const pluginPublish = Bun.spawn(
+  [process.execPath, "script/publish.ts", dryRun ? "--dry-run" : "--publish", ...(skipBuild ? ["--skip-build"] : [])],
+  {
+    cwd: path.resolve(dir, "../plugin"),
+    env: { ...process.env, VECTOR_PLUGIN_VERSION: version },
+    stdio: ["inherit", "inherit", "inherit"],
+  },
 )
+const pluginExit = await pluginPublish.exited
+if (pluginExit !== 0) process.exit(pluginExit)
 if (!dryRun) {
-  const available = await $`npm view ${`${plugin.name}@${plugin.version}`} version`.quiet().nothrow()
+  const available = await $`npm view ${`${plugin.name}@${version}`} version`.quiet().nothrow()
   if (available.exitCode !== 0)
-    throw new Error(`Plugin ${plugin.name}@${plugin.version} is not available; CLI publication stopped`)
+    throw new Error(`Plugin ${plugin.name}@${version} is not available; CLI publication stopped`)
 }
 
 // Publish platform packages before the umbrella so its optionalDependencies resolve.

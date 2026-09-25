@@ -673,13 +673,10 @@ function applyInitialPluginEnabledState(state: RuntimeState, config: TuiConfig.R
   }
 }
 
-async function resolveExternalPlugins(list: ConfigPlugin.Origin[], wait: () => Promise<void>) {
+async function resolveExternalPlugins(list: ConfigPlugin.Origin[]) {
   return PluginLoader.loadExternal({
     items: list,
     kind: "tui",
-    wait: async () => {
-      await wait().catch(() => {})
-    },
     finish: async (loaded, origin, retry) => {
       const mod = await Promise.resolve()
         .then(() => readV1Plugin(loaded.mod as Record<string, unknown>, loaded.spec, "tui") as TuiPluginModule)
@@ -856,7 +853,7 @@ async function addPluginBySpec(state: RuntimeState | undefined, raw: string) {
     state.pending.delete(spec)
     return true
   }
-  const ready = await resolveExternalPlugins([cfg], () => TuiConfig.waitForDependencies()).catch((error) => {
+  const ready = await resolveExternalPlugins([cfg]).catch((error) => {
     fail("failed to add tui plugin", { path: next, error })
     return [] as PluginLoad[]
   })
@@ -1103,7 +1100,7 @@ async function load(input: {
       })
     }
 
-    const ready = await resolveExternalPlugins(records, () => TuiConfig.waitForDependencies())
+    const ready = await resolveExternalPlugins(records)
     await addExternalPluginEntries(next, ready)
 
     applyInitialPluginEnabledState(next, config)

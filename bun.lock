@@ -112,7 +112,7 @@
       },
     },
     "packages/cli": {
-      "name": "@vectordevai/cli",
+      "name": "@vectordevai/cli-dev",
       "version": "1.17.14",
       "bin": {
         "lildax": "./bin/lildax.cjs",
@@ -2244,7 +2244,7 @@
 
     "@vectordevai/app": ["@vectordevai/app@workspace:packages/app"],
 
-    "@vectordevai/cli": ["@vectordevai/cli@workspace:packages/cli"],
+    "@vectordevai/cli-dev": ["@vectordevai/cli-dev@workspace:packages/cli"],
 
     "@vectordevai/client": ["@vectordevai/client@workspace:packages/client"],
 

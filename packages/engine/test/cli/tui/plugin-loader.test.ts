@@ -15,6 +15,28 @@ import { PluginLoader } from "../../../src/plugin/loader"
 const { allThemes, addTheme } = await import("@vectordevai/tui/context/theme")
 const { TuiPluginRuntime } = await import("../../../src/plugin/tui/runtime")
 
+test("TUI startup does not wait for SDK setup when a local plugin directory is incomplete", async () => {
+  await using tmp = await tmpdir()
+  const incomplete = path.join(tmp.path, "incomplete")
+  const ready = path.join(tmp.path, "ready.ts")
+  const marker = path.join(tmp.path, "ready.txt")
+  await fs.mkdir(incomplete)
+  await Bun.write(
+    ready,
+    `export default { id: "fixture.ready", tui: async () => { await Bun.write(${JSON.stringify(marker)}, "ready") } }\n`,
+  )
+  const mock = mockTuiRuntime(tmp.path, [pathToFileURL(incomplete).href, pathToFileURL(ready).href])
+  mock.wait.mockImplementation(() => new Promise(() => {}))
+  try {
+    await TuiPluginRuntime.init({ api: createTuiPluginApi(), config: mock.config })
+    expect(mock.wait).not.toHaveBeenCalled()
+    expect(await Bun.file(marker).text()).toBe("ready")
+  } finally {
+    await TuiPluginRuntime.dispose()
+    mock.restore()
+  }
+})
+
 type Row = Record<string, unknown>
 
 test("does not retry permanent file plugin load errors", async () => {

@@ -58,6 +58,7 @@ function load(dir: string, flags?: Parameters<typeof RuntimeFlags.layer>[0]) {
                   plugin_origins: plugins.map((plugin) => ({ spec: plugin, source, scope: "local" as const })),
                 }),
               directories: () => Effect.succeed([dir]),
+              waitForDependencies: () => Effect.die("Local plugins must not wait for SDK downloads"),
             }),
           ],
           [RuntimeFlags.node, RuntimeFlags.layer({ disableDefaultPlugins: true, ...flags })],

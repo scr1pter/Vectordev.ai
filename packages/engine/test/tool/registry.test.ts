@@ -10,6 +10,7 @@ import { disposeAllInstances, TestInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { TestConfig } from "../fixture/config"
 import { Config } from "@/config/config"
+import { ConfigDependencies } from "@/config/dependencies"
 import { Plugin } from "@/plugin"
 import { Agent } from "@/agent/agent"
 import { InstanceState } from "@/effect/instance-state"
@@ -22,6 +23,7 @@ import { ModelV2 } from "@vectordevai/core/model"
 
 const configLayer = TestConfig.layer({
   directories: () => InstanceState.directory.pipe(Effect.map((dir) => [path.join(dir, ".vector")])),
+  waitForDependencies: () => Effect.die("Local tools must not wait for SDK downloads"),
 })
 
 // Fake Plugin.Service that returns a single plugin whose `tool` map contains
@@ -61,6 +63,62 @@ afterEach(async () => {
 })
 
 describe("tool.registry", () => {
+  it.instance("loads a standalone custom tool through the completed shared SDK cache", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      const file = path.join(test.directory, ".vector", "tools", "cached-sdk.ts")
+      yield* Effect.promise(async () => {
+        await Bun.write(
+          path.join(ConfigDependencies.directory(), "package.json"),
+          JSON.stringify({ name: ConfigDependencies.packageName, type: "module", main: "index.js" }),
+        )
+        await Bun.write(
+          path.join(ConfigDependencies.directory(), "index.js"),
+          "export const tool = (value) => value;\n",
+        )
+        await Bun.write(ConfigDependencies.readyFile(), ConfigDependencies.specifier)
+        await Bun.write(
+          file,
+          'import { tool } from "@vectordevai/plugin"; export default tool({ description: "cached SDK tool", args: {}, execute: async () => "ready" });\n',
+        )
+      })
+      yield* Effect.addFinalizer(() =>
+        Effect.promise(async () => {
+          await fs.rm(ConfigDependencies.directory(), { recursive: true, force: true })
+          await fs.rm(ConfigDependencies.readyFile(), { force: true })
+        }),
+      )
+      const registry = yield* ToolRegistry.Service
+      expect(yield* registry.ids()).toContain("cached-sdk")
+      expect(
+        yield* Effect.promise(() =>
+          fs.realpath(path.join(path.dirname(file), "node_modules", ConfigDependencies.packageName)),
+        ),
+      ).toBe(yield* Effect.promise(() => fs.realpath(ConfigDependencies.directory())))
+    }),
+  )
+
+  it.instance("an uncached SDK tool does not prevent built-in and independent tools loading", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      yield* Effect.promise(async () => {
+        await Bun.write(
+          path.join(test.directory, ".vector", "tools", "missing-sdk.ts"),
+          'import { tool } from "@vectordevai/plugin"; export default tool({ description: "missing", args: {}, execute: async () => "missing" });\n',
+        )
+        await Bun.write(
+          path.join(test.directory, ".vector", "tools", "independent.ts"),
+          'export default { description: "ready", args: {}, execute: async () => "ready" };\n',
+        )
+      })
+      const registry = yield* ToolRegistry.Service
+      const ids = yield* registry.ids()
+      expect(ids).toContain("read")
+      expect(ids).toContain("independent")
+      expect(ids).not.toContain("missing-sdk")
+    }),
+  )
+
   it.instance("does not expose task_status", () =>
     Effect.gen(function* () {
       const registry = yield* ToolRegistry.Service

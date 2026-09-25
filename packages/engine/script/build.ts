@@ -16,7 +16,6 @@ const generated = await import("./generate.ts")
 
 import { Script } from "@vectordevai/script"
 import pkg from "../package.json"
-import pluginPkg from "../../plugin/package.json"
 
 const singleFlag = process.argv.includes("--single")
 const baselineFlag = process.argv.includes("--baseline")
@@ -207,7 +206,7 @@ for (const item of targets) {
     define: {
       FFF_LIBC: JSON.stringify(item.abi === "musl" ? "musl" : "gnu"),
       VECTOR_VERSION: `'${Script.version}'`,
-      VECTOR_PLUGIN_VERSION: `'${pluginPkg.version}'`,
+      VECTOR_PLUGIN_VERSION: JSON.stringify(process.env.VECTOR_PLUGIN_VERSION ?? Script.version),
       VECTOR_MODEL_CATALOG: generated.modelsData,
       OTUI_TREE_SITTER_WORKER_PATH: bunfsRoot + workerRelativePath,
       VECTOR_WORKER_PATH: workerPath,

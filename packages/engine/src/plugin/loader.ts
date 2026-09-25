@@ -11,6 +11,7 @@ import {
 import { ConfigPlugin } from "@/config/plugin"
 import { ConfigPluginV1 } from "@vectordevai/core/v1/config/plugin"
 import { InstallationVersion } from "@vectordevai/core/installation/version"
+import { ConfigDependencies } from "@/config/dependencies"
 
 export namespace PluginLoader {
   // A normalized plugin declaration derived from config before any filesystem or npm work happens.
@@ -136,8 +137,18 @@ export namespace PluginLoader {
   export async function load(row: Resolved): Promise<{ ok: true; value: Loaded } | { ok: false; error: unknown }> {
     let mod
     try {
+      if (row.source === "file") await ConfigDependencies.link(row.entry).catch(() => false)
       mod = await import(row.entry)
     } catch (error) {
+      if (row.source === "file" && errorMessage(error).includes(ConfigDependencies.packageName)) {
+        return {
+          ok: false,
+          error: new Error(
+            `Plugin SDK ${ConfigDependencies.specifier} is not ready. Vector prepares it in the shared cache in the background; restart Vector after setup succeeds because failed module resolution is cached. Check registry access if setup remains unavailable.`,
+            { cause: error },
+          ),
+        }
+      }
       return { ok: false, error }
     }
     if (!mod) return { ok: false, error: new Error(`Plugin ${row.spec} module is empty`) }

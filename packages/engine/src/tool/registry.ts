@@ -19,6 +19,9 @@ import { InvalidTool } from "./invalid"
 import { SkillTool } from "./skill"
 import * as Tool from "./tool"
 import { Config } from "@/config/config"
+import { ConfigDependencies } from "@/config/dependencies"
+import { InstallationLocal } from "@vectordevai/core/installation/version"
+import { PluginLoader } from "@/plugin/loader"
 import { type ToolContext as PluginToolContext, type ToolDefinition } from "@vectordevai/plugin"
 import type { JSONSchema7, JSONSchema7Definition } from "@ai-sdk/provider"
 import { Schema } from "effect"
@@ -86,6 +89,7 @@ const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const config = yield* Config.Service
+    const dependencies = yield* ConfigDependencies.Service
     const plugin = yield* Plugin.Service
     const agents = yield* Agent.Service
     const truncate = yield* Truncate.Service
@@ -178,13 +182,26 @@ const layer = Layer.effect(
         const matches = dirs.flatMap((dir) =>
           Glob.scanSync("{tool,tools}/*.{js,ts}", { cwd: dir, absolute: true, dot: true, symlink: true }),
         )
-        if (matches.length) yield* config.waitForDependencies()
+        if (matches.length && !InstallationLocal) yield* dependencies.prepare().pipe(Effect.forkDetach)
         for (const match of matches) {
           const namespace = path.basename(match, path.extname(match))
           // `match` is an absolute filesystem path from `Glob.scanSync(..., { absolute: true })`.
           // Import it as `file://` so Node on Windows accepts the dynamic import.
-          const mod = yield* Effect.promise(() => import(pathToFileURL(match).href))
-          for (const [id, def] of Object.entries(mod)) {
+          const loaded = yield* Effect.promise(() =>
+            PluginLoader.load({
+              spec: match,
+              target: match,
+              entry: pathToFileURL(match).href,
+              source: "file",
+              options: undefined,
+              deprecated: false,
+            }),
+          )
+          if (!loaded.ok) {
+            yield* Effect.logWarning("Custom tool could not load", { path: match, error: String(loaded.error) })
+            continue
+          }
+          for (const [id, def] of Object.entries(loaded.value.mod)) {
             if (!isPluginTool(def)) continue
             custom.push(fromPlugin(id === "default" ? namespace : `${namespace}_${id}`, def))
           }
@@ -407,6 +424,7 @@ export const node = LayerNode.make({
   layer,
   deps: [
     Config.node,
+    ConfigDependencies.node,
     Plugin.node,
     Question.node,
     Todo.node,

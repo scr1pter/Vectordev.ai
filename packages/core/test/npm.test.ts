@@ -1,7 +1,8 @@
 import fs from "fs/promises"
 import path from "path"
+import { createServer } from "node:http"
 import { describe, expect, test } from "bun:test"
-import { Effect, Option } from "effect"
+import { Effect, Exit, Fiber, Option } from "effect"
 import { AppNodeBuilder } from "@vectordevai/core/effect/app-node-builder"
 import { Global } from "@vectordevai/core/global"
 import { Npm } from "@vectordevai/core/npm"
@@ -21,6 +22,12 @@ const writePackage = (dir: string, pkg: Record<string, unknown>) =>
 const npmLayer = (cache: string) =>
   AppNodeBuilder.build(Npm.node, [[Global.node, Global.layerWith({ cache, state: path.join(cache, "state") })]])
 
+async function deadline<T>(promise: Promise<T>, label: string) {
+  const limit = Promise.withResolvers<never>()
+  const timer = setTimeout(() => limit.reject(new Error(`Timed out: ${label}`)), 2_000)
+  return Promise.race([promise, limit.promise]).finally(() => clearTimeout(timer))
+}
+
 describe("Npm.sanitize", () => {
   test("keeps normal scoped package specs unchanged", () => {
     expect(Npm.sanitize("@vector/acme")).toBe("@vector/acme")
@@ -36,6 +43,48 @@ describe("Npm.sanitize", () => {
 })
 
 describe("Npm.add", () => {
+  test.each(["interrupt", "timeout"] as const)(
+    "bounded install handles %s during a stalled real registry request",
+    async (mode) => {
+      await using tmp = await tmpdir()
+      const received = Promise.withResolvers<void>()
+      const requests: string[] = []
+      const server = createServer((request, response) => {
+        requests.push(request.url ?? "")
+        received.resolve()
+      })
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
+      const address = server.address()
+      if (!address || typeof address === "string") throw new Error("Registry did not listen")
+      const cache = path.join(tmp.path, "cache")
+      const spec = "stall-sdk@1.0.0"
+      await fs.mkdir(path.join(cache, "packages", Npm.sanitize(spec)), { recursive: true })
+      await writePackage(path.join(cache, "packages", Npm.sanitize(spec)), { name: "registry-fixture" })
+      await Bun.write(
+        path.join(cache, "packages", Npm.sanitize(spec), ".npmrc"),
+        `registry=http://127.0.0.1:${address.port}\nfetch-retries=4\nfetch-timeout=70000\n`,
+      )
+      try {
+        await Effect.gen(function* () {
+          const npm = yield* Npm.Service
+          const fiber = yield* npm.add(spec, { timeout: mode === "interrupt" ? 5_000 : 100 }).pipe(Effect.forkChild)
+          yield* Effect.promise(() => deadline(received.promise, "registry request"))
+          if (mode === "interrupt") {
+            yield* Fiber.interrupt(fiber)
+            return
+          }
+          const exit = yield* Fiber.await(fiber).pipe(Effect.timeout("2 seconds"))
+          expect(Exit.isFailure(exit)).toBe(true)
+        }).pipe(Effect.scoped, Effect.provide(npmLayer(cache)), Effect.runPromise)
+        expect(requests).toEqual(["/stall-sdk"])
+      } finally {
+        server.closeAllConnections()
+        await new Promise<void>((resolve) => server.close(() => resolve()))
+      }
+    },
+    10_000,
+  )
+
   test("reifies when package cache directory exists without the package installed", async () => {
     await using tmp = await tmpdir()
     await fs.mkdir(path.join(tmp.path, "fixture-provider"))

@@ -16,11 +16,11 @@ import { FSUtil } from "@vectordevai/core/fs-util"
 import { CurrentWorkingDirectory } from "./tui-cwd"
 import { ConfigPlugin } from "@/config/plugin"
 import { TuiKeybind } from "@vectordevai/tui/config/keybind"
-import { InstallationLocal, InstallationVersion } from "@vectordevai/core/installation/version"
+import { InstallationLocal } from "@vectordevai/core/installation/version"
 import { makeRuntime } from "@vectordevai/core/effect/runtime"
 import { Filesystem } from "@/util/filesystem"
 import { ConfigVariable } from "@/config/variable"
-import { Npm } from "@vectordevai/core/npm"
+import { ConfigDependencies } from "./dependencies"
 import { FormatError, FormatUnknownError } from "@/cli/error"
 import { TuiConfig } from "@vectordevai/tui/config"
 
@@ -198,8 +198,7 @@ const loadState = Effect.fn("TuiConfig.loadState")(function* (ctx: { directory: 
   }
 
   // 4. `.vector` directories (and VECTOR_AGENT_CONFIG_DIR) discovered while
-  // walking up the tree. Also returned below so callers can install plugin
-  // dependencies from each location.
+  // walking up the tree.
   const dirs = unique(directories).filter((dir) => dir.endsWith(".vector") || dir === Flag.VECTOR_AGENT_CONFIG_DIR)
 
   for (const dir of dirs) {
@@ -221,7 +220,6 @@ const loadState = Effect.fn("TuiConfig.loadState")(function* (ctx: { directory: 
   return {
     config: result,
     pluginOrigins: acc.plugin_origins,
-    dirs: result.plugin?.length ? dirs : [],
   }
 })
 
@@ -229,27 +227,10 @@ const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const directory = yield* CurrentWorkingDirectory
-    const npm = yield* Npm.Service
+    const dependencies = yield* ConfigDependencies.Service
     const data = yield* loadState({ directory })
-    const deps = InstallationLocal
-      ? []
-      : yield* Effect.forEach(
-          data.dirs,
-          (dir) =>
-            npm
-              .install(dir, {
-                add: [
-                  {
-                    name: "@vectordevai/plugin",
-                    version: InstallationVersion,
-                  },
-                ],
-              })
-              .pipe(Effect.forkScoped),
-          {
-            concurrency: "unbounded",
-          },
-        )
+    const deps =
+      InstallationLocal || !data.pluginOrigins.length ? [] : [yield* dependencies.prepare().pipe(Effect.forkDetach)]
 
     const get = Effect.fn("TuiConfig.get")(() => Effect.succeed(data.config))
     const pluginOrigins = Effect.fn("TuiConfig.pluginOrigins")(() => Effect.succeed(data.pluginOrigins))
@@ -261,7 +242,7 @@ const layer = Layer.effect(
   }).pipe(Effect.withSpan("TuiConfig.layer")),
 )
 
-export const node = LayerNode.make({ service: Service, layer, deps: [Npm.node, FSUtil.node] })
+export const node = LayerNode.make({ service: Service, layer, deps: [ConfigDependencies.node, FSUtil.node] })
 
 const { runPromise } = makeRuntime(Service, AppNodeBuilder.build(node))
 

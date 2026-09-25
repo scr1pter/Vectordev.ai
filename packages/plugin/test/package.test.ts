@@ -7,6 +7,7 @@ import { stagePlugin, verifyPlugin } from "../script/build"
 async function fixture() {
   const root = await mkdtemp(path.join(os.tmpdir(), "vector-plugin-package-"))
   const directory = path.join(root, "packages/plugin")
+  await Bun.write(path.join(root, "packages/desktop/package.json"), JSON.stringify({ version: "1.2.3" }))
   await Bun.write(path.join(root, "package.json"), JSON.stringify({ workspaces: { catalog: { zod: "4.1.8" } } }))
   await Bun.write(
     path.join(directory, "package.json"),
@@ -58,6 +59,7 @@ test("staged plugin closes private SDK types, resolves public versions, and expo
   const output = await stagePlugin(tmp.directory, false)
   const manifest = await Bun.file(path.join(output, "package.json")).json()
   expect(manifest.dependencies).toEqual({ zod: "4.1.8" })
+  expect(manifest.version).toBe("1.2.3")
   expect(manifest.devDependencies).toBeUndefined()
   expect(manifest.exports["."].types).toBe("./dist/index.d.ts")
   expect(await Bun.file(path.join(output, "dist/index.d.ts")).text()).toContain('from "./sdk/index.js"')
@@ -85,8 +87,8 @@ test("a runtime private SDK import cannot silently ship in the public package", 
 test("a stale stage cannot be published under a newer source version", async () => {
   await using tmp = await fixture()
   const output = await stagePlugin(tmp.directory, false)
-  const file = Bun.file(path.join(tmp.directory, "package.json"))
-  await file.write(JSON.stringify({ ...(await file.json()), version: "0.0.1-test" }))
+  const file = Bun.file(path.join(tmp.root, "packages/desktop/package.json"))
+  await file.write(JSON.stringify({ version: "1.2.4" }))
   await expect(verifyPlugin(output)).rejects.toThrow("Staged plugin identity does not match its source")
 })
 

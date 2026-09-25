@@ -65,7 +65,7 @@ for (const item of targets) {
   ]
     .filter(Boolean)
     .join("-")
-  const name = target.replace(binary, "cli")
+  const name = target.replace(binary, "cli-dev")
   console.log(`building ${name}`)
   const result = await Bun.build({
     entrypoints: ["./src/index.ts", parserWorker],
@@ -113,6 +113,7 @@ for (const item of targets) {
       {
         name: `@vectordevai/${name}`,
         version: Script.version,
+        private: true,
         license: "MIT",
         repository: { type: "git", url: "git+https://github.com/scr1pter/Vectordev.ai.git" },
         os: [item.os],

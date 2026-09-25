@@ -16,8 +16,17 @@ const manifest = await Bun.file(path.join(output, "package.json")).json()
 if (!publish) {
   await $`npm pack --offline --json`.cwd(output)
   console.log(`Packed ${manifest.name}@${manifest.version}; nothing was published`)
-} else {
+}
+if (publish) {
   const existing = await $`npm view ${`${manifest.name}@${manifest.version}`} version`.quiet().nothrow()
-  if (existing.exitCode === 0) console.log(`already published ${manifest.name}@${manifest.version}`)
-  else await $`npm publish --access public`.cwd(output)
+  if (existing.exitCode === 0) {
+    console.log(`already published ${manifest.name}@${manifest.version}`)
+    process.exit(0)
+  }
+  const child = Bun.spawn(["npm", "publish", "--access", "public"], {
+    cwd: output,
+    stdio: ["inherit", "inherit", "inherit"],
+  })
+  const code = await child.exited
+  if (code !== 0) process.exit(code)
 }

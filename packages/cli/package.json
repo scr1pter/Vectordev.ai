@@ -1,6 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
-  "name": "@vectordevai/cli",
+  "name": "@vectordevai/cli-dev",
   "version": "1.17.14",
   "type": "module",
   "license": "MIT",
@@ -32,5 +32,6 @@
     "@tsconfig/bun": "catalog:",
     "@types/bun": "catalog:",
     "@typescript/native-preview": "catalog:"
-  }
+  },
+  "private": true
 }

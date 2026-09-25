@@ -20,6 +20,9 @@ export async function stagePlugin(packageDirectory = directory, compile = true) 
   await cp(path.join(packageDirectory, "dist"), path.join(output, "dist"), { recursive: true })
   const sdkManifest = await Bun.file(path.join(sdk, "package.json")).json()
   const source = await Bun.file(path.join(packageDirectory, "package.json")).json()
+  const version =
+    process.env.VECTOR_PLUGIN_VERSION ??
+    (await Bun.file(path.join(root, "packages/desktop/package.json")).json()).version
   const catalog = (await Bun.file(path.join(root, "package.json")).json()).workspaces.catalog
   for await (const file of new Bun.Glob("**/*.d.ts").scan(path.join(sdk, "dist"))) {
     await Bun.write(path.join(output, "dist/sdk", file), Bun.file(path.join(sdk, "dist", file)))
@@ -62,6 +65,7 @@ export async function stagePlugin(packageDirectory = directory, compile = true) 
     JSON.stringify(
       {
         ...manifest,
+        version,
         private: false,
         license: "SEE LICENSE IN LICENSE",
         files: ["dist", "LICENSE", "THIRD_PARTY_NOTICES.md", "DEPENDENCY_NOTICES.md"],
@@ -82,7 +86,10 @@ export async function stagePlugin(packageDirectory = directory, compile = true) 
 export async function verifyPlugin(output: string) {
   const manifest = await Bun.file(path.join(output, "package.json")).json()
   const source = await Bun.file(path.resolve(output, "../package.json")).json()
-  if (manifest.name !== source.name || manifest.version !== source.version) {
+  const version =
+    process.env.VECTOR_PLUGIN_VERSION ??
+    (await Bun.file(path.resolve(output, "../../desktop/package.json")).json()).version
+  if (manifest.name !== source.name || manifest.version !== version) {
     throw new Error("Staged plugin identity does not match its source; rebuild before packaging")
   }
   if (manifest.private || manifest.dependencies?.["@vectordevai/sdk"]) throw new Error("Plugin requires a private SDK")
