@@ -10,6 +10,7 @@ import { FSUtil } from "../../fs-util"
 import { Location } from "../../location"
 import { Npm } from "../../npm"
 import { define } from "../../plugin/internal"
+import { LocalPluginSdk } from "../../plugin/local-sdk"
 import { PluginPromise } from "../../plugin/promise"
 
 const PluginModule = Schema.Struct({
@@ -77,7 +78,10 @@ export const Plugin = define({
             : (yield* npm.add(ref.package)).entrypoint
           if (!entrypoint) return
 
-          const mod = yield* Effect.promise(() => import(entrypoint))
+          const target = path.isAbsolute(ref.package)
+            ? yield* Effect.promise(() => LocalPluginSdk.prepare(entrypoint))
+            : entrypoint
+          const mod = yield* Effect.promise(() => import(target))
           const value = (yield* Schema.decodeUnknownEffect(PluginModule)(mod)).default
           const plugin = "effect" in value ? value : PluginPromise.fromPromise(value)
           yield* ctx.plugin.add({

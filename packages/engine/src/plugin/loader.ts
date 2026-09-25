@@ -12,6 +12,7 @@ import {
 import { ConfigPlugin } from "@/config/plugin"
 import { ConfigPluginV1 } from "@vectordevai/core/v1/config/plugin"
 import { InstallationVersion } from "@vectordevai/core/installation/version"
+import { LocalPluginSdk } from "@vectordevai/core/plugin/local-sdk"
 import { ConfigDependencies } from "@/config/dependencies"
 
 export namespace PluginLoader {
@@ -138,8 +139,10 @@ export namespace PluginLoader {
   export async function load(row: Resolved): Promise<{ ok: true; value: Loaded } | { ok: false; error: unknown }> {
     let mod
     try {
-      if (row.source === "file") await ConfigDependencies.link(row.entry).catch(() => false)
-      mod = await import(row.entry)
+      if (row.source === "file") {
+        await ConfigDependencies.link(row.entry).catch(() => false)
+      }
+      mod = await import(row.source === "file" ? await LocalPluginSdk.prepare(row.entry) : row.entry)
     } catch (error) {
       if (row.source === "file" && errorMessage(error).includes(ConfigDependencies.packageName)) {
         return {

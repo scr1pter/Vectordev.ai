@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import path from "node:path"
 import { isDeprecatedPlugin, parsePluginSpecifier } from "../../src/plugin/shared"
 
 describe("paused sign-in plugin names", () => {
@@ -105,5 +106,44 @@ describe("parsePluginSpecifier", () => {
       pkg: "@vector/acme",
       version: "latest",
     })
+  })
+})
+
+describe("theme manifest aliases", () => {
+  test("combines suffix-matched fields and deduplicates the same file", async () => {
+    const { readPackageThemes } = await import("../../src/plugin/shared")
+    expect(
+      readPackageThemes("fixture", {
+        dir: path.resolve("vector-theme-fixture"),
+        pkg: path.resolve("vector-theme-fixture/package.json"),
+        json: {
+          "fixture-themes": ["./themes/one.json"],
+          "vector-themes": ["themes/one.json", "themes/two.json"],
+          themes: ["ignored.json"],
+        },
+      }),
+    ).toEqual([
+      path.resolve("vector-theme-fixture/themes/one.json"),
+      path.resolve("vector-theme-fixture/themes/two.json"),
+    ])
+  })
+  test("applies the same validation to suffix-matched aliases", async () => {
+    const { readPackageThemes } = await import("../../src/plugin/shared")
+    for (const value of [
+      "themes/one.json",
+      [42],
+      [""],
+      ["../escape.json"],
+      ["/absolute.json"],
+      ["file:///theme.json"],
+    ]) {
+      expect(() =>
+        readPackageThemes("fixture", {
+          dir: path.resolve("vector-theme-fixture"),
+          pkg: path.resolve("vector-theme-fixture/package.json"),
+          json: { "fixture-themes": value },
+        }),
+      ).toThrow()
+    }
   })
 })

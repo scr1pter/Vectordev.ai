@@ -11,10 +11,14 @@ export const prerender = true
           </p>
           <p class="doc-cmd"><code>vector plugin @acme/vector-plugin -g</code><button class="doc-cmd-copy" type="button" aria-label="Copy this command">Copy</button></p>
           <p>
-            In the upcoming release, configuration uses Vector names only: <code>vector.json</code>,
-            <code>vector.jsonc</code>, <code>.vector/</code>, and <code>VECTOR_*</code> variables. Rename your
-            configuration before upgrading. Plugins import <code>@vectordevai/plugin</code>, including its
-            <code>/tui</code> export. Existing plugins must update their imports. The package will be published
+            For new settings, use Vector names: <code>vector.json</code>,
+            <code>vector.jsonc</code>, <code>.vector/</code>, and <code>VECTOR_*</code> variables. The upcoming release recognizes earlier config files and project folders by their contents,
+            imports them into Vector paths once, and preserves originals. Ambiguous or conflicting security
+            settings require repair before startup. Plugins import <code>@vectordevai/plugin</code>, including its
+            <code>/tui</code> export. Local plugins and tools can keep a scoped SDK import when that module is unavailable;
+            Vector supplies its own SDK without replacing a dependency that already resolves. New and published
+            plugins should use the Vector imports explicitly. Theme manifests prefer <code>vector-themes</code>;
+            keys ending in <code>-themes</code> remain accepted with the same path validation. The package will be published
             before the CLI release that installs it.
           </p>
           <p class="note">

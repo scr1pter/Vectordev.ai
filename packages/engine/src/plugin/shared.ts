@@ -236,27 +236,20 @@ export async function createPluginEntry(spec: string, target: string, kind: Plug
 }
 
 export function readPackageThemes(spec: string, pkg: PluginPackage) {
-  const field = pkg.json["vector-themes"]
-  if (field === undefined) return []
-  if (!Array.isArray(field)) {
-    throw new TypeError(`Plugin ${spec} has invalid vector-themes field`)
-  }
-
-  const list = field.map((item) => {
-    if (typeof item !== "string") {
-      throw new TypeError(`Plugin ${spec} has invalid vector-themes entry`)
-    }
-
-    const raw = item.trim()
-    if (!raw) {
-      throw new TypeError(`Plugin ${spec} has empty vector-themes entry`)
-    }
-    if (raw.startsWith("file://") || isAbsolutePath(raw)) {
-      throw new TypeError(`Plugin ${spec} vector-themes entry must be relative: ${item}`)
-    }
-
-    return resolvePackageFile(spec, raw, "vector-themes", pkg)
-  })
+  const list = Object.entries(pkg.json)
+    .filter(([key]) => key.endsWith("-themes"))
+    .flatMap(([key, field]) => {
+      if (!Array.isArray(field)) throw new TypeError(`Plugin ${spec} has invalid ${key} field`)
+      return field.map((item) => {
+        if (typeof item !== "string") throw new TypeError(`Plugin ${spec} has invalid ${key} entry`)
+        const raw = item.trim()
+        if (!raw) throw new TypeError(`Plugin ${spec} has empty ${key} entry`)
+        if (raw.startsWith("file://") || isAbsolutePath(raw)) {
+          throw new TypeError(`Plugin ${spec} ${key} entry must be relative: ${item}`)
+        }
+        return resolvePackageFile(spec, raw, key, pkg)
+      })
+    })
 
   return Array.from(new Set(list))
 }
