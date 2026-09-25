@@ -314,6 +314,23 @@ it.effect("creates global jsonc config with schema when no global configs exist"
   ),
 )
 
+it.effect("loads neutral global config.json and imports prior settings before an update", () =>
+  withGlobalConfig({ config: { permission: { bash: "deny" }, shell: "bash" }, name: "config.json" }, ({ dir }) =>
+    Effect.gen(function* () {
+      expect(yield* Config.use.getGlobal()).toMatchObject({ permission: { bash: "deny" }, shell: "bash" })
+      yield* writeConfigEffect(dir, { disabled_providers: ["openai"], shell: "/bin/zsh" }, "previous.jsonc")
+      yield* Config.use.updateGlobal({ username: "kept-settings" })
+      expect(yield* Config.use.getGlobal()).toMatchObject({
+        permission: { bash: "deny" },
+        shell: "/bin/zsh",
+        disabled_providers: ["openai"],
+        username: "kept-settings",
+      })
+      expect(yield* FSUtil.use.existsSafe(path.join(dir, "previous.jsonc"))).toBe(true)
+    }),
+  ),
+)
+
 it.effect("ignores an extensionless global TOML config", () =>
   withGlobalConfig({}, ({ dir }) =>
     Effect.gen(function* () {

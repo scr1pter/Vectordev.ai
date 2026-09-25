@@ -32,6 +32,7 @@ import { ConfigManaged } from "./managed"
 import { ConfigParse } from "./parse"
 import { ConfigSchema } from "./schema"
 import { ConfigPaths } from "./paths"
+import { ConfigImport } from "./import-settings"
 import { ConfigPlugin } from "./plugin"
 import { PluginDependencyVersion } from "./plugin-version"
 import { ConfigVariable } from "./variable"
@@ -146,7 +147,7 @@ export const use = serviceUse(Service)
 const LOCAL_CONFIG_FILES = ["vector.local.json", "vector.local.jsonc"]
 
 function globalConfigFile() {
-  const candidates = ["vector.jsonc", "vector.json"].map((file) => path.join(Global.Path.config, file))
+  const candidates = ["vector.jsonc", "vector.json", "config.json"].map((file) => path.join(Global.Path.config, file))
   for (const file of candidates) {
     if (existsSync(file)) return file
   }
@@ -187,6 +188,14 @@ const layer = Layer.effect(
     const env = yield* Env.Service
     const npmSvc = yield* Npm.Service
     const http = yield* HttpClient.HttpClient
+    const flock = yield* EffectFlock.Service
+
+    const importSettings = (directory: string, local = false) =>
+      ConfigImport.run(directory, local).pipe(
+        Effect.provideService(FSUtil.Service, fs),
+        Effect.provideService(EffectFlock.Service, flock),
+        Effect.orDie,
+      )
 
     const readConfigFile = (filepath: string) => fs.readFileStringSafe(filepath).pipe(Effect.orDie)
 
@@ -255,6 +264,7 @@ const layer = Layer.effect(
     })
 
     const loadGlobal = Effect.fnUntraced(function* (env?: Record<string, string>) {
+      yield* importSettings(Global.Path.config)
       let result: Info = {}
       // Seed the default global config with the schema for editor completion, but avoid writing when the user
       // explicitly routes config through env-provided paths or content.
@@ -267,6 +277,7 @@ const layer = Layer.effect(
         }
       }
 
+      result = mergeConfig(result, yield* loadFile(path.join(Global.Path.config, "config.json"), env))
       result = mergeConfig(result, yield* loadFile(path.join(Global.Path.config, "vector.json"), env))
       result = mergeConfig(result, yield* loadFile(path.join(Global.Path.config, "vector.jsonc"), env))
 
@@ -417,6 +428,8 @@ const layer = Layer.effect(
 
         for (const dir of directories) {
           if (dir.endsWith(".vector") || dir === Flag.VECTOR_CONFIG_DIR) {
+            if (dir === Flag.VECTOR_CONFIG_DIR) yield* importSettings(dir)
+            yield* importSettings(dir, true)
             // Local files merge after the shared ones so machine-local settings win.
             for (const file of ["vector.json", "vector.jsonc", ...LOCAL_CONFIG_FILES]) {
               const source = path.join(dir, file)
@@ -648,6 +661,7 @@ const layer = Layer.effect(
     })
 
     const updateGlobal = Effect.fn("Config.updateGlobal")(function* (config: Info) {
+      yield* importSettings(Global.Path.config)
       const file = globalConfigFile()
       const original = (yield* readConfigFile(file)) ?? "{}"
       const before = ConfigSchema.rewrite(original)
@@ -691,7 +705,7 @@ const layer = Layer.effect(
 export const node = LayerNode.make({
   service: Service,
   layer: layer,
-  deps: [FSUtil.node, Auth.node, Env.node, Npm.node, httpClient],
+  deps: [FSUtil.node, Auth.node, Env.node, Npm.node, httpClient, EffectFlock.node],
 })
 
 export * as Config from "./config"

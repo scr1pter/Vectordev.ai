@@ -32,14 +32,14 @@ The hosted console login and GitHub App token exchange are removed. GitHub autom
 
 All six named switches are false in the central provider policy:
 
-| Sign-in | Switch | Available alternative |
-| --- | --- | --- |
-| GitHub Copilot | `COPILOT_SIGN_IN` | No supported Copilot replacement method currently |
-| ChatGPT | `CHATGPT_SIGN_IN` | OpenAI API key |
-| xAI | `XAI_SIGN_IN` | xAI API key |
-| GitLab Duo OAuth | `GITLAB_SIGN_IN` | GitLab personal access token |
-| Poe OAuth | `POE_SIGN_IN` | Poe API key |
-| DigitalOcean OAuth | `DIGITALOCEAN_SIGN_IN` | DigitalOcean API key |
+| Sign-in            | Switch                 | Available alternative                             |
+| ------------------ | ---------------------- | ------------------------------------------------- |
+| GitHub Copilot     | `COPILOT_SIGN_IN`      | No supported Copilot replacement method currently |
+| ChatGPT            | `CHATGPT_SIGN_IN`      | OpenAI API key                                    |
+| xAI                | `XAI_SIGN_IN`          | xAI API key                                       |
+| GitLab Duo OAuth   | `GITLAB_SIGN_IN`       | GitLab personal access token                      |
+| Poe OAuth          | `POE_SIGN_IN`          | Poe API key                                       |
+| DigitalOcean OAuth | `DIGITALOCEAN_SIGN_IN` | DigitalOcean API key                              |
 
 Stored borrowed OAuth credentials cannot reactivate these routes. GitLab additionally requires an explicitly configured owned registration before its dormant PKCE flow can be enabled; setting `GITLAB_OAUTH_CLIENT_ID` alone does not bypass the false switch. The old DigitalOcean OAuth credential shape is also rejected. API-key native adapter and tool-loop behavior remains covered by tests.
 
@@ -47,7 +47,9 @@ Re-enabling any sign-in requires an approved Vector-owned registration, provider
 
 ## Configuration, protocol and application identity
 
-Configuration is a clean break: only Vector filenames, directories and application environment variables are read. Use `vector.json`, `vector.jsonc`, the Vector local configuration files and `.vector/`. Rename older configuration and custom scripts yourself; no legacy aliases or warning-based fallbacks remain. Provider-specific credentials such as `OPENAI_API_KEY` keep their provider names.
+Global settings keep the neutral `config.json` layer. Before loading or updating settings, Vector imports a single recognizable prior JSON/JSONC configuration family into `vector.jsonc` when there is no active Vector configuration. Import preserves original files, merges `config.json` then JSON then JSONC, retains comments from the final layer, and reports the source and destination. A schema-only first-run seed does not block import. Ambiguous candidates or invalid schema-identified settings stop startup with repair guidance, so deny rules are not silently discarded. Credential, package and license files are excluded.
+
+Runtime MCP files ending in `.local.json` or `.local.jsonc` in an existing Vector configuration directory are imported into `vector.local.jsonc` and added to its `.gitignore`. Files in a differently named project directory are not scanned automatically: move the local MCP configuration into `.vector/vector.local.jsonc`, preserve its `mcp` object, and add both `vector.local.json` and `vector.local.jsonc` to `.vector/.gitignore` before starting Vector. Review project settings separately and copy them to `vector.json` or `vector.jsonc`; global migration does not import arbitrary project files. Keep backups until the model, permissions, shell, agents and MCP connections have been checked. Provider-specific credentials such as `OPENAI_API_KEY` keep their provider names.
 
 The desktop, engine, TUI, SDK and WSL sidecar use the same Vector protocol: `x-vector-*` headers, `.well-known/vector`, the default Basic-auth username `vector`, `vector.local` discovery and Vector IPC channels. SDK factories and helpers use Vector names and launch `vector`. Explicit subprocess overrides use `VECTOR_*` settings. Regenerated GitHub workflows use Vector variables; run `vector github install` again in repositories using that workflow.
 

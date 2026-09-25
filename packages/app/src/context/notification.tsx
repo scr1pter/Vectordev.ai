@@ -402,6 +402,19 @@ function createServerNotificationState(input: {
 
   const unsub = serverSDK().event.listen((e) => {
     const event = e.details
+    if (event.type === "tui.toast.show") {
+      showToast({
+        title: event.properties.title,
+        description: event.properties.message,
+        variant: ["info", "warning"].includes(event.properties.variant)
+          ? "default"
+          : event.properties.variant === "success"
+            ? "success"
+            : "error",
+        duration: event.properties.duration,
+      })
+      return
+    }
     if (event.type !== "session.idle" && event.type !== "session.error") return
 
     const directory = e.name
