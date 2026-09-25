@@ -17,5 +17,31 @@ test("TUI schema defaults use the Vector TUI schema", () => {
     theme: "vector",
   })
   const custom = '{"$schema":"https://example.com/tui.json"}'
-  expect(ConfigSchema.rewrite(custom, "tui")).toBe(custom)
+  expect(parse(ConfigSchema.rewrite(custom, "tui")).$schema).toBe("https://vectordev.ai/tui.json")
+})
+
+test("rewrites recognized schema paths by shape and preserves settings and comments", () => {
+  for (const kind of ["config", "tui", "theme", "desktop-theme"] as const) {
+    const input = `{
+ // permission must survive
+ "$schema": "https://previous.example/schema/${kind}.json?version=1#root",
+ "permission": {"bash": "deny"}
+}`
+    const updated = ConfigSchema.rewrite(input, kind)
+    expect(updated).toContain("// permission must survive")
+    expect(parse(updated)).toEqual({ $schema: `https://vectordev.ai/${kind}.json`, permission: { bash: "deny" } })
+    expect(ConfigSchema.rewrite(updated, kind)).toBe(updated)
+  }
+})
+
+test("does not replace arbitrary custom schemas or malformed schema values", () => {
+  for (const schema of [
+    "https://enterprise.example/custom.json",
+    "https://vectordev.ai/config.json",
+    "./local.json",
+    12,
+  ]) {
+    const input = JSON.stringify({ $schema: schema, permission: { bash: "deny" } })
+    expect(ConfigSchema.rewrite(input)).toBe(input)
+  }
 })
