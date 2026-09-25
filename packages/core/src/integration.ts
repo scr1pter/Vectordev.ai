@@ -67,11 +67,11 @@ export type OAuthAuthorization = {
 } & (
   | {
       readonly mode: "auto"
-      readonly callback: Effect.Effect<Credential.OAuth, unknown>
+      readonly callback: Effect.Effect<Credential.Value, unknown>
     }
   | {
       readonly mode: "code"
-      readonly callback: (code: string) => Effect.Effect<Credential.OAuth, unknown>
+      readonly callback: (code: string) => Effect.Effect<Credential.Value, unknown>
     }
 )
 
@@ -335,7 +335,7 @@ export const locationLayer = Layer.effect(
       return error instanceof Error ? error.message : String(error)
     }
 
-    const settle = Effect.fnUntraced(function* (attemptID: AttemptID, exit: Exit.Exit<Credential.OAuth, unknown>) {
+    const settle = Effect.fnUntraced(function* (attemptID: AttemptID, exit: Exit.Exit<Credential.Value, unknown>) {
       const now = yield* Clock.currentTimeMillis
       const result = yield* SynchronizedRef.modify(attempts, (current) => {
         const attempt = current.get(attemptID)
@@ -350,7 +350,7 @@ export const locationLayer = Layer.effect(
         const implementation = state.get().integrations.get(result.integrationID)?.implementations.get(result.methodID)
         yield* credentials.create({
           integrationID: result.integrationID,
-          label: result.label ?? implementation?.label?.(exit.value),
+          label: result.label ?? (exit.value.type === "oauth" ? implementation?.label?.(exit.value) : undefined),
           value: exit.value,
         })
         yield* events.publish(Event.ConnectionUpdated, { integrationID: result.integrationID })

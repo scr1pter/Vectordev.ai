@@ -6,6 +6,48 @@ import { testEffect } from "./lib/effect"
 const it = testEffect(Layer.empty)
 
 describe("SessionRunCoordinator", () => {
+  it.effect("exclusive continuation owns the key before validation and refuses concurrent retries", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const gate = yield* Deferred.make<void>()
+        const entered = yield* Deferred.make<void>()
+        const calls: string[] = []
+        const coordinator = yield* SessionRunCoordinator.make<string, string>({
+          drain: () =>
+            Effect.sync(() => {
+              calls.push("drain")
+            }),
+        })
+        const first = yield* coordinator
+          .runExclusive(
+            "session",
+            Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(gate))),
+            "busy",
+          )
+          .pipe(Effect.forkChild)
+        yield* Deferred.await(entered)
+        const duplicate = yield* coordinator
+          .runExclusive(
+            "session",
+            Effect.sync(() => {
+              calls.push("duplicate")
+            }),
+            "busy",
+          )
+          .pipe(Effect.exit)
+        expect(Exit.isFailure(duplicate)).toBe(true)
+        expect(calls).toEqual([])
+        yield* Deferred.succeed(gate, undefined)
+        yield* Fiber.join(first)
+        expect(calls).toEqual(["drain"])
+        const rejected = yield* coordinator.runExclusive("session", Effect.fail("stale"), "busy").pipe(Effect.exit)
+        expect(Exit.isFailure(rejected)).toBe(true)
+        expect(calls).toEqual(["drain"])
+        expect(Array.from(yield* coordinator.active)).toEqual([])
+      }),
+    ),
+  )
+
   it.effect("joins concurrent resumes for one key", () =>
     Effect.scoped(
       Effect.gen(function* () {

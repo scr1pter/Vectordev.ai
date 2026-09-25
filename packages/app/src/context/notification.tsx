@@ -1,3 +1,4 @@
+import { freeModelsLimitNotice } from "@vectordevai/core/free-model-choice"
 import { createStore, reconcile } from "solid-js/store"
 import { type Accessor, batch, createEffect, createMemo, createRoot, getOwner, onCleanup } from "solid-js"
 import { useParams, useSearchParams } from "@solidjs/router"
@@ -386,7 +387,7 @@ function createServerNotificationState(input: {
         error,
       })
       const href = sessionID ? `/${base64Encode(directory)}/session/${sessionID}` : `/${base64Encode(directory)}`
-      if (viewedInCurrentSession(directory, sessionID)) {
+      if (viewedInCurrentSession(directory, sessionID) && !freeModelsLimitNotice(error)) {
         showToast({
           title: language.t("notification.session.error.title"),
           description,

@@ -2,6 +2,7 @@
 import { Check, Copy, LoaderCircle, RefreshCw, TerminalSquare } from "lucide-react"
 import { useEffect, useState } from "react"
 import { readAccountApiResponse, vectorAccountClient } from "../../../lib/account-client"
+import { desktopSignInCallback, desktopSignInRequest } from "../../../lib/desktop-sign-in"
 import "./account.css"
 
 /**
@@ -14,19 +15,38 @@ export function CliTokenPage() {
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(true)
   const [copied, setCopied] = useState(false)
+  const [callback, setCallback] = useState("")
+  const desktop = typeof location !== "undefined" && new URLSearchParams(location.search).get("desktop") === "1"
 
   // Always read the live session: Supabase rotates access tokens, so a token
   // captured at mount goes stale and would 401 on "New token".
   const mint = async () => {
     setError("")
+    const desktopRequest = desktopSignInRequest(location.search)
     const client = await vectorAccountClient()
     const session = await client.auth.getSession()
     if (session.error) throw session.error
     if (!session.data.session) {
-      location.replace(`/login?returnTo=${encodeURIComponent("/auth/cli")}`)
+      location.replace(`/login?returnTo=${encodeURIComponent(desktopRequest?.returnPath ?? "/auth/cli")}`)
       return
     }
     setEmail(session.data.session.user.email ?? "")
+    if (desktopRequest) {
+      const response = await fetch("/api/account/cli-code", {
+        method: "POST",
+        headers: {
+          accept: "application/json",
+          "content-type": "application/json",
+          authorization: `Bearer ${session.data.session.access_token}`,
+        },
+        body: JSON.stringify({ state: desktopRequest.state, challenge: desktopRequest.challenge }),
+      })
+      const payload = await readAccountApiResponse(response, "Vector could not connect this desktop.")
+      const link = desktopSignInCallback(payload, desktopRequest.state)
+      setCallback(link)
+      location.assign(link)
+      return
+    }
     const response = await fetch("/api/account/cli-token", {
       method: "POST",
       headers: { accept: "application/json", authorization: `Bearer ${session.data.session.access_token}` },
@@ -59,7 +79,7 @@ export function CliTokenPage() {
     return (
       <main className="account-loading">
         <LoaderCircle size={28} />
-        <p>Preparing your CLI token…</p>
+        <p>{desktop ? "Connecting your desktop…" : "Preparing your CLI token…"}</p>
       </main>
     )
   }
@@ -70,15 +90,17 @@ export function CliTokenPage() {
         <span className="panel-icon">
           <TerminalSquare size={20} />
         </span>
-        <p className="account-kicker">Vector CLI</p>
-        <h1>Connect your terminal.</h1>
+        <p className="account-kicker">{desktop ? "Vector desktop" : "Vector CLI"}</p>
+        <h1>{desktop ? "Continue in Vector." : "Connect your terminal."}</h1>
         <p className="cli-pair-copy">
           {email ? (
             <>
               Signed in as <strong>{email}</strong>.{" "}
             </>
           ) : null}
-          Run this command in your terminal. It links the Vector CLI to your free account and expires in 90 days.
+          {desktop
+            ? "Open Vector to finish signing in. This link works once and expires in five minutes."
+            : "Run this command in your terminal. It links the Vector CLI to your free account and expires in 90 days."}
         </p>
 
         {error && <p className="account-error">{error}</p>}
@@ -86,12 +108,19 @@ export function CliTokenPage() {
         {command && (
           <div className="cli-pair-token">
             <code>
-              <span className="cli-pair-prompt" aria-hidden="true">$ </span>
+              <span className="cli-pair-prompt" aria-hidden="true">
+                ${" "}
+              </span>
               {command}
             </code>
           </div>
         )}
         <div className="cli-pair-actions">
+          {callback && (
+            <a className="cli-pair-copy-button" href={callback}>
+              Open Vector
+            </a>
+          )}
           {token && (
             <button type="button" className="cli-pair-copy-button" onClick={copy}>
               {copied ? <Check size={15} /> : <Copy size={15} />}
@@ -103,19 +132,21 @@ export function CliTokenPage() {
           </button>
         </div>
 
-        <ol className="cli-pair-steps">
-          <li>
-            Install once: <code>npm install -g @vectordevai/cli</code>
-          </li>
-          <li>Run the command above — it signs the CLI in</li>
-          <li>
-            <code>vector</code> — start the agent in any repository
-          </li>
-          <li>
-            That's it. No API key needed: models are included with Vector. Add your own keys with{" "}
-            <code>vector auth login</code>
-          </li>
-        </ol>
+        {!desktop && (
+          <ol className="cli-pair-steps">
+            <li>
+              Install once: <code>npm install -g @vectordevai/cli</code>
+            </li>
+            <li>Run the command above — it signs the CLI in</li>
+            <li>
+              <code>vector</code> — start the agent in any repository
+            </li>
+            <li>
+              Choose Free models inside of Vector when available, or connect your own provider with{" "}
+              <code>vector auth login</code>
+            </li>
+          </ol>
+        )}
       </div>
     </main>
   )

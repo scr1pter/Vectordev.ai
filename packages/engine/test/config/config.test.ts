@@ -314,11 +314,23 @@ it.effect("creates global jsonc config with schema when no global configs exist"
   ),
 )
 
-it.effect("loads neutral global config.json and imports prior settings before an update", () =>
+it.effect("imports neutral and prior global settings once before an update", () =>
   withGlobalConfig({ config: { permission: { bash: "deny" }, shell: "bash" }, name: "config.json" }, ({ dir }) =>
     Effect.gen(function* () {
-      expect(yield* Config.use.getGlobal()).toMatchObject({ permission: { bash: "deny" }, shell: "bash" })
       yield* writeConfigEffect(dir, { disabled_providers: ["openai"], shell: "/bin/zsh" }, "previous.jsonc")
+      expect(yield* Config.use.getGlobal()).toMatchObject({
+        permission: { bash: "deny" },
+        shell: "/bin/zsh",
+        disabled_providers: ["openai"],
+      })
+      expect(yield* FSUtil.use.readFileString(path.join(dir, "config.json"))).toBe(
+        JSON.stringify(schemaConfig({ permission: { bash: "deny" }, shell: "bash" })),
+      )
+      expect(yield* FSUtil.use.readFileString(path.join(dir, "previous.jsonc"))).toBe(
+        JSON.stringify({ disabled_providers: ["openai"], shell: "/bin/zsh" }),
+      )
+      // Once imported, a changed prior file must not weaken the active permission rules.
+      yield* writeConfigEffect(dir, { permission: { bash: "allow" }, shell: "fish" }, "previous.jsonc")
       yield* Config.use.updateGlobal({ username: "kept-settings" })
       expect(yield* Config.use.getGlobal()).toMatchObject({
         permission: { bash: "deny" },
@@ -331,20 +343,19 @@ it.effect("loads neutral global config.json and imports prior settings before an
   ),
 )
 
-it.effect("ignores an extensionless global TOML config", () =>
+it.effect("imports an extensionless global TOML config while preserving its source", () =>
   withGlobalConfig({}, ({ dir }) =>
     Effect.gen(function* () {
-      yield* FSUtil.use.writeWithDirs(
-        path.join(dir, "config"),
-        'provider = "legacy"\nmodel = "model"\nusername = "legacy-user"\n',
-      )
+      const source = 'provider = "legacy"\nmodel = "model"\nusername = "legacy-user"\n'
+      yield* FSUtil.use.writeWithDirs(path.join(dir, "config"), source)
 
       const config = yield* Config.use.getGlobal()
 
-      expect(config.model).toBeUndefined()
-      expect(config.username).toBeUndefined()
+      expect(config.model).toBe("legacy/model")
+      expect(config.username).toBe("legacy-user")
       expect(yield* FSUtil.use.existsSafe(path.join(dir, "vector.json"))).toBe(false)
-      expect(yield* FSUtil.use.existsSafe(path.join(dir, "config"))).toBe(true)
+      expect(yield* FSUtil.use.existsSafe(path.join(dir, "vector.jsonc"))).toBe(true)
+      expect(yield* FSUtil.use.readFileString(path.join(dir, "config"))).toBe(source)
       expect(yield* FSUtil.use.existsSafe(path.join(dir, "config.json"))).toBe(false)
     }),
   ),

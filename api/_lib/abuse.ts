@@ -7,6 +7,7 @@ type RateLimit = {
   limit: number
   windowSeconds: number
   identifier?: string
+  requirePersistent?: boolean
 }
 
 const developmentCounters = new Map<string, Counter>()
@@ -175,7 +176,7 @@ function incrementDevelopment(key: string, windowSeconds: number) {
 export async function enforceRateLimit(request: ApiRequest, response: ApiResponse, input: RateLimit) {
   const key = counterKey(request, input)
   const remote = await incrementRemote(key, input.windowSeconds)
-  if (!remote && production()) {
+  if (!remote && (production() || input.requirePersistent)) {
     throw new ApiError(503, "ABUSE_PROTECTION_UNAVAILABLE", "Request protection is temporarily unavailable.")
   }
   const result = remote ?? incrementDevelopment(key, input.windowSeconds)

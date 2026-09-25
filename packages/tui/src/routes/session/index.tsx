@@ -1,3 +1,5 @@
+import { freeModelsLimitNotice, freeModelsLimitTitle } from "@vectordevai/core/free-model-choice"
+import { DialogFreeModelsLimit } from "../../component/dialog-free-models-limit"
 import {
   batch,
   createContext,
@@ -1340,6 +1342,8 @@ function UserMessage(props: {
 }
 
 function AssistantMessage(props: { message: AssistantMessage; parts: Part[]; last: boolean }) {
+  const dialog = useDialog()
+  const freeLimit = createMemo(() => freeModelsLimitNotice(props.message.error))
   const ctx = use()
   const local = useLocal()
   const { theme } = useTheme()
@@ -1415,7 +1419,21 @@ function AssistantMessage(props: { message: AssistantMessage; parts: Part[]; las
           customBorderChars={SplitBorder.customBorderChars}
           borderColor={theme.error}
         >
-          <text fg={theme.textMuted}>{props.message.error?.data.message}</text>
+          <Show when={freeLimit()} fallback={<text fg={theme.textMuted}>{props.message.error?.data.message}</text>}>
+            {(limit) => (
+              <box gap={1}>
+                <text fg={theme.textMuted}>{freeModelsLimitTitle(limit())}</text>
+                <text
+                  fg={theme.primary}
+                  onMouseUp={() =>
+                    dialog.replace(() => <DialogFreeModelsLimit sessionID={props.message.sessionID} limit={limit()} />)
+                  }
+                >
+                  Connect OpenRouter to continue this conversation
+                </text>
+              </box>
+            )}
+          </Show>
         </box>
       </Show>
       <Switch>

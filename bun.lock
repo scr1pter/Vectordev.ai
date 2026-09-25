@@ -9,6 +9,7 @@
         "@vectordevai/script": "workspace:*",
         "@vectordevai/sdk": "workspace:*",
         "@vercel/blob": "2.7.0",
+        "effect": "catalog:",
         "resend": "6.18.1",
         "stripe": "22.4.0",
         "typescript": "catalog:",

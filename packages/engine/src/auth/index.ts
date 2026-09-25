@@ -95,7 +95,7 @@ const layer = Layer.effect(
       if (!raw) return {}
       const data = yield* Effect.try({
         try: () => decodeStoredAuth(raw),
-        catch: fail("Failed to read encrypted auth data"),
+        catch: (cause) => (cause instanceof AuthError ? cause : fail("Failed to read encrypted auth data")(cause)),
       })
       if (credentialKey() && !storedAuthIsEncrypted(raw)) {
         const migrated = yield* Effect.try({
@@ -195,7 +195,11 @@ function decodeStoredAuth(raw: string, key = credentialKey()) {
   if (!parsed) return {}
   const encrypted = Option.getOrUndefined(decodeEncryptedAuthData(parsed))
   if (!encrypted) return decodeAuthData(parsed)
-  if (!key) throw new Error("Provider credentials require Vector's secure runtime vault.")
+  if (!key)
+    throw new AuthError({
+      message:
+        "Provider credentials require Vector's secure runtime vault. This data directory contains a desktop-encrypted credential store. Keep it unchanged. Set XDG_DATA_HOME to a separate CLI-only directory, then run vector login and every later vector command with that same value. Do not copy or export the desktop vault key.",
+    })
   try {
     const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(encrypted.iv, "base64"))
     decipher.setAuthTag(Buffer.from(encrypted.tag, "base64"))

@@ -4,6 +4,16 @@ import { normalizeCustomProviderID, providerOptions } from "../../../../src/comp
 import { modelDisplayName, modelProviderName } from "../../../../src/util/model"
 
 describe("model choices", () => {
+  test("uses dedicated Vector account sign-in instead of offering a generic API-key form", () => {
+    expect(
+      providerOptions([
+        { id: "vector", name: "Vector", source: "custom" },
+        { id: "openrouter", name: "OpenRouter", source: "api" },
+      ])
+        .filter((option) => option.type === "provider")
+        .map((option) => option.providerID),
+    ).toEqual(["openrouter"])
+  })
   test("orders model choices by release date", () => {
     const models = [
       { title: "GPT 5.2", releaseDate: "2025-12-11" },

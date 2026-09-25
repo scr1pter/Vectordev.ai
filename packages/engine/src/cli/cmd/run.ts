@@ -682,6 +682,13 @@ export const RunCommand = effectCmd({
           return false
         }
 
+        const failure = { streamed: false, request: false }
+        function rejectRequest(error: unknown) {
+          failure.request = true
+          if (!failure.streamed && !emit("error", { error })) UI.error(formatRunError(error))
+          process.exitCode = 1
+        }
+
         // Consume one subscribed event stream for the active session and mirror it
         // to stdout/UI. `client` is passed explicitly because attach mode may
         // rebind the SDK to the session's directory after the subscription is
@@ -767,7 +774,9 @@ export const RunCommand = effectCmd({
 
             if (event.type === "session.error") {
               const props = event.properties
-              if (props.sessionID !== sessionID || !props.error) continue
+              // A rejected request can also publish session.error; report that failure once in either arrival order.
+              if (props.sessionID !== sessionID || !props.error || failure.request) continue
+              failure.streamed = true
               let err = String(props.error.name)
               if ("data" in props.error && props.error.data && "message" in props.error.data) {
                 err = String(props.error.data.message)
@@ -853,8 +862,7 @@ export const RunCommand = effectCmd({
               variant: args.variant,
             })
             if (result.error) {
-              if (!emit("error", { error: result.error })) UI.error(formatRunError(result.error))
-              process.exitCode = 1
+              rejectRequest(result.error)
               return
             }
             await finish()
@@ -870,8 +878,7 @@ export const RunCommand = effectCmd({
             parts: [...files, { type: "text", text: message }],
           })
           if (result.error) {
-            if (!emit("error", { error: result.error })) UI.error(formatRunError(result.error))
-            process.exitCode = 1
+            rejectRequest(result.error)
             return
           }
           await finish()

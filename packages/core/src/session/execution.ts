@@ -3,6 +3,7 @@ export * as SessionExecution from "./execution"
 import { Context, Effect, Layer } from "effect"
 import { LayerNode } from "../effect/layer-node"
 import { Node } from "../effect/app-node"
+import { FreeModelsResume } from "./free-model-resume"
 import { SessionRunner } from "./runner/index"
 import { SessionSchema } from "./schema"
 
@@ -11,6 +12,9 @@ export interface Interface {
   readonly active: Effect.Effect<ReadonlySet<SessionSchema.ID>>
   /** Starts execution while idle or joins the active execution. */
   readonly resume: (sessionID: SessionSchema.ID) => Effect.Effect<void, SessionRunner.RunError>
+  readonly resumeFreeModels: (
+    input: FreeModelsResume.Input,
+  ) => Effect.Effect<void, SessionRunner.RunError | FreeModelsResume.Rejected>
   /** Registers newly recorded work. Repeated wakeups may coalesce. */
   readonly wake: (sessionID: SessionSchema.ID) => Effect.Effect<void>
   /** Interrupt active work owned by this process. Idle interruption is a no-op. */
@@ -28,6 +32,8 @@ export const noopLayer = Layer.succeed(
   Service.of({
     active: Effect.succeed(new Set()),
     resume: () => Effect.void,
+    resumeFreeModels: () =>
+      Effect.fail(new FreeModelsResume.Rejected({ message: "Session execution is unavailable." })),
     wake: () => Effect.void,
     interrupt: () => Effect.void,
   }),

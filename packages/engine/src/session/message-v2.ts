@@ -1,3 +1,4 @@
+import { parseFreeModelLimit } from "@vectordevai/schema/free-model"
 import { SessionID, MessageID } from "./schema"
 import { SessionV1 } from "@vectordevai/core/v1/session"
 import { ProviderV2 } from "@vectordevai/core/provider"
@@ -6,6 +7,7 @@ import {
   AbortedError,
   Assistant,
   AuthError,
+  FreeModelsLimitError,
   CompactionPart,
   ContextOverflowError,
   Info,
@@ -604,6 +606,25 @@ export function fromError(
   e: unknown,
   ctx: { providerID: ProviderV2.ID; aborted?: boolean },
 ): NonNullable<Assistant["error"]> {
+  const limit = parseFreeModelLimit(
+    APICallError.isInstance(e)
+      ? e.responseBody
+      : e && typeof e === "object" && "_tag" in e && e._tag === "FreeModelsLimitError"
+        ? {
+            ...e,
+            ...(e instanceof Error ? { message: e.message } : {}),
+            type: "free_models_limit",
+            code: "VECTOR_FREE_MODELS_LIMIT",
+          }
+        : e,
+  )
+  if (limit)
+    return new FreeModelsLimitError({
+      code: limit.code,
+      reason: limit.reason,
+      resetAt: limit.resetAt,
+      message: limit.message,
+    }).toObject()
   switch (true) {
     case e instanceof DOMException && e.name === "AbortError":
       return new AbortedError(

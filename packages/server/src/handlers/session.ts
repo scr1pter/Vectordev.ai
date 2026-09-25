@@ -6,6 +6,7 @@ import { SessionsCursor } from "@vectordevai/protocol/groups/session"
 import {
   ConflictError,
   InvalidCursorError,
+  InvalidRequestError,
   MessageNotFoundError,
   ServiceUnavailableError,
   SessionNotFoundError,
@@ -36,11 +37,7 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
               workspaceID: query.workspace,
               limit: ctx.query.limit ?? DefaultSessionsLimit,
             })
-            .pipe(
-              Effect.catch((error) =>
-                Effect.logError("Failed to list Vector sessions", error).pipe(Effect.as([])),
-              ),
-            )
+            .pipe(Effect.catch((error) => Effect.logError("Failed to list Vector sessions", error).pipe(Effect.as([]))))
           const first = sessions[0]
           const last = sessions.at(-1)
           return {
@@ -136,6 +133,32 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
                   sessionID: error.sessionID,
                   message: `Session not found: ${error.sessionID}`,
                 }),
+              ),
+            ),
+          )
+          return HttpApiSchema.NoContent.make()
+        }),
+      )
+      .handle(
+        "session.resumeFreeModels",
+        Effect.fn(function* (ctx) {
+          yield* session.resumeFreeModels({ ...ctx.payload, sessionID: ctx.params.sessionID }).pipe(
+            Effect.catchTag("Session.NotFoundError", (error) =>
+              Effect.fail(
+                new SessionNotFoundError({
+                  sessionID: error.sessionID,
+                  message: `Session not found: ${error.sessionID}`,
+                }),
+              ),
+            ),
+            Effect.catchTag("FreeModelsResume.Rejected", (error) =>
+              Effect.fail(new InvalidRequestError({ message: error.message })),
+            ),
+            Effect.catch((error) =>
+              Effect.fail(
+                error instanceof SessionNotFoundError || error instanceof InvalidRequestError
+                  ? error
+                  : new UnknownError({ message: error.message }),
               ),
             ),
           )

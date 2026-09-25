@@ -1,3 +1,6 @@
+import { ApiError } from "./http.js"
+import { persistentStore } from "./persistent-store.js"
+
 /**
  * CLI tokens are stateless HMAC grants with a ninety-day life (see cli-token.ts),
  * so deleting an account does not, by itself, stop a terminal that already holds
@@ -22,6 +25,12 @@ export function revocationConfigured() {
 }
 
 const key = (accountID: string) => `vector:cli-revoked:${accountID}`
+
+/** Grants and shared inference require an authoritative revocation check. */
+export async function requireUnrevokedAccount(accountID: string, fetcher: typeof fetch = fetch) {
+  if (await persistentStore(["GET", key(accountID)], fetcher))
+    throw new ApiError(401, "CLI_TOKEN_INVALID", "Sign in to Vector again to continue.")
+}
 
 /**
  * Returns false when no store is configured: the caller reports that tokens stay

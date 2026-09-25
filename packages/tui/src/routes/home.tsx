@@ -1,5 +1,8 @@
+import { FREE_MODELS_TITLE, OPENROUTER_ACCOUNT_COPY } from "@vectordevai/core/free-model-choice"
+import { createDialogProviderOptions } from "../component/dialog-provider"
+import { useTheme } from "../context/theme"
 import { Prompt, type PromptRef } from "../component/prompt"
-import { createEffect, createMemo, createSignal, onMount } from "solid-js"
+import { createEffect, createMemo, createSignal, onMount, Show } from "solid-js"
 import { Logo } from "../component/logo"
 import { useSync } from "../context/sync"
 import { Toast } from "../ui/toast"
@@ -21,6 +24,8 @@ const placeholder = {
 
 export function Home() {
   const pluginRuntime = usePluginRuntime()
+  const providers = createDialogProviderOptions({ preferredMethod: "oauth" })
+  const { theme } = useTheme()
   const sync = useSync()
   const route = useRouteData("home")
   const promptRef = usePromptRef()
@@ -83,6 +88,32 @@ export function Home() {
             <Prompt ref={bind} right={<pluginRuntime.Slot name="home_prompt_right" />} placeholders={placeholder} />
           </pluginRuntime.Slot>
         </box>
+        <Show
+          when={
+            sync.data.provider.length === 0 &&
+            sync.data.provider_next.all.some((provider) =>
+              Object.values(provider.models).some((model) => model.freeModel),
+            )
+          }
+        >
+          <box width="100%" maxWidth={promptMaxWidth()} paddingTop={1} gap={1}>
+            <text fg={theme.text}>{FREE_MODELS_TITLE}</text>
+            <text fg={theme.textMuted}>
+              Sign in with vector login for a shared allowance, or use /connect to choose OpenRouter.
+            </text>
+            <text fg={theme.textMuted}>{OPENROUTER_ACCOUNT_COPY}</text>
+            <text
+              fg={theme.primary}
+              onMouseUp={() => {
+                void providers()
+                  .find((provider) => provider.value === "openrouter")
+                  ?.onSelect()
+              }}
+            >
+              Connect OpenRouter
+            </text>
+          </box>
+        </Show>
         <pluginRuntime.Slot name="home_bottom" />
         <box flexGrow={1} minHeight={0} />
         <Toast />

@@ -1,3 +1,4 @@
+import type { FreeModelsLimitNotice } from "@vectordevai/core/free-model-choice"
 import type { SnapshotFileDiff } from "@vectordevai/sdk/v2"
 import type { PartGroup } from "@vectordevai/session-ui/message-part"
 import { Data, Equal } from "effect"
@@ -35,6 +36,7 @@ export namespace TimelineRow {
   export class Error extends Data.TaggedClass("Error")<{
     userMessageID: string
     text: string
+    freeLimit?: FreeModelsLimitNotice & { messageID: string; modelID: string }
   }> {}
   export class Retry extends Data.TaggedClass("Retry")<{
     userMessageID: string

@@ -31,6 +31,7 @@ import { errorMessage } from "./util/error"
 import { PluginCommand } from "./cli/cmd/plug"
 import { VectorLoginCommand, VectorLogoutCommand, VectorWhoamiCommand } from "./cli/cmd/vector-login"
 import { Heap } from "./cli/heap"
+import { disposeRuntimes } from "./effect/runtime-cleanup"
 import { assertSecurityEnvironment } from "@vectordevai/core/flag/security"
 
 const args = hideBin(process.argv)
@@ -160,6 +161,10 @@ try {
   }
   process.exitCode = 1
 } finally {
+  await disposeRuntimes().catch(() => {
+    UI.error("Vector could not finish runtime cleanup.")
+    process.exitCode = 1
+  })
   // Some subprocesses don't react properly to SIGTERM and similar signals.
   // Most notably, some docker-container-based MCP servers don't handle such signals unless
   // run using `docker run --init`.

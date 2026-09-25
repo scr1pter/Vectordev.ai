@@ -8,6 +8,7 @@ import { FileAttachment, Prompt } from "./prompt"
 import { DateTimeUtcFromMillis, RelativePath, statics } from "./schema"
 import { SessionID } from "./session-id"
 import { ascending } from "./identifier"
+import { FreeModelLimit } from "./free-model"
 
 export const ID = Schema.String.check(Schema.isStartsWith("msg_")).pipe(
   Schema.brand("Session.Message.ID"),
@@ -20,6 +21,11 @@ export const UnknownError = Schema.Struct({
   type: Schema.Literal("unknown"),
   message: Schema.String,
 }).annotate({ identifier: "Session.Error.Unknown" })
+
+export const AssistantError = Schema.Union([UnknownError, FreeModelLimit]).annotate({
+  identifier: "Session.Error.Assistant",
+})
+export type AssistantError = typeof AssistantError.Type
 
 const Base = {
   id: ID,
@@ -181,7 +187,7 @@ export const Assistant = Schema.Struct({
     reasoning: Schema.Finite,
     cache: Schema.Struct({ read: Schema.Finite, write: Schema.Finite }),
   }).pipe(optional),
-  error: UnknownError.pipe(optional),
+  error: AssistantError.pipe(optional),
   time: Schema.Struct({
     created: DateTimeUtcFromMillis,
     completed: DateTimeUtcFromMillis.pipe(optional),

@@ -304,6 +304,9 @@ import type {
   SessionPromptData,
   SessionPromptErrors,
   SessionPromptResponses,
+  SessionResumeFreeModelsData,
+  SessionResumeFreeModelsErrors,
+  SessionResumeFreeModelsResponses,
   SessionRevertData,
   SessionRevertErrors,
   SessionRevertResponses,
@@ -550,6 +553,9 @@ import type {
   V2SessionQuestionReplyData,
   V2SessionQuestionReplyErrors,
   V2SessionQuestionReplyResponses,
+  V2SessionResumeFreeModelsData,
+  V2SessionResumeFreeModelsErrors,
+  V2SessionResumeFreeModelsResponses,
   V2SessionRevertClearData,
   V2SessionRevertClearErrors,
   V2SessionRevertClearResponses,
@@ -2263,6 +2269,28 @@ export class Session2 extends HeyApiClient {
   }
 
   /**
+   * Continue a free-model interruption with your OpenRouter account
+   *
+   * Resume only the exact latest interrupted free-model turn using the same curated model and your own OpenRouter key, without adding a user prompt.
+   */
+  public resumeFreeModels<ThrowOnError extends boolean = false>(
+    options: Options<SessionResumeFreeModelsData, ThrowOnError>,
+  ) {
+    return (options.client ?? this.client).post<
+      SessionResumeFreeModelsResponses,
+      SessionResumeFreeModelsErrors,
+      ThrowOnError
+    >({
+      url: "/session/{id}/free-models/resume",
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options.headers,
+      },
+    })
+  }
+
+  /**
    * Fork session
    *
    * Create a new session by forking an existing session at a specific message point.
@@ -2994,6 +3022,28 @@ export class Session3 extends HeyApiClient {
       ThrowOnError
     >({
       url: "/api/session/{sessionID}/model",
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options.headers,
+      },
+    })
+  }
+
+  /**
+   * Continue a free-model interruption with your OpenRouter account
+   *
+   * Resume only the latest interrupted free-model turn using the same curated model and your own OpenRouter key, without admitting another prompt.
+   */
+  public resumeFreeModels<ThrowOnError extends boolean = false>(
+    options: Options<V2SessionResumeFreeModelsData, ThrowOnError>,
+  ) {
+    return (options.client ?? this.client).post<
+      V2SessionResumeFreeModelsResponses,
+      V2SessionResumeFreeModelsErrors,
+      ThrowOnError
+    >({
+      url: "/api/session/{sessionID}/free-models/resume",
       ...options,
       headers: {
         "Content-Type": "application/json",

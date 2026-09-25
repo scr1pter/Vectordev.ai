@@ -26,6 +26,7 @@ import { PerplexityPlugin } from "./provider/perplexity"
 import { SapAICorePlugin } from "./provider/sap-ai-core"
 import { TogetherAIPlugin } from "./provider/togetherai"
 import { VercelPlugin } from "./provider/vercel"
+import { VectorPlugin } from "./provider/vector"
 import { VenicePlugin } from "./provider/venice"
 import { XAIPlugin } from "./provider/xai"
 import { ZenmuxPlugin } from "./provider/zenmux"
@@ -65,5 +66,6 @@ export const ProviderPlugins: PluginInternal.Plugin<PluginInternal.Requirements 
   VenicePlugin,
   XAIPlugin,
   ZenmuxPlugin,
+  VectorPlugin,
   DynamicProviderPlugin,
 ]

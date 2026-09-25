@@ -5,6 +5,7 @@ import {
   ApiError,
   handleApiError,
   json,
+  readJson,
   requireMethod,
   type ApiRequest,
   type ApiResponse,
@@ -28,7 +29,8 @@ import { revocationConfigured, revokeAccountTokens } from "../_lib/revocation.js
 export default async function handler(request: ApiRequest, response: ApiResponse) {
   try {
     requireMethod(request, "POST")
-    const body = requireTrustedJsonRequest(request, 4_096)
+    requireTrustedJsonRequest(request, 4_096)
+    const body = await readJson<{ confirm?: unknown }>(request, 4_096)
     const user = await requireAccountUser(request)
     await enforceRateLimit(request, response, { scope: "account-delete", limit: 5, windowSeconds: 60 * 60 }).catch(
       () => undefined,

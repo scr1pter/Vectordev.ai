@@ -98,14 +98,14 @@ describe("tool.registry", () => {
     }),
   )
 
-  it.instance("an uncached SDK tool does not prevent built-in and independent tools loading", () =>
+  it.instance("an uncached SDK tool uses the bundled SDK alongside built-in and independent tools", () =>
     Effect.gen(function* () {
       const test = yield* TestInstance
+      const file = path.join(test.directory, ".vector", "tools", "bundled-sdk.ts")
+      const source =
+        'import { tool } from "@vectordevai/plugin"; export default tool({ description: "bundled", args: { text: tool.schema.string() }, execute: async ({ text }) => `bundled ${text}` });\n'
       yield* Effect.promise(async () => {
-        await Bun.write(
-          path.join(test.directory, ".vector", "tools", "missing-sdk.ts"),
-          'import { tool } from "@vectordevai/plugin"; export default tool({ description: "missing", args: {}, execute: async () => "missing" });\n',
-        )
+        await Bun.write(file, source)
         await Bun.write(
           path.join(test.directory, ".vector", "tools", "independent.ts"),
           'export default { description: "ready", args: {}, execute: async () => "ready" };\n',
@@ -115,7 +115,24 @@ describe("tool.registry", () => {
       const ids = yield* registry.ids()
       expect(ids).toContain("read")
       expect(ids).toContain("independent")
-      expect(ids).not.toContain("missing-sdk")
+      expect(ids).toContain("bundled-sdk")
+      const loaded = (yield* registry.all()).find((tool) => tool.id === "bundled-sdk")
+      if (!loaded) throw new Error("bundled SDK tool was not loaded")
+      const agents = yield* Agent.Service
+      const result = yield* loaded.execute({ text: "ready" }, {
+        sessionID: SessionID.make("ses_test"),
+        messageID: MessageID.make("msg_test"),
+        agent: (yield* agents.defaultInfo()).name,
+        abort: new AbortController().signal,
+        messages: [],
+        metadata: () => Effect.void,
+        ask: () => Effect.void,
+      } satisfies Tool.Context)
+      expect(result.output).toBe("bundled ready")
+      expect(yield* Effect.promise(() => Bun.file(file).text())).toBe(source)
+      expect(
+        yield* Effect.promise(() => fs.lstat(path.join(path.dirname(file), "node_modules")).catch(() => undefined)),
+      ).toBeUndefined()
     }),
   )
 

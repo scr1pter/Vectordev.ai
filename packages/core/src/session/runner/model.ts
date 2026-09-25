@@ -8,6 +8,8 @@ import * as OpenAIResponses from "@vectordevai/llm/protocols/openai-responses"
 import { Auth, type AnyRoute } from "@vectordevai/llm/route"
 import { Context, Effect, Layer, Schema } from "effect"
 import { produce } from "immer"
+import { FreeModels } from "../../free-models"
+import { freeModelRoute } from "./free-model-route"
 import { Catalog } from "../../catalog"
 import { Credential } from "../../credential"
 import { Integration } from "../../integration"
@@ -231,6 +233,8 @@ export const locationLayer = Layer.effect(
   Effect.gen(function* () {
     const catalog = yield* Catalog.Service
     const integrations = yield* Integration.Service
+    const freeModels = yield* FreeModels.Service
+    const freeCredentials = yield* FreeModels.CredentialsService
     return Service.of({
       resolve: Effect.fn("SessionRunnerModel.resolve")(function* (session) {
         // Location plugins populate and filter the catalog asynchronously during layer startup.
@@ -248,6 +252,8 @@ export const locationLayer = Layer.effect(
             modelID: session.model.id,
           })
         if (!selected) return yield* new ModelNotSelectedError({ sessionID: session.id })
+        if (selected.providerID === "vector" || selected.freeModel)
+          return withPricing(freeModelRoute(selected, freeModels, freeCredentials), selected.cost)
         const provider = yield* catalog.provider.get(selected.providerID)
         const connection = yield* integrations.connection.active(
           provider?.integrationID ?? Integration.ID.make(selected.providerID),
@@ -262,4 +268,8 @@ export const locationLayer = Layer.effect(
   }),
 )
 
-export const node = makeLocationNode({ service: Service, layer: locationLayer, deps: [Catalog.node, Integration.node] })
+export const node = makeLocationNode({
+  service: Service,
+  layer: locationLayer,
+  deps: [Catalog.node, Integration.node, FreeModels.node, FreeModels.credentialsNode],
+})

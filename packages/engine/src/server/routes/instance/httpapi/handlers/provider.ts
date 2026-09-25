@@ -1,3 +1,4 @@
+import { FreeModels } from "@vectordevai/core/free-models"
 import { ProviderAuth } from "@/provider/auth"
 import { Config } from "@/config/config"
 import { ModelCatalog } from "@vectordevai/core/model-catalog"
@@ -36,6 +37,7 @@ export const providerHandlers = HttpApiBuilder.group(InstanceHttpApi, "provider"
     const cfg = yield* Config.Service
     const provider = yield* Provider.Service
     const svc = yield* ProviderAuth.Service
+    const freeModels = yield* FreeModels.Service
 
     const list = Effect.fn("ProviderHttpApi.list")(function* () {
       const config = yield* cfg.get()
@@ -49,9 +51,23 @@ export const providerHandlers = HttpApiBuilder.group(InstanceHttpApi, "provider"
       const connected = yield* provider.list()
       const providers = Object.assign(
         mapValues(filtered, (item) => Provider.fromModelCatalogProvider(item)),
-        connected,
+        mapValues(connected, Provider.toPublicInfo),
       )
-      const selectable = new Set(Object.keys(connected))
+      const freeCatalog = yield* freeModels.catalog()
+      if (
+        freeCatalog.enabled &&
+        !disabled.has("vector") &&
+        (!enabled || enabled.has("vector")) &&
+        freeCatalog.models.length
+      )
+        providers.vector ??= Provider.fromFreeModels(freeCatalog.models)
+      if (!freeCatalog.enabled) {
+        delete providers.vector
+        for (const provider of Object.values(providers)) {
+          for (const model of Object.values(provider.models)) delete model.freeModel
+        }
+      }
+      const selectable = new Set(Object.keys(connected).filter((id) => !!providers[id]))
       return {
         all: Object.values(providers).map(Provider.toClientInfo),
         default: Provider.defaultModelIDs(providers),

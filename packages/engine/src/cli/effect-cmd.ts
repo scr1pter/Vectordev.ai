@@ -89,6 +89,10 @@ export const effectCmd = <Args, A>(opts: EffectCmdOpts<Args, A>) =>
       )
       try {
         await AppRuntime.runPromise(opts.handler(args).pipe(Effect.provideService(InstanceRef, ctx)))
+        const { SessionPrompt } = await import("@/session/prompt")
+        await AppRuntime.runPromise(
+          SessionPrompt.Service.use((prompts) => prompts.awaitTitles()).pipe(Effect.provideService(InstanceRef, ctx)),
+        )
       } finally {
         await AppRuntime.runPromise(store.dispose(ctx))
       }

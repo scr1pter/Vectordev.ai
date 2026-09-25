@@ -177,10 +177,12 @@ export function integrationHost(integration: Integration.Interface): PluginConte
                             ...authorization,
                             callback: authorization.callback.pipe(
                               Effect.map((credential) =>
-                                Credential.OAuth.make({
-                                  ...credential,
-                                  methodID: Integration.MethodID.make(credential.methodID),
-                                }),
+                                credential.type === "key"
+                                  ? Credential.Key.make(credential)
+                                  : Credential.OAuth.make({
+                                      ...credential,
+                                      methodID: Integration.MethodID.make(credential.methodID),
+                                    }),
                               ),
                             ),
                           }
@@ -190,10 +192,12 @@ export function integrationHost(integration: Integration.Interface): PluginConte
                           callback: (code: string) =>
                             authorization.callback(code).pipe(
                               Effect.map((credential) =>
-                                Credential.OAuth.make({
-                                  ...credential,
-                                  methodID: Integration.MethodID.make(credential.methodID),
-                                }),
+                                credential.type === "key"
+                                  ? Credential.Key.make(credential)
+                                  : Credential.OAuth.make({
+                                      ...credential,
+                                      methodID: Integration.MethodID.make(credential.methodID),
+                                    }),
                               ),
                             ),
                         }

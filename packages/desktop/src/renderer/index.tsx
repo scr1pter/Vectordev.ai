@@ -264,6 +264,8 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
       install: () => window.api.updater.install(),
     },
 
+    vectorAccount: window.api.vectorAccount,
+
     license: {
       status: () => window.api.license.status(),
       activate: (licenseKey) => window.api.license.activate(licenseKey),

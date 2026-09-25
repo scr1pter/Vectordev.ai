@@ -205,6 +205,7 @@ export const SUPPORTED_PROVIDER_IDS = [
   "upstage",
   "v0",
   "vancine",
+  "vector",
   "venice",
   "vercel",
   "vispark",

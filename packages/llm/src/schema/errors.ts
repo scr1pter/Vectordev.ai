@@ -1,4 +1,5 @@
 import { Schema } from "effect"
+import { FreeModelLimit } from "@vectordevai/schema/free-model"
 import { ModelID, ProviderID, ProviderMetadata, RouteID } from "./ids"
 
 export const ProviderFailureClassification = Schema.Literal("context-overflow")
@@ -84,6 +85,20 @@ export class RateLimitReason extends Schema.Class<RateLimitReason>("LLM.Error.Ra
   }
 }
 
+export class FreeModelsLimitReason extends Schema.Class<FreeModelsLimitReason>("LLM.Error.FreeModelsLimit")({
+  _tag: Schema.tag("FreeModelsLimit"),
+  limit: FreeModelLimit,
+  http: Schema.optional(HttpContext),
+}) {
+  get retryable() {
+    return false
+  }
+
+  get message() {
+    return this.limit.message
+  }
+}
+
 export class QuotaExceededReason extends Schema.Class<QuotaExceededReason>("LLM.Error.QuotaExceeded")({
   _tag: Schema.tag("QuotaExceeded"),
   message: Schema.String,
@@ -162,6 +177,7 @@ export const LLMErrorReason = Schema.Union([
   NoRouteReason,
   AuthenticationReason,
   RateLimitReason,
+  FreeModelsLimitReason,
   QuotaExceededReason,
   ContentPolicyReason,
   ProviderInternalReason,

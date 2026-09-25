@@ -1,3 +1,8 @@
+import {
+  freeModelsLimitNotice,
+  freeModelsLimitTitle,
+  type FreeModelsLimitNotice,
+} from "@vectordevai/core/free-model-choice"
 import { parseCommentNote, readCommentMetadata } from "@/utils/comment-note"
 import { AssistantMessage, Part, SessionStatus, SnapshotFileDiff, UserMessage } from "@vectordevai/sdk/v2"
 import { groupParts, renderable, type PartGroup } from "@vectordevai/session-ui/message-part"
@@ -26,7 +31,11 @@ export type TimelineRowMap = {
   Thinking: { userMessageID: string; reasoningHeading?: string }
   Retry: { userMessageID: string }
   DiffSummary: { userMessageID: string; diffs: SummaryDiff[] }
-  Error: { userMessageID: string; text: string }
+  Error: {
+    userMessageID: string
+    text: string
+    freeLimit?: FreeModelsLimitNotice & { messageID: string; modelID: string }
+  }
 }
 
 export namespace Timeline {
@@ -47,7 +56,8 @@ export namespace Timeline {
     const compaction = userParts.some((p) => p.type === "compaction")
     const interruptedMessageIndex = assistantMessages.findIndex((m) => m.error?.name === "MessageAbortedError")
     const interrupted = interruptedMessageIndex !== -1
-    const error = assistantMessages.find((m) => m.error && m.error.name !== "MessageAbortedError")?.error
+    const failed = assistantMessages.find((m) => m.error && m.error.name !== "MessageAbortedError")
+    const error = failed?.error
 
     const assistantPartRefs = assistantMessages.flatMap((message, messageIndex) =>
       getMessageParts(message.id)
@@ -154,12 +164,18 @@ export namespace Timeline {
 
     if (error) {
       const data = error.data?.message
+      const freeLimit = freeModelsLimitNotice(error)
       rows.push(
         new TimelineRow.Error({
           userMessageID: userMessage.id,
-          text: unwrapErrorMessage(
-            typeof data === "string" ? data : data === undefined || data === null ? "" : String(data),
-          ),
+          ...(freeLimit && failed
+            ? { freeLimit: { ...freeLimit, messageID: failed.id, modelID: failed.modelID } }
+            : {}),
+          text: freeLimit
+            ? freeModelsLimitTitle(freeLimit)
+            : unwrapErrorMessage(
+                typeof data === "string" ? data : data === undefined || data === null ? "" : String(data),
+              ),
         }),
       )
     }

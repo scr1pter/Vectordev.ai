@@ -194,3 +194,13 @@ describe("isSessionNotFoundError", () => {
     ).toBe(false)
   })
 })
+
+test("free-model quota notifications hide upstream text and offer an account switch", () => {
+  const text = formatServerError({
+    name: "FreeModelsLimitError",
+    data: { reason: "shared_daily", resetAt: 1893542400000, message: "raw proxy debug" },
+  })
+  expect(text).toContain("Today's shared free model allowance is used up")
+  expect(text).toContain("connect OpenRouter")
+  expect(text).not.toContain("raw proxy debug")
+})

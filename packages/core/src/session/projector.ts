@@ -411,6 +411,7 @@ const layer = Layer.effectDiscard(
       }),
     )
     yield* events.project(SessionEvent.Step.Failed, (event) => run(db, event))
+    yield* events.project(SessionEvent.Step.Resumed, (event) => run(db, event))
     yield* events.project(SessionEvent.Text.Started, (event) => run(db, event))
     yield* events.project(SessionEvent.Text.Ended, (event) => run(db, event))
     yield* events.project(SessionEvent.Tool.Input.Started, (event) => run(db, event))

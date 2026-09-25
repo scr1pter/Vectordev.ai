@@ -46,6 +46,7 @@ import { startCloudBridge, stopCloudBridge } from "./cloud-bridge"
 import { setupSecureRuntimeSecrets } from "./secure-runtime"
 import { handleCloudOAuthDeepLinks } from "./cloud-connections"
 import { createLicenseService } from "./license-service"
+import { vectorAccount } from "./vector-account-runtime"
 import { backgroundModeStatus, requestQuit } from "./background-mode"
 import {
   onScheduledAgentRunFinished,
@@ -93,7 +94,7 @@ function emitDeepLinks(urls: string[]) {
 
 async function routeDeepLinks(urls: string[]) {
   if (urls.length === 0) return
-  const remaining = await handleCloudOAuthDeepLinks(urls)
+  const remaining = await handleCloudOAuthDeepLinks(await vectorAccount.consume(urls))
   logger.log("deep links routed", {
     received: urls.length,
     handled: urls.length - remaining.length,
@@ -459,6 +460,7 @@ const main = Effect.gen(function* () {
       ),
     )
 
+    yield* Effect.promise(() => vectorAccount.restore())
     logger.log("loading task finished")
   }).pipe(forwardInitializationFailure(serverReady), Effect.forkChild)
 

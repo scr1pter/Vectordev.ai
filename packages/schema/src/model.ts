@@ -62,6 +62,7 @@ export const Info = Schema.Struct({
   providerID: Provider.ID,
   family: Family.pipe(optional),
   name: Schema.String,
+  freeModel: Schema.Struct({ source: Schema.Literals(["shared", "openrouter"]) }).pipe(optional),
   api: Api,
   capabilities: Capabilities,
   request: Schema.Struct({

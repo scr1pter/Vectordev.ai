@@ -1,4 +1,9 @@
 export const dict = {
+  "freeModels.connect": "Connect OpenRouter",
+  "freeModels.limit.reset":
+    "Shared allowance is expected to reset at {{time}}. You can continue this conversation with your own OpenRouter account.",
+  "freeModels.limit.resume": "Continue with connected OpenRouter",
+  "freeModels.limit.resumed": "Continuing this conversation with your OpenRouter account.",
   "command.category.suggested": "Suggested",
   "command.category.view": "View",
   "command.category.project": "Project",

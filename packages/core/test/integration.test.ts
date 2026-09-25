@@ -188,6 +188,36 @@ describe("Integration", () => {
     }),
   )
 
+  it.effect("stores an API key returned by a PKCE OAuth attempt without OAuth-only fields", () =>
+    Effect.gen(function* () {
+      const integrations = yield* Integration.Service
+      const credentials = yield* Credential.Service
+      const integrationID = Integration.ID.make("openrouter")
+      const methodID = Integration.MethodID.make("openrouter-pkce")
+      yield* integrations.transform((editor) =>
+        editor.method.update({
+          integrationID,
+          method: { id: methodID, type: "oauth", label: "Connect OpenRouter" },
+          authorize: () =>
+            Effect.succeed({
+              mode: "code" as const,
+              url: "https://openrouter.ai/auth",
+              instructions: "Connect",
+              callback: () => Effect.succeed(Credential.Key.make({ type: "key", key: "synthetic-key" })),
+            }),
+        }),
+      )
+      const attempt = yield* integrations.connection.oauth({ integrationID, methodID, inputs: {} })
+      yield* integrations.attempt.complete({ attemptID: attempt.attemptID, code: "synthetic-code" })
+      const stored = (yield* credentials.list(integrationID))[0]
+      expect(stored.value).toEqual({ type: "key", key: "synthetic-key" })
+      expect(stored.value).not.toHaveProperty("methodID")
+      expect(
+        yield* integrations.connection.resolve({ type: "credential", id: stored.id, label: stored.label }),
+      ).toEqual(stored.value)
+    }),
+  )
+
   it.effect("keeps code attempts open when the code is missing and closes them on cancel", () =>
     Effect.gen(function* () {
       const integrations = yield* Integration.Service

@@ -15,6 +15,7 @@ import { DialogCustomProvider } from "../dialog-custom-provider"
 import { SettingsListV2 } from "./parts/list"
 import { brandProviderName } from "@/utils/provider-brand"
 import { SettingsSearch } from "../settings-search"
+import { SettingsVectorAccount } from "../settings-vector-account"
 import "./settings-v2.css"
 
 type ProviderSource = "env" | "api" | "config" | "custom"
@@ -30,7 +31,7 @@ const PROVIDER_NOTES = [
 ] as const
 
 const PROVIDER_ICON_SIZE = 16
-const HIDDEN_PROVIDER_IDS = new Set<string>()
+const HIDDEN_PROVIDER_IDS = new Set(["vector"])
 
 const providerDisplayName = (id: string, name: string) => brandProviderName(id, name)
 
@@ -42,7 +43,7 @@ export const SettingsProvidersV2: Component = () => {
   const providers = useProviders()
 
   const connected = createMemo(() => {
-    return providers.connected()
+    return providers.connected().filter((provider) => !HIDDEN_PROVIDER_IDS.has(provider.id))
   })
 
   const popular = createMemo(() => {
@@ -149,6 +150,7 @@ export const SettingsProvidersV2: Component = () => {
       </div>
 
       <div class="settings-v2-tab-body settings-v2-providers">
+        <SettingsVectorAccount />
         <div class="settings-v2-section" data-component="connected-providers-section">
           <h3 class="settings-v2-section-title">{language.t("settings.providers.section.connected")}</h3>
           <SettingsListV2>

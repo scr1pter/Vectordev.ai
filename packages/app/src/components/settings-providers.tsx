@@ -16,6 +16,7 @@ import { SettingsList } from "./settings-list"
 import { SettingsServerPicker, SettingsServerScope } from "./settings-server-picker"
 import { brandProviderName } from "@/utils/provider-brand"
 import { SettingsSearch } from "./settings-search"
+import { SettingsVectorAccount } from "./settings-vector-account"
 
 type ProviderSource = "env" | "api" | "config" | "custom"
 type ProviderItem = ReturnType<ReturnType<typeof useProviders>["connected"]>[number]
@@ -29,7 +30,7 @@ const PROVIDER_NOTES = [
   { match: (id: string) => id === "vercel", key: "dialog.provider.vercel.note" },
 ] as const
 
-const HIDDEN_PROVIDER_IDS = new Set<string>()
+const HIDDEN_PROVIDER_IDS = new Set(["vector"])
 
 const providerDisplayName = (id: string, name: string) => brandProviderName(id, name)
 
@@ -49,7 +50,7 @@ const SettingsProvidersContent: Component = () => {
   const providers = useProviders()
 
   const connected = createMemo(() => {
-    return providers.connected()
+    return providers.connected().filter((provider) => !HIDDEN_PROVIDER_IDS.has(provider.id))
   })
 
   const popular = createMemo(() => {
@@ -155,6 +156,7 @@ const SettingsProvidersContent: Component = () => {
       </div>
 
       <div class="flex flex-col gap-8 max-w-[720px]">
+        <SettingsVectorAccount />
         <div class="flex flex-col gap-1" data-component="connected-providers-section">
           <h3 class="text-14-medium text-text-strong pb-2">{language.t("settings.providers.section.connected")}</h3>
           <SettingsList>

@@ -202,6 +202,23 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLo
         ),
     )
     .add(
+      HttpApiEndpoint.post("session.resumeFreeModels", "/api/session/:sessionID/free-models/resume", {
+        params: { sessionID: Session.ID },
+        payload: Schema.Struct({ messageID: SessionMessage.ID, modelID: Model.ID }),
+        success: HttpApiSchema.NoContent,
+        error: [SessionNotFoundError, ConflictError, InvalidRequestError, UnknownError],
+      })
+        .middleware(sessionLocationMiddleware)
+        .annotateMerge(
+          OpenApi.annotations({
+            identifier: "v2.session.resumeFreeModels",
+            summary: "Continue a free-model interruption with your OpenRouter account",
+            description:
+              "Resume only the latest interrupted free-model turn using the same curated model and your own OpenRouter key, without admitting another prompt.",
+          }),
+        ),
+    )
+    .add(
       HttpApiEndpoint.post("session.prompt", "/api/session/:sessionID/prompt", {
         params: { sessionID: Session.ID },
         payload: Schema.Struct({

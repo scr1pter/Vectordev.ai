@@ -11,6 +11,7 @@ import { ascending } from "../identifier"
 import { SessionID } from "../session-id"
 import { WorkspaceID } from "../workspace-id"
 import { PermissionV1 } from "./permission"
+import { FreeModelLimitReason } from "../free-model"
 
 const Timestamp = Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0))
 
@@ -54,6 +55,12 @@ export const APIError = namedError("APIError", {
   metadata: Schema.optional(Schema.Record(Schema.String, Schema.String)),
 })
 export type APIError = Schema.Schema.Type<typeof APIError.Schema>
+export const FreeModelsLimitError = namedError("FreeModelsLimitError", {
+  code: Schema.Literal("VECTOR_FREE_MODELS_LIMIT"),
+  reason: FreeModelLimitReason,
+  resetAt: Schema.Finite,
+  message: Schema.String,
+})
 export const ContextOverflowError = namedError("ContextOverflowError", {
   message: Schema.String,
   responseBody: Schema.optional(Schema.String),
@@ -392,6 +399,7 @@ const AssistantErrorSchema = Schema.Union([
   ContextOverflowError.EffectSchema,
   ContentFilterError.EffectSchema,
   APIError.EffectSchema,
+  FreeModelsLimitError.EffectSchema,
 ]).annotate({ discriminator: "name" })
 type AssistantError = Schema.Schema.Type<typeof AssistantErrorSchema>
 

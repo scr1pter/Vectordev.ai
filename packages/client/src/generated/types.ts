@@ -41,6 +41,14 @@ export type ConflictError = {
 export const isConflictError = (value: unknown): value is ConflictError =>
   typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "ConflictError"
 
+export type UnknownError = {
+  readonly _tag: "UnknownError"
+  readonly message: string
+  readonly ref?: string | undefined
+}
+export const isUnknownError = (value: unknown): value is UnknownError =>
+  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "UnknownError"
+
 export type ServiceUnavailableError = {
   readonly _tag: "ServiceUnavailableError"
   readonly message: string
@@ -57,14 +65,6 @@ export type MessageNotFoundError = {
 }
 export const isMessageNotFoundError = (value: unknown): value is MessageNotFoundError =>
   typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "MessageNotFoundError"
-
-export type UnknownError = {
-  readonly _tag: "UnknownError"
-  readonly message: string
-  readonly ref?: string | undefined
-}
-export const isUnknownError = (value: unknown): value is UnknownError =>
-  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "UnknownError"
 
 export type ProviderNotFoundError = {
   readonly _tag: "ProviderNotFoundError"
@@ -381,6 +381,14 @@ export type SessionsSwitchModelInput = {
 
 export type SessionsSwitchModelOutput = void
 
+export type SessionsResumeFreeModelsInput = {
+  readonly sessionID: { readonly sessionID: string }["sessionID"]
+  readonly messageID: { readonly messageID: string; readonly modelID: string }["messageID"]
+  readonly modelID: { readonly messageID: string; readonly modelID: string }["modelID"]
+}
+
+export type SessionsResumeFreeModelsOutput = void
+
 export type SessionsPromptInput = {
   readonly sessionID: { readonly sessionID: string }["sessionID"]
   readonly id?: {
@@ -662,7 +670,15 @@ export type SessionsContextOutput = {
           readonly reasoning: number
           readonly cache: { readonly read: number; readonly write: number }
         }
-        readonly error?: { readonly type: "unknown"; readonly message: string }
+        readonly error?:
+          | { readonly type: "unknown"; readonly message: string }
+          | {
+              readonly type: "free_models_limit"
+              readonly code: "VECTOR_FREE_MODELS_LIMIT"
+              readonly reason: "user_daily" | "user_minute" | "shared_daily" | "upstream" | "balance"
+              readonly resetAt: number
+              readonly message: string
+            }
       }
     | {
         readonly type: "compaction"
@@ -877,8 +893,24 @@ export type SessionsHistoryOutput = {
           readonly timestamp: number
           readonly sessionID: string
           readonly assistantMessageID: string
-          readonly error: { readonly type: "unknown"; readonly message: string }
+          readonly error:
+            | { readonly type: "unknown"; readonly message: string }
+            | {
+                readonly type: "free_models_limit"
+                readonly code: "VECTOR_FREE_MODELS_LIMIT"
+                readonly reason: "user_daily" | "user_minute" | "shared_daily" | "upstream" | "balance"
+                readonly resetAt: number
+                readonly message: string
+              }
         }
+      }
+    | {
+        readonly id: string
+        readonly metadata?: { readonly [x: string]: JsonValue }
+        readonly type: "session.next.step.resumed"
+        readonly durable?: { readonly aggregateID: string; readonly seq: number; readonly version: number }
+        readonly location?: { readonly directory: string; readonly workspaceID?: string }
+        readonly data: { readonly timestamp: number; readonly sessionID: string; readonly assistantMessageID: string }
       }
     | {
         readonly id: string
@@ -1335,8 +1367,24 @@ export type SessionsEventsOutput =
         readonly timestamp: number
         readonly sessionID: string
         readonly assistantMessageID: string
-        readonly error: { readonly type: "unknown"; readonly message: string }
+        readonly error:
+          | { readonly type: "unknown"; readonly message: string }
+          | {
+              readonly type: "free_models_limit"
+              readonly code: "VECTOR_FREE_MODELS_LIMIT"
+              readonly reason: "user_daily" | "user_minute" | "shared_daily" | "upstream" | "balance"
+              readonly resetAt: number
+              readonly message: string
+            }
       }
+    }
+  | {
+      readonly id: string
+      readonly metadata?: { readonly [x: string]: unknown }
+      readonly type: "session.next.step.resumed"
+      readonly durable?: { readonly aggregateID: string; readonly seq: number; readonly version: number }
+      readonly location?: { readonly directory: string; readonly workspaceID?: string }
+      readonly data: { readonly timestamp: number; readonly sessionID: string; readonly assistantMessageID: string }
     }
   | {
       readonly id: string
@@ -1740,7 +1788,15 @@ export type SessionsMessageOutput = {
           readonly reasoning: number
           readonly cache: { readonly read: number; readonly write: number }
         }
-        readonly error?: { readonly type: "unknown"; readonly message: string }
+        readonly error?:
+          | { readonly type: "unknown"; readonly message: string }
+          | {
+              readonly type: "free_models_limit"
+              readonly code: "VECTOR_FREE_MODELS_LIMIT"
+              readonly reason: "user_daily" | "user_minute" | "shared_daily" | "upstream" | "balance"
+              readonly resetAt: number
+              readonly message: string
+            }
       }
     | {
         readonly type: "compaction"
@@ -1912,7 +1968,15 @@ export type MessagesListOutput = {
           readonly reasoning: number
           readonly cache: { readonly read: number; readonly write: number }
         }
-        readonly error?: { readonly type: "unknown"; readonly message: string }
+        readonly error?:
+          | { readonly type: "unknown"; readonly message: string }
+          | {
+              readonly type: "free_models_limit"
+              readonly code: "VECTOR_FREE_MODELS_LIMIT"
+              readonly reason: "user_daily" | "user_minute" | "shared_daily" | "upstream" | "balance"
+              readonly resetAt: number
+              readonly message: string
+            }
       }
     | {
         readonly type: "compaction"
@@ -1944,6 +2008,7 @@ export type ModelsListOutput = {
     readonly providerID: string
     readonly family?: string
     readonly name: string
+    readonly freeModel?: { readonly source: "shared" | "openrouter" }
     readonly api:
       | {
           readonly id: string

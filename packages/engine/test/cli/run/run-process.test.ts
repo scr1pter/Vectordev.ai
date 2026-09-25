@@ -150,14 +150,36 @@ describe("vector run (non-interactive subprocess)", () => {
         })
 
         expect(result.exitCode).not.toBe(0)
+        expect(result.timedOut).toBe(false)
         const events = vector.parseJsonEvents(result.stdout)
-        expect(events.map((event) => event.type)).toEqual(["error"])
+        expect(
+          events.map((event) => event.type),
+          result.stdout,
+        ).toEqual(["error"])
         expect(events[0]).toEqual({
           type: "error",
           timestamp: expect.any(Number),
           sessionID: expect.any(String),
           error: expect.any(Object),
         })
+        expect(result.stdout.split("\n").filter(Boolean)).toHaveLength(1)
+      }),
+    30_000,
+  )
+
+  cliIt.concurrent(
+    "--format json reports a rejected command request once when it also publishes a session error",
+    ({ vector }) =>
+      Effect.gen(function* () {
+        const result = yield* vector.run("arguments", { command: "missing-command-fixture", format: "json" })
+        expect(result.exitCode).not.toBe(0)
+        expect(result.timedOut).toBe(false)
+        const events = vector.parseJsonEvents(result.stdout)
+        expect(
+          events.map((event) => event.type),
+          result.stdout,
+        ).toEqual(["error"])
+        expect(events[0]?.error).toEqual(expect.any(Object))
         expect(result.stdout.split("\n").filter(Boolean)).toHaveLength(1)
       }),
     30_000,

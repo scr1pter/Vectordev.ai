@@ -4,6 +4,7 @@ import { createClient } from "./gen/client/client.gen.js"
 import { type Config } from "./gen/client/types.gen.js"
 import { VectorClient } from "./gen/sdk.gen.js"
 import { wrapClientError } from "./error-interceptor.js"
+import { requestWithURL } from "./request.js"
 export { type Config as VectorClientConfig, VectorClient }
 
 function pick(value: string | null, fallback?: string) {
@@ -28,7 +29,7 @@ function rewrite(request: Request, directory?: string) {
     const value = query === "directory" ? pick(raw, directory) : raw
     if (value && !url.searchParams.has(query)) url.searchParams.set(query, value)
   }
-  return new Request(url, request)
+  return requestWithURL(request, url)
 }
 
 export function createVectorClient(config?: Config & { directory?: string }) {

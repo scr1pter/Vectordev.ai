@@ -8,6 +8,7 @@ export interface Coordinator<Key, E> {
   readonly active: Effect.Effect<ReadonlySet<Key>>
   /** Starts execution while idle or joins the active execution. */
   readonly run: (key: Key) => Effect.Effect<void, E>
+  readonly runExclusive: (key: Key, before: Effect.Effect<void, E>, busy: E) => Effect.Effect<void, E>
   /** Registers one coalesced follow-up after newly recorded work. */
   readonly wake: (key: Key) => Effect.Effect<void>
   /** Stops active execution and waits for its cleanup. */
@@ -34,10 +35,17 @@ export const make = <Key, E>(options: {
       stopping: false,
     })
 
-    const start = (key: Key, entry: Entry<E>, force: boolean, successor = false) => {
+    const start = (
+      key: Key,
+      entry: Entry<E>,
+      force: boolean,
+      successor = false,
+      before: Effect.Effect<void, E> = Effect.void,
+    ) => {
       const ready = Deferred.makeUnsafe<void>()
       const owner = fork(
         (successor ? Effect.yieldNow : Deferred.await(ready)).pipe(
+          Effect.andThen(before),
           Effect.andThen(Effect.suspend(() => options.drain(key, force))),
           Effect.onExit((exit) => Effect.sync(() => settle(key, entry, exit))),
           Effect.exit,
@@ -78,6 +86,15 @@ export const make = <Key, E>(options: {
         return restore(Deferred.await(next.done))
       })
 
+    const runExclusive = (key: Key, before: Effect.Effect<void, E>, busy: E): Effect.Effect<void, E> =>
+      Effect.uninterruptibleMask((restore) => {
+        if (active.has(key)) return Effect.fail(busy)
+        const entry = makeEntry()
+        active.set(key, entry)
+        start(key, entry, true, false, before)
+        return restore(Deferred.await(entry.done))
+      })
+
     const wake = (key: Key) =>
       Effect.sync(() => {
         const entry = active.get(key)
@@ -100,5 +117,5 @@ export const make = <Key, E>(options: {
         return Fiber.interrupt(entry.owner)
       })
 
-    return { active: Effect.sync(() => new Set(active.keys())), run, wake, interrupt }
+    return { active: Effect.sync(() => new Set(active.keys())), run, runExclusive, wake, interrupt }
   })

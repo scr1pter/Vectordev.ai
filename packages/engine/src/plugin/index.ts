@@ -15,6 +15,7 @@ import { NamedError } from "@vectordevai/core/util/error"
 import { CopilotAuthPlugin } from "./github-copilot/copilot"
 import { GitlabAuthPlugin } from "./gitlab"
 import { PoeAuthPlugin } from "./poe"
+import { OpenRouterAuthPlugin } from "./openrouter"
 import { CloudflareAIGatewayAuthPlugin, CloudflareWorkersAuthPlugin } from "./cloudflare"
 import { AzureAuthPlugin } from "./azure"
 import { DigitalOceanAuthPlugin } from "./digitalocean"
@@ -72,6 +73,7 @@ function internalPlugins(flags: RuntimeFlags.Info): PluginInstance[] {
     CopilotAuthPlugin,
     GitlabAuthPlugin,
     PoeAuthPlugin,
+    OpenRouterAuthPlugin,
     CloudflareWorkersAuthPlugin,
     CloudflareAIGatewayAuthPlugin,
     AzureAuthPlugin,

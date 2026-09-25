@@ -29,6 +29,7 @@ export type Event =
   | EventSessionNextStepStarted
   | EventSessionNextStepEnded
   | EventSessionNextStepFailed
+  | EventSessionNextStepResumed
   | EventSessionNextTextStarted
   | EventSessionNextTextDelta
   | EventSessionNextTextEnded
@@ -344,6 +345,16 @@ export type ApiError = {
   }
 }
 
+export type FreeModelsLimitError = {
+  name: "FreeModelsLimitError"
+  data: {
+    code: "VECTOR_FREE_MODELS_LIMIT"
+    reason: "user_daily" | "user_minute" | "shared_daily" | "upstream" | "balance"
+    resetAt: number
+    message: string
+  }
+}
+
 export type AssistantMessage = {
   id: string
   sessionID: string
@@ -361,6 +372,7 @@ export type AssistantMessage = {
     | ContextOverflowError
     | ContentFilterError
     | ApiError
+    | FreeModelsLimitError
   parentID: string
   modelID: string
   providerID: string
@@ -656,6 +668,14 @@ export type Prompt = {
   text: string
   files?: Array<PromptFileAttachment>
   agents?: Array<PromptAgentAttachment>
+}
+
+export type FreeModelLimit = {
+  type: "free_models_limit"
+  code: "VECTOR_FREE_MODELS_LIMIT"
+  reason: "user_daily" | "user_minute" | "shared_daily" | "upstream" | "balance"
+  resetAt: number
+  message: string
 }
 
 export type Pty = {
@@ -975,7 +995,16 @@ export type GlobalEvent = {
           timestamp: number
           sessionID: string
           assistantMessageID: string
-          error: SessionErrorUnknown
+          error: SessionErrorAssistant
+        }
+      }
+    | {
+        id: string
+        type: "session.next.step.resumed"
+        properties: {
+          timestamp: number
+          sessionID: string
+          assistantMessageID: string
         }
       }
     | {
@@ -1246,6 +1275,7 @@ export type GlobalEvent = {
             | ContextOverflowError
             | ContentFilterError
             | ApiError
+            | FreeModelsLimitError
         }
       }
     | {
@@ -1645,6 +1675,7 @@ export type GlobalEvent = {
     | SyncEventSessionNextStepStarted
     | SyncEventSessionNextStepEnded
     | SyncEventSessionNextStepFailed
+    | SyncEventSessionNextStepResumed
     | SyncEventSessionNextTextStarted
     | SyncEventSessionNextTextEnded
     | SyncEventSessionNextReasoningStarted
@@ -2058,6 +2089,9 @@ export type Model = {
     npm: string
   }
   name: string
+  freeModel?: {
+    source: "shared" | "openrouter"
+  }
   family?: string
   capabilities: {
     temperature: boolean
@@ -2700,6 +2734,12 @@ export type NotFoundError = {
   }
 }
 
+export type SessionBusyError = {
+  _tag: "SessionBusyError"
+  sessionID: string
+  message: string
+}
+
 export type PublicShareRemovalError = {
   _tag: "PublicShareRemovalError"
   links: Array<string>
@@ -2752,12 +2792,6 @@ export type SubtaskPartInput = {
     modelID: string
   }
   command?: string
-}
-
-export type SessionBusyError = {
-  _tag: "SessionBusyError"
-  sessionID: string
-  message: string
 }
 
 export type EventTuiPromptAppend = {
@@ -2858,6 +2892,12 @@ export type SessionNotFoundError = {
   message: string
 }
 
+export type UnknownError1 = {
+  _tag: "UnknownError"
+  message: string
+  ref?: string
+}
+
 export type PromptInput = {
   text: string
   files?: Array<PromptInputFileAttachment>
@@ -2877,12 +2917,6 @@ export type MessageNotFoundError = {
   message: string
 }
 
-export type UnknownError1 = {
-  _tag: "UnknownError"
-  message: string
-  ref?: string
-}
-
 export type SessionDurableEvent =
   | SessionNextAgentSwitched
   | SessionNextModelSwitched
@@ -2896,6 +2930,7 @@ export type SessionDurableEvent =
   | SessionNextStepStarted
   | SessionNextStepEnded
   | SessionNextStepFailed
+  | SessionNextStepResumed
   | SessionNextTextStarted
   | SessionNextTextEnded
   | SessionNextToolInputStarted
@@ -3024,6 +3059,7 @@ export type V2Event =
   | SessionNextStepStarted
   | SessionNextStepEnded
   | SessionNextStepFailed
+  | SessionNextStepResumed
   | SessionNextTextStarted
   | SessionNextTextDelta
   | SessionNextTextEnded
@@ -3216,6 +3252,8 @@ export type SessionErrorUnknown = {
   type: "unknown"
   message: string
 }
+
+export type SessionErrorAssistant = SessionErrorUnknown | FreeModelLimit
 
 export type LlmProviderMetadata = {
   [key: string]: {
@@ -3661,7 +3699,23 @@ export type SyncEventSessionNextStepFailed = {
       timestamp: number
       sessionID: string
       assistantMessageID: string
-      error: SessionErrorUnknown
+      error: SessionErrorAssistant
+    }
+  }
+}
+
+export type SyncEventSessionNextStepResumed = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "session.next.step.resumed.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      timestamp: number
+      sessionID: string
+      assistantMessageID: string
     }
   }
 }
@@ -4282,7 +4336,7 @@ export type SessionMessageAssistant = {
       write: number
     }
   }
-  error?: SessionErrorUnknown
+  error?: SessionErrorAssistant
 }
 
 export type SessionMessageCompaction = {
@@ -4562,7 +4616,26 @@ export type SessionNextStepFailed = {
     timestamp: number
     sessionID: string
     assistantMessageID: string
-    error: SessionErrorUnknown
+    error: SessionErrorAssistant
+  }
+}
+
+export type SessionNextStepResumed = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "session.next.step.resumed"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    timestamp: number
+    sessionID: string
+    assistantMessageID: string
   }
 }
 
@@ -4961,6 +5034,9 @@ export type ModelV2Info = {
   providerID: string
   family?: string
   name: string
+  freeModel?: {
+    source: "shared" | "openrouter"
+  }
   api: ModelApi
   capabilities: ModelCapabilities
   request: {
@@ -5528,6 +5604,7 @@ export type SessionError = {
       | ContextOverflowError
       | ContentFilterError
       | ApiError
+      | FreeModelsLimitError
   }
 }
 
@@ -6571,7 +6648,17 @@ export type EventSessionNextStepFailed = {
     timestamp: number
     sessionID: string
     assistantMessageID: string
-    error: SessionErrorUnknown
+    error: SessionErrorAssistant
+  }
+}
+
+export type EventSessionNextStepResumed = {
+  id: string
+  type: "session.next.step.resumed"
+  properties: {
+    timestamp: number
+    sessionID: string
+    assistantMessageID: string
   }
 }
 
@@ -6865,6 +6952,7 @@ export type EventSessionError = {
       | ContextOverflowError
       | ContentFilterError
       | ApiError
+      | FreeModelsLimitError
   }
 }
 
@@ -10480,6 +10568,47 @@ export type SessionMessageResponses = {
 
 export type SessionMessageResponse = SessionMessageResponses[keyof SessionMessageResponses]
 
+export type SessionResumeFreeModelsData = {
+  body?: {
+    messageID: string
+    modelID: string
+  }
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/free-models/resume"
+}
+
+export type SessionResumeFreeModelsErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+  /**
+   * SessionBusyError
+   */
+  409: SessionBusyError
+}
+
+export type SessionResumeFreeModelsError = SessionResumeFreeModelsErrors[keyof SessionResumeFreeModelsErrors]
+
+export type SessionResumeFreeModelsResponses = {
+  /**
+   * Success
+   */
+  200: boolean
+}
+
+export type SessionResumeFreeModelsResponse = SessionResumeFreeModelsResponses[keyof SessionResumeFreeModelsResponses]
+
 export type SessionForkData = {
   body?: {
     messageID?: string
@@ -12119,6 +12248,53 @@ export type V2SessionSwitchModelResponses = {
 }
 
 export type V2SessionSwitchModelResponse = V2SessionSwitchModelResponses[keyof V2SessionSwitchModelResponses]
+
+export type V2SessionResumeFreeModelsData = {
+  body: {
+    messageID: string
+    modelID: string
+  }
+  path: {
+    sessionID: string
+  }
+  query?: never
+  url: "/api/session/{sessionID}/free-models/resume"
+}
+
+export type V2SessionResumeFreeModelsErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * SessionNotFoundError
+   */
+  404: SessionNotFoundError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
+  /**
+   * UnknownError
+   */
+  500: UnknownError1
+}
+
+export type V2SessionResumeFreeModelsError = V2SessionResumeFreeModelsErrors[keyof V2SessionResumeFreeModelsErrors]
+
+export type V2SessionResumeFreeModelsResponses = {
+  /**
+   * <No Content>
+   */
+  204: void
+}
+
+export type V2SessionResumeFreeModelsResponse =
+  V2SessionResumeFreeModelsResponses[keyof V2SessionResumeFreeModelsResponses]
 
 export type V2SessionPromptData = {
   body: {

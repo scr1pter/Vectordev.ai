@@ -62,6 +62,7 @@ export function delay(attempt: number, error?: SessionV1.APIError) {
 }
 
 export function retryable(error: Err, _provider: string): Retryable | undefined {
+  if (SessionV1.FreeModelsLimitError.isInstance(error)) return undefined
   // context overflow errors should not be retried
   if (SessionV1.ContextOverflowError.isInstance(error)) return undefined
   if (SessionV1.APIError.isInstance(error)) {

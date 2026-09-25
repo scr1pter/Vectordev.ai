@@ -10,9 +10,10 @@ describe("public event manifest", () => {
     expect(EventManifest.Definitions).toBe(SchemaEventManifest.Definitions)
     expect(EventManifest.Latest).toBe(SchemaEventManifest.Latest)
     expect(EventManifest.Durable).toBe(SchemaEventManifest.Durable)
-    expect(EventManifest.Latest.size).toBe(89)
+    expect(EventManifest.Latest.size).toBe(90)
     expect(EventManifest.Latest.get("provider.unavailable")).toBe(Integration.Event.Unavailable)
     expect(EventManifest.Latest.get("session.next.step.ended")).toBe(SessionEvent.Step.Ended)
+    expect(EventManifest.Latest.get("session.next.step.resumed")).toBe(SessionEvent.Step.Resumed)
     expect(EventManifest.Latest.get("todo.updated")).toBe(Todo.Event.Updated)
     expect(EventManifest.Latest.has("ide.installed")).toBe(false)
     expect(EventManifest.Latest.has("server.connected")).toBe(true)
@@ -20,6 +21,8 @@ describe("public event manifest", () => {
   })
 
   test("contains only the current step settlement versions", () => {
+    expect(EventManifest.Durable.size).toBe(36)
+    expect(EventManifest.Durable.get("session.next.step.resumed.1")).toBe(SessionEvent.Step.Resumed)
     expect(EventManifest.Durable.has("session.next.step.ended.1")).toBe(false)
     expect(EventManifest.Durable.get("session.next.step.ended.2")).toBe(SessionEvent.Step.Ended)
   })

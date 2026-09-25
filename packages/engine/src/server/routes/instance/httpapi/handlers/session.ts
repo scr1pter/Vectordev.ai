@@ -16,6 +16,7 @@ import { SessionRunState } from "@/session/run-state"
 import { SessionStatus } from "@/session/status"
 import { SessionSummary } from "@/session/summary"
 import { Todo } from "@/session/todo"
+import { ModelV2 } from "@vectordevai/core/model"
 import { MessageID, PartID, SessionID } from "@/session/schema"
 import { NamedError } from "@vectordevai/core/util/error"
 import { Cause, Effect, Option, Schema, Scope } from "effect"
@@ -350,6 +351,20 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       return HttpApiSchema.NoContent.make()
     })
 
+    const resumeFreeModels = Effect.fn("SessionHttpApi.resumeFreeModels")(function* (ctx: {
+      params: { sessionID: SessionID }
+      payload: { messageID: MessageID; modelID: ModelV2.ID }
+    }) {
+      yield* requireSession(ctx.params.sessionID)
+      yield* promptSvc.resumeFreeModels({ ...ctx.payload, sessionID: ctx.params.sessionID }).pipe(
+        Effect.catchTag("SessionBusyError", (error) => SessionError.mapBusy(Effect.fail(error))),
+        Effect.catchTag("FreeModelsResumeError", (error) =>
+          Effect.fail(new InvalidRequestError({ message: error.message })),
+        ),
+      )
+      return true
+    })
+
     const command = Effect.fn("SessionHttpApi.command")(function* (ctx: {
       params: { sessionID: SessionID }
       payload: typeof CommandPayload.Type
@@ -452,6 +467,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       .handle("summarize", summarize)
       .handle("prompt", prompt)
       .handle("promptAsync", promptAsync)
+      .handle("resumeFreeModels", resumeFreeModels)
       .handle("command", command)
       .handle("shell", shell)
       .handle("revert", revert)

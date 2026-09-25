@@ -3,6 +3,9 @@ import path from "path"
 import open from "open"
 import { Global } from "@vectordevai/core/global"
 import { UI } from "./ui"
+import { VectorAccount } from "@vectordevai/core/vector-account"
+
+export const readVectorToken = VectorAccount.readVectorToken
 
 /**
  * Vector CLI account gate.

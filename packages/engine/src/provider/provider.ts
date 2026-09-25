@@ -1,3 +1,6 @@
+import { FreeModels } from "@vectordevai/core/free-models"
+import { freeModelRequest, serializeFreeModelRequest } from "@vectordevai/core/free-model-request"
+import type { FreeModelInfo } from "@vectordevai/schema/free-model"
 import { isFreeModel } from "@vectordevai/schema/free-model"
 import { ProviderUnavailable, providerUnavailable } from "@vectordevai/schema/provider-unavailable"
 import {
@@ -448,7 +451,7 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
         options: {
           headers: {
             "HTTP-Referer": "https://vectordev.ai/",
-            "X-Title": "Vector",
+            "X-OpenRouter-Title": "Vector",
           },
         },
       }),
@@ -1011,6 +1014,7 @@ export const Model = Schema.Struct({
   providerID: ProviderV2.ID,
   api: ProviderApiInfo,
   name: Schema.String,
+  freeModel: optional(Schema.Struct({ source: Schema.Literals(["shared", "openrouter"]) })),
   family: optional(Schema.String),
   capabilities: ProviderCapabilities,
   cost: ProviderCost,
@@ -1092,7 +1096,12 @@ export function toClientInfo(provider: Info): Info {
 }
 
 export function defaultModelIDs<T extends { models: Record<string, { id: string }> }>(providers: Record<string, T>) {
-  return mapValues(providers, (item) => sort(Object.values(item.models))[0].id)
+  return Object.fromEntries(
+    Object.entries(providers).flatMap(([id, item]) => {
+      const model = sort(Object.values(item.models))[0]
+      return model ? [[id, model.id]] : []
+    }),
+  )
 }
 
 export class ModelNotFoundError extends Schema.TaggedErrorClass<ModelNotFoundError>()("ProviderModelNotFoundError", {
@@ -1297,6 +1306,48 @@ export function fromModelCatalogProvider(provider: ModelCatalog.Provider): Info 
   }
 }
 
+export function fromFreeModels(models: readonly FreeModelInfo[], providerID: "vector" | "openrouter" = "vector"): Info {
+  return {
+    id: ProviderV2.ID.make(providerID),
+    name: providerID === "vector" ? "Vector" : "OpenRouter",
+    source: "custom",
+    env: [providerID === "vector" ? "VECTOR_CLI_TOKEN" : "OPENROUTER_API_KEY"],
+    options: {},
+    models: Object.fromEntries(
+      models.map((model) => [
+        model.id,
+        {
+          id: ModelV2.ID.make(model.id),
+          providerID: ProviderV2.ID.make(providerID),
+          name: model.name,
+          freeModel: { source: providerID === "vector" ? "shared" : "openrouter" },
+          api: {
+            id: model.id,
+            npm: "@ai-sdk/openai-compatible",
+            url: providerID === "vector" ? "https://vectordev.ai/api/free-models" : FreeModels.OPENROUTER_ROOT,
+          },
+          status: "active",
+          headers: {},
+          options: {},
+          release_date: "",
+          variants: {},
+          cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+          limit: { context: model.contextLength, output: model.maxOutputTokens },
+          capabilities: {
+            temperature: true,
+            reasoning: false,
+            attachment: false,
+            toolcall: true,
+            input: { text: true, audio: false, image: false, video: false, pdf: false },
+            output: { text: true, audio: false, image: false, video: false, pdf: false },
+            interleaved: false,
+          },
+        },
+      ]),
+    ),
+  }
+}
+
 function modelSuggestions(provider: Info | undefined, modelID: ModelV2.ID) {
   const available = provider
     ? Object.keys(provider.models).filter((id) => provider.models[id].status !== "deprecated")
@@ -1331,6 +1382,9 @@ const layer = Layer.effect(
     const plugin = yield* Plugin.Service
     const modelCatalogSvc = yield* ModelCatalog.Service
     const runtimeFlags = yield* RuntimeFlags.Service
+    const freeModels = yield* FreeModels.Service
+    const freeCredentials = yield* FreeModels.CredentialsService
+    const freeBridge = yield* EffectBridge.make()
 
     const state = yield* InstanceState.make<State>(() =>
       Effect.gen(function* () {
@@ -1340,6 +1394,9 @@ const layer = Layer.effect(
           Object.entries(yield* modelCatalogSvc.get()).filter(([id]) => providerAllowed(id)),
         )
         const catalog = mapValues(modelCatalog, fromModelCatalogProvider)
+        const freeCatalog = yield* freeModels.catalog()
+        if (freeCatalog.enabled && freeCatalog.models.length)
+          catalog[ProviderV2.ID.vector] = fromFreeModels(freeCatalog.models)
         const database = mapValues(catalog, toPublicInfo)
 
         const providers: Record<ProviderV2.ID, Info> = {} as Record<ProviderV2.ID, Info>
@@ -1619,6 +1676,21 @@ const layer = Layer.effect(
           mergeProvider(providerID, partial)
         }
 
+        // Built-in free credentials and destinations cannot be replaced by project configuration.
+        const vectorToken = yield* freeCredentials.get("vector")
+        const openRouterKey = yield* freeCredentials.get("openrouter")
+        const ownedFree = openRouterKey ? yield* freeModels.forKey(openRouterKey) : []
+        delete providers[ProviderV2.ID.vector]
+        if (freeCatalog.enabled && isProviderAllowed(ProviderV2.ID.vector) && (vectorToken || openRouterKey)) {
+          const models = openRouterKey ? ownedFree : freeCatalog.models
+          if (models.length) providers[ProviderV2.ID.vector] = fromFreeModels(models)
+        }
+        if (!freeCatalog.enabled) delete providers[ProviderV2.ID.vector]
+        if (freeCatalog.enabled && ownedFree.length && isProviderAllowed(ProviderV2.ID.openrouter)) {
+          providers[ProviderV2.ID.openrouter] ??= fromFreeModels([], "openrouter")
+          Object.assign(providers[ProviderV2.ID.openrouter].models, fromFreeModels(ownedFree, "openrouter").models)
+        }
+
         const gitlab = ProviderV2.ID.make("gitlab")
         if (discoveryLoaders[gitlab] && providers[gitlab] && isProviderAllowed(gitlab)) {
           yield* Effect.promise(async () => {
@@ -1711,6 +1783,42 @@ const layer = Layer.effect(
     async function resolveSDK(model: Model, s: State, envs: Record<string, string | undefined>) {
       try {
         const provider = s.providers[model.providerID]
+        if (model.providerID === "vector" || model.freeModel) {
+          const { createOpenAICompatible } = await import("@ai-sdk/openai-compatible")
+          return createOpenAICompatible({
+            name: model.providerID,
+            baseURL: "https://vectordev.ai/api/free-models",
+            apiKey: "vector-request-credential",
+            fetch: Object.assign(
+              async (_input: RequestInfo | URL, init?: RequestInit) => {
+                const route = await FreeModels.resolveRoute({
+                  provider: model.providerID === "vector" ? "vector" : "openrouter",
+                  modelID: model.id,
+                  catalog: () => freeBridge.promise(freeModels.catalog()),
+                  forKey: (key) => freeBridge.promise(freeModels.forKey(key)),
+                  credential: (provider) => freeBridge.promise(freeCredentials.get(provider)),
+                })
+                const body = typeof init?.body === "string" ? JSON.parse(init.body) : undefined
+                return fetch(route.url, {
+                  method: "POST",
+                  redirect: "error",
+                  signal: init?.signal,
+                  headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${route.key}`,
+                    "HTTP-Referer": "https://vectordev.ai/",
+                    "X-OpenRouter-Title": "Vector",
+                  },
+                  body: serializeFreeModelRequest(
+                    freeModelRequest({ ...body, model: model.id }, route.models),
+                    route.url === FreeModels.SHARED_CHAT_URL,
+                  ),
+                }).then(FreeModels.preserveLimit)
+              },
+              { preconnect: fetch.preconnect },
+            ),
+          })
+        }
         const options = { ...provider.options }
 
         if (
@@ -2052,7 +2160,17 @@ export function parseModel(model: string) {
 export const node = LayerNode.make({
   service: Service,
   layer: layer,
-  deps: [FSUtil.node, Config.node, Auth.node, Env.node, Plugin.node, ModelCatalog.node, RuntimeFlags.node],
+  deps: [
+    FSUtil.node,
+    Config.node,
+    Auth.node,
+    Env.node,
+    Plugin.node,
+    ModelCatalog.node,
+    RuntimeFlags.node,
+    FreeModels.node,
+    FreeModels.credentialsNode,
+  ],
 })
 
 export * as Provider from "./provider"

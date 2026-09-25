@@ -206,7 +206,7 @@ export const createLLMEventPublisher = (events: EventV2.Interface, input: Input)
     yield* flushFragments()
   })
 
-  const failAssistant = Effect.fnUntraced(function* (message: string) {
+  const failAssistant = Effect.fnUntraced(function* (error: string | SessionMessage.AssistantError) {
     if (assistantFailed) return
     yield* flush()
     const assistantMessageID = yield* startAssistant()
@@ -216,7 +216,7 @@ export const createLLMEventPublisher = (events: EventV2.Interface, input: Input)
       sessionID: input.sessionID,
       timestamp: yield* timestamp,
       assistantMessageID,
-      error: { type: "unknown", message },
+      error: typeof error === "string" ? { type: "unknown", message: error } : error,
     })
   })
 

@@ -9,6 +9,23 @@ const waitForState = <A, E>(runner: Runner.Runner<A, E>, tag: Runner.State<A, E>
   }).pipe(Effect.timeout("1 second"))
 
 describe("Runner", () => {
+  it.live(
+    "exclusive continuation rejects busy work instead of joining or executing it",
+    Effect.gen(function* () {
+      const scope = yield* Scope.Scope
+      const runner = Runner.make<string>(scope)
+      const gate = yield* Deferred.make<string>()
+      const first = yield* runner.startRunning(Deferred.await(gate)).pipe(Effect.forkChild)
+      yield* waitForState(runner, "Running")
+      const rejected = yield* runner.startRunning(Effect.succeed("duplicate")).pipe(Effect.exit)
+      expect(Exit.isFailure(rejected)).toBe(true)
+      if (Exit.isFailure(rejected)) expect(Cause.squash(rejected.cause)).toBeInstanceOf(Runner.Busy)
+      yield* Deferred.succeed(gate, "first")
+      expect(yield* Fiber.join(first)).toBe("first")
+      expect(yield* runner.startRunning(Effect.succeed("next"))).toBe("next")
+    }),
+  )
+
   // --- ensureRunning semantics ---
 
   it.live(

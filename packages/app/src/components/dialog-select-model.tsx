@@ -1,3 +1,4 @@
+import { freeModelSource } from "@vectordevai/core/free-model-choice"
 import { Popover as Kobalte } from "@kobalte/core/popover"
 import { Component, ComponentProps, createMemo, createSignal, For, JSX, Show, ValidComponent } from "solid-js"
 import { createStore } from "solid-js/store"
@@ -111,9 +112,11 @@ function SectionHeading(props: { section: ModelSection }) {
 function ModelRow(props: { item: ModelItem; section: ModelSection; now: number }) {
   // The top section mixes providers, so its rows carry their own mark; provider sections
   // carry it once, on the label.
-  const mixed = () => props.section.kind === "recent"
+  const mixed = () => props.section.kind !== "provider"
   const spec = createMemo(() => {
     const parts: { slot: string; text: string }[] = []
+    const source = freeModelSource(props.item)
+    if (source) parts.push({ slot: "model-row-source", text: source })
     const context = contextLabel(props.item.limit?.context)
     if (context) parts.push({ slot: "model-row-context", text: context })
     return parts

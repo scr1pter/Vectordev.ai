@@ -511,3 +511,31 @@ test("paused Copilot models from an older server never enter selectable sections
   })
   expect(sections.flatMap((section) => section.items).map((item) => item.provider.id)).toEqual(["openai"])
 })
+
+describe("Free models inside of Vector", () => {
+  const shared = model({ id: "vector", name: "Vector", source: "custom" }, "maker/coder:free", "Maker Coder:free", {
+    freeModel: { source: "shared" },
+    cost: { input: 0, output: 0 },
+  })
+  const own = {
+    ...shared,
+    provider: { id: "openrouter", name: "OpenRouter", source: "api" },
+    freeModel: { source: "openrouter" as const },
+  }
+  test("one section combines curated models and prefers the user's key even over a shared recent", () => {
+    const sections = buildModelSections({
+      models: [shared, own],
+      now: NOW,
+      currentKey: pickerModelKey(shared),
+      recentKeys: [pickerModelKey(shared)],
+    })
+    expect(sections.map((section) => section.label)).toEqual(["Free models inside of Vector"])
+    expect(pickerKeys(sections)).toEqual([pickerModelKey(own)])
+    expect(modelDisplayName(own)).toBe("Maker Coder")
+    expect(modelTitle(own)).toContain("Your OpenRouter account")
+  })
+  test("OFF metadata removal hides the section; ordinary zero-price models do not recreate it", () => {
+    const sections = buildModelSections({ models: [{ ...own, freeModel: undefined }], now: NOW })
+    expect(sections.some((section) => section.kind === "free")).toBe(false)
+  })
+})

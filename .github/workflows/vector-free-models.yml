@@ -1,0 +1,44 @@
+name: Vector free models integration
+
+on:
+  pull_request:
+    paths:
+      - api/**
+      - packages/schema/**
+      - packages/web/test/**
+      - packages/web/src/lib/desktop-sign-in.ts
+      - packages/desktop/src/main/vector-account.ts
+      - bun.lock
+      - .github/workflows/vector-free-models.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      valkey:
+        image: valkey/valkey:7.2.14-alpine@sha256:c6c2f0020be34bbf684a53a0ef716ab16ff70295186d4d9f2518435beb7afbff
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: ./.github/actions/setup-bun
+        with:
+          install-flags: --frozen-lockfile
+      - name: Typecheck hosted API
+        working-directory: packages/engine
+        run: bun typecheck --project ../../tsconfig.json
+      - name: Exercise proxy, real atomic quotas and desktop sign-in
+        working-directory: packages/web
+        env:
+          VECTOR_TEST_REDIS_URL: redis://127.0.0.1:6379
+        run: bun test test/free-models-api.test.ts test/desktop-account.test.ts test/account-delete-body.test.ts

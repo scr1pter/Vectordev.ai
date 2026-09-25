@@ -1,3 +1,9 @@
+import {
+  FREE_MODELS_TITLE,
+  freeModelName,
+  freeModelSource,
+  preferOwnFreeModels,
+} from "@vectordevai/core/free-model-choice"
 import { EOL } from "os"
 import { Effect } from "effect"
 import { Flag } from "@vectordevai/core/flag/flag"
@@ -40,10 +46,28 @@ export const ModelsCommand = effectCmd({
     const provider = yield* Provider.Service
     const providers = yield* provider.list()
 
+    const free = preferOwnFreeModels(
+      Object.values(providers).flatMap((provider) => Object.values(provider.models)),
+    ).filter((model) => model.freeModel && (!args.provider || model.providerID === args.provider))
+    const hidden = new Set(
+      Object.values(providers)
+        .flatMap((provider) => Object.values(provider.models))
+        .filter((model) => model.freeModel && !free.includes(model))
+        .map((model) => `${model.providerID}/${model.id}`),
+    )
+    // Human guidance goes to stderr; stdout keeps copyable, script-friendly model selectors.
+    if (free.length) {
+      UI.println(FREE_MODELS_TITLE)
+      free.forEach((model) =>
+        UI.println(`  ${freeModelName(model)} — ${freeModelSource(model)} (${model.providerID}/${model.id})`),
+      )
+    }
+
     const print = (providerID: ProviderV2.ID, verbose?: boolean) => {
       const p = providers[providerID]
       const sorted = Object.entries(p.models).sort(([a], [b]) => a.localeCompare(b))
       for (const [modelID, model] of sorted) {
+        if (hidden.has(`${providerID}/${modelID}`)) continue
         process.stdout.write(`${providerID}/${modelID}`)
         process.stdout.write(EOL)
         if (verbose) {

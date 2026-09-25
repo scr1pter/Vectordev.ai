@@ -1,3 +1,4 @@
+import { registerRuntimeCleanup } from "@/effect/runtime-cleanup"
 import { Config as EffectConfig, Context, Effect, Layer } from "effect"
 import { HttpApiBuilder, OpenApi } from "effect/unstable/httpapi"
 import { HttpClient, HttpMiddleware, HttpRouter, HttpServer, HttpServerResponse } from "effect/unstable/http"
@@ -93,6 +94,7 @@ import { permissionHandlers } from "./handlers/permission"
 import { projectHandlers } from "./handlers/project"
 import { projectCopyHandlers } from "./handlers/project-copy"
 import { providerHandlers } from "./handlers/provider"
+import { FreeModels } from "@vectordevai/core/free-models"
 import { ptyConnectHandlers, ptyHandlers } from "./handlers/pty"
 import { questionHandlers } from "./handlers/question"
 import { sessionHandlers } from "./handlers/session"
@@ -221,6 +223,7 @@ const app = LayerNode.group([
   Snapshot.node,
   Plugin.node,
   ModelCatalog.node,
+  FreeModels.node,
   Provider.node,
   ProviderAuth.node,
   Agent.node,
@@ -309,12 +312,14 @@ export function createRoutes(
 
 export const routes = createRoutes()
 
-export const webHandler = lazy(() =>
-  HttpRouter.toWebHandler(routes, {
+export const webHandler = lazy(() => {
+  const handler = HttpRouter.toWebHandler(routes, {
     disableLogger: true,
     memoMap,
     middleware: disposeMiddleware,
-  }),
-)
+  })
+  registerRuntimeCleanup(() => handler.dispose())
+  return handler
+})
 
 export * as HttpApiApp from "./server"

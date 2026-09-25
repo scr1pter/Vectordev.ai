@@ -298,6 +298,17 @@ const api: ElectronAPI = {
       set: (projectPath, taskId, input) => ipcRenderer.invoke("cloud-build-set", projectPath, taskId, input),
     },
   },
+  vectorAccount: {
+    status: () => ipcRenderer.invoke("vector-account-status"),
+    start: () => ipcRenderer.invoke("vector-account-start"),
+    cancel: () => ipcRenderer.invoke("vector-account-cancel"),
+    logout: () => ipcRenderer.invoke("vector-account-logout"),
+    onChange: (callback) => {
+      const handler = (_event: unknown, status: Parameters<typeof callback>[0]) => callback(status)
+      ipcRenderer.on("vector-account-changed", handler)
+      return () => ipcRenderer.removeListener("vector-account-changed", handler)
+    },
+  },
   github: {
     detect: () => ipcRenderer.invoke("github-detect"),
     publish: (input) => ipcRenderer.invoke("github-publish", input),

@@ -5,6 +5,7 @@ import { createClient } from "./gen/client/client.gen.js"
 import { type Config } from "./gen/client/types.gen.js"
 import { VectorClient } from "./gen/sdk.gen.js"
 import { wrapClientError } from "../error-interceptor.js"
+import { requestWithURL } from "../request.js"
 export { type Config as VectorClientConfig, VectorClient }
 
 function pick(value: string | null, fallback?: string, encode?: (value: string) => string) {
@@ -44,7 +45,7 @@ function rewrite(request: Request, values: { directory?: string; workspace?: str
 
   if (!changed) return request
 
-  return new Request(url, request)
+  return requestWithURL(request, url)
 }
 
 export function createVectorClient(config?: Config & { directory?: string; experimental_workspaceID?: string }) {

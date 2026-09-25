@@ -1,5 +1,6 @@
 export * as SessionRunner from "./index"
 
+import type { FreeModelsResume } from "../free-model-resume"
 import type { LLMError } from "@vectordevai/llm"
 import { Context, Effect } from "effect"
 import { SessionSchema } from "../schema"
@@ -10,6 +11,7 @@ import type { ToolOutputStore } from "../../tool-output-store"
 
 export type RunError =
   | LLMError
+  | FreeModelsResume.Rejected
   | SessionRunnerModel.Error
   | MessageDecodeError
   | ContextSnapshotDecodeError

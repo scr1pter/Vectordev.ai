@@ -173,7 +173,11 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
 
     const defaultModel = () => {
       const defaults = providers.default()
-      for (const provider of providers.connected()) {
+      const connected = providers.connected()
+      const own = connected.filter((provider) =>
+        Object.values(provider.models).some((model) => model.freeModel?.source !== "shared"),
+      )
+      for (const provider of own.length ? own : connected) {
         const configured = defaults[provider.id]
         if (configured) {
           const model = { providerID: provider.id, modelID: configured }
@@ -246,7 +250,10 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         fallback,
       )
       if (!item) return
-      return models.find(item)
+      const selected = models.find(item)
+      if (selected?.freeModel?.source !== "shared") return selected
+      const own = models.find({ providerID: "openrouter", modelID: item.modelID })
+      return own?.freeModel?.source === "openrouter" ? own : selected
     }
 
     createEffect(() => {

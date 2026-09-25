@@ -227,6 +227,7 @@ for (const item of targets) {
     try {
       const versionOutput = await $`${binaryPath} --version`.text()
       console.log(`Smoke test passed: ${versionOutput.trim()}`)
+      await $`${process.execPath} script/verify-local-plugin.ts ${binaryPath}`
     } catch (e) {
       console.error(`Smoke test failed for ${name}:`, e)
       process.exit(1)

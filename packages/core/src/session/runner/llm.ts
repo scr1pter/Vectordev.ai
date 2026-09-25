@@ -285,7 +285,11 @@ const layer = Layer.effect(
           const llmFailure = failure instanceof LLMError ? failure : undefined
           if (llmFailure && !publisher.hasProviderError()) {
             yield* withPublication(publisher.failUnsettledTools("Provider did not return a tool result", true))
-            yield* withPublication(publisher.failAssistant(llmFailure.reason.message))
+            yield* withPublication(
+              publisher.failAssistant(
+                llmFailure.reason._tag === "FreeModelsLimit" ? llmFailure.reason.limit : llmFailure.reason.message,
+              ),
+            )
           }
           if (stream._tag === "Failure" && Cause.hasInterrupts(stream.cause)) yield* FiberSet.clear(toolFibers)
           const settled = yield* restore(awaitToolFibers(toolFibers)).pipe(Effect.exit)
@@ -309,7 +313,7 @@ const layer = Layer.effect(
             yield* withPublication(publisher.failUnsettledTools(`Tool execution failed: ${message}`))
           }
           const stepSettlement = publisher.stepSettlement()
-          if (stepSettlement && !publisher.hasProviderError()) {
+          if (stepSettlement && !llmFailure && !publisher.hasProviderError()) {
             const endSnapshot = yield* snapshots.capture()
             const files =
               startSnapshot && endSnapshot

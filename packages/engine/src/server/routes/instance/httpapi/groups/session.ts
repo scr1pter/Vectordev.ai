@@ -207,6 +207,20 @@ export const SessionApi = HttpApi.make("session")
             description: "Retrieve a specific message from a session by its message ID.",
           }),
         ),
+        HttpApiEndpoint.post("resumeFreeModels", `${root}/:sessionID/free-models/resume`, {
+          params: { sessionID: SessionID },
+          query: WorkspaceRoutingQuery,
+          payload: Schema.Struct({ messageID: MessageID, modelID: ModelV2.ID }),
+          success: Schema.Boolean,
+          error: [InvalidRequestError, ApiNotFoundError, SessionBusyError],
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "session.resumeFreeModels",
+            summary: "Continue a free-model interruption with your OpenRouter account",
+            description:
+              "Resume only the exact latest interrupted free-model turn using the same curated model and your own OpenRouter key, without adding a user prompt.",
+          }),
+        ),
         HttpApiEndpoint.post("create", SessionPaths.create, {
           query: WorkspaceRoutingQuery,
           payload: [HttpApiSchema.NoContent, Session.CreateInput],

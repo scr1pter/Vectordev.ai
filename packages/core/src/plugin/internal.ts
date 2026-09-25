@@ -17,6 +17,7 @@ import { ConfigSkillPlugin } from "../config/plugin/skill"
 import { EventV2 } from "../event"
 import { FileSystem } from "../filesystem"
 import { FSUtil } from "../fs-util"
+import { FreeModels } from "../free-models"
 import { Global } from "../global"
 import { Integration } from "../integration"
 import { Location } from "../location"
@@ -42,6 +43,8 @@ export type Requirements =
   | EventV2.Service
   | FileSystem.Service
   | FSUtil.Service
+  | FreeModels.Service
+  | FreeModels.CredentialsService
   | Global.Service
   | HttpClient.HttpClient
   | Integration.Service
@@ -74,6 +77,8 @@ const layer = Layer.effectDiscard(
     const events = yield* EventV2.Service
     const fs = yield* FSUtil.Service
     const filesystem = yield* FileSystem.Service
+    const freeModels = yield* FreeModels.Service
+    const freeCredentials = yield* FreeModels.CredentialsService
     const global = yield* Global.Service
     const http = yield* HttpClient.HttpClient
     const skill = yield* SkillV2.Service
@@ -97,6 +102,8 @@ const layer = Layer.effectDiscard(
               Effect.provideService(FSUtil.Service, fs),
               Effect.provideService(FileSystem.Service, filesystem),
               Effect.provideService(Global.Service, global),
+              Effect.provideService(FreeModels.Service, freeModels),
+              Effect.provideService(FreeModels.CredentialsService, freeCredentials),
               Effect.provideService(HttpClient.HttpClient, http),
               Effect.provideService(SkillV2.Service, skill),
               Effect.provideService(Reference.Service, reference),
@@ -146,6 +153,8 @@ export const node = makeLocationNode({
     FSUtil.node,
     FileSystem.node,
     Global.node,
+    FreeModels.node,
+    FreeModels.credentialsNode,
     httpClient,
     SkillV2.node,
     Reference.node,

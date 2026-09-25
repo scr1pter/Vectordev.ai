@@ -565,7 +565,7 @@ const state = {
   server: null as ReturnType<typeof Bun.serve> | null,
   queue: [] as Array<{
     path: string
-    response: Response | ((req: Request, capture: Capture) => Response)
+    response: Response | ((req: Request, capture: Capture) => Response | Promise<Response>)
     resolve: (value: Capture) => void
   }>,
 }
@@ -590,7 +590,7 @@ function timeout(ms: number) {
   })
 }
 
-function waitStreamingRequest(pathname: string) {
+function waitStreamingRequest(pathname: string, beforeHeaders = false) {
   const request = deferred<Capture>()
   const requestAborted = deferred<void>()
   const responseCanceled = deferred<void>()
@@ -599,8 +599,13 @@ function waitStreamingRequest(pathname: string) {
   state.queue.push({
     path: pathname,
     resolve: request.resolve,
-    response(req: Request) {
+    async response(req: Request) {
       req.signal.addEventListener("abort", () => requestAborted.resolve(), { once: true })
+      if (beforeHeaders) {
+        await requestAborted.promise
+        responseCanceled.resolve()
+        return new Response(null, { status: 499 })
+      }
 
       return new Response(
         new ReadableStream<Uint8Array>({
@@ -907,67 +912,68 @@ describe("session.llm.stream", () => {
   )
 
   const alibabaQwenFixture = { providerID: "alibaba", modelID: "qwen-plus" }
-  it.instance(
-    "service stream cancellation cancels provider response body promptly",
-    () =>
-      Effect.gen(function* () {
-        const fixture = loadFixture(alibabaQwenFixture.providerID, alibabaQwenFixture.modelID)
-        const pending = waitStreamingRequest("/chat/completions")
+  for (const phase of ["headers", "body"] as const)
+    it.instance(
+      `service stream cancellation cancels pending provider ${phase} promptly`,
+      () =>
+        Effect.gen(function* () {
+          const fixture = loadFixture(alibabaQwenFixture.providerID, alibabaQwenFixture.modelID)
+          const pending = waitStreamingRequest("/chat/completions", phase === "headers")
 
-        const resolved = yield* Provider.use.getModel(
-          ProviderV2.ID.make(alibabaQwenFixture.providerID),
-          ModelV2.ID.make(fixture.model.id),
-        )
-        const sessionID = SessionID.make("session-test-service-abort")
-        const agent = {
-          name: "test",
-          mode: "primary",
-          options: {},
-          permission: [{ permission: "*", pattern: "*", action: "allow" }],
-        } satisfies Agent.Info
-        const user = {
-          id: MessageID.make("msg_user-service-abort"),
-          sessionID,
-          role: "user",
-          time: { created: Date.now() },
-          agent: agent.name,
-          model: { providerID: ProviderV2.ID.make(alibabaQwenFixture.providerID), modelID: resolved.id },
-        } satisfies SessionV1.User
+          const resolved = yield* Provider.use.getModel(
+            ProviderV2.ID.make(alibabaQwenFixture.providerID),
+            ModelV2.ID.make(fixture.model.id),
+          )
+          const sessionID = SessionID.make("session-test-service-abort")
+          const agent = {
+            name: "test",
+            mode: "primary",
+            options: {},
+            permission: [{ permission: "*", pattern: "*", action: "allow" }],
+          } satisfies Agent.Info
+          const user = {
+            id: MessageID.make("msg_user-service-abort"),
+            sessionID,
+            role: "user",
+            time: { created: Date.now() },
+            agent: agent.name,
+            model: { providerID: ProviderV2.ID.make(alibabaQwenFixture.providerID), modelID: resolved.id },
+          } satisfies SessionV1.User
 
-        const fiber = yield* drain({
-          user,
-          sessionID,
-          model: resolved,
-          agent,
-          system: ["You are a helpful assistant."],
-          messages: [{ role: "user", content: "Hello" }],
-          tools: {},
-        }).pipe(Effect.exit, Effect.forkScoped)
+          const fiber = yield* drain({
+            user,
+            sessionID,
+            model: resolved,
+            agent,
+            system: ["You are a helpful assistant."],
+            messages: [{ role: "user", content: "Hello" }],
+            tools: {},
+          }).pipe(Effect.exit, Effect.forkScoped)
 
-        yield* Effect.promise(() => pending.request)
-        yield* Fiber.interrupt(fiber)
+          yield* Effect.promise(() => pending.request)
+          yield* Fiber.interrupt(fiber)
 
-        yield* Effect.promise(() => Promise.race([pending.responseCanceled, timeout(500)]))
-        const exit = yield* Fiber.await(fiber)
-        // Fiber.await returns an Exit<Exit<...>>. Unwrap once.
-        const inner = Exit.isSuccess(exit) ? exit.value : exit
-        expect(Exit.isFailure(inner)).toBe(true)
-        if (Exit.isFailure(inner)) {
-          expect(Cause.hasInterrupts(inner.cause)).toBe(true)
-        }
-        yield* Effect.promise(() => Promise.race([pending.requestAborted, timeout(500)]).catch(() => undefined))
-      }),
-    {
-      config: () => ({
-        enabled_providers: [alibabaQwenFixture.providerID],
-        provider: {
-          [alibabaQwenFixture.providerID]: {
-            options: { apiKey: "test-key", baseURL: `${state.server!.url.origin}/v1` },
+          yield* Effect.promise(() => Promise.race([pending.responseCanceled, timeout(500)]))
+          const exit = yield* Fiber.await(fiber)
+          // Fiber.await returns an Exit<Exit<...>>. Unwrap once.
+          const inner = Exit.isSuccess(exit) ? exit.value : exit
+          expect(Exit.isFailure(inner)).toBe(true)
+          if (Exit.isFailure(inner)) {
+            expect(Cause.hasInterrupts(inner.cause)).toBe(true)
+          }
+          yield* Effect.promise(() => Promise.race([pending.requestAborted, timeout(500)]).catch(() => undefined))
+        }),
+      {
+        config: () => ({
+          enabled_providers: [alibabaQwenFixture.providerID],
+          provider: {
+            [alibabaQwenFixture.providerID]: {
+              options: { apiKey: "test-key", baseURL: `${state.server!.url.origin}/v1` },
+            },
           },
-        },
-      }),
-    },
-  )
+        }),
+      },
+    )
 
   it.instance(
     "keeps tools enabled by prompt permissions",

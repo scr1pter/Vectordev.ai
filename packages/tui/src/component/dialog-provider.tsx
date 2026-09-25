@@ -1,3 +1,4 @@
+import open from "open"
 import { createMemo, createSignal, onMount, Show } from "solid-js"
 import { useSync } from "../context/sync"
 import { filter, map, pipe, sortBy } from "remeda"
@@ -17,6 +18,7 @@ import { useClipboard } from "../context/clipboard"
 import { isHiddenProvider } from "../util/model"
 import { COPILOT_SIGN_IN, providerAllowed, providerEnabled } from "@vectordevai/schema/provider-policy"
 import { saveCustomProviderCredential } from "./custom-provider-credential"
+import { OPENROUTER_REMOTE_COPY } from "@vectordevai/core/free-model-choice"
 
 const PROVIDER_PRIORITY: Record<string, number> = {
   openai: 2,
@@ -48,7 +50,7 @@ export function providerOptions(list: { id: string; name: string; source?: strin
   return [
     ...pipe(
       list,
-      filter((provider) => !isHiddenProvider(provider.id, provider)),
+      filter((provider) => provider.id !== "vector" && !isHiddenProvider(provider.id, provider)),
       sortBy(
         (x) => PROVIDER_PRIORITY[x.id] ?? 99,
         (x) => x.name.toLowerCase(),
@@ -88,7 +90,10 @@ export function normalizeCustomProviderID(value: string, existing: readonly stri
   return providerID
 }
 
-export function createDialogProviderOptions() {
+export function createDialogProviderOptions(input?: {
+  preferredMethod?: "oauth"
+  onConnected?: () => void | Promise<void>
+}) {
   const sync = useSync()
   const dialog = useDialog()
   const sdk = useSDK()
@@ -150,6 +155,9 @@ export function createDialogProviderOptions() {
           category: provider.category,
           gutter: connected && onboarded() ? () => <text fg={theme.success}>✓</text> : undefined,
           async onSelect() {
+            const remoteOpenRouter =
+              providerID === "openrouter" &&
+              !["localhost", "127.0.0.1", "[::1]", "vector.internal"].includes(new URL(sdk.url).hostname)
             const methods = providerEnabled(providerID)
               ? (sync.data.provider_auth[providerID] ?? [{ type: "api" as const, label: "API key" }])
               : []
@@ -160,8 +168,12 @@ export function createDialogProviderOptions() {
               })
               return
             }
-            let index: number | null = 0
-            if (methods.length > 1) {
+            const preferred = input?.preferredMethod
+              ? methods.findIndex((method) => method.type === (remoteOpenRouter ? "api" : input.preferredMethod))
+              : -1
+            if (remoteOpenRouter) toast.show({ variant: "info", message: OPENROUTER_REMOTE_COPY })
+            let index: number | null = preferred >= 0 ? preferred : 0
+            if (methods.length > 1 && preferred < 0) {
               index = await new Promise<number | null>((resolve) => {
                 dialog.replace(
                   () => (
@@ -182,6 +194,7 @@ export function createDialogProviderOptions() {
             const method = methods[index]
             if (!method) return
             if (method.type === "oauth") {
+              if (remoteOpenRouter) return
               let inputs: Record<string, string> | undefined
               if (method.prompts?.length) {
                 const value = await PromptsMethod({
@@ -207,12 +220,25 @@ export function createDialogProviderOptions() {
               }
               if (result.data?.method === "code") {
                 dialog.replace(() => (
-                  <CodeMethod providerID={providerID} title={method.label} index={index} authorization={result.data!} />
+                  <CodeMethod
+                    providerID={providerID}
+                    title={method.label}
+                    index={index}
+                    authorization={result.data!}
+                    onConnected={input?.onConnected}
+                  />
                 ))
               }
               if (result.data?.method === "auto") {
+                if (input?.preferredMethod === "oauth") void open(result.data.url).catch(() => {})
                 dialog.replace(() => (
-                  <AutoMethod providerID={providerID} title={method.label} index={index} authorization={result.data!} />
+                  <AutoMethod
+                    providerID={providerID}
+                    title={method.label}
+                    index={index}
+                    authorization={result.data!}
+                    onConnected={input?.onConnected}
+                  />
                 ))
               }
             }
@@ -224,7 +250,12 @@ export function createDialogProviderOptions() {
                 metadata = value
               }
               return dialog.replace(() => (
-                <ApiMethod providerID={providerID} title={method.label} metadata={metadata} />
+                <ApiMethod
+                  providerID={providerID}
+                  title={method.label}
+                  metadata={metadata}
+                  onConnected={input?.onConnected}
+                />
               ))
             }
           },
@@ -241,6 +272,7 @@ export function DialogProvider() {
 }
 
 interface AutoMethodProps {
+  onConnected?: () => void | Promise<void>
   index: number
   providerID: string
   title: string
@@ -290,6 +322,11 @@ function AutoMethod(props: AutoMethodProps) {
     }
     await sdk.client.instance.dispose()
     await sync.bootstrap()
+    if (props.onConnected) {
+      dialog.clear()
+      await props.onConnected()
+      return
+    }
     dialog.replace(() => <DialogModel providerID={props.providerID} />)
   })
 
@@ -316,6 +353,7 @@ function AutoMethod(props: AutoMethodProps) {
 }
 
 interface CodeMethodProps {
+  onConnected?: () => void | Promise<void>
   index: number
   title: string
   providerID: string
@@ -341,6 +379,11 @@ function CodeMethod(props: CodeMethodProps) {
         if (!error) {
           await sdk.client.instance.dispose()
           await sync.bootstrap()
+          if (props.onConnected) {
+            dialog.clear()
+            await props.onConnected()
+            return
+          }
           dialog.replace(() => <DialogModel providerID={props.providerID} />)
           return
         }
@@ -360,6 +403,7 @@ function CodeMethod(props: CodeMethodProps) {
 }
 
 interface ApiMethodProps {
+  onConnected?: () => void | Promise<void>
   providerID: string
   title: string
   metadata?: Record<string, string>
@@ -402,6 +446,11 @@ function ApiMethod(props: ApiMethodProps) {
             message: `Saved credential for ${props.providerID}. Configure it in vector.json to use it.`,
           })
           dialog.clear()
+          return
+        }
+        if (props.onConnected) {
+          dialog.clear()
+          await props.onConnected()
           return
         }
         dialog.replace(() => <DialogModel providerID={props.providerID} />)

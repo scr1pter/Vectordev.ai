@@ -6,11 +6,23 @@ export const prerender = true
 
 <DocsPage id="models">
 
-          <h3>Models included with Vector</h3>
+          <h3>Free models inside of Vector</h3>
           <p>
-            Vector is moving the models it includes onto a provider it has its own agreement with.
-            While that is being set up, no models ship with the app: connect a provider below, and
-            your subscription covers Vector itself rather than model usage.
+            The upcoming release adds a section for approved OpenRouter free models when the service is enabled.
+            Sign in to Vector for a shared allowance, or choose Connect OpenRouter to use your own account directly.
+            Each model identifies its source: Shared Vector allowance or Your OpenRouter account.
+            When both offer the same model, your account takes precedence. The section is hidden when the service is off.
+          </p>
+          <p>
+            Uses your own free OpenRouter account: 50 requests a day, or 1,000 if you've ever added $10 of OpenRouter credits.
+            OpenRouter supplies this free access; Vector does not charge for, provide, or pay for these tokens.
+            When the shared allowance is exhausted, Vector shows its expected reset time and lets you connect OpenRouter
+            to continue the same conversation. Workspace subscription terms are unchanged.
+          </p>
+          <p>
+            Prompts are processed by OpenRouter and the selected model provider. Retention and training policies vary
+            by provider; review those policies before sending confidential code. This describes upcoming functionality,
+            not an announcement that the shared service is enabled in production.
           </p>
           <p class="note">
             The upcoming release no longer loads the former third-party hosted providers, even with an API key.
@@ -21,7 +33,7 @@ export const prerender = true
           </p>
           <h3>Bring your own key</h3>
           <p>
-            Connect a provider in Settings, or run <code>vector auth login</code> in the terminal, then
+            Connect a provider in Settings, or run <code>vector providers login</code> in the terminal, then
             select a model in the session composer. Model availability, context limits, pricing, and
             rate limits come from the provider. Vector's usage view tracks the information returned by
             those sessions.

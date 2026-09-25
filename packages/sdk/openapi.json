@@ -7471,6 +7471,116 @@
         ]
       }
     },
+    "/session/{sessionID}/free-models/resume": {
+      "post": {
+        "tags": ["session"],
+        "operationId": "session.resumeFreeModels",
+        "parameters": [
+          {
+            "name": "sessionID",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "pattern": "^ses"
+            },
+            "required": true
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFoundError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "SessionBusyError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionBusyError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Resume only the exact latest interrupted free-model turn using the same curated model and your own OpenRouter key, without adding a user prompt.",
+        "summary": "Continue a free-model interruption with your OpenRouter account",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "messageID": {
+                    "type": "string",
+                    "pattern": "^msg"
+                  },
+                  "modelID": {
+                    "type": "string"
+                  }
+                },
+                "required": ["messageID", "modelID"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.session.resumeFreeModels({\n  ...\n})"
+          }
+        ]
+      }
+    },
     "/session/{sessionID}/fork": {
       "post": {
         "tags": ["session"],
@@ -11454,6 +11564,122 @@
           {
             "lang": "js",
             "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.v2.session.switchModel({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/api/session/{sessionID}/free-models/resume": {
+      "post": {
+        "tags": ["sessions"],
+        "operationId": "v2.session.resumeFreeModels",
+        "parameters": [
+          {
+            "name": "sessionID",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "pattern": "^ses"
+            },
+            "required": true
+          }
+        ],
+        "security": [],
+        "responses": {
+          "204": {
+            "description": "<No Content>"
+          },
+          "400": {
+            "description": "InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UnauthorizedError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "SessionNotFoundError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/SessionNotFoundError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionNotFoundError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ConflictError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConflictError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "UnknownError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnknownError1"
+                }
+              }
+            }
+          }
+        },
+        "description": "Resume only the latest interrupted free-model turn using the same curated model and your own OpenRouter key, without admitting another prompt.",
+        "summary": "Continue a free-model interruption with your OpenRouter account",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "messageID": {
+                    "type": "string",
+                    "pattern": "^msg_"
+                  },
+                  "modelID": {
+                    "type": "string"
+                  }
+                },
+                "required": ["messageID", "modelID"],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": true
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.v2.session.resumeFreeModels({\n  ...\n})"
           }
         ]
       }
@@ -16290,6 +16516,9 @@
             "$ref": "#/components/schemas/EventSessionNextStepFailed"
           },
           {
+            "$ref": "#/components/schemas/EventSessionNextStepResumed"
+          },
+          {
             "$ref": "#/components/schemas/EventSessionNextTextStarted"
           },
           {
@@ -17229,6 +17458,38 @@
         "required": ["name", "data"],
         "additionalProperties": false
       },
+      "FreeModelsLimitError": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "enum": ["FreeModelsLimitError"]
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": ["VECTOR_FREE_MODELS_LIMIT"]
+              },
+              "reason": {
+                "type": "string",
+                "enum": ["user_daily", "user_minute", "shared_daily", "upstream", "balance"]
+              },
+              "resetAt": {
+                "type": "number"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": ["code", "reason", "resetAt", "message"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["name", "data"],
+        "additionalProperties": false
+      },
       "AssistantMessage": {
         "type": "object",
         "properties": {
@@ -17284,6 +17545,9 @@
               },
               {
                 "$ref": "#/components/schemas/APIError"
+              },
+              {
+                "$ref": "#/components/schemas/FreeModelsLimitError"
               }
             ]
           },
@@ -18203,6 +18467,31 @@
           }
         },
         "required": ["text"],
+        "additionalProperties": false
+      },
+      "FreeModelLimit": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["free_models_limit"]
+          },
+          "code": {
+            "type": "string",
+            "enum": ["VECTOR_FREE_MODELS_LIMIT"]
+          },
+          "reason": {
+            "type": "string",
+            "enum": ["user_daily", "user_minute", "shared_daily", "upstream", "balance"]
+          },
+          "resetAt": {
+            "type": "number"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": ["type", "code", "reason", "resetAt", "message"],
         "additionalProperties": false
       },
       "Pty": {
@@ -19216,10 +19505,43 @@
                         "pattern": "^msg_"
                       },
                       "error": {
-                        "$ref": "#/components/schemas/SessionErrorUnknown"
+                        "$ref": "#/components/schemas/SessionErrorAssistant"
                       }
                     },
                     "required": ["timestamp", "sessionID", "assistantMessageID", "error"],
+                    "additionalProperties": false
+                  }
+                },
+                "required": ["id", "type", "properties"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^evt_"
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": ["session.next.step.resumed"]
+                  },
+                  "properties": {
+                    "type": "object",
+                    "properties": {
+                      "timestamp": {
+                        "type": "number"
+                      },
+                      "sessionID": {
+                        "type": "string",
+                        "pattern": "^ses"
+                      },
+                      "assistantMessageID": {
+                        "type": "string",
+                        "pattern": "^msg_"
+                      }
+                    },
+                    "required": ["timestamp", "sessionID", "assistantMessageID"],
                     "additionalProperties": false
                   }
                 },
@@ -20163,6 +20485,9 @@
                           },
                           {
                             "$ref": "#/components/schemas/APIError"
+                          },
+                          {
+                            "$ref": "#/components/schemas/FreeModelsLimitError"
                           }
                         ]
                       }
@@ -21515,6 +21840,9 @@
                 "$ref": "#/components/schemas/SyncEventSessionNextStepFailed"
               },
               {
+                "$ref": "#/components/schemas/SyncEventSessionNextStepResumed"
+              },
+              {
                 "$ref": "#/components/schemas/SyncEventSessionNextTextStarted"
               },
               {
@@ -22604,6 +22932,17 @@
           },
           "name": {
             "type": "string"
+          },
+          "freeModel": {
+            "type": "object",
+            "properties": {
+              "source": {
+                "type": "string",
+                "enum": ["shared", "openrouter"]
+              }
+            },
+            "required": ["source"],
+            "additionalProperties": false
           },
           "family": {
             "type": "string"
@@ -24535,6 +24874,23 @@
           }
         }
       },
+      "SessionBusyError": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": ["SessionBusyError"]
+          },
+          "sessionID": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": ["_tag", "sessionID", "message"],
+        "additionalProperties": false
+      },
       "PublicShareRemovalError": {
         "type": "object",
         "properties": {
@@ -24698,23 +25054,6 @@
           }
         },
         "required": ["type", "prompt", "description", "agent"],
-        "additionalProperties": false
-      },
-      "SessionBusyError": {
-        "type": "object",
-        "properties": {
-          "_tag": {
-            "type": "string",
-            "enum": ["SessionBusyError"]
-          },
-          "sessionID": {
-            "type": "string"
-          },
-          "message": {
-            "type": "string"
-          }
-        },
-        "required": ["_tag", "sessionID", "message"],
         "additionalProperties": false
       },
       "EventTuiPromptAppend": {
@@ -25018,6 +25357,23 @@
         "required": ["_tag", "sessionID", "message"],
         "additionalProperties": false
       },
+      "UnknownError1": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": ["UnknownError"]
+          },
+          "message": {
+            "type": "string"
+          },
+          "ref": {
+            "type": "string"
+          }
+        },
+        "required": ["_tag", "message"],
+        "additionalProperties": false
+      },
       "PromptInput": {
         "type": "object",
         "properties": {
@@ -25077,23 +25433,6 @@
         "required": ["_tag", "sessionID", "messageID", "message"],
         "additionalProperties": false
       },
-      "UnknownError1": {
-        "type": "object",
-        "properties": {
-          "_tag": {
-            "type": "string",
-            "enum": ["UnknownError"]
-          },
-          "message": {
-            "type": "string"
-          },
-          "ref": {
-            "type": "string"
-          }
-        },
-        "required": ["_tag", "message"],
-        "additionalProperties": false
-      },
       "SessionDurableEvent": {
         "oneOf": [
           {
@@ -25131,6 +25470,9 @@
           },
           {
             "$ref": "#/components/schemas/SessionNextStepFailed"
+          },
+          {
+            "$ref": "#/components/schemas/SessionNextStepResumed"
           },
           {
             "$ref": "#/components/schemas/SessionNextTextStarted"
@@ -25514,6 +25856,9 @@
           },
           {
             "$ref": "#/components/schemas/SessionNextStepFailed"
+          },
+          {
+            "$ref": "#/components/schemas/SessionNextStepResumed"
           },
           {
             "$ref": "#/components/schemas/SessionNextTextStarted"
@@ -26064,6 +26409,16 @@
         },
         "required": ["type", "message"],
         "additionalProperties": false
+      },
+      "SessionErrorAssistant": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/SessionErrorUnknown"
+          },
+          {
+            "$ref": "#/components/schemas/FreeModelLimit"
+          }
+        ]
       },
       "LLMProviderMetadata": {
         "type": "object",
@@ -27437,10 +27792,64 @@
                     "pattern": "^msg_"
                   },
                   "error": {
-                    "$ref": "#/components/schemas/SessionErrorUnknown"
+                    "$ref": "#/components/schemas/SessionErrorAssistant"
                   }
                 },
                 "required": ["timestamp", "sessionID", "assistantMessageID", "error"],
+                "additionalProperties": false
+              }
+            },
+            "required": ["type", "id", "seq", "aggregateID", "data"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["type", "id", "syncEvent"],
+        "additionalProperties": false
+      },
+      "SyncEventSessionNextStepResumed": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["sync"]
+          },
+          "id": {
+            "type": "string",
+            "pattern": "^evt_"
+          },
+          "syncEvent": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": ["session.next.step.resumed.1"]
+              },
+              "id": {
+                "type": "string",
+                "pattern": "^evt_"
+              },
+              "seq": {
+                "type": "number"
+              },
+              "aggregateID": {
+                "type": "string"
+              },
+              "data": {
+                "type": "object",
+                "properties": {
+                  "timestamp": {
+                    "type": "number"
+                  },
+                  "sessionID": {
+                    "type": "string",
+                    "pattern": "^ses"
+                  },
+                  "assistantMessageID": {
+                    "type": "string",
+                    "pattern": "^msg_"
+                  }
+                },
+                "required": ["timestamp", "sessionID", "assistantMessageID"],
                 "additionalProperties": false
               }
             },
@@ -29345,7 +29754,7 @@
             "additionalProperties": false
           },
           "error": {
-            "$ref": "#/components/schemas/SessionErrorUnknown"
+            "$ref": "#/components/schemas/SessionErrorAssistant"
           }
         },
         "required": ["id", "time", "type", "agent", "model", "content"],
@@ -30159,10 +30568,65 @@
                 "pattern": "^msg_"
               },
               "error": {
-                "$ref": "#/components/schemas/SessionErrorUnknown"
+                "$ref": "#/components/schemas/SessionErrorAssistant"
               }
             },
             "required": ["timestamp", "sessionID", "assistantMessageID", "error"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "type", "data"],
+        "additionalProperties": false
+      },
+      "SessionNextStepResumed": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^evt_"
+          },
+          "metadata": {
+            "type": "object"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["session.next.step.resumed"]
+          },
+          "durable": {
+            "type": "object",
+            "properties": {
+              "aggregateID": {
+                "type": "string"
+              },
+              "seq": {
+                "type": "integer"
+              },
+              "version": {
+                "type": "integer"
+              }
+            },
+            "required": ["aggregateID", "seq", "version"],
+            "additionalProperties": false
+          },
+          "location": {
+            "$ref": "#/components/schemas/LocationRef"
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "timestamp": {
+                "type": "number"
+              },
+              "sessionID": {
+                "type": "string",
+                "pattern": "^ses"
+              },
+              "assistantMessageID": {
+                "type": "string",
+                "pattern": "^msg_"
+              }
+            },
+            "required": ["timestamp", "sessionID", "assistantMessageID"],
             "additionalProperties": false
           }
         },
@@ -31305,6 +31769,17 @@
           },
           "name": {
             "type": "string"
+          },
+          "freeModel": {
+            "type": "object",
+            "properties": {
+              "source": {
+                "type": "string",
+                "enum": ["shared", "openrouter"]
+              }
+            },
+            "required": ["source"],
+            "additionalProperties": false
           },
           "api": {
             "$ref": "#/components/schemas/ModelApi"
@@ -33151,6 +33626,9 @@
                   },
                   {
                     "$ref": "#/components/schemas/APIError"
+                  },
+                  {
+                    "$ref": "#/components/schemas/FreeModelsLimitError"
                   }
                 ]
               }
@@ -36133,10 +36611,43 @@
                 "pattern": "^msg_"
               },
               "error": {
-                "$ref": "#/components/schemas/SessionErrorUnknown"
+                "$ref": "#/components/schemas/SessionErrorAssistant"
               }
             },
             "required": ["timestamp", "sessionID", "assistantMessageID", "error"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "type", "properties"],
+        "additionalProperties": false
+      },
+      "EventSessionNextStepResumed": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^evt_"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["session.next.step.resumed"]
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "timestamp": {
+                "type": "number"
+              },
+              "sessionID": {
+                "type": "string",
+                "pattern": "^ses"
+              },
+              "assistantMessageID": {
+                "type": "string",
+                "pattern": "^msg_"
+              }
+            },
+            "required": ["timestamp", "sessionID", "assistantMessageID"],
             "additionalProperties": false
           }
         },
@@ -37072,6 +37583,9 @@
                   },
                   {
                     "$ref": "#/components/schemas/APIError"
+                  },
+                  {
+                    "$ref": "#/components/schemas/FreeModelsLimitError"
                   }
                 ]
               }

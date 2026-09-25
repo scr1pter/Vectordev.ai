@@ -1,6 +1,8 @@
 import { describe, expect, it } from "bun:test"
 import type { AgentSideConnection } from "@agentclientprotocol/sdk"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
+import { ModelV2 } from "@vectordevai/core/model"
+import { ProviderV2 } from "@vectordevai/core/provider"
 import type { Event, Message, VectorClient, Part, SessionMessageResponse, ToolPart } from "@vectordevai/sdk/v2"
 import { Effect, ManagedRuntime } from "effect"
 import { ACPEvent } from "@/acp/event"
@@ -354,31 +356,21 @@ describe("acp event routing", () => {
 
   it("does not create extra subscriptions on repeated loadSession", async () => {
     const harness = createHarness()
+    const snapshot = Directory.build({
+      directory: "/workspace",
+      providers: {},
+      modes: [],
+      defaultModeID: "build",
+      commands: [],
+      defaultModel: { providerID: ProviderV2.ID.make("local"), modelID: ModelV2.ID.make("test-model") },
+    })
     let subscription: ACPEvent.Subscription | undefined
     const service = ACPService.make({
       sdk: harness.sdk,
       connection: harness.connection,
       directory: {
-        get: () =>
-          Effect.succeed(
-            Directory.build({
-              directory: "/workspace",
-              providers: {},
-              modes: [],
-              defaultModeID: "build",
-              commands: [],
-            }),
-          ),
-        refresh: () =>
-          Effect.succeed(
-            Directory.build({
-              directory: "/workspace",
-              providers: {},
-              modes: [],
-              defaultModeID: "build",
-              commands: [],
-            }),
-          ),
+        get: () => Effect.succeed(snapshot),
+        refresh: () => Effect.succeed(snapshot),
         variants: Directory.variants,
       },
       session: harness.session,
@@ -393,6 +385,7 @@ describe("acp event routing", () => {
     await Effect.runPromise(service.loadSession({ cwd: "/workspace", sessionId: "ses_loaded", mcpServers: [] }))
 
     expect(harness.calls.eventSubscribe).toBe(1)
+    expect((await Effect.runPromise(harness.session.get("ses_loaded"))).model).toEqual(snapshot.defaultModel)
     subscription?.stop()
     harness.events.close()
   })

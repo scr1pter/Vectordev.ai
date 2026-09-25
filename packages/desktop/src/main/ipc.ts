@@ -1,3 +1,4 @@
+import { initializeVectorAccount, vectorAccount } from "./vector-account-runtime"
 import { execFile } from "node:child_process"
 import { stat } from "node:fs/promises"
 import { basename } from "node:path"
@@ -219,6 +220,12 @@ function on<T extends unknown[]>(channel: string, listener: (event: IpcMainEvent
 }
 
 export function registerIpcHandlers(deps: Deps) {
+  initializeVectorAccount(deps.awaitInitialization)
+  handle("vector-account-status", () => vectorAccount.status())
+  handle("vector-account-start", () => vectorAccount.start())
+  handle("vector-account-cancel", () => vectorAccount.cancel())
+  handle("vector-account-logout", () => vectorAccount.logout())
+
   const voiceOwners = new Set<number>()
   const updaterSubscriptions = createUpdaterSubscriptions()
   app.once("will-quit", updaterSubscriptions.clear)

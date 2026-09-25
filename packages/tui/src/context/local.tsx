@@ -225,7 +225,10 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           }
         }
 
-        const provider = sync.data.provider[0]
+        const provider =
+          sync.data.provider.find((provider) =>
+            Object.values(provider.models).some((model) => model.freeModel?.source !== "shared"),
+          ) ?? sync.data.provider[0]
         if (!provider) return undefined
         const defaultModel = sync.data.provider_default[provider.id]
         const firstModel = Object.values(provider.models)[0]
@@ -239,13 +242,18 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
 
       const currentModel = createMemo(() => {
         const a = agent.current()
-        return (
-          getFirstValidModel(
-            () => a && modelStore.model[a.name],
-            () => a && a.model,
-            fallbackModel,
-          ) ?? undefined
+        const selected = getFirstValidModel(
+          () => a && modelStore.model[a.name],
+          () => a && a.model,
+          fallbackModel,
         )
+        if (!selected) return
+        const provider = sync.data.provider.find((provider) => provider.id === selected.providerID)
+        if (provider?.models[selected.modelID]?.freeModel?.source !== "shared") return selected
+        const own = sync.data.provider.find((provider) => provider.id === "openrouter")?.models[selected.modelID]
+        return own?.freeModel?.source === "openrouter"
+          ? { providerID: "openrouter", modelID: selected.modelID }
+          : selected
       })
 
       createEffect(() => {

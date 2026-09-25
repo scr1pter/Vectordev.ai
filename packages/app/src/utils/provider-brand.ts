@@ -1,3 +1,9 @@
+import {
+  FREE_MODELS_TITLE,
+  freeModelName,
+  freeModelSource,
+  preferOwnFreeModels,
+} from "@vectordevai/core/free-model-choice"
 import { providerAllowed, providerUsable } from "@vectordevai/schema/provider-policy"
 
 export const isHiddenProvider = (id: string, provider?: Parameters<typeof providerUsable>[1]) =>
@@ -19,6 +25,7 @@ export function brandProviderName(id: string, name?: string | null): string {
 export type PickerModel = {
   id: string
   name: string
+  freeModel?: { source: "shared" | "openrouter" }
   release_date?: string
   capabilities?: {
     reasoning?: boolean
@@ -115,7 +122,7 @@ export function showRowAccess(models: readonly PickerModel[]) {
 }
 
 export function modelDisplayName(model: PickerModel) {
-  return model.name
+  return freeModelName(model)
 }
 
 /** "400K", "262K", "1M", "1.5M". Millions round down to one decimal, so the caption never
@@ -204,7 +211,7 @@ export function modelAriaLabel(model: PickerModel, now: number) {
     context ? `${context} context` : "",
     model.capabilities?.reasoning ? "reasoning" : "",
     isNewRelease(model, now) ? "new" : "",
-    access.spoken,
+    freeModelSource(model) ?? access.spoken,
   ]
     .filter(Boolean)
     .join(", ")
@@ -221,12 +228,18 @@ export function modelTitle(model: PickerModel) {
   ]
     .filter(Boolean)
     .join(" · ")
-  return [modelDisplayName(model), about, contextTitle(model.limit?.context), releaseTitle(model), access.title]
+  return [
+    modelDisplayName(model),
+    about,
+    contextTitle(model.limit?.context),
+    releaseTitle(model),
+    freeModelSource(model) ?? access.title,
+  ]
     .filter(Boolean)
     .join("\n")
 }
 
-export type PickerSectionKind = "recent" | "provider"
+export type PickerSectionKind = "recent" | "provider" | "free"
 
 export type PickerSection<T extends PickerModel = PickerModel> = {
   id: string
@@ -277,11 +290,16 @@ export function buildModelSections<T extends PickerModel>(input: {
   popular?: readonly string[]
 }): PickerSection<T>[] {
   const term = (input.term ?? "").trim().toLowerCase()
-  const models = input.models.filter(
-    (model) => !isHiddenProvider(model.provider.id, model.provider) && isCodingModel(model),
+  const models = preferOwnFreeModels(
+    input.models.filter((model) => !isHiddenProvider(model.provider.id, model.provider) && isCodingModel(model)),
   )
   const sections: PickerSection<T>[] = []
   const taken = new Set<string>()
+  const free = models.filter((model) => model.freeModel && matchRank(model, term, input.now) !== undefined)
+  if (free.length) {
+    sections.push(pickerSection({ id: "free", kind: "free", label: FREE_MODELS_TITLE, items: free.sort(byRelease) }))
+    free.forEach((model) => taken.add(pickerModelKey(model)))
+  }
 
   if (!term) {
     const byKey = new Map(models.map((model) => [pickerModelKey(model), model]))

@@ -27,6 +27,7 @@ const activeSessions = new Set<SessionV2.ID>()
 const execution = Layer.succeed(
   SessionExecution.Service,
   SessionExecution.Service.of({
+    resumeFreeModels: () => Effect.die("Free-model retry is outside this fixture"),
     active: Effect.sync(() => new Set(activeSessions)),
     resume: (sessionID) =>
       Effect.sync(() => {

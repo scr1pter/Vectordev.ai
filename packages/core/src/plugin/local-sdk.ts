@@ -98,9 +98,8 @@ function resolve(specifier: string, parent: string) {
 }
 
 async function installRuntime() {
-  const { plugin } = await import("bun")
   if (registered.has("sdk")) return
-  plugin({
+  Bun.plugin({
     name: "vector-local-plugin-sdk",
     setup(build) {
       build.module("vector:local-plugin-compat", () => ({ exports: { default: { load } }, loader: "object" }))

@@ -39,7 +39,8 @@ export const DialogSelectProvider: Component<{ directory?: Accessor<string | und
         items={() => {
           language.locale()
           return [{ id: CUSTOM_ID, name: customLabel() }, ...providers.all().values()].filter(
-            (provider) => provider.id === CUSTOM_ID || !isHiddenProvider(provider.id, provider),
+            (provider) =>
+              provider.id === CUSTOM_ID || (provider.id !== "vector" && !isHiddenProvider(provider.id, provider)),
           )
         }}
         filterKeys={["id", "name"]}

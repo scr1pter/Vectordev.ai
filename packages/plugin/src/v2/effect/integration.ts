@@ -18,11 +18,11 @@ export type IntegrationOAuthAuthorization = {
 } & (
   | {
       readonly mode: "auto"
-      readonly callback: Effect.Effect<CredentialOAuth, unknown>
+      readonly callback: Effect.Effect<CredentialValue, unknown>
     }
   | {
       readonly mode: "code"
-      readonly callback: (code: string) => Effect.Effect<CredentialOAuth, unknown>
+      readonly callback: (code: string) => Effect.Effect<CredentialValue, unknown>
     }
 )
 export type IntegrationOAuthMethodRegistration = {

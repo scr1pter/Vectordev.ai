@@ -1,3 +1,4 @@
+import type { VectorAccountPlatform } from "@vectordevai/app/vector-account"
 import type { DesktopMenuAction } from "@vectordevai/app/desktop-menu"
 import type { WslServersPlatform } from "@vectordevai/app/wsl/types"
 import type { UpdaterState } from "@vectordevai/app/updater"
@@ -700,6 +701,7 @@ export type ElectronAPI = {
   awaitInitialization: () => Promise<ServerReadyData>
   wslServers: WslServersAPI
   updater: UpdaterAPI
+  vectorAccount: VectorAccountPlatform
   license: LicenseAPI
   reportBug: (input: { message: string; email?: string }) => Promise<{ delivered: boolean; error?: string }>
   askHelpAssistant: (input: {

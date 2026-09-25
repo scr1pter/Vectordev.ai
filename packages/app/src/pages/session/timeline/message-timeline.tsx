@@ -1,3 +1,4 @@
+import { FreeModelsLimit } from "@/components/free-models-limit"
 import { publicShareError } from "@vectordevai/schema/public-share"
 import {
   createEffect,
@@ -1313,9 +1314,16 @@ export function MessageTimeline(props: {
         return (
           <TimelineRowFrame row={errorRow}>
             <div data-slot="session-turn-message-container" class="w-full px-4 md:px-5">
-              <Card variant="error" class="error-card">
-                {errorRow().text}
-              </Card>
+              <Show
+                when={errorRow().freeLimit && sessionID()}
+                fallback={
+                  <Card variant="error" class="error-card">
+                    {errorRow().text}
+                  </Card>
+                }
+              >
+                <FreeModelsLimit sessionID={sessionID()!} limit={errorRow().freeLimit!} />
+              </Show>
             </div>
           </TimelineRowFrame>
         )

@@ -1,3 +1,4 @@
+import { freeModelsLimitNotice, freeModelsLimitTitle } from "@vectordevai/core/free-model-choice"
 import type { Event } from "@vectordevai/sdk/v2"
 import type { TuiAttentionSoundName, TuiPlugin, TuiPluginApi } from "@vectordevai/plugin/tui"
 import type { BuiltinTuiPlugin } from "../builtins"
@@ -18,6 +19,8 @@ function notify(api: TuiPluginApi, sessionID: string | undefined, message: strin
 }
 
 function sessionErrorMessage(error: SessionError) {
+  const limit = freeModelsLimitNotice(error)
+  if (limit) return freeModelsLimitTitle(limit)
   if (error?.name === "MessageAbortedError") return "Session aborted"
   const data = error?.data
   if (data && typeof data === "object" && "message" in data && data.message === "SSE read timed out") {

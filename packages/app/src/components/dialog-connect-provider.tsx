@@ -1,3 +1,5 @@
+import { OPENROUTER_ACCOUNT_COPY, OPENROUTER_REMOTE_COPY } from "@vectordevai/core/free-model-choice"
+import { usePlatform } from "@/context/platform"
 import type { ProviderAuthAuthorization, ProviderAuthMethod } from "@vectordevai/sdk/v2/client"
 import { Button } from "@vectordevai/ui/button"
 import { useDialog } from "@vectordevai/ui/context/dialog"
@@ -9,21 +11,39 @@ import { ProviderIcon } from "@vectordevai/ui/provider-icon"
 import { Spinner } from "@vectordevai/ui/spinner"
 import { TextField } from "@vectordevai/ui/text-field"
 import { showToast } from "@/utils/toast"
-import { type Accessor, createEffect, createMemo, createResource, Match, onCleanup, onMount, Switch } from "solid-js"
+import {
+  type Accessor,
+  createEffect,
+  createMemo,
+  createResource,
+  Match,
+  onCleanup,
+  onMount,
+  Show,
+  Switch,
+} from "solid-js"
 import { createStore, produce } from "solid-js/store"
 import { Link } from "@/components/link"
 import { useServerSDK } from "@/context/server-sdk"
+import { ServerConnection } from "@/context/server"
 import { useServerSync } from "@/context/server-sync"
 import { useLanguage } from "@/context/language"
 import { useProviders } from "@/hooks/use-providers"
 import { providerEnabled } from "@vectordevai/schema/provider-policy"
 
-export function DialogConnectProvider(props: { provider: string; directory?: Accessor<string | undefined> }) {
+export function DialogConnectProvider(props: {
+  provider: string
+  directory?: Accessor<string | undefined>
+  preferredMethod?: "oauth"
+  onConnected?: () => void | Promise<void>
+}) {
+  const platform = usePlatform()
   const dialog = useDialog()
   const serverSync = useServerSync()
   const serverSDK = useServerSDK()
   const language = useLanguage()
   const providers = useProviders(props.directory)
+  const remoteOpenRouter = () => props.provider === "openrouter" && !ServerConnection.local(serverSDK().server)
 
   const all = () => {
     void import("./dialog-select-provider").then((x) => {
@@ -182,6 +202,10 @@ export function DialogConnectProvider(props: { provider: string; directory?: Acc
     }
 
     if (method.type === "oauth") {
+      if (remoteOpenRouter()) {
+        dispatch({ type: "auth.error", error: OPENROUTER_REMOTE_COPY })
+        return
+      }
       if (method.prompts?.length && !inputs) {
         dispatch({ type: "auth.prompt" })
         return
@@ -357,15 +381,20 @@ export function DialogConnectProvider(props: { provider: string; directory?: Acc
   createEffect(() => {
     if (auto) return
     if (loading()) return
-    if (methods().length === 1) {
+    const preferred = props.preferredMethod
+      ? methods().findIndex((method) => method.type === (remoteOpenRouter() ? "api" : props.preferredMethod))
+      : -1
+    if (methods().length === 1 || preferred >= 0) {
       auto = true
-      void selectMethod(0)
+      void selectMethod(preferred >= 0 ? preferred : 0)
     }
   })
 
   async function complete() {
     await serverSDK().client.global.dispose()
+    await serverSync().refreshProviders()
     dialog.close()
+    await props.onConnected?.()
     showToast({
       variant: "success",
       icon: "circle-check",
@@ -549,6 +578,8 @@ export function DialogConnectProvider(props: { provider: string; directory?: Acc
     })
 
     onMount(() => {
+      if (props.provider === "openrouter" && store.authorization)
+        void Promise.resolve(platform.openLink(store.authorization.url)).catch(() => {})
       void (async () => {
         const result = await serverSDK()
           .client.provider.oauth.callback({
@@ -577,13 +608,18 @@ export function DialogConnectProvider(props: { provider: string; directory?: Acc
           <Link href={store.authorization!.url}>{language.t("provider.connect.oauth.auto.visit.link")}</Link>
           {language.t("provider.connect.oauth.auto.visit.suffix", { provider: provider().name })}
         </div>
-        <TextField
-          label={language.t("provider.connect.oauth.auto.confirmationCode")}
-          class="font-mono"
-          value={code()}
-          readOnly
-          copyable
-        />
+        <Show
+          when={props.provider !== "openrouter"}
+          fallback={<div class="text-14-regular text-text-base">{OPENROUTER_ACCOUNT_COPY}</div>}
+        >
+          <TextField
+            label={language.t("provider.connect.oauth.auto.confirmationCode")}
+            class="font-mono"
+            value={code()}
+            readOnly
+            copyable
+          />
+        </Show>
         <div class="text-14-regular text-text-base flex items-center gap-4">
           <Spinner />
           <span>{language.t("provider.connect.status.waiting")}</span>
@@ -617,6 +653,11 @@ export function DialogConnectProvider(props: { provider: string; directory?: Acc
           </div>
         </div>
         <div class="px-2.5 pb-10 flex flex-col gap-6">
+          <Show when={remoteOpenRouter()}>
+            <p role="note" class="text-14-regular text-text-base">
+              {OPENROUTER_REMOTE_COPY}
+            </p>
+          </Show>
           <div onKeyDown={handleKey} tabIndex={0} autofocus={store.methodIndex === undefined ? true : undefined}>
             <Switch>
               <Match when={loading()}>

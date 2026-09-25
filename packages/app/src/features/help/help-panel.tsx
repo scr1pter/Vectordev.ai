@@ -1,3 +1,4 @@
+import { FreeModelsCard } from "@/components/free-models-card"
 import { createSignal, For, Show } from "solid-js"
 import { helpContextFor, helpDocs } from "./help-retrieval"
 
@@ -85,6 +86,10 @@ export function HelpPanel(props: { open: boolean; onClose: () => void }) {
           </svg>
         </button>
       </header>
+
+      <div class="shrink-0 px-3 pt-3">
+        <FreeModelsCard />
+      </div>
 
       <div class="flex shrink-0 gap-1 border-b border-[color:var(--vx-line)] px-3 py-2">
         <For each={["assistant", "docs"] as const}>

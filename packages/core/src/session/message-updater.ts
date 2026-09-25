@@ -227,6 +227,11 @@ export function update(adapter: Adapter, event: SessionEvent.Event) {
           draft.error = event.data.error
         })
       },
+      "session.next.step.resumed": (event) => {
+        return updateOwnedAssistant(event.data.assistantMessageID, (draft) => {
+          if (draft.error?.type === "free_models_limit") draft.error = undefined
+        })
+      },
       "session.next.text.started": (event) => {
         return updateOwnedAssistant(event.data.assistantMessageID, (draft) => {
           draft.content.push(

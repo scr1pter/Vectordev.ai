@@ -1,4 +1,5 @@
 import { Cause, Context, Effect, Layer, Random } from "effect"
+import { parseFreeModelLimit } from "@vectordevai/schema/free-model"
 import {
   FetchHttpClient,
   Headers,
@@ -10,6 +11,7 @@ import {
 import {
   AuthenticationReason,
   ContentPolicyReason,
+  FreeModelsLimitReason,
   HttpContext,
   HttpRateLimitDetails,
   HttpRequestDetails,
@@ -230,6 +232,8 @@ const statusReason = (input: {
   readonly http: HttpContext
 }) => {
   const body = input.http.body ?? ""
+  const limit = parseFreeModelLimit(body)
+  if (limit) return new FreeModelsLimitReason({ limit, http: input.http })
   if (/content[-_\s]?policy|content_filter|safety/i.test(body)) {
     return new ContentPolicyReason({ message: input.message, http: input.http })
   }

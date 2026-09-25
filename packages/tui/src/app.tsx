@@ -1,3 +1,5 @@
+import { freeModelsLimitNotice, freeModelsLimitTitle } from "@vectordevai/core/free-model-choice"
+import { DialogFreeModelsLimit } from "./component/dialog-free-models-limit"
 import { render, TimeToFirstDraw, useRenderer, useTerminalDimensions } from "@opentui/solid"
 import { createDefaultOpenTuiKeymap } from "@opentui/keymap/opentui"
 import { Deferred, Effect } from "effect"
@@ -989,6 +991,16 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
     if (workspace !== project.workspace.current()) return
     const error = evt.properties.error
     if (error && typeof error === "object" && error.name === "MessageAbortedError") return
+    const limit = freeModelsLimitNotice(error)
+    if (limit && evt.properties.sessionID) {
+      const sessionID = evt.properties.sessionID
+      if (route.data.type === "session" && route.data.sessionID === sessionID) {
+        dialog.replace(() => <DialogFreeModelsLimit sessionID={sessionID} limit={limit} />)
+        return
+      }
+      toast.show({ variant: "info", message: freeModelsLimitTitle(limit), duration: 10000 })
+      return
+    }
     const message = errorMessage(error)
 
     toast.show({

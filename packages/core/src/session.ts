@@ -25,6 +25,7 @@ import { ProjectTable } from "./project/sql"
 import path from "path"
 import { fromRow } from "./session/info"
 import { SessionRunner } from "./session/runner/index"
+import { FreeModelsResume } from "./session/free-model-resume"
 import { SessionStore } from "./session/store"
 import { SessionExecution } from "./session/execution"
 import { makeGlobalNode } from "./effect/app-node"
@@ -166,6 +167,9 @@ export interface Interface {
   readonly compact: (input: CompactInput) => Effect.Effect<void, NotFoundError | OperationUnavailableError>
   readonly wait: (id: SessionSchema.ID) => Effect.Effect<void, NotFoundError | OperationUnavailableError>
   readonly active: Effect.Effect<ReadonlySet<SessionSchema.ID>>
+  readonly resumeFreeModels: (
+    input: FreeModelsResume.Input,
+  ) => Effect.Effect<void, NotFoundError | SessionRunner.RunError | FreeModelsResume.Rejected>
   readonly resume: (sessionID: SessionSchema.ID) => Effect.Effect<void, NotFoundError | SessionRunner.RunError>
   readonly interrupt: (sessionID: SessionSchema.ID) => Effect.Effect<void>
   readonly revert: {
@@ -423,6 +427,10 @@ const layer = Layer.effect(
         return yield* new OperationUnavailableError({ operation: "wait" })
       }),
       active: execution.active,
+      resumeFreeModels: Effect.fn("V2Session.resumeFreeModels")(function* (input) {
+        yield* result.get(input.sessionID)
+        yield* execution.resumeFreeModels(input)
+      }),
       resume: Effect.fn("V2Session.resume")(function* (sessionID) {
         yield* result.get(sessionID)
         yield* execution.resume(sessionID)

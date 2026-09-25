@@ -1,3 +1,4 @@
+import { freeModelName } from "@vectordevai/core/free-model-choice"
 import {
   Component,
   createEffect,
@@ -1160,7 +1161,7 @@ export function UserMessageDisplay(props: {
     const modelID = props.message.model?.modelID
     if (!providerID || !modelID) return ""
     const match = data.store.provider?.all?.get(providerID)
-    return match?.models?.[modelID]?.name ?? modelID
+    return freeModelName({ name: match?.models?.[modelID]?.name ?? modelID })
   })
   const timefmt = createMemo(() => new Intl.DateTimeFormat(i18n.locale(), { timeStyle: "short" }))
 

@@ -46,6 +46,20 @@ export function error(detail: string, options?: CallbackPageOptions) {
   })
 }
 
+export function received(options?: CallbackPageOptions) {
+  return renderDocument({
+    title: "Authorization received",
+    body: renderCard({
+      status: "pending",
+      headline: "Authorization received",
+      message: options?.provider
+        ? `Return to Vector to finish connecting to ${escapeHtml(options.provider)}.`
+        : "Return to Vector to finish connecting.",
+      footnote: "You can close this window.",
+    }),
+  })
+}
+
 export interface BootstrapOptions {
   /** Same-origin path the in-browser script POSTs the parsed callback to. */
   tokenPath: string

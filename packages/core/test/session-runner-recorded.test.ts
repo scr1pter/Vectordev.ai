@@ -92,6 +92,7 @@ const execution = Layer.effect(
       drain: (sessionID, force) => sessionRunner.run({ sessionID, force }),
     })
     return SessionExecution.Service.of({
+      resumeFreeModels: () => Effect.die("Free-model retry is outside this fixture"),
       active: coordinator.active,
       resume: coordinator.run,
       wake: coordinator.wake,

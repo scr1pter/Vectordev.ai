@@ -230,6 +230,8 @@ import type {
   SessionPromptAsyncResponses,
   SessionPromptErrors,
   SessionPromptResponses,
+  SessionResumeFreeModelsErrors,
+  SessionResumeFreeModelsResponses,
   SessionRevertErrors,
   SessionRevertResponses,
   SessionShareErrors,
@@ -396,6 +398,8 @@ import type {
   V2SessionQuestionRejectResponses,
   V2SessionQuestionReplyErrors,
   V2SessionQuestionReplyResponses,
+  V2SessionResumeFreeModelsErrors,
+  V2SessionResumeFreeModelsResponses,
   V2SessionRevertClearErrors,
   V2SessionRevertClearResponses,
   V2SessionRevertCommitErrors,
@@ -4324,6 +4328,51 @@ export class Session2 extends HeyApiClient {
   }
 
   /**
+   * Continue a free-model interruption with your OpenRouter account
+   *
+   * Resume only the exact latest interrupted free-model turn using the same curated model and your own OpenRouter key, without adding a user prompt.
+   */
+  public resumeFreeModels<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+      messageID?: string
+      modelID?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "messageID" },
+            { in: "body", key: "modelID" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      SessionResumeFreeModelsResponses,
+      SessionResumeFreeModelsErrors,
+      ThrowOnError
+    >({
+      url: "/session/{sessionID}/free-models/resume",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
    * Fork session
    *
    * Create a new session by forking an existing session at a specific message point.
@@ -6065,6 +6114,47 @@ export class Session3 extends HeyApiClient {
       ThrowOnError
     >({
       url: "/api/session/{sessionID}/model",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Continue a free-model interruption with your OpenRouter account
+   *
+   * Resume only the latest interrupted free-model turn using the same curated model and your own OpenRouter key, without admitting another prompt.
+   */
+  public resumeFreeModels<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      messageID?: string
+      modelID?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "body", key: "messageID" },
+            { in: "body", key: "modelID" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      V2SessionResumeFreeModelsResponses,
+      V2SessionResumeFreeModelsErrors,
+      ThrowOnError
+    >({
+      url: "/api/session/{sessionID}/free-models/resume",
       ...options,
       ...params,
       headers: {

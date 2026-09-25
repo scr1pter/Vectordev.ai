@@ -3,6 +3,7 @@ export * as SessionV1 from "./session"
 import { Schema } from "effect"
 import { NonNegativeInt } from "../schema"
 import { NamedError } from "../util/error"
+import { FreeModelLimitReason } from "@vectordevai/schema/free-model"
 
 export {
   AgentPart,
@@ -61,6 +62,12 @@ export const APIError = NamedError.create("APIError", {
   metadata: Schema.optional(Schema.Record(Schema.String, Schema.String)),
 })
 export type APIError = Schema.Schema.Type<typeof APIError.Schema>
+export const FreeModelsLimitError = NamedError.create("FreeModelsLimitError", {
+  code: Schema.Literal("VECTOR_FREE_MODELS_LIMIT"),
+  reason: FreeModelLimitReason,
+  resetAt: Schema.Finite,
+  message: Schema.String,
+})
 export const ContextOverflowError = NamedError.create("ContextOverflowError", {
   message: Schema.String,
   responseBody: Schema.optional(Schema.String),

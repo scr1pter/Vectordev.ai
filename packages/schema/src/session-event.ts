@@ -188,10 +188,17 @@ export namespace Step {
     schema: {
       ...Base,
       assistantMessageID: SessionMessage.ID,
-      error: UnknownError,
+      error: SessionMessage.AssistantError,
     },
   })
   export type Failed = typeof Failed.Type
+
+  export const Resumed = Event.define({
+    type: "session.next.step.resumed",
+    ...options,
+    schema: { ...Base, assistantMessageID: SessionMessage.ID },
+  })
+  export type Resumed = typeof Resumed.Type
 }
 
 export namespace Text {
@@ -458,6 +465,7 @@ export const DurableDefinitions = Event.inventory(
   Step.Started,
   Step.Ended,
   Step.Failed,
+  Step.Resumed,
   Text.Started,
   Text.Ended,
   Tool.Input.Started,
@@ -489,6 +497,7 @@ export const Definitions = Event.inventory(
   Step.Started,
   Step.Ended,
   Step.Failed,
+  Step.Resumed,
   Text.Started,
   Text.Delta,
   Text.Ended,

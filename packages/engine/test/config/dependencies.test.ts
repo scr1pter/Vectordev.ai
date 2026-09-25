@@ -8,7 +8,6 @@ import { Global } from "@vectordevai/core/global"
 import { Npm } from "@vectordevai/core/npm"
 import { ConfigDependencies } from "@/config/dependencies"
 import { PluginDependencyVersion } from "@/config/plugin-version"
-import { PluginLoader } from "@/plugin/loader"
 import { tmpdir } from "../fixture/fixture"
 
 const dependencyLayer = (cache: string, add: Npm.Interface["add"]) =>
@@ -16,6 +15,45 @@ const dependencyLayer = (cache: string, add: Npm.Interface["add"]) =>
     [Global.node, Global.layerWith({ cache })],
     [Npm.node, Layer.mock(Npm.Service, { add })],
   ])
+
+async function loadOffline(entry: string, directory: string) {
+  const child = Bun.spawn(
+    [
+      process.execPath,
+      "--eval",
+      `import { PluginLoader } from ${JSON.stringify(path.resolve(import.meta.dir, "../../src/plugin/loader.ts"))};
+       const loaded = await PluginLoader.load(${JSON.stringify({
+         spec: entry,
+         target: entry,
+         entry: pathToFileURL(entry).href,
+         source: "file",
+         options: undefined,
+         deprecated: false,
+       })});
+       if (!loaded.ok) throw loaded.error;
+       console.log(JSON.stringify(loaded.value.mod.default));`,
+    ],
+    {
+      env: {
+        ...process.env,
+        HOME: path.join(directory, "home"),
+        VECTOR_TEST_HOME: path.join(directory, "home"),
+        XDG_DATA_HOME: path.join(directory, "data"),
+        XDG_CACHE_HOME: path.join(directory, "cache"),
+        XDG_CONFIG_HOME: path.join(directory, "config"),
+        XDG_STATE_HOME: path.join(directory, "state"),
+        npm_config_registry: "http://127.0.0.1:1",
+      },
+      stdout: "pipe",
+      stderr: "pipe",
+    },
+  )
+  const output = await new Response(child.stdout).text()
+  const error = await new Response(child.stderr).text()
+  expect(await child.exited).toBe(0)
+  expect(error).toBe("")
+  return JSON.parse(output)
+}
 
 test("concurrent config consumers prepare one versioned SDK in the shared cache", async () => {
   await using tmp = await tmpdir()
@@ -120,22 +158,16 @@ test("cached SDK imports work offline through a shared link and preserve a proje
   expect(await fs.lstat(path.join(path.dirname(file), "node_modules")).catch(() => undefined)).toBeUndefined()
 })
 
-test("an uncached SDK-dependent plugin receives temporary setup and restart guidance", async () => {
+test("an uncached SDK-dependent plugin uses the bundled SDK offline without installing it", async () => {
   await using tmp = await tmpdir()
   const entry = path.join(tmp.path, "plugin.mjs")
-  await Bun.write(entry, 'import { tool } from "@vectordevai/plugin"; export default tool({});\n')
-  const loaded = await PluginLoader.load({
-    spec: entry,
-    target: entry,
-    entry: pathToFileURL(entry).href,
-    source: "file",
-    options: undefined,
-    deprecated: false,
-  })
-  expect(loaded.ok).toBe(false)
-  if (loaded.ok) throw new Error("Expected missing SDK")
-  expect(String(loaded.error)).toContain("shared cache in the background")
-  expect(String(loaded.error)).toContain("restart Vector")
+  const source =
+    'import { tool } from "@vectordevai/plugin"; export default { value: tool.schema.string().parse("ready") };\n'
+  await Bun.write(entry, source)
+  expect(await loadOffline(entry, tmp.path)).toEqual({ value: "ready" })
+  expect(await Bun.file(ConfigDependencies.readyFile(path.join(tmp.path, "cache", "vector"))).exists()).toBe(false)
+  expect(await fs.lstat(path.join(tmp.path, "node_modules")).catch(() => undefined)).toBeUndefined()
+  expect(await Bun.file(entry).text()).toBe(source)
 })
 
 test("an interrupted SDK install is not linked into a local plugin", async () => {
@@ -151,48 +183,21 @@ test("an interrupted SDK install is not linked into a local plugin", async () =>
   expect(await fs.lstat(path.join(path.dirname(entry), "node_modules")).catch(() => undefined)).toBeUndefined()
 })
 
-test("an SDK-dependent plugin loads offline after restart with the completed shared SDK", async () => {
+test("an SDK-dependent plugin prefers a completed shared SDK over its bundled fallback after restart", async () => {
   await using tmp = await tmpdir()
   const entry = path.join(tmp.path, "plugin.mjs")
-  await Bun.write(entry, 'import { tool } from "@vectordevai/plugin"; export default tool({ recovered: true });\n')
-  const row = {
-    spec: entry,
-    target: entry,
-    entry: pathToFileURL(entry).href,
-    source: "file" as const,
-    options: undefined,
-    deprecated: false,
-  }
-  expect((await PluginLoader.load(row)).ok).toBe(false)
-  try {
-    await Bun.write(
-      path.join(ConfigDependencies.directory(), "package.json"),
-      JSON.stringify({ name: ConfigDependencies.packageName, type: "module", main: "index.js" }),
-    )
-    await Bun.write(path.join(ConfigDependencies.directory(), "index.js"), "export const tool = (value) => value;\n")
-    await Bun.write(ConfigDependencies.readyFile(), ConfigDependencies.specifier)
-    const child = Bun.spawn(
-      [
-        process.execPath,
-        "--eval",
-        `import { PluginLoader } from ${JSON.stringify(path.resolve(import.meta.dir, "../../src/plugin/loader.ts"))};
-       const loaded = await PluginLoader.load(${JSON.stringify(row)});
-       if (!loaded.ok) throw loaded.error;
-       console.log(JSON.stringify(loaded.value.mod.default));`,
-      ],
-      {
-        env: { ...process.env, npm_config_registry: "http://127.0.0.1:1" },
-        stdout: "pipe",
-        stderr: "pipe",
-      },
-    )
-    const output = await new Response(child.stdout).text()
-    const error = await new Response(child.stderr).text()
-    expect(await child.exited).toBe(0)
-    expect(error).toBe("")
-    expect(JSON.parse(output)).toEqual({ recovered: true })
-  } finally {
-    await fs.rm(ConfigDependencies.directory(), { recursive: true, force: true })
-    await fs.rm(ConfigDependencies.readyFile(), { force: true })
-  }
+  await Bun.write(entry, 'import { tool } from "@vectordevai/plugin"; export default tool({ source: "bundled" });\n')
+  expect(await loadOffline(entry, tmp.path)).toEqual({ source: "bundled" })
+  const cache = path.join(tmp.path, "cache", "vector")
+  const sdk = ConfigDependencies.directory(cache)
+  await Bun.write(
+    path.join(sdk, "package.json"),
+    JSON.stringify({ name: ConfigDependencies.packageName, type: "module", main: "index.js" }),
+  )
+  await Bun.write(path.join(sdk, "index.js"), 'export const tool = () => ({ source: "shared" });\n')
+  await Bun.write(ConfigDependencies.readyFile(cache), ConfigDependencies.specifier)
+  expect(await loadOffline(entry, tmp.path)).toEqual({ source: "shared" })
+  expect(await fs.realpath(path.join(tmp.path, "node_modules", ConfigDependencies.packageName))).toBe(
+    await fs.realpath(sdk),
+  )
 })

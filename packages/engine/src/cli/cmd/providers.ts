@@ -375,7 +375,7 @@ export const ProvidersLoginCommand = effectCmd({
     const allProviders = yield* modelCatalog.get()
     const providers: Record<string, (typeof allProviders)[string]> = {}
     for (const [key, value] of Object.entries(allProviders)) {
-      if ((enabled ? enabled.has(key) : true) && !disabled.has(key)) providers[key] = value
+      if (key !== "vector" && (enabled ? enabled.has(key) : true) && !disabled.has(key)) providers[key] = value
     }
     const hooks = yield* pluginSvc.list()
 
@@ -413,6 +413,7 @@ export const ProvidersLoginCommand = effectCmd({
       ...Object.entries(config.provider ?? {})
         .filter(
           ([id, provider]) =>
+            id !== "vector" &&
             !providers[id] &&
             !pluginProviders.some((item) => item.id === id) &&
             providerUsable(id, provider) &&
@@ -420,16 +421,19 @@ export const ProvidersLoginCommand = effectCmd({
             (!enabled || enabled.has(id)),
         )
         .map(([id, provider]) => ({ label: provider.name ?? id, value: id, hint: "custom" })),
-      ...pluginProviders.map((x) => ({
-        label: x.name,
-        value: x.id,
-        hint: "plugin",
-      })),
+      ...pluginProviders
+        .filter((provider) => provider.id !== "vector")
+        .map((x) => ({
+          label: x.name,
+          value: x.id,
+          hint: "plugin",
+        })),
     ]
 
     let provider: string
     if (args.provider) {
       const input = args.provider
+      if (input === "vector") return yield* fail("Use `vector login` to sign in to your Vector account.")
       if (!providerEnabled(input))
         return yield* fail(`${input} sign-in is currently paused in Vector. Choose another provider.`)
       const byID = options.find((x) => x.value === input)
@@ -466,6 +470,7 @@ export const ProvidersLoginCommand = effectCmd({
       }
     }
 
+    if (provider === "vector") return yield* fail("Use `vector login` to sign in to your Vector account.")
     if (!providerEnabled(provider))
       return yield* fail(`${provider} sign-in is currently paused in Vector. Choose another provider.`)
     const plugin = hooks.findLast((x) => x.auth?.provider === provider)

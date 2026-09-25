@@ -1,5 +1,6 @@
 import { describe, expect } from "bun:test"
 import {
+  FreeModelsLimitReason,
   LLMClient,
   LLMError,
   LLMEvent,
@@ -244,6 +245,7 @@ const execution = Layer.effect(
       drain: (sessionID, force) => sessionRunner.run({ sessionID, force }),
     })
     return SessionExecution.Service.of({
+    resumeFreeModels: () => Effect.die("Free-model retry is outside this fixture"),
       active: coordinator.active,
       resume: coordinator.run,
       wake: coordinator.wake,
@@ -3054,6 +3056,56 @@ describe("SessionRunnerLLM", () => {
           content: [{ type: "text", text: "Partial" }],
         },
       ])
+    }),
+  )
+
+  it.effect("replays typed free-model limits and clears only the resumed assistant error", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      const events = yield* EventV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Stop at quota" }), resume: false })
+      const reason = new FreeModelsLimitReason({
+        limit: {
+          type: "free_models_limit",
+          code: "VECTOR_FREE_MODELS_LIMIT",
+          reason: "user_daily",
+          resetAt: 1900000000000,
+          message: "The daily free allowance is exhausted.",
+        },
+      })
+      const failure = new LLMError({ module: "test", method: "stream", reason })
+      responseStream = Stream.concat(
+        Stream.fromIterable([
+          LLMEvent.textStart({ id: "quota-partial" }),
+          LLMEvent.textDelta({ id: "quota-partial", text: "Partial output" }),
+        ]),
+        Stream.fail(failure),
+      )
+      requests.length = 0
+      expect(yield* session.resume(sessionID).pipe(Effect.flip)).toBe(failure)
+      expect(requests).toHaveLength(1)
+      yield* replaySessionProjection(sessionID)
+      const messages = yield* session.context(sessionID)
+      expect(messages).toMatchObject([
+        { type: "user", text: "Stop at quota" },
+        {
+          type: "assistant",
+          finish: "error",
+          error: reason.limit,
+          content: [{ type: "text", text: "Partial output" }],
+        },
+      ])
+      const assistant = messages.find((message) => message.type === "assistant")!
+      yield* events.publish(SessionEvent.Step.Resumed, {
+        sessionID,
+        assistantMessageID: assistant.id,
+        timestamp: yield* DateTime.now,
+      })
+      yield* replaySessionProjection(sessionID)
+      const resumed = (yield* session.context(sessionID)).find((message) => message.id === assistant.id)
+      expect(resumed?.type === "assistant" && resumed.error).toBeUndefined()
+      expect(resumed).toMatchObject({ finish: "error", content: [{ type: "text", text: "Partial output" }] })
     }),
   )
 

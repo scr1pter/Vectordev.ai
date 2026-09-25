@@ -25,6 +25,7 @@ import { QuestionV2 } from "./question"
 import { Reference } from "./reference"
 import { ReferenceGuidance } from "./reference/guidance"
 import * as SessionRunnerLLM from "./session/runner/llm"
+import { FreeModelsResume } from "./session/free-model-resume"
 import { SessionRunnerModel } from "./session/runner/model"
 import { SessionTodo } from "./session/todo"
 import { SkillV2 } from "./skill"
@@ -74,6 +75,7 @@ export const locationServices = LayerNode.group([
   ReadToolFileSystem.node,
   BuiltInTools.node,
   SessionRunnerModel.node,
+  FreeModelsResume.node,
   Snapshot.node,
   SessionRunnerLLM.node,
 ])

@@ -490,6 +490,10 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
     peek: children.peek,
     disableMcp: children.disableMcp,
     queryOptions: queryOptionsApi,
+    refreshProviders: () =>
+      queryClient.invalidateQueries({
+        predicate: (query) => query.queryKey[0] === serverSDK.scope && query.queryKey[2] === "providers",
+      }),
     // bootstrap,
     updateConfig: updateConfigMutation.mutateAsync,
     project: projectApi,

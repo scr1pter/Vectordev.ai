@@ -1,3 +1,4 @@
+import { FreeModelsCard } from "@/components/free-models-card"
 import {
   createEffect,
   createMemo,
@@ -2165,6 +2166,7 @@ export default function LegacyLayout(props: ParentProps) {
           )}
         </Show>
 
+        <FreeModelsCard />
         <div
           class="shrink-0 px-3 py-3"
           classList={{

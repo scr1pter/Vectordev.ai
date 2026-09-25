@@ -1,4 +1,5 @@
 import { Effect, Schema } from "effect"
+import { FreeModelLimit } from "@vectordevai/schema/free-model"
 import { Route } from "../route/client"
 import { Auth } from "../route/auth"
 import { Endpoint } from "../route/endpoint"
@@ -6,6 +7,8 @@ import { HttpTransport } from "../route/transport"
 import { Protocol } from "../route/protocol"
 import {
   LLMEvent,
+  LLMError,
+  FreeModelsLimitReason,
   Usage,
   type FinishReason,
   type JsonSchema,
@@ -404,8 +407,14 @@ const mapUsage = (usage: OpenAIChatEvent["usage"]): Usage | undefined => {
   })
 }
 
-const step = (state: ParserState, event: OpenAIChatEvent) =>
+const step = (state: ParserState, event: OpenAIChatEvent | { readonly error: FreeModelLimit }) =>
   Effect.gen(function* () {
+    if ("error" in event)
+      return yield* new LLMError({
+        module: "OpenAIChat",
+        method: "stream",
+        reason: new FreeModelsLimitReason({ limit: event.error }),
+      })
     const events: LLMEvent[] = []
     const usage = mapUsage(event.usage) ?? state.usage
     const choice = event.choices[0]
@@ -485,7 +494,7 @@ export const protocol = Protocol.make({
     from: fromRequest,
   },
   stream: {
-    event: Protocol.jsonEvent(OpenAIChatEvent),
+    event: Protocol.jsonEvent(Schema.Union([OpenAIChatEvent, Schema.Struct({ error: FreeModelLimit })])),
     initial: () => ({ tools: ToolStream.empty<number>(), toolCallEvents: [], lifecycle: Lifecycle.initial() }),
     step,
     onHalt: finishEvents,

@@ -127,5 +127,11 @@
       "source": "/models/api.json",
       "destination": "https://42qryducihx01gl0.public.blob.vercel-storage.com/models/api.json"
     }
+  ],
+  "crons": [
+    {
+      "path": "/api/free-models/refresh",
+      "schedule": "17 3 * * *"
+    }
   ]
 }

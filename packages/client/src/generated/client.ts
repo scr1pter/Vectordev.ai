@@ -15,6 +15,8 @@ import type {
   SessionsSwitchAgentOutput,
   SessionsSwitchModelInput,
   SessionsSwitchModelOutput,
+  SessionsResumeFreeModelsInput,
+  SessionsResumeFreeModelsOutput,
   SessionsPromptInput,
   SessionsPromptOutput,
   SessionsCompactInput,
@@ -363,6 +365,18 @@ export function make(options: ClientOptions) {
             body: { model: input["model"] },
             successStatus: 204,
             declaredStatuses: [404, 400, 401],
+            empty: true,
+          },
+          requestOptions,
+        ),
+      resumeFreeModels: (input: SessionsResumeFreeModelsInput, requestOptions?: RequestOptions) =>
+        request<SessionsResumeFreeModelsOutput>(
+          {
+            method: "POST",
+            path: `/api/session/${encodeURIComponent(input.sessionID)}/free-models/resume`,
+            body: { messageID: input["messageID"], modelID: input["modelID"] },
+            successStatus: 204,
+            declaredStatuses: [404, 409, 400, 500, 401],
             empty: true,
           },
           requestOptions,

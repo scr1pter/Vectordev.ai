@@ -1,3 +1,4 @@
+import { freeModelName } from "@vectordevai/core/free-model-choice"
 import { providerUsable } from "@vectordevai/schema/provider-policy"
 import type { Provider } from "@vectordevai/sdk/v2"
 
@@ -41,7 +42,7 @@ export function modelProviderName(provider: { id: string; name?: string }, _mode
 }
 
 export function modelDisplayName(_provider: unknown, model: { id: string; name?: string }) {
-  return model.name ?? model.id
+  return freeModelName({ name: model.name ?? model.id })
 }
 
 export function hasConnectedProvider(providers: readonly { id: string; source?: string }[]) {

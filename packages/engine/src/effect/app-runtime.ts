@@ -1,5 +1,6 @@
 import { Layer, ManagedRuntime } from "effect"
 import { attach } from "./run-service"
+import { registerRuntimeCleanup } from "./runtime-cleanup"
 import * as Observability from "@vectordevai/core/observability"
 
 import { FSUtil } from "@vectordevai/core/fs-util"
@@ -107,6 +108,7 @@ export const AppLayer = AppNodeBuilderV1.build(
 ).pipe(Layer.provideMerge(AppNodeBuilderV1.build(Ripgrep.node)), Layer.provideMerge(Observability.layer))
 
 const rt = ManagedRuntime.make(AppLayer, { memoMap })
+registerRuntimeCleanup(() => rt.dispose())
 type Runtime = Pick<typeof rt, "runSync" | "runPromise" | "runPromiseExit" | "runFork" | "runCallback" | "dispose">
 
 /** Services provided by AppRuntime — i.e. what an Effect run via AppRuntime.runPromise can yield. */

@@ -1,3 +1,9 @@
+import {
+  FREE_MODELS_TITLE,
+  freeModelName,
+  freeModelSource,
+  preferOwnFreeModels,
+} from "@vectordevai/core/free-model-choice"
 import { createMemo, createSignal } from "solid-js"
 import { useLocal } from "../context/local"
 import { map, pipe, flatMap, entries, filter, sortBy, take } from "remeda"
@@ -33,8 +39,8 @@ export function DialogModel(props: { providerID?: string }) {
         const provider = sync.data.provider.find((provider) => provider.id === item.providerID)
         if (!provider || isHiddenProvider(provider.id, provider)) return []
         const model = provider.models[item.modelID]
-        if (!model) return []
-        const title = model.name ?? item.modelID
+        if (!model || model.freeModel) return []
+        const title = freeModelName({ name: model.name ?? item.modelID })
         return [
           {
             key: item,
@@ -69,15 +75,20 @@ export function DialogModel(props: { providerID?: string }) {
           filter(([_, info]) => info.status !== "deprecated"),
           filter(([_, info]) => (props.providerID ? info.providerID === props.providerID : true)),
           map(([model, info]) => {
-            const title = info.name ?? model
+            const title = freeModelName({ name: info.name ?? model })
             return {
+              id: model,
+              name: title,
+              freeModel: info.freeModel,
               value: { providerID: provider.id, modelID: model },
               title,
               releaseDate: info.release_date,
-              description: favorites.some((item) => item.providerID === provider.id && item.modelID === model)
-                ? "(Favorite)"
-                : undefined,
-              category: connected() ? provider.name : undefined,
+              description:
+                freeModelSource(info) ??
+                (favorites.some((item) => item.providerID === provider.id && item.modelID === model)
+                  ? "(Favorite)"
+                  : undefined),
+              category: info.freeModel ? FREE_MODELS_TITLE : connected() ? provider.name : undefined,
               // What search reads (searchModelOptions): the catalogue name and, once a provider
               // is connected, its name. Never the heading.
               searchName: title,
@@ -88,7 +99,7 @@ export function DialogModel(props: { providerID?: string }) {
             }
           }),
           filter((option) => {
-            if (!showSections) return true
+            if (!showSections || option.freeModel) return true
             if (
               favorites.some(
                 (item) => item.providerID === option.value.providerID && item.modelID === option.value.modelID,
@@ -106,6 +117,8 @@ export function DialogModel(props: { providerID?: string }) {
           (options) => sortModelOptions(options, props.providerID !== undefined),
         ),
       ),
+      preferOwnFreeModels,
+      (options) => [...options.filter((option) => option.freeModel), ...options.filter((option) => !option.freeModel)],
     )
 
     const popularProviders = !connected()
