@@ -21,7 +21,13 @@ import {
   WorkspaceRoutingQuery,
   WorkspaceRoutingQueryFields,
 } from "../middleware/workspace-routing"
-import { ApiNotFoundError, ConflictError, PermissionNotFoundError, SessionBusyError } from "../errors"
+import {
+  InvalidRequestError,
+  ApiNotFoundError,
+  ConflictError,
+  PermissionNotFoundError,
+  SessionBusyError,
+} from "../errors"
 import { described } from "./metadata"
 import { QueryBoolean } from "./query"
 import { ProviderV2 } from "@vectordevai/core/provider"
@@ -288,12 +294,12 @@ export const SessionApi = HttpApi.make("session")
           params: { sessionID: SessionID },
           query: WorkspaceRoutingQuery,
           success: described(Session.Info, "Successfully shared session"),
-          error: [HttpApiError.InternalServerError, ApiNotFoundError],
+          error: [HttpApiError.InternalServerError, ApiNotFoundError, InvalidRequestError],
         }).annotateMerge(
           OpenApi.annotations({
             identifier: "session.share",
             summary: "Share session",
-            description: "Create a shareable link for a session, allowing others to view the conversation.",
+            description: "Public session sharing is unavailable in Vector. Export a local JSON file instead.",
           }),
         ),
         HttpApiEndpoint.delete("unshare", SessionPaths.share, {

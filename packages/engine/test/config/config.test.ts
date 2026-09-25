@@ -2174,3 +2174,16 @@ it.instance("VECTOR_CONFIG_CONTENT is read at load time", () =>
     }),
   ),
 )
+
+configIt({
+  auth: wellKnownAuth("https://organization.example.test"),
+  client: HttpClient.make((request) => Effect.succeed(json(request, {}, 404))),
+}).instance(
+  "a missing organization endpoint does not prevent local settings from loading",
+  () =>
+    Effect.gen(function* () {
+      const config = yield* Config.use.get()
+      expect(config.shell).toBe("/fixture-shell")
+    }),
+  { config: { shell: "/fixture-shell" } },
+)

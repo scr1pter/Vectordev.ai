@@ -123,6 +123,7 @@ const cli = yargs(args)
   .command(PluginCommand)
   .command(DbCommand)
   .fail((msg, err) => {
+    if (msg) UI.error(msg)
     if (
       msg?.startsWith("Unknown argument") ||
       msg?.startsWith("Not enough non-option arguments") ||

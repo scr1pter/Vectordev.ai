@@ -25,15 +25,23 @@ export const UpgradeCommand = {
     UI.println(UI.logo("  "))
     UI.empty()
     prompts.intro("Upgrade")
-    const detectedMethod = await Installation.method()
-    const method = (args.method as Installation.Method) ?? detectedMethod
+    const method = (args.method as Installation.Method | undefined) ?? (await Installation.method())
     if (method === "unknown") {
       prompts.log.error(`vector is installed to ${process.execPath} and may be managed by a package manager`)
       prompts.log.info("Run vector upgrade --method npm (or pnpm or bun) to install the Vector CLI package.")
       return
     }
     prompts.log.info("Using method: " + method)
-    const target = args.target ? args.target.replace(/^v/, "") : await Installation.latest()
+    const target = args.target
+      ? args.target.replace(/^v/, "")
+      : await Installation.latest().catch(() => {
+          prompts.log.error(
+            "Could not reach the configured npm registry. Check your registry configuration and connection, then retry.",
+          )
+          process.exitCode = 1
+          return undefined
+        })
+    if (!target) return
 
     if (InstallationVersion === target) {
       prompts.log.warn(`vector upgrade skipped: ${target} is already installed`)

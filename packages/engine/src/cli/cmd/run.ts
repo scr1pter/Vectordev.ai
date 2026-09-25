@@ -159,6 +159,11 @@ export const RunCommand = effectCmd({
         describe: "fork the session before continuing (requires --continue or --session)",
         type: "boolean",
       })
+      .option("share", {
+        type: "boolean",
+        hidden: true,
+        describe: "Deprecated public sharing option",
+      })
       .option("model", {
         type: "string",
         alias: ["m"],
@@ -258,6 +263,7 @@ export const RunCommand = effectCmd({
         describe: "enable direct interactive demo slash commands; pass one as the message to run it immediately",
       }),
   handler: Effect.fn("Cli.run")(function* (args) {
+    if (args.share) UI.error("Session sharing is not available in Vector; --share is ignored.")
     const { Agent } = yield* Effect.promise(() => import("@/agent/agent"))
     const { RuntimeFlags } = yield* Effect.promise(() => import("@/effect/runtime-flags"))
     const { InstanceRef } = yield* Effect.promise(() => import("@/effect/instance-ref"))
@@ -979,6 +985,7 @@ export async function runMini(input: MiniCommandInput) {
     $0: "vector",
     _: ["mini"],
     message: input.prompt ? [input.prompt] : [],
+    share: undefined,
     command: undefined,
     continue: input.continue,
     session: input.session,

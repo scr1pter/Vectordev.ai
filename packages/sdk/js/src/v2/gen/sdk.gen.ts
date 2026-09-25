@@ -4472,7 +4472,7 @@ export class Session2 extends HeyApiClient {
   /**
    * Share session
    *
-   * Create a shareable link for a session, allowing others to view the conversation.
+   * Public session sharing is unavailable in Vector. Export a local JSON file instead.
    */
   public share<ThrowOnError extends boolean = false>(
     parameters: {

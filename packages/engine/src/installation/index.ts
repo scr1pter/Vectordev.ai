@@ -10,6 +10,7 @@ import { ChildProcess } from "effect/unstable/process"
 import { AppProcess } from "@vectordevai/core/process"
 import { makeRuntime } from "@vectordevai/core/effect/runtime"
 import semver from "semver"
+import { NpmConfig } from "@vectordevai/core/npm-config"
 import { InstallationChannel, InstallationVersion } from "@vectordevai/core/installation/version"
 import { InstallationEvent } from "@vectordevai/schema/installation-event"
 
@@ -144,10 +145,10 @@ const layer: Layer.Layer<Service, never, HttpClient.HttpClient | AppProcess.Serv
         return "unknown" as Method
       }),
       latest: Effect.fn("Installation.latest")(function* (_installMethod?: Method) {
+        const registry = yield* NpmConfig.registry(process.cwd())
+        const channel = ["local", "dev"].includes(InstallationChannel) ? "latest" : InstallationChannel
         const response = yield* httpOk.execute(
-          HttpClientRequest.get("https://registry.npmjs.org/@vectordevai/cli/latest").pipe(
-            HttpClientRequest.acceptJson,
-          ),
+          HttpClientRequest.get(`${registry}/@vectordevai%2fcli/${channel}`).pipe(HttpClientRequest.acceptJson),
         )
         const data = yield* HttpClientResponse.schemaBodyJson(NpmPackage)(response)
         return data.version

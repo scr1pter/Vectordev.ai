@@ -209,13 +209,16 @@ const layer = Layer.effect(
           HttpClientRequest.get(url).pipe(HttpClientRequest.acceptJson, HttpClientRequest.setHeaders(headers ?? {})),
         )
         .pipe(
-          Effect.flatMap((response) =>
-            response.status >= 200 && response.status < 300
-              ? Effect.succeed(response)
-              : Effect.die(new Error(`Remote config returned HTTP ${response.status}`)),
-          ),
           Effect.catch((error) => Effect.die(new Error(`failed to fetch remote config from ${url}: ${String(error)}`))),
         )
+      if (response.status === 404 && url.endsWith("/.well-known/vector")) {
+        yield* Effect.logWarning(
+          `Organization config at ${url} is not available for Vector (HTTP 404). Ask your administrator to serve /.well-known/vector, or run vector providers logout ${loginOrigin}. Skipping this organization config.`,
+        )
+        return
+      }
+      if (response.status < 200 || response.status >= 300)
+        return yield* Effect.die(new Error(`Remote config at ${url} returned HTTP ${response.status}`))
       const body = yield* response.text.pipe(
         Effect.catch((error) => Effect.die(new Error(`failed to read remote config from ${url}: ${String(error)}`))),
       )
@@ -364,6 +367,7 @@ const layer = Layer.effect(
             const wellknownURL = `${url}/.well-known/vector`
             yield* Effect.logDebug("fetching remote config", { url: wellknownURL })
             const wellknown = yield* fetchRemoteJson(wellknownURL, undefined, ConfigV1.WellKnown, url)
+            if (!wellknown) continue
             const remote = yield* Effect.promise(() =>
               substituteWellKnownRemoteConfig({
                 value: wellknown.remote_config,

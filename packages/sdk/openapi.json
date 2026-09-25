@@ -7785,11 +7785,18 @@
             }
           },
           "400": {
-            "description": "Bad request",
+            "description": "InvalidRequestError",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BadRequestError"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
                 }
               }
             }
@@ -7815,7 +7822,7 @@
             }
           }
         },
-        "description": "Create a shareable link for a session, allowing others to view the conversation.",
+        "description": "Public session sharing is unavailable in Vector. Export a local JSON file instead.",
         "summary": "Share session",
         "x-codeSamples": [
           {

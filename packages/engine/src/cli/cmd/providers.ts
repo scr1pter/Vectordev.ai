@@ -331,6 +331,10 @@ export const ProvidersLoginCommand = effectCmd({
       const url = args.url.replace(/\/+$/, "")
       const wellknown = (yield* cliTry(`Failed to load auth provider metadata from ${url}: `, async () => {
         const response = await fetch(`${url}/.well-known/vector`)
+        if (response.status === 404)
+          throw new Error(
+            `Organization config at ${url} is not available for Vector (HTTP 404). Ask your administrator to serve /.well-known/vector, or run vector providers logout ${url}.`,
+          )
         if (!response.ok) throw new Error(`Auth metadata returned HTTP ${response.status}`)
         return response.json()
       })) as {

@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { untrustedChildEnvironment } from "../src/child-environment"
 
 describe("untrustedChildEnvironment", () => {
-  test("removes Vector and Vector control secrets while preserving provider credentials", () => {
+  test("removes Vector control secrets while preserving provider credentials", () => {
     const environment = untrustedChildEnvironment({
       BLOB_READ_WRITE_TOKEN: "release-store-secret",
       VECTOR_AUTH_CONTENT: '{"provider":{"key":"aggregate-secret"}}',
@@ -51,4 +51,16 @@ describe("untrustedChildEnvironment", () => {
     expect(child.exitCode).toBe(0)
     expect(JSON.parse(child.stdout.toString())).toEqual({ provider: "provider-secret" })
   })
+})
+
+
+test("foreign runtime secret suffixes are stripped without dropping provider keys", () => {
+  expect(untrustedChildEnvironment({
+    LEGACY_FIXTURE_SERVER_PASSWORD: "synthetic",
+    legacy_fixture_server_guest_password: "synthetic",
+    LEGACY_FIXTURE_AUTH_CONTENT: "synthetic",
+    LEGACY_FIXTURE_CONSOLE_TOKEN: "synthetic",
+    OPENAI_API_KEY: "fixture-key",
+    GITHUB_TOKEN: "fixture-git-token",
+  })).toEqual({ OPENAI_API_KEY: "fixture-key", GITHUB_TOKEN: "fixture-git-token" })
 })

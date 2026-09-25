@@ -10644,9 +10644,9 @@ export type SessionShareData = {
 
 export type SessionShareErrors = {
   /**
-   * Bad request
+   * InvalidRequestError
    */
-  400: BadRequestError
+  400: InvalidRequestError
   /**
    * NotFoundError
    */

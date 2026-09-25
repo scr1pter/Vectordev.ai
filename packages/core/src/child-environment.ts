@@ -27,6 +27,7 @@ export function untrustedChildEnvironment(...sources: Array<NodeJS.ProcessEnv | 
 function privateRuntimeKey(key: string) {
   const normalized = key.toUpperCase()
   if (PRIVATE_RUNTIME_ENVIRONMENT.has(normalized)) return true
+  if (/^[A-Z0-9_]+_(?:AUTH_CONTENT|CONSOLE_TOKEN|SERVER_PASSWORD|SERVER_GUEST_PASSWORD)$/.test(normalized)) return true
   if (!normalized.startsWith("VECTOR_")) return false
   return (
     normalized.endsWith("_TOKEN") ||

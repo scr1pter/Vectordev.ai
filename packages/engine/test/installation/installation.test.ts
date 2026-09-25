@@ -76,7 +76,7 @@ describe("Vector installation", () => {
     ).effect(`${method} uses only the Vector registry package`, () =>
       Effect.gen(function* () {
         expect(yield* Installation.use.latest(method)).toBe("1.99.92")
-        expect(calls).toEqual(["https://registry.npmjs.org/@vectordevai/cli/latest"])
+        expect(calls).toEqual(["https://registry.npmjs.org/@vectordevai%2fcli/latest"])
       }),
     )
   }
