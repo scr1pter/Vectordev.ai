@@ -30,34 +30,57 @@ async function trackedText() {
       .map(async (name) => {
         if (notices.has(name) || name.startsWith("licenses/")) return { name, text: "" }
         const file = Bun.file(path.join(root, name))
-        const text = (await file.exists()) ? await file.text() : ""
-        return { name, text: text.includes("\0") ? "" : text }
+        const text = (await file.exists()) ? Buffer.from(await file.arrayBuffer()).toString("latin1") : ""
+        return { name, text }
       }),
   )
 }
 
 const tracked = trackedText()
 
+function containsHolder(text: string, holder: string) {
+  const lower = text.toLowerCase()
+  return [Buffer.from(holder), Buffer.from(holder, "utf16le"), Buffer.from(holder, "utf16le").swap16()].some((bytes) =>
+    lower.includes(bytes.toString("latin1")),
+  )
+}
+
 async function upstreamHolder() {
   // Derive the prohibited name only in this guard, from its required MIT notice,
   // so source scans and synthetic credential fixtures do not add that name to tracked text.
   const license = await Bun.file(path.join(root, "THIRD_PARTY_NOTICES.md")).text()
-  const holder = license.match(/^Copyright \(c\) \d{4} (.+)$/m)?.[1]?.trim().toLowerCase()
+  const holder = license
+    .match(/^Copyright \(c\) \d{4} (.+)$/m)?.[1]
+    ?.trim()
+    .toLowerCase()
   if (!holder) throw new Error("The upstream MIT copyright notice is missing")
   return holder
 }
 
 describe("Vector source independence", () => {
-  test("tracked paths and text keep the upstream holder only in license notices", async () => {
+  test("tracked paths and binary contents keep the upstream holder only in license notices", async () => {
     const holder = await upstreamHolder()
     const violations = (await tracked).flatMap(({ name, text }) => {
       if (notices.has(name) || name.startsWith("licenses/")) return []
       return [
         ...(name.toLowerCase().includes(holder) ? [`path: ${name}`] : []),
-        ...(text.toLowerCase().includes(holder) ? [`content: ${name}`] : []),
+        ...(containsHolder(text, holder) ? [`content: ${name}`] : []),
       ]
     })
     expect(violations).toEqual([])
+  })
+
+  test("the name scan detects mixed-case bytes after NUL and both UTF-16 byte orders", async () => {
+    const holder = await upstreamHolder()
+    for (const bytes of [
+      Buffer.from(holder.toUpperCase()),
+      Buffer.from(holder.toUpperCase(), "utf16le"),
+      Buffer.from(holder.toUpperCase(), "utf16le").swap16(),
+    ]) {
+      const binary = Buffer.concat([Buffer.from([0, 255, 0]), bytes, Buffer.from([0, 127])])
+      expect(containsHolder(binary.toString("latin1"), holder)).toBe(true)
+    }
+    expect(containsHolder(Buffer.from([0, 255, 0, 127]).toString("latin1"), holder)).toBe(false)
   })
 
   test("request construction uses Vector identities and no borrowed app registrations", async () => {

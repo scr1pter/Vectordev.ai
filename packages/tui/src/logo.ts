@@ -4,3 +4,5 @@ export const logo = {
 }
 
 export const marks = "_^~,"
+
+export * as Logo from "./logo"

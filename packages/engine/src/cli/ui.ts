@@ -1,13 +1,6 @@
 import { EOL } from "os"
 import { Schema } from "effect"
-import { logo as glyphs } from "./logo"
-
-const wordmark = [
-  `⠀                                ▄     `,
-  `█▀▀█ █▀▀█ █▀▀█ █▀▀▄ █▀▀▀ █▀▀█ █▀▀█ █▀▀█`,
-  `█  █ █  █ █▀▀▀ █  █ █    █  █ █  █ █▀▀▀`,
-  `▀▀▀▀ █▀▀▀ ▀▀▀▀ ▀  ▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀`,
-]
+import { Logo } from "./logo"
 
 export class CancelledError extends Schema.TaggedErrorClass<CancelledError>()("UICancelledError", {}) {}
 
@@ -47,13 +40,12 @@ export function empty() {
 
 export function logo(pad?: string) {
   if (!process.stdout.isTTY && !process.stderr.isTTY) {
-    const result = []
-    for (const row of wordmark) {
-      if (pad) result.push(pad)
-      result.push(row)
-      result.push(EOL)
-    }
-    return result.join("").trimEnd()
+    return Logo.logo.left
+      .map((row, index) =>
+        `${pad ?? ""}${row} ${Logo.logo.right[index] ?? ""}`.replaceAll("_", " ").replace(/[~^]/g, "▀"),
+      )
+      .join(EOL)
+      .trimEnd()
   }
 
   const result: string[] = []
@@ -92,11 +84,11 @@ export function logo(pad?: string) {
     }
     return parts.join("")
   }
-  glyphs.left.forEach((row, index) => {
+  Logo.logo.left.forEach((row, index) => {
     if (pad) result.push(pad)
     result.push(draw(row, left.fg, left.shadow, left.bg))
     result.push(gap)
-    const other = glyphs.right[index] ?? ""
+    const other = Logo.logo.right[index] ?? ""
     result.push(draw(other, right.fg, right.shadow, right.bg))
     result.push(EOL)
   })
