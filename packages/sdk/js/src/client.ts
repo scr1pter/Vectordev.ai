@@ -17,19 +17,16 @@ function pick(value: string | null, fallback?: string) {
 }
 
 function rewrite(request: Request, directory?: string) {
-  if (request.method !== "GET" && request.method !== "HEAD") return request
-
-  const value = pick(request.headers.get("x-vector-directory"), directory)
-  if (!value) return request
-
   const url = new URL(request.url)
-  if (!url.searchParams.has("directory")) {
-    url.searchParams.set("directory", value)
+  for (const [header, query] of [
+    ["x-vector-directory", "directory"],
+    ["x-vector-workspace", "workspace"],
+  ] as const) {
+    const raw = request.headers.get(header)
+    const value = query === "directory" ? pick(raw, directory) : raw
+    if (value && !url.searchParams.has(query)) url.searchParams.set(query, value)
   }
-
-  const next = new Request(url, request)
-  next.headers.delete("x-vector-directory")
-  return next
+  return new Request(url, request)
 }
 
 export function createVectorClient(config?: Config & { directory?: string }) {

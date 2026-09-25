@@ -554,7 +554,26 @@ describe("HttpApi workspace routing middleware", () => {
         HttpClientRequest.setHeaders({ "x-vector-directory": queryDir, "x-unrelated-directory": headerDir }),
         HttpClient.execute,
       )
-      expect(yield* preferred.json).toEqual({ directory: queryDir, workspaceID: null })
+      expect(preferred.status).toBe(400)
+      expect(yield* preferred.json).toMatchObject({ kind: "client_outdated" })
+    }),
+  )
+
+  it.live("rejects foreign directory headers before reads and writes can fall back to cwd", () =>
+    Effect.gen(function* () {
+      yield* serveProbe
+      for (const method of ["GET", "PATCH"] as const) {
+        const response = yield* HttpClientRequest.make(method)("/probe").pipe(
+          HttpClientRequest.setHeader("x-previous-directory", "/private/other-project"),
+          HttpClient.execute,
+        )
+        expect(response.status).toBe(400)
+        expect(yield* response.json).toMatchObject({
+          kind: "client_outdated",
+          message:
+            "This client uses an older directory-routing protocol. Update Vector before accessing this workspace.",
+        })
+      }
     }),
   )
 

@@ -19,8 +19,6 @@ function pick(value: string | null, fallback?: string, encode?: (value: string) 
 }
 
 function rewrite(request: Request, values: { directory?: string; workspace?: string }) {
-  if (request.method !== "GET" && request.method !== "HEAD") return request
-
   const url = new URL(request.url)
   let changed = false
 
@@ -44,10 +42,7 @@ function rewrite(request: Request, values: { directory?: string; workspace?: str
 
   if (!changed) return request
 
-  const next = new Request(url, request)
-  next.headers.delete("x-vector-directory")
-  next.headers.delete("x-vector-workspace")
-  return next
+  return new Request(url, request)
 }
 
 export function createVectorClient(config?: Config & { directory?: string; experimental_workspaceID?: string }) {

@@ -5,11 +5,14 @@ import { WorkspaceV2 } from "@vectordevai/core/workspace"
 import { Effect, Layer } from "effect"
 import { HttpServerRequest } from "effect/unstable/http"
 import { HttpApiMiddleware } from "effect/unstable/httpapi"
+import { InvalidRequestError } from "@vectordevai/protocol/errors"
+import { outdatedDirectoryHeader, OUTDATED_CLIENT_MESSAGE } from "./location-headers"
 
 export type LocationServices = Layer.Success<ReturnType<(typeof LocationServiceMap.Service)["get"]>>
 
 export class LocationMiddleware extends HttpApiMiddleware.Service<LocationMiddleware, { provides: LocationServices }>()(
   "@vector/HttpApiLocation",
+  { error: InvalidRequestError },
 ) {}
 
 export function response<A, E, R>(data: Effect.Effect<A, E, R>) {
@@ -52,6 +55,13 @@ export const layer = Layer.effect(
     return LocationMiddleware.of((effect) =>
       Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest
+        const header = outdatedDirectoryHeader(request.headers)
+        if (header)
+          return yield* new InvalidRequestError({
+            message: OUTDATED_CLIENT_MESSAGE,
+            kind: "client_outdated",
+            field: header,
+          })
         return yield* effect.pipe(Effect.provide(locations.get(ref(request))))
       }),
     )

@@ -26,7 +26,7 @@ for (const [name, sdk] of [
         })
         .session.list()
       expect(new URL(requests[0].url).searchParams.get("directory")).toBe(directory)
-      expect(requests[0].headers.has("x-vector-directory")).toBe(false)
+      expect(requests[0].headers.get("x-vector-directory")).toBe(encodeURIComponent(directory))
     })
 
     test("sends encoded Vector directory headers for writes", async () => {
@@ -43,6 +43,7 @@ for (const [name, sdk] of [
         .session.create()
       expect(requests[0].method).toBe("POST")
       expect(requests[0].headers.get("x-vector-directory")).toBe(encodeURIComponent("/write space"))
+      expect(new URL(requests[0].url).searchParams.get("directory")).toBe("/write space")
     })
   })
 }
@@ -62,7 +63,8 @@ test("V2 maps Vector directory/workspace headers to location queries", async () 
   const query = new URL(requests[0].url).searchParams
   expect(query.get("location[directory]")).toBe("/tmp/project space")
   expect(query.get("location[workspace]")).toBe("wrk_selected")
-  expect(requests[0].headers.has("x-vector-workspace")).toBe(false)
+  expect(requests[0].headers.get("x-vector-workspace")).toBe("wrk_selected")
+  expect(new URL(requests[0].url).searchParams.get("workspace")).toBe("wrk_selected")
 })
 
 test("V2 explicit query selection wins over headers", async () => {
@@ -97,6 +99,7 @@ test("V1 preserves workspace selection when converting directory headers", async
     })
     .session.list()
   expect(requests[0].headers.get("x-vector-workspace")).toBe("wrk_selected")
+  expect(new URL(requests[0].url).searchParams.get("workspace")).toBe("wrk_selected")
 })
 
 test("V2 uses the Vector workspace header for writes", async () => {
@@ -112,4 +115,5 @@ test("V2 uses the Vector workspace header for writes", async () => {
     })
     .session.create()
   expect(requests[0].headers.get("x-vector-workspace")).toBe("wrk_selected")
+  expect(new URL(requests[0].url).searchParams.get("workspace")).toBe("wrk_selected")
 })

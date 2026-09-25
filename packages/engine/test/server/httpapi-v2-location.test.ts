@@ -8,6 +8,15 @@ import { disposeAllInstances, tmpdir } from "../fixture/fixture"
 
 const context = Context.empty() as Context.Context<unknown>
 
+test("V2 rejects a foreign directory header before selecting a location", async () => {
+  const response = await HttpApiApp.webHandler().handler(
+    new Request("http://localhost/api/command", { headers: { "x-previous-directory": "/unselected-project" } }),
+    context,
+  )
+  expect(response.status).toBe(400)
+  expect(await response.json()).toMatchObject({ kind: "client_outdated", field: "x-previous-directory" })
+})
+
 function request(route: string, directory: string, init: RequestInit = {}) {
   const headers = new Headers(init.headers)
   if (!headers.has("x-vector-directory")) headers.set("x-vector-directory", directory)
@@ -121,7 +130,6 @@ describe("v2 location HttpApi", () => {
       {
         headers: {
           "x-vector-directory": "/wrong",
-          "x-unrelated-directory": "/unrelated",
           "x-vector-workspace": "wrk_vector",
           "x-unrelated-workspace": "wrk_unrelated",
         },

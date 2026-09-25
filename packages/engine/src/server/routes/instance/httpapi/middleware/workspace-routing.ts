@@ -13,6 +13,7 @@ import { HttpClient, HttpServerRequest, HttpServerResponse } from "effect/unstab
 import { HttpApiMiddleware } from "effect/unstable/httpapi"
 import * as Socket from "effect/unstable/socket/Socket"
 import { InvalidRequestError } from "../errors"
+import { outdatedDirectoryHeader, OUTDATED_CLIENT_MESSAGE } from "@vectordevai/server/location-headers"
 
 // Query fields this middleware reads from the URL. Spread into every
 // endpoint query schema in groups that apply WorkspaceRoutingMiddleware,
@@ -224,6 +225,13 @@ function routeHttpApiWorkspace<E>(
 > {
   return Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest
+    const header = outdatedDirectoryHeader(request.headers)
+    if (header) {
+      return HttpServerResponse.jsonUnsafe(
+        new InvalidRequestError({ message: OUTDATED_CLIENT_MESSAGE, kind: "client_outdated", field: header }),
+        { status: 400 },
+      )
+    }
     const sessionID = getWorkspaceRouteSessionID(requestURL(request))
     const session = sessionID
       ? yield* Session.Service.use((svc) => svc.get(sessionID)).pipe(
