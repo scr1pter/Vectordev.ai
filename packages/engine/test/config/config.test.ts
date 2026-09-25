@@ -713,7 +713,7 @@ it.instance("handles command configuration", () =>
   }),
 )
 
-it.instance("ignores legacy automatic hosted sharing requests", () =>
+it.instance("migrates the legacy automatic sharing preference without granting publication consent", () =>
   Effect.gen(function* () {
     const test = yield* TestInstance
     yield* writeConfigEffect(test.directory, {
@@ -721,8 +721,8 @@ it.instance("ignores legacy automatic hosted sharing requests", () =>
       autoshare: true,
     })
     const config = yield* Config.use.get()
-    expect(config.share).toBe("disabled")
-    expect(config.autoshare).toBe(false)
+    expect(config.share).toBe("auto")
+    expect(config.autoshare).toBe(true)
   }),
 )
 

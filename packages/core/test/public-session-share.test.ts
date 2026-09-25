@@ -1,0 +1,624 @@
+import { expect, test } from "bun:test"
+import { createHash } from "node:crypto"
+import { Context, DateTime, Effect, Exit, Fiber, Layer, Schema } from "effect"
+import { eq } from "drizzle-orm"
+import { PublicSession } from "@vectordevai/schema/public-session"
+import { AppNodeBuilder } from "../src/effect/app-node-builder"
+import { LayerNode } from "../src/effect/layer-node"
+import { makeGlobalNode } from "../src/effect/app-node"
+import { Database } from "../src/database/database"
+import { EventV2 } from "../src/event"
+import { EventTable } from "../src/event/sql"
+import { FreeModels } from "../src/free-models"
+import { PublicSessionShare } from "../src/public-session-share"
+import { SessionArchive } from "../src/share/archive"
+import { PublicSessionShareTable } from "../src/share/public.sql"
+import { makeShareTransport, shareID } from "../src/share/transport"
+import { SessionV1 } from "../src/v1/session"
+import { SessionEvent } from "../src/session/event"
+import { SessionMessage } from "../src/session/message"
+import { SessionSchema } from "../src/session/schema"
+import { SessionTable, SessionInputTable, SessionMessageTable, MessageTable } from "../src/session/sql"
+import { AbsolutePath } from "../src/schema"
+import { testEffect } from "./lib/effect"
+import { adjust } from "effect/testing/TestClock"
+
+const token = `vct_${Buffer.from(JSON.stringify({ sub: "synthetic-owner" })).toString("base64url")}.synthetic`
+const source: PublicSession.Archive = {
+  version: 1,
+  engine: "v2",
+  title: "Imported history",
+  messages: [
+    { id: "source-user", role: "user", createdAt: 1, parts: [{ type: "text", text: "Visible question" }] },
+    {
+      id: "source-assistant",
+      role: "assistant",
+      createdAt: 2,
+      parts: [
+        {
+          type: "tool",
+          name: "bash",
+          callID: "source-call",
+          status: "interrupted",
+          input: "touch NEVER_EXECUTE",
+          output: "Visible output",
+        },
+      ],
+    },
+  ],
+}
+
+function remoteFixture() {
+  const snapshots = new Map<string, PublicSession.Snapshot>()
+  const tombstones = new Set<string>()
+  const requests: { method: string; id: string; body?: unknown }[] = []
+  const state = {
+    loseCreate: false,
+    rejectDelete: false,
+    rejectUpdate: false,
+    holdUpdate: undefined as Promise<void> | undefined,
+    updateStarted: undefined as (() => void) | undefined,
+  }
+  const request = Object.assign(
+    async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input))
+      const method = init?.method ?? "GET"
+      const value = init?.body ? JSON.parse(String(init.body)) : undefined
+      const id = url.pathname.split("/").at(-1) === "shares" ? value.id : url.pathname.split("/").at(-1)!
+      requests.push({ method, id, body: value })
+      if (method === "DELETE") {
+        if (state.rejectDelete) return new Response("unavailable", { status: 503 })
+        snapshots.delete(id)
+        tombstones.add(id)
+        return new Response(null, { status: 204 })
+      }
+      if (tombstones.has(id)) return new Response("removed", { status: method === "GET" ? 404 : 409 })
+      if (method === "GET")
+        return snapshots.has(id) ? Response.json(snapshots.get(id)) : new Response("missing", { status: 404 })
+      if (method === "POST") {
+        const archive = Schema.decodeUnknownSync(PublicSession.Create)(value)
+        const existing = snapshots.get(id)
+        const saved = existing ?? {
+          id,
+          url: `https://vectordev.ai/s/${id}`,
+          expiresAt: archive.expiresAt,
+          updatedAt: Date.now(),
+          revision: 0,
+          updates: archive.consent.updates,
+          archive: archive.archive,
+        }
+        snapshots.set(id, saved)
+        if (state.loseCreate) {
+          state.loseCreate = false
+          throw new Error("synthetic lost response")
+        }
+        const { archive: _, ...info } = saved
+        return Response.json(info)
+      }
+      if (state.rejectUpdate) return new Response("unavailable", { status: 503 })
+      const update = Schema.decodeUnknownSync(PublicSession.Update)(value)
+      const current = snapshots.get(id)
+      if (!current || update.revision !== current.revision) return new Response("conflict", { status: 409 })
+      const saved = { ...current, revision: current.revision + 1, updatedAt: Date.now(), archive: update.archive }
+      snapshots.set(id, saved)
+      state.updateStarted?.()
+      await state.holdUpdate
+      const { archive: _, ...info } = saved
+      return Response.json(info)
+    },
+    { preconnect: fetch.preconnect },
+  )
+  return { snapshots, tombstones, requests, state, fetch: request }
+}
+class Remote extends Context.Service<Remote, ReturnType<typeof remoteFixture>>()("test/PublicShareRemote") {}
+const remoteLayer = Layer.sync(Remote, remoteFixture)
+const remoteNode = makeGlobalNode({ service: Remote, layer: remoteLayer, deps: [] })
+const sharing = Layer.unwrap(Effect.map(Remote, (remote) => PublicSessionShare.layerWith({ fetch: remote.fetch })))
+const sharingNode = makeGlobalNode({
+  service: PublicSessionShare.Service,
+  layer: sharing,
+  deps: [Database.node, SessionArchive.node, EventV2.node, FreeModels.credentialsNode, remoteNode],
+})
+const it = testEffect(
+  AppNodeBuilder.build(
+    LayerNode.group([
+      PublicSessionShare.node,
+      SessionArchive.node,
+      Database.node,
+      EventV2.node,
+      FreeModels.credentialsNode,
+      remoteNode,
+    ]),
+    [
+      [PublicSessionShare.node, sharingNode],
+      [FreeModels.credentialsNode, Layer.succeed(FreeModels.CredentialsService, { get: () => Effect.succeed(token) })],
+    ],
+  ),
+)
+const restarted = testEffect(
+  AppNodeBuilder.build(
+    LayerNode.group([SessionArchive.node, Database.node, EventV2.node, FreeModels.credentialsNode, remoteNode]),
+    [[FreeModels.credentialsNode, Layer.succeed(FreeModels.CredentialsService, { get: () => Effect.succeed(token) })]],
+  ),
+)
+
+const setup = Effect.gen(function* () {
+  const archives = yield* SessionArchive.Service
+  return yield* archives.import({ archive: source, location: { directory: AbsolutePath.make("/tmp") } })
+})
+const consent = { version: 1, public: true, updates: true } as const
+const publish = (sessionID: SessionSchema.ID, updates = true) => ({
+  sessionID,
+  consent: { ...consent, updates },
+  expiresAt: Date.now() + 60_000,
+})
+const edit = (sessionID: SessionSchema.ID) =>
+  Effect.gen(function* () {
+    const events = yield* EventV2.Service
+    yield* events.publish(SessionEvent.MessageImported, {
+      sessionID,
+      timestamp: DateTime.makeUnsafe(3),
+      message: SessionMessage.User.make({
+        id: SessionMessage.ID.create(),
+        type: "user",
+        text: "New visible question",
+        time: { created: DateTime.makeUnsafe(3) },
+      }),
+    })
+  })
+
+it.effect("native import is passive, remapped, complete, and notifications see the complete commit", () =>
+  Effect.gen(function* () {
+    const { db } = yield* Database.Service
+    const events = yield* EventV2.Service
+    const observed: number[] = []
+    yield* events.listen((event) =>
+      event.type === SessionEvent.MessageImported.type
+        ? db
+            .select()
+            .from(SessionMessageTable)
+            .all()
+            .pipe(
+              Effect.orDie,
+              Effect.map((rows) => {
+                observed.push(rows.length)
+              }),
+            )
+        : Effect.void,
+    )
+    const result = yield* setup
+    const archives = yield* SessionArchive.Service
+    const exported = yield* archives.export(result)
+    expect("engine" in exported && exported.engine).toBe("v2")
+    expect(exported.messages).toHaveLength(2)
+    expect(JSON.stringify(exported)).not.toContain("source-user")
+    expect(JSON.stringify(exported)).toContain("NEVER_EXECUTE")
+    expect(yield* db.select().from(SessionInputTable).all().pipe(Effect.orDie)).toHaveLength(0)
+    expect(observed).toEqual([2, 2])
+    const storedEvents = yield* db.select().from(EventTable).all().pipe(Effect.orDie)
+    expect(storedEvents.some((event) => event.type.includes("prompt.admitted"))).toBe(false)
+    const converted = yield* archives.import({
+      archive: source,
+      targetEngine: "v1",
+      location: { directory: AbsolutePath.make("/tmp") },
+    })
+    expect(converted.engine).toBe("v1")
+    expect(
+      yield* db
+        .select()
+        .from(MessageTable)
+        .where(eq(MessageTable.session_id, converted.sessionID))
+        .all()
+        .pipe(Effect.orDie),
+    ).toHaveLength(2)
+  }),
+)
+
+it.effect("invalid imports and failed projection roll back without notifications", () =>
+  Effect.gen(function* () {
+    const archives = yield* SessionArchive.Service
+    const { db } = yield* Database.Service
+    const events = yield* EventV2.Service
+    expect(
+      Exit.isFailure(
+        yield* archives
+          .import({
+            archive: { ...source, messages: [source.messages[0], source.messages[0]] },
+            location: { directory: AbsolutePath.make("/tmp") },
+          })
+          .pipe(Effect.exit),
+      ),
+    ).toBe(true)
+    const calls: string[] = []
+    yield* events.listen((event) =>
+      Effect.sync(() => {
+        calls.push(event.type)
+      }),
+    )
+    yield* events.project(SessionEvent.MessageImported, (event) =>
+      event.data.message.type === "assistant" ? Effect.die("synthetic projection failure") : Effect.void,
+    )
+    expect(Exit.isFailure(yield* setup.pipe(Effect.exit))).toBe(true)
+    expect(yield* db.select().from(SessionTable).all().pipe(Effect.orDie)).toHaveLength(0)
+    expect(yield* db.select().from(SessionMessageTable).all().pipe(Effect.orDie)).toHaveLength(0)
+    expect(yield* db.select().from(EventTable).all().pipe(Effect.orDie)).toHaveLength(0)
+    expect(calls).toEqual([])
+  }),
+)
+
+it.effect("local V1 archives retain completed attachments while public previews omit hidden prompt parts", () =>
+  Effect.gen(function* () {
+    const archives = yield* SessionArchive.Service
+    const session = yield* archives.import({
+      archive: source,
+      targetEngine: "v1",
+      location: { directory: AbsolutePath.make("/tmp") },
+    })
+    const original = yield* archives.export(session)
+    if ("engine" in original) return yield* Effect.die("Expected a legacy archive")
+    const user = original.messages[0]!
+    const assistant = original.messages[1]!
+    const base = { sessionID: session.sessionID, messageID: assistant.info.id, id: SessionV1.PartID.ascending() }
+    const completed: SessionV1.Part = {
+      ...base,
+      type: "tool",
+      tool: "read",
+      callID: "original-call",
+      state: {
+        status: "completed",
+        input: { path: "local.txt" },
+        output: "Preserved output",
+        title: "read",
+        metadata: {},
+        time: { start: 1, end: 2 },
+        attachments: [
+          {
+            ...base,
+            id: SessionV1.PartID.ascending(),
+            type: "file",
+            mime: "text/plain",
+            filename: "local.txt",
+            url: "data:text/plain,content",
+          },
+        ],
+      },
+    }
+    const local = {
+      ...original,
+      messages: [
+        {
+          ...user,
+          parts: [
+            ...user.parts,
+            {
+              ...base,
+              id: SessionV1.PartID.ascending(),
+              messageID: user.info.id,
+              type: "text" as const,
+              synthetic: true,
+              text: "HIDDEN_SYSTEM_CONTEXT",
+            },
+            {
+              ...base,
+              id: SessionV1.PartID.ascending(),
+              messageID: user.info.id,
+              type: "text" as const,
+              ignored: true,
+              text: "IGNORED_PROMPT",
+            },
+          ],
+        },
+        { ...assistant, parts: [...assistant.parts, completed] },
+      ],
+    }
+    const preview = SessionArchive.publicArchive(local)
+    expect(JSON.stringify(preview)).not.toContain("HIDDEN_SYSTEM_CONTEXT")
+    expect(JSON.stringify(preview)).not.toContain("IGNORED_PROMPT")
+    expect(JSON.stringify(preview)).toContain("Visible question")
+    const imported = yield* archives.import({ archive: local, location: { directory: AbsolutePath.make("/tmp") } })
+    const roundtrip = yield* archives.export(imported)
+    if ("engine" in roundtrip) return yield* Effect.die("Expected a legacy roundtrip")
+    const tool = roundtrip.messages[1]!.parts.find((part) => part.type === "tool")
+    expect(tool?.type === "tool" && tool.state.status).toBe("completed")
+    if (tool?.type !== "tool" || tool.state.status !== "completed") return yield* Effect.die("Missing completed tool")
+    expect(tool.state.output).toBe("Preserved output")
+    expect(tool.state.attachments?.[0]?.sessionID).toBe(imported.sessionID)
+    expect(tool.state.attachments?.[0]?.messageID).toBe(roundtrip.messages[1]!.info.id)
+    expect(tool.state.attachments?.[0]?.url).toBe("data:text/plain,content")
+    expect(tool.callID).not.toBe("original-call")
+  }),
+)
+
+it.effect("full native archives preserve completed structured tools and settle pending operations", () =>
+  Effect.gen(function* () {
+    const archives = yield* SessionArchive.Service
+    const session = yield* setup
+    const original = yield* archives.export(session)
+    if (!("engine" in original)) return yield* Effect.die("Expected a native archive")
+    const local = {
+      ...original,
+      messages: original.messages.map((message) =>
+        message.type !== "assistant"
+          ? message
+          : {
+              ...message,
+              content: [
+                ...message.content,
+                SessionMessage.AssistantTool.make({
+                  type: "tool",
+                  id: "completed-call",
+                  name: "read",
+                  time: { created: DateTime.makeUnsafe(1), completed: DateTime.makeUnsafe(2) },
+                  state: {
+                    status: "completed",
+                    input: { path: "file.txt" },
+                    structured: { preserved: true },
+                    content: [{ type: "text", text: "Complete output" }],
+                  },
+                }),
+                SessionMessage.AssistantTool.make({
+                  type: "tool",
+                  id: "pending-call",
+                  name: "bash",
+                  time: { created: DateTime.makeUnsafe(2) },
+                  state: { status: "pending", input: "touch NEVER_EXECUTE" },
+                }),
+              ],
+            },
+      ),
+    }
+    const imported = yield* archives.import({
+      archive: Schema.encodeSync(SessionArchive.Native)(local),
+      location: { directory: AbsolutePath.make("/tmp") },
+    })
+    const exported = yield* archives.export(imported)
+    if (!("engine" in exported)) return yield* Effect.die("Expected a native roundtrip")
+    const tools = exported.messages.flatMap((message) =>
+      message.type === "assistant" ? message.content.filter((part) => part.type === "tool") : [],
+    )
+    expect(tools.map((tool) => tool.state.status)).toEqual(["completed", "error"])
+    expect(tools[0]?.state).toMatchObject({
+      structured: { preserved: true },
+      content: [{ type: "text", text: "Complete output" }],
+    })
+    expect(tools[1]?.id).not.toBe("pending-call")
+    const { db } = yield* Database.Service
+    expect(yield* db.select().from(SessionInputTable).all().pipe(Effect.orDie)).toHaveLength(0)
+  }),
+)
+
+it.effect("lost create acknowledgement retains the original snapshot then reconciles consented updates", () =>
+  Effect.gen(function* () {
+    const session = yield* setup
+    const remote = yield* Remote
+    const shares = yield* PublicSessionShare.Service
+    remote.state.loseCreate = true
+    expect(Exit.isFailure(yield* shares.publish(publish(session.sessionID)).pipe(Effect.exit))).toBe(true)
+    yield* edit(session.sessionID)
+    const info = yield* shares.flush(session.sessionID)
+    expect(remote.snapshots.get(info.id)?.archive.messages).toHaveLength(3)
+    expect(remote.requests.map((request) => request.method)).toEqual(["POST", "POST", "PUT"])
+    expect(info.revision).toBe(1)
+    yield* shares.flush(session.sessionID)
+    expect(remote.requests).toHaveLength(3)
+  }),
+)
+
+it.effect("snapshot-only lost acknowledgement never publishes later messages", () =>
+  Effect.gen(function* () {
+    const session = yield* setup
+    const remote = yield* Remote
+    const shares = yield* PublicSessionShare.Service
+    remote.state.loseCreate = true
+    const preview = yield* shares.preview(session)
+    yield* shares
+      .publish({
+        ...publish(session.sessionID, false),
+        previewHash: createHash("sha256").update(JSON.stringify(preview)).digest("hex"),
+      })
+      .pipe(Effect.ignore)
+    yield* edit(session.sessionID)
+    const info = yield* shares.flush(session.sessionID)
+    expect(remote.snapshots.get(info.id)?.archive.messages).toHaveLength(2)
+    expect(remote.requests.map((request) => request.method)).toEqual(["POST", "POST"])
+  }),
+)
+
+it.effect("preview changes reject publication before storage or network writes", () =>
+  Effect.gen(function* () {
+    const session = yield* setup
+    const shares = yield* PublicSessionShare.Service
+    const remote = yield* Remote
+    const preview = yield* shares.preview(session)
+    yield* edit(session.sessionID)
+    const error = yield* shares
+      .publish({
+        ...publish(session.sessionID, false),
+        previewHash: createHash("sha256").update(JSON.stringify(preview)).digest("hex"),
+      })
+      .pipe(Effect.flip)
+    expect(error.code).toBe("CONFLICT")
+    expect(remote.requests).toHaveLength(0)
+    const { db } = yield* Database.Service
+    expect(yield* db.select().from(PublicSessionShareTable).all().pipe(Effect.orDie)).toHaveLength(0)
+  }),
+)
+
+it.effect("failed unshare preserves secrets and legacy URL; success retains the legacy URL", () =>
+  Effect.gen(function* () {
+    const session = yield* setup
+    const { db } = yield* Database.Service
+    const remote = yield* Remote
+    const shares = yield* PublicSessionShare.Service
+    yield* db
+      .update(SessionTable)
+      .set({ share_url: "https://historical.invalid/session" })
+      .where(eq(SessionTable.id, session.sessionID))
+      .run()
+      .pipe(Effect.orDie)
+    const first = yield* shares.publish(publish(session.sessionID))
+    remote.state.rejectDelete = true
+    yield* shares.unshare(session.sessionID).pipe(Effect.ignore)
+    const retained = yield* db.select().from(PublicSessionShareTable).get().pipe(Effect.orDie)
+    expect(retained?.state).toBe("deleting")
+    expect(retained?.secret).toHaveLength(64)
+    remote.state.rejectDelete = false
+    yield* shares.unshare(session.sessionID)
+    expect(remote.tombstones.has(first.id)).toBe(true)
+    const row = yield* db
+      .select()
+      .from(SessionTable)
+      .where(eq(SessionTable.id, session.sessionID))
+      .get()
+      .pipe(Effect.orDie)
+    expect(row?.share_url).toBe("https://historical.invalid/session")
+    expect(row?.share_info).toBeNull()
+    expect(yield* db.select().from(PublicSessionShareTable).all().pipe(Effect.orDie)).toHaveLength(0)
+  }),
+)
+
+it.effect("a delayed writer from another service instance cannot overwrite a republished share", () =>
+  Effect.gen(function* () {
+    const session = yield* setup
+    const remote = yield* Remote
+    const first = yield* PublicSessionShare.Service
+    const second = Context.get(
+      yield* Layer.build(PublicSessionShare.layerWith({ fetch: remote.fetch })),
+      PublicSessionShare.Service,
+    )
+    const old = yield* first.publish(publish(session.sessionID))
+    yield* edit(session.sessionID)
+    const started = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
+    remote.state.updateStarted = started.resolve
+    remote.state.holdUpdate = release.promise
+    const pending = yield* first.flush(session.sessionID).pipe(Effect.exit, Effect.forkChild)
+    yield* Effect.promise(() => started.promise)
+    yield* second.unshare(session.sessionID)
+    const fresh = yield* second.publish(publish(session.sessionID))
+    release.resolve()
+    const outcome = yield* Fiber.join(pending)
+    expect(Exit.isFailure(outcome)).toBe(true)
+    expect(fresh.id).not.toBe(old.id)
+    const { db } = yield* Database.Service
+    expect((yield* db.select().from(PublicSessionShareTable).get().pipe(Effect.orDie))?.id).toBe(fresh.id)
+    expect(
+      (yield* db.select().from(SessionTable).where(eq(SessionTable.id, session.sessionID)).get().pipe(Effect.orDie))
+        ?.share_info?.id,
+    ).toBe(fresh.id)
+  }),
+)
+
+restarted.effect("failed updates survive service restart and deleted shares never resume", () =>
+  Effect.gen(function* () {
+    const session = yield* setup
+    const remote = yield* Remote
+    const { db } = yield* Database.Service
+    const info = yield* Effect.gen(function* () {
+      const service = Context.get(
+        yield* Layer.build(PublicSessionShare.layerWith({ fetch: remote.fetch })),
+        PublicSessionShare.Service,
+      )
+      const created = yield* service.publish(publish(session.sessionID))
+      remote.state.rejectUpdate = true
+      yield* edit(session.sessionID)
+      expect((yield* service.flush(session.sessionID).pipe(Effect.flip)).code).toBe("UNAVAILABLE")
+      return created
+    }).pipe(Effect.scoped)
+    expect((yield* db.select().from(PublicSessionShareTable).get().pipe(Effect.orDie))?.dirty).toBe(true)
+    expect(remote.snapshots.get(info.id)?.archive.messages).toHaveLength(2)
+    remote.state.rejectUpdate = false
+    yield* Effect.gen(function* () {
+      const service = Context.get(
+        yield* Layer.build(PublicSessionShare.layerWith({ fetch: remote.fetch })),
+        PublicSessionShare.Service,
+      )
+      yield* adjust("1 second")
+      expect(remote.snapshots.get(info.id)?.archive.messages).toHaveLength(3)
+      expect((yield* db.select().from(PublicSessionShareTable).get().pipe(Effect.orDie))?.dirty).toBe(false)
+      yield* service.unshare(session.sessionID)
+    }).pipe(Effect.scoped)
+    const count = remote.requests.length
+    yield* Effect.gen(function* () {
+      yield* Layer.build(PublicSessionShare.layerWith({ fetch: remote.fetch }))
+      yield* adjust("10 seconds")
+    }).pipe(Effect.scoped)
+    expect(remote.requests).toHaveLength(count)
+    expect(remote.snapshots.has(info.id)).toBe(false)
+  }),
+)
+
+it.effect("automatic publication requires account consent for future updates", () =>
+  Effect.gen(function* () {
+    const session = yield* setup
+    const service = yield* PublicSessionShare.Service
+    const remote = yield* Remote
+    expect(yield* service.auto(session)).toBeUndefined()
+    expect(remote.requests).toHaveLength(0)
+    const preview = yield* service.preview(session)
+    yield* service.publish({
+      ...publish(session.sessionID, false),
+      previewHash: createHash("sha256").update(JSON.stringify(preview)).digest("hex"),
+      remember: true,
+    })
+    const next = yield* setup
+    expect(yield* service.auto(next)).toBeUndefined()
+    expect(remote.requests).toHaveLength(1)
+    yield* service.unshare(session.sessionID)
+    yield* service.publish({ ...publish(session.sessionID), remember: true })
+    expect((yield* service.auto(next))?.url).toMatch(/^https:\/\/vectordev.ai\/s\//)
+  }),
+)
+
+test("public URL validation is exact and public transport rejects identity and extra data", async () => {
+  for (const url of [
+    "https://vectordev.ai.evil/s/" + "a".repeat(32),
+    "https://vectordev.ai:443/s/" + "a".repeat(32),
+    "https://vectordev.ai/s/" + "a".repeat(32) + "?secret=x",
+    "http://vectordev.ai/s/" + "a".repeat(32),
+  ])
+    expect(() => shareID(url)).toThrow()
+  const fixture = remoteFixture()
+  const id = "a".repeat(32)
+  fixture.snapshots.set(id, {
+    id,
+    url: `https://vectordev.ai/s/${id}`,
+    expiresAt: Date.now() + 60000,
+    updatedAt: 1,
+    revision: 0,
+    updates: false,
+    archive: source,
+  })
+  const client = makeShareTransport({ token: async () => undefined, fetch: fixture.fetch })
+  expect((await client.read(`https://vectordev.ai/s/${id}`)).archive).toEqual(source)
+  fixture.snapshots.set(id, { ...fixture.snapshots.get(id)!, id: "b".repeat(32) })
+  await expect(client.read(`https://vectordev.ai/s/${id}`)).rejects.toThrow("different share identity")
+  fixture.snapshots.set(id, { ...fixture.snapshots.get(id)!, id, expiresAt: Date.now() - 1 })
+  await expect(client.read(`https://vectordev.ai/s/${id}`)).rejects.toThrow("expired")
+  fixture.snapshots.set(id, { ...fixture.snapshots.get(id)!, expiresAt: Date.now() + 60_000 })
+  const extra = makeShareTransport({
+    token: async () => undefined,
+    fetch: Object.assign(async () => Response.json({ ...fixture.snapshots.get(id)!, secret: "forbidden" }), {
+      preconnect: fetch.preconnect,
+    }),
+  })
+  await expect(extra.read(`https://vectordev.ai/s/${id}`)).rejects.toThrow()
+})
+
+test("failed and DELETE requests cancel response bodies and reject redirects", async () => {
+  const canceled: string[] = []
+  const client = makeShareTransport({
+    token: async () => token,
+    fetch: Object.assign(
+      async (_: RequestInfo | URL, init?: RequestInit) => {
+        expect(init?.redirect).toBe("error")
+        const body = new ReadableStream({ cancel: () => void canceled.push(init?.method ?? "unknown") })
+        return new Response(body, { status: init?.method === "DELETE" ? 200 : 503 })
+      },
+      { preconnect: fetch.preconnect },
+    ),
+  })
+  await expect(client.read(`https://vectordev.ai/s/${"a".repeat(32)}`)).rejects.toThrow()
+  await client.remove("a".repeat(32), "b".repeat(64))
+  expect(canceled).toEqual(["GET", "DELETE"])
+})

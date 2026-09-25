@@ -3,10 +3,16 @@ import { Session } from "@/session/session"
 import { SessionID } from "@/session/schema"
 import { Effect, Layer, Context } from "effect"
 import { ShareNext } from "./share-next"
+import { PublicSession } from "@vectordevai/schema/public-session"
+import { PublicSessionShare } from "@vectordevai/core/public-session-share"
+import { Config } from "@/config/config"
 
 export interface Interface {
   readonly create: (input?: Session.CreateInput) => Effect.Effect<Session.Info>
-  readonly share: (sessionID: SessionID) => Effect.Effect<{ url: string }, unknown>
+  readonly share: (
+    sessionID: SessionID,
+    publish: PublicSession.Publish,
+  ) => Effect.Effect<PublicSession.Info, PublicSession.Error>
   readonly unshare: (sessionID: SessionID) => Effect.Effect<void, unknown>
 }
 
@@ -17,20 +23,29 @@ const layer = Layer.effect(
   Effect.gen(function* () {
     const session = yield* Session.Service
     const shareNext = yield* ShareNext.Service
+    const publicSharing = yield* PublicSessionShare.Service
+    const config = yield* Config.Service
 
-    const share = Effect.fn("SessionShare.share")(function* (sessionID: SessionID) {
-      const result = yield* shareNext.create(sessionID)
-      yield* session.setShare({ sessionID, share: { url: result.url } })
+    const share = Effect.fn("SessionShare.share")(function* (sessionID: SessionID, publish: PublicSession.Publish) {
+      const result = yield* shareNext.create(sessionID, publish)
       return result
     })
 
     const unshare = Effect.fn("SessionShare.unshare")(function* (sessionID: SessionID) {
       yield* shareNext.remove(sessionID)
-      yield* session.setShare({ sessionID, share: undefined })
     })
 
     const create = Effect.fn("SessionShare.create")(function* (input?: Session.CreateInput) {
-      return yield* session.create(input)
+      const result = yield* session.create(input)
+      const cfg = yield* config.get()
+      if (
+        cfg.share !== "disabled" &&
+        (cfg.share === "auto" || cfg.autoshare || ["1", "true"].includes(process.env.VECTOR_AUTO_SHARE ?? ""))
+      )
+        yield* publicSharing
+          .auto({ sessionID: result.id })
+          .pipe(Effect.catch((error) => Effect.logWarning("Automatic session sharing deferred", { code: error.code })))
+      return yield* session.get(result.id).pipe(Effect.orDie)
     })
 
     return Service.of({ create, share, unshare })
@@ -40,7 +55,7 @@ const layer = Layer.effect(
 export const node = LayerNode.make({
   service: Service,
   layer: layer,
-  deps: [Session.node, ShareNext.node],
+  deps: [Session.node, ShareNext.node, PublicSessionShare.node, Config.node],
 })
 
 export * as SessionShare from "./session"

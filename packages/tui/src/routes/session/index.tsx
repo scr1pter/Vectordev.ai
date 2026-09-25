@@ -109,6 +109,8 @@ const sessionBindingCommands = [
   "messages.copy",
   "session.copy",
   "session.export",
+  "session.share",
+  "session.unshare",
   "session.child.first",
   "session.parent",
   "session.child.next",
@@ -317,6 +319,12 @@ export function Session() {
   }
   const keymap = useVectorKeymap()
   const dialog = useDialog()
+  const openSharing = async (unshareOnly = false) => {
+    const sessionID = route.sessionID
+    const { DialogShareSession } = await import("../../component/dialog-share-session")
+    if (route.sessionID !== sessionID) return
+    dialog.replace(() => <DialogShareSession sessionID={sessionID} unshareOnly={unshareOnly} />)
+  }
   const renderer = useRenderer()
 
   // Helper: Find next visible message boundary in direction
@@ -828,6 +836,20 @@ export function Session() {
         }
         dialog.clear()
       },
+    },
+    {
+      title: "Share session publicly / manage public copy",
+      value: "session.share",
+      category: "Session",
+      slash: { name: "share" },
+      run: () => openSharing(),
+    },
+    {
+      title: "Unshare session",
+      value: "session.unshare",
+      category: "Session",
+      slash: { name: "unshare" },
+      run: () => openSharing(true),
     },
     {
       title: "Export session transcript",

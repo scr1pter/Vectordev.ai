@@ -1,5 +1,5 @@
 import release from "../../../desktop/package.json"
-import { prepareGithubEnvironment } from "../../src/cli/cmd/github.environment"
+import { githubShareConsent, prepareGithubEnvironment } from "../../src/cli/cmd/github.environment"
 import { describe, expect, test } from "bun:test"
 import { buildRouteScript, buildWorkflowYaml, cliVersionSpec } from "../../src/cli/cmd/github.workflow"
 
@@ -186,6 +186,8 @@ jobs:
           GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
           VECTOR_CLI_TOKEN: \${{ secrets.VECTOR_CLI_TOKEN }}
           USE_GITHUB_TOKEN: "true"
+          # Public sharing includes conversation text, code, and tool output, including future updates.
+          SHARE: "false"
           MODEL: openai/gpt-4.1
           VECTOR_REVIEW_AUTO: "1"
           # Add the selected provider's credentials as repository secrets.
@@ -315,6 +317,8 @@ jobs:
           GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
           VECTOR_CLI_TOKEN: \${{ secrets.VECTOR_CLI_TOKEN }}
           USE_GITHUB_TOKEN: "true"
+          # Public sharing includes conversation text, code, and tool output, including future updates.
+          SHARE: "false"
           MODEL: anthropic/claude-sonnet-4-5
           # Add the selected provider's credentials as repository secrets.
           ANTHROPIC_API_KEY: \${{ secrets.ANTHROPIC_API_KEY }}
@@ -480,4 +484,47 @@ test("shared free-model workflows only need the Vector account token", () => {
   expect(yaml).not.toContain("OPENAI_API_KEY")
   expect(yaml).not.toContain("ANTHROPIC_API_KEY")
   expect(yaml).toContain("MODEL: vector/acme/coder:free")
+})
+
+describe("GitHub public sharing consent", () => {
+  test("generated workflows do not publish without an explicit install choice", () => {
+    const workflow = parse(buildWorkflowYaml(OPENAI))
+    const env = workflow.jobs.vector.steps.find((step) => step.name === "Run Vector")?.env
+    expect(env?.SHARE).toBe("false")
+    expect(env?.VECTOR_SHARE_CONSENT).toBeUndefined()
+    expect(workflow.jobs.review.steps.find((step) => step.name === "Review")?.env?.SHARE).toBeUndefined()
+  })
+
+  test("an explicit install choice records current consent and the required token secret", () => {
+    const yaml = buildWorkflowYaml({ ...OPENAI, share: true })
+    const env = parse(yaml).jobs.vector.steps.find((step) => step.name === "Run Vector")?.env
+    expect(env?.SHARE).toBe("true")
+    expect(env?.VECTOR_SHARE_CONSENT).toBe("1")
+    expect(env?.VECTOR_CLI_TOKEN).toBe("${{ secrets.VECTOR_CLI_TOKEN }}")
+    expect(yaml).toContain("conversation text, code, and tool output, including future updates")
+    expect(githubShareConsent({ ...env, VECTOR_CLI_TOKEN: "vct_synthetic" })).toEqual({
+      version: 1,
+      public: true,
+      updates: true,
+    })
+  })
+
+  test("inherited flags, project configuration, and old acknowledgments never authorize sharing", () => {
+    for (const env of [
+      {},
+      { SHARE: "true" },
+      { SHARE: "1", VECTOR_SHARE_CONSENT: "1" },
+      { SHARE: "true", VECTOR_SHARE_CONSENT: "0" },
+      { SHARE: "false", VECTOR_SHARE_CONSENT: "1" },
+      { VECTOR_CONFIG_CONTENT: '{"share":"auto","autoshare":true}', VECTOR_AUTO_SHARE: "true" },
+    ])
+      expect(githubShareConsent({ ...env, VECTOR_CLI_TOKEN: "vct_synthetic" })).toBeUndefined()
+  })
+
+  test("publication consent still requires a Vector account token", () => {
+    for (const token of [undefined, "", "provider-key"])
+      expect(() => githubShareConsent({ SHARE: "true", VECTOR_SHARE_CONSENT: "1", VECTOR_CLI_TOKEN: token })).toThrow(
+        "repository secret VECTOR_CLI_TOKEN",
+      )
+  })
 })

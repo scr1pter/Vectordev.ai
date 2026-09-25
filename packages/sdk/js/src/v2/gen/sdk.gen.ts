@@ -192,6 +192,8 @@ import type {
   PtyShellsResponses,
   PtyUpdateErrors,
   PtyUpdateResponses,
+  PublicSessionArchive,
+  PublicSessionPublish,
   QuestionAnswer,
   QuestionListErrors,
   QuestionListResponses,
@@ -200,6 +202,16 @@ import type {
   QuestionReplyErrors,
   QuestionReplyResponses,
   QuestionV2Reply,
+  ServerSessionSessionImportArchiveErrors,
+  ServerSessionSessionImportArchiveResponses,
+  ServerSessionSessionShareErrors,
+  ServerSessionSessionShareFlushErrors,
+  ServerSessionSessionShareFlushResponses,
+  ServerSessionSessionSharePreviewErrors,
+  ServerSessionSessionSharePreviewResponses,
+  ServerSessionSessionShareResponses,
+  ServerSessionSessionUnshareErrors,
+  ServerSessionSessionUnshareResponses,
   SessionAbortErrors,
   SessionAbortResponses,
   SessionChildrenErrors,
@@ -235,6 +247,10 @@ import type {
   SessionRevertErrors,
   SessionRevertResponses,
   SessionShareErrors,
+  SessionShareFlushErrors,
+  SessionShareFlushResponses,
+  SessionSharePreviewErrors,
+  SessionSharePreviewResponses,
   SessionShareResponses,
   SessionShellErrors,
   SessionShellResponses,
@@ -4521,9 +4537,46 @@ export class Session2 extends HeyApiClient {
   /**
    * Share session
    *
-   * Public session sharing is unavailable in Vector. Export a local JSON file instead.
+   * Publish the visible conversation to Vector after explicit consent.
    */
   public share<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+      publicSessionPublish?: PublicSessionPublish
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { key: "publicSessionPublish", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<SessionShareResponses, SessionShareErrors, ThrowOnError>({
+      url: "/session/{sessionID}/share",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Preview the visible public transcript without publishing
+   */
+  public sharePreview<ThrowOnError extends boolean = false>(
     parameters: {
       sessionID: string
       directory?: string
@@ -4543,8 +4596,38 @@ export class Session2 extends HeyApiClient {
         },
       ],
     )
-    return (options?.client ?? this.client).post<SessionShareResponses, SessionShareErrors, ThrowOnError>({
-      url: "/session/{sessionID}/share",
+    return (options?.client ?? this.client).get<SessionSharePreviewResponses, SessionSharePreviewErrors, ThrowOnError>({
+      url: "/session/{sessionID}/share/preview",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Flush updates to an already consented public session
+   */
+  public shareFlush<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<SessionShareFlushResponses, SessionShareFlushErrors, ThrowOnError>({
+      url: "/session/{sessionID}/share/flush",
       ...options,
       ...params,
     })
@@ -7625,6 +7708,144 @@ export class V2 extends HeyApiClient {
   }
 }
 
+export class Session4 extends HeyApiClient {
+  public importArchive<ThrowOnError extends boolean = false>(
+    parameters?: {
+      archive?: PublicSessionArchive
+      location?: LocationRef
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "body", key: "archive" },
+            { in: "body", key: "location" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      ServerSessionSessionImportArchiveResponses,
+      ServerSessionSessionImportArchiveErrors,
+      ThrowOnError
+    >({
+      url: "/api/session/import",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  public unshare<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "sessionID" }] }])
+    return (options?.client ?? this.client).delete<
+      ServerSessionSessionUnshareResponses,
+      ServerSessionSessionUnshareErrors,
+      ThrowOnError
+    >({
+      url: "/api/session/{sessionID}/share",
+      ...options,
+      ...params,
+    })
+  }
+
+  public share<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      publicSessionPublish: PublicSessionPublish
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { key: "publicSessionPublish", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      ServerSessionSessionShareResponses,
+      ServerSessionSessionShareErrors,
+      ThrowOnError
+    >({
+      url: "/api/session/{sessionID}/share",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  public sharePreview<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "sessionID" }] }])
+    return (options?.client ?? this.client).get<
+      ServerSessionSessionSharePreviewResponses,
+      ServerSessionSessionSharePreviewErrors,
+      ThrowOnError
+    >({
+      url: "/api/session/{sessionID}/share/preview",
+      ...options,
+      ...params,
+    })
+  }
+
+  public shareFlush<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "sessionID" }] }])
+    return (options?.client ?? this.client).post<
+      ServerSessionSessionShareFlushResponses,
+      ServerSessionSessionShareFlushErrors,
+      ThrowOnError
+    >({
+      url: "/api/session/{sessionID}/share/flush",
+      ...options,
+      ...params,
+    })
+  }
+}
+
+export class Session5 extends HeyApiClient {
+  private _session?: Session4
+  get session(): Session4 {
+    return (this._session ??= new Session4({ client: this.client }))
+  }
+}
+
+export class Server extends HeyApiClient {
+  private _session?: Session5
+  get session(): Session5 {
+    return (this._session ??= new Session5({ client: this.client }))
+  }
+}
+
 export class VectorClient extends HeyApiClient {
   public static readonly __registry = new HeyApiRegistry<VectorClient>()
 
@@ -7766,5 +7987,10 @@ export class VectorClient extends HeyApiClient {
   private _v2?: V2
   get v2(): V2 {
     return (this._v2 ??= new V2({ client: this.client }))
+  }
+
+  private _server?: Server
+  get server(): Server {
+    return (this._server ??= new Server({ client: this.client }))
   }
 }

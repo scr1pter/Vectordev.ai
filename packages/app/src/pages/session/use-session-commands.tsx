@@ -375,6 +375,21 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
 
   const sessionCmds = () => [
     sessionCommand({
+      id: "session.share",
+      title: "Share session publicly…",
+      description: "Review the public copy, publish, copy its link, or unshare",
+      slash: "share",
+      disabled: !params.id,
+      onSelect: () => {
+        const sessionID = params.id
+        if (!sessionID) return
+        void openDialog(
+          () => import("@/components/dialog-share-session"),
+          (x) => dialog.show(() => <x.DialogShareSession sessionID={sessionID} />),
+        )
+      },
+    }),
+    sessionCommand({
       id: "session.new",
       title: language.t("command.session.new"),
       keybind: "mod+shift+s",

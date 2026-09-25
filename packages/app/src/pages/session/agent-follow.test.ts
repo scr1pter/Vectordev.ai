@@ -22,6 +22,19 @@ const ROOT = "/repo"
 const wait = (ms = 0) => new Promise<void>((resolve) => setTimeout(resolve, ms))
 const live = new Set<AgentFollow>()
 
+async function eventually(assert: () => void) {
+  const deadline = performance.now() + 2_000
+  for (;;) {
+    try {
+      assert()
+      return
+    } catch (error) {
+      if (performance.now() >= deadline) throw error
+    }
+    await wait(5)
+  }
+}
+
 afterEach(() => {
   for (const store of live) store.dispose()
   live.clear()
@@ -284,8 +297,9 @@ describe("landing an edit", () => {
         end: Date.now(),
       }),
     )
-    await wait(10)
-    expect(h.store.cursorsFor("src/a.ts")).toEqual([expect.objectContaining({ state: "landed", line: 3 })])
+    await eventually(() =>
+      expect(h.store.cursorsFor("src/a.ts")).toEqual([expect.objectContaining({ state: "landed", line: 3 })]),
+    )
   })
 
   test("a read that lands after the write, before the formatter, is not taken as the before", async () => {
@@ -511,11 +525,11 @@ describe("external agents", () => {
     h.emit("file.watcher.updated", { file: `${ROOT}/src/a.ts`, event: "change" })
     // The file context reloads the open file on the same event.
     h.loaded["src/a.ts"] = "one\nTWO\n"
-    await wait(WATCHER_DEBOUNCE_MS + 30)
-
-    expect(h.store.attributionsFor("src/a.ts")).toEqual([
-      expect.objectContaining({ agentName: "Codex", color: agentColor("Codex"), ranges: [{ start: 2, end: 2 }] }),
-    ])
+    await eventually(() =>
+      expect(h.store.attributionsFor("src/a.ts")).toEqual([
+        expect.objectContaining({ agentName: "Codex", color: agentColor("Codex"), ranges: [{ start: 2, end: 2 }] }),
+      ]),
+    )
     expect(h.store.cursorsFor("src/a.ts")[0]).toMatchObject({ state: "landed", line: 2, agentName: "Codex" })
     expect(h.store.target()).toMatchObject({ path: "src/a.ts", line: 2 })
   })

@@ -14,6 +14,7 @@ import { Timestamps } from "../database/schema.sql"
 import type { SystemContext } from "../system-context/index"
 import { AgentV2 } from "../agent"
 import type { Revert } from "@vectordevai/schema/revert"
+import type { PublicSession } from "@vectordevai/schema/public-session"
 
 type SessionMessageData = Omit<(typeof SessionMessage.Message)["Encoded"], "type" | "id">
 type V1MessageData = Omit<SessionV1.Info, "id" | "sessionID">
@@ -35,6 +36,7 @@ export const SessionTable = sqliteTable(
     title: text().notNull(),
     version: text().notNull(),
     share_url: text(),
+    share_info: text({ mode: "json" }).$type<PublicSession.Info>(),
     summary_additions: integer(),
     summary_deletions: integer(),
     summary_files: integer(),

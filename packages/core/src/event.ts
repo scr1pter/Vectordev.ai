@@ -18,6 +18,13 @@ export type { Data, Definition, Payload } from "@vectordevai/schema/event"
 export type Subscriber<D extends Definition = Definition> = (event: Payload<D>) => Effect.Effect<void>
 export type Unsubscribe = Effect.Effect<void>
 
+const DeferredNotifications = Context.Reference<Effect.Effect<void>[] | undefined>(
+  "@vector/Event/DeferredNotifications",
+  {
+    defaultValue: (): Effect.Effect<void>[] | undefined => undefined,
+  },
+)
+
 export const latestSequence = Effect.fn("EventV2.latestSequence")(function* (
   db: Database.Interface["db"],
   aggregateID: string,
@@ -143,6 +150,8 @@ export interface Interface {
     events: SerializedEvent[],
     options?: { readonly publish?: boolean; readonly ownerID?: string; readonly strictOwner?: boolean },
   ) => Effect.Effect<string | undefined>
+  /** Atomically import a validated, locally remapped aggregate before notifying subscribers. */
+  readonly importAll: (events: SerializedEvent[]) => Effect.Effect<void>
   readonly remove: (aggregateID: string) => Effect.Effect<void>
   readonly claim: (aggregateID: string, ownerID: string) => Effect.Effect<void>
 }
@@ -352,10 +361,12 @@ export const layerWith = (options?: LayerOptions) =>
                     )
                     .pipe(Effect.orDie)
                   if (committed) {
-                    yield* Effect.forEach(
-                      pubsub.durable.get(committed.aggregateID) ?? [],
-                      (wake) => PubSub.publish(wake, undefined),
-                      { discard: true },
+                    yield* notifyAfterCommit(
+                      Effect.forEach(
+                        pubsub.durable.get(committed.aggregateID) ?? [],
+                        (wake) => PubSub.publish(wake, undefined),
+                        { discard: true },
+                      ),
                     )
                   }
                   return committed
@@ -403,17 +414,30 @@ export const layerWith = (options?: LayerOptions) =>
           ),
         )
 
-      function notify(event: Payload, isolateListeners: boolean) {
+      function notifyAfterCommit(effect: Effect.Effect<void>) {
         return Effect.gen(function* () {
-          yield* Effect.forEach(
-            listeners,
-            (listener) => (isolateListeners ? observe(event, listener) : listener(event)),
-            { discard: true },
-          )
-          const typed = pubsub.typed.get(event.type)
-          if (typed) yield* PubSub.publish(typed, event)
-          yield* PubSub.publish(pubsub.all, event)
+          const pending = yield* DeferredNotifications
+          if (pending) {
+            pending.push(effect)
+            return
+          }
+          yield* effect
         })
+      }
+
+      function notify(event: Payload, isolateListeners: boolean) {
+        return notifyAfterCommit(
+          Effect.gen(function* () {
+            yield* Effect.forEach(
+              listeners,
+              (listener) => (isolateListeners ? observe(event, listener) : listener(event)),
+              { discard: true },
+            )
+            const typed = pubsub.typed.get(event.type)
+            if (typed) yield* PubSub.publish(typed, event)
+            yield* PubSub.publish(pubsub.all, event)
+          }),
+        )
       }
 
       function publish<D extends Definition>(definition: D, data: Data<D>, options?: PublishOptions) {
@@ -628,6 +652,16 @@ export const layerWith = (options?: LayerOptions) =>
         project,
         replay,
         replayAll,
+        importAll: (input) =>
+          Effect.gen(function* () {
+            const pending: Effect.Effect<void>[] = []
+            yield* db
+              .transaction(() =>
+                replayAll(input, { publish: true }).pipe(Effect.provideService(DeferredNotifications, pending)),
+              )
+              .pipe(Effect.orDie)
+            yield* Effect.forEach(pending, (notification) => notification, { discard: true })
+          }),
         remove,
         claim,
       })

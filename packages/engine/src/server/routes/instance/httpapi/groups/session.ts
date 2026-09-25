@@ -1,4 +1,5 @@
 import { PublicShareRemovalError, SessionDeleteResult } from "@vectordevai/schema/public-share"
+import { PublicSession } from "@vectordevai/schema/public-session"
 import { PermissionV1 } from "@vectordevai/core/v1/permission"
 import { Permission } from "@/permission"
 import { SessionV1 } from "@vectordevai/core/v1/session"
@@ -243,7 +244,7 @@ export const SessionApi = HttpApi.make("session")
             SessionDeleteResult,
             "Deleted local session; warnings identify public copies that may remain online",
           ),
-          error: [HttpApiError.BadRequest, ApiNotFoundError, PublicShareRemovalError],
+          error: [HttpApiError.BadRequest, ApiNotFoundError, PublicShareRemovalError, PublicSession.Error],
         }).annotateMerge(
           OpenApi.annotations({
             identifier: "session.delete",
@@ -307,20 +308,43 @@ export const SessionApi = HttpApi.make("session")
         HttpApiEndpoint.post("share", SessionPaths.share, {
           params: { sessionID: SessionID },
           query: WorkspaceRoutingQuery,
-          success: described(Session.Info, "Successfully shared session"),
-          error: [HttpApiError.InternalServerError, ApiNotFoundError, InvalidRequestError],
+          payload: PublicSession.Publish,
+          success: described(PublicSession.Info, "Successfully shared session"),
+          error: [HttpApiError.InternalServerError, ApiNotFoundError, InvalidRequestError, PublicSession.Error],
         }).annotateMerge(
           OpenApi.annotations({
             identifier: "session.share",
             summary: "Share session",
-            description: "Public session sharing is unavailable in Vector. Export a local JSON file instead.",
+            description: "Publish the visible conversation to Vector after explicit consent.",
+          }),
+        ),
+        HttpApiEndpoint.get("sharePreview", `${SessionPaths.share}/preview`, {
+          params: { sessionID: SessionID },
+          query: WorkspaceRoutingQuery,
+          success: PublicSession.Archive,
+          error: [ApiNotFoundError, PublicSession.Error],
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "session.sharePreview",
+            summary: "Preview the visible public transcript without publishing",
+          }),
+        ),
+        HttpApiEndpoint.post("shareFlush", `${SessionPaths.share}/flush`, {
+          params: { sessionID: SessionID },
+          query: WorkspaceRoutingQuery,
+          success: PublicSession.Info,
+          error: [ApiNotFoundError, PublicSession.Error],
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "session.shareFlush",
+            summary: "Flush updates to an already consented public session",
           }),
         ),
         HttpApiEndpoint.delete("unshare", SessionPaths.share, {
           params: { sessionID: SessionID },
           query: WorkspaceRoutingQuery,
           success: described(Session.Info, "Session without a public share"),
-          error: [HttpApiError.InternalServerError, ApiNotFoundError, PublicShareRemovalError],
+          error: [HttpApiError.InternalServerError, ApiNotFoundError, PublicShareRemovalError, PublicSession.Error],
         }).annotateMerge(
           OpenApi.annotations({
             identifier: "session.unshare",

@@ -5,6 +5,7 @@ import release from "../../../../desktop/package.json"
 import { GITHUB_WORKFLOW_VERSION } from "./github.environment"
 import { DEFAULT_MENTIONS, parseReviewCommand } from "@vectordevai/core/review/command"
 import { PAUSED_LABEL } from "@vectordevai/core/review/skip"
+import { PublicSession } from "@vectordevai/schema/public-session"
 
 export const WORKFLOW_FILE = ".github/workflows/vector.yml"
 export const CLI_PACKAGE = "@vectordevai/cli"
@@ -14,6 +15,7 @@ export interface WorkflowOptions {
   model: string
   keys: readonly string[] // the provider's key variables, passed through from same-named repository secrets
   autoReview: boolean
+  share?: boolean // explicit owner consent to publish task conversations and future updates
   monthlyUsd?: number // REVIEW_MAX_COST_USD_PER_MONTH; written for paid models only
   version: string // the CLI version to pin
   mentions?: readonly string[] // baked into the route job; Vectorscope mentions and legacy aliases by default
@@ -284,6 +286,9 @@ export function buildWorkflowYaml(opts: WorkflowOptions): string {
     "          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}",
     "          VECTOR_CLI_TOKEN: ${{ secrets.VECTOR_CLI_TOKEN }}",
     '          USE_GITHUB_TOKEN: "true"',
+    "          # Public sharing includes conversation text, code, and tool output, including future updates.",
+    `          SHARE: "${opts.share === true}"`,
+    ...(opts.share ? [`          VECTOR_SHARE_CONSENT: "${PublicSession.CONSENT_VERSION}"`] : []),
     `          MODEL: ${opts.provider}/${opts.model}`,
     ...(auto ? ['          VECTOR_REVIEW_AUTO: "1"'] : []),
     ...keys,

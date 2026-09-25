@@ -1,5 +1,6 @@
 import { ShareNext } from "@/share/share-next"
 import { PublicShareRemovalError, publicShareWarning } from "@vectordevai/schema/public-share"
+import { PublicSession } from "@vectordevai/schema/public-session"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { PermissionV1 } from "@vectordevai/core/v1/permission"
 import { Slug } from "@vectordevai/core/util/slug"
@@ -68,7 +69,7 @@ export function fromRow(row: SessionRow): Info {
           diffs: row.summary_diffs ?? undefined,
         }
       : undefined
-  const share = row.share_url ? { url: row.share_url } : undefined
+  const share = row.share_info ?? (row.share_url ? { url: row.share_url } : undefined)
   const revert = row.revert
     ? {
         messageID: MessageID.make(row.revert.messageID),
@@ -132,7 +133,8 @@ export function toRow(info: Info) {
     agent: info.agent,
     model: info.model,
     version: info.version,
-    share_url: info.share?.url,
+    share_url: Schema.is(PublicSession.Info)(info.share) ? undefined : info.share?.url,
+    share_info: Schema.is(PublicSession.Info)(info.share) ? info.share : null,
     summary_additions: info.summary?.additions,
     summary_deletions: info.summary?.deletions,
     summary_files: info.summary?.files,
@@ -505,7 +507,7 @@ export interface Interface {
   readonly remove: (
     sessionID: SessionID,
     options?: { acknowledgePublicShares?: boolean },
-  ) => Effect.Effect<void, NotFound | PublicShareRemovalError>
+  ) => Effect.Effect<void, NotFound | PublicShareRemovalError | PublicSession.Error>
   readonly updateMessage: <T extends SessionV1.Info>(msg: T) => Effect.Effect<T>
   readonly removeMessage: (input: { sessionID: SessionID; messageID: MessageID }) => Effect.Effect<MessageID>
   readonly removePart: (input: { sessionID: SessionID; messageID: MessageID; partID: PartID }) => Effect.Effect<PartID>
@@ -689,6 +691,7 @@ const layer: Layer.Layer<
         const links = yield* sharing.publicLinks(sessionID)
         if (links.length) return yield* publicShareWarning(links)
       }
+      yield* sharing.removeTree(sessionID)
       try {
         // `remove` needs to work in all cases, such as broken sessions that
         // run cleanup without instance state.

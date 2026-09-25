@@ -259,6 +259,21 @@ import type {
   QuestionReplyData,
   QuestionReplyErrors,
   QuestionReplyResponses,
+  ServerSessionSessionImportArchiveData,
+  ServerSessionSessionImportArchiveErrors,
+  ServerSessionSessionImportArchiveResponses,
+  ServerSessionSessionShareData,
+  ServerSessionSessionShareErrors,
+  ServerSessionSessionShareFlushData,
+  ServerSessionSessionShareFlushErrors,
+  ServerSessionSessionShareFlushResponses,
+  ServerSessionSessionSharePreviewData,
+  ServerSessionSessionSharePreviewErrors,
+  ServerSessionSessionSharePreviewResponses,
+  ServerSessionSessionShareResponses,
+  ServerSessionSessionUnshareData,
+  ServerSessionSessionUnshareErrors,
+  ServerSessionSessionUnshareResponses,
   SessionAbortData,
   SessionAbortErrors,
   SessionAbortResponses,
@@ -312,6 +327,12 @@ import type {
   SessionRevertResponses,
   SessionShareData,
   SessionShareErrors,
+  SessionShareFlushData,
+  SessionShareFlushErrors,
+  SessionShareFlushResponses,
+  SessionSharePreviewData,
+  SessionSharePreviewErrors,
+  SessionSharePreviewResponses,
   SessionShareResponses,
   SessionShellData,
   SessionShellErrors,
@@ -2349,11 +2370,35 @@ export class Session2 extends HeyApiClient {
   /**
    * Share session
    *
-   * Public session sharing is unavailable in Vector. Export a local JSON file instead.
+   * Publish the visible conversation to Vector after explicit consent.
    */
   public share<ThrowOnError extends boolean = false>(options: Options<SessionShareData, ThrowOnError>) {
     return (options.client ?? this.client).post<SessionShareResponses, SessionShareErrors, ThrowOnError>({
       url: "/session/{id}/share",
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options.headers,
+      },
+    })
+  }
+
+  /**
+   * Preview the visible public transcript without publishing
+   */
+  public sharePreview<ThrowOnError extends boolean = false>(options: Options<SessionSharePreviewData, ThrowOnError>) {
+    return (options.client ?? this.client).get<SessionSharePreviewResponses, SessionSharePreviewErrors, ThrowOnError>({
+      url: "/session/{id}/share/preview",
+      ...options,
+    })
+  }
+
+  /**
+   * Flush updates to an already consented public session
+   */
+  public shareFlush<ThrowOnError extends boolean = false>(options: Options<SessionShareFlushData, ThrowOnError>) {
+    return (options.client ?? this.client).post<SessionShareFlushResponses, SessionShareFlushErrors, ThrowOnError>({
+      url: "/session/{id}/share/flush",
       ...options,
     })
   }
@@ -3766,6 +3811,84 @@ export class V2 extends HeyApiClient {
   }
 }
 
+export class Session4 extends HeyApiClient {
+  public importArchive<ThrowOnError extends boolean = false>(
+    options: Options<ServerSessionSessionImportArchiveData, ThrowOnError>,
+  ) {
+    return (options.client ?? this.client).post<
+      ServerSessionSessionImportArchiveResponses,
+      ServerSessionSessionImportArchiveErrors,
+      ThrowOnError
+    >({
+      url: "/api/session/import",
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options.headers,
+      },
+    })
+  }
+
+  public unshare<ThrowOnError extends boolean = false>(
+    options: Options<ServerSessionSessionUnshareData, ThrowOnError>,
+  ) {
+    return (options.client ?? this.client).delete<
+      ServerSessionSessionUnshareResponses,
+      ServerSessionSessionUnshareErrors,
+      ThrowOnError
+    >({ url: "/api/session/{sessionID}/share", ...options })
+  }
+
+  public share<ThrowOnError extends boolean = false>(options: Options<ServerSessionSessionShareData, ThrowOnError>) {
+    return (options.client ?? this.client).post<
+      ServerSessionSessionShareResponses,
+      ServerSessionSessionShareErrors,
+      ThrowOnError
+    >({
+      url: "/api/session/{sessionID}/share",
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options.headers,
+      },
+    })
+  }
+
+  public sharePreview<ThrowOnError extends boolean = false>(
+    options: Options<ServerSessionSessionSharePreviewData, ThrowOnError>,
+  ) {
+    return (options.client ?? this.client).get<
+      ServerSessionSessionSharePreviewResponses,
+      ServerSessionSessionSharePreviewErrors,
+      ThrowOnError
+    >({ url: "/api/session/{sessionID}/share/preview", ...options })
+  }
+
+  public shareFlush<ThrowOnError extends boolean = false>(
+    options: Options<ServerSessionSessionShareFlushData, ThrowOnError>,
+  ) {
+    return (options.client ?? this.client).post<
+      ServerSessionSessionShareFlushResponses,
+      ServerSessionSessionShareFlushErrors,
+      ThrowOnError
+    >({ url: "/api/session/{sessionID}/share/flush", ...options })
+  }
+}
+
+export class Session5 extends HeyApiClient {
+  private _session?: Session4
+  get session(): Session4 {
+    return (this._session ??= new Session4({ client: this.client }))
+  }
+}
+
+export class Server extends HeyApiClient {
+  private _session?: Session5
+  get session(): Session5 {
+    return (this._session ??= new Session5({ client: this.client }))
+  }
+}
+
 export class VectorClient extends HeyApiClient {
   public static readonly __registry = new HeyApiRegistry<VectorClient>()
 
@@ -3931,5 +4054,10 @@ export class VectorClient extends HeyApiClient {
   private _v2?: V2
   get v2(): V2 {
     return (this._v2 ??= new V2({ client: this.client }))
+  }
+
+  private _server?: Server
+  get server(): Server {
+    return (this._server ??= new Server({ client: this.client }))
   }
 }

@@ -86,6 +86,8 @@ Options:
   -c, --continue     continue the last session                                             [boolean]
   -s, --session      session id to continue                                                 [string]
       --fork         fork the session before continuing (requires --continue or --session) [boolean]
+      --share        publish this session’s conversation, code, and tool output publicly on
+                     vectordev.ai, including future updates (30 days)                      [boolean]
   -m, --model        model to use in the format of provider/model                           [string]
       --agent        agent to use                                                           [string]
       --format       format: default (formatted) or json (raw JSON events)
@@ -297,16 +299,18 @@ Options:
       --print-logs  print logs to stderr                                                   [boolean]
       --log-level   log level                   [string] [choices: "DEBUG", "INFO", "WARN", "ERROR"]
       --pure        run without external plugins                                           [boolean]
-      --sanitize    redact sensitive transcript and file data                              [boolean]"
+      --public      write a portable archive of visible history for local use              [boolean]
+      --sanitize    redact sensitive transcript and file data (native sessions use the portable
+                    format)                                                                [boolean]"
 `;
 
 exports[`vector CLI help-text snapshots every documented command emits stable help text: vector import --help 1`] = `
 "vector import <file>
 
-import session data from a local JSON file
+import a local session archive or a public Vector share without running its history
 
 Positionals:
-  file  path to a local JSON file                                                [string] [required]
+  file  local JSON file or https://vectordev.ai/s/<id>                           [string] [required]
 
 Options:
   -h, --help        show help                                                              [boolean]
@@ -343,11 +347,14 @@ Positionals:
   number  PR number to checkout                                                  [number] [required]
 
 Options:
-  -h, --help        show help                                                              [boolean]
-  -v, --version     show version number                                                    [boolean]
-      --print-logs  print logs to stderr                                                   [boolean]
-      --log-level   log level                   [string] [choices: "DEBUG", "INFO", "WARN", "ERROR"]
-      --pure        run without external plugins                                           [boolean]"
+  -h, --help            show help                                                          [boolean]
+  -v, --version         show version number                                                [boolean]
+      --print-logs      print logs to stderr                                               [boolean]
+      --log-level       log level               [string] [choices: "DEBUG", "INFO", "WARN", "ERROR"]
+      --pure            run without external plugins                                       [boolean]
+      --import-session  import a linked public Vector session as passive history
+                                                                           [boolean] [default: true]
+      --session-url     select a public Vector session URL when the PR links several        [string]"
 `;
 
 exports[`vector CLI help-text snapshots every documented command emits stable help text: vector review --help 1`] = `

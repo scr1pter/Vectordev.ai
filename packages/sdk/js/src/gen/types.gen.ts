@@ -17,6 +17,8 @@ export type Event =
   | EventMessageRemoved
   | EventMessagePartUpdated
   | EventMessagePartRemoved
+  | EventSessionNextMessageImported
+  | EventSessionNextShareChanged
   | EventSessionNextAgentSwitched
   | EventSessionNextModelSwitched
   | EventSessionNextMoved
@@ -205,9 +207,11 @@ export type Session = {
       write: number
     }
   }
-  share?: {
-    url: string
-  }
+  share?:
+    | PublicSessionInfo
+    | {
+        url: string
+      }
   title: string
   agent?: string
   model?: {
@@ -664,18 +668,18 @@ export type Part =
   | RetryPart
   | CompactionPart
 
-export type Prompt = {
-  text: string
-  files?: Array<PromptFileAttachment>
-  agents?: Array<PromptAgentAttachment>
-}
-
 export type FreeModelLimit = {
   type: "free_models_limit"
   code: "VECTOR_FREE_MODELS_LIMIT"
   reason: "user_daily" | "user_minute" | "shared_daily" | "upstream" | "balance"
   resetAt: number
   message: string
+}
+
+export type Prompt = {
+  text: string
+  files?: Array<PromptFileAttachment>
+  agents?: Array<PromptAgentAttachment>
 }
 
 export type Pty = {
@@ -859,6 +863,24 @@ export type GlobalEvent = {
           sessionID: string
           messageID: string
           partID: string
+        }
+      }
+    | {
+        id: string
+        type: "session.next.message.imported"
+        properties: {
+          timestamp: number
+          sessionID: string
+          message: SessionMessage
+        }
+      }
+    | {
+        id: string
+        type: "session.next.share.changed"
+        properties: {
+          timestamp: number
+          sessionID: string
+          share: PublicSessionInfo
         }
       }
     | {
@@ -1663,6 +1685,8 @@ export type GlobalEvent = {
     | SyncEventMessageRemoved
     | SyncEventMessagePartUpdated
     | SyncEventMessagePartRemoved
+    | SyncEventSessionNextMessageImported
+    | SyncEventSessionNextShareChanged
     | SyncEventSessionNextAgentSwitched
     | SyncEventSessionNextModelSwitched
     | SyncEventSessionNextMoved
@@ -2727,6 +2751,112 @@ export type ProviderAuthError1 = {
   }
 }
 
+export type Session1 = {
+  id: string
+  slug: string
+  projectID: string
+  workspaceID?: string
+  directory: string
+  path?: string
+  parentID?: string
+  summary?: {
+    additions: number
+    deletions: number
+    files: number
+    diffs?: Array<SnapshotFileDiff>
+  }
+  cost?: number
+  tokens?: {
+    input: number
+    output: number
+    reasoning: number
+    cache: {
+      read: number
+      write: number
+    }
+  }
+  share?: {
+    url: string
+  }
+  title: string
+  agent?: string
+  model?: {
+    id: string
+    providerID: string
+    variant?: string
+  }
+  version: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  time: {
+    created: number
+    updated: number
+    compacting?: number
+    archived?: number
+  }
+  permission?: PermissionRuleset
+  revert?: {
+    messageID: string
+    partID?: string
+    snapshot?: string
+    diff?: string
+  }
+}
+
+export type Session2 = {
+  id: string
+  slug: string
+  projectID: string
+  workspaceID?: string
+  directory: string
+  path?: string
+  parentID?: string
+  summary?: {
+    additions: number
+    deletions: number
+    files: number
+    diffs?: Array<SnapshotFileDiff>
+  }
+  cost?: number
+  tokens?: {
+    input: number
+    output: number
+    reasoning: number
+    cache: {
+      read: number
+      write: number
+    }
+  }
+  share?: {
+    url: string
+  }
+  title: string
+  agent?: string
+  model?: {
+    id: string
+    providerID: string
+    variant?: string
+  }
+  version: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  time: {
+    created: number
+    updated: number
+    compacting?: number
+    archived?: number
+  }
+  permission?: PermissionRuleset
+  revert?: {
+    messageID: string
+    partID?: string
+    snapshot?: string
+    diff?: string
+  }
+}
+
 export type NotFoundError = {
   name: "NotFoundError"
   data: {
@@ -2740,10 +2870,228 @@ export type SessionBusyError = {
   message: string
 }
 
+export type Session3 = {
+  id: string
+  slug: string
+  projectID: string
+  workspaceID?: string
+  directory: string
+  path?: string
+  parentID?: string
+  summary?: {
+    additions: number
+    deletions: number
+    files: number
+    diffs?: Array<SnapshotFileDiff>
+  }
+  cost?: number
+  tokens?: {
+    input: number
+    output: number
+    reasoning: number
+    cache: {
+      read: number
+      write: number
+    }
+  }
+  share?: {
+    url: string
+  }
+  title: string
+  agent?: string
+  model?: {
+    id: string
+    providerID: string
+    variant?: string
+  }
+  version: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  time: {
+    created: number
+    updated: number
+    compacting?: number
+    archived?: number
+  }
+  permission?: PermissionRuleset
+  revert?: {
+    messageID: string
+    partID?: string
+    snapshot?: string
+    diff?: string
+  }
+}
+
+export type PublicSessionError = {
+  _tag: "PublicSessionError"
+  code: "SIGN_IN_REQUIRED" | "CONSENT_REQUIRED" | "UNAVAILABLE" | "CONFLICT" | "NOT_FOUND" | "INVALID" | "TOO_LARGE"
+  message: string
+}
+
 export type PublicShareRemovalError = {
   _tag: "PublicShareRemovalError"
   links: Array<string>
   message: string
+}
+
+export type Session4 = {
+  id: string
+  slug: string
+  projectID: string
+  workspaceID?: string
+  directory: string
+  path?: string
+  parentID?: string
+  summary?: {
+    additions: number
+    deletions: number
+    files: number
+    diffs?: Array<SnapshotFileDiff>
+  }
+  cost?: number
+  tokens?: {
+    input: number
+    output: number
+    reasoning: number
+    cache: {
+      read: number
+      write: number
+    }
+  }
+  share?: {
+    url: string
+  }
+  title: string
+  agent?: string
+  model?: {
+    id: string
+    providerID: string
+    variant?: string
+  }
+  version: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  time: {
+    created: number
+    updated: number
+    compacting?: number
+    archived?: number
+  }
+  permission?: PermissionRuleset
+  revert?: {
+    messageID: string
+    partID?: string
+    snapshot?: string
+    diff?: string
+  }
+}
+
+export type Session5 = {
+  id: string
+  slug: string
+  projectID: string
+  workspaceID?: string
+  directory: string
+  path?: string
+  parentID?: string
+  summary?: {
+    additions: number
+    deletions: number
+    files: number
+    diffs?: Array<SnapshotFileDiff>
+  }
+  cost?: number
+  tokens?: {
+    input: number
+    output: number
+    reasoning: number
+    cache: {
+      read: number
+      write: number
+    }
+  }
+  share?: {
+    url: string
+  }
+  title: string
+  agent?: string
+  model?: {
+    id: string
+    providerID: string
+    variant?: string
+  }
+  version: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  time: {
+    created: number
+    updated: number
+    compacting?: number
+    archived?: number
+  }
+  permission?: PermissionRuleset
+  revert?: {
+    messageID: string
+    partID?: string
+    snapshot?: string
+    diff?: string
+  }
+}
+
+export type Session6 = {
+  id: string
+  slug: string
+  projectID: string
+  workspaceID?: string
+  directory: string
+  path?: string
+  parentID?: string
+  summary?: {
+    additions: number
+    deletions: number
+    files: number
+    diffs?: Array<SnapshotFileDiff>
+  }
+  cost?: number
+  tokens?: {
+    input: number
+    output: number
+    reasoning: number
+    cache: {
+      read: number
+      write: number
+    }
+  }
+  share?: {
+    url: string
+  }
+  title: string
+  agent?: string
+  model?: {
+    id: string
+    providerID: string
+    variant?: string
+  }
+  version: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  time: {
+    created: number
+    updated: number
+    compacting?: number
+    archived?: number
+  }
+  permission?: PermissionRuleset
+  revert?: {
+    messageID: string
+    partID?: string
+    snapshot?: string
+    diff?: string
+  }
 }
 
 export type TextPartInput = {
@@ -2792,6 +3140,112 @@ export type SubtaskPartInput = {
     modelID: string
   }
   command?: string
+}
+
+export type Session7 = {
+  id: string
+  slug: string
+  projectID: string
+  workspaceID?: string
+  directory: string
+  path?: string
+  parentID?: string
+  summary?: {
+    additions: number
+    deletions: number
+    files: number
+    diffs?: Array<SnapshotFileDiff>
+  }
+  cost?: number
+  tokens?: {
+    input: number
+    output: number
+    reasoning: number
+    cache: {
+      read: number
+      write: number
+    }
+  }
+  share?: {
+    url: string
+  }
+  title: string
+  agent?: string
+  model?: {
+    id: string
+    providerID: string
+    variant?: string
+  }
+  version: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  time: {
+    created: number
+    updated: number
+    compacting?: number
+    archived?: number
+  }
+  permission?: PermissionRuleset
+  revert?: {
+    messageID: string
+    partID?: string
+    snapshot?: string
+    diff?: string
+  }
+}
+
+export type Session8 = {
+  id: string
+  slug: string
+  projectID: string
+  workspaceID?: string
+  directory: string
+  path?: string
+  parentID?: string
+  summary?: {
+    additions: number
+    deletions: number
+    files: number
+    diffs?: Array<SnapshotFileDiff>
+  }
+  cost?: number
+  tokens?: {
+    input: number
+    output: number
+    reasoning: number
+    cache: {
+      read: number
+      write: number
+    }
+  }
+  share?: {
+    url: string
+  }
+  title: string
+  agent?: string
+  model?: {
+    id: string
+    providerID: string
+    variant?: string
+  }
+  version: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  time: {
+    created: number
+    updated: number
+    compacting?: number
+    archived?: number
+  }
+  permission?: PermissionRuleset
+  revert?: {
+    messageID: string
+    partID?: string
+    snapshot?: string
+    diff?: string
+  }
 }
 
 export type EventTuiPromptAppend = {
@@ -2918,6 +3372,8 @@ export type MessageNotFoundError = {
 }
 
 export type SessionDurableEvent =
+  | SessionNextMessageImported
+  | SessionNextShareChanged
   | SessionNextAgentSwitched
   | SessionNextModelSwitched
   | SessionNextMoved
@@ -3047,6 +3503,8 @@ export type V2Event =
   | MessageRemoved
   | MessagePartUpdated
   | MessagePartRemoved
+  | SessionNextMessageImported
+  | SessionNextShareChanged
   | SessionNextAgentSwitched
   | SessionNextModelSwitched
   | SessionNextMoved
@@ -3218,15 +3676,45 @@ export type MoveSessionDestination = {
   directory: string
 }
 
+export type PublicSessionId = string
+
+export type PublicSessionInfo = {
+  id: PublicSessionId
+  url: string
+  expiresAt: number
+  updatedAt: number
+  revision: number
+  updates: boolean
+}
+
+export type SessionMessageAgentSwitched = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  time: {
+    created: number
+  }
+  type: "agent-switched"
+  agent: string
+}
+
 export type ModelRef = {
   id: string
   providerID: string
   variant?: string
 }
 
-export type LocationRef = {
-  directory: string
-  workspaceID?: string
+export type SessionMessageModelSwitched = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  time: {
+    created: number
+  }
+  type: "model-switched"
+  model: ModelRef
 }
 
 export type PromptSource = {
@@ -3248,17 +3736,86 @@ export type PromptAgentAttachment = {
   source?: PromptSource
 }
 
-export type SessionErrorUnknown = {
-  type: "unknown"
-  message: string
+export type SessionMessageUser = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  time: {
+    created: number
+  }
+  text: string
+  files?: Array<PromptFileAttachment>
+  agents?: Array<PromptAgentAttachment>
+  type: "user"
 }
 
-export type SessionErrorAssistant = SessionErrorUnknown | FreeModelLimit
+export type SessionMessageSynthetic = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  time: {
+    created: number
+  }
+  sessionID: string
+  text: string
+  type: "synthetic"
+}
+
+export type SessionMessageSystem = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  time: {
+    created: number
+  }
+  type: "system"
+  text: string
+}
+
+export type SessionMessageShell = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  time: {
+    created: number
+    completed?: number
+  }
+  type: "shell"
+  callID: string
+  command: string
+  output: string
+}
+
+export type SessionMessageAssistantText = {
+  type: "text"
+  id: string
+  text: string
+}
 
 export type LlmProviderMetadata = {
   [key: string]: {
     [key: string]: unknown
   }
+}
+
+export type SessionMessageAssistantReasoning = {
+  type: "reasoning"
+  id: string
+  text: string
+  providerMetadata?: LlmProviderMetadata
+  time?: {
+    created: number
+    completed?: number
+  }
+}
+
+export type SessionMessageToolStatePending = {
+  status: "pending"
+  input: string
 }
 
 export type ToolTextContent = {
@@ -3274,6 +3831,134 @@ export type ToolFileContent = {
 }
 
 export type LlmToolContent = ToolTextContent | ToolFileContent
+
+export type SessionMessageToolStateRunning = {
+  status: "running"
+  input: {
+    [key: string]: unknown
+  }
+  structured: {
+    [key: string]: unknown
+  }
+  content: Array<LlmToolContent>
+}
+
+export type SessionMessageToolStateCompleted = {
+  status: "completed"
+  input: {
+    [key: string]: unknown
+  }
+  attachments?: Array<PromptFileAttachment>
+  content: Array<LlmToolContent>
+  outputPaths?: Array<string>
+  structured: {
+    [key: string]: unknown
+  }
+  result?: unknown
+}
+
+export type SessionErrorUnknown = {
+  type: "unknown"
+  message: string
+}
+
+export type SessionMessageToolStateError = {
+  status: "error"
+  input: {
+    [key: string]: unknown
+  }
+  content: Array<LlmToolContent>
+  structured: {
+    [key: string]: unknown
+  }
+  error: SessionErrorUnknown
+  result?: unknown
+}
+
+export type SessionMessageAssistantTool = {
+  type: "tool"
+  id: string
+  name: string
+  provider?: {
+    executed: boolean
+    metadata?: LlmProviderMetadata
+    resultMetadata?: LlmProviderMetadata
+  }
+  state:
+    | SessionMessageToolStatePending
+    | SessionMessageToolStateRunning
+    | SessionMessageToolStateCompleted
+    | SessionMessageToolStateError
+  time: {
+    created: number
+    ran?: number
+    completed?: number
+    pruned?: number
+  }
+}
+
+export type SessionErrorAssistant = SessionErrorUnknown | FreeModelLimit
+
+export type SessionMessageAssistant = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  time: {
+    created: number
+    completed?: number
+  }
+  type: "assistant"
+  agent: string
+  model: ModelRef
+  content: Array<SessionMessageAssistantText | SessionMessageAssistantReasoning | SessionMessageAssistantTool>
+  snapshot?: {
+    start?: string
+    end?: string
+    files?: Array<string>
+  }
+  finish?: string
+  cost?: number
+  tokens?: {
+    input: number
+    output: number
+    reasoning: number
+    cache: {
+      read: number
+      write: number
+    }
+  }
+  error?: SessionErrorAssistant
+}
+
+export type SessionMessageCompaction = {
+  type: "compaction"
+  reason: "auto" | "manual"
+  summary: string
+  recent: string
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  time: {
+    created: number
+  }
+}
+
+export type SessionMessage =
+  | SessionMessageAgentSwitched
+  | SessionMessageModelSwitched
+  | SessionMessageUser
+  | SessionMessageSynthetic
+  | SessionMessageSystem
+  | SessionMessageShell
+  | SessionMessageAssistant
+  | SessionMessageCompaction
+
+export type LocationRef = {
+  directory: string
+  workspaceID?: string
+}
 
 export type SessionNextRetryError = {
   message: string
@@ -3479,6 +4164,38 @@ export type SyncEventMessagePartRemoved = {
       sessionID: string
       messageID: string
       partID: string
+    }
+  }
+}
+
+export type SyncEventSessionNextMessageImported = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "session.next.message.imported.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      timestamp: number
+      sessionID: string
+      message: SessionMessage
+    }
+  }
+}
+
+export type SyncEventSessionNextShareChanged = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "session.next.share.changed.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      timestamp: number
+      sessionID: string
+      share: PublicSessionInfo
     }
   }
 }
@@ -4055,6 +4772,56 @@ export type PtyTicketConnectToken = {
   expires_in: number
 }
 
+export type PublicSessionConsent = {
+  version: 1
+  public: true
+  updates: boolean
+}
+
+export type PublicSessionPublish = {
+  consent: PublicSessionConsent
+  expiresAt: number
+  previewHash?: string
+  remember?: boolean
+}
+
+export type PublicSessionPart =
+  | {
+      type: "text"
+      text: string
+    }
+  | {
+      type: "reasoning"
+      text: string
+    }
+  | {
+      type: "tool"
+      name: string
+      callID: string
+      status: "completed" | "error" | "interrupted"
+      input: string
+      output: string
+    }
+  | {
+      type: "attachment"
+      name: string
+      mediaType: string
+    }
+
+export type PublicSessionMessage = {
+  id: string
+  role: "user" | "assistant" | "tool" | "shell" | "notice"
+  createdAt: number
+  parts: Array<PublicSessionPart>
+}
+
+export type PublicSessionArchive = {
+  version: 1
+  engine: "v1" | "v2"
+  title: string
+  messages: Array<PublicSessionMessage>
+}
+
 export type WorkspaceEventConnectionStatus = {
   workspaceID: string
   status: "connected" | "connecting" | "disconnected" | "error"
@@ -4125,6 +4892,7 @@ export type SessionV2Info = {
     archived?: number
   }
   title: string
+  share?: PublicSessionInfo
   location: LocationRef
   subpath?: string
   revert?: RevertState
@@ -4147,221 +4915,43 @@ export type SessionInputAdmitted = {
   promotedSeq?: number
 }
 
-export type SessionMessageAgentSwitched = {
+export type SessionNextMessageImported = {
   id: string
   metadata?: {
     [key: string]: unknown
   }
-  time: {
-    created: number
+  type: "session.next.message.imported"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
   }
-  type: "agent-switched"
-  agent: string
+  location?: LocationRef
+  data: {
+    timestamp: number
+    sessionID: string
+    message: SessionMessage
+  }
 }
 
-export type SessionMessageModelSwitched = {
+export type SessionNextShareChanged = {
   id: string
   metadata?: {
     [key: string]: unknown
   }
-  time: {
-    created: number
+  type: "session.next.share.changed"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
   }
-  type: "model-switched"
-  model: ModelRef
-}
-
-export type SessionMessageUser = {
-  id: string
-  metadata?: {
-    [key: string]: unknown
-  }
-  time: {
-    created: number
-  }
-  text: string
-  files?: Array<PromptFileAttachment>
-  agents?: Array<PromptAgentAttachment>
-  type: "user"
-}
-
-export type SessionMessageSynthetic = {
-  id: string
-  metadata?: {
-    [key: string]: unknown
-  }
-  time: {
-    created: number
-  }
-  sessionID: string
-  text: string
-  type: "synthetic"
-}
-
-export type SessionMessageSystem = {
-  id: string
-  metadata?: {
-    [key: string]: unknown
-  }
-  time: {
-    created: number
-  }
-  type: "system"
-  text: string
-}
-
-export type SessionMessageShell = {
-  id: string
-  metadata?: {
-    [key: string]: unknown
-  }
-  time: {
-    created: number
-    completed?: number
-  }
-  type: "shell"
-  callID: string
-  command: string
-  output: string
-}
-
-export type SessionMessageAssistantText = {
-  type: "text"
-  id: string
-  text: string
-}
-
-export type SessionMessageAssistantReasoning = {
-  type: "reasoning"
-  id: string
-  text: string
-  providerMetadata?: LlmProviderMetadata
-  time?: {
-    created: number
-    completed?: number
+  location?: LocationRef
+  data: {
+    timestamp: number
+    sessionID: string
+    share: PublicSessionInfo
   }
 }
-
-export type SessionMessageToolStatePending = {
-  status: "pending"
-  input: string
-}
-
-export type SessionMessageToolStateRunning = {
-  status: "running"
-  input: {
-    [key: string]: unknown
-  }
-  structured: {
-    [key: string]: unknown
-  }
-  content: Array<LlmToolContent>
-}
-
-export type SessionMessageToolStateCompleted = {
-  status: "completed"
-  input: {
-    [key: string]: unknown
-  }
-  attachments?: Array<PromptFileAttachment>
-  content: Array<LlmToolContent>
-  outputPaths?: Array<string>
-  structured: {
-    [key: string]: unknown
-  }
-  result?: unknown
-}
-
-export type SessionMessageToolStateError = {
-  status: "error"
-  input: {
-    [key: string]: unknown
-  }
-  content: Array<LlmToolContent>
-  structured: {
-    [key: string]: unknown
-  }
-  error: SessionErrorUnknown
-  result?: unknown
-}
-
-export type SessionMessageAssistantTool = {
-  type: "tool"
-  id: string
-  name: string
-  provider?: {
-    executed: boolean
-    metadata?: LlmProviderMetadata
-    resultMetadata?: LlmProviderMetadata
-  }
-  state:
-    | SessionMessageToolStatePending
-    | SessionMessageToolStateRunning
-    | SessionMessageToolStateCompleted
-    | SessionMessageToolStateError
-  time: {
-    created: number
-    ran?: number
-    completed?: number
-    pruned?: number
-  }
-}
-
-export type SessionMessageAssistant = {
-  id: string
-  metadata?: {
-    [key: string]: unknown
-  }
-  time: {
-    created: number
-    completed?: number
-  }
-  type: "assistant"
-  agent: string
-  model: ModelRef
-  content: Array<SessionMessageAssistantText | SessionMessageAssistantReasoning | SessionMessageAssistantTool>
-  snapshot?: {
-    start?: string
-    end?: string
-    files?: Array<string>
-  }
-  finish?: string
-  cost?: number
-  tokens?: {
-    input: number
-    output: number
-    reasoning: number
-    cache: {
-      read: number
-      write: number
-    }
-  }
-  error?: SessionErrorAssistant
-}
-
-export type SessionMessageCompaction = {
-  type: "compaction"
-  reason: "auto" | "manual"
-  summary: string
-  recent: string
-  id: string
-  metadata?: {
-    [key: string]: unknown
-  }
-  time: {
-    created: number
-  }
-}
-
-export type SessionMessage =
-  | SessionMessageAgentSwitched
-  | SessionMessageModelSwitched
-  | SessionMessageUser
-  | SessionMessageSynthetic
-  | SessionMessageSystem
-  | SessionMessageShell
-  | SessionMessageAssistant
-  | SessionMessageCompaction
 
 export type SessionNextAgentSwitched = {
   id: string
@@ -6500,6 +7090,26 @@ export type EventMessagePartRemoved = {
     sessionID: string
     messageID: string
     partID: string
+  }
+}
+
+export type EventSessionNextMessageImported = {
+  id: string
+  type: "session.next.message.imported"
+  properties: {
+    timestamp: number
+    sessionID: string
+    message: SessionMessage
+  }
+}
+
+export type EventSessionNextShareChanged = {
+  id: string
+  type: "session.next.share.changed"
+  properties: {
+    timestamp: number
+    sessionID: string
+    share: PublicSessionInfo
   }
 }
 
@@ -10101,7 +10711,7 @@ export type SessionListResponses = {
   /**
    * List of sessions
    */
-  200: Array<Session>
+  200: Array<Session1>
 }
 
 export type SessionListResponse = SessionListResponses[keyof SessionListResponses]
@@ -10143,7 +10753,7 @@ export type SessionCreateResponses = {
   /**
    * Successfully created session
    */
-  200: Session
+  200: Session3
 }
 
 export type SessionCreateResponse = SessionCreateResponses[keyof SessionCreateResponses]
@@ -10193,9 +10803,9 @@ export type SessionDeleteData = {
 
 export type SessionDeleteErrors = {
   /**
-   * BadRequest | InvalidRequestError
+   * BadRequest | PublicSessionError | InvalidRequestError
    */
-  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  400: EffectHttpApiErrorBadRequest | PublicSessionError | InvalidRequestError
   /**
    * NotFoundError
    */
@@ -10252,7 +10862,7 @@ export type SessionGetResponses = {
   /**
    * Get session
    */
-  200: Session
+  200: Session2
 }
 
 export type SessionGetResponse = SessionGetResponses[keyof SessionGetResponses]
@@ -10295,7 +10905,7 @@ export type SessionUpdateResponses = {
   /**
    * Successfully updated session
    */
-  200: Session
+  200: Session4
 }
 
 export type SessionUpdateResponse = SessionUpdateResponses[keyof SessionUpdateResponses]
@@ -10329,7 +10939,7 @@ export type SessionChildrenResponses = {
   /**
    * List of children
    */
-  200: Array<Session>
+  200: Array<Session1>
 }
 
 export type SessionChildrenResponse = SessionChildrenResponses[keyof SessionChildrenResponses]
@@ -10640,7 +11250,7 @@ export type SessionForkResponses = {
   /**
    * 200
    */
-  200: Session
+  200: Session5
 }
 
 export type SessionForkResponse = SessionForkResponses[keyof SessionForkResponses]
@@ -10727,9 +11337,9 @@ export type SessionUnshareData = {
 
 export type SessionUnshareErrors = {
   /**
-   * Bad request
+   * PublicSessionError | InvalidRequestError
    */
-  400: BadRequestError
+  400: PublicSessionError | InvalidRequestError
   /**
    * NotFoundError
    */
@@ -10750,13 +11360,13 @@ export type SessionUnshareResponses = {
   /**
    * Session without a public share
    */
-  200: Session
+  200: Session6
 }
 
 export type SessionUnshareResponse = SessionUnshareResponses[keyof SessionUnshareResponses]
 
 export type SessionShareData = {
-  body?: never
+  body?: PublicSessionPublish
   path: {
     id: string
   }
@@ -10769,9 +11379,9 @@ export type SessionShareData = {
 
 export type SessionShareErrors = {
   /**
-   * InvalidRequestError
+   * InvalidRequestError | PublicSessionError
    */
-  400: InvalidRequestError
+  400: InvalidRequestError | PublicSessionError
   /**
    * NotFoundError
    */
@@ -10788,10 +11398,78 @@ export type SessionShareResponses = {
   /**
    * Successfully shared session
    */
-  200: Session
+  200: PublicSessionInfo
 }
 
 export type SessionShareResponse = SessionShareResponses[keyof SessionShareResponses]
+
+export type SessionSharePreviewData = {
+  body?: never
+  path: {
+    id: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{id}/share/preview"
+}
+
+export type SessionSharePreviewErrors = {
+  /**
+   * PublicSessionError | InvalidRequestError
+   */
+  400: PublicSessionError | InvalidRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+}
+
+export type SessionSharePreviewError = SessionSharePreviewErrors[keyof SessionSharePreviewErrors]
+
+export type SessionSharePreviewResponses = {
+  /**
+   * PublicSession.Archive
+   */
+  200: PublicSessionArchive
+}
+
+export type SessionSharePreviewResponse = SessionSharePreviewResponses[keyof SessionSharePreviewResponses]
+
+export type SessionShareFlushData = {
+  body?: never
+  path: {
+    id: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{id}/share/flush"
+}
+
+export type SessionShareFlushErrors = {
+  /**
+   * PublicSessionError | InvalidRequestError
+   */
+  400: PublicSessionError | InvalidRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+}
+
+export type SessionShareFlushError = SessionShareFlushErrors[keyof SessionShareFlushErrors]
+
+export type SessionShareFlushResponses = {
+  /**
+   * PublicSession.Info
+   */
+  200: PublicSessionInfo
+}
+
+export type SessionShareFlushResponse = SessionShareFlushResponses[keyof SessionShareFlushResponses]
 
 export type SessionSummarizeData = {
   body?: {
@@ -11019,7 +11697,7 @@ export type SessionRevertResponses = {
   /**
    * Updated session
    */
-  200: Session
+  200: Session7
 }
 
 export type SessionRevertResponse = SessionRevertResponses[keyof SessionRevertResponses]
@@ -11057,7 +11735,7 @@ export type SessionUnrevertResponses = {
   /**
    * Updated session
    */
-  200: Session
+  200: Session8
 }
 
 export type SessionUnrevertResponse = SessionUnrevertResponses[keyof SessionUnrevertResponses]
@@ -11869,9 +12547,9 @@ export type ExperimentalWorkspaceRemoveData = {
 
 export type ExperimentalWorkspaceRemoveErrors = {
   /**
-   * BadRequest | InvalidRequestError
+   * PublicSessionError | BadRequest | InvalidRequestError
    */
-  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  400: PublicSessionError | EffectHttpApiErrorBadRequest | InvalidRequestError
   /**
    * PublicShareRemovalError
    */
@@ -12029,6 +12707,179 @@ export type V2AgentListResponses = {
 }
 
 export type V2AgentListResponse = V2AgentListResponses[keyof V2AgentListResponses]
+
+export type ServerSessionSessionImportArchiveData = {
+  body: {
+    archive: PublicSessionArchive
+    location?: LocationRef
+  }
+  path?: never
+  query?: never
+  url: "/api/session/import"
+}
+
+export type ServerSessionSessionImportArchiveErrors = {
+  /**
+   * PublicSessionError | InvalidRequestError
+   */
+  400: PublicSessionError | InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type ServerSessionSessionImportArchiveError =
+  ServerSessionSessionImportArchiveErrors[keyof ServerSessionSessionImportArchiveErrors]
+
+export type ServerSessionSessionImportArchiveResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: SessionV2Info
+  }
+}
+
+export type ServerSessionSessionImportArchiveResponse =
+  ServerSessionSessionImportArchiveResponses[keyof ServerSessionSessionImportArchiveResponses]
+
+export type ServerSessionSessionUnshareData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: never
+  url: "/api/session/{sessionID}/share"
+}
+
+export type ServerSessionSessionUnshareErrors = {
+  /**
+   * PublicSessionError | InvalidRequestError
+   */
+  400: PublicSessionError | InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type ServerSessionSessionUnshareError =
+  ServerSessionSessionUnshareErrors[keyof ServerSessionSessionUnshareErrors]
+
+export type ServerSessionSessionUnshareResponses = {
+  /**
+   * <No Content>
+   */
+  204: void
+}
+
+export type ServerSessionSessionUnshareResponse =
+  ServerSessionSessionUnshareResponses[keyof ServerSessionSessionUnshareResponses]
+
+export type ServerSessionSessionShareData = {
+  body: PublicSessionPublish
+  path: {
+    sessionID: string
+  }
+  query?: never
+  url: "/api/session/{sessionID}/share"
+}
+
+export type ServerSessionSessionShareErrors = {
+  /**
+   * PublicSessionError | InvalidRequestError
+   */
+  400: PublicSessionError | InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type ServerSessionSessionShareError = ServerSessionSessionShareErrors[keyof ServerSessionSessionShareErrors]
+
+export type ServerSessionSessionShareResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: PublicSessionInfo
+  }
+}
+
+export type ServerSessionSessionShareResponse =
+  ServerSessionSessionShareResponses[keyof ServerSessionSessionShareResponses]
+
+export type ServerSessionSessionSharePreviewData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: never
+  url: "/api/session/{sessionID}/share/preview"
+}
+
+export type ServerSessionSessionSharePreviewErrors = {
+  /**
+   * PublicSessionError | InvalidRequestError
+   */
+  400: PublicSessionError | InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type ServerSessionSessionSharePreviewError =
+  ServerSessionSessionSharePreviewErrors[keyof ServerSessionSessionSharePreviewErrors]
+
+export type ServerSessionSessionSharePreviewResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: PublicSessionArchive
+  }
+}
+
+export type ServerSessionSessionSharePreviewResponse =
+  ServerSessionSessionSharePreviewResponses[keyof ServerSessionSessionSharePreviewResponses]
+
+export type ServerSessionSessionShareFlushData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: never
+  url: "/api/session/{sessionID}/share/flush"
+}
+
+export type ServerSessionSessionShareFlushErrors = {
+  /**
+   * PublicSessionError | InvalidRequestError
+   */
+  400: PublicSessionError | InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type ServerSessionSessionShareFlushError =
+  ServerSessionSessionShareFlushErrors[keyof ServerSessionSessionShareFlushErrors]
+
+export type ServerSessionSessionShareFlushResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: PublicSessionInfo
+  }
+}
+
+export type ServerSessionSessionShareFlushResponse =
+  ServerSessionSessionShareFlushResponses[keyof ServerSessionSessionShareFlushResponses]
 
 export type V2SessionListData = {
   body?: never

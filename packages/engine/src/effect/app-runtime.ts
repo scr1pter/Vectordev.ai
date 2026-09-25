@@ -46,6 +46,7 @@ import { Worktree } from "@/worktree"
 import { Installation } from "@/installation"
 import { ShareNext } from "@/share/share-next"
 import { SessionShare } from "@/share/session"
+import { PublicSessionShare } from "@vectordevai/core/public-session-share"
 import { Npm } from "@vectordevai/core/npm"
 import { memoMap } from "@vectordevai/core/effect/memo-map"
 import { BackgroundJob } from "@/background/job"
@@ -104,6 +105,7 @@ export const AppLayer = AppNodeBuilderV1.build(
     Installation.node,
     ShareNext.node,
     SessionShare.node,
+    PublicSessionShare.node,
   ]),
 ).pipe(Layer.provideMerge(AppNodeBuilderV1.build(Ripgrep.node)), Layer.provideMerge(Observability.layer))
 

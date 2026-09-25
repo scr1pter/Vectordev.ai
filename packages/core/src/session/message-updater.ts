@@ -100,6 +100,8 @@ export function update(adapter: Adapter, event: SessionEvent.Event) {
 
   return Effect.gen(function* () {
     yield* SessionEvent.All.match(event, {
+      "session.next.message.imported": (event) => adapter.appendMessage(event.data.message),
+      "session.next.share.changed": () => Effect.void,
       "session.next.agent.switched": (event) => {
         return adapter.appendMessage(
           SessionMessage.AgentSwitched.make({

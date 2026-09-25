@@ -536,9 +536,9 @@ const layer = Layer.effect(
           }
         }
 
-        // Vector has no hosted session-sharing service, including for legacy repo configs.
-        result.share = "disabled"
-        result.autoshare = false
+        // Preferences do not grant publication consent. The sharing service only
+        // auto-publishes after explicit, account-bound consent in the trusted store.
+        result.share ??= result.autoshare ? "auto" : "manual"
 
         if (Flag.VECTOR_DISABLE_AUTOCOMPACT) {
           result.compaction = { ...result.compaction, auto: false }

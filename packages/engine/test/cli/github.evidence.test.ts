@@ -247,6 +247,19 @@ describe("buildEvidenceBody", () => {
     expect(body).not.toContain("social-cards")
   })
 
+  test("includes the verified public session URL only for a published task", () => {
+    const shareUrl = "https://vectordev.ai/s/" + "a".repeat(32)
+    const body = buildEvidenceBody({
+      response: "Completed the task.",
+      changes: [],
+      messages: [],
+      judge: undefined,
+      runUrl: "https://github.com/o/r/actions/runs/1",
+      shareUrl,
+    })
+    expect(body).toContain(`[Public session](${shareUrl})`)
+  })
+
   test("stays under GitHub's body limit, keeping the evidence and Closes line", () => {
     const body = buildEvidenceBody({
       response: "word ".repeat(20_000),

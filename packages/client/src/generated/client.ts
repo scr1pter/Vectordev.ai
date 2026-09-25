@@ -4,6 +4,16 @@ import type {
   LocationGetOutput,
   AgentsListInput,
   AgentsListOutput,
+  SessionsImportArchiveInput,
+  SessionsImportArchiveOutput,
+  SessionsShareInput,
+  SessionsShareOutput,
+  SessionsSharePreviewInput,
+  SessionsSharePreviewOutput,
+  SessionsShareFlushInput,
+  SessionsShareFlushOutput,
+  SessionsUnshareInput,
+  SessionsUnshareOutput,
   SessionsListInput,
   SessionsListOutput,
   SessionsCreateInput,
@@ -285,6 +295,68 @@ export function make(options: ClientOptions) {
         ),
     },
     sessions: {
+      importArchive: (input: SessionsImportArchiveInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: SessionsImportArchiveOutput }>(
+          {
+            method: "POST",
+            path: `/api/session/import`,
+            body: { archive: input["archive"], location: input["location"] },
+            successStatus: 200,
+            declaredStatuses: [400, 401],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
+      share: (input: SessionsShareInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: SessionsShareOutput }>(
+          {
+            method: "POST",
+            path: `/api/session/${encodeURIComponent(input.sessionID)}/share`,
+            body: {
+              consent: input["consent"],
+              expiresAt: input["expiresAt"],
+              previewHash: input["previewHash"],
+              remember: input["remember"],
+            },
+            successStatus: 200,
+            declaredStatuses: [400, 401],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
+      sharePreview: (input: SessionsSharePreviewInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: SessionsSharePreviewOutput }>(
+          {
+            method: "GET",
+            path: `/api/session/${encodeURIComponent(input.sessionID)}/share/preview`,
+            successStatus: 200,
+            declaredStatuses: [400, 401],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
+      shareFlush: (input: SessionsShareFlushInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: SessionsShareFlushOutput }>(
+          {
+            method: "POST",
+            path: `/api/session/${encodeURIComponent(input.sessionID)}/share/flush`,
+            successStatus: 200,
+            declaredStatuses: [400, 401],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
+      unshare: (input: SessionsUnshareInput, requestOptions?: RequestOptions) =>
+        request<SessionsUnshareOutput>(
+          {
+            method: "DELETE",
+            path: `/api/session/${encodeURIComponent(input.sessionID)}/share`,
+            successStatus: 204,
+            declaredStatuses: [400, 401],
+            empty: true,
+          },
+          requestOptions,
+        ),
       list: (input?: SessionsListInput, requestOptions?: RequestOptions) =>
         request<SessionsListOutput>(
           {

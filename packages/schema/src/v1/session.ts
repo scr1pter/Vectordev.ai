@@ -12,6 +12,7 @@ import { SessionID } from "../session-id"
 import { WorkspaceID } from "../workspace-id"
 import { PermissionV1 } from "./permission"
 import { FreeModelLimitReason } from "../free-model"
+import { PublicSession } from "../public-session"
 
 const Timestamp = Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0))
 
@@ -532,9 +533,12 @@ const SessionTokens = Schema.Struct({
   }),
 })
 
-const SessionShare = Schema.Struct({
-  url: Schema.String,
-})
+const SessionShare = Schema.Union([
+  PublicSession.Info,
+  Schema.Struct({
+    url: Schema.String,
+  }),
+])
 
 const SessionRevert = Schema.Struct({
   messageID: MessageID,

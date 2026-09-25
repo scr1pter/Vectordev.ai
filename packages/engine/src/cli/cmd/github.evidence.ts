@@ -47,6 +47,8 @@ export type EvidenceInput = {
   judge?: string
   /** Absolute URL of the GitHub Actions run. */
   runUrl: string
+  /** Verified Vector-owned public session URL, present only after explicit publication. */
+  shareUrl?: string
   /** Issue number the PR closes. */
   closes?: number
   /** Extra line under the response, e.g. "Triggered by workflow_dispatch". */
@@ -198,7 +200,7 @@ function assemble(input: EvidenceInput, response: string, checks: string[]): str
   lines.push(formatJudge(input.judge))
   lines.push("")
   if (input.closes !== undefined) lines.push(`Closes #${input.closes}`, "")
-  lines.push("---", `[Vector run](${input.runUrl})`)
+  lines.push("---", `[Vector run](${input.runUrl})${input.shareUrl ? ` · [Public session](${input.shareUrl})` : ""}`)
   return lines.join("\n")
 }
 

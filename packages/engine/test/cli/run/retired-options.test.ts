@@ -11,12 +11,12 @@ cliIt.live("unknown options print the actual argument error", ({ vector }) =>
   }),
 )
 
-cliIt.live("retired share option warns and continues the task", ({ llm, vector }) =>
+cliIt.live("explicit sharing requires a Vector account before publication", ({ vector }) =>
   Effect.gen(function* () {
-    yield* llm.text("hello")
     const result = yield* vector.run("say hello", { extraArgs: ["--share"] })
-    expect(result.exitCode).toBe(0)
-    expect(result.stderr).toContain("--share is ignored")
+    expect(result.exitCode).toBe(1)
+    expect(result.stderr).toContain("Sign in to your Vector account before sharing")
+    expect(result.stderr).not.toContain("--share is ignored")
   }),
 )
 

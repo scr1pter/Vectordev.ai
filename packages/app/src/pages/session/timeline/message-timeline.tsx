@@ -62,6 +62,7 @@ import { SessionCostReadout } from "@/components/session-cost-readout"
 import { useDialog } from "@vectordevai/ui/context/dialog"
 import { useLanguage } from "@/context/language"
 import { useSessionKey } from "@/pages/session/session-layout"
+import { createSessionOwnership } from "@/pages/session/session-ownership"
 import { useSettings } from "@/context/settings"
 import { useTabs } from "@/context/tabs"
 import { legacySessionHref, requireServerKey, sessionHref } from "@/utils/session-route"
@@ -349,6 +350,11 @@ export function MessageTimeline(props: {
   const settings = useSettings()
   const tabs = useTabs()
   const dialog = useDialog()
+  const shareSession = async (sessionID: string) => {
+    const owner = shareOwnership.capture()
+    const { DialogShareSession } = await import("@/components/dialog-share-session")
+    owner.run(() => dialog.show(() => <DialogShareSession sessionID={sessionID} />))
+  }
   const language = useLanguage()
   const backgroundTasks = useBackgroundTasks()
   // Task parts render as Background tasks chips: one per phase, drawn at its
@@ -359,6 +365,7 @@ export function MessageTimeline(props: {
     return backgroundTasks.locate(part.id)
   }
   const { params, sessionKey } = useSessionKey()
+  const shareOwnership = createSessionOwnership(sessionKey)
   const ownerSessionKey = sessionKey()
   const cached = timelineCache.get(ownerSessionKey)
   const initialMeasurements = cached?.measurements
@@ -1620,6 +1627,9 @@ export function MessageTimeline(props: {
                             />
                             <DropdownMenu.Portal>
                               <DropdownMenu.Content style={{ "min-width": "104px" }}>
+                                <DropdownMenu.Item onSelect={() => void shareSession(id)}>
+                                  <DropdownMenu.ItemLabel>Share publicly…</DropdownMenu.ItemLabel>
+                                </DropdownMenu.Item>
                                 <DropdownMenu.Item
                                   onSelect={() => dialog.show(() => <DialogRenameSession sessionID={id} />)}
                                 >
@@ -1654,6 +1664,7 @@ export function MessageTimeline(props: {
                           />
                           <MenuV2.Portal>
                             <MenuV2.Content style={{ width: "200px", "min-width": "200px" }}>
+                              <MenuV2.Item onSelect={() => void shareSession(id)}>Share publicly…</MenuV2.Item>
                               <MenuV2.Item onSelect={() => dialog.show(() => <DialogRenameSession sessionID={id} />)}>
                                 {language.t("common.rename")}
                               </MenuV2.Item>

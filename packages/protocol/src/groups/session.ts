@@ -21,6 +21,7 @@ import { Model } from "@vectordevai/schema/model"
 import { Location } from "@vectordevai/schema/location"
 import { Revert } from "@vectordevai/schema/revert"
 import { SessionEvent } from "@vectordevai/schema/session-event"
+import { PublicSession } from "@vectordevai/schema/public-session"
 
 const SessionsQueryFields = {
   workspace: Workspace.ID.pipe(Schema.optional),
@@ -105,6 +106,34 @@ export const SessionsQuery = Schema.Struct({
 
 export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLocationMiddleware: Context.Key<I, S>) =>
   HttpApiGroup.make("server.session")
+    .add(
+      HttpApiEndpoint.post("session.importArchive", "/api/session/import", {
+        payload: Schema.Struct({ archive: PublicSession.Archive, location: Location.Ref.pipe(Schema.optional) }),
+        success: Schema.Struct({ data: Session.Info }),
+        error: PublicSession.Error,
+      }),
+      HttpApiEndpoint.post("session.share", "/api/session/:sessionID/share", {
+        params: { sessionID: Session.ID },
+        payload: PublicSession.Publish,
+        success: Schema.Struct({ data: PublicSession.Info }),
+        error: PublicSession.Error,
+      }),
+      HttpApiEndpoint.get("session.sharePreview", "/api/session/:sessionID/share/preview", {
+        params: { sessionID: Session.ID },
+        success: Schema.Struct({ data: PublicSession.Archive }),
+        error: PublicSession.Error,
+      }),
+      HttpApiEndpoint.post("session.shareFlush", "/api/session/:sessionID/share/flush", {
+        params: { sessionID: Session.ID },
+        success: Schema.Struct({ data: PublicSession.Info }),
+        error: PublicSession.Error,
+      }),
+      HttpApiEndpoint.delete("session.unshare", "/api/session/:sessionID/share", {
+        params: { sessionID: Session.ID },
+        success: HttpApiSchema.NoContent,
+        error: PublicSession.Error,
+      }),
+    )
     .add(
       HttpApiEndpoint.get("session.list", "/api/session", {
         query: SessionsQuery,

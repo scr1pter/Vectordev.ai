@@ -9,8 +9,8 @@ import { WorkspaceEvent } from "../src/workspace-event"
 
 describe("public event manifest", () => {
   test("owns the complete public event surface", () => {
-    expect(EventManifest.ServerDefinitions.length).toBe(60)
-    expect(EventManifest.Definitions.length).toBe(90)
+    expect(EventManifest.ServerDefinitions.length).toBe(62)
+    expect(EventManifest.Definitions.length).toBe(92)
     expect(SessionV1.Event.Definitions).toEqual([
       SessionV1.Event.Created,
       SessionV1.Event.Updated,
@@ -23,8 +23,8 @@ describe("public event manifest", () => {
       SessionV1.Event.Diff,
       SessionV1.Event.Error,
     ])
-    expect(EventManifest.Latest.size).toBe(90)
-    expect(EventManifest.Durable.size).toBe(36)
+    expect(EventManifest.Latest.size).toBe(92)
+    expect(EventManifest.Durable.size).toBe(38)
   })
 
   test("uses canonical definitions for current public events", () => {
@@ -51,7 +51,7 @@ describe("public event manifest", () => {
     expect(EventManifest.Latest.get("session.next.revert.cleared")).toBe(SessionEvent.RevertEvent.Cleared)
     expect(EventManifest.Latest.get("session.next.revert.committed")).toBe(SessionEvent.RevertEvent.Committed)
     // The durable session block ends with the revert events, so the V1 live tail starts right after them.
-    expect(EventManifest.Definitions.slice(42, 48)).toEqual([
+    expect(EventManifest.Definitions.slice(44, 50)).toEqual([
       SessionEvent.RevertEvent.Staged,
       SessionEvent.RevertEvent.Cleared,
       SessionEvent.RevertEvent.Committed,

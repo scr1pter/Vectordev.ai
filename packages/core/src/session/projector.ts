@@ -15,6 +15,7 @@ import { WorkspaceV2 } from "../workspace"
 import { SessionContextEpoch } from "./context-epoch"
 import { MessageTable, PartTable, SessionInputTable, SessionMessageTable, SessionTable } from "./sql"
 import type { DeepMutable } from "../schema"
+import { PublicSession } from "@vectordevai/schema/public-session"
 
 type DatabaseService = Database.Interface["db"]
 
@@ -61,7 +62,8 @@ function sessionRow(info: SessionV1.SessionInfo): typeof SessionTable.$inferInse
     agent: info.agent,
     model: info.model,
     version: info.version,
-    share_url: info.share?.url,
+    share_url: Schema.is(PublicSession.Info)(info.share) ? undefined : info.share?.url,
+    share_info: Schema.is(PublicSession.Info)(info.share) ? info.share : null,
     summary_additions: info.summary?.additions,
     summary_deletions: info.summary?.deletions,
     summary_files: info.summary?.files,
@@ -219,6 +221,15 @@ const layer = Layer.effectDiscard(
   Effect.gen(function* () {
     const events = yield* EventV2.Service
     const { db } = yield* Database.Service
+    yield* events.project(SessionEvent.MessageImported, (event) => insertMessage(db, event, event.data.message))
+    yield* events.project(SessionEvent.ShareChanged, (event) =>
+      db
+        .update(SessionTable)
+        .set({ share_info: event.data.share })
+        .where(eq(SessionTable.id, event.data.sessionID))
+        .run()
+        .pipe(Effect.orDie),
+    )
     yield* events.project(SessionV1.Event.Created, (event) =>
       Effect.gen(function* () {
         const stored = yield* db

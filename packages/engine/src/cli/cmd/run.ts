@@ -17,7 +17,8 @@ import type { Argv } from "yargs"
 import path from "path"
 import { pathToFileURL } from "url"
 import { open } from "node:fs/promises"
-import { Effect } from "effect"
+import { Effect, Schema } from "effect"
+import { PublicSession } from "@vectordevai/schema/public-session"
 import { UI } from "../ui"
 import { effectCmd } from "../effect-cmd"
 import { EOL } from "os"
@@ -161,8 +162,8 @@ export const RunCommand = effectCmd({
       })
       .option("share", {
         type: "boolean",
-        hidden: true,
-        describe: "Deprecated public sharing option",
+        describe:
+          "publish this session’s conversation, code, and tool output publicly on vectordev.ai, including future updates (30 days)",
       })
       .option("model", {
         type: "string",
@@ -263,7 +264,6 @@ export const RunCommand = effectCmd({
         describe: "enable direct interactive demo slash commands; pass one as the message to run it immediately",
       }),
   handler: Effect.fn("Cli.run")(function* (args) {
-    if (args.share) UI.error("Session sharing is not available in Vector; --share is ignored.")
     const { Agent } = yield* Effect.promise(() => import("@/agent/agent"))
     const { RuntimeFlags } = yield* Effect.promise(() => import("@/effect/runtime-flags"))
     const { InstanceRef } = yield* Effect.promise(() => import("@/effect/instance-ref"))
@@ -456,7 +456,57 @@ export const RunCommand = effectCmd({
         return message.slice(0, 50) + (message.length > 50 ? "..." : "")
       }
 
+      const publications = new Map<string, VectorClient>()
+
       async function session(sdk: VectorClient): Promise<SessionInfo | undefined> {
+        const selected = await resolveSession(sdk)
+        if (!selected || !args.share) return selected
+        const result = await sdk.session.share({
+          sessionID: selected.id,
+          publicSessionPublish: {
+            consent: { version: PublicSession.CONSENT_VERSION, public: true, updates: true },
+            expiresAt: Date.now() + PublicSession.MAX_AGE_MS,
+          },
+        })
+        if (result.error) throw new Error(formatRunError(result.error))
+        const share = Schema.decodeUnknownSync(PublicSession.Info)(result.data)
+        publications.set(selected.id, sdk)
+        if (args.format === "json") {
+          process.stdout.write(
+            JSON.stringify({ type: "share", timestamp: Date.now(), sessionID: selected.id, share }) + EOL,
+          )
+          return selected
+        }
+        process.stderr.write(
+          `Public session: ${share.url}${EOL}Conversation text, code, and tool output, including future updates, are public until ${new Date(share.expiresAt).toISOString()}.${EOL}`,
+        )
+        return selected
+      }
+
+      async function withSharing<A>(work: () => Promise<A>): Promise<A> {
+        try {
+          return await work()
+        } finally {
+          for (const [sessionID, sdk] of publications) {
+            const result = await sdk.session.shareFlush({ sessionID }).catch((error: unknown) => ({ error }))
+            if (!result.error) continue
+            const message = `Could not finish updating the public session: ${formatRunError(result.error)}`
+            if (args.format === "json")
+              process.stdout.write(
+                JSON.stringify({
+                  type: "error",
+                  timestamp: Date.now(),
+                  sessionID,
+                  error: { name: "PublicSessionError", data: { message } },
+                }) + EOL,
+              )
+            if (args.format !== "json") UI.error(message)
+            process.exitCode = 1
+          }
+        }
+      }
+
+      async function resolveSession(sdk: VectorClient): Promise<SessionInfo | undefined> {
         if (args.session) {
           const current = await sdk.session
             .get({
@@ -925,23 +975,25 @@ export const RunCommand = effectCmd({
         }) as typeof globalThis.fetch
 
         try {
-          return await runInteractiveLocalMode({
-            directory: directory ?? root,
-            fetch: fetchFn,
-            resolveAgent: localAgent,
-            session,
-            createSession: createFreshSession,
-            agent: args.agent,
-            model,
-            variant: args.variant,
-            replay,
-            replayLimit: args["replay-limit"],
-            files,
-            initialInput,
-            thinking,
-            backgroundSubagents: flags.experimentalBackgroundSubagents,
-            demo: args.demo,
-          })
+          return await withSharing(() =>
+            runInteractiveLocalMode({
+              directory: directory ?? root,
+              fetch: fetchFn,
+              resolveAgent: localAgent,
+              session,
+              createSession: createFreshSession,
+              agent: args.agent,
+              model,
+              variant: args.variant,
+              replay,
+              replayLimit: args["replay-limit"],
+              files,
+              initialInput,
+              thinking,
+              backgroundSubagents: flags.experimentalBackgroundSubagents,
+              demo: args.demo,
+            }),
+          )
         } catch (error) {
           dieInteractive(error)
         }
@@ -949,7 +1001,7 @@ export const RunCommand = effectCmd({
 
       if (args.attach) {
         const sdk = attachSDK(directory)
-        return await execute(sdk)
+        return await withSharing(() => execute(sdk))
       }
 
       const fetchFn = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -965,7 +1017,7 @@ export const RunCommand = effectCmd({
         fetch: fetchFn,
         directory,
       })
-      await execute(sdk)
+      await withSharing(() => execute(sdk))
     })
   }),
 })

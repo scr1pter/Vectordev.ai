@@ -1,12 +1,13 @@
 import { Session } from "@/session/session"
-import { SessionV1 } from "@vectordevai/core/v1/session"
-import { MessageV2 } from "../../session/message-v2"
 import { SessionID } from "../../session/schema"
 import { effectCmd, fail } from "../effect-cmd"
 import { UI } from "../ui"
 import * as prompts from "@clack/prompts"
 import { EOL } from "os"
-import { Effect } from "effect"
+import { Effect, Schema } from "effect"
+import { PublicSession } from "@vectordevai/schema/public-session"
+import { PublicSessionShare } from "@vectordevai/core/public-session-share"
+import { SessionArchive } from "@vectordevai/core/share/archive"
 
 function redact(kind: string, id: string, value: string) {
   return value.trim() ? `[redacted:${kind}:${id}]` : value
@@ -24,7 +25,7 @@ function span(id: string, value: { value: string; start: number; end: number }) 
   }
 }
 
-function diff(kind: string, diffs: { file?: string; patch?: string }[] | undefined) {
+function diff<T extends { file?: string; patch?: string }>(kind: string, diffs: readonly T[] | undefined) {
   return diffs?.map((item, i) => ({
     ...item,
     file: item.file === undefined ? undefined : redact(`${kind}-file`, String(i), item.file),
@@ -32,7 +33,10 @@ function diff(kind: string, diffs: { file?: string; patch?: string }[] | undefin
   }))
 }
 
-function source(part: SessionV1.FilePart) {
+type ArchivePart = SessionArchive.Legacy["messages"][number]["parts"][number]
+type ArchiveFile = Extract<ArchivePart, { type: "file" }>
+
+function source(part: ArchiveFile) {
   if (!part.source) return part.source
   if (part.source.type === "symbol") {
     return {
@@ -57,7 +61,7 @@ function source(part: SessionV1.FilePart) {
   }
 }
 
-function filepart(part: SessionV1.FilePart): SessionV1.FilePart {
+function filepart(part: ArchiveFile): ArchiveFile {
   return {
     ...part,
     url: redact("file-url", part.id, part.url),
@@ -66,7 +70,7 @@ function filepart(part: SessionV1.FilePart): SessionV1.FilePart {
   }
 }
 
-function part(part: SessionV1.Part): SessionV1.Part {
+function part(part: ArchivePart): ArchivePart {
   switch (part.type) {
     case "text":
       return {
@@ -160,7 +164,7 @@ function part(part: SessionV1.Part): SessionV1.Part {
 
 const partFn = part
 
-function sanitize(data: { info: Session.Info; messages: SessionV1.WithParts[] }) {
+function sanitize(data: SessionArchive.Legacy) {
   return {
     info: {
       ...data.info,
@@ -228,8 +232,12 @@ export const ExportCommand = effectCmd({
         describe: "session id to export",
         type: "string",
       })
+      .option("public", {
+        describe: "write a portable archive of visible history for local use",
+        type: "boolean",
+      })
       .option("sanitize", {
-        describe: "redact sensitive transcript and file data",
+        describe: "redact sensitive transcript and file data (native sessions use the portable format)",
         type: "boolean",
       }),
   handler: Effect.fn("Cli.export")(function* (args) {
@@ -237,7 +245,12 @@ export const ExportCommand = effectCmd({
   }),
 })
 
-const run = Effect.fn("Cli.export.body")(function* (args: { sessionID?: string; sanitize?: boolean }) {
+const run = Effect.fn("Cli.export.body")(function* (args: {
+  sessionID?: string
+  sanitize?: boolean
+  public?: boolean
+}) {
+  const shares = yield* PublicSessionShare.Service
   const svc = yield* Session.Service
   let sessionID = args.sessionID ? SessionID.make(args.sessionID) : undefined
   process.stderr.write(`Exporting session: ${sessionID ?? "latest"}\n`)
@@ -278,15 +291,42 @@ const run = Effect.fn("Cli.export.body")(function* (args: { sessionID?: string; 
     prompts.outro("Exporting session...", { output: process.stderr })
   }
 
-  // Match legacy try/catch — catches both typed failures and defects
-  // (Session.Service.get throws NotFoundError as a defect, not a typed E).
   return yield* Effect.gen(function* () {
-    const sessionInfo = yield* svc.get(sessionID!)
-    const messages = yield* svc.messages({ sessionID: sessionInfo.id })
-
-    const exportData = { info: sessionInfo, messages }
-
-    process.stdout.write(JSON.stringify(args.sanitize ? sanitize(exportData) : exportData, null, 2))
+    const local = args.public ? undefined : yield* shares.export({ sessionID: sessionID! })
+    const output =
+      !local || (args.sanitize && "engine" in local)
+        ? yield* shares
+            .preview({ sessionID: sessionID! })
+            .pipe(Effect.map((archive) => (args.sanitize ? sanitizePublic(archive) : archive)))
+        : "engine" in local
+          ? Schema.encodeSync(SessionArchive.Native)(local)
+          : args.sanitize
+            ? sanitize(local)
+            : local
+    process.stdout.write(JSON.stringify(output, null, 2))
     process.stdout.write(EOL)
-  }).pipe(Effect.catchCause(() => fail(`Session not found: ${sessionID!}`)))
+  }).pipe(Effect.catchTag("PublicSessionError", (error) => fail(error.message)))
 })
+
+function sanitizePublic(archive: PublicSession.Archive): PublicSession.Archive {
+  return {
+    ...archive,
+    title: redact("session-title", "archive", archive.title),
+    messages: archive.messages.map((message) => ({
+      ...message,
+      parts: message.parts.map((part, index): PublicSession.Part => {
+        const id = `${message.id}:${index}`
+        if (part.type === "tool")
+          return {
+            ...part,
+            name: redact("tool-name", id, part.name),
+            callID: redact("tool-call", id, part.callID),
+            input: redact("tool-input", id, part.input),
+            output: redact("tool-output", id, part.output),
+          }
+        if (part.type === "attachment") return { ...part, name: redact("file-name", id, part.name) }
+        return { ...part, text: redact(part.type, id, part.text) }
+      }),
+    })),
+  }
+}

@@ -168,20 +168,17 @@ describe("review verbs in the task job", () => {
     expect(posted(again.calls)).toBe(false)
   })
 
-  test("githubRun answers before it resolves the model or touches git", async () => {
-    const source = await Bun.file(new URL("../../src/cli/cmd/github.handler.ts", import.meta.url)).text()
-    const run = source.slice(source.indexOf("export const githubRun"))
-    const routed = run.indexOf("taskRoutePlan(route")
-    expect(routed).toBeGreaterThan(0)
-    for (const later of [
-      "await normalizeModel()",
-      "await checkoutLocalBranch(",
-      "await checkoutNewBranch(",
-      "await chat(",
-    ])
-      expect(run.indexOf(later)).toBeGreaterThan(routed)
-    expect(run.slice(routed, run.indexOf("await normalizeModel()"))).toContain("process.exit(0)")
-  })
+  cliIt.live("a review verb returns normally without resolving a model or touching git", ({ vector }) =>
+    Effect.gen(function* () {
+      const result = yield* vector.spawn(["github", "run", "--event", JSON.stringify(comment("/vector review"))], {
+        env: { GITHUB_TOKEN: "", MODEL: "unconfigured-fixture/must-not-run" },
+      })
+      expect(result.exitCode, result.stderr).toBe(0)
+      expect(result.timedOut).toBe(false)
+      expect(result.stdout).toContain(REVIEW_NEEDS_WORKFLOW)
+      expect(result.stdout + result.stderr).not.toContain("Public session:")
+    }),
+  )
 
   test("tasks run; stray review events fail pointing at the review command unless the workflow gave a PROMPT", () => {
     expect(

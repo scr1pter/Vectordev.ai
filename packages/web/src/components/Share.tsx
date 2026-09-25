@@ -1,662 +1,188 @@
-import { For, Show, onMount, Suspense, onCleanup, createMemo, createSignal, SuspenseList } from "solid-js"
-import { DateTime } from "luxon"
-import { createStore, reconcile } from "solid-js/store"
-import { IconArrowDown } from "./icons"
-import { IconVector } from "./icons/custom"
-import { ShareI18nProvider, formatCurrency, formatNumber, normalizeLocale } from "./share/common"
-import styles from "./share.module.css"
-import type { SessionV1 } from "@vectordevai/core/v1/session"
-import type { ModelV2 } from "@vectordevai/core/model"
-import type { ProviderV2 } from "@vectordevai/core/provider"
-import type { Message } from "vector/session/message"
-import type { Session } from "vector/session/session"
-import { Part, ProviderIcon } from "./share/part"
-import { parseShareStreamEvent, shareMessageBelongsToSession } from "./share/stream"
+import { For, Show, onCleanup, onMount } from "solid-js"
+import { createStore } from "solid-js/store"
+import type { PublicSession } from "@vectordevai/schema/public-session"
+import { ContentMarkdown } from "./share/content-markdown"
+import { readSnapshot, shareID } from "./share/snapshot"
+import "./share/public-share.css"
 
-type MessageWithParts = SessionV1.Info & { parts: SessionV1.Part[] }
-
-const legacyMessageID = (value: string) => value as SessionV1.MessageID
-const legacyPartID = (value: string) => value as SessionV1.PartID
-const legacyModelID = (value: string) => value as ModelV2.ID
-const legacyProviderID = (value: string) => value as ProviderV2.ID
-const legacyToolInput = (value: unknown) =>
-  typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
-
-type Status = "disconnected" | "connecting" | "connected" | "error" | "reconnecting"
-
-function scrollToAnchor(id: string) {
-  const el = document.getElementById(id)
-  if (!el) return
-
-  el.scrollIntoView({ behavior: "smooth" })
-}
-
-function getStatusText(status: [Status, string?], messages: Record<string, string>): string {
-  switch (status[0]) {
-    case "connected":
-      return messages.status_connected_waiting
-    case "connecting":
-      return messages.status_connecting
-    case "disconnected":
-      return messages.status_disconnected
-    case "reconnecting":
-      return messages.status_reconnecting
-    case "error":
-      return status[1] || messages.status_error
-    default:
-      return messages.status_unknown
-  }
-}
-
-export default function Share(props: {
-  id: string
-  api: string
-  info: Session.Info
-  messages: { locale: string } & Record<string, string>
-}) {
-  let lastScrollY = 0
-  let hasScrolledToAnchor = false
-  let scrollTimeout: number | undefined
-  let scrollSentinel: HTMLElement | undefined
-  let scrollObserver: IntersectionObserver | undefined
-
-  const params = new URLSearchParams(window.location.search)
-  const debug = params.get("debug") === "true"
-
-  const [showScrollButton, setShowScrollButton] = createSignal(false)
-  const [isButtonHovered, setIsButtonHovered] = createSignal(false)
-  const [isNearBottom, setIsNearBottom] = createSignal(false)
-
-  const [store, setStore] = createStore<{
-    info?: Session.Info
-    messages: Record<string, MessageWithParts>
+export default function Share() {
+  const [state, setState] = createStore<{
+    snapshot?: PublicSession.Snapshot
+    status: string
+    unavailable: boolean
+    copied: boolean
   }>({
-    info: {
-      id: props.info.id,
-      slug: props.info.slug,
-      projectID: props.info.projectID,
-      directory: props.info.directory,
-      title: props.info.title,
-      version: props.info.version,
-      time: {
-        created: props.info.time.created,
-        updated: props.info.time.updated,
-      },
-    },
-    messages: {},
+    status: "Loading public session…",
+    unavailable: false,
+    copied: false,
   })
-  const messages = createMemo(() => Object.values(store.messages).toSorted((a, b) => a.id?.localeCompare(b.id)))
-  const [connectionStatus, setConnectionStatus] = createSignal<[Status, string?]>(["disconnected"])
-
   onMount(() => {
-    const apiUrl = props.api
-
-    if (!props.id) {
-      setConnectionStatus(["error", props.messages.error_id_not_found])
+    const id = shareID(window.location.pathname)
+    if (!id) {
+      setState({ unavailable: true, status: "This public session link is invalid." })
       return
     }
-
-    if (!apiUrl) {
-      console.error("API URL not found in environment variables")
-      setConnectionStatus(["error", props.messages.error_api_url_not_found])
-      return
+    const lifetime = new AbortController()
+    let poll: ReturnType<typeof setTimeout> | undefined
+    let expiry: ReturnType<typeof setTimeout> | undefined
+    let busy = false
+    const unavailable = () => {
+      lifetime.abort()
+      clearTimeout(poll)
+      clearTimeout(expiry)
+      setState({
+        snapshot: undefined,
+        unavailable: true,
+        status: "This public session has expired or is no longer shared.",
+      })
     }
-
-    let reconnectTimer: number | undefined
-    let socket: WebSocket | null = null
-
-    // Function to create and set up WebSocket with auto-reconnect
-    const setupWebSocket = () => {
-      // Close any existing connection
-      if (socket) {
-        socket.close()
-      }
-
-      setConnectionStatus(["connecting"])
-
-      // Always use secure WebSocket protocol (wss)
-      const wsBaseUrl = apiUrl.replace(/^https?:\/\//, "wss://")
-      const wsUrl = `${wsBaseUrl}/share_poll?id=${props.id}`
-      // Create WebSocket connection
-      socket = new WebSocket(wsUrl)
-
-      // Handle connection opening
-      socket.onopen = () => {
-        setConnectionStatus(["connected"])
-      }
-
-      // Handle incoming messages
-      socket.onmessage = (event) => {
-        try {
-          const streamEvent = parseShareStreamEvent(JSON.parse(event.data), props.info.id)
-          if (!streamEvent) return
-          if (streamEvent.type === "info") {
-            setStore("info", reconcile(streamEvent.content as Session.Info))
-            return
-          }
-          if (streamEvent.type === "message") {
-            const incoming =
-              "metadata" in streamEvent.content
-                ? fromV1(streamEvent.content as Message.Info)
-                : (streamEvent.content as MessageWithParts)
-            const content = {
-              ...incoming,
-              parts: incoming.parts ?? store.messages[streamEvent.messageID]?.parts ?? [],
-            }
-            if (!shareMessageBelongsToSession(content, props.info.id, streamEvent.messageID)) return
-            setStore("messages", streamEvent.messageID, reconcile(content))
-          }
-          if (streamEvent.type === "part") {
-            if (
-              !shareMessageBelongsToSession(store.messages[streamEvent.messageID], props.info.id, streamEvent.messageID)
-            )
-              return
-            const content = streamEvent.content as SessionV1.Part
-            setStore("messages", streamEvent.messageID, "parts", (arr) => {
-              const index = arr.findIndex((x) => x.id === content.id)
-              if (index === -1) arr.push(content)
-              if (index > -1) arr[index] = content
-              return [...arr]
-            })
-          }
-        } catch (error) {
-          console.error("Error parsing WebSocket message:", error)
+    const checkExpiry = () => {
+      if (!state.snapshot || lifetime.signal.aborted) return
+      const remaining = state.snapshot.expiresAt - Date.now()
+      if (remaining <= 0) return unavailable()
+      // Timers can fire just before their deadline, and refresh may be in flight.
+      expiry = setTimeout(checkExpiry, Math.min(remaining, 86_400_000))
+    }
+    const refresh = async () => {
+      if (state.snapshot && state.snapshot.expiresAt <= Date.now()) return unavailable()
+      if (busy || lifetime.signal.aborted || state.unavailable) return
+      busy = true
+      const result = await readSnapshot(id, lifetime.signal).then(
+        (snapshot) => ({ snapshot }),
+        () => ({ error: true as const }),
+      )
+      busy = false
+      if (lifetime.signal.aborted) return
+      if ("error" in result) {
+        setState(
+          "status",
+          state.snapshot
+            ? "Connection interrupted. Showing the last checked copy; it may have changed or been removed."
+            : "The public copy could not be loaded. Retrying shortly…",
+        )
+      } else {
+        if (!result.snapshot) return unavailable()
+        if (!state.snapshot || result.snapshot.revision >= state.snapshot.revision) {
+          setState({ snapshot: result.snapshot, status: "" })
+          clearTimeout(expiry)
+          checkExpiry()
         }
       }
-
-      // Handle errors
-      socket.onerror = (error) => {
-        console.error("WebSocket error:", error)
-        setConnectionStatus(["error", props.messages.error_connection_failed])
-      }
-
-      // Handle connection close and reconnection
-      socket.onclose = () => {
-        setConnectionStatus(["reconnecting"])
-
-        // Try to reconnect after 2 seconds
-        clearTimeout(reconnectTimer)
-        reconnectTimer = window.setTimeout(setupWebSocket, 2000) as unknown as number
-      }
+      clearTimeout(poll)
+      // Check revocation even for a one-time snapshot; never persist the transcript locally.
+      poll = setTimeout(() => {
+        if (!document.hidden) void refresh()
+      }, 15_000)
     }
-
-    // Initial connection
-    setupWebSocket()
-
-    // Clean up on component unmount
+    const visible = () => {
+      if (!document.hidden) void refresh()
+    }
+    document.addEventListener("visibilitychange", visible)
+    void refresh()
     onCleanup(() => {
-      if (socket) {
-        socket.close()
-      }
-      clearTimeout(reconnectTimer)
+      lifetime.abort()
+      clearTimeout(poll)
+      clearTimeout(expiry)
+      document.removeEventListener("visibilitychange", visible)
     })
-  })
-
-  function checkScrollNeed() {
-    const currentScrollY = window.scrollY
-    const isScrollingDown = currentScrollY > lastScrollY
-    const scrolled = currentScrollY > 200 // Show after scrolling 200px
-
-    // Only show when scrolling down, scrolled enough, and not near bottom
-    const shouldShow = isScrollingDown && scrolled && !isNearBottom()
-
-    // Update last scroll position
-    lastScrollY = currentScrollY
-
-    if (shouldShow) {
-      setShowScrollButton(true)
-      // Clear existing timeout
-      if (scrollTimeout) {
-        clearTimeout(scrollTimeout)
-      }
-      // Hide button after 3 seconds of no scrolling (unless hovered)
-      scrollTimeout = window.setTimeout(() => {
-        if (!isButtonHovered()) {
-          setShowScrollButton(false)
-        }
-      }, 1500)
-    } else if (!isButtonHovered()) {
-      // Only hide if not hovered (to prevent disappearing while user is about to click)
-      setShowScrollButton(false)
-      if (scrollTimeout) {
-        clearTimeout(scrollTimeout)
-      }
-    }
-  }
-
-  onMount(() => {
-    lastScrollY = window.scrollY // Initialize scroll position
-
-    // Create sentinel element
-    const sentinel = document.createElement("div")
-    sentinel.style.height = "1px"
-    sentinel.style.position = "absolute"
-    sentinel.style.bottom = "100px"
-    sentinel.style.width = "100%"
-    sentinel.style.pointerEvents = "none"
-    document.body.appendChild(sentinel)
-
-    // Create intersection observer
-    const observer = new IntersectionObserver((entries) => {
-      setIsNearBottom(entries[0].isIntersecting)
-    })
-    observer.observe(sentinel)
-
-    // Store references for cleanup
-    scrollSentinel = sentinel
-    scrollObserver = observer
-
-    checkScrollNeed()
-    window.addEventListener("scroll", checkScrollNeed)
-    window.addEventListener("resize", checkScrollNeed)
-  })
-
-  onCleanup(() => {
-    window.removeEventListener("scroll", checkScrollNeed)
-    window.removeEventListener("resize", checkScrollNeed)
-
-    // Clean up observer and sentinel
-    if (scrollObserver) {
-      scrollObserver.disconnect()
-    }
-    if (scrollSentinel) {
-      document.body.removeChild(scrollSentinel)
-    }
-
-    if (scrollTimeout) {
-      clearTimeout(scrollTimeout)
-    }
-  })
-
-  const data = createMemo(() => {
-    const result = {
-      rootDir: undefined as string | undefined,
-      created: undefined as number | undefined,
-      completed: undefined as number | undefined,
-      messages: [] as MessageWithParts[],
-      models: {} as Record<string, string[]>,
-      cost: 0,
-      tokens: {
-        input: 0,
-        output: 0,
-        reasoning: 0,
-      },
-    }
-
-    if (!store.info) return result
-
-    result.created = store.info.time.created
-
-    const msgs = messages()
-    for (let i = 0; i < msgs.length; i++) {
-      const msg = msgs[i]
-
-      result.messages.push(msg)
-
-      if (msg.role === "assistant") {
-        result.cost += msg.cost
-        result.tokens.input += msg.tokens.input
-        result.tokens.output += msg.tokens.output
-        result.tokens.reasoning += msg.tokens.reasoning
-
-        result.models[`${msg.providerID} ${msg.modelID}`] = [msg.providerID, msg.modelID]
-
-        if (msg.path.root) {
-          result.rootDir = msg.path.root
-        }
-
-        if (msg.time.completed) {
-          result.completed = msg.time.completed
-        }
-      }
-    }
-    return result
   })
 
   return (
-    <Show when={store.info}>
-      <ShareI18nProvider messages={props.messages}>
-        <main classList={{ [styles.root]: true, "not-content": true }}>
-          <div data-component="header">
-            <h1 data-component="header-title">{store.info?.title}</h1>
-            <div data-component="header-details">
-              <ul data-component="header-stats">
-                <li title={props.messages.vector_version} data-slot="item">
-                  <div data-slot="icon" title={props.messages.vector_name}>
-                    <IconVector width={16} height={16} />
-                  </div>
-                  <Show when={store.info?.version} fallback="v0.0.1">
-                    <span>v{store.info?.version}</span>
-                  </Show>
-                </li>
-                {Object.values(data().models).length > 0 ? (
-                  <For each={Object.values(data().models)}>
-                    {([provider, model]) => (
-                      <li data-slot="item">
-                        <div data-slot="icon" title={provider}>
-                          <ProviderIcon model={model} />
-                        </div>
-                        <span data-slot="model">{model}</span>
-                      </li>
-                    )}
-                  </For>
-                ) : (
-                  <li>
-                    <span data-element-label>{props.messages.models}</span>
-                    <span data-placeholder>&mdash;</span>
-                  </li>
+    <main class="public-session">
+      <nav>
+        <a href="https://vectordev.ai" aria-label="Vector home">
+          VECTOR
+        </a>
+        <span>Public session</span>
+      </nav>
+      <Show when={state.status}>
+        <p role="status" class="public-notice">
+          {state.status}
+        </p>
+      </Show>
+      <Show when={state.snapshot} keyed>
+        {(snapshot) => (
+          <>
+            <header>
+              <p class="public-eyebrow">Shared with anyone who has the link</p>
+              <h1>{snapshot.archive.title || "Untitled session"}</h1>
+              <p>
+                This is a read-only transcript. Conversation text, reasoning, code, and tool input or output may contain
+                sensitive information. Attachments are descriptions only; no files or images are fetched.
+              </p>
+              <p>
+                {snapshot.updates
+                  ? "Future conversation updates are public and checked periodically."
+                  : "This is a one-time snapshot; future conversation updates are not included."}
+              </p>
+              <p class="public-meta">
+                Updated {new Date(snapshot.updatedAt).toLocaleString()} · Expires{" "}
+                {new Date(snapshot.expiresAt).toLocaleString()} · {snapshot.archive.messages.length} messages
+              </p>
+              <button
+                onClick={() =>
+                  void navigator.clipboard.writeText(snapshot.url).then(
+                    () => setState("copied", true),
+                    () => setState("status", "Could not copy the link. Copy it from your address bar."),
+                  )
+                }
+              >
+                {state.copied ? "Link copied" : "Copy public link"}
+              </button>
+            </header>
+            <section aria-label="Shared transcript">
+              <For each={snapshot.archive.messages}>
+                {(message, index) => (
+                  <article id={`message-${index() + 1}`} class="public-message">
+                    <div class="public-message-heading">
+                      <h2>{message.role}</h2>
+                      <a href={`#message-${index() + 1}`}>#{index() + 1}</a>
+                      <time>{new Date(message.createdAt).toLocaleString()}</time>
+                    </div>
+                    <For each={message.parts}>{(part) => <TranscriptPart part={part} />}</For>
+                  </article>
                 )}
-              </ul>
-              <div
-                data-component="header-time"
-                title={DateTime.fromMillis(data().created || 0)
-                  .setLocale(normalizeLocale(props.messages.locale))
-                  .toLocaleString(DateTime.DATETIME_FULL_WITH_SECONDS)}
-              >
-                {DateTime.fromMillis(data().created || 0)
-                  .setLocale(normalizeLocale(props.messages.locale))
-                  .toLocaleString(DateTime.DATETIME_MED)}
-              </div>
-            </div>
-          </div>
-
-          <div>
-            <Show when={data().messages.length > 0} fallback={<p>{props.messages.waiting_for_messages}</p>}>
-              <div class={styles.parts}>
-                <SuspenseList revealOrder="forwards">
-                  <For each={data().messages}>
-                    {(msg, msgIndex) => {
-                      const filteredParts = createMemo(() =>
-                        msg.parts.filter((x, index) => {
-                          if (x.type === "step-start" && index > 0) return false
-                          if (x.type === "snapshot") return false
-                          if (x.type === "patch") return false
-                          if (x.type === "step-finish") return false
-                          if (x.type === "text" && x.synthetic === true) return false
-                          if (x.type === "text" && !x.text) return false
-                          if (x.type === "tool" && (x.state.status === "pending" || x.state.status === "running"))
-                            return false
-                          return true
-                        }),
-                      )
-
-                      return (
-                        <Suspense>
-                          <For each={filteredParts()}>
-                            {(part, partIndex) => {
-                              const last = () =>
-                                data().messages.length === msgIndex() + 1 && filteredParts().length === partIndex() + 1
-
-                              onMount(() => {
-                                const hash = window.location.hash.slice(1)
-                                // Wait till all parts are loaded
-                                if (hash !== "" && !hasScrolledToAnchor && last()) {
-                                  hasScrolledToAnchor = true
-                                  scrollToAnchor(hash)
-                                }
-                              })
-
-                              return <Part last={last()} part={part} index={partIndex()} message={msg} />
-                            }}
-                          </For>
-                        </Suspense>
-                      )
-                    }}
-                  </For>
-                </SuspenseList>
-                <div data-section="part" data-part-type="summary">
-                  <div data-section="decoration">
-                    <span data-status={connectionStatus()[0]}></span>
-                  </div>
-                  <div data-section="content">
-                    <p data-section="copy">{getStatusText(connectionStatus(), props.messages)}</p>
-                    <ul data-section="stats">
-                      <li>
-                        <span data-element-label>{props.messages.cost}</span>
-                        {data().cost !== undefined ? (
-                          <span>{formatCurrency(data().cost, props.messages.locale)}</span>
-                        ) : (
-                          <span data-placeholder>&mdash;</span>
-                        )}
-                      </li>
-                      <li>
-                        <span data-element-label>{props.messages.input_tokens}</span>
-                        {data().tokens.input ? (
-                          <span>{formatNumber(data().tokens.input, props.messages.locale)}</span>
-                        ) : (
-                          <span data-placeholder>&mdash;</span>
-                        )}
-                      </li>
-                      <li>
-                        <span data-element-label>{props.messages.output_tokens}</span>
-                        {data().tokens.output ? (
-                          <span>{formatNumber(data().tokens.output, props.messages.locale)}</span>
-                        ) : (
-                          <span data-placeholder>&mdash;</span>
-                        )}
-                      </li>
-                      <li>
-                        <span data-element-label>{props.messages.reasoning_tokens}</span>
-                        {data().tokens.reasoning ? (
-                          <span>{formatNumber(data().tokens.reasoning, props.messages.locale)}</span>
-                        ) : (
-                          <span data-placeholder>&mdash;</span>
-                        )}
-                      </li>
-                    </ul>
-                  </div>
-                </div>
-              </div>
-            </Show>
-          </div>
-
-          <Show when={debug}>
-            <div style={{ margin: "2rem 0" }}>
-              <div
-                style={{
-                  border: "1px solid #ccc",
-                  padding: "1rem",
-                  "overflow-y": "auto",
-                }}
-              >
-                <Show when={data().messages.length > 0} fallback={<p>{props.messages.waiting_for_messages}</p>}>
-                  <ul style={{ "list-style-type": "none", padding: 0 }}>
-                    <For each={data().messages}>
-                      {(msg) => (
-                        <li
-                          style={{
-                            padding: "0.75rem",
-                            margin: "0.75rem 0",
-                            "box-shadow": "0 1px 3px rgba(0,0,0,0.1)",
-                          }}
-                        >
-                          <div>
-                            <strong>{props.messages.debug_key}:</strong> {msg.id}
-                          </div>
-                          <pre>{JSON.stringify(msg, null, 2)}</pre>
-                        </li>
-                      )}
-                    </For>
-                  </ul>
-                </Show>
-              </div>
-            </div>
-          </Show>
-
-          <Show when={showScrollButton()}>
-            <button
-              type="button"
-              class={styles["scroll-button"]}
-              onClick={() => document.body.scrollIntoView({ behavior: "smooth", block: "end" })}
-              onMouseEnter={() => {
-                setIsButtonHovered(true)
-                if (scrollTimeout) {
-                  clearTimeout(scrollTimeout)
-                }
-              }}
-              onMouseLeave={() => {
-                setIsButtonHovered(false)
-                if (showScrollButton()) {
-                  scrollTimeout = window.setTimeout(() => {
-                    if (!isButtonHovered()) {
-                      setShowScrollButton(false)
-                    }
-                  }, 3000)
-                }
-              }}
-              title={props.messages.scroll_to_bottom}
-              aria-label={props.messages.scroll_to_bottom}
-            >
-              <IconArrowDown width={20} height={20} />
-            </button>
-          </Show>
-        </main>
-      </ShareI18nProvider>
-    </Show>
+              </For>
+              <Show when={snapshot.archive.messages.length === 0}>
+                <p>No visible messages in this snapshot.</p>
+              </Show>
+            </section>
+            <footer>
+              Unsharing removes Vector’s public copy. People who already saw this session may have saved their own
+              copies.
+            </footer>
+          </>
+        )}
+      </Show>
+    </main>
   )
 }
 
-export function fromV1(v1: Message.Info): MessageWithParts {
-  if (v1.role === "assistant") {
-    return {
-      id: legacyMessageID(v1.id),
-      sessionID: v1.metadata.sessionID,
-      role: "assistant",
-      parentID: legacyMessageID(""),
-      agent: "build",
-      time: {
-        created: v1.metadata.time.created,
-        completed: v1.metadata.time.completed,
-      },
-      cost: v1.metadata.assistant!.cost,
-      path: v1.metadata.assistant!.path,
-      summary: v1.metadata.assistant!.summary,
-      tokens: v1.metadata.assistant!.tokens ?? {
-        input: 0,
-        output: 0,
-        cache: {
-          read: 0,
-          write: 0,
-        },
-        reasoning: 0,
-      },
-      modelID: v1.metadata.assistant!.modelID,
-      providerID: v1.metadata.assistant!.providerID,
-      mode: "build",
-      error: v1.metadata.error,
-      parts: v1.parts.flatMap((part, index): SessionV1.Part[] => {
-        const base = {
-          id: legacyPartID(`prt_legacy_${index}`),
-          messageID: legacyMessageID(v1.id),
-          sessionID: v1.metadata.sessionID,
-        }
-        if (part.type === "text") {
-          return [
-            {
-              ...base,
-              type: "text",
-              text: part.text,
-            },
-          ]
-        }
-        if (part.type === "step-start") {
-          return [
-            {
-              ...base,
-              type: "step-start",
-            },
-          ]
-        }
-        if (part.type === "tool-invocation") {
-          return [
-            {
-              ...base,
-              type: "tool",
-              callID: part.toolInvocation.toolCallId,
-              tool: part.toolInvocation.toolName,
-              state: (() => {
-                if (part.toolInvocation.state === "partial-call") {
-                  return {
-                    status: "pending",
-                    input: {},
-                    raw: "",
-                  }
-                }
-
-                const { title, time, ...metadata } = v1.metadata.tool[part.toolInvocation.toolCallId]
-                if (part.toolInvocation.state === "call") {
-                  return {
-                    status: "running",
-                    input: legacyToolInput(part.toolInvocation.args),
-                    time: {
-                      start: time.start,
-                    },
-                  }
-                }
-
-                if (part.toolInvocation.state === "result") {
-                  return {
-                    status: "completed",
-                    input: legacyToolInput(part.toolInvocation.args),
-                    output: part.toolInvocation.result,
-                    title,
-                    time,
-                    metadata,
-                  }
-                }
-                throw new Error("unknown tool invocation state")
-              })(),
-            },
-          ]
-        }
-        return []
-      }),
-    }
-  }
-
-  if (v1.role === "user") {
-    return {
-      id: legacyMessageID(v1.id),
-      sessionID: v1.metadata.sessionID,
-      role: "user",
-      agent: "user",
-      model: {
-        providerID: legacyProviderID(""),
-        modelID: legacyModelID(""),
-      },
-      time: {
-        created: v1.metadata.time.created,
-      },
-      parts: v1.parts.flatMap((part, index): SessionV1.Part[] => {
-        const base = {
-          id: legacyPartID(`prt_legacy_${index}`),
-          messageID: legacyMessageID(v1.id),
-          sessionID: v1.metadata.sessionID,
-        }
-        if (part.type === "text") {
-          return [
-            {
-              ...base,
-              type: "text",
-              text: part.text,
-            },
-          ]
-        }
-        if (part.type === "file") {
-          return [
-            {
-              ...base,
-              type: "file",
-              mime: part.mediaType,
-              filename: part.filename,
-              url: part.url,
-            },
-          ]
-        }
-        return []
-      }),
-    }
-  }
-
-  throw new Error("unknown message type")
+function TranscriptPart(props: { part: PublicSession.Part }) {
+  const part = props.part
+  if (part.type === "text") return <ContentMarkdown text={part.text} expand />
+  if (part.type === "reasoning")
+    return (
+      <details>
+        <summary>Reasoning</summary>
+        <ContentMarkdown text={part.text} expand />
+      </details>
+    )
+  if (part.type === "attachment")
+    return (
+      <p class="public-attachment">
+        Attachment: {part.name} ({part.mediaType}) — description only
+      </p>
+    )
+  return (
+    <details class="public-tool">
+      <summary>
+        {part.name} · {part.status}
+      </summary>
+      <h3>Input</h3>
+      <pre>{part.input}</pre>
+      <h3>Output</h3>
+      <pre>{part.output}</pre>
+    </details>
+  )
 }

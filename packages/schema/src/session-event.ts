@@ -12,6 +12,7 @@ import { SessionID } from "./session-id"
 import { Location } from "./location"
 import { SessionMessage } from "./session-message"
 import { Revert } from "./revert"
+import { PublicSession } from "./public-session"
 
 export { FileAttachment }
 
@@ -452,7 +453,21 @@ export namespace RevertEvent {
   })
 }
 
+export const MessageImported = Event.define({
+  type: "session.next.message.imported",
+  ...options,
+  schema: { ...Base, message: SessionMessage.Message },
+})
+
+export const ShareChanged = Event.define({
+  type: "session.next.share.changed",
+  ...options,
+  schema: { ...Base, share: Schema.NullOr(PublicSession.Info) },
+})
+
 export const DurableDefinitions = Event.inventory(
+  MessageImported,
+  ShareChanged,
   AgentSwitched,
   ModelSwitched,
   Moved,
@@ -485,6 +500,8 @@ export const DurableDefinitions = Event.inventory(
 )
 
 export const Definitions = Event.inventory(
+  MessageImported,
+  ShareChanged,
   AgentSwitched,
   ModelSwitched,
   Moved,

@@ -38,6 +38,9 @@ import { SessionRevert } from "./session/revert"
 import { Revert } from "@vectordevai/schema/revert"
 import { FSUtil } from "./fs-util"
 import { SessionDurable } from "@vectordevai/schema/durable-event-manifest"
+import { PublicSession } from "@vectordevai/schema/public-session"
+import { PublicSessionShare } from "./public-session-share"
+import { Config } from "./config"
 
 export const RevertState = Revert.State
 export type RevertState = Revert.State
@@ -112,6 +115,16 @@ export type MessageNotFoundError = SessionRevert.MessageNotFoundError
 export type Error = NotFoundError | MessageDecodeError | OperationUnavailableError | PromptConflictError
 
 export interface Interface {
+  readonly importArchive: (input: {
+    archive: PublicSession.Archive
+    location: Location.Ref
+  }) => Effect.Effect<SessionSchema.Info, PublicSession.Error>
+  readonly share: (
+    input: { sessionID: SessionSchema.ID } & PublicSession.Publish,
+  ) => Effect.Effect<PublicSession.Info, PublicSession.Error>
+  readonly sharePreview: (sessionID: SessionSchema.ID) => Effect.Effect<PublicSession.Archive, PublicSession.Error>
+  readonly shareFlush: (sessionID: SessionSchema.ID) => Effect.Effect<PublicSession.Info, PublicSession.Error>
+  readonly unshare: (sessionID: SessionSchema.ID) => Effect.Effect<void, PublicSession.Error>
   readonly list: (input?: ListInput) => Effect.Effect<SessionSchema.Info[]>
   readonly create: (input: CreateInput) => Effect.Effect<SessionSchema.Info>
   readonly get: (sessionID: SessionSchema.ID) => Effect.Effect<SessionSchema.Info, NotFoundError>
@@ -192,9 +205,18 @@ const layer = Layer.effect(
     const db = database.db
     const events = yield* EventV2.Service
     const projects = yield* ProjectV2.Service
+    const sharing = yield* PublicSessionShare.Service
     const execution = yield* SessionExecution.Service
     const store = yield* SessionStore.Service
     const locations = yield* LocationServiceMap.Service
+    const sharingPreference = (location: Location.Ref) =>
+      Effect.gen(function* () {
+        const configuration = yield* Config.Service
+        return Config.latest(yield* configuration.entries(), "share")
+      }).pipe(
+        Effect.provide(locations.get(location)),
+        Effect.catchCause(() => Effect.succeed("disabled" as const)),
+      )
     const decodeMessage = Schema.decodeUnknownEffect(SessionMessage.Message)
     const isDurableSessionEvent = Schema.is(SessionEvent.Durable)
     const decode = (row: typeof SessionMessageTable.$inferSelect) =>
@@ -209,6 +231,25 @@ const layer = Layer.effect(
       )
 
     const result = Service.of({
+      share: (input) =>
+        Effect.gen(function* () {
+          const session = yield* store.get(input.sessionID)
+          if (!session) return yield* new PublicSession.Error({ code: "NOT_FOUND", message: "Session not found." })
+          if ((yield* sharingPreference(session.location)) === "disabled")
+            return yield* new PublicSession.Error({
+              code: "CONSENT_REQUIRED",
+              message: "Session sharing is disabled for this location.",
+            })
+          return yield* sharing.publish({ ...input, engine: "v2" })
+        }),
+      importArchive: (input) =>
+        Effect.gen(function* () {
+          const imported = yield* sharing.import({ ...input, targetEngine: "v2" })
+          return yield* result.get(imported.sessionID).pipe(Effect.orDie)
+        }),
+      sharePreview: (sessionID) => sharing.preview({ sessionID, engine: "v2" }),
+      shareFlush: sharing.flush,
+      unshare: sharing.unshare,
       create: Effect.fn("V2Session.create")(function* (input) {
         const sessionID = input.id ?? SessionSchema.ID.create()
         const recorded = yield* store.get(sessionID)
@@ -261,6 +302,16 @@ const layer = Layer.effect(
             }),
           )
         if (projected.type === "existing") return projected.session
+        const preference = yield* sharingPreference(input.location)
+        if (
+          preference !== "disabled" &&
+          (preference === "auto" || ["1", "true"].includes(process.env.VECTOR_AUTO_SHARE ?? ""))
+        )
+          yield* sharing
+            .auto({ sessionID, engine: "v2" })
+            .pipe(
+              Effect.catch((error) => Effect.logWarning("Automatic session sharing deferred", { code: error.code })),
+            )
         // TODO: Restore recorded sessions onto replacement synchronized workspaces in a future API slice.
         return yield* result.get(sessionID).pipe(Effect.orDie)
       }),
@@ -490,5 +541,6 @@ export const node = makeGlobalNode({
     SessionStore.node,
     LocationServiceMap.node,
     SessionProjector.node,
+    PublicSessionShare.node,
   ],
 })

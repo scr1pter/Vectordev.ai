@@ -41,6 +41,8 @@ import { buildEvidenceBody, judgeTextFromMessages, parseNumstat, type EvidenceCh
 import { sameLogin } from "./github.review-api"
 import { TASK_MENTIONS, mentionsFrom, routeGithubEvent, type GithubRoute } from "./github.route"
 import { WORKFLOW_FILE, buildWorkflowYaml } from "./github.workflow"
+import { PublicSession } from "@vectordevai/schema/public-session"
+import { PublicSessionShare } from "@vectordevai/core/public-session-share"
 
 type GitHubAuthor = {
   login: string
@@ -184,6 +186,7 @@ export const githubInstall = Effect.fn("Cli.github.install")(function* () {
       const model = await promptModel()
       //const key = await promptKey()
       const autoReview = await promptAutoReview()
+      const share = await promptShare()
       const monthlyUsd = await promptMonthlyLimit()
       prompts.log.info(reviewCostLine({ model: `${provider}/${model}`, monthlyUsd }))
 
@@ -306,6 +309,16 @@ export const githubInstall = Effect.fn("Cli.github.install")(function* () {
         return choice
       }
 
+      async function promptShare() {
+        const value = await prompts.confirm({
+          message:
+            "Publish task conversations, code, and tool output publicly on vectordev.ai, including future updates?",
+          initialValue: false,
+        })
+        if (prompts.isCancel(value)) throw new UI.CancelledError()
+        return value
+      }
+
       async function promptMonthlyLimit() {
         const value = await prompts.text({
           message: "Monthly limit for review spending in USD (0 for no limit)",
@@ -329,6 +342,7 @@ export const githubInstall = Effect.fn("Cli.github.install")(function* () {
             model,
             keys,
             autoReview,
+            share,
             ...(monthlyUsd !== undefined ? { monthlyUsd } : {}),
             version: InstallationVersion,
           }),
@@ -345,6 +359,7 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: {
   token?: string
   context?: Context
   route?: GithubRoute
+  share?: PublicSession.Consent
 }) {
   const ctx = yield* InstanceRef
   if (!ctx) return yield* Effect.die("InstanceRef not provided")
@@ -353,6 +368,7 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: {
   const sessionPrompt = yield* SessionPrompt.Service
   const providerSvc = yield* Provider.Service
   const events = yield* EventV2Bridge.Service
+  const shareSvc = args.share ? yield* PublicSessionShare.Service : undefined
   const runLocalEffect = <A, E>(effect: Effect.Effect<A, E>) =>
     Effect.runPromise(effect.pipe(Effect.provideService(InstanceRef, ctx)))
   yield* Effect.promise(async () => {
@@ -361,7 +377,7 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: {
     const context = args.context ?? githubEventContext(args)
     if (!SUPPORTED_EVENTS.includes(context.eventName as (typeof SUPPORTED_EVENTS)[number])) {
       core.setFailed(`Unsupported event type: ${context.eventName}`)
-      process.exit(1)
+      return
     }
 
     // Reviews have their own job. A review verb that reaches this one (an old workflow, or a stray call) gets one
@@ -378,15 +394,15 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: {
           log: (line) => console.log(line),
         })
       else console.log(REVIEW_NEEDS_WORKFLOW)
-      process.exit(0)
+      return
     }
     if (routed.action === "exit") {
       console.log(routed.message)
-      process.exit(0)
+      return
     }
     if (routed.action === "fail") {
       core.setFailed(routed.message)
-      process.exit(1)
+      return
     }
 
     // Determine event category for routing
@@ -431,6 +447,7 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: {
     // does not let Actions create PRs; the follow-up comment carries it.
     let prBlocked: string | undefined
     let exitCode = 0
+    const published: { sessionID?: SessionID; info?: PublicSession.Info } = {}
     type PromptFiles = Awaited<ReturnType<typeof getUserPrompt>>["promptFiles"]
     const triggerCommentId = isCommentEvent
       ? (payload as IssueCommentEvent | PullRequestReviewCommentEvent).comment.id
@@ -493,6 +510,19 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: {
           ],
         }),
       )
+      if (shareSvc && args.share) {
+        console.log("Publishing this task conversation, code, and tool output publicly, including future updates.")
+        published.info = await runLocalEffect(
+          shareSvc.publish({
+            sessionID: session.id,
+            engine: "v1",
+            consent: args.share,
+            expiresAt: Date.now() + PublicSession.MAX_AGE_MS,
+          }),
+        )
+        published.sessionID = session.id
+        console.log("Public session:", published.info.url)
+      }
       await subscribeSessionEvents()
       console.log("vector session", session.id)
 
@@ -625,7 +655,15 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: {
       // Also output the clean error message for the action to capture
       //core.setOutput("prepare_error", e.message);
     }
-    process.exit(exitCode)
+    if (shareSvc && published.sessionID) {
+      await runLocalEffect(shareSvc.flush(published.sessionID)).catch((error) => {
+        core.setFailed(
+          `Could not finish updating the public session: ${error instanceof Error ? error.message : String(error)}`,
+        )
+        exitCode = 1
+      })
+    }
+    process.exitCode = exitCode
 
     async function normalizeModel() {
       const value = process.env["MODEL"]
@@ -1261,7 +1299,7 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: {
     }
 
     function footer() {
-      return `\n\n---\n[Vector run](${runUrl})`
+      return `\n\n---\n[Vector run](${runUrl})${published.info ? ` · [Public session](${published.info.url})` : ""}`
     }
 
     // Events made with GITHUB_TOKEN start no workflows except workflow_dispatch, so a pull request Vector opens is
@@ -1284,6 +1322,7 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: {
         messages,
         judge,
         runUrl,
+        shareUrl: published.info?.url,
         closes: opts.closes,
         trigger: opts.trigger,
       })

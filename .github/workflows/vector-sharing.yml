@@ -1,0 +1,57 @@
+name: Vector public sharing integration
+
+on:
+  pull_request:
+    paths:
+      - api/**
+      - packages/schema/**
+      - packages/web/test/public-shares-api.test.ts
+      - docs/vector/owner-actions/sql/public-shares.sql
+      - bun.lock
+      - .github/workflows/vector-sharing.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17.11-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+        env:
+          POSTGRES_DB: vector_shares_test
+          POSTGRES_USER: vector_fixture
+          POSTGRES_PASSWORD: fixture-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U vector_fixture -d vector_shares_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      valkey:
+        image: valkey/valkey:7.2.14-alpine@sha256:c6c2f0020be34bbf684a53a0ef716ab16ff70295186d4d9f2518435beb7afbff
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: ./.github/actions/setup-bun
+        with:
+          install-flags: --frozen-lockfile
+      - name: Typecheck hosted API
+        working-directory: packages/engine
+        run: bun typecheck --project ../../tsconfig.json
+      - name: Verify real public-sharing transactions and deletion races
+        working-directory: packages/web
+        env:
+          VECTOR_TEST_POSTGRES_URL: postgres://vector_fixture:fixture-only@127.0.0.1:5432/vector_shares_test
+          VECTOR_TEST_REDIS_URL: redis://127.0.0.1:6379
+        run: bun test test/public-shares-api.test.ts

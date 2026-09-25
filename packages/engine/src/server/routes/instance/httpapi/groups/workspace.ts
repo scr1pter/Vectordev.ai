@@ -1,3 +1,4 @@
+import { PublicSession } from "@vectordevai/schema/public-session"
 import { PublicShareRemovalError } from "@vectordevai/schema/public-share"
 import { Workspace } from "@/control-plane/workspace"
 import { WorkspaceAdapterEntry } from "@/control-plane/types"
@@ -107,7 +108,7 @@ export const WorkspaceApi = HttpApi.make("workspace")
           params: { id: Workspace.Info.fields.id },
           query: WorkspaceRoutingQuery,
           success: described(Schema.UndefinedOr(Workspace.Info), "Workspace removed"),
-          error: [PublicShareRemovalError, HttpApiError.BadRequest],
+          error: [PublicShareRemovalError, PublicSession.Error, HttpApiError.BadRequest],
         }).annotateMerge(
           OpenApi.annotations({
             identifier: "experimental.workspace.remove",

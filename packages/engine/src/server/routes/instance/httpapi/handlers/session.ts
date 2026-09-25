@@ -1,4 +1,7 @@
 import { PublicShareRemovalError, publicShareWarning } from "@vectordevai/schema/public-share"
+import { PublicSession } from "@vectordevai/schema/public-session"
+import { PublicSessionShare } from "@vectordevai/core/public-session-share"
+import { Config } from "@/config/config"
 import { ShareNext } from "@/share/share-next"
 import { PermissionV1 } from "@vectordevai/core/v1/permission"
 import { Agent } from "@/agent/agent"
@@ -52,6 +55,8 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
   Effect.gen(function* () {
     const session = yield* Session.Service
     const shareSvc = yield* SessionShare.Service
+    const publicSharing = yield* PublicSessionShare.Service
+    const config = yield* Config.Service
     const promptSvc = yield* SessionPrompt.Service
     const revertSvc = yield* SessionRevert.Service
     const compactSvc = yield* SessionCompaction.Service
@@ -272,13 +277,15 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       return true
     })
 
-    const share = Effect.fn("SessionHttpApi.share")(function* (ctx: { params: { sessionID: SessionID } }) {
+    const share = Effect.fn("SessionHttpApi.share")(function* (ctx: {
+      params: { sessionID: SessionID }
+      payload: PublicSession.Publish
+    }) {
       yield* requireSession(ctx.params.sessionID)
-      if (!ShareNext.enabled()) {
+      if (!ShareNext.enabled((yield* config.get()).share)) {
         return yield* new InvalidRequestError({ message: ShareNext.disabledReason(), kind: "SharingUnavailable" })
       }
-      yield* shareSvc.share(ctx.params.sessionID).pipe(Effect.mapError(() => new HttpApiError.InternalServerError({})))
-      return yield* requireSession(ctx.params.sessionID)
+      return yield* shareSvc.share(ctx.params.sessionID, ctx.payload)
     })
 
     const unshare = Effect.fn("SessionHttpApi.unshare")(function* (ctx: { params: { sessionID: SessionID } }) {
@@ -287,7 +294,9 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
         .unshare(ctx.params.sessionID)
         .pipe(
           Effect.mapError((error) =>
-            error instanceof PublicShareRemovalError ? error : new HttpApiError.InternalServerError({}),
+            error instanceof PublicShareRemovalError || error instanceof PublicSession.Error
+              ? error
+              : new HttpApiError.InternalServerError({}),
           ),
         )
       return yield* requireSession(ctx.params.sessionID)
@@ -463,6 +472,8 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       .handle("abort", abort)
       .handle("init", init)
       .handle("share", share)
+      .handle("sharePreview", (ctx) => publicSharing.preview({ sessionID: ctx.params.sessionID }))
+      .handle("shareFlush", (ctx) => publicSharing.flush(ctx.params.sessionID))
       .handle("unshare", unshare)
       .handle("summarize", summarize)
       .handle("prompt", prompt)

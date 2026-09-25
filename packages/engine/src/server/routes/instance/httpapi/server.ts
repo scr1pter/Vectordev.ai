@@ -1,4 +1,5 @@
 import { registerRuntimeCleanup } from "@/effect/runtime-cleanup"
+import { PublicSessionShare } from "@vectordevai/core/public-session-share"
 import { Config as EffectConfig, Context, Effect, Layer } from "effect"
 import { HttpApiBuilder, OpenApi } from "effect/unstable/httpapi"
 import { HttpClient, HttpMiddleware, HttpRouter, HttpServer, HttpServerResponse } from "effect/unstable/http"
@@ -261,6 +262,7 @@ const app = LayerNode.group([
   Installation.node,
   ShareNext.node,
   SessionShare.node,
+  PublicSessionShare.node,
   InstanceStore.node,
   httpClient,
   EventV2.node,

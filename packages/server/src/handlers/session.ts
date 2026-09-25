@@ -23,6 +23,42 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
 
     return handlers
       .handle(
+        "session.importArchive",
+        Effect.fn(function* (ctx) {
+          return {
+            data: yield* session.importArchive({
+              archive: ctx.payload.archive,
+              location: ctx.payload.location ?? { directory: AbsolutePath.make(process.cwd()) },
+            }),
+          }
+        }),
+      )
+      .handle(
+        "session.share",
+        Effect.fn(function* (ctx) {
+          return { data: yield* session.share({ sessionID: ctx.params.sessionID, ...ctx.payload }) }
+        }),
+      )
+      .handle(
+        "session.sharePreview",
+        Effect.fn(function* (ctx) {
+          return { data: yield* session.sharePreview(ctx.params.sessionID) }
+        }),
+      )
+      .handle(
+        "session.shareFlush",
+        Effect.fn(function* (ctx) {
+          return { data: yield* session.shareFlush(ctx.params.sessionID) }
+        }),
+      )
+      .handle(
+        "session.unshare",
+        Effect.fn(function* (ctx) {
+          yield* session.unshare(ctx.params.sessionID)
+          return HttpApiSchema.NoContent.make()
+        }),
+      )
+      .handle(
         "session.list",
         Effect.fn(function* (ctx) {
           const query =

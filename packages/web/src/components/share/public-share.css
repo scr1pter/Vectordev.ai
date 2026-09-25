@@ -1,0 +1,146 @@
+.public-session {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 28px 24px 64px;
+  overflow-wrap: anywhere;
+}
+.public-session nav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 32px;
+  border-bottom: 1px solid var(--line);
+}
+.public-session nav a {
+  letter-spacing: 0.16em;
+  font-weight: 750;
+  text-decoration: none;
+  color: var(--ink);
+}
+.public-session nav span,
+.public-meta,
+.public-session footer,
+.public-message-heading time {
+  color: var(--muted);
+  font-size: 13px;
+}
+.public-session header {
+  padding: 36px 0;
+}
+.public-session h1 {
+  font-size: clamp(28px, 5vw, 44px);
+  line-height: 1.15;
+  letter-spacing: -0.035em;
+  margin: 14px 0 24px;
+}
+.public-session header p {
+  max-width: 760px;
+}
+.public-eyebrow {
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.public-session button {
+  background: var(--accent-soft);
+  color: var(--ink);
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  padding: 8px 14px;
+  cursor: pointer;
+}
+.public-message {
+  padding: 24px 0;
+  border-top: 1px solid var(--line);
+}
+.public-message-heading {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+.public-message-heading h2 {
+  font-size: 14px;
+  text-transform: capitalize;
+  margin: 0;
+}
+.public-message-heading time {
+  margin-left: auto;
+}
+.public-session a {
+  color: var(--accent-strong);
+}
+.public-session pre {
+  font:
+    13px/1.6 ui-monospace,
+    monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 14px;
+  max-height: 640px;
+  overflow: auto;
+}
+.public-session code {
+  font:
+    13px/1.6 ui-monospace,
+    monospace;
+}
+.public-session h3 {
+  font-size: 16px;
+}
+.public-session details {
+  border-left: 2px solid var(--line-strong);
+  padding: 8px 0 8px 16px;
+  margin: 12px 0;
+}
+.public-session summary {
+  cursor: pointer;
+  color: var(--muted-strong);
+}
+.public-session blockquote {
+  border-left: 3px solid var(--accent);
+  margin: 16px 0;
+  padding-left: 16px;
+  color: var(--muted-strong);
+}
+.public-session .public-table {
+  overflow: auto;
+}
+.public-session table {
+  border-collapse: collapse;
+  max-width: 100%;
+}
+.public-session td,
+.public-session th {
+  border: 1px solid var(--line);
+  padding: 8px 12px;
+  text-align: left;
+}
+.public-notice {
+  padding: 18px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+}
+.public-session footer {
+  padding-top: 32px;
+  border-top: 1px solid var(--line);
+  margin-top: 24px;
+}
+.public-attachment {
+  font-size: 13px;
+  color: var(--muted-strong);
+}
+@media (max-width: 600px) {
+  .public-session {
+    padding: 20px 16px 40px;
+  }
+  .public-message-heading time {
+    margin-left: 0;
+    width: 100%;
+  }
+}

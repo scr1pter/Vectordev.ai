@@ -1,3 +1,4 @@
+import { PublicSession } from "@vectordevai/schema/public-session"
 import { PublicShareRemovalError, publicShareWarning } from "@vectordevai/schema/public-share"
 import { ShareNext } from "@/share/share-next"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
@@ -136,7 +137,9 @@ export interface Interface {
   readonly list: (project: Project.Info) => Effect.Effect<Info[]>
   readonly syncList: (project: Project.Info) => Effect.Effect<void>
   readonly get: (id: WorkspaceV2.ID) => Effect.Effect<Info | undefined>
-  readonly remove: (id: WorkspaceV2.ID) => Effect.Effect<Info | undefined, PublicShareRemovalError>
+  readonly remove: (
+    id: WorkspaceV2.ID,
+  ) => Effect.Effect<Info | undefined, PublicShareRemovalError | PublicSession.Error>
   readonly status: () => Effect.Effect<ConnectionStatus[]>
   readonly isSyncing: (workspaceID: WorkspaceV2.ID) => Effect.Effect<boolean>
   readonly waitForSync: (

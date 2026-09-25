@@ -1,0 +1,11 @@
+---
+import Share from "../../components/Share"
+import MarketingLayout from "../../components/marketing/MarketingLayout.astro"
+
+export const prerender = true
+---
+
+<MarketingLayout title="Shared session · Vector" description="Read a session shared publicly with Vector." noindex>
+  <Share client:only="solid-js" />
+  <noscript>This public session requires JavaScript to check whether its snapshot is still available.</noscript>
+</MarketingLayout>
