@@ -1,3 +1,5 @@
+import { PublicShareRemovalError, publicShareWarning } from "@vectordevai/schema/public-share"
+import { ShareNext } from "@/share/share-next"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { httpClient } from "@vectordevai/core/effect/app-node-platform"
 import { Context, Effect, FiberMap, Iterable, Layer, Schema, Stream } from "effect"
@@ -134,7 +136,7 @@ export interface Interface {
   readonly list: (project: Project.Info) => Effect.Effect<Info[]>
   readonly syncList: (project: Project.Info) => Effect.Effect<void>
   readonly get: (id: WorkspaceV2.ID) => Effect.Effect<Info | undefined>
-  readonly remove: (id: WorkspaceV2.ID) => Effect.Effect<Info | undefined>
+  readonly remove: (id: WorkspaceV2.ID) => Effect.Effect<Info | undefined, PublicShareRemovalError>
   readonly status: () => Effect.Effect<ConnectionStatus[]>
   readonly isSyncing: (workspaceID: WorkspaceV2.ID) => Effect.Effect<boolean>
   readonly waitForSync: (
@@ -155,6 +157,7 @@ const layer = Layer.effect(
   Effect.gen(function* () {
     const auth = yield* Auth.Service
     const session = yield* Session.Service
+    const sharing = yield* ShareNext.Service
     const prompt = yield* SessionPrompt.Service
     const http = yield* HttpClient.HttpClient
     const events = yield* EventV2Bridge.Service
@@ -790,6 +793,8 @@ const layer = Layer.effect(
         .where(eq(SessionTable.workspace_id, id))
         .all()
         .pipe(Effect.orDie)
+      const links = (yield* Effect.forEach(sessions, (item) => sharing.publicLinks(item.id))).flat()
+      if (links.length) return yield* publicShareWarning([...new Set(links)])
       const sessionIDs = new Set(sessions.map((sessionInfo) => sessionInfo.id))
       yield* Effect.forEach(
         sessions.filter((sessionInfo) => !sessionInfo.parentID || !sessionIDs.has(sessionInfo.parentID)),
@@ -950,6 +955,7 @@ export const node = LayerNode.make({
   service: Service,
   layer: layer,
   deps: [
+    ShareNext.node,
     Auth.node,
     Session.node,
     SessionPrompt.node,

@@ -750,6 +750,9 @@ export const dict = {
   "session.delete.title": "セッションの削除",
   "session.delete.confirm": 'セッション "{{name}}" を削除しますか？',
   "session.delete.button": "セッションを削除",
+  "session.delete.publicShare.warning":
+    "このセッションまたは子セッションは、以前のバージョンで公開共有されました。Vector はその公開コピーを削除できません。ローカルセッションを削除する前に、これらのリンクを保存してください。",
+  "session.delete.publicShare.confirm": "ローカルセッションのみ削除",
   "workspace.new": "新しいワークスペース",
   "workspace.type.local": "ローカル",
   "workspace.type.sandbox": "サンドボックス",

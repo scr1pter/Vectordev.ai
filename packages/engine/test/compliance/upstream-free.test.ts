@@ -49,8 +49,9 @@ async function upstreamHolder() {
   // Derive the prohibited name only in this guard, from its required MIT notice,
   // so source scans and synthetic credential fixtures do not add that name to tracked text.
   const license = await Bun.file(path.join(root, "THIRD_PARTY_NOTICES.md")).text()
-  const holder = license
-    .match(/^Copyright \(c\) \d{4} (.+)$/m)?.[1]
+  const attribution = license.split("<!-- vector-upstream-attribution -->")[1]?.split("\n## ").slice(0, 2).join("\n## ")
+  const holder = attribution
+    ?.match(/^Copyright \(c\) \d{4} (.+)$/m)?.[1]
     ?.trim()
     .toLowerCase()
   if (!holder) throw new Error("The upstream MIT copyright notice is missing")

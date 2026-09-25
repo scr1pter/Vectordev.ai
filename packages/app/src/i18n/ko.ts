@@ -745,6 +745,9 @@ export const dict = {
   "session.delete.title": "세션 삭제",
   "session.delete.confirm": '"{{name}}" 세션을 삭제하시겠습니까?',
   "session.delete.button": "세션 삭제",
+  "session.delete.publicShare.warning":
+    "이 세션 또는 하위 세션은 이전 버전에서 공개적으로 공유되었습니다. Vector는 해당 공개 사본을 삭제할 수 없습니다. 로컬 세션을 삭제하기 전에 이 링크를 저장하세요.",
+  "session.delete.publicShare.confirm": "로컬 세션만 삭제",
   "workspace.new": "새 작업 공간",
   "workspace.type.local": "로컬",
   "workspace.type.sandbox": "샌드박스",

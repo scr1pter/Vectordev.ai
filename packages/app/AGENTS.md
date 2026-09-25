@@ -9,7 +9,7 @@
 
 ## Local Dev
 
-- `vector dev web` proxies `https://vectordev.ai`, so local UI/CSS changes will not show there.
+- `vector web` serves the embedded UI built from `packages/app`. Rebuild it or use the Vite development server (default port 3000) to see local UI/CSS changes.
 - For local UI changes, run the backend and app dev servers separately.
 - Backend (from `packages/engine`): `bun run --conditions=browser ./src/index.ts serve --port 4096`
 - App (from `packages/app`): `bun dev -- --port 4444`

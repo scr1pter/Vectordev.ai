@@ -745,6 +745,8 @@ jobs:
       - name: Verify installer signatures and updater metadata
         shell: pwsh
         run: |
+          bun packages/desktop/scripts/verify-notices.ts win32 packages/desktop/dist/win-unpacked packages/desktop/dist/win-arm64-unpacked
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $files = @(
             "packages/desktop/dist/vector-desktop-$env:VECTOR_VERSION-win.exe",
             "packages/desktop/dist/vector-desktop-$env:VECTOR_VERSION-win-x64.exe",
@@ -831,6 +833,7 @@ jobs:
       - name: Verify Linux artifacts
         run: |
           set -euo pipefail
+          bun packages/desktop/scripts/verify-notices.ts linux packages/desktop/dist/linux-unpacked packages/desktop/dist/linux-arm64-unpacked
           test -s packages/desktop/dist/vector-desktop-${VECTOR_VERSION}-linux-x86_64.AppImage
           test -s packages/desktop/dist/vector-desktop-${VECTOR_VERSION}-linux-arm64.AppImage
           test -s packages/desktop/dist/latest-linux.yml

@@ -817,6 +817,9 @@ export const dict = {
   "session.delete.title": "ลบเซสชัน",
   "session.delete.confirm": 'ลบเซสชัน "{{name}}" หรือไม่?',
   "session.delete.button": "ลบเซสชัน",
+  "session.delete.publicShare.warning":
+    "เซสชันนี้หรือเซสชันย่อยเคยถูกแชร์ต่อสาธารณะในเวอร์ชันก่อนหน้า Vector ไม่สามารถลบสำเนาสาธารณะนั้นได้ โปรดบันทึกลิงก์เหล่านี้ก่อนลบเซสชันในเครื่อง",
+  "session.delete.publicShare.confirm": "ลบเฉพาะเซสชันในเครื่อง",
 
   "workspace.new": "พื้นที่ทำงานใหม่",
   "workspace.type.local": "ในเครื่อง",

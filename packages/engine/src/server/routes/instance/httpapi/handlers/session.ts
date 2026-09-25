@@ -1,3 +1,5 @@
+import { PublicShareRemovalError, publicShareWarning } from "@vectordevai/schema/public-share"
+import { ShareNext } from "@/share/share-next"
 import { PermissionV1 } from "@vectordevai/core/v1/permission"
 import { Agent } from "@/agent/agent"
 import { SessionV1 } from "@vectordevai/core/v1/session"
@@ -36,7 +38,7 @@ import {
   SummarizePayload,
   UpdatePayload,
 } from "../groups/session"
-import { PermissionNotFoundError } from "../errors"
+import { PermissionNotFoundError, notFound } from "../errors"
 import * as SessionError from "./session-errors"
 
 const tryParseJson = (text: string) =>
@@ -184,8 +186,17 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       return yield* create({ payload })
     })
 
-    const remove = Effect.fn("SessionHttpApi.remove")(function* (ctx: { params: { sessionID: SessionID } }) {
-      yield* SessionError.mapStorageNotFound(session.remove(ctx.params.sessionID))
+    const remove = Effect.fn("SessionHttpApi.remove")(function* (ctx: {
+      params: { sessionID: SessionID }
+      query: { acknowledgePublicShares?: boolean }
+    }) {
+      yield* requireSession(ctx.params.sessionID)
+      const sharing = yield* ShareNext.Service
+      const links = yield* sharing.publicLinks(ctx.params.sessionID)
+      yield* session
+        .remove(ctx.params.sessionID, ctx.query)
+        .pipe(Effect.catchTag("NotFoundError", (error) => Effect.fail(notFound(error.message))))
+      if (links.length) return { deleted: true as const, warnings: [publicShareWarning(links).message], links }
       return true
     })
 
@@ -260,11 +271,6 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       return true
     })
 
-    // share/unshare errors aren't all client-induced — storage and network
-    // failures from SessionShare are real possibilities. Map to a typed 500
-    // (matches the legacy route behavior which routed any failure through
-    // ErrorMiddleware → NamedError.Unknown 500) instead of blanket-mapping
-    // every failure to a 400 BadRequest.
     const share = Effect.fn("SessionHttpApi.share")(function* (ctx: { params: { sessionID: SessionID } }) {
       yield* requireSession(ctx.params.sessionID)
       yield* shareSvc.share(ctx.params.sessionID).pipe(Effect.mapError(() => new HttpApiError.InternalServerError({})))
@@ -275,7 +281,11 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       yield* requireSession(ctx.params.sessionID)
       yield* shareSvc
         .unshare(ctx.params.sessionID)
-        .pipe(Effect.mapError(() => new HttpApiError.InternalServerError({})))
+        .pipe(
+          Effect.mapError((error) =>
+            error instanceof PublicShareRemovalError ? error : new HttpApiError.InternalServerError({}),
+          ),
+        )
       return yield* requireSession(ctx.params.sessionID)
     })
 

@@ -754,6 +754,9 @@ export const dict = {
   "session.delete.title": "Excluir sessão",
   "session.delete.confirm": 'Excluir sessão "{{name}}"?',
   "session.delete.button": "Excluir sessão",
+  "session.delete.publicShare.warning":
+    "Esta sessão ou uma sessão filha foi compartilhada publicamente em uma versão anterior. O Vector não pode remover essa cópia pública. Salve estes links antes de excluir a sessão local.",
+  "session.delete.publicShare.confirm": "Excluir apenas a sessão local",
   "workspace.new": "Novo espaço de trabalho",
   "workspace.type.local": "local",
   "workspace.type.sandbox": "sandbox",

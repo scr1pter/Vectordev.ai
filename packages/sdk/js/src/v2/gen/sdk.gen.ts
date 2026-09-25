@@ -3943,13 +3943,14 @@ export class Session2 extends HeyApiClient {
   /**
    * Delete session
    *
-   * Delete a session and permanently remove all associated data, including messages and history.
+   * Delete a local session and its children. Existing public shares require acknowledgment; their URLs are returned before deletion and public copies may remain online.
    */
   public delete<ThrowOnError extends boolean = false>(
     parameters: {
       sessionID: string
       directory?: string
       workspace?: string
+      acknowledgePublicShares?: "true" | "false"
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -3961,6 +3962,7 @@ export class Session2 extends HeyApiClient {
             { in: "path", key: "sessionID" },
             { in: "query", key: "directory" },
             { in: "query", key: "workspace" },
+            { in: "query", key: "acknowledgePublicShares" },
           ],
         },
       ],
@@ -4438,7 +4440,7 @@ export class Session2 extends HeyApiClient {
   /**
    * Unshare session
    *
-   * Remove the shareable link for a session, making it private again.
+   * Public sharing is unavailable. Existing public links are preserved and reported in a warning.
    */
   public unshare<ThrowOnError extends boolean = false>(
     parameters: {

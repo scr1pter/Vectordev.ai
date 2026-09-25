@@ -6541,16 +6541,52 @@
               "type": "string"
             },
             "required": false
+          },
+          {
+            "name": "acknowledgePublicShares",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["true", "false"]
+            },
+            "required": false
           }
         ],
         "responses": {
           "200": {
-            "description": "Successfully deleted session",
+            "description": "Deleted local session; warnings identify public copies that may remain online",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "boolean",
-                  "description": "Successfully deleted session"
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "deleted": {
+                          "type": "boolean",
+                          "enum": [true]
+                        },
+                        "warnings": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "links": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": ["deleted", "warnings", "links"],
+                      "additionalProperties": false
+                    }
+                  ],
+                  "description": "Deleted local session; warnings identify public copies that may remain online"
                 }
               }
             }
@@ -6581,9 +6617,19 @@
                 }
               }
             }
+          },
+          "409": {
+            "description": "PublicShareRemovalError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicShareRemovalError"
+                }
+              }
+            }
           }
         },
-        "description": "Delete a session and permanently remove all associated data, including messages and history.",
+        "description": "Delete a local session and its children. Existing public shares require acknowledgment; their URLs are returned before deletion and public copies may remain online.",
         "summary": "Delete session",
         "x-codeSamples": [
           {
@@ -7810,7 +7856,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Successfully unshared session",
+            "description": "Session without a public share",
             "content": {
               "application/json": {
                 "schema": {
@@ -7839,6 +7885,16 @@
               }
             }
           },
+          "409": {
+            "description": "PublicShareRemovalError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicShareRemovalError"
+                }
+              }
+            }
+          },
           "500": {
             "description": "InternalServerError",
             "content": {
@@ -7850,7 +7906,7 @@
             }
           }
         },
-        "description": "Remove the shareable link for a session, making it private again.",
+        "description": "Public sharing is unavailable. Existing public links are preserved and reported in a warning.",
         "summary": "Unshare session",
         "x-codeSamples": [
           {
@@ -10550,6 +10606,16 @@
                       "$ref": "#/components/schemas/InvalidRequestError"
                     }
                   ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "PublicShareRemovalError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicShareRemovalError"
                 }
               }
             }
@@ -24462,6 +24528,26 @@
             }
           }
         }
+      },
+      "PublicShareRemovalError": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": ["PublicShareRemovalError"]
+          },
+          "links": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": ["_tag", "links", "message"],
+        "additionalProperties": false
       },
       "TextPartInput": {
         "type": "object",

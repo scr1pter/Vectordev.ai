@@ -9,6 +9,7 @@
 // clicks the button.
 import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
+import { verifyNotices } from "./verify-notices"
 import { BUILD_IDENTITY_FILE, parseBuildIdentity } from "./build-identity"
 
 export type PackageCheck = { ok: true } | { ok: false; problem: string }
@@ -118,7 +119,10 @@ if (import.meta.main) {
     console.error("no packaged macOS app found to verify")
     process.exit(2)
   }
-  for (const appPath of targets) verify(appPath)
+  for (const appPath of targets) {
+    await verifyNotices(appPath, "darwin")
+    verify(appPath)
+  }
   process.exit(0)
 }
 

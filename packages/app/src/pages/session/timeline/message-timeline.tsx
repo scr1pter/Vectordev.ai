@@ -1,3 +1,4 @@
+import { publicShareError } from "@vectordevai/schema/public-share"
 import {
   createEffect,
   createMemo,
@@ -202,7 +203,14 @@ function TimelineDiffSummaryRow(props: {
               onClick={() => void props.onUndo?.()}
             >
               <svg viewBox="0 0 16 16" class="size-3.5" aria-hidden="true">
-                <path d="M6.25 4 2.5 7.5 6.25 11M3 7.5h6.25a4 4 0 0 1 0 8" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" />
+                <path
+                  d="M6.25 4 2.5 7.5 6.25 11M3 7.5h6.25a4 4 0 0 1 0 8"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.35"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
               </svg>
               Rewind
             </button>
@@ -233,7 +241,10 @@ function TimelineDiffSummaryRow(props: {
                 <Accordion.Item value={diff.file}>
                   <StickyAccordionHeader>
                     <Accordion.Trigger>
-                      <div data-slot="session-turn-diff-trigger" class="min-h-12 px-4 transition-colors hover:bg-white/[0.04]">
+                      <div
+                        data-slot="session-turn-diff-trigger"
+                        class="min-h-12 px-4 transition-colors hover:bg-white/[0.04]"
+                      >
                         <span data-slot="session-turn-diff-path">
                           <Show when={diff.file.includes("/")}>
                             <span data-slot="session-turn-diff-directory">{`\u202A${getDirectory(diff.file)}\u202C`}</span>
@@ -242,8 +253,12 @@ function TimelineDiffSummaryRow(props: {
                         </span>
                         <div data-slot="session-turn-diff-meta">
                           <span data-slot="session-turn-diff-changes" class="flex items-center gap-1.5">
-                            <span class="font-mono text-[11.5px] font-medium text-[#7dd8a2]">+{diff.additions ?? 0}</span>
-                            <span class="font-mono text-[11.5px] font-medium text-[#f2989e]">-{diff.deletions ?? 0}</span>
+                            <span class="font-mono text-[11.5px] font-medium text-[#7dd8a2]">
+                              +{diff.additions ?? 0}
+                            </span>
+                            <span class="font-mono text-[11.5px] font-medium text-[#f2989e]">
+                              -{diff.deletions ?? 0}
+                            </span>
                           </span>
                           <span data-slot="session-turn-diff-chevron">
                             <Icon name="chevron-down" size="small" />
@@ -270,8 +285,20 @@ function TimelineDiffSummaryRow(props: {
             onClick={() => setState("showAll", !showAll())}
           >
             {showAll() ? "Show fewer files" : `Show ${overflow()} more ${overflow() === 1 ? "file" : "files"}`}
-            <svg viewBox="0 0 16 16" class="size-4 transition" classList={{ "rotate-180": showAll() }} aria-hidden="true">
-              <path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" />
+            <svg
+              viewBox="0 0 16 16"
+              class="size-4 transition"
+              classList={{ "rotate-180": showAll() }}
+              aria-hidden="true"
+            >
+              <path
+                d="m4 6 4 4 4-4"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.35"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
             </svg>
           </button>
         </Show>
@@ -783,7 +810,7 @@ export function MessageTimeline(props: {
     navigate(`/${params.dir}/session`)
   }
 
-  const deleteSession = async (sessionID: string) => {
+  const deleteSession = async (sessionID: string, acknowledgePublicShares = false) => {
     const session = sync().session.get(sessionID)
     if (!session) return false
 
@@ -792,9 +819,17 @@ export function MessageTimeline(props: {
     const nextSession = index === -1 ? undefined : (sessions[index + 1] ?? sessions[index - 1])
 
     const result = await sdk()
-      .client.session.delete({ sessionID })
-      .then((x) => x.data)
+      .client.session.delete(
+        { sessionID, acknowledgePublicShares: acknowledgePublicShares ? "true" : undefined },
+        { throwOnError: false },
+      )
+      .then((result) => {
+        if (result.error) throw result.error
+        return true
+      })
       .catch((err) => {
+        const warning = publicShareError(err)
+        if (warning) return warning
         showToast({
           title: language.t("session.delete.failed.title"),
           description: errorMessage(err),
@@ -803,6 +838,7 @@ export function MessageTimeline(props: {
       })
 
     if (!result) return false
+    if (result !== true) return result
 
     const removed = new Set<string>([sessionID])
     const byParent = new Map<string, string[]>()
@@ -859,26 +895,37 @@ export function MessageTimeline(props: {
     const name = createMemo(
       () => sessionTitle(sync().session.get(props.sessionID)?.title) ?? language.t("command.session.new"),
     )
+    const [warning, setWarning] = createStore({ links: [] as string[] })
     const handleDelete = async () => {
-      await deleteSession(props.sessionID)
-      dialog.close()
+      const result = await deleteSession(props.sessionID, warning.links.length > 0)
+      if (result && result !== true) {
+        setWarning("links", [...result.links])
+        return
+      }
+      if (result) dialog.close()
     }
+    const description = () =>
+      warning.links.length
+        ? language.t("session.delete.publicShare.warning")
+        : language.t("session.delete.confirm", { name: name() })
+    const label = () =>
+      warning.links.length ? language.t("session.delete.publicShare.confirm") : language.t("session.delete.button")
 
     if (settings.general.newLayoutDesigns())
       return (
         <DialogV2 fit>
           <DialogHeader hideClose>
-            <DialogTitleGroup
-              title={language.t("session.delete.title")}
-              description={language.t("session.delete.confirm", { name: name() })}
-            />
+            <DialogTitleGroup title={language.t("session.delete.title")} description={description()} />
+            <For each={warning.links}>
+              {(url) => <code class="block break-all text-12-regular select-text">{url}</code>}
+            </For>
           </DialogHeader>
           <DialogFooter>
             <ButtonV2 variant="ghost" onClick={() => dialog.close()}>
               {language.t("common.cancel")}
             </ButtonV2>
             <ButtonV2 variant="danger" onClick={handleDelete}>
-              {language.t("session.delete.button")}
+              {label()}
             </ButtonV2>
           </DialogFooter>
         </DialogV2>
@@ -888,16 +935,17 @@ export function MessageTimeline(props: {
       <Dialog title={language.t("session.delete.title")} fit>
         <div class="flex flex-col gap-4 pl-6 pr-2.5 pb-3">
           <div class="flex flex-col gap-1">
-            <span class="text-14-regular text-text-strong">
-              {language.t("session.delete.confirm", { name: name() })}
-            </span>
+            <span class="text-14-regular text-text-strong">{description()}</span>
+            <For each={warning.links}>
+              {(url) => <code class="block break-all text-12-regular select-text">{url}</code>}
+            </For>
           </div>
           <div class="flex justify-end gap-2">
             <Button variant="ghost" size="large" onClick={() => dialog.close()}>
               {language.t("common.cancel")}
             </Button>
             <Button variant="primary" size="large" onClick={handleDelete}>
-              {language.t("session.delete.button")}
+              {label()}
             </Button>
           </div>
         </div>
@@ -948,7 +996,11 @@ export function MessageTimeline(props: {
           <ButtonV2 variant="ghost" onClick={() => dialog.close()}>
             {language.t("common.cancel")}
           </ButtonV2>
-          <ButtonV2 variant="contrast" disabled={!value().trim() || titleMutation.isPending} onClick={() => void submit()}>
+          <ButtonV2
+            variant="contrast"
+            disabled={!value().trim() || titleMutation.isPending}
+            onClick={() => void submit()}
+          >
             {language.t("common.rename")}
           </ButtonV2>
         </DialogFooter>
@@ -1409,7 +1461,10 @@ export function MessageTimeline(props: {
         }}
       >
         <Show when={settings.general.newLayoutDesigns() && timelineRows().length === 0}>
-          <div data-vector-session-empty class="pointer-events-none absolute inset-0 z-10 grid place-items-center px-6 pb-36">
+          <div
+            data-vector-session-empty
+            class="pointer-events-none absolute inset-0 z-10 grid place-items-center px-6 pb-36"
+          >
             <div class="flex flex-col items-center text-center">
               <img
                 src="/vector-logo.png"
@@ -1591,9 +1646,7 @@ export function MessageTimeline(props: {
                           />
                           <MenuV2.Portal>
                             <MenuV2.Content style={{ width: "200px", "min-width": "200px" }}>
-                              <MenuV2.Item
-                                onSelect={() => dialog.show(() => <DialogRenameSession sessionID={id} />)}
-                              >
+                              <MenuV2.Item onSelect={() => dialog.show(() => <DialogRenameSession sessionID={id} />)}>
                                 {language.t("common.rename")}
                               </MenuV2.Item>
                               <MenuV2.Item onSelect={() => dialog.show(() => <DialogDeleteSession sessionID={id} />)}>
@@ -1603,7 +1656,6 @@ export function MessageTimeline(props: {
                           </MenuV2.Portal>
                         </MenuV2>
                       </Show>
-
                     </Show>
                   </div>
                 )}

@@ -60,9 +60,10 @@ export const SessionDeleteCommand = effectCmd({
   handler: Effect.fn("Cli.session.delete")(function* (args) {
     const svc = yield* Session.Service
     const sessionID = SessionID.make(args.sessionID)
-    yield* svc
-      .remove(sessionID)
-      .pipe(Effect.catchIf(NotFoundError.isInstance, () => fail(`Session not found: ${args.sessionID}`)))
+    yield* svc.remove(sessionID).pipe(
+      Effect.catchIf(NotFoundError.isInstance, () => fail(`Session not found: ${args.sessionID}`)),
+      Effect.catchTag("PublicShareRemovalError", (error) => fail(error.message)),
+    )
     UI.println(UI.Style.TEXT_SUCCESS_BOLD + `Session ${args.sessionID} deleted` + UI.Style.TEXT_NORMAL)
   }),
 })

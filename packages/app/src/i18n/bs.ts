@@ -828,6 +828,9 @@ export const dict = {
   "session.delete.title": "Izbriši sesiju",
   "session.delete.confirm": 'Izbriši sesiju "{{name}}"?',
   "session.delete.button": "Izbriši sesiju",
+  "session.delete.publicShare.warning":
+    "Ova sesija ili podsesija javno je podijeljena u ranijoj verziji. Vector ne može ukloniti tu javnu kopiju. Sačuvajte ove linkove prije brisanja lokalne sesije.",
+  "session.delete.publicShare.confirm": "Izbriši samo lokalnu sesiju",
 
   "workspace.new": "Novi radni prostor",
   "workspace.type.local": "lokalno",

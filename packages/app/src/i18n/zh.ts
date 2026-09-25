@@ -827,6 +827,9 @@ export const dict = {
   "session.delete.title": "删除会话",
   "session.delete.confirm": '删除会话 "{{name}}"？',
   "session.delete.button": "删除会话",
+  "session.delete.publicShare.warning":
+    "此会话或子会话曾在旧版本中公开分享。Vector 无法删除该公开副本。删除本地会话前，请保存这些链接。",
+  "session.delete.publicShare.confirm": "仅删除本地会话",
 
   "workspace.new": "新建工作区",
   "workspace.type.local": "本地",

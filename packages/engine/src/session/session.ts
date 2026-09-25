@@ -1,3 +1,5 @@
+import { ShareNext } from "@/share/share-next"
+import { PublicShareRemovalError, publicShareWarning } from "@vectordevai/schema/public-share"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { PermissionV1 } from "@vectordevai/core/v1/permission"
 import { Slug } from "@vectordevai/core/util/slug"
@@ -500,7 +502,10 @@ export interface Interface {
   readonly diff: (sessionID: SessionID) => Effect.Effect<Snapshot.FileDiff[]>
   readonly messages: (input: { sessionID: SessionID; limit?: number }) => Effect.Effect<SessionV1.WithParts[], NotFound>
   readonly children: (parentID: SessionID) => Effect.Effect<Info[]>
-  readonly remove: (sessionID: SessionID) => Effect.Effect<void, NotFound>
+  readonly remove: (
+    sessionID: SessionID,
+    options?: { acknowledgePublicShares?: boolean },
+  ) => Effect.Effect<void, NotFound | PublicShareRemovalError>
   readonly updateMessage: <T extends SessionV1.Info>(msg: T) => Effect.Effect<T>
   readonly removeMessage: (input: { sessionID: SessionID; messageID: MessageID }) => Effect.Effect<MessageID>
   readonly removePart: (input: { sessionID: SessionID; messageID: MessageID; partID: PartID }) => Effect.Effect<PartID>
@@ -539,10 +544,11 @@ export type Patch = Omit<Partial<Info>, "time" | "share" | "summary" | "revert" 
 const layer: Layer.Layer<
   Service,
   never,
-  BackgroundJob.Service | RuntimeFlags.Service | Database.Service | EventV2Bridge.Service
+  BackgroundJob.Service | RuntimeFlags.Service | Database.Service | EventV2Bridge.Service | ShareNext.Service
 > = Layer.effect(
   Service,
   Effect.gen(function* () {
+    const sharing = yield* ShareNext.Service
     const { db } = yield* Database.Service
     const database = yield* Database.Service
     const background = yield* BackgroundJob.Service
@@ -677,8 +683,12 @@ const layer: Layer.Layer<
       return rows.map(fromRow)
     })
 
-    const remove: Interface["remove"] = Effect.fnUntraced(function* (sessionID: SessionID) {
+    const remove: Interface["remove"] = Effect.fnUntraced(function* (sessionID: SessionID, options) {
       const session = yield* get(sessionID)
+      if (!options?.acknowledgePublicShares) {
+        const links = yield* sharing.publicLinks(sessionID)
+        if (links.length) return yield* publicShareWarning(links)
+      }
       try {
         // `remove` needs to work in all cases, such as broken sessions that
         // run cleanup without instance state.
@@ -690,7 +700,7 @@ const layer: Layer.Layer<
         if (hasInstance) yield* cancelBackgroundJobs(background, sessionID)
         const kids = yield* children(sessionID)
         for (const child of kids) {
-          yield* remove(child.id)
+          yield* remove(child.id, options)
         }
 
         yield* events.publish(SessionV1.Event.Deleted, { sessionID, info: session })
@@ -1253,7 +1263,7 @@ function listByProject(
 export const node = LayerNode.make({
   service: Service,
   layer: layer,
-  deps: [BackgroundJob.node, RuntimeFlags.node, Database.node, EventV2Bridge.node],
+  deps: [BackgroundJob.node, RuntimeFlags.node, Database.node, EventV2Bridge.node, ShareNext.node],
 })
 
 export * as Session from "./session"

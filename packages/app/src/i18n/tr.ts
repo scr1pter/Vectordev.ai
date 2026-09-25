@@ -837,6 +837,9 @@ export const dict = {
   "session.delete.title": "Oturumu sil",
   "session.delete.confirm": '"{{name}}" oturumu silinsin mi?',
   "session.delete.button": "Oturumu sil",
+  "session.delete.publicShare.warning":
+    "Bu oturum veya bir alt oturum önceki bir sürümde herkese açık olarak paylaşıldı. Vector bu herkese açık kopyayı kaldıramaz. Yerel oturumu silmeden önce bu bağlantıları kaydedin.",
+  "session.delete.publicShare.confirm": "Yalnızca yerel oturumu sil",
 
   "workspace.new": "Yeni çalışma alanı",
   "workspace.type.local": "yerel",

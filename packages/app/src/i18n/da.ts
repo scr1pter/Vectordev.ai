@@ -822,6 +822,9 @@ export const dict = {
   "session.delete.title": "Slet session",
   "session.delete.confirm": 'Slet session "{{name}}"?',
   "session.delete.button": "Slet session",
+  "session.delete.publicShare.warning":
+    "Denne session eller en undersession blev delt offentligt i en tidligere version. Vector kan ikke fjerne den offentlige kopi. Gem disse links, før du sletter den lokale session.",
+  "session.delete.publicShare.confirm": "Slet kun den lokale session",
 
   "workspace.new": "Nyt arbejdsområde",
   "workspace.type.local": "lokal",

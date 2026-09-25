@@ -2136,7 +2136,7 @@ export class Session2 extends HeyApiClient {
   /**
    * Delete session
    *
-   * Delete a session and permanently remove all associated data, including messages and history.
+   * Delete a local session and its children. Existing public shares require acknowledgment; their URLs are returned before deletion and public copies may remain online.
    */
   public delete<ThrowOnError extends boolean = false>(options: Options<SessionDeleteData, ThrowOnError>) {
     return (options.client ?? this.client).delete<SessionDeleteResponses, SessionDeleteErrors, ThrowOnError>({
@@ -2309,7 +2309,7 @@ export class Session2 extends HeyApiClient {
   /**
    * Unshare session
    *
-   * Remove the shareable link for a session, making it private again.
+   * Public sharing is unavailable. Existing public links are preserved and reported in a warning.
    */
   public unshare<ThrowOnError extends boolean = false>(options: Options<SessionUnshareData, ThrowOnError>) {
     return (options.client ?? this.client).delete<SessionUnshareResponses, SessionUnshareErrors, ThrowOnError>({

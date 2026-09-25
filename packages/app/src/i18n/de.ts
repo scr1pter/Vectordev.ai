@@ -764,6 +764,9 @@ export const dict = {
   "session.delete.title": "Sitzung löschen",
   "session.delete.confirm": 'Sitzung "{{name}}" löschen?',
   "session.delete.button": "Sitzung löschen",
+  "session.delete.publicShare.warning":
+    "Diese Sitzung oder eine untergeordnete Sitzung wurde mit einer früheren Version öffentlich geteilt. Vector kann diese öffentliche Kopie nicht entfernen. Speichere diese Links, bevor du die lokale Sitzung löschst.",
+  "session.delete.publicShare.confirm": "Nur lokale Sitzung löschen",
   "workspace.new": "Neuer Arbeitsbereich",
   "workspace.type.local": "lokal",
   "workspace.type.sandbox": "Sandbox",

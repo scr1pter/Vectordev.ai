@@ -2701,6 +2701,12 @@ export type NotFoundError = {
   }
 }
 
+export type PublicShareRemovalError = {
+  _tag: "PublicShareRemovalError"
+  links: Array<string>
+  message: string
+}
+
 export type TextPartInput = {
   id?: string
   type: "text"
@@ -10096,6 +10102,7 @@ export type SessionDeleteData = {
   query?: {
     directory?: string
     workspace?: string
+    acknowledgePublicShares?: "true" | "false"
   }
   url: "/session/{sessionID}"
 }
@@ -10109,15 +10116,25 @@ export type SessionDeleteErrors = {
    * NotFoundError
    */
   404: NotFoundError
+  /**
+   * PublicShareRemovalError
+   */
+  409: PublicShareRemovalError
 }
 
 export type SessionDeleteError = SessionDeleteErrors[keyof SessionDeleteErrors]
 
 export type SessionDeleteResponses = {
   /**
-   * Successfully deleted session
+   * Deleted local session; warnings identify public copies that may remain online
    */
-  200: boolean
+  200:
+    | boolean
+    | {
+        deleted: true
+        warnings: Array<string>
+        links: Array<string>
+      }
 }
 
 export type SessionDeleteResponse = SessionDeleteResponses[keyof SessionDeleteResponses]
@@ -10593,6 +10610,10 @@ export type SessionUnshareErrors = {
    */
   404: NotFoundError
   /**
+   * PublicShareRemovalError
+   */
+  409: PublicShareRemovalError
+  /**
    * InternalServerError
    */
   500: EffectHttpApiErrorInternalServerError
@@ -10602,7 +10623,7 @@ export type SessionUnshareError = SessionUnshareErrors[keyof SessionUnshareError
 
 export type SessionUnshareResponses = {
   /**
-   * Successfully unshared session
+   * Session without a public share
    */
   200: Session
 }
@@ -11724,6 +11745,10 @@ export type ExperimentalWorkspaceRemoveErrors = {
    * BadRequest | InvalidRequestError
    */
   400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * PublicShareRemovalError
+   */
+  409: PublicShareRemovalError
 }
 
 export type ExperimentalWorkspaceRemoveError =

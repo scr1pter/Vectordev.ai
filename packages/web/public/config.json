@@ -905,11 +905,11 @@
             "auto",
             "disabled"
           ],
-          "description": "Control sharing behavior:'manual' allows manual sharing via commands, 'auto' enables automatic sharing, 'disabled' disables all sharing"
+          "description": "Public session sharing is unavailable in Vector; this setting is ignored."
         },
         "autoshare": {
           "type": "boolean",
-          "description": "@deprecated Use 'share' field instead. Share newly created sessions automatically"
+          "description": "@deprecated Public session sharing is unavailable in Vector; this setting is ignored."
         },
         "autoupdate": {
           "anyOf": [
@@ -998,7 +998,7 @@
           "additionalProperties": {
             "$ref": "#/$defs/AgentConfig"
           },
-          "description": "Agent configuration, see https://vectordev.ai/docs/agents"
+          "description": "Agent configuration, see https://vectordev.ai/docs/custom-agents"
         },
         "provider": {
           "type": "object",

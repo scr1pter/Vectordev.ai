@@ -1084,6 +1084,9 @@ export const dict = {
   "session.delete.title": "Delete session",
   "session.delete.confirm": 'Delete session "{{name}}"?',
   "session.delete.button": "Delete session",
+  "session.delete.publicShare.warning":
+    "This session or a child session was shared publicly with an earlier release. Vector cannot remove that public copy. Save these links before deleting the local session.",
+  "session.delete.publicShare.confirm": "Delete local session only",
 
   "workspace.new": "New workspace",
   "workspace.type.local": "local",

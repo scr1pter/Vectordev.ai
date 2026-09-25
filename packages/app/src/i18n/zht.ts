@@ -809,6 +809,9 @@ export const dict = {
   "session.delete.title": "刪除工作階段",
   "session.delete.confirm": '刪除工作階段 "{{name}}"?',
   "session.delete.button": "刪除工作階段",
+  "session.delete.publicShare.warning":
+    "此工作階段或子工作階段曾在舊版本中公開分享。Vector 無法刪除該公開副本。刪除本機工作階段前，請儲存這些連結。",
+  "session.delete.publicShare.confirm": "僅刪除本機工作階段",
 
   "workspace.new": "新增工作區",
   "workspace.type.local": "本地",

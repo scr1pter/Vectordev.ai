@@ -740,6 +740,9 @@ export const dict = {
   "session.delete.title": "حذف الجلسة",
   "session.delete.confirm": 'حذف الجلسة "{{name}}"؟',
   "session.delete.button": "حذف الجلسة",
+  "session.delete.publicShare.warning":
+    "تمت مشاركة هذه الجلسة أو جلسة فرعية علنًا في إصدار سابق. لا يستطيع Vector إزالة النسخة العامة. احفظ هذه الروابط قبل حذف الجلسة المحلية.",
+  "session.delete.publicShare.confirm": "حذف الجلسة المحلية فقط",
   "workspace.new": "مساحة عمل جديدة",
   "workspace.type.local": "محلي",
   "workspace.type.sandbox": "صندوق رمل",

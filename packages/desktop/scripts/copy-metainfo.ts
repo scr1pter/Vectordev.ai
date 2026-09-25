@@ -36,11 +36,6 @@ const xml = `<?xml version="1.0" encoding="UTF-8"?>
   <url type="homepage">https://vectordev.ai</url>
   <url type="vcs-browser">https://github.com/scr1pter/Vectordev.ai</url>
 
-  <screenshots>
-    <screenshot type="default">
-      <image>https://vectordev.ai/og.png</image>
-    </screenshot>
-  </screenshots>
 </component>
 `
 

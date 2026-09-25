@@ -1,3 +1,5 @@
+import { publicShareError } from "@vectordevai/schema/public-share"
+import { DialogConfirm } from "../ui/dialog-confirm"
 import { useDialog } from "../ui/dialog"
 import { DialogSelect } from "../ui/dialog-select"
 import { useRoute } from "../context/route"
@@ -304,9 +306,27 @@ export function DialogSessionList() {
               const status = session?.workspaceID ? project.workspace.status(session.workspaceID) : undefined
 
               try {
-                const result = await sdk.client.session.delete({
-                  sessionID: option.value,
-                })
+                const first = await sdk.client.session.delete({ sessionID: option.value }, { throwOnError: false })
+                const warning = publicShareError(first.error)
+                const result = !warning
+                  ? first
+                  : await (async () => {
+                      const confirmed = await DialogConfirm.show(
+                        dialog,
+                        "Public copy may remain online",
+                        warning.message,
+                        "Delete local session only",
+                      )
+                      if (!confirmed) return
+                      return sdk.client.session.delete(
+                        { sessionID: option.value, acknowledgePublicShares: "true" },
+                        { throwOnError: false },
+                      )
+                    })()
+                if (!result) {
+                  setToDelete(undefined)
+                  return
+                }
                 if (result.error) {
                   if (session?.workspaceID) {
                     recover(session)

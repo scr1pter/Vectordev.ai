@@ -1,3 +1,4 @@
+import { PublicShareRemovalError, SessionDeleteResult } from "@vectordevai/schema/public-share"
 import { PermissionV1 } from "@vectordevai/core/v1/permission"
 import { Permission } from "@/permission"
 import { SessionV1 } from "@vectordevai/core/v1/session"
@@ -214,14 +215,21 @@ export const SessionApi = HttpApi.make("session")
         ),
         HttpApiEndpoint.delete("remove", SessionPaths.remove, {
           params: { sessionID: SessionID },
-          query: WorkspaceRoutingQuery,
-          success: described(Schema.Boolean, "Successfully deleted session"),
-          error: [HttpApiError.BadRequest, ApiNotFoundError],
+          query: Schema.Struct({
+            ...WorkspaceRoutingQueryFields,
+            acknowledgePublicShares: Schema.optional(QueryBoolean),
+          }),
+          success: described(
+            SessionDeleteResult,
+            "Deleted local session; warnings identify public copies that may remain online",
+          ),
+          error: [HttpApiError.BadRequest, ApiNotFoundError, PublicShareRemovalError],
         }).annotateMerge(
           OpenApi.annotations({
             identifier: "session.delete",
             summary: "Delete session",
-            description: "Delete a session and permanently remove all associated data, including messages and history.",
+            description:
+              "Delete a local session and its children. Existing public shares require acknowledgment; their URLs are returned before deletion and public copies may remain online.",
           }),
         ),
         HttpApiEndpoint.patch("update", SessionPaths.update, {
@@ -291,13 +299,14 @@ export const SessionApi = HttpApi.make("session")
         HttpApiEndpoint.delete("unshare", SessionPaths.share, {
           params: { sessionID: SessionID },
           query: WorkspaceRoutingQuery,
-          success: described(Session.Info, "Successfully unshared session"),
-          error: [HttpApiError.InternalServerError, ApiNotFoundError],
+          success: described(Session.Info, "Session without a public share"),
+          error: [HttpApiError.InternalServerError, ApiNotFoundError, PublicShareRemovalError],
         }).annotateMerge(
           OpenApi.annotations({
             identifier: "session.unshare",
             summary: "Unshare session",
-            description: "Remove the shareable link for a session, making it private again.",
+            description:
+              "Public sharing is unavailable. Existing public links are preserved and reported in a warning.",
           }),
         ),
         HttpApiEndpoint.post("summarize", SessionPaths.summarize, {

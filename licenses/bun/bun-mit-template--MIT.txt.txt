@@ -1,14 +1,4 @@
-Package: abstract-logging@2.0.1
-Declared license: MIT
-Declared author: James Sumners <james.sumners@gmail.com>
-Source: https://registry.npmjs.org/abstract-logging/2.0.1
-
-This published package supplies the license identifier above but no license/copyright notice file. The corresponding standard license text follows; placeholder fields in that standard are not assertions of authorship.
-Source: https://spdx.org/licenses/MIT.html
-
 MIT License
-
-Copyright (c) <year> <copyright holders>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
 associated documentation files (the "Software"), to deal in the Software without restriction, including
