@@ -1,4 +1,4 @@
-import { providerEnabled } from "@vectordevai/core/provider-policy"
+import { providerEnabled, providerOAuthAllowed } from "@vectordevai/core/provider-policy"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import type { AuthOAuthResult, Hooks } from "@vectordevai/plugin"
 import { serviceUse } from "@vectordevai/core/effect/service-use"
@@ -88,6 +88,11 @@ export type Error = Auth.AuthError | OauthMissing | OauthCodeMissing | OauthCall
 
 type Hook = NonNullable<Hooks["auth"]>
 
+function visibleMethods(hook: Hook) {
+  if (!providerEnabled(hook.provider)) return []
+  return hook.methods.filter((method) => method.type !== "oauth" || providerOAuthAllowed(hook.provider, true))
+}
+
 export interface Interface {
   readonly methods: () => Effect.Effect<Methods>
   readonly authorize: (
@@ -133,7 +138,7 @@ const layer: Layer.Layer<Service, never, Auth.Service | Plugin.Service> = Layer.
       const hooks = (yield* InstanceState.get(state)).hooks
       return decode(
         Record.map(hooks, (item, providerID) =>
-          (providerEnabled(providerID) ? item.methods : []).map((method) => ({
+          visibleMethods(item).map((method) => ({
             type: method.type,
             label: method.label,
             ...(method.prompts && {
@@ -171,7 +176,9 @@ const layer: Layer.Layer<Service, never, Auth.Service | Plugin.Service> = Layer.
           message: `${input.providerID} sign-in is currently paused in Vector. Choose another provider.`,
         })
       }
-      const method = Object.hasOwn(hooks, input.providerID) ? hooks[input.providerID].methods[input.method] : undefined
+      const method = Object.hasOwn(hooks, input.providerID)
+        ? visibleMethods(hooks[input.providerID])[input.method]
+        : undefined
       if (!method) {
         return yield* new ValidationFailed({
           field: "method",
@@ -201,6 +208,12 @@ const layer: Layer.Layer<Service, never, Auth.Service | Plugin.Service> = Layer.
     const callback = Effect.fn("ProviderAuth.callback")(function* (
       input: { providerID: ProviderV2.ID } & CallbackInput,
     ) {
+      if (!providerOAuthAllowed(input.providerID, true)) {
+        return yield* new ValidationFailed({
+          field: "providerID",
+          message: `${input.providerID} sign-in is currently paused in Vector. Use an API key or another provider.`,
+        })
+      }
       const pending = (yield* InstanceState.get(state)).pending
       const match = pending.get(input.providerID)
       if (!match) return yield* new OauthMissing({ providerID: input.providerID })

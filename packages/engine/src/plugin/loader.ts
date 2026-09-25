@@ -4,6 +4,7 @@ import {
   isDeprecatedPlugin,
   pluginSource,
   resolvePluginTarget,
+  parsePluginSpecifier,
   type PluginKind,
   type PluginPackage,
   type PluginSource,
@@ -168,8 +169,12 @@ export namespace PluginLoader {
     const plan = candidate.plan
     const filePlugin = pluginSource(plan.spec) === "file"
 
-    // Deprecated plugin packages are silently ignored because they are now built in.
-    if (plan.deprecated) return { retry: false }
+    if (plan.deprecated) {
+      console.warn(
+        `Skipped plugin ${parsePluginSpecifier(plan.spec).pkg}: this sign-in plugin is paused in Vector. Use a supported API key connection instead.`,
+      )
+      return { retry: false }
+    }
 
     report?.start?.(candidate, retry)
 

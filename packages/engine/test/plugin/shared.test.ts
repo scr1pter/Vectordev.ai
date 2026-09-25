@@ -1,5 +1,26 @@
 import { describe, expect, test } from "bun:test"
-import { parsePluginSpecifier } from "../../src/plugin/shared"
+import { isDeprecatedPlugin, parsePluginSpecifier } from "../../src/plugin/shared"
+
+describe("paused sign-in plugin names", () => {
+  test.each([
+    "fixture-openai-codex-auth",
+    "different-copilot-auth@1.2.3",
+    "@fixture/prefix-copilot-auth@latest",
+    "friendly@npm:another-openai-codex-auth@2.0.0",
+  ])("blocks the package-name suffix in %s", (spec) => {
+    expect(isDeprecatedPlugin(spec)).toBe(true)
+  })
+
+  test.each([
+    "ordinary-plugin@1.2.3",
+    "fixture-copilot-auth-tools",
+    "./fixture-copilot-auth",
+    "file:///tmp/fixture-openai-codex-auth.js",
+    "https://example.com/fixture-copilot-auth.tgz",
+  ])("does not block an unrelated name or explicit local file in %s", (spec) => {
+    expect(isDeprecatedPlugin(spec)).toBe(false)
+  })
+})
 
 describe("parsePluginSpecifier", () => {
   test("parses standard npm package without version", () => {

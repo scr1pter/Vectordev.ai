@@ -35,17 +35,17 @@ already-loaded config until then.
 
 ## Where files live
 
-| Scope                         | Path                                                                                                                      |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Scope                         | Path                                                                                                            |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------- |
 | Project config                | `./vector.json`, `./vector.jsonc`, or `.vector/vector.json` (Vector walks up from the cwd to the worktree root) |
-| Global config                 | `~/.config/vector/vector.json` (NOT `~/.vector/`)                                                                   |
-| Project agents                | `.vector/agent/<name>.md` or `.vector/agents/<name>.md`                                                               |
-| Global agents                 | `~/.config/vector/agent(s)/<name>.md`                                                                                   |
-| Project commands              | `.vector/command/<name>.md` or `.vector/commands/<name>.md`                                                           |
-| Global commands               | `~/.config/vector/command(s)/<name>.md`                                                                                 |
-| Project skills                | `.vector/skill(s)/<name>/SKILL.md`                                                                                      |
-| Global skills                 | `~/.config/vector/skill(s)/<name>/SKILL.md`                                                                             |
-| External skills (auto-loaded) | `~/.claude/skills/<name>/SKILL.md`, `~/.agents/skills/<name>/SKILL.md`                                                    |
+| Global config                 | `~/.config/vector/vector.json` (NOT `~/.vector/`)                                                               |
+| Project agents                | `.vector/agent/<name>.md` or `.vector/agents/<name>.md`                                                         |
+| Global agents                 | `~/.config/vector/agent(s)/<name>.md`                                                                           |
+| Project commands              | `.vector/command/<name>.md` or `.vector/commands/<name>.md`                                                     |
+| Global commands               | `~/.config/vector/command(s)/<name>.md`                                                                         |
+| Project skills                | `.vector/skill(s)/<name>/SKILL.md`                                                                              |
+| Global skills                 | `~/.config/vector/skill(s)/<name>/SKILL.md`                                                                     |
+| External skills (auto-loaded) | `~/.claude/skills/<name>/SKILL.md`, `~/.agents/skills/<name>/SKILL.md`                                          |
 
 Configs from each scope are deep-merged. Project overrides global. Unknown
 top-level keys in `vector.json` are rejected with `ConfigInvalidError`.
@@ -120,10 +120,8 @@ Every field is optional.
   },
 
   "plugin": [
-    "vector-gemini-auth",
-    "vector-foo@1.2.3",
     "./local-plugin.ts",
-    ["vector-bar", { "option": "value" }]
+    ["./another-local-plugin.ts", { "option": "value" }]
   ],
 
   "permission": {
@@ -305,17 +303,20 @@ model: anthropic/claude-sonnet-4-6
 
 ## Plugins
 
-`plugin:` is an array. Each entry is one of:
+`plugin:` is an array. These examples refer to local files you create:
 
 ```json
 "plugin": [
-  "vector-gemini-auth",            // npm spec, latest
-  "vector-foo@1.2.3",              // npm spec, pinned
-  "./local-plugin.ts",               // file path, relative to the declaring config
-  "file:///abs/path/plugin.js",      // file URL
-  ["vector-bar", { "key": "val" }] // tuple form with options
+  "./local-plugin.ts",                           // relative to the declaring config
+  "file:///abs/path/plugin.js",                   // absolute file URL
+  ["./another-local-plugin.ts", { "key": "val" }] // tuple form with options
 ]
 ```
+
+Npm package specs are also supported. Before adding one, verify the publisher
+and the exact package against its official documentation, and pin a reviewed
+version. Do not invent a package name or treat a Vector-looking name as proof
+that Vector publishes it. Plugins execute with the engine's permissions.
 
 Auto-discovered plugins (no config entry needed): any `*.ts` or `*.js` file in
 `.vector/plugin/` or `.vector/plugins/`.

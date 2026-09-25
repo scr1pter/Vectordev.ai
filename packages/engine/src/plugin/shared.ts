@@ -6,11 +6,11 @@ import { Filesystem } from "@/util/filesystem"
 import { isRecord } from "@/util/record"
 import { Npm } from "@vectordevai/core/npm"
 
-// Old npm package names for plugins that are now built-in
-export const DEPRECATED_PLUGIN_PACKAGES = ["vector-openai-codex-auth", "vector-copilot-auth"]
-
 export function isDeprecatedPlugin(spec: string) {
-  return DEPRECATED_PLUGIN_PACKAGES.some((pkg) => spec.includes(pkg))
+  if (isPathPluginSpec(spec)) return false
+  const parsed = parse(spec)
+  const names = [parsed?.name, parsed?.type === "alias" ? (parsed as npa.AliasResult).subSpec?.name : undefined]
+  return names.some((name) => typeof name === "string" && /-(?:openai-codex|copilot)-auth$/i.test(name))
 }
 
 function parse(spec: string) {

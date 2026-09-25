@@ -585,7 +585,7 @@ describe("plugin.loader.shared", () => {
           path.join(dir, "vector.json"),
           JSON.stringify(
             {
-              plugin: ["vector-openai-codex-auth@1.0.0", "vector-copilot-auth@1.0.0", "regular-plugin@1.0.0"],
+              plugin: ["fixture-openai-codex-auth@1.0.0", "different-copilot-auth@1.0.0", "regular-plugin@1.0.0"],
             },
             null,
             2,
@@ -595,15 +595,19 @@ describe("plugin.loader.shared", () => {
       (_tmp) =>
         Effect.gen(function* () {
           const install = spyOn(Npm, "add").mockResolvedValue({ directory: "", entrypoint: undefined })
+          const warning = spyOn(console, "warn").mockImplementation(() => {})
 
           try {
             yield* load(_tmp.path)
 
             const pkgs = install.mock.calls.map((call) => call[0])
             expect(pkgs).toContain("regular-plugin@1.0.0")
-            expect(pkgs).not.toContain("vector-openai-codex-auth@1.0.0")
-            expect(pkgs).not.toContain("vector-copilot-auth@1.0.0")
+            expect(pkgs).not.toContain("fixture-openai-codex-auth@1.0.0")
+            expect(pkgs).not.toContain("different-copilot-auth@1.0.0")
+            expect(warning.mock.calls).toHaveLength(2)
+            expect(warning.mock.calls.every((call) => String(call[0]).includes("paused in Vector"))).toBe(true)
           } finally {
+            warning.mockRestore()
             install.mockRestore()
           }
         }),
