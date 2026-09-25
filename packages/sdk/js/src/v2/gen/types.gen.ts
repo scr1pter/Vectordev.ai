@@ -8,6 +8,7 @@ export type Event =
   | EventModelCatalogRefreshed
   | EventIntegrationUpdated
   | EventIntegrationConnectionUpdated
+  | EventProviderUnavailable
   | EventCatalogUpdated
   | EventSessionCreated
   | EventSessionUpdated
@@ -764,6 +765,15 @@ export type GlobalEvent = {
         type: "integration.connection.updated"
         properties: {
           integrationID: string
+        }
+      }
+    | {
+        id: string
+        type: "provider.unavailable"
+        properties: {
+          id: string
+          reason: "sign-in-paused" | "provider-not-configured" | "disabled" | "no-models"
+          message: string
         }
       }
     | {
@@ -2989,6 +2999,7 @@ export type V2Event =
   | ModelCatalogRefreshed
   | IntegrationUpdated
   | IntegrationConnectionUpdated
+  | ProviderUnavailable
   | CatalogUpdated
   | SessionCreated
   | SessionUpdated
@@ -5205,6 +5216,25 @@ export type IntegrationConnectionUpdated = {
   }
 }
 
+export type ProviderUnavailable = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "provider.unavailable"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    id: string
+    reason: "sign-in-paused" | "provider-not-configured" | "disabled" | "no-models"
+    message: string
+  }
+}
+
 export type CatalogUpdated = {
   id: string
   metadata?: {
@@ -6308,6 +6338,16 @@ export type EventIntegrationConnectionUpdated = {
   type: "integration.connection.updated"
   properties: {
     integrationID: string
+  }
+}
+
+export type EventProviderUnavailable = {
+  id: string
+  type: "provider.unavailable"
+  properties: {
+    id: string
+    reason: "sign-in-paused" | "provider-not-configured" | "disabled" | "no-models"
+    message: string
   }
 }
 
@@ -9828,6 +9868,11 @@ export type ProviderListResponses = {
       [key: string]: string
     }
     connected: Array<string>
+    unavailable?: Array<{
+      id: string
+      reason: "sign-in-paused" | "provider-not-configured" | "disabled" | "no-models"
+      message: string
+    }>
   }
 }
 

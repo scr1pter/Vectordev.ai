@@ -9,8 +9,8 @@ import { WorkspaceEvent } from "../src/workspace-event"
 
 describe("public event manifest", () => {
   test("owns the complete public event surface", () => {
-    expect(EventManifest.ServerDefinitions.length).toBe(58)
-    expect(EventManifest.Definitions.length).toBe(88)
+    expect(EventManifest.ServerDefinitions.length).toBe(59)
+    expect(EventManifest.Definitions.length).toBe(89)
     expect(SessionV1.Event.Definitions).toEqual([
       SessionV1.Event.Created,
       SessionV1.Event.Updated,
@@ -23,7 +23,7 @@ describe("public event manifest", () => {
       SessionV1.Event.Diff,
       SessionV1.Event.Error,
     ])
-    expect(EventManifest.Latest.size).toBe(88)
+    expect(EventManifest.Latest.size).toBe(89)
     expect(EventManifest.Durable.size).toBe(35)
   })
 
@@ -37,7 +37,11 @@ describe("public event manifest", () => {
     expect(EventManifest.Latest.get("project.updated")).toBe(Project.Event.Updated)
     expect(Project.Event.Definitions).toEqual([Project.Event.Updated])
     expect(FileSystem.Event.Definitions).toEqual([FileSystem.Event.Edited])
-    expect(Integration.Event.Definitions).toEqual([Integration.Event.Updated, Integration.Event.ConnectionUpdated])
+    expect(Integration.Event.Definitions).toEqual([
+      Integration.Event.Updated,
+      Integration.Event.ConnectionUpdated,
+      Integration.Event.Unavailable,
+    ])
     expect(Permission.Event.Definitions).toEqual([Permission.Event.Asked, Permission.Event.Replied])
     expect(Reference.Event.Definitions).toEqual([Reference.Event.Updated])
     expect(EventManifest.Latest.has("ide.installed")).toBe(false)
@@ -46,7 +50,7 @@ describe("public event manifest", () => {
     expect(EventManifest.Latest.get("session.next.revert.cleared")).toBe(SessionEvent.RevertEvent.Cleared)
     expect(EventManifest.Latest.get("session.next.revert.committed")).toBe(SessionEvent.RevertEvent.Committed)
     // The durable session block ends with the revert events, so the V1 live tail starts right after them.
-    expect(EventManifest.Definitions.slice(40, 46)).toEqual([
+    expect(EventManifest.Definitions.slice(41, 47)).toEqual([
       SessionEvent.RevertEvent.Staged,
       SessionEvent.RevertEvent.Cleared,
       SessionEvent.RevertEvent.Committed,

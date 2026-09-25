@@ -127,6 +127,18 @@ export const dict = {
   "dialog.provider.tag.recommended": "推荐",
   "dialog.provider.anthropic.note": "使用 Anthropic API 密钥访问 Claude 模型",
   "dialog.provider.copilot.note": "Vector 目前已暂停 GitHub Copilot 登录。请选择其他提供商继续。",
+  "provider.unavailable.title": "已忽略 {{provider}} 凭据",
+  "provider.unavailable.sign-in-paused":
+    "登录已暂停。请使用 API 密钥连接受支持的提供商，或运行 vector providers logout {{provider}} 删除已保存的凭据。",
+  "provider.unavailable.provider-not-configured":
+    "此提供商尚未配置。请在 vector.json 中添加其端点和模型，或运行 vector providers logout {{provider}}。",
+  "provider.unavailable.disabled": "此提供商已在配置中禁用。请将其启用，或运行 vector providers logout {{provider}}。",
+  "provider.unavailable.no-models":
+    "未加载可用模型。请检查提供商配置和身份验证，或运行 vector providers logout {{provider}}。",
+  "model.unavailable.title": "已保存的模型不可用",
+  "model.unavailable.replaced": "{{model}} 不可用。Vector 已选择 {{replacement}}。继续之前请确认其价格。",
+  "model.unavailable.empty": "{{model}} 不可用。请连接提供商或选择其他模型。",
+
   "provider.connect.unavailable": "Vector 目前已暂停 {{provider}} 登录。请选择其他提供商继续。",
   "dialog.provider.openai.note": "使用 OpenAI API 密钥访问 GPT 模型",
   "dialog.provider.google.note": "使用 Google 账号或 API 密钥连接",

@@ -809,6 +809,22 @@ export const RunCommand = effectCmd({
         // Validate agent if specified
         const agent = await pickAgent(client)
 
+        const requested = pick(args.model)
+        if (requested) {
+          const notice = (await client.provider.list()).data?.unavailable?.find(
+            (item) => item.id === requested.providerID,
+          )
+          if (notice) {
+            const error = {
+              name: "ProviderUnavailable",
+              data: { message: `Model unavailable: ${requested.providerID}/${requested.modelID}. ${notice.message}` },
+            }
+            if (!emit("error", { error })) UI.error(error.data.message)
+            process.exitCode = 1
+            return
+          }
+        }
+
         if (!interactive) {
           const events = await client.event.subscribe()
           const completed = loop(client, events).catch((e) => {

@@ -1,3 +1,4 @@
+import { Provider } from "@/provider/provider"
 import { COPILOT_SIGN_IN, providerEnabled, providerUsable } from "@vectordevai/schema/provider-policy"
 import type { Argv } from "yargs"
 import { Auth } from "../../auth"
@@ -251,11 +252,12 @@ export const ProvidersListCommand = effectCmd({
   command: "list",
   aliases: ["ls"],
   describe: "list providers and credentials",
-  // Lists global credentials + provider env vars; no project instance needed.
-  instance: false,
+  // Availability is project-specific: local configuration and plugins may define providers.
   handler: Effect.fn("Cli.providers.list")(function* (_args) {
     const authSvc = yield* Auth.Service
     const modelCatalog = yield* ModelCatalog.Service
+    const provider = yield* Provider.Service
+    const unavailable = new Map((yield* provider.unavailable()).map((item) => [item.id, item.message]))
 
     UI.empty()
     const authPath = path.join(Global.Path.data, "auth.json")
@@ -267,7 +269,8 @@ export const ProvidersListCommand = effectCmd({
 
     for (const [providerID, result] of results) {
       const name = database[providerID]?.name || providerID
-      yield* Prompt.log.info(`${name} ${UI.Style.TEXT_DIM}${result.type}`)
+      const reason = unavailable.get(providerID)
+      yield* Prompt.log.info(`${name} ${UI.Style.TEXT_DIM}${result.type}${reason ? ` (ignored: ${reason})` : ""}`)
     }
 
     yield* Prompt.outro(`${results.length} credentials`)

@@ -1,3 +1,4 @@
+import { providerNoticeTracker, unavailableModel } from "@vectordevai/schema/provider-unavailable"
 import { createStore } from "solid-js/store"
 import { createSimpleContext } from "./helper"
 import { batch, createEffect, createMemo } from "solid-js"
@@ -14,6 +15,8 @@ import { useToast } from "../ui/toast"
 import { useRoute } from "./route"
 import { usePermission } from "./permission"
 import { modelDisplayName, modelProviderName } from "../util/model"
+
+const takeNotice = providerNoticeTracker()
 
 export type LocalTheme = {
   secondary: RGBA
@@ -245,6 +248,38 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         )
       })
 
+      createEffect(() => {
+        if (sync.status === "loading" || !modelStore.ready) return
+        const a = agent.current()
+        const previous = unavailableModel(
+          [
+            a && modelStore.model[a.name],
+            a?.model,
+            args.model ? parseModel(args.model) : undefined,
+            sync.data.config.model ? parseModel(sync.data.config.model) : undefined,
+            ...modelStore.recent,
+          ],
+          isModelValid,
+        )
+        const messages = (sync.data.provider_next.unavailable ?? [])
+          .filter((item) => takeNotice(sdk.url, `credential:${item.id}:${item.reason}`))
+          .map((item) => item.message)
+        if (previous) {
+          const next = currentModel()
+          const old = `${previous.providerID}/${previous.modelID}`
+          const replacement = next ? `${next.providerID}/${next.modelID}` : undefined
+          if (takeNotice(sdk.url, `model:${sdk.directory}:${old}:${replacement ?? "none"}`)) {
+            messages.push(
+              replacement
+                ? `${old} is unavailable. Vector selected ${replacement}. Check this model's pricing before continuing.`
+                : `${old} is unavailable. Connect a provider or choose another model.`,
+            )
+          }
+        }
+        // The TUI has one toast slot; combine startup notices so none overwrite another.
+        if (messages.length) toast.show({ variant: "warning", message: messages.join("\n\n"), duration: 15000 })
+      })
+
       return {
         current: currentModel,
         get ready() {
@@ -320,17 +355,11 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         },
         set(model: { providerID: string; modelID: string }, options?: { recent?: boolean }) {
           batch(() => {
-            if (!isModelValid(model)) {
-              toast.show({
-                message: `Model ${model.providerID}/${model.modelID} is not valid`,
-                variant: "warning",
-                duration: 3000,
-              })
-              return
-            }
             const a = agent.current()
             if (!a) return
+            // Retain a restored preference until the catalog is ready so the fallback notice can name it.
             setModelStore("model", a.name, model)
+            if (!isModelValid(model)) return
             if (options?.recent) {
               setModelStore("recent", recentModels(model, modelStore.recent))
               save()
@@ -519,17 +548,6 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         }
       },
     }
-
-    createEffect(() => {
-      const value = agent.current()
-      if (!value?.model) return
-      if (isModelValid(value.model)) return
-      toast.show({
-        variant: "warning",
-        message: `Agent ${value.name}'s configured model ${value.model.providerID}/${value.model.modelID} is not valid`,
-        duration: 3000,
-      })
-    })
 
     const result = {
       model,

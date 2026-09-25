@@ -101,6 +101,20 @@ export const dict = {
   "dialog.provider.anthropic.note": "Modelos Claude con tu clave API de Anthropic",
   "dialog.provider.copilot.note":
     "El inicio de sesión de GitHub Copilot está pausado en Vector. Elige otro proveedor para continuar.",
+  "provider.unavailable.title": "Credenciales de {{provider}} ignoradas",
+  "provider.unavailable.sign-in-paused":
+    "El inicio de sesión está en pausa. Conecta un proveedor compatible con una clave API o elimina las credenciales guardadas con vector providers logout {{provider}}.",
+  "provider.unavailable.provider-not-configured":
+    "Este proveedor no está configurado. Añade su endpoint y modelos a vector.json o ejecuta vector providers logout {{provider}}.",
+  "provider.unavailable.disabled":
+    "Este proveedor está deshabilitado en tu configuración. Habilítalo o ejecuta vector providers logout {{provider}}.",
+  "provider.unavailable.no-models":
+    "No se cargaron modelos utilizables. Revisa la configuración y autenticación o ejecuta vector providers logout {{provider}}.",
+  "model.unavailable.title": "Modelo guardado no disponible",
+  "model.unavailable.replaced":
+    "{{model}} no está disponible. Vector seleccionó {{replacement}}. Revisa sus precios antes de continuar.",
+  "model.unavailable.empty": "{{model}} no está disponible. Conecta un proveedor o elige otro modelo.",
+
   "provider.connect.unavailable":
     "El inicio de sesión de {{provider}} está pausado en Vector. Elige otro proveedor para continuar.",
   "dialog.provider.openai.note": "Modelos GPT para tareas de IA generales rápidas y capaces",

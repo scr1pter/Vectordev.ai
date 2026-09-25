@@ -93,6 +93,20 @@ export const dict = {
   "dialog.provider.anthropic.note": "Modèles Claude avec votre clé API Anthropic",
   "dialog.provider.copilot.note":
     "La connexion à GitHub Copilot est actuellement suspendue dans Vector. Choisissez un autre fournisseur pour continuer.",
+  "provider.unavailable.title": "Identifiants {{provider}} ignorés",
+  "provider.unavailable.sign-in-paused":
+    "La connexion est suspendue. Connectez un fournisseur pris en charge avec une clé API, ou supprimez les identifiants enregistrés avec vector providers logout {{provider}}.",
+  "provider.unavailable.provider-not-configured":
+    "Ce fournisseur n’est pas configuré. Ajoutez son point de terminaison et ses modèles dans vector.json, ou exécutez vector providers logout {{provider}}.",
+  "provider.unavailable.disabled":
+    "Ce fournisseur est désactivé dans votre configuration. Activez-le ou exécutez vector providers logout {{provider}}.",
+  "provider.unavailable.no-models":
+    "Aucun modèle utilisable chargé. Vérifiez la configuration et l’authentification, ou exécutez vector providers logout {{provider}}.",
+  "model.unavailable.title": "Modèle enregistré indisponible",
+  "model.unavailable.replaced":
+    "{{model}} est indisponible. Vector a sélectionné {{replacement}}. Vérifiez ses tarifs avant de continuer.",
+  "model.unavailable.empty": "{{model}} est indisponible. Connectez un fournisseur ou choisissez un autre modèle.",
+
   "provider.connect.unavailable":
     "La connexion à {{provider}} est actuellement suspendue dans Vector. Choisissez un autre fournisseur pour continuer.",
   "dialog.provider.openai.note": "Modèles GPT avec votre clé API OpenAI",

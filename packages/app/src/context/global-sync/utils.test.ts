@@ -88,3 +88,9 @@ describe("directoryKey", () => {
     expect(String(directoryKey("/"))).toBe("/")
   })
 })
+
+test("provider normalization preserves actionable unavailable entries", () => {
+  const unavailable = [{ id: "openai", reason: "sign-in-paused", message: "Connect with an API key." }] as const
+  const result = normalizeProviderList({ all: [], default: {}, connected: [], unavailable: [...unavailable] })
+  expect(result.unavailable).toEqual([...unavailable])
+})

@@ -1,3 +1,4 @@
+import { providerUnavailable } from "@vectordevai/schema/provider-unavailable"
 import { COPILOT_SIGN_IN, providerAllowed, providerEnabled } from "@vectordevai/schema/provider-policy"
 export { COPILOT_SIGN_IN, providerAllowed, providerEnabled, providerUsable } from "@vectordevai/schema/provider-policy"
 
@@ -38,4 +39,15 @@ export function providerCredentialAllowed(
     )
   }
   return credential.type !== "oauth" || providerOAuthAllowed(id, userDefined)
+}
+
+export function providerCredentialUnavailable(
+  id: string,
+  credential: { type: string; clientId?: string; metadata?: Readonly<Record<string, unknown>> },
+  userDefined = false,
+) {
+  if (credential.type === "wellknown") return
+  if (!providerEnabled(id)) return providerUnavailable(id, "sign-in-paused")
+  if (!providerAllowed(id) && !userDefined) return providerUnavailable(id, "provider-not-configured")
+  if (!providerCredentialAllowed(id, credential, userDefined)) return providerUnavailable(id, "sign-in-paused")
 }

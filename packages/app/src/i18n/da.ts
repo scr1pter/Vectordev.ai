@@ -101,6 +101,20 @@ export const dict = {
   "dialog.provider.anthropic.note": "Claude-modeller med din Anthropic API-nøgle",
   "dialog.provider.copilot.note":
     "Login til GitHub Copilot er midlertidigt sat på pause i Vector. Vælg en anden udbyder for at fortsætte.",
+  "provider.unavailable.title": "Loginoplysninger for {{provider}} ignoreret",
+  "provider.unavailable.sign-in-paused":
+    "Login er sat på pause. Tilslut en understøttet udbyder med en API-nøgle, eller fjern gemte oplysninger med vector providers logout {{provider}}.",
+  "provider.unavailable.provider-not-configured":
+    "Denne udbyder er ikke konfigureret. Føj dens endpoint og modeller til vector.json, eller kør vector providers logout {{provider}}.",
+  "provider.unavailable.disabled":
+    "Denne udbyder er deaktiveret i din konfiguration. Aktivér den, eller kør vector providers logout {{provider}}.",
+  "provider.unavailable.no-models":
+    "Ingen brugbare modeller blev indlæst. Kontrollér konfiguration og godkendelse, eller kør vector providers logout {{provider}}.",
+  "model.unavailable.title": "Gemt model er utilgængelig",
+  "model.unavailable.replaced":
+    "{{model}} er utilgængelig. Vector valgte {{replacement}}. Kontrollér prisen, før du fortsætter.",
+  "model.unavailable.empty": "{{model}} er utilgængelig. Tilslut en udbyder, eller vælg en anden model.",
+
   "provider.connect.unavailable":
     "Login til {{provider}} er midlertidigt sat på pause i Vector. Vælg en anden udbyder for at fortsætte.",
   "dialog.provider.openai.note": "GPT-modeller til hurtige, kompetente generelle AI-opgaver",

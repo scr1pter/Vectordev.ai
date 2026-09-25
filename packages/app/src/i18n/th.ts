@@ -101,6 +101,19 @@ export const dict = {
   "dialog.provider.anthropic.note": "โมเดล Claude ด้วยคีย์ API ของ Anthropic ของคุณ",
   "dialog.provider.copilot.note":
     "การลงชื่อเข้าใช้ GitHub Copilot ถูกระงับชั่วคราวใน Vector โปรดเลือกผู้ให้บริการอื่นเพื่อดำเนินการต่อ",
+  "provider.unavailable.title": "ละเว้นข้อมูลรับรองของ {{provider}}",
+  "provider.unavailable.sign-in-paused":
+    "การลงชื่อเข้าใช้ถูกพักไว้ เชื่อมต่อผู้ให้บริการที่รองรับด้วยคีย์ API หรือเรียกใช้ vector providers logout {{provider}} เพื่อลบข้อมูลรับรองที่บันทึกไว้",
+  "provider.unavailable.provider-not-configured":
+    "ยังไม่ได้ตั้งค่าผู้ให้บริการนี้ เพิ่มปลายทางและโมเดลใน vector.json หรือเรียกใช้ vector providers logout {{provider}}",
+  "provider.unavailable.disabled":
+    "ผู้ให้บริการนี้ถูกปิดใช้งานในการตั้งค่า เปิดใช้งานหรือเรียกใช้ vector providers logout {{provider}}",
+  "provider.unavailable.no-models":
+    "ไม่พบโมเดลที่ใช้งานได้ ตรวจสอบการตั้งค่าและการยืนยันตัวตน หรือเรียกใช้ vector providers logout {{provider}}",
+  "model.unavailable.title": "โมเดลที่บันทึกไว้ไม่พร้อมใช้งาน",
+  "model.unavailable.replaced": "{{model}} ไม่พร้อมใช้งาน Vector เลือก {{replacement}} โปรดตรวจสอบราคาก่อนดำเนินการต่อ",
+  "model.unavailable.empty": "{{model}} ไม่พร้อมใช้งาน เชื่อมต่อผู้ให้บริการหรือเลือกโมเดลอื่น",
+
   "provider.connect.unavailable":
     "การลงชื่อเข้าใช้ {{provider}} ถูกระงับชั่วคราวใน Vector โปรดเลือกผู้ให้บริการอื่นเพื่อดำเนินการต่อ",
   "dialog.provider.openai.note": "โมเดล GPT สำหรับงาน AI ทั่วไปที่รวดเร็วและมีความสามารถ",

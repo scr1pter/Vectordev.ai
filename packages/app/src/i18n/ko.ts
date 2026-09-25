@@ -93,6 +93,20 @@ export const dict = {
   "dialog.provider.anthropic.note": "Anthropic API 키로 Claude 모델 사용",
   "dialog.provider.copilot.note":
     "현재 Vector에서 GitHub Copilot 로그인이 일시 중지되어 있습니다. 계속하려면 다른 공급자를 선택하세요.",
+  "provider.unavailable.title": "{{provider}} 인증 정보 무시됨",
+  "provider.unavailable.sign-in-paused":
+    "로그인이 일시 중지되었습니다. API 키로 지원되는 제공업체에 연결하거나 vector providers logout {{provider}} 명령으로 저장된 인증 정보를 삭제하세요.",
+  "provider.unavailable.provider-not-configured":
+    "이 제공업체가 구성되지 않았습니다. vector.json에 엔드포인트와 모델을 추가하거나 vector providers logout {{provider}} 명령을 실행하세요.",
+  "provider.unavailable.disabled":
+    "설정에서 이 제공업체가 비활성화되었습니다. 활성화하거나 vector providers logout {{provider}} 명령을 실행하세요.",
+  "provider.unavailable.no-models":
+    "사용 가능한 모델을 불러오지 못했습니다. 설정과 인증을 확인하거나 vector providers logout {{provider}} 명령을 실행하세요.",
+  "model.unavailable.title": "저장된 모델을 사용할 수 없음",
+  "model.unavailable.replaced":
+    "{{model}}을 사용할 수 없습니다. Vector가 {{replacement}}을 선택했습니다. 계속하기 전에 요금을 확인하세요.",
+  "model.unavailable.empty": "{{model}}을 사용할 수 없습니다. 제공업체에 연결하거나 다른 모델을 선택하세요.",
+
   "provider.connect.unavailable":
     "현재 Vector에서 {{provider}} 로그인이 일시 중지되어 있습니다. 계속하려면 다른 공급자를 선택하세요.",
   "dialog.provider.openai.note": "OpenAI API 키로 GPT 모델 사용",

@@ -1,4 +1,12 @@
-import type { Message, Session, Part, SnapshotFileDiff, SessionStatus, Provider } from "@vectordevai/sdk/v2"
+import type {
+  Message,
+  Session,
+  Part,
+  SnapshotFileDiff,
+  SessionStatus,
+  Provider,
+  ProviderListResponse,
+} from "@vectordevai/sdk/v2"
 import { createSimpleContext } from "@vectordevai/ui/context"
 import { PreloadMultiFileDiffResult } from "@pierre/diffs/ssr"
 
@@ -8,6 +16,7 @@ export type NormalizedProviderListResponse = {
     [key: string]: string
   }
   connected: Array<string>
+  unavailable?: ProviderListResponse["unavailable"]
 }
 
 type Data = {

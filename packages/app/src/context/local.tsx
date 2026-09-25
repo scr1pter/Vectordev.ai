@@ -1,3 +1,7 @@
+import { unavailableModel } from "@vectordevai/schema/provider-unavailable"
+import { useLanguage } from "./language"
+import { showToast } from "@/utils/toast"
+import { takeProviderNotice } from "@/utils/provider-notices"
 import { createSimpleContext } from "@vectordevai/ui/context"
 import { base64Encode } from "@vectordevai/core/util/encode"
 import { useParams } from "@solidjs/router"
@@ -68,12 +72,13 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
     const serverSDK = useServerSDK()
     const providers = useProviders(() => sdk().directory)
     const models = useModels()
+    const language = useLanguage()
 
     const id = createMemo(() => params.id || undefined)
     const list = createMemo(() => sync().data.agent.filter((item) => item.mode !== "subagent" && !item.hidden))
     const connected = createMemo(() => new Set(providers.connected().map((item) => item.id)))
 
-    const [saved, setSaved] = persisted(
+    const [saved, setSaved, , savedReady] = persisted(
       {
         ...Persist.serverWorkspace(serverSDK().scope, sdk().directory, "model-selection", ["model-selection.v1"]),
         migrate,
@@ -155,8 +160,8 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
     const configuredModel = () => {
       const configured = sync().data.config.model
       if (!configured) return
-      const [providerID, modelID] = configured.split("/")
-      const model = { providerID, modelID }
+      const [providerID, ...rest] = configured.split("/")
+      const model = { providerID, modelID: rest.join("/") }
       if (validModel(model)) return model
     }
 
@@ -243,6 +248,32 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       if (!item) return
       return models.find(item)
     }
+
+    createEffect(() => {
+      if (!sync().data.provider_ready || !savedReady() || !models.ready()) return
+      const configured = sync().data.config.model?.split("/")
+      const previous = unavailableModel(
+        [
+          scope()?.model,
+          agent.current()?.model,
+          configured ? { providerID: configured[0], modelID: configured.slice(1).join("/") } : undefined,
+          ...models.recent.list(),
+        ],
+        validModel,
+      )
+      if (!previous) return
+      const next = current()
+      const model = `${previous.providerID}/${previous.modelID}`
+      const replacement = next ? `${next.provider.id}/${next.id}` : undefined
+      if (!takeProviderNotice(serverSDK().scope, `model:${sdk().directory}:${model}:${replacement ?? "none"}`)) return
+      showToast({
+        title: language.t("model.unavailable.title"),
+        description: replacement
+          ? language.t("model.unavailable.replaced", { model, replacement })
+          : language.t("model.unavailable.empty", { model }),
+        duration: 10000,
+      })
+    })
 
     const configured = () => {
       const item = agent.current()

@@ -92,6 +92,19 @@ export const dict = {
   "dialog.provider.tag.recommended": "موصى به",
   "dialog.provider.anthropic.note": "نماذج Claude باستخدام مفتاح Anthropic API الخاص بك",
   "dialog.provider.copilot.note": "تسجيل الدخول إلى GitHub Copilot متوقف مؤقتًا في Vector. اختر موفرًا آخر للمتابعة.",
+  "provider.unavailable.title": "تم تجاهل بيانات اعتماد {{provider}}",
+  "provider.unavailable.sign-in-paused":
+    "تسجيل الدخول متوقف مؤقتًا. اتصل بمزوّد مدعوم باستخدام مفتاح API، أو احذف بيانات الاعتماد المحفوظة عبر vector providers logout {{provider}}.",
+  "provider.unavailable.provider-not-configured":
+    "هذا المزوّد غير مُعدّ. أضف عنوانه ونماذجه إلى vector.json، أو شغّل vector providers logout {{provider}}.",
+  "provider.unavailable.disabled":
+    "هذا المزوّد معطّل في إعداداتك. فعّله، أو شغّل vector providers logout {{provider}}.",
+  "provider.unavailable.no-models":
+    "لم تُحمّل نماذج قابلة للاستخدام. تحقّق من الإعدادات والمصادقة، أو شغّل vector providers logout {{provider}}.",
+  "model.unavailable.title": "النموذج المحفوظ غير متاح",
+  "model.unavailable.replaced": "{{model}} غير متاح. اختار Vector النموذج {{replacement}}. راجع أسعاره قبل المتابعة.",
+  "model.unavailable.empty": "{{model}} غير متاح. اتصل بمزوّد أو اختر نموذجًا آخر.",
+
   "provider.connect.unavailable": "تسجيل الدخول إلى {{provider}} متوقف مؤقتًا في Vector. اختر موفرًا آخر للمتابعة.",
   "dialog.provider.openai.note": "نماذج GPT باستخدام مفتاح OpenAI API الخاص بك",
   "dialog.provider.google.note": "نماذج Gemini لاستجابات سريعة ومنظمة",

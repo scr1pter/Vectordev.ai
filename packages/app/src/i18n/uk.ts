@@ -104,6 +104,20 @@ export const dict = {
   "dialog.provider.anthropic.note": "Моделі Claude з вашим API-ключем Anthropic",
   "dialog.provider.copilot.note":
     "Вхід до GitHub Copilot наразі призупинено у Vector. Виберіть іншого провайдера, щоб продовжити.",
+  "provider.unavailable.title": "Облікові дані {{provider}} проігноровано",
+  "provider.unavailable.sign-in-paused":
+    "Вхід призупинено. Підключіть підтримуваного провайдера з API-ключем або видаліть збережені дані командою vector providers logout {{provider}}.",
+  "provider.unavailable.provider-not-configured":
+    "Провайдера не налаштовано. Додайте його адресу та моделі у vector.json або виконайте vector providers logout {{provider}}.",
+  "provider.unavailable.disabled":
+    "Провайдера вимкнено в конфігурації. Увімкніть його або виконайте vector providers logout {{provider}}.",
+  "provider.unavailable.no-models":
+    "Доступні моделі не завантажено. Перевірте конфігурацію й автентифікацію або виконайте vector providers logout {{provider}}.",
+  "model.unavailable.title": "Збережена модель недоступна",
+  "model.unavailable.replaced":
+    "{{model}} недоступна. Vector вибрав {{replacement}}. Перевірте вартість перед продовженням.",
+  "model.unavailable.empty": "{{model}} недоступна. Підключіть провайдера або виберіть іншу модель.",
+
   "provider.connect.unavailable":
     "Вхід до {{provider}} наразі призупинено у Vector. Виберіть іншого провайдера, щоб продовжити.",
   "dialog.provider.openai.note": "Моделі GPT для швидких і універсальних завдань AI",

@@ -93,6 +93,20 @@ export const dict = {
   "dialog.provider.anthropic.note": "Anthropic APIキーでClaudeモデルを利用",
   "dialog.provider.copilot.note":
     "Vectorでは現在GitHub Copilotへのサインインが一時停止されています。別のプロバイダーを選択してください。",
+  "provider.unavailable.title": "{{provider}} の認証情報は無視されました",
+  "provider.unavailable.sign-in-paused":
+    "サインインは一時停止中です。対応プロバイダーに API キーで接続するか、vector providers logout {{provider}} で保存済み認証情報を削除してください。",
+  "provider.unavailable.provider-not-configured":
+    "このプロバイダーは未設定です。vector.json にエンドポイントとモデルを追加するか、vector providers logout {{provider}} を実行してください。",
+  "provider.unavailable.disabled":
+    "このプロバイダーは設定で無効になっています。有効にするか、vector providers logout {{provider}} を実行してください。",
+  "provider.unavailable.no-models":
+    "利用可能なモデルを読み込めませんでした。設定と認証を確認するか、vector providers logout {{provider}} を実行してください。",
+  "model.unavailable.title": "保存済みモデルは利用できません",
+  "model.unavailable.replaced":
+    "{{model}} は利用できません。Vector は {{replacement}} を選択しました。続行前に料金を確認してください。",
+  "model.unavailable.empty": "{{model}} は利用できません。プロバイダーに接続するか、別のモデルを選択してください。",
+
   "provider.connect.unavailable":
     "Vectorでは現在{{provider}}へのサインインが一時停止されています。別のプロバイダーを選択してください。",
   "dialog.provider.openai.note": "OpenAI APIキーでGPTモデルを利用",

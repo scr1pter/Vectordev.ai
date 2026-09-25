@@ -93,3 +93,18 @@ describe("cli.error", () => {
     expect(FormatError(new UI.CancelledError())).toBe("")
   })
 })
+
+test("ignored provider credentials replace model spelling suggestions with a recovery action", () => {
+  const data = {
+    providerID: "openai",
+    modelID: "gpt-5",
+    suggestions: ["gpt-4.1"],
+    unavailable: { id: "openai", reason: "sign-in-paused", message: "Sign-in paused; add an API key." },
+  }
+  for (const error of [
+    { name: "ProviderModelNotFoundError", data },
+    { _tag: "ProviderModelNotFoundError", ...data },
+  ]) {
+    expect(FormatError(error)).toBe("Model unavailable: openai/gpt-5\nSign-in paused; add an API key.")
+  }
+})

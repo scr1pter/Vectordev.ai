@@ -56,6 +56,7 @@ export const providerHandlers = HttpApiBuilder.group(InstanceHttpApi, "provider"
         all: Object.values(providers).map(Provider.toClientInfo),
         default: Provider.defaultModelIDs(providers),
         connected: [...selectable],
+        unavailable: yield* provider.unavailable(),
       }
     })
 

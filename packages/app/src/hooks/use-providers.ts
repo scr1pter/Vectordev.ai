@@ -1,3 +1,8 @@
+import { createEffect } from "solid-js"
+import { useLanguage } from "@/context/language"
+import { useServerSDK } from "@/context/server-sdk"
+import { takeProviderNotice } from "@/utils/provider-notices"
+import { showToast } from "@/utils/toast"
 import { providerEnabled } from "@vectordevai/schema/provider-policy"
 import { useServerSync } from "@/context/server-sync"
 import { decode64 } from "@/utils/base64"
@@ -23,6 +28,8 @@ function connectedProvider(provider: ProviderInfo | undefined): ProviderInfo[] {
 export function useProviders(directory?: Accessor<string | undefined>) {
   const serverSync = useServerSync()
   const params = useParams()
+  const serverSDK = useServerSDK()
+  const language = useLanguage()
   const dir = () => (directory ? directory() : decode64(params.dir))
   const providers = () => {
     const value = dir()
@@ -41,6 +48,18 @@ export function useProviders(directory?: Accessor<string | undefined>) {
       global: serverSync().data.provider,
     })
   }
+  createEffect(() => {
+    const directory = dir()
+    if (directory ? !serverSync().child(directory)[0].provider_ready : !serverSync().data.ready) return
+    for (const item of providers().unavailable ?? []) {
+      if (!takeProviderNotice(serverSDK().scope, `credential:${item.id}:${item.reason}`)) continue
+      showToast({
+        title: language.t("provider.unavailable.title", { provider: providers().all.get(item.id)?.name ?? item.id }),
+        description: language.t(`provider.unavailable.${item.reason}`, { provider: item.id }),
+        duration: 10000,
+      })
+    }
+  })
   return {
     all: () => new Map([...providers().all].filter(([id, provider]) => !isHiddenProvider(id, provider))),
     default: () => providers().default,

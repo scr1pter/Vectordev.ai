@@ -1,3 +1,4 @@
+import { ProviderUnavailable } from "./provider-unavailable"
 export * as Integration from "./integration"
 
 import { Schema } from "effect"
@@ -84,7 +85,13 @@ const ConnectionUpdated = define({
   type: "integration.connection.updated",
   schema: { integrationID: ID },
 })
-export const Event = { Updated, ConnectionUpdated, Definitions: inventory(Updated, ConnectionUpdated) }
+const Unavailable = define({ type: "provider.unavailable", schema: ProviderUnavailable.fields })
+export const Event = {
+  Updated,
+  ConnectionUpdated,
+  Unavailable,
+  Definitions: inventory(Updated, ConnectionUpdated, Unavailable),
+}
 
 export interface Ref extends Schema.Schema.Type<typeof Ref> {}
 export const Ref = Schema.Struct({

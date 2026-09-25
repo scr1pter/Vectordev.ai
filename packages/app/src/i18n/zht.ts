@@ -105,6 +105,18 @@ export const dict = {
   "dialog.provider.anthropic.note": "使用 Anthropic API 金鑰存取 Claude 模型",
   "dialog.provider.openai.note": "使用 OpenAI API 金鑰存取 GPT 模型",
   "dialog.provider.copilot.note": "Vector 目前已暫停 GitHub Copilot 登入。請選擇其他提供商繼續。",
+  "provider.unavailable.title": "已忽略 {{provider}} 憑證",
+  "provider.unavailable.sign-in-paused":
+    "登入已暫停。請使用 API 金鑰連接支援的供應商，或執行 vector providers logout {{provider}} 刪除已儲存的憑證。",
+  "provider.unavailable.provider-not-configured":
+    "此供應商尚未設定。請在 vector.json 中新增其端點和模型，或執行 vector providers logout {{provider}}。",
+  "provider.unavailable.disabled": "此供應商已在設定中停用。請將其啟用，或執行 vector providers logout {{provider}}。",
+  "provider.unavailable.no-models":
+    "未載入可用模型。請檢查供應商設定和驗證，或執行 vector providers logout {{provider}}。",
+  "model.unavailable.title": "已儲存的模型無法使用",
+  "model.unavailable.replaced": "{{model}} 無法使用。Vector 已選擇 {{replacement}}。繼續之前請確認其價格。",
+  "model.unavailable.empty": "{{model}} 無法使用。請連接供應商或選擇其他模型。",
+
   "provider.connect.unavailable": "Vector 目前已暫停 {{provider}} 登入。請選擇其他提供商繼續。",
   "dialog.provider.google.note": "Gemini 模型，提供快速且結構化的回應",
   "dialog.provider.openrouter.note": "從單一提供者存取所有支援的模型",

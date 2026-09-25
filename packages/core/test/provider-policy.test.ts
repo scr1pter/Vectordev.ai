@@ -1,5 +1,6 @@
+import { EventV2 } from "@vectordevai/core/event"
 import { expect, test } from "bun:test"
-import { Effect } from "effect"
+import { Effect, Stream } from "effect"
 import {
   COPILOT_SIGN_IN,
   providerEnabled,
@@ -237,5 +238,57 @@ it.effect("paused Copilot cannot acquire V2 models, defaults, key connections, o
     expect((yield* integrations.get(integrationID))?.methods).toEqual([])
     expect(yield* catalog.provider.get(providerID)).toBeUndefined()
     expect(yield* catalog.model.default()).toBeUndefined()
+  }),
+)
+
+test("unavailable credential reasons preserve ordinary and custom API keys", async () => {
+  const { providerCredentialUnavailable } = await import("@vectordevai/core/provider-policy")
+  for (const id of ["openai", "xai", "poe", "digitalocean", "gitlab"]) {
+    expect(providerCredentialUnavailable(id, { type: "oauth" })?.reason).toBe("sign-in-paused")
+    expect(providerCredentialUnavailable(id, { type: "api" })).toBeUndefined()
+  }
+  expect(
+    providerCredentialUnavailable("digitalocean", { type: "api", metadata: { oauth_access: "true" } })?.reason,
+  ).toBe("sign-in-paused")
+  expect(providerCredentialUnavailable("github-copilot", { type: "api" })?.reason).toBe("sign-in-paused")
+  expect(providerCredentialUnavailable("removed-fixture", { type: "api" })?.reason).toBe("provider-not-configured")
+  expect(providerCredentialUnavailable("company-gateway", { type: "api" }, true)).toBeUndefined()
+  expect(providerCredentialUnavailable("https://organization.example.test", { type: "wellknown" })).toBeUndefined()
+})
+
+it.effect("V2 publishes one actionable notice for a paused credential without exposing tokens", () =>
+  Effect.gen(function* () {
+    const integrations = yield* Integration.Service
+    const credentials = yield* Credential.Service
+    const events = yield* EventV2.Service
+    const integrationID = Integration.ID.make("openai")
+    const notices: unknown[] = []
+    yield* events.subscribe(Integration.Event.Unavailable).pipe(
+      Stream.runForEach((event) =>
+        Effect.sync(() => {
+          notices.push(event.data)
+        }),
+      ),
+      Effect.forkScoped,
+    )
+    yield* Effect.yieldNow
+    yield* credentials.create({
+      integrationID,
+      value: Credential.OAuth.make({
+        type: "oauth",
+        access: "fixture-private-access",
+        refresh: "fixture-private-refresh",
+        expires: 0,
+        methodID: Integration.MethodID.make("fixture-paused"),
+      }),
+    })
+    expect(yield* integrations.connection.active(integrationID)).toBeUndefined()
+    expect(yield* integrations.connection.active(integrationID)).toBeUndefined()
+    yield* integrations.list()
+    yield* Effect.yieldNow
+    expect(notices).toHaveLength(1)
+    expect(notices[0]).toMatchObject({ id: "openai", reason: "sign-in-paused" })
+    expect(JSON.stringify(notices)).toContain("vector providers logout openai")
+    expect(JSON.stringify(notices)).not.toContain("fixture-private")
   }),
 )

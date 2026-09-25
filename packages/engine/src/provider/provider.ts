@@ -1,6 +1,8 @@
+import { ProviderUnavailable, providerUnavailable } from "@vectordevai/schema/provider-unavailable"
 import {
   providerAllowed,
   providerCredentialAllowed,
+  providerCredentialUnavailable,
   providerEnabled,
   providerUsable,
 } from "@vectordevai/core/provider-policy"
@@ -1037,6 +1039,7 @@ export const ListResult = Schema.Struct({
   all: Schema.Array(Info),
   default: DefaultModelIDs,
   connected: Schema.Array(Schema.String),
+  unavailable: Schema.optional(Schema.Array(ProviderUnavailable)),
 })
 export type ListResult = Types.DeepMutable<Schema.Schema.Type<typeof ListResult>>
 
@@ -1098,9 +1101,11 @@ export class ModelNotFoundError extends Schema.TaggedErrorClass<ModelNotFoundErr
   providerID: ProviderV2.ID,
   modelID: ModelV2.ID,
   suggestions: Schema.optional(Schema.Array(Schema.String)),
+  unavailable: Schema.optional(ProviderUnavailable),
   cause: Schema.optional(Schema.Defect()),
 }) {
   override get message() {
+    if (this.unavailable) return `Model unavailable: ${this.providerID}/${this.modelID}. ${this.unavailable.message}`
     const suggestions = this.suggestions?.length ? ` Did you mean: ${this.suggestions.join(", ")}?` : ""
     return `Model not found: ${this.providerID}/${this.modelID}.${suggestions}`
   }
@@ -1150,6 +1155,7 @@ export type Error = ModelNotFoundError | InitError | NoProvidersError | NoModels
 
 export interface Interface {
   readonly list: () => Effect.Effect<Record<ProviderV2.ID, Info>>
+  readonly unavailable: () => Effect.Effect<ProviderUnavailable[]>
   readonly getProvider: (providerID: ProviderV2.ID) => Effect.Effect<Info>
   readonly getModel: (providerID: ProviderV2.ID, modelID: ModelV2.ID) => Effect.Effect<Model, ModelNotFoundError>
   readonly getLanguage: (model: Model) => Effect.Effect<LanguageModelV3, ModelNotFoundError>
@@ -1164,6 +1170,7 @@ export interface Interface {
 interface State {
   models: Map<string, LanguageModelV3>
   providers: Record<ProviderV2.ID, Info>
+  unavailable: ProviderUnavailable[]
   catalog: Record<ProviderV2.ID, Info>
   sdk: Map<string, BundledSDK>
   modelLoaders: Record<string, CustomModelLoader>
@@ -1677,9 +1684,20 @@ const layer = Layer.effect(
           }
         }
 
+        const unavailable = Object.entries(auths).flatMap(([id, credential]) => {
+          if (credential.type === "wellknown") return []
+          const rejected = providerCredentialUnavailable(id, credential, userProviders.has(id))
+          if (rejected) return [rejected]
+          if (disabled.has(id) || (enabled && !enabled.has(id))) return [providerUnavailable(id, "disabled")]
+          if (!providers[ProviderV2.ID.make(id)]) return [providerUnavailable(id, "no-models")]
+          return []
+        })
+        for (const notice of unavailable) yield* Effect.logWarning(notice.message)
+
         return {
           models: languages,
           providers,
+          unavailable,
           catalog,
           sdk,
           modelLoaders,
@@ -1689,6 +1707,8 @@ const layer = Layer.effect(
     )
 
     const list = Effect.fn("Provider.list")(() => InstanceState.use(state, (s) => s.providers))
+
+    const unavailable = Effect.fn("Provider.unavailable")(() => InstanceState.use(state, (s) => s.unavailable))
 
     async function resolveSDK(model: Model, s: State, envs: Record<string, string | undefined>) {
       try {
@@ -1838,7 +1858,12 @@ const layer = Layer.effect(
           : fuzzysort
               .go(providerID, Object.keys({ ...s.catalog, ...s.providers }), { limit: 3, threshold: -10000 })
               .map((m) => m.target)
-        return yield* new ModelNotFoundError({ providerID, modelID, suggestions })
+        return yield* new ModelNotFoundError({
+          providerID,
+          modelID,
+          suggestions,
+          unavailable: s.unavailable.find((item) => item.id === providerID),
+        })
       }
 
       const info = provider.models[modelID]
@@ -1995,7 +2020,7 @@ const layer = Layer.effect(
       }
     })
 
-    return Service.of({ list, getProvider, getModel, getLanguage, closest, getSmallModel, defaultModel })
+    return Service.of({ list, unavailable, getProvider, getModel, getLanguage, closest, getSmallModel, defaultModel })
   }),
 )
 

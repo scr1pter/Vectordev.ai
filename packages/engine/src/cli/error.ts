@@ -60,6 +60,11 @@ export function FormatError(input: unknown): string | undefined {
   // ProviderModelNotFoundError: { providerID: string, modelID: string, suggestions?: string[] }
   const providerModelNotFound = configData(input, "ProviderModelNotFoundError")
   if (providerModelNotFound) {
+    if (isRecord(providerModelNotFound.unavailable)) {
+      const message = stringField(providerModelNotFound.unavailable, "message")
+      if (message)
+        return `Model unavailable: ${stringField(providerModelNotFound, "providerID")}/${stringField(providerModelNotFound, "modelID")}\n${message}`
+    }
     const suggestions = Array.isArray(providerModelNotFound.suggestions)
       ? providerModelNotFound.suggestions.filter((x) => typeof x === "string")
       : []

@@ -1,6 +1,6 @@
 export * as Integration from "./integration"
 
-import { providerCredentialAllowed, providerEnabled } from "./provider-policy"
+import { providerCredentialAllowed, providerCredentialUnavailable, providerEnabled } from "./provider-policy"
 import { makeLocationNode } from "./effect/app-node"
 import {
   Cause,
@@ -225,6 +225,7 @@ export const locationLayer = Layer.effect(
     const credentials = yield* Credential.Service
     const events = yield* EventV2.Service
     const scope = yield* Scope.Scope
+    const notified = new Set<string>()
     const attempts = SynchronizedRef.makeUnsafe(new Map<AttemptID, AttemptEntry>())
     const state = State.create<Data, Draft>({
       initial: () => ({ integrations: new Map<ID, Entry>() }),
@@ -286,7 +287,17 @@ export const locationLayer = Layer.effect(
       finalize: () => events.publish(Event.Updated, {}).pipe(Effect.asVoid),
     })
 
-    const resolveConnections = (entry: Entry | undefined, saved: readonly Credential.Info[]) => {
+    const resolveConnections = Effect.fn("Integration.resolveConnections")(function* (
+      entry: Entry | undefined,
+      saved: readonly Credential.Info[],
+    ) {
+      for (const credential of saved) {
+        const notice = providerCredentialUnavailable(credential.integrationID, credential.value, entry !== undefined)
+        if (!notice || notified.has(`${notice.id}:${notice.reason}`)) continue
+        notified.add(`${notice.id}:${notice.reason}`)
+        yield* Effect.logWarning(notice.message)
+        yield* events.publish(Event.Unavailable, notice)
+      }
       if (entry && !providerEnabled(entry.ref.id)) return []
       const credentials = saved
         .filter((credential) =>
@@ -303,7 +314,7 @@ export const locationLayer = Layer.effect(
         .flatMap((method) => method.names.filter((name) => process.env[name]))
         .map((name) => ({ type: "env" as const, name }))
       return [...credentials, ...env]
-    }
+    })
 
     const project = (entry: Entry, connections: IntegrationConnection.Info[]) =>
       new Info({
@@ -374,18 +385,23 @@ export const locationLayer = Layer.effect(
       get: Effect.fn("Integration.get")(function* (id) {
         const entry = state.get().integrations.get(id)
         if (!entry) return undefined
-        return project(entry, resolveConnections(entry, yield* credentials.list(id)))
+        return project(entry, yield* resolveConnections(entry, yield* credentials.list(id)))
       }),
       list: Effect.fn("Integration.list")(function* () {
         const saved = Map.groupBy(yield* credentials.all(), (credential) => credential.integrationID)
-        return Array.from(state.get().integrations.values(), (entry) =>
-          project(entry, resolveConnections(entry, saved.get(entry.ref.id) ?? [])),
-        ).toSorted((a, b) => a.name.localeCompare(b.name))
+        for (const [id, values] of saved) {
+          if (!state.get().integrations.has(id)) yield* resolveConnections(undefined, values)
+        }
+        return (yield* Effect.forEach(state.get().integrations.values(), (entry) =>
+          resolveConnections(entry, saved.get(entry.ref.id) ?? []).pipe(
+            Effect.map((connections) => project(entry, connections)),
+          ),
+        )).toSorted((a, b) => a.name.localeCompare(b.name))
       }),
       connection: {
         active: Effect.fn("Integration.connection.active")(function* (id) {
           const entry = state.get().integrations.get(id)
-          return resolveConnections(entry, yield* credentials.list(id))[0]
+          return (yield* resolveConnections(entry, yield* credentials.list(id)))[0]
         }),
         resolve: Effect.fn("Integration.connection.resolve")(function* (connection) {
           if (connection.type === "env") {

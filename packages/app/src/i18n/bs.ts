@@ -101,6 +101,20 @@ export const dict = {
   "dialog.provider.anthropic.note": "Claude modeli uz vaš Anthropic API ključ",
   "dialog.provider.copilot.note":
     "Prijava za GitHub Copilot je trenutno pauzirana u Vectoru. Odaberite drugog provajdera za nastavak.",
+  "provider.unavailable.title": "Akreditivi za {{provider}} su zanemareni",
+  "provider.unavailable.sign-in-paused":
+    "Prijava je pauzirana. Povežite podržanog pružaoca API ključem ili uklonite sačuvane akreditive naredbom vector providers logout {{provider}}.",
+  "provider.unavailable.provider-not-configured":
+    "Ovaj pružalac nije konfigurisan. Dodajte njegov endpoint i modele u vector.json ili pokrenite vector providers logout {{provider}}.",
+  "provider.unavailable.disabled":
+    "Ovaj pružalac je onemogućen u konfiguraciji. Omogućite ga ili pokrenite vector providers logout {{provider}}.",
+  "provider.unavailable.no-models":
+    "Nijedan upotrebljiv model nije učitan. Provjerite konfiguraciju i autentifikaciju ili pokrenite vector providers logout {{provider}}.",
+  "model.unavailable.title": "Sačuvani model nije dostupan",
+  "model.unavailable.replaced":
+    "{{model}} nije dostupan. Vector je odabrao {{replacement}}. Provjerite cijenu prije nastavka.",
+  "model.unavailable.empty": "{{model}} nije dostupan. Povežite pružaoca ili odaberite drugi model.",
+
   "provider.connect.unavailable":
     "Prijava za {{provider}} je trenutno pauzirana u Vectoru. Odaberite drugog provajdera za nastavak.",
   "dialog.provider.openai.note": "GPT modeli za brze, sposobne opšte AI zadatke",

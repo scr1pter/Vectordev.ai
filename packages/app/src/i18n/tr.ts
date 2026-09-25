@@ -105,6 +105,20 @@ export const dict = {
   "dialog.provider.anthropic.note": "Anthropic API anahtarınızla Claude modelleri",
   "dialog.provider.copilot.note":
     "Vector içinde GitHub Copilot oturumu açma şu anda duraklatıldı. Devam etmek için başka bir sağlayıcı seçin.",
+  "provider.unavailable.title": "{{provider}} kimlik bilgileri yok sayıldı",
+  "provider.unavailable.sign-in-paused":
+    "Oturum açma duraklatıldı. API anahtarıyla desteklenen bir sağlayıcıya bağlanın veya kayıtlı kimlik bilgilerini vector providers logout {{provider}} ile kaldırın.",
+  "provider.unavailable.provider-not-configured":
+    "Bu sağlayıcı yapılandırılmamış. Uç noktasını ve modellerini vector.json dosyasına ekleyin veya vector providers logout {{provider}} komutunu çalıştırın.",
+  "provider.unavailable.disabled":
+    "Bu sağlayıcı yapılandırmanızda devre dışı. Etkinleştirin veya vector providers logout {{provider}} komutunu çalıştırın.",
+  "provider.unavailable.no-models":
+    "Kullanılabilir model yüklenmedi. Yapılandırmayı ve kimlik doğrulamayı kontrol edin veya vector providers logout {{provider}} komutunu çalıştırın.",
+  "model.unavailable.title": "Kayıtlı model kullanılamıyor",
+  "model.unavailable.replaced":
+    "{{model}} kullanılamıyor. Vector, {{replacement}} modelini seçti. Devam etmeden önce fiyatını kontrol edin.",
+  "model.unavailable.empty": "{{model}} kullanılamıyor. Bir sağlayıcıya bağlanın veya başka bir model seçin.",
+
   "provider.connect.unavailable":
     "Vector içinde {{provider}} oturumu açma şu anda duraklatıldı. Devam etmek için başka bir sağlayıcı seçin.",
   "dialog.provider.openai.note": "Hızlı ve yetenekli genel yapay zekâ görevleri için GPT modelleri",
