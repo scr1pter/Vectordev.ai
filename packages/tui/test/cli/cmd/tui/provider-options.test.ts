@@ -35,6 +35,16 @@ describe("providerOptions", () => {
     expect(new Set(values).size).toBe(values.length)
   })
 
+  test("paused Copilot is excluded even when an older server supplies its config or environment entry", () => {
+    expect(
+      providerOptions([
+        { id: "github-copilot", name: "GitHub Copilot", source: "env" },
+        { id: "github-copilot-enterprise", name: "Copilot Enterprise", source: "config" },
+        { id: "openai", name: "OpenAI", source: "env" },
+      ]).map((provider) => provider.value),
+    ).toEqual(["openai", "__vector_custom_provider__"])
+  })
+
   test("normalizes and validates custom provider ids", () => {
     expect(normalizeCustomProviderID("  ollama  ")).toBe("ollama")
     expect(normalizeCustomProviderID("custom_provider")).toBe("custom_provider")

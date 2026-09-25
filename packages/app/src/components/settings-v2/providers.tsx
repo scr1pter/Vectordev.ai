@@ -1,3 +1,4 @@
+import { providerEnabled } from "@vectordevai/schema/provider-policy"
 import { ButtonV2 } from "@vectordevai/ui/v2/button-v2"
 import { Tag } from "@vectordevai/ui/v2/badge-v2"
 import { useDialog } from "@vectordevai/ui/context/dialog"
@@ -20,7 +21,7 @@ type ProviderItem = ReturnType<ReturnType<typeof useProviders>["connected"]>[num
 
 const PROVIDER_NOTES = [
   { match: (id: string) => id === "anthropic", key: "dialog.provider.anthropic.note" },
-  { match: (id: string) => id.startsWith("github-copilot"), key: "dialog.provider.copilot.note" },
+  { match: (id: string) => !providerEnabled(id), key: "dialog.provider.copilot.note" },
   { match: (id: string) => id === "openai", key: "dialog.provider.openai.note" },
   { match: (id: string) => id === "google", key: "dialog.provider.google.note" },
   { match: (id: string) => id === "openrouter", key: "dialog.provider.openrouter.note" },

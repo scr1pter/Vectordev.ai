@@ -1,3 +1,4 @@
+import { providerEnabled } from "@vectordevai/core/provider-policy"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import type { AuthOAuthResult, Hooks } from "@vectordevai/plugin"
 import { serviceUse } from "@vectordevai/core/effect/service-use"
@@ -131,8 +132,8 @@ const layer: Layer.Layer<Service, never, Auth.Service | Plugin.Service> = Layer.
     const methods = Effect.fn("ProviderAuth.methods")(function* () {
       const hooks = (yield* InstanceState.get(state)).hooks
       return decode(
-        Record.map(hooks, (item) =>
-          item.methods.map((method) => ({
+        Record.map(hooks, (item, providerID) =>
+          (providerEnabled(providerID) ? item.methods : []).map((method) => ({
             type: method.type,
             label: method.label,
             ...(method.prompts && {
@@ -164,7 +165,19 @@ const layer: Layer.Layer<Service, never, Auth.Service | Plugin.Service> = Layer.
       input: { providerID: ProviderV2.ID } & AuthorizeInput,
     ) {
       const { hooks, pending } = yield* InstanceState.get(state)
-      const method = hooks[input.providerID].methods[input.method]
+      if (!providerEnabled(input.providerID)) {
+        return yield* new ValidationFailed({
+          field: "providerID",
+          message: `${input.providerID} sign-in is currently paused in Vector. Choose another provider.`,
+        })
+      }
+      const method = Object.hasOwn(hooks, input.providerID) ? hooks[input.providerID].methods[input.method] : undefined
+      if (!method) {
+        return yield* new ValidationFailed({
+          field: "method",
+          message: `No authentication method is available at index ${input.method} for ${input.providerID}.`,
+        })
+      }
       if (method.type !== "oauth") return
 
       if (method.prompts && input.inputs) {

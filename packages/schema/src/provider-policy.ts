@@ -1,3 +1,10 @@
+// Re-enabling Copilot requires a Vector-owned registration and provider approval.
+export const COPILOT_SIGN_IN = false
+
+export function providerEnabled(id: string) {
+  return !id.startsWith("github-copilot") || COPILOT_SIGN_IN
+}
+
 // Supported providers are frozen from the reviewed Vector release catalog.
 // Additions require an explicit review; catalog refreshes cannot enable new providers.
 export const SUPPORTED_PROVIDER_IDS = [
@@ -66,7 +73,7 @@ export const SUPPORTED_PROVIDER_IDS = [
   "freemodel",
   "friendli",
   "frogbot",
-  "github-copilot",
+  ...(COPILOT_SIGN_IN ? (["github-copilot"] as const) : []),
   "gitlab",
   "gmicloud",
   "google",
@@ -242,6 +249,7 @@ export function providerUsable(
   id: string,
   provider?: { id?: string; source?: string; npm?: string; api?: string; options?: { baseURL?: unknown } },
 ) {
+  if (!providerEnabled(id)) return false
   return (
     providerAllowed(id) ||
     provider?.source === "config" ||

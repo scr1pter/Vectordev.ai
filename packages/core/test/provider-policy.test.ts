@@ -1,6 +1,8 @@
 import { expect, test } from "bun:test"
 import { Effect } from "effect"
 import {
+  COPILOT_SIGN_IN,
+  providerEnabled,
   SUPPORTED_PROVIDER_IDS,
   filterProviderCatalog,
   providerAllowed,
@@ -189,5 +191,51 @@ it.effect("a saved key does not create an unregistered custom integration", () =
     expect(
       yield* integrations.connection.resolve({ type: "credential", id: saved.id, label: saved.label }),
     ).toBeUndefined()
+  }),
+)
+
+test("the Copilot pause switch covers catalog, explicit config, and every credential type", () => {
+  expect(COPILOT_SIGN_IN).toBe(false)
+  for (const id of ["github-copilot", "github-copilot-enterprise"]) {
+    expect(providerEnabled(id)).toBe(false)
+    expect(providerAllowed(id)).toBe(false)
+    expect(providerUsable(id, { source: "custom", npm: "@ai-sdk/openai-compatible" })).toBe(false)
+    for (const type of ["api", "key", "oauth"]) {
+      expect(providerCredentialAllowed(id, { type }, true)).toBe(false)
+    }
+  }
+  expect(filterProviderCatalog({ "github-copilot": { id: "github-copilot" } })).toEqual({})
+})
+
+it.effect("paused Copilot cannot acquire V2 models, defaults, key connections, or environment methods", () =>
+  Effect.gen(function* () {
+    const catalog = yield* Catalog.Service
+    const credentials = yield* Credential.Service
+    const integrations = yield* Integration.Service
+    const providerID = ProviderV2.ID.make("github-copilot")
+    const integrationID = Integration.ID.make("github-copilot")
+    yield* catalog.transform((draft) => {
+      draft.provider.update(providerID, (provider) => {
+        provider.request.body.apiKey = "fixture-github-token"
+      })
+      draft.model.update(providerID, ModelV2.ID.make("example"), () => {})
+      draft.model.default.set(providerID, ModelV2.ID.make("example"))
+    })
+    yield* integrations.transform((draft) => {
+      draft.update(integrationID, () => {})
+      draft.method.update({ integrationID, method: { type: "env", names: ["GITHUB_TOKEN"] } })
+      draft.method.update({ integrationID, method: { type: "key" } })
+    })
+    const saved = yield* credentials.create({
+      integrationID,
+      value: Credential.Key.make({ type: "key", key: "fixture" }),
+    })
+    expect(yield* integrations.connection.active(integrationID)).toBeUndefined()
+    expect(
+      yield* integrations.connection.resolve({ type: "credential", id: saved.id, label: saved.label }),
+    ).toBeUndefined()
+    expect((yield* integrations.get(integrationID))?.methods).toEqual([])
+    expect(yield* catalog.provider.get(providerID)).toBeUndefined()
+    expect(yield* catalog.model.default()).toBeUndefined()
   }),
 )

@@ -95,7 +95,10 @@ export const dict = {
   "dialog.provider.group.other": "Andere",
   "dialog.provider.tag.recommended": "Empfohlen",
   "dialog.provider.anthropic.note": "Claude-Modelle mit deinem Anthropic-API-Schlüssel",
-  "dialog.provider.copilot.note": "Verbinde dich mit deinem GitHub-Copilot-API-Schlüssel",
+  "dialog.provider.copilot.note":
+    "Die Anmeldung bei GitHub Copilot ist in Vector derzeit pausiert. Wähle einen anderen Anbieter, um fortzufahren.",
+  "provider.connect.unavailable":
+    "Die Anmeldung bei {{provider}} ist in Vector derzeit pausiert. Wähle einen anderen Anbieter, um fortzufahren.",
   "dialog.provider.openai.note": "GPT-Modelle mit deinem OpenAI-API-Schlüssel",
   "dialog.provider.google.note": "Gemini-Modelle für schnelle, strukturierte Antworten",
   "dialog.provider.openrouter.note": "Zugriff auf alle unterstützten Modelle über einen Anbieter",

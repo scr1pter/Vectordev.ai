@@ -16,12 +16,12 @@ import { useConnected } from "./use-connected"
 import { useBindings } from "../keymap"
 import { useClipboard } from "../context/clipboard"
 import { isHiddenProvider } from "../util/model"
-import { providerAllowed } from "@vectordevai/schema/provider-policy"
+import { COPILOT_SIGN_IN, providerAllowed, providerEnabled } from "@vectordevai/schema/provider-policy"
 import { saveCustomProviderCredential } from "./custom-provider-credential"
 
 const PROVIDER_PRIORITY: Record<string, number> = {
   openai: 2,
-  "github-copilot": 3,
+  ...(COPILOT_SIGN_IN ? { "github-copilot": 3 } : {}),
   anthropic: 4,
   google: 5,
 }
@@ -79,7 +79,13 @@ export function providerOptions(list: { id: string; name: string; source?: strin
 
 export function normalizeCustomProviderID(value: string, existing: readonly string[] = []) {
   const providerID = value.trim().replace(/^@ai-sdk\//, "")
-  if (!CUSTOM_PROVIDER_ID.test(providerID) || providerAllowed(providerID) || existing.includes(providerID)) return
+  if (
+    !CUSTOM_PROVIDER_ID.test(providerID) ||
+    !providerEnabled(providerID) ||
+    providerAllowed(providerID) ||
+    existing.includes(providerID)
+  )
+    return
   return providerID
 }
 
@@ -149,12 +155,16 @@ export function createDialogProviderOptions() {
           async onSelect() {
             if (consoleManaged) return
 
-            const methods = sync.data.provider_auth[providerID] ?? [
-              {
-                type: "api",
-                label: "API key",
-              },
-            ]
+            const methods = providerEnabled(providerID)
+              ? (sync.data.provider_auth[providerID] ?? [{ type: "api" as const, label: "API key" }])
+              : []
+            if (methods.length === 0) {
+              toast.show({
+                variant: "info",
+                message: `${provider.title} sign-in is currently paused in Vector. Choose another provider.`,
+              })
+              return
+            }
             let index: number | null = 0
             if (methods.length > 1) {
               index = await new Promise<number | null>((resolve) => {
@@ -175,6 +185,7 @@ export function createDialogProviderOptions() {
             }
             if (index == null) return
             const method = methods[index]
+            if (!method) return
             if (method.type === "oauth") {
               let inputs: Record<string, string> | undefined
               if (method.prompts?.length) {

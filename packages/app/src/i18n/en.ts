@@ -102,7 +102,10 @@ export const dict = {
   "dialog.provider.group.other": "Other",
   "dialog.provider.tag.recommended": "Recommended",
   "dialog.provider.anthropic.note": "Claude models with your Anthropic API key",
-  "dialog.provider.copilot.note": "AI models for coding assistance via GitHub Copilot",
+  "dialog.provider.copilot.note":
+    "GitHub Copilot sign-in is currently paused in Vector. Choose another provider to continue.",
+  "provider.connect.unavailable":
+    "{{provider}} sign-in is currently paused in Vector. Choose another provider to continue.",
   "dialog.provider.openai.note": "GPT models for fast, capable general AI tasks",
   "dialog.provider.google.note": "Gemini models for fast, structured responses",
   "dialog.provider.openrouter.note": "Access all supported models from one provider",
@@ -400,7 +403,7 @@ export const dict = {
   "wsl.onboarding.distroStatus.ready": "Ready",
   "wsl.onboarding.distroStatus.checking": "Checking...",
   "wsl.onboarding.distroStatus.vectorMissing": "Vector not installed",
-  "wsl.onboarding.distroStatus.missingTools": "Missing bash",
+  "wsl.onboarding.distroStatus.missingTools": "Bash, Node.js and npm required for installation",
   "wsl.onboarding.distroStatus.unsupported": "Unsupported · Use WSL 2",
   "wsl.onboarding.needAnotherDistro": "Need another distro?",
   "wsl.onboarding.needAnotherDistroHint": "Install a Linux distribution from the WSL catalog",

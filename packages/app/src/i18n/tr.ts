@@ -103,7 +103,10 @@ export const dict = {
   "dialog.provider.group.other": "Diğer",
   "dialog.provider.tag.recommended": "Önerilen",
   "dialog.provider.anthropic.note": "Anthropic API anahtarınızla Claude modelleri",
-  "dialog.provider.copilot.note": "GitHub Copilot üzerinden kodlama yardımı için yapay zekâ modelleri",
+  "dialog.provider.copilot.note":
+    "Vector içinde GitHub Copilot oturumu açma şu anda duraklatıldı. Devam etmek için başka bir sağlayıcı seçin.",
+  "provider.connect.unavailable":
+    "Vector içinde {{provider}} oturumu açma şu anda duraklatıldı. Devam etmek için başka bir sağlayıcı seçin.",
   "dialog.provider.openai.note": "Hızlı ve yetenekli genel yapay zekâ görevleri için GPT modelleri",
   "dialog.provider.google.note": "Hızlı ve yapılandırılmış yanıtlar için Gemini modelleri",
   "dialog.provider.openrouter.note": "Tek bir sağlayıcıdan tüm desteklenen modellere eriş",

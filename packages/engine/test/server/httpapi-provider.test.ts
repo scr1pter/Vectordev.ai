@@ -311,6 +311,29 @@ describe("provider HttpApi", () => {
   )
 
   it.instance(
+    "paused, missing, and invalid-index auth methods return actionable typed 400 errors",
+    Effect.gen(function* () {
+      const directory = (yield* TestInstance).directory
+      const headers = { "x-vector-directory": directory, "content-type": "application/json" }
+      for (const input of [
+        { providerID: "github-copilot", method: 0, field: "providerID", message: "paused" },
+        { providerID: "missing-provider-fixture", method: 0, field: "method", message: "No authentication method" },
+        { providerID: "constructor", method: 0, field: "method", message: "No authentication method" },
+        { providerID, method: 999, field: "method", message: "No authentication method" },
+      ]) {
+        const response = yield* requestAuthorize({ ...input, headers })
+        expect(response.status).toBe(400)
+        expect(JSON.parse(response.body)).toMatchObject({
+          name: "ProviderAuthValidationFailed",
+          data: { field: input.field, message: expect.stringContaining(input.message) },
+        })
+      }
+    }),
+    { ...projectOptions, init: writeProviderAuthPlugin },
+    30000,
+  )
+
+  it.instance(
     "returns declared provider auth validation errors",
     Effect.gen(function* () {
       const directory = (yield* TestInstance).directory

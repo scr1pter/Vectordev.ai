@@ -498,3 +498,16 @@ test("custom providers remain available in current, recent and searched model ch
     ).toEqual([pickerModelKey(custom)])
   }
 })
+
+test("paused Copilot models from an older server never enter selectable sections", () => {
+  const sections = buildModelSections({
+    models: [
+      model(copilot, "coding", "Copilot Coding"),
+      model(copilotToken, "coding", "Copilot Coding"),
+      model(openaiKey, "coding", "OpenAI Coding"),
+    ],
+    now: Date.now(),
+    popular: ["github-copilot", "openai"],
+  })
+  expect(sections.flatMap((section) => section.items).map((item) => item.provider.id)).toEqual(["openai"])
+})

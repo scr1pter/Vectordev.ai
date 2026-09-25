@@ -1,4 +1,9 @@
-import { providerAllowed, providerCredentialAllowed, providerUsable } from "@vectordevai/core/provider-policy"
+import {
+  providerAllowed,
+  providerCredentialAllowed,
+  providerEnabled,
+  providerUsable,
+} from "@vectordevai/core/provider-policy"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import os from "os"
 import { ConfigV1 } from "@vectordevai/core/v1/config/config"
@@ -1389,6 +1394,7 @@ const layer = Layer.effect(
         const enabled = cfg.enabled_providers ? new Set(cfg.enabled_providers) : null
 
         function isProviderAllowed(providerID: ProviderV2.ID): boolean {
+          if (!providerEnabled(providerID)) return false
           if (!providerAllowed(providerID) && !userProviders.has(providerID)) return false
           if (enabled && !enabled.has(providerID)) return false
           if (disabled.has(providerID)) return false
@@ -1956,7 +1962,7 @@ const layer = Layer.effect(
 
     const defaultModel = Effect.fn("Provider.defaultModel")(function* () {
       const cfg = yield* config.get()
-      if (cfg.model) return parseModel(cfg.model)
+      if (cfg.model && providerEnabled(parseModel(cfg.model).providerID)) return parseModel(cfg.model)
 
       const s = yield* InstanceState.get(state)
       const recent = yield* fs.readJson(path.join(Global.Path.state, "model.json")).pipe(

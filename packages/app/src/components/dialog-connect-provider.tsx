@@ -16,6 +16,7 @@ import { useServerSDK } from "@/context/server-sdk"
 import { useServerSync } from "@/context/server-sync"
 import { useLanguage } from "@/context/language"
 import { useProviders } from "@/hooks/use-providers"
+import { providerEnabled } from "@vectordevai/schema/provider-policy"
 
 export function DialogConnectProvider(props: { provider: string; directory?: Accessor<string | undefined> }) {
   const dialog = useDialog()
@@ -41,7 +42,11 @@ export function DialogConnectProvider(props: { provider: string; directory?: Acc
   })
 
   const provider = createMemo(
-    () => providers.all().get(props.provider) ?? serverSync().data.provider.all.get(props.provider)!,
+    () =>
+      providers.all().get(props.provider) ??
+      serverSync().data.provider.all.get(props.provider) ?? {
+        name: props.provider === "github-copilot" ? "GitHub Copilot" : props.provider,
+      },
   )
   const fallback = createMemo<ProviderAuthMethod[]>(() => [
     {
@@ -52,6 +57,7 @@ export function DialogConnectProvider(props: { provider: string; directory?: Acc
   const [auth] = createResource(
     () => props.provider,
     async () => {
+      if (!providerEnabled(props.provider)) return []
       const cached = serverSync().data.provider_auth[props.provider]
       if (cached) return cached
       const res = await serverSDK().client.provider.auth()
@@ -61,7 +67,11 @@ export function DialogConnectProvider(props: { provider: string; directory?: Acc
     },
   )
   const loading = createMemo(() => auth.loading && !serverSync().data.provider_auth[props.provider])
-  const methods = createMemo(() => auth.latest ?? serverSync().data.provider_auth[props.provider] ?? fallback())
+  const methods = createMemo(() =>
+    providerEnabled(props.provider)
+      ? (auth.latest ?? serverSync().data.provider_auth[props.provider] ?? fallback())
+      : [],
+  )
   const [store, setStore] = createStore({
     methodIndex: undefined as undefined | number,
     authorization: undefined as undefined | ProviderAuthAuthorization,
@@ -159,6 +169,7 @@ export function DialogConnectProvider(props: { provider: string; directory?: Acc
     }
 
     const method = methods()[index]
+    if (!method) return
     dispatch({ type: "method.select", index })
 
     if (method.type === "api" && method.prompts?.length) {
@@ -614,6 +625,11 @@ export function DialogConnectProvider(props: { provider: string; directory?: Acc
                     <Spinner />
                     <span>{language.t("provider.connect.status.inProgress")}</span>
                   </div>
+                </div>
+              </Match>
+              <Match when={methods().length === 0}>
+                <div role="status" class="text-14-regular text-text-base">
+                  {language.t("provider.connect.unavailable", { provider: provider().name })}
                 </div>
               </Match>
               <Match when={store.methodIndex === undefined}>

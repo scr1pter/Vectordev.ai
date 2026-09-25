@@ -1,4 +1,4 @@
-import { providerUsable } from "@vectordevai/schema/provider-policy"
+import { COPILOT_SIGN_IN, providerEnabled, providerUsable } from "@vectordevai/schema/provider-policy"
 import type { Argv } from "yargs"
 import { Auth } from "../../auth"
 import { cmd } from "./cmd"
@@ -374,7 +374,7 @@ export const ProvidersLoginCommand = effectCmd({
 
     const priority: Record<string, number> = {
       openai: 1,
-      "github-copilot": 2,
+      ...(COPILOT_SIGN_IN ? { "github-copilot": 2 } : {}),
       google: 3,
       anthropic: 4,
       openrouter: 5,
@@ -423,6 +423,8 @@ export const ProvidersLoginCommand = effectCmd({
     let provider: string
     if (args.provider) {
       const input = args.provider
+      if (!providerEnabled(input))
+        return yield* fail(`${input} sign-in is currently paused in Vector. Choose another provider.`)
       const byID = options.find((x) => x.value === input)
       const byName = options.find((x) => x.label.toLowerCase() === input.toLowerCase())
       const match = byID ?? byName
@@ -457,6 +459,8 @@ export const ProvidersLoginCommand = effectCmd({
       }
     }
 
+    if (!providerEnabled(provider))
+      return yield* fail(`${provider} sign-in is currently paused in Vector. Choose another provider.`)
     const plugin = hooks.findLast((x) => x.auth?.provider === provider)
     if (plugin && plugin.auth) {
       const handled = yield* handlePluginAuth({ auth: plugin.auth! }, provider, args.method)

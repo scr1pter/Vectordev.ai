@@ -1,3 +1,4 @@
+import { COPILOT_SIGN_IN } from "@vectordevai/schema/provider-policy"
 import { AISDK } from "@vectordevai/core/aisdk"
 import { describe, expect } from "bun:test"
 import { Effect } from "effect"
@@ -236,9 +237,8 @@ describe("GithubCopilotPlugin", () => {
       })
       yield* addPlugin()
       expect(
-        required(yield* catalog.model.get(ProviderV2.ID.make("github-copilot"), ModelV2.ID.make("gpt-5-chat-latest")))
-          .enabled,
-      ).toBe(false)
+        (yield* catalog.model.get(ProviderV2.ID.make("github-copilot"), ModelV2.ID.make("gpt-5-chat-latest")))?.enabled,
+      ).toBe(COPILOT_SIGN_IN ? false : undefined)
     }),
   )
 

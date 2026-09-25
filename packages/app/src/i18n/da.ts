@@ -99,7 +99,10 @@ export const dict = {
   "dialog.provider.group.other": "Andre",
   "dialog.provider.tag.recommended": "Anbefalet",
   "dialog.provider.anthropic.note": "Claude-modeller med din Anthropic API-nøgle",
-  "dialog.provider.copilot.note": "AI-modeller til kodningsassistance via GitHub Copilot",
+  "dialog.provider.copilot.note":
+    "Login til GitHub Copilot er midlertidigt sat på pause i Vector. Vælg en anden udbyder for at fortsætte.",
+  "provider.connect.unavailable":
+    "Login til {{provider}} er midlertidigt sat på pause i Vector. Vælg en anden udbyder for at fortsætte.",
   "dialog.provider.openai.note": "GPT-modeller til hurtige, kompetente generelle AI-opgaver",
   "dialog.provider.google.note": "Gemini-modeller til hurtige, strukturerede svar",
   "dialog.provider.openrouter.note": "Få adgang til alle understøttede modeller fra én udbyder",

@@ -1,3 +1,4 @@
+import { providerEnabled } from "./provider-policy"
 export * as Catalog from "./catalog"
 
 import { makeLocationNode } from "./effect/app-node"
@@ -167,6 +168,9 @@ const layer = Layer.effect(
         return result
       },
       finalize: Effect.fn("CatalogV2.finalize")(function* (catalog) {
+        for (const record of [...catalog.provider.list()]) {
+          if (!providerEnabled(record.provider.id)) catalog.provider.remove(record.provider.id)
+        }
         if (policy.hasStatements()) {
           for (const record of [...catalog.provider.list()]) {
             if ((yield* policy.evaluate("provider.use", record.provider.id, "allow")) === "deny") {

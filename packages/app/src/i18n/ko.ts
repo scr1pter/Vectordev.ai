@@ -91,7 +91,10 @@ export const dict = {
   "dialog.provider.group.other": "기타",
   "dialog.provider.tag.recommended": "추천",
   "dialog.provider.anthropic.note": "Anthropic API 키로 Claude 모델 사용",
-  "dialog.provider.copilot.note": "GitHub Copilot API 키로 연결",
+  "dialog.provider.copilot.note":
+    "현재 Vector에서 GitHub Copilot 로그인이 일시 중지되어 있습니다. 계속하려면 다른 공급자를 선택하세요.",
+  "provider.connect.unavailable":
+    "현재 Vector에서 {{provider}} 로그인이 일시 중지되어 있습니다. 계속하려면 다른 공급자를 선택하세요.",
   "dialog.provider.openai.note": "OpenAI API 키로 GPT 모델 사용",
   "dialog.provider.google.note": "빠르고 구조화된 응답을 위한 Gemini 모델",
   "dialog.provider.openrouter.note": "모든 지원 모델을 단일 공급자에서 액세스",

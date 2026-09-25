@@ -1,3 +1,4 @@
+import { providerEnabled } from "@vectordevai/schema/provider-policy"
 import { useServerSync } from "@/context/server-sync"
 import { decode64 } from "@/utils/base64"
 import { useParams } from "@solidjs/router"
@@ -5,7 +6,9 @@ import { Iterable, pipe } from "effect"
 import type { Accessor } from "solid-js"
 import { selectProviderCatalog } from "./provider-catalog"
 
-export const popularProviders = ["anthropic", "github-copilot", "openai", "google", "openrouter", "vercel"]
+export const popularProviders = ["anthropic", "github-copilot", "openai", "google", "openrouter", "vercel"].filter(
+  providerEnabled,
+)
 const popularProviderSet = new Set(popularProviders)
 // Built-in catalog entries and explicit custom providers can appear in setup.
 export { isHiddenProvider } from "@/utils/provider-brand"

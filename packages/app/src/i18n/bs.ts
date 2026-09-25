@@ -99,7 +99,10 @@ export const dict = {
   "dialog.provider.group.other": "Ostalo",
   "dialog.provider.tag.recommended": "Preporučeno",
   "dialog.provider.anthropic.note": "Claude modeli uz vaš Anthropic API ključ",
-  "dialog.provider.copilot.note": "AI modeli za pomoć pri kodiranju putem GitHub Copilot",
+  "dialog.provider.copilot.note":
+    "Prijava za GitHub Copilot je trenutno pauzirana u Vectoru. Odaberite drugog provajdera za nastavak.",
+  "provider.connect.unavailable":
+    "Prijava za {{provider}} je trenutno pauzirana u Vectoru. Odaberite drugog provajdera za nastavak.",
   "dialog.provider.openai.note": "GPT modeli za brze, sposobne opšte AI zadatke",
   "dialog.provider.google.note": "Gemini modeli za brze, strukturirane odgovore",
   "dialog.provider.openrouter.note": "Pristup svim podržanim modelima preko jednog provajdera",
