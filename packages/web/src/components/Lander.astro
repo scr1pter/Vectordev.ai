@@ -4,6 +4,7 @@ import {
   AppWindow,
   ArrowRight,
   BadgeCheck,
+  Blocks,
   Bot,
   ChevronLeft,
   ChevronRight,
@@ -15,6 +16,7 @@ import {
   Laptop,
   Lock,
   Network,
+  PanelsTopLeft,
   Plus,
   Radar,
   Rocket,
@@ -22,6 +24,7 @@ import {
   ScanEye,
   Sparkles,
   Split,
+  SquareTerminal,
   Terminal,
   Waypoints,
   Workflow,
@@ -33,9 +36,9 @@ import LanderMaterials from "./marketing/LanderMaterials.astro"
 import LandingFooter from "./marketing/LandingFooter.astro"
 import ScrollTicks from "./marketing/ScrollTicks.astro"
 
-// Everything the product does, section by section, lives on /docs/product.
-// This page is the short version: the hero and its one interactive picture,
-// one thing worth knowing in detail, why the agent can be trusted, and a way in.
+// The landing page is the whole product tour: the hero and its one interactive
+// picture, the workspace in one screen, and the card shelf of what Vector does,
+// each card linked to the docs page that covers it in full.
 
 // The work Vector does in one window. Six, so the grid fills two even rows.
 const workspaceFacts = [
@@ -100,8 +103,8 @@ const wordmarkCells = "VECTOR".split("").flatMap((letter, letterIndex) =>
 
 // The shelf of things Vector does, each sentence checked against the code that
 // ships it and linked to the docs section that describes it in full. Order:
-// review, the browser, the agents, what it ships to, then how it keeps itself
-// honest.
+// review, the browser, the agents, where you work with it, what it ships to,
+// then how it keeps itself honest.
 const trustCards = [
   {
     icon: GitPullRequest,
@@ -172,6 +175,27 @@ const trustCards = [
     text: "Vector plans the task graph itself, gives each task its own agent and model, and runs them in dependency order.",
     href: "/docs#agent-workspaces",
     more: "Read about coordinated runs",
+  },
+  {
+    icon: PanelsTopLeft,
+    lead: "An editor beside the agent.",
+    text: "Switch to Editor to search the project, open files in tabs and edit them yourself, while the same agent keeps the task.",
+    href: "/docs#agent-editor",
+    more: "Read about Agent and Editor",
+  },
+  {
+    icon: SquareTerminal,
+    lead: "The whole agent in your terminal.",
+    text: "Install @vectordevai/cli and the same agent runs in any shell, Vectorscope reviews included. Free with a Vector account.",
+    href: "/docs#cli-terminal",
+    more: "Read about the Vector CLI",
+  },
+  {
+    icon: Blocks,
+    lead: `${pluginCount} plugins, one click each.`,
+    text: "GitHub, Linear, Sentry, Supabase and Stripe connect from the catalog, and any MCP server you write plugs in beside them.",
+    href: "/docs#connections",
+    more: "Read about plugins and MCP",
   },
   {
     icon: Rocket,
@@ -290,7 +314,7 @@ const trustCards = [
               <span>Get Vector</span>
               <ArrowRight size={18} strokeWidth={2} aria-hidden="true" />
             </a>
-            <a class="simple-secondary" href="/docs/product#ch-cli">Install the CLI</a>
+            <a class="simple-secondary" href="/docs/cli-terminal">Install the CLI</a>
           </div>
           <p class="hero-note">$10/month or $99/year. macOS, Windows, and Linux.</p>
         </div>
@@ -337,7 +361,7 @@ const trustCards = [
           {pluginNames.map((name) => <li>{name}</li>)}
         </ul>
         <div class="story-action" data-reveal>
-          <a class="landing-pill" href="/docs/product">See everything Vector does</a>
+          <a class="landing-pill" href="/docs">See everything Vector does</a>
         </div>
       </div>
     </section>
