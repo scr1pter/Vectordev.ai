@@ -1,12 +1,22 @@
 import type { Hooks, PluginInput } from "@vectordevai/plugin"
-import { createServer } from "node:http"
-import { gitlabSignInEnabled, providerCredentialAllowed } from "@vectordevai/core/provider-policy"
-import { InstallationVersion } from "@vectordevai/core/installation/version"
+import {
+  gitlabOAuthConfiguration,
+  gitlabCredentialMatches,
+  providerCredentialAllowed,
+} from "@vectordevai/core/provider-policy"
+import { createGitlabOAuth } from "@vectordevai/core/oauth/gitlab"
 
 export async function GitlabAuthPlugin(input: PluginInput): Promise<Hooks> {
-  const clientId = process.env.GITLAB_OAUTH_CLIENT_ID?.trim()
-  const enabled = gitlabSignInEnabled()
-  const redirect = "http://127.0.0.1:8080/callback"
+  return gitlabAuthHooks(input, gitlabOAuthConfiguration)
+}
+
+/** The factory keeps protocol tests independent of the release enablement gate. */
+export function gitlabAuthHooks(
+  input: PluginInput,
+  configuration: typeof gitlabOAuthConfiguration,
+  oauth = createGitlabOAuth(),
+): Hooks {
+  let active = new AbortController()
   const instance = (value?: string) => new URL(value || process.env.GITLAB_INSTANCE_URL || "https://gitlab.com").origin
   const prompts = [
     {
@@ -15,127 +25,79 @@ export async function GitlabAuthPlugin(input: PluginInput): Promise<Hooks> {
       message: "GitLab instance URL",
       placeholder: process.env.GITLAB_INSTANCE_URL || "https://gitlab.com",
       validate(value: string) {
-        if (!value) return undefined
+        if (!value) return
         const url = URL.parse(value)
-        return url && ["https:", "http:"].includes(url.protocol) ? undefined : "Enter an HTTP or HTTPS instance URL"
+        return url &&
+          ["https:", "http:"].includes(url.protocol) &&
+          !url.username &&
+          !url.password &&
+          !url.search &&
+          !url.hash &&
+          url.pathname === "/"
+          ? undefined
+          : "Enter your GitLab instance origin without a path or credentials"
       },
     },
   ]
-
-  async function token(url: string, body: Record<string, string>) {
-    const response = await fetch(`${url}/oauth/token`, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded", "User-Agent": `vector/${InstallationVersion}` },
-      body: new URLSearchParams({ ...body, client_id: clientId! }),
-      signal: AbortSignal.timeout(10_000),
-    })
-    if (!response.ok) throw new Error(`GitLab authorization failed (${response.status})`)
-    const value: { access_token: string; refresh_token: string; expires_in: number } = await response.json()
-    return {
-      type: "oauth" as const,
-      access: value.access_token,
-      refresh: value.refresh_token,
-      expires: Date.now() + value.expires_in * 1000,
-      enterpriseUrl: url,
-      clientId,
-    }
+  const registration = () => {
+    const value = configuration()
+    if (!value) throw new Error("GitLab Duo sign-in is not enabled for this Vector build. Use a personal access token.")
+    return value
   }
-
   return {
+    async dispose() {
+      active.abort()
+    },
     auth: {
       provider: "gitlab",
       async loader(getAuth) {
         const auth = await getAuth()
-        if (!providerCredentialAllowed("gitlab", auth)) return {}
-        if (auth.type === "api") return { apiKey: auth.key, instanceUrl: instance(auth.metadata?.instanceUrl) }
-        if (auth.type !== "oauth" || !enabled) return {}
-        const value =
-          auth.expires > Date.now() + 60_000
-            ? auth
-            : await token(instance(auth.enterpriseUrl), { grant_type: "refresh_token", refresh_token: auth.refresh })
-        if (value !== auth) await input.client.auth.set({ path: { id: "gitlab" }, body: value })
-        return { apiKey: value.access, instanceUrl: instance(value.enterpriseUrl), clientId }
+        if (auth.type === "api") {
+          if (!providerCredentialAllowed("gitlab", auth)) return {}
+          return { apiKey: auth.key, instanceUrl: instance(auth.metadata?.instanceUrl) }
+        }
+        if (auth.type !== "oauth" || !gitlabCredentialMatches(auth, configuration())) return {}
+        const app = registration()
+        const value = auth.expires > Date.now() + 60_000 ? auth : await oauth.refresh(app, auth.refresh, active.signal)
+        if (!gitlabCredentialMatches(value, configuration()))
+          throw new Error("GitLab application configuration changed. Sign in again.")
+        if (value !== auth) await input.client.auth.set({ path: { id: "gitlab" }, body: { ...value, type: "oauth" } })
+        return { apiKey: value.access, instanceUrl: app.origin, clientId: app.clientId }
       },
-      methods: (
-        [
-          {
-            type: "oauth",
-            label: "GitLab OAuth (configured app)",
-            prompts,
-            async authorize(inputs) {
-              if (!enabled || !clientId) throw new Error("Configure GITLAB_OAUTH_CLIENT_ID before signing in")
-              const origin = instance(inputs?.instanceUrl)
-              const verifier = crypto.randomUUID() + crypto.randomUUID()
-              const challenge = Buffer.from(
-                await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)),
-              ).toString("base64url")
-              const state = crypto.randomUUID()
-              const pending = Promise.withResolvers<string>()
-              // Attach a handler immediately: the browser may fail before callback() starts awaiting.
-              void pending.promise.catch(() => undefined)
-              const server = createServer((request, response) => {
-                const url = new URL(request.url || "/", redirect)
-                if (url.pathname !== "/callback") {
-                  response.writeHead(404).end()
-                  return
-                }
-                if (url.searchParams.get("state") !== state) {
-                  response.writeHead(400).end("Invalid authorization state")
-                  return
-                }
-                const code = url.searchParams.get("code")
-                if (!code) {
-                  pending.reject(new Error("GitLab sign-in did not return an authorization code"))
-                  response.writeHead(400).end("GitLab sign-in failed. Return to Vector.")
-                  return
-                }
-                pending.resolve(code)
-                response.writeHead(200, { "Content-Type": "text/plain" }).end("Signed in. Return to Vector.")
-              })
-              await new Promise<void>((resolve, reject) => {
-                server.once("error", reject)
-                server.listen(8080, "127.0.0.1", resolve)
-              })
-              const timeout = setTimeout(() => {
-                pending.reject(new Error("GitLab sign-in timed out"))
-                server.close()
-              }, 120_000)
-              const url = new URL(`${origin}/oauth/authorize`)
-              url.search = new URLSearchParams({
-                client_id: clientId,
-                redirect_uri: redirect,
-                response_type: "code",
-                scope: "api read_user",
-                state,
-                code_challenge: challenge,
-                code_challenge_method: "S256",
-              }).toString()
-              return {
-                method: "auto" as const,
-                url: url.toString(),
-                instructions: "Authorize Vector using your configured GitLab application.",
-                async callback() {
-                  const result = await pending.promise
-                    .then((code) =>
-                      token(origin, {
-                        grant_type: "authorization_code",
-                        code,
-                        code_verifier: verifier,
-                        redirect_uri: redirect,
-                      }),
+      methods: [
+        ...(configuration()
+          ? [
+              {
+                type: "oauth" as const,
+                label: "Sign in with GitLab (device code)",
+                prompts,
+                async authorize(inputs?: Record<string, string>) {
+                  const app = registration()
+                  if (inputs?.instanceUrl && instance(inputs.instanceUrl) !== app.origin)
+                    throw new Error(
+                      "Set GITLAB_INSTANCE_URL and your own GITLAB_OAUTH_CLIENT_ID for this instance before signing in.",
                     )
-                    .finally(() => {
-                      clearTimeout(timeout)
-                      server.close()
-                    })
-                  return { ...result, type: "success" as const }
+                  active.abort()
+                  const flow = new AbortController()
+                  active = flow
+                  const device = await oauth.authorize(app, flow.signal)
+                  return {
+                    method: "auto" as const,
+                    url: device.url,
+                    instructions: device.instructions,
+                    async callback() {
+                      const value = await device.complete()
+                      if (!gitlabCredentialMatches(value, configuration()))
+                        throw new Error("GitLab application configuration changed. Sign in again.")
+                      return { ...value, type: "success" as const }
+                    },
+                  }
                 },
-              }
-            },
-          },
-          { type: "api", label: "GitLab Personal Access Token", prompts },
-        ] satisfies NonNullable<Hooks["auth"]>["methods"]
-      ).filter((method) => enabled || method.type !== "oauth"),
+              },
+            ]
+          : []),
+        { type: "api", label: "GitLab Personal Access Token", prompts },
+      ],
     },
   }
 }

@@ -9,6 +9,7 @@ import {
   providerCredentialUnavailable,
   providerEnabled,
   providerUsable,
+  requireGitlabOAuthEndpoint,
 } from "@vectordevai/core/provider-policy"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import os from "os"
@@ -1384,7 +1385,7 @@ const layer = Layer.effect(
     const runtimeFlags = yield* RuntimeFlags.Service
     const freeModels = yield* FreeModels.Service
     const freeCredentials = yield* FreeModels.CredentialsService
-    const freeBridge = yield* EffectBridge.make()
+    const runtimeBridge = yield* EffectBridge.make()
 
     const state = yield* InstanceState.make<State>(() =>
       Effect.gen(function* () {
@@ -1794,9 +1795,9 @@ const layer = Layer.effect(
                 const route = await FreeModels.resolveRoute({
                   provider: model.providerID === "vector" ? "vector" : "openrouter",
                   modelID: model.id,
-                  catalog: () => freeBridge.promise(freeModels.catalog()),
-                  forKey: (key) => freeBridge.promise(freeModels.forKey(key)),
-                  credential: (provider) => freeBridge.promise(freeCredentials.get(provider)),
+                  catalog: () => runtimeBridge.promise(freeModels.catalog()),
+                  forKey: (key) => runtimeBridge.promise(freeModels.forKey(key)),
+                  credential: (provider) => runtimeBridge.promise(freeCredentials.get(provider)),
                 })
                 const body = typeof init?.body === "string" ? JSON.parse(init.body) : undefined
                 return fetch(route.url, {
@@ -1864,6 +1865,11 @@ const layer = Layer.effect(
 
         if (baseURL !== undefined) options["baseURL"] = baseURL
         if (options["apiKey"] === undefined && provider.key) options["apiKey"] = provider.key
+        if (model.providerID === "gitlab") {
+          const credential = await runtimeBridge.promise(auth.get(model.providerID).pipe(Effect.orDie))
+          if (credential?.type === "oauth" && options.apiKey === credential.access)
+            options.instanceUrl = requireGitlabOAuthEndpoint(credential, options)
+        }
         if (model.headers)
           options["headers"] = {
             ...options["headers"],

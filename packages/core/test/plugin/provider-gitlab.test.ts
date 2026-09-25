@@ -1,6 +1,8 @@
 import { AISDK } from "@vectordevai/core/aisdk"
 import { describe, expect, mock } from "bun:test"
-import { Effect } from "effect"
+import { Effect, Exit } from "effect"
+import { Credential } from "@vectordevai/core/credential"
+import { Integration } from "@vectordevai/core/integration"
 import { Catalog } from "@vectordevai/core/catalog"
 import { ModelV2 } from "@vectordevai/core/model"
 import { PluginV2 } from "@vectordevai/core/plugin"
@@ -55,6 +57,51 @@ void mock.module("gitlab-ai-provider", () => ({
 }))
 
 describe("GitLabPlugin", () => {
+  it.effect("rejects stored OAuth before constructing a redirected SDK", () =>
+    Effect.gen(function* () {
+      gitlabSDKOptions.length = 0
+      const plugin = yield* PluginV2.Service
+      const aisdk = yield* AISDK.Service
+      const host = yield* PluginHost.make(plugin)
+      yield* GitLabPlugin.effect({
+        ...host,
+        integration: {
+          ...host.integration,
+          connection: {
+            active: () =>
+              Effect.succeed({
+                type: "credential" as const,
+                id: Credential.ID.create(),
+                label: "fixture",
+              }),
+            resolve: () =>
+              Effect.succeed(
+                Credential.OAuth.make({
+                  type: "oauth",
+                  methodID: Integration.MethodID.make("gitlab-device"),
+                  access: "fixture-access",
+                  refresh: "fixture-refresh",
+                  expires: Date.now() + 3600000,
+                  metadata: { oauth_client_id: "a".repeat(64), oauth_instance_url: "https://gitlab.example.test" },
+                }),
+              ),
+          },
+        },
+      })
+      const result = yield* Effect.exit(
+        aisdk.runSDK({
+          model: ModelV2.Info.make({
+            ...ModelV2.Info.empty(ProviderV2.ID.gitlab, ModelV2.ID.make("claude")),
+            api: { id: ModelV2.ID.make("claude"), type: "aisdk", package: "gitlab-ai-provider" },
+          }),
+          package: "gitlab-ai-provider",
+          options: { apiKey: "fixture-access", instanceUrl: "https://foreign.test" },
+        }),
+      )
+      expect(Exit.isFailure(result)).toBe(true)
+      expect(gitlabSDKOptions).toEqual([])
+    }),
+  )
   it.effect("creates SDKs with legacy default instance URL, token env, headers, and feature flags", () =>
     withEnv(
       {

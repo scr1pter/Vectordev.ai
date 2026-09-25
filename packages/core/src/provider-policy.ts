@@ -9,8 +9,60 @@ export const POE_SIGN_IN = false
 export const DIGITALOCEAN_SIGN_IN = false
 export const GITLAB_SIGN_IN = false
 
+// Candidate from the desktop registration. Duo reuse remains disabled until
+// ownership and device-grant configuration are confirmed; see owner-actions/gitlab.md.
+export const GITLAB_DEFAULT_CLIENT_ID = "8ac2300994dbece9bfc889ee6705f4ab8a8243b9acd04fe6185172528abc8edd"
+
+export function gitlabOAuthConfiguration(environment: NodeJS.ProcessEnv = process.env, enabled = GITLAB_SIGN_IN) {
+  if (!enabled) return
+  const origin = URL.parse(environment.GITLAB_INSTANCE_URL?.trim() || "https://gitlab.com")
+  if (
+    !origin ||
+    origin.protocol !== "https:" ||
+    origin.username ||
+    origin.password ||
+    origin.search ||
+    origin.hash ||
+    origin.pathname !== "/"
+  )
+    return
+  const override = environment.GITLAB_OAUTH_CLIENT_ID?.trim()
+  const clientId = override || (origin.origin === "https://gitlab.com" ? GITLAB_DEFAULT_CLIENT_ID : undefined)
+  if (!clientId || !/^[a-f0-9]{64}$/.test(clientId)) return
+  return { origin: origin.origin, clientId }
+}
+
+export function gitlabCredentialMatches(
+  credential: { clientId?: string; enterpriseUrl?: string; metadata?: Readonly<Record<string, unknown>> },
+  configuration: ReturnType<typeof gitlabOAuthConfiguration>,
+) {
+  return Boolean(
+    configuration &&
+      (credential.clientId ?? credential.metadata?.oauth_client_id) === configuration.clientId &&
+      (credential.enterpriseUrl ?? credential.metadata?.oauth_instance_url) === configuration.origin,
+  )
+}
+
 export function gitlabSignInEnabled() {
-  return GITLAB_SIGN_IN && Boolean(process.env.GITLAB_OAUTH_CLIENT_ID?.trim())
+  return Boolean(gitlabOAuthConfiguration())
+}
+
+export function requireGitlabOAuthEndpoint(
+  credential: Parameters<typeof gitlabCredentialMatches>[0],
+  options: { instanceUrl?: unknown; baseURL?: unknown },
+  configuration = gitlabOAuthConfiguration(),
+) {
+  if (!configuration || !gitlabCredentialMatches(credential, configuration))
+    throw new Error("This GitLab token belongs to another application or instance. Sign in again.")
+  for (const value of [options.instanceUrl, options.baseURL]) {
+    if (value === undefined || value === "") continue
+    const url = typeof value === "string" ? URL.parse(value) : null
+    if (!url || url.origin !== configuration.origin || url.username || url.password)
+      throw new Error(
+        "GitLab OAuth cannot use a different instance URL. Restore the signed-in instance or sign in again.",
+      )
+  }
+  return configuration.origin
 }
 
 export function providerOAuthAllowed(id: string, userDefined = false) {
@@ -26,24 +78,21 @@ export function providerOAuthAllowed(id: string, userDefined = false) {
 
 export function providerCredentialAllowed(
   id: string,
-  credential: { type: string; clientId?: string; metadata?: Readonly<Record<string, unknown>> },
+  credential: { type: string; clientId?: string; enterpriseUrl?: string; metadata?: Readonly<Record<string, unknown>> },
   userDefined = false,
 ) {
   if (!providerEnabled(id) || (!providerAllowed(id) && !userDefined)) return false
   // The retired DigitalOcean flow persisted its OAuth access token as an API key.
   if (id === "digitalocean" && !DIGITALOCEAN_SIGN_IN && credential.metadata?.oauth_access) return false
   if (id === "gitlab" && credential.type === "oauth") {
-    return (
-      gitlabSignInEnabled() &&
-      (credential.clientId ?? credential.metadata?.oauth_client_id) === process.env.GITLAB_OAUTH_CLIENT_ID?.trim()
-    )
+    return gitlabCredentialMatches(credential, gitlabOAuthConfiguration())
   }
   return credential.type !== "oauth" || providerOAuthAllowed(id, userDefined)
 }
 
 export function providerCredentialUnavailable(
   id: string,
-  credential: { type: string; clientId?: string; metadata?: Readonly<Record<string, unknown>> },
+  credential: { type: string; clientId?: string; enterpriseUrl?: string; metadata?: Readonly<Record<string, unknown>> },
   userDefined = false,
 ) {
   if (credential.type === "wellknown") return
