@@ -7,10 +7,92 @@
 // parsed off the "listening on http://..." line.
 import { describe, expect } from "bun:test"
 import { Effect } from "effect"
-import { HttpClient } from "effect/unstable/http"
+import { HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { cliIt } from "../../lib/cli-process"
 
 describe("vector serve (subprocess)", () => {
+  cliIt.live(
+    "refuses foreign security variables before any command or listener starts",
+    ({ vector }) =>
+      Effect.gen(function* () {
+        for (const suffix of [
+          "SERVER_PASSWORD",
+          "SERVER_USERNAME",
+          "SERVER_GUEST_PASSWORD",
+          "PERMISSION",
+          "PURE",
+          "DISABLE_PROJECT_CONFIG",
+          "SHELL_SANDBOX",
+        ]) {
+          const result = yield* vector.spawn(["serve", "--hostname", "0.0.0.0", "--unsecured"], {
+            env: { [`PRIOR_${suffix}`]: "private-fixture-value", [`VECTOR_${suffix}`]: "" },
+          })
+          expect(result.exitCode).toBe(1)
+          expect(result.timedOut).toBe(false)
+          expect(result.stderr).toContain(`VECTOR_${suffix}`)
+          expect(result.stderr).not.toContain("private-fixture-value")
+          expect(result.stdout).not.toContain("server listening")
+        }
+      }),
+    60_000,
+  )
+
+  cliIt.live(
+    "refuses unprotected network and mDNS listeners for serve and web",
+    ({ vector }) =>
+      Effect.gen(function* () {
+        for (const args of [
+          ["serve", "--hostname", "0.0.0.0"],
+          ["web", "--hostname", "0.0.0.0"],
+          ["serve", "--mdns"],
+        ]) {
+          const result = yield* vector.spawn(args)
+          expect(result.exitCode).toBe(1)
+          expect(result.timedOut).toBe(false)
+          expect(result.stderr).toContain("VECTOR_SERVER_PASSWORD")
+          expect(result.stderr).toContain("--unsecured")
+          expect(result.stdout).not.toContain("server listening")
+        }
+      }),
+    60_000,
+  )
+
+  cliIt.live(
+    "starts an explicitly unsecured listener and keeps configured authentication active",
+    ({ vector }) =>
+      Effect.gen(function* () {
+        const unsecured = yield* vector.serve({ hostname: "0.0.0.0", extraArgs: ["--unsecured"] })
+        const open = yield* HttpClient.get(`http://127.0.0.1:${unsecured.port}/config`)
+        expect(open.status).toBe(200)
+        unsecured.kill()
+        yield* Effect.promise(() => unsecured.exited)
+
+        const secured = yield* vector.serve({
+          hostname: "0.0.0.0",
+          extraArgs: ["--unsecured"],
+          env: {
+            PRIOR_SERVER_PASSWORD: "ignored-fixture-secret",
+            VECTOR_SERVER_PASSWORD: "owner-secret",
+            VECTOR_SERVER_USERNAME: "alice",
+          },
+        })
+        const unauthorized = yield* HttpClientRequest.get(`http://127.0.0.1:${secured.port}/config`).pipe(
+          HttpClientRequest.setHeader("authorization", `Basic ${btoa("vector:owner-secret")}`),
+          HttpClient.execute,
+        )
+        expect(unauthorized.status).toBe(401)
+        expect(yield* unauthorized.json).toEqual({
+          _tag: "UnauthorizedError",
+          message: "Authentication required. Use the configured server username: alice.",
+        })
+        const authorized = yield* HttpClientRequest.get(`http://127.0.0.1:${secured.port}/config`).pipe(
+          HttpClientRequest.setHeader("authorization", `Basic ${btoa("alice:owner-secret")}`),
+          HttpClient.execute,
+        )
+        expect(authorized.status).toBe(200)
+      }),
+    60_000,
+  )
   // Smoke test: server starts, binds a port, and /global/health responds.
   // If this fails, all other serve tests likely will too — debug here first.
   cliIt.live(

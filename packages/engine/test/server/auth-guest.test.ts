@@ -55,6 +55,7 @@ describe("ServerAuth guest credentials", () => {
     expect(ServerAuth.required(guestOnly)).toBe(true)
     expect(ServerAuth.identity(credential("guest", "guest-secret"), guestOnly)).toBe("guest")
     expect(ServerAuth.identity(credential("vector", "owner-secret"), guestOnly)).toBeUndefined()
+    expect(ServerAuth.identity(credential("vector", ""), { ...guestOnly, password: Option.some("") })).toBeUndefined()
     expect(ServerAuth.required(config)).toBe(true)
     expect(ServerAuth.required({ ...config, password: Option.none(), guestPassword: Option.none() })).toBe(false)
     expect(ServerAuth.required({ ...config, password: Option.none(), guestPassword: Option.some("") })).toBe(false)

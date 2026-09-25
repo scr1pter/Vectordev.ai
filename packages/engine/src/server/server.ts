@@ -13,6 +13,9 @@ import { WebSocketTracker } from "./routes/instance/httpapi/websocket-tracker"
 import { PublicApi } from "./routes/instance/httpapi/public"
 import type { CorsOptions } from "@vectordevai/server/cors"
 import { lazy } from "@/util/lazy"
+import { assertSecurityEnvironment } from "@vectordevai/core/flag/security"
+import { ServerAuth } from "./auth"
+import { assertListenSecurity } from "./listen-policy"
 
 // @ts-ignore This global is needed to prevent ai-sdk from logging warnings to stdout https://github.com/vercel/ai/blob/2dc67e0ef538307f21368db32d5a12345d98831b/packages/ai/src/logger/log-warnings.ts#L85
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -34,6 +37,7 @@ type ListenOptions = CorsOptions & {
   hostname: string
   mdns?: boolean
   mdnsDomain?: string
+  unsecured?: boolean
 }
 type ListenerState = {
   scope: Scope.Scope
@@ -71,6 +75,14 @@ export async function openapi() {
 export let url: URL | undefined
 
 export async function listen(opts: ListenOptions): Promise<Listener> {
+  assertSecurityEnvironment()
+  const auth = await Effect.runPromise(
+    ServerAuth.Config.pipe(
+      Effect.provide(ServerAuth.Config.layer),
+      Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv())),
+    ),
+  )
+  assertListenSecurity(opts, auth)
   const listener = await Effect.runPromise(listenEffect(opts))
   return {
     hostname: listener.hostname,

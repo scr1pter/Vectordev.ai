@@ -1,6 +1,7 @@
 import { NamedError } from "@vectordevai/core/util/error"
 import { errorFormat } from "@/util/error"
 import { isRecord } from "@/util/record"
+import { SecurityConfigurationError } from "@vectordevai/core/flag/security"
 
 type ConfigIssue = { message: string; path: string[] }
 
@@ -33,6 +34,7 @@ function configIssues(input: Record<string, unknown>): ConfigIssue[] {
 }
 
 export function FormatError(input: unknown): string | undefined {
+  if (input instanceof SecurityConfigurationError) return input.message
   if (input instanceof Error && isRecord(input.cause) && "body" in input.cause) {
     const formatted = FormatError(input.cause.body)
     if (formatted) return formatted

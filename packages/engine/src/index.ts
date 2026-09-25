@@ -31,6 +31,7 @@ import { errorMessage } from "./util/error"
 import { PluginCommand } from "./cli/cmd/plug"
 import { VectorLoginCommand, VectorLogoutCommand, VectorWhoamiCommand } from "./cli/cmd/vector-login"
 import { Heap } from "./cli/heap"
+import { assertSecurityEnvironment } from "@vectordevai/core/flag/security"
 
 const args = hideBin(process.argv)
 
@@ -74,6 +75,7 @@ const cli = yargs(args)
     type: "boolean",
   })
   .middleware(async (opts) => {
+    assertSecurityEnvironment()
     if (opts.printLogs) process.env.VECTOR_PRINT_LOGS = "1"
     if (opts.logLevel) process.env.VECTOR_LOG_LEVEL = opts.logLevel
     if (opts.pure) {

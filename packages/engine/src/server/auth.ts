@@ -1,5 +1,6 @@
 import { configEnv } from "@vectordevai/core/flag/compat"
 export * as ServerAuth from "./auth"
+export { unauthorizedMessage } from "@vectordevai/server/auth"
 
 import { Flag } from "@vectordevai/core/flag/flag"
 import { Config as EffectConfig, Context, Effect, Layer, Option, Redacted } from "effect"
@@ -64,7 +65,12 @@ export function required(config: Info) {
 /** The identity a credential pair matches, or undefined when it matches neither. */
 export function identity(credentials: DecodedCredentials, config: Info): Identity | undefined {
   const password = Redacted.value(credentials.password)
-  if (Option.isSome(config.password) && credentials.username === config.username && password === config.password.value)
+  if (
+    Option.isSome(config.password) &&
+    config.password.value !== "" &&
+    credentials.username === config.username &&
+    password === config.password.value
+  )
     return "owner"
   const guestPassword = config.guestPassword ?? Option.none<string>()
   if (

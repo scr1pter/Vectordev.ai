@@ -12,11 +12,11 @@ export const ServeCommand = effectCmd({
   instance: false,
   handler: Effect.fn("Cli.serve")(function* (args) {
     const { Server } = yield* Effect.promise(() => import("../../server/server"))
-    if (!Flag.VECTOR_SERVER_PASSWORD) {
-      console.log("Warning: VECTOR_SERVER_PASSWORD is not set; server is unsecured.")
-    }
     const opts = yield* resolveNetworkOptions(args)
     const server = yield* Effect.promise(() => Server.listen(opts))
+    if (!Flag.VECTOR_SERVER_PASSWORD && !process.env.VECTOR_SERVER_GUEST_PASSWORD) {
+      console.log("Warning: VECTOR_SERVER_PASSWORD is not set; server is unsecured.")
+    }
     console.log(`vector server listening on http://${server.hostname}:${server.port}`)
 
     yield* Effect.never

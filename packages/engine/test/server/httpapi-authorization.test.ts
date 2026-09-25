@@ -177,6 +177,30 @@ for (const [name, routes, route] of [
   ["v1", apiLayer, "/probe"],
   ["v2", v2ApiLayer, "/api/probe"],
 ] as const) {
+  const guestOnly = testEffect(
+    routes.pipe(
+      Layer.provide(
+        ServerAuth.Config.configLayer({
+          username: "vector",
+          password: Option.some(""),
+          guestPassword: Option.some("guest-secret"),
+        }),
+      ),
+    ),
+  )
+  guestOnly.live(`${name} rejects an empty owner password when guest authentication is enabled`, () =>
+    Effect.gen(function* () {
+      const response = yield* HttpClientRequest.get(route).pipe(
+        HttpClientRequest.setHeader("authorization", `Basic ${btoa("vector:")}`),
+        HttpClient.execute,
+      )
+      expect(response.status).toBe(401)
+      expect(yield* response.json).toEqual({
+        _tag: "UnauthorizedError",
+        message: "Authentication required. Use the configured server username: guest.",
+      })
+    }),
+  )
   const vector = testEffect(
     routes.pipe(Layer.provide(ServerAuth.Config.configLayer({ password: Option.some("secret"), username: "vector" }))),
   )
@@ -192,6 +216,50 @@ for (const [name, routes, route] of [
           HttpClient.execute,
         )
         expect(response.status).toBe(expected)
+        if (username === "other") {
+          expect(yield* response.json).toEqual({
+            _tag: "UnauthorizedError",
+            message: "Authentication required. Use the configured server username: vector.",
+          })
+        }
+      }
+    }),
+  )
+}
+
+for (const [name, routes, route] of [
+  ["v1", apiLayer, "/probe"],
+  ["v2", v2ApiLayer, "/api/probe"],
+] as const) {
+  const custom = testEffect(
+    routes.pipe(
+      Layer.provide(
+        ServerAuth.Config.configLayer({
+          username: "alice",
+          password: Option.some("owner-secret"),
+          guestUsername: "teammate",
+          guestPassword: Option.some("guest-secret"),
+        }),
+      ),
+    ),
+  )
+  custom.live(`${name} explains configured usernames while preserving owner and guest authentication`, () =>
+    Effect.gen(function* () {
+      for (const [username, password, status] of [
+        ["alice", "owner-secret", 200],
+        ["teammate", "guest-secret", 200],
+        ["vector", "owner-secret", 401],
+      ] as const) {
+        const response = yield* HttpClientRequest.get(route).pipe(
+          HttpClientRequest.setHeader("authorization", basic(username, password)),
+          HttpClient.execute,
+        )
+        expect(response.status).toBe(status)
+        if (status === 401)
+          expect(yield* response.json).toEqual({
+            _tag: "UnauthorizedError",
+            message: "Authentication required. Use the configured server username: alice or teammate.",
+          })
       }
     }),
   )

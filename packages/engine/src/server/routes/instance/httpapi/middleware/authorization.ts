@@ -1,7 +1,8 @@
 import { ServerAuth } from "@/server/auth"
 import { Effect, Encoding, Layer, Redacted } from "effect"
 import { HttpEffect, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
-import { HttpApiError, HttpApiMiddleware } from "effect/unstable/httpapi"
+import { HttpApiMiddleware } from "effect/unstable/httpapi"
+import { UnauthorizedError } from "@vectordevai/protocol/errors"
 import { hasPtyConnectTicketURL } from "@/server/shared/pty-ticket"
 import { isPublicUIPath } from "@/server/shared/public-ui"
 export {
@@ -19,14 +20,14 @@ const WWW_AUTHENTICATE = 'Basic realm="Secure Area"'
 export class Authorization extends HttpApiMiddleware.Service<Authorization>()(
   "@vector/ExperimentalHttpApiAuthorization",
   {
-    error: HttpApiError.UnauthorizedNoContent,
+    error: UnauthorizedError,
   },
 ) {}
 
 export class PtyConnectAuthorization extends HttpApiMiddleware.Service<PtyConnectAuthorization>()(
   "@vector/ExperimentalHttpApiPtyConnectAuthorization",
   {
-    error: HttpApiError.UnauthorizedNoContent,
+    error: UnauthorizedError,
   },
 ) {}
 
@@ -48,7 +49,7 @@ function validateCredential<A, E, R>(
       yield* HttpEffect.appendPreResponseHandler((_request, response) =>
         Effect.succeed(HttpServerResponse.setHeader(response, "www-authenticate", WWW_AUTHENTICATE)),
       )
-      return yield* new HttpApiError.Unauthorized({})
+      return yield* new UnauthorizedError({ message: ServerAuth.unauthorizedMessage(credential, config) })
     }
     return yield* effect
   })
@@ -90,10 +91,13 @@ function validateRawCredential<A, E, R>(
   if (!ServerAuth.required(config)) return effect
   if (!ServerAuth.authorized(credential, config))
     return Effect.succeed(
-      HttpServerResponse.empty({
-        status: UNAUTHORIZED,
-        headers: { "www-authenticate": WWW_AUTHENTICATE },
-      }),
+      HttpServerResponse.jsonUnsafe(
+        { _tag: "UnauthorizedError", message: ServerAuth.unauthorizedMessage(credential, config) },
+        {
+          status: UNAUTHORIZED,
+          headers: { "www-authenticate": WWW_AUTHENTICATE },
+        },
+      ),
     )
   return effect
 }

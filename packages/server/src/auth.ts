@@ -61,7 +61,12 @@ export function required(config: Info) {
 /** The identity a credential pair matches, or undefined when it matches neither. */
 export function identity(credentials: DecodedCredentials, config: Info): Identity | undefined {
   const password = Redacted.value(credentials.password)
-  if (Option.isSome(config.password) && credentials.username === config.username && password === config.password.value)
+  if (
+    Option.isSome(config.password) &&
+    config.password.value !== "" &&
+    credentials.username === config.username &&
+    password === config.password.value
+  )
     return "owner"
   const guestPassword = config.guestPassword ?? Option.none<string>()
   if (
@@ -78,6 +83,16 @@ export function identity(credentials: DecodedCredentials, config: Info): Identit
 // owner, so the v2 routes accept either pair.
 export function authorized(credentials: DecodedCredentials, config: Info) {
   return identity(credentials, config) !== undefined
+}
+
+export function unauthorizedMessage(credentials: DecodedCredentials, config: Info) {
+  const guestPassword = config.guestPassword ?? Option.none<string>()
+  const usernames = [
+    ...(Option.isSome(config.password) && config.password.value !== "" ? [config.username] : []),
+    ...(Option.isSome(guestPassword) && guestPassword.value !== "" ? [config.guestUsername ?? "guest"] : []),
+  ]
+  if (!credentials.username || usernames.includes(credentials.username)) return "Authentication required"
+  return `Authentication required. Use the configured server username: ${usernames.join(" or ")}.`
 }
 
 export function header(credentials?: Credentials) {

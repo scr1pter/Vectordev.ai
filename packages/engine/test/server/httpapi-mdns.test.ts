@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, mock, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
 import { Flag } from "@vectordevai/core/flag/flag"
 import { withTimeout } from "../../src/util/timeout"
 import { resetDatabase } from "../fixture/db"
@@ -28,12 +28,26 @@ const { Server } = await import("../../src/server/server")
 const original = {
   VECTOR_SERVER_PASSWORD: Flag.VECTOR_SERVER_PASSWORD,
   VECTOR_SERVER_USERNAME: Flag.VECTOR_SERVER_USERNAME,
+  envPassword: process.env.VECTOR_SERVER_PASSWORD,
+  envUsername: process.env.VECTOR_SERVER_USERNAME,
 }
+
+beforeEach(() => {
+  process.env.VECTOR_SERVER_PASSWORD = "mdns-secret"
+  process.env.VECTOR_SERVER_USERNAME = "vector"
+})
 
 afterEach(async () => {
   events.length = 0
   Flag.VECTOR_SERVER_PASSWORD = original.VECTOR_SERVER_PASSWORD
   Flag.VECTOR_SERVER_USERNAME = original.VECTOR_SERVER_USERNAME
+  for (const [key, value] of [
+    ["VECTOR_SERVER_PASSWORD", original.envPassword],
+    ["VECTOR_SERVER_USERNAME", original.envUsername],
+  ] as const) {
+    if (value === undefined) delete process.env[key]
+    if (value !== undefined) process.env[key] = value
+  }
   await disposeAllInstances()
   await resetDatabase()
 })

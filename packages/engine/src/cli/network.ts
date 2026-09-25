@@ -19,6 +19,11 @@ const options = {
     describe: "enable mDNS service discovery (defaults hostname to 0.0.0.0)",
     default: false,
   },
+  unsecured: {
+    type: "boolean" as const,
+    describe: "explicitly allow a network listener without a password",
+    default: false,
+  },
   "mdns-domain": {
     type: "string" as const,
     describe: "custom domain name for mDNS service (default: vector.local)",
@@ -76,5 +81,5 @@ export function resolveNetworkOptionsNoConfig(args: NetworkOptions, config?: Con
   const argsCors = Array.isArray(args.cors) ? args.cors : args.cors ? [args.cors] : []
   const cors = [...configCors, ...argsCors]
 
-  return { hostname, port, mdns, mdnsDomain, cors }
+  return { hostname, port, mdns, mdnsDomain, cors, unsecured: args.unsecured }
 }
