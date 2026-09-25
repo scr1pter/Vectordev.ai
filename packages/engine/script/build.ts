@@ -24,6 +24,9 @@ const skipInstall = process.argv.includes("--skip-install")
 const sourcemapsFlag = process.argv.includes("--sourcemaps")
 const plugin = createSolidTransformPlugin()
 const skipEmbedWebUi = process.argv.includes("--skip-embed-web-ui")
+const sourceRevision = process.env.VECTOR_SOURCE_REVISION ?? (await $`git rev-parse HEAD`.text()).trim()
+if (!/^[a-f0-9]{40}$/.test(sourceRevision))
+  throw new Error("VECTOR_SOURCE_REVISION must be a full lowercase Git revision")
 
 const createEmbeddedWebUIBundle = async () => {
   console.log(`Building Web UI to embed in the binary`)
@@ -210,6 +213,7 @@ for (const item of targets) {
     define: {
       FFF_LIBC: JSON.stringify(item.abi === "musl" ? "musl" : "gnu"),
       VECTOR_VERSION: `'${Script.version}'`,
+      VECTOR_CLI_STANDALONE: "true",
       VECTOR_PLUGIN_VERSION: JSON.stringify(process.env.VECTOR_PLUGIN_VERSION ?? Script.version),
       VECTOR_MODEL_CATALOG: generated.modelsData,
       OTUI_TREE_SITTER_WORKER_PATH: bunfsRoot + workerRelativePath,
@@ -241,6 +245,8 @@ for (const item of targets) {
         name,
         version: Script.version,
         vectorCatalogSha256: generated.modelsSha256,
+        vectorStandalone: true,
+        vectorSourceRevision: sourceRevision,
         preferUnplugged: true,
         license: "SEE LICENSE IN LICENSE",
         files: ["bin", "LICENSE", "THIRD_PARTY_NOTICES.md", "DEPENDENCY_NOTICES.md"],

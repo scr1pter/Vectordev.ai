@@ -6,7 +6,6 @@ import { Global } from "@vectordevai/core/global"
 import fs from "fs/promises"
 import path from "path"
 import os from "os"
-import { Process } from "@/util/process"
 
 interface UninstallArgs {
   keepConfig: boolean
@@ -54,12 +53,17 @@ export const UninstallCommand = {
     UI.empty()
     prompts.intro("Uninstall Vector")
 
-    const method = await Installation.method()
+    const owner = await Installation.ownership()
+    const method = owner.method
     prompts.log.info(`Installation method: ${method}`)
 
     const targets = await collectRemovalTargets(args)
 
     await showRemovalSummary(targets, method)
+    if (owner.method === "standalone") {
+      prompts.log.info(`  ✓ Executable: ${owner.receipt.executable}`)
+      prompts.log.info(`  ✓ Owned notices and receipt: ${owner.receipt.metadata}`)
+    }
 
     if (!args.force && !args.dryRun) {
       const confirm = await prompts.confirm({
@@ -78,9 +82,14 @@ export const UninstallCommand = {
       return
     }
 
-    await executeUninstall(method, targets)
-
-    prompts.outro("Done")
+    const result = await executeUninstall(method, targets)
+    prompts.outro(
+      result === "scheduled"
+        ? "Uninstall scheduled after Vector exits"
+        : process.exitCode
+          ? "Uninstall incomplete"
+          : "Done",
+    )
   },
 }
 
@@ -118,6 +127,9 @@ async function showRemovalSummary(targets: RemovalTargets, method: Installation.
       npm: "npm uninstall -g @vectordevai/cli",
       pnpm: "pnpm uninstall -g @vectordevai/cli",
       bun: "bun remove -g @vectordevai/cli",
+      homebrew: "Homebrew-owned Vector formula",
+      scoop: "Scoop-owned Vector package",
+      standalone: "Receipt-owned standalone files",
     }
     prompts.log.info(`  ✓ Package: ${cmds[method] || method}`)
   }
@@ -126,10 +138,36 @@ async function showRemovalSummary(targets: RemovalTargets, method: Installation.
 async function executeUninstall(method: Installation.Method, targets: RemovalTargets) {
   const spinner = prompts.spinner()
   const errors: string[] = []
+  spinner.start("Removing the verified installation...")
+  const removed = await Installation.uninstall(method).then(
+    (result) => ({ result }),
+    (error: unknown) => ({ error }),
+  )
+  if ("error" in removed) {
+    spinner.stop("Could not remove the installation", 1)
+    prompts.log.error(removed.error instanceof Error ? removed.error.message : "Installation removal failed.")
+    process.exitCode = 1
+    return
+  }
+  spinner.stop(
+    removed.result.status === "scheduled" ? "Verified removal scheduled after Vector exits" : "Installation removed",
+  )
+  if (removed.result.status === "scheduled") prompts.log.info(`Completion status: ${removed.result.statusFile}`)
 
   for (const dir of targets.directories) {
     if (dir.keep) {
       prompts.log.step(`Skipping ${dir.label} (--keep-${dir.label.toLowerCase()})`)
+      continue
+    }
+    if (
+      removed.result.status === "scheduled" &&
+      (path.relative(dir.path, removed.result.statusFile) === "" ||
+        (!path.relative(dir.path, removed.result.statusFile).startsWith("..") &&
+          !path.isAbsolute(path.relative(dir.path, removed.result.statusFile))))
+    ) {
+      prompts.log.warn(
+        `Keeping ${dir.label} until the deferred executable removal finishes; it contains the installation status and helper.`,
+      )
       continue
     }
 
@@ -149,38 +187,18 @@ async function executeUninstall(method: Installation.Method, targets: RemovalTar
     spinner.stop(`Removed ${dir.label}`)
   }
 
-  if (method !== "unknown") {
-    const cmds: Record<string, string[]> = {
-      npm: ["npm", "uninstall", "-g", "@vectordevai/cli"],
-      pnpm: ["pnpm", "uninstall", "-g", "@vectordevai/cli"],
-      bun: ["bun", "remove", "-g", "@vectordevai/cli"],
-    }
-
-    const cmd = cmds[method]
-    if (cmd) {
-      spinner.start(`Running ${cmd.join(" ")}...`)
-      const result = await Process.run(cmd, {
-        nothrow: true,
-      })
-      if (result.code !== 0) {
-        spinner.stop(`Package manager uninstall failed: exit code ${result.code}`, 1)
-        prompts.log.warn(`You may need to run manually: ${cmd.join(" ")}`)
-      } else {
-        spinner.stop("Package removed")
-      }
-    }
-  }
-
   if (errors.length > 0) {
     UI.empty()
     prompts.log.warn("Some operations failed:")
     for (const err of errors) {
       prompts.log.error(`  ${err}`)
     }
+    process.exitCode = 1
   }
 
   UI.empty()
-  prompts.log.success("Thank you for using Vector!")
+  if (!errors.length && removed.result.status === "complete") prompts.log.success("Vector was uninstalled.")
+  return removed.result.status
 }
 
 async function getDirectorySize(dir: string): Promise<number> {

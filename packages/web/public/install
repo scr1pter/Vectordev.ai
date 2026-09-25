@@ -1,0 +1,149 @@
+#!/bin/sh
+# Vector's standalone installer. Requires no Node.js, npm, jq, or elevated privileges.
+set -eu
+umask 077
+
+fail() { printf 'Vector install: %s\n' "$*" >&2; exit 1; }
+usage() { printf '%s\n' 'Usage: install [--version latest|beta|VERSION] [--install-dir PATH] [--binary-name vector|vector-native]'; }
+version=latest
+install_dir=${HOME:?HOME must be set}/.vector/bin
+binary=vector
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --version) [ "$#" -ge 2 ] || fail 'Missing version'; version=$2; shift 2 ;;
+    --install-dir) [ "$#" -ge 2 ] || fail 'Missing install directory'; install_dir=$2; shift 2 ;;
+    --binary-name) [ "$#" -ge 2 ] || fail 'Missing binary name'; binary=$2; shift 2 ;;
+    --help|-h) usage; exit 0 ;;
+    *) fail "Unknown option: $1" ;;
+  esac
+done
+case "$binary" in vector|vector-native) ;; *) fail 'Binary name must be vector or vector-native' ;; esac
+case "$version" in latest|beta) ;; *) printf '%s\n' "$version" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$' || fail 'Invalid version' ;; esac
+[ "${#version}" -le 100 ] || fail 'Invalid version'
+case "$install_dir" in /*) ;; *) fail 'Install directory must be an absolute path' ;; esac
+case "$install_dir" in *'
+'*|*"$(printf '\r')"*) fail 'Invalid install directory' ;; esac
+for tool in curl tar awk cut sort cmp wc grep mktemp find; do command -v "$tool" >/dev/null 2>&1 || fail "Missing required tool: $tool"; done
+if command -v sha256sum >/dev/null 2>&1; then
+  digest() { sha256sum "$1" | cut -d ' ' -f 1; }
+elif command -v shasum >/dev/null 2>&1; then
+  digest() { shasum -a 256 "$1" | cut -d ' ' -f 1; }
+else
+  fail 'Install sha256sum or shasum before continuing'
+fi
+case "$(uname -s)" in Darwin) platform=darwin ;; Linux) platform=linux ;; *) fail 'Use install.ps1 on Windows; this platform is unsupported' ;; esac
+case "$(uname -m)" in arm64|aarch64) arch=arm64 ;; x86_64|amd64) arch=x64-baseline ;; *) fail 'Unsupported CPU architecture' ;; esac
+target=$platform-$arch
+if [ "$platform" = linux ]; then
+  if (ldd --version 2>&1 || true) | grep -qi musl; then
+    target=$target-musl
+  elif getconf GNU_LIBC_VERSION >/dev/null 2>&1; then
+    :
+  else
+    fail 'Could not identify Linux libc (glibc or musl)'
+  fi
+fi
+
+mkdir -p "$install_dir"
+install_dir=$(CDPATH= cd -P "$install_dir" && pwd)
+destination=$install_dir/$binary
+metadata=$install_dir/.vector-$binary
+lock=$install_dir/.vector-$binary.lock
+mkdir "$lock" 2>/dev/null || fail 'Another installation is running, or a prior installation needs inspection (lock directory exists)'
+stage=
+replaced=false
+metadata_replaced=false
+committed=false
+cleanup() {
+  status=$?
+  rollback_failed=false
+  trap - EXIT HUP INT TERM
+  if [ "$committed" != true ] && [ -n "$stage" ]; then
+    if [ "$metadata_replaced" = true ]; then rm -rf "$metadata" || rollback_failed=true; fi
+    if [ -d "$stage/old-metadata" ]; then
+      if [ ! -e "$metadata" ] && mv "$stage/old-metadata" "$metadata"; then :; else rollback_failed=true; fi
+    fi
+    if [ "$replaced" = true ]; then
+      if [ -f "$stage/old-binary" ]; then mv -f "$stage/old-binary" "$destination" || rollback_failed=true; else rm -f "$destination" || rollback_failed=true; fi
+    fi
+  fi
+  if [ "$rollback_failed" = true ]; then
+    printf 'Vector install: rollback could not finish. Recovery files were preserved at %s\n' "$stage" >&2
+    status=1
+  elif [ -n "$stage" ]; then
+    rm -rf "$stage" || printf 'Vector install: temporary files remain at %s\n' "$stage" >&2
+  fi
+  rmdir "$lock" 2>/dev/null || true
+  exit "$status"
+}
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
+stage=$(mktemp -d "$install_dir/.vector-stage.XXXXXXXX")
+receipt=$metadata/receipt.tsv
+receipt_channel=
+if [ -e "$destination" ] || [ -L "$destination" ] || [ -e "$metadata" ] || [ -L "$metadata" ]; then
+  [ -f "$destination" ] && [ ! -L "$destination" ] && [ -d "$metadata" ] && [ ! -L "$metadata" ] && [ -f "$receipt" ] && [ ! -L "$receipt" ] || fail 'Refusing to replace an installation without a valid standalone receipt'
+  [ "$(wc -l < "$receipt" | tr -d ' ')" = 1 ] || fail 'Invalid standalone receipt'
+  awk -F '\t' 'NF != 8 || $1 != "vector-standalone" || $2 != "1" { exit 1 }' "$receipt" || fail 'Invalid standalone receipt'
+  cut -f 3 "$receipt" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$' || fail 'Invalid receipt version'
+  cut -f 4 "$receipt" | grep -Eq '^(darwin-(arm64|x64(-baseline)?)|linux-(arm64|x64(-baseline)?)(-musl)?|windows-(arm64|x64(-baseline)?))$' || fail 'Invalid receipt target'
+  cut -f 7 "$receipt" | grep -Eq '^[a-f0-9]{64}$' && cut -f 8 "$receipt" | grep -Eq '^[a-f0-9]{64}$' || fail 'Invalid receipt checksum'
+  [ "$(cut -f 6 "$receipt")" = "$binary" ] || fail 'Receipt names a different executable'
+  receipt_channel=$(cut -f 5 "$receipt")
+  case "$receipt_channel" in latest|beta) ;; *) fail 'Invalid receipt channel' ;; esac
+  [ "$(digest "$destination")" = "$(cut -f 7 "$receipt")" ] || fail 'Existing executable differs from its receipt; it was not overwritten'
+  printf '%s\n' DEPENDENCY_NOTICES.md LICENSE THIRD_PARTY_NOTICES.md receipt.tsv > "$stage/expected-metadata"
+  (CDPATH= cd "$metadata" && find . -mindepth 1 -maxdepth 1 -print) | cut -c 3- | LC_ALL=C sort > "$stage/actual-metadata"
+  cmp -s "$stage/expected-metadata" "$stage/actual-metadata" || fail 'Standalone metadata contains unrelated files; preserve or move them first'
+  for notice in LICENSE THIRD_PARTY_NOTICES.md DEPENDENCY_NOTICES.md; do [ -f "$metadata/$notice" ] && [ ! -L "$metadata/$notice" ] || fail 'Invalid installed notices'; done
+fi
+
+download() {
+  code=$(curl --silent --show-error --fail --proto '=https' --tlsv1.2 --connect-timeout 15 --max-time 300 --max-filesize "$3" --output "$2" --write-out '%{http_code}' "$1") || fail 'Download failed; existing installation is unchanged'
+  [ "$code" = 200 ] || fail 'Download returned an unexpected status or redirect'
+}
+download "https://vectordev.ai/api/cli-release?version=$version&target=$target&format=tsv" "$stage/release.tsv" 64000
+[ "$(wc -l < "$stage/release.tsv" | tr -d ' ')" = 1 ] || fail 'Invalid release response'
+awk -F '\t' 'NF != 5 { exit 1 }' "$stage/release.tsv" || fail 'Invalid release fields'
+release=$(cut -f 1 "$stage/release.tsv")
+selected=$(cut -f 2 "$stage/release.tsv")
+url=$(cut -f 3 "$stage/release.tsv")
+size=$(cut -f 4 "$stage/release.tsv")
+sha=$(cut -f 5 "$stage/release.tsv")
+printf '%s\n' "$release" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$' || fail 'Invalid release version'
+[ "${#release}" -le 100 ] && [ "$selected" = "$target" ] || fail 'Unexpected release target'
+case "$version" in latest|beta) ;; *) [ "$release" = "$version" ] || fail 'Server returned a different version' ;; esac
+if [ "$version" = latest ]; then case "$release" in *-*) fail 'Stable channel returned a prerelease' ;; esac; fi
+printf '%s\n' "$size" | grep -Eq '^[1-9][0-9]{0,9}$' && [ "$size" -le 1000000000 ] || fail 'Invalid archive size'
+printf '%s\n' "$sha" | grep -Eq '^[a-f0-9]{64}$' || fail 'Invalid archive checksum'
+host=${url#https://}; host=${host%%/*}
+printf '%s\n' "$host" | grep -Eq '^[a-z0-9]+\.public\.blob\.vercel-storage\.com$' || fail 'Invalid archive origin'
+[ "$url" = "https://$host/releases/vector-cli/v$release/vector-$target.tar.gz" ] || fail 'Invalid archive URL'
+download "$url" "$stage/archive.tar.gz" "$size"
+[ "$(wc -c < "$stage/archive.tar.gz" | tr -d ' ')" = "$size" ] || fail 'Archive size did not match; existing installation is unchanged'
+[ "$(digest "$stage/archive.tar.gz")" = "$sha" ] || fail 'Archive checksum did not match; existing installation is unchanged'
+printf '%s\n' DEPENDENCY_NOTICES.md LICENSE THIRD_PARTY_NOTICES.md vector > "$stage/expected-entries"
+tar -tzf "$stage/archive.tar.gz" > "$stage/entries" || fail 'Invalid archive'
+LC_ALL=C sort "$stage/entries" > "$stage/sorted-entries"
+cmp -s "$stage/expected-entries" "$stage/sorted-entries" || fail 'Archive contains unexpected paths or duplicate entries'
+tar -tvzf "$stage/archive.tar.gz" > "$stage/entry-types" || fail 'Invalid archive'
+awk 'substr($0,1,1) != "-" { exit 1 } END { if (NR != 4) exit 1 }' "$stage/entry-types" || fail 'Archive links and special files are forbidden'
+mkdir "$stage/extracted" "$stage/new-metadata"
+tar --no-same-owner -xzf "$stage/archive.tar.gz" -C "$stage/extracted" || fail 'Archive extraction failed'
+for entry in vector LICENSE THIRD_PARTY_NOTICES.md DEPENDENCY_NOTICES.md; do [ -f "$stage/extracted/$entry" ] && [ ! -L "$stage/extracted/$entry" ] || fail 'Archive extraction produced an invalid file'; done
+chmod 755 "$stage/extracted/vector"
+reported=$("$stage/extracted/vector" --version </dev/null) || fail 'Verified binary could not report its version; existing installation is unchanged'
+[ "$reported" = "$release" ] || fail 'Verified binary reports a different version; existing installation is unchanged'
+case "$version:$release" in beta:*|*:*-*) channel=beta ;; latest:*) channel=latest ;; *) channel=${receipt_channel:-latest} ;; esac
+binary_sha=$(digest "$stage/extracted/vector")
+printf 'vector-standalone\t1\t%s\t%s\t%s\t%s\t%s\t%s\n' "$release" "$target" "$channel" "$binary" "$binary_sha" "$sha" > "$stage/new-metadata/receipt.tsv"
+for notice in LICENSE THIRD_PARTY_NOTICES.md DEPENDENCY_NOTICES.md; do mv "$stage/extracted/$notice" "$stage/new-metadata/$notice"; done
+if [ -f "$destination" ]; then cp -p "$destination" "$stage/old-binary"; fi
+replaced=true
+mv -f "$stage/extracted/vector" "$destination"
+if [ -d "$metadata" ]; then mv "$metadata" "$stage/old-metadata"; fi
+metadata_replaced=true
+mv "$stage/new-metadata" "$metadata"
+committed=true
+printf 'Vector %s installed at %s\n' "$release" "$destination"
+printf 'Add this directory to PATH if needed: %s\n' "$install_dir"

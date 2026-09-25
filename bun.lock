@@ -165,6 +165,8 @@
       "dependencies": {
         "@vectordevai/schema": "workspace:*",
         "@vercel/blob": "2.7.0",
+        "@zip.js/zip.js": "2.7.62",
+        "tar": "7.5.15",
       },
       "devDependencies": {
         "@tsconfig/node22": "catalog:",

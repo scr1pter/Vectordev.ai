@@ -17,32 +17,44 @@ import { authorizationLayer } from "../../src/server/routes/instance/httpapi/mid
 import { schemaErrorLayer } from "../../src/server/routes/instance/httpapi/middleware/schema-error"
 import { testEffect } from "../lib/effect"
 
-const apiLayer = HttpRouter.serve(
-  HttpApiBuilder.layer(RootHttpApi).pipe(
-    Layer.provide([controlHandlers, controlPlaneHandlers, globalHandlers]),
-    Layer.provide([authorizationLayer, schemaErrorLayer]),
-    // Raw HttpApi routes expose an opaque handler context at the request boundary.
-    // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion
-    HttpRouter.provideRequest(Layer.succeedContext(Context.empty() as Context.Context<unknown>)),
-  ),
-  { disableListenLog: true, disableLogger: true },
-).pipe(
-  Layer.provideMerge(NodeHttpServer.layerTest),
-  Layer.provide(Layer.mock(Auth.Service)({})),
-  Layer.provide(Layer.mock(Config.Service)({})),
-  Layer.provide(Layer.mock(MoveSession.Service)({})),
-  Layer.provide(
-    Layer.mock(Installation.Service)({
-      method: () => Effect.succeed("npm"),
-      latest: () => Effect.succeed("9.9.9"),
-      upgrade: () => Effect.void,
-    }),
-  ),
-  Layer.provide(ServerAuth.Config.configLayer({ password: Option.none(), username: "vector" })),
-)
-const it = testEffect(apiLayer)
+const apiLayer = (upgrade: Installation.UpgradeResult = { status: "complete" }) =>
+  HttpRouter.serve(
+    HttpApiBuilder.layer(RootHttpApi).pipe(
+      Layer.provide([controlHandlers, controlPlaneHandlers, globalHandlers]),
+      Layer.provide([authorizationLayer, schemaErrorLayer]),
+      // Raw HttpApi routes expose an opaque handler context at the request boundary.
+      // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion
+      HttpRouter.provideRequest(Layer.succeedContext(Context.empty() as Context.Context<unknown>)),
+    ),
+    { disableListenLog: true, disableLogger: true },
+  ).pipe(
+    Layer.provideMerge(NodeHttpServer.layerTest),
+    Layer.provide(Layer.mock(Auth.Service)({})),
+    Layer.provide(Layer.mock(Config.Service)({})),
+    Layer.provide(Layer.mock(MoveSession.Service)({})),
+    Layer.provide(
+      Layer.mock(Installation.Service)({
+        method: () => Effect.succeed("npm"),
+        latest: () => Effect.succeed("9.9.9"),
+        upgrade: () => Effect.succeed(upgrade),
+      }),
+    ),
+    Layer.provide(ServerAuth.Config.configLayer({ password: Option.none(), username: "vector" })),
+  )
+const it = testEffect(apiLayer())
+const scheduled = testEffect(apiLayer({ status: "scheduled", statusFile: "C:/Vector/.vector-update-fixture.json" }))
 
 describe("global HttpApi", () => {
+  scheduled.live("reports a deferred Windows replacement without claiming completed upgrade", () =>
+    Effect.gen(function* () {
+      const response = yield* HttpClient.post(GlobalPaths.upgrade)
+      expect(response.status).toBe(202)
+      expect(yield* response.json).toMatchObject({
+        success: false,
+        error: expect.stringContaining("scheduled after this Vector process exits"),
+      })
+    }),
+  )
   it.live("upgrades to latest when the request body is omitted", () =>
     Effect.gen(function* () {
       const response = yield* HttpClient.post(GlobalPaths.upgrade)

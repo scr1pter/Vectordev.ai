@@ -1,0 +1,124 @@
+name: Vector standalone CLI release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Exact CLI version to build or commit
+        required: true
+        type: string
+      source_revision:
+        description: Reviewed source commit (full lowercase Git SHA)
+        required: true
+        type: string
+      catalog_sha256:
+        description: SHA-256 of the reviewed immutable release catalog
+        required: true
+        type: string
+      published_at:
+        description: Pinned publication timestamp (YYYY-MM-DDTHH:mm:ss.sssZ), reused on retries
+        required: true
+        type: string
+      channel:
+        description: Release channel
+        required: true
+        default: latest
+        type: choice
+        options: [latest, beta]
+      phase:
+        description: Prepare archives, stage immutable bytes, or verify and commit a staged release
+        required: true
+        default: prepare
+        type: choice
+        options: [prepare, stage, commit]
+
+# Blob does not provide compare-and-swap for the channel pointer. Serialize all
+# attempts, including retries, so an earlier commit cannot replace a later one.
+concurrency:
+  group: vector-standalone-cli-publisher
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  NODE_OPTIONS: --max-old-space-size=6144
+  VECTOR_RELEASE_VERSION: ${{ inputs.version }}
+  VECTOR_SOURCE_REVISION: ${{ inputs.source_revision }}
+  VECTOR_CATALOG_SHA256: ${{ inputs.catalog_sha256 }}
+  VECTOR_RELEASE_PUBLISHED_AT: ${{ inputs.published_at }}
+  VECTOR_RELEASE_CHANNEL: ${{ inputs.channel }}
+  VECTOR_CLI_BLOB_ORIGIN: ${{ vars.VECTOR_CLI_BLOB_ORIGIN }}
+  VECTOR_CLI_RELEASE_DIR: ${{ github.workspace }}/cli-release
+
+jobs:
+  release:
+    name: Prepare or publish all twelve native targets
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Check out the exact reviewed source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ inputs.source_revision }}
+          persist-credentials: false
+
+      - name: Set up pinned Bun and dependencies
+        uses: ./.github/actions/setup-bun
+        with:
+          install-flags: --frozen-lockfile --ignore-scripts
+
+      - name: Validate the source and release inputs
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$VECTOR_SOURCE_REVISION"
+          bun packages/cloud/src/prepare-cli-release-catalog.ts --validate
+
+      - name: Check release packaging
+        working-directory: packages/cloud
+        run: |
+          bun typecheck
+          bun test src/cli-release-package.test.ts src/upload-cli-release.test.ts src/cli-package-managers.test.ts src/prepare-cli-release-catalog.test.ts
+
+      - name: Read the exact previously published catalog
+        if: inputs.phase != 'commit'
+        run: bun packages/cloud/src/prepare-cli-release-catalog.ts
+
+      - name: Build all twelve standalone native binaries
+        if: inputs.phase != 'commit'
+        working-directory: packages/engine
+        env:
+          VECTOR_VERSION: ${{ inputs.version }}
+          VECTOR_CHANNEL: ${{ inputs.channel }}
+          VECTOR_RELEASE: ""
+          VECTOR_TARGETS: ""
+          VECTOR_RELEASE_CATALOG_PATH: ${{ github.workspace }}/cli-release-catalog/api.json
+          VECTOR_RELEASE_CATALOG_SHA256: ${{ inputs.catalog_sha256 }}
+        run: bun script/build.ts
+
+      - name: Prepare immutable native archives and manifest
+        if: inputs.phase != 'commit'
+        run: bun packages/cloud/src/upload-cli-release.ts prepare
+
+      - name: Preserve the exact prepared bytes
+        if: inputs.phase != 'commit'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: vector-cli-${{ inputs.version }}-${{ github.run_attempt }}
+          path: cli-release/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+      - name: Stage and verify immutable release bytes
+        if: inputs.phase == 'stage'
+        env:
+          BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
+        run: bun packages/cloud/src/upload-cli-release.ts stage
+
+      - name: Verify every staged archive and advance the channel
+        if: inputs.phase == 'commit'
+        env:
+          BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
+        run: bun packages/cloud/src/upload-cli-release.ts commit

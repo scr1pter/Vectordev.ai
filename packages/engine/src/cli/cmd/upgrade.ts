@@ -17,7 +17,7 @@ export const UpgradeCommand = {
         alias: "m",
         describe: "installation method to use",
         type: "string",
-        choices: ["npm", "pnpm", "bun"],
+        choices: ["npm", "pnpm", "bun", "standalone", "homebrew", "scoop"],
       })
   },
   handler: async (args: { target?: string; method?: string }) => {
@@ -28,15 +28,20 @@ export const UpgradeCommand = {
     const method = (args.method as Installation.Method | undefined) ?? (await Installation.method())
     if (method === "unknown") {
       prompts.log.error(`vector is installed to ${process.execPath} and may be managed by a package manager`)
-      prompts.log.info("Run vector upgrade --method npm (or pnpm or bun) to install the Vector CLI package.")
+      prompts.log.info(
+        "Use the original installer or package manager. Vector will only replace an installation it can identify.",
+      )
+      process.exitCode = 1
       return
     }
     prompts.log.info("Using method: " + method)
     const target = args.target
       ? args.target.replace(/^v/, "")
-      : await Installation.latest().catch(() => {
+      : await Installation.latest(method).catch(() => {
           prompts.log.error(
-            "Could not reach the configured npm registry. Check your registry configuration and connection, then retry.",
+            ["npm", "pnpm", "bun"].includes(method)
+              ? "Could not reach the configured npm registry. Check your registry configuration and connection, then retry."
+              : "Could not read this installation channel. Check your connection and package-manager configuration, then retry.",
           )
           process.exitCode = 1
           return undefined
@@ -52,13 +57,24 @@ export const UpgradeCommand = {
     prompts.log.info(`From ${InstallationVersion} → ${target}`)
     const spinner = prompts.spinner()
     spinner.start("Upgrading...")
-    const err = await Installation.upgrade(method, target).catch((err) => err)
-    if (err) {
+    const outcome = await Installation.upgrade(method, target).then(
+      (result) => ({ result }),
+      (error: unknown) => ({ error }),
+    )
+    if ("error" in outcome) {
+      const err = outcome.error
       spinner.stop("Upgrade failed", 1)
       if (err instanceof Installation.UpgradeFailedError) {
         prompts.log.error(err.stderr)
       } else if (err instanceof Error) prompts.log.error(err.message)
+      process.exitCode = 1
       prompts.outro("Done")
+      return
+    }
+    if (outcome.result.status === "scheduled") {
+      spinner.stop("Verified update scheduled after this Vector process exits")
+      prompts.log.info(`Completion status: ${outcome.result.statusFile}`)
+      prompts.outro("Restart Vector after the status reports complete")
       return
     }
     spinner.stop("Upgrade complete")

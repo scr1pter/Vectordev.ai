@@ -104,7 +104,17 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
       }
       const target = ctx.payload.target || (yield* installation.latest(method))
       const result = yield* installation.upgrade(method, target).pipe(
-        Effect.as({ status: 200, body: { success: true as const, version: target } }),
+        Effect.map((result) =>
+          result.status === "scheduled"
+            ? {
+                status: 202,
+                body: {
+                  success: false as const,
+                  error: `Verified update is scheduled after this Vector process exits. Completion status: ${result.statusFile}`,
+                },
+              }
+            : { status: 200, body: { success: true as const, version: target } },
+        ),
         Effect.catch((err) =>
           Effect.succeed({
             status: 500,

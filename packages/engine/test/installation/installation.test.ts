@@ -66,7 +66,7 @@ function testLayer(
 }
 
 describe("Vector installation", () => {
-  for (const method of ["npm", "bun", "pnpm", "unknown"] as const) {
+  for (const method of ["npm", "bun", "pnpm"] as const) {
     const calls: string[] = []
     testEffect(
       testLayer((request) => {
@@ -115,9 +115,9 @@ describe("Vector installation", () => {
       () => jsonResponse({}),
       (command) => (command === "npm" ? "@vectordevai/cli@1.99.91" : ""),
     ),
-  ).effect("detects the Vector npm package", () =>
+  ).effect("does not infer npm ownership from a global package listing", () =>
     Effect.gen(function* () {
-      expect(yield* Installation.use.method()).toBe("npm")
+      expect(yield* Installation.use.method()).toBe("unknown")
     }),
   )
 
@@ -126,9 +126,9 @@ describe("Vector installation", () => {
       () => jsonResponse({}),
       (command) => (command === "pnpm" ? "@vectordevai/cli 1.99.91" : ""),
     ),
-  ).effect("detects pnpm's whitespace-separated package listing", () =>
+  ).effect("does not infer pnpm ownership from a global package listing", () =>
     Effect.gen(function* () {
-      expect(yield* Installation.use.method()).toBe("pnpm")
+      expect(yield* Installation.use.method()).toBe("unknown")
     }),
   )
 
@@ -155,7 +155,7 @@ describe("Vector installation", () => {
   ).effect("unknown installs cannot download an upstream installer", () =>
     Effect.gen(function* () {
       expect((yield* Effect.flip(Installation.use.upgrade("unknown", "1.99.92"))).message).toContain(
-        "npm, pnpm, or Bun",
+        "could not verify this executable's installation channel",
       )
       expect((yield* Effect.flip(Installation.use.upgrade("npm", "--help"))).message).toContain(
         "Invalid Vector version",

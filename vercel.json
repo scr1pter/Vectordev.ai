@@ -133,6 +133,20 @@
           "value": "no-referrer"
         }
       ]
+    },
+    {
+      "source": "/install",
+      "headers": [
+        { "key": "Content-Type", "value": "text/plain; charset=utf-8" },
+        { "key": "Cache-Control", "value": "no-store" }
+      ]
+    },
+    {
+      "source": "/install.ps1",
+      "headers": [
+        { "key": "Content-Type", "value": "text/plain; charset=utf-8" },
+        { "key": "Cache-Control", "value": "no-store" }
+      ]
     }
   ],
   "rewrites": [

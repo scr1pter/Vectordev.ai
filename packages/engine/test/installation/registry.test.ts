@@ -25,7 +25,7 @@ for (const channel of ["local", "dev", "latest", "beta"]) {
           "--define",
           `VECTOR_CHANNEL:${JSON.stringify(channel)}`,
           "--eval",
-          `import { Installation } from ${JSON.stringify(entry)}; console.log(await Installation.latest()); process.exit(0)`,
+          `import { Installation } from ${JSON.stringify(entry)}; console.log(await Installation.latest("npm")); process.exit(0)`,
         ],
         {
           cwd: tmp.path,

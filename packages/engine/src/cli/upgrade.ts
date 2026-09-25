@@ -41,11 +41,12 @@ export async function upgrade() {
 
   if (method === "unknown") return
   await Installation.upgrade(method, latest)
-    .then(() =>
+    .then((result) =>
       GlobalBus.emit("event", {
         directory: "global",
         payload: {
-          type: Installation.Event.Updated.type,
+          type:
+            result.status === "complete" ? Installation.Event.Updated.type : Installation.Event.UpdateAvailable.type,
           properties: { version: latest },
         },
       }),

@@ -36,10 +36,11 @@ import { assertSecurityEnvironment } from "@vectordevai/core/flag/security"
 
 const args = hideBin(process.argv)
 
-// The published `vector` bin sets VECTOR_CLI=1: same agent, Vector branding,
-// and a free-account gate on agent commands (desktop sidecar is unaffected —
-// it embeds the server directly and never goes through this entrypoint).
-const isVectorCli = process.env.VECTOR_CLI === "1"
+declare const VECTOR_CLI_STANDALONE: boolean
+// Every published native CLI preserves the free-account gate without depending on its launcher.
+// The desktop embeds the server directly and does not use this CLI entrypoint.
+const isVectorCli =
+  (typeof VECTOR_CLI_STANDALONE === "boolean" && VECTOR_CLI_STANDALONE) || process.env.VECTOR_CLI === "1"
 
 function show(out: string) {
   const text = out.trimStart()

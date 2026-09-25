@@ -35,6 +35,14 @@ try {
     }),
   )
   await Bun.write(path.join(home, "models.json"), "{}")
+  await Bun.write(
+    path.join(home, "data/vector/cli-auth.json"),
+    JSON.stringify({
+      token: "vct_synthetic-plugin-smoke.synthetic",
+      user: { id: "synthetic-plugin-smoke", email: "synthetic@example.invalid" },
+      verifiedAt: Date.now(),
+    }),
+  )
   const child = Bun.spawn(
     [binary, "--print-logs", "debug", "agent", "build", "--tool", "probe", "--params", '{"input":"okay"}'],
     {

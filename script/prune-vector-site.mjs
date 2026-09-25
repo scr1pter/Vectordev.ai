@@ -17,6 +17,8 @@ const keep = new Set([
   "login",
   "releases",
   "s",
+  "install",
+  "install.ps1",
   "index.html",
   "404.html",
   "favicon.ico",
