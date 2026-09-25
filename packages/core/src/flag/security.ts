@@ -7,6 +7,7 @@ const securitySuffixes = [
   "PURE",
   "DISABLE_PROJECT_CONFIG",
   "SHELL_SANDBOX",
+  "CONFIG_CONTENT",
 ] as const
 
 export class SecurityConfigurationError extends Error {

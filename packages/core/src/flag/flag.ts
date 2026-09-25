@@ -1,4 +1,7 @@
 import { Config } from "effect"
+import { migrateEnvironment } from "./migrate"
+
+migrateEnvironment()
 
 export function truthy(key: string) {
   const value = process.env[key]?.toLowerCase()
@@ -36,9 +39,7 @@ export const Flag = {
   VECTOR_DISABLE_FFF: fff === undefined ? process.platform === "win32" : truthy("VECTOR_DISABLE_FFF"),
 
   // Experimental
-  VECTOR_EXPERIMENTAL_FILEWATCHER: Config.boolean("VECTOR_EXPERIMENTAL_FILEWATCHER").pipe(
-    Config.withDefault(false),
-  ),
+  VECTOR_EXPERIMENTAL_FILEWATCHER: Config.boolean("VECTOR_EXPERIMENTAL_FILEWATCHER").pipe(Config.withDefault(false)),
   VECTOR_EXPERIMENTAL_DISABLE_FILEWATCHER: Config.boolean("VECTOR_EXPERIMENTAL_DISABLE_FILEWATCHER").pipe(
     Config.withDefault(false),
   ),

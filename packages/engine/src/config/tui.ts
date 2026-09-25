@@ -13,6 +13,7 @@ import { Flag } from "@vectordevai/core/flag/flag"
 import { isRecord } from "@vectordevai/tui/util/record"
 import { Global } from "@vectordevai/core/global"
 import { FSUtil } from "@vectordevai/core/fs-util"
+import { EffectFlock } from "@vectordevai/core/util/effect-flock"
 import { CurrentWorkingDirectory } from "./tui-cwd"
 import { ConfigPlugin } from "@/config/plugin"
 import { TuiKeybind } from "@vectordevai/tui/config/keybind"
@@ -242,7 +243,11 @@ const layer = Layer.effect(
   }).pipe(Effect.withSpan("TuiConfig.layer")),
 )
 
-export const node = LayerNode.make({ service: Service, layer, deps: [ConfigDependencies.node, FSUtil.node] })
+export const node = LayerNode.make({
+  service: Service,
+  layer,
+  deps: [ConfigDependencies.node, FSUtil.node, EffectFlock.node],
+})
 
 const { runPromise } = makeRuntime(Service, AppNodeBuilder.build(node))
 

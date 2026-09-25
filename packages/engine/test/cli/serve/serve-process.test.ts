@@ -123,7 +123,6 @@ describe("vector serve (subprocess)", () => {
           hostname: "0.0.0.0",
           extraArgs: ["--unsecured"],
           env: {
-            PRIOR_SERVER_PASSWORD: "ignored-fixture-secret",
             VECTOR_SERVER_PASSWORD: "owner-secret",
             VECTOR_SERVER_USERNAME: "alice",
           },

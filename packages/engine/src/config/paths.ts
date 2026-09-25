@@ -6,6 +6,16 @@ import { Global } from "@vectordevai/core/global"
 import { unique } from "remeda"
 import { Effect } from "effect"
 import { FSUtil } from "@vectordevai/core/fs-util"
+import { ConfigImport } from "./import-settings"
+
+const migrate = (directory: string, worktree?: string) =>
+  ConfigImport.discover({
+    directory,
+    worktree,
+    global: Global.Path.config,
+    home: Global.Path.home,
+    disableProject: Flag.VECTOR_DISABLE_PROJECT_CONFIG,
+  })
 
 export const files = Effect.fn("ConfigPaths.projectFiles")(function* (
   name: string,
@@ -13,6 +23,7 @@ export const files = Effect.fn("ConfigPaths.projectFiles")(function* (
   worktree?: string,
 ) {
   const afs = yield* FSUtil.Service
+  yield* migrate(directory, worktree)
   return (yield* afs.up({
     targets: [`${name}.jsonc`, `${name}.json`],
     start: directory,
@@ -22,6 +33,7 @@ export const files = Effect.fn("ConfigPaths.projectFiles")(function* (
 
 export const directories = Effect.fn("ConfigPaths.directories")(function* (directory: string, worktree?: string) {
   const afs = yield* FSUtil.Service
+  yield* migrate(directory, worktree)
   const result = unique([
     Global.Path.config,
     ...(!Flag.VECTOR_DISABLE_PROJECT_CONFIG

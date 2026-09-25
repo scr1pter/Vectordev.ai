@@ -62,6 +62,8 @@ export async function migrateTuiConfig(input: MigrateInput) {
       .catch(() => false)
     if (!wrote) continue
 
+    // Earlier explicitly selected files remain intact; only Vector copies are rewritten.
+    if (!["vector.json", "vector.jsonc"].includes(path.basename(file))) continue
     const stripped = await backupAndStripLegacy(file, source)
     if (!stripped) continue
   }

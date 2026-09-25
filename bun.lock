@@ -176,9 +176,6 @@
     "packages/core": {
       "name": "@vectordevai/core",
       "version": "1.17.14",
-      "bin": {
-        "vector": "./bin/vector",
-      },
       "dependencies": {
         "@ai-sdk/alibaba": "1.0.17",
         "@ai-sdk/amazon-bedrock": "4.0.112",
@@ -239,6 +236,7 @@
         "minimatch": "10.2.5",
         "npm-package-arg": "13.0.2",
         "semver": "^7.6.3",
+        "smol-toml": "1.6.1",
         "turndown": "7.2.0",
         "venice-ai-sdk-provider": "2.1.1",
         "which": "6.0.1",

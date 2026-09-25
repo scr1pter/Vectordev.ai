@@ -38,7 +38,7 @@ function testLayer(
   )
   return AppNodeBuilder.build(LayerNode.group([Config.node, Policy.node]), [
     [Location.node, locationLayer],
-    [Global.node, Global.layerWith({ config: globalDirectory })],
+    [Global.node, Global.layerWith({ config: globalDirectory, home: path.join(directory, "home") })],
   ])
 }
 
@@ -258,6 +258,28 @@ describe("Config", () => {
               resource: "openai",
             })
             expect(yield* Effect.promise(() => fs.readFile(file, "utf8"))).toBe(contents)
+          }).pipe(Effect.provide(testLayer(tmp.path)))
+        }),
+      ),
+    ),
+  )
+
+  it.live("imports recognized prior files before loading V2 permissions", () =>
+    Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ).pipe(
+      Effect.flatMap((tmp) =>
+        Effect.gen(function* () {
+          const file = path.join(tmp.path, "previous.json")
+          const original = JSON.stringify({ permission: { bash: "deny" }, model: "fixture/model" })
+          yield* Effect.promise(() => fs.writeFile(file, original))
+          yield* Effect.gen(function* () {
+            const config = yield* Config.Service
+            const documents = (yield* config.entries()).filter((entry) => entry.type === "document")
+            expect(documents[0]?.info.permissions).toContainEqual({ action: "bash", resource: "*", effect: "deny" })
+            expect(documents[0]?.info.model).toBe("fixture/model")
+            expect(yield* Effect.promise(() => fs.readFile(file, "utf8"))).toBe(original)
           }).pipe(Effect.provide(testLayer(tmp.path)))
         }),
       ),

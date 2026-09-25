@@ -115,18 +115,24 @@ function clear() {
 function migratePreferences() {
   if (typeof localStorage !== "object") return
   try {
+    if (localStorage.getItem("vector-theme-migration") !== null) return
+    const candidates = Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index)).filter(
+      (key): key is string => key !== null && key !== STORAGE_KEYS.THEME_ID && key.endsWith("-theme-id"),
+    )
+    if (candidates.length !== 1) return
+    const previous = localStorage.getItem(candidates[0])
+    const current = localStorage.getItem(STORAGE_KEYS.THEME_ID)
+    if (!previous || (current !== null && current !== previous)) return
+    const prefix = candidates[0].slice(0, -"-theme-id".length)
     for (const key of Object.values(STORAGE_KEYS)) {
       if (localStorage.getItem(key) !== null) continue
-      const suffix = key.slice("vector".length)
-      const candidates = Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index)).filter(
-        (candidate): candidate is string => candidate !== null && candidate !== key && candidate.endsWith(suffix),
-      )
-      if (candidates.length !== 1) continue
-      const value = localStorage.getItem(candidates[0])
+      const value = localStorage.getItem(prefix + key.slice("vector".length))
       if (value === null) continue
+      if (key === STORAGE_KEYS.COLOR_SCHEME && !["dark", "light", "system"].includes(value)) continue
       localStorage.setItem(key, value)
-      localStorage.removeItem(candidates[0])
     }
+    localStorage.setItem("vector-theme-migration", "1")
+    console.info("Vector restored your earlier theme preferences. Original preferences were kept.")
   } catch {}
 }
 

@@ -1,3 +1,4 @@
+import { ConfigMigration } from "@vectordevai/core/config/migration"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { httpClient } from "@vectordevai/core/effect/app-node-platform"
 import { serviceUse } from "@vectordevai/core/effect/service-use"
@@ -233,6 +234,7 @@ const layer = Layer.effect(
       text: string,
       options: { path: string } | { dir: string; source: string },
       env?: Record<string, string>,
+      preserveSource = false,
     ) {
       const source = "path" in options ? options.path : options.source
       const expanded = yield* Effect.promise(() =>
@@ -248,18 +250,23 @@ const layer = Layer.effect(
 
       yield* Effect.promise(() => resolveLoadedPlugins(data, options.path))
       const updated = ConfigSchema.rewrite(text)
-      if (updated !== text) {
+      if (updated !== text && !preserveSource) {
         data.$schema = "https://vectordev.ai/config.json"
         yield* fs.writeFileString(options.path, updated).pipe(Effect.catch(() => Effect.void))
       }
       return data
     })
 
-    const loadFile = Effect.fnUntraced(function* (filepath: string, env?: Record<string, string>) {
+    const loadFile = Effect.fnUntraced(function* (
+      filepath: string,
+      env?: Record<string, string>,
+      preserveSource = false,
+    ) {
       yield* Effect.logInfo("loading", { path: filepath })
       const text = yield* readConfigFile(filepath)
       if (!text) return {} as Info
-      return yield* loadConfig(text, { path: filepath }, env)
+      const normalized = /^\s*[{/]/.test(text) ? text : JSON.stringify(ConfigMigration.parseConfig(text, filepath))
+      return yield* loadConfig(normalized, { path: filepath }, env, preserveSource)
     })
 
     const loadGlobal = Effect.fnUntraced(function* (env?: Record<string, string>) {
@@ -276,7 +283,7 @@ const layer = Layer.effect(
         }
       }
 
-      result = mergeConfig(result, yield* loadFile(path.join(Global.Path.config, "config.json"), env))
+      result = mergeConfig(result, yield* loadFile(path.join(Global.Path.config, "config.json"), env, true))
       result = mergeConfig(result, yield* loadFile(path.join(Global.Path.config, "vector.json"), env))
       result = mergeConfig(result, yield* loadFile(path.join(Global.Path.config, "vector.jsonc"), env))
 
@@ -404,7 +411,7 @@ const layer = Layer.effect(
         yield* merge(Global.Path.config, global, "global")
 
         if (Flag.VECTOR_AGENT_CONFIG) {
-          yield* merge(Flag.VECTOR_AGENT_CONFIG, yield* loadFile(Flag.VECTOR_AGENT_CONFIG, authEnv))
+          yield* merge(Flag.VECTOR_AGENT_CONFIG, yield* loadFile(Flag.VECTOR_AGENT_CONFIG, authEnv, true))
           yield* Effect.logDebug("loaded custom config", { path: Flag.VECTOR_AGENT_CONFIG })
         }
 
@@ -551,6 +558,7 @@ const layer = Layer.effect(
         }
       },
       Effect.provideService(FSUtil.Service, fs),
+      Effect.provideService(EffectFlock.Service, flock),
     )
 
     const state = yield* InstanceState.make<State>(
