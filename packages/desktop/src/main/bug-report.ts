@@ -24,6 +24,8 @@ export async function sendBugReport(input: BugReportInput): Promise<BugReportRes
       arch: arch(),
       channel: process.env.VECTOR_CHANNEL || "prod",
     }),
+    redirect: "error",
+    signal: AbortSignal.timeout(20_000),
   }).catch((cause: unknown) => (cause instanceof Error ? cause : new Error(String(cause))))
 
   if (response instanceof Error) {
@@ -33,5 +35,8 @@ export async function sendBugReport(input: BugReportInput): Promise<BugReportRes
     const body = (await response.json().catch(() => undefined)) as { error?: { message?: string } } | undefined
     return { delivered: false, error: body?.error?.message ?? "The report could not be delivered." }
   }
-  return { delivered: true }
+  const body: unknown = await response.json().catch(() => undefined)
+  return body && typeof body === "object" && "delivered" in body && body.delivered === true
+    ? { delivered: true }
+    : { delivered: false, error: "Vector could not confirm report delivery. Your draft is still here." }
 }

@@ -1,4 +1,4 @@
-import { createSignal, Show } from "solid-js"
+import { createEffect, createSignal, on, Show } from "solid-js"
 
 type ReportBugApi = {
   reportBug?: (input: { message: string; email?: string }) => Promise<{ delivered: boolean; error?: string }>
@@ -8,29 +8,48 @@ type ReportBugApi = {
 // can reach the endpoint directly since it is served from the same origin.
 async function submitReport(input: { message: string; email?: string }) {
   const api = (globalThis.window as unknown as { api?: ReportBugApi } | undefined)?.api
-  if (api?.reportBug) return api.reportBug(input)
+  if (api?.reportBug)
+    return api.reportBug(input).catch(() => ({ delivered: false, error: "Vector could not reach the report service." }))
 
   const response = await fetch("/api/support/bug-report", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(input),
+    redirect: "error",
+    signal: AbortSignal.timeout(20_000),
   }).catch(() => undefined)
   if (!response) return { delivered: false, error: "Vector could not reach the report service." }
   if (!response.ok) {
     const body = (await response.json().catch(() => undefined)) as { error?: { message?: string } } | undefined
     return { delivered: false, error: body?.error?.message ?? "The report could not be delivered." }
   }
-  return { delivered: true }
+  const body: unknown = await response.json().catch(() => undefined)
+  return body && typeof body === "object" && "delivered" in body && body.delivered === true
+    ? { delivered: true }
+    : { delivered: false, error: "Vector could not confirm report delivery. Your draft is still here." }
 }
 
-export function DialogReportBug(props: { open: boolean; onClose: () => void }) {
+export function DialogReportBug(props: { open: boolean; onClose: () => void; initialMessage?: string }) {
   const [message, setMessage] = createSignal("")
   const [email, setEmail] = createSignal("")
   const [sending, setSending] = createSignal(false)
   const [error, setError] = createSignal<string>()
   const [sent, setSent] = createSignal(false)
 
+  createEffect(
+    on(
+      () => props.open,
+      (open) => {
+        if (!open) return
+        setMessage((props.initialMessage ?? "").slice(0, 8_000))
+        setError(undefined)
+        setSent(false)
+      },
+    ),
+  )
+
   const close = () => {
+    if (sending()) return
     setMessage("")
     setEmail("")
     setError(undefined)
@@ -39,7 +58,7 @@ export function DialogReportBug(props: { open: boolean; onClose: () => void }) {
   }
 
   const send = async () => {
-    if (!message().trim() || sending()) return
+    if (!message().trim() || message().length > 8_000 || sending()) return
     setSending(true)
     setError(undefined)
     const result = await submitReport({ message: message().trim(), email: email().trim() || undefined })
@@ -90,11 +109,14 @@ export function DialogReportBug(props: { open: boolean; onClose: () => void }) {
             <div class="flex flex-col gap-3">
               <h2 class="text-[15px] font-semibold text-white">Report a bug</h2>
               <p class="text-[12.5px] text-white/55">
-                Describe what went wrong. Vector attaches your app version and platform automatically.
+                Review the report and remove private details before sending. The desktop app adds its version and
+                platform.
               </p>
               <textarea
                 autofocus
                 rows={7}
+                aria-label="Bug report"
+                maxLength={8_000}
                 value={message()}
                 placeholder="What happened? What did you expect instead?"
                 class="w-full resize-none rounded-[6px] border border-[color:var(--vx-line)] bg-[color:var(--vx-canvas)] p-2.5 text-[12.5px] text-white outline-none placeholder:text-white/28 focus:border-[color:var(--vx-purple)]"
@@ -102,6 +124,8 @@ export function DialogReportBug(props: { open: boolean; onClose: () => void }) {
               />
               <input
                 type="email"
+                aria-label="Reply email (optional)"
+                maxLength={320}
                 value={email()}
                 placeholder="Your email (optional, so we can reply)"
                 class="w-full rounded-[6px] border border-[color:var(--vx-line)] bg-[color:var(--vx-canvas)] px-2.5 py-1.5 text-[12.5px] text-white outline-none placeholder:text-white/28 focus:border-[color:var(--vx-purple)]"
@@ -115,12 +139,13 @@ export function DialogReportBug(props: { open: boolean; onClose: () => void }) {
                   type="button"
                   class="rounded-[6px] px-3 py-1.5 text-[12.5px] text-white/60 hover:text-white"
                   onClick={close}
+                  disabled={sending()}
                 >
                   Cancel
                 </button>
                 <button
                   type="button"
-                  disabled={!message().trim() || sending()}
+                  disabled={!message().trim() || message().length > 8_000 || sending()}
                   class="rounded-[6px] bg-[color:var(--vx-purple)] px-3 py-1.5 text-[12.5px] font-medium text-white disabled:opacity-50"
                   onClick={() => void send()}
                 >

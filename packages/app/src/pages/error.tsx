@@ -13,6 +13,8 @@ import {
   telemetryEnabled,
 } from "@/features/privacy/telemetry"
 import { errorDescriptionKey } from "./error-description"
+import { DialogReportBug } from "@/components/dialog-report-bug"
+import { openSupportReport } from "@/features/help/support-report"
 
 export type InitError = {
   name: string
@@ -233,6 +235,8 @@ export const ErrorPage: Component<ErrorPageProps> = (props) => {
     actionError: undefined as string | undefined,
   })
   const [crashDiagnostics, setCrashDiagnostics] = createSignal(telemetryEnabled())
+  const [reportOpen, setReportOpen] = createSignal(false)
+  const [reportDraft, setReportDraft] = createSignal("")
   onCleanup(observeTelemetryPreference(setCrashDiagnostics))
 
   function ensureFatalErrorRecorded() {
@@ -361,10 +365,26 @@ export const ErrorPage: Component<ErrorPageProps> = (props) => {
             <button
               type="button"
               class="flex items-center text-text-interactive-base gap-1"
-              onClick={() => platform.openLink("mailto:krishnabharadwaj0521@gmail.com")}
+              onClick={() => {
+                setReportDraft(
+                  `What happened before the crash?\n\n\nCrash details (review before sending):\n${formattedError()}`.slice(
+                    0,
+                    8_000,
+                  ),
+                )
+                if (platform.platform !== "desktop") {
+                  try {
+                    openSupportReport(reportDraft())
+                  } catch (error) {
+                    setStore("actionError", error instanceof Error ? error.message : "Vector could not open support.")
+                  }
+                  return
+                }
+                setReportOpen(true)
+              }}
             >
-              <div>{language.t("error.page.report.discord")}</div>
-              <Icon name="discord" class="text-text-interactive-base" />
+              <div>Report this issue</div>
+              <Icon name="bubble-5" class="text-text-interactive-base" />
             </button>
           </div>
           <Show when={platform.version}>
@@ -374,6 +394,7 @@ export const ErrorPage: Component<ErrorPageProps> = (props) => {
           </Show>
         </div>
       </div>
+      <DialogReportBug open={reportOpen()} onClose={() => setReportOpen(false)} initialMessage={reportDraft()} />
     </div>
   )
 }

@@ -1,0 +1,43 @@
+---
+import MarketingLayout from "../../components/marketing/MarketingLayout.astro"
+export const prerender = true
+---
+
+<MarketingLayout title="Report an issue · Vector" description="Send a bug report to the Vector team." noindex>
+  <main class="report-page">
+    <form id="vector-report">
+      <a href="/docs/troubleshooting">Vector support</a>
+      <h1>Report an issue</h1>
+      <p>Describe what happened and what you expected. Review any crash details and remove private information before sending.</p>
+      <label for="report-message">Your report</label>
+      <textarea id="report-message" name="message" rows="12" maxlength="8000" required></textarea>
+      <label for="report-email">Reply email <span>(optional)</span></label>
+      <input id="report-email" name="email" type="email" maxlength="320" autocomplete="email" />
+      <p class="privacy">Your report goes to the Vector team. <a href="/legal/privacy">Privacy policy</a></p>
+      <p id="report-status" role="status" aria-live="polite"></p>
+      <button type="submit">Send report</button>
+    </form>
+  </main>
+</MarketingLayout>
+
+<script>
+  import { initializeSupportReport } from "../../components/support/report"
+  const form = document.querySelector<HTMLFormElement>("#vector-report")
+  if (form) initializeSupportReport(form)
+</script>
+
+<style>
+  .report-page { min-height: 85vh; padding: 140px 24px 80px; color: #f2eff7; background: #100d18; }
+  form { max-width: 640px; margin: 0 auto; display: grid; gap: 14px; }
+  h1 { font-size: clamp(28px, 5vw, 42px); line-height: 1.2; margin: 10px 0; }
+  p { color: #b9b1c7; line-height: 1.6; margin: 0 0 6px; }
+  a { color: #c1a3ff; }
+  label { font-weight: 600; margin-top: 8px; }
+  label span { color: #a499b5; font-weight: 400; }
+  textarea, input { width: 100%; box-sizing: border-box; border: 1px solid #534361; border-radius: 8px; background: #181221; color: inherit; padding: 12px; font: inherit; }
+  textarea { resize: vertical; }
+  textarea:focus, input:focus { outline: 2px solid #aa85f5; outline-offset: 2px; }
+  button { justify-self: start; background: #9567e0; color: white; padding: 12px 22px; border: 0; border-radius: 8px; font: inherit; font-weight: 600; cursor: pointer; }
+  button:disabled { opacity: .6; cursor: default; }
+  .privacy { font-size: 13px; }
+</style>

@@ -199,12 +199,12 @@ export const DESKTOP_MENU: DesktopMenu[] = [
       {
         type: "item",
         label: "Share Feedback",
-        href: "https://github.com/scr1pter/Vectordev.ai/issues/new",
+        href: "https://vectordev.ai/support/report",
       },
       {
         type: "item",
         label: "Report a Bug",
-        href: "https://github.com/scr1pter/Vectordev.ai/issues/new",
+        href: "https://vectordev.ai/support/report",
       },
     ],
   },

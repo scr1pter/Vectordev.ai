@@ -1,11 +1,12 @@
 import { release } from "node:os"
 import { TextAttributes, type ScrollBoxRenderable } from "@opentui/core"
 import { useKeyboard, useTerminalDimensions } from "@opentui/solid"
-import { createSignal, For, Show } from "solid-js"
+import { createSignal, For, onCleanup, Show } from "solid-js"
 import { getScrollAcceleration } from "../util/scroll"
 import { useClipboard } from "../context/clipboard"
 import { InstallationVersion } from "@vectordevai/core/installation/version"
 import { useExit } from "../context/exit"
+import { crashReport } from "../util/crash-report"
 
 export function ErrorComponent(props: { error: Error; reset: () => void; mode?: "dark" | "light" }) {
   const term = useTerminalDimensions()
@@ -42,13 +43,36 @@ export function ErrorComponent(props: { error: Error; reset: () => void; mode?: 
 
   const message = props.error.message || "An unknown error occurred."
   const stack = props.error.stack || "No stack trace available."
-  const issueURL = buildIssueURL(message, stack)
+  const report = crashReport({
+    message,
+    stack,
+    version: InstallationVersion,
+    os: describeOS(),
+    terminal: describeTerminal(),
+  })
+  const [draft, setDraft] = createSignal<{ url: string; stop: () => void }>()
+  const [reportStatus, setReportStatus] = createSignal("")
+  onCleanup(() => draft()?.stop())
 
   const copyReport = () => {
-    void clipboard.write?.(issueURL.toString()).then(() => setCopied(true))
+    void clipboard.write?.(report).then(() => setCopied(true))
+  }
+  const reportIssue = async () => {
+    try {
+      const { openCrashReportDraft } = await import("../util/crash-report")
+      const { default: open } = await import("open")
+      draft()?.stop()
+      const local = openCrashReportDraft(report)
+      setDraft(local)
+      await open(local.url)
+      setReportStatus("Review the local draft in your browser before sending.")
+    } catch {
+      setReportStatus("Could not open your browser. Copy the report to https://vectordev.ai/support/report.")
+    }
   }
 
   const actions = [
+    { key: "s", label: () => "Report this issue", onUse: () => void reportIssue() },
     { key: "c", label: () => (copied() ? "✓ Copied" : "Copy report"), copy: true, onUse: copyReport },
     { key: "r", label: () => "Restart", onUse: props.reset },
     { key: "q", label: () => "Quit", onUse: () => exit() },
@@ -86,6 +110,7 @@ export function ErrorComponent(props: { error: Error; reset: () => void; mode?: 
     if (evt.name === "pagedown" && scroll) return scroll.scrollBy(scroll.height)
     if (evt.name === "home" && scroll) return scroll.scrollTo(0)
     if (evt.name === "end" && scroll) return scroll.scrollTo(scroll.scrollHeight)
+    if (evt.name === "s") return void reportIssue()
     if (evt.name === "q") return exit()
     if (evt.name === "c") return copyReport()
     if (evt.name === "r") return props.reset()
@@ -188,9 +213,10 @@ export function ErrorComponent(props: { error: Error; reset: () => void; mode?: 
         <Show when={showFooter()}>
           <box flexDirection="column" alignItems="center" flexShrink={0}>
             <text fg={colors.muted}>
-              {copied()
-                ? "Report copied — paste it into a new GitHub issue."
-                : "Copy the report and open a GitHub issue to help us fix this."}
+              {reportStatus() ||
+                (copied()
+                  ? "Report copied — review it at vectordev.ai/support/report."
+                  : "Report this issue opens an editable local draft. Nothing is sent automatically.")}
             </text>
             <text fg={colors.muted}>Vector {InstallationVersion}</text>
           </box>
@@ -198,45 +224,6 @@ export function ErrorComponent(props: { error: Error; reset: () => void; mode?: 
       </box>
     </box>
   )
-}
-
-function buildIssueURL(message: string, stack: string) {
-  // Field keys match the ids in .github/ISSUE_TEMPLATE/bug-report.yml so the issue
-  // form opens pre-filled. Populating os/terminal/reproduce keeps the report past
-  // the contributing-guidelines compliance check, which pushes for system info.
-  const url = new URL("https://github.com/scr1pter/Vectordev.ai/issues/new")
-  url.searchParams.set("title", `TUI crash: ${message}`)
-  url.searchParams.set("vector-version", InstallationVersion)
-  url.searchParams.set("os", describeOS())
-  url.searchParams.set("terminal", describeTerminal())
-  url.searchParams.set(
-    "reproduce",
-    "Reported automatically from the Vector crash screen. If you can, describe what you were doing when it crashed.",
-  )
-
-  // Budget the stack against the fully URL-encoded length (not the raw length) so
-  // the final link stays under GitHub's practical limit; flag truncation so a
-  // clipped trace is obvious. searchParams.set handles encoding without throwing,
-  // so measuring url.toString() is both correct and safe on any input.
-  const MAX_URL_LENGTH = 6000
-  const marker = "\n... (truncated)"
-  const head = `The Vector TUI crashed with an unexpected error.\n\n**Error:** ${message}\n\n**Stack trace:**\n`
-  const setBody = (body: string) => url.searchParams.set("description", head + "```\n" + body + "\n```")
-
-  setBody(stack)
-  if (url.toString().length <= MAX_URL_LENGTH) return url
-
-  // Largest raw stack prefix whose encoded URL (with the marker) still fits.
-  let lo = 0
-  let hi = stack.length
-  while (lo < hi) {
-    const mid = Math.ceil((lo + hi) / 2)
-    setBody(stack.slice(0, mid) + marker)
-    if (url.toString().length <= MAX_URL_LENGTH) lo = mid
-    else hi = mid - 1
-  }
-  setBody(stack.slice(0, lo) + marker)
-  return url
 }
 
 function describeOS() {
