@@ -150,7 +150,8 @@ export const dict = {
   "provider.custom.description.suffix": "。",
   "provider.custom.field.providerID.label": "提供商 ID",
   "provider.custom.field.providerID.placeholder": "myprovider",
-  "provider.custom.field.providerID.description": "使用小寫字母、數字、連字號或底線",
+  "provider.custom.field.providerID.description":
+    "請使用小寫英文字母、數字、連字號或底線設定唯一 ID。此處無法取代現有提供商。",
   "provider.custom.field.name.label": "顯示名稱",
   "provider.custom.field.name.placeholder": "我的 AI 提供商",
   "provider.custom.field.baseURL.label": "基礎 URL",

@@ -151,7 +151,8 @@ export const dict = {
   "provider.custom.description.suffix": ".",
   "provider.custom.field.providerID.label": "ID провайдера",
   "provider.custom.field.providerID.placeholder": "myprovider",
-  "provider.custom.field.providerID.description": "Малі літери, цифри, дефіси або підкреслення",
+  "provider.custom.field.providerID.description":
+    "Виберіть унікальний ID з малих латинських літер, цифр, дефісів або підкреслень. Тут не можна замінити наявного провайдера.",
   "provider.custom.field.name.label": "Відображувана назва",
   "provider.custom.field.name.placeholder": "Мій AI Провайдер",
   "provider.custom.field.baseURL.label": "Базовий URL",

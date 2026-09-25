@@ -1,11 +1,12 @@
 import { readEnv } from "@vectordevai/core/flag/compat"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import path from "path"
-import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto"
+import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from "node:crypto"
 import { Effect, Layer, Option, Record, Result, Schema, Context } from "effect"
 import { NonNegativeInt } from "@vectordevai/core/schema"
 import { Global } from "@vectordevai/core/global"
 import { FSUtil } from "@vectordevai/core/fs-util"
+import { EffectFlock } from "@vectordevai/core/util/effect-flock"
 
 export const OAUTH_DUMMY_KEY = "vector-oauth-dummy-key"
 
@@ -52,10 +53,20 @@ export class AuthError extends Schema.TaggedErrorClass<AuthError>()("AuthError",
   cause: Schema.optional(Schema.Defect()),
 }) {}
 
+export class AuthExistsError extends Schema.TaggedErrorClass<AuthExistsError>()("AuthExistsError", {
+  providerID: Schema.String,
+}) {
+  override get message() {
+    return `A credential already exists for ${this.providerID}. Choose a different provider ID.`
+  }
+}
+
 export interface Interface {
   readonly get: (providerID: string) => Effect.Effect<Info | undefined, AuthError>
   readonly all: () => Effect.Effect<Record<string, Info>, AuthError>
+  readonly exists: (key: string) => Effect.Effect<boolean, AuthError>
   readonly set: (key: string, info: Info) => Effect.Effect<void, AuthError>
+  readonly create: (key: string, info: Info) => Effect.Effect<void, AuthError | AuthExistsError>
   readonly remove: (key: string) => Effect.Effect<void, AuthError>
 }
 
@@ -65,9 +76,23 @@ const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const fsys = yield* FSUtil.Service
+    const flock = yield* EffectFlock.Service
+    const lock = () =>
+      flock.acquire(`auth:${file}`, path.dirname(file)).pipe(Effect.mapError(fail("Failed to lock auth data")))
+
+    const writeStored = Effect.fn("Auth.writeStored")(function* (data: string) {
+      const temporary = `${file}.${randomUUID()}.tmp`
+      yield* fsys
+        .writeWithDirs(temporary, data, 0o600)
+        .pipe(
+          Effect.andThen(fsys.rename(temporary, file)),
+          Effect.ensuring(fsys.remove(temporary, { force: true }).pipe(Effect.ignore)),
+          Effect.mapError(fail("Failed to write auth data")),
+        )
+    })
 
     const read = Effect.fn("Auth.read")(function* () {
-      const raw = yield* fsys.readFileStringSafe(file).pipe(Effect.catch(() => Effect.succeed(undefined)))
+      const raw = yield* fsys.readFileStringSafe(file).pipe(Effect.mapError(fail("Failed to read auth data")))
       if (!raw) return {}
       const data = yield* Effect.try({
         try: () => decodeStoredAuth(raw),
@@ -78,12 +103,12 @@ const layer = Layer.effect(
           try: () => encodeStoredAuth(data),
           catch: fail("Failed to encrypt legacy auth data"),
         })
-        yield* fsys.writeWithDirs(file, migrated, 0o600).pipe(Effect.mapError(fail("Failed to migrate auth data")))
+        yield* writeStored(migrated)
       }
       return data
     })
 
-    const all = Effect.fn("Auth.all")(function* () {
+    const contents = Effect.fn("Auth.contents")(function* () {
       if (readEnv("VECTOR_AUTH_CONTENT")) {
         const parsed = Option.getOrUndefined(decodeJson(readEnv("VECTOR_AUTH_CONTENT")))
         if (parsed) return decodeAuthData(parsed)
@@ -92,35 +117,63 @@ const layer = Layer.effect(
       return yield* read()
     })
 
+    const all = Effect.fn("Auth.all")(function* () {
+      yield* lock()
+      return yield* contents()
+    }, Effect.scoped)
+
     const write = Effect.fn("Auth.write")(function* (data: Record<string, Info>) {
       const encoded = yield* Effect.try({
         try: () => encodeStoredAuth(data),
         catch: fail("Failed to encrypt auth data"),
       })
-      yield* fsys.writeWithDirs(file, encoded, 0o600).pipe(Effect.mapError(fail("Failed to write auth data")))
+      yield* writeStored(encoded)
     })
 
     const get = Effect.fn("Auth.get")(function* (providerID: string) {
       return (yield* all())[providerID]
     })
 
-    const set = Effect.fn("Auth.set")(function* (key: string, info: Info) {
+    const exists = Effect.fn("Auth.exists")(function* (key: string) {
+      yield* lock()
       const norm = key.replace(/\/+$/, "")
-      const data = yield* all()
+      const data = { ...(yield* read()), ...(yield* contents()) }
+      return Object.keys(data).some((id) => id.replace(/\/+$/, "") === norm)
+    }, Effect.scoped)
+
+    const replace = Effect.fn("Auth.replace")(function* (key: string, info: Info, data: Record<string, Info>) {
+      const norm = key.replace(/\/+$/, "")
       if (norm !== key) delete data[key]
       delete data[norm + "/"]
       yield* write({ ...data, [norm]: info })
     })
 
-    const remove = Effect.fn("Auth.remove")(function* (key: string) {
+    const set = Effect.fn("Auth.set")(function* (key: string, info: Info) {
+      yield* lock()
+      yield* replace(key, info, yield* contents())
+    }, Effect.scoped)
+
+    const create = Effect.fn("Auth.create")(function* (key: string, info: Info) {
+      yield* lock()
       const norm = key.replace(/\/+$/, "")
-      const data = yield* all()
+      // Include stored credentials even when runtime auth is supplied through the environment.
+      const data = { ...(yield* read()), ...(yield* contents()) }
+      if (Object.keys(data).some((id) => id.replace(/\/+$/, "") === norm)) {
+        return yield* new AuthExistsError({ providerID: norm })
+      }
+      yield* replace(key, info, data)
+    }, Effect.scoped)
+
+    const remove = Effect.fn("Auth.remove")(function* (key: string) {
+      yield* lock()
+      const norm = key.replace(/\/+$/, "")
+      const data = yield* contents()
       delete data[key]
       delete data[norm]
       yield* write(data)
-    })
+    }, Effect.scoped)
 
-    return Service.of({ get, all, set, remove })
+    return Service.of({ get, all, exists, set, create, remove })
   }),
 )
 
@@ -193,6 +246,6 @@ export const AuthStorage = {
   encode: encodeStoredAuth,
 }
 
-export const node = LayerNode.make({ service: Service, layer: layer, deps: [FSUtil.node] })
+export const node = LayerNode.make({ service: Service, layer: layer, deps: [FSUtil.node, EffectFlock.node] })
 
 export * as Auth from "."

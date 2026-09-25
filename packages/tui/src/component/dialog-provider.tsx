@@ -16,6 +16,8 @@ import { useConnected } from "./use-connected"
 import { useBindings } from "../keymap"
 import { useClipboard } from "../context/clipboard"
 import { isHiddenProvider } from "../util/model"
+import { providerAllowed } from "@vectordevai/schema/provider-policy"
+import { saveCustomProviderCredential } from "./custom-provider-credential"
 
 const PROVIDER_PRIORITY: Record<string, number> = {
   openai: 2,
@@ -69,15 +71,15 @@ export function providerOptions(list: { id: string; name: string }[]): ProviderO
       type: "custom",
       title: "Other",
       value: CUSTOM_PROVIDER_OPTION_VALUE,
-      description: "Supported provider credential",
+      description: "New custom provider credential",
       category: "Providers",
     },
   ]
 }
 
-export function normalizeCustomProviderID(value: string) {
+export function normalizeCustomProviderID(value: string, existing: readonly string[] = []) {
   const providerID = value.trim().replace(/^@ai-sdk\//, "")
-  if (!CUSTOM_PROVIDER_ID.test(providerID) || isHiddenProvider(providerID)) return
+  if (!CUSTOM_PROVIDER_ID.test(providerID) || providerAllowed(providerID) || existing.includes(providerID)) return
   return providerID
 }
 
@@ -91,21 +93,26 @@ export function createDialogProviderOptions() {
 
   async function promptCustomProviderID(): Promise<string | undefined> {
     const value = await DialogPrompt.show(dialog, "Other", {
-      placeholder: "Provider id, such as lmstudio",
+      placeholder: "A unique provider ID, such as myprovider",
       description: () => (
         <text fg={theme.textMuted}>
-          Use a supported provider ID. This stores a credential; configure its endpoint and models in vector.json.
+          Use a new provider ID. This stores a credential; configure its endpoint and models in vector.json.
         </text>
       ),
     })
     if (value === null) return
 
-    const providerID = normalizeCustomProviderID(value)
+    const providerID = normalizeCustomProviderID(value, [
+      ...sync.data.provider_next.all.map((provider) => provider.id),
+      ...sync.data.provider_next.connected,
+      ...Object.keys(sync.data.config.provider ?? {}),
+      ...(sync.data.config.disabled_providers ?? []),
+    ])
     if (providerID) return providerID
 
     toast.show({
       variant: "error",
-      message: "Choose a supported provider ID, such as lmstudio or openai.",
+      message: "Choose an unused provider ID with lowercase letters, numbers, hyphens, or underscores.",
     })
     return promptCustomProviderID()
   }
@@ -365,14 +372,22 @@ function ApiMethod(props: ApiMethodProps) {
       placeholder="API key"
       onConfirm={async (value) => {
         if (!value) return
-        await sdk.client.auth.set({
-          providerID: props.providerID,
-          auth: {
-            type: "api",
-            key: value,
-            ...(props.metadata ? { metadata: props.metadata } : {}),
-          },
-        })
+        const save = props.custom
+          ? saveCustomProviderCredential(sdk.client, props.providerID, value)
+          : sdk.client.auth.set(
+              {
+                providerID: props.providerID,
+                auth: { type: "api", key: value, ...(props.metadata ? { metadata: props.metadata } : {}) },
+              },
+              { throwOnError: true },
+            )
+        const saved = await save
+          .then(() => true)
+          .catch((error: unknown) => {
+            toast.error(error)
+            return false
+          })
+        if (!saved) return
         await sdk.client.instance.dispose()
         await sync.bootstrap()
         if (props.custom && !sync.data.provider_next.all.some((provider) => provider.id === props.providerID)) {

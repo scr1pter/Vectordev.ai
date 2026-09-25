@@ -136,7 +136,8 @@ export const dict = {
   "provider.custom.description.suffix": "를 참조하세요.",
   "provider.custom.field.providerID.label": "공급자 ID",
   "provider.custom.field.providerID.placeholder": "myprovider",
-  "provider.custom.field.providerID.description": "소문자, 숫자, 하이픈 또는 밑줄",
+  "provider.custom.field.providerID.description":
+    "영문 소문자, 숫자, 하이픈 또는 밑줄로 고유한 ID를 지정하세요. 여기서는 기존 공급자를 교체할 수 없습니다.",
   "provider.custom.field.name.label": "표시 이름",
   "provider.custom.field.name.placeholder": "내 AI 공급자",
   "provider.custom.field.baseURL.label": "기본 URL",

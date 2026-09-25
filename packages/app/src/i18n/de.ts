@@ -140,7 +140,8 @@ export const dict = {
   "provider.custom.description.suffix": ".",
   "provider.custom.field.providerID.label": "Anbieter-ID",
   "provider.custom.field.providerID.placeholder": "myprovider",
-  "provider.custom.field.providerID.description": "Kleinbuchstaben, Zahlen, Bindestriche oder Unterstriche",
+  "provider.custom.field.providerID.description":
+    "Wähle eine eindeutige ID mit Kleinbuchstaben, Zahlen, Bindestrichen oder Unterstrichen. Bestehende Anbieter können hier nicht ersetzt werden.",
   "provider.custom.field.name.label": "Anzeigename",
   "provider.custom.field.name.placeholder": "Mein KI-Anbieter",
   "provider.custom.field.baseURL.label": "Basis-URL",

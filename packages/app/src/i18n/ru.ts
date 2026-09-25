@@ -148,7 +148,8 @@ export const dict = {
   "provider.custom.description.suffix": ".",
   "provider.custom.field.providerID.label": "ID провайдера",
   "provider.custom.field.providerID.placeholder": "myprovider",
-  "provider.custom.field.providerID.description": "Строчные буквы, цифры, дефисы или подчёркивания",
+  "provider.custom.field.providerID.description":
+    "Выберите уникальный ID из строчных латинских букв, цифр, дефисов или подчёркиваний. Здесь нельзя заменить существующего провайдера.",
   "provider.custom.field.name.label": "Отображаемое имя",
   "provider.custom.field.name.placeholder": "Мой AI провайдер",
   "provider.custom.field.baseURL.label": "Базовый URL",

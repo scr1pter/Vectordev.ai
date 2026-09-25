@@ -150,8 +150,9 @@ export const dict = {
   "provider.custom.description.link": "dokumentasjon for leverandørkonfigurasjon",
   "provider.custom.description.suffix": ".",
   "provider.custom.field.providerID.label": "Leverandør-ID",
-  "provider.custom.field.providerID.placeholder": "minleverandør",
-  "provider.custom.field.providerID.description": "Små bokstaver, tall, bindestreker eller understreker",
+  "provider.custom.field.providerID.placeholder": "myprovider",
+  "provider.custom.field.providerID.description":
+    "Velg en unik ID med små bokstaver, tall, bindestreker eller understreker. Eksisterende leverandører kan ikke erstattes her.",
   "provider.custom.field.name.label": "Visningsnavn",
   "provider.custom.field.name.placeholder": "Min AI-leverandør",
   "provider.custom.field.baseURL.label": "Base-URL",

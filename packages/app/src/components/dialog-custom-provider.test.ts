@@ -7,7 +7,7 @@ describe("validateCustomProvider", () => {
   test("builds trimmed config payload", () => {
     const result = validateCustomProvider({
       form: {
-        providerID: "lmstudio",
+        providerID: "myprovider",
         name: " Custom Provider ",
         baseURL: "https://api.example.com ",
         apiKey: " {env: CUSTOM_PROVIDER_KEY} ",
@@ -22,7 +22,7 @@ describe("validateCustomProvider", () => {
     })
 
     expect(result.result).toEqual({
-      providerID: "lmstudio",
+      providerID: "myprovider",
       name: "Custom Provider",
       key: undefined,
       config: {
@@ -42,10 +42,10 @@ describe("validateCustomProvider", () => {
     })
   })
 
-  test("flags duplicate rows and allows reconnecting disabled providers", () => {
+  test("flags duplicate models and headers", () => {
     const result = validateCustomProvider({
       form: {
-        providerID: "lmstudio",
+        providerID: "myprovider",
         name: "Provider",
         baseURL: "https://api.example.com",
         apiKey: "secret",
@@ -75,18 +75,23 @@ describe("validateCustomProvider", () => {
   })
 })
 
-test("rejects unlisted provider IDs while allowing a supported provider's custom endpoint", () => {
+test("allows a new custom ID and rejects catalog, configured, and disabled IDs", () => {
   const form = {
-    providerID: "unlisted-provider",
+    providerID: "ollama",
     name: "Private endpoint",
-    baseURL: "https://models.example.test/v1",
+    baseURL: "http://127.0.0.1:11434/v1",
     apiKey: "test-only",
     models: [{ row: "m0", id: "local-model", name: "Local model", err: {} }],
     headers: [],
     err: {},
   }
-  expect(validateCustomProvider({ form, t }).result).toBeUndefined()
-  const supported = validateCustomProvider({ form: { ...form, providerID: "openai" }, t })
-  expect(supported.err.providerID).toBeUndefined()
-  expect(supported.result?.config.options.baseURL).toBe("https://models.example.test/v1")
+  expect(validateCustomProvider({ form, t }).result?.providerID).toBe("ollama")
+  for (const providerID of ["openai", "lmstudio", "configured", "disabled"]) {
+    const result = validateCustomProvider({ form: { ...form, providerID }, existing: ["configured", "disabled"], t })
+    expect(result.result).toBeUndefined()
+    expect(result.err.providerID).toBe("provider.custom.error.providerID.exists")
+  }
+  expect(validateCustomProvider({ form: { ...form, providerID: "Not valid" }, t }).err.providerID).toBe(
+    "provider.custom.error.providerID.format",
+  )
 })

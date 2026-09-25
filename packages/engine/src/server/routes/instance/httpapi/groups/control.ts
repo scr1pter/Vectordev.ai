@@ -4,6 +4,8 @@ import { Schema } from "effect"
 import { HttpApi, HttpApiEndpoint, HttpApiError, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { described } from "./metadata"
 import { ProviderV2 } from "@vectordevai/core/provider"
+import { ConflictError } from "../errors"
+import { QueryBoolean } from "./query"
 
 const AuthParams = Schema.Struct({
   providerID: ProviderV2.ID,
@@ -36,11 +38,27 @@ export const ControlPaths = {
 export const ControlApi = HttpApi.make("control").add(
   HttpApiGroup.make("control")
     .add(
+      HttpApiEndpoint.get("authExists", ControlPaths.auth, {
+        params: AuthParams,
+        success: described(Schema.Boolean, "Whether a credential exists; no credential data is returned"),
+        error: HttpApiError.BadRequest,
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "auth.exists",
+          summary: "Check auth credential presence",
+          description: "Check whether authentication is saved without returning credential data",
+        }),
+      ),
       HttpApiEndpoint.put("authSet", ControlPaths.auth, {
         params: AuthParams,
+        query: Schema.Struct({
+          ifAbsent: Schema.optional(QueryBoolean).annotate({
+            description: "Only create credentials when none are stored for this provider",
+          }),
+        }),
         payload: Auth.Info,
         success: described(Schema.Boolean, "Successfully set authentication credentials"),
-        error: HttpApiError.BadRequest,
+        error: [HttpApiError.BadRequest, ConflictError],
       }).annotateMerge(
         OpenApi.annotations({
           identifier: "auth.set",

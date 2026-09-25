@@ -106,6 +106,22 @@ export type QuestionRejected = {
   requestID: string
 }
 
+export type EffectHttpApiErrorBadRequest = {
+  _tag: "BadRequest"
+}
+
+export type InvalidRequestError = {
+  _tag: "InvalidRequestError"
+  message: string
+  kind?: string
+  field?: string
+}
+
+export type UnauthorizedError = {
+  _tag: "UnauthorizedError"
+  message: string
+}
+
 export type OAuth = {
   type: "oauth"
   refresh: string
@@ -132,15 +148,10 @@ export type WellKnownAuth = {
 
 export type Auth = OAuth | ApiAuth | WellKnownAuth
 
-export type EffectHttpApiErrorBadRequest = {
-  _tag: "BadRequest"
-}
-
-export type InvalidRequestError = {
-  _tag: "InvalidRequestError"
+export type ConflictError = {
+  _tag: "ConflictError"
   message: string
-  kind?: string
-  field?: string
+  resource?: string
 }
 
 export type MoveSessionError = {
@@ -2734,12 +2745,6 @@ export type SessionBusyError = {
   message: string
 }
 
-export type ConflictError = {
-  _tag: "ConflictError"
-  message: string
-  resource?: string
-}
-
 export type EventTuiPromptAppend = {
   type: "tui.prompt.append"
   properties: {
@@ -2814,11 +2819,6 @@ export type WorkspaceWarpError = {
   data: {
     message: string
   }
-}
-
-export type UnauthorizedError = {
-  _tag: "UnauthorizedError"
-  message: string
 }
 
 export type SessionsResponse = {
@@ -7260,12 +7260,41 @@ export type AuthRemoveResponses = {
 
 export type AuthRemoveResponse = AuthRemoveResponses[keyof AuthRemoveResponses]
 
+export type AuthExistsData = {
+  body?: never
+  path: {
+    providerID: string
+  }
+  query?: never
+  url: "/auth/{providerID}"
+}
+
+export type AuthExistsErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+}
+
+export type AuthExistsError = AuthExistsErrors[keyof AuthExistsErrors]
+
+export type AuthExistsResponses = {
+  /**
+   * Whether a credential exists; no credential data is returned
+   */
+  200: boolean
+}
+
+export type AuthExistsResponse = AuthExistsResponses[keyof AuthExistsResponses]
+
 export type AuthSetData = {
   body?: Auth
   path: {
     providerID: string
   }
-  query?: never
+  query?: {
+    ifAbsent?: "true" | "false"
+  }
   url: "/auth/{providerID}"
 }
 
@@ -7274,6 +7303,10 @@ export type AuthSetErrors = {
    * BadRequest | InvalidRequestError
    */
   400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
 }
 
 export type AuthSetError = AuthSetErrors[keyof AuthSetErrors]

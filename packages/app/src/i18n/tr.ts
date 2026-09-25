@@ -151,8 +151,9 @@ export const dict = {
   "provider.custom.description.link": "Sağlayıcı yapılandırma dökümanları",
   "provider.custom.description.suffix": " sayfasına bakın.",
   "provider.custom.field.providerID.label": "Sağlayıcı kimlik",
-  "provider.custom.field.providerID.placeholder": "saglayicim",
-  "provider.custom.field.providerID.description": "Küçük harfler, rakamlar, tire veya alt çizgi",
+  "provider.custom.field.providerID.placeholder": "myprovider",
+  "provider.custom.field.providerID.description":
+    "Küçük harfler, rakamlar, tire veya alt çizgi kullanarak benzersiz bir kimlik seçin. Mevcut sağlayıcılar burada değiştirilemez.",
   "provider.custom.field.name.label": "Görünen ad",
   "provider.custom.field.name.placeholder": "Yapay Zekâ Sağlayıcım",
   "provider.custom.field.baseURL.label": "Temel URL",

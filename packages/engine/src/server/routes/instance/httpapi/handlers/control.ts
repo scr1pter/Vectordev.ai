@@ -5,16 +5,28 @@ import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { RootHttpApi } from "../api"
 import { LogInput } from "../groups/control"
 import { ProviderV2 } from "@vectordevai/core/provider"
+import { ConflictError } from "../errors"
 
 export const controlHandlers = HttpApiBuilder.group(RootHttpApi, "control", (handlers) =>
   Effect.gen(function* () {
     const auth = yield* Auth.Service
 
+    const authExists = Effect.fn("ControlHttpApi.authExists")(function* (ctx: {
+      params: { providerID: ProviderV2.ID }
+    }) {
+      return yield* auth.exists(ctx.params.providerID).pipe(Effect.orDie)
+    })
+
     const authSet = Effect.fn("ControlHttpApi.authSet")(function* (ctx: {
       params: { providerID: ProviderV2.ID }
+      query: { ifAbsent?: boolean }
       payload: Auth.Info
     }) {
-      yield* auth.set(ctx.params.providerID, ctx.payload).pipe(Effect.orDie)
+      const save = ctx.query.ifAbsent ? auth.create : auth.set
+      yield* save(ctx.params.providerID, ctx.payload).pipe(
+        Effect.catchTag("AuthError", Effect.die),
+        Effect.mapError((error) => new ConflictError({ message: error.message, resource: error.providerID })),
+      )
       return true
     })
 
@@ -38,6 +50,10 @@ export const controlHandlers = HttpApiBuilder.group(RootHttpApi, "control", (han
       return true
     })
 
-    return handlers.handle("authSet", authSet).handle("authRemove", authRemove).handle("log", log)
+    return handlers
+      .handle("authExists", authExists)
+      .handle("authSet", authSet)
+      .handle("authRemove", authRemove)
+      .handle("log", log)
   }),
 )

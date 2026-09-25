@@ -135,7 +135,8 @@ export const dict = {
   "provider.custom.description.suffix": ".",
   "provider.custom.field.providerID.label": "معرف الموفر",
   "provider.custom.field.providerID.placeholder": "myprovider",
-  "provider.custom.field.providerID.description": "أحرف صغيرة، أرقام، شرطات، أو شرطات سفلية",
+  "provider.custom.field.providerID.description":
+    "اختر معرفًا فريدًا باستخدام أحرف لاتينية صغيرة أو أرقام أو شرطات أو شرطات سفلية. لا يمكن استبدال الموفرين الحاليين هنا.",
   "provider.custom.field.name.label": "اسم العرض",
   "provider.custom.field.name.placeholder": "موفر الذكاء الاصطناعي الخاص بي",
   "provider.custom.field.baseURL.label": "عنوان URL الأساسي",

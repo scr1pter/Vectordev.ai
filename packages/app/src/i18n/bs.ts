@@ -147,8 +147,9 @@ export const dict = {
   "provider.custom.description.link": "dokumentaciju za konfiguraciju provajdera",
   "provider.custom.description.suffix": ".",
   "provider.custom.field.providerID.label": "ID provajdera",
-  "provider.custom.field.providerID.placeholder": "mojprovajder",
-  "provider.custom.field.providerID.description": "Mala slova, brojevi, crtice ili donje crte",
+  "provider.custom.field.providerID.placeholder": "myprovider",
+  "provider.custom.field.providerID.description":
+    "Odaberite jedinstveni ID koristeći mala slova, brojeve, crtice ili donje crte. Postojeći provajderi se ovdje ne mogu zamijeniti.",
   "provider.custom.field.name.label": "Prikazano ime",
   "provider.custom.field.name.placeholder": "Moj AI Provajder",
   "provider.custom.field.baseURL.label": "Bazni URL",

@@ -12,6 +12,9 @@ import type {
   AppSkillsData,
   AppSkillsErrors,
   AppSkillsResponses,
+  AuthExistsData,
+  AuthExistsErrors,
+  AuthExistsResponses,
   AuthRemoveData,
   AuthRemoveErrors,
   AuthRemoveResponses,
@@ -651,6 +654,18 @@ export class Auth extends HeyApiClient {
    */
   public remove<ThrowOnError extends boolean = false>(options: Options<AuthRemoveData, ThrowOnError>) {
     return (options.client ?? this.client).delete<AuthRemoveResponses, AuthRemoveErrors, ThrowOnError>({
+      url: "/auth/{id}",
+      ...options,
+    })
+  }
+
+  /**
+   * Check auth credential presence
+   *
+   * Check whether authentication is saved without returning credential data
+   */
+  public exists<ThrowOnError extends boolean = false>(options: Options<AuthExistsData, ThrowOnError>) {
+    return (options.client ?? this.client).get<AuthExistsResponses, AuthExistsErrors, ThrowOnError>({
       url: "/auth/{id}",
       ...options,
     })

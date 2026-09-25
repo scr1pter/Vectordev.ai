@@ -135,8 +135,9 @@ export const dict = {
   "provider.custom.description.link": "doc de config fournisseur",
   "provider.custom.description.suffix": ".",
   "provider.custom.field.providerID.label": "ID du fournisseur",
-  "provider.custom.field.providerID.placeholder": "monfournisseur",
-  "provider.custom.field.providerID.description": "Lettres minuscules, chiffres, traits d'union ou tirets bas",
+  "provider.custom.field.providerID.placeholder": "myprovider",
+  "provider.custom.field.providerID.description":
+    "Choisissez un ID unique avec des lettres minuscules, des chiffres, des traits d’union ou des tirets bas. Les fournisseurs existants ne peuvent pas être remplacés ici.",
   "provider.custom.field.name.label": "Nom d'affichage",
   "provider.custom.field.name.placeholder": "Mon fournisseur IA",
   "provider.custom.field.baseURL.label": "URL de base",

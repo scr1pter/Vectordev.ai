@@ -11,6 +11,8 @@ import type {
   AppSkillsErrors,
   AppSkillsResponses,
   Auth as Auth3,
+  AuthExistsErrors,
+  AuthExistsResponses,
   AuthRemoveErrors,
   AuthRemoveResponses,
   AuthSetErrors,
@@ -497,6 +499,25 @@ export class Auth extends HeyApiClient {
   }
 
   /**
+   * Check auth credential presence
+   *
+   * Check whether authentication is saved without returning credential data
+   */
+  public exists<ThrowOnError extends boolean = false>(
+    parameters: {
+      providerID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "providerID" }] }])
+    return (options?.client ?? this.client).get<AuthExistsResponses, AuthExistsErrors, ThrowOnError>({
+      url: "/auth/{providerID}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
    * Set auth credentials
    *
    * Set authentication credentials
@@ -504,6 +525,7 @@ export class Auth extends HeyApiClient {
   public set<ThrowOnError extends boolean = false>(
     parameters: {
       providerID: string
+      ifAbsent?: "true" | "false"
       auth?: Auth3
     },
     options?: Options<never, ThrowOnError>,
@@ -514,6 +536,7 @@ export class Auth extends HeyApiClient {
         {
           args: [
             { in: "path", key: "providerID" },
+            { in: "query", key: "ifAbsent" },
             { key: "auth", map: "body" },
           ],
         },

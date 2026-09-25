@@ -135,8 +135,9 @@ export const dict = {
   "provider.custom.description.link": "documentação de configuração do provedor",
   "provider.custom.description.suffix": ".",
   "provider.custom.field.providerID.label": "ID do Provedor",
-  "provider.custom.field.providerID.placeholder": "meuprovedor",
-  "provider.custom.field.providerID.description": "Letras minúsculas, números, hifens ou sublinhados",
+  "provider.custom.field.providerID.placeholder": "myprovider",
+  "provider.custom.field.providerID.description":
+    "Escolha um ID exclusivo com letras minúsculas, números, hífens ou sublinhados. Provedores existentes não podem ser substituídos aqui.",
   "provider.custom.field.name.label": "Nome de exibição",
   "provider.custom.field.name.placeholder": "Meu Provedor de IA",
   "provider.custom.field.baseURL.label": "URL Base",

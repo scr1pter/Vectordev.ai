@@ -135,8 +135,9 @@ export const dict = {
   "provider.custom.description.link": "dokumentację konfiguracji dostawcy",
   "provider.custom.description.suffix": ".",
   "provider.custom.field.providerID.label": "ID dostawcy",
-  "provider.custom.field.providerID.placeholder": "mojdostawca",
-  "provider.custom.field.providerID.description": "Małe litery, cyfry, łączniki lub podkreślenia",
+  "provider.custom.field.providerID.placeholder": "myprovider",
+  "provider.custom.field.providerID.description":
+    "Wybierz unikalny identyfikator z małych liter, cyfr, łączników lub podkreśleń. Nie można tutaj zastępować istniejących dostawców.",
   "provider.custom.field.name.label": "Nazwa wyświetlana",
   "provider.custom.field.name.placeholder": "Mój Dostawca AI",
   "provider.custom.field.baseURL.label": "Bazowy URL",

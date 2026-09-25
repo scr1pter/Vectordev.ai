@@ -13,6 +13,7 @@ import { useServerSDK } from "@/context/server-sdk"
 import { useServerSync } from "@/context/server-sync"
 import { useLanguage } from "@/context/language"
 import { type FormState, headerRow, modelRow, validateCustomProvider } from "./dialog-custom-provider-form"
+import { saveCustomProvider } from "./dialog-custom-provider-save"
 import { DialogSelectProvider } from "./dialog-select-provider"
 
 type Props = {
@@ -106,6 +107,12 @@ export function DialogCustomProvider(props: Props) {
     const output = validateCustomProvider({
       form,
       t: language.t,
+      existing: [
+        ...serverSync().data.provider.all.keys(),
+        ...serverSync().data.provider.connected,
+        ...Object.keys(serverSync().data.config.provider ?? {}),
+        ...(serverSync().data.config.disabled_providers ?? []),
+      ],
     })
     batch(() => {
       setForm("err", output.err)
@@ -117,22 +124,12 @@ export function DialogCustomProvider(props: Props) {
 
   const saveMutation = useMutation(() => ({
     mutationFn: async (result: NonNullable<ReturnType<typeof validate>>) => {
-      const disabledProviders = serverSync().data.config.disabled_providers ?? []
-      const nextDisabled = disabledProviders.filter((id) => id !== result.providerID)
-
-      if (result.key) {
-        await serverSDK().client.auth.set({
-          providerID: result.providerID,
-          auth: {
-            type: "api",
-            key: result.key,
-          },
-        })
-      }
-
-      await serverSync().updateConfig({
-        provider: { [result.providerID]: result.config },
-        disabled_providers: nextDisabled,
+      await saveCustomProvider({
+        client: serverSDK().client,
+        result,
+        directory: props.directory?.(),
+        updateConfig: (config) => serverSync().updateConfig(config),
+        conflictMessage: language.t("provider.custom.error.providerID.exists"),
       })
       return result
     },
@@ -192,8 +189,8 @@ export function DialogCustomProvider(props: Props) {
             <TextField
               autofocus
               label={language.t("provider.custom.field.providerID.label")}
-              placeholder="lmstudio"
-              description="Use a supported provider ID, such as lmstudio or openai. Saving configures its custom endpoint and models."
+              placeholder={language.t("provider.custom.field.providerID.placeholder")}
+              description={language.t("provider.custom.field.providerID.description")}
               value={form.providerID}
               onChange={(v) => setField("providerID", v)}
               validationState={form.err.providerID ? "invalid" : undefined}

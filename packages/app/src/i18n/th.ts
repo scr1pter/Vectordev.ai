@@ -148,7 +148,8 @@ export const dict = {
   "provider.custom.description.suffix": ".",
   "provider.custom.field.providerID.label": "รหัสผู้ให้บริการ",
   "provider.custom.field.providerID.placeholder": "myprovider",
-  "provider.custom.field.providerID.description": "ตัวอักษรพิมพ์เล็ก ตัวเลข ยัติภังค์ หรือขีดล่าง",
+  "provider.custom.field.providerID.description":
+    "เลือก ID ที่ไม่ซ้ำโดยใช้ตัวอักษรอังกฤษพิมพ์เล็ก ตัวเลข ยัติภังค์ หรือขีดล่าง ไม่สามารถแทนที่ผู้ให้บริการที่มีอยู่ได้ที่นี่",
   "provider.custom.field.name.label": "ชื่อที่แสดง",
   "provider.custom.field.name.placeholder": "My AI Provider",
   "provider.custom.field.baseURL.label": "URL พื้นฐาน",

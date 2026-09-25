@@ -151,7 +151,8 @@ export const dict = {
   "provider.custom.description.suffix": ".",
   "provider.custom.field.providerID.label": "Provider ID",
   "provider.custom.field.providerID.placeholder": "myprovider",
-  "provider.custom.field.providerID.description": "Lowercase letters, numbers, hyphens, or underscores",
+  "provider.custom.field.providerID.description":
+    "Choose a unique ID using lowercase letters, numbers, hyphens, or underscores. Existing providers cannot be replaced here.",
   "provider.custom.field.name.label": "Display name",
   "provider.custom.field.name.placeholder": "My AI Provider",
   "provider.custom.field.baseURL.label": "Base URL",

@@ -1,4 +1,4 @@
-import { isHiddenProvider } from "@/utils/provider-brand"
+import { providerAllowed } from "@vectordevai/schema/provider-policy"
 
 const PROVIDER_ID = /^[a-z0-9][a-z0-9-_]*$/
 const OPENAI_COMPATIBLE = "@ai-sdk/openai-compatible"
@@ -46,6 +46,7 @@ export type FormState = {
 type ValidateArgs = {
   form: FormState
   t: Translator
+  existing?: readonly string[]
 }
 
 export function validateCustomProvider(input: ValidateArgs) {
@@ -59,8 +60,8 @@ export function validateCustomProvider(input: ValidateArgs) {
 
   const idError = !providerID
     ? input.t("provider.custom.error.providerID.required")
-    : isHiddenProvider(providerID)
-      ? "Choose a supported provider ID, such as lmstudio or openai."
+    : providerAllowed(providerID) || input.existing?.includes(providerID)
+      ? input.t("provider.custom.error.providerID.exists")
       : !PROVIDER_ID.test(providerID)
         ? input.t("provider.custom.error.providerID.format")
         : undefined

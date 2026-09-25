@@ -147,8 +147,9 @@ export const dict = {
   "provider.custom.description.link": "dokumentation for udbyderkonfiguration",
   "provider.custom.description.suffix": ".",
   "provider.custom.field.providerID.label": "Udbyder-ID",
-  "provider.custom.field.providerID.placeholder": "minudbyder",
-  "provider.custom.field.providerID.description": "Små bogstaver, tal, bindestreger eller understregninger",
+  "provider.custom.field.providerID.placeholder": "myprovider",
+  "provider.custom.field.providerID.description":
+    "Vælg et unikt ID med små bogstaver, tal, bindestreger eller understregninger. Eksisterende udbydere kan ikke erstattes her.",
   "provider.custom.field.name.label": "Visningsnavn",
   "provider.custom.field.name.placeholder": "Min AI-udbyder",
   "provider.custom.field.baseURL.label": "Basis-URL",

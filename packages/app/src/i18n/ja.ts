@@ -136,7 +136,8 @@ export const dict = {
   "provider.custom.description.suffix": "をご覧ください。",
   "provider.custom.field.providerID.label": "プロバイダーID",
   "provider.custom.field.providerID.placeholder": "myprovider",
-  "provider.custom.field.providerID.description": "小文字、数字、ハイフン、アンダースコア",
+  "provider.custom.field.providerID.description":
+    "小文字の英字、数字、ハイフン、アンダースコアを使って一意のIDを指定してください。ここでは既存のプロバイダーを置き換えられません。",
   "provider.custom.field.name.label": "表示名",
   "provider.custom.field.name.placeholder": "My AI Provider",
   "provider.custom.field.baseURL.label": "ベースURL",

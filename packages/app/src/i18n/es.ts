@@ -147,8 +147,9 @@ export const dict = {
   "provider.custom.description.link": "documentación de configuración del proveedor",
   "provider.custom.description.suffix": ".",
   "provider.custom.field.providerID.label": "ID del proveedor",
-  "provider.custom.field.providerID.placeholder": "miproveedor",
-  "provider.custom.field.providerID.description": "Letras minúsculas, números, guiones o guiones bajos",
+  "provider.custom.field.providerID.placeholder": "myprovider",
+  "provider.custom.field.providerID.description":
+    "Elige un ID único con letras minúsculas, números, guiones o guiones bajos. Aquí no se pueden reemplazar proveedores existentes.",
   "provider.custom.field.name.label": "Nombre para mostrar",
   "provider.custom.field.name.placeholder": "Mi Proveedor de IA",
   "provider.custom.field.baseURL.label": "URL base",

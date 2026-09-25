@@ -7,6 +7,58 @@
   },
   "paths": {
     "/auth/{providerID}": {
+      "get": {
+        "tags": ["control"],
+        "operationId": "auth.exists",
+        "parameters": [
+          {
+            "name": "providerID",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Whether a credential exists; no credential data is returned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean",
+                  "description": "Whether a credential exists; no credential data is returned"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "BadRequest | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/effect_HttpApiError_BadRequest"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "description": "Check whether authentication is saved without returning credential data",
+        "summary": "Check auth credential presence",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.auth.exists({\n  ...\n})"
+          }
+        ]
+      },
       "put": {
         "tags": ["control"],
         "operationId": "auth.set",
@@ -18,6 +70,15 @@
               "type": "string"
             },
             "required": true
+          },
+          {
+            "name": "ifAbsent",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["true", "false"]
+            },
+            "required": false
           }
         ],
         "responses": {
@@ -45,6 +106,16 @@
                       "$ref": "#/components/schemas/InvalidRequestError"
                     }
                   ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ConflictError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConflictError"
                 }
               }
             }
@@ -16358,6 +16429,51 @@
         "required": ["sessionID", "requestID"],
         "additionalProperties": false
       },
+      "effect_HttpApiError_BadRequest": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": ["BadRequest"]
+          }
+        },
+        "required": ["_tag"],
+        "additionalProperties": false
+      },
+      "InvalidRequestError": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": ["InvalidRequestError"]
+          },
+          "message": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "field": {
+            "type": "string"
+          }
+        },
+        "required": ["_tag", "message"],
+        "additionalProperties": false
+      },
+      "UnauthorizedError": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": ["UnauthorizedError"]
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": ["_tag", "message"],
+        "additionalProperties": false
+      },
       "OAuth": {
         "type": "object",
         "properties": {
@@ -16438,31 +16554,17 @@
           }
         ]
       },
-      "effect_HttpApiError_BadRequest": {
+      "ConflictError": {
         "type": "object",
         "properties": {
           "_tag": {
             "type": "string",
-            "enum": ["BadRequest"]
-          }
-        },
-        "required": ["_tag"],
-        "additionalProperties": false
-      },
-      "InvalidRequestError": {
-        "type": "object",
-        "properties": {
-          "_tag": {
-            "type": "string",
-            "enum": ["InvalidRequestError"]
+            "enum": ["ConflictError"]
           },
           "message": {
             "type": "string"
           },
-          "kind": {
-            "type": "string"
-          },
-          "field": {
+          "resource": {
             "type": "string"
           }
         },
@@ -24468,23 +24570,6 @@
         "required": ["_tag", "sessionID", "message"],
         "additionalProperties": false
       },
-      "ConflictError": {
-        "type": "object",
-        "properties": {
-          "_tag": {
-            "type": "string",
-            "enum": ["ConflictError"]
-          },
-          "message": {
-            "type": "string"
-          },
-          "resource": {
-            "type": "string"
-          }
-        },
-        "required": ["_tag", "message"],
-        "additionalProperties": false
-      },
       "EventTuiPromptAppend": {
         "type": "object",
         "properties": {
@@ -24718,20 +24803,6 @@
           }
         },
         "required": ["name", "data"],
-        "additionalProperties": false
-      },
-      "UnauthorizedError": {
-        "type": "object",
-        "properties": {
-          "_tag": {
-            "type": "string",
-            "enum": ["UnauthorizedError"]
-          },
-          "message": {
-            "type": "string"
-          }
-        },
-        "required": ["_tag", "message"],
         "additionalProperties": false
       },
       "SessionsResponse": {

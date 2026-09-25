@@ -5,7 +5,7 @@ describe("providerOptions", () => {
   test("includes a synthetic Other option for custom providers", () => {
     expect(providerOptions([{ id: "openai", name: "OpenAI" }]).at(-1)).toMatchObject({
       title: "Other",
-      description: "Supported provider credential",
+      description: "New custom provider credential",
       category: "Providers",
     })
   })
@@ -33,10 +33,12 @@ describe("providerOptions", () => {
   })
 
   test("normalizes and validates custom provider ids", () => {
-    expect(normalizeCustomProviderID("  lmstudio  ")).toBe("lmstudio")
-    expect(normalizeCustomProviderID("custom_provider")).toBeUndefined()
-    expect(normalizeCustomProviderID("@ai-sdk/openai")).toBe("openai")
-    expect(normalizeCustomProviderID("custom-provider")).toBeUndefined()
+    expect(normalizeCustomProviderID("  ollama  ")).toBe("ollama")
+    expect(normalizeCustomProviderID("custom_provider")).toBe("custom_provider")
+    expect(normalizeCustomProviderID("@ai-sdk/openai")).toBeUndefined()
+    expect(normalizeCustomProviderID("custom-provider")).toBe("custom-provider")
+    expect(normalizeCustomProviderID("configured", ["configured"])).toBeUndefined()
+    expect(normalizeCustomProviderID("lmstudio")).toBeUndefined()
     expect(normalizeCustomProviderID("-custom-provider")).toBeUndefined()
     expect(normalizeCustomProviderID("Custom Provider")).toBeUndefined()
   })
