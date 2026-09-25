@@ -57,9 +57,15 @@ import { ProviderV2 } from "@vectordevai/core/provider"
 import { ModelV2 } from "@vectordevai/core/model"
 import { BrowserTool } from "./browser"
 import { VectorCloudTool } from "./vector-cloud"
+import { Auth } from "@/auth"
 
 export function webSearchEnabled(flags = { exa: false, parallel: false }) {
-  return flags.exa || flags.parallel
+  return (
+    flags.exa ||
+    flags.parallel ||
+    process.env.VECTOR_WEBSEARCH_PROVIDER === "exa" ||
+    process.env.VECTOR_WEBSEARCH_PROVIDER === "parallel"
+  )
 }
 
 type TaskDef = Tool.InferDef<typeof TaskTool>
@@ -94,6 +100,7 @@ const layer = Layer.effect(
     const agents = yield* Agent.Service
     const truncate = yield* Truncate.Service
     const flags = yield* RuntimeFlags.Service
+    const auth = yield* Auth.Service
 
     const invalid = yield* InvalidTool
     const task = yield* TaskTool
@@ -293,9 +300,15 @@ const layer = Layer.effect(
     })
 
     const tools: Interface["tools"] = Effect.fn("ToolRegistry.tools")(function* (input) {
+      const exa = yield* auth.get("exa").pipe(Effect.orDie)
+      const parallel = yield* auth.get("parallel").pipe(Effect.orDie)
       const filtered = (yield* all()).filter((tool) => {
         if (tool.id === WebSearchTool.id) {
-          return webSearchEnabled({ exa: flags.enableExa, parallel: flags.enableParallel })
+          return webSearchEnabled({
+            exa: flags.enableExa || !!process.env.EXA_API_KEY || (exa?.type === "api" && !!exa.key),
+            parallel:
+              flags.enableParallel || !!process.env.PARALLEL_API_KEY || (parallel?.type === "api" && !!parallel.key),
+          })
         }
 
         const usePatch =
@@ -442,6 +455,7 @@ export const node = LayerNode.make({
     Format.node,
     Truncate.node,
     RuntimeFlags.node,
+    Auth.node,
     Database.node,
     Ripgrep.node,
   ],

@@ -1,6 +1,7 @@
 export * as WebSearchTool from "./websearch"
 
 import { ToolFailure } from "@vectordevai/llm"
+import { Integration } from "@vectordevai/schema/integration"
 import { Context, Duration, Effect, Layer, Schema } from "effect"
 import { HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { makeLocationNode } from "../effect/app-node"
@@ -12,7 +13,7 @@ import { PermissionV2 } from "../permission"
 import { Tool } from "./tool"
 import { Tools } from "./tools"
 import { collectBoundedResponseBody } from "./http-body"
-import { checksum } from "../util/encode"
+import { Credential } from "../credential"
 import { ToolRegistry } from "./registry"
 
 export const name = "websearch"
@@ -83,15 +84,42 @@ export const defaultConfigLayer = Layer.sync(ConfigService, () => {
 
 export const configNode = makeLocationNode({ service: ConfigService, layer: defaultConfigLayer, deps: [] })
 
+export class CredentialsService extends Context.Service<
+  CredentialsService,
+  { readonly get: (provider: Provider) => Effect.Effect<string | undefined> }
+>()("@vector/v2/WebSearchCredentials") {}
+
+export const credentialsNode = makeLocationNode({
+  service: CredentialsService,
+  layer: Layer.effect(
+    CredentialsService,
+    Effect.gen(function* () {
+      const credentials = yield* Credential.Service
+      return CredentialsService.of({
+        get: Effect.fn("WebSearchTool.getKey")(function* (provider) {
+          const stored = yield* credentials.list(Integration.ID.make(provider))
+          return stored
+            .flatMap((credential) => (credential.value.type === "key" ? [credential.value.key] : []))
+            .find(Boolean)
+        }),
+      })
+    }),
+  ),
+  deps: [Credential.node],
+})
+
 export function selectProvider(
-  sessionID: string,
-  flags: Pick<Config, "enableExa" | "enableParallel"> = { enableExa: false, enableParallel: false },
+  _sessionID: string,
+  flags: Pick<Config, "enableExa" | "enableParallel" | "exaApiKey" | "parallelApiKey"> = {
+    enableExa: false,
+    enableParallel: false,
+  },
   override?: Provider,
-): Provider {
+): Provider | undefined {
   if (override) return override
-  if (flags.enableParallel) return "parallel"
-  if (flags.enableExa) return "exa"
-  return Number.parseInt(checksum(sessionID) ?? "0", 36) % 2 === 0 ? "exa" : "parallel"
+  if (flags.enableParallel || flags.parallelApiKey) return "parallel"
+  if (flags.enableExa || flags.exaApiKey) return "exa"
+  return undefined
 }
 
 const McpResult = Schema.Struct({
@@ -140,13 +168,6 @@ const McpRequest = <F extends Schema.Struct.Fields>(args: Schema.Struct<F>) =>
     params: Schema.Struct({ name: Schema.String, arguments: args }),
   })
 
-const exaUrl = (apiKey: string | undefined) => {
-  if (!apiKey) return EXA_URL
-  const url = new URL(EXA_URL)
-  url.searchParams.set("exaApiKey", apiKey)
-  return url.toString()
-}
-
 const callMcp = <F extends Schema.Struct.Fields>(
   http: HttpClient.HttpClient,
   url: string,
@@ -192,7 +213,16 @@ const layer = Layer.effectDiscard(
     const tools = yield* Tools.Service
     const http = yield* HttpClient.HttpClient
     const config = yield* ConfigService
+    const credentials = yield* CredentialsService
     const permission = yield* PermissionV2.Service
+    const current = Effect.fn("WebSearchTool.currentConfig")(function* () {
+      return {
+        ...config,
+        exaApiKey: config.exaApiKey || (yield* credentials.get("exa")),
+        parallelApiKey: config.parallelApiKey || (yield* credentials.get("parallel")),
+      }
+    })
+    if (!selectProvider("", yield* current(), config.provider)) return
 
     yield* tools
       .register({
@@ -201,50 +231,71 @@ const layer = Layer.effectDiscard(
           input: Input,
           output: Output,
           toModelOutput: ({ output }) => [{ type: "text", text: output.text }],
-          execute: (input, context) => {
-            const provider = selectProvider(context.sessionID, config, config.provider)
-            return Effect.gen(function* () {
-              yield* permission.assert({
-                action: name,
-                resources: [input.query],
-                save: ["*"],
-                metadata: { ...input, provider },
-                sessionID: context.sessionID,
-                agent: context.agent,
-                source: { type: "tool", messageID: context.assistantMessageID, callID: context.toolCallID },
-              })
+          execute: (input, context) =>
+            Effect.gen(function* () {
+              const settings = yield* current()
+              const provider = selectProvider(context.sessionID, settings, settings.provider)
+              if (!provider)
+                return yield* Effect.fail(
+                  new ToolFailure({
+                    message:
+                      "Web search is unavailable. Add your Exa or Parallel key in Settings, or explicitly enable a search provider.",
+                  }),
+                )
+              return yield* Effect.gen(function* () {
+                yield* permission.assert({
+                  action: name,
+                  resources: [input.query],
+                  save: ["*"],
+                  metadata: { ...input, provider },
+                  sessionID: context.sessionID,
+                  agent: context.agent,
+                  source: { type: "tool", messageID: context.assistantMessageID, callID: context.toolCallID },
+                })
 
-              const text =
-                provider === "exa"
-                  ? yield* callMcp(http, exaUrl(config.exaApiKey), "web_search_exa", ExaArgs, {
-                      query: input.query,
-                      type: input.type || "auto",
-                      numResults: input.numResults || 8,
-                      livecrawl: input.livecrawl || "fallback",
-                      contextMaxCharacters: input.contextMaxCharacters,
-                    })
-                  : yield* callMcp(
-                      http,
-                      PARALLEL_URL,
-                      "web_search",
-                      ParallelArgs,
-                      {
-                        objective: input.query,
-                        search_queries: [input.query],
-                        session_id: context.sessionID,
-                        // V2 invocation context does not safely expose the model yet.
-                      },
-                      {
-                        "User-Agent": `vector/${InstallationVersion}`,
-                        ...(config.parallelApiKey ? { Authorization: `Bearer ${config.parallelApiKey}` } : {}),
-                      },
-                    )
-              return {
-                provider,
-                text: text ?? NO_RESULTS,
-              }
-            }).pipe(Effect.mapError(() => new ToolFailure({ message: `Unable to search the web for ${input.query}` })))
-          },
+                const text =
+                  provider === "exa"
+                    ? yield* callMcp(
+                        http,
+                        EXA_URL,
+                        "web_search_exa",
+                        ExaArgs,
+                        {
+                          query: input.query,
+                          type: input.type || "auto",
+                          numResults: input.numResults || 8,
+                          livecrawl: input.livecrawl || "fallback",
+                          contextMaxCharacters: input.contextMaxCharacters,
+                        },
+                        {
+                          ...(settings.exaApiKey ? { "x-api-key": settings.exaApiKey } : {}),
+                          "User-Agent": `vector/${InstallationVersion}`,
+                        },
+                      )
+                    : yield* callMcp(
+                        http,
+                        PARALLEL_URL,
+                        "web_search",
+                        ParallelArgs,
+                        {
+                          objective: input.query,
+                          search_queries: [input.query],
+                          session_id: context.sessionID,
+                          // V2 invocation context does not safely expose the model yet.
+                        },
+                        {
+                          "User-Agent": `vector/${InstallationVersion}`,
+                          ...(settings.parallelApiKey ? { Authorization: `Bearer ${settings.parallelApiKey}` } : {}),
+                        },
+                      )
+                return {
+                  provider,
+                  text: text ?? NO_RESULTS,
+                }
+              }).pipe(
+                Effect.mapError(() => new ToolFailure({ message: `Unable to search the web for ${input.query}` })),
+              )
+            }),
         }),
       })
       .pipe(Effect.orDie)
@@ -254,5 +305,5 @@ const layer = Layer.effectDiscard(
 export const node = makeLocationNode({
   name: "tool/websearch",
   layer,
-  deps: [ToolRegistry.node, PermissionV2.node, LayerNodePlatform.httpClient, configNode],
+  deps: [ToolRegistry.node, PermissionV2.node, LayerNodePlatform.httpClient, configNode, credentialsNode],
 })

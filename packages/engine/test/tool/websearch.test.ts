@@ -1,7 +1,12 @@
 import { describe, expect, test } from "bun:test"
 import { Effect } from "effect"
 import { parseResponse } from "../../src/tool/mcp-websearch"
-import { selectWebSearchProvider, webSearchModelName, webSearchProviderLabel } from "../../src/tool/websearch"
+import {
+  selectWebSearchProvider,
+  webSearchAuthHeaders,
+  webSearchModelName,
+  webSearchProviderLabel,
+} from "../../src/tool/websearch"
 
 import { webSearchEnabled } from "../../src/tool/registry"
 import { it } from "../lib/effect"
@@ -10,8 +15,17 @@ import { ProviderV2 } from "@vectordevai/core/provider"
 const SESSION_ID = "ses_0196aabbccddeeff001122334455"
 
 describe("websearch provider", () => {
-  test("selects a stable provider per session", () => {
-    expect(selectWebSearchProvider(SESSION_ID)).toBe(selectWebSearchProvider(SESSION_ID))
+  test("keeps keyless search off without an explicit opt-in", () => {
+    expect(selectWebSearchProvider(SESSION_ID)).toBeUndefined()
+  })
+
+  test("keeps both providers' keys in authentication headers", () => {
+    expect(webSearchAuthHeaders("exa", "exa-secret")).toMatchObject({ "x-api-key": "exa-secret" })
+    expect(webSearchAuthHeaders("parallel", "parallel-secret")).toMatchObject({
+      Authorization: "Bearer parallel-secret",
+    })
+    expect(webSearchAuthHeaders("exa")).not.toHaveProperty("x-api-key")
+    expect(webSearchAuthHeaders("parallel")).not.toHaveProperty("Authorization")
   })
 
   test("supports an operational override", () => {

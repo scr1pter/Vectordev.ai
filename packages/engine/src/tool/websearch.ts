@@ -3,9 +3,9 @@ import { HttpClient } from "effect/unstable/http"
 import * as Tool from "./tool"
 import * as McpWebSearch from "./mcp-websearch"
 import DESCRIPTION from "./websearch.txt"
-import { checksum } from "@vectordevai/core/util/encode"
 import { InstallationVersion } from "@vectordevai/core/installation/version"
 import { RuntimeFlags } from "@/effect/runtime-flags"
+import { Auth } from "@/auth"
 
 export const Parameters = Schema.Struct({
   query: Schema.String.annotate({ description: "Websearch query" }),
@@ -27,13 +27,16 @@ export const Parameters = Schema.Struct({
 const WebSearchProviderSchema = Schema.Literals(["exa", "parallel"])
 export type WebSearchProvider = Schema.Schema.Type<typeof WebSearchProviderSchema>
 
-export function selectWebSearchProvider(sessionID: string, flags = { exa: false, parallel: false }): WebSearchProvider {
+export function selectWebSearchProvider(
+  _sessionID: string,
+  flags = { exa: false, parallel: false },
+): WebSearchProvider | undefined {
   const override = process.env.VECTOR_WEBSEARCH_PROVIDER
   if (override === "exa" || override === "parallel") return override
   if (flags.parallel) return "parallel"
   if (flags.exa) return "exa"
 
-  return Number.parseInt(checksum(sessionID) ?? "0", 36) % 2 === 0 ? "exa" : "parallel"
+  return undefined
 }
 
 export function webSearchProviderLabel(provider: unknown) {
@@ -51,10 +54,11 @@ export function webSearchModelName(extra: Tool.Context["extra"]) {
   return (apiID ?? id)?.slice(0, 100)
 }
 
-function parallelAuthHeaders() {
+export function webSearchAuthHeaders(provider: WebSearchProvider, key?: string) {
   const headers = { "User-Agent": `vector/${InstallationVersion}` }
-  if (!process.env.PARALLEL_API_KEY) return headers
-  return { ...headers, Authorization: `Bearer ${process.env.PARALLEL_API_KEY}` }
+  if (!key) return headers
+  if (provider === "exa") return { ...headers, "x-api-key": key }
+  return { ...headers, Authorization: `Bearer ${key}` }
 }
 
 function callProvider(
@@ -62,6 +66,7 @@ function callProvider(
   provider: WebSearchProvider,
   params: Schema.Schema.Type<typeof Parameters>,
   ctx: Tool.Context,
+  key?: string,
 ) {
   if (provider === "parallel") {
     return McpWebSearch.call(
@@ -76,7 +81,7 @@ function callProvider(
         model_name: webSearchModelName(ctx.extra),
       },
       "25 seconds",
-      parallelAuthHeaders(),
+      webSearchAuthHeaders(provider, key),
     )
   }
 
@@ -93,6 +98,7 @@ function callProvider(
       contextMaxCharacters: params.contextMaxCharacters,
     },
     "25 seconds",
+    webSearchAuthHeaders(provider, key),
   )
 }
 
@@ -101,6 +107,7 @@ export const WebSearchTool = Tool.define(
   Effect.gen(function* () {
     const http = yield* HttpClient.HttpClient
     const flags = yield* RuntimeFlags.Service
+    const auth = yield* Auth.Service
 
     return {
       get description() {
@@ -109,10 +116,18 @@ export const WebSearchTool = Tool.define(
       parameters: Parameters,
       execute: (params: Schema.Schema.Type<typeof Parameters>, ctx: Tool.Context) =>
         Effect.gen(function* () {
+          const exa = yield* auth.get("exa")
+          const parallel = yield* auth.get("parallel")
+          const keys = {
+            exa: process.env.EXA_API_KEY || (exa?.type === "api" ? exa.key : undefined),
+            parallel: process.env.PARALLEL_API_KEY || (parallel?.type === "api" ? parallel.key : undefined),
+          }
           const provider = selectWebSearchProvider(ctx.sessionID, {
-            exa: flags.enableExa,
-            parallel: flags.enableParallel,
+            exa: flags.enableExa || !!keys.exa,
+            parallel: flags.enableParallel || !!keys.parallel,
           })
+          if (!provider)
+            return yield* Effect.die(new Error("Connect Exa or Parallel in Settings → Providers to enable web search."))
           const title = webSearchProviderLabel(provider)
           yield* ctx.metadata({ title: `${title} "${params.query}"`, metadata: { provider } })
 
@@ -130,7 +145,9 @@ export const WebSearchTool = Tool.define(
             },
           })
 
-          const result = yield* callProvider(http, provider, params, ctx)
+          const result = yield* callProvider(http, provider, params, ctx, keys[provider]).pipe(
+            Effect.mapError(() => new Error("Web search failed. Check the provider key and try again.")),
+          )
 
           return {
             output: result ?? "No search results found. Please try a different query.",

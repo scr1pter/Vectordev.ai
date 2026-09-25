@@ -9,6 +9,8 @@ import { SessionV2 } from "@vectordevai/core/session"
 import { ToolRegistry } from "@vectordevai/core/tool/registry"
 import { WebSearchTool } from "@vectordevai/core/tool/websearch"
 import { ToolOutputStore } from "@vectordevai/core/tool-output-store"
+import { Credential } from "@vectordevai/core/credential"
+import { Integration } from "@vectordevai/schema/integration"
 import { testEffect } from "./lib/effect"
 import { toolIdentity, executeTool, settleTool, toolDefinitions } from "./lib/tool"
 
@@ -27,8 +29,9 @@ describe("WebSearchTool provider selection", () => {
     expect(() => decode({ query: "x", numResults: WebSearchTool.MAX_NUM_RESULTS + 1 })).toThrow()
     expect(() => decode({ query: "x", contextMaxCharacters: WebSearchTool.MAX_CONTEXT_CHARACTERS + 1 })).toThrow()
   })
-  test("selects a stable provider per session", () => {
-    expect(WebSearchTool.selectProvider(sessionID)).toBe(WebSearchTool.selectProvider(sessionID))
+  test("has no random keyless default for any session", () => {
+    for (const id of [sessionID, "another-session", "odd", "even"])
+      expect(WebSearchTool.selectProvider(id)).toBeUndefined()
   })
 
   test("supports an explicit operational override", () => {
@@ -44,6 +47,15 @@ describe("WebSearchTool provider selection", () => {
 
   test("prefers Exa when only its explicit flag is enabled", () => {
     expect(WebSearchTool.selectProvider(sessionID, { enableExa: true, enableParallel: false })).toBe("exa")
+  })
+
+  test("an own key enables only its provider", () => {
+    expect(
+      WebSearchTool.selectProvider(sessionID, { enableExa: false, enableParallel: false, exaApiKey: "own-key" }),
+    ).toBe("exa")
+    expect(
+      WebSearchTool.selectProvider(sessionID, { enableExa: false, enableParallel: false, parallelApiKey: "own-key" }),
+    ).toBe("parallel")
   })
 })
 
@@ -72,10 +84,15 @@ const assertions: PermissionV2.AssertInput[] = []
 let responseBody = payload("search results")
 let makeResponse = () => new Response(responseBody, { status: 200 })
 let config: WebSearchTool.Config = { enableExa: false, enableParallel: false }
+let keys: Partial<Record<WebSearchTool.Provider, string>> = {}
 
 beforeEach(() => {
   responseBody = payload("search results")
   makeResponse = () => new Response(responseBody, { status: 200 })
+  config = { provider: "exa", enableExa: false, enableParallel: false }
+  keys = {}
+  requests.length = 0
+  assertions.length = 0
 })
 
 const http = Layer.succeed(
@@ -130,6 +147,12 @@ const it = testEffect(
       [PermissionV2.node, permission],
       [LayerNodePlatform.httpClient, http],
       [WebSearchTool.configNode, websearchConfig],
+      [
+        WebSearchTool.credentialsNode,
+        Layer.succeed(WebSearchTool.CredentialsService, {
+          get: (provider) => Effect.sync(() => keys[provider]),
+        }),
+      ],
       [ToolOutputStore.node, ToolOutputStore.nodeWithoutConfig],
     ],
   ),
@@ -242,7 +265,7 @@ describe("WebSearchTool registration", () => {
     }),
   )
 
-  it.effect("keeps an Exa credential in the transport URL and out of model output", () =>
+  it.effect("sends an Exa credential only in its transport header and never the URL or model output", () =>
     Effect.gen(function* () {
       requests.length = 0
       assertions.length = 0
@@ -256,7 +279,9 @@ describe("WebSearchTool registration", () => {
         call: { type: "tool-call", id: "call-exa-key", name: "websearch", input: { query: "effect schema" } },
       })
 
-      expect(requests[0]?.url).toBe(`${WebSearchTool.EXA_URL}?exaApiKey=exa+secret`)
+      expect(requests[0]?.url).toBe(WebSearchTool.EXA_URL)
+      expect(requests[0]?.headers["x-api-key"]).toBe("exa secret")
+      expect(JSON.stringify(requests[0]?.body)).not.toContain("exa secret")
       expect(JSON.stringify(settled)).not.toContain("exa secret")
     }),
   )
@@ -314,3 +339,106 @@ describe("WebSearchTool registration", () => {
     }),
   )
 })
+
+describe("WebSearchTool disabled default", () => {
+  beforeEach(() => {
+    config = { enableExa: false, enableParallel: false }
+  })
+  it.effect("does not advertise a tool or send any request when no key or explicit opt-in exists", () =>
+    Effect.gen(function* () {
+      const registry = yield* ToolRegistry.Service
+      expect(yield* toolDefinitions(registry)).toEqual([])
+      expect(requests).toEqual([])
+      expect(assertions).toEqual([])
+    }),
+  )
+})
+
+for (const provider of ["exa", "parallel"] as const) {
+  describe(`WebSearchTool own ${provider} key`, () => {
+    beforeEach(() => {
+      config = { enableExa: false, enableParallel: false }
+      keys = { [provider]: "stored-key" }
+    })
+    it.effect("advertises search, rereads rotated keys, and prevents keyless fallback after removal", () =>
+      Effect.gen(function* () {
+        const registry = yield* ToolRegistry.Service
+        expect((yield* toolDefinitions(registry)).map((tool) => tool.name)).toEqual(["websearch"])
+        keys[provider] = "rotated-key"
+        const result = yield* executeTool(registry, {
+          sessionID,
+          ...toolIdentity,
+          call: { type: "tool-call", id: "own-key", name: "websearch", input: { query: "own credential" } },
+        })
+        expect(result).toEqual({ type: "text", value: "search results" })
+        expect(requests[0]?.url).toBe(provider === "exa" ? WebSearchTool.EXA_URL : WebSearchTool.PARALLEL_URL)
+        expect(requests[0]?.headers[provider === "exa" ? "x-api-key" : "authorization"]).toBe(
+          provider === "exa" ? "rotated-key" : "Bearer rotated-key",
+        )
+        expect(JSON.stringify(result)).not.toContain("rotated-key")
+        keys = {}
+        const removed = yield* executeTool(registry, {
+          sessionID,
+          ...toolIdentity,
+          call: { type: "tool-call", id: "removed-key", name: "websearch", input: { query: "removed credential" } },
+        })
+        expect(removed).toMatchObject({
+          type: "error",
+          value: expect.stringContaining("Add your Exa or Parallel key in Settings"),
+        })
+        expect(requests).toHaveLength(1)
+      }),
+    )
+
+    it.effect("environment key overrides a saved key without entering the request URL", () =>
+      Effect.gen(function* () {
+        config = {
+          ...config,
+          ...(provider === "exa" ? { exaApiKey: "environment-key" } : { parallelApiKey: "environment-key" }),
+        }
+        const registry = yield* ToolRegistry.Service
+        yield* executeTool(registry, {
+          sessionID,
+          ...toolIdentity,
+          call: { type: "tool-call", id: "environment-key", name: "websearch", input: { query: "precedence" } },
+        })
+        expect(requests[0]?.headers[provider === "exa" ? "x-api-key" : "authorization"]).toBe(
+          provider === "exa" ? "environment-key" : "Bearer environment-key",
+        )
+        expect(requests[0]?.url).not.toContain("environment-key")
+        expect(JSON.stringify(requests[0]?.body)).not.toContain("environment-key")
+      }),
+    )
+  })
+}
+
+const credentialTest = testEffect(LayerNode.compile(LayerNode.group([Credential.node, WebSearchTool.credentialsNode])))
+credentialTest.effect("the production search resolver reads current Core keys and ignores OAuth credentials", () =>
+  Effect.gen(function* () {
+    const credentials = yield* Credential.Service
+    const search = yield* WebSearchTool.CredentialsService
+    for (const provider of ["exa", "parallel"] as const) {
+      const created = yield* credentials.create({
+        integrationID: Integration.ID.make(provider),
+        value: { type: "key", key: `${provider}-stored` },
+      })
+      expect(yield* search.get(provider)).toBe(`${provider}-stored`)
+      yield* credentials.update(created.id, { value: { type: "key", key: `${provider}-rotated` } })
+      expect(yield* search.get(provider)).toBe(`${provider}-rotated`)
+      yield* credentials.remove(created.id)
+      expect(yield* search.get(provider)).toBeUndefined()
+      const oauth = yield* credentials.create({
+        integrationID: Integration.ID.make(provider),
+        value: Credential.OAuth.make({
+          type: "oauth",
+          methodID: Integration.MethodID.make("fixture-oauth"),
+          access: "ignored",
+          refresh: "ignored",
+          expires: 0,
+        }),
+      })
+      expect(yield* search.get(provider)).toBeUndefined()
+      yield* credentials.remove(oauth.id)
+    }
+  }),
+)
