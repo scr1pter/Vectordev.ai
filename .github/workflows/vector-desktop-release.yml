@@ -184,10 +184,25 @@ jobs:
             echo "restored=true" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Check out the owner-configured Vector catalog fork
+        if: steps.catalog-restore.outputs.restored != 'true' && vars.VECTOR_CATALOG_FORK_REPOSITORY != '' && vars.VECTOR_CATALOG_FORK_REVISION != ''
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          repository: ${{ vars.VECTOR_CATALOG_FORK_REPOSITORY }}
+          ref: ${{ vars.VECTOR_CATALOG_FORK_REVISION }}
+          path: tmp/model-catalog-fork
+          persist-credentials: false
+
+      - name: Require icons for every reviewed catalog provider
+        run: bun packages/ui/script/provider-catalog-icons.ts
+
       - name: Prepare the catalog once for every platform
         if: steps.catalog-restore.outputs.restored != 'true'
         env:
           TAG: ${{ env.RELEASE_TAG }}
+          VECTOR_CATALOG_FORK_PATH: ${{ github.workspace }}/tmp/model-catalog-fork
+          VECTOR_CATALOG_FORK_REPOSITORY: ${{ vars.VECTOR_CATALOG_FORK_REPOSITORY }}
+          VECTOR_CATALOG_FORK_REVISION: ${{ vars.VECTOR_CATALOG_FORK_REVISION }}
         run: |
           set -euo pipefail
           mkdir -p release-catalog
@@ -958,7 +973,8 @@ jobs:
           set -euo pipefail
           test "$(sha256sum "$VECTOR_RELEASE_CATALOG_PATH" | cut -d ' ' -f 1)" = "$VECTOR_RELEASE_CATALOG_SHA256"
           export VECTOR_CATALOG_FILE="$VECTOR_RELEASE_CATALOG_PATH"
-          VECTOR_RELEASE_VERSION="${TAG#v}" bun packages/cloud/src/upload-model-catalog.ts
+          VECTOR_RELEASE_VERSION="${TAG#v}" bun packages/cloud/src/upload-model-catalog.ts --update-mirror
+          bun packages/engine/script/verify-catalog-mirror.ts
 
       - name: Stage Vector download and update artifacts
         env:

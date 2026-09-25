@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test"
 import { SUPPORTED_PROVIDER_IDS } from "@vectordevai/schema/provider-policy"
 import { ModelCatalog } from "@vectordevai/schema/model-catalog"
-import { releaseCatalogBody, releaseCatalogText } from "./upload-model-catalog"
+import { publishCatalog, releaseCatalogBody, releaseCatalogText } from "./upload-model-catalog"
 
 test("publishes the exact prepared provider catalog without changing models or ordering", () => {
   const prepared = ModelCatalog.decodeCatalog(
@@ -80,4 +80,65 @@ test("the uploader preserves reviewed bytes and refuses whitespace rewrites befo
   expect(releaseCatalogText(text)).toBe(text)
   for (const changed of [JSON.stringify(prepared, null, 2), `${text}\n`, ` ${text}`])
     expect(() => releaseCatalogText(changed)).toThrow("exact prepared bytes")
+})
+
+for (const existing of [false, true]) {
+  for (const updateMirror of [false, true]) {
+    test(`publishes immutable catalog before explicitly requested current mirror: existing=${existing}, mirror=${updateMirror}`, async () => {
+      const text = JSON.stringify(
+        ModelCatalog.decodeCatalog({ openai: { id: "openai", name: "OpenAI", env: [], models: {} } }),
+      )
+      const writes: Array<{ pathname: string; body: string; mutable: boolean }> = []
+      const requests: string[] = []
+      const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response(text) })
+      try {
+        const result = await publishCatalog({
+          version: "1.99.123",
+          text,
+          updateMirror,
+          find: async (pathname) => {
+            requests.push(pathname)
+            return existing ? { url: server.url.href } : undefined
+          },
+          write: async (pathname, body, mutable) => {
+            writes.push({ pathname, body, mutable })
+            return { url: new URL(pathname, server.url).href }
+          },
+        })
+        expect(requests).toEqual(["releases/vector-v1.99.123/api.json"])
+        expect(writes).toEqual([
+          ...(existing ? [] : [{ pathname: "releases/vector-v1.99.123/api.json", body: text, mutable: false }]),
+          ...(updateMirror ? [{ pathname: "models/api.json", body: text, mutable: true }] : []),
+        ])
+        expect(Boolean(result.mirror)).toBe(updateMirror)
+      } finally {
+        await server.stop(true)
+      }
+    })
+  }
+}
+
+test("a conflicting immutable catalog prevents any current-mirror update", async () => {
+  const text = JSON.stringify(
+    ModelCatalog.decodeCatalog({ openai: { id: "openai", name: "OpenAI", env: [], models: {} } }),
+  )
+  const writes: string[] = []
+  const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response(`${text}\n`) })
+  try {
+    await expect(
+      publishCatalog({
+        version: "1.99.123",
+        text,
+        updateMirror: true,
+        find: async () => ({ url: server.url.href }),
+        write: async (pathname) => {
+          writes.push(pathname)
+          return { url: server.url.href }
+        },
+      }),
+    ).rejects.toThrow("different content")
+    expect(writes).toEqual([])
+  } finally {
+    await server.stop(true)
+  }
 })

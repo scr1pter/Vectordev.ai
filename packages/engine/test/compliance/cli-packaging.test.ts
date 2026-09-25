@@ -27,6 +27,10 @@ async function fixture() {
     Bun.file(path.join(root, "packages/engine/script/release-catalog.ts")),
   )
   await Bun.write(
+    path.join(dir, "packages/engine/script/catalog-fork.ts"),
+    Bun.file(path.join(root, "packages/engine/script/catalog-fork.ts")),
+  )
+  await Bun.write(
     path.join(dir, "packages/engine/script/publish-vector.ts"),
     Bun.file(path.join(root, "packages/engine/script/publish-vector.ts")),
   )

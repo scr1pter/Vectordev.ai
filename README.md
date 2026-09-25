@@ -82,7 +82,7 @@ Unsigned desktop releases require a manual download. They do not replace signed 
 
 Use `vector.json` or `vector.jsonc` in your repository, or `~/.config/vector/vector.json` for global settings. Put custom agents, commands, plugins and themes under `.vector/`. Configuration now uses Vector names only: `vector.json`, `.vector/`, and `VECTOR_*` variables. When Vector configuration is absent, the app imports a uniquely identifiable prior global configuration by content and preserves the source. Review project configuration separately and move it into these paths. Use `VECTOR_AGENT_CONFIG`, `VECTOR_AGENT_CONFIG_DIR` and `VECTOR_AGENT_DB` for file, directory and database overrides; the shorter names collide with other tools and are ignored. Other Vector variables retain their existing names. Plugins import `@vectordevai/plugin`, and plugin manifests declare theme files with `vector-themes`. Repositories using Vector’s GitHub workflow should run `vector github install` again.
 
-The model catalog is bundled; startup does not need an upstream catalog service. `VECTOR_MODELS_PATH` selects a local catalog, and `VECTOR_MODELS_URL` opts into `https://vectordev.ai/models` or a versioned Vector release-catalog directory. Catalogs are validated and may only select bundled SDK packages; configure a custom provider to use your own adapter. `VECTOR_DISABLE_MODELS_FETCH=1` prevents network refresh. Release builds use separate, digest-pinned `VECTOR_RELEASE_CATALOG_PATH` and `VECTOR_RELEASE_CATALOG_SHA256` inputs shared by CLI and desktop.
+The model catalog is bundled for offline startup and refreshes from `https://vectordev.ai/models` by default. `VECTOR_MODELS_PATH` selects a local catalog and disables refresh. `VECTOR_MODELS_URL` can select an immutable Vector release-catalog directory or an explicit enterprise mirror; non-Vector sources produce a warning. Catalogs are validated and may only select bundled SDK packages; configure a custom provider to use your own adapter. `VECTOR_DISABLE_MODELS_FETCH=1` prevents network refresh. Release builds use separate, digest-pinned `VECTOR_RELEASE_CATALOG_PATH` and `VECTOR_RELEASE_CATALOG_SHA256` inputs shared by CLI and desktop. Fresh snapshots and provider artwork come from a reviewed commit in the [owner-configured Vector catalog fork](docs/vector/owner-actions/model-catalog.md).
 
 For a WSL server, install Linux Node.js and npm in that distribution for setup. Vector discovers npm through supported nvm/fnm setups, installs the matching CLI, and copies its native engine to `~/.vector/bin/vector-native`. The running server does not depend on Node.js. Use `VECTOR_CLI=1 ~/.vector/bin/vector-native login` and `VECTOR_CLI=1 ~/.vector/bin/vector-native providers login` inside WSL before adding its server; Windows-side sign-in does not supply the WSL account token. The desktop checks the engine version and verifies that unauthenticated requests are rejected before it connects.
 
@@ -105,7 +105,9 @@ Vector is a Bun monorepo.
 
 ```bash
 bun install
-# Once: prepare and review a catalog for this checkout.
+# Once: configure the owner's catalog checkout, repository and full commit SHA.
+# See docs/vector/owner-actions/model-catalog.md for the three VECTOR_CATALOG_FORK_* variables.
+# Prepare and review that committed export; there is no implicit external source.
 VECTOR_CATALOG_FILE="$PWD/tmp/release-catalog.json" bun packages/engine/script/generate.ts --fresh-catalog
 export VECTOR_RELEASE_CATALOG_PATH="$PWD/tmp/release-catalog.json"
 export VECTOR_RELEASE_CATALOG_SHA256="$(bun -e 'console.log(new Bun.CryptoHasher("sha256").update(await Bun.file(process.env.VECTOR_RELEASE_CATALOG_PATH).text()).digest("hex"))')"

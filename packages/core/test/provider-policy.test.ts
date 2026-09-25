@@ -67,26 +67,29 @@ test("catalog documentation uses provider guides without changing providers or m
   }
 })
 
-test("runtime catalog refresh only accepts owned HTTPS mirrors", () => {
-  expect(ModelCatalog.mirrorURL("https://vectordev.ai/models")).toBe("https://vectordev.ai/models")
-  expect(ModelCatalog.mirrorURL("https://42qryducihx01gl0.public.blob.vercel-storage.com/releases/vector-v1.2.3")).toBe(
-    "https://42qryducihx01gl0.public.blob.vercel-storage.com/releases/vector-v1.2.3",
-  )
-  for (const url of [
-    undefined,
-    "https://catalog.vectordev.ai/releases/",
-    "https://vectordev.ai/sites/catalog",
-    "https://vectordev.ai:444/models",
-    "https://42qryducihx01gl0.public.blob.vercel-storage.com/sites/catalog",
-    "https://42qryducihx01gl0.public.blob.vercel-storage.com/releases/../sites/catalog",
-    "https://42qryducihx01gl0.public.blob.vercel-storage.com/releases/vector-v1.2.3/%2e%2e/sites/catalog",
-    "http://vectordev.ai/catalog",
-    "https://vectordev.ai.example.test/catalog",
+test("runtime catalog defaults to Vector and accepts deliberate custom mirrors", () => {
+  expect(ModelCatalog.mirrorURL(undefined)).toBe("https://vectordev.ai/models")
+  expect(ModelCatalog.mirrorURL("https://vectordev.ai/models/api.json")).toBe("https://vectordev.ai/models")
+  for (const value of [
     "https://catalog.example.test",
-    "https://user:password@vectordev.ai/catalog",
-    "https://vectordev.ai/catalog?redirect=example",
+    "https://catalog.example.test:444/models",
+    "http://127.0.0.1:1234/catalog",
   ]) {
-    expect(ModelCatalog.mirrorURL(url)).toBeUndefined()
+    expect(ModelCatalog.mirrorURL(value)).toBe(value)
+    expect(ModelCatalog.ownedMirror(value)).toBe(false)
+  }
+  expect(ModelCatalog.ownedMirror("https://vectordev.ai/models")).toBe(true)
+  expect(
+    ModelCatalog.ownedMirror("https://42qryducihx01gl0.public.blob.vercel-storage.com/releases/vector-v1.2.3"),
+  ).toBe(true)
+  for (const value of [
+    "file:///catalog.json",
+    "https://user:password@catalog.example.test/models",
+    "https://catalog.example.test/models?token=hidden",
+    "https://catalog.example.test/models#fragment",
+    "not a url",
+  ]) {
+    expect(ModelCatalog.mirrorURL(value)).toBeUndefined()
   }
 })
 

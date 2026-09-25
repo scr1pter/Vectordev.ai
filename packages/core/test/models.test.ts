@@ -1,5 +1,5 @@
 import { describe, expect, beforeAll, beforeEach, afterAll } from "bun:test"
-import { Effect, Layer, Ref } from "effect"
+import { Effect, Layer, Logger, Ref } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import { AppNodeBuilder } from "@vectordevai/core/effect/app-node-builder"
 import { LayerNodePlatform } from "@vectordevai/core/effect/app-node-platform"
@@ -38,10 +38,7 @@ afterAll(() => {
 })
 
 const cacheFile = () =>
-  path.join(
-    directory,
-    Flag.VECTOR_MODELS_URL ? `models-${Hash.fast(Flag.VECTOR_MODELS_URL)}.json` : "models-bundled.json",
-  )
+  path.join(directory, `models-${Hash.fast(ModelCatalog.mirrorURL(Flag.VECTOR_MODELS_URL)!)}.json`)
 
 const fixture: Record<string, ModelCatalog.Provider> = {
   lmstudio: {
@@ -322,7 +319,7 @@ describe("ModelCatalog Service", () => {
     }),
   )
 
-  it.live("without a configured mirror neither get() nor forced refresh makes a network request", () =>
+  it.live("without an override forced refresh fetches the default Vector mirror", () =>
     Effect.gen(function* () {
       const state = yield* Ref.make(initialState)
       const result = yield* provided(
@@ -334,14 +331,16 @@ describe("ModelCatalog Service", () => {
         }),
         true,
       )
-      expect(result).toEqual({})
-      expect((yield* Ref.get(state)).calls).toEqual([])
+      expect(result).toEqual(fixture)
+      expect((yield* Ref.get(state)).calls).toEqual([
+        { url: `${mirror}/api.json`, userAgent: expect.stringContaining("vector/") },
+      ])
     }),
   )
 
   it.live("a configured mirror does not read the bundled cache or another mirror's cache", () =>
     Effect.gen(function* () {
-      yield* writeCache(fixture)
+      yield* Effect.promise(() => Bun.write(path.join(directory, "models-bundled.json"), JSON.stringify(fixture)))
       Flag.VECTOR_MODELS_URL = "https://42qryducihx01gl0.public.blob.vercel-storage.com/releases/vector-v1.2.3"
       yield* writeCache(fixture2)
       Flag.VECTOR_MODELS_URL = mirror
@@ -363,7 +362,8 @@ describe("ModelCatalog Service", () => {
       const state = yield* Ref.make(initialState)
       const result = yield* provided(
         state,
-        ModelCatalog.Service.use((service) => service.get()),
+        ModelCatalog.Service.use((service) => Effect.andThen(service.refresh(true), service.get())),
+        true,
       )
       expect(result).toEqual(fixture2)
       expect((yield* Ref.get(state)).calls).toEqual([])
@@ -383,6 +383,25 @@ describe("ModelCatalog Service", () => {
     }),
   )
 })
+
+it.live("an explicit enterprise mirror works and emits an operator-source warning", () =>
+  Effect.gen(function* () {
+    Flag.VECTOR_MODELS_URL = "http://catalog.enterprise.test:8123/reviewed"
+    const messages: unknown[] = []
+    const state = yield* Ref.make(initialState)
+    const result = yield* provided(
+      state,
+      ModelCatalog.Service.use((service) => service.get()),
+      true,
+    ).pipe(Effect.provide(Logger.layer([Logger.make((options) => messages.push(options.message))])))
+    expect(result).toEqual(fixture)
+    expect((yield* Ref.get(state)).calls.map((call) => call.url)).toEqual([
+      "http://catalog.enterprise.test:8123/reviewed/api.json",
+    ])
+    expect(JSON.stringify(messages)).toContain("operator-supplied model catalog mirror")
+    expect(JSON.stringify(messages)).toContain('"encrypted":false')
+  }),
+)
 
 for (const body of [
   "{",
@@ -434,7 +453,7 @@ it.live("unbundled SDK names in a disk snapshot never enter the runtime catalog"
 
 it.live("a rejected mirror path makes no HTTP requests", () =>
   Effect.gen(function* () {
-    Flag.VECTOR_MODELS_URL = "https://42qryducihx01gl0.public.blob.vercel-storage.com/sites/user-content"
+    Flag.VECTOR_MODELS_URL = "https://operator.example.test/catalog?credential=not-allowed"
     const state = yield* Ref.make(initialState)
     yield* provided(
       state,

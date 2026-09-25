@@ -7356,3 +7356,29 @@ SHA-256 of reproduced text: `927d41a546253817c6a83fdb7fe044622e83665d625be2cf83e
 ````
 
 <!-- vector-bun-notices:end -->
+
+## Model catalog data and provider artwork
+
+Catalog metadata and provider SVG artwork derive from the MIT-licensed Models.dev data project, maintained for Vector through an owner-controlled fork. Source: https://github.com/anomalyco/models.dev. New preparation reads only the configured Vector fork at a pinned commit; the original public service is not a build or runtime dependency. Provider names and logos identify their respective providers; this attribution grants no trademark rights or endorsement.
+
+MIT License
+
+Copyright (c) 2025 models.dev
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

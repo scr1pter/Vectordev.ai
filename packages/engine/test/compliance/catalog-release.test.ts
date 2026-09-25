@@ -4,6 +4,7 @@ import os from "node:os"
 import path from "node:path"
 import { catalogBody, catalogDigest, ensurePublishedCatalog, prepareReleaseCatalog } from "../../script/release-catalog"
 import { ModelCatalog } from "@vectordevai/schema/model-catalog"
+import { catalogForkFixture } from "../fixture/catalog-fork"
 
 const script = path.resolve(import.meta.dirname, "../../script/generate.ts")
 const provider = {
@@ -119,6 +120,7 @@ for (const status of [200, 404, 503]) {
   for (const fresh of [false, true]) {
     test(`CLI preparation uses immutable mirror HTTP ${status}, fresh=${fresh}`, async () => {
       await using tmp = await fixture({ anthropic: provider })
+      await using fork = await catalogForkFixture({ "vector/api.json": JSON.stringify({ anthropic: provider }) })
       const requests: string[] = []
       const server = Bun.serve({
         hostname: "127.0.0.1",
@@ -136,6 +138,7 @@ for (const status of [200, 404, 503]) {
           version: "1.99.123",
           directory: tmp.dir,
           fresh,
+          fork: fork.input,
           request: (url, init) => fetch(new URL(new URL(url).pathname, server.url), init),
         })
         if (status === 200 || (status === 404 && fresh)) {
@@ -143,11 +146,7 @@ for (const status of [200, 404, 503]) {
           const text = await Bun.file(result.file).text()
           expect(result.sha256).toBe(catalogDigest(text))
           expect(JSON.parse(text)).toEqual({ anthropic: provider })
-          expect(requests).toEqual(
-            status === 404
-              ? ["/releases/vector-v1.99.123/api.json", "/api.json"]
-              : ["/releases/vector-v1.99.123/api.json"],
-          )
+          expect(requests).toEqual(["/releases/vector-v1.99.123/api.json"])
           return
         }
         await expect(prepared).rejects.toThrow(status === 404 ? "--fresh-catalog" : "HTTP 503")
@@ -187,17 +186,39 @@ test("CLI accepts the exact workflow artifact before its mirror exists", async (
   )
 })
 
-test("builds reject noncanonical inputs until explicit preparation is requested", async () => {
+test("fresh preparation requires the pinned fork and never blesses arbitrary supplied JSON", async () => {
   await using tmp = await fixture({
     anthropic: provider,
     openai: { ...provider, id: "openai", npm: "unreviewed-package" },
   })
   const pinned = await generate(tmp.dir, { VECTOR_RELEASE_CATALOG_SHA256: tmp.sha256 })
   expect(pinned.code).not.toBe(0)
-  const prepared = await generate(tmp.dir, { VECTOR_RELEASE_CATALOG_SHA256: tmp.sha256 }, ["--fresh-catalog"])
+  const supplied = await generate(tmp.dir, { VECTOR_RELEASE_CATALOG_SHA256: tmp.sha256 }, ["--fresh-catalog"])
+  expect(supplied.code).not.toBe(0)
+  expect(supplied.stderr).toContain("Fresh catalogs must come from the pinned Vector fork")
+  const missing = await generate(tmp.dir, { VECTOR_RELEASE_CATALOG_PATH: "" }, ["--fresh-catalog"])
+  expect(missing.code).not.toBe(0)
+  expect(missing.stderr).toContain("there is no external catalog fallback")
+  await using fork = await catalogForkFixture({
+    "vector/api.json": await Bun.file(path.join(tmp.dir, "input.json")).text(),
+  })
+  const prepared = await generate(
+    tmp.dir,
+    {
+      VECTOR_RELEASE_CATALOG_PATH: "",
+      VECTOR_CATALOG_FORK_PATH: fork.input.directory,
+      VECTOR_CATALOG_FORK_REPOSITORY: fork.input.repository,
+      VECTOR_CATALOG_FORK_REVISION: fork.input.revision,
+    },
+    ["--fresh-catalog"],
+  )
   expect(prepared.code, prepared.stderr).toBe(0)
   expect(prepared.stderr).toContain("Omitting catalog provider openai")
   expect(JSON.parse(await Bun.file(path.join(tmp.dir, "api.json")).text())).toEqual({ anthropic: provider })
+  expect(await Bun.file(path.join(tmp.dir, "api.json.provenance.json")).json()).toMatchObject({
+    repository: fork.input.repository,
+    revision: fork.input.revision,
+  })
 })
 
 test("an existing mirror cannot be normalized into a different release artifact", async () => {

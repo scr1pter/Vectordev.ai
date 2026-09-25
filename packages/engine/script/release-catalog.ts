@@ -2,6 +2,7 @@ import path from "path"
 import { ModelCatalog } from "@vectordevai/schema/model-catalog"
 import { filterProviderCatalog } from "@vectordevai/schema/provider-policy"
 import { Schema } from "effect"
+import { catalogFork } from "./catalog-fork"
 
 export function catalogDigest(text: string) {
   return new Bun.CryptoHasher("sha256").update(text).digest("hex")
@@ -41,12 +42,29 @@ export function releaseCatalogURL(version: string) {
   return `https://42qryducihx01gl0.public.blob.vercel-storage.com/releases/vector-v${version}/api.json`
 }
 
+export async function freshCatalog(input?: Parameters<typeof catalogFork>[0]) {
+  const fork = await catalogFork(input)
+  const source = await fork.read("vector/api.json")
+  const text = catalogBody(source, true)
+  return {
+    text,
+    provenance: {
+      repository: fork.repository,
+      revision: fork.revision,
+      path: "vector/api.json",
+      sourceSha256: catalogDigest(source),
+      sha256: catalogDigest(text),
+    },
+  }
+}
+
 export async function prepareReleaseCatalog(input: {
   version: string
   directory: string
   fresh?: boolean
   file?: string
   sha256?: string
+  fork?: Parameters<typeof catalogFork>[0]
   request?: (input: string, init: RequestInit) => Promise<Response>
 }) {
   if (input.file || input.sha256) {
@@ -72,21 +90,22 @@ export async function prepareReleaseCatalog(input: {
     throw new Error(
       "The immutable release catalog is missing. Prepare and review it with --fresh-catalog before building.",
     )
-  const upstream =
-    response.status === 404
-      ? await request("https://models.dev/api.json", { redirect: "error", signal: AbortSignal.timeout(30_000) })
-      : undefined
-  if (upstream && !upstream.ok) throw new Error(`Fresh catalog source returned HTTP ${upstream.status}`)
-  const body = await (upstream ?? response).text()
-  const text = catalogBody(body, Boolean(upstream))
-  if (!upstream && text !== body)
+  const prepared = response.status === 404 ? await freshCatalog(input.fork) : undefined
+  const body = prepared?.text ?? (await response.text())
+  const text = catalogBody(body)
+  if (text !== body)
     throw new Error("The immutable release catalog is not a prepared Vector snapshot; refusing to change its content")
   const file = path.join(input.directory, "api.json")
   const sha256 = catalogDigest(text)
   await Bun.write(file, text)
   await Bun.write(path.join(input.directory, "api.sha256"), `${sha256}  api.json\n`)
+  if (prepared)
+    await Bun.write(
+      path.join(input.directory, "api.provenance.json"),
+      JSON.stringify(prepared.provenance, null, 2) + "\n",
+    )
   console.log(
-    `Prepared Vector release catalog from ${upstream ? "https://models.dev/api.json" : source}; sha256=${sha256}`,
+    `Prepared Vector release catalog from ${prepared ? `${prepared.provenance.repository}@${prepared.provenance.revision}` : source}; sha256=${sha256}`,
   )
   return { file, sha256 }
 }
