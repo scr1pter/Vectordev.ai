@@ -5,6 +5,15 @@ import os from "node:os"
 
 type Entry = { name: string; version: string; license: string; texts: string[] }
 type PlatformEntry = Entry & { integrity: string; source: string; override?: string }
+type BundledEntry = {
+  name: string
+  version: string
+  integrity: string
+  source: string
+  publisherCommit: string
+  publisherLock: string
+  components: (PlatformEntry & { textSha256: string; publisherPath: string })[]
+}
 type Locked = [
   string,
   string,
@@ -21,6 +30,14 @@ export async function dependencyNotices(root: string, refreshPlatforms = false) 
   const inventory: Record<string, PlatformEntry> = await Bun.file(inventoryFile)
     .json()
     .catch(() => ({}))
+  const bundledFile = Bun.file(path.join(root, "licenses/dependencies/bundled-provider-notices.json"))
+  const bundled: Record<string, BundledEntry> = (await bundledFile.exists()) ? await bundledFile.json() : {}
+  if (!bundled || typeof bundled !== "object" || Array.isArray(bundled))
+    throw new Error("Invalid bundled provider notice inventory")
+  // These published SDKs embed dependency code outside the installer's graph.
+  // Removing their inventory must not silently remove their embedded notices.
+  const requiredBundles = new Set(["@jerome-benoit/sap-ai-provider", "merge-gateway-ai-sdk-provider"])
+  const usedBundles = new Set<string>()
   const lockedPackages = new Map<string, Locked[]>()
   const lockedParents = new Map<string, string[]>()
   for (const [key, entry] of Object.entries(lock.packages)) {
@@ -100,6 +117,60 @@ export async function dependencyNotices(root: string, refreshPlatforms = false) 
       texts,
       ...(overrides.has(override) ? { override } : {}),
     }
+  }
+
+  function includeBundled(pkg: { name: string; version: string }) {
+    const identity = `${pkg.name}@${pkg.version}`
+    const record = bundled[identity]
+    if (!record) {
+      if (requiredBundles.has(pkg.name)) throw new Error(`Missing bundled provider notices for ${identity}`)
+      return
+    }
+    if (usedBundles.has(identity)) return
+    const locked = lockedPackages.get(pkg.name)?.filter((entry) => entry[0] === identity)
+    if (
+      record.name !== pkg.name ||
+      record.version !== pkg.version ||
+      !locked?.length ||
+      locked.some((entry) => entry[3] !== record.integrity) ||
+      !/^sha512-[A-Za-z0-9+/]{86}==$/.test(record.integrity) ||
+      record.source !== `https://registry.npmjs.org/${pkg.name}/-/${pkg.name.split("/").at(-1)}-${pkg.version}.tgz` ||
+      !/^[a-f0-9]{40}$/.test(record.publisherCommit) ||
+      typeof record.publisherLock !== "string" ||
+      !record.publisherLock.startsWith("https://raw.githubusercontent.com/") ||
+      !record.publisherLock.endsWith(`/${record.publisherCommit}/package-lock.json`) ||
+      !Array.isArray(record.components) ||
+      !record.components.length
+    )
+      throw new Error(
+        `Missing or stale bundled provider notices for ${identity}; verify the exact publisher artifact again`,
+      )
+    const seen = new Set<string>()
+    for (const component of record.components) {
+      const name = `${component.name}@${component.version}`
+      if (
+        typeof component.name !== "string" ||
+        !/^(?:@[a-z0-9_.-]+\/)?[a-z0-9_.-]+$/i.test(component.name) ||
+        typeof component.version !== "string" ||
+        !/^\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$/.test(component.version) ||
+        !/^sha512-[A-Za-z0-9+/]{86}==$/.test(component.integrity) ||
+        component.source !==
+          `https://registry.npmjs.org/${component.name}/-/${component.name.split("/").at(-1)}-${component.version}.tgz` ||
+        typeof component.publisherPath !== "string" ||
+        !component.publisherPath.endsWith(`node_modules/${component.name}`) ||
+        typeof component.license !== "string" ||
+        !component.license.trim() ||
+        !Array.isArray(component.texts) ||
+        !component.texts.length ||
+        component.texts.some((text) => typeof text !== "string" || !text.trim()) ||
+        component.textSha256 !== new Bun.CryptoHasher("sha256").update(JSON.stringify(component.texts)).digest("hex") ||
+        seen.has(name)
+      )
+        throw new Error(`Invalid bundled component notice for ${name} in ${identity}`)
+      seen.add(name)
+      entries.push(component)
+    }
+    usedBundles.add(identity)
   }
 
   async function visitPlatform(locked: Locked, from: string, installed?: string) {
@@ -222,6 +293,7 @@ export async function dependencyNotices(root: string, refreshPlatforms = false) 
       const locked = platformLock(pkg.name, pkg.version)
       if (locked) return visitPlatform(locked, dir, refreshPlatforms ? dir : undefined)
       entries.push(await legal(dir))
+      includeBundled(pkg)
     }
     const extra = new Set<string>()
     if (workspace) {
@@ -247,6 +319,8 @@ export async function dependencyNotices(root: string, refreshPlatforms = false) 
     throw new Error(
       `Missing license texts (add exact upstream notices under licenses/dependencies):\n${missing.join("\n")}`,
     )
+  const unusedBundles = Object.keys(bundled).filter((identity) => !usedBundles.has(identity))
+  if (unusedBundles.length) throw new Error(`Unused bundled provider notice records: ${unusedBundles.join(", ")}`)
   const stale = Object.keys(inventory).filter((identity) => !platforms.has(identity))
   if (!refreshPlatforms && stale.length) throw new Error(`Unused platform notice records: ${stale.join(", ")}`)
   if (refreshPlatforms)
@@ -254,16 +328,23 @@ export async function dependencyNotices(root: string, refreshPlatforms = false) 
       inventoryFile,
       JSON.stringify(Object.fromEntries([...platforms].sort(([a], [b]) => a.localeCompare(b))), null, 2) + "\n",
     )
-  const unique = [...new Map(entries.map((entry) => [`${entry.name}@${entry.version}`, entry])).values()].sort((a, b) =>
-    `${a.name}@${a.version}`.localeCompare(`${b.name}@${b.version}`),
-  )
+  const merged = new Map<string, Entry>()
+  for (const entry of entries) {
+    const identity = `${entry.name}@${entry.version}`
+    const existing = merged.get(identity)
+    if (existing && existing.license !== entry.license)
+      throw new Error(`Conflicting license declarations for ${identity}`)
+    merged.set(identity, { ...entry, texts: [...new Set([...(existing?.texts ?? []), ...entry.texts])] })
+  }
+  const unique = [...merged.values()].sort((a, b) => `${a.name}@${a.version}`.localeCompare(`${b.name}@${b.version}`))
   return {
     count: unique.length,
     body: [
       "# Vector bundled dependency notices",
-      "Generated from Vector's runtime dependency closure and locked platform-package license sources. Includes bundled JavaScript and external native packages for every locked platform, independent of the build host. Vector's own notices, vendored assets and runtimes are covered in THIRD_PARTY_NOTICES.md. Individual component licenses remain authoritative.",
+      "Generated from Vector's runtime dependency closure, locked platform-package license sources, and integrity-pinned inventories of code embedded in provider SDKs. Includes bundled JavaScript and external native packages for every locked platform, independent of the build host. Vector's own notices, vendored assets and runtimes are covered in THIRD_PARTY_NOTICES.md. Individual component licenses remain authoritative.",
       ...unique.map(
-        (entry) => `## ${entry.name}@${entry.version}\n\nLicense: ${entry.license}\n\n${entry.texts.join("\n\n")}`,
+        (entry) =>
+          `## ${entry.name}@${entry.version}\n\nLicense: ${entry.license}\n\n${entry.texts.map((text) => text.replaceAll("\r\n", "\n").replace(/[ \t]+$/gm, "")).join("\n\n")}`,
       ),
       "",
     ].join("\n\n"),

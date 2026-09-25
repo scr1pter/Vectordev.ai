@@ -1,0 +1,58 @@
+diff --git a/dist/index.d.mts b/dist/index.d.mts
+index cf4f454122f65fefd0a02ce74c767e0a9e2a3a0e..d4f6fe646efb195a81cb4cdbe84724c18005b752 100644
+--- a/dist/index.d.mts
++++ b/dist/index.d.mts
+@@ -45,6 +45,8 @@ type AiGatewayOptions = {
+     retries?: AiGatewayReties;
+ };
+ type AiGatewayAPISettings = {
++    fetch?: FetchFunction;
++    headers?: Record<string, string>;
+     gateway: string;
+     accountId: string;
+     apiKey?: string;
+diff --git a/dist/index.d.ts b/dist/index.d.ts
+index cf4f454122f65fefd0a02ce74c767e0a9e2a3a0e..d4f6fe646efb195a81cb4cdbe84724c18005b752 100644
+--- a/dist/index.d.ts
++++ b/dist/index.d.ts
+@@ -45,6 +45,8 @@ type AiGatewayOptions = {
+     retries?: AiGatewayReties;
+ };
+ type AiGatewayAPISettings = {
++    fetch?: FetchFunction;
++    headers?: Record<string, string>;
+     gateway: string;
+     accountId: string;
+     apiKey?: string;
+diff --git a/dist/index.js b/dist/index.js
+index 6fb7ae621cf5fe350ec9295af8f3d3507d265df3..b70edea635e1c2d1f093287c452811774cb8fcf3 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -228,9 +228,10 @@ var AiGatewayChatLanguageModel = class {
+         signal: options.abortSignal
+       });
+     } else {
++      new Headers(this.config.headers).forEach((value, key) => headers.set(key, value));
+       headers.set("Content-Type", "application/json");
+       headers.set("cf-aig-authorization", `Bearer ${this.config.apiKey}`);
+-      resp = await fetch(
++      resp = await (this.config.fetch ?? fetch)(
+         `https://gateway.ai.cloudflare.com/v1/${this.config.accountId}/${this.config.gateway}`,
+         {
+           body: JSON.stringify(body),
+diff --git a/dist/index.mjs b/dist/index.mjs
+index 1c00a815117b5854073eb9c01cafa5bc273a367e..3a21d692b54190cb79d6753dc8fc0c8f91406f22 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -199,9 +199,10 @@ var AiGatewayChatLanguageModel = class {
+         signal: options.abortSignal
+       });
+     } else {
++      new Headers(this.config.headers).forEach((value, key) => headers.set(key, value));
+       headers.set("Content-Type", "application/json");
+       headers.set("cf-aig-authorization", `Bearer ${this.config.apiKey}`);
+-      resp = await fetch(
++      resp = await (this.config.fetch ?? fetch)(
+         `https://gateway.ai.cloudflare.com/v1/${this.config.accountId}/${this.config.gateway}`,
+         {
+           body: JSON.stringify(body),

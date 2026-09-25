@@ -1,159 +1,91 @@
+import "../../src/plugin/internal"
 import { AISDK } from "@vectordevai/core/aisdk"
-import { describe, expect } from "bun:test"
-import { Effect } from "effect"
+import { expect } from "bun:test"
+import { Effect, Exit } from "effect"
 import { ModelV2 } from "@vectordevai/core/model"
 import { PluginV2 } from "@vectordevai/core/plugin"
 import { PluginHost } from "@vectordevai/core/plugin/host"
-import { Npm } from "@vectordevai/core/npm"
 import { SapAICorePlugin } from "@vectordevai/core/plugin/provider/sap-ai-core"
 import { ProviderV2 } from "@vectordevai/core/provider"
 import { testEffect } from "../lib/effect"
 import { PluginTestLayer } from "./fixture"
 
-const fixtureProvider = new URL("./fixtures/provider-factory.ts", import.meta.url).href
 const it = testEffect(PluginTestLayer)
-const npm = Npm.Service.of({
-  add: () => Effect.succeed({ directory: "", entrypoint: undefined }),
-  install: () => Effect.void,
-  which: () => Effect.succeed(undefined),
+const model = ModelV2.Info.make({
+  ...ModelV2.Info.empty(ProviderV2.ID.make("sap-ai-core"), ModelV2.ID.make("gpt-4o")),
+  api: { id: ModelV2.ID.make("gpt-4o"), type: "aisdk", package: "@jerome-benoit/sap-ai-provider" },
 })
 
-const addPlugin = Effect.fn(function* () {
-  const plugin = yield* PluginV2.Service
-  const aisdk = yield* AISDK.Service
-  const host = yield* PluginHost.make(plugin)
-  yield* SapAICorePlugin.effect(host).pipe(Effect.provideService(Npm.Service, npm))
-})
-
-function withEnv<A, E, R>(vars: Record<string, string | undefined>, effect: () => Effect.Effect<A, E, R>) {
-  return Effect.acquireUseRelease(
-    Effect.sync(() => {
-      const previous = Object.fromEntries(Object.keys(vars).map((key) => [key, process.env[key]]))
-      for (const [key, value] of Object.entries(vars)) {
-        if (value === undefined) delete process.env[key]
-        else process.env[key] = value
-      }
-      return previous
-    }),
-    effect,
-    (previous) =>
-      Effect.sync(() => {
-        for (const [key, value] of Object.entries(previous)) {
-          if (value === undefined) delete process.env[key]
-          else process.env[key] = value
-        }
-      }),
-  )
-}
-
-function model(providerID: string) {
-  return ModelV2.Info.make({
-    ...ModelV2.Info.empty(ProviderV2.ID.make(providerID), ModelV2.ID.make("sap-model")),
-    api: { id: ModelV2.ID.make("sap-model"), type: "aisdk", package: fixtureProvider },
-  })
-}
-
-describe("SapAICorePlugin", () => {
-  it.effect("copies serviceKey option into AICORE_SERVICE_KEY but keeps SDK options to deployment metadata", () =>
-    withEnv(
-      { AICORE_SERVICE_KEY: undefined, AICORE_DEPLOYMENT_ID: "deployment", AICORE_RESOURCE_GROUP: "resource-group" },
-      () =>
-        Effect.gen(function* () {
-          const plugin = yield* PluginV2.Service
-          const aisdk = yield* AISDK.Service
-          yield* addPlugin()
-          const sdk = yield* aisdk.runSDK({
-            model: model("sap-ai-core"),
-            package: fixtureProvider,
-            options: { name: "sap-ai-core", serviceKey: "service-key" },
-          })
-          expect(process.env.AICORE_SERVICE_KEY).toBe("service-key")
-          expect(sdk.sdk.options).toEqual({ deploymentId: "deployment", resourceGroup: "resource-group" })
+it.effect("creates a real V3 SAP model without exporting credentials into the process environment", () =>
+  Effect.gen(function* () {
+    const before = process.env.AICORE_SERVICE_KEY
+    const plugin = yield* PluginV2.Service
+    const aisdk = yield* AISDK.Service
+    const host = yield* PluginHost.make(plugin)
+    yield* SapAICorePlugin.effect(host)
+    const result = yield* aisdk.runSDK({
+      model,
+      package: "@jerome-benoit/sap-ai-provider",
+      options: {
+        serviceKey: JSON.stringify({
+          clientid: "fixture-client",
+          clientsecret: "fixture-secret",
+          url: "https://auth.fixture.test",
+          serviceurls: { AI_API_URL: "https://api.fixture.test" },
         }),
-    ),
-  )
-
-  it.effect("preserves existing AICORE_SERVICE_KEY over serviceKey option", () =>
-    withEnv(
-      {
-        AICORE_SERVICE_KEY: "env-service-key",
-        AICORE_DEPLOYMENT_ID: "deployment",
-        AICORE_RESOURCE_GROUP: "resource-group",
+        deploymentId: "fixture-deployment",
       },
-      () =>
-        Effect.gen(function* () {
-          const plugin = yield* PluginV2.Service
-          const aisdk = yield* AISDK.Service
-          yield* addPlugin()
-          const sdk = yield* aisdk.runSDK({
-            model: model("sap-ai-core"),
-            package: fixtureProvider,
-            options: { name: "sap-ai-core", serviceKey: "option-service-key" },
-          })
-          expect(process.env.AICORE_SERVICE_KEY).toBe("env-service-key")
-          expect(sdk.sdk.options).toEqual({ deploymentId: "deployment", resourceGroup: "resource-group" })
-        }),
-    ),
-  )
+    })
+    const language = result.sdk.languageModel("gpt-4o")
+    expect(language.specificationVersion).toBe("v3")
+    expect(language.modelId).toBe("gpt-4o")
+    expect(process.env.AICORE_SERVICE_KEY).toBe(before)
+  }),
+)
 
-  it.effect("omits deployment and resourceGroup SDK options when no service key is available", () =>
-    withEnv(
-      { AICORE_SERVICE_KEY: undefined, AICORE_DEPLOYMENT_ID: "deployment", AICORE_RESOURCE_GROUP: "resource-group" },
-      () =>
-        Effect.gen(function* () {
-          const plugin = yield* PluginV2.Service
-          const aisdk = yield* AISDK.Service
-          yield* addPlugin()
-          const sdk = yield* aisdk.runSDK({
-            model: model("sap-ai-core"),
-            package: fixtureProvider,
-            options: { name: "sap-ai-core" },
-          })
-          expect(process.env.AICORE_SERVICE_KEY).toBeUndefined()
-          expect(sdk.sdk.options).toEqual({})
-        }),
-    ),
-  )
+it.effect("rejects a malformed service key without echoing its contents", () =>
+  Effect.gen(function* () {
+    const plugin = yield* PluginV2.Service
+    const aisdk = yield* AISDK.Service
+    const host = yield* PluginHost.make(plugin)
+    yield* SapAICorePlugin.effect(host)
+    const result = yield* Effect.exit(
+      aisdk.runSDK({
+        model,
+        package: "@jerome-benoit/sap-ai-provider",
+        options: { serviceKey: "fixture-secret-invalid-json" },
+      }),
+    )
+    expect(Exit.isFailure(result)).toBe(true)
+    expect(JSON.stringify(result)).not.toContain("fixture-secret-invalid-json")
+  }),
+)
 
-  it.effect("uses the callable SDK for language selection", () =>
-    Effect.gen(function* () {
-      const plugin = yield* PluginV2.Service
-      const aisdk = yield* AISDK.Service
-      yield* addPlugin()
-      const sdk = Object.assign((modelID: string) => ({ modelID, provider: "callable" }), {
-        languageModel() {
-          throw new Error("SAP AI Core should call the SDK directly")
-        },
-      })
-      const language = yield* aisdk.runLanguage({ model: model("sap-ai-core"), sdk, options: {} })
-      expect(language.language as unknown).toEqual({ modelID: "sap-model", provider: "callable" })
-    }),
-  )
+it.effect("does not install arbitrary packages advertised under the SAP provider name", () =>
+  Effect.gen(function* () {
+    const plugin = yield* PluginV2.Service
+    const aisdk = yield* AISDK.Service
+    const host = yield* PluginHost.make(plugin)
+    yield* SapAICorePlugin.effect(host)
+    const result = yield* aisdk.runSDK({ model, package: "file:///unreviewed-provider.js", options: {} })
+    expect(result.sdk).toBeUndefined()
+  }),
+)
 
-  it.effect("ignores non-SAP AI Core providers", () =>
-    withEnv(
-      { AICORE_SERVICE_KEY: undefined, AICORE_DEPLOYMENT_ID: "deployment", AICORE_RESOURCE_GROUP: "resource-group" },
-      () =>
-        Effect.gen(function* () {
-          const plugin = yield* PluginV2.Service
-          const aisdk = yield* AISDK.Service
-          yield* addPlugin()
-          const sdk = yield* aisdk.runSDK({
-            model: model("openai"),
-            package: fixtureProvider,
-            options: { name: "openai", serviceKey: "service-key" },
-          })
-          const language = yield* aisdk.runLanguage({
-            model: model("openai"),
-            sdk: () => {
-              throw new Error("SAP AI Core should ignore other providers")
-            },
-            options: {},
-          })
-          expect(process.env.AICORE_SERVICE_KEY).toBeUndefined()
-          expect(sdk.sdk).toBeUndefined()
-          expect(language.language).toBeUndefined()
-        }),
-    ),
-  )
-})
+it.effect("rejects service-key endpoint overrides before resolving credentials", () =>
+  Effect.promise(async () => {
+    const { ProviderSDK } = await import("../../src/provider-sdk")
+    const create = await ProviderSDK.load("@jerome-benoit/sap-ai-provider")
+    const serviceKey = JSON.stringify({
+      clientid: "fixture-client",
+      clientsecret: "fixture-secret",
+      url: "https://auth.fixture.test",
+      serviceurls: { AI_API_URL: "https://api.fixture.test" },
+    })
+    for (const name of ["url", "baseURL", "socketPath", "auth", "adapter", "transport"]) {
+      expect(() => create({ serviceKey, requestConfig: { [name]: "https://foreign.fixture.test" } })).toThrow(
+        "cannot be combined",
+      )
+    }
+  }),
+)

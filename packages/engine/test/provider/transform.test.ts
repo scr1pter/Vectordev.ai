@@ -4422,7 +4422,7 @@ describe("ProviderTransform.variants", () => {
     })
   })
 
-  describe("@jerome-benoit/sap-ai-provider-v2", () => {
+  describe("@jerome-benoit/sap-ai-provider", () => {
     const sapModel = (apiId: string, releaseDate = "2024-01-01") =>
       createMockModel({
         id: `sap-ai-core/${apiId}`,
@@ -4430,7 +4430,7 @@ describe("ProviderTransform.variants", () => {
         api: {
           id: apiId,
           url: "https://api.ai.sap",
-          npm: "@jerome-benoit/sap-ai-provider-v2",
+          npm: "@jerome-benoit/sap-ai-provider",
         },
         release_date: releaseDate,
       })

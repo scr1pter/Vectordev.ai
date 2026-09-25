@@ -2,12 +2,12 @@ import { Effect } from "effect"
 import { define } from "../internal"
 import { ProviderSDK } from "../../provider-sdk"
 
-export const CloudflareAIGatewayPlugin = define({
-  id: "cloudflare-ai-gateway",
+export const ReviewedProviderPlugin = define({
+  id: "reviewed-providers",
   effect: Effect.fn(function* (ctx) {
     yield* ctx.aisdk.sdk(
       Effect.fn(function* (evt) {
-        if (evt.package !== "ai-gateway-provider") return
+        if (!ProviderSDK.packages.includes(evt.package as (typeof ProviderSDK.packages)[number]) || evt.sdk) return
         const create = yield* Effect.promise(() => ProviderSDK.load(evt.package))
         evt.sdk = create(evt.options)
       }),

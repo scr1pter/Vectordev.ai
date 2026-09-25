@@ -4,6 +4,12 @@ Vector includes third-party software that remains governed by its original
 license. The Vector commercial license applies only to Vector-owned materials
 and does not replace or narrow these third-party terms.
 
+## Bundled provider SDKs
+
+Vector bundles Cloudflare AI Gateway `ai-gateway-provider@3.1.2` (MIT), SAP AI Core `@jerome-benoit/sap-ai-provider@4.9.1` (Apache-2.0), `@aihubmix/ai-sdk-provider@2.2.1` (declared Apache-2.0), `merge-gateway-ai-sdk-provider@0.3.0` (MIT), `watsonx-ai-provider@2.0.0` (Apache-2.0), and `@qvac/ai-sdk-provider@0.1.0` (Apache-2.0). Their full notices and the licenses of embedded components are in `DEPENDENCY_NOTICES.md`; exact provenance is recorded under `licenses/dependencies/`. QVAC's supplied NOTICE is reproduced there. AIHubMix omits a license file from its exact package and source commit; its declared Apache-2.0 license is reproduced without inventing a package-specific copyright notice.
+
+SAP's published JavaScript also contains 51 dependency components, and Merge's SDK embeds Zod 4.3.6. Their integrity-verified license texts are included even when the component is absent from Vector's install graph. Cloudflare's SDK has a Vector modification to pass an explicit request transport and headers to its outer gateway request; the original MIT attribution is retained. The MIT notice for `@ai-sdk/provider-utils`' embedded `zod3-to-json-schema` code and node-rsa's additional Tom Wu notices are also preserved. Provider names and marks identify their respective providers and do not imply endorsement.
+
 <!-- vector-upstream-attribution -->
 
 ## OpenCode-derived portions

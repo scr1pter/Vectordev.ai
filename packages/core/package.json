@@ -75,8 +75,8 @@
     "@ai-sdk/openai": "3.0.53",
     "@ai-sdk/openai-compatible": "2.0.41",
     "@ai-sdk/perplexity": "3.0.26",
-    "@ai-sdk/provider": "3.0.8",
-    "@ai-sdk/provider-utils": "4.0.23",
+    "@ai-sdk/provider": "3.0.16",
+    "@ai-sdk/provider-utils": "4.0.52",
     "@ai-sdk/togetherai": "2.0.41",
     "@ai-sdk/vercel": "2.0.39",
     "@ai-sdk/xai": "3.0.82",
@@ -123,7 +123,12 @@
     "venice-ai-sdk-provider": "2.1.1",
     "which": "6.0.1",
     "xdg-basedir": "5.1.0",
-    "zod": "catalog:"
+    "zod": "catalog:",
+    "@aihubmix/ai-sdk-provider": "2.2.1",
+    "@jerome-benoit/sap-ai-provider": "4.9.1",
+    "@qvac/ai-sdk-provider": "0.1.0",
+    "merge-gateway-ai-sdk-provider": "0.3.0",
+    "watsonx-ai-provider": "2.0.0"
   },
   "overrides": {
     "drizzle-orm": "catalog:"

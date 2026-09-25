@@ -277,3 +277,31 @@ for (const result of ["same", "missing", "different", "failed"] as const) {
     }
   })
 }
+
+test("reviewed V3 SDKs survive catalog preparation and old SAP package identities normalize", () => {
+  const packages = {
+    "cloudflare-ai-gateway": "ai-gateway-provider",
+    "sap-ai-core": "@jerome-benoit/sap-ai-provider-v2",
+    aihubmix: "@aihubmix/ai-sdk-provider",
+    "merge-gateway": "merge-gateway-ai-sdk-provider",
+    watsonx: "watsonx-ai-provider",
+    qvac: "@qvac/ai-sdk-provider",
+    "salad-cloud": "@saladtechnologies/ai-sdk-provider",
+  }
+  const input = Object.fromEntries(
+    Object.entries(packages).map(([id, npm]) => [
+      id,
+      { ...provider, id, npm, ...(id === "qvac" ? { api: "http://127.0.0.1:11435/v1" } : {}) },
+    ]),
+  )
+  const result = JSON.parse(catalogBody(JSON.stringify(input), true))
+  expect(Object.keys(result)).toHaveLength(6)
+  expect(result["sap-ai-core"].npm).toBe("@jerome-benoit/sap-ai-provider")
+  expect(result["salad-cloud"]).toBeUndefined()
+  expect(result.qvac.api).toBeUndefined()
+  expect(ModelCatalog.packageAllowed("@saladtechnologies/ai-sdk-provider")).toBe(false)
+  expect(ModelCatalog.packageAllowed("@jerome-benoit/sap-ai-provider-v2")).toBe(false)
+  expect(ModelCatalog.decodeCatalog({ "sap-ai-core": input["sap-ai-core"] })["sap-ai-core"].npm).toBe(
+    "@jerome-benoit/sap-ai-provider",
+  )
+})

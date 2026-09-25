@@ -15,6 +15,7 @@ import { Config } from "@/config/config"
 import { Env } from "../../src/env"
 import { Plugin } from "../../src/plugin/index"
 import { Provider } from "@/provider/provider"
+import { ProviderTransform } from "@/provider/transform"
 
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Filesystem } from "@/util/filesystem"
@@ -2022,3 +2023,58 @@ it.instance(
     },
   },
 )
+
+for (const entry of [
+  {
+    id: "cloudflare-ai-gateway",
+    npm: "ai-gateway-provider",
+    options: { accountId: "fixture", gatewayId: "fixture", apiKey: "fixture-key" },
+  },
+  {
+    id: "sap-ai-core",
+    npm: "@jerome-benoit/sap-ai-provider",
+    options: {
+      destination: { url: "https://sap.fixture.test", authentication: "NoAuthentication" },
+      deploymentId: "fixture",
+    },
+  },
+  {
+    id: "aihubmix",
+    npm: "@aihubmix/ai-sdk-provider",
+    options: { apiKey: "fixture-key", baseURL: "http://127.0.0.1:1" },
+  },
+  { id: "merge-gateway", npm: "merge-gateway-ai-sdk-provider", options: { apiKey: "fixture-key" } },
+  { id: "watsonx", npm: "watsonx-ai-provider", options: { apiKey: "fixture-key", projectId: "fixture-project" } },
+  { id: "qvac", npm: "@qvac/ai-sdk-provider", options: { baseURL: "http://127.0.0.1:11435/v1" } },
+]) {
+  it.instance(
+    `restored ${entry.id} resolves an actual bundled V3 language model`,
+    () =>
+      Effect.gen(function* () {
+        const provider = yield* Provider.Service
+        const model = yield* provider.getModel(ProviderV2.ID.make(entry.id), ModelV2.ID.make("fixture"))
+        expect(model.api.npm).toBe(entry.npm)
+        if (entry.id === "merge-gateway")
+          expect(ProviderTransform.providerOptions(model, { strictJsonSchema: false })).toEqual({
+            mergeGateway: { strictJsonSchema: false },
+          })
+        if (entry.id === "aihubmix")
+          expect(
+            ProviderTransform.providerOptions(
+              { ...model, api: { ...model.api, id: "gemini-fixture" } },
+              { thinkingConfig: { thinkingBudget: 100 } },
+            ),
+          ).toEqual({ google: { thinkingConfig: { thinkingBudget: 100 } } })
+
+        const language = yield* provider.getLanguage(model)
+        expect(language.specificationVersion).toBe("v3")
+        expect(typeof language.doGenerate).toBe("function")
+        expect(typeof language.doStream).toBe("function")
+      }),
+    {
+      config: {
+        provider: { [entry.id]: { npm: entry.npm, options: entry.options, models: { fixture: { name: "Fixture" } } } },
+      },
+    },
+  )
+}

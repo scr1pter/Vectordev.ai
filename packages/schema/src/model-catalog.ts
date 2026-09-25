@@ -130,6 +130,12 @@ export const BUNDLED_PROVIDER_PACKAGES = [
   "gitlab-ai-provider",
   "@ai-sdk/github-copilot",
   "venice-ai-sdk-provider",
+  "ai-gateway-provider",
+  "@jerome-benoit/sap-ai-provider",
+  "@aihubmix/ai-sdk-provider",
+  "merge-gateway-ai-sdk-provider",
+  "watsonx-ai-provider",
+  "@qvac/ai-sdk-provider",
 ] as const
 
 const bundled = new Set<string>(BUNDLED_PROVIDER_PACKAGES)
@@ -140,7 +146,7 @@ export function packageAllowed(value: string | undefined) {
 export const Catalog = Schema.Record(Schema.String, Provider)
 
 export function decodeCatalog(value: unknown) {
-  const catalog = Schema.decodeUnknownSync(Catalog, { onExcessProperty: "preserve" })(value)
+  const catalog = normalizePackages(Schema.decodeUnknownSync(Catalog, { onExcessProperty: "preserve" })(value))
   for (const [id, provider] of Object.entries(catalog)) {
     if (provider.id !== id) throw new Error(`Catalog provider identity does not match ${id}`)
     if (!packageAllowed(provider.npm)) throw new Error(`Catalog provider ${id} requires an unbundled SDK`)
@@ -150,4 +156,38 @@ export function decodeCatalog(value: unknown) {
     }
   }
   return filterProviderCatalog(catalog)
+}
+
+// The upstream catalog used the separate AI SDK V2 package name. Vector bundles
+// the reviewed V3 release under its canonical package identity.
+export function normalizePackages(catalog: typeof Catalog.Type) {
+  const normalize = (npm: string | undefined) =>
+    npm === "@jerome-benoit/sap-ai-provider-v2" ? "@jerome-benoit/sap-ai-provider" : npm
+  return Object.fromEntries(
+    Object.entries(catalog).map(([id, provider]) => {
+      const result = {
+        ...provider,
+        ...(provider.npm ? { npm: normalize(provider.npm) } : {}),
+        models: Object.fromEntries(
+          Object.entries(provider.models).map(([modelID, model]) => {
+            const settings = model.provider ? { ...model.provider } : undefined
+            if (id === "qvac" && settings) delete settings.api
+            return [
+              modelID,
+              {
+                ...model,
+                ...(settings
+                  ? { provider: { ...settings, ...(settings.npm ? { npm: normalize(settings.npm) } : {}) } }
+                  : {}),
+              },
+            ]
+          }),
+        ),
+      }
+      // QVAC's catalog URL is a placeholder, not a provisioned local runtime.
+      // Users select their already-running server explicitly in provider options.
+      if (id === "qvac") delete result.api
+      return [id, result]
+    }),
+  )
 }

@@ -12,7 +12,9 @@ export function catalogBody(text: string, fresh = false) {
   const value: unknown = JSON.parse(text)
   if (!value || typeof value !== "object" || Array.isArray(value) || !Object.keys(value).length)
     throw new Error("The release catalog must be a nonempty provider object")
-  const shaped = Schema.decodeUnknownSync(ModelCatalog.Catalog, { onExcessProperty: "preserve" })(value)
+  const shaped = ModelCatalog.normalizePackages(
+    Schema.decodeUnknownSync(ModelCatalog.Catalog, { onExcessProperty: "preserve" })(value),
+  )
   const catalog = filterProviderCatalog(shaped)
   const reviewed = fresh
     ? Object.fromEntries(

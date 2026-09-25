@@ -50,6 +50,8 @@ function sdkKey(npm: string): string | undefined {
       return "gateway"
     case "@openrouter/ai-sdk-provider":
       return "openrouter"
+    case "merge-gateway-ai-sdk-provider":
+      return "mergeGateway"
     case "ai-gateway-provider":
       // ai-gateway-provider/unified wraps createOpenAICompatible({ name: "Unified" }),
       // and @ai-sdk/openai-compatible parses compatibleOptions from one of
@@ -1034,7 +1036,7 @@ export function variants(model: Provider.Model): Record<string, Record<string, a
       // https://v5.ai-sdk.dev/providers/ai-sdk-providers/perplexity
       return {}
 
-    case "@jerome-benoit/sap-ai-provider-v2": {
+    case "@jerome-benoit/sap-ai-provider": {
       if (id.includes("anthropic")) {
         if (adaptiveEfforts) {
           // Bedrock adaptive splits `effort` out into `output_config` (vs Anthropic
@@ -1262,6 +1264,14 @@ export function providerOptions(model: Provider.Model, options: { [x: string]: a
     (model.capabilities.reasoning || options.reasoningEffort !== undefined || options.reasoningSummary !== undefined)
       ? { ...options, forceReasoning: true }
       : options
+
+  if (
+    model.api.npm === "@aihubmix/ai-sdk-provider" &&
+    /^(gemini|imagen)/.test(model.api.id) &&
+    !model.api.id.endsWith("-nothink") &&
+    !model.api.id.endsWith("-search")
+  )
+    return { google: normalized }
 
   if (model.api.npm === "@ai-sdk/gateway") {
     // Gateway providerOptions are split across two namespaces:

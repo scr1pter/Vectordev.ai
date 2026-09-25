@@ -1,3 +1,4 @@
+import { ProviderSDK } from "@vectordevai/core/provider-sdk"
 import { FreeModels } from "@vectordevai/core/free-models"
 import { freeModelRequest, serializeFreeModelRequest } from "@vectordevai/core/free-model-request"
 import type { FreeModelInfo } from "@vectordevai/schema/free-model"
@@ -119,6 +120,12 @@ type BundledSDK = {
 }
 
 const BUNDLED_PROVIDERS: Record<string, () => Promise<(opts: any) => BundledSDK>> = {
+  "ai-gateway-provider": () => ProviderSDK.load("ai-gateway-provider"),
+  "@jerome-benoit/sap-ai-provider": () => ProviderSDK.load("@jerome-benoit/sap-ai-provider"),
+  "@aihubmix/ai-sdk-provider": () => ProviderSDK.load("@aihubmix/ai-sdk-provider"),
+  "merge-gateway-ai-sdk-provider": () => ProviderSDK.load("merge-gateway-ai-sdk-provider"),
+  "watsonx-ai-provider": () => ProviderSDK.load("watsonx-ai-provider"),
+  "@qvac/ai-sdk-provider": () => ProviderSDK.load("@qvac/ai-sdk-provider"),
   "@ai-sdk/amazon-bedrock": () => import("@ai-sdk/amazon-bedrock").then((m) => m.createAmazonBedrock),
   "@ai-sdk/amazon-bedrock/mantle": () => import("@ai-sdk/amazon-bedrock/mantle").then((m) => m.createBedrockMantle),
   "@ai-sdk/anthropic": () => import("@ai-sdk/anthropic").then((m) => m.createAnthropic),
@@ -551,26 +558,11 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
     }),
     "sap-ai-core": Effect.fnUntraced(function* () {
       const auth = yield* dep.auth("sap-ai-core")
-      // TODO: Using process.env directly because Env.set only updates a shallow copy (not process.env),
-      // until the scope of the Env API is clarified (test only or runtime?)
-      const envServiceKey = iife(() => {
-        const envAICoreServiceKey = process.env.AICORE_SERVICE_KEY
-        if (envAICoreServiceKey) return envAICoreServiceKey
-        if (auth?.type === "api") {
-          process.env.AICORE_SERVICE_KEY = auth.key
-          return auth.key
-        }
-        return undefined
-      })
-      const deploymentId = process.env.AICORE_DEPLOYMENT_ID
-      const resourceGroup = process.env.AICORE_RESOURCE_GROUP
-
+      const env = yield* dep.env()
+      const serviceKey = env.AICORE_SERVICE_KEY ?? (auth?.type === "api" ? auth.key : undefined)
       return {
-        autoload: !!envServiceKey,
-        options: envServiceKey ? { deploymentId, resourceGroup } : {},
-        async getModel(sdk: any, modelID: string) {
-          return sdk(modelID)
-        },
+        autoload: !!serviceKey,
+        options: { serviceKey, deploymentId: env.AICORE_DEPLOYMENT_ID, resourceGroup: env.AICORE_RESOURCE_GROUP },
       }
     }),
     zenmux: () =>
@@ -747,80 +739,23 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
       }
     }),
     "cloudflare-ai-gateway": Effect.fnUntraced(function* (input: Info) {
-      // When baseURL is already configured (e.g. corporate config), skip the ID checks.
-      if (input.options?.baseURL) return { autoload: false }
-
       const auth = yield* dep.auth(input.id)
       const env = yield* dep.env()
-      const accountId = env["CLOUDFLARE_ACCOUNT_ID"] || (auth?.type === "api" ? auth.metadata?.accountId : undefined)
-      // The Cloudflare auth prompt stores this value as gatewayId metadata.
-      const gateway = env["CLOUDFLARE_GATEWAY_ID"] || (auth?.type === "api" ? auth.metadata?.gatewayId : undefined)
-
-      if (!accountId || !gateway) {
-        const missing = [
-          !accountId ? "CLOUDFLARE_ACCOUNT_ID" : undefined,
-          !gateway ? "CLOUDFLARE_GATEWAY_ID" : undefined,
-        ].filter((x): x is string => Boolean(x))
-        return {
-          autoload: false,
-          async getModel() {
-            throw new Error(
-              `${missing.join(" and ")} missing. Set with: ${missing.map((x) => `export ${x}=<value>`).join(" && ")}`,
-            )
-          },
-        }
-      }
-
-      // Get API token from env or auth - required for authenticated gateways
-      const apiToken =
-        env["CLOUDFLARE_API_TOKEN"] || env["CF_AIG_TOKEN"] || (auth?.type === "api" ? auth.key : undefined)
-
-      if (!apiToken) {
-        throw new Error(
-          "CLOUDFLARE_API_TOKEN (or CF_AIG_TOKEN) is required for Cloudflare AI Gateway. " +
-            "Set it via environment variable or run `vector auth cloudflare-ai-gateway`.",
-        )
-      }
-
-      // Use official ai-gateway-provider package (v2.x for AI SDK v5 compatibility)
-      const { createAiGateway } = yield* Effect.promise(() => import("ai-gateway-provider"))
-      const { createUnified } = yield* Effect.promise(() => import("ai-gateway-provider/providers/unified"))
-
-      const metadata = iife(() => {
-        if (input.options?.metadata) return input.options.metadata
-        try {
-          return JSON.parse(input.options?.headers?.["cf-aig-metadata"])
-        } catch {
-          return undefined
-        }
-      })
-      const opts = {
-        metadata,
-        cacheTtl: input.options?.cacheTtl,
-        cacheKey: input.options?.cacheKey,
-        skipCache: input.options?.skipCache,
-        collectLog: input.options?.collectLog,
-        headers: {
-          "User-Agent": `vector/${InstallationVersion} cloudflare-ai-gateway (${os.platform()} ${os.release()}; ${os.arch()})`,
-        },
-      }
-
-      const aigateway = createAiGateway({
-        accountId,
-        gateway,
-        apiKey: apiToken,
-        ...(Object.values(opts).some((v) => v !== undefined) ? { options: opts } : {}),
-      })
-      const unified = createUnified({ apiKey: apiToken })
-
-      return {
-        autoload: true,
-        async getModel(_sdk: any, modelID: string, _options?: Record<string, any>) {
-          // Model IDs use Unified API format: provider/model (e.g., "anthropic/claude-sonnet-4-5")
-          return aigateway(unified(modelID))
-        },
-        options: {},
-      }
+      const accountId =
+        input.options?.accountId ??
+        env.CLOUDFLARE_ACCOUNT_ID ??
+        (auth?.type === "api" ? auth.metadata?.accountId : undefined)
+      const gatewayId =
+        input.options?.gatewayId ??
+        input.options?.gateway ??
+        env.CLOUDFLARE_GATEWAY_ID ??
+        (auth?.type === "api" ? auth.metadata?.gatewayId : undefined)
+      const apiKey =
+        input.options?.apiKey ??
+        env.CLOUDFLARE_API_TOKEN ??
+        env.CF_AIG_TOKEN ??
+        (auth?.type === "api" ? auth.key : undefined)
+      return { autoload: !!(accountId && gatewayId && apiKey), options: { accountId, gatewayId, apiKey } }
     }),
     cerebras: () =>
       Effect.succeed({

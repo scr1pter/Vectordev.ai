@@ -168,7 +168,6 @@ export const SUPPORTED_PROVIDER_IDS = [
   "routing-run",
   "runinfra",
   "sakana",
-  "salad-cloud",
   "sap-ai-core",
   "sarvam",
   "scaleway",
