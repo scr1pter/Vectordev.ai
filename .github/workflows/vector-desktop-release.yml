@@ -38,7 +38,7 @@ jobs:
   prepare:
     name: Validate release metadata
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     outputs:
       unsigned: ${{ steps.release-policy.outputs.unsigned }}
     steps:
@@ -95,8 +95,11 @@ jobs:
           NPM_CONFIG_FETCH_TIMEOUT: "15000"
         run: |
           set -euo pipefail
-          version=$(jq -r .version packages/desktop/package.json)
-          for package in @vectordevai/plugin @vectordevai/cli @vectordevai/cli-darwin-arm64 @vectordevai/cli-darwin-x64 @vectordevai/cli-linux-x64 @vectordevai/cli-linux-arm64 @vectordevai/cli-windows-x64; do
+          desktop_version=$(jq -r .version packages/desktop/package.json)
+          cli_version=$(jq -r .vectorRequiredCliVersion packages/desktop/package.json)
+          for package in @vectordevai/plugin @vectordevai/cli @vectordevai/cli-darwin-arm64 @vectordevai/cli-darwin-x64 @vectordevai/cli-linux-x64 @vectordevai/cli-linux-arm64 @vectordevai/cli-windows-x64 @vectordevai/cli-windows-arm64; do
+            version="$cli_version"
+            if [ "$package" = "@vectordevai/plugin" ]; then version="$desktop_version"; fi
             published=$(npm view "$package@$version" version --json) || {
               echo "Publish $package@$version before starting the desktop release."
               exit 1
@@ -106,6 +109,14 @@ jobs:
               exit 1
             }
           done
+
+      - name: Set up release verification dependencies
+        uses: ./.github/actions/setup-bun
+        with:
+          install-flags: --frozen-lockfile --ignore-scripts
+
+      - name: Verify exact standalone CLI required by WSL
+        run: bun packages/cloud/src/verify-required-cli.ts
 
       - name: Resolve the release signing policy
         id: release-policy

@@ -45,7 +45,7 @@ describe("WSL server settings presentation", () => {
         resolvedPath: null,
         version: null,
         expectedVersion: "1.2.3",
-        matchesDesktop: null,
+        matchesRequired: null,
         error: null,
       }),
     ).toBe("Install Vector")
@@ -55,7 +55,7 @@ describe("WSL server settings presentation", () => {
         resolvedPath: "/usr/local/bin/vector",
         version: "1.2.2",
         expectedVersion: "1.2.3",
-        matchesDesktop: false,
+        matchesRequired: false,
         error: null,
       }),
     ).toBe("Update Vector")
@@ -65,7 +65,7 @@ describe("WSL server settings presentation", () => {
         resolvedPath: "/usr/local/bin/vector",
         version: "1.2.3",
         expectedVersion: "1.2.3",
-        matchesDesktop: true,
+        matchesRequired: true,
         error: null,
       }),
     ).toBeUndefined()
@@ -148,7 +148,7 @@ describe("WSL server settings presentation", () => {
         ],
         online: [{ name: "Alpine", label: "Alpine Linux" }],
         distroProbes: {
-          Ubuntu: { name: "Ubuntu", canExecute: true, hasBash: true, hasNpm: true, error: null },
+          Ubuntu: { name: "Ubuntu", canExecute: true, hasBash: true, hasInstallTools: true, error: null },
         },
       },
       view: "main",
@@ -186,7 +186,7 @@ describe("WSL server settings presentation", () => {
         installed: [{ name: "Debian", version: 2, isDefault: true }],
         online: [{ name: "Ubuntu", label: "Ubuntu" }],
         distroProbes: {
-          Debian: { name: "Debian", canExecute: true, hasBash: true, hasNpm: true, error: null },
+          Debian: { name: "Debian", canExecute: true, hasBash: true, hasInstallTools: true, error: null },
         },
         vectorChecks: {
           Debian: {
@@ -194,7 +194,7 @@ describe("WSL server settings presentation", () => {
             resolvedPath: "/home/me/.vector/bin/vector",
             version: null,
             expectedVersion: "1.2.3",
-            matchesDesktop: null,
+            matchesRequired: null,
             error: "vector is installed but could not run",
           },
         },
@@ -231,18 +231,20 @@ describe("WSL server settings presentation", () => {
 })
 
 for (const installedNative of [false, true]) {
-  test(`npm is required for installation but not for an existing native server: ${installedNative}`, () => {
+  test(`download tools are required for installation but not for an existing native server: ${installedNative}`, () => {
     const model = addServerViewModel({
       state: readyState({
         installed: [{ name: "Debian", version: 2, isDefault: true }],
-        distroProbes: { Debian: { name: "Debian", canExecute: true, hasBash: true, hasNpm: false, error: null } },
+        distroProbes: {
+          Debian: { name: "Debian", canExecute: true, hasBash: true, hasInstallTools: false, error: null },
+        },
         vectorChecks: {
           Debian: {
             distro: "Debian",
             resolvedPath: installedNative ? "/home/me/.vector/bin/vector-native" : null,
             version: installedNative ? "1.16.2" : null,
             expectedVersion: "1.16.2",
-            matchesDesktop: installedNative ? true : null,
+            matchesRequired: installedNative ? true : null,
             error: null,
           },
         },

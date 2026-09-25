@@ -1,5 +1,5 @@
 import path from "node:path"
-import { BUILD_IDENTITY_FILE, createBuildIdentity } from "./build-identity"
+import { BUILD_IDENTITY_FILE, createBuildIdentity, requiredCliVersion } from "./build-identity"
 import { resolveChannel } from "./utils"
 
 const packageDir = path.dirname(import.meta.dir)
@@ -33,6 +33,10 @@ await Bun.write(
     createBuildIdentity({
       channel,
       version: manifest.version,
+      requiredCliVersion: requiredCliVersion(
+        "vectorRequiredCliVersion" in manifest ? manifest.vectorRequiredCliVersion : undefined,
+        Bun.env.VECTOR_REQUIRED_CLI_VERSION,
+      ),
       revision: Bun.env.GITHUB_SHA ?? Bun.env.VERCEL_GIT_COMMIT_SHA,
     }),
     null,

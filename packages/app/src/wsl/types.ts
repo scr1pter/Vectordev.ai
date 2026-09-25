@@ -19,7 +19,7 @@ export type WslDistroProbe = {
   name: string
   canExecute: boolean
   hasBash: boolean
-  hasNpm: boolean
+  hasInstallTools: boolean
   error: string | null
 }
 
@@ -28,7 +28,7 @@ export type WslVectorCheck = {
   resolvedPath: string | null
   version: string | null
   expectedVersion: string | null
-  matchesDesktop: boolean | null
+  matchesRequired: boolean | null
   error: string | null
 }
 

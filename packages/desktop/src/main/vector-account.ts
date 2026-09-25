@@ -201,7 +201,6 @@ export function createVectorAccount(deps: Dependencies) {
           // cancelled when this earlier engine synchronization completes.
           state.pending = undefined
           state.error = undefined
-          notify()
           await deps.sync(account.token)
         }).catch(() => {
           if (state.pending === pending) state.pending = undefined

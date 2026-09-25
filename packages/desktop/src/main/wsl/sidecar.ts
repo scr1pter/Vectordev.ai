@@ -1,16 +1,19 @@
 import { spawn } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import { createServer } from "node:net"
-import { untrustedChildEnvironment } from "@vectordevai/core/child-environment"
 import { app } from "electron"
 import { checkHealth } from "../server"
 import { type WslCommandLine, resolveWslVector, wslArgs } from "./runtime"
 import { pollWslHealth, requireWslAuthentication, wslReinstallMessage } from "./startup"
 import { wslServerScript } from "./scripts"
+import { redactWslOutput, wslLaunchEnvironment, wslProcessLifetime } from "./lifecycle"
 import { VECTOR_AGENT_RUNTIME_ENV } from "../agent-runtime"
 
 export type WslSidecar = {
-  listener: { stop: () => void; onExit: (cb: (code: number | null, signal: NodeJS.Signals | null) => void) => void }
+  listener: {
+    stop: () => Promise<void>
+    onExit: (cb: (code: number | null, signal: NodeJS.Signals | null) => void) => void
+  }
   url: string
   username: string | null
   password: string
@@ -18,12 +21,20 @@ export type WslSidecar = {
 
 export async function spawnWslSidecar(
   distro: string,
-  opts: { onLine?: (line: WslCommandLine) => void; healthTimeoutMs?: number } = {},
+  opts: {
+    token: string
+    signal: AbortSignal
+    onStart: (stop: () => Promise<void>) => () => void
+    onLine?: (line: WslCommandLine) => void
+    healthTimeoutMs?: number
+  },
 ): Promise<WslSidecar> {
-  const vector = await resolveWslVector(distro)
+  opts.signal.throwIfAborted()
+  const vector = await resolveWslVector(distro, { signal: opts.signal })
   if (!vector) throw new Error(wslReinstallMessage(distro))
 
   const port = await allocatePort()
+  opts.signal.throwIfAborted()
   const password = randomUUID()
   const username = "vector"
   const script = wslServerScript({
@@ -34,21 +45,55 @@ export async function spawnWslSidecar(
       ...VECTOR_AGENT_RUNTIME_ENV,
       VECTOR_EXPERIMENTAL_DISABLE_FILEWATCHER: "true",
       VECTOR_CLIENT: "desktop",
+      VECTOR_CLI_TOKEN: opts.token,
       VECTOR_SERVER_USERNAME: username,
       VECTOR_SERVER_PASSWORD: password,
       ...(process.env.VECTOR_MCP_AUTH_KEY ? { VECTOR_MCP_AUTH_KEY: process.env.VECTOR_MCP_AUTH_KEY } : {}),
       ...(process.env.VECTOR_CREDENTIAL_KEY ? { VECTOR_CREDENTIAL_KEY: process.env.VECTOR_CREDENTIAL_KEY } : {}),
     },
   })
-  const child = spawn("wsl", wslArgs(["bash", "-se"], distro), {
-    env: untrustedChildEnvironment(),
-    stdio: ["pipe", "pipe", "pipe"],
-    windowsHide: true,
-  })
-  child.stdin.end(script)
+  const child = spawn(
+    "wsl",
+    wslArgs(
+      [
+        "env",
+        "-u",
+        "BASH_ENV",
+        "-u",
+        "ENV",
+        "-u",
+        "SHELLOPTS",
+        "-u",
+        "BASHOPTS",
+        "bash",
+        "--noprofile",
+        "--norc",
+        "-se",
+      ],
+      distro,
+    ),
+    {
+      env: wslLaunchEnvironment(),
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
+    },
+  )
+  const lifetime = wslProcessLifetime(child)
+  const untrack = opts.onStart(() => lifetime.stop())
+  void lifetime.exited.then(untrack)
+  child.stdin.on("error", () => {})
+  child.stdin.write(script)
+  const secrets = [opts.token, password, process.env.VECTOR_MCP_AUTH_KEY ?? "", process.env.VECTOR_CREDENTIAL_KEY ?? ""]
+  const stopped = Promise.withResolvers<never>()
+  const abort = () => {
+    void lifetime.stop().then(() => stopped.reject(new DOMException("Aborted", "AbortError")), stopped.reject)
+  }
+  opts.signal.addEventListener("abort", abort, { once: true })
+  if (opts.signal.aborted) abort()
 
   const recentOutput: string[] = []
-  const emit = (line: WslCommandLine) => {
+  const emit = (raw: WslCommandLine) => {
+    const line = { ...raw, text: redactWslOutput(raw.text, secrets) }
     if (!line.text.trim()) return
     recentOutput.push(`[${line.stream}] ${line.text}`)
     if (recentOutput.length > 12) recentOutput.shift()
@@ -64,7 +109,14 @@ export async function spawnWslSidecar(
   const url = `http://127.0.0.1:${port}`
   const startup = new AbortController()
   const health = pollWslHealth(() => checkHealth(url, password), startup.signal).then(() =>
-    requireWslAuthentication(url, distro, () => child.kill(), startup.signal),
+    requireWslAuthentication(
+      url,
+      distro,
+      () => {
+        void lifetime.stop().catch(() => {})
+      },
+      startup.signal,
+    ),
   )
   const timeoutMs = opts.healthTimeoutMs ?? 30_000
   let timeout: ReturnType<typeof setTimeout>
@@ -76,18 +128,19 @@ export async function spawnWslSidecar(
       )),
   )
 
-  await Promise.race([health, exit, timedOut])
-    .catch((error) => {
-      child.kill()
+  await Promise.race([health, exit, timedOut, stopped.promise])
+    .catch(async (error) => {
+      await lifetime.stop()
       throw error
     })
     .finally(() => {
       clearTimeout(timeout)
       startup.abort()
+      opts.signal.removeEventListener("abort", abort)
     })
   return {
     listener: {
-      stop: () => child.kill(),
+      stop: () => lifetime.stop(),
       onExit: (cb) => child.once("exit", cb),
     },
     url,

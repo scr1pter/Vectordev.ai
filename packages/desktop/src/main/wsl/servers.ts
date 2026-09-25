@@ -18,6 +18,7 @@ import {
   pendingRestartAfterWslInstall,
   wslServerIdsToStartOnInitialize,
   wslReinstallMessage,
+  wslSignInMessage,
 } from "./startup"
 import { clearWslDistroState, wslServerIdToRestart } from "./policy"
 import {
@@ -35,13 +36,19 @@ import {
 } from "./runtime"
 
 type RunningSidecar = {
-  listener: { stop: () => void; onExit: (cb: (code: number | null, signal: NodeJS.Signals | null) => void) => void }
+  listener: {
+    stop: () => Promise<void>
+    onExit: (cb: (code: number | null, signal: NodeJS.Signals | null) => void) => void
+  }
   url: string
   username: string | null
   password: string
 }
 
-type SpawnSidecar = (distro: string) => Promise<RunningSidecar>
+type SpawnSidecar = (
+  distro: string,
+  input: { token: string; signal: AbortSignal; onStart: (stop: () => Promise<void>) => () => void },
+) => Promise<RunningSidecar>
 
 type ControllerLogger = {
   log: (message: string, meta?: unknown) => void
@@ -64,7 +71,7 @@ export function wslServerIdForDistro(distro: string) {
 }
 
 export function createWslServersController(
-  appVersion: string,
+  requiredCliVersion: string,
   spawnSidecar: SpawnSidecar,
   options?: WslServersControllerOptions,
 ) {
@@ -72,6 +79,14 @@ export function createWslServersController(
   const listeners = new Set<(event: WslServersEvent) => void>()
   const sidecars = new Map<string, RunningSidecar>()
   const startAttempts = new Map<string, number>()
+  const starts = new Set<Promise<void>>()
+  const starting = new Map<string, AbortController>()
+  const live = new Set<RunningSidecar>()
+  const stops = new Map<RunningSidecar, Promise<void>>()
+  const launching = new Set<() => Promise<void>>()
+  let accountRevision = 0
+  let accountToken: string | undefined
+  let accountWork = Promise.resolve()
   let jobAbort: AbortController | undefined
   const logger = options?.logger
   const readServers = options?.readServers ?? readPersistedServers
@@ -140,7 +155,7 @@ export function createWslServersController(
     const version = resolved
       ? await (options?.readCommandVersion ?? readWslCommandVersion)(resolved, distro, opts)
       : null
-    return vectorCheck(distro, resolved, version, appVersion)
+    return vectorCheck(distro, resolved, version, requiredCliVersion)
   }
 
   const refreshVectorCheck = async (distro: string, opts?: { signal?: AbortSignal }) => {
@@ -192,27 +207,38 @@ export function createWslServersController(
     return startAttempts.get(id) === attempt && state.servers.some((item) => item.config.id === id)
   }
 
-  const startServer = async (id: string) => {
+  const runStartServer = async (id: string) => {
     const item = state.servers.find((x) => x.config.id === id)
     if (!item) return
     const attempt = nextStartAttempt(id)
-    await stopServerInternal(id)
-    if (!isCurrentStartAttempt(id, attempt)) return
-    setRuntime(id, { kind: "starting" })
-    logger?.log("wsl sidecar starting", { id, distro: item.config.distro })
+    starting.get(id)?.abort()
+    const abort = new AbortController()
+    starting.set(id, abort)
     try {
-      const check = await checkVector(item.config.distro)
+      await stopServerInternal(id)
+      if (!isCurrentStartAttempt(id, attempt)) return
+      setRuntime(id, { kind: "starting" })
+      logger?.log("wsl sidecar starting", { id, distro: item.config.distro })
+      const token = accountToken
+      if (!token) throw new Error(wslSignInMessage)
+      const check = await checkVector(item.config.distro, { signal: abort.signal })
       if (!isCurrentStartAttempt(id, attempt)) return
       setVectorCheck(item.config.distro, check)
       if (!check.resolvedPath) throw new Error(wslReinstallMessage(item.config.distro))
-      expectVectorVersion(check.version, appVersion, item.config.distro)
-      const sidecar = await spawnSidecar(item.config.distro)
+      expectVectorVersion(check.version, requiredCliVersion, item.config.distro)
+      const sidecar = await spawnSidecar(item.config.distro, {
+        token,
+        signal: abort.signal,
+        onStart: (stop) => {
+          launching.add(stop)
+          return () => {
+            launching.delete(stop)
+          }
+        },
+      })
+      live.add(sidecar)
       if (!isCurrentStartAttempt(id, attempt)) {
-        try {
-          sidecar.listener.stop()
-        } catch {
-          // ignore stop errors for stale sidecars
-        }
+        await stopSidecar(sidecar)
         return
       }
       sidecars.set(id, sidecar)
@@ -223,8 +249,9 @@ export function createWslServersController(
         password: sidecar.password,
       })
       sidecar.listener.onExit((code, signal) => {
-        if (sidecars.get(id) !== sidecar) return
+        if (sidecars.get(id) !== sidecar || stops.has(sidecar)) return
         sidecars.delete(id)
+        live.delete(sidecar)
         const message = startupFailure(code, signal)
         setRuntime(id, { kind: "failed", message })
         logger?.error("wsl sidecar exited", { id, distro: item.config.distro, code, signal })
@@ -232,24 +259,57 @@ export function createWslServersController(
       logger?.log("wsl sidecar ready", { id, distro: item.config.distro, url: sidecar.url })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      if (!isCurrentStartAttempt(id, attempt)) return
+      if (!isCurrentStartAttempt(id, attempt)) {
+        if (error instanceof Error && error.name === "AbortError") return
+        throw error
+      }
       setRuntime(id, { kind: "failed", message })
       // Without this, an Ubuntu-style silent failure leaves no trace in
       // main.log — the controller captures the message in its state but
       // nothing surfaces unless the user opens the WSL servers dialog.
       logger?.error("wsl sidecar failed to start", { id, distro: item.config.distro, message })
+    } finally {
+      if (starting.get(id) === abort) starting.delete(id)
     }
+  }
+
+  const startServer = (id: string) => {
+    const work = runStartServer(id)
+    starts.add(work)
+    void work.finally(() => starts.delete(work)).catch(() => {})
+    return work
+  }
+
+  const stopSidecar = (sidecar: RunningSidecar) => {
+    const existing = stops.get(sidecar)
+    if (existing) return existing
+    const work = sidecar.listener
+      .stop()
+      .then(() => {
+        live.delete(sidecar)
+        for (const [id, current] of sidecars) if (current === sidecar) sidecars.delete(id)
+      })
+      .finally(() => stops.delete(sidecar))
+    stops.set(sidecar, work)
+    return work
   }
 
   const stopServerInternal = async (id: string) => {
     const existing = sidecars.get(id)
-    if (!existing) return
-    sidecars.delete(id)
-    try {
-      existing.listener.stop()
-    } catch {
-      // ignore stop errors
-    }
+    if (existing) await stopSidecar(existing)
+  }
+
+  const stopManaged = async () => {
+    for (const item of state.servers) invalidateStartAttempt(item.config.id)
+    for (const abort of starting.values()) abort.abort()
+    const results = await Promise.allSettled([
+      ...starts,
+      ...[...launching].map((stop) => stop()),
+      ...[...live].map(stopSidecar),
+    ])
+    if (results.some((result) => result.status === "rejected"))
+      throw new Error("Vector could not confirm that every WSL server stopped. Retry before changing accounts.")
+    for (const item of state.servers) setRuntime(item.config.id, { kind: "stopped" })
   }
 
   const runJob = async <T>(job: WslJob, runner: (abort: AbortController) => Promise<T>) => {
@@ -280,7 +340,8 @@ export function createWslServersController(
 
     async initialize() {
       refreshFromStore()
-      for (const id of wslServerIdsToStartOnInitialize(state.servers.map((item) => item.config))) void startServer(id)
+      for (const id of wslServerIdsToStartOnInitialize(state.servers.map((item) => item.config)))
+        void startServer(id).catch((error) => logger?.error("wsl server cleanup failed", error))
     },
 
     async probeRuntime() {
@@ -336,12 +397,12 @@ export function createWslServersController(
 
     async installVector(name: string) {
       await runJob({ kind: "install-vector", distro: name, startedAt: Date.now() }, async (abort) => {
-        const result = await installWslVector(appVersion, name, { signal: abort.signal })
+        const result = await installWslVector(requiredCliVersion, name, { signal: abort.signal })
         if (result.code !== 0) {
           throw new Error(summarize(result.stderr || result.stdout) || "Vector installation failed")
         }
         await refreshVectorCheck(name, { signal: abort.signal })
-        expectVectorVersion(state.vectorChecks[name]?.version ?? null, appVersion, name)
+        expectVectorVersion(state.vectorChecks[name]?.version ?? null, requiredCliVersion, name)
         const id = wslServerIdToRestart(state.servers, name)
         if (id) await startServer(id)
       })
@@ -364,13 +425,14 @@ export function createWslServersController(
       setState({
         servers: [...state.servers, { config, runtime: { kind: "starting" } }],
       })
-      void startServer(id)
+      void startServer(id).catch((error) => logger?.error("wsl server cleanup failed", error))
       return config
     },
 
     async removeServer(id: string) {
       const distro = state.servers.find((item) => item.config.id === id)?.config.distro
       invalidateStartAttempt(id)
+      starting.get(id)?.abort()
       await stopServerInternal(id)
       const remaining = readServers().filter((item) => item.id !== id)
       persistServers(remaining)
@@ -382,16 +444,34 @@ export function createWslServersController(
 
     startServer,
 
-    stopAll() {
+    async replaceAccount(token: string | undefined, synchronize: () => Promise<void> = async () => {}) {
+      const revision = ++accountRevision
+      accountToken = undefined
       for (const item of state.servers) invalidateStartAttempt(item.config.id)
-      for (const existing of sidecars.values()) {
-        try {
-          existing.listener.stop()
-        } catch {
-          // ignore
-        }
-      }
-      sidecars.clear()
+      for (const abort of starting.values()) abort.abort()
+      // Serialize embedded credential synchronization too: a slower previous
+      // request must never overwrite the newest account after it finishes.
+      const work = accountWork.then(async () => {
+        await stopManaged()
+        if (revision !== accountRevision) return
+        await synchronize()
+        if (revision !== accountRevision) return
+        accountToken = token
+        if (token) await Promise.all(state.servers.map((item) => startServer(item.config.id)))
+        if (!token)
+          for (const item of state.servers) setRuntime(item.config.id, { kind: "failed", message: wslSignInMessage })
+      })
+      accountWork = work.catch(() => {})
+      await work
+    },
+
+    async stopAll() {
+      accountRevision++
+      accountToken = undefined
+      for (const item of state.servers) invalidateStartAttempt(item.config.id)
+      for (const abort of starting.values()) abort.abort()
+      await accountWork
+      await stopManaged()
     },
   }
 }
@@ -450,7 +530,7 @@ function vectorCheck(
       resolvedPath: null,
       version: null,
       expectedVersion,
-      matchesDesktop: null,
+      matchesRequired: null,
       error: wslReinstallMessage(distro),
     }
   }
@@ -460,7 +540,7 @@ function vectorCheck(
       resolvedPath,
       version: null,
       expectedVersion,
-      matchesDesktop: null,
+      matchesRequired: null,
       error: "Vector is installed but could not run",
     }
   }
@@ -469,7 +549,7 @@ function vectorCheck(
     resolvedPath,
     version,
     expectedVersion,
-    matchesDesktop: version === expectedVersion,
+    matchesRequired: version === expectedVersion,
     error: null,
   }
 }

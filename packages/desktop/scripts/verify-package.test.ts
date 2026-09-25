@@ -47,7 +47,12 @@ describe("verifying a packaged app can self-update", () => {
       version: "1.19.99",
       buildIdentity: {
         present: true,
-        contents: JSON.stringify({ schemaVersion: 1, channel: "dev", version: "1.19.99" }),
+        contents: JSON.stringify({
+          schemaVersion: 1,
+          channel: "dev",
+          version: "1.19.99",
+          requiredCliVersion: "1.17.14",
+        }),
       },
       updaterMetadata: { present: true, contents: good },
     })
@@ -62,7 +67,12 @@ describe("verifying a packaged app can self-update", () => {
         version: "1.19.99",
         buildIdentity: {
           present: true,
-          contents: JSON.stringify({ schemaVersion: 1, channel: "prod", version: "1.19.99" }),
+          contents: JSON.stringify({
+            schemaVersion: 1,
+            channel: "prod",
+            version: "1.19.99",
+            requiredCliVersion: "1.17.14",
+          }),
         },
         updaterMetadata: { present: true, contents: good },
       }),
@@ -75,7 +85,12 @@ describe("verifying a packaged app can self-update", () => {
       version: "1.19.99",
       buildIdentity: {
         present: true,
-        contents: JSON.stringify({ schemaVersion: 1, channel: "prod", version: "1.19.99" }),
+        contents: JSON.stringify({
+          schemaVersion: 1,
+          channel: "prod",
+          version: "1.19.99",
+          requiredCliVersion: "1.17.14",
+        }),
       },
       updaterMetadata: {
         present: true,
@@ -93,7 +108,12 @@ describe("verifying a packaged app can self-update", () => {
         version: "1.19.99",
         buildIdentity: {
           present: true,
-          contents: JSON.stringify({ schemaVersion: 1, channel: "dev", version: "1.19.99" }),
+          contents: JSON.stringify({
+            schemaVersion: 1,
+            channel: "dev",
+            version: "1.19.99",
+            requiredCliVersion: "1.17.14",
+          }),
         },
         updaterMetadata: { present: false },
       }),

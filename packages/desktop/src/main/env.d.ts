@@ -1,5 +1,6 @@
 interface ImportMetaEnv {
   readonly VECTOR_CHANNEL: string
+  readonly VECTOR_REQUIRED_CLI_VERSION: string
 }
 
 interface ImportMeta {

@@ -31,7 +31,7 @@ function abortableDelay(duration: number, signal: AbortSignal) {
 }
 
 export function wslReinstallMessage(distro: string) {
-  return `This WSL server needs Vector installed again in ${distro}. Install Linux Node.js and npm, then choose Install Vector in server settings.`
+  return `This WSL server needs Vector installed again in ${distro}. Install Linux curl, tar and SHA-256 tools, then choose Install Vector in server settings.`
 }
 
 export async function requireWslAuthentication(url: string, distro: string, stop: () => void, signal: AbortSignal) {
@@ -48,3 +48,5 @@ export async function requireWslAuthentication(url: string, distro: string, stop
     `The Vector engine in ${distro} is not enforcing authentication. Reinstall Vector from server settings.`,
   )
 }
+
+export const wslSignInMessage = "Sign in to your Vector account in the desktop app before starting a WSL server."

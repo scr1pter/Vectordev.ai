@@ -51,14 +51,14 @@ test("restarts an existing distro server after updating the engine", () => {
 test("clears cached distro probes when removing a WSL server", () => {
   expect(
     clearWslDistroState(
-      { Debian: { name: "Debian", canExecute: true, hasBash: true, hasNpm: true, error: null } },
+      { Debian: { name: "Debian", canExecute: true, hasBash: true, hasInstallTools: true, error: null } },
       {
         Debian: {
           distro: "Debian",
           resolvedPath: "/home/luke/.vector/bin/vector",
           version: "1.16.2",
           expectedVersion: "1.16.2",
-          matchesDesktop: true,
+          matchesRequired: true,
           error: null,
         },
       },
@@ -111,7 +111,7 @@ test("ignores stale background engine checks after removing a WSL server", async
     "1.16.2",
     async () => ({
       listener: {
-        stop: () => undefined,
+        stop: async () => undefined,
         onExit: () => undefined,
       },
       url: "http://127.0.0.1:4096",
@@ -121,6 +121,7 @@ test("ignores stale background engine checks after removing a WSL server", async
     testControllerOptions(),
   )
 
+  await controller.replaceAccount("vct_synthetic")
   await controller.addServer("Debian")
   await waitFor(() => !!releaseVectorResolve)
   await controller.removeServer("wsl:Debian")
@@ -140,6 +141,7 @@ test("ignores stale startup engine checks after removing a WSL server", async ()
     testControllerOptions(),
   )
 
+  await controller.replaceAccount("vct_synthetic")
   await controller.initialize()
   await waitFor(() => !!releaseVectorResolve)
   await controller.removeServer("wsl:Debian")
@@ -160,7 +162,7 @@ test("probes addable distros in parallel before checking the engine", async () =
     probeDistro: async (distro) => {
       started.push(distro)
       await new Promise<void>((resolve) => release.set(distro, resolve))
-      return { name: distro, canExecute: true, hasBash: true, hasNpm: true, error: null }
+      return { name: distro, canExecute: true, hasBash: true, hasInstallTools: true, error: null }
     },
     resolveVector: async (distro) => {
       vector.push(distro)
@@ -190,7 +192,7 @@ test("does not check the engine in addable distros that cannot execute commands"
       name: distro,
       canExecute: distro === "Debian",
       hasBash: distro === "Debian",
-      hasNpm: distro === "Debian",
+      hasInstallTools: distro === "Debian",
       error: distro === "Debian" ? null : "Open Ubuntu once to finish setup",
     }),
     resolveVector: async (distro) => {
@@ -246,6 +248,7 @@ for (const version of [null, "1.16.1", "1.16.3"]) {
         readCommandVersion: async () => version,
       },
     )
+    await controller.replaceAccount("vct_synthetic")
     await controller.initialize()
     await waitFor(() => controller.getState().servers[0]?.runtime.kind === "failed")
     expect(spawned).toEqual([])
@@ -254,7 +257,7 @@ for (const version of [null, "1.16.1", "1.16.3"]) {
     if (runtime.kind !== "failed") throw new Error("Expected failed runtime")
     expect(runtime.message).toContain(version === null ? "needs Vector installed again" : "Update Vector in Debian")
     expect(runtime.message).toContain("server settings")
-    expect(controller.getState().vectorChecks.Debian.matchesDesktop).not.toBe(true)
+    expect(controller.getState().vectorChecks.Debian.matchesRequired).not.toBe(true)
   })
 }
 
@@ -268,7 +271,7 @@ test("rechecks the actual engine version before every start", async () => {
       spawned++
       return {
         listener: {
-          stop: () => {
+          stop: async () => {
             stopped++
           },
           onExit: () => undefined,
@@ -285,6 +288,7 @@ test("rechecks the actual engine version before every start", async () => {
       readCommandVersion: async () => version,
     },
   )
+  await controller.replaceAccount("vct_synthetic")
   await controller.initialize()
   await waitFor(() => controller.getState().servers[0]?.runtime.kind === "ready")
   expect(spawned).toBe(1)
@@ -293,4 +297,237 @@ test("rechecks the actual engine version before every start", async () => {
   expect(spawned).toBe(1)
   expect(stopped).toBe(1)
   expect(controller.getState().servers[0].runtime.kind).toBe("failed")
+})
+
+test("a missing desktop account refuses WSL startup before launching a process", async () => {
+  let spawned = 0
+  const controller = createWslServersController(
+    "1.16.2",
+    async () => {
+      spawned++
+      throw new Error("must not launch")
+    },
+    {
+      readServers: () => [{ id: "wsl:Debian", distro: "Debian" }],
+      writeServers: () => {},
+      resolveVector: async () => "/fixture/native",
+      readCommandVersion: async () => "1.16.2",
+    },
+  )
+  await controller.initialize()
+  await waitFor(() => controller.getState().servers[0]?.runtime.kind === "failed")
+  expect(spawned).toBe(0)
+  expect(JSON.stringify(controller.getState())).toContain("Sign in to your Vector account in the desktop app")
+})
+
+test("rotation waits for old sidecar termination and emits no account token", async () => {
+  const closed = Promise.withResolvers<void>()
+  const tokens: string[] = []
+  const events: unknown[] = []
+  const controller = createWslServersController(
+    "1.16.2",
+    async (_distro, input) => {
+      tokens.push(input.token)
+      return {
+        listener: { stop: () => (input.token === "vct_old" ? closed.promise : Promise.resolve()), onExit: () => {} },
+        url: "http://127.0.0.1:1",
+        username: "vector",
+        password: "synthetic",
+      }
+    },
+    {
+      readServers: () => [{ id: "wsl:Debian", distro: "Debian" }],
+      writeServers: () => {},
+      resolveVector: async () => "/fixture/native",
+      readCommandVersion: async () => "1.16.2",
+    },
+  )
+  controller.subscribe((event) => events.push(event))
+  await controller.replaceAccount("vct_old")
+  await controller.initialize()
+  await waitFor(() => tokens.length === 1)
+  let synchronized = false
+  const rotation = controller.replaceAccount("vct_new", async () => {
+    synchronized = true
+  })
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  expect(synchronized).toBe(false)
+  expect(tokens).toEqual(["vct_old"])
+  closed.resolve()
+  await rotation
+  expect(tokens).toEqual(["vct_old", "vct_new"])
+  expect(JSON.stringify(events)).not.toContain("vct_")
+  await controller.replaceAccount(undefined)
+  expect(controller.getState().servers[0]?.runtime.kind).toBe("failed")
+})
+
+test("logout fences an in-flight start and waits for its eventual termination", async () => {
+  const ready = Promise.withResolvers<void>()
+  const stopped = Promise.withResolvers<void>()
+  let launched = false
+  let stopCalled = false
+  const controller = createWslServersController(
+    "1.16.2",
+    async () => {
+      launched = true
+      await ready.promise
+      return {
+        listener: {
+          stop: () => {
+            stopCalled = true
+            return stopped.promise
+          },
+          onExit: () => {},
+        },
+        url: "http://127.0.0.1:1",
+        username: "vector",
+        password: "synthetic",
+      }
+    },
+    {
+      readServers: () => [{ id: "wsl:Debian", distro: "Debian" }],
+      writeServers: () => {},
+      resolveVector: async () => "/fixture/native",
+      readCommandVersion: async () => "1.16.2",
+    },
+  )
+  await controller.replaceAccount("vct_old")
+  await controller.initialize()
+  await waitFor(() => launched)
+  let done = false
+  const logout = controller.replaceAccount(undefined).then(() => {
+    done = true
+  })
+  ready.resolve()
+  await waitFor(() => stopCalled)
+  expect(done).toBe(false)
+  stopped.resolve()
+  await logout
+  expect(controller.getState().servers[0]?.runtime.kind).not.toBe("ready")
+})
+
+test("failed termination blocks logout completion and later generations cannot revive an older token", async () => {
+  let canStop = false
+  const tokens: string[] = []
+  const controller = createWslServersController(
+    "1.16.2",
+    async (_distro, input) => {
+      tokens.push(input.token)
+      return {
+        listener: {
+          stop: async () => {
+            if (!canStop) throw new Error("still alive")
+          },
+          onExit: () => {},
+        },
+        url: "http://127.0.0.1:1",
+        username: "vector",
+        password: "synthetic",
+      }
+    },
+    {
+      readServers: () => [{ id: "wsl:Debian", distro: "Debian" }],
+      writeServers: () => {},
+      resolveVector: async () => "/fixture/native",
+      readCommandVersion: async () => "1.16.2",
+    },
+  )
+  await controller.replaceAccount("vct_old")
+  await controller.initialize()
+  await waitFor(() => controller.getState().servers[0]?.runtime.kind === "ready")
+  let synchronized = false
+  await expect(
+    controller.replaceAccount(undefined, async () => {
+      synchronized = true
+    }),
+  ).rejects.toThrow("could not confirm")
+  expect(synchronized).toBe(false)
+  canStop = true
+  const blocked = Promise.withResolvers<void>()
+  const first = controller.replaceAccount("vct_superseded", () => blocked.promise)
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  const final = controller.replaceAccount("vct_final")
+  blocked.resolve()
+  await Promise.all([first, final])
+  expect(tokens).toEqual(["vct_old", "vct_final"])
+  await controller.stopAll()
+})
+
+test("account synchronization is serialized so a slow old account cannot overwrite the new account", async () => {
+  const controller = createWslServersController(
+    "1.16.2",
+    async () => {
+      throw new Error("No servers configured")
+    },
+    {
+      readServers: () => [],
+      writeServers: () => {},
+    },
+  )
+  const release = Promise.withResolvers<void>()
+  const entered = Promise.withResolvers<void>()
+  const synchronized: string[] = []
+  const first = controller.replaceAccount("vct_old", async () => {
+    entered.resolve()
+    await release.promise
+    synchronized.push("old")
+  })
+  await entered.promise
+  const second = controller.replaceAccount("vct_final", async () => {
+    synchronized.push("final")
+  })
+  expect(synchronized).toEqual([])
+  release.resolve()
+  await Promise.all([first, second])
+  expect(synchronized).toEqual(["old", "final"])
+})
+
+test("an unhealthy process remains owned until confirmed stopped, including startup cancellation", async () => {
+  let stopAllowed = false
+  let started = false
+  let aborted = false
+  const controller = createWslServersController(
+    "1.16.2",
+    async (_distro, input) => {
+      const untrack = input.onStart(async () => {
+        if (!stopAllowed) throw new Error("still alive")
+        untrack()
+      })
+      started = true
+      await new Promise<void>((resolve) =>
+        input.signal.addEventListener(
+          "abort",
+          () => {
+            aborted = true
+            resolve()
+          },
+          { once: true },
+        ),
+      )
+      throw new DOMException("Aborted", "AbortError")
+    },
+    {
+      readServers: () => [{ id: "wsl:Debian", distro: "Debian" }],
+      writeServers: () => {},
+      resolveVector: async () => "/fixture/native",
+      readCommandVersion: async () => "1.16.2",
+    },
+  )
+  await controller.replaceAccount("vct_fixture")
+  await controller.initialize()
+  await waitFor(() => started)
+  let synchronized = false
+  await expect(
+    controller.replaceAccount(undefined, async () => {
+      synchronized = true
+    }),
+  ).rejects.toThrow("could not confirm")
+  expect(aborted).toBe(true)
+  expect(synchronized).toBe(false)
+  stopAllowed = true
+  await controller.replaceAccount(undefined, async () => {
+    synchronized = true
+  })
+  expect(synchronized).toBe(true)
+  expect(controller.getState().servers[0]?.runtime.kind).not.toBe("ready")
 })

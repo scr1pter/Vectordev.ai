@@ -5,7 +5,7 @@ import * as pty from "@lydell/node-pty"
 import { untrustedChildEnvironment } from "@vectordevai/core/child-environment"
 import type { WslDistroProbe, WslInstalledDistro, WslOnlineDistro, WslRuntimeCheck } from "../../preload/types"
 import { wslTerminalArgs } from "./policy"
-import { shellEscape, wslInstallScript, wslNpmProbeScript, wslResolveScript } from "./scripts"
+import { shellEscape, wslInstallScript, wslToolsProbeScript, wslResolveScript } from "./scripts"
 export { shellEscape } from "./scripts"
 
 export type WslCommandLine = {
@@ -284,21 +284,21 @@ export async function probeWslDistro(name: string, opts?: RunWslOptions): Promis
       name,
       canExecute: false,
       hasBash: false,
-      hasNpm: false,
+      hasInstallTools: false,
       error: summarize(executable.stderr || executable.stdout) || "Cannot execute commands in distro",
     }
   }
 
-  const [bash, npm] = await Promise.all([
+  const [bash, tools] = await Promise.all([
     runWslSh("command -v bash >/dev/null && printf yes || printf no", name, opts),
-    runWslInDistro(["bash", "-lc", wslNpmProbeScript()], name, opts),
+    runWslInDistro(["bash", "-lc", wslToolsProbeScript()], name, opts),
   ])
 
   return {
     name,
     canExecute: true,
     hasBash: bash.code === 0 && summarize(bash.stdout) === "yes",
-    hasNpm: npm.code === 0 && summarize(npm.stdout) === "yes",
+    hasInstallTools: tools.code === 0 && summarize(tools.stdout) === "yes",
     error: null,
   }
 }

@@ -1,5 +1,5 @@
 import path from "node:path"
-import { BUILD_IDENTITY_FILE, parseBuildIdentity } from "./build-identity"
+import { BUILD_IDENTITY_FILE, parseBuildIdentity, requiredCliVersion } from "./build-identity"
 
 type PackageTarget = "mac" | "win" | "linux"
 
@@ -98,11 +98,20 @@ if (import.meta.main) {
     environmentChannel: Bun.env.VECTOR_CHANNEL,
     unsignedRelease: Bun.env.VECTOR_ALLOW_UNSIGNED_RELEASE === "true",
   })
-  const environment = { ...process.env, ...request.environment }
+  const requiredVersion = requiredCliVersion(
+    "vectorRequiredCliVersion" in manifest ? manifest.vectorRequiredCliVersion : undefined,
+    Bun.env.VECTOR_REQUIRED_CLI_VERSION,
+  )
+  const environment = { ...process.env, ...request.environment, VECTOR_REQUIRED_CLI_VERSION: requiredVersion }
   run([process.execPath, "run", "build"], packageDir, environment, "Desktop build failed")
 
   const identity = parseBuildIdentity(await Bun.file(path.join(packageDir, "out", BUILD_IDENTITY_FILE)).text())
-  if (!identity || identity.channel !== request.channel || identity.version !== manifest.version) {
+  if (
+    !identity ||
+    identity.channel !== request.channel ||
+    identity.version !== manifest.version ||
+    identity.requiredCliVersion !== requiredVersion
+  ) {
     throw new Error("Desktop build identity does not match the requested package channel and version")
   }
 

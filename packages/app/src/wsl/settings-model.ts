@@ -54,7 +54,7 @@ export const wslRuntimeRetryable = (runtime: WslServerRuntime) =>
 export function wslVectorAction(check?: WslVectorCheck) {
   if (!check) return
   if (!check.resolvedPath) return "Install Vector"
-  if (check.matchesDesktop !== true) return "Update Vector"
+  if (check.matchesRequired !== true) return "Update Vector"
 }
 
 export function wslDistroReady(state: WslServersState | undefined, name: string) {
@@ -62,7 +62,9 @@ export function wslDistroReady(state: WslServersState | undefined, name: string)
   const probe = state?.distroProbes[name]
   if (!probe || !installed) return false
   if (installed.version === 1) return false
-  return probe.canExecute && probe.hasBash && (probe.hasNpm || state?.vectorChecks[name]?.matchesDesktop === true)
+  return (
+    probe.canExecute && probe.hasBash && (probe.hasInstallTools || state?.vectorChecks[name]?.matchesRequired === true)
+  )
 }
 
 export function addServerViewModel(input: {
@@ -162,7 +164,7 @@ function addServerDistroStatus(input: {
     }
     return { label: { key: "wsl.onboarding.openDistroOnce", params: { distro: input.name } }, tone: "warning" }
   }
-  if (!probe.hasBash || (!probe.hasNpm && input.state?.vectorChecks[input.name]?.matchesDesktop !== true)) {
+  if (!probe.hasBash || (!probe.hasInstallTools && input.state?.vectorChecks[input.name]?.matchesRequired !== true)) {
     return { label: { key: "wsl.onboarding.distroStatus.missingTools" }, tone: "warning" }
   }
   const check = input.state?.vectorChecks[input.name]
@@ -172,7 +174,7 @@ function addServerDistroStatus(input: {
     }
     return
   }
-  if (check.matchesDesktop === false) return { label: { key: "wsl.onboarding.updateVector" }, tone: "warning" }
+  if (check.matchesRequired === false) return { label: { key: "wsl.onboarding.updateVector" }, tone: "warning" }
   if (!check.resolvedPath) return { label: { key: "wsl.onboarding.distroStatus.vectorMissing" }, tone: "warning" }
   if (check.error) return { label: { key: "wsl.onboarding.installVector" }, tone: "warning" }
   return { label: { key: "wsl.onboarding.distroStatus.ready" }, tone: "success" }
@@ -211,7 +213,7 @@ function addServerPrimaryButton(input: {
     }
   }
   if (!addServerVectorReady(input.vectorCheck)) {
-    const update = !!input.vectorCheck?.resolvedPath && input.vectorCheck.matchesDesktop === false
+    const update = !!input.vectorCheck?.resolvedPath && input.vectorCheck.matchesRequired === false
     return {
       variant: "neutral",
       label: installingVector
@@ -236,7 +238,7 @@ function addServerPrimaryButton(input: {
 }
 
 function addServerVectorReady(check: WslVectorCheck | null) {
-  return !!check?.resolvedPath && check.matchesDesktop !== false && !check.error
+  return !!check?.resolvedPath && check.matchesRequired !== false && !check.error
 }
 
 function addServerSelectedDistroSettled(state: WslServersState | undefined, selectedDistro: string | null) {

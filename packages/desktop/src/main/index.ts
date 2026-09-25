@@ -46,7 +46,7 @@ import { startCloudBridge, stopCloudBridge } from "./cloud-bridge"
 import { setupSecureRuntimeSecrets } from "./secure-runtime"
 import { handleCloudOAuthDeepLinks } from "./cloud-connections"
 import { createLicenseService } from "./license-service"
-import { vectorAccount } from "./vector-account-runtime"
+import { registerManagedVectorAccount, vectorAccount } from "./vector-account-runtime"
 import { backgroundModeStatus, requestQuit } from "./background-mode"
 import {
   onScheduledAgentRunFinished,
@@ -169,10 +169,11 @@ const main = Effect.gen(function* () {
   initCrashReporter()
 
   const wslServers = createWslServersController(
-    app.getVersion(),
-    async (distro) => {
+    import.meta.env.VECTOR_REQUIRED_CLI_VERSION,
+    async (distro, input) => {
       logger.log("spawning wsl sidecar", { distro })
       return spawnWslSidecar(distro, {
+        ...input,
         onLine: (line) => logger.log("wsl sidecar", { distro, stream: line.stream, text: line.text }),
       })
     },
@@ -183,9 +184,12 @@ const main = Effect.gen(function* () {
       },
     },
   )
+  const unregisterManagedAccount = registerManagedVectorAccount((token, synchronize) =>
+    wslServers.replaceAccount(token, synchronize),
+  )
   const stopSidecars = async () => {
-    await Promise.all([killSidecar(), stopBrowserBridge(), stopCloudBridge()])
-    wslServers.stopAll()
+    unregisterManagedAccount()
+    await Promise.all([killSidecar(), stopBrowserBridge(), stopCloudBridge(), wslServers.stopAll()])
   }
   const relaunch = () => {
     // A relaunch ends this process, so it counts as an explicit quit: without
@@ -447,10 +451,6 @@ const main = Effect.gen(function* () {
       password,
     })
 
-    if (process.platform === "win32") {
-      void wslServers.initialize().catch((error) => logger.error("wsl server initialization failed", error))
-    }
-
     yield* Effect.promise(() => health.wait).pipe(
       Effect.timeout("30 seconds"),
       Effect.catch((e) =>
@@ -461,6 +461,9 @@ const main = Effect.gen(function* () {
     )
 
     yield* Effect.promise(() => vectorAccount.restore())
+    if (process.platform === "win32") {
+      yield* Effect.promise(() => wslServers.initialize())
+    }
     logger.log("loading task finished")
   }).pipe(forwardInitializationFailure(serverReady), Effect.forkChild)
 

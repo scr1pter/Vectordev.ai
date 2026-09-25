@@ -3,6 +3,9 @@ import { defineConfig } from "electron-vite"
 import appPlugin from "@vectordevai/app/vite"
 import * as fs from "node:fs/promises"
 
+import manifest from "./package.json"
+import { requiredCliVersion } from "./scripts/build-identity"
+
 const VECTOR_SERVER_DIST = "../engine/dist/node"
 
 const channel = (() => {
@@ -33,6 +36,9 @@ export default defineConfig({
   main: {
     define: {
       "import.meta.env.VECTOR_CHANNEL": JSON.stringify(channel),
+      "import.meta.env.VECTOR_REQUIRED_CLI_VERSION": JSON.stringify(
+        requiredCliVersion(manifest.vectorRequiredCliVersion, process.env.VECTOR_REQUIRED_CLI_VERSION),
+      ),
     },
     build: {
       rollupOptions: {

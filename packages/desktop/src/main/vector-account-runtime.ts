@@ -1,9 +1,13 @@
 import { BrowserWindow, safeStorage, shell } from "electron"
 import { getStore, removeStoreFileIfEmpty } from "./store"
 import { createVectorAccount, syncVectorAccount } from "./vector-account"
+import { createManagedAccountLifecycle } from "./vector-account-lifecycle"
 
 const STORE = "vector-account"
-const engine: { ready?: () => Promise<{ url: string; username: string | null; password: string | null }> } = {}
+const engine: {
+  ready?: () => Promise<{ url: string; username: string | null; password: string | null }>
+} = {}
+const managed = createManagedAccountLifecycle()
 
 async function available() {
   if (process.platform === "linux" && safeStorage.getSelectedStorageBackend() === "basic_text") return false
@@ -36,7 +40,9 @@ export const vectorAccount = createVectorAccount({
   fetch: (url, init) => fetch(url, init),
   sync: async (token) => {
     if (!engine.ready) throw new Error("The local server is not ready.")
-    await syncVectorAccount(await engine.ready(), token)
+    const ready = engine.ready
+    const synchronize = async () => syncVectorAccount(await ready(), token)
+    await managed.sync(token, synchronize)
   },
   changed: (status) =>
     BrowserWindow.getAllWindows().forEach((window) => {
@@ -47,3 +53,6 @@ export const vectorAccount = createVectorAccount({
 export function initializeVectorAccount(ready: NonNullable<typeof engine.ready>) {
   engine.ready = ready
 }
+
+/** Main-process lifecycle hook; never exposed through preload or renderer IPC. */
+export const registerManagedVectorAccount = managed.register

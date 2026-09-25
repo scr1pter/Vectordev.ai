@@ -3,6 +3,7 @@
   "productName": "Vector",
   "private": true,
   "version": "1.99.91",
+  "vectorRequiredCliVersion": "1.99.91",
   "type": "module",
   "license": "SEE LICENSE IN ../../LICENSE",
   "homepage": "https://vectordev.ai",
@@ -58,7 +59,8 @@
     "sury": "11.0.0-alpha.4",
     "typescript": "~5.6.2",
     "vite": "catalog:",
-    "zod-openapi": "5.4.6"
+    "zod-openapi": "5.4.6",
+    "@vectordevai/schema": "workspace:*"
   },
   "optionalDependencies": {
     "@lydell/node-pty-darwin-arm64": "1.2.0-beta.12",

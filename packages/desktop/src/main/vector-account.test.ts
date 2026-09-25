@@ -9,6 +9,8 @@ function fixture() {
     now: 1_000,
     failStorage: false,
     fetchDelay: undefined as Promise<void> | undefined,
+    syncDelay: undefined as Promise<void> | undefined,
+    failSync: false,
   }
   const urls: string[] = []
   const tokens: Array<string | undefined> = []
@@ -46,6 +48,8 @@ function fixture() {
     },
     sync: async (value) => {
       tokens.push(value)
+      await state.syncDelay
+      if (state.failSync) throw new Error("WSL termination not confirmed")
     },
     changed: (status) => statuses.push(status),
     now: () => state.now,
@@ -54,6 +58,29 @@ function fixture() {
     `vector://auth/callback?${new URLSearchParams({ code: randomBytes(32).toString("base64url"), state: new URL(urls.at(-1)!).searchParams.get("state")! })}`
   return { controller, state, urls, tokens, statuses, requests, token, callback }
 }
+
+test("account success notifications wait for managed server synchronization", async () => {
+  const app = fixture()
+  const released = Promise.withResolvers<void>()
+  app.state.syncDelay = released.promise
+  await app.controller.start()
+  const signingIn = app.controller.consume([app.callback()])
+  for (let count = 0; count < 50 && !app.tokens.length; count++) await Bun.sleep(1)
+  expect(app.tokens).toEqual([app.token])
+  expect(app.statuses).toEqual([{ authenticated: false, pending: true }])
+  released.resolve()
+  await signingIn
+  expect(app.statuses.at(-1)).toMatchObject({ authenticated: true, pending: false })
+  app.state.failSync = true
+  const stored = app.state.stored
+  const status = await app.controller.logout()
+  expect(status).toMatchObject({ authenticated: true, error: expect.stringContaining("could not finish signing out") })
+  expect(app.state.stored).toEqual(stored)
+  expect(app.statuses.at(-1)).toEqual(status)
+  app.state.failSync = false
+  await app.controller.logout()
+  expect(app.state.stored).toBeUndefined()
+})
 
 test("desktop owns PKCE exchange and only ciphertext/status cross persistence and renderer boundaries", async () => {
   const app = fixture()
