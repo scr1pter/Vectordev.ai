@@ -148,7 +148,7 @@ describe("WSL server settings presentation", () => {
         ],
         online: [{ name: "Alpine", label: "Alpine Linux" }],
         distroProbes: {
-          Ubuntu: { name: "Ubuntu", canExecute: true, hasBash: true, hasCurl: true, error: null },
+          Ubuntu: { name: "Ubuntu", canExecute: true, hasBash: true, hasNpm: true, error: null },
         },
       },
       view: "main",
@@ -186,7 +186,7 @@ describe("WSL server settings presentation", () => {
         installed: [{ name: "Debian", version: 2, isDefault: true }],
         online: [{ name: "Ubuntu", label: "Ubuntu" }],
         distroProbes: {
-          Debian: { name: "Debian", canExecute: true, hasBash: true, hasCurl: true, error: null },
+          Debian: { name: "Debian", canExecute: true, hasBash: true, hasNpm: true, error: null },
         },
         vectorChecks: {
           Debian: {
@@ -229,3 +229,35 @@ describe("WSL server settings presentation", () => {
     expect(calls).toEqual([["Debian", "Ubuntu"]])
   })
 })
+
+for (const installedNative of [false, true]) {
+  test(`npm is required for installation but not for an existing native server: ${installedNative}`, () => {
+    const model = addServerViewModel({
+      state: readyState({
+        installed: [{ name: "Debian", version: 2, isDefault: true }],
+        distroProbes: { Debian: { name: "Debian", canExecute: true, hasBash: true, hasNpm: false, error: null } },
+        vectorChecks: {
+          Debian: {
+            distro: "Debian",
+            resolvedPath: installedNative ? "/home/me/.vector/bin/vector-native" : null,
+            version: installedNative ? "1.16.2" : null,
+            expectedVersion: "1.16.2",
+            matchesDesktop: installedNative ? true : null,
+            error: null,
+          },
+        },
+      }),
+      view: "main",
+      selectedDistro: "Debian",
+      catalogSearch: "",
+      catalogTarget: null,
+      adding: false,
+      probingAddable: false,
+    })
+    expect(model.primaryButton.disabled).toBe(!installedNative)
+    expect(model.primaryButton.action).toBe(installedNative ? "add" : null)
+    expect(model.distroStatuses.Debian?.label.key).toBe(
+      installedNative ? "wsl.onboarding.distroStatus.ready" : "wsl.onboarding.distroStatus.missingTools",
+    )
+  })
+}

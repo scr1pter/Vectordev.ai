@@ -1,5 +1,8 @@
 ---
 import DocsPage from "../../layouts/DocsPage.astro"
+import desktop from "../../../../desktop/package.json"
+
+const wslInstall = `npm install --global --prefix "$HOME/.vector" @vectordevai/cli@${desktop.version}`
 
 export const prerender = true
 ---
@@ -14,10 +17,15 @@ vector attach http://localhost:4096 --dir ~/code/myapp</code><button class="doc-
           <h3>Windows Subsystem for Linux</h3>
           <p>
             Install Linux Node.js and npm inside the WSL 2 distro before choosing Install Vector in server settings.
-            The installer uses <code>npm install --global --prefix "$HOME/.vector" @vectordevai/cli</code>.
-            Open a terminal in that distro and run <code>~/.vector/bin/vector login</code> before adding its server,
-            then <code>~/.vector/bin/vector auth login</code> to connect model credentials. The account token in your
-            Windows app does not sign in the separate Linux installation.
+            The installer uses <code>{wslInstall}</code>,
+            pinned to the exact version shown in About Vector, then installs a native Linux executable at
+            <code>~/.vector/bin/vector-native</code>. It loads nvm and fnm when available; Node.js and npm are needed
+            for installation and updates, while the installed server runs without Node.js.
+            Open a terminal in that distro and run <code>VECTOR_CLI=1 ~/.vector/bin/vector-native login</code> before adding its server,
+            then <code>VECTOR_CLI=1 ~/.vector/bin/vector-native auth login</code> to connect model credentials. The account token in your
+            Windows app does not sign in the separate Linux installation. Existing servers that report a missing engine
+            need Install Vector again. The desktop refuses mismatched versions, binds the server to Linux loopback,
+            and confirms that requests without authentication are rejected before marking it ready.
           </p>
           <p>
             Server configuration uses <code>VECTOR_SERVER_PASSWORD</code> and <code>VECTOR_SERVER_USERNAME</code>;

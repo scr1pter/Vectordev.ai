@@ -13,7 +13,12 @@ import type {
 } from "../../preload/types"
 import { WSL_SERVERS_KEY } from "../store-keys"
 import { getStore } from "../store"
-import { expectVectorVersion, pendingRestartAfterWslInstall, wslServerIdsToStartOnInitialize } from "./startup"
+import {
+  expectVectorVersion,
+  pendingRestartAfterWslInstall,
+  wslServerIdsToStartOnInitialize,
+  wslReinstallMessage,
+} from "./startup"
 import { clearWslDistroState, wslServerIdToRestart } from "./policy"
 import {
   installWslDistro,
@@ -168,38 +173,6 @@ export function createWslServersController(
     return state.servers.some((item) => item.config.id === id && item.config.distro === distro)
   }
 
-  const refreshVectorCheckBackground = (id: string, distro: string) => {
-    void checkVector(distro)
-      .then((check) => {
-        if (!hasServer(id, distro)) return
-        setVectorCheck(distro, check)
-      })
-      .catch((error) => {
-        const message = error instanceof Error ? error.message : String(error)
-        logger?.error("wsl Vector check failed", { id, distro, message })
-      })
-  }
-
-  const refreshVectorChecks = async () => {
-    await Promise.all(
-      state.servers.map((item) =>
-        checkVector(item.config.distro)
-          .then((check) => {
-            if (!hasServer(item.config.id, item.config.distro)) return
-            setVectorCheck(item.config.distro, check)
-          })
-          .catch((error) => {
-            const message = error instanceof Error ? error.message : String(error)
-            logger?.error("wsl Vector check failed", {
-              id: item.config.id,
-              distro: item.config.distro,
-              message,
-            })
-          }),
-      ),
-    )
-  }
-
   const refreshDistroLists = async (opts: { signal?: AbortSignal }) => {
     const [installed, online] = await Promise.all([listInstalledWslDistros(opts), listOnlineWslDistros(opts)])
     return { installed, online }
@@ -228,6 +201,11 @@ export function createWslServersController(
     setRuntime(id, { kind: "starting" })
     logger?.log("wsl sidecar starting", { id, distro: item.config.distro })
     try {
+      const check = await checkVector(item.config.distro)
+      if (!isCurrentStartAttempt(id, attempt)) return
+      setVectorCheck(item.config.distro, check)
+      if (!check.resolvedPath) throw new Error(wslReinstallMessage(item.config.distro))
+      expectVectorVersion(check.version, appVersion, item.config.distro)
       const sidecar = await spawnSidecar(item.config.distro)
       if (!isCurrentStartAttempt(id, attempt)) {
         try {
@@ -251,7 +229,6 @@ export function createWslServersController(
         setRuntime(id, { kind: "failed", message })
         logger?.error("wsl sidecar exited", { id, distro: item.config.distro, code, signal })
       })
-      refreshVectorCheckBackground(id, item.config.distro)
       logger?.log("wsl sidecar ready", { id, distro: item.config.distro, url: sidecar.url })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -303,7 +280,6 @@ export function createWslServersController(
 
     async initialize() {
       refreshFromStore()
-      void refreshVectorChecks()
       for (const id of wslServerIdsToStartOnInitialize(state.servers.map((item) => item.config))) void startServer(id)
     },
 
@@ -475,7 +451,7 @@ function vectorCheck(
       version: null,
       expectedVersion,
       matchesDesktop: null,
-      error: "Vector is not installed in this distro",
+      error: wslReinstallMessage(distro),
     }
   }
   if (!version) {

@@ -5,6 +5,8 @@ import * as pty from "@lydell/node-pty"
 import { untrustedChildEnvironment } from "@vectordevai/core/child-environment"
 import type { WslDistroProbe, WslInstalledDistro, WslOnlineDistro, WslRuntimeCheck } from "../../preload/types"
 import { wslTerminalArgs } from "./policy"
+import { shellEscape, wslInstallScript, wslNpmProbeScript, wslResolveScript } from "./scripts"
+export { shellEscape } from "./scripts"
 
 export type WslCommandLine = {
   stream: "stdout" | "stderr"
@@ -264,14 +266,7 @@ export async function installWslDistro(name: string, opts?: RunWslOptions) {
 export async function installWslVector(version: string, distro: string, opts?: RunWslOptions) {
   return runInteractiveCommand(
     resolveSystem32Command("wsl.exe"),
-    wslArgs(
-      [
-        "bash",
-        "-lc",
-        `PATH=$(awk -v RS=: -v ORS=: '$0 !~ /^\\/mnt\\//' <<<"$PATH" | sed "s/:$//"); export PATH; command -v npm >/dev/null || { printf "%s\\n" "Install Node.js and npm in this Linux distro first." >&2; exit 1; }; npm install --global --prefix "$HOME/.vector" ${shellEscape(`@vectordevai/cli@${version}`)}`,
-      ],
-      distro,
-    ),
+    wslArgs(["bash", "-lc", wslInstallScript(version)], distro),
     withTimeout(opts, DEFAULT_WSL_INSTALL_TIMEOUT_MS),
     DEFAULT_WSL_INSTALL_TIMEOUT_MS,
   )
@@ -289,39 +284,31 @@ export async function probeWslDistro(name: string, opts?: RunWslOptions): Promis
       name,
       canExecute: false,
       hasBash: false,
-      hasCurl: false,
+      hasNpm: false,
       error: summarize(executable.stderr || executable.stdout) || "Cannot execute commands in distro",
     }
   }
 
-  const [bash, curl] = await Promise.all([
+  const [bash, npm] = await Promise.all([
     runWslSh("command -v bash >/dev/null && printf yes || printf no", name, opts),
-    runWslSh("command -v curl >/dev/null && printf yes || printf no", name, opts),
+    runWslInDistro(["bash", "-lc", wslNpmProbeScript()], name, opts),
   ])
 
   return {
     name,
     canExecute: true,
     hasBash: bash.code === 0 && summarize(bash.stdout) === "yes",
-    hasCurl: curl.code === 0 && summarize(curl.stdout) === "yes",
+    hasNpm: npm.code === 0 && summarize(npm.stdout) === "yes",
     error: null,
   }
 }
 
 export async function resolveWslVector(distro: string, opts?: RunWslOptions) {
-  return firstLine(
-    (
-      await runWslSh(
-        'if [ -x "$HOME/.vector/bin/vector" ]; then printf "%s\\n" "$HOME/.vector/bin/vector"; fi',
-        distro,
-        opts,
-      )
-    ).stdout,
-  )
+  return firstLine((await runWslSh(wslResolveScript(), distro, opts)).stdout)
 }
 
 export async function readWslCommandVersion(command: string, distro: string, opts?: RunWslOptions) {
-  const result = await runWslSh(`${shellEscape(command)} --version 2>/dev/null || true`, distro, opts)
+  const result = await runWslSh(`VECTOR_CLI=1 ${shellEscape(command)} --version 2>/dev/null || true`, distro, opts)
   return firstLine(result.stdout)
 }
 
@@ -386,10 +373,6 @@ export function summarize(value: string) {
     .map((line) => line.trim())
     .filter(Boolean)
     .join("\n")
-}
-
-export function shellEscape(value: string) {
-  return `'${value.replace(/'/g, `'"'"'`)}'`
 }
 
 function resolveSystem32Command(command: string) {

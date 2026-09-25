@@ -5,7 +5,7 @@ export function wslServerIdsToStartOnInitialize(servers: { id: string }[]) {
 export function expectVectorVersion(installed: string | null, expected: string, distro = "Debian") {
   if (installed === expected) return
   throw new Error(
-    `Vector update finished but ${distro} still reports ${installed ?? "no version"}; expected ${expected}`,
+    `Update Vector in ${distro} before starting this server: installed ${installed ?? "no version"}; desktop requires ${expected}. Choose Install Vector or Update Vector in server settings.`,
   )
 }
 
@@ -28,4 +28,23 @@ function abortableDelay(duration: number, signal: AbortSignal) {
     const timeout = setTimeout(done, duration)
     signal.addEventListener("abort", done, { once: true })
   })
+}
+
+export function wslReinstallMessage(distro: string) {
+  return `This WSL server needs Vector installed again in ${distro}. Install Linux Node.js and npm, then choose Install Vector in server settings.`
+}
+
+export async function requireWslAuthentication(url: string, distro: string, stop: () => void, signal: AbortSignal) {
+  const response = await fetch(new URL("/config", url), {
+    signal,
+    redirect: "manual",
+  }).catch((error: unknown) => {
+    stop()
+    throw error
+  })
+  if (response.status === 401) return
+  stop()
+  throw new Error(
+    `The Vector engine in ${distro} is not enforcing authentication. Reinstall Vector from server settings.`,
+  )
 }

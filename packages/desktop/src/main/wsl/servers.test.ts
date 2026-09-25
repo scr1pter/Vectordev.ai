@@ -29,7 +29,7 @@ test("starts every configured WSL server on initialization", () => {
 test("rejects an update that did not install the Vector desktop version", () => {
   expect(() => expectVectorVersion("1.16.2", "1.16.2")).not.toThrow()
   expect(() => expectVectorVersion("1.14.35", "1.16.2")).toThrow(
-    "Vector update finished but Debian still reports 1.14.35; expected 1.16.2",
+    "Update Vector in Debian before starting this server: installed 1.14.35; desktop requires 1.16.2",
   )
 })
 
@@ -51,7 +51,7 @@ test("restarts an existing distro server after updating the engine", () => {
 test("clears cached distro probes when removing a WSL server", () => {
   expect(
     clearWslDistroState(
-      { Debian: { name: "Debian", canExecute: true, hasBash: true, hasCurl: true, error: null } },
+      { Debian: { name: "Debian", canExecute: true, hasBash: true, hasNpm: true, error: null } },
       {
         Debian: {
           distro: "Debian",
@@ -160,7 +160,7 @@ test("probes addable distros in parallel before checking the engine", async () =
     probeDistro: async (distro) => {
       started.push(distro)
       await new Promise<void>((resolve) => release.set(distro, resolve))
-      return { name: distro, canExecute: true, hasBash: true, hasCurl: true, error: null }
+      return { name: distro, canExecute: true, hasBash: true, hasNpm: true, error: null }
     },
     resolveVector: async (distro) => {
       vector.push(distro)
@@ -190,7 +190,7 @@ test("does not check the engine in addable distros that cannot execute commands"
       name: distro,
       canExecute: distro === "Debian",
       hasBash: distro === "Debian",
-      hasCurl: distro === "Debian",
+      hasNpm: distro === "Debian",
       error: distro === "Debian" ? null : "Open Ubuntu once to finish setup",
     }),
     resolveVector: async (distro) => {
@@ -229,3 +229,68 @@ function testControllerOptions() {
     },
   }
 }
+
+for (const version of [null, "1.16.1", "1.16.3"]) {
+  test(`refuses to launch a WSL engine reporting ${version}`, async () => {
+    const spawned: string[] = []
+    const controller = createWslServersController(
+      "1.16.2",
+      async (distro) => {
+        spawned.push(distro)
+        throw new Error("must not launch")
+      },
+      {
+        readServers: () => [{ id: "wsl:Debian", distro: "Debian" }],
+        writeServers: () => undefined,
+        resolveVector: async () => (version === null ? null : "/home/me/.vector/bin/vector-native"),
+        readCommandVersion: async () => version,
+      },
+    )
+    await controller.initialize()
+    await waitFor(() => controller.getState().servers[0]?.runtime.kind === "failed")
+    expect(spawned).toEqual([])
+    const runtime = controller.getState().servers[0].runtime
+    expect(runtime.kind).toBe("failed")
+    if (runtime.kind !== "failed") throw new Error("Expected failed runtime")
+    expect(runtime.message).toContain(version === null ? "needs Vector installed again" : "Update Vector in Debian")
+    expect(runtime.message).toContain("server settings")
+    expect(controller.getState().vectorChecks.Debian.matchesDesktop).not.toBe(true)
+  })
+}
+
+test("rechecks the actual engine version before every start", async () => {
+  let version = "1.16.2"
+  let spawned = 0
+  let stopped = 0
+  const controller = createWslServersController(
+    "1.16.2",
+    async () => {
+      spawned++
+      return {
+        listener: {
+          stop: () => {
+            stopped++
+          },
+          onExit: () => undefined,
+        },
+        url: "http://127.0.0.1:4096",
+        username: "vector",
+        password: "fixture-password",
+      }
+    },
+    {
+      readServers: () => [{ id: "wsl:Debian", distro: "Debian" }],
+      writeServers: () => undefined,
+      resolveVector: async () => "/home/me/.vector/bin/vector-native",
+      readCommandVersion: async () => version,
+    },
+  )
+  await controller.initialize()
+  await waitFor(() => controller.getState().servers[0]?.runtime.kind === "ready")
+  expect(spawned).toBe(1)
+  version = "1.16.1"
+  await controller.startServer("wsl:Debian")
+  expect(spawned).toBe(1)
+  expect(stopped).toBe(1)
+  expect(controller.getState().servers[0].runtime.kind).toBe("failed")
+})

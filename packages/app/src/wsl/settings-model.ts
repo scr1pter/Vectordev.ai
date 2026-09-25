@@ -54,7 +54,7 @@ export const wslRuntimeRetryable = (runtime: WslServerRuntime) =>
 export function wslVectorAction(check?: WslVectorCheck) {
   if (!check) return
   if (!check.resolvedPath) return "Install Vector"
-  if (check.matchesDesktop === false) return "Update Vector"
+  if (check.matchesDesktop !== true) return "Update Vector"
 }
 
 export function wslDistroReady(state: WslServersState | undefined, name: string) {
@@ -62,7 +62,7 @@ export function wslDistroReady(state: WslServersState | undefined, name: string)
   const probe = state?.distroProbes[name]
   if (!probe || !installed) return false
   if (installed.version === 1) return false
-  return probe.canExecute && probe.hasBash
+  return probe.canExecute && probe.hasBash && (probe.hasNpm || state?.vectorChecks[name]?.matchesDesktop === true)
 }
 
 export function addServerViewModel(input: {
@@ -162,7 +162,7 @@ function addServerDistroStatus(input: {
     }
     return { label: { key: "wsl.onboarding.openDistroOnce", params: { distro: input.name } }, tone: "warning" }
   }
-  if (!probe.hasBash) {
+  if (!probe.hasBash || (!probe.hasNpm && input.state?.vectorChecks[input.name]?.matchesDesktop !== true)) {
     return { label: { key: "wsl.onboarding.distroStatus.missingTools" }, tone: "warning" }
   }
   const check = input.state?.vectorChecks[input.name]

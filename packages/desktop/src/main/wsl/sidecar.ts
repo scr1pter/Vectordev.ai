@@ -4,8 +4,9 @@ import { createServer } from "node:net"
 import { untrustedChildEnvironment } from "@vectordevai/core/child-environment"
 import { app } from "electron"
 import { checkHealth } from "../server"
-import { type WslCommandLine, resolveWslVector, shellEscape, wslArgs } from "./runtime"
-import { pollWslHealth } from "./startup"
+import { type WslCommandLine, resolveWslVector, wslArgs } from "./runtime"
+import { pollWslHealth, requireWslAuthentication, wslReinstallMessage } from "./startup"
+import { wslServerScript } from "./scripts"
 import { VECTOR_AGENT_RUNTIME_ENV } from "../agent-runtime"
 
 export type WslSidecar = {
@@ -20,35 +21,25 @@ export async function spawnWslSidecar(
   opts: { onLine?: (line: WslCommandLine) => void; healthTimeoutMs?: number } = {},
 ): Promise<WslSidecar> {
   const vector = await resolveWslVector(distro)
-  if (!vector) throw new Error(`Vector is not installed in ${distro}`)
+  if (!vector) throw new Error(wslReinstallMessage(distro))
 
   const port = await allocatePort()
   const password = randomUUID()
   const username = "vector"
-  const script = [
-    "set -euo pipefail",
-    'cd "$HOME" || cd /',
-    'PATH=$(awk -v RS=: -v ORS=: \'$0 !~ /^\\/mnt\\//\' <<<"$PATH" | sed "s/:$//")',
-    "export PATH",
-    "export WSLENV=",
-    ...Object.entries({
+  const script = wslServerScript({
+    binary: vector,
+    port,
+    logLevel: app.isPackaged ? "WARN" : "INFO",
+    env: {
       ...VECTOR_AGENT_RUNTIME_ENV,
-      ...{
-        VECTOR_EXPERIMENTAL_DISABLE_FILEWATCHER: "true",
-        VECTOR_CLIENT: "desktop",
-        VECTOR_SERVER_USERNAME: username,
-        VECTOR_SERVER_PASSWORD: password,
-      },
-    }).map(([key, value]) => `export ${key}=${shellEscape(value)}`),
-    ...(process.env.VECTOR_MCP_AUTH_KEY
-      ? [`export VECTOR_MCP_AUTH_KEY=${shellEscape(process.env.VECTOR_MCP_AUTH_KEY)}`]
-      : []),
-    ...(process.env.VECTOR_CREDENTIAL_KEY
-      ? [`export VECTOR_CREDENTIAL_KEY=${shellEscape(process.env.VECTOR_CREDENTIAL_KEY)}`]
-      : []),
-    'export XDG_STATE_HOME="$HOME/.local/state"',
-    `exec ${shellEscape(vector)} --print-logs --log-level ${app.isPackaged ? "WARN" : "INFO"} serve --hostname 0.0.0.0 --port ${port}`,
-  ].join("\n")
+      VECTOR_EXPERIMENTAL_DISABLE_FILEWATCHER: "true",
+      VECTOR_CLIENT: "desktop",
+      VECTOR_SERVER_USERNAME: username,
+      VECTOR_SERVER_PASSWORD: password,
+      ...(process.env.VECTOR_MCP_AUTH_KEY ? { VECTOR_MCP_AUTH_KEY: process.env.VECTOR_MCP_AUTH_KEY } : {}),
+      ...(process.env.VECTOR_CREDENTIAL_KEY ? { VECTOR_CREDENTIAL_KEY: process.env.VECTOR_CREDENTIAL_KEY } : {}),
+    },
+  })
   const child = spawn("wsl", wslArgs(["bash", "-se"], distro), {
     env: untrustedChildEnvironment(),
     stdio: ["pipe", "pipe", "pipe"],
@@ -72,7 +63,9 @@ export async function spawnWslSidecar(
   })
   const url = `http://127.0.0.1:${port}`
   const startup = new AbortController()
-  const health = pollWslHealth(() => checkHealth(url, password), startup.signal)
+  const health = pollWslHealth(() => checkHealth(url, password), startup.signal).then(() =>
+    requireWslAuthentication(url, distro, () => child.kill(), startup.signal),
+  )
   const timeoutMs = opts.healthTimeoutMs ?? 30_000
   let timeout: ReturnType<typeof setTimeout>
   const timedOut = new Promise<never>(
