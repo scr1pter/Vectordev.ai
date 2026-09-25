@@ -9,6 +9,11 @@
   "outputDirectory": "packages/web/dist",
   "redirects": [
     {
+      "source": "/docs/product",
+      "destination": "/",
+      "permanent": true
+    },
+    {
       "source": "/billing",
       "destination": "/account#billing",
       "permanent": false

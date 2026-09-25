@@ -27,7 +27,6 @@ const group = id ? groupOf(id) : (eyebrow ?? "Documentation")
 const { previous, next } = id ? neighbours(id) : { previous: undefined, next: docsOrder[0] }
 
 const externals: [string, string][] = [
-  ["Product tour", "/docs/product"],
   ["Releases", "/releases"],
   ["Download Vector", "/login"],
 ]
