@@ -1,3 +1,5 @@
+import { upcomingRelease } from "./vector-releases"
+
 // The tables and lists the documentation pages interpolate. Extracted from the
 // single-page docs when it became one page per section.
 export const ecosystem = [
@@ -402,6 +404,7 @@ export const subagentKinds = [
   ],
 ]
 export const changelog = [
+  [upcomingRelease.label, upcomingRelease.title, `${upcomingRelease.summary} ${upcomingRelease.status}`],
   [
     "September 2026 · 1.99.91",
     "Provider setup and Vectorscope reliability",

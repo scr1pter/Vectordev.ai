@@ -4,6 +4,16 @@ export type VectorRelease = {
   summary: string
 }
 
+// Shared by the landing release feed and documentation changelog. This is not a versioned release.
+export const upcomingRelease = {
+  label: "Upcoming — unversioned candidate",
+  title: "Vector services, upgrade recovery and native distribution",
+  summary:
+    "This candidate prepares Free models inside of Vector through OpenRouter, public sessions with preview and consent, native installers, WSL account handoff and Vector Teams. It also restores reviewed provider adapters, improves configuration recovery and crash reports, and prepares a public SDK and container images. Shared model access and provider sign-ins that need registrations remain disabled pending owner setup. ChatGPT subscription sign-in is not pursued; the separate Codex CLI integration is unchanged.",
+  status:
+    "Source preview only. No new version, release date, installer availability or production service enablement is announced. Package publication, platform checks and signed desktop updates remain pending. Pricing and licensing behavior are unchanged.",
+}
+
 export const releaseSeries: VectorRelease[] = [
   {
     version: "1.0",

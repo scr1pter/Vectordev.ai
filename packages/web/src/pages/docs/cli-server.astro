@@ -1,38 +1,63 @@
 ---
 import DocsPage from "../../layouts/DocsPage.astro"
-import desktop from "../../../../desktop/package.json"
-
-const wslInstall = `npm install --global --prefix "$HOME/.vector" @vectordevai/cli@${desktop.version}`
 
 export const prerender = true
 ---
 
 <DocsPage id="cli-server">
-
-          <p>
-            <code>vector serve</code> runs the agent as a headless server with <code>--port</code> and <code>--hostname</code>; <code>vector web</code> starts the same server and opens the browser interface. <code>vector attach &lt;url&gt;</code> connects a terminal session to a server that is already running, with <code>--dir</code> to choose the directory on it, the usual session flags, and <code>--username</code> and <code>--password</code> for basic auth.
-          </p>
-          <p class="doc-cmd"><code>vector serve --port 4096
+  <p>
+    <code>vector serve</code> runs the agent as a headless server with <code>--port</code> and <code>--hostname</code>;
+    <code>vector web</code> starts the same server and opens the browser interface. <code>vector attach &lt;url&gt;</code>
+    connects a terminal session to a running server, with <code>--dir</code> to choose its directory and
+    <code>--username</code> and <code>--password</code> for Basic authentication.
+  </p>
+  <p class="doc-cmd"><code>vector serve --port 4096
 vector attach http://localhost:4096 --dir ~/code/myapp</code><button class="doc-cmd-copy" type="button" aria-label="Copy this command">Copy</button></p>
-          <h3>Windows Subsystem for Linux</h3>
-          <p>
-            Install Linux Node.js and npm inside the WSL 2 distro before choosing Install Vector in server settings.
-            The installer uses <code>{wslInstall}</code>,
-            pinned to the exact version shown in About Vector, then installs a native Linux executable at
-            <code>~/.vector/bin/vector-native</code>. It loads nvm and fnm when available; Node.js and npm are needed
-            for installation and updates, while the installed server runs without Node.js.
-            Open a terminal in that distro and run <code>VECTOR_CLI=1 ~/.vector/bin/vector-native login</code> before adding its server,
-            then <code>VECTOR_CLI=1 ~/.vector/bin/vector-native auth login</code> to connect model credentials. The account token in your
-            Windows app does not sign in the separate Linux installation. Existing servers that report a missing engine
-            need Install Vector again. The desktop refuses mismatched versions, binds the server to Linux loopback,
-            and confirms that requests without authentication are rejected before marking it ready.
-          </p>
-          <p>
-            Server configuration uses <code>VECTOR_SERVER_PASSWORD</code> and <code>VECTOR_SERVER_USERNAME</code>;
-            the default username is <code>vector</code>. The upcoming release reads only <code>VECTOR_*</code> variables;
-            update server scripts and configuration before upgrading.
-          </p>
-          <p>
-            <code>vector acp</code> starts an Agent Client Protocol server, so an ACP-speaking editor can drive Vector's agent as its backend.
-          </p>
+  <p>
+    Configure <code>VECTOR_SERVER_PASSWORD</code> and, optionally, <code>VECTOR_SERVER_USERNAME</code>;
+    the default username is <code>vector</code>. Non-loopback binding requires a password unless you explicitly
+    choose <code>--unsecured</code>. Use a protected secret source for server passwords. Settings and database
+    overrides are <code>VECTOR_AGENT_CONFIG</code>, <code>VECTOR_AGENT_CONFIG_DIR</code> and <code>VECTOR_AGENT_DB</code>.
+    Keep the existing database file when migrating an ambiguous historical override.
+  </p>
+  <h3>Upcoming native installation</h3>
+  <p>
+    The unversioned candidate prepares Vector shell and PowerShell installers that verify native archives and
+    do not require Node.js or npm. <code>vector upgrade</code> and <code>vector uninstall</code> respect the verified
+    installer or package manager that owns the running executable. On Windows, replacement of a running executable
+    is scheduled after it exits; scheduled does not mean completed. Installer publication and Windows acceptance
+    are still pending. Use the <a href="/releases">published release instructions</a> for available downloads.
+  </p>
+  <h3>Windows Subsystem for Linux</h3>
+  <p>
+    In the candidate, Install Vector in server settings uses the native Vector installer with a separately pinned,
+    exact CLI version required by the desktop. It installs <code>~/.vector/bin/vector-native</code> using Linux
+    download, archive and SHA-256 tools. Node.js and npm are not required. A matching installed engine can start
+    without the download tools; a version mismatch requires an update.
+  </p>
+  <p>
+    Sign in to the desktop before starting its managed WSL server. The desktop passes its Vector account token
+    through the managed process's stdin and stops stale processes when the account changes or signs out. It does
+    not put the token in command arguments, an installer receipt or a new credential file. Provider credentials
+    remain separate; connect your chosen provider inside that environment when needed. Startup binds to Linux
+    loopback, checks health and requires an unauthenticated request to be rejected before connecting. Actual
+    Windows/WSL and published-installer validation remain release requirements.
+  </p>
+  <h3>Public transcripts and teams</h3>
+  <p>
+    The candidate restores public transcript sharing on Vector's service. Preview the content, explicitly choose
+    publication and future updates, and set an expiry before sharing. Public links can expose visible prompts,
+    code and tool output; importing creates passive local history. Removing a new Vector share does not remove a
+    historical copy on another service. <code>vector invite</code> remains the separate live-workspace feature.
+  </p>
+  <p>
+    Vector Teams offers <code>vector org list</code>, <code>vector org switch &lt;orgID&gt;</code> and
+    <code>vector org personal</code>. A selected team supplies signed provider, permission and integration defaults;
+    Personal clears selection even while offline. Refresh running apps after changing the selection from a separate
+    CLI. Sharing and Teams require their production service setup before availability can be announced.
+  </p>
+  <p>
+    <code>vector acp</code> starts an Agent Client Protocol server for compatible editors. For programmatic HTTP
+    use, see the <a href="/docs/sdk">SDK guide</a>; first public SDK publication remains pending.
+  </p>
 </DocsPage>

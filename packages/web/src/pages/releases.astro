@@ -3,7 +3,7 @@ import { ArrowDownToLine, ArrowUpRight, BookOpen, GitCommitHorizontal, Tag } fro
 import MarketingFooter from "../components/marketing/MarketingFooter.astro"
 import MarketingLayout from "../components/marketing/MarketingLayout.astro"
 import MarketingNav from "../components/marketing/MarketingNav.astro"
-import { release117, release118, release119, release199, releaseSeries, type VectorRelease } from "../data/vector-releases"
+import { release117, release118, release119, release199, releaseSeries, upcomingRelease, type VectorRelease } from "../data/vector-releases"
 
 export const prerender = true
 
@@ -87,6 +87,19 @@ const latestAnchor = `#release-${latest.version.replaceAll(".", "-")}`
         </div>
 
         <div class="timeline">
+          <article class="release-post" id="release-upcoming">
+            <div class="timeline-rail" aria-hidden="true"><span></span></div>
+            <div class="release-card">
+              <div class="release-meta"><span class="version-tag">{upcomingRelease.label}</span></div>
+              <h3>{upcomingRelease.title}</h3>
+              <p>{upcomingRelease.summary}</p>
+              <p>{upcomingRelease.status}</p>
+              <div class="release-links">
+                <a href="/docs/changelog">Candidate and release history <ArrowUpRight size={13} strokeWidth={1.8} /></a>
+                <a href="/docs/cli-server">CLI and server guide <ArrowUpRight size={13} strokeWidth={1.8} /></a>
+              </div>
+            </div>
+          </article>
           {posts.map((release) => (
             <article
               class:list={["release-post", { latest: release.latest }]}
