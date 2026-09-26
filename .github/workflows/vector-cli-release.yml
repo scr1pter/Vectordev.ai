@@ -25,6 +25,12 @@ on:
         default: latest
         type: choice
         options: [latest, beta]
+      containers:
+        description: Build container candidates or publish to the owner-configured GHCR namespace
+        required: true
+        default: prepare
+        type: choice
+        options: [skip, prepare, publish]
       phase:
         description: Prepare archives, stage immutable bytes, or verify and commit a staged release
         required: true
@@ -79,7 +85,7 @@ jobs:
         working-directory: packages/cloud
         run: |
           bun typecheck
-          bun test src/cli-release-package.test.ts src/upload-cli-release.test.ts src/cli-package-managers.test.ts src/prepare-cli-release-catalog.test.ts
+          bun test src/cli-release-package.test.ts src/upload-cli-release.test.ts src/cli-package-managers.test.ts src/prepare-cli-release-catalog.test.ts src/cli-container.test.ts
 
       - name: Read the exact previously published catalog
         if: inputs.phase != 'commit'
@@ -111,6 +117,19 @@ jobs:
           compression-level: 0
           retention-days: 30
 
+      - name: Preserve musl inputs for container jobs
+        if: inputs.phase != 'commit' && inputs.containers != 'skip'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: vector-container-inputs-${{ inputs.version }}-${{ github.run_attempt }}
+          path: |
+            cli-release/manifest.json
+            cli-release/vector-linux-x64-baseline-musl.tar.gz
+            cli-release/vector-linux-arm64-musl.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
       - name: Stage and verify immutable release bytes
         if: inputs.phase == 'stage'
         env:
@@ -122,3 +141,17 @@ jobs:
         env:
           BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
         run: bun packages/cloud/src/upload-cli-release.ts commit
+
+  containers:
+    needs: release
+    if: inputs.phase != 'commit' && inputs.containers != 'skip'
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/vector-container-release.yml
+    with:
+      version: ${{ inputs.version }}
+      source_revision: ${{ inputs.source_revision }}
+      catalog_sha256: ${{ inputs.catalog_sha256 }}
+      artifact_name: vector-container-inputs-${{ inputs.version }}-${{ github.run_attempt }}
+      mode: ${{ inputs.containers }}

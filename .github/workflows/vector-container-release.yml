@@ -1,0 +1,165 @@
+name: Vector container artifacts
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+      source_revision:
+        required: true
+        type: string
+      catalog_sha256:
+        required: true
+        type: string
+      artifact_name:
+        required: true
+        type: string
+      mode:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  VECTOR_RELEASE_VERSION: ${{ inputs.version }}
+  VECTOR_SOURCE_REVISION: ${{ inputs.source_revision }}
+  VECTOR_CATALOG_SHA256: ${{ inputs.catalog_sha256 }}
+  VECTOR_CLI_BLOB_ORIGIN: ${{ vars.VECTOR_CLI_BLOB_ORIGIN }}
+  VECTOR_CLI_RELEASE_DIR: cli-release
+  VECTOR_CONTAINER_OWNER: ${{ vars.VECTOR_CONTAINER_OWNER }}
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ inputs.source_revision }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-bun
+        with:
+          install-flags: --frozen-lockfile --ignore-scripts
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: cli-release
+      - name: Verify and unpack the reviewed musl archive
+        env:
+          VECTOR_CONTAINER_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$VECTOR_SOURCE_REVISION"
+          bun packages/cloud/src/cli-container.ts
+      - name: Build and run on the target architecture
+        env:
+          VECTOR_CONTAINER_ARCH: ${{ matrix.arch }}
+          VECTOR_SOURCE_URL: https://github.com/${{ github.repository }}
+        run: |
+          set -euo pipefail
+          image="vector-container:$VECTOR_RELEASE_VERSION-$VECTOR_CONTAINER_ARCH"
+          docker build --platform "linux/$VECTOR_CONTAINER_ARCH" --build-arg "VECTOR_VERSION=$VECTOR_RELEASE_VERSION" --build-arg "VECTOR_SOURCE_REVISION=$VECTOR_SOURCE_REVISION" --build-arg "VECTOR_SOURCE_URL=$VECTOR_SOURCE_URL" --tag "$image" container-context
+          test "$(docker run --rm "$image" --version)" = "$VECTOR_RELEASE_VERSION"
+          docker run --rm --entrypoint /bin/sh "$image" -c 'test "$(id -u)" = 10001 && vector --help >/dev/null && git --version >/dev/null && test -s /usr/share/vector/LICENSE'
+          docker save "$image" --output "vector-container-$VECTOR_CONTAINER_ARCH.tar"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: vector-container-${{ inputs.version }}-${{ matrix.arch }}-${{ github.run_attempt }}
+          path: vector-container-*.tar
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 7
+      - name: Publish immutable architecture image when owner enables publication
+        if: inputs.mode == 'publish'
+        env:
+          VECTOR_CONTAINER_ARCH: ${{ matrix.arch }}
+          VECTOR_CONTAINER_PUBLISH_ENABLED: ${{ vars.VECTOR_CONTAINER_PUBLISH_ENABLED }}
+          REGISTRY_TOKEN: ${{ github.token }}
+          REGISTRY_ACTOR: ${{ github.actor }}
+          DOCKER_CONFIG: ${{ runner.temp }}/vector-registry-auth
+        run: |
+          set -euo pipefail
+          test "$VECTOR_CONTAINER_PUBLISH_ENABLED" = true
+          [[ "$VECTOR_CONTAINER_OWNER" =~ ^[a-z0-9][a-z0-9-]{0,38}$ ]]
+          image="ghcr.io/$VECTOR_CONTAINER_OWNER/vector:$VECTOR_RELEASE_VERSION-$VECTOR_CONTAINER_ARCH"
+          trap 'rm -rf "$DOCKER_CONFIG"' EXIT
+          printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io --username "$REGISTRY_ACTOR" --password-stdin
+          if docker manifest inspect "$image" > existing-manifest.json 2> registry-error.txt; then
+            expected="$(docker inspect --format '{{.Id}}' "vector-container:$VECTOR_RELEASE_VERSION-$VECTOR_CONTAINER_ARCH")"
+            test "$(jq -r '.config.digest' existing-manifest.json)" = "$expected" || { echo 'Version tag contains different bytes; refusing replacement.' >&2; exit 1; }
+            docker pull "$image"
+          else
+            if ! grep -Eiq 'manifest unknown|no such manifest|manifest_unknown' registry-error.txt; then
+              echo 'Registry lookup failed; refusing to assume the version is absent.' >&2
+              exit 1
+            fi
+            docker tag "vector-container:$VECTOR_RELEASE_VERSION-$VECTOR_CONTAINER_ARCH" "$image"
+            docker push "$image"
+          fi
+          mkdir -p image-digests
+          docker inspect --format '{{index .RepoDigests 0}}' "$image" > "image-digests/$VECTOR_CONTAINER_ARCH.txt"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: inputs.mode == 'publish'
+        with:
+          name: vector-container-digest-${{ matrix.arch }}-${{ github.run_attempt }}
+          path: image-digests/
+          if-no-files-found: error
+
+  index:
+    needs: build
+    if: inputs.mode == 'publish'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: vector-container-digest-*-${{ github.run_attempt }}
+          path: image-digests
+          merge-multiple: true
+      - name: Publish reviewed multi-platform version index
+        env:
+          REGISTRY_TOKEN: ${{ github.token }}
+          REGISTRY_ACTOR: ${{ github.actor }}
+          VECTOR_CONTAINER_PUBLISH_ENABLED: ${{ vars.VECTOR_CONTAINER_PUBLISH_ENABLED }}
+          DOCKER_CONFIG: ${{ runner.temp }}/vector-registry-auth
+        run: |
+          set -euo pipefail
+          test "$VECTOR_CONTAINER_PUBLISH_ENABLED" = true
+          [[ "$VECTOR_CONTAINER_OWNER" =~ ^[a-z0-9][a-z0-9-]{0,38}$ ]]
+          [[ "$VECTOR_RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.-]+)?$ ]]
+          image="ghcr.io/$VECTOR_CONTAINER_OWNER/vector:$VECTOR_RELEASE_VERSION"
+          amd64="$(cat image-digests/amd64.txt)"
+          arm64="$(cat image-digests/arm64.txt)"
+          for digest in "$amd64" "$arm64"; do
+            [[ "$digest" =~ ^ghcr\.io/$VECTOR_CONTAINER_OWNER/vector@sha256:[a-f0-9]{64}$ ]]
+          done
+          trap 'rm -rf "$DOCKER_CONFIG"' EXIT
+          printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io --username "$REGISTRY_ACTOR" --password-stdin
+          if docker manifest inspect "$image" > existing-manifest.json 2> registry-error.txt; then
+            expected="$(printf '%s\n' "${amd64##*@}" "${arm64##*@}" | sort)"
+            actual="$(jq -r '.manifests[].digest' existing-manifest.json | sort)"
+            test "$actual" = "$expected" || { echo 'Version index contains different images; refusing replacement.' >&2; exit 1; }
+          else
+            if ! grep -Eiq 'manifest unknown|no such manifest|manifest_unknown' registry-error.txt; then
+              echo 'Registry lookup failed; refusing to assume the version is absent.' >&2
+              exit 1
+            fi
+            docker buildx imagetools create --tag "$image" "$amd64" "$arm64"
+          fi
+          docker buildx imagetools inspect "$image"
