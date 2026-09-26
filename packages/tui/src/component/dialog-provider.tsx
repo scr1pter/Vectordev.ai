@@ -16,7 +16,12 @@ import { useConnected } from "./use-connected"
 import { useBindings } from "../keymap"
 import { useClipboard } from "../context/clipboard"
 import { isHiddenProvider } from "../util/model"
-import { COPILOT_SIGN_IN, providerAllowed, providerEnabled } from "@vectordevai/schema/provider-policy"
+import {
+  COPILOT_SIGN_IN,
+  providerAllowed,
+  providerEnabled,
+  providerRuntimeEnabled,
+} from "@vectordevai/schema/provider-policy"
 import { saveCustomProviderCredential } from "./custom-provider-credential"
 import { OPENROUTER_REMOTE_COPY } from "@vectordevai/core/free-model-choice"
 
@@ -46,7 +51,9 @@ type ProviderOption =
       type: "custom"
     })
 
-export function providerOptions(list: { id: string; name: string; source?: string }[]): ProviderOption[] {
+export function providerOptions(
+  list: { id: string; name: string; source?: string; options?: { vectorOAuthPlugin?: unknown } }[],
+): ProviderOption[] {
   return [
     ...pipe(
       list,
@@ -158,8 +165,12 @@ export function createDialogProviderOptions(input?: {
             const remoteOpenRouter =
               providerID === "openrouter" &&
               !["localhost", "127.0.0.1", "[::1]", "vector.internal"].includes(new URL(sdk.url).hostname)
-            const methods = providerEnabled(providerID)
-              ? (sync.data.provider_auth[providerID] ?? [{ type: "api" as const, label: "API key" }])
+            const methods = providerRuntimeEnabled(
+              providerID,
+              sync.data.provider_next.all.find((item) => item.id === providerID),
+            )
+              ? (sync.data.provider_auth[providerID] ??
+                (providerEnabled(providerID) ? [{ type: "api" as const, label: "API key" }] : []))
               : []
             if (methods.length === 0) {
               toast.show({

@@ -1,8 +1,19 @@
+export * as ProviderPolicy from "./provider-policy"
+
 // Re-enabling Copilot requires a Vector-owned registration and provider approval.
 export const COPILOT_SIGN_IN = false
 
 export function providerEnabled(id: string) {
   return !id.startsWith("github-copilot") || COPILOT_SIGN_IN
+}
+
+/** Presentation hint from the trusted runtime catalog; never a credential authorization. */
+export function providerRuntimeEnabled(id: string, provider?: { options?: { vectorOAuthPlugin?: unknown } }) {
+  return (
+    providerEnabled(id) ||
+    (typeof provider?.options?.vectorOAuthPlugin === "string" &&
+      /^[a-f0-9]{64}$/.test(provider.options.vectorOAuthPlugin))
+  )
 }
 
 // Supported providers are frozen from the reviewed Vector release catalog.
@@ -247,10 +258,17 @@ export function providerAllowed(id: string) {
 /** Runtime providers may also come from explicit user configuration or installed plugins. */
 export function providerUsable(
   id: string,
-  provider?: { id?: string; source?: string; npm?: string; api?: string; options?: { baseURL?: unknown } },
+  provider?: {
+    id?: string
+    source?: string
+    npm?: string
+    api?: string
+    options?: { baseURL?: unknown; vectorOAuthPlugin?: unknown }
+  },
 ) {
-  if (!providerEnabled(id)) return false
+  if (!providerRuntimeEnabled(id, provider)) return false
   return (
+    !providerEnabled(id) ||
     providerAllowed(id) ||
     provider?.source === "config" ||
     provider?.source === "custom" ||

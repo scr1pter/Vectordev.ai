@@ -1,5 +1,6 @@
+import { PluginOAuthCommand } from "./plugin-oauth"
 import { Provider } from "@/provider/provider"
-import { COPILOT_SIGN_IN, providerEnabled, providerUsable } from "@vectordevai/schema/provider-policy"
+import { COPILOT_SIGN_IN, providerEnabled, providerUsable } from "@vectordevai/core/provider-policy"
 import type { Argv } from "yargs"
 import { Auth } from "../../auth"
 import { cmd } from "./cmd"
@@ -244,7 +245,12 @@ export const ProvidersCommand = cmd({
   aliases: ["auth"],
   describe: "manage AI providers and credentials",
   builder: (yargs) =>
-    yargs.command(ProvidersListCommand).command(ProvidersLoginCommand).command(ProvidersLogoutCommand).demandCommand(),
+    yargs
+      .command(ProvidersListCommand)
+      .command(ProvidersLoginCommand)
+      .command(ProvidersLogoutCommand)
+      .command(PluginOAuthCommand)
+      .demandCommand(),
   async handler() {},
 })
 

@@ -17367,6 +17367,12 @@
           },
           "enterpriseUrl": {
             "type": "string"
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
           }
         },
         "required": ["type", "refresh", "access", "expires"],

@@ -11,6 +11,15 @@ import { Location } from "../../location"
 import { Npm } from "../../npm"
 import { define } from "../../plugin/internal"
 import { LocalPluginSdk } from "../../plugin/local-sdk"
+import {
+  activateOAuthApproval,
+  borrowedOAuthPlugin,
+  blockedPluginEntry,
+  inspectOAuthPluginForLoad,
+  confirmOAuthPluginLoad,
+  warning,
+} from "../../plugin/oauth-approval"
+import { oauthPluginContext } from "../../plugin/oauth"
 import { PluginPromise } from "../../plugin/promise"
 
 const PluginModule = Schema.Struct({
@@ -73,20 +82,33 @@ export const Plugin = define({
 
       for (const ref of configured) {
         yield* Effect.gen(function* () {
+          if (borrowedOAuthPlugin(ref.package)) return
           const entrypoint = path.isAbsolute(ref.package)
             ? pathToFileURL(ref.package).href
             : (yield* npm.add(ref.package)).entrypoint
-          if (!entrypoint) return
+          if (!entrypoint || blockedPluginEntry(entrypoint)) return
 
+          const inspected = yield* Effect.sync(() => inspectOAuthPluginForLoad(entrypoint))
           const target = path.isAbsolute(ref.package)
             ? yield* Effect.promise(() => LocalPluginSdk.prepare(entrypoint))
             : entrypoint
           const mod = yield* Effect.promise(() => import(target))
+          const approvals = yield* Effect.sync(() => confirmOAuthPluginLoad(inspected))
           const value = (yield* Schema.decodeUnknownEffect(PluginModule)(mod)).default
           const plugin = "effect" in value ? value : PluginPromise.fromPromise(value)
           yield* ctx.plugin.add({
             id: plugin.id,
-            effect: (host) => plugin.effect({ ...host, options: ref.options ?? {} }),
+            effect: (host) =>
+              Effect.gen(function* () {
+                for (const approval of approvals) {
+                  const release = activateOAuthApproval(approval)
+                  yield* Effect.addFinalizer(() => Effect.sync(release))
+                  yield* Effect.logWarning(
+                    `Approved OAuth plugin ${approval.plugin}@${approval.version} for ${approval.declaration.provider}. ${warning}`,
+                  )
+                }
+                yield* plugin.effect({ ...oauthPluginContext(host, approvals), options: ref.options ?? {} })
+              }),
           })
         }).pipe(Effect.ignoreCause)
       }

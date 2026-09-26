@@ -29,7 +29,7 @@ import { ServerConnection } from "@/context/server"
 import { useServerSync } from "@/context/server-sync"
 import { useLanguage } from "@/context/language"
 import { useProviders } from "@/hooks/use-providers"
-import { providerEnabled } from "@vectordevai/schema/provider-policy"
+import { providerEnabled, providerRuntimeEnabled } from "@vectordevai/schema/provider-policy"
 
 export function DialogConnectProvider(props: {
   provider: string
@@ -66,18 +66,17 @@ export function DialogConnectProvider(props: {
       providers.all().get(props.provider) ??
       serverSync().data.provider.all.get(props.provider) ?? {
         name: props.provider === "github-copilot" ? "GitHub Copilot" : props.provider,
+        options: {},
       },
   )
-  const fallback = createMemo<ProviderAuthMethod[]>(() => [
-    {
-      type: "api" as const,
-      label: language.t("provider.connect.method.apiKey"),
-    },
-  ])
+  const fallback = createMemo<ProviderAuthMethod[]>(() =>
+    providerEnabled(props.provider) ? [{ type: "api", label: language.t("provider.connect.method.apiKey") }] : [],
+  )
+  const enabled = createMemo(() => providerRuntimeEnabled(props.provider, provider()))
   const [auth] = createResource(
-    () => props.provider,
+    () => `${props.provider}:${enabled()}`,
     async () => {
-      if (!providerEnabled(props.provider)) return []
+      if (!enabled()) return []
       const cached = serverSync().data.provider_auth[props.provider]
       if (cached) return cached
       const res = await serverSDK().client.provider.auth()
@@ -88,9 +87,7 @@ export function DialogConnectProvider(props: {
   )
   const loading = createMemo(() => auth.loading && !serverSync().data.provider_auth[props.provider])
   const methods = createMemo(() =>
-    providerEnabled(props.provider)
-      ? (auth.latest ?? serverSync().data.provider_auth[props.provider] ?? fallback())
-      : [],
+    enabled() ? (auth.latest ?? serverSync().data.provider_auth[props.provider] ?? fallback()) : [],
   )
   const [store, setStore] = createStore({
     methodIndex: undefined as undefined | number,

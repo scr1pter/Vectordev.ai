@@ -512,6 +512,15 @@ test("paused Copilot models from an older server never enter selectable sections
   expect(sections.flatMap((section) => section.items).map((item) => item.provider.id)).toEqual(["openai"])
 })
 
+test("only the server-marked approved plugin makes a paused provider selectable", () => {
+  const approved = model({ ...copilot, options: { vectorOAuthPlugin: "a".repeat(64) } }, "coding", "Plugin Coding")
+  expect(pickerKeys(buildModelSections({ models: [approved], now: NOW }))).toEqual(["github-copilot:coding"])
+  for (const value of [undefined, "approved", "A".repeat(64)]) {
+    const unapproved = { ...approved, provider: { ...copilot, options: { vectorOAuthPlugin: value } } }
+    expect(pickerKeys(buildModelSections({ models: [unapproved], now: NOW }))).toEqual([])
+  }
+})
+
 describe("Free models inside of Vector", () => {
   const shared = model({ id: "vector", name: "Vector", source: "custom" }, "maker/coder:free", "Maker Coder:free", {
     freeModel: { source: "shared" },

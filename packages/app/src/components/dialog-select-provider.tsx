@@ -1,4 +1,4 @@
-import { providerEnabled } from "@vectordevai/schema/provider-policy"
+import { providerRuntimeEnabled } from "@vectordevai/schema/provider-policy"
 import { type Accessor, Component, Show } from "solid-js"
 import { useDialog } from "@vectordevai/ui/context/dialog"
 import { popularProviders, useProviders } from "@/hooks/use-providers"
@@ -25,7 +25,7 @@ export const DialogSelectProvider: Component<{ directory?: Accessor<string | und
   const note = (id: string) => {
     if (id === "anthropic") return language.t("dialog.provider.anthropic.note")
     if (id === "openai") return language.t("dialog.provider.openai.note")
-    if (!providerEnabled(id)) return language.t("dialog.provider.copilot.note")
+    if (!providerRuntimeEnabled(id, providers.all().get(id))) return language.t("dialog.provider.copilot.note")
   }
 
   return (

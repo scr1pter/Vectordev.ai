@@ -31,6 +31,7 @@ import { registerAdapter } from "@/control-plane/adapters"
 import type { WorkspaceAdapter } from "@/control-plane/types"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { EventV2Bridge } from "@/event-v2-bridge"
+import { protectPluginOAuth } from "./oauth"
 import { InstallationChannel } from "@vectordevai/core/installation/version"
 
 type State = {
@@ -113,12 +114,12 @@ async function applyPlugin(load: PluginLoader.Loaded, input: PluginInput, hooks:
   const plugin = readV1Plugin(load.mod, load.spec, "server", "detect")
   if (plugin) {
     await resolvePluginId(load.source, load.spec, load.target, readPluginId(plugin.id, load.spec), load.pkg)
-    hooks.push(await (plugin as PluginModule).server(input, load.options))
+    hooks.push(protectPluginOAuth(await (plugin as PluginModule).server(input, load.options), load))
     return
   }
 
   for (const server of getLegacyPlugins(load.mod)) {
-    hooks.push(await server(input, load.options))
+    hooks.push(protectPluginOAuth(await server(input, load.options), load))
   }
 }
 

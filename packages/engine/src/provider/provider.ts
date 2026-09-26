@@ -1,3 +1,8 @@
+import {
+  activeOAuthApproval,
+  pluginCredentialAllowed,
+  requirePluginDestination,
+} from "@vectordevai/core/plugin/oauth-approval"
 import { ProviderSDK } from "@vectordevai/core/provider-sdk"
 import { FreeModels } from "@vectordevai/core/free-models"
 import { freeModelRequest, serializeFreeModelRequest } from "@vectordevai/core/free-model-request"
@@ -9,6 +14,7 @@ import {
   providerCredentialAllowed,
   providerCredentialUnavailable,
   providerEnabled,
+  providerEnvironmentAllowed,
   providerUsable,
   requireGitlabOAuthEndpoint,
 } from "@vectordevai/core/provider-policy"
@@ -1380,6 +1386,9 @@ const layer = Layer.effect(
         // load plugins first so config() hook runs before reading cfg.provider
         const plugins = yield* plugin.list()
 
+        // Runtime consent markers cannot be supplied by project/global config or plugin config hooks.
+        for (const provider of Object.values(cfg.provider ?? {}))
+          if (provider.options) delete provider.options.vectorOAuthPlugin
         // now read config providers - includes any modifications from plugin config() hook
         const configProviders = Object.entries(cfg.provider ?? {}).filter(([id, provider]) =>
           providerUsable(id, provider),
@@ -1538,6 +1547,7 @@ const layer = Layer.effect(
         for (const [id, provider] of Object.entries(database)) {
           const providerID = ProviderV2.ID.make(id)
           if (!isProviderAllowed(providerID)) continue
+          if (!providerEnvironmentAllowed(providerID)) continue
           const apiKey = provider.env.map((item) => envs[item]).find(Boolean)
           if (!apiKey) continue
           mergeProvider(providerID, {
@@ -1648,6 +1658,9 @@ const layer = Layer.effect(
             continue
           }
 
+          delete provider.options.vectorOAuthPlugin
+          const approval = activeOAuthApproval(providerID)
+          if (approval) provider.options.vectorOAuthPlugin = approval.id
           const configProvider = cfg.provider?.[providerID]
 
           for (const [modelID, model] of Object.entries(provider.models)) {
@@ -1756,6 +1769,11 @@ const layer = Layer.effect(
           })
         }
         const options = { ...provider.options }
+        const credential = await runtimeBridge.promise(auth.get(model.providerID).pipe(Effect.orDie))
+        const consentID = credential?.type !== "wellknown" ? credential?.metadata?.vector_plugin_oauth : undefined
+        const consent = typeof consentID === "string" ? activeOAuthApproval(model.providerID, consentID) : undefined
+        if (consentID && (!consent || !pluginCredentialAllowed(model.providerID, credential!)))
+          throw new Error("Plugin OAuth approval changed. Reconnect to continue.")
 
         if (
           model.providerID === "google-vertex" &&
@@ -1799,10 +1817,10 @@ const layer = Layer.effect(
         })
 
         if (baseURL !== undefined) options["baseURL"] = baseURL
+        if (consent) requirePluginDestination(consent, baseURL)
         if (options["apiKey"] === undefined && provider.key) options["apiKey"] = provider.key
         if (model.providerID === "gitlab") {
-          const credential = await runtimeBridge.promise(auth.get(model.providerID).pipe(Effect.orDie))
-          if (credential?.type === "oauth" && options.apiKey === credential.access)
+          if (credential?.type === "oauth" && !consent && options.apiKey === credential.access)
             options.instanceUrl = requireGitlabOAuthEndpoint(credential, options)
         }
         if (model.headers)
@@ -1829,7 +1847,19 @@ const layer = Layer.effect(
 
         options["fetch"] = async (input: any, init?: BunFetchRequestInit) => {
           const fetchFn = customFetch ?? fetch
-          const opts = init ?? {}
+          const opts = { ...init }
+          if (consent) {
+            requirePluginDestination(consent, input instanceof Request ? input.url : String(input))
+            const current = await runtimeBridge.promise(auth.get(model.providerID).pipe(Effect.orDie))
+            if (
+              !current ||
+              current.type === "wellknown" ||
+              current.metadata?.vector_plugin_oauth !== consent.id ||
+              !pluginCredentialAllowed(model.providerID, current)
+            )
+              throw new Error("Plugin OAuth approval or credential changed. Reconnect to continue.")
+            opts.redirect = "error"
+          }
           const chunkAbortCtl = typeof chunkTimeout === "number" && chunkTimeout > 0 ? new AbortController() : undefined
           const headerTimeoutMs = headerTimeout === false ? undefined : headerTimeout
           const headerTimeoutCtl = typeof headerTimeoutMs === "number" ? timeoutController(headerTimeoutMs) : undefined

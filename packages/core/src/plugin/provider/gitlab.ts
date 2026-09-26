@@ -22,6 +22,7 @@ export const GitLabPlugin = define({
         const credential = connection
           ? yield* ctx.integration.connection.resolve(connection).pipe(Effect.orDie)
           : undefined
+        if (credential?.metadata?.vector_plugin_oauth) return
         const oauthOrigin =
           credential?.type === "oauth" ? requireGitlabOAuthEndpoint(credential, evt.options) : undefined
         const mod = yield* Effect.promise(() => import("gitlab-ai-provider"))

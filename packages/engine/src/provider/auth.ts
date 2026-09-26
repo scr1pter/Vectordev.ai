@@ -1,4 +1,5 @@
-import { providerEnabled, providerOAuthAllowed } from "@vectordevai/core/provider-policy"
+import { providerEnabled } from "@vectordevai/core/provider-policy"
+import { pluginOAuthAllowed } from "../plugin/oauth"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import type { AuthOAuthResult, Hooks } from "@vectordevai/plugin"
 import { serviceUse } from "@vectordevai/core/effect/service-use"
@@ -90,7 +91,7 @@ type Hook = NonNullable<Hooks["auth"]>
 
 function visibleMethods(hook: Hook) {
   if (!providerEnabled(hook.provider)) return []
-  return hook.methods.filter((method) => method.type !== "oauth" || providerOAuthAllowed(hook.provider, true))
+  return hook.methods.filter((method) => method.type !== "oauth" || pluginOAuthAllowed(hook))
 }
 
 export interface Interface {
@@ -208,7 +209,8 @@ const layer: Layer.Layer<Service, never, Auth.Service | Plugin.Service> = Layer.
     const callback = Effect.fn("ProviderAuth.callback")(function* (
       input: { providerID: ProviderV2.ID } & CallbackInput,
     ) {
-      if (!providerOAuthAllowed(input.providerID, true)) {
+      const current = (yield* InstanceState.get(state)).hooks[input.providerID]
+      if (!current || !pluginOAuthAllowed(current)) {
         return yield* new ValidationFailed({
           field: "providerID",
           message: `${input.providerID} sign-in is currently paused in Vector. Use an API key or another provider.`,

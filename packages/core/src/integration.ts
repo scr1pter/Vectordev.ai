@@ -1,6 +1,11 @@
 export * as Integration from "./integration"
 
-import { providerCredentialAllowed, providerCredentialUnavailable, providerEnabled } from "./provider-policy"
+import {
+  providerCredentialAllowed,
+  providerCredentialUnavailable,
+  providerEnabled,
+  providerEnvironmentAllowed,
+} from "./provider-policy"
 import { makeLocationNode } from "./effect/app-node"
 import {
   Cause,
@@ -311,6 +316,7 @@ export const locationLayer = Layer.effect(
         .toReversed()
       const env = (entry?.methods ?? [])
         .filter((method) => method.type === "env")
+        .filter(() => providerEnvironmentAllowed(entry?.ref.id ?? ""))
         .flatMap((method) => method.names.filter((name) => process.env[name]))
         .map((name) => ({ type: "env" as const, name }))
       return [...credentials, ...env]

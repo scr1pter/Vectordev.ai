@@ -145,6 +145,7 @@ Commands:
   vector providers list               list providers and credentials                   [aliases: ls]
   vector providers login [url]        log in to a provider
   vector providers logout [provider]  log out from a configured provider
+  vector providers plugin             manage explicit OAuth consent for owned-client plugins
 
 Options:
   -h, --help        show help                                                              [boolean]
@@ -550,6 +551,73 @@ log out from a configured provider
 
 Positionals:
   provider  provider id or name to log out from                                             [string]
+
+Options:
+  -h, --help        show help                                                              [boolean]
+  -v, --version     show version number                                                    [boolean]
+      --print-logs  print logs to stderr                                                   [boolean]
+      --log-level   log level                   [string] [choices: "DEBUG", "INFO", "WARN", "ERROR"]
+      --pure        run without external plugins                                           [boolean]"
+`;
+
+exports[`vector CLI help-text snapshots every documented command emits stable help text: vector auth plugin --help 1`] = `
+"vector auth plugin
+
+manage explicit OAuth consent for owned-client plugins
+
+Commands:
+  vector auth plugin approve <entry>  inspect and approve the exact installed plugin content
+  vector auth plugin revoke <id>      revoke a plugin OAuth approval immediately
+  vector auth plugin list             list explicitly approved plugin OAuth registrations
+
+Options:
+  -h, --help        show help                                                              [boolean]
+  -v, --version     show version number                                                    [boolean]
+      --print-logs  print logs to stderr                                                   [boolean]
+      --log-level   log level                   [string] [choices: "DEBUG", "INFO", "WARN", "ERROR"]
+      --pure        run without external plugins                                           [boolean]"
+`;
+
+exports[`vector CLI help-text snapshots every documented command emits stable help text: vector auth plugin approve --help 1`] = `
+"vector auth plugin approve <entry>
+
+inspect and approve the exact installed plugin content
+
+Positionals:
+  entry  installed plugin entrypoint path (its directory must contain package.json)
+                                                                                 [string] [required]
+
+Options:
+  -h, --help         show help                                                             [boolean]
+  -v, --version      show version number                                                   [boolean]
+      --print-logs   print logs to stderr                                                  [boolean]
+      --log-level    log level                  [string] [choices: "DEBUG", "INFO", "WARN", "ERROR"]
+      --pure         run without external plugins                                          [boolean]
+      --provider     provider ID declared in vectorOAuth                         [string] [required]
+      --accept-risk  explicitly trust this exact plugin and its declared owned client
+                                                                          [boolean] [default: false]"
+`;
+
+exports[`vector CLI help-text snapshots every documented command emits stable help text: vector auth plugin revoke --help 1`] = `
+"vector auth plugin revoke <id>
+
+revoke a plugin OAuth approval immediately
+
+Positionals:
+  id                                                                             [string] [required]
+
+Options:
+  -h, --help        show help                                                              [boolean]
+  -v, --version     show version number                                                    [boolean]
+      --print-logs  print logs to stderr                                                   [boolean]
+      --log-level   log level                   [string] [choices: "DEBUG", "INFO", "WARN", "ERROR"]
+      --pure        run without external plugins                                           [boolean]"
+`;
+
+exports[`vector CLI help-text snapshots every documented command emits stable help text: vector auth plugin list --help 1`] = `
+"vector auth plugin list
+
+list explicitly approved plugin OAuth registrations
 
 Options:
   -h, --help        show help                                                              [boolean]

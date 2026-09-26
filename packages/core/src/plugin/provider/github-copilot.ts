@@ -35,6 +35,7 @@ export const GithubCopilotPlugin = {
         const credential = connection
           ? yield* ctx.integration.connection.resolve(connection).pipe(Effect.orDie)
           : undefined
+        if (credential?.metadata?.vector_plugin_oauth) return
         if (credential?.type !== "oauth") {
           evt.sdk = mod.createOpenaiCompatible(evt.options)
           return

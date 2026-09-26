@@ -55,4 +55,14 @@ describe("providerOptions", () => {
     expect(normalizeCustomProviderID("-custom-provider")).toBeUndefined()
     expect(normalizeCustomProviderID("Custom Provider")).toBeUndefined()
   })
+
+  test("an approved plugin is listed without opening the generic custom-provider gate", () => {
+    expect(
+      providerOptions([
+        { id: "github-copilot", name: "Approved plugin", options: { vectorOAuthPlugin: "a".repeat(64) } },
+        { id: "github-copilot-enterprise", name: "Unapproved plugin", options: { vectorOAuthPlugin: "yes" } },
+      ]).map((option) => option.value),
+    ).toEqual(["github-copilot", "__vector_custom_provider__"])
+    expect(normalizeCustomProviderID("github-copilot")).toBeUndefined()
+  })
 })

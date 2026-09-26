@@ -134,6 +134,9 @@ export type OAuth = {
   accountId?: string
   clientId?: string
   enterpriseUrl?: string
+  metadata?: {
+    [key: string]: string
+  }
 }
 
 export type ApiAuth = {

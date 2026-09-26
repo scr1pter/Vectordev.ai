@@ -22,6 +22,7 @@ export const XAIPlugin = define({
         const mod = yield* Effect.promise(() => import("@ai-sdk/xai"))
         const connection = yield* ctx.integration.connection.active("xai")
         const saved = connection ? yield* ctx.integration.connection.resolve(connection).pipe(Effect.orDie) : undefined
+        if (saved?.metadata?.vector_plugin_oauth) return
         if (saved?.type !== "oauth") {
           evt.sdk = mod.createXai(evt.options)
           return

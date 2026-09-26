@@ -1,4 +1,4 @@
-import { providerEnabled } from "@vectordevai/schema/provider-policy"
+import { providerEnabled, providerRuntimeEnabled } from "@vectordevai/schema/provider-policy"
 import { Button } from "@vectordevai/ui/button"
 import { useDialog } from "@vectordevai/ui/context/dialog"
 import { ProviderIcon } from "@vectordevai/ui/provider-icon"
@@ -88,6 +88,7 @@ const SettingsProvidersContent: Component = () => {
   const note = (id: string) => PROVIDER_NOTES.find((item) => item.match(id))?.key
   const description = (id: string) => {
     const key = note(id)
+    if (key === "dialog.provider.copilot.note" && providerRuntimeEnabled(id, providers.all().get(id))) return
     return key ? language.t(key) : undefined
   }
 

@@ -1,6 +1,17 @@
 import { providerUnavailable } from "@vectordevai/schema/provider-unavailable"
-import { COPILOT_SIGN_IN, providerAllowed, providerEnabled } from "@vectordevai/schema/provider-policy"
-export { COPILOT_SIGN_IN, providerAllowed, providerEnabled, providerUsable } from "@vectordevai/schema/provider-policy"
+import { COPILOT_SIGN_IN, providerAllowed, ProviderPolicy } from "@vectordevai/schema/provider-policy"
+import { activeOAuthApproval, pluginCredentialAllowed } from "./plugin/oauth-approval"
+export { COPILOT_SIGN_IN, providerAllowed } from "@vectordevai/schema/provider-policy"
+export function providerEnabled(id: string) {
+  return ProviderPolicy.providerEnabled(id) || Boolean(activeOAuthApproval(id))
+}
+export function providerEnvironmentAllowed(id: string) {
+  return ProviderPolicy.providerEnabled(id)
+}
+export function providerUsable(id: string, provider?: Parameters<typeof ProviderPolicy.providerUsable>[1]) {
+  if (!ProviderPolicy.providerEnabled(id)) return Boolean(activeOAuthApproval(id))
+  return ProviderPolicy.providerUsable(id, provider) || Boolean(activeOAuthApproval(id))
+}
 
 // Re-enabling these requires Vector-owned registrations and provider approval.
 export const CHATGPT_SIGN_IN = false
@@ -167,6 +178,8 @@ export function providerCredentialAllowed(
   credential: { type: string; clientId?: string; enterpriseUrl?: string; metadata?: Readonly<Record<string, unknown>> },
   userDefined = false,
 ) {
+  if (credential.metadata?.vector_plugin_oauth !== undefined) return pluginCredentialAllowed(id, credential)
+  if (!ProviderPolicy.providerEnabled(id)) return false
   if (!providerEnabled(id) || (!providerAllowed(id) && !userDefined)) return false
   if (id.startsWith("github-copilot") && credential.type === "oauth")
     return ownedOAuthMatches(credential, copilotOAuthConfiguration())

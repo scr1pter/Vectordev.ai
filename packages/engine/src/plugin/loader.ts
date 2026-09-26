@@ -1,4 +1,10 @@
 import {
+  blockedPluginEntry,
+  inspectOAuthPluginForLoad,
+  confirmOAuthPluginLoad,
+  type OAuthApproval,
+} from "@vectordevai/core/plugin/oauth-approval"
+import {
   checkPluginCompatibility,
   createPluginEntry,
   isDeprecatedPlugin,
@@ -42,6 +48,7 @@ export namespace PluginLoader {
   // A resolved plugin whose module has been imported successfully.
   export type Loaded = Resolved & {
     mod: Record<string, unknown>
+    oauthApprovals: OAuthApproval[]
   }
 
   type Candidate = { origin: ConfigPlugin.Origin; plan: Plan }
@@ -138,11 +145,14 @@ export namespace PluginLoader {
   // Import the resolved module only after all earlier validation has succeeded.
   export async function load(row: Resolved): Promise<{ ok: true; value: Loaded } | { ok: false; error: unknown }> {
     let mod
+    let oauthApprovals: OAuthApproval[] = []
     try {
+      const inspected = inspectOAuthPluginForLoad(row.entry, row.pkg?.dir)
       if (row.source === "file") {
         await ConfigDependencies.link(row.entry).catch(() => false)
       }
       mod = await import(row.source === "file" ? await LocalPluginSdk.prepare(row.entry) : row.entry)
+      oauthApprovals = confirmOAuthPluginLoad(inspected)
     } catch (error) {
       if (row.source === "file" && errorMessage(error).includes(ConfigDependencies.packageName)) {
         return {
@@ -156,7 +166,7 @@ export namespace PluginLoader {
       return { ok: false, error }
     }
     if (!mod) return { ok: false, error: new Error(`Plugin ${row.spec} module is empty`) }
-    return { ok: true, value: { ...row, mod } }
+    return { ok: true, value: { ...row, mod, oauthApprovals } }
   }
 
   // Run one candidate through the full pipeline: resolve, optionally surface a missing entry,
@@ -197,6 +207,7 @@ export namespace PluginLoader {
       return { retry: filePlugin && isRetryableResolveError(resolved.stage, resolved.error) }
     }
 
+    if (blockedPluginEntry(resolved.value.entry)) return { retry: false }
     const loaded = await load(resolved.value)
     if (!loaded.ok) {
       report?.error?.(candidate, retry, "load", loaded.error, resolved.value)
