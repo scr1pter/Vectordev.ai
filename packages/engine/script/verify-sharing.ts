@@ -121,6 +121,15 @@ const upstream = Bun.serve({
       requests.push({ method: request.method, path: url.pathname, kind: "fixture-login" })
       return Response.json({ ok: true, user: { id: backend.owner, email: "fixture@example.invalid" } })
     }
+    if (url.pathname === "/api/org/keys") {
+      assert.equal(request.method, "GET")
+      assert.equal(request.headers.get("authorization"), null)
+      requests.push({ method: request.method, path: url.pathname, status: 503, kind: "fixture-teams-disabled" })
+      return Response.json(
+        { error: { code: "TEAMS_NOT_CONFIGURED", message: "Vector Teams is not enabled or configured." } },
+        { status: 503 },
+      )
+    }
     if (/^\/api\/shares(?:\/[a-f0-9]{32})?$/.test(url.pathname)) {
       assert.equal(request.headers.get("authorization"), request.method === "GET" ? null : `Bearer ${backend.token}`)
       const response = await fetch(`${origin.origin}${url.pathname}`, {

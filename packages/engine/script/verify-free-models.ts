@@ -150,6 +150,15 @@ const upstream = Bun.serve({
         user: { id: "00000000-0000-4000-8000-000000000001", email: "fixture@example.invalid" },
       })
     }
+    if (url.hostname === "vectordev.ai" && url.pathname === "/api/org/keys") {
+      assert.equal(request.method, "GET")
+      assert.equal(request.headers.get("authorization"), null)
+      requests.push({ host: url.hostname, path: url.pathname, kind: "teams-disabled" })
+      return Response.json(
+        { error: { code: "TEAMS_NOT_CONFIGURED", message: "Vector Teams is not enabled or configured." } },
+        { status: 503 },
+      )
+    }
     if (url.hostname === "openrouter.ai" && url.pathname === "/api/v1/models/user") {
       assert.equal(request.headers.get("authorization"), `Bearer ${ownKey}`)
       requests.push({ host: url.hostname, path: url.pathname, kind: "privacy-catalog" })
