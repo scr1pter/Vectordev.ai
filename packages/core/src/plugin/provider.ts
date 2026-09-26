@@ -6,6 +6,7 @@ import { CerebrasPlugin } from "./provider/cerebras"
 import { CloudflareAIGatewayPlugin } from "./provider/cloudflare-ai-gateway"
 import { CloudflareWorkersAIPlugin } from "./provider/cloudflare-workers-ai"
 import { CoherePlugin } from "./provider/cohere"
+import { DigitalOceanPlugin } from "./provider/digitalocean"
 import { DeepInfraPlugin } from "./provider/deepinfra"
 import { DynamicProviderPlugin } from "./provider/dynamic"
 import { GatewayPlugin } from "./provider/gateway"
@@ -45,6 +46,7 @@ export const ProviderPlugins: PluginInternal.Plugin<PluginInternal.Requirements 
   CloudflareWorkersAIPlugin,
   CoherePlugin,
   DeepInfraPlugin,
+  DigitalOceanPlugin,
   GatewayPlugin,
   GithubCopilotPlugin,
   GitLabPlugin,

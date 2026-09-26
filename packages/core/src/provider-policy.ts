@@ -65,6 +65,23 @@ export function xaiOAuthConfiguration(environment: NodeJS.ProcessEnv = process.e
   }
 }
 
+export const DIGITALOCEAN_CLIENT_ID = ""
+export const DIGITALOCEAN_REDIRECT_URI = "http://localhost:1456/auth/callback"
+export function digitalOceanOAuthConfiguration(
+  environment: NodeJS.ProcessEnv = process.env,
+  enabled = DIGITALOCEAN_SIGN_IN,
+) {
+  if (!enabled) return
+  const clientId = environment.VECTOR_DIGITALOCEAN_OAUTH_CLIENT_ID?.trim() || DIGITALOCEAN_CLIENT_ID
+  if (!/^[A-Za-z0-9._-]{8,256}$/.test(clientId)) return
+  return {
+    clientId,
+    origin: "https://cloud.digitalocean.com",
+    redirectUri: DIGITALOCEAN_REDIRECT_URI,
+    scope: "genai:read inference:query",
+  }
+}
+
 // Candidate from the desktop registration. Duo reuse remains disabled until
 // ownership and device-grant configuration are confirmed; see owner-actions/gitlab.md.
 export const GITLAB_DEFAULT_CLIENT_ID = "8ac2300994dbece9bfc889ee6705f4ab8a8243b9acd04fe6185172528abc8edd"
@@ -127,7 +144,7 @@ export function providerOAuthAllowed(id: string, userDefined = false) {
   if (id === "openai") return CHATGPT_SIGN_IN
   if (id === "xai") return Boolean(xaiOAuthConfiguration())
   if (id === "poe") return POE_SIGN_IN
-  if (id === "digitalocean") return DIGITALOCEAN_SIGN_IN
+  if (id === "digitalocean") return Boolean(digitalOceanOAuthConfiguration())
   if (id === "gitlab") return gitlabSignInEnabled()
   return providerAllowed(id) || userDefined
 }
@@ -141,8 +158,10 @@ export function providerCredentialAllowed(
   if (id.startsWith("github-copilot") && credential.type === "oauth")
     return ownedOAuthMatches(credential, copilotOAuthConfiguration())
   if (id === "xai" && credential.type === "oauth") return ownedOAuthMatches(credential, xaiOAuthConfiguration())
+  if (id === "digitalocean" && credential.type === "oauth")
+    return ownedOAuthMatches(credential, digitalOceanOAuthConfiguration())
   // The retired DigitalOcean flow persisted its OAuth access token as an API key.
-  if (id === "digitalocean" && !DIGITALOCEAN_SIGN_IN && credential.metadata?.oauth_access) return false
+  if (id === "digitalocean" && credential.metadata?.oauth_access) return false
   if (id === "gitlab" && credential.type === "oauth") {
     return gitlabCredentialMatches(credential, gitlabOAuthConfiguration())
   }

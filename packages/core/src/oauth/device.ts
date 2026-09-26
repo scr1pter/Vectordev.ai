@@ -35,6 +35,10 @@ export async function oauthJSON(
     signal.throwIfAborted()
     throw new Error("Vector could not reach the authorization provider securely. Try signing in again.")
   })
+  return { ok: response.ok, value: await readOAuthJSON(response) }
+}
+
+export async function readOAuthJSON(response: Response) {
   const reader = response.body?.getReader()
   if (!reader) throw new Error("The authorization provider returned an empty response.")
   let size = 0
@@ -60,7 +64,7 @@ export async function oauthJSON(
   const value: unknown = await new Response(bytes).json().catch(() => undefined)
   if (!value || typeof value !== "object" || Array.isArray(value))
     throw new Error("The authorization provider returned an invalid response.")
-  return { ok: response.ok, value: value as Record<string, unknown> }
+  return value as Record<string, unknown>
 }
 
 export function oauthToken(

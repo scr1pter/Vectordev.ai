@@ -135,10 +135,11 @@ var TOKEN_URL=new URL(${scriptString(options.tokenPath)},window.location.origin)
     var search=new URLSearchParams(window.location.search||"");
     var err=hash.get("error")||search.get("error");
     var errDescription=hash.get("error_description")||search.get("error_description");
-    var body=err?{error:err,error_description:errDescription||""}:{access_token:hash.get("access_token")||"",expires_in:hash.get("expires_in")||"0",state:hash.get("state")||""};
+    var body=err?{error:err,state:hash.get("state")||search.get("state")||""}:{access_token:hash.get("access_token")||"",expires_in:hash.get("expires_in")||"0",state:hash.get("state")||"",token_type:hash.get("token_type")||"bearer"};
+    window.history.replaceState(null,"",window.location.pathname);
     fetch(TOKEN_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}).then(function(res){
       if(!res.ok)return res.text().catch(function(){return""}).then(function(t){throw new Error(t||("callback failed ("+res.status+")"))});
-      if(err){fail(errDescription||err);return}
+      if(err){fail("The provider declined authorization. Start sign-in again.");return}
       ok();
     }).catch(function(e){fail(String(e&&e.message?e.message:e))});
   }catch(e){fail(String(e&&e.message?e.message:e))}
