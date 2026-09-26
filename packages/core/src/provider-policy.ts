@@ -82,6 +82,19 @@ export function digitalOceanOAuthConfiguration(
   }
 }
 
+export const POE_CLIENT_ID = ""
+export function poeOAuthConfiguration(environment: NodeJS.ProcessEnv = process.env, enabled = POE_SIGN_IN) {
+  if (!enabled) return
+  const clientId = environment.VECTOR_POE_OAUTH_CLIENT_ID?.trim() || POE_CLIENT_ID
+  if (!/^[A-Za-z0-9._-]{8,256}$/.test(clientId)) return
+  return {
+    clientId,
+    origin: "https://poe.com",
+    redirectUri: "http://localhost:0/oauth/poe/callback",
+    scope: "apikey:create",
+  }
+}
+
 // Candidate from the desktop registration. Duo reuse remains disabled until
 // ownership and device-grant configuration are confirmed; see owner-actions/gitlab.md.
 export const GITLAB_DEFAULT_CLIENT_ID = "8ac2300994dbece9bfc889ee6705f4ab8a8243b9acd04fe6185172528abc8edd"
@@ -143,7 +156,7 @@ export function providerOAuthAllowed(id: string, userDefined = false) {
   if (id.startsWith("github-copilot")) return Boolean(copilotOAuthConfiguration())
   if (id === "openai") return CHATGPT_SIGN_IN
   if (id === "xai") return Boolean(xaiOAuthConfiguration())
-  if (id === "poe") return POE_SIGN_IN
+  if (id === "poe") return Boolean(poeOAuthConfiguration())
   if (id === "digitalocean") return Boolean(digitalOceanOAuthConfiguration())
   if (id === "gitlab") return gitlabSignInEnabled()
   return providerAllowed(id) || userDefined
@@ -160,6 +173,7 @@ export function providerCredentialAllowed(
   if (id === "xai" && credential.type === "oauth") return ownedOAuthMatches(credential, xaiOAuthConfiguration())
   if (id === "digitalocean" && credential.type === "oauth")
     return ownedOAuthMatches(credential, digitalOceanOAuthConfiguration())
+  if (id === "poe" && credential.type === "oauth") return ownedOAuthMatches(credential, poeOAuthConfiguration())
   // The retired DigitalOcean flow persisted its OAuth access token as an API key.
   if (id === "digitalocean" && credential.metadata?.oauth_access) return false
   if (id === "gitlab" && credential.type === "oauth") {

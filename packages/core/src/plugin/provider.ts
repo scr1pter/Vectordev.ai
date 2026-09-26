@@ -23,6 +23,7 @@ import { OpenAIPlugin } from "./provider/openai"
 import { SnowflakeCortexPlugin } from "./provider/snowflake-cortex"
 import { OpenAICompatiblePlugin } from "./provider/openai-compatible"
 import { OpenRouterPlugin } from "./provider/openrouter"
+import { PoePlugin } from "./provider/poe"
 import { PerplexityPlugin } from "./provider/perplexity"
 import { ReviewedProviderPlugin } from "./provider/reviewed"
 import { SapAICorePlugin } from "./provider/sap-ai-core"
@@ -63,6 +64,7 @@ export const ProviderPlugins: PluginInternal.Plugin<PluginInternal.Requirements 
   OpenAIPlugin,
   OpenRouterPlugin,
   PerplexityPlugin,
+  PoePlugin,
   SapAICorePlugin,
   TogetherAIPlugin,
   VercelPlugin,
