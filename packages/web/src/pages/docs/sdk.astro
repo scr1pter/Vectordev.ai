@@ -1,0 +1,32 @@
+---
+import DocsPage from "../../layouts/DocsPage.astro"
+export const prerender = true
+---
+<DocsPage id="sdk">
+  <p>The Vector JavaScript SDK connects an application to <code>vector serve</code>. It includes typed requests, streaming events, and helpers that launch a locally installed Vector CLI. The first public <code>@vectordevai/sdk</code> release is awaiting publication approval.</p>
+  <h3>Connect to a local server</h3>
+  <p>Use Node.js 22 or newer. After the SDK package is published, install <code>@vectordevai/sdk</code> at the version matching your CLI. Install and sign in to the CLI separately.</p>
+  <pre><code>{`vector serve --hostname 127.0.0.1 --port 4096`}</code></pre>
+  <pre><code>{`import { createVectorClient } from "@vectordevai/sdk/v2/client"
+
+const client = createVectorClient({
+  baseUrl: "http://127.0.0.1:4096",
+  directory: process.cwd(),
+  throwOnError: true,
+})
+const health = await client.global.health()
+const session = await client.session.create({ title: "My integration" })`}</code></pre>
+  <h3>Launch a server from JavaScript</h3>
+  <pre><code>{`import { createVectorServer } from "@vectordevai/sdk/v2/server"
+
+const server = await createVectorServer({ port: 0 })
+try {
+  console.log(server.url)
+} finally {
+  server.close()
+}`}</code></pre>
+  <p>The launcher finds <code>vector</code> on PATH. It does not install Vector or connect a provider. Pass an <code>AbortSignal</code> to stop the process when your application exits. Browser code should import the client entry only.</p>
+  <h3>Authentication and API versions</h3>
+  <p>Keep the server on loopback unless you have configured authenticated network access. The server can operate on files and run tools. Set <code>VECTOR_SERVER_PASSWORD</code> and optionally <code>VECTOR_SERVER_USERNAME</code>, then pass the corresponding Authorization header through the SDK client’s <code>headers</code> option. Never embed server credentials in a public webpage.</p>
+  <p>The root and <code>/client</code> exports retain grouped v1 arguments. The <code>/v2/client</code> export uses flat arguments. Match the SDK release to the server and consult its generated declarations for request and response types. The package includes its applicable license and third-party notices.</p>
+</DocsPage>
