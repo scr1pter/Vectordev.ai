@@ -44,6 +44,28 @@ const exec = Effect.fn("WebFetchToolTest.exec")(function* (args: Tool.InferParam
 })
 
 describe("tool.webfetch", () => {
+  it.instance("retries declared challenges once with Vector identity and unchanged permission scope", () =>
+    Effect.gen(function* () {
+      const agents: Array<string | null> = []
+      yield* withFetch(
+        (request) => {
+          agents.push(request.headers.get("user-agent"))
+          return agents.length === 1
+            ? new Response("challenge", { status: 403, headers: { "cf-mitigated": "challenge" } })
+            : new Response("restored", { headers: { "content-type": "text/plain" } })
+        },
+        (url) =>
+          Effect.gen(function* () {
+            const result = yield* exec({ url: url.toString(), format: "text" })
+            expect(result.output).toBe("restored")
+            expect(agents).toHaveLength(2)
+            expect(agents[0]).toMatch(/^Mozilla\/.* Vector\//)
+            expect(agents[1]).toMatch(/^Vector\//)
+          }),
+      )
+    }),
+  )
+
   it.instance("returns image responses as file attachments", () =>
     Effect.gen(function* () {
       const bytes = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])

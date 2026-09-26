@@ -2,7 +2,8 @@ import { Effect, Schema } from "effect"
 import { HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { Parser } from "htmlparser2"
 import { Tool } from "./tool"
-import { InstallationVersion } from "@vectordevai/core/installation/version"
+import { WebFetchRequest } from "@vectordevai/core/util/webfetch-request"
+import { collectBoundedResponseBody } from "@vectordevai/core/tool/http-body"
 import TurndownService from "turndown"
 import DESCRIPTION from "./webfetch.txt"
 import { isImageAttachment } from "@/util/media"
@@ -26,7 +27,6 @@ export const WebFetchTool = Tool.define(
   "webfetch",
   Effect.gen(function* () {
     const http = yield* HttpClient.HttpClient
-    const httpOk = HttpClient.filterStatusOk(http)
 
     return {
       description: DESCRIPTION,
@@ -68,34 +68,31 @@ export const WebFetchTool = Tool.define(
                 "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8"
           }
           const headers = {
-            "User-Agent": `vector/${InstallationVersion}`,
             Accept: acceptHeader,
             "Accept-Language": "en-US,en;q=0.9",
           }
 
           const request = HttpClientRequest.get(params.url).pipe(HttpClientRequest.setHeaders(headers))
 
-          const response = yield* httpOk
-            .execute(request)
-            .pipe(Effect.timeoutOrElse({ duration: timeout, orElse: () => Effect.die(new Error("Request timed out")) }))
-
-          // Check content length
-          const contentLength = response.headers["content-length"]
-          if (contentLength && parseInt(contentLength) > MAX_RESPONSE_SIZE) {
-            throw new Error("Response too large (exceeds 5MB limit)")
-          }
-
-          const arrayBuffer = yield* response.arrayBuffer
-          if (arrayBuffer.byteLength > MAX_RESPONSE_SIZE) {
-            throw new Error("Response too large (exceeds 5MB limit)")
-          }
+          const { response, body } = yield* Effect.gen(function* () {
+            const response = yield* WebFetchRequest.execute(http, request)
+            const body = yield* collectBoundedResponseBody(
+              response,
+              MAX_RESPONSE_SIZE,
+              () => new Error("Response too large (exceeds 5MB limit)"),
+            )
+            return { response, body }
+          }).pipe(
+            Effect.scoped,
+            Effect.timeoutOrElse({ duration: timeout, orElse: () => Effect.die(new Error("Request timed out")) }),
+          )
 
           const contentType = response.headers["content-type"] || ""
           const mime = contentType.split(";")[0]?.trim().toLowerCase() || ""
           const title = `${params.url} (${contentType})`
 
           if (isImageAttachment(mime)) {
-            const base64Content = Buffer.from(arrayBuffer).toString("base64")
+            const base64Content = body.toString("base64")
             return {
               title,
               output: "Image fetched successfully",
@@ -110,7 +107,7 @@ export const WebFetchTool = Tool.define(
             }
           }
 
-          const content = new TextDecoder().decode(arrayBuffer)
+          const content = new TextDecoder().decode(body)
 
           // Handle content based on requested format and actual content type
           switch (params.format) {

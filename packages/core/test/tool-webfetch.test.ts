@@ -242,7 +242,7 @@ describe("WebFetchTool registration", () => {
     }),
   )
 
-  it.effect("identifies Vector and preserves HTTP errors without changing identity", () =>
+  it.effect("retries a declared challenge once and retains Vector identity on both attempts", () =>
     Effect.gen(function* () {
       reset()
       respond = () =>
@@ -252,8 +252,9 @@ describe("WebFetchTool registration", () => {
         type: "error",
         value: "Unable to fetch https://1.1.1.1",
       })
-      expect(requests).toHaveLength(1)
-      expect(requests[0]?.headers["user-agent"]).toMatch(/^vector\//)
+      expect(requests).toHaveLength(2)
+      expect(requests[0]?.headers["user-agent"]).toMatch(/^Mozilla\/.* Vector\//)
+      expect(requests[1]?.headers["user-agent"]).toMatch(/^Vector\//)
     }),
   )
 

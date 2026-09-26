@@ -8,7 +8,7 @@ import TurndownService from "turndown"
 import { makeLocationNode } from "../effect/app-node"
 import { LayerNodePlatform } from "../effect/app-node-platform"
 import { PermissionV2 } from "../permission"
-import { InstallationVersion } from "../installation/version"
+import { WebFetchRequest } from "../util/webfetch-request"
 import { collectBoundedResponseBody } from "./http-body"
 import { ToolRegistry } from "./registry"
 import { Tool } from "./tool"
@@ -57,7 +57,6 @@ const acceptHeader = (format: Format) => {
 }
 
 const headers = (format: Format) => ({
-  "User-Agent": `vector/${InstallationVersion}`,
   Accept: acceptHeader(format),
   "Accept-Language": "en-US,en;q=0.9",
 })
@@ -70,7 +69,7 @@ const assertHttpUrl = (url: URL) => {
 }
 
 const execute = (http: HttpClient.HttpClient, url: string, format: Format) =>
-  http.execute(request(url, format)).pipe(Effect.flatMap(HttpClientResponse.filterStatusOk))
+  WebFetchRequest.execute(http, request(url, format))
 
 const collectBody = (response: HttpClientResponse.HttpClientResponse) =>
   collectBoundedResponseBody(
@@ -141,6 +140,7 @@ const layer = Layer.effectDiscard(
                   return yield* Effect.fail(new Error(`Unsupported fetched file content type: ${mime}`))
                 return { body: yield* collectBody(response), contentType }
               }).pipe(
+                Effect.scoped,
                 Effect.timeoutOrElse({
                   duration: Duration.seconds(input.timeout ?? DEFAULT_TIMEOUT_SECONDS),
                   orElse: () => Effect.fail(new Error("Request timed out")),
