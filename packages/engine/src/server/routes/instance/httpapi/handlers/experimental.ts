@@ -11,7 +11,7 @@ import { ToolRegistry } from "@/tool/registry"
 import { Worktree } from "@/worktree"
 import { Effect } from "effect"
 import { HttpServerResponse } from "effect/unstable/http"
-import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi"
+import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { InstanceHttpApi } from "../api"
 import { SessionListQuery, ToolListQuery, WorktreeApiError } from "../groups/experimental"
 
@@ -35,11 +35,6 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
     const capabilities = Effect.fn("ExperimentalHttpApi.capabilities")(function* () {
       return { backgroundSubagents: flags.experimentalBackgroundSubagents }
     })
-
-    // Keep the existing local API shape for older clients without using a hosted account.
-    const getConsole = () => Effect.succeed({ consoleManagedProviders: [], switchableOrgCount: 0 })
-    const listConsoleOrgs = () => Effect.succeed({ orgs: [] })
-    const switchConsole = () => Effect.fail(new HttpApiError.BadRequest({}))
 
     const tool = Effect.fn("ExperimentalHttpApi.tool")(function* (ctx: { query: typeof ToolListQuery.Type }) {
       const list = yield* registry.tools({
@@ -131,9 +126,6 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
 
     return handlers
       .handle("capabilities", capabilities)
-      .handle("console", getConsole)
-      .handle("consoleOrgs", listConsoleOrgs)
-      .handle("consoleSwitch", switchConsole)
       .handle("tool", tool)
       .handle("toolIDs", toolIDs)
       .handle("worktree", worktree)

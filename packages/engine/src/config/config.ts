@@ -10,6 +10,7 @@ import { Global } from "@vectordevai/core/global"
 import fsNode from "fs/promises"
 import { Flag } from "@vectordevai/core/flag/flag"
 import { Auth } from "../auth"
+import { Teams } from "@vectordevai/core/teams"
 import { Env } from "../env"
 import { applyEdits, modify } from "jsonc-parser"
 import { InstallationLocal } from "@vectordevai/core/installation/version"
@@ -182,6 +183,7 @@ const layer = Layer.effect(
   Effect.gen(function* () {
     const fs = yield* FSUtil.Service
     const authSvc = yield* Auth.Service
+    const teams = yield* Teams.Service
     const env = yield* Env.Service
     const dependencies = yield* ConfigDependencies.Service
     const http = yield* HttpClient.HttpClient
@@ -405,6 +407,17 @@ const layer = Layer.effect(
             yield* merge(source, next, "global")
             yield* Effect.logDebug("loaded remote config from well-known", { url })
           }
+        }
+
+        const team = yield* teams.current().pipe(Effect.orDie)
+        if (team.active) {
+          const source = `https://vectordev.ai/api/org/config?org=${team.active.id}`
+          const next = yield* loadConfig(
+            JSON.stringify(team.active.config),
+            { dir: "https://vectordev.ai", source },
+            authEnv,
+          )
+          yield* merge(source, next, "global")
         }
 
         const global = Object.keys(authEnv).length ? yield* loadGlobal(authEnv) : yield* getGlobal()
@@ -692,7 +705,7 @@ const layer = Layer.effect(
 export const node = LayerNode.make({
   service: Service,
   layer: layer,
-  deps: [FSUtil.node, Auth.node, Env.node, ConfigDependencies.node, httpClient, EffectFlock.node],
+  deps: [FSUtil.node, Auth.node, Teams.node, Env.node, ConfigDependencies.node, httpClient, EffectFlock.node],
 })
 
 export * as Config from "./config"

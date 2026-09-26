@@ -162,7 +162,7 @@ describe("experimental HttpApi", () => {
         })
 
         expect(consoleOrgs.status).toBe(200)
-        expect(yield* json(consoleOrgs)).toEqual({ orgs: [] })
+        expect(yield* json(consoleOrgs)).toEqual({ enabled: false, orgs: [] })
 
         expect(toolList.status).toBe(200)
         expect(yield* json<unknown[]>(toolList)).toContainEqual(
@@ -215,7 +215,7 @@ describe("experimental HttpApi", () => {
   )
 
   it.instance(
-    "keeps Console compatibility endpoints inert even with a saved account",
+    "does not treat obsolete saved accounts as verified Vector Teams membership",
     () =>
       Effect.gen(function* () {
         const tmp = yield* TestInstance
@@ -232,7 +232,7 @@ describe("experimental HttpApi", () => {
         expect(yield* json(state)).toEqual({ consoleManagedProviders: [], switchableOrgCount: 0 })
         const orgs = yield* request(ExperimentalPaths.consoleOrgs, tmp.directory)
         expect(orgs.status).toBe(200)
-        expect(yield* json(orgs)).toEqual({ orgs: [] })
+        expect(yield* json(orgs)).toEqual({ enabled: false, orgs: [] })
       }),
     { config: { formatter: false, lsp: false } },
   )

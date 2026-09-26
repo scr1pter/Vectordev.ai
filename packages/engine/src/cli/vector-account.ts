@@ -48,6 +48,8 @@ async function save(auth: StoredAuth) {
 }
 
 export async function signOut() {
+  const { VectorTeams } = await import("@/teams")
+  await VectorTeams.runtime.runPromise((teams) => teams.clear())
   await fs.rm(AUTH_FILE, { force: true })
 }
 
@@ -118,10 +120,24 @@ export async function login(provided?: string): Promise<CliUser | undefined> {
     return undefined
   }
   await save({ token, user: verified.user, verifiedAt: Date.now() })
+  const { VectorTeams } = await import("@/teams")
+  await VectorTeams.runtime
+    .runPromise((teams) => teams.refresh())
+    .catch((error: unknown) =>
+      UI.println(
+        `Signed in, but Vector Teams could not refresh: ${error instanceof Error ? error.message : "try again from vector org list"}`,
+      ),
+    )
   UI.empty()
   UI.println(UI.Style.TEXT_SUCCESS_BOLD + "✓ Signed in as " + verified.user.email)
   UI.empty()
-  UI.println("Now run " + UI.Style.TEXT_INFO_BOLD + "vector" + UI.Style.TEXT_NORMAL + " inside any repository to start the agent — you type to it there, not at the shell prompt.")
+  UI.println(
+    "Now run " +
+      UI.Style.TEXT_INFO_BOLD +
+      "vector" +
+      UI.Style.TEXT_NORMAL +
+      " inside any repository to start the agent — you type to it there, not at the shell prompt.",
+  )
   return verified.user
 }
 

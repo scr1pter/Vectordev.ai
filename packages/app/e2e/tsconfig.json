@@ -23,6 +23,7 @@
     "./regression/public-share-delete.spec.ts",
     "./regression/public-share-viewer.spec.ts",
     "./regression/support-report.spec.ts",
+    "./regression/teams.spec.ts",
     "./regression/editor-codespace-providers.spec.ts",
     "./regression/settings-workspace.spec.ts",
     "./regression/workspace-global-tabs.spec.ts",

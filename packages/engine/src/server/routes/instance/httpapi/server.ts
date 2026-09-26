@@ -87,6 +87,9 @@ import { configHandlers } from "./handlers/config"
 import { controlHandlers } from "./handlers/control"
 import { controlPlaneHandlers } from "./handlers/control-plane"
 import { experimentalHandlers } from "./handlers/experimental"
+import { teamsHandlers } from "./handlers/teams"
+import { Teams } from "@vectordevai/core/teams"
+import { VectorTeams } from "@/teams"
 import { fileHandlers } from "./handlers/file"
 import { globalHandlers } from "./handlers/global"
 import { instanceHandlers } from "./handlers/instance"
@@ -141,7 +144,7 @@ const ptyConnectHttpApiAuthLayer = ptyConnectAuthorizationLayer.pipe(Layer.provi
 const serverHttpApiAuthLayer = serverAuthorizationLayer.pipe(Layer.provide(ServerAuth.Config.layer))
 const workspaceRoutingLive = workspaceRoutingLayer.pipe(Layer.provide(Socket.layerWebSocketConstructorGlobal))
 const rootApiRoutes = HttpApiBuilder.layer(RootHttpApi).pipe(
-  Layer.provide([controlHandlers, controlPlaneHandlers, globalHandlers]),
+  Layer.provide([controlHandlers, controlPlaneHandlers, globalHandlers, teamsHandlers]),
   Layer.provide(schemaErrorLayer),
   Layer.provide(httpApiAuthLayer),
 )
@@ -216,6 +219,7 @@ const app = LayerNode.group([
   FSUtil.node,
   Database.node,
   Auth.node,
+  Teams.node,
   Config.node,
   Env.node,
   Git.node,
@@ -274,7 +278,7 @@ const app = LayerNode.group([
 export function createRoutes(
   corsOptions?: CorsOptions,
 ): Layer.Layer<never, EffectConfig.ConfigError, RouteRequirements> {
-  const locationServiceMapV2 = buildLocationServiceMap()
+  const locationServiceMapV2 = buildLocationServiceMap([[Teams.node, VectorTeams.node]])
 
   return Layer.mergeAll(
     rootApiRoutes,

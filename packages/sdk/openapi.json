@@ -644,6 +644,252 @@
         ]
       }
     },
+    "/experimental/console": {
+      "get": {
+        "tags": ["teams"],
+        "operationId": "experimental.console.get",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Active Vector Teams metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleState"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "TeamsError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/TeamsError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "description": "Get the selected team and its configured provider IDs. Personal mode performs no hosted request.",
+        "summary": "Get active Vector Teams metadata",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.experimental.console.get({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/experimental/console/orgs": {
+      "get": {
+        "tags": ["teams"],
+        "operationId": "experimental.console.listOrgs",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Verified Vector Teams memberships",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "orgs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "accountID": {
+                            "$ref": "#/components/schemas/TeamsID"
+                          },
+                          "accountEmail": {
+                            "type": "string"
+                          },
+                          "accountUrl": {
+                            "type": "string"
+                          },
+                          "orgID": {
+                            "$ref": "#/components/schemas/TeamsID"
+                          },
+                          "orgName": {
+                            "type": "string"
+                          },
+                          "active": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": ["accountID", "accountEmail", "accountUrl", "orgID", "orgName", "active"],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": ["enabled", "orgs"],
+                  "additionalProperties": false,
+                  "description": "Verified Vector Teams memberships"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "TeamsError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/TeamsError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "description": "Refresh signed memberships from Vector. Returns enabled:false when Teams is unavailable without an active selection or no account is signed in.",
+        "summary": "List verified Vector Teams memberships",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.experimental.console.listOrgs({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/experimental/console/switch": {
+      "post": {
+        "tags": ["teams"],
+        "operationId": "experimental.console.switchOrg",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Team selection saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean",
+                  "description": "Team selection saved"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "TeamsError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/TeamsError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "description": "A team requires its verified account ID. orgID:null clears team selection locally without an account, including while offline or repairing invalid configuration.",
+        "summary": "Switch Vector Teams or Personal workspace",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "accountID": {
+                    "$ref": "#/components/schemas/TeamsID"
+                  },
+                  "orgID": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/TeamsID"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": ["orgID"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.experimental.console.switchOrg({\n  ...\n})"
+          }
+        ]
+      }
+    },
     "/event": {
       "get": {
         "tags": ["event"],
@@ -931,231 +1177,6 @@
           {
             "lang": "js",
             "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.experimental.capabilities.get({\n  ...\n})"
-          }
-        ]
-      }
-    },
-    "/experimental/console": {
-      "get": {
-        "tags": ["experimental"],
-        "operationId": "experimental.console.get",
-        "parameters": [
-          {
-            "name": "directory",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            },
-            "required": false
-          },
-          {
-            "name": "workspace",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            },
-            "required": false
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Active Console provider metadata",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ConsoleState"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Bad request",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BadRequestError"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "InternalServerError",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/effect_HttpApiError_InternalServerError"
-                }
-              }
-            }
-          }
-        },
-        "description": "Get the active Console org name and the set of provider IDs managed by that Console org.",
-        "summary": "Get active Console provider metadata",
-        "x-codeSamples": [
-          {
-            "lang": "js",
-            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.experimental.console.get({\n  ...\n})"
-          }
-        ]
-      }
-    },
-    "/experimental/console/orgs": {
-      "get": {
-        "tags": ["experimental"],
-        "operationId": "experimental.console.listOrgs",
-        "parameters": [
-          {
-            "name": "directory",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            },
-            "required": false
-          },
-          {
-            "name": "workspace",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            },
-            "required": false
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Switchable Console orgs",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "orgs": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "accountID": {
-                            "type": "string"
-                          },
-                          "accountEmail": {
-                            "type": "string"
-                          },
-                          "accountUrl": {
-                            "type": "string"
-                          },
-                          "orgID": {
-                            "type": "string"
-                          },
-                          "orgName": {
-                            "type": "string"
-                          },
-                          "active": {
-                            "type": "boolean"
-                          }
-                        },
-                        "required": ["accountID", "accountEmail", "accountUrl", "orgID", "orgName", "active"],
-                        "additionalProperties": false
-                      }
-                    }
-                  },
-                  "required": ["orgs"],
-                  "additionalProperties": false,
-                  "description": "Switchable Console orgs"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Bad request",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BadRequestError"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "InternalServerError",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/effect_HttpApiError_InternalServerError"
-                }
-              }
-            }
-          }
-        },
-        "description": "Get the available Console orgs across logged-in accounts, including the current active org.",
-        "summary": "List switchable Console orgs",
-        "x-codeSamples": [
-          {
-            "lang": "js",
-            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.experimental.console.listOrgs({\n  ...\n})"
-          }
-        ]
-      }
-    },
-    "/experimental/console/switch": {
-      "post": {
-        "tags": ["experimental"],
-        "operationId": "experimental.console.switchOrg",
-        "parameters": [
-          {
-            "name": "directory",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            },
-            "required": false
-          },
-          {
-            "name": "workspace",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            },
-            "required": false
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Switch success",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "boolean",
-                  "description": "Switch success"
-                }
-              }
-            }
-          }
-        },
-        "description": "Persist a new active Console account/org selection for the current local Vector state.",
-        "summary": "Switch active Console org",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "accountID": {
-                    "type": "string"
-                  },
-                  "orgID": {
-                    "type": "string"
-                  }
-                },
-                "required": ["accountID", "orgID"],
-                "additionalProperties": false
-              }
-            }
-          }
-        },
-        "x-codeSamples": [
-          {
-            "lang": "js",
-            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.experimental.console.switchOrg({\n  ...\n})"
           }
         ]
       }
@@ -23531,6 +23552,51 @@
         },
         "additionalProperties": false
       },
+      "ConsoleState": {
+        "type": "object",
+        "properties": {
+          "consoleManagedProviders": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "activeOrgName": {
+            "type": "string"
+          },
+          "switchableOrgCount": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": ["consoleManagedProviders", "switchableOrgCount"],
+        "additionalProperties": false
+      },
+      "TeamsError": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "enum": ["TeamsError"]
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": ["unavailable", "denied", "invalid", "storage"]
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": ["code", "message"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["name", "data"],
+        "additionalProperties": false
+      },
       "Model": {
         "type": "object",
         "properties": {
@@ -23846,37 +23912,6 @@
           }
         },
         "required": ["backgroundSubagents"],
-        "additionalProperties": false
-      },
-      "ConsoleState": {
-        "type": "object",
-        "properties": {
-          "consoleManagedProviders": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "activeOrgName": {
-            "type": "string"
-          },
-          "switchableOrgCount": {
-            "type": "integer",
-            "minimum": 0
-          }
-        },
-        "required": ["consoleManagedProviders", "switchableOrgCount"],
-        "additionalProperties": false
-      },
-      "effect_HttpApiError_InternalServerError": {
-        "type": "object",
-        "properties": {
-          "_tag": {
-            "type": "string",
-            "enum": ["InternalServerError"]
-          }
-        },
-        "required": ["_tag"],
         "additionalProperties": false
       },
       "ToolListItem": {
@@ -26406,6 +26441,17 @@
           }
         },
         "required": ["id", "slug", "projectID", "directory", "title", "version", "time"],
+        "additionalProperties": false
+      },
+      "effect_HttpApiError_InternalServerError": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": ["InternalServerError"]
+          }
+        },
+        "required": ["_tag"],
         "additionalProperties": false
       },
       "Session6": {
@@ -31679,6 +31725,10 @@
         },
         "required": ["action", "effect", "resource"],
         "additionalProperties": false
+      },
+      "TeamsID": {
+        "type": "string",
+        "pattern": "^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$"
       },
       "ProjectDirectories": {
         "type": "array",
@@ -41369,6 +41419,9 @@
     {
       "name": "global",
       "description": "Global server routes."
+    },
+    {
+      "name": "teams"
     },
     {
       "name": "event",

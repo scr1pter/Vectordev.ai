@@ -16,6 +16,7 @@ import { SettingsList } from "./settings-list"
 import { SettingsServerPicker, SettingsServerScope } from "./settings-server-picker"
 import { brandProviderName } from "@/utils/provider-brand"
 import { SettingsSearch } from "./settings-search"
+import { SettingsVectorTeams } from "./settings-vector-teams"
 import { SettingsVectorAccount } from "./settings-vector-account"
 
 type ProviderSource = "env" | "api" | "config" | "custom"
@@ -158,6 +159,7 @@ const SettingsProvidersContent: Component = () => {
 
       <div class="flex flex-col gap-8 max-w-[720px]">
         <SettingsVectorAccount />
+        <SettingsVectorTeams />
         <div class="flex flex-col gap-1" data-component="connected-providers-section">
           <h3 class="text-14-medium text-text-strong pb-2">{language.t("settings.providers.section.connected")}</h3>
           <SettingsList>

@@ -15,6 +15,7 @@ import { DialogCustomProvider } from "../dialog-custom-provider"
 import { SettingsListV2 } from "./parts/list"
 import { brandProviderName } from "@/utils/provider-brand"
 import { SettingsSearch } from "../settings-search"
+import { SettingsVectorTeams } from "../settings-vector-teams"
 import { SettingsVectorAccount } from "../settings-vector-account"
 import "./settings-v2.css"
 
@@ -152,6 +153,7 @@ export const SettingsProvidersV2: Component = () => {
 
       <div class="settings-v2-tab-body settings-v2-providers">
         <SettingsVectorAccount />
+        <SettingsVectorTeams />
         <div class="settings-v2-section" data-component="connected-providers-section">
           <h3 class="settings-v2-section-title">{language.t("settings.providers.section.connected")}</h3>
           <SettingsListV2>

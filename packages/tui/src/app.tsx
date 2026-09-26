@@ -43,6 +43,7 @@ import { PermissionProvider } from "./context/permission"
 import { DialogModel } from "./component/dialog-model"
 import { useConnected } from "./component/use-connected"
 import { DialogMcp } from "./component/dialog-mcp"
+import { DialogTeams } from "./component/dialog-teams"
 import { DialogStatus } from "./component/dialog-status"
 import { DialogThemeList } from "./component/dialog-theme-list"
 import { DialogHelp } from "./ui/dialog-help"
@@ -687,6 +688,13 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         run: () => {
           dialog.replace(() => <DialogMcp />)
         },
+      },
+      {
+        name: "console.org.switch",
+        title: "Switch Vector Teams workspace",
+        category: "Account",
+        slashName: "org",
+        run: () => dialog.replace(() => <DialogTeams />),
       },
       {
         name: "agent.cycle",

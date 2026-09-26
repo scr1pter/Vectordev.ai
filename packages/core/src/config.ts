@@ -28,6 +28,7 @@ import { ConfigMigrateV1 } from "./v1/config/migrate"
 import { ConfigMigration } from "./config/migration"
 import { Flag } from "./flag/flag"
 import { EffectFlock } from "./util/effect-flock"
+import { Teams } from "./teams"
 
 export class Info extends Schema.Class<Info>("Config.Info")({
   $schema: Schema.optional(Schema.String).annotate({
@@ -142,6 +143,7 @@ const layer = Layer.effect(
     const global = yield* Global.Service
     const location = yield* Location.Service
     const policy = yield* Policy.Service
+    const teams = yield* Teams.Service
     yield* ConfigMigration.discover({
       directory: location.directory,
       worktree: location.project.directory,
@@ -211,15 +213,33 @@ const layer = Layer.effect(
     const supplementary = yield* Effect.forEach(directories, loadDirectory).pipe(Effect.orDie)
     // Apply general settings first and more specific settings last:
     // global config, project files, then `.vector` files.
-    const configs = [...(supplementary[0] ?? []), ...direct, ...supplementary.slice(1).flat()]
+    const team = yield* teams.current().pipe(Effect.orDie)
+    const teamInfo = team.active
+      ? Option.getOrUndefined(
+          ConfigMigrateV1.isV1(team.active.config)
+            ? decodeV1Info(team.active.config).pipe(Option.map(ConfigMigrateV1.migrate), Option.flatMap(decodeInfo))
+            : decodeInfo(team.active.config),
+        )
+      : undefined
+    if (team.active && !teamInfo)
+      return yield* Effect.die(
+        new Error(
+          "The selected team's configuration is invalid. Ask its administrator to update it before continuing.",
+        ),
+      )
+    // Team defaults have the same precedence as customer-hosted configuration:
+    // personal and project settings remain authoritative on this machine.
+    const localConfigs = [...(supplementary[0] ?? []), ...direct, ...supplementary.slice(1).flat()]
+    const configs = [...(teamInfo ? [new Document({ type: "document", info: teamInfo })] : []), ...localConfigs]
     // Rules use the opposite order so a user-global rule can override a
     // repository rule. Statement order inside each file stays unchanged.
-    yield* policy.load(
-      configs
+    yield* policy.load([
+      ...(teamInfo?.experimental?.policies ?? []),
+      ...localConfigs
         .filter((config): config is Document => config.type === "document")
         .toReversed()
         .flatMap((config) => config.info.experimental?.policies ?? []),
-    )
+    ])
 
     return Service.of({
       entries: Effect.fn("Config.entries")(function* () {
@@ -234,5 +254,5 @@ export const locationLayer = layer.pipe(Layer.provideMerge(Policy.locationLayer)
 export const node = makeLocationNode({
   service: Service,
   layer,
-  deps: [FSUtil.node, Global.node, Location.node, Policy.node, EffectFlock.node],
+  deps: [FSUtil.node, Global.node, Location.node, Policy.node, EffectFlock.node, Teams.node],
 })

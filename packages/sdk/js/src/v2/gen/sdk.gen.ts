@@ -37,6 +37,7 @@ import type {
   ExperimentalConsoleGetResponses,
   ExperimentalConsoleListOrgsErrors,
   ExperimentalConsoleListOrgsResponses,
+  ExperimentalConsoleSwitchOrgErrors,
   ExperimentalConsoleSwitchOrgResponses,
   ExperimentalControlPlaneMoveSessionErrors,
   ExperimentalControlPlaneMoveSessionResponses,
@@ -275,6 +276,7 @@ import type {
   SyncStartResponses,
   SyncStealErrors,
   SyncStealResponses,
+  TeamsId,
   TextPartInput,
   ToolIdsErrors,
   ToolIdsResponses,
@@ -725,6 +727,119 @@ export class ControlPlane extends HeyApiClient {
   }
 }
 
+export class Console extends HeyApiClient {
+  /**
+   * Get active Vector Teams metadata
+   *
+   * Get the selected team and its configured provider IDs. Personal mode performs no hosted request.
+   */
+  public get<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<
+      ExperimentalConsoleGetResponses,
+      ExperimentalConsoleGetErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/console",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * List verified Vector Teams memberships
+   *
+   * Refresh signed memberships from Vector. Returns enabled:false when Teams is unavailable without an active selection or no account is signed in.
+   */
+  public listOrgs<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<
+      ExperimentalConsoleListOrgsResponses,
+      ExperimentalConsoleListOrgsErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/console/orgs",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Switch Vector Teams or Personal workspace
+   *
+   * A team requires its verified account ID. orgID:null clears team selection locally without an account, including while offline or repairing invalid configuration.
+   */
+  public switchOrg<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      accountID?: TeamsId
+      orgID?: TeamsId | null
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "accountID" },
+            { in: "body", key: "orgID" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      ExperimentalConsoleSwitchOrgResponses,
+      ExperimentalConsoleSwitchOrgErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/console/switch",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
 export class Capabilities extends HeyApiClient {
   /**
    * Get experimental capabilities
@@ -757,115 +872,6 @@ export class Capabilities extends HeyApiClient {
       url: "/experimental/capabilities",
       ...options,
       ...params,
-    })
-  }
-}
-
-export class Console extends HeyApiClient {
-  /**
-   * Get active Console provider metadata
-   *
-   * Get the active Console org name and the set of provider IDs managed by that Console org.
-   */
-  public get<ThrowOnError extends boolean = false>(
-    parameters?: {
-      directory?: string
-      workspace?: string
-    },
-    options?: Options<never, ThrowOnError>,
-  ) {
-    const params = buildClientParams(
-      [parameters],
-      [
-        {
-          args: [
-            { in: "query", key: "directory" },
-            { in: "query", key: "workspace" },
-          ],
-        },
-      ],
-    )
-    return (options?.client ?? this.client).get<
-      ExperimentalConsoleGetResponses,
-      ExperimentalConsoleGetErrors,
-      ThrowOnError
-    >({
-      url: "/experimental/console",
-      ...options,
-      ...params,
-    })
-  }
-
-  /**
-   * List switchable Console orgs
-   *
-   * Get the available Console orgs across logged-in accounts, including the current active org.
-   */
-  public listOrgs<ThrowOnError extends boolean = false>(
-    parameters?: {
-      directory?: string
-      workspace?: string
-    },
-    options?: Options<never, ThrowOnError>,
-  ) {
-    const params = buildClientParams(
-      [parameters],
-      [
-        {
-          args: [
-            { in: "query", key: "directory" },
-            { in: "query", key: "workspace" },
-          ],
-        },
-      ],
-    )
-    return (options?.client ?? this.client).get<
-      ExperimentalConsoleListOrgsResponses,
-      ExperimentalConsoleListOrgsErrors,
-      ThrowOnError
-    >({
-      url: "/experimental/console/orgs",
-      ...options,
-      ...params,
-    })
-  }
-
-  /**
-   * Switch active Console org
-   *
-   * Persist a new active Console account/org selection for the current local Vector state.
-   */
-  public switchOrg<ThrowOnError extends boolean = false>(
-    parameters?: {
-      directory?: string
-      workspace?: string
-      accountID?: string
-      orgID?: string
-    },
-    options?: Options<never, ThrowOnError>,
-  ) {
-    const params = buildClientParams(
-      [parameters],
-      [
-        {
-          args: [
-            { in: "query", key: "directory" },
-            { in: "query", key: "workspace" },
-            { in: "body", key: "accountID" },
-            { in: "body", key: "orgID" },
-          ],
-        },
-      ],
-    )
-    return (options?.client ?? this.client).post<ExperimentalConsoleSwitchOrgResponses, unknown, ThrowOnError>({
-      url: "/experimental/console/switch",
-      ...options,
-      ...params,
-      headers: {
-        "Content-Type": "application/json",
-        ...options?.headers,
-        ...params.headers,
-      },
     })
   }
 }
@@ -1348,14 +1354,14 @@ export class Experimental extends HeyApiClient {
     return (this._controlPlane ??= new ControlPlane({ client: this.client }))
   }
 
-  private _capabilities?: Capabilities
-  get capabilities(): Capabilities {
-    return (this._capabilities ??= new Capabilities({ client: this.client }))
-  }
-
   private _console?: Console
   get console(): Console {
     return (this._console ??= new Console({ client: this.client }))
+  }
+
+  private _capabilities?: Capabilities
+  get capabilities(): Capabilities {
+    return (this._capabilities ??= new Capabilities({ client: this.client }))
   }
 
   private _session?: Session

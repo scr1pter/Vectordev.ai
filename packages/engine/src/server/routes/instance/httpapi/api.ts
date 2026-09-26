@@ -29,6 +29,7 @@ import { makeApi } from "@vectordevai/protocol/api"
 import { LocationMiddleware } from "@vectordevai/server/location"
 import { SessionLocationMiddleware } from "@vectordevai/server/middleware/session-location"
 import { GlobalApi } from "./groups/global"
+import { TeamsApi } from "./groups/teams"
 import { Authorization } from "./middleware/authorization"
 import { SchemaErrorMiddleware } from "./middleware/schema-error"
 
@@ -55,6 +56,7 @@ export const RootHttpApi = HttpApi.make("vector-root")
   .addHttpApi(ControlApi)
   .addHttpApi(ControlPlaneApi)
   .addHttpApi(GlobalApi)
+  .addHttpApi(TeamsApi)
   .middleware(SchemaErrorMiddleware)
   .middleware(Authorization)
 

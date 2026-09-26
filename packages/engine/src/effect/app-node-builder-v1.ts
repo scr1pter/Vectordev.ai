@@ -7,6 +7,8 @@ import { VectorAccount } from "@vectordevai/core/vector-account"
 import { WebSearchTool } from "@vectordevai/core/tool/websearch"
 import { Effect, Layer } from "effect"
 import { Auth } from "@/auth"
+import { Teams } from "@vectordevai/core/teams"
+import { VectorTeams } from "@/teams"
 import { makeGlobalNode, makeLocationNode } from "@vectordevai/core/effect/app-node"
 
 const bootstrapReplacement = [InstanceStore.bootstrapNode, InstanceBootstrap.node] as const
@@ -56,6 +58,7 @@ export function build<A, E>(root: LayerNode.Node<A, E, any>, replacements: Layer
       bootstrapReplacement,
       [WebSearchTool.credentialsNode, searchCredentials],
       [FreeModels.credentialsNode, freeModelCredentials],
+      [Teams.node, VectorTeams.node],
     ]),
   )
 }

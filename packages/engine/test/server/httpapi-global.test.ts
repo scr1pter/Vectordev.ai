@@ -1,3 +1,6 @@
+import { Teams } from "@vectordevai/core/teams"
+import { buildLocationServiceMap } from "@vectordevai/core/location-services"
+import { teamsHandlers } from "../../src/server/routes/instance/httpapi/handlers/teams"
 import { NodeHttpServer } from "@effect/platform-node"
 import { describe, expect } from "bun:test"
 import { Context, Effect, Layer, Option } from "effect"
@@ -20,7 +23,7 @@ import { testEffect } from "../lib/effect"
 const apiLayer = (upgrade: Installation.UpgradeResult = { status: "complete" }) =>
   HttpRouter.serve(
     HttpApiBuilder.layer(RootHttpApi).pipe(
-      Layer.provide([controlHandlers, controlPlaneHandlers, globalHandlers]),
+      Layer.provide([controlHandlers, controlPlaneHandlers, globalHandlers, teamsHandlers]),
       Layer.provide([authorizationLayer, schemaErrorLayer]),
       // Raw HttpApi routes expose an opaque handler context at the request boundary.
       // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion
@@ -30,6 +33,8 @@ const apiLayer = (upgrade: Installation.UpgradeResult = { status: "complete" }) 
   ).pipe(
     Layer.provideMerge(NodeHttpServer.layerTest),
     Layer.provide(Layer.mock(Auth.Service)({})),
+    Layer.provide(Layer.mock(Teams.Service)({})),
+    Layer.provide(buildLocationServiceMap()),
     Layer.provide(Layer.mock(Config.Service)({})),
     Layer.provide(Layer.mock(MoveSession.Service)({})),
     Layer.provide(

@@ -2107,6 +2107,20 @@ export type Config = {
   }
 }
 
+export type ConsoleState = {
+  consoleManagedProviders: Array<string>
+  activeOrgName?: string
+  switchableOrgCount: number
+}
+
+export type TeamsError = {
+  name: "TeamsError"
+  data: {
+    code: "unavailable" | "denied" | "invalid" | "storage"
+    message: string
+  }
+}
+
 export type Model = {
   id: string
   providerID: string
@@ -2209,16 +2223,6 @@ export type Provider = {
 
 export type ExperimentalCapabilities = {
   backgroundSubagents: boolean
-}
-
-export type ConsoleState = {
-  consoleManagedProviders: Array<string>
-  activeOrgName?: string
-  switchableOrgCount: number
-}
-
-export type EffectHttpApiErrorInternalServerError = {
-  _tag: "InternalServerError"
 }
 
 export type ToolListItem = {
@@ -3042,6 +3046,10 @@ export type Session5 = {
     snapshot?: string
     diff?: string
   }
+}
+
+export type EffectHttpApiErrorInternalServerError = {
+  _tag: "InternalServerError"
 }
 
 export type Session6 = {
@@ -4764,6 +4772,8 @@ export type ConfigV2ExperimentalPolicy = {
   effect: PolicyEffect
   resource: string
 }
+
+export type TeamsId = string
 
 export type ProjectDirectories = Array<{
   directory: string
@@ -8301,6 +8311,107 @@ export type GlobalUpgradeResponses = {
 
 export type GlobalUpgradeResponse = GlobalUpgradeResponses[keyof GlobalUpgradeResponses]
 
+export type ExperimentalConsoleGetData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/experimental/console"
+}
+
+export type ExperimentalConsoleGetErrors = {
+  /**
+   * TeamsError | InvalidRequestError
+   */
+  400: TeamsError | InvalidRequestError
+}
+
+export type ExperimentalConsoleGetError = ExperimentalConsoleGetErrors[keyof ExperimentalConsoleGetErrors]
+
+export type ExperimentalConsoleGetResponses = {
+  /**
+   * Active Vector Teams metadata
+   */
+  200: ConsoleState
+}
+
+export type ExperimentalConsoleGetResponse = ExperimentalConsoleGetResponses[keyof ExperimentalConsoleGetResponses]
+
+export type ExperimentalConsoleListOrgsData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/experimental/console/orgs"
+}
+
+export type ExperimentalConsoleListOrgsErrors = {
+  /**
+   * TeamsError | InvalidRequestError
+   */
+  400: TeamsError | InvalidRequestError
+}
+
+export type ExperimentalConsoleListOrgsError =
+  ExperimentalConsoleListOrgsErrors[keyof ExperimentalConsoleListOrgsErrors]
+
+export type ExperimentalConsoleListOrgsResponses = {
+  /**
+   * Verified Vector Teams memberships
+   */
+  200: {
+    enabled: boolean
+    orgs: Array<{
+      accountID: TeamsId
+      accountEmail: string
+      accountUrl: string
+      orgID: TeamsId
+      orgName: string
+      active: boolean
+    }>
+  }
+}
+
+export type ExperimentalConsoleListOrgsResponse =
+  ExperimentalConsoleListOrgsResponses[keyof ExperimentalConsoleListOrgsResponses]
+
+export type ExperimentalConsoleSwitchOrgData = {
+  body?: {
+    accountID?: TeamsId
+    orgID: TeamsId | null
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/experimental/console/switch"
+}
+
+export type ExperimentalConsoleSwitchOrgErrors = {
+  /**
+   * TeamsError | InvalidRequestError
+   */
+  400: TeamsError | InvalidRequestError
+}
+
+export type ExperimentalConsoleSwitchOrgError =
+  ExperimentalConsoleSwitchOrgErrors[keyof ExperimentalConsoleSwitchOrgErrors]
+
+export type ExperimentalConsoleSwitchOrgResponses = {
+  /**
+   * Team selection saved
+   */
+  200: boolean
+}
+
+export type ExperimentalConsoleSwitchOrgResponse =
+  ExperimentalConsoleSwitchOrgResponses[keyof ExperimentalConsoleSwitchOrgResponses]
+
 export type EventSubscribeData = {
   body?: never
   path?: never
@@ -8438,104 +8549,6 @@ export type ExperimentalCapabilitiesGetResponses = {
 
 export type ExperimentalCapabilitiesGetResponse =
   ExperimentalCapabilitiesGetResponses[keyof ExperimentalCapabilitiesGetResponses]
-
-export type ExperimentalConsoleGetData = {
-  body?: never
-  path?: never
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/experimental/console"
-}
-
-export type ExperimentalConsoleGetErrors = {
-  /**
-   * Bad request
-   */
-  400: BadRequestError
-  /**
-   * InternalServerError
-   */
-  500: EffectHttpApiErrorInternalServerError
-}
-
-export type ExperimentalConsoleGetError = ExperimentalConsoleGetErrors[keyof ExperimentalConsoleGetErrors]
-
-export type ExperimentalConsoleGetResponses = {
-  /**
-   * Active Console provider metadata
-   */
-  200: ConsoleState
-}
-
-export type ExperimentalConsoleGetResponse = ExperimentalConsoleGetResponses[keyof ExperimentalConsoleGetResponses]
-
-export type ExperimentalConsoleListOrgsData = {
-  body?: never
-  path?: never
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/experimental/console/orgs"
-}
-
-export type ExperimentalConsoleListOrgsErrors = {
-  /**
-   * Bad request
-   */
-  400: BadRequestError
-  /**
-   * InternalServerError
-   */
-  500: EffectHttpApiErrorInternalServerError
-}
-
-export type ExperimentalConsoleListOrgsError =
-  ExperimentalConsoleListOrgsErrors[keyof ExperimentalConsoleListOrgsErrors]
-
-export type ExperimentalConsoleListOrgsResponses = {
-  /**
-   * Switchable Console orgs
-   */
-  200: {
-    orgs: Array<{
-      accountID: string
-      accountEmail: string
-      accountUrl: string
-      orgID: string
-      orgName: string
-      active: boolean
-    }>
-  }
-}
-
-export type ExperimentalConsoleListOrgsResponse =
-  ExperimentalConsoleListOrgsResponses[keyof ExperimentalConsoleListOrgsResponses]
-
-export type ExperimentalConsoleSwitchOrgData = {
-  body?: {
-    accountID: string
-    orgID: string
-  }
-  path?: never
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/experimental/console/switch"
-}
-
-export type ExperimentalConsoleSwitchOrgResponses = {
-  /**
-   * Switch success
-   */
-  200: boolean
-}
-
-export type ExperimentalConsoleSwitchOrgResponse =
-  ExperimentalConsoleSwitchOrgResponses[keyof ExperimentalConsoleSwitchOrgResponses]
 
 export type ToolListData = {
   body?: never

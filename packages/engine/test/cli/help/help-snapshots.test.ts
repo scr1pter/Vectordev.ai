@@ -50,6 +50,7 @@ const TOP_LEVEL = [
   "run",
   "debug",
   "providers", // aliased to `auth`
+  "org",
   "agent",
   "upgrade",
   "uninstall",
@@ -82,6 +83,9 @@ const SUBCOMMANDS = [
   ["auth", "plugin", "approve"],
   ["auth", "plugin", "revoke"],
   ["auth", "plugin", "list"],
+  ["org", "list"],
+  ["org", "switch"],
+  ["org", "personal"],
   ["agent", "create"],
   ["agent", "list"],
   ["session", "list"],

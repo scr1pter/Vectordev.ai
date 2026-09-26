@@ -25,7 +25,10 @@ type OpenApiOperation = {
     readonly schema?: { readonly type?: string }
   }>
   readonly responses?: Record<string, OpenApiResponse>
-  readonly requestBody?: { readonly required?: boolean }
+  readonly requestBody?: {
+    readonly required?: boolean
+    readonly content?: Record<string, { readonly schema?: OpenApiSchema }>
+  }
   readonly security?: unknown
 }
 type OpenApiPathItem = Partial<Record<Method, OpenApiOperation>>
@@ -70,6 +73,14 @@ function isBuiltInEndpointError(name: string) {
 }
 
 describe("PublicApi OpenAPI v2 errors", () => {
+  test("Teams Personal selection is nullable and its typed recovery error is documented", () => {
+    const spec = OpenApi.fromApi(PublicApi) as OpenApiSpec
+    const operation = spec.paths["/experimental/console/switch"].post!
+    expect(operation.requestBody?.content?.["application/json"]?.schema?.properties?.orgID?.anyOf).toContainEqual({
+      type: "null",
+    })
+    expect(componentNames(operation.responses?.["400"])).toContain("TeamsError")
+  })
   test("includes plugin-facing core schemas", () => {
     const spec = OpenApi.fromApi(PublicApi) as OpenApiSpec
 

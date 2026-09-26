@@ -137,6 +137,11 @@ function matchLegacyOpenApi(input: Record<string, unknown>) {
             : operation.requestBody.content?.["application/json"]?.schema?.properties
           if (properties?.id) properties.id = { anyOf: [properties.id, { type: "null" }] }
         }
+        if (path === "/experimental/console/switch" && method === "post") {
+          // Personal workspace is an explicit null selection, not an omitted organization.
+          const properties = body?.schema?.properties
+          if (properties?.orgID) properties.orgID = nullable(properties.orgID)
+        }
       }
       for (const response of Object.values(operation.responses ?? {})) {
         for (const content of Object.values(response.content ?? {})) {
@@ -373,7 +378,6 @@ function referencesComponent(input: unknown, name: string): boolean {
 }
 
 function normalizeLegacyOperation(operation: OpenApiOperation, path: string, method: string) {
-  if (path === "/experimental/console/switch" && method === "post") delete operation.responses?.["400"]
   if ((path !== "/session/{sessionID}/message" && path !== "/session/{sessionID}/command") || method !== "post") return
   const response = operation.responses?.["200"]?.content?.["application/json"]
   if (!response) return

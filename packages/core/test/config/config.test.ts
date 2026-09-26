@@ -13,6 +13,7 @@ import { FSUtil } from "@vectordevai/core/fs-util"
 import { Global } from "@vectordevai/core/global"
 import { Location } from "@vectordevai/core/location"
 import { Policy } from "@vectordevai/core/policy"
+import { Teams } from "@vectordevai/core/teams"
 import { Project } from "@vectordevai/core/project"
 import { AbsolutePath } from "@vectordevai/core/schema"
 import { location } from "../fixture/location"
@@ -26,6 +27,7 @@ function testLayer(
   globalDirectory = path.join(directory, "global"),
   projectDirectory = directory,
   vcs?: Project.Vcs,
+  team?: Teams.TeamsStatus,
 ) {
   const locationLayer = Layer.succeed(
     Location.Service,
@@ -39,6 +41,22 @@ function testLayer(
   return AppNodeBuilder.build(LayerNode.group([Config.node, Policy.node]), [
     [Location.node, locationLayer],
     [Global.node, Global.layerWith({ config: globalDirectory, home: path.join(directory, "home") })],
+    ...(team
+      ? [
+          [
+            Teams.node,
+            Layer.succeed(
+              Teams.Service,
+              Teams.Service.of({
+                current: () => Effect.succeed(team),
+                refresh: () => Effect.succeed(team),
+                select: () => Effect.succeed(team),
+                clear: () => Effect.void,
+              }),
+            ),
+          ] as const,
+        ]
+      : []),
   ])
 }
 
@@ -52,6 +70,60 @@ const provider = {
 }
 
 describe("Config", () => {
+  it.effect("merges verified team providers beneath personal settings and preserves personal policy denial", () =>
+    Effect.gen(function* () {
+      const directory = yield* Effect.acquireRelease(Effect.promise(tmpdir), (value) =>
+        Effect.promise(() => value[Symbol.asyncDispose]()),
+      )
+      const globalDirectory = path.join(directory.path, "global")
+      yield* Effect.promise(() => fs.mkdir(globalDirectory))
+      yield* Effect.promise(() =>
+        Bun.write(
+          path.join(globalDirectory, "vector.json"),
+          JSON.stringify({
+            model: "personal/model",
+            permission: { bash: "deny" },
+            experimental: { policies: [{ action: "provider.use", resource: "*", effect: "deny" }] },
+          }),
+        ),
+      )
+      return yield* Effect.gen(function* () {
+        const config = yield* Config.Service
+        const policy = yield* Policy.Service
+        const entries = yield* config.entries()
+        expect(Config.latest(entries, "model")).toBe("personal/model")
+        expect(Config.latest(entries, "permissions")).toContainEqual({ action: "bash", resource: "*", effect: "deny" })
+        expect(Config.latest(entries, "providers")).toHaveProperty("team-fixture")
+        expect(yield* policy.evaluate("provider.use", "command", "allow")).toBe("deny")
+      }).pipe(
+        Effect.provide(
+          testLayer(directory.path, globalDirectory, directory.path, undefined, {
+            enabled: true,
+            orgs: [],
+            active: {
+              id: "12345678-1234-4234-8234-123456789012",
+              name: "Fixture team",
+              revision: 1,
+              config: {
+                model: "team-fixture/model",
+                provider: {
+                  "team-fixture": {
+                    name: "Fixture",
+                    npm: "@ai-sdk/openai-compatible",
+                    options: { baseURL: "https://fixture.invalid/v1" },
+                    models: { model: { name: "Fixture model" } },
+                  },
+                },
+                permission: { bash: "allow" },
+                experimental: { policies: [{ action: "provider.use", resource: "*", effect: "allow" }] },
+              },
+            },
+          }),
+        ),
+      )
+    }).pipe(Effect.scoped),
+  )
+
   it.effect("returns the latest defined scalar from priority-ordered documents", () =>
     Effect.sync(() => {
       const entries = [

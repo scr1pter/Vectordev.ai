@@ -30,6 +30,7 @@ import { DbCommand } from "./cli/cmd/db"
 import { errorMessage } from "./util/error"
 import { PluginCommand } from "./cli/cmd/plug"
 import { VectorLoginCommand, VectorLogoutCommand, VectorWhoamiCommand } from "./cli/cmd/vector-login"
+import { OrgCommand } from "./cli/cmd/org"
 import { Heap } from "./cli/heap"
 import { disposeRuntimes } from "./effect/runtime-cleanup"
 import { assertSecurityEnvironment } from "@vectordevai/core/flag/security"
@@ -53,7 +54,7 @@ function show(out: string) {
 }
 
 // Commands that must stay reachable without an account.
-const openCommands = new Set(["login", "logout", "whoami", "completion", "uninstall", "upgrade"])
+const openCommands = new Set(["login", "logout", "whoami", "org", "completion", "uninstall", "upgrade"])
 
 const cli = yargs(args)
   .parserConfiguration({ "populate--": true })
@@ -108,6 +109,7 @@ const cli = yargs(args)
   .command(GenerateCommand)
   .command(DebugCommand)
   .command(ProvidersCommand)
+  .command(OrgCommand)
   .command(AgentCommand)
   .command(UpgradeCommand)
   .command(UninstallCommand)

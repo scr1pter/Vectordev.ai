@@ -45,6 +45,7 @@ import type {
   ExperimentalConsoleListOrgsErrors,
   ExperimentalConsoleListOrgsResponses,
   ExperimentalConsoleSwitchOrgData,
+  ExperimentalConsoleSwitchOrgErrors,
   ExperimentalConsoleSwitchOrgResponses,
   ExperimentalControlPlaneMoveSessionData,
   ExperimentalControlPlaneMoveSessionErrors,
@@ -781,26 +782,11 @@ export class ControlPlane extends HeyApiClient {
   }
 }
 
-export class Capabilities extends HeyApiClient {
-  /**
-   * Get experimental capabilities
-   *
-   * Get experimental features enabled on the Vector engine.
-   */
-  public get<ThrowOnError extends boolean = false>(options?: Options<ExperimentalCapabilitiesGetData, ThrowOnError>) {
-    return (options?.client ?? this.client).get<
-      ExperimentalCapabilitiesGetResponses,
-      ExperimentalCapabilitiesGetErrors,
-      ThrowOnError
-    >({ url: "/experimental/capabilities", ...options })
-  }
-}
-
 export class Console extends HeyApiClient {
   /**
-   * Get active Console provider metadata
+   * Get active Vector Teams metadata
    *
-   * Get the active Console org name and the set of provider IDs managed by that Console org.
+   * Get the selected team and its configured provider IDs. Personal mode performs no hosted request.
    */
   public get<ThrowOnError extends boolean = false>(options?: Options<ExperimentalConsoleGetData, ThrowOnError>) {
     return (options?.client ?? this.client).get<
@@ -811,9 +797,9 @@ export class Console extends HeyApiClient {
   }
 
   /**
-   * List switchable Console orgs
+   * List verified Vector Teams memberships
    *
-   * Get the available Console orgs across logged-in accounts, including the current active org.
+   * Refresh signed memberships from Vector. Returns enabled:false when Teams is unavailable without an active selection or no account is signed in.
    */
   public listOrgs<ThrowOnError extends boolean = false>(
     options?: Options<ExperimentalConsoleListOrgsData, ThrowOnError>,
@@ -826,14 +812,18 @@ export class Console extends HeyApiClient {
   }
 
   /**
-   * Switch active Console org
+   * Switch Vector Teams or Personal workspace
    *
-   * Persist a new active Console account/org selection for the current local Vector state.
+   * A team requires its verified account ID. orgID:null clears team selection locally without an account, including while offline or repairing invalid configuration.
    */
   public switchOrg<ThrowOnError extends boolean = false>(
     options?: Options<ExperimentalConsoleSwitchOrgData, ThrowOnError>,
   ) {
-    return (options?.client ?? this.client).post<ExperimentalConsoleSwitchOrgResponses, unknown, ThrowOnError>({
+    return (options?.client ?? this.client).post<
+      ExperimentalConsoleSwitchOrgResponses,
+      ExperimentalConsoleSwitchOrgErrors,
+      ThrowOnError
+    >({
       url: "/experimental/console/switch",
       ...options,
       headers: {
@@ -841,6 +831,21 @@ export class Console extends HeyApiClient {
         ...options?.headers,
       },
     })
+  }
+}
+
+export class Capabilities extends HeyApiClient {
+  /**
+   * Get experimental capabilities
+   *
+   * Get experimental features enabled on the Vector engine.
+   */
+  public get<ThrowOnError extends boolean = false>(options?: Options<ExperimentalCapabilitiesGetData, ThrowOnError>) {
+    return (options?.client ?? this.client).get<
+      ExperimentalCapabilitiesGetResponses,
+      ExperimentalCapabilitiesGetErrors,
+      ThrowOnError
+    >({ url: "/experimental/capabilities", ...options })
   }
 }
 
@@ -1054,14 +1059,14 @@ export class Experimental extends HeyApiClient {
     return (this._controlPlane ??= new ControlPlane({ client: this.client }))
   }
 
-  private _capabilities?: Capabilities
-  get capabilities(): Capabilities {
-    return (this._capabilities ??= new Capabilities({ client: this.client }))
-  }
-
   private _console?: Console
   get console(): Console {
     return (this._console ??= new Console({ client: this.client }))
+  }
+
+  private _capabilities?: Capabilities
+  get capabilities(): Capabilities {
+    return (this._capabilities ??= new Capabilities({ client: this.client }))
   }
 
   private _session?: Session
