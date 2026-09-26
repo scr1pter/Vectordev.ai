@@ -311,8 +311,8 @@ export function AccountPage(props: { preview?: AccountState }) {
             <>
               <p>
                 {account?.betaAccess
-                  ? "Vector is free while it's in beta. A paid plan is optional — it gives you a private license key and Stripe billing controls, and keeps access uninterrupted when public pricing begins. Either way, models are included with Vector, so you need no API key."
-                  : "Choose monthly or annual access. Both come with models included, so you need no API key. Your private license key and Stripe billing controls stay attached to this account."}
+                  ? "Vector is free while it's in beta. A paid plan is optional — it gives you a private license key and Stripe billing controls, and keeps access uninterrupted when public pricing begins. Connect your own provider account to start. Eligible accounts may also see Free models inside of Vector, with availability and usage limits shown in the app."
+                  : "Choose monthly or annual access. Your private license key and Stripe billing controls stay attached to this account. Connect your own provider account to start. Eligible accounts may also see Free models inside of Vector, with availability and usage limits shown in the app."}
               </p>
               <div className="acct-plans" role="radiogroup" aria-label="Plan">
                 {(configuration.plans ?? fallbackPlans).map((item) => (

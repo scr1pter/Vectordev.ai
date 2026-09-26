@@ -188,7 +188,7 @@ export const spendRows = [
   ],
   [
     "Your keys, your bill",
-    "The models included with Vector come with your Vector account and need no key. Bring your own provider keys and that model spend is between you and that provider — Vector does not resell tokens or add a margin to them.",
+    "Connect your own provider account to start. Eligible accounts may also see Free models inside of Vector, with availability and usage limits shown in the app. With your own provider keys, model spend is between you and that provider — Vector does not resell tokens or add a margin to it.",
   ],
 ]
 export const systemRows = [
@@ -536,11 +536,11 @@ export const faqs = [
   {
     question: "Do I need an API key?",
     answer:
-      "No. Vector comes with models included, so you can work without connecting a provider. You can also bring your own key for Claude, GPT, Gemini and the rest; availability and billing for those depend on the provider you connect. Included models are served by outside providers, and some may use your prompts to improve their models, so use your own provider key for confidential code.",
+      "Connect a provider account or API key to start. Eligible accounts may also see Free models inside of Vector, with availability and usage limits shown in the app. Model requests go to external providers. The shared free-model catalog excludes providers whose published policies allow training or publication of submitted data, but retention varies by provider. Review the provider’s retention terms before sending confidential code; your own provider connection follows that provider’s settings and terms.",
   },
   {
     question: "How do I buy and activate Vector?",
     answer:
-      "Create a Vector account with Google or email, then open Account and choose a desktop subscription: $10 a month or $99 a year. Creating an account does not start a subscription. After Stripe checkout, your private VEC1 license key and billing controls are available in Account. Enter that key when the desktop app asks for activation. Both plans include models, so you need no API key.",
+      "Create a Vector account with Google or email, then open Account and choose a desktop subscription: $10 a month or $99 a year. Creating an account does not start a subscription. After Stripe checkout, your private VEC1 license key and billing controls are available in Account. Enter that key when the desktop app asks for activation. Connect your own provider account to start. Eligible accounts may also see Free models inside of Vector, with availability and usage limits shown in the app.",
   },
 ]

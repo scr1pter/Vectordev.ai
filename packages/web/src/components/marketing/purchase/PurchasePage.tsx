@@ -110,7 +110,7 @@ export function PurchasePage() {
                 <Check size={15} /> One active computer at a time
               </li>
               <li>
-                <Check size={15} /> BYOK models and free provider options
+                <Check size={15} /> Bring your own provider accounts and API keys
               </li>
               <li>
                 <Check size={15} /> Vector Cloud Services through your accounts
