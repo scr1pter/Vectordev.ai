@@ -5,7 +5,7 @@ export type DeviceRegistration = {
   origin: string
   devicePath: string
   tokenPath: string
-  verificationPath: string
+  verificationPath?: string
   scope: string
 }
 export type OAuthToken = { access: string; refresh: string; expires: number; clientId: string; enterpriseUrl: string }
@@ -119,7 +119,7 @@ export function createDeviceOAuth(dependencies?: {
       if (
         !verification ||
         verification.origin !== registration.origin ||
-        verification.pathname !== registration.verificationPath ||
+        (registration.verificationPath !== undefined && verification.pathname !== registration.verificationPath) ||
         verification.username ||
         verification.password ||
         verification.search ||
@@ -182,7 +182,7 @@ export function createDeviceOAuth(dependencies?: {
       )
       if (!result.ok || result.value.error)
         throw new Error("Your provider sign-in could not be renewed. Sign in again.")
-      return oauthToken(registration, result.value, now())
+      return oauthToken(registration, { refresh_token: refresh, ...result.value }, now())
     },
   }
 }
@@ -194,7 +194,9 @@ function requireDeviceRegistration(value: DeviceRegistration) {
     origin.origin !== value.origin ||
     origin.protocol !== "https:" ||
     !/^[A-Za-z0-9._-]{8,256}$/.test(value.clientId) ||
-    [value.devicePath, value.tokenPath, value.verificationPath].some((path) => !/^\/[A-Za-z0-9/_-]+$/.test(path))
+    [value.devicePath, value.tokenPath, ...(value.verificationPath ? [value.verificationPath] : [])].some(
+      (path) => !/^\/[A-Za-z0-9/_-]+$/.test(path),
+    )
   )
     throw new Error("Configure Vector's approved provider application before signing in.")
 }

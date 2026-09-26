@@ -35,6 +35,36 @@ export function ownedOAuthMatches(
   )
 }
 
+export const XAI_CLIENT_ID = ""
+export const XAI_REDIRECT_URI = "http://127.0.0.1:1457/oauth/xai/callback"
+export function xaiOAuthConfiguration(environment: NodeJS.ProcessEnv = process.env, enabled = XAI_SIGN_IN) {
+  if (!enabled) return
+  const clientId = environment.VECTOR_XAI_OAUTH_CLIENT_ID?.trim() || XAI_CLIENT_ID
+  const redirectUri = environment.VECTOR_XAI_OAUTH_REDIRECT_URI?.trim() || XAI_REDIRECT_URI
+  const redirect = URL.parse(redirectUri)
+  if (
+    !/^[A-Za-z0-9._-]{8,256}$/.test(clientId) ||
+    !redirect ||
+    redirect.protocol !== "http:" ||
+    redirect.hostname !== "127.0.0.1" ||
+    !redirect.port ||
+    Number(redirect.port) < 1024 ||
+    redirect.username ||
+    redirect.password ||
+    redirect.search ||
+    redirect.hash
+  )
+    return
+  return {
+    clientId,
+    origin: "https://auth.x.ai",
+    devicePath: "/oauth2/device/code",
+    tokenPath: "/oauth2/token",
+    scope: "openid profile email offline_access api:access",
+    redirectUri: redirect.href,
+  }
+}
+
 // Candidate from the desktop registration. Duo reuse remains disabled until
 // ownership and device-grant configuration are confirmed; see owner-actions/gitlab.md.
 export const GITLAB_DEFAULT_CLIENT_ID = "8ac2300994dbece9bfc889ee6705f4ab8a8243b9acd04fe6185172528abc8edd"
@@ -95,7 +125,7 @@ export function providerOAuthAllowed(id: string, userDefined = false) {
   if (!providerEnabled(id) || (!providerAllowed(id) && !userDefined)) return false
   if (id.startsWith("github-copilot")) return Boolean(copilotOAuthConfiguration())
   if (id === "openai") return CHATGPT_SIGN_IN
-  if (id === "xai") return XAI_SIGN_IN
+  if (id === "xai") return Boolean(xaiOAuthConfiguration())
   if (id === "poe") return POE_SIGN_IN
   if (id === "digitalocean") return DIGITALOCEAN_SIGN_IN
   if (id === "gitlab") return gitlabSignInEnabled()
@@ -110,6 +140,7 @@ export function providerCredentialAllowed(
   if (!providerEnabled(id) || (!providerAllowed(id) && !userDefined)) return false
   if (id.startsWith("github-copilot") && credential.type === "oauth")
     return ownedOAuthMatches(credential, copilotOAuthConfiguration())
+  if (id === "xai" && credential.type === "oauth") return ownedOAuthMatches(credential, xaiOAuthConfiguration())
   // The retired DigitalOcean flow persisted its OAuth access token as an API key.
   if (id === "digitalocean" && !DIGITALOCEAN_SIGN_IN && credential.metadata?.oauth_access) return false
   if (id === "gitlab" && credential.type === "oauth") {
