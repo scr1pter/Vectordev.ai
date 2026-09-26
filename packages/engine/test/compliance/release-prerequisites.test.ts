@@ -13,16 +13,16 @@ test.skipIf(process.platform === "win32")("desktop preparation refuses missing m
   expect(script).toBeString()
   const directory = await mkdtemp(path.join(os.tmpdir(), "vector-release-prerequisites-"))
   try {
-    await Bun.write(path.join(directory, "packages/desktop/package.json"), '{"version":"1.2.3"}')
+    await Bun.write(path.join(directory, "packages/desktop/package.json"), '{"version":"1.2.3","vectorRequiredCliVersion":"4.5.6"}')
     const npm = path.join(directory, "bin/npm")
     await Bun.write(npm, `#!/usr/bin/env node
 const fs = require("node:fs")
 fs.appendFileSync(${JSON.stringify(path.join(directory, "requests"))}, process.argv[3] + "\\n")
 if (process.argv[3] === process.env.MISSING_PACKAGE) process.exit(1)
-console.log(JSON.stringify("1.2.3"))
+console.log(JSON.stringify(process.argv[3].slice(process.argv[3].lastIndexOf("@") + 1)))
 `)
     await chmod(npm, 0o755)
-    for (const missing of ["", "@vectordevai/plugin@1.2.3", "@vectordevai/cli-linux-arm64@1.2.3"]) {
+    for (const missing of ["", "@vectordevai/plugin@1.2.3", "@vectordevai/cli-linux-arm64@4.5.6"]) {
       const child = Bun.spawn(["bash", "-c", script!], {
         cwd: directory,
         env: { PATH: path.dirname(npm) + path.delimiter + process.env.PATH, HOME: directory, MISSING_PACKAGE: missing },
@@ -34,7 +34,9 @@ console.log(JSON.stringify("1.2.3"))
       if (missing) expect(stdout).toContain(`Publish ${missing} before starting the desktop release.`)
     }
     const requested = await Bun.file(path.join(directory, "requests")).text()
-    expect(requested).toContain("@vectordevai/cli-windows-x64@1.2.3")
+    expect(requested).toContain("@vectordevai/plugin@1.2.3")
+    expect(requested).toContain("@vectordevai/cli-windows-x64@4.5.6")
+    expect(requested).not.toContain("@null")
   } finally {
     await rm(directory, { recursive: true, force: true })
   }

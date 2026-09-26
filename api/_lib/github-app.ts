@@ -81,7 +81,7 @@ export function createGithubApp(
       headers: {
         accept: "application/vnd.github+json",
         "x-github-api-version": githubApiVersion,
-        "user-agent": "Vector-GitHub-App",
+        "user-agent": "Vector/GitHub-App",
         ...(token ? { authorization: `Bearer ${token}` } : {}),
         ...(options.body !== undefined ? { "content-type": "application/json" } : {}),
       },
