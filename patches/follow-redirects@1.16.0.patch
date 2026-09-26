@@ -1,0 +1,26 @@
+diff --git a/index.js b/index.js
+index 3d32523ec32f38db18e05a67551f1948af67c144..0f91907d88c2ec37daaf01d304304d856e0fad65 100644
+--- a/index.js
++++ b/index.js
+@@ -642,13 +642,17 @@ function removeMatchingHeaders(regex, headers) {
+ function createErrorType(code, message, baseClass) {
+   // Create constructor
+   function CustomError(properties) {
++    // Bun's native stack formatter requires an Error internal slot, including
++    // when Babel delegates to it through a custom prepareStackTrace hook.
++    var error = Reflect.construct(Error, [], CustomError);
+     // istanbul ignore else
+     if (isFunction(Error.captureStackTrace)) {
+-      Error.captureStackTrace(this, this.constructor);
++      Error.captureStackTrace(error, CustomError);
+     }
+-    Object.assign(this, properties || {});
+-    this.code = code;
+-    this.message = this.cause ? message + ": " + this.cause.message : message;
++    Object.assign(error, properties || {});
++    error.code = code;
++    error.message = error.cause ? message + ": " + error.cause.message : message;
++    return error;
+   }
+ 
+   // Attach constructor and set default properties

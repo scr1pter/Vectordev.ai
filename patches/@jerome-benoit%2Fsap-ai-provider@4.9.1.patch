@@ -1,0 +1,48 @@
+diff --git a/dist/chunk-5ZKQJNHO.js b/dist/chunk-5ZKQJNHO.js
+index 01f27d02d9ab294cd1dbc7b82122415d255fb19f..2a1016dcb7182db75d5845eb251a158be5262449 100644
+--- a/dist/chunk-5ZKQJNHO.js
++++ b/dist/chunk-5ZKQJNHO.js
+@@ -25110,12 +25110,15 @@ var require_follow_redirects = __commonJS({
+     }
+     function createErrorType(code, message, baseClass) {
+       function CustomError(properties) {
++        // Vector: preserve native Error slots for Bun/Babel stack formatting.
++        var error = Reflect.construct(Error, [], CustomError);
+         if (isFunction(Error.captureStackTrace)) {
+-          Error.captureStackTrace(this, this.constructor);
++          Error.captureStackTrace(error, CustomError);
+         }
+-        Object.assign(this, properties || {});
+-        this.code = code;
+-        this.message = this.cause ? message + ": " + this.cause.message : message;
++        Object.assign(error, properties || {});
++        error.code = code;
++        error.message = error.cause ? message + ": " + error.cause.message : message;
++        return error;
+       }
+       CustomError.prototype = new (baseClass || Error)();
+       Object.defineProperties(CustomError.prototype, {
+diff --git a/dist/index.cjs b/dist/index.cjs
+index e4e66342db7926f71c2c2fd5a43ea674600e2aeb..b9356e6ac06d8b1774388eb94a7bcef7ad286509 100644
+--- a/dist/index.cjs
++++ b/dist/index.cjs
+@@ -25573,12 +25573,15 @@ var require_follow_redirects = __commonJS({
+     }
+     function createErrorType(code, message, baseClass) {
+       function CustomError(properties) {
++        // Vector: preserve native Error slots for Bun/Babel stack formatting.
++        var error = Reflect.construct(Error, [], CustomError);
+         if (isFunction(Error.captureStackTrace)) {
+-          Error.captureStackTrace(this, this.constructor);
++          Error.captureStackTrace(error, CustomError);
+         }
+-        Object.assign(this, properties || {});
+-        this.code = code;
+-        this.message = this.cause ? message + ": " + this.cause.message : message;
++        Object.assign(error, properties || {});
++        error.code = code;
++        error.message = error.cause ? message + ": " + error.cause.message : message;
++        return error;
+       }
+       CustomError.prototype = new (baseClass || Error)();
+       Object.defineProperties(CustomError.prototype, {

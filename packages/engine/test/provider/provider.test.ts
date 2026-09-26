@@ -2051,6 +2051,10 @@ for (const entry of [
     `restored ${entry.id} resolves an actual bundled V3 language model`,
     () =>
       Effect.gen(function* () {
+        if (entry.id === "sap-ai-core") {
+          // TUI transpilation installs Babel's stack formatter before lazy SDK loading.
+          yield* Effect.promise(() => import("../../src/config/tui"))
+        }
         const provider = yield* Provider.Service
         const model = yield* provider.getModel(ProviderV2.ID.make(entry.id), ModelV2.ID.make("fixture"))
         expect(model.api.npm).toBe(entry.npm)
