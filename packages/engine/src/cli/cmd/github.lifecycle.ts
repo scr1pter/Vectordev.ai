@@ -21,26 +21,28 @@ export function withGithubCallbacks<A, E, R>(use: (run: CallbackRunner) => Effec
 
 /** Actions cancellation must interrupt the Effect so credential finalizers finish before CLI exit. */
 export function withGithubSignals<A, E, R>(effect: Effect.Effect<A, E, R>) {
-  return Effect.raceFirst(
-    effect,
-    Effect.callback<void>((resume) => {
-      const interrupt = () => {
-        process.exitCode = 130
-        cleanup()
-        resume(Effect.void)
+  return Effect.acquireUseRelease(
+    Effect.sync(() => {
+      const signal = Promise.withResolvers<void>()
+      let received = false
+      const stop = (code: 130 | 143) => {
+        if (received) return
+        received = true
+        process.exitCode = code
+        signal.resolve()
       }
-      const terminate = () => {
-        process.exitCode = 143
-        cleanup()
-        resume(Effect.void)
-      }
+      const interrupt = () => stop(130)
+      const terminate = () => stop(143)
       const cleanup = () => {
         process.removeListener("SIGINT", interrupt)
         process.removeListener("SIGTERM", terminate)
       }
-      process.once("SIGINT", interrupt)
-      process.once("SIGTERM", terminate)
-      return Effect.sync(cleanup)
+      process.on("SIGINT", interrupt)
+      process.on("SIGTERM", terminate)
+      return { wait: signal.promise, cleanup }
     }),
+    // Install both listeners before the job can acquire credentials or announce readiness.
+    (signal) => Effect.raceFirst(effect, Effect.promise(() => signal.wait)),
+    (signal) => Effect.sync(signal.cleanup),
   )
 }
