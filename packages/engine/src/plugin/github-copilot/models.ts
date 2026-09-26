@@ -216,6 +216,7 @@ export async function get(
   existing: Record<string, Model> = {},
 ): Promise<{ models: Record<string, Model>; pickerEnabled: Set<string> }> {
   const data = await fetch(`${baseURL}/models`, {
+    redirect: "error",
     headers,
     signal: AbortSignal.timeout(5_000),
   }).then(async (res) => {

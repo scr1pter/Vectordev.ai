@@ -9,6 +9,32 @@ export const POE_SIGN_IN = false
 export const DIGITALOCEAN_SIGN_IN = false
 export const GITLAB_SIGN_IN = false
 
+// Register a separate, least-privilege Vector application after Copilot partner approval.
+export const COPILOT_CLIENT_ID = ""
+export function copilotOAuthConfiguration(environment: NodeJS.ProcessEnv = process.env, enabled = COPILOT_SIGN_IN) {
+  if (!enabled) return
+  const clientId = environment.VECTOR_COPILOT_OAUTH_CLIENT_ID?.trim() || COPILOT_CLIENT_ID
+  if (!/^[A-Za-z0-9._-]{8,256}$/.test(clientId)) return
+  return {
+    clientId,
+    origin: "https://github.com",
+    devicePath: "/login/device/code",
+    tokenPath: "/login/oauth/access_token",
+    verificationPath: "/login/device",
+    scope: "read:user",
+  }
+}
+export function ownedOAuthMatches(
+  credential: { clientId?: string; enterpriseUrl?: string; metadata?: Readonly<Record<string, unknown>> },
+  configuration: { clientId: string; origin: string } | undefined,
+) {
+  return Boolean(
+    configuration &&
+      (credential.clientId ?? credential.metadata?.oauth_client_id) === configuration.clientId &&
+      (credential.enterpriseUrl ?? credential.metadata?.oauth_instance_url) === configuration.origin,
+  )
+}
+
 // Candidate from the desktop registration. Duo reuse remains disabled until
 // ownership and device-grant configuration are confirmed; see owner-actions/gitlab.md.
 export const GITLAB_DEFAULT_CLIENT_ID = "8ac2300994dbece9bfc889ee6705f4ab8a8243b9acd04fe6185172528abc8edd"
@@ -67,7 +93,7 @@ export function requireGitlabOAuthEndpoint(
 
 export function providerOAuthAllowed(id: string, userDefined = false) {
   if (!providerEnabled(id) || (!providerAllowed(id) && !userDefined)) return false
-  if (id.startsWith("github-copilot")) return COPILOT_SIGN_IN
+  if (id.startsWith("github-copilot")) return Boolean(copilotOAuthConfiguration())
   if (id === "openai") return CHATGPT_SIGN_IN
   if (id === "xai") return XAI_SIGN_IN
   if (id === "poe") return POE_SIGN_IN
@@ -82,6 +108,8 @@ export function providerCredentialAllowed(
   userDefined = false,
 ) {
   if (!providerEnabled(id) || (!providerAllowed(id) && !userDefined)) return false
+  if (id.startsWith("github-copilot") && credential.type === "oauth")
+    return ownedOAuthMatches(credential, copilotOAuthConfiguration())
   // The retired DigitalOcean flow persisted its OAuth access token as an API key.
   if (id === "digitalocean" && !DIGITALOCEAN_SIGN_IN && credential.metadata?.oauth_access) return false
   if (id === "gitlab" && credential.type === "oauth") {

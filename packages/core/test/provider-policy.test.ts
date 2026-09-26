@@ -219,6 +219,14 @@ test("the Copilot pause switch covers catalog, explicit config, and every creden
 
 it.effect("paused Copilot cannot acquire V2 models, defaults, key connections, or environment methods", () =>
   Effect.gen(function* () {
+    const previous = process.env.GITHUB_TOKEN
+    process.env.GITHUB_TOKEN = "synthetic-token-that-must-not-autoload"
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => {
+        if (previous === undefined) delete process.env.GITHUB_TOKEN
+        if (previous !== undefined) process.env.GITHUB_TOKEN = previous
+      }),
+    )
     const catalog = yield* Catalog.Service
     const credentials = yield* Credential.Service
     const integrations = yield* Integration.Service
