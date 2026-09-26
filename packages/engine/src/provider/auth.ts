@@ -1,4 +1,4 @@
-import { providerEnabled } from "@vectordevai/core/provider-policy"
+import { providerEnabled, providerOAuthAllowed } from "@vectordevai/core/provider-policy"
 import { pluginOAuthAllowed } from "../plugin/oauth"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import type { AuthOAuthResult, Hooks } from "@vectordevai/plugin"
@@ -209,15 +209,17 @@ const layer: Layer.Layer<Service, never, Auth.Service | Plugin.Service> = Layer.
     const callback = Effect.fn("ProviderAuth.callback")(function* (
       input: { providerID: ProviderV2.ID } & CallbackInput,
     ) {
-      const current = (yield* InstanceState.get(state)).hooks[input.providerID]
-      if (!current || !pluginOAuthAllowed(current)) {
+      const snapshot = yield* InstanceState.get(state)
+      const current = Object.hasOwn(snapshot.hooks, input.providerID) ? snapshot.hooks[input.providerID] : undefined
+      // An allowed provider without a hook has no OAuth attempt; a paused or revoked
+      // hook must still be rejected before looking up or running its callback.
+      if (current ? !pluginOAuthAllowed(current) : !providerOAuthAllowed(input.providerID, true)) {
         return yield* new ValidationFailed({
           field: "providerID",
           message: `${input.providerID} sign-in is currently paused in Vector. Use an API key or another provider.`,
         })
       }
-      const pending = (yield* InstanceState.get(state)).pending
-      const match = pending.get(input.providerID)
+      const match = snapshot.pending.get(input.providerID)
       if (!match) return yield* new OauthMissing({ providerID: input.providerID })
       if (match.method === "code" && !input.code) {
         return yield* new OauthCodeMissing({ providerID: input.providerID })

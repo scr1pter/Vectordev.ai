@@ -375,6 +375,32 @@ describe("provider HttpApi", () => {
   )
 
   it.instance(
+    "distinguishes absent callbacks from paused-provider authorization without a hook",
+    Effect.gen(function* () {
+      const directory = (yield* TestInstance).directory
+      const headers = { "x-vector-directory": directory, "content-type": "application/json" }
+      for (const missing of ["missing-provider-fixture", "constructor"]) {
+        const response = yield* requestCallback({ providerID: missing, method: 0, headers })
+        expect(response.status).toBe(400)
+        expect(JSON.parse(response.body)).toEqual({
+          name: "ProviderAuthOauthMissing",
+          data: { providerID: missing },
+        })
+      }
+      for (const paused of ["github-copilot", "openai", "xai"]) {
+        const response = yield* requestCallback({ providerID: paused, method: 0, headers })
+        expect(response.status).toBe(400)
+        expect(JSON.parse(response.body)).toMatchObject({
+          name: "ProviderAuthValidationFailed",
+          data: { field: "providerID", message: expect.stringContaining("paused") },
+        })
+      }
+    }),
+    projectOptions,
+    30000,
+  )
+
+  it.instance(
     "serves provider lists when auth loaders add runtime fetch options",
     Effect.gen(function* () {
       const directory = (yield* TestInstance).directory

@@ -106,6 +106,11 @@ for (const approved of [false, true]) {
         revokeOAuthApproval(approval.id)
         expect(providerCredentialAllowed(providerID, credential)).toBe(false)
         expect((yield* oauth.methods())[providerID]).toEqual([])
+        expect(yield* oauth.callback({ providerID, method: 0, code: "fixture-code" }).pipe(Effect.flip)).toMatchObject({
+          _tag: "ProviderAuthValidationFailed",
+          field: "providerID",
+        })
+        expect(yield* auth.get(providerID)).toEqual(credential)
         expect((yield* oauth.authorize({ providerID, method: 0 }).pipe(Effect.exit))._tag).toBe("Failure")
         yield* auth.remove(providerID)
       }),
