@@ -10,6 +10,32 @@ Vector bundles Cloudflare AI Gateway `ai-gateway-provider@3.1.2` (MIT), SAP AI C
 
 SAP's published JavaScript also contains 51 dependency components, and Merge's SDK embeds Zod 4.3.6. Their integrity-verified license texts are included even when the component is absent from Vector's install graph. Cloudflare's SDK has a Vector modification to pass an explicit request transport and headers to its outer gateway request; the original MIT attribution is retained. The MIT notice for `@ai-sdk/provider-utils`' embedded `zod3-to-json-schema` code and node-rsa's additional Tom Wu notices are also preserved. Provider names and marks identify their respective providers and do not imply endorsement.
 
+## Vendored documentation theme
+
+The website includes styles and components derived from `toolbeam-docs-theme@0.4.8`. Vector vendors the used Header, PageTitle, HeaderLinks and four stylesheets locally; the integration uses local paths and configuration. Package integrity and original file hashes are recorded in `packages/web/src/theme/NOTICE.md`. The full original MIT notice follows.
+
+MIT License
+
+Copyright (c) 2025 SST
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
 <!-- vector-upstream-attribution -->
 
 ## OpenCode-derived portions

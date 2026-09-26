@@ -48,7 +48,6 @@
     "solid-js": "catalog:",
     "tailwind-merge": "3.6.0",
     "tailwindcss": "catalog:",
-    "toolbeam-docs-theme": "0.4.8",
     "vaul": "1.1.2",
     "vscode-languageserver-types": "3.17.5"
   },

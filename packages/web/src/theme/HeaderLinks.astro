@@ -1,0 +1,19 @@
+---
+import config from "../../config.mjs";
+const headerLinks = config.headerLinks;
+---
+{
+  headerLinks?.map(({ name, url }) => (
+    <a class="links" href={url}>{name}</a>
+  ))
+}
+
+<style>
+  a.links {
+		text-transform: uppercase;
+    font-size: var(--sl-text-sm);
+    color: var(--sl-color-text-secondary);
+    line-height: normal;
+  }
+</style>
+

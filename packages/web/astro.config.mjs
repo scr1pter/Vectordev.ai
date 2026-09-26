@@ -5,7 +5,7 @@ import solidJs from "@astrojs/solid-js"
 import react from "@astrojs/react"
 import cloudflare from "@astrojs/cloudflare"
 import tailwindcss from "@tailwindcss/vite"
-import theme from "toolbeam-docs-theme"
+import theme from "./src/theme/index.ts"
 import config from "./config.mjs"
 import { rehypeHeadingIds } from "@astrojs/markdown-remark"
 import rehypeAutolinkHeadings from "rehype-autolink-headings"
@@ -121,11 +121,7 @@ export default defineConfig({
         LanguageSelect: "./src/components/LanguageSelect.astro",
         SiteTitle: "./src/components/SiteTitle.astro",
       },
-      plugins: [
-        theme({
-          headerLinks: config.headerLinks,
-        }),
-      ],
+      plugins: [theme()],
     }),
   ],
 })
