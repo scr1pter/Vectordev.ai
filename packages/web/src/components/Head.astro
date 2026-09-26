@@ -1,6 +1,7 @@
 ---
 import Default from '@astrojs/starlight/components/Head.astro'
 import config from '../../config.mjs'
+import { socialCardImage } from '../lib/social-card'
 
 const base = import.meta.env.BASE_URL.replace(/^\//, "").replace(/\/$/, "")
 
@@ -9,7 +10,7 @@ const shareSlug = base === "" ? "s" : `${base}/s`
 const isShare = slug === shareSlug || slug.startsWith(`${shareSlug}/`)
 const isHome = slug === "" || slug === base
 
-const ogImage = `${config.url}/vector-logo.png`;
+const ogImage = socialCardImage(Astro.locals.starlightRoute?.entry.data.title ?? "Vector documentation", import.meta.env.PUBLIC_VECTOR_OG_ENABLED === "true");
 
 ---
 

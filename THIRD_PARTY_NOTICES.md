@@ -10,6 +10,10 @@ Vector bundles Cloudflare AI Gateway `ai-gateway-provider@3.1.2` (MIT), SAP AI C
 
 SAP's published JavaScript also contains 51 dependency components, and Merge's SDK embeds Zod 4.3.6. Their integrity-verified license texts are included even when the component is absent from Vector's install graph. Cloudflare's SDK has a Vector modification to pass an explicit request transport and headers to its outer gateway request; the original MIT attribution is retained. The MIT notice for `@ai-sdk/provider-utils`' embedded `zod3-to-json-schema` code and node-rsa's additional Tom Wu notices are also preserved. Provider names and marks identify their respective providers and do not imply endorsement.
 
+## Optional documentation social-card server
+
+The optional hosted documentation image renderer uses unmodified `@vercel/og@1.0.1`, Satori and resvg under MPL-2.0, with a bundled Geist font under SIL OFL-1.1. Full license texts, package notices, verified archive integrity and source references are retained in `licenses/server/social-card-notices.md` and `licenses/server/social-card-sources.json`, and reproduced on the website's third-party licenses page. These server components are separate from Vector desktop and CLI distributions.
+
 ## Vendored documentation theme
 
 The website includes styles and components derived from `toolbeam-docs-theme@0.4.8`. Vector vendors the used Header, PageTitle, HeaderLinks and four stylesheets locally; the integration uses local paths and configuration. Package integrity and original file hashes are recorded in `packages/web/src/theme/NOTICE.md`. The full original MIT notice follows.

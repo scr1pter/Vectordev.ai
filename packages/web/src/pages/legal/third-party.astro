@@ -1,6 +1,7 @@
 ---
 import LegalPage from "../../components/marketing/LegalPage.astro"
 import notices from "../../../../../THIRD_PARTY_NOTICES.md?raw"
+import socialCardNotices from "../../../../../licenses/server/social-card-notices.md?raw"
 export const prerender = true
 ---
 
@@ -9,6 +10,11 @@ export const prerender = true
     <h2>Bundled third-party notices</h2>
     <p>These notices are included with Vector. Desktop and CLI distributions also include DEPENDENCY_NOTICES.md with package versions, license texts, and available copyright notices for bundled and external dependencies. Packages that omit a notice file are identified explicitly.</p>
     <pre>{notices}</pre>
+  </section>
+  <section>
+    <h2>Optional social-card server notices</h2>
+    <p>The documentation image service uses separate server components. Their notices and source archive references follow.</p>
+    <pre>{socialCardNotices}</pre>
   </section>
   <section><h2>Scope</h2><p>The Vector commercial license applies to Vector-owned code, branding, product assets, and proprietary additions. It does not replace or narrow the permissions attached to third-party code.</p></section>
 </LegalPage>

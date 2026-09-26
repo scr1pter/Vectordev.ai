@@ -1,0 +1,569 @@
+{
+  "format": 1,
+  "renderer": "@vercel/og@1.0.1",
+  "scope": "optional hosted social-card server; not native distributions",
+  "packages": [
+    {
+      "name": "@vercel/og",
+      "version": "1.0.1",
+      "license": "MPL-2.0",
+      "source": "https://registry.npmjs.org/@vercel/og/-/og-1.0.1.tgz",
+      "integrity": "sha512-uLTgu6ZIYuPuDnPpwkYhJsOjogqIhMnjjLREFpRAXjsMpCIQ2RmNX8Iz/5shDXfva1A2V0kC5j+KFVUSc4TVew==",
+      "notices": [
+        {
+          "path": "package/LICENSE",
+          "sha256": "1f256ecad192880510e84ad60474eab7589218784b9a50bc7ceee34c2b91f1d5"
+        }
+      ]
+    },
+    {
+      "name": "@resvg/resvg-wasm",
+      "version": "2.4.1",
+      "license": "MPL-2.0",
+      "source": "https://registry.npmjs.org/@resvg/resvg-wasm/-/resvg-wasm-2.4.1.tgz",
+      "integrity": "sha512-yi6R0HyHtsoWTRA06Col4WoDs7SvlXU3DLMNP2bdAgs7HK18dTEVl1weXgxRzi8gwLteGUbIg29zulxIB3GSdg==",
+      "notices": [
+        {
+          "path": "LICENSE (exact publisher commit supplement)",
+          "sha256": "4b89d4518bd135ab4ee154a7bce722246b57a98c3d7efc1a09409898160c2bd1",
+          "source": "https://raw.githubusercontent.com/yisibl/resvg-js/2347b417e1955a6954223f1c17b815e177a01765/LICENSE"
+        }
+      ]
+    },
+    {
+      "name": "satori",
+      "version": "0.29.0",
+      "license": "MPL-2.0",
+      "source": "https://registry.npmjs.org/satori/-/satori-0.29.0.tgz",
+      "integrity": "sha512-fPAfrwNaIQ7EsJLhY382STEqpczN6ZEH9NsKXDQgRcxUXNNPB73iAjSshzFwTaaScT68pxV0pmG6TBzDQ4sEGw==",
+      "notices": [
+        {
+          "path": "package/LICENSE",
+          "sha256": "1f256ecad192880510e84ad60474eab7589218784b9a50bc7ceee34c2b91f1d5"
+        }
+      ]
+    },
+    {
+      "name": "@shuding/opentype.js",
+      "version": "1.4.0-beta.0",
+      "license": "MIT",
+      "source": "https://registry.npmjs.org/@shuding/opentype.js/-/opentype.js-1.4.0-beta.0.tgz",
+      "integrity": "sha512-3NgmNyH3l/Hv6EvsWJbsvpcpUba6R8IREQ83nH83cyakCw7uM1arZKNfHwv1Wz6jgqrF/j4x5ELvR6PnK9nTcA==",
+      "notices": [
+        {
+          "path": "package/LICENSE",
+          "sha256": "a5b87c9bc191e7f9c06b07bd7cbbed3ed846dfdb50e859484b2c245aa1ab2e61"
+        }
+      ]
+    },
+    {
+      "name": "fflate",
+      "version": "0.8.3",
+      "license": "MIT",
+      "source": "https://registry.npmjs.org/fflate/-/fflate-0.8.3.tgz",
+      "integrity": "sha512-tbZNuJrLwGUp3zshBtdy4W+ORxZuIh8a5ilyIEQDC5rY1f3U20JMry0Ll3WBzU58EZKsEuJFXhb5gwv8CsPvgA==",
+      "notices": [
+        {
+          "path": "package/LICENSE",
+          "sha256": "0a1df3a083d0c010560aa342e87959c8c1070e6fd54545741f083f22d0c8b551"
+        }
+      ]
+    },
+    {
+      "name": "string.prototype.codepointat",
+      "version": "0.2.1",
+      "license": "MIT",
+      "source": "https://registry.npmjs.org/string.prototype.codepointat/-/string.prototype.codepointat-0.2.1.tgz",
+      "integrity": "sha512-2cBVCj6I4IOvEnjgO/hWqXjqBGsY+zwPmHl12Srk9IXSZ56Jwwmy+66XO5Iut/oQVR7t5ihYdLB0GMa4alEUcg==",
+      "notices": [
+        {
+          "path": "package/LICENSE-MIT.txt",
+          "sha256": "483acb265f182907d1caf6cff9c16c96f31325ed23792832cc5d8b12d5f88c8a"
+        }
+      ]
+    },
+    {
+      "name": "css-background-parser",
+      "version": "0.1.0",
+      "license": "MIT",
+      "source": "https://registry.npmjs.org/css-background-parser/-/css-background-parser-0.1.0.tgz",
+      "integrity": "sha512-2EZLisiZQ+7m4wwur/qiYJRniHX4K5Tc9w93MT3AS0WS1u5kaZ4FKXlOTBhOjc+CgEgPiGY+fX1yWD8UwpEqUA==",
+      "notices": [
+        {
+          "path": "package/LICENSE",
+          "sha256": "d9be3156783d47481385a916dfb1cc4b5289577e71b548a377ec71940270b8d5"
+        }
+      ]
+    },
+    {
+      "name": "css-box-shadow",
+      "version": "1.0.0-3",
+      "license": "MIT",
+      "source": "https://registry.npmjs.org/css-box-shadow/-/css-box-shadow-1.0.0-3.tgz",
+      "integrity": "sha512-9jaqR6e7Ohds+aWwmhe6wILJ99xYQbfmK9QQB9CcMjDbTxPZjwEmUQpU91OG05Xgm8BahT5fW+svbsQGjS/zPg==",
+      "notices": [
+        {
+          "path": "MIT (declared license supplement)",
+          "sha256": "508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1",
+          "source": "https://github.com/jxnblk/css-box-shadow/tree/6fc6c3716752879fa683f7925dbc51cf2c7930ee"
+        }
+      ],
+      "note": "The exact package and publisher commit declare MIT but omit a complete license file. The author field identifies Brent Jackson. The standard MIT grant is reproduced without inventing a copyright notice."
+    },
+    {
+      "name": "css-gradient-parser",
+      "version": "0.0.17",
+      "license": "MIT",
+      "source": "https://registry.npmjs.org/css-gradient-parser/-/css-gradient-parser-0.0.17.tgz",
+      "integrity": "sha512-w2Xy9UMMwlKtou0vlRnXvWglPAceXCTtcmVSo8ZBUvqCV5aXEFP/PC6d+I464810I9FT++UACwTD5511bmGPUg==",
+      "notices": [
+        {
+          "path": "package/LICENSE",
+          "sha256": "112f34fd9cb305e61b039d047dab3835b3ce277b7a26c56b372022473b8f610a"
+        }
+      ]
+    },
+    {
+      "name": "css-to-react-native",
+      "version": "3.2.0",
+      "license": "MIT",
+      "source": "https://registry.npmjs.org/css-to-react-native/-/css-to-react-native-3.2.0.tgz",
+      "integrity": "sha512-e8RKaLXMOFii+02mOlqwjbD00KSEKqblnpO9e++1aXS1fPQOpS1YoqdVHBqPjHNoxeF2mimzVqawm2KCbEdtHQ==",
+      "notices": [
+        {
+          "path": "package/LICENSE.md",
+          "sha256": "9200b800b2460900fe3bff06010726f3a29079511e80245f43a24ef89c0e9d38"
+        }
+      ]
+    },
+    {
+      "name": "camelize",
+      "version": "1.0.1",
+      "license": "MIT",
+      "source": "https://registry.npmjs.org/camelize/-/camelize-1.0.1.tgz",
+      "integrity": "sha512-dU+Tx2fsypxTgtLoE36npi3UqcjSSMNYfkqgmoEhtZrraP5VWq0K7FkWVTYa8eMPtnU/G2txVsfdCJTn9uzpuQ==",
+      "notices": [
+        {
+          "path": "package/LICENSE",
+          "sha256": "435a6722c786b0a56fbe7387028f1d9d3f3a2d0fb615bb8fee118727c3f59b7b"
+        }
+      ]
+    },
+    {
+      "name": "css-color-keywords",
+      "version": "1.0.0",
+      "license": "ISC",
+      "source": "https://registry.npmjs.org/css-color-keywords/-/css-color-keywords-1.0.0.tgz",
+      "integrity": "sha512-FyyrDHZKEjXDpNJYvVsV960FiqQyXc/LlYmsxl2BcdMb2WPx0OGRVgTg55rPSyLSNMqP52R9r8geSp7apN3Ofg==",
+      "notices": [
+        {
+          "path": "package/LICENSE",
+          "sha256": "17a548211b4a0cfaa8991068a39d30b0e7ef5c199321bb1c3484509529a8df05"
+        }
+      ]
+    },
+    {
+      "name": "postcss-value-parser",
+      "version": "4.2.0",
+      "license": "MIT",
+      "source": "https://registry.npmjs.org/postcss-value-parser/-/postcss-value-parser-4.2.0.tgz",
+      "integrity": "sha512-1NNCs6uurfkVbeXG4S8JFT9t19m45ICnif8zWLd5oPSZ50QnwMfK+H3jv408d4jw/7Bttv5axS5IiHoLaVNHeQ==",
+      "notices": [
+        {
+          "path": "package/LICENSE",
+          "sha256": "3687447039151857a6ba378db062172c7f33d4aa70a615c87a43a9c50e990485"
+        }
+      ]
+    },
+    {
+      "name": "emoji-regex-xs",
+      "version": "2.0.1",
+      "license": "MIT",
+      "source": "https://registry.npmjs.org/emoji-regex-xs/-/emoji-regex-xs-2.0.1.tgz",
+      "integrity": "sha512-1QFuh8l7LqUcKe24LsPUNzjrzJQ7pgRwp1QMcZ5MX6mFplk2zQ08NVCM84++1cveaUUYtcCYHmeFEuNg16sU4g==",
+      "notices": [
+        {
+          "path": "package/LICENSE",
+          "sha256": "3d19c2b6246b3072547af2bd05e6b4c09bd3d15955590f1f1e1d20382c919a49"
+        }
+      ]
+    },
+    {
+      "name": "escape-html",
+      "version": "1.0.3",
+      "license": "MIT",
+      "source": "https://registry.npmjs.org/escape-html/-/escape-html-1.0.3.tgz",
+      "integrity": "sha512-NiSupZ4OeuGwr68lGIeym/ksIZMJodUGOSCZ/FSnTxcrekbvqrgdUxlJOMpijaKZVjAJrWrGs/6Jy8OMuyj9ow==",
+      "notices": [
+        {
+          "path": "package/LICENSE",
+          "sha256": "255aa557a1f55224ce522f311629c0bf20854740a67955cefd798fbd1d3d1ded"
+        }
+      ]
+    },
+    {
+      "name": "linebreak",
+      "version": "1.1.0",
+      "license": "MIT",
+      "source": "https://registry.npmjs.org/linebreak/-/linebreak-1.1.0.tgz",
+      "integrity": "sha512-MHp03UImeVhB7XZtjd0E4n6+3xr5Dq/9xI/5FptGk5FrbDR3zagPa2DS6U8ks/3HjbKWG9Q1M2ufOzxV2qLYSQ==",
+      "notices": [
+        {
+          "path": "package/LICENSE",
+          "sha256": "cf22b8198f0886a8d4626121579114f23141070e1fceab02ab3c1c361e163440"
+        }
+      ]
+    },
+    {
+      "name": "base64-js",
+      "version": "0.0.8",
+      "license": "MIT",
+      "source": "https://registry.npmjs.org/base64-js/-/base64-js-0.0.8.tgz",
+      "integrity": "sha512-3XSA2cR/h/73EzlXXdU6YNycmYI7+kicTxks4eJg2g39biHR84slg2+des+p7iHYhbRg/udIS4TD53WabcOUkw==",
+      "notices": [
+        {
+          "path": "package/LICENSE.MIT",
+          "sha256": "136239d1783a151cdbf6fd7935dd945082b9d0ee2cbb8497cc0ae49e8a743a47"
+        }
+      ]
+    },
+    {
+      "name": "unicode-trie",
+      "version": "2.0.0",
+      "license": "MIT",
+      "source": "https://registry.npmjs.org/unicode-trie/-/unicode-trie-2.0.0.tgz",
+      "integrity": "sha512-x7bc76x0bm4prf1VLg79uhAzKw8DVboClSN5VxJuQ+LKDOVEW9CdH+VY7SP+vX7xCYQqzzgQpFqz15zeLvAtZQ==",
+      "notices": [
+        {
+          "path": "package/LICENSE",
+          "sha256": "43439dbd4f43837aadab215cdbe5a422cc6323a50c4ea84d8d6bbc3671666a1d"
+        }
+      ]
+    },
+    {
+      "name": "pako",
+      "version": "0.2.9",
+      "license": "MIT",
+      "source": "https://registry.npmjs.org/pako/-/pako-0.2.9.tgz",
+      "integrity": "sha512-NUcwaKxUxWrZLpDG+z/xZaCgQITkA/Dv4V/T6bw7VON6l1Xz/VnrBqrYjZQ12TamKHzITTfOEIYUj48y2KXImA==",
+      "notices": [
+        {
+          "path": "package/LICENSE",
+          "sha256": "3bc404ffa7888053253eedcc5a667619aa08dc1be0bea400e5ff28c51602180f"
+        }
+      ]
+    },
+    {
+      "name": "tiny-inflate",
+      "version": "1.0.3",
+      "license": "MIT",
+      "source": "https://registry.npmjs.org/tiny-inflate/-/tiny-inflate-1.0.3.tgz",
+      "integrity": "sha512-pkY1fj1cKHb2seWDy0B16HeWyczlJA9/WW3u3c4z/NiWDsO3DOU5D7nhTLE9CF0yXv/QZFY7sEJmj24dK+Rrqw==",
+      "notices": [
+        {
+          "path": "package/LICENSE",
+          "sha256": "c0df7f551401f8f80197ff31bf69b8cd23727d127423403282514d242a3ab132"
+        }
+      ]
+    },
+    {
+      "name": "parse-css-color",
+      "version": "0.2.1",
+      "license": "MIT",
+      "source": "https://registry.npmjs.org/parse-css-color/-/parse-css-color-0.2.1.tgz",
+      "integrity": "sha512-bwS/GGIFV3b6KS4uwpzCFj4w297Yl3uqnSgIPsoQkx7GMLROXfMnWvxfNkL0oh8HVhZA4hvJoEoEIqonfJ3BWg==",
+      "notices": [
+        {
+          "path": "package/LICENSE",
+          "sha256": "3c8c000c81035fa1f6dceeb5eced4b60cb91811e6e1e749ab01dc8b34dea34bd"
+        }
+      ]
+    },
+    {
+      "name": "color-name",
+      "version": "1.1.4",
+      "license": "MIT",
+      "source": "https://registry.npmjs.org/color-name/-/color-name-1.1.4.tgz",
+      "integrity": "sha512-dOy+3AuW3a2wNbZHIuMZpTcgjGuLU/uBL/ubcZF9OXbDo8ff4O8yVp5Bf0efS8uEoYo5q4Fx7dY9OgQGXgAsQA==",
+      "notices": [
+        {
+          "path": "package/LICENSE",
+          "sha256": "c064f7a3e353bc1bc977f3c897941c75ef763f44f41677e0a15370ca0853d6e2"
+        }
+      ]
+    },
+    {
+      "name": "hex-rgb",
+      "version": "4.3.0",
+      "license": "MIT",
+      "source": "https://registry.npmjs.org/hex-rgb/-/hex-rgb-4.3.0.tgz",
+      "integrity": "sha512-Ox1pJVrDCyGHMG9CFg1tmrRUMRPRsAWYc/PinY0XzJU4K7y7vjNoLKIQ7BR5UJMCxNN8EM1MNDmHWA/B3aZUuw==",
+      "notices": [
+        {
+          "path": "package/license",
+          "sha256": "5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3"
+        }
+      ]
+    },
+    {
+      "name": "yoga-layout",
+      "version": "3.2.1",
+      "license": "MIT",
+      "source": "https://registry.npmjs.org/yoga-layout/-/yoga-layout-3.2.1.tgz",
+      "integrity": "sha512-0LPOt3AxKqMdFBZA3HBAt/t/8vIKq7VaQYbuA8WxCgung+p9TVyKRYdpvCb80HcdTN2NkbIKbhNwKUfm3tQywQ==",
+      "notices": [
+        {
+          "path": "LICENSE (upstream supplement)",
+          "sha256": "243a215b639719ea33e9d93339dbbf05029e5c1361435a2ac52b06230e246581",
+          "source": "https://github.com/react/yoga/blob/main/LICENSE"
+        }
+      ]
+    },
+    {
+      "name": "sharp",
+      "version": "0.35.4",
+      "license": "Apache-2.0",
+      "source": "https://registry.npmjs.org/sharp/-/sharp-0.35.4.tgz",
+      "integrity": "sha512-n++8XWcj+jCOr2IOl7h8LbKnGBDY4aPbmprMONBNFdn0ImXqpGVv5zliDs0V9HbmbCQLpbuo2ej9rAoOQTvMDA==",
+      "notices": [
+        {
+          "path": "package/LICENSE",
+          "sha256": "73ba74dfaa520b49a401b5d21459a8523a146f3b7518a833eea5efa85130bf68"
+        }
+      ]
+    },
+    {
+      "name": "@img/colour",
+      "version": "1.1.0",
+      "license": "MIT",
+      "source": "https://registry.npmjs.org/@img/colour/-/colour-1.1.0.tgz",
+      "integrity": "sha512-Td76q7j57o/tLVdgS746cYARfSyxk8iEfRxewL9h4OMzYhbW4TAcppl0mT4eyqXddh6L/jwoM75mo7ixa/pCeQ==",
+      "notices": [
+        {
+          "path": "package/LICENSE.md",
+          "sha256": "e2eaa4603c14cb26f301e88648c12a853fa3f0f5da6d4b0972958c666e7f2ab8"
+        }
+      ]
+    },
+    {
+      "name": "detect-libc",
+      "version": "2.1.2",
+      "license": "Apache-2.0",
+      "source": "https://registry.npmjs.org/detect-libc/-/detect-libc-2.1.2.tgz",
+      "integrity": "sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==",
+      "notices": [
+        {
+          "path": "package/LICENSE",
+          "sha256": "b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1"
+        }
+      ]
+    },
+    {
+      "name": "semver",
+      "version": "7.8.5",
+      "license": "ISC",
+      "source": "https://registry.npmjs.org/semver/-/semver-7.8.5.tgz",
+      "integrity": "sha512-Y7/KDsb8LjooZpwaqGyulO6DQlksgCncchHGk+sZIY4SBvUocMBEFH5Ur1fI4dV+Jvl0w6cjvucaIi40puRioA==",
+      "notices": [
+        {
+          "path": "package/LICENSE",
+          "sha256": "4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b"
+        }
+      ]
+    },
+    {
+      "name": "@img/sharp-darwin-arm64",
+      "version": "0.35.4",
+      "license": "Apache-2.0",
+      "source": "https://registry.npmjs.org/@img/sharp-darwin-arm64/-/sharp-darwin-arm64-0.35.4.tgz",
+      "integrity": "sha512-Uhfl4V4lhP2nbUVF9+hyH1+luj86f1gUFeo8ALYxFoULoU+G87D43BfeMP8XHsk9boxAnCY/bf2EHwhA7MuGsA==",
+      "notices": [
+        {
+          "path": "package/LICENSE",
+          "sha256": "73ba74dfaa520b49a401b5d21459a8523a146f3b7518a833eea5efa85130bf68"
+        }
+      ]
+    },
+    {
+      "name": "@img/sharp-libvips-darwin-arm64",
+      "version": "1.3.3",
+      "license": "LGPL-3.0-or-later",
+      "source": "https://registry.npmjs.org/@img/sharp-libvips-darwin-arm64/-/sharp-libvips-darwin-arm64-1.3.3.tgz",
+      "integrity": "sha512-suTBPTDGrI9WodccaDdwZItTSaBYASlBk1NSfElSHrUfzu3szG6lvIF58+WiFvnfzuK8ZBFS5zE00PxqxnRiPg==",
+      "notices": [
+        {
+          "path": "package/README.md (publisher component license table)",
+          "sha256": "47083f1ae7e990f74a56f576bcb8434051cb84ed1982fa57932720869e5147fe",
+          "source": "https://registry.npmjs.org/@img/sharp-libvips-darwin-arm64/-/sharp-libvips-darwin-arm64-1.3.3.tgz"
+        }
+      ],
+      "note": "Optional server-side image dependency. Publisher component licensing table retained verbatim; complete LGPLv3 and GPLv3 terms appear below. This server package is not shipped in Vector native installers."
+    },
+    {
+      "name": "react",
+      "version": "19.2.8",
+      "license": "MIT",
+      "source": "https://registry.npmjs.org/react/-/react-19.2.8.tgz",
+      "integrity": "sha512-PWaYA1L/q9u2u7xYQi+Y3L3Yfnie7XyLeaJICV1MGD6LprsBxcAqGjYyr0eY3p+QdsA+x/Irkt4Qif8D63+Sbw==",
+      "notices": [
+        {
+          "path": "package/LICENSE",
+          "sha256": "da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93"
+        }
+      ]
+    },
+    {
+      "name": "@img/sharp-libvips-linux-arm64",
+      "version": "1.3.3",
+      "license": "LGPL-3.0-or-later",
+      "source": "https://registry.npmjs.org/@img/sharp-libvips-linux-arm64/-/sharp-libvips-linux-arm64-1.3.3.tgz",
+      "integrity": "sha512-0DaL0A6Xu6sQSQFwe4iVCrKWU2cCTItnRsYsCdxAMm9NF6twAA9BKnoqy4hqz4+azQ0JHuA26qiUKsf1XJ/v5A==",
+      "notices": [
+        {
+          "path": "package/README.md (publisher component license table)",
+          "sha256": "b05efaa208519f349746a54ee195c433ab8e5c250847a257c984c7a9dc68df20",
+          "source": "https://registry.npmjs.org/@img/sharp-libvips-linux-arm64/-/sharp-libvips-linux-arm64-1.3.3.tgz"
+        }
+      ],
+      "note": "Optional server-side image dependency. Publisher component licensing table retained verbatim; complete LGPLv3 and GPLv3 terms appear below. This server package is not shipped in Vector native installers."
+    },
+    {
+      "name": "@img/sharp-libvips-linux-x64",
+      "version": "1.3.3",
+      "license": "LGPL-3.0-or-later",
+      "source": "https://registry.npmjs.org/@img/sharp-libvips-linux-x64/-/sharp-libvips-linux-x64-1.3.3.tgz",
+      "integrity": "sha512-4vKmvAst9nrowcqquKFAyZJUDolUaIp8uRiN0mWFguJ1IplC9/pitXtlnnlU4aa/eJw3J7i67V+pwUL+wZGdsA==",
+      "notices": [
+        {
+          "path": "package/README.md (publisher component license table)",
+          "sha256": "4f87b4934d26d52ed65a42e96bfe88e75ac98dbd3bc302b50fe6c07d22e42630",
+          "source": "https://registry.npmjs.org/@img/sharp-libvips-linux-x64/-/sharp-libvips-linux-x64-1.3.3.tgz"
+        }
+      ],
+      "note": "Optional server-side image dependency. Publisher component licensing table retained verbatim; complete LGPLv3 and GPLv3 terms appear below. This server package is not shipped in Vector native installers."
+    },
+    {
+      "name": "@img/sharp-linux-arm64",
+      "version": "0.35.4",
+      "license": "Apache-2.0",
+      "source": "https://registry.npmjs.org/@img/sharp-linux-arm64/-/sharp-linux-arm64-0.35.4.tgz",
+      "integrity": "sha512-De4jpEnAU8Hd5oT0j1G3uL4ZvTuipVMn7YC6vPaJhy6/7EwEae0SVAoBrUMYQbkLGDm85taVWwuPc1a44LTzCQ==",
+      "notices": [
+        {
+          "path": "package/LICENSE",
+          "sha256": "73ba74dfaa520b49a401b5d21459a8523a146f3b7518a833eea5efa85130bf68"
+        }
+      ]
+    },
+    {
+      "name": "@img/sharp-linux-x64",
+      "version": "0.35.4",
+      "license": "Apache-2.0",
+      "source": "https://registry.npmjs.org/@img/sharp-linux-x64/-/sharp-linux-x64-0.35.4.tgz",
+      "integrity": "sha512-9qvvEAuk8k89TfWUoX2htWjbAMX8p+NxCppjpcg5k6xMsjhBQPTsoIh36h9Qde4WRuGpJeYnOjdosDn/cnv+OA==",
+      "notices": [
+        {
+          "path": "package/LICENSE",
+          "sha256": "73ba74dfaa520b49a401b5d21459a8523a146f3b7518a833eea5efa85130bf68"
+        }
+      ]
+    },
+    {
+      "name": "fflate",
+      "version": "0.7.3",
+      "license": "MIT",
+      "source": "https://registry.npmjs.org/fflate/-/fflate-0.7.3.tgz",
+      "integrity": "sha512-0Zz1jOzJWERhyhsimS54VTqOteCNwRtIlh8isdL0AXLo0g7xNTfTL7oWrkmCnPhZGocKIkWHBistBrrpoNH3aw==",
+      "note": "The renderer includes prebundled font inflation code. The installed font dependency is separately overridden to 0.8.3. Review found no unzipSync/ZIP64 routine in the renderer bundle; this notice covers the embedded inflate code.",
+      "notices": [
+        {
+          "path": "package/LICENSE",
+          "sha256": "62249119bb7df6e54300f37a37145c26a6d4420410aac8881a119c5b427cf751",
+          "source": "https://registry.npmjs.org/fflate/-/fflate-0.7.3.tgz"
+        }
+      ]
+    },
+    {
+      "name": "tailwindcss",
+      "version": "3.1.8",
+      "license": "MIT",
+      "source": "https://registry.npmjs.org/tailwindcss/-/tailwindcss-3.1.8.tgz",
+      "integrity": "sha512-YSneUCZSFDYMwk+TGq8qYFdCA3yfBRdBlS7txSq0LUmzyeqRe3a8fBQzbz9M3WS/iFT4BNf/nmw9mEzrnSaC0g==",
+      "note": "Embedded in the verified @vercel/og@1.0.1 source map; exact version identified from its published pnpm source path. Not an additional Vector dependency.",
+      "notices": [
+        {
+          "path": "package/lib/css/LICENSE",
+          "sha256": "c15f7afc9058d8a9995c2922a4c5812ac16a17647b2eb84014bb2fccada131c9"
+        },
+        {
+          "path": "package/LICENSE",
+          "sha256": "60e0b68c0f35c078eef3a5d29419d0b03ff84ec1df9c3f9d6e39a519a5ae7985"
+        },
+        {
+          "path": "package/src/css/LICENSE",
+          "sha256": "c15f7afc9058d8a9995c2922a4c5812ac16a17647b2eb84014bb2fccada131c9"
+        }
+      ]
+    },
+    {
+      "name": "postcss-selector-parser",
+      "version": "6.0.10",
+      "license": "MIT",
+      "source": "https://registry.npmjs.org/postcss-selector-parser/-/postcss-selector-parser-6.0.10.tgz",
+      "integrity": "sha512-IQ7TZdoaqbT+LCpShg46jnZVlhWD2w6iQYAcYXfHARZ7X1t/UGhhceQDs5X0cGqKvYlHNOuv7Oa1xmb0oQuA3w==",
+      "note": "Embedded in the verified @vercel/og@1.0.1 source map; exact version identified from its published pnpm source path. Not an additional Vector dependency.",
+      "notices": [
+        {
+          "path": "package/LICENSE-MIT",
+          "sha256": "2998094b38f7ace25f141fb36f334d8338f65a1812978d618b1161f4d77ae10e"
+        }
+      ]
+    },
+    {
+      "name": "cssesc",
+      "version": "3.0.0",
+      "license": "MIT",
+      "source": "https://registry.npmjs.org/cssesc/-/cssesc-3.0.0.tgz",
+      "integrity": "sha512-/Tb/JcjK111nNScGob5MNtsntNM1aCNUDipB/TkwZFhyDrrE47SOx/18wF2bbjgc3ZzCSKW1T5nt5EbFoAz/Vg==",
+      "note": "Embedded in the verified @vercel/og@1.0.1 source map; exact version identified from its published pnpm source path. Not an additional Vector dependency.",
+      "notices": [
+        {
+          "path": "package/LICENSE-MIT.txt",
+          "sha256": "483acb265f182907d1caf6cff9c16c96f31325ed23792832cc5d8b12d5f88c8a"
+        }
+      ]
+    },
+    {
+      "name": "twrnc",
+      "version": "3.4.0",
+      "license": "MIT",
+      "source": "https://registry.npmjs.org/twrnc/-/twrnc-3.4.0.tgz",
+      "integrity": "sha512-zJzueyC+LUphbrUEyeVmbR7VfAFObq2mr6ALfMytusHxzHJnOMCdxsw2GCTD67nThP1V22QFp9CZ/DulcZMl1g==",
+      "note": "Embedded in the verified @vercel/og@1.0.1 source map; exact version identified from its published pnpm source path. The exact tarball and publisher commit omit a complete license file. The package declares MIT and identifies author Jared Henderson; the standard MIT grant is supplemented without inventing a copyright notice. Not an additional Vector dependency.",
+      "notices": [
+        {
+          "path": "MIT (declared license supplement)",
+          "sha256": "508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1",
+          "source": "https://registry.npmjs.org/twrnc/3.4.0"
+        }
+      ]
+    }
+  ],
+  "additionalLicenseTexts": [
+    {
+      "path": "Geist font: SIL Open Font License 1.1",
+      "sha256": "c683bfbcc7e087f5d37a54ef628f10387c451a83ddc459b151403a164ac46c90",
+      "source": "https://raw.githubusercontent.com/vercel/geist-font/main/OFL.txt"
+    },
+    {
+      "path": "GNU Lesser General Public License v3",
+      "sha256": "996af0513df21f7496288951c41428a03c174e9e4a9d63665c57d670f845ccb1",
+      "source": "https://raw.githubusercontent.com/spdx/license-list-data/main/text/LGPL-3.0-or-later.txt"
+    },
+    {
+      "path": "GNU General Public License v3",
+      "sha256": "fb981668c18a279e285fc4d83fba1e836cc84dd4daa73c9697d3cfd2d8aca6e0",
+      "source": "https://raw.githubusercontent.com/spdx/license-list-data/main/text/GPL-3.0-or-later.txt"
+    }
+  ]
+}

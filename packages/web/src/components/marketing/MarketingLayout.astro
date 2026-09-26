@@ -1,14 +1,17 @@
 ---
 import "../../styles/marketing.css"
+import { socialCardImage, STATIC_SOCIAL_IMAGE } from "../../lib/social-card"
 
 interface Props {
   title: string
   description: string
+  socialTitle?: string
   /** Keeps a page out of search results. For operator surfaces, not content. */
   noindex?: boolean
 }
 
-const { title, description, noindex = false } = Astro.props
+const { title, description, socialTitle, noindex = false } = Astro.props
+const image = socialTitle && !noindex ? socialCardImage(socialTitle, import.meta.env.PUBLIC_VECTOR_OG_ENABLED === "true") : STATIC_SOCIAL_IMAGE
 const canonical = new URL(Astro.url.pathname, Astro.site ?? "https://vectordev.ai").toString()
 ---
 
@@ -29,11 +32,11 @@ const canonical = new URL(Astro.url.pathname, Astro.site ?? "https://vectordev.a
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
     <meta property="og:url" content={canonical} />
-    <meta property="og:image" content="https://vectordev.ai/vector-logo.png" />
-    <meta name="twitter:card" content="summary" />
+    <meta property="og:image" content={image} />
+    <meta name="twitter:card" content={image === STATIC_SOCIAL_IMAGE ? "summary" : "summary_large_image"} />
     <meta name="twitter:title" content={title} />
     <meta name="twitter:description" content={description} />
-    <meta name="twitter:image" content="https://vectordev.ai/vector-logo.png" />
+    <meta name="twitter:image" content={image} />
     <title>{title}</title>
   </head>
   <body>

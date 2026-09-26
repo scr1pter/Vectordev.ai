@@ -30,6 +30,12 @@ export default defineConfig({
   },
   build: {},
   vite: {
+    define: {
+      // Only this public boolean crosses into page metadata; server secrets remain private.
+      "import.meta.env.PUBLIC_VECTOR_OG_ENABLED": JSON.stringify(
+        process.env.VECTOR_OG_ENABLED === "true" ? "true" : "false",
+      ),
+    },
     // Astro 5 carries Vite 6 while the workspace-wide Tailwind peer resolves
     // against Vite 7. The plugin API is compatible, but the duplicated Vite
     // type identities are not.

@@ -104,7 +104,9 @@
     "resend": "6.18.1",
     "stripe": "22.4.0",
     "typescript": "catalog:",
-    "effect": "catalog:"
+    "effect": "catalog:",
+    "@vercel/og": "1.0.1",
+    "react": "19.2.8"
   },
   "repository": {
     "type": "git",
@@ -130,7 +132,8 @@
     "@opentui/solid": "catalog:",
     "@types/bun": "catalog:",
     "@types/node": "catalog:",
-    "@ai-sdk/provider-utils": "4.0.52"
+    "@ai-sdk/provider-utils": "4.0.52",
+    "fflate": "0.8.3"
   },
   "patchedDependencies": {
     "@ff-labs/fff-bun@0.9.3": "patches/@ff-labs%2Ffff-bun@0.9.3.patch",
