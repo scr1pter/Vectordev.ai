@@ -1,6 +1,6 @@
 import { afterEach, expect } from "bun:test"
 import { createServer, type Server } from "node:http"
-import { streamText } from "ai"
+import { APICallError, streamText } from "ai"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { CrossSpawnSpawner } from "@vectordevai/core/cross-spawn-spawner"
 import { Effect } from "effect"
@@ -13,6 +13,7 @@ import { Env } from "@/env"
 import { Plugin } from "@/plugin"
 import { Provider } from "@/provider/provider"
 import { ProviderError } from "@/provider/error"
+import { MessageV2 } from "@/session/message-v2"
 
 afterEach(async () => {
   await disposeAllInstances()
@@ -73,7 +74,17 @@ it.live("chunkTimeout raises a response stream error when SSE body stalls", () =
               return error
             }
           })
-          expect(error).toBeInstanceOf(ProviderError.ResponseStreamError)
+          expect(APICallError.isInstance(error)).toBe(true)
+          if (!APICallError.isInstance(error)) throw error
+          expect(error.cause).toBeInstanceOf(ProviderError.ResponseStreamError)
+          expect(MessageV2.fromError(error, { providerID: model.providerID })).toEqual({
+            name: "APIError",
+            data: {
+              message: "SSE read timed out",
+              isRetryable: true,
+              metadata: { code: "ProviderResponseStreamError" },
+            },
+          })
         }),
       { config: providerConfig(server.url, { chunkTimeout: 50 }) },
     )

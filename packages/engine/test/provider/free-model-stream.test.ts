@@ -4,6 +4,7 @@ import { streamText } from "ai"
 import { FreeModels } from "@vectordevai/core/free-models"
 import { MessageV2 } from "@/session/message-v2"
 import { ProviderV2 } from "@vectordevai/core/provider"
+import { SessionRetry } from "@/session/retry"
 
 const limit = {
   type: "free_models_limit",
@@ -46,6 +47,9 @@ test("AI SDK SSE quota retains typed details across split frames and suppresses 
     name: "FreeModelsLimitError",
     data: { code: limit.code, reason: limit.reason, resetAt: limit.resetAt, message: limit.message },
   })
+  expect(
+    SessionRetry.retryable(MessageV2.fromError(errors[0], { providerID: ProviderV2.ID.vector }), "vector"),
+  ).toBeUndefined()
 })
 
 test("HTTP quota is typed and nonquota provider errors retain their normal representation", async () => {

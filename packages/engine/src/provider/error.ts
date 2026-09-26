@@ -3,6 +3,7 @@ import { STATUS_CODES } from "http"
 import { iife } from "@/util/iife"
 import type { ProviderV2 } from "@vectordevai/core/provider"
 import { isContextOverflow } from "@vectordevai/llm"
+import { FreeModelsLimitError } from "@vectordevai/schema/free-model"
 
 export class HeaderTimeoutError extends Error {
   public override readonly name = "ProviderHeaderTimeoutError"
@@ -18,6 +19,22 @@ export class ResponseStreamError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options)
   }
+}
+
+export function unwrapTypedError(error: unknown): unknown {
+  const seen = new Set<unknown>()
+  // The SDK wraps response-body failures in APICallError. Recover only Vector's
+  // typed errors; ordinary provider failures must retain their HTTP metadata.
+  for (let current = error; APICallError.isInstance(current) && !seen.has(current); current = current.cause) {
+    seen.add(current)
+    if (
+      current.cause instanceof HeaderTimeoutError ||
+      current.cause instanceof ResponseStreamError ||
+      current.cause instanceof FreeModelsLimitError
+    )
+      return current.cause
+  }
+  return error
 }
 
 function isOpenAiErrorRetryable(e: APICallError) {
