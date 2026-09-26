@@ -69,7 +69,7 @@ export const docsNav: DocGroup[] = [
       },
       {
         id: "browser",
-        title: "Controlled browser",
+        title: "Using the browser",
         blurb: "The Browser is attached to the current repository and session.",
       },
       {
