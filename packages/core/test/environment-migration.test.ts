@@ -83,7 +83,10 @@ describe("earlier environment migration", () => {
 
   test("a leftover earlier server password keeps protecting the server", () => {
     for (const current of [undefined, ""]) {
-      const env: NodeJS.ProcessEnv = { [prior("SERVER_PASSWORD")]: "synthetic-private", VECTOR_SERVER_PASSWORD: current }
+      const env: NodeJS.ProcessEnv = {
+        [prior("SERVER_PASSWORD")]: "synthetic-private",
+        VECTOR_SERVER_PASSWORD: current,
+      }
       migrateEnvironment(env, () => {})
       expect(env.VECTOR_SERVER_PASSWORD).toBe("synthetic-private")
     }
