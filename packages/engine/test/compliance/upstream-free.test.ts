@@ -49,8 +49,11 @@ function containsHolder(text: string, holder: string) {
 }
 
 async function upstreamHolder() {
-  // Derive the prohibited name only in this guard, from its required MIT notice,
-  // so source scans and synthetic credential fixtures do not add that name to tracked text.
+  // The prohibited name is never written literally in tracked text. This guard and
+  // packages/core/src/flag/legacy.ts (which imports the earlier product's environment and
+  // accepts its default server username) both derive it from the required MIT notice.
+  // Bundles that include legacy.ts embed the notice text, so binary audits count those
+  // extra hits as legal attribution.
   const license = await Bun.file(path.join(root, "THIRD_PARTY_NOTICES.md")).text()
   const attribution = license.split("<!-- vector-upstream-attribution -->")[1]?.split("\n## ").slice(0, 2).join("\n## ")
   const holder = attribution

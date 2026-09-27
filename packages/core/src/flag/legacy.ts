@@ -1,7 +1,10 @@
 import notices from "../../../../THIRD_PARTY_NOTICES.md" with { type: "text" }
 
 // The earlier product's name may appear only inside its required MIT notice (the
-// upstream-free compliance test enforces this), so it is read from that notice.
+// upstream-free compliance test enforces this), so it is derived from that notice here,
+// the same way that test derives it, and never written literally. Importing the notice
+// embeds its text in every bundle that includes this module; binary audits attribute
+// those hits to the legal notice.
 export const legacyName = notices
   .split("<!-- vector-upstream-attribution -->")[1]
   ?.match(/^Copyright \(c\) \d{4} (.+)$/m)?.[1]
