@@ -28,6 +28,52 @@ test("first-run failure stays OFF, enabled cache allows reviewed fallback, expli
   }
 })
 
+test("a known OFF catalog answers at once and refreshes in the background", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "vector-free-models-off-"))
+  try {
+    const file = path.join(root, "catalog.json")
+    await writeFile(file, JSON.stringify(off))
+    const requests: string[] = []
+    const reply = Promise.withResolvers<Response>()
+    const client = FreeModels.createClient({
+      file,
+      wait: 60_000,
+      request: (url) => {
+        requests.push(url)
+        return reply.promise
+      },
+    })
+    expect(await client.catalog()).toEqual(off)
+    expect(await client.forKey("synthetic-secret")).toEqual([])
+    expect(requests).toEqual([FreeModels.CATALOG_URL])
+
+    reply.resolve(Response.json(enabled))
+    await Bun.sleep(20)
+    expect(await client.catalog()).toEqual(enabled)
+    expect(JSON.parse(await readFile(file, "utf8"))).toEqual(enabled)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test("an unknown catalog waits briefly for a silent network, then answers without it", async () => {
+  const reply = Promise.withResolvers<Response>()
+  const client = FreeModels.createClient({ wait: 20, request: () => reply.promise })
+  expect(await client.catalog()).toEqual(off)
+  reply.resolve(Response.json(enabled))
+  await Bun.sleep(20)
+  expect(await client.catalog()).toEqual(enabled)
+})
+
+test("a forced catalog read still waits for the answer", async () => {
+  const reply = Promise.withResolvers<Response>()
+  const client = FreeModels.createClient({ wait: 20, request: () => reply.promise })
+  const forced = client.catalog(true)
+  await Bun.sleep(40)
+  reply.resolve(Response.json(enabled))
+  expect(await forced).toEqual(enabled)
+})
+
 test("optional cache creation failures preserve validated results and explicit OFF in memory", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "vector-free-cache-failure-"))
   try {

@@ -39,6 +39,8 @@ export function createClient(
     request?: (url: string, init: RequestInit) => Promise<Response>
     now?: () => number
     disabled?: () => boolean
+    /** How long a non-forced catalog read waits for vectordev.ai before answering without it. */
+    wait?: number
   } = {},
 ) {
   const now = input.now ?? Date.now
@@ -47,17 +49,30 @@ export function createClient(
   const users = new Map<string, { expires: number; models: FreeModelInfo[] }>()
   const catalog = async (force = false): Promise<FreeModelCatalog> => {
     if (!force && state.value && state.expires > now()) return state.value
-    if (state.pending) return state.pending
-    const load = async () => {
-      const saved =
-        state.value ??
-        (input.file
-          ? await readFile(input.file, "utf8")
-              .then((text) =>
-                Option.getOrUndefined(Schema.decodeUnknownOption(Schema.fromJsonString(FreeModelCatalog))(text)),
-              )
-              .catch(() => undefined)
-          : undefined)
+    const saved =
+      state.value ??
+      (input.file
+        ? await readFile(input.file, "utf8")
+            .then((text) =>
+              Option.getOrUndefined(Schema.decodeUnknownOption(Schema.fromJsonString(FreeModelCatalog))(text)),
+            )
+            .catch(() => undefined)
+        : undefined)
+    const refresh = state.pending ?? load(saved)
+    if (force) return refresh
+    // Provider loading waits here, so it must never stall on vectordev.ai. A known OFF answer is
+    // served at once while the refresh lands for the next caller; otherwise the wait is short and
+    // ends as if the request had failed, leaving the refresh to update the cache when it arrives.
+    if (saved && !saved.enabled) return OFF
+    return Promise.race([
+      refresh,
+      new Promise<FreeModelCatalog>((resolve) =>
+        setTimeout(() => resolve(unreachable(saved)), input.wait ?? 1_500).unref(),
+      ),
+    ])
+  }
+  const load = (saved: FreeModelCatalog | undefined) => {
+    const pending = (async () => {
       const response = input.disabled?.()
         ? undefined
         : await request(CATALOG_URL, {
@@ -83,13 +98,7 @@ export function createClient(
               model.providers.length > 0 &&
               model.providers.every((provider) => !!provider.id.trim()),
           ))
-      const value = valid
-        ? parsed.enabled
-          ? parsed
-          : OFF
-        : saved?.enabled
-          ? { enabled: true, updatedAt: saved.updatedAt, models: [...FREE_MODEL_FALLBACKS] }
-          : OFF
+      const value = valid ? (parsed.enabled ? parsed : OFF) : unreachable(saved)
       state.value = value
       state.expires = now() + TTL
       if (!value.enabled) users.clear()
@@ -103,11 +112,11 @@ export function createClient(
           .catch(() => rm(temporary, { force: true }).catch(() => undefined))
       }
       return value
-    }
-    state.pending = load().finally(() => {
+    })().finally(() => {
       state.pending = undefined
     })
-    return state.pending
+    state.pending = pending
+    return pending
   }
   const forKey = async (key: string, force = false) => {
     const curated = await catalog(force)
@@ -159,6 +168,12 @@ export function createClient(
     return models
   }
   return { catalog, forKey }
+}
+
+/** The catalog to use when vectordev.ai cannot answer: the reviewed fallbacks only if free models were last seen on. */
+function unreachable(saved: FreeModelCatalog | undefined): FreeModelCatalog {
+  if (!saved?.enabled) return OFF
+  return { enabled: true, updatedAt: saved.updatedAt, models: [...FREE_MODEL_FALLBACKS] }
 }
 
 export class Service extends Context.Service<
