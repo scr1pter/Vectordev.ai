@@ -8,10 +8,10 @@ export const prerender = true
 <DocsPage id="tokenomics">
 
           <p>
-            The number is the provider's, not ours. Vector records what a run really spent by reading what the
-            provider reported on the assistant messages — input, output, reasoning, cache reads and cache writes —
-            along with the provider's own cost figure. Nothing is inferred from character counts. That ledger is then
-            held against the limits you set: per day, per run, per project.
+            Vector prices each chat from the tokens the provider reported on the assistant messages — input,
+            output, reasoning, cache reads and cache writes — at the model catalog's list price. Automations and
+            parallel agents are also written to a local ledger, and an automation is refused a start once your daily
+            cap is spent.
           </p>
           <dl class="doc-rows">
             {spendRows.map(([term, detail]) => (<div><dt>{term}</dt><dd>{detail}</dd></div>))}

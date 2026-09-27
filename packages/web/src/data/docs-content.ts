@@ -175,16 +175,16 @@ export const licenseRows = [
 ]
 export const spendRows = [
   [
-    "Measured, never estimated",
-    "What a run cost comes from the numbers the provider itself reported — input, output, reasoning, cache reads and cache writes — alongside its own cost figure. Nothing is inferred from character counts.",
+    "Measured tokens, catalog prices",
+    "Token counts come from what the provider reported: input, output, reasoning, cache reads and cache writes. Dollars are those tokens at the model catalog's list price, so plan billing, discounts and negotiated rates are not reflected.",
   ],
   [
     "Unmeasured is not free",
-    "A run whose provider reported no usage is recorded as unmeasured rather than as zero, because a fabricated zero reads as free and quietly poisons every total built on top of it.",
+    "In the spend ledger, a run whose provider reported no usage is recorded as unmeasured rather than as zero, because a fabricated zero reads as free and quietly poisons every total built on top of it.",
   ],
   [
     "The ledger is yours and it is local",
-    "Spend is kept in a file on your machine, with daily totals retained far longer than the raw events behind them. Vector reads it to enforce the caps you set and to stop a run before it goes past them.",
+    "Spend is kept in a file on your machine, with daily totals retained far longer than the raw events behind them. Vector reads it before an automation or parallel agent starts, and refuses the start once a cap is already spent.",
   ],
   [
     "Your keys, your bill",
@@ -258,8 +258,8 @@ export const comparison = [
   ],
   ["Memory file the app shows and can erase", "One MEMORY.md, with path, size and one-click erase", "—", "—", "—", "—"],
   [
-    "Provider-reported spend recorded per run",
-    "Ledger, plus model ranking",
+    "Spend recorded per run (catalog-priced)",
+    "Session cost, plus a local ledger for automations and parallel agents",
     "Session cost readout",
     "—",
     "Usage dashboard",

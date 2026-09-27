@@ -64,7 +64,7 @@ const workspaceFacts = [
   },
   {
     title: "A tokenomics engine",
-    text: "Tokens and cost as the provider reported them, with limits per run, per day and per project.",
+    text: "Tokens as the provider reported them, priced at catalog rates, with daily and monthly caps checked before automations start.",
   },
 ]
 
@@ -345,7 +345,7 @@ const trustCards = [
           Point a swarm of agents at separate branches and let each one spawn subagents for the parts. Set up the
           database, deploy to your own cloud account, and have the change reviewed before it reaches main. Vector does
           all of it in one window, over the repository already on your disk — with a browser it can drive, a tokenomics
-          engine that measures every run, {pluginCount} one-click plugins, and any MCP server you write yourself.
+          engine that prices every chat, {pluginCount} one-click plugins, and any MCP server you write yourself.
         </p>
         <ul class="story-facts" data-reveal>
           {
@@ -361,6 +361,7 @@ const trustCards = [
           {pluginNames.map((name) => <li>{name}</li>)}
         </ul>
         <div class="story-action" data-reveal>
+          <a class="landing-pill" href="/why-vector">Why Vector</a>
           <a class="landing-pill" href="/docs">See everything Vector does</a>
         </div>
       </div>
@@ -1442,6 +1443,9 @@ const trustCards = [
   }
 
   .story-action {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
     margin-top: 44px;
   }
 

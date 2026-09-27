@@ -319,7 +319,7 @@ export const docsNav: DocGroup[] = [
       {
         id: "tokenomics",
         title: "Tokenomics engine",
-        blurb: "The number is the provider's, not ours.",
+        blurb: "Priced from the tokens your provider reported.",
       },
       {
         id: "hulk",
