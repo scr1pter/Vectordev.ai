@@ -105,7 +105,8 @@ export const run = Effect.fn("ConfigMigration.run")(function* (
           return
       }
 
-      const entries = yield* fs.readDirectoryEntries(directory)
+      // Unreadable folders and files hold nothing to import; they must never stop config loading.
+      const entries = yield* fs.readDirectoryEntries(directory).pipe(Effect.orElseSucceed(() => []))
       const candidates = yield* Effect.forEach(
         entries.filter(
           (entry) =>
@@ -117,8 +118,10 @@ export const run = Effect.fn("ConfigMigration.run")(function* (
         ),
         Effect.fnUntraced(function* (entry) {
           const file = path.join(directory, entry.name)
-          if ((yield* fs.stat(file)).size > 1_048_576n) return
-          const text = yield* fs.readFileString(file)
+          const info = yield* fs.stat(file).pipe(Effect.option)
+          if (Option.isNone(info) || info.value.size > 1_048_576n) return
+          const text = yield* fs.readFileString(file).pipe(Effect.orElseSucceed(() => undefined))
+          if (text === undefined) return
           const parsed = yield* Effect.try({ try: () => parseConfig(text, file), catch: (error) => error }).pipe(
             Effect.option,
           )
