@@ -45,7 +45,7 @@ Vector desktop remains available for macOS, Windows and Linux at [vectordev.ai](
 
 ### Models
 
-**Choose your provider.** Connect API-key providers, local models or an explicit company gateway in Settings or with `vector auth login`. In the candidate, an enabled shared service can offer free models through OpenRouter with no paid fallback; Connect OpenRouter uses your own account and can resume a conversation after a shared limit. When the service is off, Vector asks you to connect a provider. Native Copilot, GitLab Duo, xAI, DigitalOcean and Poe sign-ins have prepared Vector-owned flows but remain disabled pending registrations or approval. Native ChatGPT subscription sign-in is not pursued; the separate Codex runtime is unchanged.
+**Choose your provider.** Connect API-key providers, local models or an explicit company gateway in Settings or with `vector auth login`. In the candidate, an enabled shared service can offer free models through OpenRouter with no paid fallback; Connect OpenRouter uses your own account and can resume a conversation after a shared limit. When the service is off, Vector asks you to connect a provider. Native Copilot, GitLab Duo, xAI, DigitalOcean and Poe sign-ins have prepared Vector-owned flows but remain disabled pending registrations or approval. Sign in with ChatGPT is available for OpenAI models; the separate Codex runtime is unchanged.
 
 **Every model in one picker.** Connected providers use the bundled catalog with an optional validated refresh. Free-model eligibility is checked through the live Vector service, so a bundled price of zero does not promise access.
 
