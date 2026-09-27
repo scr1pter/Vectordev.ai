@@ -1,5 +1,6 @@
 export * as ServerAuth from "./auth"
 
+import { legacyName } from "@vectordevai/core/flag/legacy"
 import { Config as EffectConfig, Context, Effect, Layer, Option, Redacted } from "effect"
 
 export type Credentials = {
@@ -20,6 +21,8 @@ export type Identity = "owner" | "guest"
 export type Info = {
   readonly password: Option.Option<string>
   readonly username: string
+  /** Also accepted as the owner username; set only while no username is configured. */
+  readonly legacyUsername?: string
   readonly guestPassword?: Option.Option<string>
   readonly guestUsername?: string
 }
@@ -33,16 +36,19 @@ export class Config extends Context.Service<Config, Info>()("@vector/ServerAuthC
     return Layer.effect(
       this,
       Effect.gen(function* () {
-        return Config.of(
-          yield* EffectConfig.all({
-            password: EffectConfig.string("VECTOR_SERVER_PASSWORD").pipe(EffectConfig.option),
-            username: EffectConfig.string("VECTOR_SERVER_USERNAME").pipe(EffectConfig.withDefault("vector")),
-            guestPassword: EffectConfig.string("VECTOR_SERVER_GUEST_PASSWORD").pipe(EffectConfig.option),
-            guestUsername: EffectConfig.string("VECTOR_SERVER_GUEST_USERNAME").pipe(
-              EffectConfig.withDefault("guest"),
-            ),
-          }),
-        )
+        const config = yield* EffectConfig.all({
+          password: EffectConfig.string("VECTOR_SERVER_PASSWORD").pipe(EffectConfig.option),
+          username: EffectConfig.string("VECTOR_SERVER_USERNAME").pipe(EffectConfig.option),
+          guestPassword: EffectConfig.string("VECTOR_SERVER_GUEST_PASSWORD").pipe(EffectConfig.option),
+          guestUsername: EffectConfig.string("VECTOR_SERVER_GUEST_USERNAME").pipe(EffectConfig.withDefault("guest")),
+        })
+        return Config.of({
+          ...config,
+          username: Option.getOrElse(config.username, () => "vector"),
+          // The earlier product defaulted the owner username to its own name, and saved
+          // connections and scripts still send it. The password is still required.
+          legacyUsername: Option.isNone(config.username) ? legacyName : undefined,
+        })
       }),
     )
   }
@@ -63,7 +69,7 @@ export function identity(credentials: DecodedCredentials, config: Info): Identit
   if (
     Option.isSome(config.password) &&
     config.password.value !== "" &&
-    credentials.username === config.username &&
+    (credentials.username === config.username || credentials.username === config.legacyUsername) &&
     password === config.password.value
   )
     return "owner"
@@ -90,7 +96,12 @@ export function unauthorizedMessage(credentials: DecodedCredentials, config: Inf
     ...(Option.isSome(config.password) && config.password.value !== "" ? [config.username] : []),
     ...(Option.isSome(guestPassword) && guestPassword.value !== "" ? [config.guestUsername ?? "guest"] : []),
   ]
-  if (!credentials.username || usernames.includes(credentials.username)) return "Authentication required"
+  if (
+    !credentials.username ||
+    credentials.username === config.legacyUsername ||
+    usernames.includes(credentials.username)
+  )
+    return "Authentication required"
   return `Authentication required. Use the configured server username: ${usernames.join(" or ")}.`
 }
 

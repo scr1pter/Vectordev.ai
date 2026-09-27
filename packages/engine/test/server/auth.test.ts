@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { Option, Redacted } from "effect"
+import { ConfigProvider, Effect, Option, Redacted } from "effect"
 import { Flag } from "@vectordevai/core/flag/flag"
+import { legacyName } from "@vectordevai/core/flag/legacy"
 import { ServerAuth } from "../../src/server/auth"
 
 const original = {
@@ -65,4 +66,29 @@ test("server identities require an exact configured username and password", () =
     expect(ServerAuth.identity({ username: configured, password: Redacted.make("wrong") }, config)).toBeUndefined()
     expect(ServerAuth.identity({ username: "unrelated", password: Redacted.make("secret") }, config)).toBeUndefined()
   }
+})
+
+function loadConfig(input: Record<string, string>) {
+  return Effect.runPromise(
+    ServerAuth.Config.pipe(
+      Effect.provide(ServerAuth.Config.layer),
+      Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown(input))),
+    ),
+  )
+}
+
+test("saved connections using the earlier default username keep working while no username is configured", async () => {
+  const config = await loadConfig({ VECTOR_SERVER_PASSWORD: "secret" })
+  expect(config.username).toBe("vector")
+  for (const username of ["vector", legacyName!])
+    expect(ServerAuth.identity({ username, password: Redacted.make("secret") }, config)).toBe("owner")
+  expect(ServerAuth.identity({ username: legacyName!, password: Redacted.make("wrong") }, config)).toBeUndefined()
+  expect(ServerAuth.identity({ username: "unrelated", password: Redacted.make("secret") }, config)).toBeUndefined()
+})
+
+test("a configured username is the only owner username", async () => {
+  const config = await loadConfig({ VECTOR_SERVER_PASSWORD: "secret", VECTOR_SERVER_USERNAME: "alice" })
+  expect(ServerAuth.identity({ username: "alice", password: Redacted.make("secret") }, config)).toBe("owner")
+  for (const username of ["vector", legacyName!])
+    expect(ServerAuth.identity({ username, password: Redacted.make("secret") }, config)).toBeUndefined()
 })
