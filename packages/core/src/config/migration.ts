@@ -81,6 +81,9 @@ export const run = Effect.fn("ConfigMigration.run")(function* (
   const flock = yield* EffectFlock.Service
   return yield* flock.withLock(
     Effect.gen(function* () {
+      // Unreadable folders and files hold nothing to import; they must never stop config loading.
+      const entries = yield* fs.readDirectoryEntries(directory).pipe(Effect.option)
+      if (Option.isNone(entries)) return
       const stem = local ? "vector.local" : "vector"
       const targets = [path.join(destination, `${stem}.json`), path.join(destination, `${stem}.jsonc`)]
       for (const target of targets) {
@@ -97,10 +100,8 @@ export const run = Effect.fn("ConfigMigration.run")(function* (
           return
       }
 
-      // Unreadable folders and files hold nothing to import; they must never stop config loading.
-      const entries = yield* fs.readDirectoryEntries(directory).pipe(Effect.orElseSucceed(() => []))
       const candidates = yield* Effect.forEach(
-        entries.filter(
+        entries.value.filter(
           (entry) =>
             entry.type === "file" &&
             !excluded.test(entry.name) &&
@@ -241,7 +242,13 @@ export const discover = Effect.fn("ConfigMigration.discover")(function* (input: 
     )
     if (!earlier) continue
     const source = path.join(directory, earlier.name)
-    const files = yield* fs.readDirectoryEntries(source).pipe(Effect.orElseSucceed(() => []))
+    // No marker is written for a folder that cannot be listed yet, so a later launch imports it once readable.
+    const listing = yield* fs.readDirectoryEntries(source).pipe(Effect.option)
+    if (Option.isNone(listing)) {
+      yield* Effect.logWarning(`Cannot read ${source}. Its settings will be imported once it is readable.`)
+      continue
+    }
+    const files = listing.value
     const assets = files.filter((file) => file.type === "directory" && assetNames.includes(file.name))
     const target = path.join(directory, ".vector")
     if (entries.find((entry) => entry.name === ".vector")?.type === "symlink")
@@ -306,9 +313,10 @@ const copyAsset: (source: string, target: string) => Effect.Effect<void, FSUtil.
       ),
     )
   if (type === "directory") {
+    const children = yield* fs.readDirectoryEntries(source).pipe(Effect.option)
+    if (Option.isNone(children)) return yield* skipUnreadable(source)
     yield* fs.ensureDir(target)
-    for (const child of yield* fs.readDirectoryEntries(source))
-      yield* copyAsset(path.join(source, child.name), path.join(target, child.name))
+    for (const child of children.value) yield* copyAsset(path.join(source, child.name), path.join(target, child.name))
     return
   }
   if (type !== "file")
@@ -317,6 +325,8 @@ const copyAsset: (source: string, target: string) => Effect.Effect<void, FSUtil.
         `Cannot import special file ${source}. Move the intended settings into ${target} before starting Vector.`,
       ),
     )
+  if (Option.isNone(yield* fs.access(source, { readable: true }).pipe(Effect.option)))
+    return yield* skipUnreadable(source)
   if (yield* fs.exists(target)) {
     const original = yield* fs.readFile(source)
     const current = yield* fs.readFile(target)
@@ -331,3 +341,8 @@ const copyAsset: (source: string, target: string) => Effect.Effect<void, FSUtil.
   yield* fs.copyFile(source, temporary)
   yield* fs.rename(temporary, target).pipe(Effect.onError(() => fs.remove(temporary).pipe(Effect.ignore)))
 })
+
+// The marker is still written: retrying would report conflicts for imported files the user has since edited.
+function skipUnreadable(source: string) {
+  return Effect.logWarning(`Skipped ${source} while importing earlier settings because it cannot be read.`)
+}

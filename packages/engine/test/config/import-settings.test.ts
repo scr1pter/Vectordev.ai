@@ -159,6 +159,57 @@ it.live("skips unreadable folders and unrelated dot folders that only look like 
   }),
 )
 
+it.live("retries an earlier folder until it can be listed and skips unreadable folders inside it", () =>
+  Effect.gen(function* () {
+    const root = yield* tmpdirScoped()
+    const fs = yield* FSUtil.Service
+    const home = path.join(root, "home")
+    const global = path.join(root, "global")
+    const parent = path.join(root, "work", "locked")
+    const directory = path.join(parent, "app")
+    const source = path.join(directory, `.${previous}`)
+    yield* fs.writeWithDirs(path.join(home, `.${previous}`, `${previous}.json`), '{"model":"fixture/model"}')
+    yield* fs.writeWithDirs(path.join(global, "config.json"), '{"model":"fixture/model"}')
+    yield* fs.writeWithDirs(path.join(source, `${previous}.json`), '{"permission":{"bash":"deny"}}')
+    yield* fs.writeWithDirs(path.join(source, "agents", "reviewer.md"), "reviewer")
+    yield* fs.writeWithDirs(path.join(source, "commands", "secret.md"), "secret")
+    yield* fs.writeWithDirs(path.join(source, "skills", "locked", "SKILL.md"), "locked")
+    // Mode 0o311 keeps the parent traversable, so the project below it stays reachable while its listing fails.
+    const modes = [
+      [home, 0o000],
+      [global, 0o000],
+      [parent, 0o311],
+      [source, 0o000],
+    ] as const
+    yield* Effect.forEach(modes, ([item, mode]) => fs.chmod(item, mode))
+    yield* Effect.addFinalizer(() =>
+      Effect.forEach([...modes.map(([item]) => item), path.join(source, "skills", "locked")], (item) =>
+        fs.chmod(item, 0o755).pipe(Effect.ignore),
+      ),
+    )
+    const input = { directory, worktree: path.join(root, "work"), home, global }
+    expect(yield* ConfigMigration.discover(input)).toEqual([])
+    expect(yield* fs.exists(path.join(directory, ".vector"))).toBe(false)
+
+    yield* fs.chmod(source, 0o755)
+    yield* fs.chmod(path.join(source, "commands", "secret.md"), 0o000)
+    yield* fs.chmod(path.join(source, "skills", "locked"), 0o000)
+    const target = path.join(directory, ".vector")
+    expect((yield* ConfigMigration.discover(input)).map((item) => item.target)).toEqual([
+      path.join(target, "vector.jsonc"),
+      target,
+    ])
+    expect(yield* fs.readJson(path.join(target, "vector.jsonc"))).toMatchObject({ permission: { bash: "deny" } })
+    expect(yield* fs.readFileString(path.join(target, "agents", "reviewer.md"))).toBe("reviewer")
+    expect(yield* fs.exists(path.join(target, "commands", "secret.md"))).toBe(false)
+    expect(yield* fs.exists(path.join(target, "skills", "locked"))).toBe(false)
+    expect(yield* fs.exists(path.join(target, "vector-migration.json"))).toBe(true)
+    yield* Effect.forEach([home, global], (item) => fs.chmod(item, 0o755))
+    expect(yield* fs.exists(path.join(home, ".vector"))).toBe(false)
+    expect(yield* fs.exists(path.join(global, "vector.jsonc"))).toBe(false)
+  }),
+)
+
 it.live("imports config-only earlier project and home folders, including runtime MCP servers", () =>
   Effect.gen(function* () {
     const root = yield* tmpdirScoped()
