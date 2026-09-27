@@ -8,7 +8,7 @@ import { FreeModels } from "@vectordevai/core/free-models"
 import { freeModelRequest, serializeFreeModelRequest } from "@vectordevai/core/free-model-request"
 import type { FreeModelInfo } from "@vectordevai/schema/free-model"
 import { isFreeModel } from "@vectordevai/schema/free-model"
-import { ProviderUnavailable, providerUnavailable } from "@vectordevai/schema/provider-unavailable"
+import { ProviderUnavailable, providerRetired, providerUnavailable } from "@vectordevai/schema/provider-unavailable"
 import {
   providerAllowed,
   providerCredentialAllowed,
@@ -2070,9 +2070,13 @@ const layer = Layer.effect(
 
     const defaultModel = Effect.fn("Provider.defaultModel")(function* () {
       const cfg = yield* config.get()
-      if (cfg.model && providerEnabled(parseModel(cfg.model).providerID)) return parseModel(cfg.model)
-
       const s = yield* InstanceState.get(state)
+      if (cfg.model) {
+        const model = parseModel(cfg.model)
+        if (providerEnabled(model.providerID) && !providerRetired(model.providerID, (id) => id in s.providers))
+          return model
+      }
+
       const recent = yield* fs.readJson(path.join(Global.Path.state, "model.json")).pipe(
         Effect.map((x): { providerID: ProviderV2.ID; modelID: ModelV2.ID }[] => {
           if (!isRecord(x) || !Array.isArray(x.recent)) return []

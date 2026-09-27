@@ -11,6 +11,7 @@ import { SessionRevert } from "./revert"
 import { Session } from "./session"
 import { Agent } from "../agent/agent"
 import { Provider } from "@/provider/provider"
+import { providerRetired } from "@vectordevai/schema/provider-unavailable"
 
 import { type Tool as AITool, tool, jsonSchema } from "ai"
 import type { JSONSchema7 } from "@ai-sdk/provider"
@@ -651,7 +652,11 @@ const layer = Layer.effect(
         .where(eq(SessionTable.id, sessionID))
         .get()
         .pipe(Effect.orDie)
-      if (current?.model) {
+      // Sessions from earlier versions can name a provider this one no longer offers; continue them
+      // with the usual default instead of failing with "Model not found".
+      const loaded = yield* provider.list()
+      const retired = (providerID: string) => providerRetired(providerID, (id) => id in loaded)
+      if (current?.model && !retired(current.model.providerID)) {
         return {
           providerID: ProviderV2.ID.make(current.model.providerID),
           modelID: ModelV2.ID.make(current.model.id),
@@ -659,7 +664,7 @@ const layer = Layer.effect(
         }
       }
       const match = yield* sessions
-        .findMessage(sessionID, (m) => m.info.role === "user" && !!m.info.model)
+        .findMessage(sessionID, (m) => m.info.role === "user" && !!m.info.model && !retired(m.info.model.providerID))
         .pipe(Effect.orDie)
       if (Option.isSome(match) && match.value.info.role === "user") return match.value.info.model
       return yield* provider.defaultModel().pipe(Effect.orDie)

@@ -357,6 +357,16 @@ it.instance(
 )
 
 it.instance(
+  "defaultModel skips a configured model whose provider this version no longer offers",
+  Effect.gen(function* () {
+    yield* setProcessEnv("ANTHROPIC_API_KEY", "test-api-key")
+    const model = yield* Provider.use.defaultModel()
+    expect(String(model.providerID)).toBe("anthropic")
+  }),
+  { config: { model: "retired-gateway/included-model" } },
+)
+
+it.instance(
   "defaultModel treats empty provider config as no allowlist",
   Effect.gen(function* () {
     yield* setProcessEnv("ANTHROPIC_API_KEY", "test-api-key")

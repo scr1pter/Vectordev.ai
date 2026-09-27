@@ -1,4 +1,5 @@
 import { Schema } from "effect"
+import { providerAllowed } from "./provider-policy"
 
 export const ProviderUnavailable = Schema.Struct({
   id: Schema.String,
@@ -23,13 +24,21 @@ export function providerUnavailable(id: string, reason: ProviderUnavailable["rea
 
 export type ModelChoice = { providerID: string; modelID: string }
 
-// Report only a preference that was actually skipped before the chosen model.
+// A provider this Vector no longer offers: outside the supported set and not loaded from configuration
+// or a plugin. Saved choices from earlier versions can still name one; they fall back silently.
+export function providerRetired(id: string, loaded: (id: string) => boolean) {
+  return !providerAllowed(id) && !loaded(id)
+}
+
+// Report only a preference that was actually skipped before the chosen model. A preference for a
+// retired provider is skipped without a report.
 export function unavailableModel(
   candidates: ReadonlyArray<ModelChoice | undefined>,
   valid: (model: ModelChoice) => boolean,
+  loaded: (providerID: string) => boolean,
 ) {
   for (const candidate of candidates) {
-    if (!candidate) continue
+    if (!candidate || providerRetired(candidate.providerID, loaded)) continue
     if (valid(candidate)) return
     return candidate
   }

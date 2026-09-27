@@ -268,6 +268,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
             ...modelStore.recent,
           ],
           isModelValid,
+          (providerID) => sync.data.provider.some((provider) => provider.id === providerID),
         )
         const messages = (sync.data.provider_next.unavailable ?? [])
           .filter((item) => takeNotice(sdk.url, `credential:${item.id}:${item.reason}`))

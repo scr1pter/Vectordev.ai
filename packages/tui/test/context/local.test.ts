@@ -23,12 +23,24 @@ test("moves a model to the front, deduplicates, and limits recents", () => {
 
 test("model fallback notices include slash-containing saved IDs and ignore stale lower-priority recents", async () => {
   const { unavailableModel, providerNoticeTracker } = await import("@vectordevai/schema/provider-unavailable")
-  const missing = parseModel("missing/family/saved")
+  const missing = parseModel("openrouter/family/saved")
   const live = parseModel("anthropic/claude-sonnet-4")
   const valid = (model: { providerID: string }) => model.providerID === "anthropic"
-  expect(unavailableModel([missing, live], valid)).toEqual({ providerID: "missing", modelID: "family/saved" })
-  expect(unavailableModel([live, missing], valid)).toBeUndefined()
+  const loaded = (providerID: string) => providerID === "anthropic" || providerID === "openrouter"
+  expect(unavailableModel([missing, live], valid, loaded)).toEqual({
+    providerID: "openrouter",
+    modelID: "family/saved",
+  })
+  expect(unavailableModel([live, missing], valid, loaded)).toBeUndefined()
   const take = providerNoticeTracker()
-  expect(take("server", "missing/family/saved")).toBe(true)
-  expect(take("server", "missing/family/saved")).toBe(false)
+  expect(take("server", "openrouter/family/saved")).toBe(true)
+  expect(take("server", "openrouter/family/saved")).toBe(false)
+})
+
+test("a saved model from a retired provider falls back without a notice", async () => {
+  const { unavailableModel } = await import("@vectordevai/schema/provider-unavailable")
+  const retired = parseModel("retired-gateway/included/model")
+  const live = parseModel("anthropic/claude-sonnet-4")
+  const valid = (model: { providerID: string }) => model.providerID === "anthropic"
+  expect(unavailableModel([retired, live], valid, (providerID) => providerID === "anthropic")).toBeUndefined()
 })

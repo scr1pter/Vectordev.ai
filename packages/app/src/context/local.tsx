@@ -267,6 +267,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           ...models.recent.list(),
         ],
         validModel,
+        (providerID) => providers.all().has(providerID),
       )
       if (!previous) return
       const next = current()

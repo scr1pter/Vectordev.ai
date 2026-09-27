@@ -674,6 +674,33 @@ it.instance("legacy prompt emits message events without session.next events", ()
   }),
 )
 
+it.instance("a session saved with a retired provider's model continues with the default model", () =>
+  Effect.gen(function* () {
+    yield* useServerConfig(providerCfg)
+    const prompt = yield* SessionPrompt.Service
+    const sessions = yield* Session.Service
+    const provider = yield* ProviderSvc.Service
+    const chat = yield* sessions.create({
+      title: "From an earlier version",
+      model: { providerID: ProviderV2.ID.make("retired-gateway"), id: ModelV2.ID.make("included-model") },
+    })
+
+    const next = yield* prompt.prompt({
+      sessionID: chat.id,
+      agent: "build",
+      noReply: true,
+      parts: [{ type: "text", text: "continue" }],
+    })
+
+    const fallback = yield* provider.defaultModel()
+    expect(next.info.role).toBe("user")
+    if (next.info.role === "user") {
+      expect(next.info.model.providerID).toBe(fallback.providerID)
+      expect(next.info.model.modelID).toBe(fallback.modelID)
+    }
+  }),
+)
+
 it.instance("loop surfaces content-filter finishes as session errors", () =>
   Effect.gen(function* () {
     const { llm } = yield* useServerConfig(providerCfg)
