@@ -1,0 +1,216 @@
+---
+import MarketingFooter from "../components/marketing/MarketingFooter.astro"
+import MarketingLayout from "../components/marketing/MarketingLayout.astro"
+import MarketingNav from "../components/marketing/MarketingNav.astro"
+
+export const prerender = true
+
+// Every sentence here describes shipped behaviour and links to the docs page
+// that covers it. Say nothing about another product beyond where it runs.
+const reasons = [
+  {
+    title: "Many agents at once, none in your way.",
+    lead: "Start as many agents as the work needs. Each one works in its own copy of the repository, so nothing collides, and you merge the ones that landed.",
+    points: [
+      ["No cap", "Run agents side by side, each in its own git worktree, or a managed copy when a worktree won't do."],
+      ["Work that splits itself", "A large task hands its parts to subagents that run at the same time, and a card shows what each one is doing."],
+      ["One objective, a whole plan", "Vector can plan the task graph itself, give each task its own agent and model, and run them in dependency order."],
+    ],
+    href: "/docs/agent-workspaces",
+    more: "Read about agent workspaces",
+  },
+  {
+    title: "It checks its work before it calls it done.",
+    lead: "Finishing is not the agent's opinion. Vector exercises the change, looks at the result, and can send the work back.",
+    points: [
+      ["An independent judge", "Turn it on and a read-only subagent compares your request, the changed files and the test output. A fail names the repair and sends the agent back."],
+      ["A browser it drives", "A real Chromium view: the agent loads your app, clicks through it, and reads the console errors and failed requests."],
+      ["Reviewed before main", "Vectorscope comments on the exact lines of every pull request, and runs the same pass on your branch before you push."],
+    ],
+    href: "/docs/verified-completion",
+    more: "Read about verified completion",
+  },
+  {
+    title: "Your team in the same session.",
+    lead: "Agent work is usually a solo window. In Vector it can be a room.",
+    points: [
+      ["One link", "vector invite shares your workspace. Teammates land in the same sessions, files and agents, and the header shows who is there."],
+      ["Watch the agent type", "Follow mode opens the file the agent is editing, highlights its lines and gives each agent a named cursor."],
+      ["Merge the hunks you trust", "Tick the parts of an agent's diff you want, and Vector merges a patch built from exactly those."],
+    ],
+    href: "/docs/multiplayer",
+    more: "Read about multiplayer",
+  },
+  {
+    title: "Every model, and the agents you already use.",
+    lead: "Vector doesn't make you pick one lab. Use the model that fits the task, and bring your other agents along.",
+    points: [
+      ["Your keys, your bill", "Connect Claude, GPT, Gemini, local models or a company gateway. The bill stays between you and that provider."],
+      ["Sign in with ChatGPT", "Use your ChatGPT plan for OpenAI models instead of an API key."],
+      ["Claude Code, Codex and Cursor inside", "Run their CLIs in a Vector workspace, with Vector's isolated checkouts, checks and follow-ups around them."],
+    ],
+    href: "/docs/external-agents",
+    more: "Read about Claude Code, Codex and Cursor in Vector",
+  },
+]
+
+// What the Tokenomics engine does in the shipped app, then what the Run Guard adds
+// in the next release. Keep both lists in step with /docs/tokenomics.
+const tokenomics = {
+  title: "Know what a run costs, and stop it before it runs away.",
+  lead: "Every token an agent spends in Vector is your money, on your own key. The Vector Tokenomics Engine prices every chat from what your provider reported and keeps a ledger of what your agents spent. In the next release, the Run Guard puts a live cap on every run.",
+  today: [
+    ["Priced from what the provider reported", "Input, output, reasoning, cache reads and cache writes, at the model catalog's list price. A run that reported nothing is marked unmeasured, never counted as free."],
+    ["A ledger on your machine", "Automations and parallel agents are written to a local spend ledger, and an automation is refused a start once your daily cap is spent."],
+    ["Reviews with a budget", "Vectorscope stops at the per-review, per-pull-request and monthly budgets you set."],
+    ["Models ranked on measured spend", "Recommendations come from your own recorded runs. A model needs three of them for a kind of task before Vector recommends it."],
+  ],
+  next: [
+    ["A cap on every run", "Set a dollar cap in Settings, in project config, or with vector run --max-cost. Vector checks spend after every model step and stops within one step of the cap."],
+    ["Stops before the step that would cross it", "Vector estimates the next step from catalog prices and the context it carries, shows the estimate as a range, and stops before a step that would go over."],
+    ["Subagents share the cap", "Spend from subagents counts against the same cap as the task that launched them."],
+    ["Loops pause themselves", "An agent that repeats the same tool call three times with no file change, or hits the same error three times in a row, is paused. Auto-approve can't click through it."],
+    ["Outages don't retry forever", "A provider outage ends a run after 10 retries or 15 minutes."],
+    ["Made for scripts", "vector run exits with code 3 when a budget stops it, so CI can tell a budget stop from a failure."],
+  ],
+}
+
+const places = [
+  ["Your editor", "An editor, file search and diagnostics beside the agent, over the repository already on your disk."],
+  ["Your terminal", "The same agent in any shell with @vectordevai/cli, Vectorscope reviews included."],
+  ["Your accounts", "Deploys to your own Vercel, Netlify or Supabase, on tokens encrypted on your machine."],
+]
+---
+
+<MarketingLayout
+  title="Why Vector"
+  description="Why teams choose Vector: many agents at once, work that is checked before it is done, your team in the session, every model, and a Tokenomics engine that keeps the bill in sight."
+  socialTitle="Why Vector"
+>
+  <div class="why-page">
+    <MarketingNav active="why" />
+    <main>
+      <header class="why-hero">
+        <p class="eyebrow">Why Vector</p>
+        <h1>Most tools write the code. Vector finishes the work.</h1>
+        <p>
+          AI coding tools usually live in one place: an editor, a terminal, or a cloud sandbox. Vector is the workspace
+          around the whole job. Many agents at once, checks before anything counts as done, your team in the same
+          session, any model you like, and a bill you can see and cap before it surprises you.
+        </p>
+      </header>
+
+      <ol class="why-reasons">
+        {reasons.map((reason, index) => (
+          <li>
+            <span class="why-index">0{index + 1}</span>
+            <div>
+              <h2>{reason.title}</h2>
+              <p class="why-lead">{reason.lead}</p>
+              <dl>
+                {reason.points.map(([term, detail]) => (
+                  <div><dt>{term}</dt><dd>{detail}</dd></div>
+                ))}
+              </dl>
+              <a class="why-more" href={reason.href}>{reason.more} →</a>
+            </div>
+          </li>
+        ))}
+      </ol>
+
+      <section class="why-tokenomics" aria-labelledby="tokenomics-title">
+        <p class="eyebrow">The Vector Tokenomics Engine</p>
+        <h2 id="tokenomics-title">{tokenomics.title}</h2>
+        <p class="why-tokenomics-lead">{tokenomics.lead}</p>
+        <div class="why-tokenomics-grid">
+          <div>
+            <h3>In Vector today</h3>
+            <dl>
+              {tokenomics.today.map(([term, detail]) => (
+                <div><dt>{term}</dt><dd>{detail}</dd></div>
+              ))}
+            </dl>
+          </div>
+          <div>
+            <h3>Next release: the Run Guard</h3>
+            <dl>
+              {tokenomics.next.map(([term, detail]) => (
+                <div><dt>{term}</dt><dd>{detail}</dd></div>
+              ))}
+            </dl>
+          </div>
+        </div>
+        <a class="why-more" href="/docs/tokenomics">Read about the Tokenomics engine →</a>
+      </section>
+
+      <section class="why-places" aria-labelledby="places-title">
+        <h2 id="places-title">One workspace, wherever you work.</h2>
+        <div>
+          {places.map(([term, detail]) => (
+            <article><h3>{term}</h3><p>{detail}</p></article>
+          ))}
+        </div>
+        <p class="why-note">
+          Comparing tools? The <a href="/docs/comparison">side-by-side comparison</a> lists what Vector does next to
+          Claude Code, Codex and Cursor. Those products change quickly, so check their own documentation too.
+        </p>
+      </section>
+
+      <section class="why-cta">
+        <h2>Try it on your own repository.</h2>
+        <p>Vector desktop runs on macOS, Windows and Linux. The terminal agent is free with a Vector account.</p>
+        <a class="why-button" href="/login">Get Vector</a>
+        <a class="why-link" href="/docs/cli-terminal">Install the CLI</a>
+      </section>
+    </main>
+    <MarketingFooter />
+  </div>
+</MarketingLayout>
+
+<style is:global>
+  .why-page { min-height: 100vh; background: rgba(8, 6, 13, 0.62); }
+  .why-page main { width: min(960px, calc(100% - 32px)); margin: 0 auto; padding: 86px 0 110px; }
+  .why-page .eyebrow { margin: 0 0 16px; color: var(--accent-strong); font-size: 11px; font-weight: 670; letter-spacing: 0.1em; text-transform: uppercase; }
+  .why-hero { padding: 20px 0 56px; border-bottom: 1px solid var(--line); }
+  .why-hero h1 { max-width: 820px; margin: 0; color: var(--ink); font-size: clamp(38px, 6.4vw, 66px); font-weight: 560; line-height: 1.04; letter-spacing: -0.02em; }
+  .why-hero > p:not(.eyebrow) { max-width: 680px; margin: 24px 0 0; color: var(--muted-strong); font-size: 17px; line-height: 1.65; }
+  .why-reasons { margin: 0; padding: 0; list-style: none; }
+  .why-reasons > li { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 0 20px; padding: 56px 0; border-bottom: 1px solid var(--line); }
+  .why-index { color: var(--accent-strong); font-size: 13px; font-weight: 650; letter-spacing: 0.08em; padding-top: 10px; }
+  .why-reasons h2, .why-tokenomics h2, .why-places h2, .why-cta h2 { margin: 0; color: var(--ink); font-size: clamp(26px, 3.6vw, 36px); font-weight: 600; line-height: 1.15; letter-spacing: -0.015em; }
+  .why-lead, .why-tokenomics-lead { max-width: 680px; margin: 14px 0 0; color: var(--muted-strong); font-size: 16px; line-height: 1.65; }
+  .why-page dl { margin: 22px 0 0; padding: 0; }
+  .why-page dl > div { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.9fr); gap: 8px 28px; padding: 16px 0; border-top: 1px solid var(--line); }
+  .why-page dt { margin: 0; color: var(--ink); font-size: 15px; font-weight: 620; }
+  .why-page dd { margin: 0; color: var(--muted-strong); font-size: 14.5px; line-height: 1.65; }
+  .why-more { display: inline-block; margin-top: 18px; color: var(--accent-strong); font-size: 14px; text-decoration: none; }
+  .why-more:hover { text-decoration: underline; text-underline-offset: 3px; }
+  .why-tokenomics { margin: 56px 0 0; padding: 44px 40px; border: 1px solid rgba(183, 149, 255, 0.28); border-radius: 18px; background: linear-gradient(180deg, rgba(155, 108, 255, 0.1), rgba(155, 108, 255, 0.02)); }
+  .why-tokenomics-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 36px; margin-top: 12px; }
+  .why-tokenomics-grid h3 { margin: 26px 0 0; color: var(--accent-strong); font-size: 12px; font-weight: 670; letter-spacing: 0.08em; text-transform: uppercase; }
+  .why-tokenomics-grid dl > div { grid-template-columns: 1fr; gap: 4px; }
+  .why-places { padding: 64px 0; border-bottom: 1px solid var(--line); }
+  .why-places > div { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; margin-top: 26px; }
+  .why-places article { padding: 4px 24px 4px 0; }
+  .why-places article + article { padding-left: 24px; border-left: 1px solid var(--line); }
+  .why-places h3 { margin: 0; color: var(--ink); font-size: 16px; font-weight: 620; }
+  .why-places article p { margin: 10px 0 0; color: var(--muted-strong); font-size: 14.5px; line-height: 1.6; }
+  .why-note { max-width: 680px; margin: 30px 0 0; color: var(--muted); font-size: 14px; line-height: 1.6; }
+  .why-note a { color: var(--muted-strong); text-decoration: underline; text-decoration-color: rgba(183, 149, 255, 0.4); text-underline-offset: 3px; }
+  .why-cta { padding: 72px 0 0; }
+  .why-cta > p { max-width: 640px; margin: 14px 0 26px; color: var(--muted-strong); font-size: 15px; line-height: 1.65; }
+  .why-button { display: inline-flex; align-items: center; min-height: 44px; padding: 0 22px; color: #171020; background: linear-gradient(180deg, #eee7ff, #c2a7f8); border: 1px solid rgba(255, 255, 255, 0.5); border-radius: 999px; font-size: 14px; font-weight: 640; text-decoration: none; }
+  .why-link { margin-left: 18px; color: var(--muted-strong); font-size: 14px; text-decoration: underline; text-decoration-color: rgba(183, 149, 255, 0.4); text-underline-offset: 3px; }
+  .why-link:hover { color: var(--ink); }
+  @media (max-width: 800px) {
+    .why-reasons > li { grid-template-columns: 1fr; padding: 40px 0; }
+    .why-index { padding: 0 0 8px; }
+    .why-page dl > div { grid-template-columns: 1fr; gap: 4px; }
+    .why-tokenomics { padding: 30px 20px; }
+    .why-tokenomics-grid { grid-template-columns: 1fr; }
+    .why-places > div { grid-template-columns: 1fr; }
+    .why-places article { padding: 18px 0; }
+    .why-places article + article { padding-left: 0; border-left: 0; border-top: 1px solid var(--line); }
+    .why-link { display: inline-block; margin: 14px 0 0; }
+  }
+</style>
