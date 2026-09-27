@@ -34,9 +34,12 @@ for (const platform of ["darwin", "win32", "linux"] as const) {
 }
 
 test("the pinned electron-builder renames Electron's LICENSE on Windows and Linux", async () => {
-  const require = createRequire(import.meta.url)
-  const builderRequire = createRequire(require.resolve("electron-builder/package.json"))
-  const source = await Bun.file(builderRequire.resolve("app-builder-lib/out/electron/ElectronFramework.js")).text()
   // verify-notices.ts looks for this name; an electron-builder upgrade that changes it must fail here, not in CI.
-  expect(source).toContain('path.join(out, "LICENSE"), path.join(out, "LICENSE.electron.txt")')
+  expect(
+    await Bun.file(
+      createRequire(createRequire(import.meta.url).resolve("electron-builder/package.json")).resolve(
+        "app-builder-lib/out/electron/ElectronFramework.js",
+      ),
+    ).text(),
+  ).toContain('path.join(out, "LICENSE"), path.join(out, "LICENSE.electron.txt")')
 })

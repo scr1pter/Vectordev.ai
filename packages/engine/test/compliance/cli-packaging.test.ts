@@ -151,15 +151,17 @@ test("dry-run packages every target with notices and a working Vector launcher w
         )
         // The desktop release refuses to start until each package it names is on npm, so the
         // publisher's default targets must publish exactly that set.
-        const workflow = Bun.YAML.parse(
-          await Bun.file(path.join(root, ".github/workflows/vector-desktop-release.yml")).text(),
-        ) as { jobs: { prepare: { steps: { name: string; run?: string }[] } } }
-        const required = workflow.jobs.prepare.steps
+        const required = (
+          Bun.YAML.parse(await Bun.file(path.join(root, ".github/workflows/vector-desktop-release.yml")).text()) as {
+            jobs: { prepare: { steps: { name: string; run?: string }[] } }
+          }
+        ).jobs.prepare.steps
           .find((step) => step.name === "Require published CLI and plugin packages")
           ?.run?.match(/for package in ([^;]+);/)?.[1]
           ?.split(/\s+/)
           .filter((item) => item.startsWith("@vectordevai/cli-"))
-        expect(required?.toSorted()).toEqual(Object.keys(manifest.optionalDependencies).toSorted())
+          .toSorted()
+        expect(required).toEqual(Object.keys(manifest.optionalDependencies).toSorted())
       }
       const host = `${process.platform === "win32" ? "windows" : process.platform}-${process.arch}`
       if (target !== "umbrella" && target !== host) continue
