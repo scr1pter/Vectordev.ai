@@ -41,9 +41,11 @@ function sessionLineage(session: { id: string; parentID?: string }[], sessionID:
 export function autoRespondsPermission(
   autoAccept: Record<string, boolean>,
   session: { id: string; parentID?: string }[],
-  permission: { sessionID: string },
+  permission: { sessionID: string; permission?: string },
   directory?: string,
 ) {
+  // A doom_loop request means the agent is repeating itself; auto-accept must leave it for a person.
+  if (permission.permission === "doom_loop") return false
   const value = sessionLineage(session, permission.sessionID)
     .map((id) => accepted(autoAccept, id, directory))
     .find((item): item is boolean => item !== undefined)

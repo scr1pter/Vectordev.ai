@@ -9,10 +9,11 @@ const session = (input: { id: string; parentID?: string }) =>
     parentID: input.parentID,
   }) as Session
 
-const permission = (sessionID: string) =>
+const permission = (sessionID: string, name = "edit") =>
   ({
     sessionID,
-  }) as Pick<PermissionRequest, "sessionID">
+    permission: name,
+  }) as Pick<PermissionRequest, "sessionID" | "permission">
 
 describe("autoRespondsPermission", () => {
   test("uses a parent session's directory-scoped auto-accept", () => {
@@ -80,6 +81,17 @@ describe("autoRespondsPermission", () => {
     }
 
     expect(autoRespondsPermission(autoAccept, sessions, permission("root"), directory)).toBe(false)
+  })
+
+  test("never auto-accepts a doom_loop request on an auto-accepting lineage", () => {
+    const directory = "/tmp/project"
+    const sessions = [session({ id: "root" }), session({ id: "child", parentID: "root" })]
+    const autoAccept = {
+      [`${base64Encode(directory)}/root`]: true,
+    }
+
+    expect(autoRespondsPermission(autoAccept, sessions, permission("child", "doom_loop"), directory)).toBe(false)
+    expect(autoRespondsPermission(autoAccept, sessions, permission("child", "edit"), directory)).toBe(true)
   })
 })
 

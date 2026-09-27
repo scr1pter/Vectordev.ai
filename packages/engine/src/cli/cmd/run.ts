@@ -848,7 +848,8 @@ export const RunCommand = effectCmd({
               const permission = event.properties
               if (permission.sessionID !== sessionID) continue
 
-              if (auto) {
+              // A doom_loop request means the agent is repeating itself; --auto/--yolo must not wave it through.
+              if (auto && permission.permission !== "doom_loop") {
                 await client.permission.reply({
                   requestID: permission.id,
                   reply: "once",
