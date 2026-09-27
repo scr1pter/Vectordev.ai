@@ -6,6 +6,7 @@ import { NonNegativeInt } from "@vectordevai/core/schema"
 import { Global } from "@vectordevai/core/global"
 import { FSUtil } from "@vectordevai/core/fs-util"
 import { EffectFlock } from "@vectordevai/core/util/effect-flock"
+import { RENAMED_PROVIDER_IDS } from "@vectordevai/schema/provider-policy"
 
 export const OAUTH_DUMMY_KEY = "vector-oauth-dummy-key"
 
@@ -94,11 +95,12 @@ const layer = Layer.effect(
     const read = Effect.fn("Auth.read")(function* () {
       const raw = yield* fsys.readFileStringSafe(file).pipe(Effect.mapError(fail("Failed to read auth data")))
       if (!raw) return {}
-      const data = yield* Effect.try({
+      const stored = yield* Effect.try({
         try: () => decodeStoredAuth(raw),
         catch: (cause) => (cause instanceof AuthError ? cause : fail("Failed to read encrypted auth data")(cause)),
       })
-      if (credentialKey() && !storedAuthIsEncrypted(raw)) {
+      const data = renameProviders(stored)
+      if ((credentialKey() && !storedAuthIsEncrypted(raw)) || data !== stored) {
         const migrated = yield* Effect.try({
           try: () => encodeStoredAuth(data),
           catch: fail("Failed to encrypt legacy auth data"),
@@ -111,7 +113,7 @@ const layer = Layer.effect(
     const contents = Effect.fn("Auth.contents")(function* () {
       if (process.env.VECTOR_AUTH_CONTENT) {
         const parsed = Option.getOrUndefined(decodeJson(process.env.VECTOR_AUTH_CONTENT))
-        if (parsed) return decodeAuthData(parsed)
+        if (parsed) return renameProviders(decodeAuthData(parsed))
       }
 
       return yield* read()
@@ -176,6 +178,16 @@ const layer = Layer.effect(
     return Service.of({ get, all, exists, set, create, remove })
   }),
 )
+
+// Moves credentials saved under a provider ID the catalog has since renamed. A credential already
+// saved under the new ID wins, and the old entry is then left untouched.
+function renameProviders(data: Record<string, Info>) {
+  const moves = Object.entries(RENAMED_PROVIDER_IDS).filter(([from, to]) => data[from] && !data[to])
+  if (!moves.length) return data
+  return Object.fromEntries(
+    Object.entries(data).map(([id, info]) => [moves.find(([from]) => from === id)?.[1] ?? id, info]),
+  )
+}
 
 function credentialKey() {
   const raw = process.env.VECTOR_CREDENTIAL_KEY

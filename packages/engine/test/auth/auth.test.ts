@@ -76,6 +76,35 @@ describe("Auth", () => {
     }),
   )
 
+  it.live("carries a Kimi For Coding credential saved under its old provider ID to the renamed provider", () =>
+    Effect.gen(function* () {
+      const auth = yield* Auth.Service
+      yield* auth.remove("kimi-code-plan-cn")
+      yield* auth.set("kimi-for-coding", { type: "api", key: "kimi-fixture" })
+
+      const data = yield* auth.all()
+      expect(data["kimi-code-plan-cn"]).toEqual({ type: "api", key: "kimi-fixture" })
+      expect(data["kimi-for-coding"]).toBeUndefined()
+      // The move is saved, so removing the renamed credential does not bring the old one back.
+      yield* auth.remove("kimi-code-plan-cn")
+      expect(yield* auth.get("kimi-code-plan-cn")).toBeUndefined()
+      expect(yield* auth.get("kimi-for-coding")).toBeUndefined()
+    }),
+  )
+
+  it.live("keeps a credential already saved under the renamed Kimi provider", () =>
+    Effect.gen(function* () {
+      const auth = yield* Auth.Service
+      yield* auth.set("kimi-code-plan-cn", { type: "api", key: "current-fixture" })
+      yield* auth.set("kimi-for-coding", { type: "api", key: "legacy-fixture" })
+
+      const data = yield* auth.all()
+      expect(data["kimi-code-plan-cn"]).toEqual({ type: "api", key: "current-fixture" })
+      expect(data["kimi-for-coding"]).toEqual({ type: "api", key: "legacy-fixture" })
+      yield* Effect.forEach(["kimi-code-plan-cn", "kimi-for-coding"], auth.remove)
+    }),
+  )
+
   it.live("create preserves an existing credential while ordinary set still replaces it", () =>
     Effect.gen(function* () {
       const auth = yield* Auth.Service

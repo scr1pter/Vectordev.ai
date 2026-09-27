@@ -244,6 +244,11 @@ export const SUPPORTED_PROVIDER_IDS = [
 
 const supported = new Set<string>(SUPPORTED_PROVIDER_IDS)
 
+// Providers the reviewed catalog renamed, mapped to the provider that serves the same endpoint.
+// 1.99.8 saved Kimi For Coding (api.kimi.com/coding/v1) as "kimi-for-coding"; the catalog now calls it
+// "kimi-code-plan-cn", so credentials saved under the old ID carry over.
+export const RENAMED_PROVIDER_IDS: Readonly<Record<string, string>> = { "kimi-for-coding": "kimi-code-plan-cn" }
+
 // Link to each provider's verified general documentation, rather than a client-specific integration guide.
 const documentation: Record<string, string> = {
   infer: "https://infer.flow7.org/docs",
