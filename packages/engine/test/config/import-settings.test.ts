@@ -210,6 +210,44 @@ it.live("retries an earlier folder until it can be listed and skips unreadable f
   }),
 )
 
+it.live("imports a linked earlier folder and keeps linked assets as links", () =>
+  Effect.gen(function* () {
+    const root = yield* tmpdirScoped()
+    const fs = yield* FSUtil.Service
+    const shared = path.join(root, "shared")
+    const directory = path.join(root, "project")
+    yield* fs.writeWithDirs(path.join(shared, "earlier", `${previous}.json`), '{"permission":{"bash":"deny"}}')
+    yield* fs.writeWithDirs(path.join(shared, "agent.md"), "linked agent")
+    yield* fs.writeWithDirs(path.join(shared, "skills", "review", "SKILL.md"), "linked skill")
+    yield* fs.writeWithDirs(path.join(shared, "earlier", "commands", "review.md"), "review")
+    yield* fs.ensureDir(path.join(shared, "earlier", "agents"))
+    yield* fs.ensureDir(directory)
+    const source = path.join(directory, `.${previous}`)
+    yield* fs.symlink(path.join(shared, "earlier"), source)
+    yield* fs.symlink(path.join(shared, "agent.md"), path.join(source, "agents", "linked.md"))
+    yield* fs.symlink(path.join(shared, "missing.md"), path.join(source, "agents", "broken.md"))
+    yield* fs.symlink(path.join(shared, "skills"), path.join(source, "skills"))
+    const input = { directory, worktree: directory, home: path.join(root, "home"), global: path.join(root, "global") }
+    const target = path.join(directory, ".vector")
+    expect((yield* ConfigMigration.discover(input)).map((item) => item.target)).toEqual([
+      path.join(target, "vector.jsonc"),
+      target,
+    ])
+    expect(yield* fs.readJson(path.join(target, "vector.jsonc"))).toMatchObject({ permission: { bash: "deny" } })
+    expect(yield* fs.readFileString(path.join(target, "commands", "review.md"))).toBe("review")
+    expect(yield* fs.readLink(path.join(target, "agents", "linked.md"))).toBe(
+      yield* fs.realPath(path.join(shared, "agent.md")),
+    )
+    expect(yield* fs.readFileString(path.join(target, "skills", "review", "SKILL.md"))).toBe("linked skill")
+    expect(yield* fs.readLink(path.join(target, "skills"))).toBe(yield* fs.realPath(path.join(shared, "skills")))
+    expect(yield* fs.exists(path.join(target, "agents", "broken.md"))).toBe(false)
+    expect(yield* ConfigMigration.discover(input)).toEqual([])
+    // An import interrupted before its marker is retried without treating its own links as conflicts.
+    yield* fs.remove(path.join(target, "vector-migration.json"))
+    expect((yield* ConfigMigration.discover(input)).map((item) => item.target)).toEqual([target])
+  }),
+)
+
 it.live("imports config-only earlier project and home folders, including runtime MCP servers", () =>
   Effect.gen(function* () {
     const root = yield* tmpdirScoped()

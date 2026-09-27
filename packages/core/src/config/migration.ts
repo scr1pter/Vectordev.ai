@@ -236,12 +236,15 @@ export const discover = Effect.fn("ConfigMigration.discover")(function* (input: 
     // Only the exact earlier folder is opened; other dot folders, such as ~/.Trash, which macOS refuses to list
     // without Full Disk Access, are never read. An unreadable folder holds nothing to import.
     const entries = yield* fs.readDirectoryEntries(directory).pipe(Effect.orElseSucceed(() => []))
+    // Earlier versions followed a linked earlier folder, such as one managed by dotfiles, so it is imported too.
     const earlier = entries.find(
       (entry) =>
-        entry.type === "directory" && earlierFolders.has(createHash("sha256").update(entry.name).digest("hex")),
+        (entry.type === "directory" || entry.type === "symlink") &&
+        earlierFolders.has(createHash("sha256").update(entry.name).digest("hex")),
     )
     if (!earlier) continue
     const source = path.join(directory, earlier.name)
+    if (!(yield* fs.isDir(source))) continue
     // No marker is written for a folder that cannot be listed yet, so a later launch imports it once readable.
     const listing = yield* fs.readDirectoryEntries(source).pipe(Effect.option)
     if (Option.isNone(listing)) {
@@ -296,30 +299,42 @@ const copyAsset: (source: string, target: string) => Effect.Effect<void, FSUtil.
   "ConfigMigration.copyAsset",
 )(function* (source: string, target: string) {
   const fs = yield* FSUtil.Service
-  if (
-    (yield* fs.readDirectoryEntries(path.dirname(target))).find((entry) => entry.name === path.basename(target))
+  const existing = (yield* fs.readDirectoryEntries(path.dirname(target))).find(
+    (entry) => entry.name === path.basename(target),
+  )?.type
+  const linked =
+    (yield* fs.readDirectoryEntries(path.dirname(source))).find((entry) => entry.name === path.basename(source))
       ?.type === "symlink"
-  )
+  // stat follows links, so a linked asset is judged by what it points to; a broken link is skipped like an unreadable file.
+  const info = yield* fs.stat(source).pipe(Effect.option)
+  if (Option.isNone(info)) return yield* skipUnreadable(source)
+  if (existing === "symlink") {
+    // A link left by an interrupted import already points at the same content.
+    const current = yield* fs.realPath(target).pipe(Effect.option)
+    const original = yield* fs.realPath(source)
+    if (Option.isSome(current) && current.value === original) return
     return yield* Effect.die(
       new Error(`Cannot replace linked settings at ${target}. Resolve the link before starting Vector.`),
     )
-  const type = (yield* fs.readDirectoryEntries(path.dirname(source))).find(
-    (entry) => entry.name === path.basename(source),
-  )?.type
-  if (type === "symlink")
-    return yield* Effect.die(
-      new Error(
-        `Cannot safely import symbolic link ${source}. Copy its intended contents into ${target} before starting Vector.`,
-      ),
-    )
-  if (type === "directory") {
+  }
+  // Earlier versions and Vector both follow linked assets, so keep the link instead of copying what it points to.
+  // Where links cannot be created, such as on Windows without Developer Mode, the asset is skipped with a warning.
+  if (linked && existing === undefined)
+    return yield* fs
+      .symlink(yield* fs.realPath(source), target)
+      .pipe(
+        Effect.catch(() =>
+          Effect.logWarning(`Skipped linked ${source} while importing earlier settings; link it into ${target}.`),
+        ),
+      )
+  if (info.value.type === "Directory") {
     const children = yield* fs.readDirectoryEntries(source).pipe(Effect.option)
     if (Option.isNone(children)) return yield* skipUnreadable(source)
     yield* fs.ensureDir(target)
     for (const child of children.value) yield* copyAsset(path.join(source, child.name), path.join(target, child.name))
     return
   }
-  if (type !== "file")
+  if (info.value.type !== "File")
     return yield* Effect.die(
       new Error(
         `Cannot import special file ${source}. Move the intended settings into ${target} before starting Vector.`,
@@ -327,10 +342,10 @@ const copyAsset: (source: string, target: string) => Effect.Effect<void, FSUtil.
     )
   if (Option.isNone(yield* fs.access(source, { readable: true }).pipe(Effect.option)))
     return yield* skipUnreadable(source)
-  if (yield* fs.exists(target)) {
+  if (existing !== undefined) {
     const original = yield* fs.readFile(source)
-    const current = yield* fs.readFile(target)
-    if (Buffer.from(original).equals(Buffer.from(current))) return
+    const current = existing === "file" ? yield* fs.readFile(target) : undefined
+    if (current && Buffer.from(original).equals(Buffer.from(current))) return
     return yield* Effect.die(
       new Error(
         `Existing settings at ${target} conflict with ${source}. Merge them before starting Vector; neither file was changed.`,
