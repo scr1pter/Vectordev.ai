@@ -17242,6 +17242,9 @@
             "$ref": "#/components/schemas/EventSessionIdle"
           },
           {
+            "$ref": "#/components/schemas/EventSessionSpend"
+          },
+          {
             "$ref": "#/components/schemas/EventQuestionAsked"
           },
           {
@@ -19200,6 +19203,10 @@
             "additionalProperties": false
           }
         ]
+      },
+      "RunBudgetStopReason": {
+        "type": "string",
+        "enum": ["cap", "predicted", "unpriced", "steps", "loop"]
       },
       "QuestionOption": {
         "type": "object",
@@ -22087,6 +22094,73 @@
                       }
                     },
                     "required": ["sessionID"],
+                    "additionalProperties": false
+                  }
+                },
+                "required": ["id", "type", "properties"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^evt_"
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": ["session.spend"]
+                  },
+                  "properties": {
+                    "type": "object",
+                    "properties": {
+                      "sessionID": {
+                        "type": "string",
+                        "pattern": "^ses"
+                      },
+                      "state": {
+                        "type": "string",
+                        "enum": ["ok", "warn", "stopped"]
+                      },
+                      "reason": {
+                        "$ref": "#/components/schemas/RunBudgetStopReason"
+                      },
+                      "message": {
+                        "type": "string"
+                      },
+                      "spentUsd": {
+                        "type": "number"
+                      },
+                      "capUsd": {
+                        "type": "number"
+                      },
+                      "steps": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "unpricedSteps": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "costKind": {
+                        "type": "string",
+                        "enum": ["free", "priced", "plan", "unknown"]
+                      },
+                      "estimate": {
+                        "type": "object",
+                        "properties": {
+                          "lowUsd": {
+                            "type": "number"
+                          },
+                          "highUsd": {
+                            "type": "number"
+                          }
+                        },
+                        "required": ["lowUsd", "highUsd"],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": ["sessionID", "state", "spentUsd", "steps", "unpricedSteps", "costKind"],
                     "additionalProperties": false
                   }
                 },
@@ -28080,6 +28154,9 @@
           },
           {
             "$ref": "#/components/schemas/SessionIdle"
+          },
+          {
+            "$ref": "#/components/schemas/SessionSpend"
           },
           {
             "$ref": "#/components/schemas/QuestionAsked"
@@ -37693,6 +37770,95 @@
         "required": ["id", "type", "data"],
         "additionalProperties": false
       },
+      "SessionSpend": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^evt_"
+          },
+          "metadata": {
+            "type": "object"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["session.spend"]
+          },
+          "durable": {
+            "type": "object",
+            "properties": {
+              "aggregateID": {
+                "type": "string"
+              },
+              "seq": {
+                "type": "integer"
+              },
+              "version": {
+                "type": "integer"
+              }
+            },
+            "required": ["aggregateID", "seq", "version"],
+            "additionalProperties": false
+          },
+          "location": {
+            "$ref": "#/components/schemas/LocationRef"
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "sessionID": {
+                "type": "string",
+                "pattern": "^ses"
+              },
+              "state": {
+                "type": "string",
+                "enum": ["ok", "warn", "stopped"]
+              },
+              "reason": {
+                "$ref": "#/components/schemas/RunBudgetStopReason"
+              },
+              "message": {
+                "type": "string"
+              },
+              "spentUsd": {
+                "type": "number"
+              },
+              "capUsd": {
+                "type": "number"
+              },
+              "steps": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "unpricedSteps": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "costKind": {
+                "type": "string",
+                "enum": ["free", "priced", "plan", "unknown"]
+              },
+              "estimate": {
+                "type": "object",
+                "properties": {
+                  "lowUsd": {
+                    "type": "number"
+                  },
+                  "highUsd": {
+                    "type": "number"
+                  }
+                },
+                "required": ["lowUsd", "highUsd"],
+                "additionalProperties": false
+              }
+            },
+            "required": ["sessionID", "state", "spentUsd", "steps", "unpricedSteps", "costKind"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "type", "data"],
+        "additionalProperties": false
+      },
       "QuestionAsked": {
         "type": "object",
         "properties": {
@@ -40962,6 +41128,73 @@
               }
             },
             "required": ["sessionID"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "type", "properties"],
+        "additionalProperties": false
+      },
+      "EventSessionSpend": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^evt_"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["session.spend"]
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "sessionID": {
+                "type": "string",
+                "pattern": "^ses"
+              },
+              "state": {
+                "type": "string",
+                "enum": ["ok", "warn", "stopped"]
+              },
+              "reason": {
+                "$ref": "#/components/schemas/RunBudgetStopReason"
+              },
+              "message": {
+                "type": "string"
+              },
+              "spentUsd": {
+                "type": "number"
+              },
+              "capUsd": {
+                "type": "number"
+              },
+              "steps": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "unpricedSteps": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "costKind": {
+                "type": "string",
+                "enum": ["free", "priced", "plan", "unknown"]
+              },
+              "estimate": {
+                "type": "object",
+                "properties": {
+                  "lowUsd": {
+                    "type": "number"
+                  },
+                  "highUsd": {
+                    "type": "number"
+                  }
+                },
+                "required": ["lowUsd", "highUsd"],
+                "additionalProperties": false
+              }
+            },
+            "required": ["sessionID", "state", "spentUsd", "steps", "unpricedSteps", "costKind"],
             "additionalProperties": false
           }
         },

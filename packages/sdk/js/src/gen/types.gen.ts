@@ -85,6 +85,7 @@ export type Event =
   | EventProjectUpdated
   | EventSessionStatus
   | EventSessionIdle
+  | EventSessionSpend
   | EventQuestionAsked
   | EventQuestionReplied
   | EventQuestionRejected
@@ -732,6 +733,8 @@ export type SessionStatus =
   | {
       type: "busy"
     }
+
+export type RunBudgetStopReason = "cap" | "predicted" | "unpriced" | "steps" | "loop"
 
 export type QuestionOption = {
   /**
@@ -1583,6 +1586,25 @@ export type GlobalEvent = {
         type: "session.idle"
         properties: {
           sessionID: string
+        }
+      }
+    | {
+        id: string
+        type: "session.spend"
+        properties: {
+          sessionID: string
+          state: "ok" | "warn" | "stopped"
+          reason?: RunBudgetStopReason
+          message?: string
+          spentUsd: number
+          capUsd?: number
+          steps: number
+          unpricedSteps: number
+          costKind: "free" | "priced" | "plan" | "unknown"
+          estimate?: {
+            lowUsd: number
+            highUsd: number
+          }
         }
       }
     | {
@@ -3582,6 +3604,7 @@ export type V2Event =
   | ProjectUpdated
   | SessionStatus2
   | SessionIdle
+  | SessionSpend
   | QuestionAsked
   | QuestionReplied2
   | QuestionRejected2
@@ -6775,6 +6798,35 @@ export type SessionIdle = {
   }
 }
 
+export type SessionSpend = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "session.spend"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    sessionID: string
+    state: "ok" | "warn" | "stopped"
+    reason?: RunBudgetStopReason
+    message?: string
+    spentUsd: number
+    capUsd?: number
+    steps: number
+    unpricedSteps: number
+    costKind: "free" | "priced" | "plan" | "unknown"
+    estimate?: {
+      lowUsd: number
+      highUsd: number
+    }
+  }
+}
+
 export type QuestionAsked = {
   id: string
   metadata?: {
@@ -7834,6 +7886,26 @@ export type EventSessionIdle = {
   type: "session.idle"
   properties: {
     sessionID: string
+  }
+}
+
+export type EventSessionSpend = {
+  id: string
+  type: "session.spend"
+  properties: {
+    sessionID: string
+    state: "ok" | "warn" | "stopped"
+    reason?: RunBudgetStopReason
+    message?: string
+    spentUsd: number
+    capUsd?: number
+    steps: number
+    unpricedSteps: number
+    costKind: "free" | "priced" | "plan" | "unknown"
+    estimate?: {
+      lowUsd: number
+      highUsd: number
+    }
   }
 }
 
