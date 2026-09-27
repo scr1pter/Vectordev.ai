@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { legacyPrefix } from "../src/flag/legacy"
 import { assertSecurityEnvironment, SecurityConfigurationError } from "../src/flag/security"
 
 describe("security environment migration", () => {
@@ -13,7 +14,7 @@ describe("security environment migration", () => {
     "SHELL_SANDBOX",
   ]) {
     test(`refuses an ignored ${suffix} without exposing its value`, () => {
-      const foreign = `PRIOR_${suffix}`
+      const foreign = `${legacyPrefix}${suffix}`
       const current = `VECTOR_${suffix}`
       expect(() => assertSecurityEnvironment({ [foreign]: "private-fixture-value" })).toThrow(
         SecurityConfigurationError,
@@ -27,13 +28,15 @@ describe("security environment migration", () => {
     })
   }
 
-  test("matches foreign suffixes case insensitively and requires a separator", () => {
-    expect(() => assertSecurityEnvironment({ prior_server_password: "secret" })).toThrow("VECTOR_SERVER_PASSWORD")
-    expect(() =>
-      assertSecurityEnvironment({ PRIOR_SERVER_PASSWORD_BACKUP: "secret", SERVER_PASSWORD: "secret" }),
-    ).not.toThrow()
-    expect(() =>
-      assertSecurityEnvironment({ VECTOR_SERVER_PASSWORD: "secret", VECTOR_OTHER_SERVER_PASSWORD: "secret" }),
-    ).not.toThrow()
+  test("ignores other tools' variables that share a security suffix", () => {
+    for (const env of [
+      { SQL_SERVER_PASSWORD: "secret" },
+      { SQL_SERVER_USERNAME: "sa" },
+      { S3_PERMISSION: "public-read" },
+      { [`${legacyPrefix}SERVER_PASSWORD`.toLowerCase()]: "secret" },
+      { [`${legacyPrefix}SERVER_PASSWORD_BACKUP`]: "secret", SERVER_PASSWORD: "secret" },
+      { VECTOR_SERVER_PASSWORD: "secret", VECTOR_OTHER_SERVER_PASSWORD: "secret" },
+    ])
+      expect(() => assertSecurityEnvironment(env)).not.toThrow()
   })
 })
