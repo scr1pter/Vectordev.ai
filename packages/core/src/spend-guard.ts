@@ -52,6 +52,9 @@ export type Sig = { readonly tool: string; readonly input: string }
 export type Estimate = { readonly lowUsd: number; readonly highUsd: number }
 export type Stop = { readonly reason: RunBudget.StopReason; readonly message: string }
 type Streak = { readonly tool: string; readonly error: string; readonly count: number }
+// The loop detector's memory for one session of the run. Each session keeps its own, so parallel subagents that
+// run the same tool once each are not one loop, and a patch in one session does not clear another's.
+export type Loop = { readonly ring: readonly Sig[]; readonly errorStreak: Streak }
 
 export type Run = {
   readonly rootID: SessionID
@@ -63,8 +66,7 @@ export type Run = {
   readonly costKind?: CostKind
   readonly stopped?: Stop
   readonly warned: boolean
-  readonly ring: readonly Sig[]
-  readonly errorStreak: Streak
+  readonly loops: ReadonlyMap<SessionID, Loop>
 }
 
 export type Step = {
@@ -103,14 +105,14 @@ export function start(rootID: SessionID, budget: RunBudget.Info): Run {
     steps: 0,
     unpricedSteps: 0,
     warned: false,
-    ring: [],
-    errorStreak: { tool: "", error: "", count: 0 },
+    loops: new Map(),
   }
 }
 
-// Called after every provider step of any session in the run. A stopped run keeps counting what in-flight steps
-// spent, and answers stop to every later step, which is how a stop reaches the rest of the lineage.
-export function afterStep(run: Run, step: Step): { run: Run; verdict: Verdict } {
+// Called after every provider step of any session in the run, with the session that took the step. Spend and steps
+// count against the run; loops are detected per session. A stopped run keeps counting what in-flight steps spent,
+// and answers stop to every later step, which is how a stop reaches the rest of the lineage.
+export function afterStep(run: Run, step: Step, sessionID = run.rootID): { run: Run; verdict: Verdict } {
   const counted = {
     ...run,
     steps: run.steps + 1,
@@ -121,7 +123,7 @@ export function afterStep(run: Run, step: Step): { run: Run; verdict: Verdict } 
   if (run.stopped) return { run: counted, verdict: { state: "stopped", ...run.stopped } }
   const limits = checkLimits(counted, step)
   if (limits.state === "stopped") return stop(counted, limits)
-  const loops = checkLoops(counted, step)
+  const loops = checkLoops(counted, step, sessionID)
   if (loops.verdict.state === "stopped") return stop(loops.run, loops.verdict)
   if (limits.state === "warn") return { run: { ...loops.run, warned: true }, verdict: limits }
   return { run: loops.run, verdict: limits }
@@ -194,19 +196,23 @@ function checkLimits(run: Run, step: Step): Verdict {
 
 // A tool with the same input LOOP_REPEATS times in the last LOOP_WINDOW calls, with no file change in between, or
 // the same tool failing with the same error ERROR_STREAK calls in a row.
-function checkLoops(run: Run, step: Step): { run: Run; verdict: Verdict } {
+function checkLoops(run: Run, step: Step, sessionID: SessionID): { run: Run; verdict: Verdict } {
+  const loop = run.loops.get(sessionID) ?? { ring: [], errorStreak: { tool: "", error: "", count: 0 } }
   const ring = [
-    ...(step.patched ? [] : run.ring),
+    ...(step.patched ? [] : loop.ring),
     ...step.tools.map((item) => ({ tool: item.tool, input: item.input })),
   ].slice(-LOOP_WINDOW)
   const streaks = step.tools.reduce<Streak[]>((all, item) => {
-    const previous = all.at(-1) ?? run.errorStreak
+    const previous = all.at(-1) ?? loop.errorStreak
     if (item.error === undefined) return [...all, { tool: "", error: "", count: 0 }]
     if (item.tool === previous.tool && item.error === previous.error)
       return [...all, { ...previous, count: previous.count + 1 }]
     return [...all, { tool: item.tool, error: item.error, count: 1 }]
   }, [])
-  const next = { ...run, ring, errorStreak: streaks.at(-1) ?? run.errorStreak }
+  const next = {
+    ...run,
+    loops: new Map(run.loops).set(sessionID, { ring, errorStreak: streaks.at(-1) ?? loop.errorStreak }),
+  }
   const failing = streaks.find((streak) => streak.count >= ERROR_STREAK)
   if (failing)
     return {
@@ -298,7 +304,7 @@ const layer = Layer.effect(
           const rootID = rootIn(current, sessionID)
           const run = current.runs.get(rootID)
           if (!run) return [undefined, current] as const
-          const next = afterStep(run, step)
+          const next = afterStep(run, step, sessionID)
           return [next, { ...current, runs: new Map(current.runs).set(rootID, next.run) }] as const
         })
         if (!result) return { state: "ok" } satisfies Verdict

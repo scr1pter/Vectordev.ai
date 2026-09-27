@@ -38,6 +38,7 @@ describe("SpendGuard cost kind and price", () => {
 
 const root = SessionID.make("ses_root")
 const child = SessionID.make("ses_child")
+const sibling = SessionID.make("ses_sibling")
 
 const step = (input: Partial<SpendGuard.Step> = {}): SpendGuard.Step => ({
   costKind: "priced",
@@ -49,11 +50,11 @@ const step = (input: Partial<SpendGuard.Step> = {}): SpendGuard.Step => ({
   ...input,
 })
 
-// Applies steps in order and returns the final run and every verdict.
-const play = (budget: RunBudget.Info, steps: SpendGuard.Step[]) =>
+// Applies steps in order and returns the final run and every verdict. `sessions[i]` took step i, else the root.
+const play = (budget: RunBudget.Info, steps: SpendGuard.Step[], sessions: SessionID[] = []) =>
   steps.reduce(
-    (acc, item) => {
-      const next = SpendGuard.afterStep(acc.run, item)
+    (acc, item, index) => {
+      const next = SpendGuard.afterStep(acc.run, item, sessions[index])
       return { run: next.run, verdicts: [...acc.verdicts, next.verdict] }
     },
     { run: SpendGuard.start(root, budget), verdicts: [] as SpendGuard.Verdict[] },
@@ -169,6 +170,51 @@ describe("SpendGuard.afterStep", () => {
       step({ tools: [bash("bun test")] }),
     ])
     expect(patched.verdicts.every((verdict) => verdict.state === "ok")).toBe(true)
+  })
+
+  test("detects loops per session, not across the lineage", () => {
+    // Three subagents each read the same file once.
+    const read = () => step({ tools: [{ tool: "read", input: "src/a.ts" }] })
+    const parallel = play({}, [read(), read(), read()], [root, child, sibling])
+    expect(parallel.verdicts.every((verdict) => verdict.state === "ok")).toBe(true)
+
+    // A patch in one session does not clear another session's repeats.
+    const stuck = play(
+      {},
+      [
+        step({ tools: [bash("bun test")] }),
+        step({ tools: [bash("bun test")] }),
+        step({ tools: [{ tool: "edit", input: "src/a.ts" }], patched: true }),
+        step({ tools: [bash("bun test")] }),
+      ],
+      [child, child, sibling, child],
+    )
+    expect(stuck.verdicts.at(-1)?.reason).toBe("loop")
+
+    // Failures in another session neither break nor build a session's streak.
+    const built = play(
+      {},
+      [
+        step({ tools: [bash("bun run a", "exit 1")] }),
+        step({ tools: [bash("bun run b", "exit 1")] }),
+        step({ tools: [bash("bun run c", "exit 1")] }),
+      ],
+      [child, sibling, child],
+    )
+    expect(built.verdicts.every((verdict) => verdict.state === "ok")).toBe(true)
+    const unbroken = play(
+      {},
+      [
+        step({ tools: [bash("bun run a", "exit 1")] }),
+        step({ tools: [bash("bun run b", "exit 1")] }),
+        step({ tools: [bash("bun run c")] }),
+        step({ tools: [bash("bun run d", "exit 1")] }),
+      ],
+      [child, child, sibling, child],
+    )
+    expect(unbroken.verdicts.at(-1)?.message).toBe(
+      "Paused a repeating loop: `bash` failed with the same error 3 times in a row.",
+    )
   })
 
   test("pauses the same error three times in a row", () => {
