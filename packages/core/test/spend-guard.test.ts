@@ -61,6 +61,8 @@ const play = (budget: RunBudget.Info, steps: SpendGuard.Step[], sessions: Sessio
   )
 
 const bash = (input: string, error?: string) => ({ tool: "bash", input, ...(error === undefined ? {} : { error }) })
+const reads = (count: number) =>
+  Array.from({ length: count }, (_, index) => step({ tools: [{ tool: "read", input: `src/${index}.ts` }] }))
 
 describe("SpendGuard.afterStep", () => {
   test("warns once at 80% of the cap", () => {
@@ -99,6 +101,40 @@ describe("SpendGuard.afterStep", () => {
       "Stopped before the next step: $4.62 spent of a $5.00 cap, and the next step was estimated at $0.41–$0.97 at catalog list prices.",
     )
     expect(verdict?.estimate?.lowUsd).toBeLessThanOrEqual(verdict?.estimate?.highUsd ?? 0)
+  })
+
+  test("shows one figure when the estimate has no cache-read range", () => {
+    const predicted = step({
+      costUsd: 4.62,
+      continues: true,
+      contextTokens: 317_000,
+      cachedTokens: 207_000,
+      price: { input: 3, output: 15 },
+    })
+    expect(play({ usd: 5 }, [predicted]).verdicts[0]?.message).toBe(
+      "Stopped before the next step: $4.62 spent of a $5.00 cap, and the next step was estimated at $0.97 at catalog list prices.",
+    )
+  })
+
+  test("warns once when the high estimate would cross the cap below 80%", () => {
+    // 500k tokens of next-step input at $3/M, 400k of them cached at $0.30/M: low $0.43, high $1.51.
+    const near = (costUsd: number) =>
+      step({
+        costUsd,
+        continues: true,
+        contextTokens: 497_000,
+        cachedTokens: 400_000,
+        price: { input: 3, output: 15, cacheRead: 0.3 },
+      })
+    const result = play({ usd: 5 }, [near(3.9), near(0.01)])
+    expect(result.verdicts[0]).toMatchObject({
+      state: "warn",
+      message: "Approaching the spend cap: $3.90 of $5.00 spent on this run.",
+    })
+    expect(result.verdicts[0]?.estimate?.lowUsd).toBeCloseTo(0.429, 6)
+    expect(result.verdicts[0]?.estimate?.highUsd).toBeCloseTo(1.509, 6)
+    expect(result.verdicts[1]?.state).toBe("ok")
+    expect(result.verdicts[1]?.estimate?.highUsd).toBeCloseTo(1.509, 6)
   })
 
   test("does not predict when no step follows", () => {
@@ -170,6 +206,24 @@ describe("SpendGuard.afterStep", () => {
       step({ tools: [bash("bun test")] }),
     ])
     expect(patched.verdicts.every((verdict) => verdict.state === "ok")).toBe(true)
+  })
+
+  test("forgets a call once it leaves the last 8 calls", () => {
+    const left = play({}, [
+      step({ tools: [bash("bun test")] }),
+      step({ tools: [bash("bun test")] }),
+      ...reads(6),
+      step({ tools: [bash("bun test")] }),
+    ])
+    expect(left.verdicts.every((verdict) => verdict.state === "ok")).toBe(true)
+
+    const inside = play({}, [
+      step({ tools: [bash("bun test")] }),
+      step({ tools: [bash("bun test")] }),
+      ...reads(5),
+      step({ tools: [bash("bun test")] }),
+    ])
+    expect(inside.verdicts.at(-1)?.reason).toBe("loop")
   })
 
   test("detects loops per session, not across the lineage", () => {
@@ -288,6 +342,45 @@ describe("SpendGuard service", () => {
       expect(last?.budget.usd).toBe(10)
       expect((yield* guard.record(child, step({ costUsd: 5 }))).state).toBe("ok")
       expect((yield* guard.snapshot(root))?.spentUsd).toBe(1.1)
+    }),
+  )
+
+  it.effect("publishes a stop to the lineage with its reason and message", () =>
+    Effect.gen(function* () {
+      const guard = yield* SpendGuard.Service
+      const events = yield* EventV2.Service
+      const published = yield* events
+        .subscribe(SessionStatusEvent.Spend)
+        .pipe(Stream.take(2), Stream.runCollect, Effect.forkScoped)
+      yield* Effect.yieldNow
+
+      yield* guard.begin(root, { usd: 5 })
+      yield* guard.link(child, root)
+      yield* guard.record(root, step({ costUsd: 4.1 }))
+      expect((yield* guard.record(child, step({ costUsd: 0.92 }))).state).toBe("stopped")
+
+      const message =
+        "Spend cap reached: $5.02 spent against a $5.00 cap for this run. Vector stopped after the step that crossed it."
+      expect([...(yield* Fiber.join(published))].map((event) => event.data)).toMatchObject([
+        { sessionID: root, state: "warn", message: "Approaching the spend cap: $4.10 of $5.00 spent on this run." },
+        { sessionID: root, state: "stopped", reason: "cap", message, spentUsd: 5.02, capUsd: 5 },
+      ])
+      expect(yield* guard.stopped(child)).toEqual({ reason: "cap", message })
+    }),
+  )
+
+  it.effect("warns again only when a new cap is armed", () =>
+    Effect.gen(function* () {
+      const guard = yield* SpendGuard.Service
+      yield* guard.begin(root, { usd: 5 })
+      expect((yield* guard.record(root, step({ costUsd: 4.1 }))).state).toBe("warn")
+      yield* guard.arm(root, { usd: 5 })
+      expect((yield* guard.record(root, step({ costUsd: 0.01 }))).state).toBe("ok")
+      yield* guard.arm(root, { usd: 4.5 })
+      expect(yield* guard.record(root, step({ costUsd: 0.01 }))).toEqual({
+        state: "warn",
+        message: "Approaching the spend cap: $4.12 of $4.50 spent on this run.",
+      })
     }),
   )
 
