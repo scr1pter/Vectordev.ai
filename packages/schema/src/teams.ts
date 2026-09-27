@@ -1,7 +1,7 @@
-export * as Teams from "./teams"
+export * as Teams from "./teams.js"
 
 import { Schema } from "effect"
-import { NonNegativeInt, PositiveInt } from "./schema"
+import { NonNegativeInt, PositiveInt } from "./schema.js"
 
 export const MAX_RESPONSE_BYTES = 256_000
 export const MAX_CONFIG_BYTES = 160_000

@@ -1,4 +1,4 @@
-export * as CliRelease from "./cli-release"
+export * as CliRelease from "./cli-release.js"
 
 import { Schema } from "effect"
 

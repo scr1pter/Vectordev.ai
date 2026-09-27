@@ -1,7 +1,7 @@
-export * as PublicSession from "./public-session"
+export * as PublicSession from "./public-session.js"
 
 import { Schema } from "effect"
-import { NonNegativeInt, PositiveInt, optional } from "./schema"
+import { NonNegativeInt, PositiveInt, optional } from "./schema.js"
 
 export const MAX_BYTES = 4_000_000
 export const MAX_RESPONSE_BYTES = MAX_BYTES + 1_024
