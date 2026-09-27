@@ -79,9 +79,10 @@ export function migrateEnvironment(env: NodeJS.ProcessEnv = process.env, notice 
   const aliases = renames.flatMap(([suffix, target]) => {
     const key = `${legacyPrefix}${suffix}`
     const value = env[key]
-    if (value === undefined) return []
-    // An empty current variable does not count as set; importing keeps an earlier
-    // restrictive setting (a password, a deny rule) from being silently dropped.
+    // An empty variable counts as unset on both sides, as it did in the earlier product:
+    // an empty leftover export is skipped, and an empty current variable does not block
+    // importing an earlier restrictive setting (a password, a deny rule).
+    if (!value) return []
     const current = env[target] || undefined
     return [{ key, target, suffix, value, conflict: current !== undefined && current !== value, apply: !current }]
   })

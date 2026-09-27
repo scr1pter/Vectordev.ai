@@ -19,12 +19,12 @@ export class SecurityConfigurationError extends Error {
 /**
  * Refuse to discard a security setting the earlier product's variable still carries.
  * Only that product's exact prefix counts; other tools' *_SERVER_PASSWORD and similar
- * variables are theirs, not Vector settings.
+ * variables are theirs, not Vector settings. An empty earlier variable meant unset.
  */
 export function assertSecurityEnvironment(env: NodeJS.ProcessEnv = process.env) {
   const messages = securitySuffixes.flatMap((suffix) => {
     const key = `${legacyPrefix}${suffix}`
-    if (!legacyPrefix || env[key] === undefined || env[`VECTOR_${suffix}`]) return []
+    if (!legacyPrefix || !env[key] || env[`VECTOR_${suffix}`]) return []
     return [`Found ${key}; Vector only reads VECTOR_${suffix}. Rename the variable or explicitly set VECTOR_${suffix}.`]
   })
   if (messages.length) throw new SecurityConfigurationError(messages.join("\n"))

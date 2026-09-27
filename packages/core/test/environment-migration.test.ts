@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import path from "node:path"
 import { migrateEnvironment } from "../src/flag/migrate"
 import { legacyName, legacyPrefix } from "../src/flag/legacy"
+import { assertSecurityEnvironment } from "../src/flag/security"
 import { tmpdir } from "./fixture/tmpdir"
 
 // Built from the derived prefix so the earlier product's name stays out of tracked text.
@@ -90,6 +91,22 @@ describe("earlier environment migration", () => {
       migrateEnvironment(env, () => {})
       expect(env.VECTOR_SERVER_PASSWORD).toBe("synthetic-private")
     }
+  })
+
+  test("an empty earlier variable counts as unset and never stops startup", () => {
+    // `export <earlier>PURE=` in a shell profile meant unset; the desktop sidecar sets
+    // only its own server credentials.
+    for (const suffix of ["PURE", "DISABLE_PROJECT_CONFIG", "SHELL_SANDBOX", "PERMISSION", "CONFIG_CONTENT"]) {
+      const values = { VECTOR_SERVER_PASSWORD: "sidecar", [prior(suffix)]: "" }
+      const env: NodeJS.ProcessEnv = { ...values }
+      expect(migrateEnvironment(env, () => {})).toEqual([])
+      expect(env).toEqual(values)
+      expect(() => assertSecurityEnvironment(env)).not.toThrow()
+    }
+    const env: NodeJS.ProcessEnv = { [prior("SERVER_PASSWORD")]: "" }
+    expect(migrateEnvironment(env, () => {})).toEqual([])
+    expect(env.VECTOR_SERVER_PASSWORD).toBeUndefined()
+    expect(() => assertSecurityEnvironment(env)).not.toThrow()
   })
 
   test("refuses an invalid earlier security setting before mutating the environment", () => {
