@@ -10,22 +10,22 @@ export const prerender = true
 const reasons = [
   {
     title: "Many agents at once, none in your way.",
-    lead: "Start as many agents as the work needs. Each one works in its own copy of the repository, so nothing collides, and you merge the ones that landed.",
+    lead: "Start as many agents as the work needs. By default each one works in its own copy of the repository, so nothing collides, and you merge the ones that landed.",
     points: [
-      ["No cap", "Run agents side by side, each in its own git worktree, or a managed copy when a worktree won't do."],
-      ["Work that splits itself", "A large task hands its parts to subagents that run at the same time, and a card shows what each one is doing."],
+      ["No cap", "Run as many agents side by side as you like, by default each in its own git worktree, or a managed copy when a worktree won't do."],
+      ["Work that splits itself", "A large task hands its parts to subagents that run at the same time, and a card in the chat shows each one's task and status."],
       ["One objective, a whole plan", "Vector can plan the task graph itself, give each task its own agent and model, and run them in dependency order."],
     ],
     href: "/docs/agent-workspaces",
     more: "Read about agent workspaces",
   },
   {
-    title: "It checks its work before it calls it done.",
-    lead: "Finishing is not the agent's opinion. Vector exercises the change, looks at the result, and can send the work back.",
+    title: "It can check its work before it calls it done.",
+    lead: "Turn on verified completion and finishing stops being the agent's opinion: the agent has to exercise the change, a judge checks the result, and a fail sends the work back.",
     points: [
       ["An independent judge", "Turn it on and a read-only subagent compares your request, the changed files and the test output. A fail names the repair and sends the agent back."],
-      ["A browser it drives", "A real Chromium view: the agent loads your app, clicks through it, and reads the console errors and failed requests."],
-      ["Reviewed before main", "Vectorscope comments on the exact lines of every pull request, and runs the same pass on your branch before you push."],
+      ["A browser it drives", "A real Chromium view in the desktop app: the agent loads your app, clicks through it, and reads console errors, runtime errors and pages that failed to load."],
+      ["Reviewed before main", "Vectorscope comments on the exact lines of your pull requests, and vector review runs the same pass on your branch before you push."],
     ],
     href: "/docs/verified-completion",
     more: "Read about verified completion",
@@ -34,15 +34,15 @@ const reasons = [
     title: "Your team in the same session.",
     lead: "Agent work is usually a solo window. In Vector it can be a room.",
     points: [
-      ["One link", "vector invite shares your workspace. Teammates land in the same sessions, files and agents, and the header shows who is there."],
+      ["One link", "vector invite prints a link that teammates on your network, or through your own tunnel, open to join your running workspace: the same sessions, files and agents."],
       ["Watch the agent type", "Follow mode opens the file the agent is editing, highlights its lines and gives each agent a named cursor."],
-      ["Merge the hunks you trust", "Tick the parts of an agent's diff you want, and Vector merges a patch built from exactly those."],
+      ["Merge the hunks you trust", "Approve the hunks you want from an agent's diff, and in a Git project Vector merges a patch built from exactly those."],
     ],
     href: "/docs/multiplayer",
     more: "Read about multiplayer",
   },
   {
-    title: "Every model, and the agents you already use.",
+    title: "Your choice of model, and the agents you already use.",
     lead: "Vector doesn't make you pick one lab. Use the model that fits the task, and bring your other agents along.",
     points: [
       ["Your keys, your bill", "Connect Claude, GPT, Gemini, local models or a company gateway. The bill stays between you and that provider."],
@@ -58,12 +58,12 @@ const reasons = [
 // in the next release. Keep both lists in step with /docs/tokenomics.
 const tokenomics = {
   title: "Know what a run costs, and stop it before it runs away.",
-  lead: "Every token an agent spends in Vector is your money, on your own key. The Vector Tokenomics Engine prices every chat from what your provider reported and keeps a ledger of what your agents spent. In the next release, the Run Guard puts a live cap on every run.",
+  lead: "When an agent runs on your own provider key, every token it spends is your money. The Vector Tokenomics Engine prices every chat from the token counts your provider reported, and keeps a local ledger of what automations and parallel agents spent. In the next release, the Run Guard puts a live cap on every run.",
   today: [
-    ["Priced from what the provider reported", "Input, output, reasoning, cache reads and cache writes, at the model catalog's list price. A run that reported nothing is marked unmeasured, never counted as free."],
-    ["A ledger on your machine", "Automations and parallel agents are written to a local spend ledger, and an automation is refused a start once your daily cap is spent."],
-    ["Reviews with a budget", "Vectorscope stops at the per-review, per-pull-request and monthly budgets you set."],
-    ["Models ranked on measured spend", "Recommendations come from your own recorded runs. A model needs three of them for a kind of task before Vector recommends it."],
+    ["Priced from what the provider reported", "Input, output, cache reads and cache writes, as your provider counted them, at the model catalog's rates, with reasoning charged at the output rate."],
+    ["A ledger on your machine", "Automations and parallel agents are written to a local spend ledger. A run that reported no cost is marked unmeasured there, never counted as free, and an automation won't start once the day's measured spend reaches its $25 cap."],
+    ["Reviews with a budget", "Vectorscope stops a review at its per-review budget, stops automatic reviews of a pull request at its per-PR budget, and pauses GitHub reviews once the monthly budget you set is used."],
+    ["Models ranked on your own results", "Recommendations come from your own recorded runs, ranked by checks passed and then by measured spend. A model needs three runs for a kind of task before Vector recommends it."],
   ],
   next: [
     ["A cap on every run", "Set a dollar cap in Settings, in project config, or with vector run --max-cost. Vector checks spend after every model step and stops within one step of the cap."],
@@ -78,13 +78,13 @@ const tokenomics = {
 const places = [
   ["Your editor", "An editor, file search and diagnostics beside the agent, over the repository already on your disk."],
   ["Your terminal", "The same agent in any shell with @vectordevai/cli, Vectorscope reviews included."],
-  ["Your accounts", "Deploys to your own Vercel, Netlify or Supabase, on tokens encrypted on your machine."],
+  ["Your accounts", "Deploys to your own Vercel or Netlify, and databases on your own Supabase, with account tokens encrypted on your machine."],
 ]
 ---
 
 <MarketingLayout
   title="Why Vector"
-  description="Why teams choose Vector: many agents at once, work that is checked before it is done, your team in the session, every model, and a Tokenomics engine that keeps the bill in sight."
+  description="Why teams choose Vector: many agents at once, work a judge can check before it is done, your team in the session, your choice of model, and a Tokenomics engine that keeps the bill in sight."
   socialTitle="Why Vector"
 >
   <div class="why-page">
@@ -95,8 +95,9 @@ const places = [
         <h1>Most tools write the code. Vector finishes the work.</h1>
         <p>
           AI coding tools usually live in one place: an editor, a terminal, or a cloud sandbox. Vector is the workspace
-          around the whole job. Many agents at once, checks before anything counts as done, your team in the same
-          session, any model you like, and a bill you can see and cap before it surprises you.
+          around the whole job. Many agents at once, a judge you can switch on before work counts as done, your team
+          in the same session, any model you like, and a bill you can see, with a live cap on every run coming in the
+          next release.
         </p>
       </header>
 
