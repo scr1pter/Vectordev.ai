@@ -18,6 +18,7 @@ const keep = new Set([
   "releases",
   "s",
   "support",
+  "why-vector",
   "install",
   "install.ps1",
   "index.html",
