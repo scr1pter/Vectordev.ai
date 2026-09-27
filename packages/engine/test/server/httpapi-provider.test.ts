@@ -379,7 +379,8 @@ describe("provider HttpApi", () => {
     Effect.gen(function* () {
       const directory = (yield* TestInstance).directory
       const headers = { "x-vector-directory": directory, "content-type": "application/json" }
-      for (const missing of ["missing-provider-fixture", "constructor"]) {
+      // ChatGPT sign-in is available again, so OpenAI without a pending sign-in is missing, not paused.
+      for (const missing of ["missing-provider-fixture", "constructor", "openai"]) {
         const response = yield* requestCallback({ providerID: missing, method: 0, headers })
         expect(response.status).toBe(400)
         expect(JSON.parse(response.body)).toEqual({
@@ -387,7 +388,7 @@ describe("provider HttpApi", () => {
           data: { providerID: missing },
         })
       }
-      for (const paused of ["github-copilot", "openai", "xai"]) {
+      for (const paused of ["github-copilot", "xai"]) {
         const response = yield* requestCallback({ providerID: paused, method: 0, headers })
         expect(response.status).toBe(400)
         expect(JSON.parse(response.body)).toMatchObject({
