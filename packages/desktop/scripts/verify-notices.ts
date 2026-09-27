@@ -6,9 +6,11 @@ export async function verifyNotices(directory: string, platform: "darwin" | "win
     platform === "darwin" ? path.join(directory, "Contents/Resources") : path.join(directory, "resources")
   const files = [
     ...["LICENSE.txt", "THIRD_PARTY_NOTICES.md", "DEPENDENCY_NOTICES.md"].map((file) => path.join(resources, file)),
+    // The macOS config copies Electron's notices into Resources. On Windows and Linux they stay beside the
+    // executable, where electron-builder renames Electron's LICENSE to LICENSE.electron.txt after unpacking.
     ...(platform === "darwin"
       ? ["Electron-LICENSE.txt", "LICENSES.chromium.html"].map((file) => path.join(resources, file))
-      : ["LICENSE", "LICENSES.chromium.html"].map((file) => path.join(directory, file))),
+      : ["LICENSE.electron.txt", "LICENSES.chromium.html"].map((file) => path.join(directory, file))),
   ]
   for (const file of files) {
     const info = await stat(file).catch(() => undefined)
