@@ -16,6 +16,7 @@ import { Integration } from "../../integration"
 import { ModelV2 } from "../../model"
 import { ProviderV2 } from "../../provider"
 import { SessionSchema } from "../schema"
+import { SpendGuard } from "../../spend-guard"
 
 export class ModelNotSelectedError extends Schema.TaggedErrorClass<ModelNotSelectedError>()(
   "SessionRunnerModel.ModelNotSelectedError",
@@ -94,6 +95,12 @@ const pricing = new WeakMap<Model, ModelV2.Info["cost"]>()
 export const withPricing = (model: Model, cost: ModelV2.Info["cost"]) => {
   pricing.set(model, cost)
   return model
+}
+
+// The catalog's base (untiered) rates, which the spend guard uses to estimate the next step.
+export const priceOf = (model: Model) => {
+  const cost = pricing.get(model)?.find((item) => item.tier === undefined)
+  return cost ? SpendGuard.priceOf(cost) : undefined
 }
 
 export const calculateCost = (model: Model, tokens: Tokens, metadata?: ProviderMetadata) => {
