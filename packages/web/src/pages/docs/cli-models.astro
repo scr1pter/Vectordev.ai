@@ -7,7 +7,7 @@ export const prerender = true
 <DocsPage id="cli-models">
 
           <p>
-            <code>vector models</code> lists the supported model catalog. Connect a provider with <code>vector providers login</code> to use its models. Pass a provider id to filter and <code>--verbose</code> for metadata such as per-token cost. The catalog is bundled with the release; <code>--refresh</code> only fetches when a mirror is explicitly configured with <code>VECTOR_MODELS_URL</code>. <code>VECTOR_MODELS_PATH</code> selects a local catalog and <code>VECTOR_DISABLE_MODELS_FETCH=1</code> disables refresh.
+            <code>vector models</code> lists the supported model catalog. Connect a provider with <code>vector providers login</code> to use its models. Pass a provider id to filter and <code>--verbose</code> for metadata such as per-token cost. The catalog is bundled with the release. From the next release, <code>--refresh</code> only fetches when a mirror is explicitly configured with <code>VECTOR_MODELS_URL</code>, <code>VECTOR_MODELS_PATH</code> selects a local catalog, and <code>VECTOR_DISABLE_MODELS_FETCH=1</code> disables refresh.
           </p>
           <p>
             In the upcoming release, an enabled service adds the heading <strong>Free models inside of Vector</strong>,

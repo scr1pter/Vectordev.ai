@@ -27,6 +27,6 @@ try {
 }`}</code></pre>
   <p>The launcher finds <code>vector</code> on PATH. It does not install Vector or connect a provider. Pass an <code>AbortSignal</code> to stop the process when your application exits. Browser code should import the client entry only.</p>
   <h3>Authentication and API versions</h3>
-  <p>Keep the server on loopback unless you have configured authenticated network access. The server can operate on files and run tools. Set <code>VECTOR_SERVER_PASSWORD</code> and optionally <code>VECTOR_SERVER_USERNAME</code>, then pass the corresponding Authorization header through the SDK client’s <code>headers</code> option. Never embed server credentials in a public webpage.</p>
+  <p>Keep the server on loopback unless you have configured authenticated network access. The server can operate on files and run tools. With the release that ships the SDK, set <code>VECTOR_SERVER_PASSWORD</code> and optionally <code>VECTOR_SERVER_USERNAME</code>, then pass the corresponding Authorization header through the SDK client’s <code>headers</code> option. Never embed server credentials in a public webpage.</p>
   <p>The root and <code>/client</code> exports retain grouped v1 arguments. The <code>/v2/client</code> export uses flat arguments. Match the SDK release to the server and consult its generated declarations for request and response types. The package includes its applicable license and third-party notices.</p>
 </DocsPage>

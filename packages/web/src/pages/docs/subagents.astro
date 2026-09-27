@@ -57,8 +57,8 @@ export const prerender = true
           </p>
           <ul class="feature-list">
             <li><strong>In the desktop app</strong><span>Switch off General subagents in Settings → Agents. Changing it stops any work in progress, and the new setting applies from your next message.</span></li>
-            <li><strong>In the terminal</strong><span>The terminal reads its own config file, so the desktop switch does not change it. Add <code>{'"agent": { "general": { "disable": true } }'}</code> to <code>~/.config/vector/vector.json</code> (<code>%USERPROFILE%\.config\vector\vector.json</code> on Windows). It takes effect the next time you start Vector in the terminal.</span></li>
-            <li><strong>For one project</strong><span>Put the same setting in the project's <code>vector.json</code>. It turns subagents off for that project in the terminal and the desktop app alike, whatever the switch says.</span></li>
+            <li><strong>In the terminal</strong><span>The terminal reads its own config file, so the desktop switch does not change it. From the next release, add <code>{'"agent": { "general": { "disable": true } }'}</code> to <code>~/.config/vector/vector.json</code> (<code>%USERPROFILE%\.config\vector\vector.json</code> on Windows). It takes effect the next time you start Vector in the terminal.</span></li>
+            <li><strong>For one project</strong><span>From the next release, put the same setting in the project's <code>vector.json</code>. It turns subagents off for that project in the terminal and the desktop app alike, whatever the switch says.</span></li>
           </ul>
           <p class="note">
             Subagents are not agent workspaces. A subagent works inside your session and your checkout and reports to the

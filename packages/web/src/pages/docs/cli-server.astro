@@ -14,10 +14,12 @@ export const prerender = true
   <p class="doc-cmd"><code>vector serve --port 4096
 vector attach http://localhost:4096 --dir ~/code/myapp</code><button class="doc-cmd-copy" type="button" aria-label="Copy this command">Copy</button></p>
   <p>
-    Configure <code>VECTOR_SERVER_PASSWORD</code> and, optionally, <code>VECTOR_SERVER_USERNAME</code>;
-    the default username is <code>vector</code>. Non-loopback binding requires a password unless you explicitly
-    choose <code>--unsecured</code>. Use a protected secret source for server passwords. Settings and database
-    overrides are <code>VECTOR_AGENT_CONFIG</code>, <code>VECTOR_AGENT_CONFIG_DIR</code> and <code>VECTOR_AGENT_DB</code>.
+    From the next release, configure <code>VECTOR_SERVER_PASSWORD</code> and, optionally,
+    <code>VECTOR_SERVER_USERNAME</code>; the default username is <code>vector</code>, and non-loopback binding requires
+    a password unless you explicitly choose <code>--unsecured</code>. Current releases do not read these names or
+    enforce that rule, so keep <code>vector serve</code> on loopback until you upgrade. Use a protected secret source
+    for server passwords. That release's settings and database overrides are <code>VECTOR_AGENT_CONFIG</code>,
+    <code>VECTOR_AGENT_CONFIG_DIR</code> and <code>VECTOR_AGENT_DB</code>.
     Keep the existing database file when migrating an ambiguous historical override.
   </p>
   <h3>Upcoming native installation</h3>
