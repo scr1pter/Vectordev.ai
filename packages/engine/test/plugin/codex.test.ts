@@ -149,9 +149,13 @@ describe("plugin.codex", () => {
     await enabled.dispose?.()
   })
 
-  test("offers only API keys and ignores cached ChatGPT OAuth credentials", async () => {
+  test("offers ChatGPT sign-in alongside API keys and uses a cached ChatGPT credential", async () => {
     const hooks = await CodexAuthPlugin({} as never)
-    expect(hooks.auth?.methods.map((method) => method.type)).toEqual(["api"])
+    expect(hooks.auth?.methods.map((method) => method.label)).toEqual([
+      "ChatGPT Pro/Plus (browser)",
+      "ChatGPT Pro/Plus (headless)",
+      "Manually enter API Key",
+    ])
     const options = await hooks.auth!.loader!(
       async () => ({
         type: "oauth",
@@ -159,8 +163,8 @@ describe("plugin.codex", () => {
         access: "placeholder",
         expires: 0,
       }),
-      {} as never,
+      { models: {} } as never,
     )
-    expect(options).toEqual({})
+    expect(Object.keys(options)).not.toHaveLength(0)
   })
 })

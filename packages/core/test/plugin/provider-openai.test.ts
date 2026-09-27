@@ -41,11 +41,22 @@ function fakeSelectorSdk(calls: string[]) {
 }
 
 describe("OpenAIPlugin", () => {
-  it.effect("does not register borrowed ChatGPT OAuth methods", () =>
+  it.effect("registers browser and headless ChatGPT OAuth methods", () =>
     Effect.gen(function* () {
       yield* addPlugin()
       const integrations = yield* Integration.Service
-      expect((yield* integrations.get(Integration.ID.make("openai")))?.methods ?? []).toEqual([])
+      expect((yield* integrations.get(Integration.ID.make("openai")))?.methods).toEqual([
+        {
+          id: Integration.MethodID.make("chatgpt-browser"),
+          type: "oauth",
+          label: "ChatGPT Pro/Plus (browser)",
+        },
+        {
+          id: Integration.MethodID.make("chatgpt-headless"),
+          type: "oauth",
+          label: "ChatGPT Pro/Plus (headless)",
+        },
+      ])
     }),
   )
 

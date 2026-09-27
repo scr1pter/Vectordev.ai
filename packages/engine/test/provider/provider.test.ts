@@ -1932,7 +1932,7 @@ it.instance(
   },
 )
 
-it.instance("Vector auth content admits API keys and rejects unsupported providers and paused OAuth", () =>
+it.instance("Vector auth content admits API keys and ChatGPT sign-in, and rejects unsupported providers and paused OAuth", () =>
   Effect.gen(function* () {
     yield* set(
       "VECTOR_AUTH_CONTENT",
@@ -1940,12 +1940,14 @@ it.instance("Vector auth content admits API keys and rejects unsupported provide
         anthropic: { type: "api", key: "placeholder-current" },
         "unsupported-fixture": { type: "api", key: "placeholder-unsupported" },
         openai: { type: "oauth", access: "placeholder", refresh: "placeholder", expires: Date.now() + 60_000 },
+        xai: { type: "oauth", access: "placeholder", refresh: "placeholder", expires: Date.now() + 60_000 },
       }),
     )
     const providers = yield* Provider.use.list()
     expect(providers[ProviderV2.ID.anthropic].key).toBe("placeholder-current")
     expect(providers[ProviderV2.ID.make("unsupported-fixture")]).toBeUndefined()
-    expect(providers[ProviderV2.ID.openai]).toBeUndefined()
+    expect(providers[ProviderV2.ID.openai]).toBeDefined()
+    expect(providers[ProviderV2.ID.make("xai")]).toBeUndefined()
   }),
 )
 

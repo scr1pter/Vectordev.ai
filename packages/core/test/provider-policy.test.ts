@@ -158,7 +158,7 @@ it.effect("paused sign-ins never expose stored OAuth connections", () =>
   Effect.gen(function* () {
     const credentials = yield* Credential.Service
     const integrations = yield* Integration.Service
-    for (const id of ["openai", "github-copilot", "xai", "gitlab", "poe", "digitalocean"]) {
+    for (const id of ["github-copilot", "xai", "gitlab", "poe", "digitalocean"]) {
       const integrationID = Integration.ID.make(id)
       yield* integrations.transform((draft) => draft.update(integrationID, () => {}))
       const saved = yield* credentials.create({
@@ -260,10 +260,13 @@ it.effect("paused Copilot cannot acquire V2 models, defaults, key connections, o
 
 test("unavailable credential reasons preserve ordinary and custom API keys", async () => {
   const { providerCredentialUnavailable } = await import("@vectordevai/core/provider-policy")
-  for (const id of ["openai", "xai", "poe", "digitalocean", "gitlab"]) {
+  for (const id of ["xai", "poe", "digitalocean", "gitlab"]) {
     expect(providerCredentialUnavailable(id, { type: "oauth" })?.reason).toBe("sign-in-paused")
     expect(providerCredentialUnavailable(id, { type: "api" })).toBeUndefined()
   }
+  // ChatGPT sign-in was restored on 26 September 2026.
+  expect(providerCredentialUnavailable("openai", { type: "oauth" })).toBeUndefined()
+  expect(providerCredentialUnavailable("openai", { type: "api" })).toBeUndefined()
   expect(
     providerCredentialUnavailable("digitalocean", { type: "api", metadata: { oauth_access: "true" } })?.reason,
   ).toBe("sign-in-paused")
@@ -278,7 +281,7 @@ it.effect("V2 publishes one actionable notice for a paused credential without ex
     const integrations = yield* Integration.Service
     const credentials = yield* Credential.Service
     const events = yield* EventV2.Service
-    const integrationID = Integration.ID.make("openai")
+    const integrationID = Integration.ID.make("xai")
     const notices: unknown[] = []
     yield* events.subscribe(Integration.Event.Unavailable).pipe(
       Stream.runForEach((event) =>
@@ -304,8 +307,8 @@ it.effect("V2 publishes one actionable notice for a paused credential without ex
     yield* integrations.list()
     yield* Effect.yieldNow
     expect(notices).toHaveLength(1)
-    expect(notices[0]).toMatchObject({ id: "openai", reason: "sign-in-paused" })
-    expect(JSON.stringify(notices)).toContain("vector providers logout openai")
+    expect(notices[0]).toMatchObject({ id: "xai", reason: "sign-in-paused" })
+    expect(JSON.stringify(notices)).toContain("vector providers logout xai")
     expect(JSON.stringify(notices)).not.toContain("fixture-private")
   }),
 )

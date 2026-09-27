@@ -14,7 +14,9 @@ export function providerUsable(id: string, provider?: Parameters<typeof Provider
 }
 
 // Re-enabling these requires Vector-owned registrations and provider approval.
-export const CHATGPT_SIGN_IN = false
+// Restored at the owner's request (26 September 2026): "Sign in with ChatGPT"
+// works as it did up to 1.99.10.
+export const CHATGPT_SIGN_IN = true
 export const XAI_SIGN_IN = false
 export const POE_SIGN_IN = false
 export const DIGITALOCEAN_SIGN_IN = false

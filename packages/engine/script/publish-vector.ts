@@ -87,11 +87,12 @@ for (const suffix of targets) {
     }
   }
   const bytes = Buffer.from(await Bun.file(binary).arrayBuffer())
+  // The Codex CLI client is allowed again: the owner restored ChatGPT sign-in
+  // on 26 September 2026.
   for (const credential of [
     'apiKey:"public"',
     "1d89f9fdb23ee96d4e603201f6861dab6e143c5c3c00469a018a2d94bdc03d4e",
     "Ov23li8tweQw6odWQebz",
-    "app_EMoamEEZ73f0CkXaXp7hrann",
   ]) {
     if (bytes.includes(credential))
       throw new Error(

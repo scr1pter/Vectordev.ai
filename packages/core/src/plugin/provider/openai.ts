@@ -12,7 +12,8 @@ import { OauthCallbackPage } from "../../oauth/page"
 import { ProviderV2 } from "../../provider"
 import type { PluginInternal } from "../internal"
 
-const clientID = "" // Requires a Vector-owned OpenAI OAuth registration.
+// The Codex CLI client, as Vector used it for ChatGPT sign-in up to 1.99.10.
+const clientID = "app_EMoamEEZ73f0CkXaXp7hrann"
 const issuer = "https://auth.openai.com"
 const callbackPort = 1455
 const pollingSafetyMargin = 3000

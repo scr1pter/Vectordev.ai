@@ -183,11 +183,9 @@ test("dry-run packages every target with notices and a working Vector launcher w
   }
 }, 30_000)
 
-const borrowedRegistrations = [
-  "1d89f9fdb23ee96d4e603201f6861dab6e143c5c3c00469a018a2d94bdc03d4e",
-  "Ov23li8tweQw6odWQebz",
-  "app_EMoamEEZ73f0CkXaXp7hrann",
-]
+// The Codex CLI client was restored for ChatGPT sign-in on 26 September 2026;
+// every other borrowed registration still stops a publish.
+const borrowedRegistrations = ["1d89f9fdb23ee96d4e603201f6861dab6e143c5c3c00469a018a2d94bdc03d4e", "Ov23li8tweQw6odWQebz"]
 for (const problem of [
   "stale version",
   "missing binary",

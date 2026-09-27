@@ -8,7 +8,8 @@ import { createServer } from "http"
 import { OpenAIWebSocketPool } from "./ws-pool"
 import { OauthCallbackPage } from "@vectordevai/core/oauth/page"
 
-const CLIENT_ID = "" // Requires a Vector-owned OpenAI OAuth registration.
+// The Codex CLI client, as Vector used it for ChatGPT sign-in up to 1.99.10.
+const CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 const ISSUER = "https://auth.openai.com"
 const CODEX_API_ENDPOINT = "https://chatgpt.com/backend-api/codex/responses"
 const OAUTH_PORT = 1455
