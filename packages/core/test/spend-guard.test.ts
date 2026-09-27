@@ -290,4 +290,32 @@ describe("SpendGuard service", () => {
       expect((yield* guard.snapshot(root))?.spentUsd).toBe(1.1)
     }),
   )
+
+  it.effect("drops a budget armed for a run that never began", () =>
+    Effect.gen(function* () {
+      const guard = yield* SpendGuard.Service
+      yield* guard.arm(root, { usd: 1 })
+      yield* guard.end(root)
+      yield* guard.begin(root, { usd: 9 })
+      expect((yield* guard.snapshot(root))?.budget.usd).toBe(9)
+    }),
+  )
+
+  it.effect("keeps the last 200 finished runs, and drops the links of older ones", () =>
+    Effect.gen(function* () {
+      const guard = yield* SpendGuard.Service
+      yield* guard.begin(root)
+      yield* guard.link(child, root)
+      yield* guard.end(root)
+      const others = Array.from({ length: SpendGuard.LAST_RUNS - 1 }, (_, index) => SessionID.make(`ses_run_${index}`))
+      yield* Effect.forEach(others, (id) => Effect.andThen(guard.begin(id), guard.end(id)), { discard: true })
+      expect(yield* guard.snapshot(child)).toBeDefined()
+
+      yield* guard.begin(sibling)
+      yield* guard.end(sibling)
+      expect(yield* guard.snapshot(root)).toBeUndefined()
+      expect(yield* guard.rootOf(child)).toBe(child)
+      expect(yield* guard.snapshot(SessionID.make("ses_run_0"))).toBeDefined()
+    }),
+  )
 })

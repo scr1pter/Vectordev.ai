@@ -249,6 +249,7 @@ export interface Interface {
   // active run is ignored.
   readonly record: (sessionID: SessionID, step: Step) => Effect.Effect<Verdict>
   readonly stopped: (sessionID: SessionID) => Effect.Effect<Stop | undefined>
+  // Moves the run into the finished runs, and drops a budget armed for a run that never began.
   readonly end: (rootID: SessionID) => Effect.Effect<void>
   // The active run of `sessionID`'s root, else its last finished run.
   readonly snapshot: (sessionID: SessionID) => Effect.Effect<Run | undefined>
@@ -328,14 +329,24 @@ const layer = Layer.effect(
       }),
       end: Effect.fn("SpendGuard.end")(function* (rootID) {
         yield* Ref.update(state, (current) => {
+          const armed = new Map(current.armed)
+          armed.delete(rootID)
           const run = current.runs.get(rootID)
-          if (!run) return current
+          if (!run) return { ...current, armed }
           const runs = new Map(current.runs)
           runs.delete(rootID)
           const last = new Map(current.last)
           last.delete(rootID)
           last.set(rootID, run)
-          return { ...current, runs, last: new Map([...last].slice(-LAST_RUNS)) }
+          // A root whose finished run falls out of `last` also loses its subagent links, unless it runs again.
+          const dropped = new Set([...last.keys()].slice(0, -LAST_RUNS).filter((id) => !runs.has(id)))
+          return {
+            ...current,
+            armed,
+            runs,
+            roots: new Map([...current.roots].filter((entry) => !dropped.has(entry[1]))),
+            last: new Map([...last].slice(-LAST_RUNS)),
+          }
         })
       }),
       snapshot: Effect.fn("SpendGuard.snapshot")(function* (sessionID) {
