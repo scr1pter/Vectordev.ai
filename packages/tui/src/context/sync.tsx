@@ -181,7 +181,8 @@ export const {
 
         case "permission.asked": {
           const request = event.properties
-          if (permission.mode === "auto") {
+          // doom_loop means the agent is repeating itself; auto mode must still leave it for a person to answer.
+          if (permission.mode === "auto" && request.permission !== "doom_loop") {
             void sdk.client.permission.reply({
               requestID: request.id,
               reply: "once",

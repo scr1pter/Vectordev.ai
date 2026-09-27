@@ -22,7 +22,7 @@ export async function wait(fn: () => boolean, timeout = 2000) {
 
 type Ctx = { kv: ReturnType<typeof useKV>; project: ReturnType<typeof useProject>; sync: ReturnType<typeof useSync> }
 
-export async function mount(override?: FetchHandler, state?: string, observe?: () => void) {
+export async function mount(override?: FetchHandler, state?: string, observe?: () => void, auto?: boolean) {
   const calls = createFetch(override)
   const events = createEventSource()
   let sync!: ReturnType<typeof useSync>
@@ -47,7 +47,7 @@ export async function mount(override?: FetchHandler, state?: string, observe?: (
 
   const app = await testRender(() => (
     <TestTuiContexts paths={state ? { state } : undefined}>
-      <ArgsProvider>
+      <ArgsProvider auto={auto}>
         <KVProvider>
           <SDKProvider url="http://test" directory={directory} fetch={calls.fetch} events={events.source}>
             <PermissionProvider>
