@@ -1,6 +1,7 @@
 export * as ConfigMigration from "./migration"
 
 import path from "node:path"
+import { createHash } from "node:crypto"
 import { Effect, Option, Schema } from "effect"
 import { applyEdits, modify, parse, type ParseError } from "jsonc-parser"
 import TOML from "smol-toml"
@@ -25,19 +26,10 @@ const assetNames = [
   "mode",
   "modes",
 ]
-const ignoredDirectories = new Set([
-  ".vector",
-  ".git",
-  ".claude",
-  ".agents",
-  ".codex",
-  ".config",
-  ".cache",
-  ".local",
-  ".npm",
-  ".ssh",
-  ".gnupg",
-])
+// SHA-256 digests of the exact folder names that earlier agent versions created in projects and in the home
+// folder. Matching digests recognizes only those folders, never look-alikes such as ~/.cursor or .github, and
+// keeps the earlier product name out of Vector's source.
+const earlierFolders = new Set(["5e2dd251c591a56f07d7103d60847b604e12ed80719fefa8342b70789f4d4907"])
 const configKeys = new Set(Object.keys(ConfigV1.Info.fields))
 const decode = Schema.decodeUnknownOption(ConfigV1.Info)
 
@@ -240,54 +232,17 @@ export const discover = Effect.fn("ConfigMigration.discover")(function* (input: 
     if (imported) results.push(imported)
   }
   for (const directory of new Set([input.home, ...parents])) {
-    if (!(yield* fs.isDir(directory))) continue
-    const entries = yield* fs.readDirectoryEntries(directory)
-    const folders = yield* Effect.forEach(
-      entries.filter(
-        (entry) => entry.type === "directory" && entry.name.startsWith(".") && !ignoredDirectories.has(entry.name),
-      ),
-      Effect.fnUntraced(function* (entry) {
-        const source = path.join(directory, entry.name)
-        const files = yield* fs.readDirectoryEntries(source)
-        const assets = files.filter((file) => file.type === "directory" && assetNames.includes(file.name))
-        if (!assets.length) return
-        const identified =
-          assets.length > 1 ||
-          (yield* Effect.forEach(
-            files.filter(
-              (file) => file.type === "file" && !excluded.test(file.name) && /\.(?:jsonc?|toml)$/.test(file.name),
-            ),
-            Effect.fnUntraced(function* (file) {
-              const text = yield* fs.readFileString(path.join(source, file.name))
-              const data = yield* Effect.try({ try: () => parseConfig(text, file.name), catch: () => undefined }).pipe(
-                Effect.option,
-              )
-              if (Option.isNone(data) || !data.value || typeof data.value !== "object" || Array.isArray(data.value))
-                return false
-              const value = Object.fromEntries(
-                Object.entries(data.value).filter(([key]) => !["theme", "keybinds", "tui"].includes(key)),
-              )
-              return (
-                (typeof value.$schema === "string" && /\/config\.json(?:[?#]|$)/.test(value.$schema)) ||
-                (Object.keys(value).some((key) => key !== "$schema") &&
-                  Object.keys(value).every((key) => configKeys.has(key)) &&
-                  Option.isSome(decode(value)))
-              )
-            }),
-          )).some(Boolean)
-        if (!identified) return
-        return { source, files, assets }
-      }),
+    // Only the exact earlier folder is opened; other dot folders, such as ~/.Trash, which macOS refuses to list
+    // without Full Disk Access, are never read. An unreadable folder holds nothing to import.
+    const entries = yield* fs.readDirectoryEntries(directory).pipe(Effect.orElseSucceed(() => []))
+    const earlier = entries.find(
+      (entry) =>
+        entry.type === "directory" && earlierFolders.has(createHash("sha256").update(entry.name).digest("hex")),
     )
-    const recognized = folders.filter((folder) => folder !== undefined)
-    if (recognized.length > 1)
-      return yield* Effect.die(
-        new Error(
-          `Multiple earlier agent folders found in ${directory}. Merge their settings into .vector before starting Vector.`,
-        ),
-      )
-    const folder = recognized[0]
-    if (!folder) continue
+    if (!earlier) continue
+    const source = path.join(directory, earlier.name)
+    const files = yield* fs.readDirectoryEntries(source).pipe(Effect.orElseSucceed(() => []))
+    const assets = files.filter((file) => file.type === "directory" && assetNames.includes(file.name))
     const target = path.join(directory, ".vector")
     if (entries.find((entry) => entry.name === ".vector")?.type === "symlink")
       return yield* Effect.die(
@@ -302,24 +257,26 @@ export const discover = Effect.fn("ConfigMigration.discover")(function* (input: 
       Effect.gen(function* () {
         if (yield* fs.exists(marker)) return
         yield* fs.ensureDir(target)
-        const imported = yield* run(folder.source, false, target)
-        const local = yield* run(folder.source, true, target)
+        const imported = yield* run(source, false, target)
+        const local = yield* run(source, true, target)
         if (imported) results.push(imported)
         if (local) results.push(local)
-        for (const item of folder.files.filter(
+        // package.json only carries dependencies for copied plugins and tools.
+        const copies = files.filter(
           (file) =>
             assetNames.includes(file.name) ||
-            ["tui.json", "tui.jsonc", "package.json", "AGENTS.md"].includes(file.name),
-        )) {
-          yield* copyAsset(path.join(folder.source, item.name), path.join(target, item.name))
-        }
-        yield* fs.writeFileString(marker, JSON.stringify({ source: folder.source, version: 1 }, null, 2), {
+            ["tui.json", "tui.jsonc", "AGENTS.md"].includes(file.name) ||
+            (file.name === "package.json" && assets.length > 0),
+        )
+        for (const item of copies) yield* copyAsset(path.join(source, item.name), path.join(target, item.name))
+        yield* fs.writeFileString(marker, JSON.stringify({ source, version: 1 }, null, 2), {
           mode: 0o600,
           flag: "wx",
         })
-        const message = `Imported agent assets from ${folder.source} into ${target}. Original files were kept.`
+        if (!copies.length) return
+        const message = `Imported agent assets from ${source} into ${target}. Original files were kept.`
         yield* Effect.logInfo(message)
-        return { sources: [folder.source], target, message }
+        return { sources: [source], target, message }
       }),
       `config-folder-import:${target}`,
     )

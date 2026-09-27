@@ -12,6 +12,15 @@ import { GlobalBus } from "@/bus/global"
 import { testEffect } from "../lib/effect"
 import { tmpdirScoped } from "../fixture/fixture"
 
+// Historical fixture names come from retained attribution, never production code.
+const notices = await Bun.file(new URL("../../../../THIRD_PARTY_NOTICES.md", import.meta.url)).text()
+const previous = notices
+  .split("<!-- vector-upstream-attribution -->")[1]
+  ?.match(/^Copyright \(c\) \d{4} (.+)$/m)?.[1]
+  ?.trim()
+  .toLowerCase()
+if (!previous) throw new Error("Missing attribution for historical upgrade fixture")
+
 const it = testEffect(LayerNode.compile(LayerNode.group([FSUtil.node, EffectFlock.node, CrossSpawnSpawner.node])))
 
 it.live("imports neutral JSON and extensionless TOML while retaining the original files", () =>
@@ -41,7 +50,7 @@ it.live("imports recognized project assets and both config layers once without c
   Effect.gen(function* () {
     const directory = yield* tmpdirScoped()
     const fs = yield* FSUtil.Service
-    const source = path.join(directory, ".earlier-agent")
+    const source = path.join(directory, `.${previous}`)
     for (const name of [
       "agents/reviewer.md",
       "commands/review.md",
@@ -52,10 +61,10 @@ it.live("imports recognized project assets and both config layers once without c
     ])
       yield* fs.writeWithDirs(path.join(source, name), `fixture:${name}`)
     yield* fs.writeFileString(
-      path.join(source, "previous.jsonc"),
+      path.join(source, `${previous}.jsonc`),
       '{"permission":{"bash":"deny"},"theme":"custom","mcp":{"fixture":{"type":"local","command":["fixture"]}}}',
     )
-    yield* fs.writeFileString(path.join(source, "previous.local.json"), '{"permission":{"edit":"deny"}}')
+    yield* fs.writeFileString(path.join(source, `${previous}.local.json`), '{"permission":{"edit":"deny"}}')
     yield* fs.writeWithDirs(path.join(directory, ".unrelated", "data.json"), '{"model":"must-not-import"}')
     const input = {
       directory,
@@ -91,8 +100,8 @@ it.live("protects current assets and respects disabled project config during mig
   Effect.gen(function* () {
     const directory = yield* tmpdirScoped()
     const fs = yield* FSUtil.Service
-    yield* fs.writeWithDirs(path.join(directory, ".earlier-agent", "agents", "reviewer.md"), "earlier")
-    yield* fs.writeWithDirs(path.join(directory, ".earlier-agent", "commands", "review.md"), "earlier")
+    yield* fs.writeWithDirs(path.join(directory, `.${previous}`, "agents", "reviewer.md"), "earlier")
+    yield* fs.writeWithDirs(path.join(directory, `.${previous}`, "commands", "review.md"), "earlier")
     yield* fs.writeWithDirs(path.join(directory, ".vector", "agents", "reviewer.md"), "current")
     const input = {
       directory,
@@ -104,6 +113,89 @@ it.live("protects current assets and respects disabled project config during mig
     expect(String(yield* ConfigMigration.discover(input).pipe(Effect.exit))).toContain("conflict")
     expect(yield* fs.readFileString(path.join(directory, ".vector", "agents", "reviewer.md"))).toBe("current")
     expect(yield* fs.exists(path.join(directory, ".vector", "vector-migration.json"))).toBe(false)
+  }),
+)
+
+it.live("skips unreadable folders and unrelated dot folders that only look like agent folders", () =>
+  Effect.gen(function* () {
+    const root = yield* tmpdirScoped()
+    const fs = yield* FSUtil.Service
+    const home = path.join(root, "home")
+    const directory = path.join(home, "project")
+    for (const name of [
+      "home/.cursor/agents/.keep",
+      "home/.cursor/plugins/local/.keep",
+      "home/.cursor/mcp.json",
+      "home/.oh-my-zsh/plugins/git/git.plugin.zsh",
+      "home/.oh-my-zsh/themes/robbyrussell.zsh-theme",
+      "home/.oh-my-zsh/tools/upgrade.sh",
+      "home/project/.github/agents/reviewer.md",
+      "home/project/.github/skills/review/SKILL.md",
+      "home/project/.obsidian/plugins/example/main.js",
+      "home/project/.obsidian/themes/Minimal/theme.css",
+      "home/project/.earlier-agent/agents/reviewer.md",
+      "home/project/.earlier-agent/commands/review.md",
+      "home/.Trash/deleted.json",
+      "home/.locked/locked.json",
+    ])
+      yield* fs.writeWithDirs(path.join(root, name), "{}")
+    yield* fs.writeFileString(
+      path.join(home, ".cursor", "mcp.json"),
+      '{"mcp":{"docs":{"type":"local","command":["x"]}}}',
+    )
+    yield* fs.writeFileString(
+      path.join(directory, ".earlier-agent", "earlier-agent.json"),
+      '{"$schema":"https://earlier-agent.ai/config.json","permission":{"bash":"deny"}}',
+    )
+    yield* fs.writeFileString(path.join(directory, "notes"), 'model = "must-not-import"\n')
+    yield* fs.writeFileString(path.join(home, ".locked", "locked.json"), '{"model":"must-not-import"}')
+    const locked = [path.join(home, ".Trash"), path.join(home, ".locked"), path.join(directory, "notes")]
+    yield* Effect.forEach(locked, (item) => fs.chmod(item, 0o000))
+    yield* Effect.addFinalizer(() => Effect.forEach(locked, (item) => fs.chmod(item, 0o755).pipe(Effect.ignore)))
+    const input = { directory, worktree: directory, home, global: path.join(root, "global") }
+    expect(yield* ConfigMigration.discover(input)).toEqual([])
+    expect(yield* fs.exists(path.join(home, ".vector"))).toBe(false)
+    expect(yield* fs.exists(path.join(directory, ".vector"))).toBe(false)
+  }),
+)
+
+it.live("imports config-only earlier project and home folders, including runtime MCP servers", () =>
+  Effect.gen(function* () {
+    const root = yield* tmpdirScoped()
+    const fs = yield* FSUtil.Service
+    const directory = path.join(root, "project")
+    const source = path.join(directory, `.${previous}`)
+    yield* fs.writeWithDirs(
+      path.join(source, `${previous}.local.json`),
+      JSON.stringify({
+        $schema: `https://${previous}.ai/config.json`,
+        mcp: { docs: { type: "remote", url: "https://example.test/mcp", headers: { Authorization: "placeholder" } } },
+      }),
+    )
+    yield* fs.writeFileString(path.join(source, `${previous}.json`), '{"permission":{"bash":"deny"}}')
+    yield* fs.writeFileString(path.join(source, "package.json"), `{"dependencies":{"@${previous}-ai/plugin":"1"}}`)
+    yield* fs.writeFileString(path.join(source, ".gitignore"), "node_modules\npackage.json\n")
+    yield* fs.writeWithDirs(path.join(source, "node_modules", "fixture", "index.js"), "")
+    const home = path.join(root, "home")
+    yield* fs.writeWithDirs(path.join(home, `.${previous}`, `${previous}.jsonc`), '{"model":"fixture/model"}')
+    yield* fs.writeWithDirs(path.join(home, `.${previous}`, "bin", "fixture"), "")
+    const input = { directory, worktree: directory, home, global: path.join(root, "global") }
+    const imported = yield* ConfigMigration.discover(input)
+    const target = path.join(directory, ".vector")
+    expect(imported.map((item) => item.target)).toEqual([
+      path.join(home, ".vector", "vector.jsonc"),
+      path.join(target, "vector.jsonc"),
+      path.join(target, "vector.local.jsonc"),
+    ])
+    expect(yield* fs.readJson(path.join(home, ".vector", "vector.jsonc"))).toMatchObject({ model: "fixture/model" })
+    expect(yield* fs.exists(path.join(home, ".vector", "bin"))).toBe(false)
+    expect(yield* fs.readJson(path.join(target, "vector.jsonc"))).toMatchObject({ permission: { bash: "deny" } })
+    expect(yield* fs.readJson(path.join(target, "vector.local.jsonc"))).toMatchObject({
+      mcp: { docs: { type: "remote", url: "https://example.test/mcp", headers: { Authorization: "placeholder" } } },
+    })
+    expect(yield* fs.exists(path.join(target, "package.json"))).toBe(false)
+    expect(yield* fs.exists(path.join(target, "node_modules"))).toBe(false)
+    expect(yield* ConfigMigration.discover(input)).toEqual([])
   }),
 )
 
