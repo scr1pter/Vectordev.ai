@@ -36,6 +36,7 @@ console.log(JSON.stringify(process.argv[3].slice(process.argv[3].lastIndexOf("@"
     const requested = await Bun.file(path.join(directory, "requests")).text()
     expect(requested).toContain("@vectordevai/plugin@1.2.3")
     expect(requested).toContain("@vectordevai/cli-windows-x64@4.5.6")
+    expect(requested).toContain("@vectordevai/cli-windows-arm64@4.5.6")
     expect(requested).not.toContain("@null")
   } finally {
     await rm(directory, { recursive: true, force: true })

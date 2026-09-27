@@ -6,7 +6,7 @@ import { catalogBody, catalogDigest } from "../../script/release-catalog"
 
 const root = path.resolve(import.meta.dir, "../../../..")
 const notices = ["LICENSE", "THIRD_PARTY_NOTICES.md", "DEPENDENCY_NOTICES.md"]
-const targets = ["darwin-arm64", "darwin-x64", "linux-x64", "linux-arm64", "windows-x64"]
+const targets = ["darwin-arm64", "darwin-x64", "linux-x64", "linux-arm64", "windows-x64", "windows-arm64"]
 const version = "1.2.3"
 
 async function fixture() {
@@ -118,7 +118,6 @@ test("dry-run packages every target with notices and a working Vector launcher w
       VECTOR_TARGETS: "stale-inherited-target",
       VECTOR_RELEASE: "true",
       VECTOR_CLI_VERSION: version,
-      VECTOR_CLI_TARGETS: targets.join(","),
     })
     expect(result.code, result.stderr).toBe(0)
     expect(requests).toEqual([])
@@ -150,6 +149,17 @@ test("dry-run packages every target with notices and a working Vector launcher w
         expect(manifest.optionalDependencies).toEqual(
           Object.fromEntries(targets.map((item) => [`@vectordevai/cli-${item}`, version])),
         )
+        // The desktop release refuses to start until each package it names is on npm, so the
+        // publisher's default targets must publish exactly that set.
+        const workflow = Bun.YAML.parse(
+          await Bun.file(path.join(root, ".github/workflows/vector-desktop-release.yml")).text(),
+        ) as { jobs: { prepare: { steps: { name: string; run?: string }[] } } }
+        const required = workflow.jobs.prepare.steps
+          .find((step) => step.name === "Require published CLI and plugin packages")
+          ?.run?.match(/for package in ([^;]+);/)?.[1]
+          ?.split(/\s+/)
+          .filter((item) => item.startsWith("@vectordevai/cli-"))
+        expect(required?.toSorted()).toEqual(Object.keys(manifest.optionalDependencies).toSorted())
       }
       const host = `${process.platform === "win32" ? "windows" : process.platform}-${process.arch}`
       if (target !== "umbrella" && target !== host) continue
@@ -198,7 +208,7 @@ for (const problem of [
   test(`refuses every package before publishing when the final target has ${problem}`, async () => {
     await using tmp = await fixture()
     const cwd = path.join(tmp.dir, "packages/engine")
-    const folder = path.join(cwd, "dist/vector-windows-x64")
+    const folder = path.join(cwd, "dist", `vector-${targets.at(-1)}`)
     if (problem === "stale version" || problem === "excluded notice" || problem === "wrong catalog digest") {
       const file = Bun.file(path.join(folder, "package.json"))
       const manifest = await file.json()

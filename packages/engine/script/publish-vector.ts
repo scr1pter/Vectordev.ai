@@ -11,7 +11,8 @@
  * Env:
  *   VECTOR_RELEASE_CATALOG_PATH / VECTOR_RELEASE_CATALOG_SHA256  reviewed workflow artifact
  *   VECTOR_CLI_VERSION   version to publish (default: packages/desktop version)
- *   VECTOR_CLI_TARGETS   comma list, default darwin-arm64,darwin-x64,linux-x64,linux-arm64,windows-x64
+ *   VECTOR_CLI_TARGETS   comma list, default darwin-arm64,darwin-x64,linux-x64,linux-arm64,windows-x64,windows-arm64
+ *                        (the desktop release refuses to start unless every one of these is on npm)
  *
  * One thin umbrella package exposes the `vector` command and
  * bin resolves a platform package (@vectordevai/cli-<os>-<arch>) that carries the
@@ -32,7 +33,9 @@ process.chdir(dir)
 const SCOPE = "@vectordevai"
 const UMBRELLA = `${SCOPE}/cli`
 const version = process.env.VECTOR_CLI_VERSION ?? desktop.version
-const targets = (process.env.VECTOR_CLI_TARGETS ?? "darwin-arm64,darwin-x64,linux-x64,linux-arm64,windows-x64")
+const targets = (
+  process.env.VECTOR_CLI_TARGETS ?? "darwin-arm64,darwin-x64,linux-x64,linux-arm64,windows-x64,windows-arm64"
+)
   .split(",")
   .map((item) => item.trim())
   .filter(Boolean)
