@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import os from "os"
 import {
   CodexAuthPlugin,
   parseJwtClaims,
@@ -166,5 +167,68 @@ describe("plugin.codex", () => {
       { models: {} } as never,
     )
     expect(Object.keys(options)).not.toHaveLength(0)
+  })
+
+  describe("browser sign-in callback server", () => {
+    const start = async () => {
+      const hooks = await CodexAuthPlugin({} as never)
+      const method = hooks.auth!.methods[0]
+      if (method.type !== "oauth") throw new Error("expected the browser OAuth method")
+      const authorization = await method.authorize()
+      if (authorization.method !== "auto") throw new Error("expected an automatic callback")
+      return {
+        state: new URL(authorization.url).searchParams.get("state")!,
+        // Settle into a value right away, as the sign-in dialog awaits it, so a rejection is never unhandled.
+        failure: authorization.callback().then(
+          () => undefined,
+          (error: Error) => error.message,
+        ),
+      }
+    }
+    const reachable = (host: string) =>
+      fetch(`http://${host}:1455/`, { signal: AbortSignal.timeout(2_000) }).then(
+        () => true,
+        () => false,
+      )
+
+    test("listens on loopback only and closes after a provider error", async () => {
+      const attempt = await start()
+      expect(await reachable("127.0.0.1")).toBe(true)
+      const lan = Object.values(os.networkInterfaces())
+        .flatMap((items) => items ?? [])
+        .find((item) => item.family === "IPv4" && !item.internal)
+      if (lan) expect(await reachable(lan.address)).toBe(false)
+
+      const response = await fetch(
+        `http://127.0.0.1:1455/auth/callback?error=access_denied&state=${encodeURIComponent(attempt.state)}`,
+      )
+      expect(response.status).toBe(200)
+      expect(await attempt.failure).toBe("access_denied")
+      expect(await reachable("127.0.0.1")).toBe(false)
+    })
+
+    test("ignores cancel and error requests that do not carry the sign-in state", async () => {
+      const attempt = await start()
+
+      expect((await fetch("http://127.0.0.1:1455/cancel")).status).toBe(400)
+      expect((await fetch("http://127.0.0.1:1455/auth/callback?error=access_denied&state=wrong")).status).toBe(400)
+      expect((await fetch("http://127.0.0.1:1455/auth/callback?code=stolen")).status).toBe(400)
+      expect(await Promise.race([attempt.failure, Bun.sleep(50).then(() => "pending")])).toBe("pending")
+
+      expect((await fetch(`http://127.0.0.1:1455/cancel?state=${encodeURIComponent(attempt.state)}`)).status).toBe(200)
+      expect(await attempt.failure).toBe("Login cancelled")
+      expect(await reachable("127.0.0.1")).toBe(false)
+    })
+
+    test("a newer sign-in replaces an unfinished one and keeps the server up", async () => {
+      const first = await start()
+      const second = await start()
+      expect(await first.failure).toBe("Login cancelled")
+      expect(await reachable("127.0.0.1")).toBe(true)
+
+      await fetch(`http://127.0.0.1:1455/cancel?state=${encodeURIComponent(second.state)}`)
+      expect(await second.failure).toBe("Login cancelled")
+      expect(await reachable("127.0.0.1")).toBe(false)
+    })
   })
 })

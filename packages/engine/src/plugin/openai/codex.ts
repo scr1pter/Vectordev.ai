@@ -156,71 +156,64 @@ async function startOAuthServer(): Promise<{ port: number; redirectUri: string }
     return { port: OAUTH_PORT, redirectUri: `http://localhost:${OAUTH_PORT}/auth/callback` }
   }
 
-  oauthServer = createServer((req, res) => {
+  const server = createServer((req, res) => {
     const url = new URL(req.url || "/", `http://localhost:${OAUTH_PORT}`)
+    const current = pendingOAuth
 
-    if (url.pathname === "/auth/callback") {
-      const code = url.searchParams.get("code")
-      const state = url.searchParams.get("state")
-      const error = url.searchParams.get("error")
-      const errorDescription = url.searchParams.get("error_description")
-
-      if (error) {
-        const errorMsg = errorDescription || error
-        pendingOAuth?.reject(new Error(errorMsg))
-        pendingOAuth = undefined
-        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" })
-        res.end(renderOAuthError(errorMsg))
-        return
-      }
-
-      if (!code) {
-        const errorMsg = "Missing authorization code"
-        pendingOAuth?.reject(new Error(errorMsg))
-        pendingOAuth = undefined
-        res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" })
-        res.end(renderOAuthError(errorMsg))
-        return
-      }
-
-      if (!pendingOAuth || state !== pendingOAuth.state) {
-        const errorMsg = "Invalid state - potential CSRF attack"
-        pendingOAuth?.reject(new Error(errorMsg))
-        pendingOAuth = undefined
-        res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" })
-        res.end(renderOAuthError(errorMsg))
-        return
-      }
-
-      const current = pendingOAuth
-      pendingOAuth = undefined
-
-      exchangeCodeForTokens(code, `http://localhost:${OAUTH_PORT}/auth/callback`, current.pkce)
-        .then((tokens) => current.resolve(tokens))
-        .catch((err) => current.reject(err))
-
-      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" })
-      res.end(OauthCallbackPage.success({ provider: "ChatGPT" }))
+    if (url.pathname !== "/auth/callback" && url.pathname !== "/cancel") {
+      res.writeHead(404)
+      res.end("Not found")
       return
     }
 
+    // Only the browser that started this sign-in knows its state, so a request from another
+    // page or process cannot cancel or fail the sign-in in progress.
+    if (!current || url.searchParams.get("state") !== current.state) {
+      res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" })
+      res.end(renderOAuthError("Invalid state - potential CSRF attack"))
+      return
+    }
+
+    // Each branch answers before settling the sign-in, since settling closes the server and its connections.
     if (url.pathname === "/cancel") {
-      pendingOAuth?.reject(new Error("Login cancelled"))
-      pendingOAuth = undefined
       res.writeHead(200)
       res.end("Login cancelled")
+      current.reject(new Error("Login cancelled"))
       return
     }
 
-    res.writeHead(404)
-    res.end("Not found")
-  })
+    const error = url.searchParams.get("error_description") || url.searchParams.get("error")
+    if (error) {
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" })
+      res.end(renderOAuthError(error))
+      current.reject(new Error(error))
+      return
+    }
 
+    const code = url.searchParams.get("code")
+    if (!code) {
+      res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" })
+      res.end(renderOAuthError("Missing authorization code"))
+      current.reject(new Error("Missing authorization code"))
+      return
+    }
+
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" })
+    res.end(OauthCallbackPage.success({ provider: "ChatGPT" }))
+    releaseOAuth(current)
+    exchangeCodeForTokens(code, `http://localhost:${OAUTH_PORT}/auth/callback`, current.pkce)
+      .then((tokens) => current.resolve(tokens))
+      .catch((err) => current.reject(err))
+  })
+  oauthServer = server
+
+  // Loopback only: the callback carries an authorization code and must not be reachable from the network.
   await new Promise<void>((resolve, reject) => {
-    oauthServer!.listen(OAUTH_PORT, () => {
-      resolve()
+    server.once("error", (error) => {
+      if (oauthServer === server) oauthServer = undefined
+      reject(error)
     })
-    oauthServer!.on("error", reject)
+    server.listen(OAUTH_PORT, "127.0.0.1", () => resolve())
   })
 
   return { port: OAUTH_PORT, redirectUri: `http://localhost:${OAUTH_PORT}/auth/callback` }
@@ -229,34 +222,43 @@ async function startOAuthServer(): Promise<{ port: number; redirectUri: string }
 function stopOAuthServer() {
   if (oauthServer) {
     oauthServer.close(() => {})
+    // A browser keep-alive connection would otherwise keep reaching the handler after close.
+    oauthServer.closeAllConnections()
     oauthServer = undefined
   }
 }
 
+// Every sign-in ends here, whether it succeeds, fails, is cancelled or times out, so the
+// callback server closes as soon as no sign-in is waiting on it.
+function releaseOAuth(entry: PendingOAuth) {
+  if (pendingOAuth === entry) pendingOAuth = undefined
+  if (!pendingOAuth) stopOAuthServer()
+}
+
 function waitForOAuthCallback(pkce: PkceCodes, state: string): Promise<TokenResponse> {
   return new Promise((resolve, reject) => {
-    const timeout = setTimeout(
-      () => {
-        if (pendingOAuth) {
-          pendingOAuth = undefined
-          reject(new Error("OAuth callback timeout - authorization took too long"))
-        }
-      },
-      5 * 60 * 1000,
-    ) // 5 minute timeout
-
-    pendingOAuth = {
+    const entry: PendingOAuth = {
       pkce,
       state,
       resolve: (tokens) => {
         clearTimeout(timeout)
+        releaseOAuth(entry)
         resolve(tokens)
       },
       reject: (error) => {
         clearTimeout(timeout)
+        releaseOAuth(entry)
         reject(error)
       },
     }
+    const timeout = setTimeout(
+      () => entry.reject(new Error("OAuth callback timeout - authorization took too long")),
+      5 * 60 * 1000,
+    )
+    // A newer sign-in replaces an unfinished one; the server stays up for the newer one.
+    const previous = pendingOAuth
+    pendingOAuth = entry
+    previous?.reject(new Error("Login cancelled"))
   })
 }
 
@@ -434,6 +436,9 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
               const authUrl = buildAuthorizeUrl(redirectUri, pkce, state)
 
               const callbackPromise = waitForOAuthCallback(pkce, state)
+              // The client may never ask for the result (it closed the dialog), so a timeout or a
+              // newer sign-in rejecting this one must not surface as an unhandled rejection.
+              callbackPromise.catch(() => undefined)
 
               return {
                 url: authUrl,
@@ -441,7 +446,6 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
                 method: "auto" as const,
                 callback: async () => {
                   const tokens = await callbackPromise
-                  stopOAuthServer()
                   const accountId = extractAccountId(tokens)
                   return {
                     type: "success" as const,

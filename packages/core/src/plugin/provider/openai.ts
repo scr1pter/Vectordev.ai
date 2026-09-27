@@ -57,31 +57,39 @@ const browser = {
           response.writeHead(404).end("Not found")
           return
         }
-        const error = url.searchParams.get("error_description") ?? url.searchParams.get("error")
-        const value = url.searchParams.get("code")
-        if (error) {
-          Effect.runFork(Deferred.fail(code, new Error(error)))
+        // Only the browser that started this sign-in knows its state, so a request from another
+        // page or process cannot fail the sign-in in progress.
+        if (url.searchParams.get("state") !== state) {
           response
             .writeHead(400, { "Content-Type": "text/html" })
-            .end(OauthCallbackPage.error(error, { provider: "ChatGPT" }))
+            .end(OauthCallbackPage.error("Invalid OAuth state", { provider: "ChatGPT" }))
           return
         }
-        if (!value || url.searchParams.get("state") !== state) {
-          const message = value ? "Invalid OAuth state" : "Missing authorization code"
-          Effect.runFork(Deferred.fail(code, new Error(message)))
+        const error = url.searchParams.get("error_description") ?? url.searchParams.get("error")
+        const value = url.searchParams.get("code")
+        if (error || !value) {
+          const message = error ?? "Missing authorization code"
+          // Answer first: settling the sign-in closes the server and its connections.
           response
             .writeHead(400, { "Content-Type": "text/html" })
             .end(OauthCallbackPage.error(message, { provider: "ChatGPT" }))
+          Effect.runFork(Deferred.fail(code, new Error(message)))
           return
         }
-        Effect.runFork(Deferred.succeed(code, value))
         response.writeHead(200, { "Content-Type": "text/html" }).end(OauthCallbackPage.success({ provider: "ChatGPT" }))
+        Effect.runFork(Deferred.succeed(code, value))
       })
       yield* Effect.callback<void, Error>((resume) => {
         server.once("error", (error) => resume(Effect.fail(error)))
-        server.listen(callbackPort, "localhost", () => resume(Effect.void))
+        // Loopback only: the callback carries an authorization code and must not be reachable from the network.
+        server.listen(callbackPort, "127.0.0.1", () => resume(Effect.void))
       })
-      yield* Effect.addFinalizer(() => Effect.sync(() => server.close()))
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          server.close()
+          server.closeAllConnections()
+        }),
+      )
       return {
         mode: "auto" as const,
         url: authorizeURL(redirect, pkce, state),

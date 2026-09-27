@@ -1,5 +1,6 @@
 import { AISDK } from "@vectordevai/core/aisdk"
 import { describe, expect } from "bun:test"
+import os from "os"
 import type { LanguageModelV3 } from "@ai-sdk/provider"
 import { Effect } from "effect"
 import { Catalog } from "@vectordevai/core/catalog"
@@ -172,6 +173,43 @@ describe("OpenAIPlugin", () => {
         required(yield* catalog.model.get(ProviderV2.ID.make("lmstudio"), ModelV2.ID.make("gpt-5-chat-latest")))
           .enabled,
       ).toBe(true)
+    }),
+  )
+
+  it.live("serves the ChatGPT callback on loopback only and ignores requests without the sign-in state", () =>
+    Effect.gen(function* () {
+      yield* addPlugin()
+      const integrations = yield* Integration.Service
+      const attempt = yield* integrations.connection.oauth({
+        integrationID: Integration.ID.make("openai"),
+        methodID: Integration.MethodID.make("chatgpt-browser"),
+        inputs: {},
+      })
+      const state = new URL(attempt.url).searchParams.get("state")!
+      const reachable = (host: string) =>
+        Effect.promise(() =>
+          fetch(`http://${host}:1455/`, { signal: AbortSignal.timeout(2_000) }).then(
+            () => true,
+            () => false,
+          ),
+        )
+      const status = (path: string) =>
+        Effect.promise(() => fetch(`http://127.0.0.1:1455${path}`).then((response) => response.status))
+
+      expect(yield* reachable("127.0.0.1")).toBe(true)
+      const lan = Object.values(os.networkInterfaces())
+        .flatMap((items) => items ?? [])
+        .find((item) => item.family === "IPv4" && !item.internal)
+      if (lan) expect(yield* reachable(lan.address)).toBe(false)
+
+      expect(yield* status("/auth/callback?error=access_denied&state=wrong")).toBe(400)
+      expect(yield* status("/auth/callback?code=stolen")).toBe(400)
+      expect((yield* integrations.attempt.status(attempt.attemptID))?.status).toBe("pending")
+
+      expect(yield* status(`/auth/callback?error=access_denied&state=${encodeURIComponent(state)}`)).toBe(400)
+      yield* Effect.promise(() => Bun.sleep(50))
+      expect((yield* integrations.attempt.status(attempt.attemptID))?.status).toBe("failed")
+      expect(yield* reachable("127.0.0.1")).toBe(false)
     }),
   )
 })
