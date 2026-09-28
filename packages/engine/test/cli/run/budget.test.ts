@@ -73,6 +73,58 @@ describe("vector run budget flags", () => {
     60_000,
   )
 
+  cliIt.live(
+    "the non-interactive prompt request carries the --max-cost and --max-steps budget",
+    ({ llm, vector }) =>
+      Effect.gen(function* () {
+        yield* llm.text("within budget")
+        const server = yield* vector.serve()
+        // Relays the CLI's requests to the real server and keeps each prompt body as it left the CLI.
+        const prompts: unknown[] = []
+        const relay = yield* Effect.acquireRelease(
+          Effect.sync(() =>
+            Bun.serve({
+              port: 0,
+              // The relayed event stream is idle between events.
+              idleTimeout: 0,
+              hostname: "127.0.0.1",
+              async fetch(request) {
+                const url = new URL(request.url)
+                const body = request.method === "GET" || request.method === "HEAD" ? undefined : await request.text()
+                if (body && /^\/session\/[^/]+\/message$/.test(url.pathname)) prompts.push(JSON.parse(body))
+                const headers = new Headers(request.headers)
+                headers.delete("accept-encoding")
+                headers.delete("host")
+                const response = await fetch(new URL(url.pathname + url.search, server.url), {
+                  method: request.method,
+                  headers,
+                  body,
+                })
+                // fetch already decoded the body, so the encoding headers no longer describe it.
+                const out = new Headers(response.headers)
+                out.delete("content-encoding")
+                out.delete("content-length")
+                out.delete("transfer-encoding")
+                return new Response(response.body, { status: response.status, headers: out })
+              },
+            }),
+          ),
+          // Not awaited: the relayed event stream stays open until the server behind it is killed after this.
+          (relay) => Effect.sync(() => void relay.stop(true)),
+        )
+
+        const result = yield* vector.run("say hi", {
+          extraArgs: ["--attach", relay.url.origin, "--max-cost", "2", "--max-steps", "60", "--"],
+        })
+
+        vector.expectExit(result, 0)
+        expect(result.stdout).toBe("within budget\n")
+        expect(prompts).toHaveLength(1)
+        expect(prompts[0]).toMatchObject({ budget: { usd: 2, steps: 60 } })
+      }),
+    60_000,
+  )
+
   cliIt.live("rejects budgets the spend guard cannot hold", ({ vector }) =>
     Effect.gen(function* () {
       const cost = yield* vector.spawn(["run", "--max-cost", "0", "hello"])
@@ -87,5 +139,6 @@ describe("vector run budget flags", () => {
       expect(command.exitCode).toBe(1)
       expect(command.stderr).toContain("--max-cost and --max-steps cannot be used with --command")
     }),
+    30_000,
   )
 })
