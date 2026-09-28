@@ -1150,7 +1150,7 @@ const layer = Layer.effect(
       if (!session.parentID) return Effect.succeed(session)
       return sessions.get(session.parentID).pipe(
         Effect.flatMap(rootSession),
-        Effect.catchCause(() => Effect.succeed(session)),
+        Effect.catch(() => Effect.succeed(session)),
       )
     }
 
