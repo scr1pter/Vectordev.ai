@@ -52,7 +52,9 @@ import { Ripgrep } from "@vectordevai/core/ripgrep"
 import { Format } from "../../src/format"
 import { TestInstance } from "../fixture/fixture"
 import { awaitWithTimeout, pollWithTimeout, testEffect } from "../lib/effect"
-import { reply, TestLLMServer } from "../lib/llm-server"
+import { reply, TestLLMServer, type Reply } from "../lib/llm-server"
+import { SpendGuard } from "@vectordevai/core/spend-guard"
+import { isRecord } from "@/util/record"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderV2 } from "@vectordevai/core/provider"
 import { ModelV2 } from "@vectordevai/core/model"
@@ -207,6 +209,7 @@ const promptRoot = LayerNode.group([
   SystemPrompt.node,
   CrossSpawnSpawner.node,
   RuntimeFlags.node,
+  SpendGuard.node,
 ])
 
 function makePrompt(input?: { mcpInstructions?: MCP.ServerInstructions[]; processor?: "blocking" }) {
@@ -2605,6 +2608,237 @@ noLLMServer.instance(
           expect(err.data.message).toContain("init")
         }
       }
+    }),
+  30_000,
+)
+
+// Run guard: the test model priced through config, in USD per million tokens.
+function pricedCfg(cost: { input: number; output: number; cache_read?: number }, extra: Partial<ConfigV1.Info> = {}) {
+  return (url: string) => {
+    const base = providerCfg(url)
+    return {
+      ...base,
+      ...extra,
+      provider: {
+        ...base.provider,
+        lmstudio: {
+          ...base.provider.lmstudio,
+          models: { "test-model": { ...base.provider.lmstudio.models["test-model"], cost } },
+        },
+      },
+    }
+  }
+}
+
+// A scripted reply whose usage also reports cache reads, which the chat protocol reads from prompt_tokens_details.
+function cachedUsage(out: Reply, cached: number) {
+  const item = out.item()
+  if (item.type !== "sse") return item
+  return {
+    ...item,
+    tail: item.tail.map((line) =>
+      isRecord(line) && isRecord(line.usage)
+        ? { ...line, usage: { ...line.usage, prompt_tokens_details: { cached_tokens: cached } } }
+        : line,
+    ),
+  }
+}
+
+const budgetStop = (info: SessionV1.Info) =>
+  info.role === "assistant" && info.error?.name === "BudgetStopError" ? info.error.data : undefined
+
+const guardedChat = Effect.fn("test.guardedChat")(function* (budget?: { usd?: number; steps?: number }) {
+  const prompt = yield* SessionPrompt.Service
+  const sessions = yield* Session.Service
+  const chat = yield* sessions.create({
+    title: "Pinned",
+    permission: [{ permission: "*", pattern: "*", action: "allow" }],
+  })
+  yield* prompt.prompt({
+    sessionID: chat.id,
+    agent: "build",
+    noReply: true,
+    parts: [{ type: "text", text: "go" }],
+    ...(budget ? { budget } : {}),
+  })
+  return chat
+})
+
+it.instance(
+  "run guard stops a priced run on the step that crosses the prompt's cap",
+  () =>
+    Effect.gen(function* () {
+      // Each turn costs $0.10 of output, and the next step is estimated at $0.06, so turns one and two pass a $0.29
+      // cap and turn three crosses it.
+      const { llm } = yield* useServerConfig(pricedCfg({ input: 0, output: 100 }))
+      const prompt = yield* SessionPrompt.Service
+      const chat = yield* guardedChat({ usd: 0.29 })
+      yield* llm.push(
+        reply().tool("first", { value: 1 }).usage({ input: 100, output: 1000 }),
+        reply().tool("second", { value: 2 }).usage({ input: 100, output: 1000 }),
+        reply().tool("third", { value: 3 }).usage({ input: 100, output: 1000 }),
+      )
+      yield* llm.text("never requested")
+
+      const result = yield* prompt.loop({ sessionID: chat.id })
+
+      const stop = budgetStop(result.info)
+      expect(stop?.reason).toBe("cap")
+      expect(stop?.capUsd).toBe(0.29)
+      expect(stop?.spentUsd).toBeCloseTo(0.3, 6)
+      expect(stop?.message).toBe(
+        "Spend cap reached: $0.30 spent against a $0.29 cap for this run. Vector stopped after the step that crossed it.",
+      )
+      expect(yield* llm.pending).toBe(1)
+    }),
+  30_000,
+)
+
+it.instance(
+  "run guard stops before a step it predicts would cross the config cap",
+  () =>
+    Effect.gen(function* () {
+      // Turn one costs $0.39 against a $0.40 cap from config. Its 20k-token context, 18k of it cached, prices the
+      // next step at $0.74 at the cheapest, so the run stops before it.
+      const { llm } = yield* useServerConfig(
+        pricedCfg({ input: 100, output: 100, cache_read: 10 }, { budget: { run: { usd: 0.4 } } }),
+      )
+      const prompt = yield* SessionPrompt.Service
+      const chat = yield* guardedChat()
+      yield* llm.push(cachedUsage(reply().tool("first", { value: 1 }).usage({ input: 20_000, output: 100 }), 18_000))
+      yield* llm.text("never requested")
+
+      const result = yield* prompt.loop({ sessionID: chat.id })
+
+      const stop = budgetStop(result.info)
+      expect(stop?.reason).toBe("predicted")
+      expect(stop?.spentUsd).toBeCloseTo(0.39, 6)
+      expect(stop?.estimate).toBeDefined()
+      if (!stop?.estimate) return
+      expect(stop.estimate.lowUsd).toBeCloseTo(0.74, 6)
+      expect(stop.estimate.lowUsd).toBeLessThanOrEqual(stop.estimate.highUsd)
+      expect(stop.estimate.highUsd).toBeGreaterThan(stop.estimate.lowUsd)
+      expect(yield* llm.pending).toBe(1)
+    }),
+  30_000,
+)
+
+unix(
+  "run guard pauses the same bash call repeated across turns",
+  () =>
+    withSh(() =>
+      Effect.gen(function* () {
+        if (!(yield* hasBash)) return
+        const { llm } = yield* useServerConfig(providerCfg)
+        const prompt = yield* SessionPrompt.Service
+        const chat = yield* guardedChat()
+        const call = { command: "echo loop", description: "Print loop" }
+        yield* llm.tool("bash", call)
+        yield* llm.tool("bash", call)
+        yield* llm.tool("bash", call)
+        yield* llm.text("never requested")
+
+        const result = yield* prompt.loop({ sessionID: chat.id })
+
+        const stop = budgetStop(result.info)
+        expect(stop?.reason).toBe("loop")
+        expect(stop?.message).toBe(
+          "Paused a repeating loop: `bash` ran with the same input 3 times with no file changes in between.",
+        )
+        expect(yield* llm.pending).toBe(1)
+      }),
+    ),
+  30_000,
+)
+
+unix(
+  "run guard leaves repeated calls alone when config turns the loop rules off",
+  () =>
+    withSh(() =>
+      Effect.gen(function* () {
+        if (!(yield* hasBash)) return
+        const { llm } = yield* useServerConfig((url) => ({
+          ...providerCfg(url),
+          budget: { loop: { enabled: false } },
+        }))
+        const prompt = yield* SessionPrompt.Service
+        const chat = yield* guardedChat()
+        const call = { command: "echo loop", description: "Print loop" }
+        yield* llm.tool("bash", call)
+        yield* llm.tool("bash", call)
+        yield* llm.tool("bash", call)
+        yield* llm.text("done")
+
+        const result = yield* prompt.loop({ sessionID: chat.id })
+
+        expect(budgetStop(result.info)).toBeUndefined()
+        expect(result.parts.some((part) => part.type === "text" && part.text === "done")).toBe(true)
+        expect(yield* llm.pending).toBe(0)
+      }),
+    ),
+  30_000,
+)
+
+it.instance(
+  "run guard counts a subagent's spend against the root and stops both",
+  () =>
+    Effect.gen(function* () {
+      // The root's own step is free of tokens; the child's single step spends $2.00 of input against a $1.00 cap.
+      const { llm } = yield* useServerConfig(pricedCfg({ input: 100, output: 1 }))
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const guard = yield* SpendGuard.Service
+      const chat = yield* guardedChat({ usd: 1 })
+      yield* llm.tool("task", {
+        description: "inspect bug",
+        prompt: "look into the cache key path",
+        subagent_type: "general",
+      })
+      yield* llm.push(reply().tool("lookup", { value: 1 }).usage({ input: 20_000, output: 0 }))
+      yield* llm.text("never requested")
+
+      const result = yield* prompt.loop({ sessionID: chat.id })
+
+      const kids = yield* sessions.children(chat.id)
+      expect(kids).toHaveLength(1)
+      const childMessages = yield* MessageV2.filterCompactedEffect(kids[0]!.id)
+      const childStop = childMessages.map((item) => budgetStop(item.info)).find((item) => item !== undefined)
+      expect(childStop?.reason).toBe("cap")
+      expect(childStop?.spentUsd).toBeCloseTo(2, 6)
+      expect(result.info.role).toBe("assistant")
+      if (result.info.role !== "assistant") return
+      expect(result.info.error?.name).toBe("BudgetStopError")
+      expect(budgetStop(result.info)?.reason).toBe("cap")
+      expect((yield* guard.snapshot(chat.id))?.spentUsd).toBeCloseTo(2, 6)
+      expect(yield* llm.pending).toBe(1)
+    }),
+  30_000,
+)
+
+it.instance(
+  "run guard without a budget or config leaves a multi-turn run unchanged",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* useServerConfig(providerCfg)
+      const prompt = yield* SessionPrompt.Service
+      const guard = yield* SpendGuard.Service
+      const chat = yield* guardedChat()
+      yield* llm.tool("first", { value: 1 })
+      yield* llm.tool("second", { value: 2 })
+      yield* llm.text("second")
+
+      const result = yield* prompt.loop({ sessionID: chat.id })
+
+      expect(yield* llm.calls).toBe(3)
+      expect(result.info.role).toBe("assistant")
+      if (result.info.role !== "assistant") return
+      expect(result.info.error).toBeUndefined()
+      expect(result.info.finish).toBe("stop")
+      expect(result.parts.some((part) => part.type === "text" && part.text === "second")).toBe(true)
+      const run = yield* guard.snapshot(chat.id)
+      expect(run?.steps).toBe(3)
+      expect(run?.stopped).toBeUndefined()
+      expect(yield* guard.stopped(chat.id)).toBeUndefined()
     }),
   30_000,
 )
