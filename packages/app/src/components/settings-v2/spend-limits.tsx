@@ -55,6 +55,8 @@ function SpendLimitsPanel(props: { api: SpendLimitsApi; repositoryPath?: string 
   const [policy, { mutate }] = createResource(() => props.api.limits())
   const [summary, { refetch: refetchSummary }] = createResource(() => props.api.status(props.repositoryPath))
   const [recent] = createResource(() => props.api.recent(20))
+  // A Warn at typed into a column with no cap yet, applied to its first cap.
+  const [pending, setPending] = createSignal<Partial<Record<keyof SpendPolicy, number>>>({})
 
   const save = async (column: keyof SpendPolicy, next: SpendLimitSet) => {
     setError("")
@@ -71,13 +73,16 @@ function SpendLimitsPanel(props: { api: SpendLimitsApi; repositoryPath?: string 
   const setLimit = (column: keyof SpendPolicy, key: LimitKey, text: string) => {
     const parsed = parseUsd(text)
     if (!parsed.ok) return setError("Enter a dollar amount above zero, or leave the field empty for no limit.")
-    void save(column, withLimit(policy()?.[column] ?? {}, key, parsed.usd))
+    void save(column, withLimit(policy()?.[column] ?? {}, key, parsed.usd, pending()[column]))
   }
 
   const setWarnAt = (column: keyof SpendPolicy, text: string) => {
     const parsed = parseWarnAt(text)
     if (!parsed.ok) return setError("Enter a percentage between 1 and 100, or leave the field empty for 80%.")
-    void save(column, withWarnAt(policy()?.[column] ?? {}, parsed.warnAt))
+    setPending((current) => ({ ...current, [column]: parsed.warnAt }))
+    const set = policy()?.[column] ?? {}
+    if (Object.keys(set).length === 0) return setError("")
+    void save(column, withWarnAt(set, parsed.warnAt))
   }
 
   return (
@@ -148,7 +153,7 @@ function SpendLimitsPanel(props: { api: SpendLimitsApi; repositoryPath?: string 
                     inputmode="decimal"
                     placeholder="80%"
                     disabled={policy.loading}
-                    value={warnAtText(policy()?.[column.key])}
+                    value={warnAtText(policy()?.[column.key], pending()[column.key])}
                     onChange={(event) => setWarnAt(column.key, event.currentTarget.value)}
                   />
                 </label>
@@ -192,7 +197,7 @@ function SpendLimitsPanel(props: { api: SpendLimitsApi; repositoryPath?: string 
   )
 }
 
-function warnAtText(set: SpendLimitSet | undefined) {
-  const warnAt = set ? columnWarnAt(set) : undefined
+function warnAtText(set: SpendLimitSet | undefined, pendingWarnAt: number | undefined) {
+  const warnAt = (set ? columnWarnAt(set) : undefined) ?? pendingWarnAt
   return warnAt === undefined ? "" : `${Math.round(warnAt * 100)}%`
 }

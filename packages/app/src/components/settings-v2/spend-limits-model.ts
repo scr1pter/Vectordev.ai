@@ -28,13 +28,21 @@ export function parseWarnAt(text: string) {
   return { ok: true as const, warnAt: percent / 100 }
 }
 
-export function withLimit(set: SpendLimitSet, key: LimitKey, usd: number | undefined): SpendLimitSet {
+// `pendingWarnAt` is a Warn at typed while the column had no cap to store it on;
+// the first cap set afterwards takes it.
+export function withLimit(
+  set: SpendLimitSet,
+  key: LimitKey,
+  usd: number | undefined,
+  pendingWarnAt?: number,
+): SpendLimitSet {
   if (usd === undefined) return Object.fromEntries(Object.entries(set).filter((entry) => entry[0] !== key))
-  const warnAt = columnWarnAt(set)
+  const warnAt = columnWarnAt(set) ?? pendingWarnAt
   return { ...set, [key]: warnAt === undefined ? { usd } : { usd, warnAt } }
 }
 
-// One Warn at per column, applied to every cap in it.
+// One Warn at per column, applied to every cap in it. A column with no cap has
+// nowhere to store it, so the page holds it until a cap is set.
 export function withWarnAt(set: SpendLimitSet, warnAt: number | undefined): SpendLimitSet {
   return Object.fromEntries(
     Object.entries(set).flatMap((entry) =>

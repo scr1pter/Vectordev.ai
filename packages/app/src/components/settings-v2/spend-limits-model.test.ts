@@ -24,6 +24,13 @@ describe("spend limit fields", () => {
     expect(withLimit(set, "perDay", undefined)).toEqual({ perRun: { usd: 5, warnAt: 0.9 } })
   })
 
+  test("a warn at set before any cap is applied to the first cap", () => {
+    expect(withWarnAt({}, 0.7)).toEqual({})
+    expect(withLimit({}, "perRun", 5, 0.7)).toEqual({ perRun: { usd: 5, warnAt: 0.7 } })
+    // A stored warn at wins over one typed earlier.
+    expect(withLimit({ perDay: { usd: 25, warnAt: 0.9 } }, "perRun", 5, 0.7).perRun).toEqual({ usd: 5, warnAt: 0.9 })
+  })
+
   test("warn at applies to every cap in the column", () => {
     expect(withWarnAt({ perRun: { usd: 5 }, perDay: { usd: 25, warnAt: 0.5 } }, 0.7)).toEqual({
       perRun: { usd: 5, warnAt: 0.7 },
