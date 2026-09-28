@@ -248,10 +248,12 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
       const differentModel = `${model.providerID}/${model.id}` !== `${msg.info.providerID}/${msg.info.modelID}`
       const media: Array<{ mime: string; url: string; filename?: string }> = []
 
+      // An aborted or budget-stopped turn stays in history: its tool calls already ran, and a model that never sees
+      // them repeats them, re-spending what tripped the cap.
       if (
         msg.info.error &&
         !(
-          AbortedError.isInstance(msg.info.error) &&
+          (AbortedError.isInstance(msg.info.error) || SessionV1.BudgetStopError.isInstance(msg.info.error)) &&
           msg.parts.some((part) => part.type !== "step-start" && part.type !== "reasoning")
         )
       ) {

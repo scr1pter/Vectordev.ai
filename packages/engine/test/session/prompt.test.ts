@@ -2842,3 +2842,37 @@ it.instance(
     }),
   30_000,
 )
+
+it.instance(
+  "run guard keeps a stopped step's tool calls in the next turn's history",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* useServerConfig(pricedCfg({ input: 0, output: 100 }))
+      const prompt = yield* SessionPrompt.Service
+      const chat = yield* guardedChat({ usd: 0.05 })
+      yield* llm.push(reply().tool("glob", { pattern: "**/*.nothing" }).usage({ input: 100, output: 1000 }))
+      const stopped = yield* prompt.loop({ sessionID: chat.id })
+      expect(budgetStop(stopped.info)?.reason).toBe("cap")
+
+      yield* llm.text("done")
+      yield* prompt.prompt({
+        sessionID: chat.id,
+        agent: "build",
+        parts: [{ type: "text", text: "Continue from where you stopped." }],
+        budget: { usd: 5 },
+      })
+
+      const messages = (yield* llm.inputs).at(-1)?.messages
+      expect(Array.isArray(messages)).toBe(true)
+      if (!Array.isArray(messages)) return
+      const call = messages
+        .filter(isRecord)
+        .flatMap((message) => (Array.isArray(message.tool_calls) ? message.tool_calls.filter(isRecord) : []))
+        .find((item) => isRecord(item.function) && item.function.name === "glob")
+      expect(call).toBeDefined()
+      expect(
+        messages.some((message) => isRecord(message) && message.role === "tool" && message.tool_call_id === call?.id),
+      ).toBe(true)
+    }),
+  30_000,
+)
