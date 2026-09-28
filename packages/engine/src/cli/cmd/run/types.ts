@@ -11,7 +11,7 @@
 //     → stream.ts bridges to footer API
 //       → footer.ts queues commits and patches the footer view
 //         → OpenTUI split-footer renderer writes to terminal
-import type { VectorClient, PermissionRequest, QuestionRequest, ToolPart } from "@vectordevai/sdk/v2"
+import type { VectorClient, PermissionRequest, QuestionRequest, RunBudget, ToolPart } from "@vectordevai/sdk/v2"
 import type { TuiConfig } from "@vectordevai/tui/config"
 
 export type RunFilePart = {
@@ -65,6 +65,8 @@ export type RunInput = {
   agent: string | undefined
   model: PromptModel | undefined
   variant: string | undefined
+  // Arms the spend guard on every prompt turn sent from this session, from --max-cost and --max-steps.
+  budget?: RunBudget
   files: RunFilePart[]
   initialInput?: string
   thinking: boolean
