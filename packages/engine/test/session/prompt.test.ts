@@ -54,6 +54,7 @@ import { TestInstance } from "../fixture/fixture"
 import { awaitWithTimeout, pollWithTimeout, testEffect } from "../lib/effect"
 import { reply, TestLLMServer, type Reply } from "../lib/llm-server"
 import { SpendGuard } from "@vectordevai/core/spend-guard"
+import { Auth } from "@/auth"
 import { isRecord } from "@/util/record"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderV2 } from "@vectordevai/core/provider"
@@ -210,6 +211,7 @@ const promptRoot = LayerNode.group([
   CrossSpawnSpawner.node,
   RuntimeFlags.node,
   SpendGuard.node,
+  Auth.node,
 ])
 
 function makePrompt(input?: { mcpInstructions?: MCP.ServerInstructions[]; processor?: "blocking" }) {
@@ -2873,6 +2875,92 @@ it.instance(
       expect(
         messages.some((message) => isRecord(message) && message.role === "tool" && message.tool_call_id === call?.id),
       ).toBe(true)
+    }),
+  30_000,
+)
+
+it.instance(
+  "run guard predicts past a stop-finish step that still called tools",
+  () =>
+    Effect.gen(function* () {
+      // Some providers finish "stop" with tool calls, and the loop goes on. Step one spends $0.60, and its 6k-token
+      // context prices the next step at $0.60 or more, past what is left of a $1.00 cap.
+      const { llm } = yield* useServerConfig(pricedCfg({ input: 100, output: 1 }))
+      const prompt = yield* SessionPrompt.Service
+      const chat = yield* guardedChat({ usd: 1 })
+      yield* llm.push(reply().tool("first", { value: 1 }).stop().usage({ input: 6_000, output: 0 }))
+      yield* llm.text("never requested")
+
+      const result = yield* prompt.loop({ sessionID: chat.id })
+
+      expect(budgetStop(result.info)?.reason).toBe("predicted")
+      expect(yield* llm.pending).toBe(1)
+    }),
+  30_000,
+)
+
+it.instance(
+  "run guard leaves a structured answer that crosses the cap without an error",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* useServerConfig(pricedCfg({ input: 100, output: 1 }))
+      const prompt = yield* SessionPrompt.Service
+      const guard = yield* SpendGuard.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({
+        title: "Pinned",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+      yield* llm.push(reply().tool("StructuredOutput", { answer: 4 }).usage({ input: 20_000, output: 0 }))
+
+      const result = yield* prompt.prompt({
+        sessionID: chat.id,
+        agent: "build",
+        parts: [{ type: "text", text: "What is 2 + 2?" }],
+        format: new SessionV1.OutputFormatJsonSchema({
+          type: "json_schema",
+          schema: { type: "object", properties: { answer: { type: "number" } }, required: ["answer"] },
+          retryCount: 0,
+        }),
+        budget: { usd: 1 },
+      })
+
+      expect(result.info.role).toBe("assistant")
+      if (result.info.role !== "assistant") return
+      expect(result.info.error).toBeUndefined()
+      expect(result.info.structured).toEqual({ answer: 4 })
+      expect((yield* guard.snapshot(chat.id))?.stopped?.reason).toBe("cap")
+    }),
+  30_000,
+)
+
+it.instance(
+  "run guard counts a stored OAuth plan's steps as plan and never caps them in dollars",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* useServerConfig(pricedCfg({ input: 100, output: 1 }))
+      const prompt = yield* SessionPrompt.Service
+      const guard = yield* SpendGuard.Service
+      const auth = yield* Auth.Service
+      yield* auth.set("lmstudio", {
+        type: "oauth",
+        refresh: "placeholder-refresh",
+        access: "placeholder-access",
+        expires: Date.now() + 3_600_000,
+      })
+      yield* Effect.addFinalizer(() => auth.remove("lmstudio").pipe(Effect.ignore))
+      const chat = yield* guardedChat({ usd: 1 })
+      yield* llm.push(reply().tool("first", { value: 1 }).usage({ input: 20_000, output: 0 }))
+      yield* llm.text("done")
+
+      const result = yield* prompt.loop({ sessionID: chat.id })
+
+      expect(budgetStop(result.info)).toBeUndefined()
+      const run = yield* guard.snapshot(chat.id)
+      expect(run?.costKind).toBe("plan")
+      expect(run?.spentUsd).toBe(0)
+      expect(run?.stopped).toBeUndefined()
+      expect(yield* llm.pending).toBe(0)
     }),
   30_000,
 )

@@ -26,7 +26,7 @@ import { EventV2Bridge } from "@/event-v2-bridge"
 import { Database } from "@vectordevai/core/database/database"
 import { Usage, type LLMEvent } from "@vectordevai/llm"
 import { SpendGuard } from "@vectordevai/core/spend-guard"
-import { providerCredentialAllowed } from "@vectordevai/core/provider-policy"
+import { providerCredentialAllowed, providerUsable } from "@vectordevai/core/provider-policy"
 import { isFreeModel } from "@vectordevai/schema/free-model"
 import { Auth } from "@/auth"
 
@@ -77,7 +77,7 @@ interface ProcessorContext extends Input {
   snapshot: string | undefined
   blocked: boolean
   // The tool calls of the current provider step, for the spend guard's loop rules.
-  stepTools: { callID: string; tool: string; input: string; error?: string }[]
+  stepTools: { callID: string; tool: string; input: string; error?: string; providerExecuted: boolean }[]
   needsCompaction: boolean
   currentText: SessionV1.TextPart | undefined
   reasoningMap: Record<string, SessionV1.ReasoningPart>
@@ -111,14 +111,18 @@ const layer = Layer.effect(
       // may execute tools internally before emitting start-step events,
       // so capturing inside the event handler can be too late.
       const initialSnapshot = yield* snapshot.track()
-      // How this model's steps count against a run budget, by the rule Vectorscope uses: the stored sign-in decides
-      // whether an OAuth plan, such as a ChatGPT plan, pays for them instead of per-token billing.
+      // How this model's steps count against a run budget. A plan, such as a ChatGPT plan, pays for them only when
+      // the credential llm.ts actually sends is the stored OAuth sign-in, so this applies the same credential rule.
       const signIn = yield* auth.get(input.model.providerID).pipe(Effect.catch(() => Effect.succeed(undefined)))
       const costKind = SpendGuard.costKindOf({
         free: isFreeModel(input.model),
         oauthPlan:
           signIn?.type === "oauth" &&
-          providerCredentialAllowed(input.model.providerID, signIn, Boolean(input.model.api.npm || input.model.api.url)),
+          providerCredentialAllowed(
+            input.model.providerID,
+            signIn,
+            providerUsable(input.model.providerID, { npm: input.model.api.npm, api: input.model.api.url }),
+          ),
         listed: input.model.cost.input > 0 || input.model.cost.output > 0,
       })
       const price = SpendGuard.priceOf(input.model.cost)
@@ -391,9 +395,14 @@ const layer = Layer.effect(
             if (ctx.assistantMessage.summary) {
               throw new Error(`Tool call not allowed while generating summary: ${value.name}`)
             }
-            yield* ensureToolCall(value)
+            const call = yield* ensureToolCall(value)
             const input = isRecord(value.input) ? value.input : { value: value.input }
-            ctx.stepTools.push({ callID: value.id, tool: value.name, input: JSON.stringify(input) })
+            ctx.stepTools.push({
+              callID: value.id,
+              tool: value.name,
+              input: JSON.stringify(input),
+              providerExecuted: call.part.metadata?.providerExecuted === true,
+            })
             yield* updateToolCall(value.id, (match) => ({
               ...match,
               tool: value.name,
@@ -529,7 +538,11 @@ const layer = Layer.effect(
             yield* recordStep({
               costUsd: usage.cost,
               tokens: usage.tokens,
-              continues: value.reason === "tool-calls",
+              // The loop's own rule: it goes on after "tool-calls", and after local tool calls under any finish
+              // reason. A StructuredOutput call is the final answer.
+              continues:
+                (value.reason === "tool-calls" || ctx.stepTools.some((item) => !item.providerExecuted)) &&
+                !ctx.stepTools.some((item) => item.tool === "StructuredOutput"),
               patched: patch
                 ? patch.files.length > 0
                 : ctx.stepTools.some((item) => FILE_TOOLS.has(item.tool) && item.error === undefined),
