@@ -197,6 +197,8 @@ describe("OpenAIPlugin", () => {
         Effect.promise(() => fetch(`http://127.0.0.1:1455${path}`).then((response) => response.status))
 
       expect(yield* reachable("127.0.0.1")).toBe(true)
+      // A wildcard listen binds "::" dual-stack and would answer on IPv6 loopback; this check needs no LAN address.
+      expect(yield* reachable("[::1]")).toBe(false)
       const lan = Object.values(os.networkInterfaces())
         .flatMap((items) => items ?? [])
         .find((item) => item.family === "IPv4" && !item.internal)

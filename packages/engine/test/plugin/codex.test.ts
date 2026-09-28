@@ -170,8 +170,8 @@ describe("plugin.codex", () => {
   })
 
   describe("browser sign-in callback server", () => {
-    const start = async () => {
-      const hooks = await CodexAuthPlugin({} as never)
+    const start = async (options: Parameters<typeof CodexAuthPlugin>[1] = {}) => {
+      const hooks = await CodexAuthPlugin({} as never, options)
       const method = hooks.auth!.methods[0]
       if (method.type !== "oauth") throw new Error("expected the browser OAuth method")
       const authorization = await method.authorize()
@@ -194,6 +194,9 @@ describe("plugin.codex", () => {
     test("listens on loopback only and closes after a provider error", async () => {
       const attempt = await start()
       expect(await reachable("127.0.0.1")).toBe(true)
+      // A wildcard listen (no host) binds "::" dual-stack, which answers on IPv6 loopback too. This holds
+      // on any machine, unlike the LAN check below, which needs a non-internal IPv4 address.
+      expect(await reachable("[::1]")).toBe(false)
       const lan = Object.values(os.networkInterfaces())
         .flatMap((items) => items ?? [])
         .find((item) => item.family === "IPv4" && !item.internal)
@@ -217,6 +220,13 @@ describe("plugin.codex", () => {
 
       expect((await fetch(`http://127.0.0.1:1455/cancel?state=${encodeURIComponent(attempt.state)}`)).status).toBe(200)
       expect(await attempt.failure).toBe("Login cancelled")
+      expect(await reachable("127.0.0.1")).toBe(false)
+    })
+
+    test("closes after a sign-in times out", async () => {
+      const attempt = await start({ callbackTimeout: 50 })
+      expect(await reachable("127.0.0.1")).toBe(true)
+      expect(await attempt.failure).toBe("OAuth callback timeout - authorization took too long")
       expect(await reachable("127.0.0.1")).toBe(false)
     })
 

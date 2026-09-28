@@ -102,6 +102,8 @@ interface CodexAuthPluginOptions {
   issuer?: string
   codexApiEndpoint?: string
   experimentalWebSockets?: boolean
+  /** How long a browser sign-in waits for its callback before failing and closing the server. */
+  callbackTimeout?: number
 }
 
 async function exchangeCodeForTokens(code: string, redirectUri: string, pkce: PkceCodes): Promise<TokenResponse> {
@@ -235,7 +237,7 @@ function releaseOAuth(entry: PendingOAuth) {
   if (!pendingOAuth) stopOAuthServer()
 }
 
-function waitForOAuthCallback(pkce: PkceCodes, state: string): Promise<TokenResponse> {
+function waitForOAuthCallback(pkce: PkceCodes, state: string, wait: number): Promise<TokenResponse> {
   return new Promise((resolve, reject) => {
     const entry: PendingOAuth = {
       pkce,
@@ -253,7 +255,7 @@ function waitForOAuthCallback(pkce: PkceCodes, state: string): Promise<TokenResp
     }
     const timeout = setTimeout(
       () => entry.reject(new Error("OAuth callback timeout - authorization took too long")),
-      5 * 60 * 1000,
+      wait,
     )
     // A newer sign-in replaces an unfinished one; the server stays up for the newer one.
     const previous = pendingOAuth
@@ -435,7 +437,7 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
               const state = base64UrlEncode(crypto.getRandomValues(new Uint8Array(32)).buffer)
               const authUrl = buildAuthorizeUrl(redirectUri, pkce, state)
 
-              const callbackPromise = waitForOAuthCallback(pkce, state)
+              const callbackPromise = waitForOAuthCallback(pkce, state, options.callbackTimeout ?? 5 * 60 * 1000)
               // The client may never ask for the result (it closed the dialog), so a timeout or a
               // newer sign-in rejecting this one must not surface as an unhandled rejection.
               callbackPromise.catch(() => undefined)
