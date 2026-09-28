@@ -30,7 +30,22 @@ test("session.spend keeps the latest spend guard report per session", async () =
       }),
     )
     await wait(() => sync.data.session_spend.ses_root?.state === "warn")
-    expect(sync.data.session_spend.ses_root).toMatchObject({ spentUsd: 1.64, capUsd: 2, steps: 7 })
+    expect(sync.data.session_spend.ses_root).toMatchObject({ spentUsd: 1.64, capUsd: 2, steps: 7, warned: true })
+
+    // The next step of the same run reports "ok"; the warning is kept for the rest of the run.
+    emit(
+      spendEvent("evt_spend_after_warn", {
+        sessionID: "ses_root",
+        state: "ok",
+        spentUsd: 1.8,
+        capUsd: 2,
+        steps: 8,
+        unpricedSteps: 0,
+        costKind: "priced",
+      }),
+    )
+    await wait(() => sync.data.session_spend.ses_root?.steps === 8)
+    expect(sync.data.session_spend.ses_root).toMatchObject({ state: "ok", spentUsd: 1.8, warned: true })
 
     // A later run with no cap replaces the report, so the stale cap and warning do not linger.
     emit(
@@ -43,7 +58,7 @@ test("session.spend keeps the latest spend guard report per session", async () =
         costKind: "priced",
       }),
     )
-    await wait(() => sync.data.session_spend.ses_root?.state === "ok")
+    await wait(() => sync.data.session_spend.ses_root?.steps === 1)
     expect(sync.data.session_spend.ses_root).toEqual({
       sessionID: "ses_root",
       state: "ok",
@@ -51,6 +66,7 @@ test("session.spend keeps the latest spend guard report per session", async () =
       steps: 1,
       unpricedSteps: 0,
       costKind: "priced",
+      warned: false,
     })
     expect(sync.data.session_spend.ses_other).toBeUndefined()
   } finally {

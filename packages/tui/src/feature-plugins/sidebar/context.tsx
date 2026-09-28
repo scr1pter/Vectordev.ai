@@ -52,7 +52,7 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
       <text fg={theme().textMuted}>{state().tokens.toLocaleString()} tokens</text>
       <text fg={theme().textMuted}>{state().percent ?? 0}% used</text>
       <Show when={spendCapLabel(spend())} fallback={<text fg={theme().textMuted}>{money.format(cost())} spent</text>}>
-        {(label) => <text fg={spend()?.state === "warn" ? theme().warning : theme().textMuted}>{label()}</text>}
+        {(label) => <text fg={spend()?.warned ? theme().warning : theme().textMuted}>{label()}</text>}
       </Show>
     </box>
   )

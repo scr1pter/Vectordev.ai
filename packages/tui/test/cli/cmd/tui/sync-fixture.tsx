@@ -1,6 +1,6 @@
 /** @jsxImportSource @opentui/solid */
 import { testRender } from "@opentui/solid"
-import { onMount } from "solid-js"
+import { onMount, type JSX } from "solid-js"
 import { ArgsProvider } from "../../../../src/context/args"
 import { KVProvider, useKV } from "../../../../src/context/kv"
 import { ProjectProvider, useProject } from "../../../../src/context/project"
@@ -22,7 +22,14 @@ export async function wait(fn: () => boolean, timeout = 2000) {
 
 type Ctx = { kv: ReturnType<typeof useKV>; project: ReturnType<typeof useProject>; sync: ReturnType<typeof useSync> }
 
-export async function mount(override?: FetchHandler, state?: string, observe?: () => void, auto?: boolean) {
+// `extra` renders next to the probe inside SyncProvider, for components that read the sync store.
+export async function mount(
+  override?: FetchHandler,
+  state?: string,
+  observe?: () => void,
+  auto?: boolean,
+  extra?: () => JSX.Element,
+) {
   const calls = createFetch(override)
   const events = createEventSource()
   let sync!: ReturnType<typeof useSync>
@@ -55,6 +62,7 @@ export async function mount(override?: FetchHandler, state?: string, observe?: (
                 <ExitProvider exit={() => {}}>
                   <SyncProvider>
                     <Probe />
+                    {extra?.()}
                   </SyncProvider>
                 </ExitProvider>
               </ProjectProvider>
