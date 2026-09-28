@@ -36,6 +36,7 @@ import { SessionRunCoordinator } from "@vectordevai/core/session/run-coordinator
 import { SessionRunner } from "@vectordevai/core/session/runner"
 import * as SessionRunnerLLM from "@vectordevai/core/session/runner/llm"
 import { SessionRunnerModel } from "@vectordevai/core/session/runner/model"
+import { SpendGuard } from "@vectordevai/core/spend-guard"
 import { ToolRegistry } from "@vectordevai/core/tool/registry"
 import { ApplicationTools } from "@vectordevai/core/tool/application-tools"
 import { AgentV2 } from "@vectordevai/core/agent"
@@ -275,6 +276,7 @@ const it = testEffect(
       SessionRunnerLLM.node,
       SessionExecution.node,
       SessionV2.node,
+      SpendGuard.node,
     ]),
     [
       [LayerNodePlatform.llmClient, client],
@@ -3333,6 +3335,177 @@ describe("SessionRunnerLLM", () => {
           content: [{ type: "tool", id: "call-parsed", state: { status: "error", input: { query: "hello" } } }],
         },
       ])
+    }),
+  )
+
+  // $2 per million input tokens and $10 per million output tokens, with no cache-read price.
+  const pricedModel = () =>
+    SessionRunnerModel.withPricing(Model.make({ id: "priced-model", provider: "fake", route: OpenAIChat.route }), [
+      { input: 2, output: 10, cache: { read: 0, write: 0 } },
+    ])
+  const pricedTurn = (input: { call?: string; inputTokens: number; outputTokens: number }) => [
+    LLMEvent.stepStart({ index: 0 }),
+    ...(input.call ? [LLMEvent.toolCall({ id: `call-${input.call}`, name: "echo", input: { text: input.call } })] : []),
+    LLMEvent.stepFinish({
+      index: 0,
+      reason: input.call ? "tool-calls" : "stop",
+      usage: {
+        inputTokens: input.inputTokens,
+        nonCachedInputTokens: input.inputTokens,
+        outputTokens: input.outputTokens,
+      },
+    }),
+    LLMEvent.finish({ reason: input.call ? "tool-calls" : "stop" }),
+  ]
+
+  it.effect("stops a guarded run at its dollar cap without another provider request", () =>
+    Effect.gen(function* () {
+      yield* setup
+      currentModel = pricedModel()
+      const session = yield* SessionV2.Service
+      const guard = yield* SpendGuard.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Keep working" }), resume: false })
+      yield* guard.arm(sessionID, { usd: 1 })
+      requests.length = 0
+      executions.length = 0
+      // Each turn costs $0.502 and predicts a $0.014 next step, so the second turn crosses the $1 cap.
+      responses = [
+        pricedTurn({ call: "first", inputTokens: 1_000, outputTokens: 50_000 }),
+        pricedTurn({ call: "second", inputTokens: 1_000, outputTokens: 50_000 }),
+        pricedTurn({ call: "third", inputTokens: 1_000, outputTokens: 50_000 }),
+        pricedTurn({ inputTokens: 1_000, outputTokens: 1_000 }),
+      ]
+
+      yield* session.resume(sessionID)
+
+      expect(requests).toHaveLength(2)
+      expect(executions).toEqual(["first", "second"])
+      const snapshot = yield* guard.snapshot(sessionID)
+      expect(snapshot).toMatchObject({ steps: 2, costKind: "priced", stopped: { reason: "cap" } })
+      expect(snapshot?.spentUsd).toBeCloseTo(1.004)
+      const message =
+        "Spend cap reached: $1.00 spent against a $1.00 cap for this run. Vector stopped after the step that crossed it."
+      expect(snapshot?.stopped?.message).toBe(message)
+      expect(yield* session.context(sessionID)).toMatchObject([
+        { type: "user", text: "Keep working" },
+        { type: "assistant", finish: "tool-calls" },
+        { type: "assistant", finish: "error", error: { type: "unknown", message }, cost: 0.502 },
+      ])
+    }),
+  )
+
+  it.effect("stops before a step it predicts would cross the cap", () =>
+    Effect.gen(function* () {
+      yield* setup
+      currentModel = pricedModel()
+      const session = yield* SessionV2.Service
+      const guard = yield* SpendGuard.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Read everything" }), resume: false })
+      yield* guard.arm(sessionID, { usd: 1 })
+      requests.length = 0
+      // $0.61 spent, and the next step over the same 300k-token context is estimated at $0.612.
+      responses = [
+        pricedTurn({ call: "first", inputTokens: 300_000, outputTokens: 1_000 }),
+        pricedTurn({ inputTokens: 300_000, outputTokens: 1_000 }),
+      ]
+
+      yield* session.resume(sessionID)
+
+      expect(requests).toHaveLength(1)
+      expect(yield* guard.snapshot(sessionID)).toMatchObject({
+        steps: 1,
+        stopped: {
+          reason: "predicted",
+          message:
+            "Stopped before the next step: $0.61 spent of a $1.00 cap, and the next step was estimated at $0.61 at catalog list prices.",
+        },
+      })
+    }),
+  )
+
+  it.effect("leaves steering admitted during a stopped turn for the next run", () =>
+    Effect.gen(function* () {
+      yield* setup
+      currentModel = pricedModel()
+      const session = yield* SessionV2.Service
+      const guard = yield* SpendGuard.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Start working" }), resume: false })
+      yield* guard.arm(sessionID, { usd: 1 })
+      requests.length = 0
+      responses = [
+        pricedTurn({ call: "first", inputTokens: 1_000, outputTokens: 110_000 }),
+        pricedTurn({ inputTokens: 1_000, outputTokens: 1_000 }),
+      ]
+      streamGate = yield* Deferred.make<void>()
+      streamStarted = yield* Deferred.make<void>()
+
+      const first = yield* session.resume(sessionID).pipe(Effect.forkChild)
+      yield* Deferred.await(streamStarted)
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Change direction" }), resume: false })
+      yield* Deferred.succeed(streamGate, undefined)
+      yield* Fiber.join(first)
+      streamGate = undefined
+      streamStarted = undefined
+
+      expect(requests).toHaveLength(1)
+      expect(yield* guard.snapshot(sessionID)).toMatchObject({ steps: 1, stopped: { reason: "cap" } })
+      const { db } = yield* Database.Service
+      expect(yield* SessionInput.hasPending(db, sessionID, "steer")).toBe(true)
+
+      yield* session.resume(sessionID)
+
+      expect(requests).toHaveLength(2)
+      expect(userTexts(requests[1]!)).toEqual(["Start working", "Change direction"])
+      const next = yield* guard.snapshot(sessionID)
+      expect(next).toMatchObject({ steps: 1, budget: {} })
+      expect(next?.stopped).toBeUndefined()
+    }),
+  )
+
+  it.effect("charges a linked session's steps to its root run and leaves that run active", () =>
+    Effect.gen(function* () {
+      yield* setup
+      currentModel = pricedModel()
+      const session = yield* SessionV2.Service
+      const guard = yield* SpendGuard.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Subagent work" }), resume: false })
+      yield* guard.begin(otherSessionID, { usd: 5 })
+      yield* guard.link(sessionID, otherSessionID)
+      response = pricedTurn({ inputTokens: 1_000, outputTokens: 50_000 })
+
+      yield* session.resume(sessionID)
+
+      const root = yield* guard.snapshot(otherSessionID)
+      expect(root).toMatchObject({ rootID: otherSessionID, steps: 1 })
+      expect(root?.spentUsd).toBeCloseTo(0.502)
+      // Arming reaches only an active run's budget, so the root run is still open after the linked drain.
+      yield* guard.arm(sessionID, { usd: 10 })
+      expect(yield* guard.snapshot(otherSessionID)).toMatchObject({ budget: { usd: 10 }, steps: 1 })
+    }),
+  )
+
+  it.effect("counts an unpriced V2 step as unknown rather than free", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      const guard = yield* SpendGuard.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "No catalog price" }), resume: false })
+      yield* guard.arm(sessionID, { usd: 1, unpricedSteps: 1 })
+      requests.length = 0
+      responses = [
+        pricedTurn({ call: "first", inputTokens: 1_000, outputTokens: 1_000 }),
+        pricedTurn({ inputTokens: 1_000, outputTokens: 1_000 }),
+      ]
+
+      yield* session.resume(sessionID)
+
+      expect(requests).toHaveLength(1)
+      expect(yield* guard.snapshot(sessionID)).toMatchObject({
+        spentUsd: 0,
+        unpricedSteps: 1,
+        costKind: "unknown",
+        stopped: { reason: "unpriced" },
+      })
     }),
   )
 

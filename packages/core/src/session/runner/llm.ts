@@ -36,6 +36,7 @@ import { createLLMEventPublisher } from "./publish-llm-event"
 import { toLLMMessages } from "./to-llm-message"
 import { MAX_STEPS_PROMPT } from "./max-steps"
 import { Snapshot } from "../../snapshot"
+import { SpendGuard } from "../../spend-guard"
 import { makeLocationNode } from "../../effect/app-node"
 import { llmClient } from "../../effect/app-node-platform"
 
@@ -51,6 +52,7 @@ import { llmClient } from "../../effect/app-node-platform"
  *   - [ ] Mark busy, retrying, idle, interrupted, or terminal-failure status durably.
  *   - [ ] Honor interruption and reject stale work after runtime attachment replacement.
  *   - [x] Honor optional agent step limits.
+ *   - [x] Stop a guarded run at its spend, step, or unpriced-step limit before the next provider turn.
  *   - [ ] Bound provider retries and repeated identical tool calls.
  *
  * - Runtime context assembly
@@ -104,6 +106,7 @@ const layer = Layer.effect(
     const referenceGuidance = yield* ReferenceGuidance.Service
     const config = yield* Config.Service
     const snapshots = yield* Snapshot.Service
+    const guard = yield* SpendGuard.Service
     const db = (yield* Database.Service).db
     const compaction = SessionCompaction.make({ events, llm, config: yield* config.entries() })
     const getSession = Effect.fn("SessionRunner.getSession")(function* (sessionID: SessionSchema.ID) {
@@ -321,6 +324,7 @@ const layer = Layer.effect(
                     .files({ from: startSnapshot, to: endSnapshot })
                     .pipe(Effect.catch(() => Effect.succeed(undefined)))
                 : undefined
+            const cost = SessionRunnerModel.calculateCost(model, stepSettlement.tokens, stepSettlement.providerMetadata)
             yield* withPublication(
               events.publish(SessionEvent.Step.Ended, {
                 sessionID: session.id,
@@ -330,13 +334,35 @@ const layer = Layer.effect(
                 // The durable V2 event currently requires a finite number. Preserve unknown pricing
                 // until this boundary, then use the narrow compatibility fallback rather than
                 // treating an absent catalog entry as a measured free model internally.
-                cost:
-                  SessionRunnerModel.calculateCost(model, stepSettlement.tokens, stepSettlement.providerMetadata) ?? 0,
+                cost: cost ?? 0,
                 tokens: stepSettlement.tokens,
                 snapshot: endSnapshot,
                 files,
               }),
             )
+            // The guard gets the unrounded cost: an unpriced step counts as unknown, never as a free $0 step.
+            // V2 does not detect OAuth plans or tool loops yet.
+            const verdict = yield* guard.record(session.id, {
+              costUsd: cost,
+              costKind: SpendGuard.costKindOf({
+                free: SessionRunnerModel.isFree(model),
+                oauthPlan: false,
+                listed: cost !== undefined,
+              }),
+              price: SessionRunnerModel.priceOf(model),
+              contextTokens:
+                stepSettlement.tokens.input + stepSettlement.tokens.cache.read + stepSettlement.tokens.cache.write,
+              cachedTokens: stepSettlement.tokens.cache.read,
+              continues: needsContinuation,
+              tools: [],
+              patched: Boolean(files?.length),
+            })
+            if (verdict.state === "stopped") {
+              // The step's answer is final when nothing follows it; only a cut-short continuation says why on the
+              // message. Step.Failed after Step.Ended keeps the step's cost and tokens and marks it an error.
+              if (needsContinuation) yield* withPublication(publisher.failAssistant(verdict.message))
+              needsContinuation = false
+            }
           }
           if (publisher.hasProviderError())
             yield* withPublication(publisher.failUnsettledTools("Tool execution interrupted"))
@@ -391,21 +417,30 @@ const layer = Layer.effect(
       const hasQueue = hasSteer ? false : yield* SessionInput.hasPending(db, input.sessionID, "queue")
       if (!input.force && !hasSteer && !hasQueue) return
       yield* failInterruptedTools(input.sessionID)
-      let promotion: SessionInput.Delivery | undefined = hasSteer ? "steer" : hasQueue ? "queue" : undefined
-      let shouldRun = input.force || hasSteer || hasQueue
-      while (shouldRun) {
-        let needsContinuation = true
-        let step = 1
-        while (needsContinuation) {
-          const result = yield* runTurn(input.sessionID, promotion, step)
-          needsContinuation = result.needsContinuation
-          step = result.step + 1
-          promotion = "steer"
-          if (!needsContinuation) needsContinuation = yield* SessionInput.hasPending(db, input.sessionID, "steer")
+      // A drain is one guarded run. A linked subagent spends against its root's run, which only the root begins and
+      // ends. Inputs left pending by a stop stay durable and drain on the next wake, under a fresh run.
+      const owner = (yield* guard.rootOf(input.sessionID)) === input.sessionID
+      if (owner) yield* guard.begin(input.sessionID)
+      yield* Effect.gen(function* () {
+        let promotion: SessionInput.Delivery | undefined = hasSteer ? "steer" : hasQueue ? "queue" : undefined
+        let shouldRun = input.force || hasSteer || hasQueue
+        while (shouldRun) {
+          let needsContinuation = true
+          let step = 1
+          while (needsContinuation) {
+            // Every provider turn starts here, including the ones re-armed by pending steer or queued input, so a
+            // stopped run (or a stopped root, for a subagent) never starts another.
+            if (yield* guard.stopped(input.sessionID)) return
+            const result = yield* runTurn(input.sessionID, promotion, step)
+            needsContinuation = result.needsContinuation
+            step = result.step + 1
+            promotion = "steer"
+            if (!needsContinuation) needsContinuation = yield* SessionInput.hasPending(db, input.sessionID, "steer")
+          }
+          shouldRun = yield* SessionInput.hasPending(db, input.sessionID, "queue")
+          promotion = shouldRun ? "queue" : undefined
         }
-        shouldRun = yield* SessionInput.hasPending(db, input.sessionID, "queue")
-        promotion = shouldRun ? "queue" : undefined
-      }
+      }).pipe(Effect.ensuring(owner ? guard.end(input.sessionID) : Effect.void))
     })
 
     return Service.of({
@@ -431,5 +466,6 @@ export const node = makeLocationNode({
     Config.node,
     Snapshot.node,
     Database.node,
+    SpendGuard.node,
   ],
 })

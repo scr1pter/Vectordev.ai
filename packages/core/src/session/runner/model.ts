@@ -17,6 +17,7 @@ import { ModelV2 } from "../../model"
 import { ProviderV2 } from "../../provider"
 import { SessionSchema } from "../schema"
 import { SpendGuard } from "../../spend-guard"
+import { isFreeModel } from "@vectordevai/schema/free-model"
 
 export class ModelNotSelectedError extends Schema.TaggedErrorClass<ModelNotSelectedError>()(
   "SessionRunnerModel.ModelNotSelectedError",
@@ -102,6 +103,14 @@ export const priceOf = (model: Model) => {
   const cost = pricing.get(model)?.find((item) => item.tier === undefined)
   return cost ? SpendGuard.priceOf(cost) : undefined
 }
+
+// Free models are exempt from the spend guard's dollar checks. An unpriced model is never free.
+export const isFree = (model: Model) =>
+  isFreeModel({
+    providerID: model.provider,
+    id: model.id,
+    cost: pricing.get(model)?.find((item) => item.tier === undefined),
+  })
 
 export const calculateCost = (model: Model, tokens: Tokens, metadata?: ProviderMetadata) => {
   const totalNanoAiu = metadata?.copilot?.totalNanoAiu
