@@ -24,6 +24,7 @@ import { Effect, Exit, Schema, Scope, Semaphore } from "effect"
 import { EffectBridge } from "@/effect/bridge"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Database } from "@vectordevai/core/database/database"
+import { SpendGuard } from "@vectordevai/core/spend-guard"
 import path from "path"
 
 export interface TaskPromptOps {
@@ -195,6 +196,7 @@ export const TaskTool = Tool.define(
     const scope = yield* Scope.Scope
     const flags = yield* RuntimeFlags.Service
     const database = yield* Database.Service
+    const guard = yield* SpendGuard.Service
 
     const run = Effect.fn("TaskTool.execute")(function* (
       params: Schema.Schema.Type<typeof Parameters>,
@@ -423,6 +425,8 @@ export const TaskTool = Tool.define(
             ),
           ],
         }))
+      // The child's spend counts against its parent's run, for new children and task_id resumes alike.
+      yield* guard.link(nextSession.id, ctx.sessionID)
 
       const metadata = {
         parentSessionId: ctx.sessionID,

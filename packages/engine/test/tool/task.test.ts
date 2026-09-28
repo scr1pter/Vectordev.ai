@@ -10,6 +10,7 @@ import { EventV2Bridge } from "@/event-v2-bridge"
 import { Config } from "@/config/config"
 import { CrossSpawnSpawner } from "@vectordevai/core/cross-spawn-spawner"
 import { Ripgrep } from "@vectordevai/core/ripgrep"
+import { SpendGuard } from "@vectordevai/core/spend-guard"
 import { Session } from "@/session/session"
 import type { SessionPrompt } from "../../src/session/prompt"
 import { MessageID, PartID, SessionID } from "../../src/session/schema"
@@ -51,6 +52,7 @@ const layer = (flags: Partial<RuntimeFlags.Info> = {}) =>
       Database.node,
       RuntimeFlags.node,
       Ripgrep.node,
+      SpendGuard.node,
     ]),
     [[RuntimeFlags.node, RuntimeFlags.layer(flags)]],
   )

@@ -1129,16 +1129,43 @@ const layer = Layer.effect(
       throw new Error("Impossible")
     })
 
+    // Every root run is a spend guard run, with the prompt's armed budget or else the config budget, and the loop
+    // rules even without either. A subagent's steps count against its root's run.
     const runLoop = Effect.fn("SessionPrompt.run")(function* (
       sessionID: SessionID,
       resumed?: ResumeFreeModelsInput & { parentID: MessageID },
     ) {
+      const session = yield* sessions.get(sessionID).pipe(Effect.orDie)
+      if (session.parentID) {
+        if ((yield* guard.rootOf(sessionID)) === sessionID)
+          yield* guard.link(sessionID, (yield* rootSession(session)).id)
+        return yield* runSteps(session, resumed)
+      }
+      yield* guard.begin(sessionID, (yield* config.get()).budget?.run)
+      return yield* runSteps(session, resumed).pipe(Effect.ensuring(guard.end(sessionID)))
+    })
+
+    // The top of a session's parent chain, or the last ancestor that could still be read.
+    const rootSession = (session: Session.Info): Effect.Effect<Session.Info> => {
+      if (!session.parentID) return Effect.succeed(session)
+      return sessions.get(session.parentID).pipe(
+        Effect.flatMap(rootSession),
+        Effect.catchCause(() => Effect.succeed(session)),
+      )
+    }
+
+    const runSteps = Effect.fn("SessionPrompt.runSteps")(function* (
+      session: Session.Info,
+      resumed?: ResumeFreeModelsInput & { parentID: MessageID },
+    ) {
       const ctx = yield* InstanceState.context
+      const sessionID = session.id
       let structured: unknown
       let step = 0
-      const session = yield* sessions.get(sessionID).pipe(Effect.orDie)
 
       while (true) {
+        // A run the spend guard stopped, in this session or anywhere in its lineage, ends at this boundary.
+        if (yield* guard.stopped(sessionID)) break
         yield* status.set(sessionID, { type: "busy" })
         yield* Effect.logInfo("loop", { "session.id": sessionID, step })
 

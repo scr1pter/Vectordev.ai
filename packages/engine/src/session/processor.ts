@@ -25,8 +25,15 @@ import { isRecord } from "@/util/record"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { Database } from "@vectordevai/core/database/database"
 import { Usage, type LLMEvent } from "@vectordevai/llm"
+import { SpendGuard } from "@vectordevai/core/spend-guard"
+import { providerCredentialAllowed } from "@vectordevai/core/provider-policy"
+import { isFreeModel } from "@vectordevai/schema/free-model"
+import { Auth } from "@/auth"
 
 const DOOM_LOOP_THRESHOLD = 3
+// Tools that change files. Without a snapshot to diff, a successful call to one of these counts as a file change for
+// the spend guard's loop rules.
+const FILE_TOOLS = new Set(["edit", "write", "apply_patch"])
 export type Result = "compact" | "stop" | "continue"
 
 export interface Handle {
@@ -69,6 +76,8 @@ interface ProcessorContext extends Input {
   shouldBreak: boolean
   snapshot: string | undefined
   blocked: boolean
+  // The tool calls of the current provider step, for the spend guard's loop rules.
+  stepTools: { callID: string; tool: string; input: string; error?: string }[]
   needsCompaction: boolean
   currentText: SessionV1.TextPart | undefined
   reasoningMap: Record<string, SessionV1.ReasoningPart>
@@ -94,12 +103,25 @@ const layer = Layer.effect(
     const image = yield* Image.Service
     const events = yield* EventV2Bridge.Service
     const database = yield* Database.Service
+    const auth = yield* Auth.Service
+    const guard = yield* SpendGuard.Service
 
     const create = Effect.fn("SessionProcessor.create")(function* (input: Input) {
       // Pre-capture snapshot before the LLM stream starts. The AI SDK
       // may execute tools internally before emitting start-step events,
       // so capturing inside the event handler can be too late.
       const initialSnapshot = yield* snapshot.track()
+      // How this model's steps count against a run budget, by the rule Vectorscope uses: the stored sign-in decides
+      // whether an OAuth plan, such as a ChatGPT plan, pays for them instead of per-token billing.
+      const signIn = yield* auth.get(input.model.providerID).pipe(Effect.catch(() => Effect.succeed(undefined)))
+      const costKind = SpendGuard.costKindOf({
+        free: isFreeModel(input.model),
+        oauthPlan:
+          signIn?.type === "oauth" &&
+          providerCredentialAllowed(input.model.providerID, signIn, Boolean(input.model.api.npm || input.model.api.url)),
+        listed: input.model.cost.input > 0 || input.model.cost.output > 0,
+      })
+      const price = SpendGuard.priceOf(input.model.cost)
       const ctx: ProcessorContext = {
         assistantMessage: input.assistantMessage,
         sessionID: input.sessionID,
@@ -108,6 +130,7 @@ const layer = Layer.effect(
         shouldBreak: false,
         snapshot: initialSnapshot,
         blocked: false,
+        stepTools: [],
         needsCompaction: false,
         currentText: undefined,
         reasoningMap: {},
@@ -198,8 +221,46 @@ const layer = Layer.effect(
         if (error instanceof PermissionV1.RejectedError || error instanceof Question.RejectedError) {
           ctx.blocked = ctx.shouldBreak
         }
+        ctx.stepTools = ctx.stepTools.map((item) =>
+          item.callID === toolCallID ? { ...item, error: errorMessage(error) } : item,
+        )
         yield* settleToolCall(toolCallID)
         return true
+      })
+
+      // Counts one provider step against the run of this session's root. A stop on a step that would continue ends
+      // the turn with BudgetStopError. A stop on a final answer leaves the answer alone; the run's stopped flag still
+      // halts the rest of the lineage at its next boundary.
+      const recordStep = Effect.fn("SessionProcessor.recordStep")(function* (step: {
+        costUsd: number
+        tokens: SessionV1.Assistant["tokens"]
+        continues: boolean
+        patched: boolean
+      }) {
+        const tools = ctx.stepTools
+        ctx.stepTools = []
+        const verdict = yield* guard.record(ctx.sessionID, {
+          costUsd: step.costUsd,
+          costKind,
+          price,
+          contextTokens: step.tokens.input + step.tokens.cache.read + step.tokens.cache.write,
+          cachedTokens: step.tokens.cache.read,
+          continues: step.continues,
+          tools: (yield* config.get()).budget?.loop?.enabled === false ? [] : tools,
+          patched: step.patched,
+        })
+        if (verdict.state !== "stopped" || !step.continues) return
+        const run = yield* guard.snapshot(ctx.sessionID)
+        ctx.assistantMessage.error = new SessionV1.BudgetStopError({
+          reason: verdict.reason,
+          message: verdict.message,
+          spentUsd: run?.spentUsd,
+          capUsd: run?.budget.usd,
+          unpricedSteps: run?.unpricedSteps,
+          estimate: verdict.estimate,
+        }).toObject()
+        ctx.blocked = true
+        yield* session.updateMessage(ctx.assistantMessage)
       })
 
       const finishReasoning = Effect.fn("SessionProcessor.finishReasoning")(function* (reasoningID: string) {
@@ -332,6 +393,7 @@ const layer = Layer.effect(
             }
             yield* ensureToolCall(value)
             const input = isRecord(value.input) ? value.input : { value: value.input }
+            ctx.stepTools.push({ callID: value.id, tool: value.name, input: JSON.stringify(input) })
             yield* updateToolCall(value.id, (match) => ({
               ...match,
               tool: value.name,
@@ -452,20 +514,26 @@ const layer = Layer.effect(
               cost: usage.cost,
             })
             yield* session.updateMessage(ctx.assistantMessage)
-            if (ctx.snapshot) {
-              const patch = yield* snapshot.patch(ctx.snapshot)
-              if (patch.files.length) {
-                yield* session.updatePart({
-                  id: PartID.ascending(),
-                  messageID: ctx.assistantMessage.id,
-                  sessionID: ctx.sessionID,
-                  type: "patch",
-                  hash: patch.hash,
-                  files: patch.files,
-                })
-              }
-              ctx.snapshot = undefined
+            const patch = ctx.snapshot ? yield* snapshot.patch(ctx.snapshot) : undefined
+            if (patch?.files.length) {
+              yield* session.updatePart({
+                id: PartID.ascending(),
+                messageID: ctx.assistantMessage.id,
+                sessionID: ctx.sessionID,
+                type: "patch",
+                hash: patch.hash,
+                files: patch.files,
+              })
             }
+            ctx.snapshot = undefined
+            yield* recordStep({
+              costUsd: usage.cost,
+              tokens: usage.tokens,
+              continues: value.reason === "tool-calls",
+              patched: patch
+                ? patch.files.length > 0
+                : ctx.stepTools.some((item) => FILE_TOOLS.has(item.tool) && item.error === undefined),
+            })
             yield* summary
               .summarize({
                 sessionID: ctx.sessionID,
@@ -634,6 +702,7 @@ const layer = Layer.effect(
           yield* Effect.gen(function* () {
             ctx.currentText = undefined
             ctx.reasoningMap = {}
+            ctx.stepTools = []
             yield* status.set(ctx.sessionID, { type: "busy" })
             const stream = llm.stream(streamInput)
 
@@ -710,6 +779,8 @@ export const node = LayerNode.make({
     Image.node,
     EventV2Bridge.node,
     Database.node,
+    Auth.node,
+    SpendGuard.node,
   ],
 })
 
