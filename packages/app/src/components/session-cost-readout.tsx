@@ -6,20 +6,13 @@ import { useSDK } from "@/context/sdk"
 import { useProviders } from "@/hooks/use-providers"
 import { useSessionLayout } from "@/pages/session/session-layout"
 import { getSessionTokenTotal } from "@/components/session/session-context-metrics"
-import {
-  SPEND_TOOLTIP,
-  capTooltip,
-  formatSpend,
-  formatUsd,
-  lastAssistantModel,
-  spendKind,
-} from "@/features/economics/format-spend"
+import { SPEND_TOOLTIP, capTooltip, lastAssistantModel, spendKind, spendPill } from "@/features/economics/format-spend"
 
 /**
  * Live BYOK cost readout for the active session. It reads the aggregated `cost`
- * and `tokens` the backend records on every assistant message, and the run
- * guard's cap from `session.spend`, surfaced always-visible instead of hidden
- * in a hover tooltip.
+ * and `tokens` the backend records on every assistant message and, while a
+ * capped run is going, the run guard's per-run figure from `session.spend`,
+ * surfaced always-visible instead of hidden in a hover tooltip.
  */
 export function SessionCostReadout() {
   const sync = useSync()
@@ -31,27 +24,28 @@ export function SessionCostReadout() {
   const info = createMemo(() => (params.id ? sync().session.get(params.id) : undefined))
   const cost = createMemo(() => info()?.cost ?? 0)
   const tokens = createMemo(() => getSessionTokenTotal(info()?.tokens) ?? 0)
-  // The guard keys a run by its root session, so a subagent's pill shows its root's cap.
-  const spend = createMemo(() => {
+  // The guard keys a run by its root session, so a subagent's pill reads its root's run.
+  const runID = createMemo(() => {
     const session = info()
     if (!session) return undefined
-    return (
-      sync().data.session_spend[session.id] ??
-      (session.parentID ? sync().data.session_spend[session.parentID] : undefined)
-    )
+    if (sync().data.session_spend[session.id]) return session.id
+    if (session.parentID && sync().data.session_spend[session.parentID]) return session.parentID
+    return undefined
   })
   const kind = createMemo(() => {
     const model = lastAssistantModel(params.id ? (sync().data.message[params.id] ?? []) : [])
     return spendKind(providers.all(), model?.providerID, model?.modelID)
   })
-  const label = createMemo(() => formatSpend({ usd: cost(), tokens: tokens(), kind: kind() }))
-  // A cap is a dollar figure, so it only follows an amount, never "free" or "unpriced".
-  const cap = createMemo(() => {
-    const capUsd = spend()?.capUsd
-    if (capUsd === undefined || !label().includes("$")) return ""
-    return ` of ${formatUsd(capUsd)}`
+  const pill = createMemo(() => {
+    const id = runID()
+    return spendPill({
+      usd: cost(),
+      tokens: tokens(),
+      kind: kind(),
+      run: id ? sync().data.session_spend[id] : undefined,
+      running: id ? sync().data.session_working(id) : false,
+    })
   })
-  const warn = createMemo(() => spend()?.state === "warn")
 
   const compactTokens = createMemo(() => {
     const value = tokens()
@@ -69,14 +63,22 @@ export function SessionCostReadout() {
           <div class="flex w-[220px] flex-col gap-1.5">
             <div class="flex items-center justify-between gap-4">
               <span class="text-v2-text-text-muted">Session cost</span>
-              <span class="text-v2-text-text-base">{label()}</span>
+              <span class="text-v2-text-text-base">{pill().session}</span>
             </div>
+            <Show when={pill().run}>
+              {(run) => (
+                <div class="flex items-center justify-between gap-4">
+                  <span class="text-v2-text-text-muted">This run</span>
+                  <span class="text-v2-text-text-base">{run()}</span>
+                </div>
+              )}
+            </Show>
             <div class="flex items-center justify-between gap-4">
               <span class="text-v2-text-text-muted">Tokens</span>
               <span class="text-v2-text-text-base">{tokens().toLocaleString(language.intl())}</span>
             </div>
-            <div class="pt-1 text-[11px] leading-4 text-v2-text-text-faint">{SPEND_TOOLTIP[kind()]}</div>
-            <Show when={spend()?.capUsd} keyed>
+            <div class="pt-1 text-[11px] leading-4 text-v2-text-text-faint">{SPEND_TOOLTIP[pill().kind]}</div>
+            <Show when={pill().capUsd} keyed>
               {(capUsd) => <div class="text-[11px] leading-4 text-v2-text-text-faint">{capTooltip(capUsd)}</div>}
             </Show>
           </div>
@@ -84,13 +86,10 @@ export function SessionCostReadout() {
       >
         <div
           data-component="session-cost-readout"
-          data-state={spend()?.state}
+          data-state={pill().warn ? "warn" : undefined}
           class="flex h-6 shrink-0 items-center gap-1.5 rounded-full border border-[color:var(--vx-line)] bg-white/[0.03] px-2.5 text-[11px] font-medium tabular-nums text-white/62 transition-colors duration-150 hover:border-[color:var(--vx-line)] hover:text-white/80"
         >
-          <span classList={{ "text-[#a78bfa]": !warn(), "text-amber-300": warn() }}>
-            {label()}
-            {cap()}
-          </span>
+          <span classList={{ "text-[#a78bfa]": !pill().warn, "text-amber-300": pill().warn }}>{pill().label}</span>
           <span class="text-white/25">·</span>
           <span>{compactTokens()}</span>
         </div>
