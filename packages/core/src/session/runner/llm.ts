@@ -53,6 +53,8 @@ import { llmClient } from "../../effect/app-node-platform"
  *   - [ ] Honor interruption and reject stale work after runtime attachment replacement.
  *   - [x] Honor optional agent step limits.
  *   - [x] Stop a guarded run at its spend, step, or unpriced-step limit before the next provider turn.
+ *   - [ ] Record compaction model calls with the spend guard; a compaction's cost is not counted against the cap.
+ *   - [ ] Apply the project's budget.run config to runs; only a prompt's own budget arms a V2 run today.
  *   - [ ] Bound provider retries and repeated identical tool calls.
  *
  * - Runtime context assembly
@@ -316,7 +318,14 @@ const layer = Layer.effect(
             yield* withPublication(publisher.failUnsettledTools(`Tool execution failed: ${message}`))
           }
           const stepSettlement = publisher.stepSettlement()
-          if (stepSettlement && !llmFailure && !publisher.hasProviderError()) {
+          const failed = llmFailure !== undefined || publisher.hasProviderError()
+          // A step that fails after the provider settled it was still billed, so the guard counts it.
+          if (stepSettlement && failed)
+            yield* guard.record(
+              session.id,
+              SessionRunnerModel.spendStep(model, stepSettlement, { continues: false, patched: false }),
+            )
+          if (stepSettlement && !failed) {
             const endSnapshot = yield* snapshots.capture()
             const files =
               startSnapshot && endSnapshot
@@ -324,7 +333,10 @@ const layer = Layer.effect(
                     .files({ from: startSnapshot, to: endSnapshot })
                     .pipe(Effect.catch(() => Effect.succeed(undefined)))
                 : undefined
-            const cost = SessionRunnerModel.calculateCost(model, stepSettlement.tokens, stepSettlement.providerMetadata)
+            const spend = SessionRunnerModel.spendStep(model, stepSettlement, {
+              continues: needsContinuation,
+              patched: Boolean(files?.length),
+            })
             yield* withPublication(
               events.publish(SessionEvent.Step.Ended, {
                 sessionID: session.id,
@@ -334,29 +346,13 @@ const layer = Layer.effect(
                 // The durable V2 event currently requires a finite number. Preserve unknown pricing
                 // until this boundary, then use the narrow compatibility fallback rather than
                 // treating an absent catalog entry as a measured free model internally.
-                cost: cost ?? 0,
+                cost: spend.costUsd ?? 0,
                 tokens: stepSettlement.tokens,
                 snapshot: endSnapshot,
                 files,
               }),
             )
-            // The guard gets the unrounded cost: an unpriced step counts as unknown, never as a free $0 step.
-            // V2 does not detect OAuth plans or tool loops yet.
-            const verdict = yield* guard.record(session.id, {
-              costUsd: cost,
-              costKind: SpendGuard.costKindOf({
-                free: SessionRunnerModel.isFree(model),
-                oauthPlan: false,
-                listed: cost !== undefined,
-              }),
-              price: SessionRunnerModel.priceOf(model),
-              contextTokens:
-                stepSettlement.tokens.input + stepSettlement.tokens.cache.read + stepSettlement.tokens.cache.write,
-              cachedTokens: stepSettlement.tokens.cache.read,
-              continues: needsContinuation,
-              tools: [],
-              patched: Boolean(files?.length),
-            })
+            const verdict = yield* guard.record(session.id, spend)
             if (verdict.state === "stopped") {
               // The step's answer is final when nothing follows it; only a cut-short continuation says why on the
               // message. Step.Failed after Step.Ended keeps the step's cost and tokens and marks it an error.
@@ -417,10 +413,15 @@ const layer = Layer.effect(
       const hasQueue = hasSteer ? false : yield* SessionInput.hasPending(db, input.sessionID, "queue")
       if (!input.force && !hasSteer && !hasQueue) return
       yield* failInterruptedTools(input.sessionID)
-      // A drain is one guarded run. A linked subagent spends against its root's run, which only the root begins and
-      // ends. Inputs left pending by a stop stay durable and drain on the next wake, under a fresh run.
+      // A drain is one guarded run. A linked subagent's steps are charged to its root's run whichever drain begins
+      // it, so only the root begins and ends one: a subagent would otherwise hold an empty run of its own and push
+      // a stray finished run into the guard's bounded history.
       const owner = (yield* guard.rootOf(input.sessionID)) === input.sessionID
-      if (owner) yield* guard.begin(input.sessionID)
+      // Inputs left pending by a stop stay durable and drain under a fresh run, which keeps the stopped run's cap
+      // unless a new budget was armed. That drain often starts at once: a prompt admitted during the stopped turn
+      // wakes a successor drain, and a budget armed then landed on the stopped run.
+      const previous = owner ? yield* guard.snapshot(input.sessionID) : undefined
+      if (owner) yield* guard.begin(input.sessionID, previous?.stopped ? previous.budget : undefined)
       yield* Effect.gen(function* () {
         let promotion: SessionInput.Delivery | undefined = hasSteer ? "steer" : hasQueue ? "queue" : undefined
         let shouldRun = input.force || hasSteer || hasQueue

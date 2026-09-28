@@ -112,10 +112,37 @@ export const isFree = (model: Model) =>
     cost: pricing.get(model)?.find((item) => item.tier === undefined),
   })
 
+// One settled provider step as the spend guard counts it. An unpriced step's cost stays undefined, never $0. A
+// catalog entry with no input and no output rate still prices every step at $0, so a step is listed only with real
+// catalog rates or Copilot's metered cost. That is Vectorscope's rule, so both call such a model unknown.
+export const spendStep = (
+  model: Model,
+  settlement: { readonly tokens: Tokens; readonly providerMetadata?: ProviderMetadata },
+  step: { readonly continues: boolean; readonly patched: boolean },
+): SpendGuard.Step => {
+  const costUsd = calculateCost(model, settlement.tokens, settlement.providerMetadata)
+  const price = priceOf(model)
+  return {
+    costUsd,
+    costKind: SpendGuard.costKindOf({
+      free: isFree(model),
+      // V2 does not detect OAuth plans yet.
+      oauthPlan: false,
+      listed: meteredUsd(settlement.providerMetadata) !== undefined || (costUsd !== undefined && price !== undefined),
+    }),
+    price,
+    contextTokens: settlement.tokens.input + settlement.tokens.cache.read + settlement.tokens.cache.write,
+    cachedTokens: settlement.tokens.cache.read,
+    continues: step.continues,
+    // V2 does not collect loop signatures yet.
+    tools: [],
+    patched: step.patched,
+  }
+}
+
 export const calculateCost = (model: Model, tokens: Tokens, metadata?: ProviderMetadata) => {
-  const totalNanoAiu = metadata?.copilot?.totalNanoAiu
-  if (typeof totalNanoAiu === "number" && Number.isFinite(totalNanoAiu) && totalNanoAiu >= 0)
-    return totalNanoAiu / 100_000_000_000
+  const metered = meteredUsd(metadata)
+  if (metered !== undefined) return metered
 
   const costs = pricing.get(model)
   if (!costs?.length) return undefined
@@ -134,6 +161,14 @@ export const calculateCost = (model: Model, tokens: Tokens, metadata?: ProviderM
     1_000_000
   if (!Number.isFinite(cost)) return undefined
   return Math.max(0, cost)
+}
+
+// Copilot reports what a step cost itself, whatever the catalog says.
+const meteredUsd = (metadata?: ProviderMetadata) => {
+  const totalNanoAiu = metadata?.copilot?.totalNanoAiu
+  if (typeof totalNanoAiu === "number" && Number.isFinite(totalNanoAiu) && totalNanoAiu >= 0)
+    return totalNanoAiu / 100_000_000_000
+  return undefined
 }
 
 const apiKey = (model: ModelV2.Info, credential?: Credential.Value) => {

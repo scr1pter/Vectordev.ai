@@ -3394,7 +3394,7 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
-  it.effect("stops before a step it predicts would cross the cap", () =>
+  it.effect("stops before a step it predicts would cross the cap, and a resume keeps the cap", () =>
     Effect.gen(function* () {
       yield* setup
       currentModel = pricedModel()
@@ -3412,18 +3412,56 @@ describe("SessionRunnerLLM", () => {
       yield* session.resume(sessionID)
 
       expect(requests).toHaveLength(1)
-      expect(yield* guard.snapshot(sessionID)).toMatchObject({
-        steps: 1,
-        stopped: {
-          reason: "predicted",
-          message:
-            "Stopped before the next step: $0.61 spent of a $1.00 cap, and the next step was estimated at $0.61 at catalog list prices.",
-        },
-      })
+      const message =
+        "Stopped before the next step: $0.61 spent of a $1.00 cap, and the next step was estimated at $0.61 at catalog list prices."
+      expect(yield* guard.snapshot(sessionID)).toMatchObject({ steps: 1, stopped: { reason: "predicted", message } })
+      expect(yield* session.context(sessionID)).toMatchObject([
+        { type: "user", text: "Read everything" },
+        { type: "assistant", finish: "error", error: { type: "unknown", message } },
+      ])
+
+      yield* session.resume(sessionID)
+
+      expect(requests).toHaveLength(2)
+      const next = yield* guard.snapshot(sessionID)
+      expect(next).toMatchObject({ steps: 1, budget: { usd: 1 } })
+      expect(next?.stopped).toBeUndefined()
     }),
   )
 
-  it.effect("leaves steering admitted during a stopped turn for the next run", () =>
+  it.effect("keeps a final answer that crosses the cap", () =>
+    Effect.gen(function* () {
+      yield* setup
+      currentModel = pricedModel()
+      const session = yield* SessionV2.Service
+      const guard = yield* SpendGuard.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Answer once" }), resume: false })
+      yield* guard.arm(sessionID, { usd: 0.1 })
+      requests.length = 0
+      response = pricedTurn({ inputTokens: 1_000, outputTokens: 50_000 })
+
+      yield* session.resume(sessionID)
+
+      expect(requests).toHaveLength(1)
+      expect(yield* guard.snapshot(sessionID)).toMatchObject({
+        steps: 1,
+        stopped: {
+          reason: "cap",
+          message:
+            "Spend cap reached: $0.50 spent against a $0.10 cap for this run. Vector stopped after the step that crossed it.",
+        },
+      })
+      const context = yield* session.context(sessionID)
+      expect(context).toMatchObject([
+        { type: "user", text: "Answer once" },
+        { type: "assistant", finish: "stop" },
+      ])
+      const answer = context.at(-1)
+      expect(answer?.type === "assistant" ? answer.error : "not an assistant").toBeUndefined()
+    }),
+  )
+
+  it.effect("runs steering left by a stop at once under the stopped run's cap", () =>
     Effect.gen(function* () {
       yield* setup
       currentModel = pricedModel()
@@ -3432,6 +3470,7 @@ describe("SessionRunnerLLM", () => {
       yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Start working" }), resume: false })
       yield* guard.arm(sessionID, { usd: 1 })
       requests.length = 0
+      executions.length = 0
       responses = [
         pricedTurn({ call: "first", inputTokens: 1_000, outputTokens: 110_000 }),
         pricedTurn({ inputTokens: 1_000, outputTokens: 1_000 }),
@@ -3441,24 +3480,32 @@ describe("SessionRunnerLLM", () => {
 
       const first = yield* session.resume(sessionID).pipe(Effect.forkChild)
       yield* Deferred.await(streamStarted)
-      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Change direction" }), resume: false })
+      // The way the server admits a steer with a budget: arm the session, then admit and wake. The wake lands while
+      // the drain is active, so the coordinator starts a successor drain as soon as the stopped one returns.
+      yield* guard.arm(sessionID, { usd: 1.05 })
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Change direction" }) })
       yield* Deferred.succeed(streamGate, undefined)
       yield* Fiber.join(first)
       streamGate = undefined
       streamStarted = undefined
 
-      expect(requests).toHaveLength(1)
-      expect(yield* guard.snapshot(sessionID)).toMatchObject({ steps: 1, stopped: { reason: "cap" } })
-      const { db } = yield* Database.Service
-      expect(yield* SessionInput.hasPending(db, sessionID, "steer")).toBe(true)
-
-      yield* session.resume(sessionID)
-
+      // The first step crossed the cap and the stopped drain started no turn for the steer; the successor did.
       expect(requests).toHaveLength(2)
+      expect(executions).toEqual(["first"])
       expect(userTexts(requests[1]!)).toEqual(["Start working", "Change direction"])
+      const message =
+        "Spend cap reached: $1.10 spent against a $1.05 cap for this run. Vector stopped after the step that crossed it."
+      expect(yield* session.context(sessionID)).toMatchObject([
+        { type: "user", text: "Start working" },
+        { type: "assistant", finish: "error", error: { type: "unknown", message } },
+        { type: "user", text: "Change direction" },
+        { type: "assistant", finish: "stop" },
+      ])
       const next = yield* guard.snapshot(sessionID)
-      expect(next).toMatchObject({ steps: 1, budget: {} })
+      expect(next).toMatchObject({ steps: 1, budget: { usd: 1.05 } })
       expect(next?.stopped).toBeUndefined()
+      const db = (yield* Database.Service).db
+      expect(yield* SessionInput.hasPending(db, sessionID, "steer")).toBe(false)
     }),
   )
 
@@ -3490,6 +3537,35 @@ describe("SessionRunnerLLM", () => {
       const session = yield* SessionV2.Service
       const guard = yield* SpendGuard.Service
       yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "No catalog price" }), resume: false })
+      yield* guard.arm(sessionID, { usd: 1, unpricedSteps: 1 })
+      requests.length = 0
+      responses = [
+        pricedTurn({ call: "first", inputTokens: 1_000, outputTokens: 1_000 }),
+        pricedTurn({ inputTokens: 1_000, outputTokens: 1_000 }),
+      ]
+
+      yield* session.resume(sessionID)
+
+      expect(requests).toHaveLength(1)
+      expect(yield* guard.snapshot(sessionID)).toMatchObject({
+        spentUsd: 0,
+        unpricedSteps: 1,
+        costKind: "unknown",
+        stopped: { reason: "unpriced" },
+      })
+    }),
+  )
+
+  it.effect("counts a catalog model with no rates as unknown rather than a priced $0", () =>
+    Effect.gen(function* () {
+      yield* setup
+      currentModel = SessionRunnerModel.withPricing(
+        Model.make({ id: "unrated-model", provider: "fake", route: OpenAIChat.route }),
+        [{ input: 0, output: 0, cache: { read: 0, write: 0 } }],
+      )
+      const session = yield* SessionV2.Service
+      const guard = yield* SpendGuard.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "No catalog rates" }), resume: false })
       yield* guard.arm(sessionID, { usd: 1, unpricedSteps: 1 })
       requests.length = 0
       responses = [
