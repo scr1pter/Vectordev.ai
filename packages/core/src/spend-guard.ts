@@ -348,7 +348,8 @@ const layer = Layer.effect(
           const found = runOf(current, sessionID)
           if (!found) return [undefined, current] as const
           const next = afterStep(found.run, step, sessionID)
-          if (found.active) return [next, { ...current, runs: new Map(current.runs).set(found.rootID, next.run) }] as const
+          if (found.active)
+            return [next, { ...current, runs: new Map(current.runs).set(found.rootID, next.run) }] as const
           return [next, { ...current, last: new Map(current.last).set(found.rootID, next.run) }] as const
         })
         if (!result) return { state: "ok" } satisfies Verdict
