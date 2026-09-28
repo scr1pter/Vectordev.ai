@@ -6,13 +6,15 @@ import { useDialog } from "@vectordevai/ui/context/dialog"
 import { useSDK } from "@/context/sdk"
 import { usePlatform } from "@/context/platform"
 import { formatServerError } from "@/utils/server-errors"
-import { spendLimitsApi } from "@/features/economics/spend-limits-api"
+import { useSync } from "@/context/sync"
+import { cachedSpendPolicy, promptRunBudget, spendLimitsApi } from "@/features/economics/spend-limits-api"
 import { BUDGET_STOP_CONTINUE_PROMPT, budgetStopCopy, type BudgetStopNotice } from "./budget-stop-copy"
 
 // Shown in place of the plain error card when the run guard stopped a run.
 // Continuing is a new prompt under a fresh cap, not a resume of the stopped run.
 export function BudgetStop(props: { sessionID: string; stop: BudgetStopNotice }) {
   const sdk = useSDK()
+  const sync = useSync()
   const platform = usePlatform()
   const dialog = useDialog()
   const copy = () => budgetStopCopy(props.stop.error)
@@ -21,7 +23,13 @@ export function BudgetStop(props: { sessionID: string; stop: BudgetStopNotice })
   const resume = async () => {
     if (state.busy || state.continued) return
     setState({ busy: true, error: "" })
-    const budget = copy().budget
+    // Built on the configured limits so the new run keeps its step limits and
+    // warn threshold, and a loop continuation keeps the interactive cap.
+    const budget = promptRunBudget({
+      configured: sync().data.config.budget?.run,
+      policy: await cachedSpendPolicy(),
+      capUsd: copy().capUsd,
+    })
     const sent = await sdk()
       .client.session.promptAsync({
         sessionID: props.sessionID,

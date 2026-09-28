@@ -1,3 +1,5 @@
+import type { RunBudget } from "@vectordevai/sdk/v2/client"
+
 // The desktop spend ledger, as the renderer sees it through window.api. The web
 // build has no ledger, so every accessor here returns undefined there.
 //
@@ -55,8 +57,7 @@ let cached: { at: number; policy: Promise<SpendPolicy | undefined> } | undefined
 
 // Read on every prompt submit, so the policy is cached for 30 seconds rather
 // than paying an IPC round trip per message. Saving limits clears it.
-export function cachedSpendPolicy(now = Date.now()) {
-  const api = spendLimitsApi()
+export function cachedSpendPolicy(api = spendLimitsApi(), now = Date.now()) {
   if (!api) return Promise.resolve(undefined)
   if (cached && now - cached.at < CACHE_MS) return cached.policy
   const policy = api.limits().catch(() => undefined)
@@ -74,4 +75,33 @@ export function interactiveRunBudget(policy: SpendPolicy | undefined) {
   const perRun = policy?.interactive.perRun
   if (!perRun || !(perRun.usd > 0)) return undefined
   return { usd: perRun.usd, ...(perRun.warnAt === undefined ? {} : { warnAt: perRun.warnAt }) }
+}
+
+// A prompt budget replaces the configured budget.run for its run rather than
+// adding to it, so it is built on top of that config: its step limits stay, and
+// the smaller of the two dollar caps wins, with that cap's warn threshold.
+// `capUsd` renews a stopped run's cap for a continuation. With neither an
+// interactive cap nor a renewed one, no budget is sent and the engine applies
+// the config on its own.
+export function promptRunBudget(input: {
+  configured: RunBudget | undefined
+  policy: SpendPolicy | undefined
+  capUsd?: number
+}): RunBudget | undefined {
+  const interactive = interactiveRunBudget(input.policy)
+  if (!interactive && input.capUsd === undefined) return undefined
+  const configured = input.configured ?? {}
+  const cap = input.capUsd === undefined ? smallerCap(configured, interactive) : { usd: input.capUsd }
+  const warnAt = cap?.warnAt ?? interactive?.warnAt ?? configured.warnAt
+  return {
+    ...configured,
+    ...(cap ? { usd: cap.usd } : {}),
+    ...(warnAt === undefined ? {} : { warnAt }),
+  }
+}
+
+function smallerCap(configured: RunBudget, interactive: RunBudget | undefined) {
+  if (configured.usd === undefined) return interactive
+  if (interactive?.usd === undefined || configured.usd <= interactive.usd) return configured
+  return interactive
 }

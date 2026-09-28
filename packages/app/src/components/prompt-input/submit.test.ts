@@ -193,7 +193,7 @@ beforeAll(async () => {
 
   mock.module("@/context/sync", () => ({
     useSync: () => () => ({
-      data: { command: [] },
+      data: { command: [], config: {} },
       session: {
         optimistic: {
           add: (value: {
@@ -502,7 +502,7 @@ describe("prompt submit worktree selection", () => {
 describe("follow-up optimistic echo", () => {
   type SendInput = Parameters<typeof import("./submit").sendFollowupDraft>[0]
   type SentPart = { id: string; type: string; synthetic?: boolean }
-  type Step = { kind: "echo" | "request"; parts: SentPart[] }
+  type Step = { kind: "echo" | "request"; parts: SentPart[]; budget?: unknown }
 
   const text = "describe the colors in this picture and explain what the square could represent"
   const pasted = {
@@ -524,22 +524,22 @@ describe("follow-up optimistic echo", () => {
     }
   }
 
-  const send = async (draft: Partial<import("./submit").FollowupDraft> = {}) => {
+  const send = async (draft: Partial<import("./submit").FollowupDraft> = {}, config: object = {}) => {
     const { sendFollowupDraft } = await import("./submit")
     // One ordered log, so a test also sees when the echo happens relative to the request.
     const steps: Step[] = []
     await sendFollowupDraft({
       client: {
         session: {
-          promptAsync: async (input: { parts: SentPart[] }) => {
-            steps.push({ kind: "request", parts: input.parts })
+          promptAsync: async (input: { parts: SentPart[]; budget?: unknown }) => {
+            steps.push({ kind: "request", parts: input.parts, budget: input.budget })
             return { data: undefined }
           },
         },
       } as unknown as SendInput["client"],
       serverSync: { session: { set: () => undefined } } as unknown as SendInput["serverSync"],
       sync: {
-        data: { command: [] },
+        data: { command: [], config },
         session: {
           optimistic: {
             add: (value: { parts: SentPart[] }) => void steps.push({ kind: "echo", parts: value.parts }),
@@ -592,6 +592,25 @@ describe("follow-up optimistic echo", () => {
 
   test("sends exactly the echoed parts when nothing is added", async () => {
     expectOneEchoBeforeRequest(await send(), 0)
+  })
+
+  test("sends the interactive per-run cap on top of the configured run budget", async () => {
+    const { clearSpendPolicyCache } = await import("@/features/economics/spend-limits-api")
+    const policy = { interactive: { perRun: { usd: 10, warnAt: 0.7 } }, unattended: {} }
+    clearSpendPolicyCache()
+    Object.assign(window, { api: { spendLimits: { limits: async () => policy } } })
+    try {
+      const steps = await send({}, { budget: { run: { usd: 20, steps: 60 } } })
+      expect(steps.find((step) => step.kind === "request")?.budget).toEqual({ usd: 10, steps: 60, warnAt: 0.7 })
+    } finally {
+      delete (window as { api?: unknown }).api
+      clearSpendPolicyCache()
+    }
+  })
+
+  test("sends no budget without an interactive cap, leaving the config to the engine", async () => {
+    const steps = await send({}, { budget: { run: { usd: 20, steps: 60 } } })
+    expect(steps.find((step) => step.kind === "request")?.budget).toBeUndefined()
   })
 })
 

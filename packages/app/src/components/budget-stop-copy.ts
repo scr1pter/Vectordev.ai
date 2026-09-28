@@ -38,7 +38,9 @@ export function budgetStopCopy(error: BudgetStopError["data"]) {
       ? `Next step estimated at ${formatUsd(error.estimate.lowUsd)}–${formatUsd(error.estimate.highUsd)}`
       : undefined,
     continueLabel: continueLabel(error),
-    budget: error.capUsd === undefined ? undefined : { usd: error.capUsd },
+    // A continuation renews the stopped run's cap at the same size; the card
+    // builds the rest of the budget from the user's configured limits.
+    capUsd: error.capUsd,
     footnote: BUDGET_STOP_FOOTNOTE,
   }
 }

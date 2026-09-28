@@ -49,7 +49,7 @@ describe("budgetStopCopy", () => {
     )
     expect(copy.spent).toBe("$5.02 of $5.00 spent")
     expect(copy.continueLabel).toBe("Continue with a new $5.00 cap")
-    expect(copy.budget).toEqual({ usd: 5 })
+    expect(copy.capUsd).toBe(5)
     expect(copy.footnote).toBe("Continuing starts a new run with its own cap.")
   })
 
@@ -63,6 +63,9 @@ describe("budgetStopCopy", () => {
     })
     expect(copy.title).toBe("Budget stop")
     expect(copy.estimate).toBe("Next step estimated at $0.41–$0.97")
+    expect(copy.spent).toBe("$4.62 of $5.00 spent")
+    expect(copy.continueLabel).toBe("Continue with a new $5.00 cap")
+    expect(copy.capUsd).toBe(5)
   })
 
   test("an estimate whose ends agree still prints as a range", () => {
@@ -75,15 +78,24 @@ describe("budgetStopCopy", () => {
     expect(copy.estimate).toBe("Next step estimated at $0.50–$0.50")
   })
 
-  test("unpriced and step stops use the budget title", () => {
-    expect(budgetStopCopy({ reason: "unpriced", message: "m", capUsd: 5, unpricedSteps: 40 }).title).toBe("Budget stop")
-    expect(budgetStopCopy({ reason: "steps", message: "m" }).title).toBe("Budget stop")
+  test("an unpriced stop renews the cap it ran under", () => {
+    const copy = budgetStopCopy({ reason: "unpriced", message: "m", capUsd: 5, unpricedSteps: 40 })
+    expect(copy.title).toBe("Budget stop")
+    expect(copy.continueLabel).toBe("Continue with a new $5.00 cap")
+    expect(copy.capUsd).toBe(5)
+  })
+
+  test("a step stop under a cap renews that cap", () => {
+    const copy = budgetStopCopy({ reason: "steps", message: "m", spentUsd: 1.2, capUsd: 5 })
+    expect(copy.title).toBe("Budget stop")
+    expect(copy.continueLabel).toBe("Continue with a new $5.00 cap")
+    expect(copy.capUsd).toBe(5)
   })
 
   test("no Continue button appears without a cap", () => {
     const copy = budgetStopCopy({ reason: "steps", message: "Step limit reached: 60 of 60 steps used for this run." })
     expect(copy.continueLabel).toBeUndefined()
-    expect(copy.budget).toBeUndefined()
+    expect(copy.capUsd).toBeUndefined()
     expect(copy.spent).toBeUndefined()
     expect(copy.estimate).toBeUndefined()
   })
@@ -95,6 +107,14 @@ describe("budgetStopCopy", () => {
     })
     expect(copy.title).toBe("Loop paused")
     expect(copy.continueLabel).toBe("Continue anyway")
-    expect(copy.budget).toBeUndefined()
+    expect(copy.capUsd).toBeUndefined()
+  })
+
+  test("a loop under a cap still continues anyway, and the new run keeps a cap of the same size", () => {
+    const copy = budgetStopCopy({ reason: "loop", message: "Paused a repeating loop", spentUsd: 1.1, capUsd: 5 })
+    expect(copy.title).toBe("Loop paused")
+    expect(copy.continueLabel).toBe("Continue anyway")
+    expect(copy.capUsd).toBe(5)
+    expect(copy.spent).toBe("$1.10 of $5.00 spent")
   })
 })
