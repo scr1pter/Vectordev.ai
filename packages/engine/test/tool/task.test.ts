@@ -330,6 +330,9 @@ describe("tool.task", () => {
       expect(result.output).toContain(`<task id="${child.id}" state="completed">`)
       expect(seen?.sessionID).toBe(child.id)
       expect(seen?.variant).toBe("xhigh")
+      // The stubbed prompt never runs the loop, so only the task tool itself links the resumed child to its root.
+      const guard = yield* SpendGuard.Service
+      expect(yield* guard.rootOf(child.id)).toBe(chat.id)
       expect((yield* sessions.get(child.id)).metadata?.subagent).toMatchObject({
         status: "completed",
         agent: "general",
@@ -1074,6 +1077,8 @@ describe("tool.task", () => {
       expect(result.metadata.sessionId).not.toBe("ses_missing")
       expect(result.output).toContain(`<task id="${result.metadata.sessionId}" state="completed">`)
       expect(seen?.sessionID).toBe(result.metadata.sessionId)
+      const guard = yield* SpendGuard.Service
+      expect(yield* guard.rootOf(SessionID.make(result.metadata.sessionId))).toBe(chat.id)
     }),
   )
 
