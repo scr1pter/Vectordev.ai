@@ -41,6 +41,7 @@ import {
   combineSpend,
   formatUsd,
   measuredCost,
+  newSpend,
   readSpend,
   tokenTotal,
   usageDelta,
@@ -206,15 +207,21 @@ type ActiveParallelRun = {
 // What a Vector-runtime run holds and has spent. `budgetUsd` is the ledger
 // headroom it reserved, sent as the engine budget with every prompt it admits.
 // Each drain of the session is its own guard run, so `measured` sums the
-// drains read so far, a later prompt only gets what is left, and `draining`
-// says a drain has started that is not in `measured` yet.
+// drains read so far, `counted` is the last reading added to it, a later
+// prompt only gets what is left, and `draining` says a drain has started that
+// is not in `measured` yet.
 type ParallelRunSpend = {
   projectPath: string
   budgetUsd?: number
   measured?: RunBudget.Snapshot
+  counted?: RunBudget.Snapshot
   draining: boolean
   before?: EngineSessionResponse["data"]
 }
+
+// The engine can take longer than this only when it is wedged, and a wedged
+// engine must not keep a finished run's reservation held.
+const SPEND_READ_TIMEOUT_MS = 5_000
 
 const activeRuns = new Map<string, ActiveParallelRun>()
 const queuedRuns = new Map<string, ActiveParallelRun>()
@@ -1062,7 +1069,9 @@ async function admitVectorPrompt(
   const pending = team ? nextVectorTeammateDelivery(pendingTeamMessages(team.id, record.id)) : []
   if (!prompt && !pending.length && !required) return false
   const budgetUsd =
-    active.spend?.budgetUsd === undefined ? undefined : active.spend.budgetUsd - (active.spend.measured?.spentUsd ?? 0)
+    active.spend?.budgetUsd === undefined
+      ? undefined
+      : active.spend.budgetUsd - (await spentSoFar(active.spend, active, active.sessionId))
   if (budgetUsd !== undefined && budgetUsd <= 0) {
     // A teammate note can wait for a run that still has money; this one has none.
     if (!required) return false
@@ -2043,19 +2052,22 @@ async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEng
     const persisted = readRecords().find((record) => record.id === id)
     if (!persisted) throw new Error("Parallel workspace was not found.")
     const ledger = await spendLedger()
-    const allowance = await ledger.checkAllowance({ projectPath: persisted.sourcePath, runId, source: "parallel" })
+    // The headroom is held inside the check, so agents launched beside this
+    // one cannot be handed the same dollars.
+    const allowance = await ledger.checkAllowance({
+      projectPath: persisted.sourcePath,
+      runId,
+      source: "parallel",
+      reserve: true,
+    })
     // Blocked means the money is already spent, so the agent must never start.
     // Throwing lands in the catch below, which is the same failed-record shape
     // every other pre-flight failure uses, so the reason reaches the UI.
     if (!allowance.allowed) {
       throw new Error(allowance.reason || "A spend limit blocked this parallel agent run.")
     }
-    // The headroom is held for this run until it records its cost, so agents
-    // launched beside it cannot be handed the same dollars.
-    const budgetUsd = allowance.remainingUsd
-    if (budgetUsd !== undefined) ledger.reserve(runId, budgetUsd, persisted.sourcePath)
     const launched = activeRuns.get(id)
-    if (launched) launched.spend = { projectPath: persisted.sourcePath, budgetUsd, draining: false }
+    if (launched) launched.spend = { projectPath: persisted.sourcePath, budgetUsd: allowance.budgetUsd, draining: false }
     // A warning is information, not a gate: the run proceeds and the user gets
     // told how close the cap is.
     const warning = allowance.state === "warn" ? allowance.reason : undefined
@@ -2349,7 +2361,8 @@ async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEng
     syncBackgroundTask(failed, detail)
   } finally {
     // A failed or stopped run spent real money too, so the spend is recorded on
-    // every exit path. Whatever the run still holds is released either way.
+    // every exit path. Its engine reads time out, so whatever the run still
+    // holds is released even when the engine never answers.
     await recordVectorRunSpend(id, runId, engine, activeRuns.get(id)).catch(() => undefined)
     await spendLedger()
       .then((ledger) => ledger.release(runId))
@@ -2367,13 +2380,17 @@ async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEng
 }
 
 // Adds a finished drain's guard reading to the run. A guard stop ends the run
-// here, before its checks or a repair pass can start another drain.
+// here, before its checks or a repair pass can start another drain. A reading
+// already counted means the drain has not begun yet, as when the idle wait
+// gave up waiting for it, so it stays pending for the finally to read.
 async function measureDrain(active: ActiveParallelRun, engine: ParallelWorkspaceEngine, sessionId: string) {
   if (!active.spend) return
-  const snapshot = await readSpend((path) => engineRequest(engine, path), sessionId)
+  const snapshot = newSpend(active.spend.counted, await readSpend((path) => engineRequest(engine, path), sessionId))
+  if (!snapshot) return
   active.spend.measured = combineSpend(active.spend.measured, snapshot)
+  active.spend.counted = snapshot
   active.spend.draining = false
-  if (snapshot?.state === "stopped") {
+  if (snapshot.state === "stopped") {
     throw new Error(`Stopped by spend guard: ${snapshot.message ?? "the run reached its spend limit."}`)
   }
 }
@@ -2393,8 +2410,17 @@ async function recordVectorRunSpend(
   const after = await engineRequest<EngineSessionResponse | undefined>(
     engine,
     `/api/session/${encodeURIComponent(sessionId)}`,
+    { signal: AbortSignal.timeout(SPEND_READ_TIMEOUT_MS) },
   ).catch(() => undefined)
-  const last = spend.draining ? await readSpend((path) => engineRequest(engine, path), sessionId) : undefined
+  const last = spend.draining
+    ? newSpend(
+        spend.counted,
+        await readSpend(
+          (path) => engineRequest(engine, path, { signal: AbortSignal.timeout(SPEND_READ_TIMEOUT_MS) }),
+          sessionId,
+        ),
+      )
+    : undefined
   const cost = measuredCost(combineSpend(spend.measured, last), spend.before?.cost, after?.data?.cost)
   const record = readRecords().find((item) => item.id === id)
   const ledger = await spendLedger()
@@ -2418,6 +2444,20 @@ async function recordVectorRunSpend(
     logs: stop ? [stop, ...current.logs].slice(0, 120) : current.logs,
   }))
   syncBackgroundTask(measured)
+}
+
+// What a run has spent before the prompt it is about to admit. The drain
+// readings miss one that ended after the last idle check, which a teammate
+// note admitted in that gap would otherwise be handed again, so the session's
+// own cost since the run began is the floor. Mid-drain that floor includes the
+// drain the prompt joins, so the budget errs strict rather than loose.
+async function spentSoFar(spend: ParallelRunSpend, active: ActiveParallelRun, sessionId: string) {
+  const now = await engineRequest<EngineSessionResponse | undefined>(
+    active.engine,
+    `/api/session/${encodeURIComponent(sessionId)}`,
+    { signal: active.controller.signal },
+  ).catch(() => undefined)
+  return Math.max(spend.measured?.spentUsd ?? 0, usageDelta(spend.before?.cost, now?.data?.cost) ?? 0)
 }
 
 export async function runParallelWorkspace(
