@@ -74,6 +74,8 @@ export type Run = {
   readonly stopped?: Stop
   readonly warned: boolean
   readonly loops: ReadonlyMap<SessionID, Loop>
+  // Off for a root that polices its own loops; see ignoreLoops.
+  readonly loopRules: boolean
 }
 
 export type Step = {
@@ -104,7 +106,7 @@ export type StopDetail = {
   readonly loop?: { readonly tool: string; readonly kind: "repeat" | "error" }
 }
 
-export function start(rootID: SessionID, budget: RunBudget.Info): Run {
+export function start(rootID: SessionID, budget: RunBudget.Info, loopRules = true): Run {
   return {
     rootID,
     budget,
@@ -113,6 +115,7 @@ export function start(rootID: SessionID, budget: RunBudget.Info): Run {
     unpricedSteps: 0,
     warned: false,
     loops: new Map(),
+    loopRules,
   }
 }
 
@@ -130,7 +133,9 @@ export function afterStep(run: Run, step: Step, sessionID = run.rootID): { run: 
   if (run.stopped) return { run: counted, verdict: { state: "stopped", ...run.stopped } }
   const limits = checkLimits(counted, step)
   if (limits.state === "stopped") return stop(counted, limits)
-  const loops = checkLoops(counted, step, sessionID)
+  const loops = counted.loopRules
+    ? checkLoops(counted, step, sessionID)
+    : { run: counted, verdict: { state: "ok" } satisfies Verdict }
   if (loops.verdict.state === "stopped") return stop(loops.run, loops.verdict)
   if (limits.state === "warn") return { run: { ...loops.run, warned: true }, verdict: limits }
   return { run: loops.run, verdict: limits }
@@ -250,6 +255,10 @@ export interface Interface {
   readonly arm: (sessionID: SessionID, budget: RunBudget.Info) => Effect.Effect<void>
   // Starts a run for a root session with the armed budget, else `fallback`. A no-op while the run is active.
   readonly begin: (rootID: SessionID, fallback?: RunBudget.Info) => Effect.Effect<void>
+  // Turns the loop rules off for a root that polices itself, such as a Vectorscope specialist: it has its own step,
+  // cost and time limits, never edits files (so nothing would ever reset the loop window), and must account for
+  // every stop it gets. Spend, step and cap checks still apply.
+  readonly ignoreLoops: (rootID: SessionID) => Effect.Effect<void>
   readonly link: (childID: SessionID, parentID: SessionID) => Effect.Effect<void>
   readonly rootOf: (sessionID: SessionID) => Effect.Effect<SessionID>
   // Applies one provider step to the run of `sessionID`'s root and publishes session.spend. A root with no active
@@ -270,13 +279,20 @@ type State = {
   readonly roots: ReadonlyMap<SessionID, SessionID>
   readonly armed: ReadonlyMap<SessionID, RunBudget.Info>
   readonly last: ReadonlyMap<SessionID, Run>
+  readonly quiet: ReadonlySet<SessionID>
 }
 
 const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const events = yield* EventV2.Service
-    const state = yield* Ref.make<State>({ runs: new Map(), roots: new Map(), armed: new Map(), last: new Map() })
+    const state = yield* Ref.make<State>({
+      runs: new Map(),
+      roots: new Map(),
+      armed: new Map(),
+      last: new Map(),
+      quiet: new Set(),
+    })
     const rootIn = (current: State, sessionID: SessionID) => current.roots.get(sessionID) ?? sessionID
     // The run a session's steps count against: its root's active run, else, for a linked subagent, the root's
     // finished run.
@@ -306,8 +322,16 @@ const layer = Layer.effect(
           if (current.runs.has(rootID)) return current
           const armed = new Map(current.armed)
           armed.delete(rootID)
-          const run = start(rootID, current.armed.get(rootID) ?? fallback ?? {})
+          const run = start(rootID, current.armed.get(rootID) ?? fallback ?? {}, !current.quiet.has(rootID))
           return { ...current, armed, runs: new Map(current.runs).set(rootID, run) }
+        })
+      }),
+      ignoreLoops: Effect.fn("SpendGuard.ignoreLoops")(function* (rootID) {
+        yield* Ref.update(state, (current) => {
+          const quiet = new Set(current.quiet).add(rootID)
+          const run = current.runs.get(rootID)
+          if (!run) return { ...current, quiet }
+          return { ...current, quiet, runs: new Map(current.runs).set(rootID, { ...run, loopRules: false }) }
         })
       }),
       link: Effect.fn("SpendGuard.link")(function* (childID, parentID) {
@@ -363,6 +387,7 @@ const layer = Layer.effect(
             armed,
             runs,
             roots: new Map([...current.roots].filter((entry) => !dropped.has(entry[1]))),
+            quiet: new Set([...current.quiet].filter((id) => !dropped.has(id))),
             last: new Map([...last].slice(-LAST_RUNS)),
           }
         })

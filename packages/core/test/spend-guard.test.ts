@@ -208,6 +208,23 @@ describe("SpendGuard.afterStep", () => {
     expect(patched.verdicts.every((verdict) => verdict.state === "ok")).toBe(true)
   })
 
+  test("a run with loop rules off never pauses a loop, but still stops on its cap", () => {
+    const quiet = [
+      step({ tools: [bash("git diff")], costUsd: 0.2 }),
+      step({ tools: [bash("git diff")], costUsd: 0.2 }),
+      step({ tools: [bash("git diff")], costUsd: 0.2 }),
+      step({ tools: [bash("git diff")], costUsd: 0.5 }),
+    ].reduce(
+      (acc, item) => {
+        const next = SpendGuard.afterStep(acc.run, item)
+        return { run: next.run, verdicts: [...acc.verdicts, next.verdict] }
+      },
+      { run: SpendGuard.start(root, { usd: 1 }, false), verdicts: [] as SpendGuard.Verdict[] },
+    )
+    expect(quiet.verdicts.slice(0, 3).map((verdict) => verdict.state)).toEqual(["ok", "ok", "ok"])
+    expect(quiet.verdicts[3]).toMatchObject({ state: "stopped", reason: "cap" })
+  })
+
   test("forgets a call once it leaves the last 8 calls", () => {
     const left = play({}, [
       step({ tools: [bash("bun test")] }),
@@ -342,6 +359,25 @@ describe("SpendGuard service", () => {
       expect(last?.budget.usd).toBe(10)
       expect((yield* guard.record(root, step({ costUsd: 5 }))).state).toBe("ok")
       expect((yield* guard.snapshot(root))?.spentUsd).toBe(1.1)
+    }),
+  )
+
+  it.effect("turns the loop rules off for a root marked before or during its run", () =>
+    Effect.gen(function* () {
+      const guard = yield* SpendGuard.Service
+      const before = SessionID.make("ses_quiet_before")
+      yield* guard.ignoreLoops(before)
+      yield* guard.begin(before)
+      const during = SessionID.make("ses_quiet_during")
+      yield* guard.begin(during)
+      yield* guard.ignoreLoops(during)
+      for (const id of [before, during]) {
+        const verdicts = yield* Effect.forEach([1, 2, 3], () => guard.record(id, step({ tools: [bash("git diff")] })))
+        expect(verdicts.map((verdict) => verdict.state)).toEqual(["ok", "ok", "ok"])
+      }
+      yield* guard.begin(root)
+      const looping = yield* Effect.forEach([1, 2, 3], () => guard.record(root, step({ tools: [bash("git diff")] })))
+      expect(looping[2]).toMatchObject({ state: "stopped", reason: "loop" })
     }),
   )
 

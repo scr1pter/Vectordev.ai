@@ -56,6 +56,7 @@ import { TestInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { httpError, reply, TestLLMServer } from "../lib/llm-server"
 import { testProviderConfig } from "../lib/test-provider"
+import { SpendGuard } from "@vectordevai/core/spend-guard"
 
 // Review.run against the fake LLM. Requests are matched by the prompt they answer, since the review and security
 // sessions run in parallel.
@@ -117,6 +118,7 @@ const mcp = Layer.succeed(
 
 const root = LayerNode.group([
   SessionPrompt.node,
+  SpendGuard.node,
   Session.node,
   SessionProjector.node,
   MessageV2.node,
