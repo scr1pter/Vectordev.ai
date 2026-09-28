@@ -337,6 +337,23 @@ export type ContentFilterError = {
   }
 }
 
+export type RunBudgetStopReason = "cap" | "predicted" | "unpriced" | "steps" | "loop"
+
+export type BudgetStopError = {
+  name: "BudgetStopError"
+  data: {
+    reason: RunBudgetStopReason
+    message: string
+    spentUsd?: number
+    capUsd?: number
+    unpricedSteps?: number
+    estimate?: {
+      lowUsd: number
+      highUsd: number
+    }
+  }
+}
+
 export type ApiError = {
   name: "APIError"
   data: {
@@ -379,6 +396,7 @@ export type AssistantMessage = {
     | StructuredOutputError
     | ContextOverflowError
     | ContentFilterError
+    | BudgetStopError
     | ApiError
     | FreeModelsLimitError
   parentID: string
@@ -733,8 +751,6 @@ export type SessionStatus =
   | {
       type: "busy"
     }
-
-export type RunBudgetStopReason = "cap" | "predicted" | "unpriced" | "steps" | "loop"
 
 export type QuestionOption = {
   /**
@@ -1302,6 +1318,7 @@ export type GlobalEvent = {
             | StructuredOutputError
             | ContextOverflowError
             | ContentFilterError
+            | BudgetStopError
             | ApiError
             | FreeModelsLimitError
         }
@@ -1984,6 +2001,13 @@ export type AttachmentConfig = {
   image?: ImageAttachmentConfig
 }
 
+export type RunBudget = {
+  usd?: number
+  steps?: number
+  warnAt?: number
+  unpricedSteps?: number
+}
+
 export type Config = {
   $schema?: string
   shell?: string
@@ -2117,6 +2141,12 @@ export type Config = {
     tail_turns?: number
     preserve_recent_tokens?: number
     reserved?: number
+  }
+  budget?: {
+    run?: RunBudget
+    loop?: {
+      enabled?: boolean
+    }
   }
   experimental?: {
     disable_paste_summary?: boolean
@@ -3389,6 +3419,18 @@ export type PromptInput = {
   text: string
   files?: Array<PromptInputFileAttachment>
   agents?: Array<PromptAgentAttachment>
+}
+
+export type SpendSnapshot = {
+  sessionID: string
+  state: "ok" | "warn" | "stopped"
+  reason?: RunBudgetStopReason
+  message?: string
+  budget: RunBudget
+  spentUsd: number
+  steps: number
+  unpricedSteps: number
+  costKind?: "free" | "priced" | "plan" | "unknown"
 }
 
 export type ServiceUnavailableError = {
@@ -6229,6 +6271,7 @@ export type SessionError = {
       | StructuredOutputError
       | ContextOverflowError
       | ContentFilterError
+      | BudgetStopError
       | ApiError
       | FreeModelsLimitError
   }
@@ -7626,6 +7669,7 @@ export type EventSessionError = {
       | StructuredOutputError
       | ContextOverflowError
       | ContentFilterError
+      | BudgetStopError
       | ApiError
       | FreeModelsLimitError
   }
@@ -11152,6 +11196,7 @@ export type SessionPromptData = {
     system?: string
     variant?: string
     executionMode?: "normal" | "fast"
+    budget?: RunBudget
     parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
   }
   path: {
@@ -11613,6 +11658,7 @@ export type SessionPromptAsyncData = {
     system?: string
     variant?: string
     executionMode?: "normal" | "fast"
+    budget?: RunBudget
     parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
   }
   path: {
@@ -13241,6 +13287,7 @@ export type V2SessionPromptData = {
     prompt: PromptInput
     delivery?: "steer" | "queue"
     resume?: boolean
+    budget?: RunBudget
   }
   path: {
     sessionID: string
@@ -13280,6 +13327,43 @@ export type V2SessionPromptResponses = {
 }
 
 export type V2SessionPromptResponse = V2SessionPromptResponses[keyof V2SessionPromptResponses]
+
+export type V2SessionSpendData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: never
+  url: "/api/session/{sessionID}/spend"
+}
+
+export type V2SessionSpendErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * SessionNotFoundError
+   */
+  404: SessionNotFoundError
+}
+
+export type V2SessionSpendError = V2SessionSpendErrors[keyof V2SessionSpendErrors]
+
+export type V2SessionSpendResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data?: SpendSnapshot
+  }
+}
+
+export type V2SessionSpendResponse = V2SessionSpendResponses[keyof V2SessionSpendResponses]
 
 export type V2SessionCompactData = {
   body?: never

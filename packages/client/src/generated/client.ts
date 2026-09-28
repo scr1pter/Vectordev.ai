@@ -29,6 +29,8 @@ import type {
   SessionsResumeFreeModelsOutput,
   SessionsPromptInput,
   SessionsPromptOutput,
+  SessionsSpendInput,
+  SessionsSpendOutput,
   SessionsCompactInput,
   SessionsCompactOutput,
   SessionsWaitInput,
@@ -458,9 +460,26 @@ export function make(options: ClientOptions) {
           {
             method: "POST",
             path: `/api/session/${encodeURIComponent(input.sessionID)}/prompt`,
-            body: { id: input["id"], prompt: input["prompt"], delivery: input["delivery"], resume: input["resume"] },
+            body: {
+              id: input["id"],
+              prompt: input["prompt"],
+              delivery: input["delivery"],
+              resume: input["resume"],
+              budget: input["budget"],
+            },
             successStatus: 200,
             declaredStatuses: [409, 404, 400, 401],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
+      spend: (input: SessionsSpendInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: SessionsSpendOutput }>(
+          {
+            method: "GET",
+            path: `/api/session/${encodeURIComponent(input.sessionID)}/spend`,
+            successStatus: 200,
+            declaredStatuses: [404, 400, 401],
             empty: false,
           },
           requestOptions,
