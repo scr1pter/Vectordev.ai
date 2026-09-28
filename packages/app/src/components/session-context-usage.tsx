@@ -14,6 +14,7 @@ import { useSDK } from "@/context/sdk"
 import { getSessionContext, getSessionTokenTotal } from "@/components/session/session-context-metrics"
 import { useSessionLayout } from "@/pages/session/session-layout"
 import { createSessionTabs } from "@/pages/session/helpers"
+import { formatSpend, lastAssistantModel, spendKind } from "@/features/economics/format-spend"
 
 interface SessionContextUsageProps {
   variant?: "button" | "indicator"
@@ -60,18 +61,15 @@ export function SessionContextUsage(props: SessionContextUsageProps) {
   const messages = createMemo(() => (params.id ? (sync().data.message[params.id] ?? []) : []))
   const info = createMemo(() => (params.id ? sync().session.get(params.id) : undefined))
 
-  const usd = createMemo(
-    () =>
-      new Intl.NumberFormat(language.intl(), {
-        style: "currency",
-        currency: "USD",
-      }),
-  )
-
   const context = createMemo(() => getSessionContext(messages(), [...providers.all().values()]))
   const tokens = createMemo(() => info()?.tokens)
   const cost = createMemo(() => {
-    return usd().format(info()?.cost ?? 0)
+    const model = lastAssistantModel(messages())
+    return formatSpend({
+      usd: info()?.cost,
+      tokens: getSessionTokenTotal(tokens()),
+      kind: spendKind(providers.all(), model?.providerID, model?.modelID),
+    })
   })
   const contextVisible = createMemo(() => view().reviewPanel.opened() && tabState.activeTab() === "context")
   const hasOtherTabs = createMemo(() =>

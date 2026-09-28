@@ -71,6 +71,7 @@ const baseState = (input: Partial<State> = {}) =>
     session: [],
     sessionTotal: 0,
     session_status: {},
+    session_spend: {},
     session_diff: {},
     todo: {},
     permission: {},
@@ -134,6 +135,18 @@ describe("applyGlobalEvent", () => {
 })
 
 describe("applyDirectoryEvent", () => {
+  test("stores the latest session.spend reading per root session, even with session content off", () => {
+    const [store, setStore] = createStore(baseState())
+    const spend = (spentUsd: number, state: "ok" | "warn") => ({
+      type: "session.spend",
+      properties: { sessionID: "ses_root", state, spentUsd, capUsd: 5, steps: 3, unpricedSteps: 0, costKind: "priced" },
+    })
+    applyDirectoryEvent({ event: spend(1.2, "ok"), store, setStore, push() {}, directory: "/tmp", loadLsp() {}, sessionContent: false })
+    applyDirectoryEvent({ event: spend(4.1, "warn"), store, setStore, push() {}, directory: "/tmp", loadLsp() {}, sessionContent: false })
+
+    expect(store.session_spend.ses_root).toMatchObject({ state: "warn", spentUsd: 4.1, capUsd: 5 })
+  })
+
   test("initializes text delta accumulation from the current part text", () => {
     const part = { ...textPart("part", "session", "message"), text: "existing" }
     const [store, setStore] = createStore(baseState({ part: { message: [part] } }))

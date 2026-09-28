@@ -8,6 +8,7 @@ import { useSessionLayout } from "@/pages/session/session-layout"
 import { useSync } from "@/context/sync"
 import { same } from "@/utils/same"
 import { listOutcomes } from "@/features/economics/economics-repository"
+import { formatSpend, lastAssistantModel, spendKind } from "@/features/economics/format-spend"
 import { categorizeTask } from "@/features/economics/task-categorizer"
 import { getSessionContext, getSessionTokenTotal } from "./session-context-metrics"
 import { rankModelsForCategory } from "./session-model-economics"
@@ -43,6 +44,7 @@ export function SessionContextTab() {
   )
   const ctx = createMemo(() => getSessionContext(messages(), [...providers.all().values()]))
   const tokens = createMemo(() => info()?.tokens)
+  const lastModel = createMemo(() => lastAssistantModel(messages()))
   const formatter = createMemo(() => createSessionContextFormatter(language.intl()))
   const usage = createMemo(() => Math.max(0, Math.min(100, ctx()?.usage ?? 0)))
   const totalTokens = createMemo(() => getSessionTokenTotal(tokens()) ?? 0)
@@ -122,7 +124,11 @@ export function SessionContextTab() {
     },
     {
       label: "Total cost",
-      value: usd().format(info()?.cost ?? 0),
+      value: formatSpend({
+        usd: info()?.cost,
+        tokens: totalTokens(),
+        kind: spendKind(providers.all(), lastModel()?.providerID, lastModel()?.modelID),
+      }),
     },
     {
       label: "Session created",
