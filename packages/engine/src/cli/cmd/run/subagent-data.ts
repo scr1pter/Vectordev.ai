@@ -860,6 +860,7 @@ export function reduceSubagentData(input: {
           phase: "start",
           source: "system",
           messageID: `session.error:${event.properties.sessionID}:${formatError(event.properties.error)}`,
+          ...(event.properties.error.name === "BudgetStopError" && { stopped: true }),
         },
       ]) || cancelled
     )

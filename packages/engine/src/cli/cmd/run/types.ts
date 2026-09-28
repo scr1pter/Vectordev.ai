@@ -315,6 +315,8 @@ export type StreamCommit = {
   interrupted?: boolean
   toolState?: StreamToolState
   toolError?: string
+  // An error entry for a spend guard stop, shown as a warning.
+  stopped?: boolean
   shell?: {
     callID: string
     command: string
