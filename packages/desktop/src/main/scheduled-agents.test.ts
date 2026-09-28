@@ -720,7 +720,8 @@ describe("unattended spend limits", () => {
   })
 
   test("a run the spend guard stopped fails with the guard's message and records its measured cost", async () => {
-    const message = "Spend cap reached: $5.02 spent against a $5.00 cap for this run. Vector stopped after the step that crossed it."
+    const message =
+      "Spend cap reached: $5.02 spent against a $5.00 cap for this run. Vector stopped after the step that crossed it."
     const harnessed = harness({
       at: new Date(2026, 7, 19, 9, 0, 0, 0),
       records: [scheduledRecord({})],

@@ -265,7 +265,9 @@ export function createSpendLedger(input: { userDataPath: string }) {
     const held = [...reservations].filter((entry) => entry[0] !== allowance.runId).map((entry) => entry[1])
     const heldAll = sum(held.map((reservation) => reservation.usd))
     const heldProject = sum(
-      held.filter((reservation) => reservation.projectPath === allowance.projectPath).map((reservation) => reservation.usd),
+      held
+        .filter((reservation) => reservation.projectPath === allowance.projectPath)
+        .map((reservation) => reservation.usd),
     )
 
     const checks = [

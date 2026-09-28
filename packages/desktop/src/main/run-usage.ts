@@ -57,3 +57,24 @@ export function measuredCost(
   if (snapshot && snapshot.unpricedSteps > 0 && !delta) return undefined
   return delta
 }
+
+// Folds one drain's guard reading into a run's total. Every drain of a session
+// is its own guard run, so spend and step counts add up, and the latest drain's
+// state and cost kind stand for the run.
+export function combineSpend(total: RunBudget.Snapshot | undefined, drain: RunBudget.Snapshot | undefined) {
+  if (!drain) return total
+  if (!total) return drain
+  return {
+    ...drain,
+    spentUsd: total.spentUsd + drain.spentUsd,
+    steps: total.steps + drain.steps,
+    unpricedSteps: total.unpricedSteps + drain.unpricedSteps,
+  }
+}
+
+// The measured cost an agent card shows. Two decimals like the engine's stop
+// messages, and never "$0.00" for spend that was real but tiny.
+export function formatUsd(value: number) {
+  if (value > 0 && value < 0.01) return "<$0.01"
+  return `$${value.toFixed(2)}`
+}

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { SessionID } from "@vectordevai/schema/session-id"
-import { measuredCost, readSpend, tokenTotal, usageDelta } from "./run-usage"
+import { combineSpend, formatUsd, measuredCost, readSpend, tokenTotal, usageDelta } from "./run-usage"
 
 const snapshot = (input: { spentUsd: number; unpricedSteps?: number; costKind?: "priced" | "unknown" | "free" }) => ({
   sessionID: SessionID.make("ses_run_usage"),
@@ -74,5 +74,24 @@ describe("readSpend", () => {
         throw new Error("engine down")
       }, "ses_a"),
     ).toBeUndefined()
+  })
+})
+
+describe("combineSpend", () => {
+  test("adds each drain's spend and steps to the run", () => {
+    const first = combineSpend(undefined, snapshot({ spentUsd: 0.3 }))
+    const both = combineSpend(first, snapshot({ spentUsd: 0.12, unpricedSteps: 1 }))
+    expect(both?.spentUsd).toBeCloseTo(0.42)
+    expect(both?.steps).toBe(6)
+    expect(both?.unpricedSteps).toBe(1)
+    expect(combineSpend(first, undefined)).toBe(first)
+  })
+})
+
+describe("formatUsd", () => {
+  test("shows cents, and a tiny real spend as under a cent", () => {
+    expect(formatUsd(0.42)).toBe("$0.42")
+    expect(formatUsd(0.004)).toBe("<$0.01")
+    expect(formatUsd(0)).toBe("$0.00")
   })
 })

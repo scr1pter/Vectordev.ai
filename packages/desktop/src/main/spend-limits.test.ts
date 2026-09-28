@@ -144,9 +144,9 @@ describe("reservations", () => {
     await ledger.setPolicy({ unattended: { perDay: { usd: 10 } } })
     const at = new Date(2026, 7, 19, 10, 0)
     ledger.reserve("run-1", 10, PROJECT)
-    expect((await ledger.checkAllowance({ projectPath: PROJECT, runId: "run-2", source: "scheduled", at })).allowed).toBe(
-      false,
-    )
+    expect(
+      (await ledger.checkAllowance({ projectPath: PROJECT, runId: "run-2", source: "scheduled", at })).allowed,
+    ).toBe(false)
 
     await ledger.recordRunCost({
       projectPath: PROJECT,
