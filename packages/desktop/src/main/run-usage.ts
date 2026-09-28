@@ -41,6 +41,14 @@ export async function readSpend(get: (path: string) => Promise<unknown>, session
   return Option.getOrUndefined(Schema.decodeUnknownOption(SpendResponse)(response))?.data
 }
 
+// The spend guard snapshot carries no run identity, so a reading equal in
+// every field to one already seen is taken to be that same finished run, not a
+// new one. Undefined means "no new reading".
+export function newSpend(seen: RunBudget.Snapshot | undefined, next: RunBudget.Snapshot | undefined) {
+  if (!seen || !next) return next
+  return JSON.stringify(seen) === JSON.stringify(next) ? undefined : next
+}
+
 // A run's cost, from the best reading there is. The guard counts money as it
 // is spent, subagents included, and a revert never lowers it, so a fully
 // priced run trusts it. It is still floored at the session delta, because a run

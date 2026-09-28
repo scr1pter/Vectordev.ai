@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { SessionID } from "@vectordevai/schema/session-id"
-import { combineSpend, formatUsd, measuredCost, readSpend, tokenTotal, usageDelta } from "./run-usage"
+import { combineSpend, formatUsd, measuredCost, newSpend, readSpend, tokenTotal, usageDelta } from "./run-usage"
 
 const snapshot = (input: { spentUsd: number; unpricedSteps?: number; costKind?: "priced" | "unknown" | "free" }) => ({
   sessionID: SessionID.make("ses_run_usage"),
@@ -85,6 +85,16 @@ describe("combineSpend", () => {
     expect(both?.steps).toBe(6)
     expect(both?.unpricedSteps).toBe(1)
     expect(combineSpend(first, undefined)).toBe(first)
+  })
+})
+
+describe("newSpend", () => {
+  test("drops a reading that has not moved since the one already seen", () => {
+    const seen = snapshot({ spentUsd: 0.3 })
+    expect(newSpend(seen, snapshot({ spentUsd: 0.3 }))).toBeUndefined()
+    expect(newSpend(seen, snapshot({ spentUsd: 0.31 }))?.spentUsd).toBe(0.31)
+    expect(newSpend(undefined, seen)).toBe(seen)
+    expect(newSpend(seen, undefined)).toBeUndefined()
   })
 })
 

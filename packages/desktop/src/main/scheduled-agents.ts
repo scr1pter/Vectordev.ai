@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto"
 import { getStore } from "./store"
 import { nextRun, type Recurrence } from "@vectordevai/app/schedule"
 import type { SpendLedger } from "./spend-limits"
-import { measuredCost, readSpend, tokenTotal, usageDelta, type EngineSessionResponse } from "./run-usage"
+import { measuredCost, newSpend, readSpend, tokenTotal, usageDelta, type EngineSessionResponse } from "./run-usage"
 
 const STORE_NAME = "scheduled-agents"
 const STORE_KEY = "records"
@@ -260,7 +260,7 @@ export function createScheduledAgents(
     now?: () => Date
     request?: ScheduledAgentRequest
     delay?: (milliseconds: number) => Promise<void>
-    spend?: () => Promise<Pick<SpendLedger, "checkAllowance" | "recordRunCost" | "reserve" | "release">>
+    spend?: () => Promise<Pick<SpendLedger, "checkAllowance" | "recordRunCost" | "release">>
   } = {},
 ) {
   // Resolved per call rather than captured, because electron-store cannot be
@@ -474,8 +474,12 @@ export function createScheduledAgents(
       engine,
       `/api/session/${encodeURIComponent(sessionId)}`,
     ).catch(() => undefined)
+    // A continued session answers the spend route with its last run, which may
+    // be an earlier recurrence or the user's own turn. Reading it first is what
+    // tells this run's reading apart from that one.
+    const earlier = await readSpend((path) => request(engine, path), sessionId)
     // Settled rather than thrown, so a failed turn is still measured below.
-    const execution = await request<{ data?: { id?: string } } | undefined>(
+    const admission = await request<{ data?: { id?: string } } | undefined>(
       engine,
       `/api/session/${encodeURIComponent(sessionId)}/prompt`,
       {
@@ -488,17 +492,25 @@ export function createScheduledAgents(
           budget: budgetUsd === undefined ? undefined : { usd: budgetUsd },
         },
       },
+    ).then(
+      (admitted) => ({ admitted }),
+      (error: unknown) => ({ error }),
     )
-      .then((admitted) => waitForSessionCompletion(engine, id, sessionId, admitted?.data?.id))
-      .then(
-        (status) => ({ status }),
-        (error: unknown) => ({ error }),
-      )
+    const execution =
+      "error" in admission
+        ? admission
+        : await waitForSessionCompletion(engine, id, sessionId, admission.admitted?.data?.id).then(
+            (status) => ({ status }),
+            (error: unknown) => ({ error }),
+          )
     const after = await request<EngineSessionResponse | undefined>(
       engine,
       `/api/session/${encodeURIComponent(sessionId)}`,
     ).catch(() => undefined)
-    const snapshot = await readSpend((path) => request(engine, path), sessionId)
+    // A prompt the engine never admitted started no run, so any reading is an
+    // earlier run's, and so is one that has not moved since before the prompt.
+    const snapshot =
+      "error" in admission ? undefined : newSpend(earlier, await readSpend((path) => request(engine, path), sessionId))
     await ledger
       .recordRunCost({
         projectPath: target.directory,
@@ -549,14 +561,15 @@ export function createScheduledAgents(
         projectPath: target.directory,
         runId,
         source: "scheduled",
+        // Every target of this launch is checked at once, so the hold has to
+        // be taken inside the check, not after it.
+        reserve: true,
       })
       if (!allowance.allowed) throw new Error(allowance.reason || "A spend limit blocked this scheduled run.")
-      const budgetUsd = allowance.remainingUsd
-      if (budgetUsd !== undefined) ledger.reserve(runId, budgetUsd, target.directory)
       // recordRunCost releases the reservation on the normal path. This covers a
       // run that failed before it reached the engine.
-      return promptTarget(engine, id, index, target, prompt, record?.model, ledger, runId, budgetUsd).finally(() =>
-        ledger.release(runId),
+      return promptTarget(engine, id, index, target, prompt, record?.model, ledger, runId, allowance.budgetUsd).finally(
+        () => ledger.release(runId),
       )
     })
     const outcome = await execution.then(

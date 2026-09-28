@@ -221,8 +221,17 @@ function harness(options: {
   legacyShape?: boolean
   staleAssistantPolls?: number
   incompleteAssistantPolls?: number
-  allowance?: { allowed: boolean; state: "ok" | "warn" | "blocked"; reason?: string; remainingUsd?: number }
-  spend?: (sessionId: string) => unknown
+  allowance?: {
+    allowed: boolean
+    state: "ok" | "warn" | "blocked"
+    reason?: string
+    remainingUsd?: number
+    budgetUsd?: number
+  }
+  // `prompted` says whether this session has been prompted in this harness,
+  // so a reading can differ before and after the run.
+  spend?: (sessionId: string, prompted: boolean) => unknown
+  promptFailure?: string
 }) {
   const clock = { at: options.at }
   const persisted = { value: JSON.parse(JSON.stringify(options.records ?? [])) as unknown }
@@ -232,7 +241,7 @@ function harness(options: {
   const promptedAt = new Map<string, number>()
   const created: string[] = []
   const createdModels: unknown[] = []
-  const spendChecks: Array<{ projectPath: string; runId: string; source: string }> = []
+  const spendChecks: Array<{ projectPath: string; runId: string; source: string; reserve?: boolean }> = []
   const reserved = new Map<string, number>()
   const released: string[] = []
   const prompts: unknown[] = []
@@ -263,14 +272,18 @@ function harness(options: {
     spend: async () => ({
       checkAllowance: async (input) => {
         spendChecks.push(input)
-        return { unmeasuredRuns: 0, ...(options.allowance ?? { allowed: true, state: "ok" as const }) }
+        const allowance = {
+          unmeasuredRuns: 0,
+          ...(options.allowance ?? { allowed: true, state: "ok" as const }),
+        }
+        // The real ledger's budget is its remaining headroom under a per-run cap.
+        const budgetUsd = allowance.budgetUsd ?? allowance.remainingUsd
+        if (input.reserve && allowance.allowed && budgetUsd !== undefined) reserved.set(input.runId, budgetUsd)
+        return { ...allowance, budgetUsd }
       },
       recordRunCost: async (input) => {
         spendRecords.push(input)
         return undefined
-      },
-      reserve: (runId, usd) => {
-        reserved.set(runId, usd)
       },
       release: (runId) => {
         released.push(runId)
@@ -318,9 +331,10 @@ function harness(options: {
       }
       const match = /^\/api\/session\/([^/]+)\/([a-z]+)/.exec(path)
       const sessionId = decodeURIComponent(match?.[1] ?? "")
-      if (match?.[2] === "spend") return options.spend?.(sessionId) ?? {}
+      if (match?.[2] === "spend") return options.spend?.(sessionId, promptedAt.has(sessionId)) ?? {}
       if (match?.[2] === "prompt") {
         prompts.push(init?.body)
+        if (options.promptFailure) throw new Error(options.promptFailure)
         promptedAt.set(sessionId, clock.at.getTime())
         return { data: { id: "msg_0001" } }
       }
@@ -726,19 +740,22 @@ describe("unattended spend limits", () => {
       at: new Date(2026, 7, 19, 9, 0, 0, 0),
       records: [scheduledRecord({})],
       allowance: { allowed: true, state: "ok", remainingUsd: 5 },
-      spend: (sessionId) => ({
-        data: {
-          sessionID: sessionId,
-          state: "stopped",
-          reason: "cap",
-          message,
-          budget: { usd: 5 },
-          spentUsd: 5.02,
-          steps: 12,
-          unpricedSteps: 0,
-          costKind: "priced",
-        },
-      }),
+      spend: (sessionId, prompted) =>
+        prompted
+          ? {
+              data: {
+                sessionID: sessionId,
+                state: "stopped",
+                reason: "cap",
+                message,
+                budget: { usd: 5 },
+                spentUsd: 5.02,
+                steps: 12,
+                unpricedSteps: 0,
+                costKind: "priced",
+              },
+            }
+          : {},
     })
 
     await harnessed.runtime.tick()
@@ -746,6 +763,66 @@ describe("unattended spend limits", () => {
     expect(harnessed.record()?.status).toBe("failed")
     expect(harnessed.record()?.results?.[0]?.error).toBe(message)
     expect(harnessed.spendRecords[0]?.totalCostUsd).toBe(5.02)
+  })
+
+  // A recurring automation continues one session, whose spend route answers
+  // with the last run it had: an earlier recurrence, or the user's own turn.
+  const earlierRun = (sessionId: string) => ({
+    data: {
+      sessionID: sessionId,
+      state: "stopped",
+      reason: "cap",
+      message: "Spend cap reached on an earlier run.",
+      budget: { usd: 5 },
+      spentUsd: 3,
+      steps: 9,
+      unpricedSteps: 0,
+      costKind: "priced",
+    },
+  })
+
+  test("a prompt the engine never admitted fails with its own error and records no earlier run's spend", async () => {
+    const harnessed = harness({
+      at: new Date(2026, 7, 19, 9, 0, 0, 0),
+      records: [scheduledRecord({ targets: [{ directory: "/repos/alpha", sessionId: "ses_established" }] })],
+      allowance: { allowed: true, state: "ok", remainingUsd: 5 },
+      spend: earlierRun,
+      promptFailure: "Vector engine request failed (503)",
+    })
+
+    await harnessed.runtime.tick()
+
+    expect(harnessed.record()?.results?.[0]?.status).toBe("failed")
+    expect(harnessed.record()?.results?.[0]?.error).toContain("Vector engine request failed (503)")
+    expect(harnessed.spendRecords[0]?.totalCostUsd).toBe(0)
+    expect(harnessed.released).toEqual([...harnessed.reserved.keys()])
+  })
+
+  test("a spend reading that has not moved since before the prompt is not this run's", async () => {
+    const harnessed = harness({
+      at: new Date(2026, 7, 19, 9, 0, 0, 0),
+      records: [scheduledRecord({ targets: [{ directory: "/repos/alpha", sessionId: "ses_established" }] })],
+      allowance: { allowed: true, state: "ok", remainingUsd: 5 },
+      spend: earlierRun,
+    })
+
+    await harnessed.runtime.tick()
+
+    expect(harnessed.record()?.results?.[0]?.status).toBe("completed")
+    expect(harnessed.spendRecords[0]?.totalCostUsd).toBe(0.25)
+  })
+
+  test("every target of one launch asks for its hold inside the check", async () => {
+    const harnessed = harness({
+      at: new Date(2026, 7, 19, 9, 0, 0, 0),
+      records: [scheduledRecord({ targets: [{ directory: "/repos/alpha" }, { directory: "/repos/beta" }] })],
+      allowance: { allowed: true, state: "ok", remainingUsd: 5 },
+    })
+
+    await harnessed.runtime.tick()
+
+    expect(harnessed.spendChecks.map((check) => check.reserve)).toEqual([true, true])
+    expect(harnessed.prompts).toHaveLength(2)
   })
 })
 
