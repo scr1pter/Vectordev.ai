@@ -61,7 +61,7 @@ export const Spend = Event.define({
     capUsd: optional(Schema.Finite),
     steps: NonNegativeInt,
     unpricedSteps: NonNegativeInt,
-    costKind: Schema.Literals(["free", "priced", "plan", "unknown"]),
+    costKind: RunBudget.CostKind,
     estimate: optional(Schema.Struct({ lowUsd: Schema.Finite, highUsd: Schema.Finite })),
   },
 })

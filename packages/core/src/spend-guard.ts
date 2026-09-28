@@ -16,6 +16,13 @@ import type { CostKind } from "./review/types"
 
 export type { CostKind }
 
+// review/types stays import-free for the desktop renderer, so its CostKind is held equal to the schema's here.
+const costKindMatchesSchema: [CostKind] extends [RunBudget.CostKind]
+  ? [RunBudget.CostKind] extends [CostKind]
+    ? true
+    : never
+  : never = true
+
 export const WARN_AT = 0.8
 export const UNPRICED_STEPS = 40
 export const LOOP_REPEATS = 3

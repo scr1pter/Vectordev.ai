@@ -19,6 +19,11 @@ export const StopReason = Schema.Literals(["cap", "predicted", "unpriced", "step
 })
 export type StopReason = typeof StopReason.Type
 
+// How a model's steps are billed: priced at catalog list rates, free, covered by a subscription plan, or unknown
+// because the catalog has no price. Vectorscope and the run guard share it.
+export const CostKind = Schema.Literals(["free", "priced", "plan", "unknown"]).annotate({ identifier: "CostKind" })
+export type CostKind = typeof CostKind.Type
+
 // What the run of a root session has spent so far, or what its last finished run spent. `sessionID` is the root.
 export const Snapshot = Schema.Struct({
   sessionID: SessionID,
@@ -29,6 +34,6 @@ export const Snapshot = Schema.Struct({
   spentUsd: Schema.Finite,
   steps: NonNegativeInt,
   unpricedSteps: NonNegativeInt,
-  costKind: optional(Schema.Literals(["free", "priced", "plan", "unknown"])),
+  costKind: optional(CostKind),
 }).annotate({ identifier: "SpendSnapshot" })
 export type Snapshot = Schema.Schema.Type<typeof Snapshot>
