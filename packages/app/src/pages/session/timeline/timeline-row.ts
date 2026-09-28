@@ -1,4 +1,5 @@
 import type { FreeModelsLimitNotice } from "@vectordevai/core/free-model-choice"
+import type { BudgetStopNotice } from "@/components/budget-stop-copy"
 import type { SnapshotFileDiff } from "@vectordevai/sdk/v2"
 import type { PartGroup } from "@vectordevai/session-ui/message-part"
 import { Data, Equal } from "effect"
@@ -37,6 +38,7 @@ export namespace TimelineRow {
     userMessageID: string
     text: string
     freeLimit?: FreeModelsLimitNotice & { messageID: string; modelID: string }
+    budgetStop?: BudgetStopNotice
   }> {}
   export class Retry extends Data.TaggedClass("Retry")<{
     userMessageID: string

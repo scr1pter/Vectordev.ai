@@ -1,0 +1,100 @@
+import { describe, expect, test } from "bun:test"
+import type { AssistantMessage } from "@vectordevai/sdk/v2/client"
+import { budgetStopCopy, budgetStopNotice } from "./budget-stop-copy"
+
+const assistant = (error: AssistantMessage["error"]) =>
+  ({
+    id: "msg_assistant",
+    sessionID: "ses_1",
+    role: "assistant",
+    parentID: "msg_user",
+    providerID: "anthropic",
+    modelID: "claude-sonnet",
+    agent: "build",
+    mode: "build",
+    time: { created: 2 },
+    error,
+  }) as AssistantMessage
+
+describe("budgetStopNotice", () => {
+  test("a budget stop carries the model and agent a continuation runs with", () => {
+    const data = { reason: "cap" as const, message: "Spend cap reached", spentUsd: 5.02, capUsd: 5 }
+    expect(budgetStopNotice(assistant({ name: "BudgetStopError", data }))).toEqual({
+      messageID: "msg_assistant",
+      providerID: "anthropic",
+      modelID: "claude-sonnet",
+      agent: "build",
+      error: data,
+    })
+  })
+
+  test("other errors and no message give no notice", () => {
+    expect(budgetStopNotice(assistant({ name: "UnknownError", data: { message: "boom" } }))).toBeUndefined()
+    expect(budgetStopNotice(undefined)).toBeUndefined()
+  })
+})
+
+describe("budgetStopCopy", () => {
+  test("cap stops offer a fresh cap of the same size", () => {
+    const copy = budgetStopCopy({
+      reason: "cap",
+      message:
+        "Spend cap reached: $5.02 spent against a $5.00 cap for this run. Vector stopped after the step that crossed it.",
+      spentUsd: 5.02,
+      capUsd: 5,
+    })
+    expect(copy.title).toBe("Budget stop")
+    expect(copy.body).toBe(
+      "Spend cap reached: $5.02 spent against a $5.00 cap for this run. Vector stopped after the step that crossed it.",
+    )
+    expect(copy.spent).toBe("$5.02 of $5.00 spent")
+    expect(copy.continueLabel).toBe("Continue with a new $5.00 cap")
+    expect(copy.budget).toEqual({ usd: 5 })
+    expect(copy.footnote).toBe("Continuing starts a new run with its own cap.")
+  })
+
+  test("a predicted stop prints its estimate as a range with an en dash", () => {
+    const copy = budgetStopCopy({
+      reason: "predicted",
+      message: "Stopped before the next step",
+      spentUsd: 4.62,
+      capUsd: 5,
+      estimate: { lowUsd: 0.41, highUsd: 0.97 },
+    })
+    expect(copy.title).toBe("Budget stop")
+    expect(copy.estimate).toBe("Next step estimated at $0.41–$0.97")
+  })
+
+  test("an estimate whose ends agree still prints as a range", () => {
+    const copy = budgetStopCopy({
+      reason: "predicted",
+      message: "Stopped",
+      capUsd: 5,
+      estimate: { lowUsd: 0.5, highUsd: 0.5 },
+    })
+    expect(copy.estimate).toBe("Next step estimated at $0.50–$0.50")
+  })
+
+  test("unpriced and step stops use the budget title", () => {
+    expect(budgetStopCopy({ reason: "unpriced", message: "m", capUsd: 5, unpricedSteps: 40 }).title).toBe("Budget stop")
+    expect(budgetStopCopy({ reason: "steps", message: "m" }).title).toBe("Budget stop")
+  })
+
+  test("no Continue button appears without a cap", () => {
+    const copy = budgetStopCopy({ reason: "steps", message: "Step limit reached: 60 of 60 steps used for this run." })
+    expect(copy.continueLabel).toBeUndefined()
+    expect(copy.budget).toBeUndefined()
+    expect(copy.spent).toBeUndefined()
+    expect(copy.estimate).toBeUndefined()
+  })
+
+  test("a loop pauses and continues anyway", () => {
+    const copy = budgetStopCopy({
+      reason: "loop",
+      message: "Paused a repeating loop: `bash` failed with the same error 3 times in a row.",
+    })
+    expect(copy.title).toBe("Loop paused")
+    expect(copy.continueLabel).toBe("Continue anyway")
+    expect(copy.budget).toBeUndefined()
+  })
+})
