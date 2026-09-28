@@ -1,4 +1,5 @@
 import { providerNoticeTracker, unavailableModel } from "@vectordevai/schema/provider-unavailable"
+import { renamedModel } from "@vectordevai/schema/provider-policy"
 import { createStore } from "solid-js/store"
 import { createSimpleContext } from "./helper"
 import { batch, createEffect, createMemo } from "solid-js"
@@ -70,10 +71,12 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       return !!provider?.models[model.modelID]
     }
 
+    // Saved choices follow a provider rename, so they keep working with their carried-over credential.
     function getFirstValidModel(...modelFns: (() => { providerID: string; modelID: string } | undefined)[]) {
       for (const modelFn of modelFns) {
-        const model = modelFn()
-        if (!model) continue
+        const saved = modelFn()
+        if (!saved) continue
+        const model = renamedModel(saved)
         if (isModelValid(model)) return model
       }
     }
@@ -210,19 +213,13 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         }
 
         if (sync.data.config.model) {
-          const { providerID, modelID } = parseModel(sync.data.config.model)
-          if (isModelValid({ providerID, modelID })) {
-            return {
-              providerID,
-              modelID,
-            }
-          }
+          const model = renamedModel(parseModel(sync.data.config.model))
+          if (isModelValid(model)) return model
         }
 
         for (const item of modelStore.recent) {
-          if (isModelValid(item)) {
-            return item
-          }
+          const model = renamedModel(item)
+          if (isModelValid(model)) return model
         }
 
         const provider =
@@ -268,7 +265,11 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
             ...modelStore.recent,
           ],
           isModelValid,
-          (providerID) => sync.data.provider.some((provider) => provider.id === providerID),
+          (providerID) =>
+            sync.data.provider.some((provider) => provider.id === providerID) ||
+            providerID in (sync.data.config.provider ?? {}) ||
+            !!sync.data.config.disabled_providers?.includes(providerID) ||
+            !!sync.data.config.enabled_providers?.includes(providerID),
         )
         const messages = (sync.data.provider_next.unavailable ?? [])
           .filter((item) => takeNotice(sdk.url, `credential:${item.id}:${item.reason}`))

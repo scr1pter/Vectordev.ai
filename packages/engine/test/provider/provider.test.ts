@@ -3,7 +3,7 @@ import { mkdir, unlink } from "fs/promises"
 import path from "path"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { AppNodeBuilder } from "@vectordevai/core/effect/app-node-builder"
-import { Effect, Layer } from "effect"
+import { Effect, Exit, Layer } from "effect"
 import { ModelCatalog } from "@vectordevai/core/model-catalog"
 import { FSUtil } from "@vectordevai/core/fs-util"
 import { CrossSpawnSpawner } from "@vectordevai/core/cross-spawn-spawner"
@@ -364,6 +364,42 @@ it.instance(
     expect(String(model.providerID)).toBe("anthropic")
   }),
   { config: { model: "retired-gateway/included-model" } },
+)
+
+it.instance(
+  "defaultModel follows a configured model to the provider it was renamed to",
+  Effect.gen(function* () {
+    const model = yield* Provider.use.defaultModel()
+    expect(String(model.providerID)).toBe("kimi-code-plan-cn")
+    expect(String(model.modelID)).toBe("k3")
+  }),
+  { config: { model: "kimi-for-coding/k3" } },
+)
+
+it.instance(
+  "defaultModel keeps a configured model on a declared custom provider that loaded no models",
+  Effect.gen(function* () {
+    yield* setProcessEnv("ANTHROPIC_API_KEY", "test-api-key")
+    expect((yield* list)[ProviderV2.ID.make("private-endpoint")]).toBeUndefined()
+    const model = yield* Provider.use.defaultModel()
+    expect(String(model.providerID)).toBe("private-endpoint")
+    expect(String(model.modelID)).toBe("private-model")
+    // The session then reports the model as unavailable rather than moving to another provider.
+    const exit = yield* Provider.use.getModel(model.providerID, model.modelID).pipe(Effect.exit)
+    expect(Exit.isFailure(exit)).toBe(true)
+  }),
+  {
+    config: {
+      model: "private-endpoint/private-model",
+      provider: {
+        "private-endpoint": {
+          npm: "@ai-sdk/openai-compatible",
+          api: "http://127.0.0.1:9/v1",
+          models: {},
+        },
+      },
+    },
+  },
 )
 
 it.instance(

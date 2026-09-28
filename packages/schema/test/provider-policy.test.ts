@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { providerEnabled, providerRuntimeEnabled, providerUsable } from "../src/provider-policy"
+import { providerEnabled, providerRuntimeEnabled, providerUsable, renamedModel } from "../src/provider-policy"
 
 test("runtime plugin presentation does not enable the built-in Copilot gate", () => {
   expect(providerEnabled("github-copilot")).toBe(false)
@@ -20,4 +20,14 @@ test("missing or malformed runtime approval markers cannot expose paused provide
   expect(providerUsable("openai")).toBe(true)
   expect(providerUsable("unlisted-provider")).toBe(false)
   expect(providerUsable("my-company-gateway", { source: "config" })).toBe(true)
+})
+
+test("a saved Kimi For Coding model follows the provider it was renamed to", () => {
+  expect(renamedModel({ providerID: "kimi-for-coding", modelID: "k3", variant: "high" })).toEqual({
+    providerID: "kimi-code-plan-cn",
+    modelID: "k3",
+    variant: "high",
+  })
+  const current = { providerID: "anthropic", modelID: "claude-sonnet-4" }
+  expect(renamedModel(current)).toBe(current)
 })

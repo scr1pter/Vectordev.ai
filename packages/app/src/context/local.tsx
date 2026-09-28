@@ -1,4 +1,5 @@
 import { unavailableModel } from "@vectordevai/schema/provider-unavailable"
+import { renamedModel } from "@vectordevai/schema/provider-policy"
 import { useLanguage } from "./language"
 import { showToast } from "@/utils/toast"
 import { takeProviderNotice } from "@/utils/provider-notices"
@@ -109,10 +110,12 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       return !!provider?.models[model.modelID] && connected().has(model.providerID)
     }
 
+    // Saved choices follow a provider rename, so they keep working with their carried-over credential.
     const firstModel = (...items: Array<() => ModelKey | undefined>) => {
       for (const item of items) {
-        const model = item()
-        if (!model) continue
+        const saved = item()
+        if (!saved) continue
+        const model = renamedModel(saved)
         if (validModel(model)) return model
       }
     }
@@ -161,13 +164,14 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       const configured = sync().data.config.model
       if (!configured) return
       const [providerID, ...rest] = configured.split("/")
-      const model = { providerID, modelID: rest.join("/") }
+      const model = renamedModel({ providerID, modelID: rest.join("/") })
       if (validModel(model)) return model
     }
 
     const recentModel = () => {
       for (const item of models.recent.list()) {
-        if (validModel(item)) return item
+        const model = renamedModel(item)
+        if (validModel(model)) return model
       }
     }
 
@@ -267,7 +271,11 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           ...models.recent.list(),
         ],
         validModel,
-        (providerID) => providers.all().has(providerID),
+        (providerID) =>
+          providers.all().has(providerID) ||
+          providerID in (sync().data.config.provider ?? {}) ||
+          !!sync().data.config.disabled_providers?.includes(providerID) ||
+          !!sync().data.config.enabled_providers?.includes(providerID),
       )
       if (!previous) return
       const next = current()

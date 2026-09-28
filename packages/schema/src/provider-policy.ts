@@ -249,6 +249,12 @@ const supported = new Set<string>(SUPPORTED_PROVIDER_IDS)
 // "kimi-code-plan-cn", so credentials saved under the old ID carry over.
 export const RENAMED_PROVIDER_IDS: Readonly<Record<string, string>> = { "kimi-for-coding": "kimi-code-plan-cn" }
 
+// A saved model choice moved to the provider ID that serves it now, so choices follow their credentials.
+export function renamedModel<T extends { providerID: string }>(model: T): T {
+  const providerID = RENAMED_PROVIDER_IDS[model.providerID]
+  return providerID ? { ...model, providerID } : model
+}
+
 // Link to each provider's verified general documentation, rather than a client-specific integration guide.
 const documentation: Record<string, string> = {
   infer: "https://infer.flow7.org/docs",

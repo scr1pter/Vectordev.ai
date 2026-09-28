@@ -26,12 +26,12 @@ test("model fallback notices include slash-containing saved IDs and ignore stale
   const missing = parseModel("openrouter/family/saved")
   const live = parseModel("anthropic/claude-sonnet-4")
   const valid = (model: { providerID: string }) => model.providerID === "anthropic"
-  const loaded = (providerID: string) => providerID === "anthropic" || providerID === "openrouter"
-  expect(unavailableModel([missing, live], valid, loaded)).toEqual({
+  const declared = (providerID: string) => providerID === "anthropic" || providerID === "openrouter"
+  expect(unavailableModel([missing, live], valid, declared)).toEqual({
     providerID: "openrouter",
     modelID: "family/saved",
   })
-  expect(unavailableModel([live, missing], valid, loaded)).toBeUndefined()
+  expect(unavailableModel([live, missing], valid, declared)).toBeUndefined()
   const take = providerNoticeTracker()
   expect(take("server", "openrouter/family/saved")).toBe(true)
   expect(take("server", "openrouter/family/saved")).toBe(false)

@@ -1,5 +1,5 @@
 import { Schema } from "effect"
-import { providerAllowed } from "./provider-policy"
+import { providerAllowed, renamedModel } from "./provider-policy"
 
 export const ProviderUnavailable = Schema.Struct({
   id: Schema.String,
@@ -24,22 +24,26 @@ export function providerUnavailable(id: string, reason: ProviderUnavailable["rea
 
 export type ModelChoice = { providerID: string; modelID: string }
 
-// A provider this Vector no longer offers: outside the supported set and not loaded from configuration
-// or a plugin. Saved choices from earlier versions can still name one; they fall back silently.
-export function providerRetired(id: string, loaded: (id: string) => boolean) {
-  return !providerAllowed(id) && !loaded(id)
+// A provider this Vector no longer offers: outside the supported set and declared nowhere, neither in
+// configuration nor by a plugin. Saved choices from earlier versions can still name one; they fall back
+// silently. A declared provider that failed to load is not retired, so its choices keep their notice or
+// error rather than quietly moving the conversation to another provider.
+export function providerRetired(id: string, declared: (id: string) => boolean) {
+  return !providerAllowed(id) && !declared(id)
 }
 
-// Report only a preference that was actually skipped before the chosen model. A preference for a
-// retired provider is skipped without a report.
+// Report only a preference that was actually skipped before the chosen model. A preference under a
+// renamed provider is judged by its new ID, and one for a retired provider is skipped without a report.
 export function unavailableModel(
   candidates: ReadonlyArray<ModelChoice | undefined>,
   valid: (model: ModelChoice) => boolean,
-  loaded: (providerID: string) => boolean,
+  declared: (providerID: string) => boolean,
 ) {
   for (const candidate of candidates) {
-    if (!candidate || providerRetired(candidate.providerID, loaded)) continue
-    if (valid(candidate)) return
+    if (!candidate) continue
+    const current = renamedModel(candidate)
+    if (providerRetired(current.providerID, declared)) continue
+    if (valid(current)) return
     return candidate
   }
 }

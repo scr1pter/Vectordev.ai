@@ -9,6 +9,7 @@ import { freeModelRequest, serializeFreeModelRequest } from "@vectordevai/core/f
 import type { FreeModelInfo } from "@vectordevai/schema/free-model"
 import { isFreeModel } from "@vectordevai/schema/free-model"
 import { ProviderUnavailable, providerRetired, providerUnavailable } from "@vectordevai/schema/provider-unavailable"
+import { renamedModel } from "@vectordevai/schema/provider-policy"
 import {
   providerAllowed,
   providerCredentialAllowed,
@@ -1114,12 +1115,19 @@ export interface Interface {
   ) => Effect.Effect<{ providerID: ProviderV2.ID; modelID: string } | undefined>
   readonly getSmallModel: (providerID: ProviderV2.ID, primaryID?: ModelV2.ID) => Effect.Effect<Model | undefined>
   readonly defaultModel: () => Effect.Effect<{ providerID: ProviderV2.ID; modelID: ModelV2.ID }, DefaultModelError>
+  /** The model a saved choice names today: renamed providers map to their new ID, retired ones give undefined. */
+  readonly savedModel: (model: {
+    providerID: string
+    modelID: string
+  }) => Effect.Effect<{ providerID: ProviderV2.ID; modelID: ModelV2.ID } | undefined>
 }
 
 interface State {
   models: Map<string, LanguageModelV3>
   providers: Record<ProviderV2.ID, Info>
   unavailable: ProviderUnavailable[]
+  // Every provider ID configuration or a plugin names, whether or not it loaded.
+  declared: Set<string>
   catalog: Record<ProviderV2.ID, Info>
   sdk: Map<string, BundledSDK>
   modelLoaders: Record<string, CustomModelLoader>
@@ -1717,6 +1725,12 @@ const layer = Layer.effect(
           models: languages,
           providers,
           unavailable,
+          declared: new Set([
+            ...Object.keys(cfg.provider ?? {}),
+            ...(cfg.disabled_providers ?? []),
+            ...(cfg.enabled_providers ?? []),
+            ...userProviders,
+          ]),
           catalog,
           sdk,
           modelLoaders,
@@ -2068,15 +2082,19 @@ const layer = Layer.effect(
       return undefined
     })
 
+    const savedModel = Effect.fn("Provider.savedModel")(function* (model: { providerID: string; modelID: string }) {
+      const s = yield* InstanceState.get(state)
+      const current = renamedModel(model)
+      if (providerRetired(current.providerID, (id) => s.declared.has(id) || id in s.providers)) return
+      return { providerID: ProviderV2.ID.make(current.providerID), modelID: ModelV2.ID.make(current.modelID) }
+    })
+
     const defaultModel = Effect.fn("Provider.defaultModel")(function* () {
       const cfg = yield* config.get()
-      const s = yield* InstanceState.get(state)
-      if (cfg.model) {
-        const model = parseModel(cfg.model)
-        if (providerEnabled(model.providerID) && !providerRetired(model.providerID, (id) => id in s.providers))
-          return model
-      }
+      const saved = cfg.model ? yield* savedModel(parseModel(cfg.model)) : undefined
+      if (saved && providerEnabled(saved.providerID)) return saved
 
+      const s = yield* InstanceState.get(state)
       const recent = yield* fs.readJson(path.join(Global.Path.state, "model.json")).pipe(
         Effect.map((x): { providerID: ProviderV2.ID; modelID: ModelV2.ID }[] => {
           if (!isRecord(x) || !Array.isArray(x.recent)) return []
@@ -2084,7 +2102,8 @@ const layer = Layer.effect(
             if (!isRecord(item)) return []
             if (typeof item.providerID !== "string") return []
             if (typeof item.modelID !== "string") return []
-            return [{ providerID: ProviderV2.ID.make(item.providerID), modelID: ModelV2.ID.make(item.modelID) }]
+            const model = renamedModel({ providerID: item.providerID, modelID: item.modelID })
+            return [{ providerID: ProviderV2.ID.make(model.providerID), modelID: ModelV2.ID.make(model.modelID) }]
           })
         }),
         Effect.catch(() => Effect.succeed([] as { providerID: ProviderV2.ID; modelID: ModelV2.ID }[])),
@@ -2109,7 +2128,17 @@ const layer = Layer.effect(
       }
     })
 
-    return Service.of({ list, unavailable, getProvider, getModel, getLanguage, closest, getSmallModel, defaultModel })
+    return Service.of({
+      list,
+      unavailable,
+      getProvider,
+      getModel,
+      getLanguage,
+      closest,
+      getSmallModel,
+      defaultModel,
+      savedModel,
+    })
   }),
 )
 

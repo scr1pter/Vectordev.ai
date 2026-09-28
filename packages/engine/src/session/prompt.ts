@@ -11,7 +11,6 @@ import { SessionRevert } from "./revert"
 import { Session } from "./session"
 import { Agent } from "../agent/agent"
 import { Provider } from "@/provider/provider"
-import { providerRetired } from "@vectordevai/schema/provider-unavailable"
 
 import { type Tool as AITool, tool, jsonSchema } from "ai"
 import type { JSONSchema7 } from "@ai-sdk/provider"
@@ -652,21 +651,23 @@ const layer = Layer.effect(
         .where(eq(SessionTable.id, sessionID))
         .get()
         .pipe(Effect.orDie)
-      // Sessions from earlier versions can name a provider this one no longer offers; continue them
-      // with the usual default instead of failing with "Model not found".
-      const loaded = yield* provider.list()
-      const retired = (providerID: string) => providerRetired(providerID, (id) => id in loaded)
-      if (current?.model && !retired(current.model.providerID)) {
-        return {
-          providerID: ProviderV2.ID.make(current.model.providerID),
-          modelID: ModelV2.ID.make(current.model.id),
-          ...(current.model.variant && current.model.variant !== "default" ? { variant: current.model.variant } : {}),
-        }
+      // Sessions from earlier versions can name a provider this one renamed or no longer offers; follow
+      // the rename, or continue with the usual default instead of failing with "Model not found".
+      if (current?.model) {
+        const saved = yield* provider.savedModel({ providerID: current.model.providerID, modelID: current.model.id })
+        if (saved)
+          return {
+            ...saved,
+            ...(current.model.variant && current.model.variant !== "default" ? { variant: current.model.variant } : {}),
+          }
       }
       const match = yield* sessions
-        .findMessage(sessionID, (m) => m.info.role === "user" && !!m.info.model && !retired(m.info.model.providerID))
+        .findMessage(sessionID, (m) => m.info.role === "user" && !!m.info.model)
         .pipe(Effect.orDie)
-      if (Option.isSome(match) && match.value.info.role === "user") return match.value.info.model
+      if (Option.isSome(match) && match.value.info.role === "user") {
+        const saved = yield* provider.savedModel(match.value.info.model)
+        if (saved) return { ...match.value.info.model, ...saved }
+      }
       return yield* provider.defaultModel().pipe(Effect.orDie)
     })
 

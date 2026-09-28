@@ -75,6 +75,9 @@ export namespace ProviderTest {
           defaultModel: Effect.fn("TestProvider.defaultModel")(() =>
             Effect.succeed({ providerID: row.id, modelID: mdl.id }),
           ),
+          savedModel: Effect.fn("TestProvider.savedModel")((model) =>
+            Effect.succeed({ providerID: ProviderV2.ID.make(model.providerID), modelID: ModelV2.ID.make(model.modelID) }),
+          ),
           ...override,
         }),
       ),

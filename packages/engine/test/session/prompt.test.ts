@@ -701,6 +701,63 @@ it.instance("a session saved with a retired provider's model continues with the 
   }),
 )
 
+it.instance("an earlier message on a retired provider's model does not choose the next prompt's model", () =>
+  Effect.gen(function* () {
+    yield* useServerConfig(providerCfg)
+    const prompt = yield* SessionPrompt.Service
+    const sessions = yield* Session.Service
+    const provider = yield* ProviderSvc.Service
+    const chat = yield* sessions.create({ title: "From an earlier version" })
+    yield* sessions.updateMessage({
+      id: MessageID.ascending(),
+      role: "user",
+      sessionID: chat.id,
+      agent: "build",
+      model: { providerID: ProviderV2.ID.make("retired-gateway"), modelID: ModelV2.ID.make("included-model") },
+      time: { created: Date.now() },
+    })
+
+    const next = yield* prompt.prompt({
+      sessionID: chat.id,
+      agent: "build",
+      noReply: true,
+      parts: [{ type: "text", text: "continue" }],
+    })
+
+    const fallback = yield* provider.defaultModel()
+    expect(next.info.role).toBe("user")
+    if (next.info.role === "user") {
+      expect(next.info.model.providerID).toBe(fallback.providerID)
+      expect(next.info.model.modelID).toBe(fallback.modelID)
+    }
+  }),
+)
+
+it.instance("a session saved under a renamed provider continues on the provider it was renamed to", () =>
+  Effect.gen(function* () {
+    yield* useServerConfig(providerCfg)
+    const prompt = yield* SessionPrompt.Service
+    const sessions = yield* Session.Service
+    const chat = yield* sessions.create({
+      title: "From 1.99.8",
+      model: { providerID: ProviderV2.ID.make("kimi-for-coding"), id: ModelV2.ID.make("k3") },
+    })
+
+    const next = yield* prompt.prompt({
+      sessionID: chat.id,
+      agent: "build",
+      noReply: true,
+      parts: [{ type: "text", text: "continue" }],
+    })
+
+    expect(next.info.role).toBe("user")
+    if (next.info.role === "user") {
+      expect(String(next.info.model.providerID)).toBe("kimi-code-plan-cn")
+      expect(String(next.info.model.modelID)).toBe("k3")
+    }
+  }),
+)
+
 it.instance("loop surfaces content-filter finishes as session errors", () =>
   Effect.gen(function* () {
     const { llm } = yield* useServerConfig(providerCfg)
