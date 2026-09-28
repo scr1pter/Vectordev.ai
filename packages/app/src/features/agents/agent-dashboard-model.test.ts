@@ -378,6 +378,19 @@ describe("agentCostLabel", () => {
     ).toBe("$0.20")
   })
 
+  test("measured cost prints like the rest of the app", () => {
+    expect(agentCostLabel({ runtime: "vector", estimatedCost: "", actualCost: "$0.4213", running: false })).toBe(
+      "$0.42",
+    )
+    expect(agentCostLabel({ runtime: "vector", estimatedCost: "", actualCost: "$0.0031", running: false })).toBe(
+      "<$0.01",
+    )
+    expect(agentCostLabel({ runtime: "claude-code", estimatedCost: "", actualCost: "$1,204.5", running: false })).toBe(
+      "$1,204.50",
+    )
+    expect(agentCostLabel({ runtime: "claude-code", estimatedCost: "", actualCost: "n/a", running: false })).toBe("n/a")
+  })
+
   test("the Vector runtime is measured, measuring or unmeasured", () => {
     expect(agentCostLabel({ runtime: "vector", estimatedCost: "", running: true })).toBe("measuring…")
     expect(agentCostLabel({ runtime: "vector", estimatedCost: "< $0.01", running: false })).toBe("unmeasured")
