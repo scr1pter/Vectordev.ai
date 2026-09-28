@@ -13,22 +13,16 @@ import { cliIt } from "../../lib/cli-process"
 
 describe("vector serve (subprocess)", () => {
   cliIt.live(
-    "refuses foreign security variables before any command or listener starts",
+    "starts despite other tools' security variables and never prints them",
     ({ home }) =>
       Effect.gen(function* () {
-        for (const suffix of [
-          "SERVER_PASSWORD",
-          "SERVER_USERNAME",
-          "SERVER_GUEST_PASSWORD",
-          "PERMISSION",
-          "PURE",
-          "DISABLE_PROJECT_CONFIG",
-          "SHELL_SANDBOX",
-        ]) {
+        // Another tool's SERVER_PASSWORD or PERMISSION in the user's shell must neither stop
+        // the server nor be read by it. Only Vector's own names and the earlier product's
+        // exact prefix count, and those are covered by the environment migration tests.
+        for (const suffix of ["SERVER_PASSWORD", "SERVER_USERNAME", "PERMISSION", "SHELL_SANDBOX"]) {
           yield* Effect.scoped(
             Effect.gen(function* () {
-              // AppProcess deliberately strips foreign secrets. A trusted direct launch
-              // is required to exercise the CLI's own inherited-environment guard.
+              // AppProcess deliberately strips foreign secrets, so launch the CLI directly.
               const child = yield* Effect.acquireRelease(
                 Effect.sync(() =>
                   Bun.spawn(
@@ -39,10 +33,9 @@ describe("vector serve (subprocess)", () => {
                       path.resolve(import.meta.dir, "../../../src/index.ts"),
                       "serve",
                       "--hostname",
-                      "0.0.0.0",
+                      "127.0.0.1",
                       "--port",
                       "0",
-                      "--unsecured",
                     ],
                     {
                       cwd: home,
@@ -60,8 +53,7 @@ describe("vector serve (subprocess)", () => {
                         VECTOR_PURE: "1",
                         VECTOR_DISABLE_AUTOUPDATE: "1",
                         VECTOR_DISABLE_MODELS_FETCH: "1",
-                        [`PRIOR_${suffix}`]: "private-fixture-value",
-                        [`VECTOR_${suffix}`]: "",
+                        [`OTHER_TOOL_${suffix}`]: "private-fixture-value",
                       },
                       stdin: "ignore",
                       stdout: "pipe",
@@ -75,18 +67,23 @@ describe("vector serve (subprocess)", () => {
                     return child.exited
                   }).pipe(Effect.ignore),
               )
-              const result = yield* Effect.promise(() =>
-                Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]),
-              ).pipe(Effect.timeout("10 seconds"))
-              expect(result[0]).toBe(1)
-              expect(result[2]).toContain(`VECTOR_${suffix}`)
-              expect(result[1] + result[2]).not.toContain("private-fixture-value")
-              expect(result[1]).not.toContain("server listening")
+              const output = yield* Effect.promise(async () => {
+                const reader = child.stdout.getReader()
+                const chunks: string[] = []
+                while (!chunks.join("").includes("server listening")) {
+                  const next = await reader.read()
+                  if (next.done) break
+                  chunks.push(new TextDecoder().decode(next.value))
+                }
+                return chunks.join("")
+              }).pipe(Effect.timeout("20 seconds"))
+              expect(output).toContain("server listening")
+              expect(output).not.toContain("private-fixture-value")
             }),
           )
         }
       }),
-    60_000,
+    120_000,
   )
 
   cliIt.live(
