@@ -752,6 +752,8 @@ export type SessionStatus =
       type: "busy"
     }
 
+export type CostKind = "free" | "priced" | "plan" | "unknown"
+
 export type QuestionOption = {
   /**
    * Display text (1-5 words, concise)
@@ -1617,7 +1619,7 @@ export type GlobalEvent = {
           capUsd?: number
           steps: number
           unpricedSteps: number
-          costKind: "free" | "priced" | "plan" | "unknown"
+          costKind: CostKind
           estimate?: {
             lowUsd: number
             highUsd: number
@@ -3430,7 +3432,7 @@ export type SpendSnapshot = {
   spentUsd: number
   steps: number
   unpricedSteps: number
-  costKind?: "free" | "priced" | "plan" | "unknown"
+  costKind?: CostKind
 }
 
 export type ServiceUnavailableError = {
@@ -6862,7 +6864,7 @@ export type SessionSpend = {
     capUsd?: number
     steps: number
     unpricedSteps: number
-    costKind: "free" | "priced" | "plan" | "unknown"
+    costKind: CostKind
     estimate?: {
       lowUsd: number
       highUsd: number
@@ -7945,7 +7947,7 @@ export type EventSessionSpend = {
     capUsd?: number
     steps: number
     unpricedSteps: number
-    costKind: "free" | "priced" | "plan" | "unknown"
+    costKind: CostKind
     estimate?: {
       lowUsd: number
       highUsd: number

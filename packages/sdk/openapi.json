@@ -19348,6 +19348,10 @@
           }
         ]
       },
+      "CostKind": {
+        "type": "string",
+        "enum": ["free", "priced", "plan", "unknown"]
+      },
       "QuestionOption": {
         "type": "object",
         "properties": {
@@ -22286,8 +22290,7 @@
                         "minimum": 0
                       },
                       "costKind": {
-                        "type": "string",
-                        "enum": ["free", "priced", "plan", "unknown"]
+                        "$ref": "#/components/schemas/CostKind"
                       },
                       "estimate": {
                         "type": "object",
@@ -27736,8 +27739,7 @@
             "minimum": 0
           },
           "costKind": {
-            "type": "string",
-            "enum": ["free", "priced", "plan", "unknown"]
+            "$ref": "#/components/schemas/CostKind"
           }
         },
         "required": ["sessionID", "state", "budget", "spentUsd", "steps", "unpricedSteps"],
@@ -38061,8 +38063,7 @@
                 "minimum": 0
               },
               "costKind": {
-                "type": "string",
-                "enum": ["free", "priced", "plan", "unknown"]
+                "$ref": "#/components/schemas/CostKind"
               },
               "estimate": {
                 "type": "object",
@@ -41406,8 +41407,7 @@
                 "minimum": 0
               },
               "costKind": {
-                "type": "string",
-                "enum": ["free", "priced", "plan", "unknown"]
+                "$ref": "#/components/schemas/CostKind"
               },
               "estimate": {
                 "type": "object",
