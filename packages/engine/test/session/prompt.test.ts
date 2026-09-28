@@ -2880,6 +2880,71 @@ it.instance(
 )
 
 it.instance(
+  "run guard ends a subagent that starts after its lineage was stopped, without a request",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* useServerConfig(providerCfg)
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const guard = yield* SpendGuard.Service
+      const root = yield* sessions.create({ title: "Root" })
+      const child = yield* sessions.create({ title: "Child", parentID: root.id })
+      yield* guard.begin(root.id, { usd: 1 })
+      yield* guard.record(root.id, {
+        costUsd: 2,
+        costKind: "priced",
+        contextTokens: 0,
+        cachedTokens: 0,
+        continues: false,
+        tools: [],
+        patched: false,
+      })
+      yield* user(child.id, "hello")
+      yield* llm.text("never requested")
+
+      const result = yield* prompt.loop({ sessionID: child.id })
+
+      expect(yield* llm.calls).toBe(0)
+      expect(yield* guard.rootOf(child.id)).toBe(root.id)
+      expect(budgetStop(result.info)?.reason).toBe("cap")
+      expect(budgetStop(result.info)?.spentUsd).toBe(2)
+    }),
+  30_000,
+)
+
+it.instance(
+  "run guard marks the root's subtask turn stopped when its subagent crosses the cap",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* useServerConfig(pricedCfg({ input: 100, output: 1 }))
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({ title: "Pinned" })
+      const msg = yield* prompt.prompt({
+        sessionID: chat.id,
+        agent: "build",
+        noReply: true,
+        parts: [{ type: "text", text: "go" }],
+        budget: { usd: 1 },
+      })
+      yield* addSubtask(chat.id, msg.info.id)
+      yield* llm.push(reply().tool("lookup", { value: 1 }).usage({ input: 20_000, output: 0 }))
+      yield* llm.text("never requested")
+
+      const result = yield* prompt.loop({ sessionID: chat.id })
+
+      expect(result.info.role).toBe("assistant")
+      if (result.info.role !== "assistant") return
+      expect(result.info.agent).toBe("general")
+      expect(result.info.finish).toBe("tool-calls")
+      expect(budgetStop(result.info)?.reason).toBe("cap")
+      expect(budgetStop(result.info)?.spentUsd).toBeCloseTo(2, 6)
+      expect(yield* llm.pending).toBe(1)
+    }),
+  30_000,
+)
+
+it.instance(
   "run guard predicts past a stop-finish step that still called tools",
   () =>
     Effect.gen(function* () {

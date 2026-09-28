@@ -1154,6 +1154,49 @@ const layer = Layer.effect(
       )
     }
 
+    // Records why a turn the spend guard stopped at a loop boundary ended, as a BudgetStopError on this turn's latest
+    // assistant message. A subtask command, auto-compaction or a turn stopped before its first step leaves no such
+    // message after the latest user message, and a summary must stay error-free to count as a compaction, so those
+    // turns get a new assistant message that carries only the stop.
+    const markStopped = Effect.fn("SessionPrompt.markStopped")(function* (input: {
+      stop: SpendGuard.Stop
+      sessionID: SessionID
+      user: SessionV1.User
+      assistant: SessionV1.Assistant | undefined
+    }) {
+      const current = input.assistant && input.assistant.id > input.user.id ? input.assistant : undefined
+      if (current?.error) return
+      const run = yield* guard.snapshot(input.sessionID)
+      const error = new SessionV1.BudgetStopError({
+        reason: input.stop.reason,
+        message: input.stop.message,
+        spentUsd: run?.spentUsd,
+        capUsd: run?.budget.usd,
+        unpricedSteps: run?.unpricedSteps,
+      }).toObject()
+      if (current && !current.summary) {
+        yield* sessions.updateMessage({ ...current, error })
+        return
+      }
+      const ctx = yield* InstanceState.context
+      yield* sessions.updateMessage({
+        id: MessageID.ascending(),
+        parentID: input.user.id,
+        role: "assistant",
+        mode: input.user.agent,
+        agent: input.user.agent,
+        variant: input.user.model.variant,
+        path: { cwd: ctx.directory, root: ctx.worktree },
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        modelID: input.user.model.modelID,
+        providerID: input.user.model.providerID,
+        time: { created: Date.now(), completed: Date.now() },
+        sessionID: input.sessionID,
+        error,
+      })
+    })
+
     const runSteps = Effect.fn("SessionPrompt.runSteps")(function* (
       session: Session.Info,
       resumed?: ResumeFreeModelsInput & { parentID: MessageID },
@@ -1164,8 +1207,6 @@ const layer = Layer.effect(
       let step = 0
 
       while (true) {
-        // A run the spend guard stopped, in this session or anywhere in its lineage, ends at this boundary.
-        if (yield* guard.stopped(sessionID)) break
         yield* status.set(sessionID, { type: "busy" })
         yield* Effect.logInfo("loop", { "session.id": sessionID, step })
 
@@ -1209,6 +1250,14 @@ const layer = Layer.effect(
             })
           }
           yield* Effect.logInfo("exiting loop", { "session.id": sessionID })
+          break
+        }
+
+        // A run the spend guard stopped, in this session or anywhere in its lineage, ends at this boundary. A turn
+        // that finished its answer has already left above, so a stop here always interrupts unfinished work.
+        const stop = yield* guard.stopped(sessionID)
+        if (stop) {
+          yield* markStopped({ stop, sessionID, user: lastUser, assistant: lastAssistant })
           break
         }
 
