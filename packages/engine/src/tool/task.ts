@@ -540,6 +540,9 @@ export const TaskTool = Tool.define(
         text: string,
       ) {
         const currentParent = yield* sessions.get(ctx.sessionID)
+        // A run the spend guard stopped stays stopped until the user continues it, so a result that lands after the
+        // stop is recorded without starting a new, uncapped turn.
+        const halted = (yield* guard.snapshot(ctx.sessionID))?.stopped !== undefined
         yield* ops
           .prompt({
             sessionID: ctx.sessionID,
@@ -547,7 +550,7 @@ export const TaskTool = Tool.define(
             variant,
             // A stopped subagent is recorded for the parent's next turn without
             // starting one, so stopping work never makes the agent carry on alone.
-            ...(state === "cancelled" ? { noReply: true } : {}),
+            ...(state === "cancelled" || halted ? { noReply: true } : {}),
             parts: [
               {
                 type: "text",

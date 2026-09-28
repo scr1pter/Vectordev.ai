@@ -252,8 +252,9 @@ export interface Interface {
   readonly begin: (rootID: SessionID, fallback?: RunBudget.Info) => Effect.Effect<void>
   readonly link: (childID: SessionID, parentID: SessionID) => Effect.Effect<void>
   readonly rootOf: (sessionID: SessionID) => Effect.Effect<SessionID>
-  // Applies one provider step to the run of `sessionID`'s root and publishes session.spend. A session with no
-  // active run is ignored.
+  // Applies one provider step to the run of `sessionID`'s root and publishes session.spend. A root with no active
+  // run is ignored. A linked subagent still stepping after its root's run ended, such as a background task, counts
+  // against that finished run until the root begins another, so it keeps its cap, loop rules and stop.
   readonly record: (sessionID: SessionID, step: Step) => Effect.Effect<Verdict>
   readonly stopped: (sessionID: SessionID) => Effect.Effect<Stop | undefined>
   // Moves the run into the finished runs, and drops a budget armed for a run that never began.
@@ -277,6 +278,17 @@ const layer = Layer.effect(
     const events = yield* EventV2.Service
     const state = yield* Ref.make<State>({ runs: new Map(), roots: new Map(), armed: new Map(), last: new Map() })
     const rootIn = (current: State, sessionID: SessionID) => current.roots.get(sessionID) ?? sessionID
+    // The run a session's steps count against: its root's active run, else, for a linked subagent, the root's
+    // finished run.
+    const runOf = (current: State, sessionID: SessionID) => {
+      const rootID = rootIn(current, sessionID)
+      const active = current.runs.get(rootID)
+      if (active) return { rootID, run: active, active: true }
+      if (rootID === sessionID) return undefined
+      const finished = current.last.get(rootID)
+      if (finished) return { rootID, run: finished, active: false }
+      return undefined
+    }
 
     return Service.of({
       arm: Effect.fn("SpendGuard.arm")(function* (sessionID, budget) {
@@ -309,11 +321,11 @@ const layer = Layer.effect(
       }),
       record: Effect.fn("SpendGuard.record")(function* (sessionID, step) {
         const result = yield* Ref.modify(state, (current) => {
-          const rootID = rootIn(current, sessionID)
-          const run = current.runs.get(rootID)
-          if (!run) return [undefined, current] as const
-          const next = afterStep(run, step, sessionID)
-          return [next, { ...current, runs: new Map(current.runs).set(rootID, next.run) }] as const
+          const found = runOf(current, sessionID)
+          if (!found) return [undefined, current] as const
+          const next = afterStep(found.run, step, sessionID)
+          if (found.active) return [next, { ...current, runs: new Map(current.runs).set(found.rootID, next.run) }] as const
+          return [next, { ...current, last: new Map(current.last).set(found.rootID, next.run) }] as const
         })
         if (!result) return { state: "ok" } satisfies Verdict
         yield* events.publish(SessionStatusEvent.Spend, {
@@ -331,8 +343,7 @@ const layer = Layer.effect(
         return result.verdict
       }),
       stopped: Effect.fn("SpendGuard.stopped")(function* (sessionID) {
-        const current = yield* Ref.get(state)
-        return current.runs.get(rootIn(current, sessionID))?.stopped
+        return runOf(yield* Ref.get(state), sessionID)?.run.stopped
       }),
       end: Effect.fn("SpendGuard.end")(function* (rootID) {
         yield* Ref.update(state, (current) => {

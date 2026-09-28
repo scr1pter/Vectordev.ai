@@ -2845,6 +2845,13 @@ it.instance(
   30_000,
 )
 
+// A request whose history carries `text` in a user message, which tells a subagent's requests from its root's.
+const asksFor = (text: string) => (hit: { body: Record<string, unknown> }) =>
+  Array.isArray(hit.body.messages) &&
+  hit.body.messages.some(
+    (message) => isRecord(message) && message.role === "user" && JSON.stringify(message.content).includes(text),
+  )
+
 it.instance(
   "run guard keeps a stopped step's tool calls in the next turn's history",
   () =>
@@ -3026,6 +3033,79 @@ it.instance(
       expect(run?.spentUsd).toBe(0)
       expect(run?.stopped).toBeUndefined()
       expect(yield* llm.pending).toBe(0)
+    }),
+  30_000,
+)
+
+const withBackground = testEffect(
+  LayerNode.compile(LayerNode.group([promptRoot, testLLMServerNode]), [
+    [SessionSummary.node, summary],
+    [LSP.node, lsp],
+    [MCP.node, makeMcp()],
+    [RuntimeFlags.node, RuntimeFlags.layer({ experimentalEventSystem: true, experimentalBackgroundSubagents: true })],
+  ]),
+)
+
+withBackground.instance(
+  "run guard stops a background subagent at its next step after the root's run stopped",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* useServerConfig(pricedCfg({ input: 100, output: 1 }))
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const guard = yield* SpendGuard.Service
+      const chat = yield* guardedChat({ usd: 1 })
+      const gate = Promise.withResolvers<void>()
+      const child = asksFor("look into the cache key path")
+      const root = (hit: { body: Record<string, unknown> }) => !child(hit)
+      yield* llm.pushMatch(
+        root,
+        reply().tool("task", {
+          description: "inspect bug",
+          prompt: "look into the cache key path",
+          subagent_type: "general",
+          background: true,
+        }),
+        // The root's second step spends $2.00 against the $1.00 cap while its subagent's first step is in flight.
+        reply().tool("first", { value: 1 }).usage({ input: 20_000, output: 0 }),
+      )
+      yield* llm.pushMatch(
+        child,
+        reply().wait(gate.promise).tool("lookup", { value: 1 }).usage({ input: 10, output: 0 }),
+        reply().text("never requested").stop(),
+      )
+
+      const result = yield* prompt.loop({ sessionID: chat.id })
+      expect(budgetStop(result.info)?.reason).toBe("cap")
+      const kids = yield* sessions.children(chat.id)
+      expect(kids).toHaveLength(1)
+      gate.resolve()
+
+      const childStop = yield* pollWithTimeout(
+        MessageV2.filterCompactedEffect(kids[0]!.id).pipe(
+          Effect.map((messages) => messages.map((item) => budgetStop(item.info)).find((item) => item !== undefined)),
+        ),
+        "the background subagent never stopped",
+      )
+      expect(childStop.reason).toBe("cap")
+      // The late result is recorded on the root without starting an uncapped turn.
+      yield* pollWithTimeout(
+        MessageV2.filterCompactedEffect(chat.id).pipe(
+          Effect.map((messages) =>
+            messages.findLast((item) =>
+              item.parts.some((part) => part.type === "text" && part.text.includes("Background task")),
+            ),
+          ),
+        ),
+        "the background result never reached the root",
+      )
+      // A reply to the result would start right after it lands; give one the chance to show up.
+      yield* Effect.sleep("300 millis")
+      const latest = (yield* MessageV2.filterCompactedEffect(chat.id)).at(-1)
+      expect(latest?.info.role).toBe("user")
+      expect(yield* llm.calls).toBe(3)
+      expect(yield* llm.pending).toBe(1)
+      expect((yield* guard.snapshot(chat.id))?.steps).toBe(3)
     }),
   30_000,
 )

@@ -340,8 +340,43 @@ describe("SpendGuard service", () => {
       const last = yield* guard.snapshot(root)
       expect(last?.spentUsd).toBe(1.1)
       expect(last?.budget.usd).toBe(10)
-      expect((yield* guard.record(child, step({ costUsd: 5 }))).state).toBe("ok")
+      expect((yield* guard.record(root, step({ costUsd: 5 }))).state).toBe("ok")
       expect((yield* guard.snapshot(root))?.spentUsd).toBe(1.1)
+    }),
+  )
+
+  it.effect("holds a linked child still stepping after its root's run ended to that run, until the root begins again", () =>
+    Effect.gen(function* () {
+      const guard = yield* SpendGuard.Service
+      yield* guard.begin(root, { usd: 1 })
+      yield* guard.link(child, root)
+      expect((yield* guard.record(root, step({ costUsd: 1.2 }))).state).toBe("stopped")
+      yield* guard.end(root)
+
+      // A background child keeps the finished run's stop and has its spend counted.
+      expect((yield* guard.stopped(child))?.reason).toBe("cap")
+      expect((yield* guard.record(child, step({ costUsd: 0.3 }))).state).toBe("stopped")
+      expect((yield* guard.snapshot(root))?.spentUsd).toBeCloseTo(1.5, 6)
+      // The root itself only ever steps inside a run of its own.
+      expect(yield* guard.stopped(root)).toBeUndefined()
+
+      yield* guard.begin(root, { usd: 1 })
+      expect(yield* guard.stopped(child)).toBeUndefined()
+      expect((yield* guard.record(child, step({ costUsd: 0.1 }))).state).toBe("ok")
+      expect((yield* guard.snapshot(root))?.spentUsd).toBeCloseTo(0.1, 6)
+    }),
+  )
+
+  it.effect("holds a linked child to its root's finished run with no stop, and counts its spend there", () =>
+    Effect.gen(function* () {
+      const guard = yield* SpendGuard.Service
+      yield* guard.begin(root, { usd: 1 })
+      yield* guard.link(child, root)
+      yield* guard.end(root)
+      expect((yield* guard.record(child, step({ costUsd: 0.5 }))).state).toBe("ok")
+      expect((yield* guard.record(child, step({ costUsd: 0.6 }))).state).toBe("stopped")
+      expect((yield* guard.stopped(child))?.reason).toBe("cap")
+      expect((yield* guard.snapshot(root))?.spentUsd).toBeCloseTo(1.1, 6)
     }),
   )
 
