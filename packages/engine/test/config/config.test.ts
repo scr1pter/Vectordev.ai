@@ -1392,6 +1392,21 @@ test("config parser preserves permission order while rejecting unknown top-level
   }
 })
 
+test("config accepts a run budget and the loop switch", () => {
+  const config = ConfigParse.schema(
+    ConfigV1.Info,
+    { budget: { run: { usd: 5, steps: 60, warnAt: 0.8, unpricedSteps: 40 }, loop: { enabled: false } } },
+    "test",
+  )
+
+  expect(config.budget).toEqual({
+    run: { usd: 5, steps: 60, warnAt: 0.8, unpricedSteps: 40 },
+    loop: { enabled: false },
+  })
+  expect(() => ConfigParse.schema(ConfigV1.Info, { budget: { run: { usd: 0 } } }, "test")).toThrow()
+  expect(() => ConfigParse.schema(ConfigV1.Info, { budget: { run: { warnAt: 1.5 } } }, "test")).toThrow()
+})
+
 // MCP config merging tests
 
 it.instance("project config can override MCP server enabled status", () =>
