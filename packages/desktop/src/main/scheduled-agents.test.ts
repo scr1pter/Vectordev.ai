@@ -221,7 +221,8 @@ function harness(options: {
   legacyShape?: boolean
   staleAssistantPolls?: number
   incompleteAssistantPolls?: number
-  allowance?: { allowed: boolean; state: "ok" | "warn" | "blocked"; reason?: string }
+  allowance?: { allowed: boolean; state: "ok" | "warn" | "blocked"; reason?: string; remainingUsd?: number }
+  spend?: (sessionId: string) => unknown
 }) {
   const clock = { at: options.at }
   const persisted = { value: JSON.parse(JSON.stringify(options.records ?? [])) as unknown }
@@ -232,6 +233,9 @@ function harness(options: {
   const created: string[] = []
   const createdModels: unknown[] = []
   const spendChecks: Array<{ projectPath: string; runId: string; source: string }> = []
+  const reserved = new Map<string, number>()
+  const released: string[] = []
+  const prompts: unknown[] = []
   const spendRecords: Array<{
     projectPath: string
     runId: string
@@ -264,6 +268,12 @@ function harness(options: {
       recordRunCost: async (input) => {
         spendRecords.push(input)
         return undefined
+      },
+      reserve: (runId, usd) => {
+        reserved.set(runId, usd)
+      },
+      release: (runId) => {
+        released.push(runId)
       },
     }),
     request: async (_engine, path, init) => {
@@ -308,7 +318,9 @@ function harness(options: {
       }
       const match = /^\/api\/session\/([^/]+)\/([a-z]+)/.exec(path)
       const sessionId = decodeURIComponent(match?.[1] ?? "")
+      if (match?.[2] === "spend") return options.spend?.(sessionId) ?? {}
       if (match?.[2] === "prompt") {
+        prompts.push(init?.body)
         promptedAt.set(sessionId, clock.at.getTime())
         return { data: { id: "msg_0001" } }
       }
@@ -346,6 +358,9 @@ function harness(options: {
     createdModels,
     spendChecks,
     spendRecords,
+    reserved,
+    released,
+    prompts,
     contextPolls: () => contextPolls,
     record: (id = "task-1") => runtime.list().find((item) => item.id === id),
   }
@@ -679,6 +694,57 @@ describe("unattended spend limits", () => {
     expect(harnessed.record()?.status).toBe("failed")
     expect(harnessed.spendRecords).toHaveLength(1)
     expect(harnessed.spendRecords[0]?.totalCostUsd).toBe(0.25)
+  })
+
+  test("sends the remaining headroom as the run's live budget and holds it", async () => {
+    const harnessed = harness({
+      at: new Date(2026, 7, 19, 9, 0, 0, 0),
+      records: [scheduledRecord({})],
+      allowance: { allowed: true, state: "ok", remainingUsd: 5 },
+    })
+
+    await harnessed.runtime.tick()
+
+    expect(harnessed.prompts[0]).toMatchObject({ resume: true, budget: { usd: 5 } })
+    expect([...harnessed.reserved.values()]).toEqual([5])
+    expect(harnessed.released).toEqual([...harnessed.reserved.keys()])
+  })
+
+  test("sends no budget when nothing is capped", async () => {
+    const harnessed = harness({ at: new Date(2026, 7, 19, 9, 0, 0, 0), records: [scheduledRecord({})] })
+
+    await harnessed.runtime.tick()
+
+    expect(harnessed.prompts[0]).toMatchObject({ resume: true, budget: undefined })
+    expect(harnessed.reserved.size).toBe(0)
+  })
+
+  test("a run the spend guard stopped fails with the guard's message and records its measured cost", async () => {
+    const message = "Spend cap reached: $5.02 spent against a $5.00 cap for this run. Vector stopped after the step that crossed it."
+    const harnessed = harness({
+      at: new Date(2026, 7, 19, 9, 0, 0, 0),
+      records: [scheduledRecord({})],
+      allowance: { allowed: true, state: "ok", remainingUsd: 5 },
+      spend: (sessionId) => ({
+        data: {
+          sessionID: sessionId,
+          state: "stopped",
+          reason: "cap",
+          message,
+          budget: { usd: 5 },
+          spentUsd: 5.02,
+          steps: 12,
+          unpricedSteps: 0,
+          costKind: "priced",
+        },
+      }),
+    })
+
+    await harnessed.runtime.tick()
+
+    expect(harnessed.record()?.status).toBe("failed")
+    expect(harnessed.record()?.results?.[0]?.error).toBe(message)
+    expect(harnessed.spendRecords[0]?.totalCostUsd).toBe(5.02)
   })
 })
 
