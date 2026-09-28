@@ -60,15 +60,14 @@ export function createClient(
         : undefined)
     const refresh = state.pending ?? load(saved)
     if (force) return refresh
-    // Provider loading waits here, so it must never stall on vectordev.ai. A known OFF answer is
-    // served at once while the refresh lands for the next caller; otherwise the wait is short and
-    // ends as if the request had failed, leaving the refresh to update the cache when it arrives.
+    // Provider loading and every free-model chat wait here, so they must never stall on vectordev.ai.
+    // A known OFF answer is served at once while the refresh lands for the next caller. Otherwise the
+    // wait is short and then serves the last catalog seen, stale, or OFF on a first run; only a request
+    // that actually fails falls back to the reviewed list, inside load().
     if (saved && !saved.enabled) return OFF
     return Promise.race([
       refresh,
-      new Promise<FreeModelCatalog>((resolve) =>
-        setTimeout(() => resolve(unreachable(saved)), input.wait ?? 1_500).unref(),
-      ),
+      new Promise<FreeModelCatalog>((resolve) => setTimeout(() => resolve(saved ?? OFF), input.wait ?? 1_500).unref()),
     ])
   }
   const load = (saved: FreeModelCatalog | undefined) => {

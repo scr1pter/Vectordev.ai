@@ -34,21 +34,22 @@ test("a known OFF catalog answers at once and refreshes in the background", asyn
     const file = path.join(root, "catalog.json")
     await writeFile(file, JSON.stringify(off))
     const requests: string[] = []
-    const reply = Promise.withResolvers<Response>()
+    const reply = Promise.withResolvers<void>()
     const client = FreeModels.createClient({
       file,
       wait: 60_000,
       request: (url) => {
         requests.push(url)
-        return reply.promise
+        return reply.promise.then(() => Response.json(enabled))
       },
     })
     expect(await client.catalog()).toEqual(off)
     expect(await client.forKey("synthetic-secret")).toEqual([])
     expect(requests).toEqual([FreeModels.CATALOG_URL])
 
-    reply.resolve(Response.json(enabled))
-    await Bun.sleep(20)
+    reply.resolve()
+    // A forced read joins the refresh still in flight, which settles only after the cache file is written.
+    expect(await client.catalog(true)).toEqual(enabled)
     expect(await client.catalog()).toEqual(enabled)
     expect(JSON.parse(await readFile(file, "utf8"))).toEqual(enabled)
   } finally {
@@ -57,12 +58,38 @@ test("a known OFF catalog answers at once and refreshes in the background", asyn
 })
 
 test("an unknown catalog waits briefly for a silent network, then answers without it", async () => {
-  const reply = Promise.withResolvers<Response>()
-  const client = FreeModels.createClient({ wait: 20, request: () => reply.promise })
+  const reply = Promise.withResolvers<void>()
+  const client = FreeModels.createClient({ wait: 20, request: () => reply.promise.then(() => Response.json(enabled)) })
   expect(await client.catalog()).toEqual(off)
-  reply.resolve(Response.json(enabled))
-  await Bun.sleep(20)
+  reply.resolve()
+  expect(await client.catalog(true)).toEqual(enabled)
   expect(await client.catalog()).toEqual(enabled)
+})
+
+test("an expired catalog last seen ON is served stale while a slow refresh continues", async () => {
+  const real = { enabled: true, updatedAt: 456, models: [{ ...FREE_MODEL_FALLBACKS[0], id: "acme/real:free" }] }
+  const clock = { now: 0 }
+  const slow = Promise.withResolvers<void>()
+  const replies = [Promise.resolve(), slow.promise]
+  const client = FreeModels.createClient({
+    wait: 20,
+    now: () => clock.now,
+    request: () => (replies.shift() ?? slow.promise).then(() => Response.json(real)),
+  })
+  expect(await client.catalog()).toEqual(real)
+
+  clock.now = 10 * 60_000
+  expect(await client.catalog()).toEqual(real)
+  const route = await FreeModels.resolveRoute({
+    provider: "vector",
+    modelID: "acme/real:free",
+    catalog: () => client.catalog(),
+    forKey: async () => [],
+    credential: async (provider) => (provider === "vector" ? "vct_placeholder" : undefined),
+  })
+  expect(route.source).toBe("shared")
+  expect(route.models.map((model) => model.id)).toEqual(["acme/real:free"])
+  slow.resolve()
 })
 
 test("a forced catalog read still waits for the answer", async () => {
