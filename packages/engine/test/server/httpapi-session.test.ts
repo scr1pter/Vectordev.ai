@@ -557,6 +557,39 @@ describe("session HttpApi", () => {
         })
         expect(prompt.status).toBe(404)
         expect(yield* responseJson(prompt)).toEqual(expected)
+
+        const spend = yield* request(`/api/session/${missing}/spend`, { headers })
+        expect(spend.status).toBe(404)
+        expect(yield* responseJson(spend)).toEqual(expected)
+      }),
+    { git: true, config: { formatter: false, lsp: false } },
+  )
+
+  it.instance(
+    "reports no spend for an idle session and accepts a v2 prompt budget",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const headers = { "x-vector-directory": test.directory }
+        const session = yield* createSession({ title: "v2 spend" })
+
+        expect(yield* requestJson(`/api/session/${session.id}/spend`, { headers })).toEqual({})
+
+        const budgeted = yield* request(`/api/session/${session.id}/prompt`, {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify({ prompt: { text: "hello" }, budget: { usd: 2, steps: 10 }, resume: false }),
+        })
+        expect(budgeted.status).toBe(200)
+        // Arming holds the budget for the next run; nothing has spent yet.
+        expect(yield* requestJson(`/api/session/${session.id}/spend`, { headers })).toEqual({})
+
+        const invalid = yield* request(`/api/session/${session.id}/prompt`, {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify({ prompt: { text: "hello" }, budget: { usd: -1 }, resume: false }),
+        })
+        expect(invalid.status).toBe(400)
       }),
     { git: true, config: { formatter: false, lsp: false } },
   )

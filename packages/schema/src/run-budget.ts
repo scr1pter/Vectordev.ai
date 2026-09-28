@@ -1,7 +1,8 @@
 export * as RunBudget from "./run-budget"
 
 import { Schema } from "effect"
-import { optional, PositiveInt } from "./schema"
+import { NonNegativeInt, optional, PositiveInt } from "./schema"
+import { SessionID } from "./session-id"
 
 // Limits for one run of a root session and its subagents. `usd` is priced at catalog list rates; `warnAt` is the
 // share of `usd` at which the run warns once; `unpricedSteps` bounds steps on a model with no catalog price.
@@ -17,3 +18,17 @@ export const StopReason = Schema.Literals(["cap", "predicted", "unpriced", "step
   identifier: "RunBudgetStopReason",
 })
 export type StopReason = typeof StopReason.Type
+
+// What the run of a root session has spent so far, or what its last finished run spent. `sessionID` is the root.
+export const Snapshot = Schema.Struct({
+  sessionID: SessionID,
+  state: Schema.Literals(["ok", "warn", "stopped"]),
+  reason: optional(StopReason),
+  message: optional(Schema.String),
+  budget: Info,
+  spentUsd: Schema.Finite,
+  steps: NonNegativeInt,
+  unpricedSteps: NonNegativeInt,
+  costKind: optional(Schema.Literals(["free", "priced", "plan", "unknown"])),
+}).annotate({ identifier: "SpendSnapshot" })
+export type Snapshot = Schema.Schema.Type<typeof Snapshot>

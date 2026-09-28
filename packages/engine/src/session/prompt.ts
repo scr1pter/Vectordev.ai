@@ -58,6 +58,8 @@ import { SessionTable } from "@vectordevai/core/session/sql"
 import { SessionReminders } from "./reminders"
 import { SessionTools } from "./tools"
 import { LLMEvent } from "@vectordevai/llm"
+import { SpendGuard } from "@vectordevai/core/spend-guard"
+import { RunBudget } from "@vectordevai/schema/run-budget"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -160,6 +162,7 @@ const layer = Layer.effect(
     const events = yield* EventV2Bridge.Service
     const flags = yield* RuntimeFlags.Service
     const database = yield* Database.Service
+    const guard = yield* SpendGuard.Service
     const { db } = database
     const backgroundTasks = yield* InstanceState.make(
       Effect.fnUntraced(function* () {
@@ -1100,6 +1103,8 @@ const layer = Layer.effect(
     )(function* (input: PromptInput) {
       const session = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
       yield* revert.cleanup(session)
+      // The budget lives in the guard's memory for this process, not on the user message.
+      if (input.budget) yield* guard.arm(input.sessionID, input.budget)
       const message = yield* createUserMessage(input)
       yield* sessions.touch(input.sessionID)
 
@@ -1662,6 +1667,7 @@ export const PromptInput = Schema.Struct({
   system: Schema.optional(Schema.String),
   variant: Schema.optional(Schema.String),
   executionMode: Schema.optional(Schema.Union([Schema.Literal("normal"), Schema.Literal("fast")])),
+  budget: Schema.optional(RunBudget.Info),
   parts: Schema.Array(
     Schema.Union([
       SessionV1.TextPartInput,
@@ -1781,6 +1787,7 @@ export const node = LayerNode.make({
     EventV2Bridge.node,
     RuntimeFlags.node,
     Database.node,
+    SpendGuard.node,
   ],
 })
 

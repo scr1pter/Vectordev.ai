@@ -22,6 +22,7 @@ import { Location } from "@vectordevai/schema/location"
 import { Revert } from "@vectordevai/schema/revert"
 import { SessionEvent } from "@vectordevai/schema/session-event"
 import { PublicSession } from "@vectordevai/schema/public-session"
+import { RunBudget } from "@vectordevai/schema/run-budget"
 
 const SessionsQueryFields = {
   workspace: Workspace.ID.pipe(Schema.optional),
@@ -255,6 +256,7 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLo
           prompt: PromptInput.Prompt,
           delivery: SessionInput.Delivery.pipe(Schema.optional),
           resume: Schema.Boolean.pipe(Schema.optional),
+          budget: RunBudget.Info.pipe(Schema.optional),
         }),
         success: Schema.Struct({ data: SessionInput.Admitted }),
         error: [ConflictError, SessionNotFoundError],
@@ -265,6 +267,22 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLo
             identifier: "v2.session.prompt",
             summary: "Send message",
             description: "Durably admit one session input and schedule agent-loop execution unless resume is false.",
+          }),
+        ),
+    )
+    .add(
+      HttpApiEndpoint.get("session.spend", "/api/session/:sessionID/spend", {
+        params: { sessionID: Session.ID },
+        success: Schema.Struct({ data: RunBudget.Snapshot.pipe(Schema.optional) }),
+        error: SessionNotFoundError,
+      })
+        .middleware(sessionLocationMiddleware)
+        .annotateMerge(
+          OpenApi.annotations({
+            identifier: "v2.session.spend",
+            summary: "Get session spend",
+            description:
+              "Retrieve what the run of the session's root has spent against its budget, or what its last finished run spent. Empty when no run has been guarded in this Vector process.",
           }),
         ),
     )
