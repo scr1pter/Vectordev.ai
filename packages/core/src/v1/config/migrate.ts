@@ -32,6 +32,9 @@ export function isV1(input: unknown) {
   return Object.keys(input).some((key) => keys.has(key))
 }
 
+// `budget` is deliberately not carried over. The V1 runner reads it straight from ConfigV1, which parses every
+// vector.json, and the V2 runner runs only under budgets armed from a prompt. Add it to V2 Info here once the V2
+// runner reads a config budget.
 export function migrate(info: typeof ConfigV1.Info.Type) {
   return {
     $schema: info.$schema,
