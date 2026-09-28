@@ -31,6 +31,7 @@ import {
   type TaskDifficulty,
 } from "@/utils/task-intelligence"
 import { modelDisplayName } from "@/utils/provider-brand"
+import { cachedSpendPolicy, interactiveRunBudget } from "@/features/economics/spend-limits-api"
 
 type PendingPrompt = {
   abort: AbortController
@@ -224,6 +225,7 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
       ...(preparation?.instruction ? [preparation.instruction] : []),
       ...(llmJudge ? [VERIFIED_COMPLETION_POLICY] : []),
     ]
+    const budget = interactiveRunBudget(await cachedSpendPolicy())
     await input.client.session.promptAsync({
       sessionID: input.draft.sessionID,
       agent,
@@ -234,6 +236,7 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
       parts: withSyntheticText(baseParts, syntheticText),
       variant: input.draft.variant,
       executionMode: input.draft.executionMode,
+      ...(budget ? { budget } : {}),
     })
     return true
   } catch (err) {
