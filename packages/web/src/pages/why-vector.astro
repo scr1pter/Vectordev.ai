@@ -66,11 +66,12 @@ const tokenomics = {
     ["Models ranked on your own results", "Recommendations come from your own recorded runs, ranked by checks passed and then by measured spend. A model needs three runs for a kind of task before Vector recommends it."],
   ],
   next: [
-    ["A cap on every run", "Set a dollar cap in Settings, in project config, or with vector run --max-cost. Vector checks spend after every model step and stops within one step of the cap."],
+    ["A cap on every run", "Set a dollar cap in Settings → Spend limits, in project config, or with vector run --max-cost. Vector checks spend after every model step and stops within one step of the cap."],
     ["Stops before the step that would cross it", "Vector estimates the next step from catalog prices and the context it carries, shows the estimate as a range, and stops before a step that would go over."],
     ["Subagents share the cap", "Spend from subagents counts against the same cap as the task that launched them."],
-    ["Loops pause themselves", "An agent that repeats the same tool call three times with no file change, or hits the same error three times in a row, is paused. Auto-approve can't click through it."],
-    ["Outages don't retry forever", "A provider outage ends a run after 10 retries or 15 minutes."],
+    ["Loops pause themselves", "In chats and vector run, an agent that repeats the same tool call three times with no file change, or hits the same error three times in a row, is paused. Auto-approve can't click through it."],
+    ["Outages don't retry forever", "In chats and vector run, a provider outage ends the run after 10 retries or 15 minutes."],
+    ["Automations hold while they run", "An automation gets the headroom left in your limits as its live cap, and automations running at the same time share it."],
     ["Made for scripts", "vector run exits with code 3 when a budget stops it, so CI can tell a budget stop from a failure."],
   ],
 }

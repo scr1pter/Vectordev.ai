@@ -191,6 +191,42 @@ export const spendRows = [
     "Connect your own provider account to start. Eligible accounts may also see Free models inside of Vector, with availability and usage limits shown in the app. With your own provider keys, model spend is between you and that provider — Vector does not resell tokens or add a margin to it.",
   ],
 ]
+// The Run Guard ships in the next release; keep these in step with /why-vector.
+export const runGuardRows = [
+  [
+    "Where caps come from",
+    "Settings → Spend limits for chats and the parallel agents you start, the project's budget.run for chats, the terminal UI and vector run, or vector run --max-cost and --max-steps for one run. Automations use the Left alone limits: $5 a run and $25 a day unless you change them.",
+  ],
+  [
+    "A stop before the step that would cross",
+    "After a step, Vector estimates the next one from catalog prices and the context it carries, shows the estimate as a range, and stops before starting a step that would go over the cap.",
+  ],
+  ["Subagents share the cap", "Spend from subagents counts against the same cap as the task that launched them."],
+  [
+    "Automations hold while they run",
+    "An automation gets the headroom left in your limits as its live cap, and automations that run at the same time share that headroom instead of each spending all of it.",
+  ],
+  [
+    "Unpriced is not free",
+    "With a dollar cap set, a model with no catalog price stops after 40 unpriced steps, because its spend cannot be counted. Free models are labelled free and are held by step and loop limits instead.",
+  ],
+  [
+    "Loops pause themselves",
+    "In chats, the terminal UI and vector run, an agent that repeats the same tool call three times with no file change in between, or hits the same error three times in a row, is paused. Auto-approve and --yolo cannot click through it. Set budget.loop.enabled to false to turn this off.",
+  ],
+  [
+    "Outages end",
+    "In chats, the terminal UI and vector run, a provider outage ends the run after 10 retries or 15 minutes instead of retrying forever.",
+  ],
+  [
+    "Made for scripts",
+    "vector run exits with code 3 when a spend cap, step limit or loop pause stops it, so CI can tell a budget stop from a failure.",
+  ],
+  [
+    "Honest numbers everywhere",
+    "The session cost readout shows unpriced for a model with no catalog price, never $0.00. Vector parallel agents show their measured cost, and failed or stopped runs are still recorded in the ledger.",
+  ],
+]
 export const systemRows = [
   [
     "Memory that is one file you can delete",
