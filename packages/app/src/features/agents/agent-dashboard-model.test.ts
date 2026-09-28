@@ -373,9 +373,9 @@ describe("agentCostLabel", () => {
   test("external runtimes keep their estimate until their own cost arrives", () => {
     expect(agentCostLabel({ runtime: "claude-code", estimatedCost: "$0.10", running: true })).toBe("$0.10")
     expect(agentCostLabel({ runtime: "claude-code", estimatedCost: "", running: false })).toBeUndefined()
-    expect(agentCostLabel({ runtime: "claude-code", estimatedCost: "$0.10", actualCost: "$0.20", running: false })).toBe(
-      "$0.20",
-    )
+    expect(
+      agentCostLabel({ runtime: "claude-code", estimatedCost: "$0.10", actualCost: "$0.20", running: false }),
+    ).toBe("$0.20")
   })
 
   test("the Vector runtime is measured, measuring or unmeasured", () => {

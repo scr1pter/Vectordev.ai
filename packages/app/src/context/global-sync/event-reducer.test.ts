@@ -141,8 +141,24 @@ describe("applyDirectoryEvent", () => {
       type: "session.spend",
       properties: { sessionID: "ses_root", state, spentUsd, capUsd: 5, steps: 3, unpricedSteps: 0, costKind: "priced" },
     })
-    applyDirectoryEvent({ event: spend(1.2, "ok"), store, setStore, push() {}, directory: "/tmp", loadLsp() {}, sessionContent: false })
-    applyDirectoryEvent({ event: spend(4.1, "warn"), store, setStore, push() {}, directory: "/tmp", loadLsp() {}, sessionContent: false })
+    applyDirectoryEvent({
+      event: spend(1.2, "ok"),
+      store,
+      setStore,
+      push() {},
+      directory: "/tmp",
+      loadLsp() {},
+      sessionContent: false,
+    })
+    applyDirectoryEvent({
+      event: spend(4.1, "warn"),
+      store,
+      setStore,
+      push() {},
+      directory: "/tmp",
+      loadLsp() {},
+      sessionContent: false,
+    })
 
     expect(store.session_spend.ses_root).toMatchObject({ state: "warn", spentUsd: 4.1, capUsd: 5 })
   })

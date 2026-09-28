@@ -66,6 +66,11 @@ export function recentRunMeta(event: SpendEvent) {
   return [
     event.costUsd === undefined ? "unmeasured" : formatUsd(event.costUsd),
     SOURCE_LABEL[event.source],
-    new Date(event.at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }),
+    new Date(event.at).toLocaleString(undefined, {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    }),
   ].join(" · ")
 }

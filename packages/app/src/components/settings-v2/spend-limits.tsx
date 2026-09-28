@@ -35,8 +35,8 @@ export const SettingsSpendLimitsV2: Component<{ repositoryPath?: string }> = (pr
           <p class="settings-v2-page-kicker">Spend</p>
           <h2 class="settings-v2-page-title">Spend limits</h2>
           <p class="settings-v2-page-subtitle">
-            Caps are checked after every model step. Vector stops a run within one step of its cap, and before a step
-            it estimates would cross it.
+            Caps are checked after every model step. Vector stops a run within one step of its cap, and before a step it
+            estimates would cross it.
           </p>
         </div>
       </div>

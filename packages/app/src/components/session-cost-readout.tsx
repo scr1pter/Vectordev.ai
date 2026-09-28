@@ -35,7 +35,10 @@ export function SessionCostReadout() {
   const spend = createMemo(() => {
     const session = info()
     if (!session) return undefined
-    return sync().data.session_spend[session.id] ?? (session.parentID ? sync().data.session_spend[session.parentID] : undefined)
+    return (
+      sync().data.session_spend[session.id] ??
+      (session.parentID ? sync().data.session_spend[session.parentID] : undefined)
+    )
   })
   const kind = createMemo(() => {
     const model = lastAssistantModel(params.id ? (sync().data.message[params.id] ?? []) : [])
