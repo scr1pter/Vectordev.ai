@@ -43,7 +43,7 @@ import { HelpPanel } from "@/features/help/help-panel"
 import { AgentDashboard } from "@/features/agents/agent-dashboard"
 import { agentReviewCopy, agentRuntimeLabel, type AgentRuntime } from "@/features/agents/agent-runtime-copy"
 import { useSettings } from "@/context/settings"
-import type { TeamConversation } from "@/features/agents/agent-dashboard-model"
+import { agentCostLabel, type TeamConversation } from "@/features/agents/agent-dashboard-model"
 import { ExternalRuntimeSetupPanel } from "@/features/agents/external-runtime-setup"
 import {
   externalRuntimeReady,
@@ -3336,7 +3336,7 @@ export default function NewLayout(props: ParentProps) {
         statusTone={parallelStatusTone(record().status)}
         branchLabel={record().isolation === "git-worktree" ? record().gitBranch || "Git worktree" : "Managed copy"}
         model={record().model}
-        cost={record().actualCost || record().estimatedCost}
+        cost={agentCostLabel({ ...record(), running: isParallelWorkspaceRunning(record()) }) ?? ""}
         running={isParallelWorkspaceRunning(record())}
         changedFiles={record().changedFilesCount}
         changedFilePaths={record().changedFiles}
@@ -4584,7 +4584,9 @@ export default function NewLayout(props: ParentProps) {
                                   <span class="text-emerald-300/75">+{candidateStats().added}</span>
                                   <span class="text-rose-300/75">-{candidateStats().removed}</span>
                                   <span class="capitalize">{candidate.riskLevel} risk</span>
-                                  <span>{candidate.actualCost || candidate.estimatedCost}</span>
+                                  <span>
+                                    {agentCostLabel({ ...candidate, running: isParallelWorkspaceRunning(candidate) })}
+                                  </span>
                                 </div>
                               </button>
                             )
@@ -5317,8 +5319,7 @@ export default function NewLayout(props: ParentProps) {
                         </label>
                       </div>
                       <div class="rounded-[10px] border border-amber-300/15 bg-amber-300/[0.05] px-3 py-2 text-[11.5px] leading-5 text-amber-100/70">
-                        Parallel agents can multiply BYOK usage. Vector routes simpler work to lighter connected models
-                        and reserves stronger models for complex or high-risk work.
+                        Each worker spends on your provider key. Set a per-run cap in Settings → Spend limits.
                       </div>
                     </Show>
                     <div class="px-1 text-[11.5px] leading-5 text-white/45">

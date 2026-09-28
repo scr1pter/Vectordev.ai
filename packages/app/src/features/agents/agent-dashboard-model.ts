@@ -227,9 +227,18 @@ export function agentCardDetails(agent: DashboardAgentInput): AgentCardDetails {
   return {
     activity: agent.error || agent.lastAction || agent.status,
     changes: changedFiles === 1 ? "1 file changed" : `${changedFiles} files changed`,
-    cost: agent.actualCost || agent.estimatedCost || undefined,
+    cost: agentCostLabel({ ...agent, running: isRunning(agent.status) }),
     runtime: [agent.runtime, agent.model].filter(Boolean).join(" · "),
   }
+}
+
+// A Vector-runtime agent's cost is measured by the engine, so it shows that
+// figure or says plainly that there is none yet. The prompt-length band is an
+// estimate for external runtimes only, which report their own cost later.
+export function agentCostLabel(agent: { runtime: string; actualCost?: string; estimatedCost: string; running: boolean }) {
+  if (agent.actualCost) return agent.actualCost
+  if (agent.runtime !== "vector") return agent.estimatedCost || undefined
+  return agent.running ? "measuring…" : "unmeasured"
 }
 
 // The board mirrors what a reviewer actually does with a run: watch it, act on
