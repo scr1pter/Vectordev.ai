@@ -14,6 +14,7 @@ import type {
   McpResource,
   FormatterStatus,
   SessionStatus,
+  EventSessionSpend,
   ProviderListResponse,
   ProviderAuthMethod,
   VcsInfo,
@@ -77,6 +78,10 @@ export const {
       session_status: {
         [sessionID: string]: SessionStatus
       }
+      // Latest spend guard report per root session; child sessions report under their root.
+      session_spend: {
+        [sessionID: string]: EventSessionSpend["properties"]
+      }
       session_diff: {
         [sessionID: string]: SnapshotFileDiff[]
       }
@@ -118,6 +123,7 @@ export const {
       provider_default: {},
       session: [],
       session_status: {},
+      session_spend: {},
       session_diff: {},
       todo: {},
       message: {},
@@ -302,6 +308,11 @@ export const {
 
         case "session.status": {
           setStore("session_status", event.properties.sessionID, event.properties.status)
+          break
+        }
+
+        case "session.spend": {
+          setStore("session_spend", event.properties.sessionID, reconcile(event.properties))
           break
         }
 
