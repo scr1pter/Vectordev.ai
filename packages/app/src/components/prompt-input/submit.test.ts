@@ -35,6 +35,9 @@ let selected = "/repo/worktree-a"
 let variant: string | undefined
 let workspaceError: Error | undefined
 let promptResetCount = 0
+let currentModel: { id: string; provider: { id: string } } | undefined
+let availableModels: Array<{ id: string; provider: { id: string } }> = []
+const toasts: Array<{ title?: string; description?: string }> = []
 
 const promptValue: Prompt = [{ type: "text", content: "ls", start: 0, end: 2 }]
 const prompt = {
@@ -113,7 +116,10 @@ beforeAll(async () => {
 
   mock.module("@vectordevai/ui/toast", () => ({
     Toast: { Region: () => null },
-    showToast: () => 0,
+    showToast: (options: { title?: string; description?: string }) => {
+      toasts.push(options)
+      return 0
+    },
   }))
 
   mock.module("@vectordevai/core/util/encode", () => ({
@@ -124,7 +130,8 @@ beforeAll(async () => {
   mock.module("@/context/local", () => ({
     useLocal: () => ({
       model: {
-        current: () => ({ id: "model", provider: { id: "provider" } }),
+        current: () => currentModel,
+        list: () => availableModels,
         variant: { current: () => variant },
       },
       agent: {
@@ -278,6 +285,9 @@ beforeEach(() => {
   variant = undefined
   workspaceError = undefined
   promptResetCount = 0
+  currentModel = { id: "model", provider: { id: "provider" } }
+  availableModels = [currentModel]
+  toasts.length = 0
   for (const key of Object.keys(storedSessions)) delete storedSessions[key]
 })
 
@@ -741,5 +751,61 @@ describe("workspace validation", () => {
     await submit.handleSubmit({ preventDefault: () => undefined } as unknown as Event)
 
     expect(optimistic).toHaveLength(0)
+  })
+})
+
+describe("missing model", () => {
+  const submitWith = (connectProvider: () => void) =>
+    createPromptSubmit({
+      prompt,
+      info: () => undefined,
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "normal",
+      working: () => false,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+      onSubmit: () => undefined,
+      connectProvider,
+    })
+
+  test("opens the connect-provider flow when no provider offers a model", async () => {
+    currentModel = undefined
+    availableModels = []
+    const opened: boolean[] = []
+
+    await submitWith(() => opened.push(true)).handleSubmit({ preventDefault: () => undefined } as unknown as Event)
+
+    expect(opened).toEqual([true])
+    expect(toasts).toEqual([
+      {
+        title: "prompt.toast.providerRequired.title",
+        description: "prompt.toast.providerRequired.description",
+      },
+    ])
+    expect(promptResetCount).toBe(0)
+    expect(createdSessions).toHaveLength(0)
+  })
+
+  test("still asks for a model when one is available but none is selected", async () => {
+    currentModel = undefined
+    const opened: boolean[] = []
+
+    await submitWith(() => opened.push(true)).handleSubmit({ preventDefault: () => undefined } as unknown as Event)
+
+    expect(opened).toHaveLength(0)
+    expect(toasts).toEqual([
+      {
+        title: "prompt.toast.modelAgentRequired.title",
+        description: "prompt.toast.modelAgentRequired.description",
+      },
+    ])
+    expect(createdSessions).toHaveLength(0)
   })
 })

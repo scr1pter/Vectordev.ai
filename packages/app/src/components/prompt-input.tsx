@@ -1520,6 +1520,10 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       executionMode,
       llmJudge: settings.general.llmJudge,
       autoModelRouting: settings.general.autoModelRouting,
+      connectProvider: async () => {
+        const { DialogSelectProvider } = await import("./dialog-select-provider")
+        dialog.show(() => <DialogSelectProvider directory={() => sdk().directory} />)
+      },
     })
 
   const handleKeyDown = (event: KeyboardEvent) => {

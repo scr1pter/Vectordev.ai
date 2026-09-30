@@ -294,6 +294,9 @@ export const dict = {
   "prompt.toast.pasteUnsupported.description": "Only images, PDFs, or text files can be attached here.",
   "prompt.toast.modelAgentRequired.title": "Select an agent and model",
   "prompt.toast.modelAgentRequired.description": "Choose an agent and model before sending a prompt.",
+  "prompt.toast.providerRequired.title": "Connect a provider to send prompts",
+  "prompt.toast.providerRequired.description":
+    "No models are available yet. Connect a provider with an API key or sign-in, then send your prompt again.",
   "prompt.toast.worktreeCreateFailed.title": "Failed to create worktree",
   "prompt.toast.sessionCreateFailed.title": "Failed to create session",
   "prompt.toast.shellSendFailed.title": "Failed to send shell command",

@@ -269,6 +269,7 @@ type PromptSubmitInput = {
   executionMode?: Accessor<"normal" | "quick" | "fast">
   llmJudge?: Accessor<boolean>
   autoModelRouting?: Accessor<boolean>
+  connectProvider?: () => void
 }
 
 export function createPromptSubmit(input: PromptSubmitInput) {
@@ -399,6 +400,17 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     const currentModel = local.model.current()
     const currentAgent = local.agent.current()
     const selectedVariant = local.model.variant.current()
+    // With no connected provider the model picker is empty, so asking the user
+    // to choose a model is a dead end. Send them to the connect flow instead and
+    // leave the prompt in the editor so they can send it once a model exists.
+    if (!currentModel && local.model.list().length === 0) {
+      showToast({
+        title: language.t("prompt.toast.providerRequired.title"),
+        description: language.t("prompt.toast.providerRequired.description"),
+      })
+      input.connectProvider?.()
+      return
+    }
     if (!currentModel || !currentAgent) {
       showToast({
         title: language.t("prompt.toast.modelAgentRequired.title"),
