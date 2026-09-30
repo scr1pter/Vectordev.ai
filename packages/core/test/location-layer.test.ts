@@ -22,6 +22,7 @@ import { testEffect } from "./lib/effect"
 import { toolDefinitions } from "./lib/tool"
 import { FSUtil } from "../src/fs-util"
 import { Credential } from "../src/credential"
+import { Integration } from "@vectordevai/schema/integration"
 import { Database } from "../src/database/database"
 import { EventV2 } from "../src/event"
 import { Global } from "../src/global"
@@ -33,7 +34,7 @@ import { ToolRegistry } from "../src/tool/registry"
 import { ApplicationTools } from "../src/tool/application-tools"
 
 const it = testEffect(
-  AppNodeBuilder.build(LayerNode.group([ApplicationTools.node, Database.node, EventV2.node, LocationServiceMap.node])),
+  AppNodeBuilder.build(LayerNode.group([ApplicationTools.node, Credential.node, Database.node, EventV2.node, LocationServiceMap.node])),
 )
 
 describe("LocationServiceMap", () => {
@@ -116,7 +117,6 @@ describe("LocationServiceMap", () => {
             "skill",
             "todowrite",
             "webfetch",
-            "websearch",
             "write",
           ])
           const allowedState = yield* update(allowed.path)
@@ -134,9 +134,36 @@ describe("LocationServiceMap", () => {
             "skill",
             "todowrite",
             "webfetch",
-            "websearch",
             "write",
           ])
+        }),
+      ),
+    ),
+  )
+
+  it.live("registers websearch in a location once a search key is stored", () =>
+    Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
+    ).pipe(
+      Effect.flatMap((dir) =>
+        Effect.gen(function* () {
+          const credentials = yield* Credential.Service
+          yield* Effect.acquireRelease(
+            credentials.create({
+              integrationID: Integration.ID.make("exa"),
+              value: { type: "key", key: "location-test-key" },
+            }),
+            (created) => credentials.remove(created.id),
+          )
+          const tools = yield* Effect.gen(function* () {
+            const registry = yield* ToolRegistry.Service
+            return yield* toolDefinitions(registry)
+          }).pipe(
+            Effect.scoped,
+            Effect.provide(LocationServiceMap.Service.get(Location.Ref.make({ directory: AbsolutePath.make(dir.path) }))),
+          )
+          expect(tools.map((tool) => tool.name)).toContain("websearch")
         }),
       ),
     ),
