@@ -101,7 +101,7 @@ describe("diff viewer file tree utilities", () => {
 
     expect(rows.map((row) => `${"  ".repeat(row.depth)}${row.kind}:${row.name}`)).toEqual([
       "directory:packages",
-      "  directory:vector/src",
+      "  directory:engine/src",
       "    directory:cli",
       "      file:app.ts",
       "    directory:server",
