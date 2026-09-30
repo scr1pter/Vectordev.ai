@@ -338,6 +338,9 @@ test.skipIf(!sandboxAvailability().supported)(
 test.skipIf(!darwin)("linked worktrees keep shared objects, refs, and reflogs read-only", () => {
   // Keep both checkouts outside macOS's broad temporary-directory allowance so
   // this proves the metadata grant does not accidentally open the parent tree.
+  // The per-user cache allowances (~/.cache and friends) hang off a stand-in
+  // home, so a repository checked out under a real cache root still proves it.
+  const fakeHome = workspace("home-")
   const main = fs.realpathSync(fs.mkdtempSync(path.join(process.cwd(), ".sandbox-main-")))
   const linkedParent = fs.realpathSync(fs.mkdtempSync(path.join(process.cwd(), ".sandbox-linked-")))
   const linked = path.join(linkedParent, "checkout")
@@ -366,6 +369,7 @@ test.skipIf(!darwin)("linked worktrees keep shared objects, refs, and reflogs re
       cwd: linked,
       env: process.env,
       workspaceRoot: linked,
+      home: fakeHome,
     })
     expect(wrapped.sandboxed).toBe(true)
     const profile = wrapped.args[1]
@@ -382,6 +386,7 @@ test.skipIf(!darwin)("linked worktrees keep shared objects, refs, and reflogs re
 
     const result = sandboxed({
       workspaceRoot: linked,
+      home: fakeHome,
       command: [
         "printf 'linked\\n' >> tracked.txt",
         `printf local > ${JSON.stringify(path.join(gitdir, "vector-sandbox-probe"))}`,
@@ -402,6 +407,7 @@ test.skipIf(!darwin)("linked worktrees keep shared objects, refs, and reflogs re
   } finally {
     fs.rmSync(linkedParent, { recursive: true, force: true })
     fs.rmSync(main, { recursive: true, force: true })
+    fs.rmSync(fakeHome, { recursive: true, force: true })
   }
 })
 
