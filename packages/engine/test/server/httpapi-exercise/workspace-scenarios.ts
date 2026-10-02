@@ -1,7 +1,7 @@
 import { $ } from "bun"
 import { Effect } from "effect"
 import path from "node:path"
-import { check, object, stable } from "./assertions"
+import { array, check, object, stable } from "./assertions"
 import { http } from "./dsl"
 import type { Scenario } from "./types"
 
@@ -76,6 +76,97 @@ export const workspaceScenarios: Scenario[] = [
           check(/^vector\/pre-commit-\d+$/.test(restore), "commit should retain a restore tag at the previous HEAD")
         }),
       "status",
+    ),
+  http.protected
+    .get("/vcs/branches", "workspace.vcs.branches")
+    .seeded((ctx) =>
+      Effect.gen(function* () {
+        check(ctx.directory !== undefined, "branch listing needs an isolated Git workspace")
+        const current = (yield* git(ctx.directory, "symbolic-ref", "--short", "HEAD")).trim()
+        const head = (yield* git(ctx.directory, "rev-parse", "HEAD")).trim()
+        const other = `${current}-listed`
+        yield* git(ctx.directory, "branch", other)
+        return { directory: ctx.directory, current, head, other }
+      }),
+    )
+    .jsonEffect(200, (body, ctx) =>
+      Effect.gen(function* () {
+        object(body)
+        check(body.current === ctx.state.current, "branch listing should identify the current branch")
+        array(body.branches)
+        check(body.branches.length === 2, "branch listing should include both local branches")
+        const branches = body.branches.map((branch) => {
+          object(branch)
+          check(typeof branch.name === "string", "each branch should have a name")
+          check(branch.checkedOutElsewhere === undefined, "neither branch is checked out in another worktree")
+          return { name: branch.name, current: branch.current }
+        })
+        check(
+          stable(branches.toSorted((left, right) => left.name.localeCompare(right.name))) ===
+            stable(
+              [
+                { name: ctx.state.current, current: true },
+                { name: ctx.state.other, current: false },
+              ].toSorted((left, right) => left.name.localeCompare(right.name)),
+            ),
+          "branch listing should mark only the actual current branch",
+        )
+        check(
+          (yield* git(ctx.state.directory, "rev-parse", "HEAD")).trim() === ctx.state.head &&
+            (yield* git(ctx.state.directory, "symbolic-ref", "--short", "HEAD")).trim() === ctx.state.current,
+          "listing branches should not move HEAD",
+        )
+      }),
+    ),
+  http.protected
+    .post("/vcs/switch", "workspace.vcs.switch")
+    .mutating()
+    .seeded((ctx) =>
+      Effect.gen(function* () {
+        check(ctx.directory !== undefined, "branch switching needs an isolated Git workspace")
+        yield* git(ctx.directory, "config", "core.autocrlf", "false")
+        const original = (yield* git(ctx.directory, "symbolic-ref", "--short", "HEAD")).trim()
+        const before = (yield* git(ctx.directory, "rev-parse", "HEAD")).trim()
+        const target = `${original}-switch`
+        yield* git(ctx.directory, "switch", "-c", target)
+        yield* ctx.file("branch-marker.txt", "Target branch contents\n")
+        yield* git(ctx.directory, "add", "--", "branch-marker.txt")
+        yield* git(ctx.directory, "commit", "-m", "Seed branch switch target")
+        const targetHead = (yield* git(ctx.directory, "rev-parse", "HEAD")).trim()
+        yield* git(ctx.directory, "switch", original)
+        yield* ctx.file("untracked-note.txt", "Keep local work\n")
+        return { directory: ctx.directory, original, before, target, targetHead }
+      }),
+    )
+    .at((ctx) => ({ path: "/vcs/switch", headers: ctx.headers(), body: { branch: ctx.state.target } }))
+    .jsonEffect(200, (body, ctx) =>
+      Effect.gen(function* () {
+        object(body)
+        check(body.branch === ctx.state.target, "switch should return the requested branch")
+        check(
+          (yield* git(ctx.state.directory, "symbolic-ref", "--short", "HEAD")).trim() === ctx.state.target,
+          "switch should update the checkout's actual branch",
+        )
+        check(
+          (yield* git(ctx.state.directory, "rev-parse", "HEAD")).trim() === ctx.state.targetHead,
+          "switch should check out the target commit",
+        )
+        check(
+          (yield* git(ctx.state.directory, "rev-parse", `refs/heads/${ctx.state.original}`)).trim() ===
+            ctx.state.before,
+          "switch should preserve the original branch history",
+        )
+        check(
+          (yield* Effect.promise(() => Bun.file(path.join(ctx.state.directory, "branch-marker.txt")).text())) ===
+            "Target branch contents\n",
+          "switch should materialize the target branch's tracked file",
+        )
+        check(
+          (yield* Effect.promise(() => Bun.file(path.join(ctx.state.directory, "untracked-note.txt")).text())) ===
+            "Keep local work\n",
+          "switch should preserve unrelated untracked work",
+        )
+      }),
     ),
   // Disabled LSP is a supported editor mode: valid requests return no results and never rewrite source files.
   ...[
