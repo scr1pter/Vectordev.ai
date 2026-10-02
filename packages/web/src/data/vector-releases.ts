@@ -10,7 +10,7 @@ export const upcomingRelease = {
   label: "Upcoming — unversioned",
   title: "Features waiting on Vector's own setup",
   summary:
-    "Vector's source also carries features that stay switched off or unpublished until Vector completes their setup: Free models inside of Vector through OpenRouter, consent-based public sessions on Vector's own service, Vector Teams, the Vector GitHub App, native CLI installers, the public SDK and container images, and provider sign-ins that need their own registrations, such as xAI, Poe, DigitalOcean, GitLab and GitHub Copilot. None of them is needed to use 1.99.91: API-key connections and Sign in with ChatGPT work without them.",
+    "Vector's source also carries features that stay switched off or unpublished until Vector completes their setup: Free models inside of Vector through OpenRouter, consent-based public sessions on Vector's own service, Vector Teams, the Vector GitHub App, standalone CLI releases for the shell and PowerShell installers, the public SDK and container images, and provider sign-ins that need their own registrations, such as xAI, Poe, DigitalOcean, GitLab and GitHub Copilot. None of them is needed to use 1.99.91: API-key connections and Sign in with ChatGPT work without them.",
   status:
     "No version or release date is announced for these. Each one is enabled only after its service setup, legal review or package publication is complete. Pricing and licensing behavior are unchanged.",
 }
