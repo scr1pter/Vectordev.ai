@@ -1,4 +1,6 @@
-import { CliRelease } from "@vectordevai/schema/cli-release"
+// Relative, so electron-vite bundles it when it loads the config: Node cannot load the schema's TypeScript
+// directly, because its imports name the .js files the website's serverless functions need.
+import { CliRelease } from "../../schema/src/cli-release"
 import { Schema } from "effect"
 import type { Channel } from "./utils"
 
