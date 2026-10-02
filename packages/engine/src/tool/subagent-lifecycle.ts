@@ -13,7 +13,8 @@ import { isRecord } from "@/util/record"
  * Session.setMetadata publishes `session.updated`, so the record survives a
  * restart and reaches clients live. The same lifecycle fields are mirrored
  * onto the parent's task tool part, which publishes `message.part.updated`.
- * Nothing here may fail a task, so every helper swallows its own errors.
+ * Nothing here may fail a task, so every helper swallows its own errors, and
+ * logs them so a card that stopped updating can still be traced.
  */
 
 /** Key of the lifecycle record in a child session's metadata. */
@@ -59,7 +60,7 @@ export function update(sessions: Session.Interface, sessionID: SessionID, patch:
       metadata: { ...info.metadata, [METADATA_KEY]: merge(read(info), patch) },
     })
   }).pipe(
-    Effect.catchCause(() => Effect.void),
+    Effect.catchCause((cause) => Effect.logWarning("subagent lifecycle update failed", { sessionID, cause })),
     Effect.withSpan("SubagentLifecycle.update"),
   )
 }
@@ -104,7 +105,11 @@ export function observe(sessions: Session.Interface, sessionID: SessionID) {
     }
     const last = messages.findLast((message) => message.info.role === "assistant")
     return { usage, failure: last?.info.role === "assistant" ? failure(last.info.error) : undefined }
-  }).pipe(Effect.catchCause(() => Effect.succeed(undefined)))
+  }).pipe(
+    Effect.catchCause((cause) =>
+      Effect.logWarning("subagent usage could not be read", { sessionID, cause }).pipe(Effect.as(undefined)),
+    ),
+  )
 }
 
 /**
@@ -172,7 +177,9 @@ export function patchPart(input: {
       yield* Effect.sleep(PART_RETRY)
     }
   }).pipe(
-    Effect.catchCause(() => Effect.void),
+    Effect.catchCause((cause) =>
+      Effect.logWarning("subagent tool part patch failed", { messageID: input.messageID, callID: input.callID, cause }),
+    ),
     Effect.withSpan("SubagentLifecycle.patchPart"),
   )
 }

@@ -855,30 +855,33 @@ describe("tool.task", () => {
       const { chat, assistant } = yield* seed()
       const tool = yield* TaskTool
       const def = yield* tool.init()
-      const exit = yield* Effect.exit(
-        def.execute(
-          {
-            description: "edit outside repo",
-            prompt: "Edit a file outside the repository.",
-            subagent_type: "general",
-            owned_paths: ["../secrets"],
-            background: true,
-          },
-          {
-            sessionID: chat.id,
-            messageID: assistant.id,
-            agent: "build",
-            abort: new AbortController().signal,
-            extra: { promptOps: stubOps() },
-            messages: [],
-            metadata: () => Effect.void,
-            ask: () => Effect.void,
-          },
-        ),
-      )
+      // Normalizing first folds a traversal in the middle of a path into a leading one.
+      for (const owned of ["../secrets", "src/../../secrets", "./a/b/../../../c", ".."]) {
+        const exit = yield* Effect.exit(
+          def.execute(
+            {
+              description: "edit outside repo",
+              prompt: "Edit a file outside the repository.",
+              subagent_type: "general",
+              owned_paths: [owned],
+              background: true,
+            },
+            {
+              sessionID: chat.id,
+              messageID: assistant.id,
+              agent: "build",
+              abort: new AbortController().signal,
+              extra: { promptOps: stubOps() },
+              messages: [],
+              metadata: () => Effect.void,
+              ask: () => Effect.void,
+            },
+          ),
+        )
 
-      expect(Exit.isFailure(exit)).toBe(true)
-      if (Exit.isFailure(exit)) expect(Cause.pretty(exit.cause)).toContain("cannot leave the repository")
+        expect(Exit.isFailure(exit)).toBe(true)
+        if (Exit.isFailure(exit)) expect(Cause.pretty(exit.cause)).toContain("cannot leave the repository")
+      }
     }),
   )
 

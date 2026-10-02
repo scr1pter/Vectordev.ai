@@ -321,9 +321,10 @@ export const TaskTool = Tool.define(
         }
       }
 
+      // Walking past the limit cannot change the answer, so a corrupt parent chain cannot keep it looping either.
       let cursor = parent
       let depth = 0
-      while (cursor.parentID) {
+      while (cursor.parentID && depth < MAX_SUBAGENT_DEPTH) {
         depth += 1
         const ancestor = yield* sessions.get(cursor.parentID).pipe(Effect.catchCause(() => Effect.succeed(undefined)))
         if (!ancestor) break
