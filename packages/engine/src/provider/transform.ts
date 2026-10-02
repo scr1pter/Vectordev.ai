@@ -22,6 +22,16 @@ export const OUTPUT_TOKEN_MAX = 32_000
 // branch that requests it stays in lockstep.
 const INCLUDE_ENCRYPTED_REASONING = ["reasoning.encrypted_content"] as const
 
+// GPT-5 and every later generation (gpt-6-astra, gpt-6.1-sol) take the same reasoning defaults; matching the
+// literal "gpt-5" left GPT-6 without a reasoning summary or the encrypted reasoning later turns build on. A two-digit
+// run is a dotless version (Azure's gpt-35-turbo is 3.5, Venice's openai-gpt-54-pro is 5.4), so its first digit is
+// the generation.
+function gpt5OrNewer(id: string) {
+  const digits = /gpt-(\d+)/.exec(id)?.[1]
+  if (!digits) return false
+  return Number(digits.length === 2 ? digits[0] : digits) >= 5
+}
+
 export function sanitizeSurrogates(content: string) {
   return content.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "\uFFFD")
 }
@@ -1177,7 +1187,7 @@ export function options(input: {
     return result
   }
 
-  if (input.model.api.id.includes("gpt-5") && !input.model.api.id.includes("gpt-5-chat")) {
+  if (gpt5OrNewer(input.model.api.id) && !input.model.api.id.includes("gpt-5-chat")) {
     if (!input.model.api.id.includes("gpt-5-pro")) {
       result["reasoningEffort"] = "medium"
       if (

@@ -24,6 +24,7 @@ export const Provider = ModelCatalog.Provider
 export type Provider = ModelCatalog.Provider
 
 export const Event = ModelCatalog.Event
+export const modeSupported = ModelCatalog.modeSupported
 
 declare const VECTOR_MODEL_CATALOG: Record<string, Provider> | undefined
 

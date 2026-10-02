@@ -48,6 +48,8 @@ const keep = new Set([
   // The feed the desktop app polls for "what's new". Pruning it is what made
   // the release-notes dialog silently never run.
   "changelog.json",
+  // The model catalog every installed app refreshes from (packages/core/src/model-catalog.ts DEFAULT_MIRROR).
+  "models",
   "vector-logo.png",
   "vector-space-backdrop.png",
 ])

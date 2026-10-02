@@ -376,11 +376,7 @@
     },
     {
       "source": "/models",
-      "destination": "https://42qryducihx01gl0.public.blob.vercel-storage.com/models/api.json"
-    },
-    {
-      "source": "/models/api.json",
-      "destination": "https://42qryducihx01gl0.public.blob.vercel-storage.com/models/api.json"
+      "destination": "/models/api.json"
     }
   ],
   "crons": [

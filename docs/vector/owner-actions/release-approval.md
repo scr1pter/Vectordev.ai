@@ -9,12 +9,15 @@ The publication request does not authorize purchases or changes to billing.
 
 ## Source parity
 
-At the comparison checkpoint, `free-only-safety` and fetched `origin/main` both
-resolve to `12c3ffd78fdd03219310f88573a188d3b2a32b77`. The complete `free-models`,
-`independence-rebuild`, and `release-ready` histories are ancestors of that commit.
+The original comparison used `12c3ffd78fdd03219310f88573a188d3b2a32b77`, which
+contains the complete `free-models`, `independence-rebuild`, and `release-ready`
+histories. Another session subsequently advanced `main` to
+`62a83b7258a688d470d110d24287019885305dd3`. Its model-mirror and GPT-6 changes are
+included in `free-only-safety`, preserving both histories; this task
+has pushed only the candidate branch since the owner imposed the main hold.
 No runtime or test files were lost in the comparison; removed website pages were
 consolidated into the current feature documentation. Recheck the final release
-commit after any further changes. The separate shared working checkout contains
+commit after further changes. The separate shared working checkout contains
 other work and is not the release workspace.
 
 ## Remaining release inputs
@@ -63,6 +66,23 @@ local rerun now passes **103 app cases and four public-viewer cases**, with one
 existing skip. Both event fixtures keep global envelopes and directory presence
 payloads in separate queues; their regression checks also pass repeated parallel
 runs. Native CI remains required before application publication.
+
+The native run on `47984948d` confirmed the Linux installer and Windows app fixes
+(Windows app: 1,264 passing unit cases). Linux engine tests found one remaining
+cold-start cancellation failure; Windows unit tests reached the existing
+20-minute timeout without a diagnostic identifying the unfinished package.
+Streamed unit logs now preserve that diagnostic information for subsequent runs.
+The Linux browser failure was the event-queue issue fixed after that source.
+These native results are not an all-green release check.
+
+The cold-start cache fix in `85053bbfe` protects successful cache publication as
+well as loading. Core passed 1,561 tests, and the affected engine configuration,
+instance-state and review groups passed 136 tests. The original review case
+passed 50 repetitions and each deterministic cancellation regression passed 20.
+All 22 package typechecks passed. Concurrent callers waiting on the first cache
+load now defer cancellation until that load publishes; existing catalog lock
+and HTTP limits remain unchanged. Model execution itself stays interruptible.
+Repeat relevant verification after integrating the newer main changes.
 
 ## Publication order and unsigned policy
 

@@ -4746,3 +4746,41 @@ describe("ProviderTransform.providerOptions - ai-gateway-provider", () => {
     expect(result).toEqual({ openaiCompatible: { reasoningEffort: "high" } })
   })
 })
+
+describe("ProviderTransform.options - GPT-6 reasoning defaults", () => {
+  const model = (id: string) =>
+    ({
+      id: `openai/${id}`,
+      providerID: "openai",
+      api: { id, url: "https://api.openai.com", npm: "@ai-sdk/openai" },
+      name: id,
+      capabilities: {
+        temperature: false,
+        reasoning: true,
+        attachment: true,
+        toolcall: true,
+        input: { text: true, audio: false, image: true, video: false, pdf: true },
+        output: { text: true, audio: false, image: false, video: false, pdf: false },
+        interleaved: false,
+      },
+      cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+      limit: { context: 1_050_000, output: 128_000 },
+      status: "active",
+      options: {},
+      headers: {},
+    }) as any
+
+  for (const id of ["gpt-5.5", "gpt-6-astra", "gpt-6-sol", "gpt-6.1-sol"])
+    test(`${id} keeps its reasoning summary and encrypted reasoning`, () => {
+      const result = ProviderTransform.options({ model: model(id), sessionID: "s", providerOptions: {} })
+      expect(result.reasoningEffort).toBe("medium")
+      expect(result.reasoningSummary).toBe("auto")
+      expect(result.include).toEqual(["reasoning.encrypted_content"])
+    })
+
+  for (const id of ["gpt-4o", "gpt-35-turbo"])
+    test(`${id} gets no reasoning defaults`, () => {
+      const result = ProviderTransform.options({ model: model(id), sessionID: "s", providerOptions: {} })
+      expect(result.reasoningEffort).toBeUndefined()
+    })
+})

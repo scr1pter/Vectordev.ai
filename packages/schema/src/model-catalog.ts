@@ -143,6 +143,41 @@ export function packageAllowed(value: string | undefined) {
   return value === undefined || bundled.has(value)
 }
 
+// What the bundled SDKs actually send. @ai-sdk/openai (also behind @ai-sdk/azure and Bedrock's OpenAI "mantle"
+// path) accepts four service tiers, honours priority and flex only for model families it knows and silently drops
+// them for any other id (gpt-6-astra included), and has no reasoning-mode option; @ai-sdk/amazon-bedrock accepts its
+// own four tiers. A catalog mode that needs anything else would fail at send time or quietly run the base model at
+// the mode's price, so it is not offered as a model of its own.
+const OPENAI_STYLE_PACKAGES = new Set(["@ai-sdk/openai", "@ai-sdk/azure", "@ai-sdk/amazon-bedrock/mantle"])
+const OPENAI_SERVICE_TIERS = new Set(["auto", "flex", "priority", "default"])
+const BEDROCK_SERVICE_TIERS = new Set(["reserved", "priority", "default", "flex"])
+
+export function modeSupported(
+  npm: string | undefined,
+  modelID: string,
+  body: Readonly<Record<string, unknown>> | undefined,
+) {
+  if (!body) return true
+  const tier = "service_tier" in body ? String(body.service_tier) : undefined
+  if (npm === "@ai-sdk/amazon-bedrock") return tier === undefined || BEDROCK_SERVICE_TIERS.has(tier)
+  if (!npm || !OPENAI_STYLE_PACKAGES.has(npm)) return true
+  if ("reasoning" in body) return false
+  if (tier === undefined) return true
+  if (tier === "priority") return priorityModel(modelID)
+  if (tier === "flex") return flexModel(modelID)
+  return OPENAI_SERVICE_TIERS.has(tier)
+}
+
+// Mirrors getOpenAILanguageModelCapabilities in the bundled @ai-sdk/openai.
+function priorityModel(id: string) {
+  if (id.startsWith("gpt-4") || id.startsWith("o3") || id.startsWith("o4-mini")) return true
+  return id.startsWith("gpt-5") && !["gpt-5-nano", "gpt-5-chat", "gpt-5.4-nano"].some((prefix) => id.startsWith(prefix))
+}
+
+function flexModel(id: string) {
+  return id.startsWith("o3") || id.startsWith("o4-mini") || (id.startsWith("gpt-5") && !id.startsWith("gpt-5-chat"))
+}
+
 export const Catalog = Schema.Record(Schema.String, Provider)
 
 /**

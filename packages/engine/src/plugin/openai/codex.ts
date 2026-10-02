@@ -264,6 +264,16 @@ function waitForOAuthCallback(pkce: PkceCodes, state: string, wait: number): Pro
   })
 }
 
+// Through a ChatGPT sign-in the Codex backend serves gpt-5.5 and every later model with a 272K-token window
+// (openai/codex codex-rs/models-manager/models.json), far below the API limits in the catalog, so compaction has to
+// start from that window or long sessions overflow.
+function codexWindow(id: string) {
+  const match = /^gpt-(\d+)(?:\.(\d+))?/.exec(id)
+  if (!match) return false
+  const major = Number(match[1])
+  return major > 5 || (major === 5 && Number(match[2] ?? 0) >= 5)
+}
+
 export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPluginOptions = {}): Promise<Hooks> {
   const issuer = options.issuer ?? ISSUER
   const codexApiEndpoint = options.codexApiEndpoint ?? CODEX_API_ENDPOINT
@@ -304,14 +314,13 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
                   output: 0,
                   cache: { read: 0, write: 0 },
                 },
-                limit:
-                  model.id.includes("gpt-5.5") || model.id.includes("gpt-5.6")
-                    ? {
-                        context: 400_000,
-                        input: 272_000,
-                        output: 128_000,
-                      }
-                    : model.limit,
+                limit: codexWindow(model.api.id)
+                  ? {
+                      context: 400_000,
+                      input: 272_000,
+                      output: 128_000,
+                    }
+                  : model.limit,
               },
             ]),
         )
