@@ -1,6 +1,12 @@
 import { VECTOR_USER_AGENT } from "./user-agent"
-import { constants, createHash, generateKeyPairSync, privateDecrypt, randomBytes, type KeyObject } from "node:crypto"
+import { createHash, randomBytes, type KeyObject } from "node:crypto"
 import { shell } from "electron"
+import {
+  cloudOAuthAuthorizeUrl,
+  createCloudOAuthRelay,
+  matchesCloudOAuthState,
+  readCloudOAuthCallback,
+} from "./cloud-oauth-relay"
 
 import {
   addDomain,
@@ -28,6 +34,8 @@ import { validateCloudProviderToken, type CloudProviderId } from "./cloud-provid
 
 export { decryptCloudCredential, encryptCloudCredential } from "./cloud-credential-vault"
 export type { CloudProviderId } from "./cloud-provider-token"
+
+type CloudFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>
 
 export type CloudProviderConnection = {
   provider: CloudProviderId
@@ -152,10 +160,6 @@ function now(): string {
   return new Date().toISOString()
 }
 
-function base64Url(value: Buffer | string): string {
-  return Buffer.from(value).toString("base64url")
-}
-
 function isProvider(value: unknown): value is CloudProviderId {
   return value === "vercel" || value === "netlify" || value === "supabase"
 }
@@ -191,13 +195,14 @@ function connectionLabel(provider: CloudProviderId): string {
   return "Supabase"
 }
 
-async function brokerRequest<T>(path: string, init?: RequestInit): Promise<T> {
+async function brokerRequest<T>(path: string, init?: RequestInit, request: CloudFetch = fetch): Promise<T> {
   const headers = new Headers(init?.headers)
   headers.set("accept", "application/json")
   if (init?.body) headers.set("content-type", "application/json")
-  const response = await fetch(`${brokerUrl()}${path}`, {
+  const response = await request(`${brokerUrl()}${path}`, {
     ...init,
     headers,
+    redirect: "error",
     signal: init?.signal ?? AbortSignal.timeout(20_000),
   }).catch((error) => {
     throw new Error(
@@ -266,18 +271,6 @@ function makePkce(): { verifier: string; challenge: string } {
   return { verifier, challenge }
 }
 
-function makeNetlifyRelay(): {
-  state: string
-  privateKey: KeyObject
-} {
-  const keys = generateKeyPairSync("rsa", { modulusLength: 2048 })
-  const nonce = randomBytes(32).toString("base64url")
-  return {
-    state: `${nonce}.${base64Url(JSON.stringify(keys.publicKey.export({ format: "jwk" })))}`,
-    privateKey: keys.privateKey,
-  }
-}
-
 function cancelFlow(provider: CloudProviderId, error?: Error): void {
   const flow = activeFlows.get(provider)
   if (!flow) return
@@ -290,13 +283,13 @@ export async function connectCloudProvider(provider: CloudProviderId): Promise<C
   cancelFlow(provider, new Error(`${connectionLabel(provider)} connection was restarted.`))
 
   const pkce = provider === "supabase" ? makePkce() : undefined
-  const relay = provider === "netlify" ? makeNetlifyRelay() : undefined
+  const relay = provider === "supabase" ? undefined : createCloudOAuthRelay()
   const state = relay?.state ?? randomBytes(32).toString("base64url")
   const start = await brokerRequest<{ authorizeUrl: string; callbackUrl: string; state: string }>("/start", {
     method: "POST",
     body: JSON.stringify({ provider, state, codeChallenge: pkce?.challenge }),
   })
-  if (!URL.canParse(start.authorizeUrl)) throw new Error("The provider returned an invalid authorization URL.")
+  const authorizeUrl = cloudOAuthAuthorizeUrl(provider, start.authorizeUrl)
 
   const pending = new Promise<CloudProviderConnection>((resolve, reject) => {
     const timeout = setTimeout(() => {
@@ -315,7 +308,7 @@ export async function connectCloudProvider(provider: CloudProviderId): Promise<C
     })
   })
 
-  await shell.openExternal(start.authorizeUrl).catch((error) => {
+  await shell.openExternal(authorizeUrl).catch((error) => {
     cancelFlow(provider)
     throw new Error(error instanceof Error ? error.message : "Could not open the provider sign-in page.")
   })
@@ -349,12 +342,6 @@ export async function connectCloudProviderWithToken(
   }
 }
 
-function constantTimeEqual(left: string, right: string): boolean {
-  const leftHash = createHash("sha256").update(left).digest()
-  const rightHash = createHash("sha256").update(right).digest()
-  return leftHash.equals(rightHash)
-}
-
 function stringField(value: unknown, key: string): string | undefined {
   if (!value || typeof value !== "object") return undefined
   const field = Reflect.get(value, key)
@@ -373,12 +360,17 @@ function booleanField(value: unknown, key: string): boolean | undefined {
   return typeof field === "boolean" ? field : undefined
 }
 
-async function providerJson(token: string, url: string, init?: RequestInit): Promise<unknown> {
+async function providerJson(
+  token: string,
+  url: string,
+  init?: RequestInit,
+  request: CloudFetch = fetch,
+): Promise<unknown> {
   const headers = new Headers(init?.headers)
   headers.set("accept", "application/json")
   headers.set("authorization", `Bearer ${token}`)
   headers.set("user-agent", VECTOR_USER_AGENT)
-  const response = await fetch(url, {
+  const response = await request(url, {
     ...init,
     headers,
     signal: init?.signal ?? AbortSignal.timeout(20_000),
@@ -410,31 +402,16 @@ async function finishOAuthDeepLink(url: URL): Promise<void> {
   if (!isProvider(providerValue)) return
   const flow = activeFlows.get(providerValue)
   if (!flow) throw new Error(`No ${connectionLabel(providerValue)} connection is waiting for approval.`)
-  const error = url.searchParams.get("error")
-  if (error) throw new Error(error)
-  const returnedState = url.searchParams.get("state") ?? ""
-  if (!constantTimeEqual(flow.state, returnedState)) {
-    throw new Error("The OAuth security state did not match. Start the connection again.")
-  }
+  const authorization = readCloudOAuthCallback(providerValue, url, flow)
+  const returnedState = flow.state
 
   let accessToken = ""
   let refreshToken: string | undefined
   let expiresIn: number | undefined
   let teamId = url.searchParams.get("teamId") ?? undefined
   if (providerValue === "netlify") {
-    const encrypted = url.searchParams.get("encrypted")
-    if (!encrypted || !flow.privateKey) throw new Error("Netlify did not return a secure authorization result.")
-    accessToken = privateDecrypt(
-      {
-        key: flow.privateKey,
-        padding: constants.RSA_PKCS1_OAEP_PADDING,
-        oaepHash: "sha256",
-      },
-      Buffer.from(encrypted, "base64url"),
-    ).toString("utf8")
+    accessToken = authorization
   } else {
-    const code = url.searchParams.get("code")
-    if (!code) throw new Error(`${connectionLabel(providerValue)} did not return an authorization code.`)
     const token = await brokerRequest<{
       accessToken: string
       refreshToken?: string
@@ -444,7 +421,7 @@ async function finishOAuthDeepLink(url: URL): Promise<void> {
       method: "POST",
       body: JSON.stringify({
         provider: providerValue,
-        code,
+        code: authorization,
         state: returnedState,
         codeVerifier: flow.codeVerifier,
       }),
@@ -456,10 +433,7 @@ async function finishOAuthDeepLink(url: URL): Promise<void> {
   }
   if (!accessToken) throw new Error(`${connectionLabel(providerValue)} did not return an access token.`)
 
-  const identity = await validateCloudProviderToken(providerValue, accessToken, fetch, teamId).catch(() => ({
-    account: connectionLabel(providerValue),
-    accountId: teamId,
-  }))
+  const identity = await validateCloudProviderToken(providerValue, accessToken, fetch, teamId)
   const connectedAt = now()
   saveConnection({
     provider: providerValue,
@@ -501,6 +475,9 @@ export async function handleCloudOAuthDeepLinks(urls: string[]): Promise<string[
       continue
     }
     const provider = url.searchParams.get("provider")
+    const flow = isProvider(provider) ? activeFlows.get(provider) : undefined
+    // An unrelated protocol invocation must not cancel a pending approval.
+    if (!flow || !matchesCloudOAuthState(flow.state, url.searchParams.get("state") ?? "")) continue
     try {
       await finishOAuthDeepLink(url)
     } catch (error) {
@@ -532,7 +509,10 @@ export async function disconnectCloudProvider(provider: CloudProviderId): Promis
   await removeStoreFileIfEmpty(CONNECTION_STORE)
 }
 
-async function accessToken(provider: CloudProviderId): Promise<{ token: string; record: StoredConnection }> {
+async function accessToken(
+  provider: CloudProviderId,
+  request: CloudFetch = fetch,
+): Promise<{ token: string; record: StoredConnection }> {
   let record = storedConnection(provider)
   if (!record) throw new Error(`Connect ${connectionLabel(provider)} in Vector Cloud first.`)
   if (
@@ -546,10 +526,21 @@ async function accessToken(provider: CloudProviderId): Promise<{ token: string; 
       accessToken: string
       refreshToken?: string
       expiresIn?: number
-    }>("/refresh", {
-      method: "POST",
-      body: JSON.stringify({ provider: "supabase", refreshToken }),
+    }>(
+      "/refresh",
+      {
+        method: "POST",
+        body: JSON.stringify({ provider: "supabase", refreshToken }),
+      },
+      request,
+    ).catch(() => {
+      // Broker diagnostics can echo a rejected credential. Keep it out of
+      // agent reports and retain the old record when renewal fails.
+      throw new Error("Supabase could not renew its connection. Reconnect Supabase in Vector Cloud.")
     })
+    if (typeof refreshed.accessToken !== "string" || !refreshed.accessToken.trim()) {
+      throw new Error("Supabase did not return a renewed access token. Reconnect Supabase in Vector Cloud.")
+    }
     record = {
       ...record,
       accessToken: encryptCloudCredential(refreshed.accessToken),
@@ -560,6 +551,11 @@ async function accessToken(provider: CloudProviderId): Promise<{ token: string; 
   }
   const token = decryptCloudCredential(record.accessToken)
   return { token, record }
+}
+
+export async function getSupabaseManagementToken(request: CloudFetch = fetch): Promise<string | undefined> {
+  if (!storedConnection("supabase")) return undefined
+  return (await accessToken("supabase", request)).token
 }
 
 export async function getCloudProviderRuntimeAuth(
@@ -728,8 +724,14 @@ function requireProjectLink(
 async function netlifySite(
   token: string,
   siteId: string,
+  request: CloudFetch = fetch,
 ): Promise<{ accountId?: string; name?: string; customDomain?: string; aliases: string[] }> {
-  const site = await providerJson(token, `https://api.netlify.com/api/v1/sites/${encodeURIComponent(siteId)}`)
+  const site = await providerJson(
+    token,
+    `https://api.netlify.com/api/v1/sites/${encodeURIComponent(siteId)}`,
+    undefined,
+    request,
+  )
   const aliases = site && typeof site === "object" ? Reflect.get(site, "domain_aliases") : undefined
   return {
     accountId: stringField(site, "account_id"),
@@ -743,27 +745,41 @@ export async function syncCloudProviderEnvironment(
   projectPath: string,
   taskId: string | undefined,
   provider: Exclude<CloudProviderId, "supabase">,
+  request: CloudFetch = fetch,
 ): Promise<CloudProviderSyncResult> {
   const link = requireProjectLink(projectPath, taskId, provider)
   const variables = listEnv(projectPath, taskId)
   if (!variables.length) throw new Error("Add at least one environment variable before syncing.")
-  const auth = await accessToken(provider)
+  const auth = await accessToken(provider, request)
 
   if (provider === "vercel") {
     const url = providerApiUrl(provider, `/v10/projects/${encodeURIComponent(link.projectId)}/env`, auth.record)
     url.searchParams.set("upsert", "true")
-    await providerJson(auth.token, url.toString(), {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(vercelEnvironmentPayload(variables)),
-    })
+    const result = await providerJson(
+      auth.token,
+      url.toString(),
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(vercelEnvironmentPayload(variables)),
+      },
+      request,
+    )
+    const failed = result && typeof result === "object" ? Reflect.get(result, "failed") : undefined
+    if (Array.isArray(failed) && failed.length) {
+      // Bulk upserts may return HTTP 201 with rejected entries. Provider error
+      // payloads can contain submitted values, so report no raw entry details.
+      throw new Error(
+        `Vercel rejected ${failed.length} environment-variable ${failed.length === 1 ? "operation" : "operations"}. Some variables may already be updated. Check project access and manage variables owned outside this integration in Vercel before syncing again.`,
+      )
+    }
   } else {
-    const site = await netlifySite(auth.token, link.projectId)
+    const site = await netlifySite(auth.token, link.projectId, request)
     const accountId = link.accountId ?? site.accountId
     if (!accountId) throw new Error("Netlify did not return the account that owns this site.")
     const listUrl = providerApiUrl(provider, `/api/v1/accounts/${encodeURIComponent(accountId)}/env`, auth.record)
     listUrl.searchParams.set("site_id", link.projectId)
-    const existing = await providerJson(auth.token, listUrl.toString())
+    const existing = await providerJson(auth.token, listUrl.toString(), undefined, request)
     const existingKeys = new Set(
       Array.isArray(existing)
         ? existing.map((item) => stringField(item, "key")).filter((key): key is string => Boolean(key))
@@ -771,11 +787,16 @@ export async function syncCloudProviderEnvironment(
     )
     const create = variables.filter((variable) => !existingKeys.has(variable.key))
     if (create.length) {
-      await providerJson(auth.token, listUrl.toString(), {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(netlifyEnvironmentPayload(create)),
-      })
+      await providerJson(
+        auth.token,
+        listUrl.toString(),
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(netlifyEnvironmentPayload(create)),
+        },
+        request,
+      )
     }
     for (const variable of variables.filter((item) => existingKeys.has(item.key))) {
       const updateUrl = providerApiUrl(
@@ -784,11 +805,16 @@ export async function syncCloudProviderEnvironment(
         auth.record,
       )
       updateUrl.searchParams.set("site_id", link.projectId)
-      await providerJson(auth.token, updateUrl.toString(), {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(netlifyEnvironmentPayload([variable])[0]),
-      })
+      await providerJson(
+        auth.token,
+        updateUrl.toString(),
+        {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(netlifyEnvironmentPayload([variable])[0]),
+        },
+        request,
+      )
     }
   }
 
