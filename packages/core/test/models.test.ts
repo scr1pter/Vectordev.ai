@@ -1,5 +1,5 @@
 import { describe, expect, beforeAll, beforeEach, afterAll } from "bun:test"
-import { Effect, Layer, Logger, Ref } from "effect"
+import { Effect, Layer, Logger, References, Ref } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import { AppNodeBuilder } from "@vectordevai/core/effect/app-node-builder"
 import { LayerNodePlatform } from "@vectordevai/core/effect/app-node-platform"
@@ -408,12 +408,7 @@ for (const body of [
   JSON.stringify({ lmstudio: { ...fixture.lmstudio, name: 42 } }),
   JSON.stringify({ lmstudio: { ...fixture.lmstudio, id: "different" } }),
   JSON.stringify({ lmstudio: { ...fixture.lmstudio, npm: "unreviewed-catalog-sdk" } }),
-  JSON.stringify({
-    lmstudio: {
-      ...fixture.lmstudio,
-      models: { example: { ...fixture.lmstudio.models["lmstudio-1"], provider: { npm: "unreviewed-catalog-sdk" } } },
-    },
-  }),
+  JSON.stringify({}),
 ]) {
   it.live(`invalid mirror data preserves the last valid cache: ${body.slice(0, 100)}`, () =>
     Effect.gen(function* () {
@@ -437,6 +432,75 @@ for (const body of [
     }),
   )
 }
+
+it.live("a mirror entry needing an unbundled SDK is skipped once while the rest of the catalog refreshes", () =>
+  Effect.gen(function* () {
+    Flag.VECTOR_MODELS_URL = mirror
+    yield* writeCache(fixture)
+    const messages: unknown[] = []
+    const lmstudio = fixture.lmstudio.models["lmstudio-1"]
+    const state = yield* Ref.make({
+      ...initialState,
+      body: JSON.stringify({
+        lmstudio: {
+          ...fixture.lmstudio,
+          models: { ...fixture.lmstudio.models, later: { ...lmstudio, id: "later", provider: { npm: "later-sdk" } } },
+        },
+        cerebras: { ...fixture2.cerebras, npm: "later-provider-sdk" },
+      }),
+    })
+    const result = yield* provided(
+      state,
+      Effect.gen(function* () {
+        const service = yield* ModelCatalog.Service
+        yield* service.refresh(true)
+        yield* service.refresh(true)
+        return yield* service.get()
+      }),
+      true,
+    ).pipe(Effect.provide(Logger.layer([Logger.make((options) => messages.push(options.message))])))
+    expect(result).toEqual(fixture)
+    expect(JSON.parse(yield* Effect.promise(() => readFile(cacheFile(), "utf8")))).toEqual(fixture)
+    expect((yield* Ref.get(state)).calls).toHaveLength(2)
+    const skipped = messages.map((message) => JSON.stringify(message)).filter((text) => text.includes("Skipping"))
+    expect(skipped).toHaveLength(2)
+    expect(skipped.join()).toContain("lmstudio/later requires the unbundled SDK later-sdk")
+    expect(skipped.join()).toContain("cerebras requires the unbundled SDK later-provider-sdk")
+  }),
+)
+
+it.live("a missing default mirror degrades to an empty catalog with one warning", () =>
+  Effect.gen(function* () {
+    const messages: Array<{ level: string; message: string }> = []
+    const state = yield* Ref.make({ ...initialState, status: 404, body: "Not Found" })
+    const result = yield* provided(
+      state,
+      Effect.gen(function* () {
+        const service = yield* ModelCatalog.Service
+        const first = yield* service.get()
+        yield* service.refresh(true)
+        yield* service.refresh(true)
+        return first
+      }),
+      true,
+    ).pipe(
+      Effect.provide(
+        Logger.layer([
+          Logger.make((options) =>
+            messages.push({ level: options.logLevel, message: JSON.stringify(options.message) }),
+          ),
+        ]),
+      ),
+      Effect.provide(Layer.succeed(References.MinimumLogLevel, "Debug")),
+    )
+    expect(result).toEqual({})
+    expect((yield* Ref.get(state)).calls.map((call) => call.url)).toContain(`${mirror}/api.json`)
+    const unavailable = messages.filter((entry) => entry.message.includes("model catalog is"))
+    expect(unavailable.filter((entry) => entry.level === "Warn")).toHaveLength(1)
+    expect(unavailable.filter((entry) => entry.level === "Error")).toEqual([])
+    expect(unavailable.length).toBeGreaterThan(1)
+  }),
+)
 
 it.live("unbundled SDK names in a disk snapshot never enter the runtime catalog", () =>
   Effect.gen(function* () {

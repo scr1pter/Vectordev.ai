@@ -145,17 +145,34 @@ export function packageAllowed(value: string | undefined) {
 
 export const Catalog = Schema.Record(Schema.String, Provider)
 
-export function decodeCatalog(value: unknown) {
+/**
+ * Decodes a provider catalog. Without `omit`, an entry that needs an SDK this build does not bundle rejects the
+ * whole catalog, which keeps release preparation strict. With `omit`, such entries are dropped and reported, so a
+ * shared mirror written by a later release that bundles more SDKs still refreshes every other provider.
+ */
+export function decodeCatalog(value: unknown, omit?: (entry: string) => void) {
   const catalog = normalizePackages(Schema.decodeUnknownSync(Catalog, { onExcessProperty: "preserve" })(value))
   for (const [id, provider] of Object.entries(catalog)) {
     if (provider.id !== id) throw new Error(`Catalog provider identity does not match ${id}`)
-    if (!packageAllowed(provider.npm)) throw new Error(`Catalog provider ${id} requires an unbundled SDK`)
-    for (const [modelID, model] of Object.entries(provider.models)) {
-      if (!packageAllowed(model.provider?.npm))
-        throw new Error(`Catalog model ${id}/${modelID} requires an unbundled SDK`)
-    }
   }
-  return filterProviderCatalog(catalog)
+  // Providers this build filters out anyway never need their SDK checked.
+  return Object.fromEntries(
+    Object.entries(filterProviderCatalog(catalog)).flatMap(([id, provider]) => {
+      if (!packageAllowed(provider.npm)) return unbundled(`Catalog provider ${id}`, provider.npm, omit)
+      const models = Object.entries(provider.models).flatMap(([modelID, model]) =>
+        packageAllowed(model.provider?.npm)
+          ? [[modelID, model] as const]
+          : unbundled(`Catalog model ${id}/${modelID}`, model.provider?.npm, omit),
+      )
+      return [[id, { ...provider, models: Object.fromEntries(models) }] as const]
+    }),
+  )
+}
+
+function unbundled(entry: string, npm: string | undefined, omit: ((entry: string) => void) | undefined) {
+  if (!omit) throw new Error(`${entry} requires an unbundled SDK`)
+  omit(`${entry} requires the unbundled SDK ${npm}`)
+  return []
 }
 
 // The upstream catalog used the separate AI SDK V2 package name. Vector bundles

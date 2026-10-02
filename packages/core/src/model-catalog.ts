@@ -1,5 +1,5 @@
 import path from "path"
-import { Context, Duration, Effect, Layer, Option, Schedule } from "effect"
+import { Context, Duration, Effect, Layer, Option, Ref, Schedule } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { ModelCatalog } from "@vectordevai/schema/model-catalog"
 import { Global } from "./global"
@@ -78,6 +78,38 @@ const layer = Layer.effect(
     const ttl = Duration.minutes(5)
     const lockKey = `model-catalog:${filepath}`
 
+    // A missing mirror stays missing for the whole session: warn once, then stay quiet until a fetch succeeds.
+    const unavailable = yield* Ref.make(false)
+    const reportUnavailable = (cause: unknown) =>
+      Ref.getAndSet(unavailable, true).pipe(
+        Effect.flatMap((reported) =>
+          reported
+            ? Effect.logDebug("The Vector model catalog is still unavailable", { cause: cause })
+            : Effect.logWarning(
+                "The Vector model catalog is unavailable; configured providers keep working without catalog models",
+                { cause: cause },
+              ),
+        ),
+      )
+
+    // A mirror written by a later release may name SDKs this build lacks; skip those entries, keep the rest,
+    // and name each skipped entry once rather than on every hourly refresh.
+    const skipped = new Set<string>()
+    const decode = (value: unknown) =>
+      Effect.gen(function* () {
+        const omitted: string[] = []
+        const catalog = yield* Effect.try({
+          try: () => ModelCatalog.decodeCatalog(value, (entry) => omitted.push(entry)),
+          catch: (cause) => cause,
+        })
+        const unseen = omitted.filter((entry) => !skipped.has(entry))
+        unseen.forEach((entry) => skipped.add(entry))
+        yield* Effect.forEach(unseen, (entry) => Effect.logWarning(`Skipping model catalog entry: ${entry}`), {
+          discard: true,
+        })
+        return catalog
+      })
+
     const fresh = Effect.fnUntraced(function* () {
       const stat = yield* fs.stat(filepath).pipe(Effect.catch(() => Effect.succeed(undefined)))
       if (!stat) return false
@@ -96,7 +128,7 @@ const layer = Layer.effect(
     })
 
     const loadFromDisk = fs.readJson(Flag.VECTOR_MODELS_PATH ?? filepath).pipe(
-      Effect.flatMap((value) => Effect.try({ try: () => ModelCatalog.decodeCatalog(value), catch: (cause) => cause })),
+      Effect.flatMap(decode),
       Effect.catch(() => {
         if (Flag.VECTOR_MODELS_PATH === undefined) {
           return fs.remove(filepath, { force: true }).pipe(Effect.ignore, Effect.as(undefined))
@@ -105,16 +137,17 @@ const layer = Layer.effect(
       }),
     )
 
-    const loadSnapshot = Effect.sync(() =>
-      typeof VECTOR_MODEL_CATALOG === "undefined" ? undefined : ModelCatalog.decodeCatalog(VECTOR_MODEL_CATALOG),
-    )
+    const loadSnapshot =
+      typeof VECTOR_MODEL_CATALOG === "undefined" ? Effect.succeed(undefined) : decode(VECTOR_MODEL_CATALOG)
 
     const fetchAndWrite = Effect.fn("ModelCatalog.fetchAndWrite")(function* () {
       const response = yield* fetchApi()
-      const catalog = yield* Effect.try({
-        try: () => ModelCatalog.decodeCatalog(JSON.parse(response)),
-        catch: (cause) => cause,
-      })
+      const catalog = yield* Effect.try({ try: () => JSON.parse(response), catch: (cause) => cause }).pipe(
+        Effect.flatMap(decode),
+      )
+      // Never replace a usable cache with a mirror whose every provider was skipped or refused.
+      if (!Object.keys(catalog).length)
+        return yield* Effect.fail(new Error("The model catalog mirror has no usable providers"))
       const text = JSON.stringify(catalog)
       const tempfile = `${filepath}.${process.pid}.${Date.now()}.tmp`
       yield* fs.writeWithDirs(tempfile, text).pipe(
@@ -126,6 +159,7 @@ const layer = Layer.effect(
           }),
         ),
       )
+      yield* Ref.set(unavailable, false)
       return catalog
     })
 
@@ -136,12 +170,13 @@ const layer = Layer.effect(
       if (snapshot) return snapshot
       if (!source || Flag.VECTOR_MODELS_PATH || Flag.VECTOR_DISABLE_MODELS_FETCH) return {}
       // Flock is cross-process: concurrent Vector CLIs can race on this cache file.
+      // A failed fetch degrades to an empty catalog so configured and custom providers still resolve.
       return yield* Effect.scoped(
         Effect.gen(function* () {
           yield* Flock.effect(lockKey)
           return yield* fetchAndWrite()
         }),
-      )
+      ).pipe(Effect.catch((error) => reportUnavailable(error).pipe(Effect.as({}))))
     }).pipe(Effect.withSpan("ModelCatalog.populate"), Effect.orDie)
 
     const [cachedGet, invalidate] = yield* Effect.cachedInvalidateWithTTL(populate, Duration.infinity)
@@ -161,10 +196,7 @@ const layer = Layer.effect(
           yield* invalidate
           yield* events.publish(Event.Refreshed, {})
         }),
-      ).pipe(
-        Effect.tapCause((cause) => Effect.logError("Failed to refresh the Vector model catalog", { cause: cause })),
-        Effect.ignore,
-      )
+      ).pipe(Effect.catch(reportUnavailable))
     })
 
     if (

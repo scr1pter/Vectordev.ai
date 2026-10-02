@@ -5,6 +5,9 @@ import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { AppNodeBuilder } from "@vectordevai/core/effect/app-node-builder"
 import { Effect, Exit, Layer } from "effect"
 import { ModelCatalog } from "@vectordevai/core/model-catalog"
+import { httpClient } from "@vectordevai/core/effect/app-node-platform"
+import { Flag } from "@vectordevai/core/flag/flag"
+import { HttpClient, HttpClientResponse } from "effect/unstable/http"
 import { FSUtil } from "@vectordevai/core/fs-util"
 import { CrossSpawnSpawner } from "@vectordevai/core/cross-spawn-spawner"
 import { Global } from "@vectordevai/core/global"
@@ -2130,3 +2133,77 @@ for (const entry of [
     },
   )
 }
+
+// Source and dev runs have no bundled catalog snapshot; with no cache either, the first catalog read fetches the
+// default mirror. When that mirror answers 404, a configured custom provider must still resolve its model.
+const missingMirror = testEffect(
+  Layer.unwrap(
+    Effect.acquireRelease(
+      Effect.sync(() => {
+        const saved = { path: Flag.VECTOR_MODELS_PATH, disabled: Flag.VECTOR_DISABLE_MODELS_FETCH }
+        Flag.VECTOR_MODELS_PATH = undefined
+        Flag.VECTOR_DISABLE_MODELS_FETCH = false
+        return saved
+      }),
+      (saved) =>
+        Effect.sync(() => {
+          Flag.VECTOR_MODELS_PATH = saved.path
+          Flag.VECTOR_DISABLE_MODELS_FETCH = saved.disabled
+        }),
+    ).pipe(
+      Effect.as(
+        Layer.fresh(
+          LayerNode.compile(
+            LayerNode.group([
+              Provider.node,
+              FSUtil.node,
+              Env.node,
+              Config.node,
+              Auth.node,
+              Plugin.node,
+              ModelCatalog.node,
+              RuntimeFlags.node,
+            ]),
+            [
+              [
+                httpClient,
+                Layer.succeed(
+                  HttpClient.HttpClient,
+                  HttpClient.make((request) =>
+                    Effect.succeed(HttpClientResponse.fromWeb(request, new Response("Not Found", { status: 404 }))),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    ),
+  ),
+)
+
+missingMirror.instance(
+  "a missing model catalog mirror still resolves a configured custom provider",
+  () =>
+    Effect.gen(function* () {
+      const catalog = yield* ModelCatalog.Service
+      expect(yield* catalog.get()).toEqual({})
+      const provider = yield* Provider.Service
+      const model = yield* provider.getModel(ProviderV2.ID.make("acme-local"), ModelV2.ID.make("acme-chat"))
+      expect(String(model.id)).toBe("acme-chat")
+      expect(model.api.npm).toBe("@ai-sdk/openai-compatible")
+    }),
+  {
+    config: {
+      provider: {
+        "acme-local": {
+          name: "Acme Local",
+          npm: "@ai-sdk/openai-compatible",
+          api: "http://127.0.0.1:11434/v1",
+          options: { apiKey: "placeholder-key" },
+          models: { "acme-chat": { name: "Acme Chat" } },
+        },
+      },
+    },
+  },
+)
