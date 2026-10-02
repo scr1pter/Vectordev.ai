@@ -12,7 +12,10 @@ export interface MockServerConfig {
   vcsDiff?: unknown[]
   messageDelay?: number
   onMessages?: (input: { sessionID: string; before?: string; phase: "start" | "end" }) => void
+  /** Global stream envelopes containing directory and payload. */
   events?: () => unknown[]
+  /** Connection-scoped directory events, such as unwrapped presence payloads. */
+  directoryEvents?: () => unknown[]
   eventRetry?: number
   todos?: (sessionID: string) => unknown[]
   permissions?: unknown[] | (() => unknown[])
@@ -50,7 +53,8 @@ export async function mockVectorServer(page: Page, config: MockServerConfig) {
     if (url.port !== targetPort && url.port !== appPort) return route.fallback()
 
     const path = url.pathname
-    if (path === "/global/event" || path === "/event") return sse(route, config.events?.(), config.eventRetry)
+    if (path === "/global/event") return sse(route, config.events?.(), config.eventRetry)
+    if (path === "/event") return sse(route, config.directoryEvents?.(), config.eventRetry)
     if (path === "/global/health") return json(route, { healthy: true })
     if (path === "/permission")
       return json(route, typeof config.permissions === "function" ? config.permissions() : (config.permissions ?? []))

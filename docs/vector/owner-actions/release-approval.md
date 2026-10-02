@@ -59,7 +59,10 @@ current contracts. The four public-viewer security cases run against the built,
 pruned website in a separate Playwright configuration, included by
 `bun run test:e2e:local`. A real duplicate syntax-theme registration found by the
 console-error smoke check was removed. Focused browser checks pass; the complete
-local rerun and native CI remain required before application publication.
+local rerun now passes **103 app cases and four public-viewer cases**, with one
+existing skip. Both event fixtures keep global envelopes and directory presence
+payloads in separate queues; their regression checks also pass repeated parallel
+runs. Native CI remains required before application publication.
 
 ## Publication order and unsigned policy
 
