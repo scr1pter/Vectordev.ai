@@ -15,6 +15,9 @@ histories. Another session subsequently advanced `main` to
 `62a83b7258a688d470d110d24287019885305dd3`. Its model-mirror and GPT-6 changes are
 included in `free-only-safety`, preserving both histories; this task
 has pushed only the candidate branch since the owner imposed the main hold.
+The subsequent documentation-only changes through
+`7372c5b1c19add723be6b7ffa23e7a3abaed08ac` are included as well. The candidate
+therefore contains that complete main history, not just selected patches.
 No runtime or test files were lost in the comparison; removed website pages were
 consolidated into the current feature documentation. Recheck the final release
 commit after further changes. The separate shared working checkout contains
@@ -42,6 +45,34 @@ at 1.99.8 and npm CLI at 1.99.7. The Mac's separately installed 1.99.91 app is a
 older local build and must not be relabelled as this candidate.
 
 ## GitHub Actions is executing
+
+At source `7d8cf97318bba7a7acb78bff5f75b7185ca83cba`, all four native typecheck
+jobs, the website build and the free-model integration job passed. Linux browser
+validation passed; Linux unit tests, generated-client verification and all HTTP
+API gate steps also passed. Windows browser validation failed and needs its
+detailed authenticated log before the remaining failure can be diagnosed.
+Windows unit validation was still running at this checkpoint. These results
+do not establish a passing Windows release candidate.
+
+The same source's standalone Windows harness passed initial installation, beta
+channel handling, and rejection of bad checksums and redirects without replacing
+the old executable. It then failed while preparing a deferred update. The actual
+installer passed ordinary PowerShell `$null` to `File.Replace`, which binds as an
+empty string instead of the API's optional null backup path. Commit `7557bdf3e`
+uses `NullString.Value` for both atomic status updates and rollback. Exact old
+and new calls were exercised with portable Microsoft PowerShell 7.4.15 on Mac:
+both old calls failed with an empty-path error and both corrected calls passed.
+This confirms the binder defect, not native Windows PowerShell 5 acceptance.
+
+The native harness now checks the real status writer directly before its HTTPS
+scenarios. Bounded diagnostics retain the 60-second status deadline and report
+early worker exits. Temporary holders and workers are disposed even when setup
+fails, with a two-second termination-join limit. Five diagnostic checks passed,
+including a real 60,040 ms timeout; three cleanup checks passed. Engine typecheck
+and independent review passed. The native installer workflow also runs when its
+shared Core PowerShell environment helper changes. TLS, process identity,
+acknowledgement, checksum, rollback and exact certificate-cleanup checks remain
+enforced. The repaired source still requires a successful native installer run.
 
 At source `013ebfeb0c081e024b3f2718461dc2b5d3ab28d2`, native typechecks,
 the website build and the free-model integration job passed. The Windows Core
