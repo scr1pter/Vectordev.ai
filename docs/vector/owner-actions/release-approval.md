@@ -108,6 +108,45 @@ Forty-one focused CLI cases passed locally. Native verification of the final
 candidate remains required; no timeout increases or release-gate bypasses were
 used to obtain these results.
 
+The completed native Linux unit step on `c901d471f` passed Engine with 3,747
+passes, 33 skips, one todo and zero failures, and Core with 1,556 passes, six
+skips and zero failures. Generated-client verification also passed. The job then
+stopped at the HTTP coverage inventory: 21 public routes had no registered
+scenario. That inventory did not execute HTTP requests. New scenarios now cover
+those routes, including local file and Git changes, disabled LSP behavior,
+passive transcript import, private share previews, rejected continuation,
+credential presence, MCP removal, and usage from a local synthetic model.
+Authentication probes also use the isolated test directory, preventing valid
+probes from writing configuration into the checkout.
+The completed local gate now passes all three modes: 230 coverage registrations,
+230 authentication probes and 230 actual request scenarios, covering all 209
+public routes with zero failures, skips, missing routes or extra routes. Existing
+file-read and legacy-sharing fixtures were corrected to require exact newline
+preservation and explicit consent rejection while sharing is disabled.
+
+The same source's Windows unit step reached its existing 20-minute timeout with
+34 observed Engine failures and no final Engine or Core totals. Further repairs
+keep audited license/provenance bytes at LF, avoid relocated dependency links,
+use Git Bash paths in real installer tests, preserve Git review fixture bytes,
+and exercise Windows permission and deferred-uninstall contracts. No license
+hash or notice exception was relaxed. A simulated Windows checkout preserved all
+205 audited files byte for byte; the shell, audit and review groups passed 47
+tests, and the review groups also passed all 33 cases with autocrlf enabled.
+Permission and ownership groups passed 18 cases locally; two new native Windows
+uninstall cases remain unexecuted on this Mac.
+
+The SDK resolver repair at `b007feffa` converts file URL parents to native paths
+before Bun resolution, preserving an installed plugin SDK's authority on Windows
+and in paths containing spaces or escaped characters. Two regressions failed
+before the repair. SDK/dependency checks passed 17 tests and packaging checks
+passed 14. Full Core verification after the repair passed 1,561 tests with zero
+failures. Final native Windows execution is still required.
+
+The `c901d471f` Windows browser step also reached its existing 30-minute timeout,
+with 21 numbered failures observed and no final totals; the viewer command was
+not reached. Its load timeouts followed the ONNX optimizer errors repaired in
+`3c3c32652`. That earlier run does not validate the repaired Vite configuration.
+
 ## Publication order and unsigned policy
 
 1. Prepare the immutable catalog and record its digest and fork provenance. Build
