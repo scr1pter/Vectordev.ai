@@ -28,7 +28,9 @@ vector attach http://localhost:4096 --dir ~/code/myapp</code><button class="doc-
     <code>https://vectordev.ai/install.ps1</code>. They download a standalone Vector CLI archive, check its size and
     SHA-256 checksum before installing, and do not require Node.js or npm. They install only standalone CLI releases
     that Vector has published for them, which are separate from the npm package; when the requested release is not
-    published, the installer stops with an error and leaves any existing installation unchanged.
+    published, the installer stops with an error and leaves any existing installation unchanged. No standalone CLI
+    release is published for the installers yet, so today they stop with that error; install the CLI from npm as
+    <code>@vectordevai/cli</code> or use the desktop download until then.
     <code>vector upgrade</code> and <code>vector uninstall</code> respect the verified installer or package manager
     that owns the running executable. On Windows, replacement of a running executable is scheduled after it exits;
     scheduled does not mean completed. Windows acceptance is still pending. Use the
