@@ -176,7 +176,7 @@ for (const replacement of [false, true]) {
       // that exact process to exit; using the test runner's PID would leave it waiting for the suite.
       const script = `
         import { Standalone } from ${JSON.stringify(new URL("../../src/installation/standalone.ts", import.meta.url).href)};
-        import { WindowsPowerShell } from ${JSON.stringify(new URL("../../src/installation/windows-powershell.ts", import.meta.url).href)};
+        import { WindowsPowerShell } from ${JSON.stringify(new URL("../../../core/src/util/windows-powershell.ts", import.meta.url).href)};
         const receipt = await Standalone.receipt(${JSON.stringify(executable)});
         if (!receipt) throw new Error("Fixture receipt was rejected");
         const result = await Standalone.uninstall(receipt, async (command) => {

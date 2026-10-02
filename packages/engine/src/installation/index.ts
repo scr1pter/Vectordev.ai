@@ -15,7 +15,7 @@ import { InstallationChannel, InstallationVersion } from "@vectordevai/core/inst
 import { InstallationEvent } from "@vectordevai/schema/installation-event"
 import type { InstallationOwnership } from "./ownership"
 import type { Standalone } from "./standalone"
-import { WindowsPowerShell } from "./windows-powershell"
+import { WindowsPowerShell } from "@vectordevai/core/util/windows-powershell"
 
 export type Method = InstallationOwnership.Method
 export type UpgradeResult = Standalone.Result
