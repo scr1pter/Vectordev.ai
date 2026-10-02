@@ -108,9 +108,12 @@ export function compile<Id extends string, Groups extends HttpApiGroup.Any>(
       }
       const payloads = sourcePayloads.map((schema) => normalizeTransport(schema, "payload", endpoint, name)!)
       const success = normalizeTransport(successSchemas[0], "success", endpoint, name)!
-      const errorSchemas = Array.from(errors).flatMap(([status, schemas]) =>
-        schemas.map((schema) => ({ status, ...normalizeTransport(schema, "error", endpoint, name)! })),
-      )
+      // Ordered by status so the same endpoint generates the same output whichever order middleware added its errors.
+      const errorSchemas = Array.from(errors)
+        .toSorted((a, b) => a[0] - b[0])
+        .flatMap(([status, schemas]) =>
+          schemas.map((schema) => ({ status, ...normalizeTransport(schema, "error", endpoint, name)! })),
+        )
       const inputs = [
         ...inputFields(params?.schema, "params", name),
         ...inputFields(query?.schema, "query", name),

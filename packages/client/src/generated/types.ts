@@ -8,10 +8,6 @@ export type JsonValue =
   | ReadonlyArray<JsonValue>
   | { readonly [key: string]: JsonValue }
 
-export type UnauthorizedError = { readonly _tag: "UnauthorizedError"; readonly message: string }
-export const isUnauthorizedError = (value: unknown): value is UnauthorizedError =>
-  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "UnauthorizedError"
-
 export type InvalidRequestError = {
   readonly _tag: "InvalidRequestError"
   readonly message: string
@@ -20,6 +16,10 @@ export type InvalidRequestError = {
 }
 export const isInvalidRequestError = (value: unknown): value is InvalidRequestError =>
   typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "InvalidRequestError"
+
+export type UnauthorizedError = { readonly _tag: "UnauthorizedError"; readonly message: string }
+export const isUnauthorizedError = (value: unknown): value is UnauthorizedError =>
+  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "UnauthorizedError"
 
 export type PublicSessionError = {
   readonly _tag: "PublicSessionError"
