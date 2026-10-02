@@ -17,6 +17,8 @@ import { EventV2Bridge } from "../../src/event-v2-bridge"
 import { Watcher } from "@vectordevai/core/filesystem/watcher"
 import { Git } from "../../src/git"
 import { Vcs } from "@/project/vcs"
+import { SessionStatus } from "@/session/status"
+import { SessionID } from "@/session/schema"
 import { testEffect } from "../lib/effect"
 
 // ---------------------------------------------------------------------------
@@ -26,7 +28,7 @@ import { testEffect } from "../lib/effect"
 const weird = process.platform === "win32" ? "space file.txt" : "tab\tfile.txt"
 
 const layer = LayerNode.compile(
-  LayerNode.group([Vcs.node, Git.node, EventV2Bridge.node, FSUtil.node, CrossSpawnSpawner.node]),
+  LayerNode.group([Vcs.node, Git.node, EventV2Bridge.node, SessionStatus.node, FSUtil.node, CrossSpawnSpawner.node]),
 )
 const it = testEffect(layer)
 const worktreeIt = testEffect(Layer.mergeAll(layer, testInstanceStoreLayer))
@@ -34,6 +36,11 @@ const worktreeIt = testEffect(Layer.mergeAll(layer, testInstanceStoreLayer))
 const git = Effect.fn("VcsTest.git")(function* (cwd: string, args: string[]) {
   const result = yield* Git.Service.use((git) => git.run(args, { cwd }))
   if (result.exitCode !== 0) throw new Error(`git ${args.join(" ")} failed: ${result.stderr.toString("utf8")}`)
+})
+
+const output = Effect.fn("VcsTest.output")(function* (cwd: string, args: string[]) {
+  const result = yield* Git.Service.use((git) => git.run(args, { cwd }))
+  return result.text().trim()
 })
 
 const write = Effect.fn("VcsTest.write")(function* (file: string, content: string) {
@@ -329,6 +336,281 @@ describe("Vcs diff", () => {
             }),
           ]),
         )
+      }),
+    { git: true },
+  )
+})
+
+describe("Vcs branches", () => {
+  afterEach(async () => {
+    await disposeAllInstances()
+  })
+
+  const read = (file: string) => Effect.promise(() => fs.readFile(file, "utf8"))
+
+  it.instance(
+    "branches() lists local branches and marks the current one",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        yield* git(test.directory, ["branch", "-M", "main"])
+        yield* git(test.directory, ["branch", "feature/one"])
+        yield* git(test.directory, ["branch", "two"])
+
+        const vcs = yield* init()
+        const list = yield* vcs.branches()
+
+        expect(list.current).toBe("main")
+        expect(list.branches.map((item) => item.name).toSorted()).toEqual(["feature/one", "main", "two"])
+        expect(list.branches.find((item) => item.name === "main")).toMatchObject({ current: true })
+        expect(list.branches.find((item) => item.name === "two")).toMatchObject({ current: false })
+        expect(list.branches.every((item) => item.checkedOutElsewhere === undefined)).toBe(true)
+      }),
+    { git: true },
+  )
+
+  it.instance("branches() is empty for non-git directories", () =>
+    Effect.gen(function* () {
+      const vcs = yield* init()
+      expect(yield* vcs.branches()).toEqual({ current: undefined, branches: [] })
+    }),
+  )
+
+  it.instance(
+    "switchBranch() switches to an existing branch and publishes the new branch",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        yield* git(test.directory, ["branch", "-M", "main"])
+        yield* git(test.directory, ["branch", "feature/two"])
+
+        const vcs = yield* init()
+        expect(yield* vcs.branch()).toBe("main")
+        const pending = yield* nextBranchUpdate()
+
+        const info = yield* vcs.switchBranch({ branch: "feature/two" })
+
+        expect(info.branch).toBe("feature/two")
+        expect(yield* vcs.branch()).toBe("feature/two")
+        expect(yield* Deferred.await(pending).pipe(Effect.timeout("2 seconds"))).toBe("feature/two")
+        expect((yield* vcs.branches()).current).toBe("feature/two")
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "switchBranch() creates a branch from HEAD and keeps uncommitted work",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        yield* git(test.directory, ["branch", "-M", "main"])
+        const file = path.join(test.directory, "draft.txt")
+        yield* write(file, "work in progress\n")
+
+        const vcs = yield* init()
+        const info = yield* vcs.switchBranch({ branch: "agent/new-idea", create: true })
+
+        expect(info.branch).toBe("agent/new-idea")
+        expect(yield* vcs.branch()).toBe("agent/new-idea")
+        expect(yield* read(file)).toBe("work in progress\n")
+        expect((yield* vcs.branches()).branches.map((item) => item.name)).toContain("main")
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "switchBranch() refuses when uncommitted changes would be overwritten",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        yield* git(test.directory, ["branch", "-M", "main"])
+        const file = path.join(test.directory, "shared.txt")
+        yield* write(file, "one\n")
+        yield* git(test.directory, ["add", "."])
+        yield* git(test.directory, ["commit", "--no-gpg-sign", "-m", "one"])
+        yield* git(test.directory, ["switch", "-c", "other"])
+        yield* write(file, "two\n")
+        yield* git(test.directory, ["commit", "--no-gpg-sign", "-am", "two"])
+        yield* git(test.directory, ["switch", "main"])
+        yield* write(file, "local edit\n")
+
+        const vcs = yield* init()
+        const error = yield* vcs.switchBranch({ branch: "other" }).pipe(Effect.flip)
+
+        expect(error.reason).toBe("dirty")
+        expect(error.message).toContain("shared.txt")
+        expect(error.message).not.toContain("error:")
+        expect(error.message).not.toContain("Aborting")
+        expect(yield* vcs.branch()).toBe("main")
+        expect(yield* read(file)).toBe("local edit\n")
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "switchBranch() refuses to overwrite an ignored file that the target branch tracks",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        yield* git(test.directory, ["branch", "-M", "main"])
+        yield* git(test.directory, ["switch", "-c", "other"])
+        yield* write(path.join(test.directory, ".env"), "tracked-on-other\n")
+        yield* git(test.directory, ["add", ".env"])
+        yield* git(test.directory, ["commit", "--no-gpg-sign", "-m", "track env"])
+        yield* git(test.directory, ["switch", "main"])
+        yield* write(path.join(test.directory, ".gitignore"), ".env\n")
+        yield* write(path.join(test.directory, ".env"), "SECRET=local\n")
+
+        const vcs = yield* init()
+        const error = yield* vcs.switchBranch({ branch: "other" }).pipe(Effect.flip)
+
+        expect(error.reason).toBe("dirty")
+        expect(error.message).toContain(".env")
+        expect(error.message).not.toContain("error:")
+        expect(error.message).not.toContain("Aborting")
+        expect(yield* vcs.branch()).toBe("main")
+        expect(yield* read(path.join(test.directory, ".env"))).toBe("SECRET=local\n")
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "switchBranch() refuses while a session in the instance is running",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        yield* git(test.directory, ["branch", "-M", "main"])
+        yield* git(test.directory, ["branch", "other"])
+        const vcs = yield* init()
+        const status = yield* SessionStatus.Service
+        const sessionID = SessionID.descending()
+        yield* status.set(sessionID, { type: "busy" })
+
+        const switching = yield* vcs.switchBranch({ branch: "other" }).pipe(Effect.flip)
+        const creating = yield* vcs.switchBranch({ branch: "agent/new", create: true }).pipe(Effect.flip)
+        expect(switching.reason).toBe("busy")
+        expect(switching.message).toContain("Wait for it to finish")
+        expect(creating.reason).toBe("busy")
+        expect(yield* vcs.branch()).toBe("main")
+
+        yield* status.set(sessionID, { type: "idle" })
+        expect((yield* vcs.switchBranch({ branch: "other" })).branch).toBe("other")
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "branches() and switchBranch() handle a tag named like the current branch",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        yield* git(test.directory, ["branch", "-M", "v1"])
+        yield* git(test.directory, ["branch", "other"])
+        yield* git(test.directory, ["tag", "v1"])
+
+        const vcs = yield* init()
+        expect(yield* vcs.branch()).toBe("v1")
+        const list = yield* vcs.branches()
+        expect(list.current).toBe("v1")
+        expect(list.branches.find((item) => item.name === "v1")).toEqual({ name: "v1", current: true })
+
+        expect((yield* vcs.switchBranch({ branch: "v1" })).branch).toBe("v1")
+        expect((yield* vcs.switchBranch({ branch: "other" })).branch).toBe("other")
+        expect((yield* vcs.switchBranch({ branch: "v1" })).branch).toBe("v1")
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "switchBranch() refuses to leave detached commits behind but may branch from them",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        yield* git(test.directory, ["branch", "-M", "main"])
+        yield* git(test.directory, ["branch", "feat"])
+        yield* git(test.directory, ["switch", "--detach", "HEAD"])
+
+        const vcs = yield* init()
+        expect((yield* vcs.switchBranch({ branch: "feat" })).branch).toBe("feat")
+        yield* git(test.directory, ["switch", "--detach", "HEAD"])
+        yield* write(path.join(test.directory, "lost.txt"), "only here\n")
+        yield* git(test.directory, ["add", "."])
+        yield* git(test.directory, ["commit", "--no-gpg-sign", "-m", "detached work"])
+        const head = yield* output(test.directory, ["rev-parse", "HEAD"])
+
+        const error = yield* vcs.switchBranch({ branch: "main" }).pipe(Effect.flip)
+        expect(error.reason).toBe("detached")
+        expect(error.message).toContain("1 commit")
+        expect(yield* output(test.directory, ["rev-parse", "HEAD"])).toBe(head)
+
+        expect((yield* vcs.switchBranch({ branch: "keep-work", create: true })).branch).toBe("keep-work")
+        expect(yield* output(test.directory, ["rev-parse", "keep-work"])).toBe(head)
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "switchBranch() only creates branches in a Vector-managed agent workspace",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        yield* git(test.directory, ["branch", "-M", "main"])
+        yield* git(test.directory, ["switch", "-c", "vector-parallel/fix-header-1a2b3c4d"])
+
+        const vcs = yield* init()
+        const error = yield* vcs.switchBranch({ branch: "main" }).pipe(Effect.flip)
+        expect(error.reason).toBe("managed")
+        expect(error.message).toContain("managed by Vector")
+        expect(yield* vcs.branch()).toBe("vector-parallel/fix-header-1a2b3c4d")
+
+        expect((yield* vcs.switchBranch({ branch: "fix-header-v2", create: true })).branch).toBe("fix-header-v2")
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "switchBranch() refuses a branch checked out in another worktree",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const wt = yield* tmpdirScoped()
+        const dir = path.join(wt, "elsewhere")
+        yield* git(test.directory, ["branch", "-M", "main"])
+        yield* git(test.directory, ["worktree", "add", "-b", "busy", dir, "HEAD"])
+
+        const vcs = yield* init()
+        const list = yield* vcs.branches()
+        const busy = list.branches.find((item) => item.name === "busy")
+        expect(busy?.current).toBe(false)
+        expect(busy?.checkedOutElsewhere).toBeDefined()
+        expect(yield* Effect.promise(() => fs.realpath(busy?.checkedOutElsewhere ?? ""))).toBe(
+          yield* Effect.promise(() => fs.realpath(dir)),
+        )
+
+        const error = yield* vcs.switchBranch({ branch: "busy" }).pipe(Effect.flip)
+        expect(error.reason).toBe("checked-out-elsewhere")
+        expect(yield* vcs.branch()).toBe("main")
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "switchBranch() rejects invalid, unknown and duplicate names",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        yield* git(test.directory, ["branch", "-M", "main"])
+        yield* git(test.directory, ["branch", "taken"])
+        const vcs = yield* init()
+
+        const invalid = yield* Effect.forEach(["bad..name", "-x", "@{-1}", "HEAD", "with space", ""], (branch) =>
+          vcs.switchBranch({ branch, create: true }).pipe(Effect.flip),
+        )
+        expect(invalid.map((error) => error.reason)).toEqual(Array(6).fill("invalid-name"))
+
+        expect((yield* vcs.switchBranch({ branch: "missing" }).pipe(Effect.flip)).reason).toBe("not-found")
+        expect((yield* vcs.switchBranch({ branch: "taken", create: true }).pipe(Effect.flip)).reason).toBe("exists")
+        expect(yield* vcs.branch()).toBe("main")
       }),
     { git: true },
   )

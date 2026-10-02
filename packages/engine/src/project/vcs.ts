@@ -7,6 +7,7 @@ import { Git } from "@/git"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { EventV2 } from "@vectordevai/core/event"
 import { VcsEvent } from "@vectordevai/schema/vcs-event"
+import { SessionStatus } from "@/session/status"
 
 const PATCH_CONTEXT_LINES = 2_147_483_647
 const MAX_PATCH_BYTES = 10_000_000
@@ -232,6 +233,60 @@ const track = Effect.fnUntraced(function* (
   return yield* diffAgainstRef(git, cwd, ref, options)
 })
 
+// `symbolic-ref --short` disambiguates a branch that shares its name with a tag ("heads/v1"), so
+// read the full ref and strip the prefix. A detached HEAD has no symbolic ref.
+const currentBranch = Effect.fnUntraced(function* (git: Git.Interface, cwd: string) {
+  const result = yield* git.run(["symbolic-ref", "--quiet", "HEAD"], { cwd })
+  const ref = result.exitCode === 0 ? result.text().trim() : ""
+  return ref.startsWith("refs/heads/") ? ref.slice("refs/heads/".length) : undefined
+})
+
+// One row per local branch: "*" when it is HEAD in this worktree, the full ref name, and the path
+// of the worktree that has it checked out (empty when none), separated by NUL bytes.
+const branchRows = (text: string) =>
+  text
+    .split(/\r?\n/)
+    .map((line) => line.split("\0"))
+    .filter((row) => row[1]?.startsWith("refs/heads/"))
+    .map((row) => ({ head: row[0] === "*", name: row[1].slice("refs/heads/".length), worktree: row[2] ?? "" }))
+
+const branchFormat = "--format=%(HEAD)%00%(refname)%00%(worktreepath)"
+
+// Desktop parallel workspaces run agents on `vector-parallel/...` branches and review or merge
+// them by diffing against the workspace's recorded base commit. Switching such a checkout to an
+// unrelated existing branch would make that merge offer the other branch's whole divergence.
+const managedBranchPrefix = "vector-parallel/"
+
+// Git reports a failed switch over several lines: "error:"/"fatal:" prefixes, a tab-indented
+// file list, hints and a trailing "Aborting". Collapse that into one sentence a toast can show.
+const readableGitError = (stderr: string, fallback: string) => {
+  const lines = stderr
+    .split(/\r?\n/)
+    .filter((line) => line.trim() && !line.startsWith("hint:") && line.trim() !== "Aborting")
+  const files = lines.filter((line) => line.startsWith("\t")).map((line) => line.trim())
+  const listed = files.length > 5 ? [...files.slice(0, 5), `and ${files.length - 5} more`] : files
+  const text = lines
+    .filter((line) => !line.startsWith("\t"))
+    .map((line) => line.replace(/^(error|fatal):\s*/, "").trim())
+  if (text.length === 0) return fallback
+  if (listed.length === 0) return text.join(" ")
+  return [text[0], `${listed.join(", ")}.`, ...text.slice(1)].join(" ")
+}
+
+// Commits reachable from a detached HEAD but from no branch, tag or remote: switching away leaves
+// them reachable only through the reflog.
+const unreachableCommits = Effect.fnUntraced(function* (git: Git.Interface, cwd: string) {
+  const result = yield* git.run(["rev-list", "--count", "HEAD", "--not", "--branches", "--tags", "--remotes"], { cwd })
+  return result.exitCode === 0 ? Number(result.text().trim()) || 0 : 0
+})
+
+const validBranchName = Effect.fnUntraced(function* (git: Git.Interface, cwd: string, name: string) {
+  if (!name || name === "HEAD" || name.startsWith("-")) return false
+  const result = yield* git.run(["check-ref-format", "--branch", name], { cwd })
+  // check-ref-format expands shorthands such as "@{-1}"; only accept names it echoes back unchanged.
+  return result.exitCode === 0 && result.text().trim() === name
+})
+
 export const Mode = Schema.Literals(["git", "branch"])
 export type Mode = Schema.Schema.Type<typeof Mode>
 
@@ -284,6 +339,44 @@ export const CommitResult = Schema.Struct({
 }).annotate({ identifier: "VcsCommitResult" })
 export type CommitResult = Schema.Schema.Type<typeof CommitResult>
 
+export const Branch = Schema.Struct({
+  name: Schema.String,
+  current: Schema.Boolean,
+  // Path of the other worktree that has this branch checked out. Git refuses to switch to it here.
+  checkedOutElsewhere: Schema.optional(Schema.String),
+}).annotate({ identifier: "VcsBranch" })
+export type Branch = Schema.Schema.Type<typeof Branch>
+
+export const BranchList = Schema.Struct({
+  current: Schema.optional(Schema.String),
+  branches: Schema.Array(Branch),
+}).annotate({ identifier: "VcsBranchList" })
+export type BranchList = Schema.Schema.Type<typeof BranchList>
+
+export const SwitchInput = Schema.Struct({
+  branch: Schema.String,
+  create: Schema.optional(Schema.Boolean),
+})
+export type SwitchInput = Schema.Schema.Type<typeof SwitchInput>
+
+export const SwitchReason = Schema.Literals([
+  "non-git",
+  "invalid-name",
+  "not-found",
+  "exists",
+  "checked-out-elsewhere",
+  "dirty",
+  "busy",
+  "detached",
+  "managed",
+  "switch-failed",
+])
+
+export class SwitchError extends Schema.TaggedErrorClass<SwitchError>()("VcsSwitchError", {
+  message: Schema.String,
+  reason: SwitchReason,
+}) {}
+
 export class PatchApplyError extends Schema.TaggedErrorClass<PatchApplyError>()("VcsPatchApplyError", {
   message: Schema.String,
   reason: Schema.Literals(["non-git", "not-clean"]),
@@ -303,6 +396,8 @@ export interface Interface {
   readonly diffRaw: () => Effect.Effect<string>
   readonly apply: (input: ApplyInput) => Effect.Effect<ApplyResult, PatchApplyError>
   readonly commit: (input: CommitInput) => Effect.Effect<CommitResult, CommitError>
+  readonly branches: () => Effect.Effect<BranchList>
+  readonly switchBranch: (input: SwitchInput) => Effect.Effect<Info, SwitchError>
 }
 
 interface State {
@@ -312,11 +407,12 @@ interface State {
 
 export class Service extends Context.Service<Service, Interface>()("@vector/Vcs") {}
 
-const layer: Layer.Layer<Service, never, Git.Service | EventV2Bridge.Service> = Layer.effect(
+const layer: Layer.Layer<Service, never, Git.Service | EventV2Bridge.Service | SessionStatus.Service> = Layer.effect(
   Service,
   Effect.gen(function* () {
     const git = yield* Git.Service
     const events = yield* EventV2Bridge.Service
+    const status = yield* SessionStatus.Service
     const scope = yield* Scope.Scope
 
     const state = yield* InstanceState.make<State>(
@@ -326,9 +422,9 @@ const layer: Layer.Layer<Service, never, Git.Service | EventV2Bridge.Service> = 
         }
 
         const get = Effect.fnUntraced(function* () {
-          return yield* git.branch(ctx.directory)
+          return yield* currentBranch(git, ctx.directory)
         })
-        const [current, root] = yield* Effect.all([git.branch(ctx.directory), git.defaultBranch(ctx.directory)], {
+        const [current, root] = yield* Effect.all([get(), git.defaultBranch(ctx.directory)], {
           concurrency: 2,
         })
         const value = { current, root }
@@ -480,10 +576,121 @@ const layer: Layer.Layer<Service, never, Git.Service | EventV2Bridge.Service> = 
         const sha = head.exitCode === 0 ? head.text().trim() || undefined : undefined
         return { committed: true, sha }
       }),
+      branches: Effect.fn("Vcs.branches")(function* () {
+        const ctx = yield* InstanceState.context
+        if (ctx.project.vcs !== "git") return { branches: [] }
+        const cwd = ctx.directory
+        const [current, refs] = yield* Effect.all(
+          [
+            currentBranch(git, cwd),
+            git.run(["for-each-ref", "--sort=-committerdate", branchFormat, "refs/heads"], { cwd }),
+          ],
+          { concurrency: 2 },
+        )
+        // Leave absent fields out: the HTTP encoder would otherwise send them as null.
+        return {
+          ...(current ? { current } : {}),
+          branches: branchRows(refs.text()).map((row) => ({
+            name: row.name,
+            current: row.head,
+            // The row that is HEAD here is checked out in this worktree, not elsewhere.
+            ...(row.worktree && !row.head ? { checkedOutElsewhere: row.worktree } : {}),
+          })),
+        }
+      }),
+      // Only ever a plain `git switch`: never forced, never stashed and never over ignored files, so
+      // uncommitted work is either carried over by git or the switch is refused with git's own
+      // explanation. Refused while any session in this instance is running.
+      switchBranch: Effect.fn("Vcs.switchBranch")(function* (input: SwitchInput) {
+        const value = yield* InstanceState.get(state)
+        const ctx = yield* InstanceState.context
+        if (ctx.project.vcs !== "git") {
+          return yield* new SwitchError({
+            message: "Branches can't be switched because the project is not git-based",
+            reason: "non-git",
+          })
+        }
+        const cwd = ctx.directory
+        const name = input.branch.trim()
+        if (!(yield* validBranchName(git, cwd, name))) {
+          return yield* new SwitchError({ message: `"${name}" is not a valid branch name`, reason: "invalid-name" })
+        }
+
+        const [current, refs, sessions] = yield* Effect.all(
+          [
+            currentBranch(git, cwd),
+            git.run(["for-each-ref", branchFormat, `refs/heads/${name}`], { cwd }),
+            status.list(),
+          ],
+          { concurrency: 3 },
+        )
+        if (!input.create && name === current) return { branch: current, default_branch: value.root?.name }
+        if ([...sessions.values()].some((item) => item.type !== "idle")) {
+          return yield* new SwitchError({
+            message: "An agent is still running in this checkout. Wait for it to finish before switching branches.",
+            reason: "busy",
+          })
+        }
+        if (!input.create && current?.startsWith(managedBranchPrefix)) {
+          return yield* new SwitchError({
+            message:
+              "This agent workspace is managed by Vector. Create a new branch here instead of switching to an existing one.",
+            reason: "managed",
+          })
+        }
+        // A `refs/heads/<name>` pattern also matches branches below it, so look for the exact ref.
+        const target = branchRows(refs.text()).find((row) => row.name === name)
+        if (input.create && target) {
+          return yield* new SwitchError({ message: `A branch named "${name}" already exists`, reason: "exists" })
+        }
+        if (!input.create && !target) {
+          return yield* new SwitchError({ message: `There is no local branch named "${name}"`, reason: "not-found" })
+        }
+        if (!input.create && target?.worktree) {
+          return yield* new SwitchError({
+            message: `"${name}" is already checked out in another worktree at ${target.worktree}`,
+            reason: "checked-out-elsewhere",
+          })
+        }
+        const behind = !input.create && !current ? yield* unreachableCommits(git, cwd) : 0
+        if (behind > 0) {
+          return yield* new SwitchError({
+            message: `HEAD is detached with ${behind} commit${behind === 1 ? "" : "s"} that no branch contains. Create a branch here first so that work isn't left behind.`,
+            reason: "detached",
+          })
+        }
+
+        const switched = yield* git.run(
+          input.create ? ["switch", "-c", name] : ["switch", "--no-overwrite-ignore", "--no-guess", name],
+          { cwd },
+        )
+        if (switched.exitCode !== 0) {
+          const stderr = switched.stderr.toString("utf8")
+          return yield* new SwitchError({
+            message: readableGitError(stderr, `Couldn't switch to "${name}"`),
+            // Covers both local changes to tracked files and untracked or ignored files (such as a
+            // local .env) that the target branch tracks.
+            reason: stderr.includes("overwritten") ? "dirty" : "switch-failed",
+          })
+        }
+
+        // The HEAD watcher may also see this switch; whichever runs first updates the cached
+        // branch, so the event is published once either way.
+        const next = yield* currentBranch(git, cwd)
+        if (next !== value.current) {
+          value.current = next
+          yield* events.publish(Event.BranchUpdated, { branch: next })
+        }
+        return { branch: next, default_branch: value.root?.name }
+      }),
     })
   }),
 )
 
-export const node = LayerNode.make({ service: Service, layer: layer, deps: [Git.node, EventV2Bridge.node] })
+export const node = LayerNode.make({
+  service: Service,
+  layer: layer,
+  deps: [Git.node, EventV2Bridge.node, SessionStatus.node],
+})
 
 export * as Vcs from "./vcs"

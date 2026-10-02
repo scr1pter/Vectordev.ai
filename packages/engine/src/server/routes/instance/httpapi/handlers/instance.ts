@@ -12,7 +12,7 @@ import { HttpApiBuilder } from "effect/unstable/httpapi"
 import path from "node:path"
 import { pathToFileURL } from "node:url"
 import { InstanceHttpApi } from "../api"
-import { ApiVcsApplyError, ApiVcsCommitError } from "../groups/instance"
+import { ApiVcsApplyError, ApiVcsCommitError, ApiVcsSwitchError } from "../groups/instance"
 import { markInstanceForDisposal } from "../lifecycle"
 
 export const instanceHandlers = HttpApiBuilder.group(InstanceHttpApi, "instance", (handlers) =>
@@ -82,6 +82,25 @@ export const instanceHandlers = HttpApiBuilder.group(InstanceHttpApi, "instance"
           (error) =>
             new ApiVcsCommitError({
               name: "VcsCommitError",
+              data: {
+                message: error.message,
+                reason: error.reason,
+              },
+            }),
+        ),
+      )
+    })
+
+    const getVcsBranches = Effect.fn("InstanceHttpApi.vcsBranches")(function* () {
+      return yield* vcs.branches()
+    })
+
+    const switchVcs = Effect.fn("InstanceHttpApi.vcsSwitch")(function* (ctx: { payload: Vcs.SwitchInput }) {
+      return yield* vcs.switchBranch(ctx.payload).pipe(
+        Effect.mapError(
+          (error) =>
+            new ApiVcsSwitchError({
+              name: "VcsSwitchError",
               data: {
                 message: error.message,
                 reason: error.reason,
@@ -208,6 +227,8 @@ export const instanceHandlers = HttpApiBuilder.group(InstanceHttpApi, "instance"
       .handle("vcsDiffRaw", getVcsDiffRaw)
       .handle("vcsApply", applyVcs)
       .handle("vcsCommit", commitVcs)
+      .handle("vcsBranches", getVcsBranches)
+      .handle("vcsSwitch", switchVcs)
       .handle("command", getCommand)
       .handle("agent", getAgent)
       .handle("skill", getSkill)

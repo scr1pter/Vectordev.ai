@@ -602,6 +602,9 @@ import type {
   VcsApplyData,
   VcsApplyErrors,
   VcsApplyResponses,
+  VcsBranchesData,
+  VcsBranchesErrors,
+  VcsBranchesResponses,
   VcsCommitData,
   VcsCommitErrors,
   VcsCommitResponses,
@@ -617,6 +620,9 @@ import type {
   VcsStatusData,
   VcsStatusErrors,
   VcsStatusResponses,
+  VcsSwitchData,
+  VcsSwitchErrors,
+  VcsSwitchResponses,
   WorktreeCreateData,
   WorktreeCreateErrors,
   WorktreeCreateResponses,
@@ -1518,6 +1524,34 @@ export class Vcs extends HeyApiClient {
   public commit<ThrowOnError extends boolean = false>(options?: Options<VcsCommitData, ThrowOnError>) {
     return (options?.client ?? this.client).post<VcsCommitResponses, VcsCommitErrors, ThrowOnError>({
       url: "/vcs/commit",
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+      },
+    })
+  }
+
+  /**
+   * List branches
+   *
+   * List local git branches, marking the current branch and branches checked out in another worktree.
+   */
+  public branches<ThrowOnError extends boolean = false>(options?: Options<VcsBranchesData, ThrowOnError>) {
+    return (options?.client ?? this.client).get<VcsBranchesResponses, VcsBranchesErrors, ThrowOnError>({
+      url: "/vcs/branches",
+      ...options,
+    })
+  }
+
+  /**
+   * Switch branch
+   *
+   * Switch the working tree to another local branch, or create a branch from HEAD and switch to it. Never forces, stashes or discards changes, including ignored files and commits on a detached HEAD. Refused while a session in this directory is running, and in Vector-managed agent workspaces only creating a branch is allowed.
+   */
+  public switch<ThrowOnError extends boolean = false>(options?: Options<VcsSwitchData, ThrowOnError>) {
+    return (options?.client ?? this.client).post<VcsSwitchResponses, VcsSwitchErrors, ThrowOnError>({
+      url: "/vcs/switch",
       ...options,
       headers: {
         "Content-Type": "application/json",

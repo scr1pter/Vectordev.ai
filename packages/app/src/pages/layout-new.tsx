@@ -1123,6 +1123,11 @@ export default function NewLayout(props: ParentProps) {
     const title = serverSync().session.get(id)?.title?.trim()
     return title && title !== "New session" ? title : "Main agent"
   }
+  const mainBranch = () => {
+    const path = activeTaskScope().projectPath
+    if (!path) return undefined
+    return serverSync().child(path, { bootstrap: false })[0].vcs?.branch
+  }
   const scopeForParallelRecord = (record: ParallelWorkspaceRecord) => {
     const run = record.swarmRunId ? swarmRuns().find((item) => item.id === record.swarmRunId) : undefined
     return {
@@ -6325,6 +6330,7 @@ export default function NewLayout(props: ParentProps) {
         resizing={navigationResizing()}
         projectName={projectDisplayName()}
         mainLabel={mainAgentLabel()}
+        mainBranch={mainBranch()}
         mainActive={!sidebarActiveAgentID() && taskRoute()}
         treeOpen={workspaceTreeOpen()}
         items={workspaceNavigationItems()}
