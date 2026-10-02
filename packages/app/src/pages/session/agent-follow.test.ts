@@ -348,8 +348,7 @@ describe("landing an edit", () => {
         end: Date.now(),
       }),
     )
-    await wait(10)
-    expect(h.store.attributionsFor("src/a.ts")[0]?.ranges).toEqual([{ start: 2, end: 2 }])
+    await eventually(() => expect(h.store.attributionsFor("src/a.ts")[0]?.ranges).toEqual([{ start: 2, end: 2 }]))
   })
 
   test("ignores a completed call from long ago", async () => {

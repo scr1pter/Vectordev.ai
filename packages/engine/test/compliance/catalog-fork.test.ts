@@ -21,6 +21,10 @@ test("fresh preparation reads only a regular committed export at the owner-confi
   const fork = await catalogFork(fixture.input)
   await expect(fork.read("../outside.json")).rejects.toThrow("relative data paths")
   await expect(fork.read("missing.json")).rejects.toThrow("regular committed")
+  expect(await fork.readOptional("missing.json")).toBeUndefined()
+  expect(await fork.readOptional("vector/api.json")).toBe(catalog)
+  await expect(fork.readOptional("../outside.json")).rejects.toThrow("relative data paths")
+  await expect(fork.readOptional("vector")).rejects.toThrow("regular committed")
 })
 
 test("fresh preparation fails closed without owner configuration or when origin, revision, or tracked export changes", async () => {
@@ -41,6 +45,18 @@ test("fork data never follows a committed symlink to a local file", async () => 
   await fixture.git(["commit", "--quiet", "-m", "symlink"])
   const fork = await catalogFork({ ...fixture.input, revision: await fixture.git(["rev-parse", "HEAD"]) })
   await expect(fork.read("api.json")).rejects.toThrow("regular committed")
+  await expect(fork.readOptional("api.json")).rejects.toThrow("regular committed")
+})
+
+test("optional artwork never treats symlink or file ancestors as absent directories", async () => {
+  await using fixture = await catalogForkFixture({ "logos/logo.svg": "<svg></svg>", file: "not a directory" })
+  await symlink("logos", path.join(fixture.input.directory, "linked-provider"))
+  await fixture.git(["add", "linked-provider"])
+  await fixture.git(["commit", "--quiet", "-m", "linked artwork directory"])
+  const fork = await catalogFork({ ...fixture.input, revision: await fixture.git(["rev-parse", "HEAD"]) })
+  await expect(fork.readOptional("linked-provider/logo.svg")).rejects.toThrow("non-directory ancestor")
+  await expect(fork.readOptional("file/logo.svg")).rejects.toThrow("non-directory ancestor")
+  expect(await fork.readOptional("absent/provider/logo.svg")).toBeUndefined()
 })
 
 test("committed text bytes are never silently repaired before their provenance digest", async () => {
@@ -51,5 +67,6 @@ test("committed text bytes are never silently repaired before their provenance d
   await fixture.git(["commit", "--quiet", "-m", "byte fixtures"])
   const fork = await catalogFork({ ...fixture.input, revision: await fixture.git(["rev-parse", "HEAD"]) })
   await expect(fork.read("invalid.json")).rejects.toThrow()
+  await expect(fork.readOptional("invalid.json")).rejects.toThrow()
   expect(await fork.read("bom.json")).toBe(`\uFEFF${catalog}`)
 })

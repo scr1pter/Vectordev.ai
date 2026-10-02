@@ -29,6 +29,8 @@ vector
 
 Published builds and their notes are at [vectordev.ai/releases](https://vectordev.ai/releases).
 
+**Release status.** This branch prepares **1.999.99** for desktop and CLI. Public downloads are still desktop **1.99.8** and CLI **1.99.7**; the guarded personal OpenRouter free-model setup described below is coming in the new build. Model access and Vector's desktop subscription are separate. See the [release notes](https://vectordev.ai/releases#release-1-999-99) for what is prepared and what remains unavailable.
+
 ## Features
 
 ### Agents

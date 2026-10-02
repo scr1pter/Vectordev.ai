@@ -16,6 +16,8 @@ async function fixture() {
   await mkdir(files)
   for (const command of [
     "tar",
+    // GNU tar invokes gzip through PATH; keep it available in the no-Node fixture.
+    "gzip",
     "awk",
     "cut",
     "sort",

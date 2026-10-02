@@ -28,6 +28,7 @@ export const iconNames = [
   "deepinfra",
   "openrouter",
   "fireworks-ai",
+  "generic-provider",
   "v0",
   "cloudferro-sherlock",
   "alibaba",

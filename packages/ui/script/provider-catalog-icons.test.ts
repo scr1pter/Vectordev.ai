@@ -1,40 +1,64 @@
 import { expect, test } from "bun:test"
 import path from "node:path"
-import { checkProviderIcons, forkProviderIcons, importProviderIcons } from "./provider-catalog-icons"
+import {
+  checkProviderIconFiles,
+  checkProviderIcons,
+  forkProviderIcons,
+  importProviderIcons,
+} from "./provider-catalog-icons"
 import { catalogFork } from "../../engine/script/catalog-fork"
 import { catalogForkFixture } from "../../engine/test/fixture/catalog-fork"
+import { GENERIC_PROVIDER_ICON } from "../src/components/provider-icon-name"
 
-test("each catalog provider must have both a named icon and a generated sprite symbol", () => {
+test("catalog icons keep branded artwork consistent and require a registered neutral fallback", () => {
   const input = {
-    providers: ["openai", "anthropic"],
-    names: ["openai", "anthropic"],
-    sprite: '<svg><symbol id="openai"/><symbol id="anthropic"/></svg>',
+    providers: ["openai", "anthropic", "missing-provider"],
+    names: ["openai", "anthropic", GENERIC_PROVIDER_ICON],
+    sprite: '<svg><symbol id="openai"/><symbol id="anthropic"/><symbol id="generic-provider"/></svg>',
   }
-  expect(checkProviderIcons(input)).toEqual({ providers: 2 })
-  expect(() => checkProviderIcons({ ...input, names: ["openai"] })).toThrow("anthropic")
-  expect(() => checkProviderIcons({ ...input, sprite: '<svg><symbol id="anthropic"/></svg>' })).toThrow("openai")
+  expect(checkProviderIcons(input)).toEqual({ providers: 3, fallback: ["missing-provider"] })
+  expect(() => checkProviderIcons({ ...input, names: ["openai", GENERIC_PROVIDER_ICON] })).toThrow("anthropic")
+  expect(() =>
+    checkProviderIcons({ ...input, sprite: '<svg><symbol id="anthropic"/><symbol id="generic-provider"/></svg>' }),
+  ).toThrow("openai")
+  expect(() => checkProviderIcons({ ...input, names: ["openai", "anthropic"] })).toThrow("generic provider")
+  expect(() => checkProviderIcons({ ...input, sprite: '<svg><symbol id="openai"/></svg>' })).toThrow("generic provider")
 })
 
-test("provider logos are read from the same pinned Git revision and missing artwork fails closed", async () => {
+test("pinned provider artwork remains preferred and missing artwork uses the committed neutral icon", async () => {
   const svg =
     '<svg xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="color"/></defs><path fill="url(\'#color\')" d="M0 0"/></svg>'
   await using fixture = await catalogForkFixture({ "providers/openai/logo.svg": svg })
   const fork = await catalogFork(fixture.input)
   expect(await forkProviderIcons(fork, ["openai"])).toEqual([{ id: "openai", svg }])
-  await expect(forkProviderIcons(fork, ["anthropic"])).rejects.toThrow("regular committed")
+  expect(await forkProviderIcons(fork, ["anthropic"])).toEqual([])
   const directory = path.join(fixture.input.directory, "output")
-  await expect(importProviderIcons(fork, ["openai", "anthropic"], directory)).rejects.toThrow("regular committed")
-  expect(await Bun.file(path.join(directory, "src/assets/icons/provider/openai.svg")).exists()).toBe(false)
-  await importProviderIcons(fork, ["openai"], directory)
+  const existing = '<svg xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="6"/></svg>'
+  await Bun.write(path.join(directory, "src/assets/icons/provider/google.svg"), existing)
+  await importProviderIcons(fork, ["openai", "anthropic", "google"], directory)
   expect(await Bun.file(path.join(directory, "src/assets/icons/provider/openai.svg")).text()).toBe(svg)
-  const types = await Bun.file(path.join(directory, "src/components/provider-icons/types.ts")).text()
-  expect(
-    checkProviderIcons({
-      providers: ["openai"],
-      names: Array.from(types.matchAll(/^\s*["']([^"']+)["'],?$/gm), (match) => match[1]),
-      sprite: await Bun.file(path.join(directory, "src/components/provider-icons/sprite.svg")).text(),
-    }),
-  ).toEqual({ providers: 1 })
+  expect(await Bun.file(path.join(directory, "src/assets/icons/provider/google.svg")).text()).toBe(existing)
+  expect(await Bun.file(path.join(directory, "src/assets/icons/provider/anthropic.svg")).exists()).toBe(false)
+  expect(await Bun.file(path.join(directory, "src/assets/icons/provider/generic-provider.svg")).text()).toBe(
+    await Bun.file(new URL("../src/assets/icons/provider/generic-provider.svg", import.meta.url)).text(),
+  )
+  expect(await checkProviderIconFiles(directory, ["openai", "anthropic", "google"])).toEqual({
+    providers: 3,
+    fallback: ["anthropic"],
+  })
+})
+
+test("invalid supplied artwork aborts the entire import rather than replacing existing icons", async () => {
+  await using fixture = await catalogForkFixture({
+    "providers/openai/logo.svg": '<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0"/></svg>',
+    "providers/anthropic/logo.svg": "not an SVG",
+  })
+  const directory = path.join(fixture.input.directory, "output")
+  await expect(
+    importProviderIcons(await catalogFork(fixture.input), ["openai", "anthropic"], directory),
+  ).rejects.toThrow("Invalid provider logo SVG")
+  expect(await Bun.file(path.join(directory, "src/assets/icons/provider/openai.svg")).exists()).toBe(false)
+  expect(await Bun.file(path.join(directory, "src/assets/icons/provider/generic-provider.svg")).exists()).toBe(false)
 })
 
 for (const content of [
