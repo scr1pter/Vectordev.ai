@@ -31,18 +31,13 @@ The standalone archives that `packages/engine/script/build.ts` uploads to GitHub
 
 It fails on the former name in any case in UTF-8 and both UTF-16 byte orders, retired upstream hosts (the former product domain and the public model catalog service URL), and borrowed OAuth registrations or shared-key literals. The Codex CLI client used for ChatGPT sign-in is allowed. Only three classes are allowed and each is counted in the output: exact notice lines from `THIRD_PARTY_NOTICES.md` and `LICENSE`, Monaco's open-code-editor method name in its one exact casing, and Bun's built-in package table entry between its pinned neighbours. Run it by hand with `bun script/artifact-audit.ts <file-or-directory>...`.
 
-## Release blocker: two desktop identifier classes need an owner decision
+## Decision: both desktop identifier classes are allowed (1 October 2026)
 
-Desktop releases on macOS, Windows and Linux will fail the audit as `main` stands. The failure happens in `verify:package` (macOS) and `verify-notices.ts` (Windows and Linux), which run after the signing and notarization steps, so a release attempt spends that time before stopping. Neither class below is allowlisted, and none will be without the owner's approval.
+The owner's rule is that the former name may appear only in license text and third-party code. Both desktop classes are third-party identifiers that contain the name by coincidence, so they are allowed in `script/artifact-audit.ts` like the Monaco and Bun entries: each matches only its exact identifier between non-identifier boundaries, is counted in the audit summary, and has a fixture test.
 
-| Class | Where it comes from | Evidence |
-| ----- | ------------------- | -------- |
-| Node.js `util.styleText` local variable | Node.js inside Electron 42.11.4, the version `main` pins. The local variable that holds the opening ANSI codes is the former name followed by `s`. Node.js is part of the Electron executable on all three platforms (`Electron Framework` on macOS, the main executable on Windows and Linux). | 5 matches in `/Applications/Vector.app/Contents/Frameworks/Electron Framework.framework/Versions/A` from the installed 1.99.91 app. The packaged Linux and Windows Electron binaries were not audited here (no network to fetch them), but the same Node.js source ships in them. |
-| Drizzle's no-op encoder export | `drizzle-orm` 1.0.0-rc.2 exports a no-op encoder helper whose name is the word `noop` directly followed by `Encoder`. Lowercased, that identifier contains the former name. `packages/desktop/electron.vite.config.ts` bundles the engine's Node build (`packages/engine/dist/node/node.js`) into the desktop main process, and `packages/engine/script/build-node.ts` does not minify, so the identifier survives into `app.asar` on every desktop platform. The standalone CLI is minified (`packages/engine/script/build.ts`), which renames it there. | 5 matches, all in `main/chunks/node-*.js`, in a September 24 desktop build output, and the same 5 in a September 1 `app.asar`. |
+| Class     | Where it comes from                                                                                                             | Allowed form                                                                                           |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `node`    | Node.js `util.styleText` inside Electron's executable (`Electron Framework` on macOS, the main executable on Windows and Linux) | the local variable for the opening ANSI codes: the Monaco casing followed by `s`, next to `closeCodes` |
+| `drizzle` | drizzle-orm 1.0.0-rc.2's no-op encoder export, carried by the engine bundle in `app.asar`                                       | `no` + the name with its third letter capitalised + `r`                                                |
 
-The owner decides for each class:
-
-1. Approve it. Then each class gets its own tightly anchored, counted allowlist entry in `script/artifact-audit.ts`, like the Monaco and Bun entries: the exact identifier between non-identifier boundaries, reported in the audit summary, with a fixture test.
-2. Remove it at the source. For Node.js, move to an Electron build whose Node.js does not carry the identifier. For Drizzle, either minify the engine Node build that the desktop bundles (and verify the desktop app after that change) or move to a Drizzle release without the identifier. Do not patch compiled bytes or hide the name through string splitting or encoding.
-
-Until both classes are decided, report desktop releases as blocked by the artifact audit. The npm CLI and standalone CLI paths are not affected by either class.
+Anything else that contains the name, in any casing or encoding, still fails the release. Desktop releases are no longer blocked by the audit; repeat the audit on every release artifact as before.

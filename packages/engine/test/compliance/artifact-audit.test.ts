@@ -22,6 +22,14 @@ const monaco = (
     ),
   ).text()
 ).match(new RegExp(`\\b${name}Editor\\b`, "i"))?.[0] as string
+// The real export from the drizzle-orm release the desktop app's engine bundle carries.
+const drizzle = (
+  await Bun.file(
+    path.join(path.dirname(Bun.resolveSync("drizzle-orm/package.json", path.join(root, "packages/core"))), "index.js"),
+  ).text()
+).match(new RegExp(`\\bno${name}r\\b`, "i"))?.[0] as string
+// Node.js util.styleText, as Electron's executable embeds it: the opening-codes local variable.
+const styleText = `let ${monaco?.slice(0, -"Editor".length)}s = '';\n  let closeCodes = '';`
 const noise = Buffer.from([0, 255, 0, 127, 0x7f, 0x45, 0x4c, 0x46])
 
 // A synthetic native binary: embedded notices, a minified renderer and Bun's package table.
@@ -56,7 +64,7 @@ describe("release artifact audit", () => {
     })
     expect(report.violations).toEqual([])
     expect(report.files).toBe(4)
-    expect(report.allowed).toEqual({ license: 5, monaco: 2, bun: 1 })
+    expect(report.allowed).toEqual({ license: 5, monaco: 2, bun: 1, node: 0, drizzle: 0 })
   })
 
   test("Bun's Windows table layout is recognised only between its pinned neighbours", async () => {
@@ -86,7 +94,7 @@ describe("release artifact audit", () => {
       ["former-name", "utf-16be"],
       ["former-name", "utf-16"],
     ])
-    expect(report.allowed).toEqual({ license: 2, monaco: 2, bun: 1 })
+    expect(report.allowed).toEqual({ license: 2, monaco: 2, bun: 1, node: 0, drizzle: 0 })
     // Logs never repeat the matched bytes.
     expect(report.violations.some((item) => item.context.toLowerCase().includes(name))).toBe(false)
   })
@@ -103,6 +111,28 @@ describe("release artifact audit", () => {
     })
     expect(report.allowed.monaco).toBe(0)
     expect(report.violations.map((item) => item.kind)).toEqual(variants.map(() => "former-name"))
+  })
+
+  test("Node.js styleText's variable and drizzle-orm's no-op encoder pass only in their exact forms", async () => {
+    expect(drizzle).toBeString()
+    const allowed = await audit({
+      "Electron Framework": Buffer.concat([noise, Buffer.from(styleText), noise]),
+      "app.asar": Buffer.from(`exports.${drizzle} = sql.${drizzle};var x=${drizzle}(v);`),
+    })
+    expect(allowed).toMatchObject({ allowed: { node: 1, drizzle: 3 }, violations: [] })
+    const near = await audit({
+      "app.asar": Buffer.from(
+        [
+          `let ${styleText.slice(4, 4 + name.length)}sX = '';`,
+          `let ${name}s = '';`,
+          `exports.${drizzle}s = 1;`,
+          `exports.x${drizzle} = 1;`,
+          `exports.no${name}r = 1;`,
+        ].join(""),
+      ),
+    })
+    expect(near.allowed).toMatchObject({ node: 0, drizzle: 0 })
+    expect(near.violations).toHaveLength(5)
   })
 
   test("a notice line is allowed only verbatim", async () => {
@@ -157,7 +187,7 @@ describe("release artifact audit", () => {
           (item) => bytes.toString("latin1", item.offset, item.offset + 20) === "Ov23li8tweQw6odWQebz",
         ),
       ).toBe(true)
-      expect(report.allowed).toEqual({ license: 2, monaco: 2, bun: 1 })
+      expect(report.allowed).toEqual({ license: 2, monaco: 2, bun: 1, node: 0, drizzle: 0 })
     }
   })
 
@@ -182,7 +212,7 @@ describe("release artifact audit", () => {
 
     const clean = await auditArtifacts([path.join(dir.path, "clean-release")])
     expect(clean.violations).toEqual([])
-    expect(clean.allowed).toEqual({ license: 4, monaco: 4, bun: 2 })
+    expect(clean.allowed).toEqual({ license: 4, monaco: 4, bun: 2, node: 0, drizzle: 0 })
 
     const failing = await auditArtifacts([path.join(dir.path, "release")])
     expect(failing.violations.map((item) => [item.kind, path.basename(item.file)])).toEqual([

@@ -24,7 +24,13 @@
  * - monaco: Monaco's camel-case method that opens a code editor, exactly the name in the
  *   casing the notices display (first letter lowered) followed by `Editor`;
  * - bun: Bun's built-in trusted-package table entry (the name plus `-ai`), recognised only
- *   between its pinned alphabetical neighbours.
+ *   between its pinned alphabetical neighbours;
+ * - node: Node.js `util.styleText`'s local variable for the opening ANSI codes, the Monaco
+ *   casing plus `s`, inside Electron's executable;
+ * - drizzle: drizzle-orm's no-op encoder export, `no` + the name with its third letter
+ *   capitalised + `r`, in the engine bundle the desktop app embeds.
+ * The last two were approved on 1 October 2026 under the owner's rule that only license text
+ * and third-party code may carry the name: both are unrelated words that happen to contain it.
  */
 import path from "node:path"
 import { lstat, readdir } from "node:fs/promises"
@@ -55,7 +61,7 @@ type Context = { before: string; match: string; after: string }
 type Reading = Context & { encoding: Encoding; start: number }
 type Rules = Awaited<ReturnType<typeof loadRules>>
 
-export type AllowedClass = "license" | "monaco" | "bun"
+export type AllowedClass = "license" | "monaco" | "bun" | "node" | "drizzle"
 export type Violation = {
   file: string
   offset: number
@@ -75,7 +81,12 @@ export type AuditReport = {
 export async function auditArtifacts(paths: string[], options?: { chunkSize?: number }) {
   if (!paths.length) throw new Error("Name at least one artifact file or directory to audit")
   const rules = await loadRules()
-  const report: AuditReport = { files: 0, bytes: 0, allowed: { license: 0, monaco: 0, bun: 0 }, violations: [] }
+  const report: AuditReport = {
+    files: 0,
+    bytes: 0,
+    allowed: { license: 0, monaco: 0, bun: 0, node: 0, drizzle: 0 },
+    violations: [],
+  }
   const chunkSize = options?.chunkSize ?? 4 * 1024 * 1024
   for (const file of (await Promise.all(paths.map((item) => listFiles(path.resolve(item))))).flat()) {
     report.files++
@@ -102,6 +113,8 @@ export async function assertCleanArtifacts(paths: string[]) {
       `  allowed license notice text: ${report.allowed.license}`,
       `  allowed Monaco open-editor method names: ${report.allowed.monaco}`,
       `  allowed Bun built-in package table entries: ${report.allowed.bun}`,
+      `  allowed Node.js styleText variable names: ${report.allowed.node}`,
+      `  allowed drizzle-orm no-op encoder names: ${report.allowed.drizzle}`,
       `  violations: ${report.violations.length}`,
       ...report.violations
         .slice(0, 50)
@@ -133,6 +146,7 @@ async function loadRules() {
     .find((item) => item !== name && item !== item.toUpperCase())
   if (!display) throw new Error("The notices no longer show the former name's display casing")
   const monaco = display[0].toLowerCase() + display.slice(1)
+  const drizzle = name.slice(0, 2) + name[2].toUpperCase() + name.slice(3)
   // Every position of the name inside each notice line that carries it.
   const legal = [
     ...new Set(
@@ -167,7 +181,15 @@ async function loadRules() {
   })
   // Hides every audited value in printed context, not just the reported match.
   const mask = new RegExp(values.map((item) => item.value.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")).join("|"), "gi")
-  return { name, monaco, legal, needles, mask, reach: CONTEXT + Math.max(...needles.map((needle) => needle.length)) }
+  return {
+    name,
+    monaco,
+    drizzle,
+    legal,
+    needles,
+    mask,
+    reach: CONTEXT + Math.max(...needles.map((needle) => needle.length)),
+  }
 }
 
 async function listFiles(item: string): Promise<string[]> {
@@ -291,6 +313,10 @@ function allowedClass(context: Context, rules: Rules): AllowedClass | undefined 
     /^Editor(?![\w$])/.test(context.after)
   )
     return "monaco"
+  if (context.match === rules.monaco && !/[\w$]$/.test(context.before) && /^s(?![\w$])/.test(context.after))
+    return "node"
+  if (context.match === rules.drizzle && /(?<![\w$])no$/.test(context.before) && /^r(?![\w$])/.test(context.after))
+    return "drizzle"
   const previous = context.before.replace(/(?:\s|\\[nr]|\0)*$/, "")
   const following = context.after.slice(3).replace(/^(?:\s|\\[nr]|\0)*/, "")
   if (
