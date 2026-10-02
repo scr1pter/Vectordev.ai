@@ -14,11 +14,11 @@ export const prerender = true
   <p class="doc-cmd"><code>vector serve --port 4096
 vector attach http://localhost:4096 --dir ~/code/myapp</code><button class="doc-cmd-copy" type="button" aria-label="Copy this command">Copy</button></p>
   <p>
-    From the next release, configure <code>VECTOR_SERVER_PASSWORD</code> and, optionally,
+    From 1.99.91, the next release, configure <code>VECTOR_SERVER_PASSWORD</code> and, optionally,
     <code>VECTOR_SERVER_USERNAME</code>; the default username is <code>vector</code>, and non-loopback binding requires
-    a password unless you explicitly choose <code>--unsecured</code>. Current releases do not read these names or
+    a password unless you explicitly choose <code>--unsecured</code>. Releases before 1.99.91, such as desktop 1.99.8 and npm CLI 1.99.7, do not read these names or
     enforce that rule, so keep <code>vector serve</code> on loopback until you upgrade. Use a protected secret source
-    for server passwords. That release's settings and database overrides are <code>VECTOR_AGENT_CONFIG</code>,
+    for server passwords. From 1.99.91, the settings and database overrides are <code>VECTOR_AGENT_CONFIG</code>,
     <code>VECTOR_AGENT_CONFIG_DIR</code> and <code>VECTOR_AGENT_DB</code>.
     Keep the existing database file when migrating an ambiguous historical override.
   </p>

@@ -15,9 +15,9 @@ export const prerender = true
             {conditions.map(([term, detail]) => (<div><dt>{term}</dt><dd>{detail}</dd></div>))}
           </dl>
           <p class="note">
-            The sandbox flag: from the next release, operating-system confinement is enabled with the
-            <code>VECTOR_SHELL_SANDBOX</code> environment variable. Current releases do not read that name, so setting it
-            there confines nothing. It is opt-in and off by default, uses a seatbelt profile on macOS and bwrap on Linux
+            The sandbox flag: from 1.99.91, the next release, operating-system confinement is enabled with the
+            <code>VECTOR_SHELL_SANDBOX</code> environment variable. Releases before 1.99.91, such as desktop 1.99.8 and npm CLI 1.99.7, do not read that name, so
+            setting it there confines nothing. It is opt-in and off by default, uses a seatbelt profile on macOS and bwrap on Linux
             where installed, and has no Windows equivalent — so on Windows Vector reports that it is running
             unconfined instead of implying protection it cannot provide.
           </p>

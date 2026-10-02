@@ -130,7 +130,7 @@ export const conditions = [
   ],
   [
     "The shell sandbox is off by default",
-    "Commands an agent runs can be confined to their workspace by the operating system's own mechanism — a seatbelt profile on macOS, bubblewrap on Linux where it is installed — by setting VECTOR_SHELL_SANDBOX from the next release (current releases do not read that name, so setting it there confines nothing). It is opt-in, off by default, and Windows ships no equivalent, so Vector says so and runs unconfined there rather than pretending.",
+    "Commands an agent runs can be confined to their workspace by the operating system's own mechanism — a seatbelt profile on macOS, bubblewrap on Linux where it is installed — by setting VECTOR_SHELL_SANDBOX from 1.99.91, the next release (releases before 1.99.91, such as desktop 1.99.8 and npm CLI 1.99.7, do not read that name, so setting it there confines nothing). It is opt-in, off by default, and Windows ships no equivalent, so Vector says so and runs unconfined there rather than pretending.",
   ],
   [
     "Cloud actions need your authorization",
@@ -406,9 +406,9 @@ export const subagentKinds = [
 export const changelog = [
   [upcomingRelease.label, upcomingRelease.title, `${upcomingRelease.summary} ${upcomingRelease.status}`],
   [
-    "September 2026 · 1.99.91",
+    "Next release · 1.99.91",
     "Provider setup, ChatGPT sign-in and settings that carry over",
-    "Requests without a provider key no longer go through a third-party shared gateway: connect a provider in Settings or with vector auth login, and Sign in with ChatGPT remains available for OpenAI models. A prompt sent before any provider is connected opens the connect-provider dialog. Free models inside of Vector are available only once Vector's service for them is enabled. Settings use vector.json and .vector, Vector's environment variables start with VECTOR_ (the generic overrides are VECTOR_AGENT_CONFIG, VECTOR_AGENT_CONFIG_DIR and VECTOR_AGENT_DB), and an upgrade imports recognized earlier settings and variables while keeping the original files. GitHub automation without a configured model stops with MODEL and provider-key instructions. Vectorscope answers /vectorscope, /vs, /vector and /vx, and Command-F places chat search below the title strip. Unsigned desktop releases require a manual download; signed automatic-update feeds are preserved.",
+    "Not published yet: until its installers are published, the download page offers desktop 1.99.8 and npm installs CLI 1.99.7, which do not read the VECTOR_ names or vector.json. Requests without a provider key no longer go through a third-party shared gateway: connect a provider in Settings or with vector auth login, and Sign in with ChatGPT remains available for OpenAI models. A prompt sent before any provider is connected opens the connect-provider dialog. Free models inside of Vector are available only once Vector's service for them is enabled. Settings use vector.json and .vector, Vector's environment variables start with VECTOR_ (the generic overrides are VECTOR_AGENT_CONFIG, VECTOR_AGENT_CONFIG_DIR and VECTOR_AGENT_DB), and an upgrade imports recognized earlier settings and variables while keeping the original files. GitHub automation without a configured model stops with MODEL and provider-key instructions. Vectorscope answers /vectorscope, /vs, /vector and /vx, and Command-F places chat search below the title strip. Unsigned desktop releases require a manual download; signed automatic-update feeds are preserved.",
   ],
   [
     "September 2026 · 1.99.9",
@@ -521,7 +521,7 @@ export const faqs = [
   {
     question: "Can I stop Vector from using subagents?",
     answer:
-      "Yes. In the desktop app, switch off General subagents in Settings → Agents. In the terminal, from the next release, set agent.general.disable to true in ~/.config/vector/vector.json, or in a project's vector.json for that project only. In the terminal it takes effect the next time you start Vector there. Vector's agent then does the work itself, except parts that fit a subagent specialist, which it can still hand to one. You can also still call a specialist yourself with @ and its name.",
+      "Yes. In the desktop app, switch off General subagents in Settings → Agents. In the terminal, from 1.99.91, the next release, set agent.general.disable to true in ~/.config/vector/vector.json, or in a project's vector.json for that project only. In the terminal it takes effect the next time you start Vector there. Vector's agent then does the work itself, except parts that fit a subagent specialist, which it can still hand to one. You can also still call a specialist yourself with @ and its name.",
   },
   {
     question: "Can I edit code myself?",

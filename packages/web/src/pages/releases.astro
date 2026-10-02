@@ -9,14 +9,12 @@ export const prerender = true
 
 type ReleasePost = VectorRelease & {
   line: string
-  latest?: boolean
 }
 
 const posts: ReleasePost[] = [
-  ...[...release199].reverse().map((release, index) => ({
+  ...[...release199].reverse().map((release) => ({
     ...release,
     line: "Vector 1.99",
-    latest: index === 0,
   })),
   ...[...release119].reverse().map((release) => ({
     ...release,
@@ -39,7 +37,8 @@ const posts: ReleasePost[] = [
     })),
 ]
 
-const latest = posts[0]
+// A release whose installers are not published yet is the next release, not the latest one.
+const latest = posts.find((post) => !post.availability) ?? posts[0]
 const latestAnchor = `#release-${latest.version.replaceAll(".", "-")}`
 ---
 
@@ -102,7 +101,7 @@ const latestAnchor = `#release-${latest.version.replaceAll(".", "-")}`
           </article>
           {posts.map((release) => (
             <article
-              class:list={["release-post", { latest: release.latest }]}
+              class:list={["release-post", { latest: release === latest }]}
               id={`release-${release.version.replaceAll(".", "-")}`}
             >
               <div class="timeline-rail" aria-hidden="true">
@@ -113,9 +112,11 @@ const latestAnchor = `#release-${latest.version.replaceAll(".", "-")}`
                 <div class="release-meta">
                   <span class="version-tag"><Tag size={12} strokeWidth={1.8} /> v{release.version}</span>
                   <span>{release.line}</span>
-                  {release.latest && <strong>Latest</strong>}
+                  {release === latest && <strong>Latest</strong>}
+                  {release.availability && <strong>Next release</strong>}
                 </div>
                 <h3>{release.title}</h3>
+                {release.availability && <p>{release.availability}</p>}
                 <p>{release.summary}</p>
                 <div class="release-links">
                   <a href="/login?returnTo=%2Faccount">Download Vector <ArrowUpRight size={13} strokeWidth={1.8} /></a>
