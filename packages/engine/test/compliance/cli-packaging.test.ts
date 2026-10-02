@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { chmod, mkdtemp, mkdir, rm, symlink } from "node:fs/promises"
+import { chmod, mkdtemp, mkdir, realpath, rm, symlink } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import { catalogBody, catalogDigest } from "../../script/release-catalog"
@@ -18,11 +18,16 @@ const formerName = realNotices
 
 async function fixture() {
   const dir = await mkdtemp(path.join(os.tmpdir(), "vector-cli-packaging-"))
-  await symlink(
-    path.join(root, "packages/engine/node_modules"),
-    path.join(dir, "node_modules"),
-    process.platform === "win32" ? "junction" : "dir",
-  )
+  // Relocating the whole dependency directory breaks its relative workspace links on Windows.
+  for (const name of ["@vectordevai/schema", "effect"]) {
+    const destination = path.join(dir, "node_modules", name)
+    await mkdir(path.dirname(destination), { recursive: true })
+    await symlink(
+      await realpath(path.join(root, "packages/engine/node_modules", name)),
+      destination,
+      process.platform === "win32" ? "junction" : "dir",
+    )
+  }
   const catalog = catalogBody(
     JSON.stringify({ openai: { id: "openai", name: "OpenAI", env: ["OPENAI_API_KEY"], models: {} } }),
   )
