@@ -52,7 +52,7 @@
   min-width: 0;
 }
 
-/* Same tile as the checkpoint glyphs (.vx-arch__glyph): soft purple, one quiet ring. */
+/* A soft purple tile with one quiet ring. */
 .vx-server-dialog__glyph {
   display: grid;
   place-items: center;

@@ -3103,8 +3103,8 @@ html[data-vector-glass="false"] [data-vector-help-menu] {
 }
 
 /* ============================================================================
- * Agent surfaces — the runtime picker, its setup panel, the external agent
- * transcript, and Code Archaeology.
+ * Agent surfaces — the runtime picker, its setup panel and the external agent
+ * transcript.
  *
  * These screens were built from raw white-alpha utilities rather than the ramp
  * above: fourteen different text opacities, flat `white/[0.02]` fills, and a
@@ -3591,104 +3591,4 @@ html[data-vector-focus-indicators="true"] [data-vector-agent-launcher] textarea.
   font-family: var(--vx-mono);
   font-size: 10.5px;
   line-height: 1.42;
-}
-
-/* ---- Code Archaeology ---- */
-.vx-arch {
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  height: min(720px, 88vh);
-  width: min(760px, 92vw);
-  border-radius: 16px;
-  border: 1px solid var(--vx-line);
-  background: var(--vector-workspace-bg, #1d1d1f);
-  box-shadow: var(--vx-shadow-float);
-}
-
-.vx-arch__head {
-  display: flex;
-  flex-shrink: 0;
-  align-items: center;
-  gap: 12px;
-  padding: 13px 16px;
-  border-bottom: 1px solid var(--vx-line);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0) 100%);
-}
-
-.vx-arch__glyph {
-  display: grid;
-  place-items: center;
-  width: 32px;
-  height: 32px;
-  flex-shrink: 0;
-  border-radius: 10px;
-  color: var(--vx-purple-bright);
-  background: linear-gradient(180deg, rgba(182, 159, 247, 0.22), rgba(182, 159, 247, 0.08));
-  box-shadow: 0 0 0 1px color-mix(in oklab, var(--vx-purple) 26%, transparent);
-}
-
-/* Each checkpoint is a station on one line. The rail is what turns a stack of
-   identical grey rows into a history you can read top to bottom. */
-.vx-arch__list {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.vx-arch__list::before {
-  content: "";
-  position: absolute;
-  top: 18px;
-  bottom: 18px;
-  left: 25px;
-  width: 1px;
-  background: linear-gradient(180deg, transparent, var(--vx-line-strong) 8%, var(--vx-line-strong) 92%, transparent);
-}
-
-.vx-arch__item {
-  position: relative;
-  z-index: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 10px 12px 10px 44px;
-  border-radius: 11px;
-  border: 1px solid var(--vx-line);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0) 44%), var(--vx-surface);
-  transition:
-    border-color 180ms var(--vx-ease),
-    background 180ms var(--vx-ease);
-}
-
-.vx-arch__item:hover {
-  border-color: var(--vx-line-strong);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0) 44%), var(--vx-surface-raised);
-}
-
-.vx-arch__seq {
-  position: absolute;
-  top: 11px;
-  left: 12px;
-  display: grid;
-  place-items: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 999px;
-  color: var(--vx-purple-bright);
-  font-size: 10px;
-  font-variant-numeric: tabular-nums;
-  background: linear-gradient(180deg, rgba(182, 159, 247, 0.2), rgba(182, 159, 247, 0.07));
-  /* Rings the workspace colour so the rail passes behind, not through. */
-  box-shadow:
-    0 0 0 1px color-mix(in oklab, var(--vx-purple) 30%, transparent),
-    0 0 0 4px var(--vector-workspace-bg, #1d1d1f);
-}
-
-.vx-arch__name {
-  min-width: 0;
-  color: var(--vx-text);
-  font-size: 13px;
-  font-weight: 550;
 }
