@@ -1,4 +1,7 @@
-const literal = (value: string) => `'${value.replaceAll("'", "''")}'`
+// PowerShell 5.1 treats smart quotes as delimiters and reads BOM-less scripts as ANSI.
+// Decode string data at runtime so generated source stays ASCII regardless of path characters.
+const literal = (value: string) =>
+  `([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${Buffer.from(value, "utf8").toString("base64")}')))`
 
 export function script(input: {
   pid: number
