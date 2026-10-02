@@ -1443,6 +1443,45 @@ test("mode cost preserves over-200k pricing from base model", () => {
   })
 })
 
+test("catalog modes the bundled SDKs cannot send are not offered as models", () => {
+  const modes = {
+    fast: { provider: { body: { service_tier: "priority" } } },
+    pro: { provider: { body: { reasoning: { mode: "pro" } } } },
+    ultrafast: { provider: { body: { service_tier: "ultrafast" } } },
+  }
+  const model = (id: string, extra: object = {}) => ({
+    id,
+    name: id,
+    cost: { input: 10, output: 50 },
+    limit: { context: 1_050_000, input: 922_000, output: 128_000 },
+    experimental: { modes },
+    ...extra,
+  })
+  const openai = Provider.fromModelCatalogProvider({
+    id: "openai",
+    name: "OpenAI",
+    npm: "@ai-sdk/openai",
+    env: [],
+    models: { "gpt-6-astra": model("gpt-6-astra"), "gpt-5.5": model("gpt-5.5") },
+  } as unknown as ModelCatalog.Provider).models
+  // The bundled SDK honours priority for gpt-5 ids and drops it for gpt-6, so only GPT-5.5 keeps a Fast model.
+  expect(Object.keys(openai).sort()).toEqual(["gpt-5.5", "gpt-5.5-fast", "gpt-6-astra"])
+  expect(openai["gpt-5.5-fast"].options["serviceTier"]).toEqual("priority")
+
+  const bedrock = Provider.fromModelCatalogProvider({
+    id: "amazon-bedrock",
+    name: "Amazon Bedrock",
+    npm: "@ai-sdk/amazon-bedrock",
+    env: [],
+    models: { "global.openai.gpt-6-astra": model("global.openai.gpt-6-astra") },
+  } as unknown as ModelCatalog.Provider).models
+  expect(Object.keys(bedrock).sort()).toEqual([
+    "global.openai.gpt-6-astra",
+    "global.openai.gpt-6-astra-fast",
+    "global.openai.gpt-6-astra-pro",
+  ])
+})
+
 test("the model catalog normalization fills required response fields", () => {
   const provider = {
     id: "gateway",

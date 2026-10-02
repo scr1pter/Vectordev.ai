@@ -1225,6 +1225,7 @@ export function fromModelCatalogProvider(provider: ModelCatalog.Provider): Info 
   for (const [key, model] of Object.entries(provider.models)) {
     models[key] = fromModelCatalogModel(provider, model)
     for (const [mode, opts] of Object.entries(model.experimental?.modes ?? {})) {
+      if (!ModelCatalog.modeSupported(model.provider?.npm ?? provider.npm, model.id, opts.provider?.body)) continue
       const id = `${model.id}-${mode}`
       const base = fromModelCatalogModel(provider, model)
       models[id] = {

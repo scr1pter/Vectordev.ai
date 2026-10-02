@@ -166,6 +166,7 @@ export const ModelCatalogPlugin = define({
             const baseCost = cost(model.cost)
             catalog.model.update(providerID, model.id, (draft) => applyModel(draft, model, { cost: baseCost }))
             for (const [mode, options] of Object.entries(model.experimental?.modes ?? {})) {
+              if (!ModelCatalog.modeSupported(model.provider?.npm ?? item.npm, model.id, options.provider?.body)) continue
               catalog.model.update(providerID, `${model.id}-${mode}`, (draft) =>
                 applyModel(draft, model, {
                   name: modeName(model, mode),

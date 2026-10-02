@@ -16,6 +16,33 @@ function createTestJwt(payload: object): string {
 }
 
 describe("plugin.codex", () => {
+  test("a ChatGPT sign-in keeps every GPT-5 and GPT-6 model at no cost and drops older OpenAI models", async () => {
+    const hooks = await CodexAuthPlugin({} as never)
+    const ids = ["gpt-6-astra", "gpt-6-sol", "gpt-6.1-sol", "gpt-5.6-sol", "gpt-5.5", "codex-mini-latest", "gpt-4o", "o3"]
+    const provider = {
+      models: Object.fromEntries(
+        ids.map((id) => [
+          id,
+          {
+            id,
+            api: { id },
+            cost: { input: 1, output: 2, cache: { read: 0, write: 0 } },
+            limit: { context: 1_050_000, output: 128_000 },
+          },
+        ]),
+      ),
+    }
+    const models = await hooks.provider!.models!(provider as never, { auth: { type: "oauth" } } as never)
+    expect(Object.keys(models).sort()).toEqual(
+      ["codex-mini-latest", "gpt-5.5", "gpt-5.6-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6.1-sol"].sort(),
+    )
+    expect(models["gpt-6-astra"].cost.input).toBe(0)
+    // The Codex backend's 272K window, not the API's 1,050,000.
+    expect(models["gpt-6-astra"].limit).toEqual({ context: 400_000, input: 272_000, output: 128_000 })
+    expect(models["gpt-6.1-sol"].limit.input).toBe(272_000)
+    expect(models["codex-mini-latest"].limit.context).toBe(1_050_000)
+  })
+
   test("escapes provider errors in callback HTML", () => {
     const error = `</div><script>alert("xss" & 'more')</script>`
     const html = renderOAuthError(error)
