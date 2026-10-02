@@ -85,6 +85,47 @@ export default tool({ description: "fixture", args: { value: tool.schema.string(
     await Bun.write(path.join(tmp.path, "unrelated.ts"), 'export { x } from "@fixture-unrelated/not-plugin"')
     expect((await load(path.join(tmp.path, "unrelated.ts"))).ok).toBe(false)
   })
+  test("resolves installed SDKs from escaped plugin paths for static, computed, and metadata imports", async () => {
+    await using tmp = await tmpdir()
+    const directory = path.join(tmp.path, "plugin space # percent%")
+    const file = path.join(directory, "plugin.ts")
+    for (const location of [directory, path.join(directory, "other")]) {
+      const sdk = path.join(location, "node_modules/@fixture-escaped/plugin")
+      await Bun.write(
+        path.join(sdk, "package.json"),
+        JSON.stringify({
+          name: "@fixture-escaped/plugin",
+          type: "module",
+          exports: { ".": { import: "./root.js", require: "./require.cjs" } },
+        }),
+      )
+      await Bun.write(path.join(sdk, "root.js"), 'export const identity = "installed import"')
+      await Bun.write(path.join(sdk, "require.cjs"), 'exports.identity = "installed require"')
+    }
+    await Bun.write(
+      file,
+      `export { tool } from "@fixture-escaped-missing/plugin"
+export { identity } from "@fixture-escaped/plugin"
+const sdk = "@fixture-escaped/plugin"
+export const computed = (await import(sdk)).identity
+export const resolved = import.meta.resolve(sdk)
+export const explicit = import.meta.resolve(sdk, new URL("./other/probe.ts", import.meta.url).href)
+export const explicitURL = import.meta.resolve(sdk, new URL("./other/probe.ts", import.meta.url))
+export const required = import.meta.require("./node_modules/@fixture-escaped/plugin/require.cjs").identity`,
+    )
+    const result = await load(file)
+    if (!result.ok) throw result.error
+    expect(result.value.mod).toMatchObject({
+      identity: "installed import",
+      computed: "installed import",
+      resolved: pathToFileURL(path.join(directory, "node_modules/@fixture-escaped/plugin/root.js")).href,
+      explicit: pathToFileURL(path.join(directory, "other/node_modules/@fixture-escaped/plugin/root.js")).href,
+      explicitURL: pathToFileURL(path.join(directory, "other/node_modules/@fixture-escaped/plugin/root.js")).href,
+      required: "installed require",
+    })
+    expect(typeof result.value.mod.tool).toBe("function")
+    expect((await fs.lstat(path.join(directory, "node_modules/@fixture-escaped/plugin"))).isSymbolicLink()).toBe(false)
+  })
   test("preserves import.meta identity, local resources, and literal and computed dynamic imports", async () => {
     await using tmp = await tmpdir()
     const file = path.join(tmp.path, "plugin.ts")

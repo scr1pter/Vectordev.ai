@@ -185,7 +185,7 @@ test("an interrupted SDK install is not linked into a local plugin", async () =>
 
 test("an SDK-dependent plugin prefers a completed shared SDK over its bundled fallback after restart", async () => {
   await using tmp = await tmpdir()
-  const entry = path.join(tmp.path, "plugin.mjs")
+  const entry = path.join(tmp.path, "plugin space # percent%", "plugin.mjs")
   await Bun.write(entry, 'import { tool } from "@vectordevai/plugin"; export default tool({ source: "bundled" });\n')
   expect(await loadOffline(entry, tmp.path)).toEqual({ source: "bundled" })
   const cache = path.join(tmp.path, "cache", "vector")
@@ -197,7 +197,7 @@ test("an SDK-dependent plugin prefers a completed shared SDK over its bundled fa
   await Bun.write(path.join(sdk, "index.js"), 'export const tool = () => ({ source: "shared" });\n')
   await Bun.write(ConfigDependencies.readyFile(cache), ConfigDependencies.specifier)
   expect(await loadOffline(entry, tmp.path)).toEqual({ source: "shared" })
-  expect(await fs.realpath(path.join(tmp.path, "node_modules", ConfigDependencies.packageName))).toBe(
+  expect(await fs.realpath(path.join(path.dirname(entry), "node_modules", ConfigDependencies.packageName))).toBe(
     await fs.realpath(sdk),
   )
 })
