@@ -231,66 +231,109 @@ test("credential stores cover the data directory, the CLI default, the earlier p
   const fakeHome = workspace("sandbox-home-")
   // The desktop layout: the engine's data directory lives under the app's user data.
   const data = path.join(fakeHome, "Library", "Application Support", "ai.vector.app", "xdg-data", "vector")
-  const paths = credentialStorePaths(fakeHome, data)
   const cliData = path.join(fakeHome, ".local", "share")
+  const configHome = path.join(fakeHome, "custom-config")
+  // A channel database exists only on disk, so the sandbox has to find it by listing.
+  fs.mkdirSync(data, { recursive: true })
+  ;["vector-nightly.db", "vector-nightly.db-wal", "vector-nightly.db-shm", "notes.db"].forEach((file) =>
+    fs.writeFileSync(path.join(data, file), ""),
+  )
+  const paths = credentialStorePaths(fakeHome, data, configHome)
+  const directories = [
+    data,
+    path.join(cliData, "vector"),
+    path.join(cliData, legacyName!),
+    path.join(path.dirname(data), legacyName!),
+  ]
 
-  ;["auth.json", "mcp-auth.json", "cli-auth.json", "plugin-oauth-approvals.json"].forEach((file) => {
-    expect(paths).toContain(path.join(data, file))
-    expect(paths).toContain(path.join(cliData, "vector", file))
-    expect(paths).toContain(path.join(cliData, legacyName!, file))
-    expect(paths).toContain(path.join(path.dirname(data), legacyName!, file))
-  })
-  // macOS keeps Electron user data under Application Support, Linux under ~/.config.
-  ;["Library/Application Support", ".config"].forEach((root) =>
+  directories.forEach((directory) =>
+    ["auth.json", "mcp-auth.json", "cli-auth.json", "plugin-oauth-approvals.json"].forEach((file) =>
+      expect(paths).toContain(path.join(directory, file)),
+    ),
+  )
+  // The database keeps integration keys in plain JSON, on every channel and in WAL mode.
+  directories.forEach((directory) =>
+    ["", "-wal", "-shm"].forEach((suffix) =>
+      expect(paths).toContain(path.join(directory, `${path.basename(directory)}.db${suffix}`)),
+    ),
+  )
+  ;["vector-nightly.db", "vector-nightly.db-wal", "vector-nightly.db-shm"].forEach((file) =>
+    expect(paths).toContain(path.join(data, file)),
+  )
+  expect(paths).not.toContain(path.join(data, "notes.db"))
+  // macOS keeps Electron user data under Application Support, Linux under $XDG_CONFIG_HOME
+  // or ~/.config. Each desktop engine keeps its own stores in the app's xdg-data folder.
+  ;[path.join(fakeHome, "Library", "Application Support"), path.join(fakeHome, ".config"), configHome].forEach((root) =>
     ["ai.vector.app", "ai.vector.app.beta", "ai.vector.app.dev"].forEach((id) => {
-      expect(paths).toContain(path.join(fakeHome, root, id, "secure-runtime"))
-      expect(paths).toContain(path.join(fakeHome, root, id, "vector-license.json"))
+      expect(paths).toContain(path.join(root, id, "secure-runtime"))
+      expect(paths).toContain(path.join(root, id, "vector-license.json"))
+      expect(paths).toContain(path.join(root, id, "xdg-data", "vector", "auth.json"))
+      expect(paths).toContain(path.join(root, id, "xdg-data", "vector", "mcp-auth.json"))
+      expect(paths).toContain(path.join(root, id, "xdg-data", "vector", "vector.db"))
     }),
   )
   // The rest of the data directory (worktrees, logs, tool output) stays reachable.
   expect(paths).not.toContain(data)
 })
 
-test.skipIf(!sandboxAvailability().supported)("an agent cannot read Vector's credential stores or the vault key", () => {
-  const root = workspace()
-  const fakeHome = workspace("sandbox-home-")
-  const data = path.join(fakeHome, ".local", "share", "vector")
-  const secrets = [
-    path.join(data, "auth.json"),
-    path.join(data, "mcp-auth.json"),
-    path.join(data, "cli-auth.json"),
-    path.join(fakeHome, ".local", "share", legacyName!, "auth.json"),
-    path.join(fakeHome, ".local", "share", legacyName!, "mcp-auth.json"),
-    path.join(fakeHome, darwin ? "Library/Application Support" : ".config", "ai.vector.app", "secure-runtime", "credential-key.v1"),
-  ]
-  const readable = path.join(data, "log", "engine.log")
-  ;[...secrets, readable].forEach((file) => {
-    fs.mkdirSync(path.dirname(file), { recursive: true })
-    fs.writeFileSync(file, file === readable ? "log-line" : "secret")
-  })
+test.skipIf(!sandboxAvailability().supported)(
+  "an agent cannot read Vector's credential stores or the vault key",
+  () => {
+    const root = workspace()
+    const fakeHome = workspace("sandbox-home-")
+    const data = path.join(fakeHome, ".local", "share", "vector")
+    const secrets = [
+      path.join(data, "auth.json"),
+      path.join(data, "mcp-auth.json"),
+      path.join(data, "cli-auth.json"),
+      path.join(fakeHome, ".local", "share", legacyName!, "auth.json"),
+      path.join(fakeHome, ".local", "share", legacyName!, "mcp-auth.json"),
+      path.join(data, "vector.db"),
+      path.join(
+        fakeHome,
+        darwin ? "Library/Application Support" : ".config",
+        "ai.vector.app",
+        "secure-runtime",
+        "credential-key.v1",
+      ),
+      path.join(
+        fakeHome,
+        darwin ? "Library/Application Support" : ".config",
+        "ai.vector.app",
+        "xdg-data",
+        "vector",
+        "auth.json",
+      ),
+    ]
+    const readable = path.join(data, "log", "engine.log")
+    ;[...secrets, readable].forEach((file) => {
+      fs.mkdirSync(path.dirname(file), { recursive: true })
+      fs.writeFileSync(file, file === readable ? "log-line" : "secret")
+    })
 
-  const wrapped = wrapCommand({
-    shell: "/bin/sh",
-    command: [
-      ...secrets.map((file) => `cat ${JSON.stringify(file)} 2>/dev/null`),
-      `cat ${JSON.stringify(readable)}`,
-      ...secrets.map((file) => `printf tamper > ${JSON.stringify(file)} 2>/dev/null`),
-      "true",
-    ].join("; "),
-    cwd: root,
-    env: process.env,
-    workspaceRoot: root,
-    home: fakeHome,
-    data,
-  })
-  expect(wrapped.sandboxed).toBe(true)
-  const result = spawnSync(wrapped.command, wrapped.args, { cwd: root, env: process.env, encoding: "utf8" })
-  const output = (result.stdout + result.stderr).trim()
+    const wrapped = wrapCommand({
+      shell: "/bin/sh",
+      command: [
+        ...secrets.map((file) => `cat ${JSON.stringify(file)} 2>/dev/null`),
+        `cat ${JSON.stringify(readable)}`,
+        ...secrets.map((file) => `printf tamper > ${JSON.stringify(file)} 2>/dev/null`),
+        "true",
+      ].join("; "),
+      cwd: root,
+      env: process.env,
+      workspaceRoot: root,
+      home: fakeHome,
+      data,
+    })
+    expect(wrapped.sandboxed).toBe(true)
+    const result = spawnSync(wrapped.command, wrapped.args, { cwd: root, env: process.env, encoding: "utf8" })
+    const output = (result.stdout + result.stderr).trim()
 
-  expect(output).not.toContain("secret")
-  expect(output).toContain("log-line")
-  secrets.forEach((file) => expect(fs.readFileSync(file, "utf8")).toBe("secret"))
-})
+    expect(output).not.toContain("secret")
+    expect(output).toContain("log-line")
+    secrets.forEach((file) => expect(fs.readFileSync(file, "utf8")).toBe("secret"))
+  },
+)
 
 test.skipIf(!darwin)("linked worktrees keep shared objects, refs, and reflogs read-only", () => {
   // Keep both checkouts outside macOS's broad temporary-directory allowance so

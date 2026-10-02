@@ -75,7 +75,8 @@ const SECRETS = [
 const CREDENTIAL_FILES = ["auth.json", "mcp-auth.json", "cli-auth.json", "plugin-oauth-approvals.json"]
 
 // The desktop app keeps its vault key and license beside its user data. Electron puts
-// that under Application Support on macOS and ~/.config on Linux, named by app ID.
+// that under Application Support on macOS and $XDG_CONFIG_HOME (default ~/.config) on
+// Linux, named by app ID.
 const DESKTOP_ROOTS = ["Library/Application Support", ".config"]
 const DESKTOP_APP_IDS = ["ai.vector.app", "ai.vector.app.beta", "ai.vector.app.dev"]
 const DESKTOP_SECRETS = ["secure-runtime", "vector-license.json"]
@@ -400,21 +401,55 @@ function cargoCredentialPaths(home: string) {
 
 /**
  * Vector's credential stores, the earlier product's equivalents (a user who upgraded
- * still has them on disk), and the desktop vault key. The desktop runs the engine
- * with its own XDG_DATA_HOME, so the CLI's default data root is listed as well: the
- * two apps often share one machine.
+ * still has them on disk), and the desktop vault key. The desktop runs its engine
+ * with XDG_DATA_HOME=<userData>/xdg-data, so that engine's stores are listed beside
+ * the vault key, and the CLI's default data root is listed as well: the two apps
+ * often share one machine.
+ *
+ * The SQLite database is listed too. Its `credential` table holds integration keys as
+ * plain JSON, so it is worth as much as auth.json. Hiding it also hides session
+ * history from sandboxed commands, which is the intended trade.
  */
-export function credentialStorePaths(home: string, data: string) {
-  const roots = Array.from(new Set([path.dirname(data), path.join(home, ".local", "share")]))
+export function credentialStorePaths(home: string, data: string, configHome = process.env.XDG_CONFIG_HOME) {
   const names = [path.basename(data), ...(legacyName ? [legacyName] : [])]
-  return [
-    ...roots.flatMap((root) =>
-      names.flatMap((name) => CREDENTIAL_FILES.map((file) => canonical(path.join(root, name, file)))),
+  const desktops = Array.from(
+    new Set([...DESKTOP_ROOTS, ...(configHome ? [configHome] : [])].map((root) => path.resolve(home, root))),
+  ).flatMap((root) => DESKTOP_APP_IDS.map((id) => path.join(root, id)))
+  const directories = [
+    ...Array.from(new Set([path.dirname(data), path.join(home, ".local", "share")])).flatMap((root) =>
+      names.map((name) => path.join(root, name)),
     ),
-    ...DESKTOP_ROOTS.flatMap((root) =>
-      DESKTOP_APP_IDS.flatMap((id) => DESKTOP_SECRETS.map((entry) => canonical(path.join(home, root, id, entry)))),
-    ),
+    ...desktops.map((app) => path.join(app, "xdg-data", "vector")),
   ]
+  return [
+    ...directories.flatMap((directory) => [
+      ...CREDENTIAL_FILES.map((file) => path.join(directory, file)),
+      ...databaseFiles(directory),
+    ]),
+    ...desktops.flatMap((app) => DESKTOP_SECRETS.map((entry) => path.join(app, entry))),
+  ].map(canonical)
+}
+
+/**
+ * The database is `<name>.db`, or `<name>-<channel>.db` on other release channels,
+ * with -wal and -shm beside it. Seatbelt and bubblewrap both deny by exact path, so
+ * channel databases are found by listing the directory. The engine opens its
+ * database before any shell command runs, so a channel file that does not exist yet
+ * is not one this engine is using.
+ */
+function databaseFiles(directory: string) {
+  const name = path.basename(directory)
+  const existing =
+    fs.existsSync(directory) && fs.statSync(directory).isDirectory()
+      ? fs
+          .readdirSync(directory)
+          .filter(
+            (entry) => entry.startsWith(name) && /^(-[^/]+)?\.db(-wal|-shm|-journal)?$/.test(entry.slice(name.length)),
+          )
+      : []
+  return Array.from(new Set([...["", "-wal", "-shm"].map((suffix) => `${name}.db${suffix}`), ...existing])).map(
+    (entry) => path.join(directory, entry),
+  )
 }
 
 /**
