@@ -18,12 +18,16 @@ test("build, runtime and release catalog paths have no live dependency on the or
   expect(workflow).toContain("verify-catalog-mirror.ts")
 })
 
-test("both public catalog aliases rewrite to the owned Blob mirror", async () => {
-  const config = await Bun.file(new URL("../../../../vercel.json", import.meta.url)).json()
-  for (const source of ["/models", "/models/api.json"]) {
-    expect(config.rewrites.find((rule: { source: string }) => rule.source === source)).toEqual({
-      source,
-      destination: "https://42qryducihx01gl0.public.blob.vercel-storage.com/models/api.json",
-    })
-  }
+test("both public catalog aliases serve the committed catalog from vectordev.ai itself", async () => {
+  const root = path.resolve(import.meta.dirname, "../../../..")
+  const config = await Bun.file(path.join(root, "vercel.json")).json()
+  // /models/api.json is the static file itself (Vercel serves files before rewrites); /models aliases it.
+  expect(config.rewrites.find((rule: { source: string }) => rule.source === "/models/api.json")).toBeUndefined()
+  expect(config.rewrites.find((rule: { source: string }) => rule.source === "/models")).toEqual({
+    source: "/models",
+    destination: "/models/api.json",
+  })
+  const catalog = await Bun.file(path.join(root, "packages/web/public/models/api.json")).json()
+  expect(Object.keys(catalog.openai.models)).toEqual(expect.arrayContaining(["gpt-6-astra", "gpt-6-sol", "gpt-6.1-sol"]))
+  expect(await Bun.file(path.join(root, "script/prune-vector-site.mjs")).text()).toContain('"models"')
 })

@@ -1,5 +1,17 @@
 # Owner action: Vector model catalog and provider artwork
 
+## Current state (2 October 2026)
+
+Desktop 1.99.91 first shipped with a stale bundled catalog that stopped at gpt-5.5, and `https://vectordev.ai/models/api.json` returned 404, so signed-in ChatGPT users could not see gpt-6-astra, gpt-6-sol, gpt-6.1-sol or the gpt-5.6 family. Until the fork below exists, the catalog is an interim snapshot:
+
+- Source: the Models.dev project's published `api.json`, downloaded on 2 October 2026 (MIT, attributed in `THIRD_PARTY_NOTICES.md`); source sha256 `9de50f94219793121deb6d1b6f6fc290433a82b70b7974459853d35d198ed61f`.
+- Prepared with `catalogBody(text, true)` from `packages/engine/script/release-catalog.ts`, the same allowlist and bundled-SDK filtering a fork export gets: 219 providers, 8,184 models; prepared sha256 `b3477f4feb7bb439731ad20bad15772394c8a7dec65f527e8488648e5931ae8a`.
+- Served as the static file `packages/web/public/models/api.json`. `vercel.json` rewrites `/models` to it, and `script/prune-vector-site.mjs` keeps the `models` folder. The Blob rewrites were removed because nothing was ever published there; restore them when `upload-model-catalog.ts --update-mirror` takes over, or that upload will be shadowed by this file.
+- Bundled into desktop builds by passing the same prepared file as `VECTOR_RELEASE_CATALOG_PATH` with its sha256.
+- At runtime, catalog modes the bundled SDKs cannot send are not offered as models (`ModelCatalog.modeSupported`): the "pro" reasoning modes, the "ultrafast" tier, and priority or flex tiers the SDK drops for a model family it does not know (GPT-6 Fast). The served file keeps every mode so a build with a newer SDK can offer them.
+
+Installed apps fetch the mirror at launch and every 60 minutes, so a refreshed file reaches them without a reinstall. To refresh the snapshot, prepare a new `api.json` the same way, replace the static file, and record the new digests here. The fork process below remains the intended long-term source.
+
 Status: preparation, validation, runtime refresh and publication plumbing are built. The Vector data fork, its reviewed export, complete logo import and first mirror publication still require owner action. No repository, account or key was created for this work. A missing fork is a release error; the tools never fall back to the original live data service.
 
 ## Create and review the data repository
@@ -45,7 +57,7 @@ bun packages/engine/script/verify-catalog-mirror.ts
 
 This first verifies or creates the immutable `releases/vector-v<version>/api.json`, then explicitly updates `models/api.json` with the same bytes. Re-running the uploader without `--update-mirror` only verifies/publishes the immutable release; an old release retry cannot silently roll the shared mirror back. Use `--update-mirror` only when that snapshot is the intended current catalog.
 
-The application site's `/models` and `/models/api.json` rewrites target the existing Vector-owned Blob bucket. They need the corresponding website deployment before the public check can pass. The check requires HTTP 200, `application/json`, the same canonical catalog bytes at both URLs, supported provider identities and bundled SDKs. The release workflow runs it after mirror publication. No first publication or successful live response is claimed until this command passes against production.
+Today `/models/api.json` is the committed static file and `/models` is rewritten to it (see Current state above); the Blob rewrites this section was written for are removed. Until they are restored, the release workflow's `verify-catalog-mirror.ts` step will compare its uploaded catalog with the static file, so a CI release must ship the same bytes as `packages/web/public/models/api.json` or restore the Blob rewrites first. When restored, the rewrites need the corresponding website deployment before the public check can pass. The check requires HTTP 200, `application/json`, the same canonical catalog bytes at both URLs, supported provider identities and bundled SDKs. The release workflow runs it after mirror publication. No first publication or successful live response is claimed until this command passes against production.
 
 Runtime defaults to `https://vectordev.ai/models`; the bundled snapshot remains available when a refresh fails. `VECTOR_DISABLE_MODELS_FETCH=1` disables refresh. `VECTOR_MODELS_PATH` selects a local file and makes no mirror requests. Operators may deliberately set `VECTOR_MODELS_URL` to an HTTP or HTTPS directory (or its `api.json` URL); Vector warns that this source is operator-maintained and records whether transport is encrypted. Embedded credentials, query strings, fragments and redirects are refused. Catalog shape and bundled-SDK checks apply equally to owned and custom mirrors. Custom mirrors cannot add executable adapters.
 
