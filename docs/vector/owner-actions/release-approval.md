@@ -82,7 +82,31 @@ passed 50 repetitions and each deterministic cancellation regression passed 20.
 All 22 package typechecks passed. Concurrent callers waiting on the first cache
 load now defer cancellation until that load publishes; existing catalog lock
 and HTTP limits remain unchanged. Model execution itself stays interruptible.
-Repeat relevant verification after integrating the newer main changes.
+After integration at `c901d471f`, Core again passed 1,561 tests. The focused
+provider, authentication and compliance groups passed 544 tests, Schema passed
+27, and the native typecheck workflow passed all four jobs. The complete local
+Engine run remains **failed**: 3,752 passed, 21 skipped, one todo and seven CLI
+subprocess timeouts. The unchanged isolated CLI group passed all 14 cases;
+the full-run timeout cause is not established, so the isolated pass does not
+replace that failed result.
+
+Native Linux browser validation on `c901d471f` succeeded with 98 app cases passing
+initially, five passing on retry, one existing skip and all four public-viewer
+cases passing. Its Vite logs exposed incorrect optimization of the local ONNX
+asset URLs. The repair at `3c3c32652` excludes only those asset imports from
+dependency optimization and retains local speech assets in the production build.
+A real empty-cache regression failed before the fix and passed after it. The
+full app unit suite passed 1,265 cases, ten cold-cache browser cases passed, and
+the subsequent complete local browser run passed 103 app cases plus all four
+public-viewer cases with no retries and one existing skip.
+
+Windows CI also exposed test assumptions about LF line endings, file URL paths
+and POSIX subprocess signals. The repaired fixtures retain exact output,
+credential-preservation and cancellation-cleanup checks. Actual OS signal cases
+remain on POSIX; portable asynchronous handler cases cover every platform.
+Forty-one focused CLI cases passed locally. Native verification of the final
+candidate remains required; no timeout increases or release-gate bypasses were
+used to obtain these results.
 
 ## Publication order and unsigned policy
 

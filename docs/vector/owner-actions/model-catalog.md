@@ -12,6 +12,8 @@ The separate local desktop 1.99.91 build used a stale bundled catalog that stopp
 
 Installed apps fetch the mirror at launch and every 60 minutes, so a refreshed file reaches them without a reinstall. To refresh the snapshot, prepare a new `api.json` the same way, replace the static file, and record the new digests here. The fork process below remains the intended long-term source.
 
+The interim mirror was verified in production on 2 October 2026 from source `c901d471f4fc32091bd98882b0a25af1316090c0`: both `/models` and `/models/api.json` returned HTTP 200 and the same canonical, committed snapshot with 219 providers. This verifies the runtime mirror only. It does not establish an owner-fork revision or publish an immutable 1.999.99 release catalog.
+
 Status: preparation, validation, runtime refresh and publication plumbing are built. The Vector data fork, its reviewed export and immutable release-catalog publication still require owner action. Provider-specific artwork is preferred; missing artwork uses a neutral server icon drawn for Vector, never another provider's logo. No repository, account or key was created for this work. A missing fork is a release error; the tools never fall back to the original live data service.
 
 ## Create and review the data repository
