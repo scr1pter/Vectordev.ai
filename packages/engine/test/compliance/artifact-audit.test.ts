@@ -196,10 +196,11 @@ describe("release artifact audit", () => {
     await Bun.write(path.join(dir.path, "staging/vector"), binary(Buffer.from(`https://${name}.ai`)))
     await Bun.write(path.join(dir.path, "clean/vector"), binary())
     await Promise.all(["release", "clean-release"].map((item) => mkdir(path.join(dir.path, item))))
+    // Keep drive prefixes out of archive names: GNU tar interprets them as remote hosts.
     const tar = (source: string, archive: string) =>
-      Bun.spawn(["tar", "-czf", archive, "vector"], { cwd: path.join(dir.path, source) }).exited
-    expect(await tar("staging", path.join(dir.path, "release/vector-linux-x64.tar.gz"))).toBe(0)
-    expect(await tar("clean", path.join(dir.path, "clean-release/vector-linux-arm64.tar.gz"))).toBe(0)
+      Bun.spawn(["tar", "-czf", `../${archive}`, "vector"], { cwd: path.join(dir.path, source) }).exited
+    expect(await tar("staging", "release/vector-linux-x64.tar.gz")).toBe(0)
+    expect(await tar("clean", "clean-release/vector-linux-arm64.tar.gz")).toBe(0)
     const zip = async (source: string, archive: string) => {
       const writer = new ZipWriter(new BlobWriter("application/zip"), { level: 9 })
       await writer.add("vector.exe", new BlobReader(Bun.file(path.join(dir.path, source, "vector"))), {

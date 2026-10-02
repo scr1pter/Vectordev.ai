@@ -333,7 +333,8 @@ describe("ReviewSource untrusted fetch", () => {
       yield* git(origin, "branch", "-q", "-D", "fork")
 
       const work = (yield* scopedTmpdir()).path
-      yield* git(work, "clone", "-q", `file://${origin}`, ".")
+      // Preserve the fixture's exact worktree bytes even when the host enables CRLF checkout.
+      yield* git(work, "clone", "-q", "-c", "core.autocrlf=false", `file://${origin}`, ".")
       const refsBefore = yield* git(work, "for-each-ref", "--format=%(refname)")
 
       const fetched = yield* ReviewSource.ensureObjects({ directory: work, base, head, pr: 7 })
