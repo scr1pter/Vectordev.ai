@@ -67,7 +67,7 @@ jobs:
 
       - name: Run unit tests
         timeout-minutes: 20
-        run: GITHUB_ACTIONS=false bun turbo test --log-order=stream
+        run: GITHUB_ACTIONS=false bun turbo test --log-order=stream --continue=dependencies-successful
         env:
           VECTOR_EXPERIMENTAL_DISABLE_FILEWATCHER: ${{ runner.os == 'Windows' && 'true' || 'false' }}
 
@@ -139,6 +139,8 @@ jobs:
         run: bun --cwd packages/app test:e2e:local
         env:
           CI: true
+          # Native Windows traces show broad load stalls with five browser workers on four cores.
+          PLAYWRIGHT_WORKERS: ${{ runner.os == 'Windows' && '1' || '5' }}
         timeout-minutes: 30
 
       - name: Upload Playwright artifacts
