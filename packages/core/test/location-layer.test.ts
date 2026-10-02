@@ -34,7 +34,9 @@ import { ToolRegistry } from "../src/tool/registry"
 import { ApplicationTools } from "../src/tool/application-tools"
 
 const it = testEffect(
-  AppNodeBuilder.build(LayerNode.group([ApplicationTools.node, Credential.node, Database.node, EventV2.node, LocationServiceMap.node])),
+  AppNodeBuilder.build(
+    LayerNode.group([ApplicationTools.node, Credential.node, Database.node, EventV2.node, LocationServiceMap.node]),
+  ),
 )
 
 describe("LocationServiceMap", () => {
@@ -161,7 +163,9 @@ describe("LocationServiceMap", () => {
             return yield* toolDefinitions(registry)
           }).pipe(
             Effect.scoped,
-            Effect.provide(LocationServiceMap.Service.get(Location.Ref.make({ directory: AbsolutePath.make(dir.path) }))),
+            Effect.provide(
+              LocationServiceMap.Service.get(Location.Ref.make({ directory: AbsolutePath.make(dir.path) })),
+            ),
           )
           expect(tools.map((tool) => tool.name)).toContain("websearch")
         }),
