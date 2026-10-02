@@ -56,6 +56,8 @@ test("other commands retain their module paths", () => {
 test.skipIf(process.platform !== "win32")(
   "pwsh to Bun to Windows PowerShell loads native certificate and installer commands",
   async () => {
+    const pwsh = Bun.which("pwsh.exe")
+    if (!pwsh) throw new Error("The native module-path regression requires PowerShell 7")
     const root = await mkdtemp(path.join(os.tmpdir(), "vector powershell '"))
     const file = path.join(root, "hash fixture.txt")
     const entry = path.join(root, "child.ts")
@@ -91,11 +93,15 @@ test.skipIf(process.platform !== "win32")(
       )
       const child = Bun.spawn(
         [
-          "pwsh.exe",
+          pwsh,
           "-NoProfile",
           "-NonInteractive",
-          "-Command",
-          `& ${quote(process.execPath)} --no-env-file ${quote(entry)}; exit $LASTEXITCODE`,
+          // Keep the nested script out of Windows argument quoting; fixture paths contain spaces and apostrophes.
+          "-EncodedCommand",
+          Buffer.from(
+            `$ErrorActionPreference = 'Stop'; [IO.File]::WriteAllText(${quote(diagnostic)}, '{"phase":"pwsh-started"}'); & ${quote(process.execPath)} --no-env-file ${quote(entry)}; exit $LASTEXITCODE`,
+            "utf16le",
+          ).toString("base64"),
         ],
         {
           env: { ...process.env, VECTOR_INSTALLER_ENV_MARKER: "preserved" },
@@ -112,6 +118,7 @@ test.skipIf(process.platform !== "win32")(
           new Response(child.stderr).text(),
         ])
         const details = JSON.stringify({
+          pwsh,
           stderr,
           diagnostic: await Bun.file(diagnostic)
             .text()
