@@ -405,15 +405,21 @@ describe("Review.run", () => {
     () =>
       Effect.gen(function* () {
         const { llm, directory } = yield* useServer()
+        // A first review loads the instance's config, providers and tools, so the short deadline below is spent
+        // waiting on the hung model rather than racing a cold start that can end before the model is ever asked.
+        yield* llm.pushMatch(REVIEW, reply().tool("StructuredOutput", report()))
+        expect((yield* Review.run(input(directory))).specialists[0]).toMatchObject({ name: "review", status: "ok" })
         yield* llm.pushMatch(REVIEW, reply().hang())
         yield* llm.pushMatch(FINALIZE, reply().tool("StructuredOutput", report([finding()])))
         const started = Date.now()
 
         const outcome = yield* Review.run(input(directory, { config: config({ timeoutMinutes: 0.02 }) }))
 
-        expect(outcome.specialists[0]).toMatchObject({ name: "review", status: "timeout" })
+        expect(outcome.specialists[0]).toMatchObject({ name: "review", status: "timeout", detail: "timeout" })
         expect(outcome.partial).toBe("timeout")
         expect(outcome.report.findings).toHaveLength(1)
+        // The deadline ended a request the model never answered: the warm-up review and the hung one.
+        expect((yield* llm.hits).filter(REVIEW)).toHaveLength(2)
         expect(Date.now() - started).toBeLessThan(20_000)
       }),
     TIMEOUT,
