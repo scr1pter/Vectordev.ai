@@ -1,6 +1,7 @@
 import { expect } from "bun:test"
 import path from "node:path"
 import { Effect } from "effect"
+import { systemError } from "effect/PlatformError"
 import { CrossSpawnSpawner } from "@vectordevai/core/cross-spawn-spawner"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { FSUtil } from "@vectordevai/core/fs-util"
@@ -116,99 +117,114 @@ it.live("protects current assets and respects disabled project config during mig
   }),
 )
 
-it.live("skips unreadable folders and unrelated dot folders that only look like agent folders", () =>
-  Effect.gen(function* () {
-    const root = yield* tmpdirScoped()
-    const fs = yield* FSUtil.Service
-    const home = path.join(root, "home")
-    const directory = path.join(home, "project")
-    for (const name of [
-      "home/.cursor/agents/.keep",
-      "home/.cursor/plugins/local/.keep",
-      "home/.cursor/mcp.json",
-      "home/.oh-my-zsh/plugins/git/git.plugin.zsh",
-      "home/.oh-my-zsh/themes/robbyrussell.zsh-theme",
-      "home/.oh-my-zsh/tools/upgrade.sh",
-      "home/project/.github/agents/reviewer.md",
-      "home/project/.github/skills/review/SKILL.md",
-      "home/project/.obsidian/plugins/example/main.js",
-      "home/project/.obsidian/themes/Minimal/theme.css",
-      "home/project/.earlier-agent/agents/reviewer.md",
-      "home/project/.earlier-agent/commands/review.md",
-      "home/.Trash/deleted.json",
-      "home/.locked/locked.json",
-    ])
-      yield* fs.writeWithDirs(path.join(root, name), "{}")
-    yield* fs.writeFileString(
-      path.join(home, ".cursor", "mcp.json"),
-      '{"mcp":{"docs":{"type":"local","command":["x"]}}}',
-    )
-    yield* fs.writeFileString(
-      path.join(directory, ".earlier-agent", "earlier-agent.json"),
-      '{"$schema":"https://earlier-agent.ai/config.json","permission":{"bash":"deny"}}',
-    )
-    yield* fs.writeFileString(path.join(directory, "notes"), 'model = "must-not-import"\n')
-    yield* fs.writeFileString(path.join(home, ".locked", "locked.json"), '{"model":"must-not-import"}')
-    const locked = [path.join(home, ".Trash"), path.join(home, ".locked"), path.join(directory, "notes")]
-    yield* Effect.forEach(locked, (item) => fs.chmod(item, 0o000))
-    yield* Effect.addFinalizer(() => Effect.forEach(locked, (item) => fs.chmod(item, 0o755).pipe(Effect.ignore)))
-    const input = { directory, worktree: directory, home, global: path.join(root, "global") }
-    expect(yield* ConfigMigration.discover(input)).toEqual([])
-    expect(yield* fs.exists(path.join(home, ".vector"))).toBe(false)
-    expect(yield* fs.exists(path.join(directory, ".vector"))).toBe(false)
-  }),
-)
+for (const permissionMode of process.platform === "win32" ? ["denied"] : ["posix", "denied"]) {
+  it.live(
+    `skips unreadable folders and unrelated dot folders that only look like agent folders (${permissionMode})`,
+    () =>
+      Effect.gen(function* () {
+        const root = yield* tmpdirScoped()
+        const fs = yield* FSUtil.Service
+        const permissions = readPermissions(fs, permissionMode === "denied")
+        const home = path.join(root, "home")
+        const directory = path.join(home, "project")
+        for (const name of [
+          "home/.cursor/agents/.keep",
+          "home/.cursor/plugins/local/.keep",
+          "home/.cursor/mcp.json",
+          "home/.oh-my-zsh/plugins/git/git.plugin.zsh",
+          "home/.oh-my-zsh/themes/robbyrussell.zsh-theme",
+          "home/.oh-my-zsh/tools/upgrade.sh",
+          "home/project/.github/agents/reviewer.md",
+          "home/project/.github/skills/review/SKILL.md",
+          "home/project/.obsidian/plugins/example/main.js",
+          "home/project/.obsidian/themes/Minimal/theme.css",
+          "home/project/.earlier-agent/agents/reviewer.md",
+          "home/project/.earlier-agent/commands/review.md",
+          "home/.Trash/deleted.json",
+          "home/.locked/locked.json",
+        ])
+          yield* fs.writeWithDirs(path.join(root, name), "{}")
+        yield* fs.writeFileString(
+          path.join(home, ".cursor", "mcp.json"),
+          '{"mcp":{"docs":{"type":"local","command":["x"]}}}',
+        )
+        yield* fs.writeFileString(
+          path.join(directory, ".earlier-agent", "earlier-agent.json"),
+          '{"$schema":"https://earlier-agent.ai/config.json","permission":{"bash":"deny"}}',
+        )
+        yield* fs.writeFileString(path.join(directory, "notes"), 'model = "must-not-import"\n')
+        yield* fs.writeFileString(path.join(home, ".locked", "locked.json"), '{"model":"must-not-import"}')
+        const locked = [path.join(home, ".Trash"), path.join(home, ".locked"), path.join(directory, "notes")]
+        yield* Effect.forEach(locked, (item) => permissions.change(item, 0o000))
+        yield* Effect.addFinalizer(() =>
+          Effect.forEach(locked, (item) => permissions.change(item, 0o755).pipe(Effect.ignore)),
+        )
+        const input = { directory, worktree: directory, home, global: path.join(root, "global") }
+        expect(
+          yield* ConfigMigration.discover(input).pipe(Effect.provideService(FSUtil.Service, permissions.fs)),
+        ).toEqual([])
+        expect(yield* fs.exists(path.join(home, ".vector"))).toBe(false)
+        expect(yield* fs.exists(path.join(directory, ".vector"))).toBe(false)
+      }),
+  )
 
-it.live("retries an earlier folder until it can be listed and skips unreadable folders inside it", () =>
-  Effect.gen(function* () {
-    const root = yield* tmpdirScoped()
-    const fs = yield* FSUtil.Service
-    const home = path.join(root, "home")
-    const global = path.join(root, "global")
-    const parent = path.join(root, "work", "locked")
-    const directory = path.join(parent, "app")
-    const source = path.join(directory, `.${previous}`)
-    yield* fs.writeWithDirs(path.join(home, `.${previous}`, `${previous}.json`), '{"model":"fixture/model"}')
-    yield* fs.writeWithDirs(path.join(global, "config.json"), '{"model":"fixture/model"}')
-    yield* fs.writeWithDirs(path.join(source, `${previous}.json`), '{"permission":{"bash":"deny"}}')
-    yield* fs.writeWithDirs(path.join(source, "agents", "reviewer.md"), "reviewer")
-    yield* fs.writeWithDirs(path.join(source, "commands", "secret.md"), "secret")
-    yield* fs.writeWithDirs(path.join(source, "skills", "locked", "SKILL.md"), "locked")
-    // Mode 0o311 keeps the parent traversable, so the project below it stays reachable while its listing fails.
-    const modes = [
-      [home, 0o000],
-      [global, 0o000],
-      [parent, 0o311],
-      [source, 0o000],
-    ] as const
-    yield* Effect.forEach(modes, ([item, mode]) => fs.chmod(item, mode))
-    yield* Effect.addFinalizer(() =>
-      Effect.forEach([...modes.map(([item]) => item), path.join(source, "skills", "locked")], (item) =>
-        fs.chmod(item, 0o755).pipe(Effect.ignore),
-      ),
-    )
-    const input = { directory, worktree: path.join(root, "work"), home, global }
-    expect(yield* ConfigMigration.discover(input)).toEqual([])
-    expect(yield* fs.exists(path.join(directory, ".vector"))).toBe(false)
+  it.live(
+    `retries an earlier folder until it can be listed and skips unreadable folders inside it (${permissionMode})`,
+    () =>
+      Effect.gen(function* () {
+        const root = yield* tmpdirScoped()
+        const fs = yield* FSUtil.Service
+        const permissions = readPermissions(fs, permissionMode === "denied")
+        const home = path.join(root, "home")
+        const global = path.join(root, "global")
+        const parent = path.join(root, "work", "locked")
+        const directory = path.join(parent, "app")
+        const source = path.join(directory, `.${previous}`)
+        yield* fs.writeWithDirs(path.join(home, `.${previous}`, `${previous}.json`), '{"model":"fixture/model"}')
+        yield* fs.writeWithDirs(path.join(global, "config.json"), '{"model":"fixture/model"}')
+        yield* fs.writeWithDirs(path.join(source, `${previous}.json`), '{"permission":{"bash":"deny"}}')
+        yield* fs.writeWithDirs(path.join(source, "agents", "reviewer.md"), "reviewer")
+        yield* fs.writeWithDirs(path.join(source, "commands", "secret.md"), "secret")
+        yield* fs.writeWithDirs(path.join(source, "skills", "locked", "SKILL.md"), "locked")
+        // Mode 0o311 keeps the parent traversable, so the project below it stays reachable while its listing fails.
+        const modes = [
+          [home, 0o000],
+          [global, 0o000],
+          [parent, 0o311],
+          [source, 0o000],
+        ] as const
+        yield* Effect.forEach(modes, ([item, mode]) => permissions.change(item, mode))
+        yield* Effect.addFinalizer(() =>
+          Effect.forEach([...modes.map(([item]) => item), path.join(source, "skills", "locked")], (item) =>
+            permissions.change(item, 0o755).pipe(Effect.ignore),
+          ),
+        )
+        const input = { directory, worktree: path.join(root, "work"), home, global }
+        expect(
+          yield* ConfigMigration.discover(input).pipe(Effect.provideService(FSUtil.Service, permissions.fs)),
+        ).toEqual([])
+        expect(yield* fs.exists(path.join(directory, ".vector"))).toBe(false)
 
-    yield* fs.chmod(source, 0o755)
-    yield* fs.chmod(path.join(source, "commands", "secret.md"), 0o000)
-    yield* fs.chmod(path.join(source, "skills", "locked"), 0o000)
-    const target = path.join(directory, ".vector")
-    expect((yield* ConfigMigration.discover(input)).map((item) => item.target)).toEqual([
-      path.join(target, "vector.jsonc"),
-      target,
-    ])
-    expect(yield* fs.readJson(path.join(target, "vector.jsonc"))).toMatchObject({ permission: { bash: "deny" } })
-    expect(yield* fs.readFileString(path.join(target, "agents", "reviewer.md"))).toBe("reviewer")
-    expect(yield* fs.exists(path.join(target, "commands", "secret.md"))).toBe(false)
-    expect(yield* fs.exists(path.join(target, "skills", "locked"))).toBe(false)
-    expect(yield* fs.exists(path.join(target, "vector-migration.json"))).toBe(true)
-    yield* Effect.forEach([home, global], (item) => fs.chmod(item, 0o755))
-    expect(yield* fs.exists(path.join(home, ".vector"))).toBe(false)
-    expect(yield* fs.exists(path.join(global, "vector.jsonc"))).toBe(false)
-  }),
-)
+        yield* permissions.change(source, 0o755)
+        yield* permissions.change(path.join(source, "commands", "secret.md"), 0o000)
+        yield* permissions.change(path.join(source, "skills", "locked"), 0o000)
+        const target = path.join(directory, ".vector")
+        expect(
+          (yield* ConfigMigration.discover(input).pipe(Effect.provideService(FSUtil.Service, permissions.fs))).map(
+            (item) => item.target,
+          ),
+        ).toEqual([path.join(target, "vector.jsonc"), target])
+        expect(yield* fs.readJson(path.join(target, "vector.jsonc"))).toMatchObject({ permission: { bash: "deny" } })
+        expect(yield* fs.readFileString(path.join(target, "agents", "reviewer.md"))).toBe("reviewer")
+        expect(yield* fs.exists(path.join(target, "commands", "secret.md"))).toBe(false)
+        expect(yield* fs.exists(path.join(target, "skills", "locked"))).toBe(false)
+        expect(yield* fs.exists(path.join(target, "vector-migration.json"))).toBe(true)
+        yield* Effect.forEach([home, global], (item) => permissions.change(item, 0o755))
+        expect(yield* fs.exists(path.join(home, ".vector"))).toBe(false)
+        expect(yield* fs.exists(path.join(global, "vector.jsonc"))).toBe(false)
+      }),
+  )
+}
 
 it.live("imports a linked earlier folder and keeps linked assets as links", () =>
   Effect.gen(function* () {
@@ -387,3 +403,31 @@ it.live("imports runtime MCP layers by filename shape in the existing config dir
     expect(yield* ConfigImport.run(dir, true)).toBeUndefined()
   }),
 )
+
+// Windows chmod cannot deny reads or directory traversal. Keep real POSIX permissions,
+// and scope equivalent read failures to the FS service used by these Windows scenarios.
+function readPermissions(fs: FSUtil.Interface, emulateDenials: boolean) {
+  const modes = new Map<string, number>()
+  const readable = (file: string) => (modes.get(path.resolve(file)) ?? 0o755) & 0o400
+  const fail = (method: string, file: string) =>
+    Effect.fail(systemError({ _tag: "PermissionDenied", module: "FileSystem", method, pathOrDescriptor: file }))
+  return {
+    change: (file: string, mode: number) =>
+      emulateDenials
+        ? Effect.sync(() => {
+            modes.set(path.resolve(file), mode)
+          })
+        : fs.chmod(file, mode),
+    fs: !emulateDenials
+      ? fs
+      : FSUtil.Service.of({
+          ...fs,
+          readDirectoryEntries: (file) =>
+            readable(file) ? fs.readDirectoryEntries(file) : fail("readDirectoryEntries", file),
+          readFileString: (file, encoding) =>
+            readable(file) ? fs.readFileString(file, encoding) : fail("readFileString", file),
+          access: (file, options) =>
+            options?.readable && !readable(file) ? fail("access", file) : fs.access(file, options),
+        }),
+  }
+}
