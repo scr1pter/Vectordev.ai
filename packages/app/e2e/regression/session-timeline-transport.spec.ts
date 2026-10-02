@@ -89,6 +89,25 @@ test("reconnects after a stream error", async ({ page }) => {
   expect((await timeline.transport.connections())[0]?.endedBy).toBe("error")
 })
 
+test("keeps directory presence open while reconnecting the global timeline stream", async ({ page }) => {
+  const timeline = await setupTimeline(page, { eventRetry: 10 })
+  const first = await timeline.transport.waitForConnection()
+  await expect.poll(async () => (await timeline.transport.connections({ path: "/event" })).length).toBe(1)
+  const presence = (await timeline.transport.connections({ path: "/event" }))[0]!
+
+  expect(first.path).toBe("/global/event")
+  expect(presence.endedAt).toBeUndefined()
+  await timeline.transport.error("global timeline reconnect")
+  const second = await timeline.transport.waitForConnection({ after: first.id })
+  const delivered = await timeline.transport.send(partUpdated(textPart("prt_transport_isolated", "global only")))
+
+  await timeline.waitForPart("prt_transport_isolated")
+  expect(second.path).toBe("/global/event")
+  expect(delivered.connectionID).toBe(second.id)
+  expect(await timeline.transport.connections()).toHaveLength(2)
+  expect(await timeline.transport.connections({ path: "/event" })).toEqual([presence])
+})
+
 test("records event IDs and reconnect Last-Event-ID headers", async ({ page }) => {
   const timeline = await setupTimeline(page, { eventRetry: 10 })
   const first = await timeline.transport.send(partUpdated(textPart("prt_transport_id", "event with id")), {

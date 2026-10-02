@@ -111,6 +111,7 @@ export async function setupTimeline(
   )
   const transport = await installSseTransport<EventPayload>(page, {
     server: `http://${process.env.PLAYWRIGHT_SERVER_HOST ?? "127.0.0.1"}:${process.env.PLAYWRIGHT_SERVER_PORT ?? "4096"}`,
+    path: "/global/event",
     retry: input.eventRetry ?? 20,
   })
   await mockVectorServer(page, {

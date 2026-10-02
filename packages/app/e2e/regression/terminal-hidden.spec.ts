@@ -6,6 +6,7 @@ const directory = "C:/Vector/HiddenTerminalRegression"
 const projectID = "proj_hidden_terminal_regression"
 const sessionID = "ses_hidden_terminal_regression"
 const title = "Hidden terminal regression"
+const ptyID = "pty_hidden_terminal"
 
 test("unmounts the terminal renderer while the pane is hidden", async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 })
@@ -43,17 +44,34 @@ test("unmounts the terminal renderer while the pane is hidden", async ({ page })
     ],
     pageMessages: () => ({ items: [] }),
   })
-  await page.route("**/pty", (route) =>
-    route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ id: "pty_hidden_terminal", title: "Terminal 1" }),
-    }),
+  // Directory-scoped SDK requests include a query string, so match exact paths.
+  await page.route(
+    (url) => ["/pty", `/pty/${ptyID}`, `/pty/${ptyID}/connect-token`].includes(url.pathname),
+    (route) => {
+      const url = new URL(route.request().url())
+      expect(url.searchParams.get("directory")).toBe(directory)
+      expect(route.request().method()).toBe(url.pathname === `/pty/${ptyID}` ? "PUT" : "POST")
+      if (url.pathname.endsWith("/connect-token")) expect(route.request().headers()["x-vector-ticket"]).toBe("1")
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        headers: { "access-control-allow-origin": "*" },
+        body: JSON.stringify(
+          url.pathname.endsWith("/connect-token") ? { ticket: "e2e-ticket" } : { id: ptyID, title: "Terminal 1" },
+        ),
+      })
+    },
   )
-  await page.route("**/pty/pty_hidden_terminal", (route) =>
-    route.fulfill({ status: 200, contentType: "application/json", body: "{}" }),
+  const connections: string[] = []
+  await page.routeWebSocket(
+    (url) => url.pathname === `/pty/${ptyID}/connect`,
+    (ws) => {
+      const url = new URL(ws.url())
+      expect(url.searchParams.get("directory")).toBe(directory)
+      expect(url.searchParams.get("ticket")).toBe("e2e-ticket")
+      connections.push(ws.url())
+    },
   )
-  await page.routeWebSocket("**/pty/pty_hidden_terminal/connect", () => undefined)
 
   await page.goto(`/${base64Encode(directory)}/session/${sessionID}`)
   await expectSessionTitle(page, title)
@@ -62,6 +80,7 @@ test("unmounts the terminal renderer while the pane is hidden", async ({ page })
   const panel = page.locator("#terminal-panel")
   await expect(panel).toHaveAttribute("aria-hidden", "false")
   await expect(page.locator('[data-component="terminal"]')).toBeVisible()
+  await expect.poll(() => connections.length).toBe(1)
 
   await page.keyboard.press("Control+Backquote")
   await expect(panel).toHaveAttribute("aria-hidden", "true")
@@ -72,6 +91,7 @@ test("unmounts the terminal renderer while the pane is hidden", async ({ page })
 
   await page.keyboard.press("Control+Backquote")
   await expect(page.locator('[data-component="terminal"]')).toBeVisible()
+  await expect.poll(() => connections.length).toBe(2)
 })
 
 function base64Encode(value: string) {

@@ -23,7 +23,10 @@ test("explains ignored credentials and a configured model fallback in the app", 
   )
   await page.route(
     (url) => url.pathname === "/config",
-    (route) => route.fulfill({ json: { model: "missing/family/saved" } }),
+    (route) =>
+      route.fulfill({
+        json: { model: "missing/family/saved", provider: { missing: { name: "Unavailable fixture", models: {} } } },
+      }),
   )
   await page.goto(stressDraftHref("draft_provider_notice"))
   await expect(page.getByText("openai credential ignored", { exact: true })).toHaveCount(1)

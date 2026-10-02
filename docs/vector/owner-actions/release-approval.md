@@ -52,6 +52,15 @@ passed focused local checks; native CI confirmation on the new branch is still
 required. No payment, spending-limit change, or credit purchase is required or
 authorized by this preparation.
 
+The browser run also exposed stale fixtures: timeline and presence event streams
+were mixed together, terminal routes omitted directory query parameters, and
+several selectors described earlier UI behavior. These fixtures now exercise the
+current contracts. The four public-viewer security cases run against the built,
+pruned website in a separate Playwright configuration, included by
+`bun run test:e2e:local`. A real duplicate syntax-theme registration found by the
+console-error smoke check was removed. Focused browser checks pass; the complete
+local rerun and native CI remain required before application publication.
+
 ## Publication order and unsigned policy
 
 1. Prepare the immutable catalog and record its digest and fork provenance. Build
