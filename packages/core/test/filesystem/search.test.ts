@@ -1,10 +1,11 @@
-import { describe, expect } from "bun:test"
+import { beforeAll, describe, expect } from "bun:test"
 import fs from "fs/promises"
 import path from "path"
 import { Effect } from "effect"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { Ripgrep } from "@vectordevai/core/ripgrep"
 import { AbsolutePath, RelativePath } from "@vectordevai/core/schema"
+import { prepareRipgrep } from "../fixture/ripgrep"
 import { tmpdir } from "../fixture/tmpdir"
 import { testEffect } from "../lib/effect"
 
@@ -17,6 +18,8 @@ const withTmp = <A, E, R>(f: (directory: AbsolutePath) => Effect.Effect<A, E, R>
   ).pipe(Effect.flatMap((tmp) => f(AbsolutePath.make(tmp.path))))
 
 describe("Ripgrep", () => {
+  beforeAll(prepareRipgrep, 65_000)
+
   it.live("globs files as an array", () =>
     withTmp((cwd) =>
       Effect.gen(function* () {

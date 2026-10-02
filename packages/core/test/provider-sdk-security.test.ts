@@ -20,7 +20,7 @@ test("every reviewed SDK resolves the patched provider-utils family on disk", as
     )
       continue
     const entry = import.meta.resolve(pkg, path.resolve(import.meta.dir, "../src/provider-sdk.ts"))
-    const utils = fileURLToPath(import.meta.resolve("@ai-sdk/provider-utils", entry))
+    const utils = fileURLToPath(import.meta.resolve("@ai-sdk/provider-utils", fileURLToPath(entry)))
     const metadata = await Bun.file(path.resolve(path.dirname(utils), "../package.json")).json()
     expect(metadata.version, pkg).toBe("4.0.52")
   }

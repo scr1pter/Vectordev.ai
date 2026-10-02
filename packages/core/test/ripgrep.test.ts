@@ -1,16 +1,19 @@
-import { describe, expect } from "bun:test"
+import { beforeAll, describe, expect } from "bun:test"
 import fs from "fs/promises"
 import path from "path"
 import { Effect } from "effect"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { Ripgrep } from "@vectordevai/core/ripgrep"
 import { RelativePath } from "@vectordevai/core/schema"
+import { prepareRipgrep } from "./fixture/ripgrep"
 import { tmpdir } from "./fixture/tmpdir"
 import { testEffect } from "./lib/effect"
 
 const it = testEffect(LayerNode.compile(Ripgrep.node))
 
 describe("Ripgrep", () => {
+  beforeAll(prepareRipgrep, 65_000)
+
   it.live("keeps ignored files out of catch-all find results", () =>
     Effect.acquireUseRelease(
       Effect.promise(() => tmpdir()),
