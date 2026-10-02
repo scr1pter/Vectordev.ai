@@ -37,6 +37,7 @@ let workspaceError: Error | undefined
 let promptResetCount = 0
 let currentModel: { id: string; provider: { id: string } } | undefined
 let availableModels: Array<{ id: string; provider: { id: string } }> = []
+let providerReady = true
 const toasts: Array<{ title?: string; description?: string }> = []
 
 const promptValue: Prompt = [{ type: "text", content: "ls", start: 0, end: 2 }]
@@ -200,7 +201,12 @@ beforeAll(async () => {
 
   mock.module("@/context/sync", () => ({
     useSync: () => () => ({
-      data: { command: [] },
+      data: {
+        command: [],
+        get provider_ready() {
+          return providerReady
+        },
+      },
       session: {
         optimistic: {
           add: (value: {
@@ -287,6 +293,7 @@ beforeEach(() => {
   promptResetCount = 0
   currentModel = { id: "model", provider: { id: "provider" } }
   availableModels = [currentModel]
+  providerReady = true
   toasts.length = 0
   for (const key of Object.keys(storedSessions)) delete storedSessions[key]
 })
@@ -787,6 +794,25 @@ describe("missing model", () => {
       {
         title: "prompt.toast.providerRequired.title",
         description: "prompt.toast.providerRequired.description",
+      },
+    ])
+    expect(promptResetCount).toBe(0)
+    expect(createdSessions).toHaveLength(0)
+  })
+
+  test("keeps the select-model toast while the provider catalog is still loading", async () => {
+    currentModel = undefined
+    availableModels = []
+    providerReady = false
+    const opened: boolean[] = []
+
+    await submitWith(() => opened.push(true)).handleSubmit({ preventDefault: () => undefined } as unknown as Event)
+
+    expect(opened).toHaveLength(0)
+    expect(toasts).toEqual([
+      {
+        title: "prompt.toast.modelAgentRequired.title",
+        description: "prompt.toast.modelAgentRequired.description",
       },
     ])
     expect(promptResetCount).toBe(0)
