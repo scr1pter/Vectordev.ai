@@ -38,6 +38,7 @@ let promptResetCount = 0
 let currentModel: { id: string; provider: { id: string } } | undefined
 let availableModels: Array<{ id: string; provider: { id: string } }> = []
 let providerReady = true
+let providerLoaded = true
 const toasts: Array<{ title?: string; description?: string }> = []
 
 const promptValue: Prompt = [{ type: "text", content: "ls", start: 0, end: 2 }]
@@ -206,6 +207,9 @@ beforeAll(async () => {
         get provider_ready() {
           return providerReady
         },
+        get provider_loaded() {
+          return providerLoaded
+        },
       },
       session: {
         optimistic: {
@@ -294,6 +298,7 @@ beforeEach(() => {
   currentModel = { id: "model", provider: { id: "provider" } }
   availableModels = [currentModel]
   providerReady = true
+  providerLoaded = true
   toasts.length = 0
   for (const key of Object.keys(storedSessions)) delete storedSessions[key]
 })
@@ -804,6 +809,28 @@ describe("missing model", () => {
     currentModel = undefined
     availableModels = []
     providerReady = false
+    providerLoaded = false
+    const opened: boolean[] = []
+
+    await submitWith(() => opened.push(true)).handleSubmit({ preventDefault: () => undefined } as unknown as Event)
+
+    expect(opened).toHaveLength(0)
+    expect(toasts).toEqual([
+      {
+        title: "prompt.toast.modelAgentRequired.title",
+        description: "prompt.toast.modelAgentRequired.description",
+      },
+    ])
+    expect(promptResetCount).toBe(0)
+    expect(createdSessions).toHaveLength(0)
+  })
+
+  test("keeps the select-model toast when the provider catalog failed to load", async () => {
+    // A failed load leaves the catalog empty even for users with connected providers.
+    currentModel = undefined
+    availableModels = []
+    providerReady = true
+    providerLoaded = false
     const opened: boolean[] = []
 
     await submitWith(() => opened.push(true)).handleSubmit({ preventDefault: () => undefined } as unknown as Event)

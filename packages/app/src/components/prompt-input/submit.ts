@@ -403,9 +403,9 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     // With no connected provider the model picker is empty, so asking the user
     // to choose a model is a dead end. Send them to the connect flow instead and
     // leave the prompt in the editor so they can send it once a model exists.
-    // The list is also empty while the provider catalog is still loading, so only
-    // take this branch once it has loaded.
-    if (!currentModel && sync().data.provider_ready && local.model.list().length === 0) {
+    // The list is also empty while the provider catalog is still loading or after
+    // it failed to load, so only take this branch once it has loaded successfully.
+    if (!currentModel && sync().data.provider_loaded && local.model.list().length === 0) {
       showToast({
         title: language.t("prompt.toast.providerRequired.title"),
         description: language.t("prompt.toast.providerRequired.description"),

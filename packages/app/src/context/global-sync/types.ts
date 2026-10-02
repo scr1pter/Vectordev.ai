@@ -41,6 +41,8 @@ export type State = {
   projectMeta: ProjectMeta | undefined
   icon: string | undefined
   provider_ready: boolean
+  // True only once the provider list has loaded without error; provider_ready is also true after a failed load.
+  provider_loaded: boolean
   provider: NormalizedProviderListResponse
   config: Config
   path: Path

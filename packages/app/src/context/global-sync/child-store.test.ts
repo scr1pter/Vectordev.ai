@@ -8,6 +8,7 @@ import { ServerScope } from "@/utils/server-scope"
 
 let createChildStoreManager: typeof import("./child-store").createChildStoreManager
 const querySingles: Array<() => { queryKey?: unknown[]; enabled?: boolean }> = []
+let providerFailed = false
 const persist: typeof import("@/utils/persist").persisted = (_target, store) => [
   store[0],
   store[1],
@@ -58,11 +59,15 @@ beforeAll(async () => {
         get isLoading() {
           return options().queryKey?.[1] === "path"
         },
+        get isSuccess() {
+          if (options().queryKey?.[1] === "path") return false
+          return !(providerFailed && options().queryKey?.[1] === "providers")
+        },
         get data() {
           if (options().queryKey?.[1] === "path") throw new Error("pending path data read")
           if (options().queryKey?.[1] === "mcp") return options().enabled ? { demo: { status: "disabled" } } : undefined
           if (options().queryKey?.[1] === "lsp") return []
-          if (options().queryKey?.[1] === "providers") return provider
+          if (options().queryKey?.[1] === "providers") return providerFailed ? undefined : provider
           return undefined
         },
       }
@@ -218,6 +223,41 @@ describe("createChildStoreManager", () => {
       expect(query().enabled).toBe(false)
       expect(manager.mcp("/project")).toBe(false)
     } finally {
+      dispose()
+    }
+  })
+
+  test("reports the provider list as loaded only when its query succeeded", () => {
+    let manager: ReturnType<typeof createChildStoreManager> | undefined
+
+    const dispose = createOwner((owner) => {
+      manager = createChildStoreManager({
+        owner,
+        scope: ServerScope.local,
+        persist,
+        isBooting: () => false,
+        isLoadingSessions: () => false,
+        onBootstrap() {},
+        onMcp() {},
+        onDispose() {},
+        translate: (key) => key,
+        queryOptions: queryOptionsApi,
+        global: { provider },
+      })
+    })
+
+    try {
+      if (!manager) throw new Error("manager required")
+      const [store] = manager.child("/project", { bootstrap: false })
+      expect(store.provider_ready).toBe(true)
+      expect(store.provider_loaded).toBe(true)
+
+      providerFailed = true
+      expect(store.provider_ready).toBe(true)
+      expect(store.provider_loaded).toBe(false)
+      expect(store.provider.all.size).toBe(0)
+    } finally {
+      providerFailed = false
       dispose()
     }
   })
