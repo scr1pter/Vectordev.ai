@@ -6,6 +6,28 @@ const serverB = "http://127.0.0.1:4097"
 const sessionA = session("ses_server_a", "C:/server-a", "Server A session")
 const sessionB = session("ses_server_b", "/home/server-b", "Server B session")
 
+test("server status endpoints remain distinct from unknown session IDs", async ({ page }) => {
+  await mockServers(page, [])
+  const responses = await page.evaluate(
+    async (servers) =>
+      Promise.all(
+        servers.flatMap((server) =>
+          ["/session/status", "/session/missing"].map(async (pathname) => {
+            const response = await fetch(`${server}${pathname}`)
+            return { status: response.status, body: await response.json() }
+          }),
+        ),
+      ),
+    [serverA, serverB],
+  )
+  expect(responses).toEqual([
+    { status: 200, body: {} },
+    { status: 404, body: { name: "NotFoundError" } },
+    { status: 200, body: {} },
+    { status: 404, body: { name: "NotFoundError" } },
+  ])
+})
+
 test("closing the active task by keyboard opens the remaining server task", async ({ page }) => {
   const requests: string[] = []
   await mockServers(page, requests)
@@ -76,7 +98,7 @@ function session(id: string, directory: string, title: string) {
 }
 
 async function mockServers(page: Page, requests: string[]) {
-  await page.route("**/*", async (route) => {
+  await page.route(/^http:\/\/127\.0\.0\.1:(4096|4097)\//, async (route) => {
     const url = new URL(route.request().url())
     if (url.origin !== serverA && url.origin !== serverB) return route.fallback()
     requests.push(url.toString())
@@ -85,6 +107,7 @@ async function mockServers(page: Page, requests: string[]) {
     if (directory && directory !== current.directory) return json(route, { name: "InvalidDirectory" }, 500)
     if (url.pathname === "/global/event" || url.pathname === "/event") return sse(route)
     if (url.pathname === "/global/health") return json(route, { healthy: true })
+    if (url.pathname === "/session/status") return json(route, {})
     if (url.pathname === "/session") return json(route, [current])
     if (url.pathname === `/session/${current.id}`) return json(route, current)
     if (/^\/session\/[^/]+$/.test(url.pathname)) return json(route, { name: "NotFoundError" }, 404)
@@ -92,8 +115,7 @@ async function mockServers(page: Page, requests: string[]) {
     if (/^\/session\/[^/]+\/(children|todo|diff)$/.test(url.pathname)) return json(route, [])
     if (["/skill", "/command", "/lsp", "/formatter", "/permission", "/question", "/vcs/diff"].includes(url.pathname))
       return json(route, [])
-    if (["/global/config", "/config", "/provider/auth", "/mcp", "/session/status"].includes(url.pathname))
-      return json(route, {})
+    if (["/global/config", "/config", "/provider/auth", "/mcp"].includes(url.pathname)) return json(route, {})
     if (url.pathname === "/provider")
       return json(route, { all: [], connected: [], default: { providerID: "", modelID: "" } })
     if (url.pathname === "/agent") return json(route, [{ name: "build", mode: "primary" }])
