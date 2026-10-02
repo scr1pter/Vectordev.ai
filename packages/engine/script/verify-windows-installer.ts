@@ -5,7 +5,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import { WindowsRemoval } from "../src/installation/windows-remove"
-import { WindowsPowerShell } from "../src/installation/windows-powershell"
+import { WindowsPowerShell } from "../../core/src/util/windows-powershell"
 
 if (
   process.platform !== "win32" ||

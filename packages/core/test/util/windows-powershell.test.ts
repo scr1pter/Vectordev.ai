@@ -3,7 +3,7 @@ import { createHash } from "node:crypto"
 import { mkdtemp, rm } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
-import { WindowsPowerShell } from "../../src/installation/windows-powershell"
+import { WindowsPowerShell } from "../../src/util/windows-powershell"
 
 test("Windows PowerShell child environments discard inherited module paths without changing other variables", async () => {
   const inherited = {
@@ -65,11 +65,11 @@ test.skipIf(process.platform !== "win32")(
       await Bun.write(
         entry,
         `import assert from "node:assert/strict"
-      import { WindowsPowerShell } from ${JSON.stringify(new URL("../../src/installation/windows-powershell.ts", import.meta.url).href)}
+      import { WindowsPowerShell } from ${JSON.stringify(new URL("../../src/util/windows-powershell.ts", import.meta.url).href)}
       assert.ok(process.env.PSModulePath, "pwsh must pass its module paths through Bun")
       const powershell = ${JSON.stringify(path.join(process.env.SYSTEMROOT!, "System32/WindowsPowerShell/v1.0/powershell.exe"))}
       const child = Bun.spawn([powershell, "-NoProfile", "-NonInteractive", "-Command", ${JSON.stringify(
-        `$ErrorActionPreference = 'Stop'; [pscustomobject]@{ Edition = $PSEdition; CertificateProvider = (Get-PSDrive Cert).Provider.Name; ProcessId = (Get-Process -Id $PID).Id; Hash = (Get-FileHash -Algorithm SHA256 -LiteralPath ${quote(file)}).Hash; Marker = $env:VECTOR_INSTALLER_ENV_MARKER } | ConvertTo-Json -Compress`,
+        `$ErrorActionPreference = 'Stop'; [pscustomobject]@{ Edition = $PSEdition; CertificateProvider = (Get-PSDrive Cert).Provider.Name; ArchiveCommand = (Get-Command Expand-Archive -ErrorAction Stop).Name; ProcessId = (Get-Process -Id $PID).Id; Hash = (Get-FileHash -Algorithm SHA256 -LiteralPath ${quote(file)}).Hash; Marker = $env:VECTOR_INSTALLER_ENV_MARKER } | ConvertTo-Json -Compress`,
       )}], { env: WindowsPowerShell.environment(powershell), stdin: "ignore", stdout: "pipe", stderr: "pipe" })
       const timeout = setTimeout(() => child.kill(), 15_000)
       try {
@@ -108,6 +108,7 @@ test.skipIf(process.platform !== "win32")(
         expect(JSON.parse(stdout)).toEqual({
           Edition: "Desktop",
           CertificateProvider: "Certificate",
+          ArchiveCommand: "Expand-Archive",
           ProcessId: expect.any(Number),
           Hash: createHash("sha256").update("installer hash fixture\n").digest("hex").toUpperCase(),
           Marker: "preserved",

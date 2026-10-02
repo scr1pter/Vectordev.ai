@@ -9,6 +9,7 @@ import { httpClient } from "../effect/app-node-platform"
 import { FSUtil } from "../fs-util"
 import { Global } from "../global"
 import { which } from "../util/which"
+import { WindowsPowerShell } from "../util/windows-powershell"
 
 export namespace RipgrepBinary {
   const VERSION = "15.1.0"
@@ -36,7 +37,13 @@ export namespace RipgrepBinary {
       const spawner = yield* ChildProcessSpawner
 
       const run = Effect.fnUntraced(function* (command: string, args: string[]) {
-        const handle = yield* spawner.spawn(ChildProcess.make(command, args, { extendEnv: true, stdin: "ignore" }))
+        const handle = yield* spawner.spawn(
+          ChildProcess.make(command, args, {
+            env: WindowsPowerShell.environment(command),
+            extendEnv: false,
+            stdin: "ignore",
+          }),
+        )
         const [stdout, stderr, code] = yield* Effect.all(
           [
             Stream.mkString(Stream.decodeText(handle.stdout)),
