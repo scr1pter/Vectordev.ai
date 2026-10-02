@@ -407,8 +407,8 @@ export const changelog = [
   [upcomingRelease.label, upcomingRelease.title, `${upcomingRelease.summary} ${upcomingRelease.status}`],
   [
     "September 2026 · 1.99.91",
-    "Provider setup and Vectorscope reliability",
-    "A third-party shared keyless gateway was disabled. That release required connecting a provider in Settings or with vector auth login and retained provider-key connections, including keys for the former gateway. GitHub automation stops with actionable MODEL and provider-key setup instructions when no model is configured, instead of selecting an unavailable default. Vectorscope's /vectorscope, /vs, /vector and /vx aliases and workflow fixtures agree again, and release checks no longer depend on an unshipped computer tool. Command-F places chat search below the title strip. Unsigned desktop releases require a manual download; signed automatic-update feeds are preserved.",
+    "Provider setup, ChatGPT sign-in and settings that carry over",
+    "Requests without a provider key no longer go through a third-party shared gateway: connect a provider in Settings or with vector auth login, and Sign in with ChatGPT remains available for OpenAI models. A prompt sent before any provider is connected opens the connect-provider dialog. Free models inside of Vector are available only once Vector's service for them is enabled. Settings use vector.json and .vector, Vector's environment variables start with VECTOR_ (the generic overrides are VECTOR_AGENT_CONFIG, VECTOR_AGENT_CONFIG_DIR and VECTOR_AGENT_DB), and an upgrade imports recognized earlier settings and variables while keeping the original files. GitHub automation without a configured model stops with MODEL and provider-key instructions. Vectorscope answers /vectorscope, /vs, /vector and /vx, and Command-F places chat search below the title strip. Unsigned desktop releases require a manual download; signed automatic-update feeds are preserved.",
   ],
   [
     "September 2026 · 1.99.9",

@@ -4,14 +4,15 @@ export type VectorRelease = {
   summary: string
 }
 
-// Shared by the landing release feed and documentation changelog. This is not a versioned release.
+// Shared by the landing release feed and documentation changelog. This is not a versioned release:
+// it lists what main's source carries but keeps switched off or unpublished until the owner sets it up.
 export const upcomingRelease = {
-  label: "Upcoming — unversioned candidate",
-  title: "Vector services, upgrade recovery and native distribution",
+  label: "Upcoming — unversioned",
+  title: "Features waiting on Vector's own setup",
   summary:
-    "This candidate prepares Free models inside of Vector through OpenRouter, public sessions with preview and consent, native installers, WSL account handoff and Vector Teams. It also restores reviewed provider adapters, improves configuration recovery and crash reports, and prepares a public SDK and container images. Shared model access and provider sign-ins that need registrations remain disabled pending owner setup. Sign in with ChatGPT stays available for OpenAI models; the separate Codex CLI integration is unchanged.",
+    "Vector's source also carries features that stay switched off or unpublished until Vector completes their setup: Free models inside of Vector through OpenRouter, consent-based public sessions on Vector's own service, Vector Teams, the Vector GitHub App, native CLI installers, the public SDK and container images, and provider sign-ins that need their own registrations, such as xAI, Poe, DigitalOcean, GitLab and GitHub Copilot. None of them is needed to use 1.99.91: API-key connections and Sign in with ChatGPT work without them.",
   status:
-    "Source preview only. No new version, release date, installer availability or production service enablement is announced. Package publication, platform checks and signed desktop updates remain pending. Pricing and licensing behavior are unchanged.",
+    "No version or release date is announced for these. Each one is enabled only after its service setup, legal review or package publication is complete. Pricing and licensing behavior are unchanged.",
 }
 
 export const releaseSeries: VectorRelease[] = [
@@ -622,8 +623,8 @@ export const release199: VectorRelease[] = [
   },
   {
     version: "1.99.91",
-    title: "Provider setup and Vectorscope reliability",
+    title: "Provider setup, ChatGPT sign-in and settings that carry over",
     summary:
-      "Vector no longer routes requests without a provider key through a third-party shared gateway. Models included with Vector are moving to a provider Vector has its own agreement with; until then, connect your own provider in Settings or with vector auth login. At that release, a new install without credentials had no available models, while provider-key connections, including keys for that third-party gateway, remained supported. GitHub automation no longer falls back to the unavailable default gateway model when no model is configured: it stops early with instructions to set MODEL and provide the matching provider key. Vectorscope recognizes /vectorscope, /vs, /vector and /vx; older review workflows retain their aliases, and general agent tasks keep their own mentions. Release checks now match the Vectorscope name and generated workflows, and no longer depend on a computer tool that has not shipped. Command-F also places chat search below the window chrome and adjusts when the window resizes. Unsigned desktop releases require a manual download and may show an unidentified-developer or unknown-publisher warning. Signed automatic-update feeds are preserved.",
+      "Vector no longer routes requests without a provider key through a third-party shared gateway. Connect your own provider in Settings or with vector auth login; Sign in with ChatGPT remains available for OpenAI models, alongside API keys. A prompt sent before any provider is connected now says what is missing and opens the connect-provider dialog, instead of asking for a model the picker cannot offer. Free models inside of Vector through OpenRouter are built in but available only once Vector's service for them is enabled; until then a new install without credentials starts with provider setup. Vector's agent now uses Vector's own names: settings live in vector.json or vector.jsonc and the .vector folder, Vector's environment variables start with VECTOR_, and the three generic overrides are VECTOR_AGENT_CONFIG, VECTOR_AGENT_CONFIG_DIR and VECTOR_AGENT_DB. When you upgrade, Vector imports recognized settings, project assets and environment variables saved under the earlier agent's names, keeps the original files, and tells you once what it imported; a variable already set under Vector's name always wins. GitHub automation without a configured model stops early with instructions to set MODEL and provide the matching provider key. Vectorscope recognizes /vectorscope, /vs, /vector and /vx. Command-F places chat search below the window chrome and adjusts when the window resizes. Unsigned desktop releases require a manual download and may show an unidentified-developer or unknown-publisher warning, and the download page offers this version only once its installers are published. Signed automatic-update feeds are preserved.",
   },
 ]
