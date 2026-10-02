@@ -38,6 +38,11 @@ export default [
             "onnxruntime-web/dist": ortDist,
           },
         },
+        // These ?url imports are runtime assets. Vite's alias optimizer treats the .mjs asset as JS otherwise,
+        // producing a malformed ?url.js dependency and breaking cold-start dependency optimization.
+        optimizeDeps: {
+          exclude: ["onnxruntime-web/dist"],
+        },
         define: {
           "import.meta.env.VITE_VECTOR_CHANNEL": JSON.stringify(channel),
         },
