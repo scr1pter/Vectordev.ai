@@ -6,8 +6,8 @@ import path from "node:path"
 import { InstallationOwnership } from "../../src/installation/ownership"
 import { Standalone } from "../../src/installation/standalone"
 
-async function directory() {
-  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), "vector-ownership-")))
+async function directory(prefix = "vector-ownership-") {
+  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), prefix)))
   return {
     root,
     async [Symbol.asyncDispose]() {
@@ -160,7 +160,7 @@ for (const replacement of [false, true]) {
   test.skipIf(process.platform !== "win32")(
     `Windows deferred standalone removal ${replacement ? "preserves a replaced executable" : "removes only owned files after its parent exits"}`,
     async () => {
-      await using fixture = await directory()
+      await using fixture = await directory("vector ownership '‘’‚‛%VECTOR_FIXTURE_PATH%&^-")
       const executable = path.join(fixture.root, "vector.exe")
       const metadata = path.join(fixture.root, ".vector-vector.exe")
       await mkdir(metadata)
@@ -199,6 +199,7 @@ for (const replacement of [false, true]) {
       `
       const child = Bun.spawn([process.execPath, "--eval", script], {
         cwd: path.resolve(import.meta.dir, "../.."),
+        env: { ...process.env, VECTOR_FIXTURE_PATH: "wrong-expanded-path" },
         stdin: "pipe",
         stdout: "pipe",
         stderr: "pipe",
