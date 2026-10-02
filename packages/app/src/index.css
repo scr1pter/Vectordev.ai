@@ -210,8 +210,9 @@
     display: none !important;
   }
 
+  /* Square, with corners concentric with the composer's: its 16px corner minus the button's 8px inset. */
   [data-action="prompt-submit"] {
-    border-radius: 999px !important;
+    border-radius: 8px !important;
   }
 
   [data-component="prompt-input"],
@@ -268,7 +269,7 @@
     min-height: 42px;
   }
 
-  /* Keep the send button round when larger targets stretch its height. */
+  /* Keep the send button square when larger targets stretch its height. */
   html[data-vector-larger-targets="true"] [data-action="prompt-submit"] {
     min-width: 42px;
   }

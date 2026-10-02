@@ -1600,7 +1600,7 @@ html[data-vector-navigation-resizing] * {
   width: 38px !important;
   height: 38px !important;
   border: 1px solid var(--vx-line-strong) !important;
-  border-radius: 50% !important;
+  border-radius: 8px !important;
 }
 
 [data-vector-shell] [data-action="prompt-mic"][aria-label="Listening"] {
