@@ -133,6 +133,21 @@ const layer = Layer.effect(
     const state = yield* InstanceState.make<State>(
       Effect.fn("Plugin.state")(function* (ctx) {
         const hooks: Hooks[] = []
+        // Dispose plugins that already started if the load is interrupted before it finishes.
+        yield* Effect.addFinalizer(() =>
+          Effect.forEach(
+            hooks,
+            (hook) =>
+              Effect.tryPromise({
+                try: () => Promise.resolve(hook.dispose?.()),
+                catch: errorMessage,
+              }).pipe(
+                Effect.tapError((error) => Effect.logError("plugin dispose hook failed", { error })),
+                Effect.ignore,
+              ),
+            { discard: true },
+          ),
+        )
         const bridge = yield* EffectBridge.make()
 
         function publishPluginError(message: string) {
@@ -258,21 +273,6 @@ const layer = Layer.effect(
           })
         })
         yield* Effect.addFinalizer(() => unsubscribe)
-
-        yield* Effect.addFinalizer(() =>
-          Effect.forEach(
-            hooks,
-            (hook) =>
-              Effect.tryPromise({
-                try: () => Promise.resolve(hook.dispose?.()),
-                catch: errorMessage,
-              }).pipe(
-                Effect.tapError((error) => Effect.logError("plugin dispose hook failed", { error })),
-                Effect.ignore,
-              ),
-            { discard: true },
-          ),
-        )
 
         return { hooks }
       }),

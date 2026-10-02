@@ -3,7 +3,7 @@ import { pathToFileURL } from "node:url"
 import { expect, mock, beforeEach } from "bun:test"
 import { ListRootsRequestSchema, ToolListChangedNotificationSchema } from "@modelcontextprotocol/sdk/types.js"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
-import { Cause, Effect, Exit } from "effect"
+import { Cause, Effect, Exit, Fiber } from "effect"
 import type { MCP as MCPNS } from "../../src/mcp/index"
 import { testEffect } from "../lib/effect"
 import { TestInstance } from "../fixture/fixture"
@@ -63,6 +63,11 @@ let clientCreateCount = 0
 let transportCloseCount = 0
 // Captures the opts passed to each MockStdioTransport, keyed by lastCreatedClientName
 const stdioOptsByName = new Map<string, any>()
+// Local server commands whose connect, or whose tool listing, never finishes
+const hangingConnects = new Set<string>()
+const hangingListings = new Set<string>()
+// Clients that connected and have not been closed yet
+const liveClients = new Set<{ transport: any }>()
 
 function getOrCreateClientState(name?: string): MockClientState {
   const key = name ?? "default"
@@ -101,11 +106,13 @@ function getOrCreateClientState(name?: string): MockClientState {
 class MockStdioTransport {
   stderr: null = null
   pid = 12345
+  command: string
   constructor(opts: any) {
+    this.command = opts.command
     if (lastCreatedClientName) stdioOptsByName.set(lastCreatedClientName, opts)
   }
   async start() {
-    if (connectShouldHang) return new Promise<void>(() => {}) // never resolves
+    if (connectShouldHang || hangingConnects.has(this.command)) return new Promise<void>(() => {}) // never resolves
     if (connectShouldFail) throw new Error(connectError)
   }
   async close() {
@@ -173,6 +180,7 @@ void mock.module("@modelcontextprotocol/sdk/client/index.js", () => ({
     async connect(transport: { start: () => Promise<void> }) {
       this.transport = transport
       await transport.start()
+      liveClients.add(this)
       // After successful connect, bind to the last-created client name
       this._state = getOrCreateClientState(lastCreatedClientName)
     }
@@ -196,6 +204,7 @@ void mock.module("@modelcontextprotocol/sdk/client/index.js", () => ({
 
     async listTools(params?: { cursor?: string }) {
       if (this._state) this._state.listToolsCalls++
+      if (hangingListings.has(this.transport?.command)) return new Promise<never>(() => {})
       if (this._state?.listToolsShouldFail) {
         throw new Error(this._state.listToolsError)
       }
@@ -257,6 +266,7 @@ void mock.module("@modelcontextprotocol/sdk/client/index.js", () => ({
     }
 
     async close() {
+      liveClients.delete(this)
       if (this._state) this._state.closed = true
     }
   },
@@ -270,6 +280,9 @@ beforeEach(() => {
   connectError = "Mock transport cannot connect"
   clientCreateCount = 0
   transportCloseCount = 0
+  hangingConnects.clear()
+  hangingListings.clear()
+  liveClients.clear()
 })
 
 // Import after mocks
@@ -591,6 +604,41 @@ it.instance(
       }),
     ),
   { config: { mcp: {} } },
+)
+
+it.instance(
+  "an interrupted load closes the servers it already connected before loading again",
+  () =>
+    MCP.Service.use((mcp: MCPNS.Interface) =>
+      Effect.gen(function* () {
+        const liveCommands = () => [...liveClients].map((client) => client.transport.command).sort()
+        hangingConnects.add("slow")
+        hangingListings.add("listing")
+
+        const first = yield* mcp.status().pipe(Effect.forkChild)
+        // Wait until "fast" is fully connected and "listing" is connected but still listing its tools.
+        yield* Effect.sleep("5 millis").pipe(
+          Effect.repeat({ until: () => liveCommands().join() === "fast,listing", times: 200 }),
+        )
+        yield* Effect.sleep("20 millis")
+        yield* Fiber.interrupt(first)
+
+        hangingConnects.clear()
+        hangingListings.clear()
+        const status = yield* mcp.status()
+        expect(Object.values(status).map((item) => item.status)).toEqual(["connected", "connected", "connected"])
+        expect(liveCommands()).toEqual(["fast", "listing", "slow"])
+      }),
+    ),
+  {
+    config: {
+      mcp: {
+        fast: { type: "local", command: ["fast"] },
+        listing: { type: "local", command: ["listing"] },
+        slow: { type: "local", command: ["slow"] },
+      },
+    },
+  },
 )
 
 // ========================================================================

@@ -390,3 +390,31 @@ it.live("InstanceState survives deferred resume outside ALS when InstanceRef is 
     }).pipe(Effect.provide(Test.layer))
   }),
 )
+
+it.live("InstanceState releases what an interrupted load started before it loads again", () =>
+  Effect.gen(function* () {
+    const dir = yield* tmpdirScoped()
+    const started = yield* Deferred.make<void>()
+    const live = new Set<number>()
+    let attempts = 0
+    const state = yield* InstanceState.make(() =>
+      Effect.gen(function* () {
+        const attempt = ++attempts
+        yield* Effect.acquireRelease(
+          Effect.sync(() => live.add(attempt)),
+          () => Effect.sync(() => live.delete(attempt)),
+        )
+        if (attempt > 1) return attempt
+        yield* Deferred.succeed(started, undefined)
+        return yield* Effect.never
+      }),
+    )
+
+    const first = yield* access(state, dir).pipe(Effect.forkScoped)
+    yield* Deferred.await(started)
+    yield* Fiber.interrupt(first)
+
+    expect(yield* access(state, dir)).toBe(2)
+    expect([...live]).toEqual([2])
+  }),
+)

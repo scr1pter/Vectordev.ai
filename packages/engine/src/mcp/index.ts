@@ -514,9 +514,8 @@ const layer = Layer.effect(
             instructions: mcpClient.getInstructions()?.trim(),
           } satisfies CreateResult
         }).pipe(
-          Effect.catchCause((cause) =>
-            Effect.tryPromise(() => mcpClient.close()).pipe(Effect.ignore, Effect.andThen(Effect.failCause(cause))),
-          ),
+          // onError also runs when the load is interrupted while listing tools, which catchCause would skip.
+          Effect.onError(() => Effect.tryPromise(() => mcpClient.close()).pipe(Effect.ignore)),
         )
       },
       Effect.map((result): CreateResult => result),
@@ -619,6 +618,35 @@ const layer = Layer.effect(
           timeouts: {},
         }
 
+        // Register cleanup before connecting: an interrupted load (a stop during cold start) closes this scope
+        // before the retry, and every client already stored in s.clients must be closed with it.
+        yield* Effect.addFinalizer(() =>
+          Effect.gen(function* () {
+            const clients = Object.values(s.clients)
+            s.clients = {}
+            s.defs = {}
+            s.instructions = {}
+            yield* Effect.forEach(
+              clients,
+              (client) =>
+                Effect.gen(function* () {
+                  const pid = client.transport instanceof StdioClientTransport ? client.transport.pid : null
+                  if (typeof pid === "number") {
+                    const pids = yield* descendants(pid)
+                    for (const dpid of pids) {
+                      try {
+                        process.kill(dpid, "SIGTERM")
+                      } catch {}
+                    }
+                  }
+                  yield* Effect.tryPromise(() => client.close()).pipe(Effect.ignore)
+                }),
+              { concurrency: "unbounded" },
+            )
+            pendingOAuthTransports.clear()
+          }),
+        )
+
         yield* Effect.forEach(
           Object.entries(config),
           ([key, mcp]) =>
@@ -647,33 +675,6 @@ const layer = Layer.effect(
               }
             }),
           { concurrency: "unbounded" },
-        )
-
-        yield* Effect.addFinalizer(() =>
-          Effect.gen(function* () {
-            const clients = Object.values(s.clients)
-            s.clients = {}
-            s.defs = {}
-            s.instructions = {}
-            yield* Effect.forEach(
-              clients,
-              (client) =>
-                Effect.gen(function* () {
-                  const pid = client.transport instanceof StdioClientTransport ? client.transport.pid : null
-                  if (typeof pid === "number") {
-                    const pids = yield* descendants(pid)
-                    for (const dpid of pids) {
-                      try {
-                        process.kill(dpid, "SIGTERM")
-                      } catch {}
-                    }
-                  }
-                  yield* Effect.tryPromise(() => client.close()).pipe(Effect.ignore)
-                }),
-              { concurrency: "unbounded" },
-            )
-            pendingOAuthTransports.clear()
-          }),
         )
 
         return s
