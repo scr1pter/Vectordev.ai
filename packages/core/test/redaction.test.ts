@@ -90,6 +90,26 @@ describe("Redaction", () => {
     })
   })
 
+  test("redactConfig masks secrets nested in an agent's unknown keys", () => {
+    const headers = { Authorization: "Bearer agent-nested", "User-Agent": "vector" }
+    const config = {
+      agent: { build: { headers, options: { headers }, tools: { "read.key": true }, permission: { "*.key": "deny" } } },
+      mode: { plan: { providerOptions: { custom: { apiKey: "mode-nested" } } } },
+    }
+    const masked = { Authorization: Redaction.MARKER, "User-Agent": "vector" }
+    expect(Redaction.redactConfig(config)).toEqual({
+      agent: {
+        build: {
+          headers: masked,
+          options: { headers: masked },
+          tools: { "read.key": true },
+          permission: { "*.key": "deny" },
+        },
+      },
+      mode: { plan: { providerOptions: { custom: { apiKey: Redaction.MARKER } } } },
+    })
+  })
+
   test("redactConfig masks secret query parameters and command arguments", () => {
     const config = {
       provider: { custom: { options: { baseURL: "https://api.example.com/v1?api_key=sk-url&region=us" } } },
@@ -154,9 +174,70 @@ describe("Redaction", () => {
       ],
     }
     expect(Redaction.restore(sent, file)).toEqual({ plugin: [["second", { apiKey: "second-secret" }]] })
-    expect<unknown>(Redaction.restore({ plugin: [["third", { apiKey: Redaction.MARKER }]] }, file)).toEqual({
-      plugin: [["third", {}]],
+    // A tuple the file does not hold is left out, so the copy holding the key stays
+    // in effect, and so is a list left empty by that.
+    expect<unknown>(Redaction.restore({ plugin: [["third", { apiKey: Redaction.MARKER }]] }, file)).toEqual({})
+    expect<unknown>(Redaction.restore({ plugin: [] }, file)).toEqual({ plugin: [] })
+  })
+
+  test("restore leaves out a masked URL or command the file does not hold, with its entry", () => {
+    const sent = {
+      mcp: {
+        remote: { type: "remote", url: `https://h.example/p?token=${Redaction.MARKER}`, enabled: true },
+        tools: { type: "local", command: ["srv", "--api-key", Redaction.MARKER] },
+        added: { type: "local", command: ["new-server"] },
+      },
+      provider: { custom: { name: "Custom", options: { baseURL: `https://h.example?key=${Redaction.MARKER}` } } },
+      plugin: ["plain", ["global-only", { apiKey: Redaction.MARKER }]],
+    }
+    expect<unknown>(Redaction.restore(sent, {})).toEqual({
+      mcp: { added: { type: "local", command: ["new-server"] } },
+      provider: { custom: { name: "Custom" } },
+      plugin: ["plain"],
     })
+    // An entry the file holds, such as an `enabled` override, keeps the rest of what was sent.
+    expect<unknown>(Redaction.restore(sent.mcp, { remote: { enabled: false }, tools: { enabled: false } })).toEqual({
+      remote: { type: "remote", enabled: true },
+      tools: { type: "local" },
+      added: { type: "local", command: ["new-server"] },
+    })
+  })
+
+  test("restore pairs a repeated flag or query parameter with the stored one in the same place", () => {
+    const command = ["srv", "--api-key", "A", "--api-key", "B", "--x-token=C", "--x-token=D"]
+    expect(
+      Redaction.restore(
+        [
+          "srv",
+          "--verbose",
+          "--api-key",
+          Redaction.MARKER,
+          "--api-key",
+          Redaction.MARKER,
+          `--x-token=${Redaction.MARKER}`,
+          `--x-token=${Redaction.MARKER}`,
+        ],
+        command,
+      ),
+    ).toEqual(["srv", "--verbose", "--api-key", "A", "--api-key", "B", "--x-token=C", "--x-token=D"])
+    // An edited first value keeps the second stored one in the second place, and a
+    // third occurrence with nothing stored behind it is dropped.
+    expect(
+      Redaction.restore(
+        ["srv", "--api-key", "edited", "--api-key", Redaction.MARKER, "--api-key", Redaction.MARKER],
+        command,
+      ),
+    ).toEqual(["srv", "--api-key", "edited", "--api-key", "B", "--api-key"])
+    const url = "https://h.example/p?token=a&token=b&mode=full"
+    expect(
+      Redaction.restore(`https://h.example/p?token=${Redaction.MARKER}&token=${Redaction.MARKER}&mode=lite`, url),
+    ).toBe("https://h.example/p?token=a&token=b&mode=lite")
+    expect(
+      Redaction.restore(
+        `https://h.example/p?token=${Redaction.MARKER}&token=${Redaction.MARKER}&token=${Redaction.MARKER}`,
+        url,
+      ),
+    ).toBe("https://h.example/p?token=a&token=b")
   })
 
   test("restore keeps a changed URL but never sends the stored key to a new host", () => {

@@ -98,8 +98,7 @@ export const instanceHandlers = HttpApiBuilder.group(InstanceHttpApi, "instance"
     // Agent options come from config and can carry keys. Every client of the
     // server reads this list, including guests invited with `vector invite`.
     const getAgent = Effect.fn("InstanceHttpApi.agent")(function* () {
-      const agents = yield* agent.list()
-      return agents.map((item) => ({ ...item, options: Redaction.redact(item.options) }))
+      return (yield* agent.list()).map((item) => ({ ...item, options: Redaction.redact(item.options) }))
     })
 
     const getSkill = Effect.fn("InstanceHttpApi.skill")(function* () {

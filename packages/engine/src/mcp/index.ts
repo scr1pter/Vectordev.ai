@@ -857,7 +857,8 @@ const layer = Layer.effect(
           } satisfies Status,
         }
       }
-      if (mcp.type === "local" && (!mcp.command.length || !mcp.command[0]?.trim())) {
+      // Restoring drops a command whose masked secret nothing stored can fill.
+      if (mcp.type === "local" && (!mcp.command?.length || !mcp.command[0]?.trim())) {
         return {
           status: {
             status: "failed",
