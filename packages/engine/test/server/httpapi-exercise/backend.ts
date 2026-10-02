@@ -1,6 +1,7 @@
 import { ConfigProvider, Effect, Layer } from "effect"
 import { HttpRouter } from "effect/unstable/http"
 import { parse } from "./assertions"
+import { exerciseGlobalRoot } from "./environment"
 import { runtime, type Runtime } from "./runtime"
 import type { ActiveScenario, BackendApp, CallResult, CaptureMode, SeededContext } from "./types"
 
@@ -92,6 +93,7 @@ function toAuthProbeRequest(scenario: ActiveScenario, credentials: "missing" | "
     body: scenario.method === "GET" ? undefined : {},
   }
   const headers = {
+    "x-vector-directory": exerciseGlobalRoot,
     ...(spec.body === undefined ? {} : { "content-type": "application/json" }),
     ...spec.headers,
     ...(credentials === "valid" ? { authorization: basic("vector", "secret") } : {}),

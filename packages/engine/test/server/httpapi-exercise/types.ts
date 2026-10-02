@@ -5,6 +5,7 @@ import type { Config } from "../../../src/config/config"
 import type { Project } from "../../../src/project/project"
 import type { Worktree } from "../../../src/worktree"
 import type { MessageV2 } from "../../../src/session/message-v2"
+import type { TestLLMServer } from "../../lib/llm-server"
 import type { SessionID } from "../../../src/session/schema"
 
 export const OpenApiMethods = ["get", "post", "put", "delete", "patch"] as const
@@ -63,7 +64,7 @@ export type ScenarioContext = {
   todos: (sessionID: SessionID, todos: TodoInfo[]) => Effect.Effect<void>
   worktree: (input?: { name?: string }) => Effect.Effect<Worktree.Info>
   worktreeRemove: (directory: string) => Effect.Effect<void>
-  llmText: (value: string) => Effect.Effect<void>
+  llmText: TestLLMServer["Service"]["text"]
   llmWait: (count: number) => Effect.Effect<void>
   tuiRequest: (request: { path: string; body: unknown }) => Effect.Effect<void>
 }
