@@ -86,6 +86,45 @@ describe("BackgroundJob", () => {
     }).pipe(Effect.provide(jobsLayer)),
   )
 
+  it.live("an extension racing the job's completion is either refused or runs before the job settles", () =>
+    Effect.gen(function* () {
+      const jobs = yield* BackgroundJob.Service
+
+      yield* Effect.forEach(Array.from({ length: 200 }), (_, index) =>
+        Effect.gen(function* () {
+          const first = yield* Deferred.make<void>()
+          let extensionRan = false
+          const job = yield* jobs.start({
+            type: "test",
+            run: Deferred.await(first).pipe(Effect.as(`first-${index}`)),
+          })
+
+          // Release the first run and extend at the same moment, so settle and extend contend for the registry.
+          const [, extended] = yield* Effect.all(
+            [
+              Deferred.succeed(first, undefined),
+              jobs.extend({
+                id: job.id,
+                run: Effect.sync(() => {
+                  extensionRan = true
+                  return `second-${index}`
+                }),
+              }),
+            ],
+            { concurrency: "unbounded" },
+          )
+
+          // The pending count is raised atomically with the status check, so the job cannot settle without the
+          // extension it accepted, and a refused extension never runs.
+          const settled = yield* jobs.wait({ id: job.id }).pipe(Effect.timeout("2 seconds"))
+          expect(settled.info?.status).toBe("completed")
+          expect(extensionRan).toBe(extended)
+          expect(settled.info?.output).toBe(extended ? `second-${index}` : `first-${index}`)
+        }),
+      )
+    }).pipe(Effect.provide(jobsLayer)),
+  )
+
   it.live("interrupts live work without promising settlement after the owning process-local scope closes", () =>
     Effect.gen(function* () {
       const scope = yield* Scope.make()
