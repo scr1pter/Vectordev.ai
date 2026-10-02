@@ -1,6 +1,7 @@
 import { Config } from "@/config/config"
 import { Provider } from "@/provider/provider"
 import * as InstanceState from "@/effect/instance-state"
+import { Redaction } from "@vectordevai/core/redaction"
 import { Effect } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { InstanceHttpApi } from "../api"
@@ -11,14 +12,17 @@ export const configHandlers = HttpApiBuilder.group(InstanceHttpApi, "config", (h
     const providerSvc = yield* Provider.Service
     const configSvc = yield* Config.Service
 
+    // Every client of the server reads config, including guests invited with
+    // `vector invite`, so stored keys go out as Redaction.MARKER. Config.update
+    // treats a MARKER sent back as "unchanged".
     const get = Effect.fn("ConfigHttpApi.get")(function* () {
-      return yield* configSvc.get()
+      return Redaction.redact(yield* configSvc.get())
     })
 
     const update = Effect.fn("ConfigHttpApi.update")(function* (ctx) {
       yield* configSvc.update(ctx.payload)
       yield* markInstanceForDisposal(yield* InstanceState.context)
-      return ctx.payload
+      return Redaction.redact(ctx.payload)
     })
 
     const providers = Effect.fn("ConfigHttpApi.providers")(function* () {

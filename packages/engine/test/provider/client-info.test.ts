@@ -46,4 +46,23 @@ describe("Provider.toClientInfo", () => {
     expect(info.options.headers["User-Agent"]).toBe("vector")
     expect(info.options.maxTokens).toBe(4096)
   })
+
+  test("drops keys from model options and headers too", () => {
+    const info = Provider.toClientInfo(
+      provider({
+        models: {
+          small: {
+            id: "small",
+            options: { apiKey: "secret-7", temperature: 0 },
+            headers: { "x-api-key": "secret-8", "User-Agent": "vector" },
+          },
+        },
+      }),
+    )
+    const text = JSON.stringify(info)
+    expect(text).not.toContain("secret-7")
+    expect(text).not.toContain("secret-8")
+    expect(info.models.small.options.temperature).toBe(0)
+    expect(info.models.small.headers["User-Agent"]).toBe("vector")
+  })
 })

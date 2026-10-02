@@ -45,6 +45,7 @@ import { EffectBridge } from "@/effect/bridge"
 import { InstanceState } from "@/effect/instance-state"
 import { EffectPromise } from "@/effect/promise"
 import { FSUtil } from "@vectordevai/core/fs-util"
+import { Redaction } from "@vectordevai/core/redaction"
 import { isRecord } from "@/util/record"
 import { optional } from "@vectordevai/core/schema"
 import { ProviderTransform } from "./transform"
@@ -1009,33 +1010,25 @@ export function toPublicInfo(provider: Info): Info {
 
 // These sign-in placeholders contain no credentials. All other key values stay private.
 const CLIENT_VISIBLE_API_KEYS = new Set<string>(["", OAUTH_DUMMY_KEY])
-// Matched against the end of a field name, so "sessionToken" and "api_key" go
-// while "maxTokens" stays.
-const SECRET_FIELD = /(key|secret|token|password|passphrase|credentials?|authorization|cookie|accesskeyid)$/i
-
-function withoutSecrets(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(withoutSecrets)
-  if (!value || typeof value !== "object") return value
-  return Object.fromEntries(
-    Object.entries(value)
-      .filter(([name]) => !SECRET_FIELD.test(name))
-      .map(([name, inner]) => [name, withoutSecrets(inner)]),
-  )
-}
 
 /**
  * The provider record as a client may see it. The provider list and config
  * endpoints used to send toPublicInfo(), which still carries `key`, the user's
  * stored API key, to every client of the server, including guests invited with
  * `vector invite`. Clients need to know how a provider is connected, never the
- * credential itself.
+ * credential itself. Model options and headers can carry keys too.
  */
 export function toClientInfo(provider: Info): Info {
   const { key: _key, ...info } = toPublicInfo(provider)
   const apiKey = info.options?.apiKey
-  const options = withoutSecrets(info.options ?? {}) as Info["options"]
+  const options = Redaction.omit(info.options ?? {})
   if (typeof apiKey === "string" && CLIENT_VISIBLE_API_KEYS.has(apiKey)) options.apiKey = apiKey
-  return { ...info, options }
+  const models = mapValues(info.models ?? {}, (model) => ({
+    ...model,
+    options: Redaction.omit(model.options ?? {}),
+    headers: Redaction.omit(model.headers ?? {}),
+  }))
+  return { ...info, options, models }
 }
 
 export function defaultModelIDs<T extends { models: Record<string, { id: string }> }>(providers: Record<string, T>) {

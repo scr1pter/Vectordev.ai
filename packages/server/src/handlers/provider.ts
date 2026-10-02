@@ -1,4 +1,5 @@
 import { Catalog } from "@vectordevai/core/catalog"
+import { Redaction } from "@vectordevai/core/redaction"
 import { Effect } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { Api } from "../api"
@@ -12,7 +13,8 @@ export const ProviderHandler = HttpApiBuilder.group(Api, "server.provider", (han
         "provider.list",
         Effect.fn(function* () {
           const catalog = yield* Catalog.Service
-          return yield* response(catalog.provider.available())
+          // Provider settings and request headers can hold the API key from config.
+          return yield* response(catalog.provider.available().pipe(Effect.map(Redaction.redact)))
         }),
       )
       .handle(
@@ -25,7 +27,7 @@ export const ProviderHandler = HttpApiBuilder.group(Api, "server.provider", (han
               providerID: ctx.params.providerID,
               message: `Provider not found: ${ctx.params.providerID}`,
             })
-          return yield* response(Effect.succeed(provider))
+          return yield* response(Effect.succeed(Redaction.redact(provider)))
         }),
       )
   }),

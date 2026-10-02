@@ -26,6 +26,7 @@ import { NamedError } from "@vectordevai/core/util/error"
 import { InstallationVersion } from "@vectordevai/core/installation/version"
 import { withTimeout } from "@/util/timeout"
 import { FSUtil } from "@vectordevai/core/fs-util"
+import { Redaction } from "@vectordevai/core/redaction"
 import { McpOAuthPendingProvider, McpOAuthProvider, OAUTH_CALLBACK_PATH } from "./oauth-provider"
 import { McpOAuthCallback } from "./oauth-callback"
 import { McpAuth } from "./auth"
@@ -820,8 +821,11 @@ const layer = Layer.effect(
       )
     })
 
-    const add = Effect.fn("MCP.add")(function* (name: string, mcp: ConfigMCPV1.Info, secrets?: Record<string, string>) {
-      const unsafeHeader = mcp.type === "remote" ? unsafeCredentialHeader(mcp.headers) : undefined
+    const add = Effect.fn("MCP.add")(function* (
+      name: string,
+      input: ConfigMCPV1.Info,
+      secrets?: Record<string, string>,
+    ) {
       if (!validMcpName(name)) {
         return {
           status: {
@@ -830,6 +834,14 @@ const layer = Layer.effect(
           } satisfies Status,
         }
       }
+      // Clients read config with secrets replaced by Redaction.MARKER. One that
+      // sends an entry back unchanged keeps the stored values, not the marker.
+      // Runtime state holds servers added since load; config also holds disabled ones.
+      const running = (yield* InstanceState.get(state)).config
+      const configured = (yield* cfgSvc.get()).mcp ?? {}
+      const stored = [running, configured].find((entries) => Object.hasOwn(entries, name))
+      const mcp = Redaction.restore(input, stored?.[name])
+      const unsafeHeader = mcp.type === "remote" ? unsafeCredentialHeader(mcp.headers) : undefined
       if (mcp.type === "remote" && !remoteURL(mcp.url)) {
         return {
           status: {

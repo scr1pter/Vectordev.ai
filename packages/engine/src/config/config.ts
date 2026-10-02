@@ -17,6 +17,7 @@ import { InstallationLocal } from "@vectordevai/core/installation/version"
 import { existsSync } from "fs"
 import { isRecord } from "@/util/record"
 import { FSUtil } from "@vectordevai/core/fs-util"
+import { Redaction } from "@vectordevai/core/redaction"
 import { InstanceState } from "@/effect/instance-state"
 import { Context, Duration, Effect, Fiber, Layer, Schema } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
@@ -599,7 +600,10 @@ const layer = Layer.effect(
       const file = path.join(dir, "vector.json")
       const existing = yield* loadFile(file)
       yield* fs
-        .writeFileString(file, JSON.stringify(mergeDeep(writable(existing), writable(config)), null, 2))
+        .writeFileString(
+          file,
+          JSON.stringify(mergeDeep(writable(existing), Redaction.unchanged(writable(config))), null, 2),
+        )
         .pipe(Effect.orDie)
     })
 
@@ -666,7 +670,7 @@ const layer = Layer.effect(
       const file = globalConfigFile()
       const original = (yield* readConfigFile(file)) ?? "{}"
       const before = ConfigSchema.rewrite(original)
-      const patch = writableGlobal(config)
+      const patch = Redaction.unchanged(writableGlobal(config))
 
       let next: Info
       let changed: boolean
