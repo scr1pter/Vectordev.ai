@@ -247,7 +247,7 @@ describe("GitHub App Actions authentication", () => {
       [
         process.execPath,
         "--eval",
-        `import { resolveGithubAuth } from ${JSON.stringify(new URL("../../src/cli/cmd/github.auth.ts", import.meta.url).pathname)};
+        `import { resolveGithubAuth } from ${JSON.stringify(new URL("../../src/cli/cmd/github.auth.ts", import.meta.url).href)};
        await resolveGithubAuth({ repository: "fixture-owner/fixture-repo", purpose: "task", providedToken: process.env.VECTOR_TEST_TOKEN, env: {} });`,
       ],
       {

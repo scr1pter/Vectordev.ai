@@ -87,7 +87,7 @@ test("separate CLI login and run recover from a shared desktop vault without cha
     expect(login.stderr).toContain("fixture@example.invalid")
     const completed = await run(cli, ["run", "--model", "lmstudio/test-model", "Say hello"])
     expect(completed.code, completed.stderr).toBe(0)
-    expect(completed.stdout).toBe("Separate CLI store works\n")
+    expect(completed.stdout).toBe(`Separate CLI store works${os.EOL}`)
     expect(await Bun.file(path.join(cli, "vector", "cli-auth.json")).exists()).toBe(true)
     expect(await store.text()).toBe(encrypted)
   } finally {
