@@ -7,7 +7,6 @@ import { Git } from "@/git"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { EventV2 } from "@vectordevai/core/event"
 import { VcsEvent } from "@vectordevai/schema/vcs-event"
-import { SessionStatus } from "@/session/status"
 
 const PATCH_CONTEXT_LINES = 2_147_483_647
 const MAX_PATCH_BYTES = 10_000_000
@@ -407,12 +406,11 @@ interface State {
 
 export class Service extends Context.Service<Service, Interface>()("@vector/Vcs") {}
 
-const layer: Layer.Layer<Service, never, Git.Service | EventV2Bridge.Service | SessionStatus.Service> = Layer.effect(
+const layer: Layer.Layer<Service, never, Git.Service | EventV2Bridge.Service> = Layer.effect(
   Service,
   Effect.gen(function* () {
     const git = yield* Git.Service
     const events = yield* EventV2Bridge.Service
-    const status = yield* SessionStatus.Service
     const scope = yield* Scope.Scope
 
     const state = yield* InstanceState.make<State>(
@@ -616,21 +614,11 @@ const layer: Layer.Layer<Service, never, Git.Service | EventV2Bridge.Service | S
           return yield* new SwitchError({ message: `"${name}" is not a valid branch name`, reason: "invalid-name" })
         }
 
-        const [current, refs, sessions] = yield* Effect.all(
-          [
-            currentBranch(git, cwd),
-            git.run(["for-each-ref", branchFormat, `refs/heads/${name}`], { cwd }),
-            status.list(),
-          ],
-          { concurrency: 3 },
+        const [current, refs] = yield* Effect.all(
+          [currentBranch(git, cwd), git.run(["for-each-ref", branchFormat, `refs/heads/${name}`], { cwd })],
+          { concurrency: 2 },
         )
         if (!input.create && name === current) return { branch: current, default_branch: value.root?.name }
-        if ([...sessions.values()].some((item) => item.type !== "idle")) {
-          return yield* new SwitchError({
-            message: "An agent is still running in this checkout. Wait for it to finish before switching branches.",
-            reason: "busy",
-          })
-        }
         if (!input.create && current?.startsWith(managedBranchPrefix)) {
           return yield* new SwitchError({
             message:
@@ -690,7 +678,7 @@ const layer: Layer.Layer<Service, never, Git.Service | EventV2Bridge.Service | S
 export const node = LayerNode.make({
   service: Service,
   layer: layer,
-  deps: [Git.node, EventV2Bridge.node, SessionStatus.node],
+  deps: [Git.node, EventV2Bridge.node],
 })
 
 export * as Vcs from "./vcs"

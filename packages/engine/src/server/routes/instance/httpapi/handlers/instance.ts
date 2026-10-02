@@ -6,6 +6,7 @@ import { Global } from "@vectordevai/core/global"
 import { Redaction } from "@vectordevai/core/redaction"
 import { LSP } from "@/lsp/lsp"
 import { Vcs } from "@/project/vcs"
+import { SessionStatus } from "@/session/status"
 import { Skill } from "@/skill"
 import { Effect } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
@@ -23,6 +24,7 @@ export const instanceHandlers = HttpApiBuilder.group(InstanceHttpApi, "instance"
     const lsp = yield* LSP.Service
     const skill = yield* Skill.Service
     const vcs = yield* Vcs.Service
+    const sessionStatus = yield* SessionStatus.Service
 
     const dispose = Effect.fn("InstanceHttpApi.dispose")(function* () {
       yield* markInstanceForDisposal(yield* InstanceState.context)
@@ -96,6 +98,16 @@ export const instanceHandlers = HttpApiBuilder.group(InstanceHttpApi, "instance"
     })
 
     const switchVcs = Effect.fn("InstanceHttpApi.vcsSwitch")(function* (ctx: { payload: Vcs.SwitchInput }) {
+      // Every session in this instance shares the checkout, so a running agent would find its files changed under it.
+      const sessions = yield* sessionStatus.list()
+      if ([...sessions.values()].some((item) => item.type !== "idle"))
+        return yield* new ApiVcsSwitchError({
+          name: "VcsSwitchError",
+          data: {
+            message: "An agent is still running in this checkout. Wait for it to finish before switching branches.",
+            reason: "busy",
+          },
+        })
       return yield* vcs.switchBranch(ctx.payload).pipe(
         Effect.mapError(
           (error) =>

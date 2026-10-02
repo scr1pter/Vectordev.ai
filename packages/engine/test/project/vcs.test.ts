@@ -17,7 +17,6 @@ import { EventV2Bridge } from "../../src/event-v2-bridge"
 import { Watcher } from "@vectordevai/core/filesystem/watcher"
 import { Git } from "../../src/git"
 import { Vcs } from "@/project/vcs"
-import { SessionStatus } from "@/session/status"
 import { SessionID } from "@/session/schema"
 import { testEffect } from "../lib/effect"
 
@@ -28,7 +27,7 @@ import { testEffect } from "../lib/effect"
 const weird = process.platform === "win32" ? "space file.txt" : "tab\tfile.txt"
 
 const layer = LayerNode.compile(
-  LayerNode.group([Vcs.node, Git.node, EventV2Bridge.node, SessionStatus.node, FSUtil.node, CrossSpawnSpawner.node]),
+  LayerNode.group([Vcs.node, Git.node, EventV2Bridge.node, FSUtil.node, CrossSpawnSpawner.node]),
 )
 const it = testEffect(layer)
 const worktreeIt = testEffect(Layer.mergeAll(layer, testInstanceStoreLayer))
@@ -470,31 +469,6 @@ describe("Vcs branches", () => {
         expect(error.message).not.toContain("Aborting")
         expect(yield* vcs.branch()).toBe("main")
         expect(yield* read(path.join(test.directory, ".env"))).toBe("SECRET=local\n")
-      }),
-    { git: true },
-  )
-
-  it.instance(
-    "switchBranch() refuses while a session in the instance is running",
-    () =>
-      Effect.gen(function* () {
-        const test = yield* TestInstance
-        yield* git(test.directory, ["branch", "-M", "main"])
-        yield* git(test.directory, ["branch", "other"])
-        const vcs = yield* init()
-        const status = yield* SessionStatus.Service
-        const sessionID = SessionID.descending()
-        yield* status.set(sessionID, { type: "busy" })
-
-        const switching = yield* vcs.switchBranch({ branch: "other" }).pipe(Effect.flip)
-        const creating = yield* vcs.switchBranch({ branch: "agent/new", create: true }).pipe(Effect.flip)
-        expect(switching.reason).toBe("busy")
-        expect(switching.message).toContain("Wait for it to finish")
-        expect(creating.reason).toBe("busy")
-        expect(yield* vcs.branch()).toBe("main")
-
-        yield* status.set(sessionID, { type: "idle" })
-        expect((yield* vcs.switchBranch({ branch: "other" })).branch).toBe("other")
       }),
     { git: true },
   )
