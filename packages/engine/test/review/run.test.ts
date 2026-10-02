@@ -425,6 +425,28 @@ describe("Review.run", () => {
     TIMEOUT,
   )
 
+  // Known bug, kept visible until it is fixed: interrupting the first prompt on an instance while its config and
+  // providers are still loading leaves the interruption cached (the per-instance ScopedCache in
+  // src/effect/instance-state.ts, and the Effect.cachedInvalidateWithTTL loaders in src/config/config.ts and
+  // core's model-catalog.ts), so every later prompt on that instance fails before reaching the model until the
+  // instance is reloaded. The hung-model test above warms the instance first so it does not depend on this.
+  it.instance.failing(
+    "a review after an interrupted cold start still reaches the model",
+    () =>
+      Effect.gen(function* () {
+        const { llm, directory } = yield* useServer()
+        // A 5 ms deadline ends the first review while the instance is still loading.
+        yield* Review.run(input(directory, { config: config({ timeoutMinutes: 5 / 60_000 }) }))
+        yield* llm.pushMatch(REVIEW, reply().tool("StructuredOutput", report()))
+
+        const outcome = yield* Review.run(input(directory))
+
+        expect(outcome.specialists[0]).toMatchObject({ name: "review", status: "ok" })
+        expect((yield* llm.hits).filter(REVIEW).length).toBeGreaterThan(0)
+      }),
+    TIMEOUT,
+  )
+
   it.instance(
     "falls back to JSON in the reply text",
     () =>
