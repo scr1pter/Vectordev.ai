@@ -169,16 +169,14 @@ const layer = Layer.effect(
       const args = Shell.login(command) ? [...(input.args ?? []), "-l"] : [...(input.args ?? [])]
       const cwd = input.cwd || location.directory
       // The terminal runs whatever the user or a project script launches, so it must not inherit
-      // Vector's vault key, server passwords or bridge tokens that live in this process.
-      const env: Record<string, string> = {
+      // Vector's vault key, server passwords or bridge tokens that live in this process. The shared
+      // filter also drops BLOB_READ_WRITE_TOKEN and any *_SERVER_PASSWORD, *_SERVER_GUEST_PASSWORD,
+      // *_CONSOLE_TOKEN or *_AUTH_CONTENT variable, whoever set it, as it does for other children.
+      const env = {
         ...untrustedChildEnvironment(process.env, input.env),
         TERM: "xterm-256color",
         VECTOR_TERMINAL: "1",
-      }
-      if (process.platform === "win32") {
-        env.LC_ALL = "C.UTF-8"
-        env.LC_CTYPE = "C.UTF-8"
-        env.LANG = "C.UTF-8"
+        ...(process.platform === "win32" ? { LC_ALL: "C.UTF-8", LC_CTYPE: "C.UTF-8", LANG: "C.UTF-8" } : {}),
       }
       yield* Effect.logInfo("creating session", { id, cmd: command, args, cwd })
       const { spawn } = yield* Effect.promise(() => pty())
