@@ -46,15 +46,32 @@ export async function catalogFork(
   if (await git(["status", "--porcelain", "--untracked-files=no"]))
     throw new Error("Catalog fork has modified tracked files; review and commit its export before preparing a release")
   const revision = input.revision
-  const read = async (file: string) => {
+  const readOptional = async (file: string) => {
     if (!/^[a-zA-Z0-9_./-]+$/.test(file) || file.startsWith("/") || file.split("/").includes(".."))
       throw new Error("Catalog fork paths must be relative data paths")
     const entry = (await git(["ls-tree", revision, "--", file])).trimEnd()
+    if (!entry) {
+      const parents = file.split("/").slice(0, -1)
+      const entries = await Promise.all(
+        parents.map((_, index) => git(["ls-tree", revision, "--", parents.slice(0, index + 1).join("/")])),
+      )
+      if (entries.some((value) => value && !value.startsWith("040000 tree ")))
+        throw new Error(`The pinned Vector catalog fork path ${file} contains a non-directory ancestor`)
+      return
+    }
     if (!entry.startsWith("100644 blob ") || !entry.endsWith(`\t${file}`))
       throw new Error(
         `The pinned Vector catalog fork lacks a regular committed ${file}; complete docs/vector/owner-actions/model-catalog.md`,
       )
     return git(["show", `${revision}:${file}`])
   }
-  return { repository: input.repository, revision, read }
+  const read = async (file: string) => {
+    const contents = await readOptional(file)
+    if (contents === undefined)
+      throw new Error(
+        `The pinned Vector catalog fork lacks a regular committed ${file}; complete docs/vector/owner-actions/model-catalog.md`,
+      )
+    return contents
+  }
+  return { repository: input.repository, revision, read, readOptional }
 }
