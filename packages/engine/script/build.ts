@@ -265,6 +265,7 @@ for (const item of targets) {
 }
 
 if (Script.release) {
+  const { assertCleanArtifacts } = await import("../../../script/artifact-audit")
   for (const key of Object.keys(binaries)) {
     if (key.includes("linux")) {
       await $`tar -czf ../${key}.tar.gz -C bin . -C .. LICENSE THIRD_PARTY_NOTICES.md DEPENDENCY_NOTICES.md`.cwd(
@@ -274,6 +275,10 @@ if (Script.release) {
       await $`zip -j ../${key}.zip bin/* LICENSE THIRD_PARTY_NOTICES.md DEPENDENCY_NOTICES.md`.cwd(`dist/${key}`)
     }
   }
+  // These archives go straight to GitHub Releases, so they pass the byte audit first.
+  await assertCleanArtifacts(
+    Object.keys(binaries).map((key) => path.join(dir, "dist", key.includes("linux") ? `${key}.tar.gz` : `${key}.zip`)),
+  )
   await $`gh release upload v${Script.version} ./dist/*.zip ./dist/*.tar.gz --clobber --repo ${process.env.GH_REPO}`
 }
 
