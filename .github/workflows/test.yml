@@ -139,8 +139,8 @@ jobs:
         run: bun --cwd packages/app test:e2e:local
         env:
           CI: true
-          # Native Windows traces show broad load stalls with five browser workers on four cores.
-          PLAYWRIGHT_WORKERS: ${{ runner.os == 'Windows' && '1' || '5' }}
+          # Five browser workers stalled asset loading on both hosted platforms; keep test deadlines intact.
+          PLAYWRIGHT_WORKERS: "1"
         timeout-minutes: 30
 
       - name: Upload Playwright artifacts
