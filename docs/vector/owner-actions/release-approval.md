@@ -53,8 +53,9 @@ jobs, the website build and the free-model integration job passed. Linux browser
 validation passed; Linux unit tests, generated-client verification and all HTTP
 API gate steps also passed. Windows browser validation failed and needs its
 detailed authenticated log before the remaining failure can be diagnosed.
-Windows unit validation was still running at this checkpoint. These results
-do not establish a passing Windows release candidate.
+Windows unit validation also completed with failure at 20:40 UTC; its detailed
+log remains unavailable at this checkpoint. These results do not establish a
+passing Windows release candidate.
 
 The same source's standalone Windows harness passed initial installation, beta
 channel handling, and rejection of bad checksums and redirects without replacing
